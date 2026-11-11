@@ -254,3 +254,12 @@ pub fn remove(computer_id: &str) -> Result<(), String> {
         Ok(())
     })
 }
+
+/// The computers that have an entry, in order.
+#[cfg(test)]
+pub(crate) fn get_stored_ids_for_test() -> Result<Vec<String>, String> {
+    let Some(path) = path() else {
+        return Ok(Vec::new());
+    };
+    Ok(read(&path)?.computers.keys().cloned().collect())
+}

@@ -694,6 +694,43 @@ mod tests {
         value
     }
     #[test]
+    fn a_start_is_refused_when_the_runtime_rules_are_not_the_saved_policys() {
+        let _test_state = crate::test_support::global_state();
+        let (dir, paths, _) = setup();
+        let file = dir.path().join("network-policy.json");
+        crate::network_policy::store::use_test_path(Some(file.clone()));
+        // No saved policy: the computer keeps the rules it was made with and starts.
+        let runner = Fake::new("Stopped");
+        perform(&runner, &paths, &device(), "start", "dev").unwrap();
+        assert_eq!(runner.mutations(), vec!["start"]);
+        // A saved policy the runtime does not hold: a recovered or finished start must not run it.
+        crate::network_policy::store::set(
+            ID,
+            &crate::network_policy::NetworkPolicy {
+                mode: crate::network_policy::NetworkPolicyMode::Closed,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let runner = Fake::new("Stopped");
+        let refused = perform(&runner, &paths, &device(), "start", "dev").unwrap_err();
+        assert!(refused.to_string().contains("network rules"), "{refused}");
+        assert!(runner.mutations().is_empty());
+        // The same for a start that recovery resumes.
+        pending(&paths, "start", Phase::StartPending);
+        let runner = Fake::new("Stopped");
+        let recovered = recover_with(&runner, &paths, &device()).unwrap();
+        assert_eq!(recovered.failures.len(), 1, "{:?}", recovered.failures);
+        assert!(runner.mutations().is_empty());
+        // A saved policy that cannot be read refuses too.
+        std::fs::write(&file, "{ not json").unwrap();
+        let runner = Fake::new("Stopped");
+        assert!(perform(&runner, &paths, &device(), "start", "dev").is_err());
+        assert!(runner.mutations().is_empty());
+        crate::network_policy::store::use_test_path(None);
+    }
+
+    #[test]
     fn lifecycle_retry_does_not_undo_a_newer_stop_on_the_same_computer() {
         let _test_state = crate::test_support::global_state();
         for same_computer in [true, false] {

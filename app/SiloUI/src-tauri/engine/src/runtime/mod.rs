@@ -12507,6 +12507,34 @@ exit 9
     }
 
     #[test]
+    fn a_computer_is_not_created_while_the_saved_network_policies_cannot_be_read() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let file = directory.path().join("network-policy.json");
+        std::fs::write(&file, "{ not json").unwrap();
+        crate::network_policy::store::use_test_path(Some(file.clone()));
+        let runner = StubRunner::successful_json(vec![
+            json!([]),
+            json!(1),
+            json!(1),
+            json!(1),
+            json!(1),
+            json!(1),
+        ]);
+        let refused = create_computer(&runner, &paths, &built_in_computer()).unwrap_err();
+        assert!(refused.to_string().contains("unreadable"), "{refused}");
+        assert!(!runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call.iter().any(|argument| argument == "create")));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
+        crate::network_policy::store::use_test_path(None);
+    }
+
+    #[test]
     fn creation_finishes_with_a_warning_when_the_computer_use_apply_fails() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();

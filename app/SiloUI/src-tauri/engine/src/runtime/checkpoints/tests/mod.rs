@@ -6849,3 +6849,67 @@ fn an_imported_container_starts_from_the_deny_all_policy_like_a_virtual_machine(
         assert!(!restore.iter().any(|arg| arg == "--net-rule"), "{restore:?}");
     }
 }
+
+#[test]
+fn an_import_saves_a_closed_policy_and_a_start_does_not_run_on_an_unreadable_one() {
+    let _test_state = crate::test_support::global_state();
+    struct Probe(Mutex<Vec<Vec<String>>>);
+    impl RuntimeRunner for Probe {
+        fn run(
+            &self,
+            _paths: &RuntimePaths,
+            args: &[String],
+            _timeout: Duration,
+        ) -> Result<CommandOutput, RuntimeError> {
+            self.0.lock().unwrap().push(args.to_vec());
+            let stdout = match args.first().map(String::as_str) {
+                Some("snapshot") => serde_json::json!([{
+                    "group":"silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9",
+                    "name":"silo-backup-0-330418-1790360984903",
+                    "scope":"disk", "availability":"ready"
+                }])
+                .to_string(),
+                Some("list") => "[]".into(),
+                _ => panic!("unexpected command: {args:?}"),
+            };
+            Ok(CommandOutput {
+                stdout,
+                stderr: String::new(),
+            })
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let file = directory.path().join("network-policy.json");
+    crate::network_policy::store::use_test_path(Some(file.clone()));
+    // A policy left over from a computer of this id is replaced by an explicit closed one.
+    crate::network_policy::store::set(
+        ID,
+        &crate::network_policy::NetworkPolicy::default(),
+    )
+    .unwrap();
+    import_pending_restore(
+        &paths,
+        ID,
+        "silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9",
+        "silo-backup-0-330418-1790360984903",
+    )
+    .unwrap();
+    let stored = crate::network_policy::store::get_stored(ID).unwrap().unwrap();
+    assert_eq!(stored.mode, crate::network_policy::NetworkPolicyMode::Closed);
+    assert!(stored.incoming_denied);
+    // With the saved policies unreadable the start refuses before it asks the runtime for
+    // anything that changes it.
+    std::fs::write(&file, "{ not json").unwrap();
+    let runner = Probe(Mutex::new(Vec::new()));
+    let refused = start_pending(&runner, &paths, &computer_configuration()).unwrap_err();
+    assert!(refused.to_string().contains("unreadable"), "{refused}");
+    assert!(runner
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|args| args[0] != "restore" && args[0] != "remove"));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
+    crate::network_policy::store::use_test_path(None);
+}

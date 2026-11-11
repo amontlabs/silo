@@ -301,6 +301,25 @@ mod tests {
     }
 
     #[test]
+    fn a_container_that_cannot_say_which_computer_it_is_or_whose_policy_cannot_be_read_gets_no_way_out(
+    ) {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("network-policy.json");
+        crate::network_policy::store::use_test_path(Some(file.clone()));
+        let no_way_out = (Some(blocked_gateway_policy()), None);
+        let mut unlabelled = record();
+        unlabelled.labels.retain(|(key, _)| key != "silo.machine-id");
+        assert_eq!(gateway_network("dev", &unlabelled), no_way_out);
+        let mut labelled = record();
+        labelled.labels.push(("silo.machine-id".into(), "c1".into()));
+        assert_eq!(gateway_network("dev", &labelled), (None, None));
+        std::fs::write(&file, "{ not json").unwrap();
+        assert_eq!(gateway_network("dev", &labelled), no_way_out);
+        crate::network_policy::store::use_test_path(None);
+    }
+
+    #[test]
     fn a_blocked_computer_stays_blocked_whatever_secrets_it_is_given() {
         // What the engine sends: a GitHub profile applied or detached (`modify --secret
         // SILO_GITHUB:...`), a secret of the user's, and their removal.
