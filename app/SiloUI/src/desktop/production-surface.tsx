@@ -17,6 +17,7 @@ import type { SiloPreflightCheck } from "@/contracts/silo"
 import { SiloWindow } from "@/components/silo-window"
 import { InlineAlert } from "@/components/inline-alert"
 import { useDependencyStore, type DependencyStore } from "@/desktop/dependencies"
+import { onEngineConnected } from "@/desktop/engine-connection"
 import { ProductionOnboarding } from "@/desktop/production-onboarding"
 import { localUpdatingNotice, useProductionSource, type ProductionSource } from "@/desktop/production-source"
 import { StatusPanel } from "@/desktop/status-panel"
@@ -89,6 +90,10 @@ function ProductionContent({ source, dependencyStore, statusPanel = false }: Pro
   // Initialize again rather than refresh: after a failed start it also restores live
   // events, polling and refresh-on-focus; once live it only refreshes.
   const retryChecks = useStableCallback(() => { dependencies?.retry(); void source.initialize().catch((error: unknown) => console.error("Silo live updates:", error)) })
+  // The engine can start after the app: checks and loads that ran before it was there failed
+  // for that reason alone, so run them again when it connects instead of waiting for Retry.
+  const recoverOnEngineConnected = useStableCallback(() => { if (!current.source || current.error || checking || failures.length) retryChecks() })
+  useEffect(() => onEngineConnected(recoverOnEngineConnected), [recoverOnEngineConnected])
   // Finish persists completion; keep this session on its preferences screen until Open Silo.
   // Settings that could not be read (or a damaged, write-protected file) report defaults,
   // so a missing completion flag is unknown, not "new user": never route to onboarding

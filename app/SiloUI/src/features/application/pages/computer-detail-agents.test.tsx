@@ -103,6 +103,22 @@ it("installs an agent from the section and then offers to open it", async () => 
   expect(await screen.findByRole("button", { name: `Open Codex in ${name}` })).toBeVisible()
 })
 
+it("reads Silo's tools again once an agent install finishes", async () => {
+  const { source, computer } = linuxSource()
+  const name = computer.configuration.name
+  const installAgent = vi.fn(async () => [agent("claude-code", "ready", "2.1.287"), agent("codex", "ready", "0.167.0")])
+  const listAgents = vi.fn(async () => [agent("claude-code", "ready", "2.1.287"), agent("codex", "missing")])
+  const tools = (detail: string) => ({ enabled: true, restartNeeded: false, components: [{ id: "silo-mcp", state: "waiting", detail }] })
+  const readComputerTools = vi.fn()
+    .mockResolvedValueOnce(tools("Claude Code and Codex not installed yet"))
+    .mockResolvedValue({ enabled: true, restartNeeded: false, components: [{ id: "silo-mcp", state: "ready" }] })
+  const user = await openDetail(source, name, { openAgent: vi.fn(), listAgents, installAgent, readComputerTools, setComputerTools: vi.fn() })
+  expect(await screen.findByText(/not installed yet/)).toBeVisible()
+  await user.click(await screen.findByRole("button", { name: `Install Codex in ${name}` }))
+  await waitFor(() => expect(screen.queryByText(/not installed yet/)).not.toBeInTheDocument())
+  expect(readComputerTools).toHaveBeenCalledTimes(2)
+})
+
 function MacosPage({ source, actions }: { source: ApplicationSource; actions: ApplicationActions }) {
   const merged = useMacosApplication(source, actions)
   return <OverviewPage source={merged.source} actions={merged.actions} onConfigurationsChange={vi.fn()} />

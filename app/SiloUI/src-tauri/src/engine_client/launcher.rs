@@ -52,6 +52,8 @@ pub(crate) trait ServiceControl: Send + Sync {
     fn unregister(&self) -> Result<(), String>;
     /// Whether launchd has the agent's job: `None` when that cannot be told.
     fn job_loaded(&self) -> Option<bool>;
+    /// Asks launchd to run the loaded job now. It does nothing for a job that is running.
+    fn start(&self);
     fn open_login_items(&self);
 }
 
@@ -200,6 +202,11 @@ impl Launcher for BundleLauncher {
                         ))
                     })?;
                     self.check_registration(ServiceStatus::Enabled, self.service.register())?;
+                } else {
+                    // launchd restarts the engine only after a crash (`KeepAlive` on an
+                    // unsuccessful exit), so one that exited cleanly stays loaded but idle.
+                    // Starting a job that is already running does nothing.
+                    self.service.start();
                 }
             }
             // Service Management also reports an agent that was never registered as not found,
@@ -283,6 +290,18 @@ impl ServiceControl for SmAppService {
         }
     }
 
+    fn start(&self) {
+        let Some(label) = self.plist_name.strip_suffix(".plist") else {
+            return;
+        };
+        let target = format!("gui/{}/{label}", unsafe { libc::getuid() });
+        let _ = std::process::Command::new("/bin/launchctl")
+            .args(["kickstart", &target])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
     fn open_login_items(&self) {
         unsafe { objc2_service_management::SMAppService::openSystemSettingsLoginItems() };
     }
@@ -308,6 +327,8 @@ impl ServiceControl for UnsupportedService {
     fn job_loaded(&self) -> Option<bool> {
         None
     }
+
+    fn start(&self) {}
 
     fn open_login_items(&self) {}
 }
@@ -335,6 +356,9 @@ mod tests {
         unregistered: Mutex<u32>,
         unregister_error: Option<String>,
         job_loaded: Option<bool>,
+        started: Mutex<u32>,
+        /// Whether starting the loaded job makes it listen, as a launchd kickstart does.
+        start_listens: bool,
     }
 
     impl FakeService {
@@ -350,6 +374,8 @@ mod tests {
                 unregistered: Mutex::new(0),
                 unregister_error: None,
                 job_loaded: None,
+                started: Mutex::new(0),
+                start_listens: false,
             }
         }
     }
@@ -383,6 +409,13 @@ mod tests {
 
         fn job_loaded(&self) -> Option<bool> {
             self.job_loaded
+        }
+
+        fn start(&self) {
+            *self.started.lock().unwrap() += 1;
+            if let (true, Some(path)) = (self.start_listens, &self.listener_path) {
+                *self.listener.lock().unwrap() = Some(UnixListener::bind(path).unwrap());
+            }
         }
 
         fn open_login_items(&self) {
@@ -591,6 +624,37 @@ mod tests {
             .unwrap_err();
         assert!(error.message.contains("did not start"));
         assert_eq!(*service.unregistered.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_loaded_agent_that_exited_cleanly_is_started_again() {
+        // KeepAlive restarts only a crashed engine: after a clean exit launchd keeps the job
+        // loaded but idle, and Service Management still reports Enabled.
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = FakeService::new(ServiceStatus::Enabled);
+        service.job_loaded = Some(true);
+        service.start_listens = true;
+        service.listener_path = Some(directory.path().join("engine.sock"));
+        let service = Arc::new(service);
+        launcher(directory.path(), service.clone(), None)
+            .ensure_running()
+            .unwrap();
+        assert_eq!(*service.started.lock().unwrap(), 1);
+        assert_eq!(*service.unregistered.lock().unwrap(), 0);
+        assert_eq!(*service.registered.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_running_engine_is_not_started_again() {
+        let directory = tempfile::tempdir().unwrap();
+        let _listener = UnixListener::bind(directory.path().join("engine.sock")).unwrap();
+        let mut service = FakeService::new(ServiceStatus::Enabled);
+        service.job_loaded = Some(true);
+        let service = Arc::new(service);
+        launcher(directory.path(), service.clone(), None)
+            .ensure_running()
+            .unwrap();
+        assert_eq!(*service.started.lock().unwrap(), 0);
     }
 
     #[test]

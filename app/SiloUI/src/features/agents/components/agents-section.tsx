@@ -64,7 +64,7 @@ export function AgentsSection({ target, computerName, running, offline = false, 
         const detail = current?.status === "running" ? (current.progress?.detail ?? installStepText[current.progress?.step ?? "waiting"])
           : current?.status === "failed" ? `Could not install ${agentName[agent.id]}: ${current.message}`
             : agentStateText(agent)
-        const label = current?.status === "failed" ? "Try again" : action
+        const label = current?.status === "failed" ? "Retry" : action
         return <ListRow
           key={agent.id}
           role="group"
@@ -75,8 +75,8 @@ export function AgentsSection({ target, computerName, running, offline = false, 
           detailClassName={current?.status === "failed" ? "whitespace-normal break-words text-destructive" : "whitespace-normal"}
           actions={!installing && label && installAgent
             ? <DisabledReason reason={reason}>
-              <Button type="button" variant="outline" size="xs" aria-label={`${label === "Try again" ? "Install" : label} ${agentName[agent.id]} in ${computerName}`} disabled={Boolean(reason) || busy} onClick={() => void install(agent.id)}>
-                {label === "Try again" ? <RotateCw aria-hidden="true" data-icon="inline-start" /> : null}{label}
+              <Button type="button" variant="outline" size="xs" aria-label={`${label === "Retry" ? "Retry installing" : label} ${agentName[agent.id]} in ${computerName}`} disabled={Boolean(reason) || busy} onClick={() => void install(agent.id)}>
+                {label === "Retry" ? <RotateCw aria-hidden="true" data-icon="inline-start" /> : null}{label}
               </Button>
             </DisabledReason>
             : undefined}
