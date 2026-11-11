@@ -44,9 +44,10 @@ files: [/etc/app.conf] # settings files kept into the computer; a merge appends 
 `silo recipe list` shows the stored recipes and which are built. `silo recipe show <name>` prints
 one with its hash and any warnings. `silo recipe remove <name>` forgets it and drops its build
 (removing a saved recipe that replaced a shipped one brings the shipped one back). Storing, removing and building belong to the owner. A
-computer's agent can list the recipes (names, system and whether each is built) and show the one
-its computer was built from, because setup lines may hold secrets; asking to show another is
-refused. It cannot change any.
+computer's agent can list the recipes (names, system, a one-way hash and whether each is built) and
+show the one its computer was built from, because setup lines may hold secrets; asking to show
+another is refused. It cannot change any. A computer that forks a recipe's hidden build gets a
+record with that recipe's full text, so it can read that one through `computers.recipe`.
 
 Package names are single words (a version suffix such as `name@1.2` or `name==1.0` is fine);
 they are passed to the package manager as arguments, never as shell text. `setup` commands are
@@ -94,8 +95,13 @@ The engine uses the record in two places:
 After a merge brings packages or settings files into a computer, the engine appends them to
 that computer's recipe: packages under their manager (`apt`, `brew`, `pip`, `pipx`, `npm`,
 `cargo`; a package the recipe's system cannot install is left out) and files under `files:`. It
-changes the computer's record, and the stored recipe of the same name when the owner saved one;
-a recipe that ships with Silo is never edited. The merge result lists what was added, so that
+always changes the computer's record. It changes the stored recipe of the same name only when the
+owner saved that recipe and the owner ran the merge or approved it (an approved call runs as the
+owner, and the approval says so): a computer's agent that merges into a computer it made changes
+that computer's record alone, so it cannot add packages that the owner's next rebuild installs
+from the saved recipe. A recipe that ships with Silo is never edited. A merge into a computer
+built from a recipe runs that recipe's `keep:` hooks; hooks the caller supplies are refused, and
+the merge summary shows the recipe's. The merge result lists what was added, so that
 rebuilding from the recipe makes the machine the merged computer now is. Undoing the merge takes
 those entries back out of the record and out of the stored recipe; entries that were already
 there before the merge stay.
