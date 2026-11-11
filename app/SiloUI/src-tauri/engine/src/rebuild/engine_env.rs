@@ -598,6 +598,11 @@ impl RebuildEnv for EngineRebuildEnv {
     }
 
     fn check_cancelled(&self) -> Result<(), String> {
+        // Quit waits for the operation, so it counts as a request to stop too: the rebuild
+        // rolls back at the next step and the next start settles whatever is left.
+        if runtime::shutdown::quitting() {
+            return Err("The rebuild was stopped because Silo is quitting.".to_owned());
+        }
         runtime::operation_gate::check_cancelled()
             .map_err(|_| "The rebuild was cancelled.".to_owned())
     }
