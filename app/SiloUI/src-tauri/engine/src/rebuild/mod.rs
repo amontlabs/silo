@@ -1,85 +1,92 @@
-//! Linux computer rebuild on the newest image.
+//! Rebuild a Linux computer on the newest guest image, keeping its workspace, its home folder
+//! and its SSH identity.
 //!
-//! Rebuilds an existing Linux computer on the newest guest image while preserving its
-//! workspace disk, its `/home/silo` directory, and its SSH credentials.
-//! The operation follows the S2 design:
-//! 1. Acquire the computer's operation lane.
-//! 2. Check refusal conditions cleanly before making changes (macOS refusal, undo name collision,
-//!    home size exceeding new root disk capacity, or missing host reflink when clone is needed).
-//! 3. Journal each step to support crash resume and clean rollback.
-//! 4. Create an integrity checkpoint of the old computer as the durable undo mechanism.
-//! 5. Create `<name>-rebuild-<hex>` on the newest image with the old hardware arguments.
-//! 6. Boot the rebuild computer once to initialize its working account, then stop it.
-//! 7. Move the workspace disk (preserving layer structure and destination volume ID).
-//! 8. Boot both computers, carry `/home/silo` via guest tar and host staging, and copy the host `ssh/` folder.
-//! 9. Replay the computer's recipe (if recorded).
-//! 10. Stop both computers, swap names (`<name>` -> `<name>-undo`, `<name>-rebuild-<hex>` -> `<name>`),
-//!     and relabel `silo.machine-id` on both computers.
+//! The computer is stopped and checkpointed, a second sandbox is built beside it on the newest
+//! image with the same size, the workspace disk is cloned into it, `/home/silo` is carried
+//! over as a tar file, the recipe the computer was built from is replayed on the new root
+//! disk, and then the two sandboxes swap: the rebuilt one takes the computer's name and id, the
+//! old one becomes `<name>-undo` (stopped, on its own id). Every step is journaled. An
+//! interrupted rebuild is rolled back at the next engine start unless the swap was done, in
+//! which case it is finished (see [`recover_one`]).
+//!
+//! Whatever is not copied stays behind in `<name>-undo`: things installed by hand outside the
+//! home folder and the recipe, and the memory of earlier checkpoints, which still restore the
+//! old image.
 
 pub mod engine_env;
 pub mod journal;
+pub mod service;
+pub mod swap;
 #[cfg(test)]
 mod tests;
 
-use std::any::Any;
+use std::time::Duration;
 
-pub use journal::{Journal, RebuildRecord, RebuildState, RebuildStep};
-use silo_api::methods::computers::ComputerRebuildResult;
-use silo_api::methods::recipes::RecipeSpec;
+pub use journal::{Journal, Plan, Record, Step};
+use silo_api::methods::{
+    computers::ComputerRebuildResult,
+    recipes::{RecipeOs, RecipeSpec},
+};
 
-/// Basic properties of a computer needed for rebuild planning and validation.
+use crate::changes::keep::{lane, CheckpointRef, Os};
+
+/// How long a rebuild waits for another operation on the same computer.
+pub const LANE_WAIT: Duration = Duration::from_secs(120);
+
+/// How long a computer may take to finish stopping before a rebuild gives up.
+#[cfg(not(test))]
+const STOP_WAIT: Duration = Duration::from_secs(120);
+#[cfg(test)]
+const STOP_WAIT: Duration = Duration::from_millis(50);
+
+/// The longest a computer name may be.
+const NAME_LIMIT: usize = 32;
+
+/// How much of the new root disk the home folder may fill: the tar file is on that disk too,
+/// next to the unpacked folder.
+const HOME_SHARE_PERCENT: u64 = 45;
+
+/// What a rebuild needs to know about a computer.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ComputerInfo {
+pub struct Info {
     pub id: String,
     pub name: String,
-    pub is_linux: bool,
+    pub os: Os,
+    /// A container computer runs on another runtime and has no sandbox to rebuild.
+    pub container: bool,
     pub running: bool,
-    pub cpus: u32,
-    pub max_cpus: u32,
-    pub memory_gib: u32,
-    pub max_memory_gib: u32,
+    /// Why the computer cannot be taken now (a checkpoint restore is pending), when it cannot.
+    pub busy: Option<String>,
+    /// The size of its root disk, in GiB.
     pub root_disk_gib: u32,
-    pub workspace_storage_gib: u32,
-    pub desktop: bool,
-    pub has_checkpoint_layers: bool,
 }
 
-/// Interface for executing rebuild steps.
+/// The engine side of a rebuild. Tests supply a fake; the engine supplies
+/// [`engine_env::EngineRebuildEnv`]. Computers are named by id; the real environment looks the
+/// sandbox up.
 pub trait RebuildEnv: Send + Sync {
-    fn computer_info(&self, computer: &str) -> Result<ComputerInfo, String>;
-    fn computer_exists(&self, name: &str) -> bool;
-    fn supports_reflink(&self) -> bool;
-    fn measure_home_bytes(&self, computer: &str) -> Result<u64, String>;
-    fn hold_lane(&self, computer_id: &str) -> Result<Box<dyn Any>, String>;
-    fn stop_computer(&self, computer: &str) -> Result<(), String>;
-    fn start_computer(&self, computer: &str) -> Result<(), String>;
-    fn checkpoint_integrity(&self, computer: &str, name: &str) -> Result<String, String>;
+    fn info(&self, id: &str) -> Result<Info, String>;
+    /// Why this computer cannot be rebuilt on this device, when it cannot (no copy-on-write
+    /// cloning on the host, a disk kept under the computer's name, a resized workspace).
+    fn refusal(&self, _info: &Info) -> Option<String> {
+        None
+    }
+    /// Whether any computer already has `name`.
+    fn name_in_use(&self, name: &str) -> bool;
+    /// The recipe the computer was built from, as recorded when it was built.
+    fn recipe(&self, _id: &str) -> Result<Option<RecipeSpec>, String> {
+        Ok(None)
+    }
+    /// The size of `/home/silo` in bytes. A stopped computer may be started for the
+    /// measurement and is stopped again.
+    fn home_bytes(&self, id: &str) -> Result<u64, String>;
+    /// The reference of the newest guest image, ready to build computers from.
     fn newest_image(&self) -> Result<String, String>;
-    fn create_computer(
-        &self,
-        name: &str,
-        id: &str,
-        image: &str,
-        info: &ComputerInfo,
-    ) -> Result<(), String>;
-    fn setup_account(&self, computer: &str) -> Result<(), String>;
-    fn move_workspace_disk(&self, from: &str, to: &str) -> Result<(), String>;
-    fn carry_home(&self, from: &str, to: &str) -> Result<(), String>;
-    fn copy_ssh_folder(&self, from: &str, to: &str) -> Result<(), String>;
-    fn replay_recipe(&self, computer: &str, spec: &RecipeSpec) -> Result<(), String>;
-    fn swap_names_and_relabel(
-        &self,
-        old_name: &str,
-        old_id: &str,
-        rebuild_name: &str,
-        rebuild_id: &str,
-        undo_name: &str,
-        undo_id: &str,
-    ) -> Result<(), String>;
-    fn delete_computer(&self, computer: &str) -> Result<(), String>;
-    fn random_hex(&self) -> String {
-        let id = uuid::Uuid::new_v4().simple().to_string();
-        id[..8].to_owned()
+    fn fresh_id(&self) -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+    fn stage_key(&self) -> String {
+        uuid::Uuid::new_v4().simple().to_string()[..8].to_owned()
     }
     fn now_millis(&self) -> u64 {
         std::time::SystemTime::now()
@@ -87,239 +94,340 @@ pub trait RebuildEnv: Send + Sync {
             .map(|d| d.as_millis() as u64)
             .unwrap_or_default()
     }
-    fn note(&self, _msg: &str) {}
+    fn start(&self, id: &str) -> Result<(), String>;
+    fn stop(&self, id: &str) -> Result<(), String>;
+    /// Saves the disk checkpoint of the stopped computer (with its integrity record).
+    fn checkpoint(&self, id: &str, name: &str) -> Result<CheckpointRef, String>;
+    /// Builds the new sandbox on `plan.image` with the old computer's size and settings and
+    /// leaves it stopped.
+    fn create(&self, plan: &Plan) -> Result<(), String>;
+    /// Gives the new sandbox a clone of the old one's workspace disk. Both are stopped.
+    fn move_workspace(&self, plan: &Plan) -> Result<(), String>;
+    /// Copies the old sandbox's host-side SSH folder (its host key) to the new one.
+    fn copy_ssh(&self, plan: &Plan) -> Result<(), String>;
+    /// Copies `/home/silo` of the running old computer into the running new one.
+    fn carry_home(&self, plan: &Plan) -> Result<(), String>;
+    /// Runs the recipe's install, setup and service steps in the running new computer.
+    fn replay_recipe(&self, id: &str, spec: &RecipeSpec) -> Result<(), String>;
+    /// Moves the identities (see [`swap`]). Both sandboxes are stopped. Repeating it changes
+    /// nothing.
+    fn swap_apply(&self, plan: &Plan) -> Result<(), String>;
+    /// Moves them back, whether or not the swap was applied.
+    fn swap_revert(&self, plan: &Plan) -> Result<(), String>;
+    /// Forgets what the build id and the build name had in the stores, after the swap. Best
+    /// effort.
+    fn settle_swapped(&self, plan: &Plan) -> Result<(), String>;
+    /// Removes the new sandbox and the staged home folder, whatever exists of them.
+    fn remove_build(&self, plan: &Plan) -> Result<(), String>;
+    fn note(&self, _line: &str) {}
 }
 
-/// Rebuilds a Linux computer on the newest image.
+/// `head` shortened so that `head + tail` fits a computer name.
+fn fitted(head: &str, tail: &str) -> String {
+    let room = NAME_LIMIT.saturating_sub(tail.len());
+    let head: String = head.chars().take(room).collect();
+    format!("{}{tail}", head.trim_end_matches('-'))
+}
+
+/// `<name>-undo`, with the name shortened as far as it takes.
+pub fn undo_name(name: &str) -> String {
+    fitted(name, "-undo")
+}
+
+/// `<name>-rb-<key>`: the sandbox built beside the computer.
+fn build_name(name: &str, key: &str) -> String {
+    fitted(name, &format!("-rb-{key}"))
+}
+
+fn stop_and_wait(env: &dyn RebuildEnv, id: &str) -> Result<(), String> {
+    if env.info(id)?.running {
+        env.stop(id)?;
+    }
+    let begun = std::time::Instant::now();
+    loop {
+        let info = env.info(id)?;
+        if !info.running {
+            return Ok(());
+        }
+        if begun.elapsed() > STOP_WAIT {
+            return Err(format!(
+                "{} did not finish stopping. Nothing more was changed.",
+                info.name
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn refuse(message: String) -> String {
+    format!("{message} Nothing was changed.")
+}
+
+/// The home folder's size limit on a root disk of `root_disk_gib`.
+pub fn home_limit(root_disk_gib: u32) -> u64 {
+    u64::from(root_disk_gib) * 1024 * 1024 * 1024 * HOME_SHARE_PERCENT / 100
+}
+
+/// Rebuilds the Linux computer `computer_id` on the newest guest image.
 pub fn rebuild(
     env: &dyn RebuildEnv,
     journal: &Journal,
-    computer: &str,
-    recipe: Option<&silo_api::methods::recipes::RecipeRecord>,
+    computer_id: &str,
+    wait: Duration,
 ) -> Result<ComputerRebuildResult, String> {
-    let info = env.computer_info(computer)?;
-
-    // 1. Refusal: only Linux computers can be rebuilt on the guest image.
-    if !info.is_linux {
-        return Err(
-            "Rebuild on the newest image is currently only supported for Linux computers. Nothing was changed."
-                .into(),
-        );
+    let _lane = lane::acquire(computer_id, wait)?;
+    // A rebuild this one finds half done is settled first.
+    if let Some(record) = journal.get(computer_id) {
+        env.note("A rebuild was interrupted; settling it first");
+        recover_record(env, journal, &record)?;
     }
 
-    let undo_name = format!("{}-undo", info.name);
-    // 2. Refusal: undo name must not collide with an existing computer.
-    if env.computer_exists(&undo_name) {
-        return Err(format!(
-            "Computer '{undo_name}' already exists. Drop or rename it before rebuilding '{}'. Nothing was changed.",
+    // Every refusal comes before the first change.
+    let info = env
+        .info(computer_id)
+        .map_err(|_| "This computer no longer exists on this device.".to_owned())?;
+    if info.os != Os::Linux {
+        return Err(refuse(format!(
+            "{} is a Mac. Rebuilding on the newest image works for Linux computers only.",
             info.name
-        ));
+        )));
     }
-
-    // 3. Refusal: layered disk requires copy-on-write (reflink) support on host.
-    if info.has_checkpoint_layers && !env.supports_reflink() {
-        return Err(
-            "The host filesystem does not support copy-on-write (reflink) cloning, which is required to rebuild a computer with checkpoint layers. Nothing was changed."
-                .into(),
-        );
+    if info.container {
+        return Err(refuse(format!(
+            "{} runs as a container, which has no separate image to rebuild on.",
+            info.name
+        )));
     }
-
-    // 4. Refusal: home size must fit on the root disk alongside its transfer tar.
-    let home_bytes = env.measure_home_bytes(&info.name)?;
-    let max_home_bytes = (info.root_disk_gib as u64)
-        .saturating_mul(1024 * 1024 * 1024)
-        .saturating_mul(45)
-        / 100;
-    if home_bytes > max_home_bytes {
-        let home_mb = home_bytes / (1024 * 1024);
-        return Err(format!(
-            "The home folder of '{}' ({} MB) is too large for the new root disk (maximum 1.8 GiB for a 4 GiB root disk). Nothing was changed.",
-            info.name, home_mb
-        ));
+    if let Some(why) = &info.busy {
+        return Err(refuse(format!(
+            "{} is busy ({why}). Retry when it is idle.",
+            info.name
+        )));
     }
-
-    // Acquire the computer's operation lane.
-    let _lane = env.hold_lane(&info.id)?;
-
-    // Settle any previous interrupted rebuild for this computer first.
-    if let Some(existing) = journal.get(&info.id) {
-        if existing.state == RebuildState::Rebuilding {
-            resume_or_rollback(env, journal, &existing)?;
-        }
+    if let Some(why) = env.refusal(&info) {
+        return Err(refuse(why));
     }
-
-    let hex = env.random_hex();
-    let rebuild_name = format!("{}-rebuild-{}", info.name, hex);
-    let rebuild_id = format!("{}-rebuild-{}", info.id, hex);
-    let undo_id = format!("{}-undo", info.id);
+    let undo_name = undo_name(&info.name);
+    if env.name_in_use(&undo_name) {
+        return Err(refuse(format!(
+            "Computer '{undo_name}' already exists. Drop or rename it before rebuilding '{}'.",
+            info.name
+        )));
+    }
+    let recipe = env.recipe(computer_id)?;
     let image = env.newest_image()?;
+    let limit = home_limit(info.root_disk_gib);
+    let home = env.home_bytes(computer_id)?;
+    if home > limit {
+        return Err(refuse(format!(
+            "The home folder of '{}' ({} MB) is too large to carry to a new {} GiB root disk (up to {} MB fits).",
+            info.name,
+            home / (1024 * 1024),
+            info.root_disk_gib,
+            limit / (1024 * 1024)
+        )));
+    }
 
-    let mut record = RebuildRecord {
-        computer_id: info.id.clone(),
-        computer_name: info.name.clone(),
-        rebuild_id: rebuild_id.clone(),
-        rebuild_name: rebuild_name.clone(),
-        undo_id: undo_id.clone(),
+    let key = env.stage_key();
+    let plan = Plan {
+        old_id: info.id.clone(),
+        old_name: info.name.clone(),
+        new_id: env.fresh_id(),
+        new_name: build_name(&info.name, &key),
+        undo_id: env.fresh_id(),
         undo_name: undo_name.clone(),
         image: image.clone(),
-        state: RebuildState::Rebuilding,
-        step: RebuildStep::Init,
-        checkpoint_id: None,
+        stage: key,
+    };
+    let mut record = Record {
+        plan,
+        step: Step::Planned,
+        checkpoint: None,
         was_running: info.running,
-        created_at: env.now_millis(),
+        at: env.now_millis(),
     };
     journal.save(&record)?;
 
-    // Execution with rollback protection before swap.
-    let execute = || -> Result<(), String> {
-        // Step 1: Stop old computer if running.
-        if info.running {
-            env.note(&format!("Stopping {}", info.name));
-            env.stop_computer(&info.name)?;
-        }
-        record.step = RebuildStep::Stopped;
-        journal.save(&record)?;
-
-        // Step 2: Checkpoint with integrity as undo.
-        env.note("Creating integrity checkpoint");
-        let checkpoint_id =
-            env.checkpoint_integrity(&info.name, &format!("before-rebuild-{}", hex))?;
-        record.checkpoint_id = Some(checkpoint_id);
-        record.step = RebuildStep::CheckpointCreated;
-        journal.save(&record)?;
-
-        // Step 3: Create rebuild computer on newest image with old arguments.
-        env.note(&format!("Creating rebuild sandbox {}", record.rebuild_name));
-        env.create_computer(&record.rebuild_name, &record.rebuild_id, &image, &info)?;
-        env.start_computer(&record.rebuild_name)?;
-        env.setup_account(&record.rebuild_name)?;
-        env.stop_computer(&record.rebuild_name)?;
-        record.step = RebuildStep::RebuildCreated;
-        journal.save(&record)?;
-
-        // Step 4: Move workspace disk.
-        env.note("Moving workspace storage");
-        env.move_workspace_disk(&info.name, &record.rebuild_name)?;
-        record.step = RebuildStep::WorkspaceMoved;
-        journal.save(&record)?;
-
-        // Step 5: Carry /home/silo and host ssh folder.
-        env.note("Carrying home folder and SSH credentials");
-        env.start_computer(&info.name)?;
-        env.start_computer(&record.rebuild_name)?;
-        env.carry_home(&info.name, &record.rebuild_name)?;
-        env.copy_ssh_folder(&info.name, &record.rebuild_name)?;
-        record.step = RebuildStep::HomeAndSshCarried;
-        journal.save(&record)?;
-
-        // Step 6: Replay recipe.
-        if let Some(record_entry) = recipe {
-            env.note("Replaying recipe");
-            env.replay_recipe(&record.rebuild_name, &record_entry.recipe.spec)?;
-        }
-        record.step = RebuildStep::RecipeReplayed;
-        journal.save(&record)?;
-
-        // Step 7: Swap names and relabel machine-id.
-        env.note("Swapping computer identities");
-        env.stop_computer(&info.name)?;
-        env.stop_computer(&record.rebuild_name)?;
-        env.swap_names_and_relabel(
-            &info.name,
-            &info.id,
-            &record.rebuild_name,
-            &record.rebuild_id,
-            &record.undo_name,
-            &record.undo_id,
-        )?;
-        record.step = RebuildStep::NamesSwapped;
-        journal.save(&record)?;
-
-        // Step 8: Restart if it was running.
-        if record.was_running {
-            env.note(&format!("Starting rebuilt computer {}", info.name));
-            env.start_computer(&info.name)?;
-        }
-
-        Ok(())
-    };
-
-    match execute() {
-        Ok(()) => {
-            record.state = RebuildState::Finished;
-            record.step = RebuildStep::Complete;
-            journal.remove(&info.id);
-            Ok(ComputerRebuildResult {
-                computer_id: info.id,
-                name: info.name,
-                undo_name: record.undo_name,
-                image,
-            })
-        }
-        Err(err) => {
-            // Roll back if swap has not occurred.
-            if record.step != RebuildStep::NamesSwapped && record.step != RebuildStep::Complete {
-                let _ = env.stop_computer(&record.rebuild_name);
-                let _ = env.delete_computer(&record.rebuild_name);
-                if record.was_running && !env.computer_info(&info.name).map_or(false, |c| c.running)
-                {
-                    let _ = env.start_computer(&info.name);
-                }
-                record.state = RebuildState::Failed;
-                let _ = journal.save(&record);
-            }
-            Err(err)
-        }
+    if let Err(error) = advance(env, journal, &mut record, recipe.as_ref()) {
+        return Err(match roll_back(env, journal, &record) {
+            Ok(()) => format!(
+                "{error} The rebuild was rolled back; {} is as it was.",
+                info.name
+            ),
+            Err(also) => format!(
+                "{error} Rolling back also failed ({also}); restarting Silo retries it."
+            ),
+        });
     }
+    Ok(ComputerRebuildResult {
+        computer_id: info.id,
+        name: info.name,
+        undo_name,
+        image,
+    })
 }
 
-/// Resumes or rolls back an interrupted rebuild found in the journal.
-pub fn resume_or_rollback(
+fn save(
     env: &dyn RebuildEnv,
     journal: &Journal,
-    record: &RebuildRecord,
+    record: &mut Record,
+    step: Step,
 ) -> Result<(), String> {
-    match record.step {
-        RebuildStep::NamesSwapped | RebuildStep::Complete => {
-            // Already swapped: ensure names and labels are consistent.
-            if record.was_running
-                && env
-                    .computer_info(&record.computer_name)
-                    .map_or(false, |c| !c.running)
-            {
-                let _ = env.start_computer(&record.computer_name);
-            }
-            journal.remove(&record.computer_id);
-            Ok(())
+    record.step = step;
+    record.at = env.now_millis();
+    journal.save(record)
+}
+
+/// Runs the steps the record has not done yet.
+fn advance(
+    env: &dyn RebuildEnv,
+    journal: &Journal,
+    record: &mut Record,
+    recipe: Option<&RecipeSpec>,
+) -> Result<(), String> {
+    let plan = record.plan.clone();
+    if record.step < Step::Stopped {
+        env.note(&format!("Stopping {}", plan.old_name));
+        stop_and_wait(env, &plan.old_id)?;
+        save(env, journal, record, Step::Stopped)?;
+    }
+    if record.step < Step::Checkpointed {
+        env.note("Saving a checkpoint to go back to");
+        let checkpoint = env.checkpoint(&plan.old_id, "Before rebuild on the newest image")?;
+        record.checkpoint = Some(checkpoint);
+        save(env, journal, record, Step::Checkpointed)?;
+    }
+    if record.step < Step::Created {
+        env.note("Building the new computer");
+        env.create(&plan)?;
+        // The first start sets up the working account before the workspace arrives.
+        env.start(&plan.new_id)?;
+        stop_and_wait(env, &plan.new_id)?;
+        save(env, journal, record, Step::Created)?;
+    }
+    if record.step < Step::WorkspaceMoved {
+        env.note("Copying the workspace disk");
+        env.move_workspace(&plan)?;
+        env.copy_ssh(&plan)?;
+        save(env, journal, record, Step::WorkspaceMoved)?;
+    }
+    if record.step < Step::HomeCarried {
+        env.note("Carrying the home folder");
+        env.start(&plan.old_id)?;
+        env.start(&plan.new_id)?;
+        env.carry_home(&plan)?;
+        save(env, journal, record, Step::HomeCarried)?;
+    }
+    if record.step < Step::RecipeReplayed {
+        if let Some(spec) = recipe.filter(|spec| spec.os == RecipeOs::Linux) {
+            env.note("Installing the recipe on the new image");
+            env.replay_recipe(&plan.new_id, spec)?;
         }
-        _ => {
-            // Not swapped yet: roll back safely.
-            if env.computer_exists(&record.rebuild_name) {
-                let _ = env.stop_computer(&record.rebuild_name);
-                let _ = env.delete_computer(&record.rebuild_name);
-            }
-            if record.was_running
-                && env
-                    .computer_info(&record.computer_name)
-                    .map_or(false, |c| !c.running)
-            {
-                let _ = env.start_computer(&record.computer_name);
-            }
-            journal.remove(&record.computer_id);
-            Ok(())
+        save(env, journal, record, Step::RecipeReplayed)?;
+    }
+    if record.step < Step::Swapping {
+        stop_and_wait(env, &plan.old_id)?;
+        stop_and_wait(env, &plan.new_id)?;
+        save(env, journal, record, Step::Swapping)?;
+    }
+    if record.step < Step::Swapped {
+        env.note("Swapping the computers");
+        env.swap_apply(&plan)?;
+        save(env, journal, record, Step::Swapped)?;
+    }
+    finish(env, journal, record);
+    Ok(())
+}
+
+/// What follows the swap: forget what the build left in the stores, bring the computer back
+/// if it was running, and close the journal. None of it undoes the rebuild.
+fn finish(env: &dyn RebuildEnv, journal: &Journal, record: &Record) {
+    if let Err(error) = env.settle_swapped(&record.plan) {
+        env.note(&format!(
+            "Some leftovers of the build were not cleaned up: {error}"
+        ));
+    }
+    if record.was_running {
+        env.note(&format!("Starting {}", record.plan.old_name));
+        if let Err(error) = env.start(&record.plan.old_id) {
+            env.note(&format!(
+                "{} was not started again: {error}",
+                record.plan.old_name
+            ));
         }
+    }
+    journal.remove(&record.plan.old_id);
+}
+
+/// Puts everything back before the swap: the identities if the swap had begun, then the build
+/// sandbox and its staged files go, and the computer runs again if it did.
+fn roll_back(env: &dyn RebuildEnv, journal: &Journal, record: &Record) -> Result<(), String> {
+    let plan = &record.plan;
+    for id in [&plan.new_id, &plan.old_id] {
+        // A running computer cannot be renamed or removed.
+        if env.info(id).map(|info| info.running).unwrap_or(false) {
+            stop_and_wait(env, id)?;
+        }
+    }
+    if record.step >= Step::Swapping {
+        env.swap_revert(plan)?;
+    }
+    env.remove_build(plan)?;
+    if record.was_running {
+        if let Err(error) = env.start(&plan.old_id) {
+            env.note(&format!("{} was not started again: {error}", plan.old_name));
+        }
+    }
+    journal.remove(&plan.old_id);
+    Ok(())
+}
+
+/// Finishes or rolls back a rebuild the engine stopped in the middle of: finished when the
+/// swap was done, rolled back otherwise.
+fn recover_record(env: &dyn RebuildEnv, journal: &Journal, record: &Record) -> Result<(), String> {
+    if record.step >= Step::Swapped {
+        finish(env, journal, record);
+        Ok(())
+    } else {
+        roll_back(env, journal, record)
     }
 }
 
-/// Scans the journal and recovers all interrupted rebuild operations.
-pub fn recover_all(env: &dyn RebuildEnv, journal: &Journal) -> Result<usize, String> {
-    let records = journal.all();
-    let mut recovered = 0;
-    for record in records {
-        if record.state == RebuildState::Rebuilding {
-            resume_or_rollback(env, journal, &record)?;
-            recovered += 1;
+/// The computers with a rebuild to settle.
+pub fn interrupted_ids(journal: &Journal) -> Vec<String> {
+    journal
+        .all()
+        .into_iter()
+        .map(|record| record.plan.old_id)
+        .collect()
+}
+
+/// Settles the interrupted rebuild of `computer_id` with its lane held from the start. `held`
+/// runs once the lane is held, so the caller can let startup go on knowing no other rebuild
+/// of the computer can begin meanwhile. It is tried up to `attempts` times, `pause` apart (the
+/// runtime may not be ready yet at engine start).
+pub fn recover_one(
+    env: &dyn RebuildEnv,
+    journal: &Journal,
+    computer_id: &str,
+    held: &dyn Fn(),
+    attempts: u32,
+    pause: Duration,
+) -> Result<(), String> {
+    let _lane = lane::acquire(computer_id, Duration::from_secs(30))?;
+    held();
+    let mut last = Ok(());
+    for attempt in 0..attempts.max(1) {
+        let Some(record) = journal.get(computer_id) else {
+            return Ok(());
+        };
+        last = recover_record(env, journal, &record);
+        if last.is_ok() {
+            return Ok(());
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(pause);
         }
     }
-    Ok(recovered)
+    last
 }

@@ -5843,6 +5843,26 @@ pub(crate) fn rename_sandbox(
         .map(|_| ())
 }
 
+/// Forgets what the stores keep for a computer whose entry was dropped from the saved
+/// configuration while its sandbox lives on under another identity (the build of a rebuild,
+/// after its swap).
+pub(crate) fn forget_replaced_identity(
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<(), RuntimeError> {
+    let (id, name) = (configuration.id(), configuration.name());
+    crate::network::computer_removed(paths, name).map_err(RuntimeError::Unavailable)?;
+    lifecycle_recovery::forget_removed(paths, configuration)?;
+    crate::secrets::computer_removed(name).map_err(RuntimeError::Unavailable)?;
+    forget_github_state(&paths.home, name);
+    crate::github::computer_removed(name).map_err(RuntimeError::Unavailable)?;
+    checkpoints::forget_removed(paths, id)?;
+    crate::policy::store::computer_removed(id);
+    crate::network_policy::computer_removed(id);
+    crate::guest_client::computer_removed(id);
+    Ok(())
+}
+
 /// Forgets what this process remembers under a computer name (GitHub identity and access state),
 /// after a promote moved the name to another computer.
 pub(crate) fn forget_name_state(paths: &RuntimePaths, name: &str) {

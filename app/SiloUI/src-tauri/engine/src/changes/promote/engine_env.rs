@@ -100,7 +100,7 @@ fn with_linux<T>(
 /// Runs `work` while holding the computer's operation lane, as a `computers.start` job does:
 /// the runtime's start reconciles published ports, which requires the lane to be held.
 /// Callers must not hold the lane themselves (the gate does not nest).
-fn under_gate<T>(
+pub(crate) fn under_gate<T>(
     id: &str,
     name: &str,
     label: &str,
@@ -114,7 +114,7 @@ fn under_gate<T>(
 }
 
 /// The computer ids that hold disks under a name of their own (see `refusal`).
-fn stored_under_its_name(paths: &RuntimePaths, name: &str) -> bool {
+pub(crate) fn stored_under_its_name(paths: &RuntimePaths, name: &str) -> bool {
     let folder = paths.volumes.join(name).to_string_lossy().into_owned();
     runtime::inspect_computer(&runtime::ProcessRunner, paths, name)
         .map(|inspected| inspected.config.to_string().contains(&folder))

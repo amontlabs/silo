@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, RecipeSpec};
 
 pub use build::{build, remove, BuildEnv, BuildOutcome, Created, ExecOut, RunAs, BUILDER_PREFIX};
+pub(crate) use scripts::Step as BuildStep;
 #[cfg(test)]
 use build::{builder_name, is_builder_of};
 pub use additions::{append, manager_key, record_merge, Additions};
@@ -108,6 +109,11 @@ pub fn hash(spec: &RecipeSpec, image: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+/// The guest steps that put `spec` on a computer: the ones a build runs, in the same order.
+pub(crate) fn steps_for(spec: &RecipeSpec) -> Vec<BuildStep> {
+    scripts::all_steps(&normalize(spec))
 }
 
 /// A recipe name: lowercase letters, digits, `-` and `_`, as a file name.
