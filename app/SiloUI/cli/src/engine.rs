@@ -694,6 +694,18 @@ impl Engine {
         Ok(macos_supported(&listed))
     }
 
+    /// Puts computer names in place of the ids in a merge result. Ids stay where the engine
+    /// cannot list the computers.
+    pub async fn name_merge_computers(&self, value: &mut Value) {
+        if let Ok(computers) = self.all_computers().await {
+            let names: Vec<(String, String)> = computers
+                .into_iter()
+                .map(|computer| (computer.id, computer.name))
+                .collect();
+            crate::render::name_merge_computers(value, &names);
+        }
+    }
+
     pub async fn computer(&self, name: &str) -> Result<Computer, CliError> {
         let computers = self.computers().await?;
         find(&computers, name).cloned()

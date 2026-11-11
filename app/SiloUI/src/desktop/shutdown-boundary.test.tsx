@@ -9,11 +9,14 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }))
 // subscribes to the operation queue while quitting, and that second listener must not
 // steal the handle the tests use to toggle shutdown.
 vi.mock("@tauri-apps/api/event", () => ({ listen: native.listen }))
+const handlers = new Map<string, () => void>()
 beforeEach(() => {
   vi.clearAllMocks()
+  handlers.clear()
   native.listen.mockReset().mockImplementation(async (event: string, receive: typeof native.receive) => {
     if (event === "silo://shutdown-state-changed") native.receive = receive
     if (event === "silo://operation-queue-changed") native.queueChanged = receive as unknown as typeof native.queueChanged
+    handlers.set(event, receive as unknown as () => void)
     return native.stop
   })
   native.invoke.mockImplementation(async (command: string) => {
@@ -49,9 +52,9 @@ it("reads active shutdown when a window opens after the event", async () => {
   const view = render(<ShutdownBoundary compact><button>Quit Silo</button></ShutdownBoundary>)
   expect(await screen.findByRole("status")).toHaveTextContent("Stopping local computers…")
   view.unmount()
-  // While quitting the boundary holds two subscriptions: shutdown state and the
-  // operation queue it reads for the overlay. Both are released on unmount.
-  expect(native.stop).toHaveBeenCalledTimes(2)
+  // The boundary holds four subscriptions: shutdown state, engine connection, Quit prompt
+  // and the operation queue it reads for the overlay. All are released on unmount.
+  expect(native.stop).toHaveBeenCalledTimes(4)
 })
 it("names the running work Quit waits for and cancels only cancellable entries on request", async () => {
   const queue = { running: [
@@ -172,7 +175,7 @@ it("keeps running work and cancellation visible when the queue subscription fail
   const logged = vi.spyOn(console, "error").mockImplementation(() => {})
   native.listen.mockImplementation(async (event: string, receive: typeof native.receive) => {
     if (event === "silo://operation-queue-changed") throw new Error("Event bridge not ready")
-    native.receive = receive
+    if (event === "silo://shutdown-state-changed") native.receive = receive
     return native.stop
   })
   const queue = { running: [{ id: 8, label: "Backing up computers", computerId: null, computerName: null, sinceMs: 0, cancellable: true, expectedMs: null, blockedByHidden: false }], waiting: [] }
@@ -203,4 +206,37 @@ it("retries an unread shutdown snapshot on focus without duplicating its subscri
     expect(await screen.findByRole("dialog", { name: "Quitting Silo" })).toBeVisible()
     expect(native.listen.mock.calls.filter(([event]) => event === "silo://shutdown-state-changed")).toHaveLength(1)
   } finally { logged.mockRestore() }
+})
+
+it("clears an engine-initiated shutdown overlay when the engine connection drops", async () => {
+  render(<ShutdownBoundary><button>Create computer</button></ShutdownBoundary>)
+  await vi.waitFor(() => expect(handlers.has("silo://engine-connection")).toBe(true))
+  act(() => native.receive({ payload: true }))
+  expect(screen.getByRole("status")).toHaveTextContent("Stopping local computers…")
+  await act(async () => handlers.get("silo://engine-connection")!())
+  expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Create computer" }).closest("[inert]")).toBeNull()
+})
+it("clears the overlay when the engine reconnects without a shutdown under way", async () => {
+  render(<ShutdownBoundary><button>Create computer</button></ShutdownBoundary>)
+  await vi.waitFor(() => expect(handlers.has("silo://engine-connection")).toBe(true))
+  act(() => native.receive({ payload: true }))
+  expect(screen.getByRole("status")).toBeVisible()
+  await act(async () => handlers.get("silo://engine-connection")!())
+  expect(screen.queryByRole("dialog", { name: "Quitting Silo" })).not.toBeInTheDocument()
+})
+it("keeps the overlay across a connection change while this app's own Quit is under way", async () => {
+  native.invoke.mockImplementation(async (command: string) => command === "read_operation_queue" ? { running: [], waiting: [] } : true)
+  render(<ShutdownBoundary><button>Create computer</button></ShutdownBoundary>)
+  expect(await screen.findByRole("status")).toBeVisible()
+  await act(async () => handlers.get("silo://engine-connection")!())
+  expect(screen.getByRole("status")).toBeVisible()
+})
+it("lets the Quit prompt through an engine-initiated overlay so Cancel leaves the window usable", async () => {
+  render(<ShutdownBoundary><button>Create computer</button></ShutdownBoundary>)
+  await vi.waitFor(() => expect(handlers.has("silo://quit-requested")).toBe(true))
+  act(() => native.receive({ payload: true }))
+  expect(screen.getByRole("status")).toBeVisible()
+  act(() => handlers.get("silo://quit-requested")!())
+  expect(screen.queryByRole("status")).not.toBeInTheDocument()
 })

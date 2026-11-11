@@ -54,6 +54,27 @@ export function ShutdownBoundary({ children, compact = false, pendingWork }: { c
     connect()
     return () => { disposed = true; unsubscribe?.(); window.removeEventListener("focus", connect) }
   }, [])
+  // The overlay also appears when the engine itself is shutting down (a stop asked by the
+  // command line, an update or another device). It must not outlive that: when the engine
+  // connection drops or comes back, only this app's own Quit (asked from the native side)
+  // keeps it; and a Quit prompt means this app is not quitting yet, so the prompt must
+  // stay reachable and Cancel leaves the window usable.
+  useEffect(() => {
+    let disposed = false
+    const stops: Array<() => void> = []
+    const resync = () => {
+      void invoke<boolean>("read_shutdown_state")
+        .then(active => { if (!disposed && typeof active === "boolean") setQuitting(active) })
+        .catch(error => { console.error("Silo shutdown status:", error); if (!disposed) setQuitting(false) })
+    }
+    const subscribe = (event: string, handler: () => void) => {
+      void listen(event, handler).then(stop => { if (disposed) stop(); else stops.push(stop) })
+        .catch(error => console.error("Silo shutdown status:", error))
+    }
+    subscribe("silo://engine-connection", resync)
+    subscribe("silo://quit-requested", () => setQuitting(false))
+    return () => { disposed = true; stops.forEach(stop => stop()) }
+  }, [])
   // While quitting, follow the operation queue so the overlay can name the work
   // Quit is waiting for and offer to cancel it. The read command keeps working
   // during shutdown; queue changes (including cancelled waiters) re-fetch it.

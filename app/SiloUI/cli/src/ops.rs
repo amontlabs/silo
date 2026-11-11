@@ -702,7 +702,7 @@ async fn fork_now(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let mut recipe_hash = None;
-    let mut checkpoint = args.checkpoint.clone();
+    let mut checkpoint = None;
     let mut recipe_ports: Vec<u16> = Vec::new();
     let source = match &args.recipe_name {
         Some(recipe_name) => {
@@ -722,7 +722,17 @@ async fn fork_now(
             builder.name = recipe_name.clone();
             builder
         }
-        None => engine.computer(&args.source).await?,
+        None => {
+            let source = engine.computer(&args.source).await?;
+            if let Some(wanted) = &args.checkpoint {
+                checkpoint = Some(resolve_checkpoint(
+                    &source.name,
+                    &source.checkpoints,
+                    wanted,
+                )?);
+            }
+            source
+        }
     };
     let name = match &args.name {
         Some(name) => name.clone(),
@@ -1637,6 +1647,38 @@ pub async fn agent_install(
     Ok(value)
 }
 
+/// The id of the checkpoint `wanted` names, by id or by name. A name that several checkpoints
+/// share is refused with their ids listed.
+pub fn resolve_checkpoint(
+    computer: &str,
+    checkpoints: &[Value],
+    wanted: &str,
+) -> Result<String, CliError> {
+    if let Some(id) = checkpoints
+        .iter()
+        .find(|cp| cp["id"] == wanted)
+        .and_then(|cp| cp["id"].as_str())
+    {
+        return Ok(id.to_owned());
+    }
+    let ids: Vec<&str> = checkpoints
+        .iter()
+        .filter(|cp| cp["name"] == wanted)
+        .filter_map(|cp| cp["id"].as_str())
+        .collect();
+    match ids.as_slice() {
+        [id] => Ok((*id).to_owned()),
+        [] => Err(CliError::new(format!(
+            "{computer} has no checkpoint {wanted}. `silo checkpoints {computer}` lists them."
+        ))),
+        many => Err(CliError::new(format!(
+            "{computer} has {} checkpoints named {wanted}: {}. Use one of these ids.",
+            many.len(),
+            many.join(", ")
+        ))),
+    }
+}
+
 /// Puts a computer back to one of its checkpoints, named by id or by name.
 pub async fn restore(
     engine: &Engine,
@@ -1645,18 +1687,7 @@ pub async fn restore(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let target = engine.computer(computer).await?;
-    let wanted = target
-        .checkpoints
-        .iter()
-        .find(|cp| cp["id"] == checkpoint || cp["name"] == checkpoint)
-        .and_then(|cp| cp["id"].as_str())
-        .ok_or_else(|| {
-            CliError::new(format!(
-                "{} has no checkpoint {checkpoint}. `silo checkpoints {}` lists them.",
-                target.name, target.name
-            ))
-        })?
-        .to_owned();
+    let wanted = resolve_checkpoint(&target.name, &target.checkpoints, checkpoint)?;
     engine
         .run_job(
             &format!("Restoring {}", target.name),
@@ -1679,6 +1710,34 @@ pub async fn checkpoints(engine: &Engine, computer: &str) -> Result<Value, CliEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_checkpoint_is_found_by_id_or_by_a_unique_name() {
+        let checkpoints = vec![
+            json!({"id": "cp-1", "name": "before"}),
+            json!({"id": "cp-2", "name": "twin"}),
+            json!({"id": "cp-3", "name": "twin"}),
+        ];
+        assert_eq!(
+            resolve_checkpoint("a", &checkpoints, "cp-2").unwrap(),
+            "cp-2"
+        );
+        assert_eq!(
+            resolve_checkpoint("a", &checkpoints, "before").unwrap(),
+            "cp-1"
+        );
+        let ambiguous = resolve_checkpoint("a", &checkpoints, "twin")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            ambiguous.contains("cp-2") && ambiguous.contains("cp-3"),
+            "{ambiguous}"
+        );
+        let missing = resolve_checkpoint("a", &checkpoints, "nope")
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("no checkpoint nope"), "{missing}");
+    }
 
     #[test]
     fn no_desktop_sends_the_setting_the_apps_form_sends() {

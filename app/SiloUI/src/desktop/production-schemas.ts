@@ -437,9 +437,9 @@ export const deviceResourcesSchema = z.object({
 })
 export type DeviceResources = z.infer<typeof deviceResourcesSchema>
 
-/** How a job an allowed approval started is going. */
+/** How a job an allowed approval started is going; `gone` means the engine no longer holds it. */
 export const approvalJobSchema = z.object({
-  state: tolerantEnum(["waiting", "running", "finished"], "running"),
+  state: tolerantEnum(["waiting", "running", "finished", "gone"], "running"),
   error: optionalText, status: optionalText, message: optionalText,
 })
 export type ApprovalJob = z.infer<typeof approvalJobSchema>

@@ -1188,7 +1188,9 @@ async fn dispatch(
             }) => {
                 let engine = &review::locate(engine, &id).await?;
                 let choices = parse_choices(&choose)?;
-                let value = review::merge(engine, &id, data_ok, choices, skip, progress).await?;
+                let mut value =
+                    review::merge(engine, &id, data_ok, choices, skip, progress).await?;
+                engine.name_merge_computers(&mut value).await;
                 emit(json, &value, render::merge);
                 return Ok(merge_exit(&value));
             }
@@ -1697,6 +1699,8 @@ async fn merge_command(
         emit(json, &value, render::requested);
         return Ok(0);
     }
+    let mut value = value;
+    engine.name_merge_computers(&mut value).await;
     emit(json, &value, render::merge);
     Ok(merge_exit(&value))
 }

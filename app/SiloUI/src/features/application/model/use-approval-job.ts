@@ -33,9 +33,10 @@ export function useApprovalJob(read: ApplicationActions["readApprovalJob"], appr
       try {
         const next = await read(jobId)
         if (disposed) return
-        if (next.state === "finished") remember(jobId, next)
+        const ended = next.state === "finished" || next.state === "gone"
+        if (ended) remember(jobId, next)
         setJob({ id: jobId, job: next })
-        if (next.state === "finished") return
+        if (ended) return
       } catch {
         if (disposed) return
       }

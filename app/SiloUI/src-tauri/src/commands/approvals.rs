@@ -86,7 +86,14 @@ pub(crate) async fn job_progress(engine: &EngineClient, id: &str) -> Result<Valu
             device_id: None,
             offset_bytes: None,
         }))
-        .await?;
+        .await;
+    let job = match job {
+        Ok(job) => job,
+        Err(error) if error.is("not_found") => {
+            return Ok(json!({"state": "gone", "error": null, "status": null, "message": null}))
+        }
+        Err(error) => return Err(error),
+    };
     let text = |pointer: &str| job.pointer(pointer).cloned().unwrap_or(Value::Null);
     Ok(json!({
         "state": text("/state"),
@@ -165,11 +172,14 @@ mod forwarding_tests {
     use serde_json::json;
     use silo_api::methods::MethodName;
 
-    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
             MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
             MethodName::ApprovalsList => Ok(json!({"approvals": []})),
             MethodName::AuditList => Ok(json!({"entries": []})),
+            MethodName::OperationsJobGet if params["jobId"] == "job:2" => {
+                Err(("not_found", "The job was not found.".to_owned()))
+            }
             MethodName::OperationsJobGet => Ok(json!({"jobId": "job:1", "state": "finished",
                 "outcome": {"error": {"code": "busy", "message": "The port is taken."}}})),
             _ => Ok(Value::Null),
@@ -224,6 +234,17 @@ mod forwarding_tests {
             json!({"state": "finished", "error": "The port is taken.", "status": null, "message": null})
         );
         assert!(job_progress(&engine, "not a job").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_job_the_engine_no_longer_holds_reads_as_gone() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        let progress = job_progress(&engine, "job:2").await.unwrap();
+        assert_eq!(
+            progress,
+            json!({"state": "gone", "error": null, "status": null, "message": null})
+        );
     }
 
     #[tokio::test]
