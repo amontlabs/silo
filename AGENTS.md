@@ -31,7 +31,7 @@ Preserve bundled MicroSandbox and Git tools, guest scripts, the Rust vendor patc
 
 ## Setup and commands
 
-Use Node.js 24, Python 3.11 or newer, Rust, and the device's Tauri prerequisites. Runtime preparation (`npm --prefix app/SiloUI run runtime:prepare`, also run by `desktop`) requires Rust 1.94.0 for the pinned MicroSandbox build, Go 1.25, and network access on a cold cache. The runner module (`app/SiloUI/runner`) pins its own Go version in its `go.mod` (1.27.3, required by `actions/scaleset` v0.5.0). The Silo app builds for Apple Silicon macOS 15+ only. The engine daemon (`silod`) also builds for Linux hosts (x86_64 and aarch64), where it runs Linux computers; see [`silod` on a Linux host](docs/SiloUI-ENGINE.md#silod-on-a-linux-host). Linux computers also run as guests on a Mac.
+Use Node.js 24, Python 3.11 or newer, Rust, and the device's Tauri prerequisites. Runtime preparation (`npm --prefix app/SiloUI run runtime:prepare`, also run by `desktop`) requires Rust 1.95.0 for the pinned MicroSandbox build, Go 1.25, and network access on a cold cache. The runner module (`app/SiloUI/runner`) pins its own Go version in its `go.mod` (1.27.3, required by `actions/scaleset` v0.5.0). The Silo app builds for Apple Silicon macOS 15+ only. The engine daemon (`silod`) also builds for Linux hosts (x86_64 and aarch64), where it runs Linux computers; see [`silod` on a Linux host](docs/SiloUI-ENGINE.md#silod-on-a-linux-host). Linux computers also run as guests on a Mac.
 
 Native builds and Rust tests require GitHub App configuration. Follow `docs/SiloUI-RELEASES.md#local-setup`; do not print `github-build.local.json`, signing credentials, or verbose build output containing configuration. For native unit tests only, the release guide permits explicit synthetic GitHub configuration. Never distribute those test executables.
 
@@ -48,7 +48,7 @@ Run checks appropriate to the change:
 npm --prefix app/SiloUI run typecheck
 npm --prefix app/SiloUI run lint
 npm --prefix app/SiloUI test
-cargo +1.94.0 fmt --manifest-path app/SiloUI/src-tauri/Cargo.toml --check
+cargo +1.95.0 fmt --manifest-path app/SiloUI/src-tauri/Cargo.toml --check
 cargo test --manifest-path app/SiloUI/Cargo.toml --workspace --locked
 npm --prefix app/SiloUI run test:release
 ```

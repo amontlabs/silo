@@ -139,7 +139,7 @@ Linux computers over KVM. The Silo app stays Mac-only; a Linux host is managed f
 device's engine through Connections. The macOS code paths are unchanged: everything below is
 behind `cfg(target_os = "linux")`.
 
-- **Build.** `cargo build -p silod` (from `app/SiloUI`, toolchain 1.94.0). It needs
+- **Build.** `cargo build -p silod` (from `app/SiloUI`, toolchain 1.95.0). It needs
   `pkg-config` and `libdbus-1-dev` (for keyring's optional Secret Service backend) but no
   GTK: the engine depends on `silo-host` without its `desktop` feature, which holds the GIO
   and GTK integrations the app uses (application discovery, autostart, notifications). Without

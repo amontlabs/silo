@@ -4,7 +4,7 @@
   "libkrunfwVersion": "5.6.1",
   "sourceCommit": "09df3d4b9d832adaede1fb9a198cfc660bfab8cd",
   "sourceArchiveSha256": "3d076d83211e9755b17c0a1b93fadb3f201fcc4073e311ca139636ebebf827bb",
-  "toolchain": "1.94.0",
+  "toolchain": "1.95.0",
   "features": "net,ssh,embed-binaries",
   "libkrunfwCommit": "cf4c22b9f05c680928e6d96a9d198f5845573a87",
   "targets": {
