@@ -17,13 +17,13 @@ pub mod store;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 pub use silo_api::methods::network::{
-    NetworkPolicy, NetworkPolicyHost, NetworkPolicyMode, NetworkPreset,
+    NetworkPolicy, NetworkPolicyHost, NetworkPolicyMode, NetworkPreset, NetworkPresetUpdate,
 };
 use silo_api::plain_text_within;
 
@@ -88,12 +88,24 @@ impl Allowed {
     }
 }
 
+/// The preset version a policy saved before presets had versions was approved at.
+const FIRST_PRESET_VERSION: u32 = 1;
+
+/// The version of each preset a policy was approved at, by preset name. A preset without an
+/// entry was approved at the first version.
+pub type Pins = BTreeMap<String, u32>;
+
 /// A named host list from `presets.json`.
 #[derive(Clone, Debug)]
 pub struct Preset {
     pub name: String,
     pub title: String,
+    /// Raised whenever the host list changes in a way that can add a host.
+    pub version: u32,
     pub hosts: Vec<Allowed>,
+    /// The host lists of earlier versions, kept for as long as a saved policy may have been
+    /// approved at one.
+    pub history: Vec<(u32, Vec<Allowed>)>,
 }
 
 #[derive(Deserialize)]
@@ -108,6 +120,16 @@ struct PresetFile {
 struct PresetEntry {
     name: String,
     title: String,
+    version: u32,
+    hosts: Vec<PresetHost>,
+    #[serde(default)]
+    history: Vec<PresetHistory>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PresetHistory {
+    version: u32,
     hosts: Vec<PresetHost>,
 }
 
@@ -118,9 +140,28 @@ enum PresetHost {
     WithPorts { host: String, ports: Vec<u16> },
 }
 
+fn preset_hosts(name: &str, listed: Vec<PresetHost>) -> Result<Vec<Allowed>, String> {
+    let mut hosts = Vec::new();
+    for host in listed {
+        let (host, ports) = match host {
+            PresetHost::Host(host) => (host, vec![HTTPS_PORT]),
+            PresetHost::WithPorts { host, ports } => (host, ports),
+        };
+        validate_host(&host)?;
+        if ports.is_empty() || ports.contains(&0) {
+            return Err(format!("preset {name} lists {host} without a port"));
+        }
+        hosts.extend(ports.into_iter().map(|port| Allowed::new(&host, port)));
+    }
+    if hosts.is_empty() {
+        return Err(format!("preset {name} has no hosts"));
+    }
+    Ok(hosts)
+}
+
 fn load_presets(text: &str) -> Result<Vec<Preset>, String> {
     let file: PresetFile = serde_json::from_str(text).map_err(|error| error.to_string())?;
-    if file.version != 1 {
+    if file.version != 2 {
         return Err("unknown preset file version".into());
     }
     let mut names = BTreeSet::new();
@@ -136,32 +177,51 @@ fn load_presets(text: &str) -> Result<Vec<Preset>, String> {
             {
                 return Err(format!("preset name {:?} is invalid or repeated", entry.name));
             }
-            let mut hosts = Vec::new();
-            for host in entry.hosts {
-                let (host, ports) = match host {
-                    PresetHost::Host(host) => (host, vec![HTTPS_PORT]),
-                    PresetHost::WithPorts { host, ports } => (host, ports),
-                };
-                validate_host(&host)?;
-                if ports.is_empty() || ports.contains(&0) {
-                    return Err(format!("preset {} lists {host} without a port", entry.name));
-                }
-                hosts.extend(ports.into_iter().map(|port| Allowed::new(&host, port)));
+            if entry.version < FIRST_PRESET_VERSION {
+                return Err(format!("preset {} has no version", entry.name));
             }
-            if hosts.is_empty() {
-                return Err(format!("preset {} has no hosts", entry.name));
+            let mut history = Vec::new();
+            for earlier in entry.history {
+                if earlier.version >= entry.version
+                    || history.iter().any(|(version, _)| *version == earlier.version)
+                {
+                    return Err(format!(
+                        "preset {} lists version {} twice or after its own",
+                        entry.name, earlier.version
+                    ));
+                }
+                history.push((earlier.version, preset_hosts(&entry.name, earlier.hosts)?));
             }
             Ok(Preset {
+                hosts: preset_hosts(&entry.name, entry.hosts)?,
                 name: entry.name,
                 title: entry.title,
-                hosts,
+                version: entry.version,
+                history,
             })
         })
         .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_PRESETS: std::cell::RefCell<Option<&'static [Preset]>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests on this thread see `presets` instead of the data file.
+#[cfg(test)]
+pub(crate) fn use_test_presets(presets: Option<Vec<Preset>>) {
+    TEST_PRESETS.with(|test| {
+        *test.borrow_mut() = presets.map(|presets| &*Box::leak(presets.into_boxed_slice()));
+    });
+}
+
 /// The presets the engine knows, from `presets.json`.
 pub fn presets() -> &'static [Preset] {
+    #[cfg(test)]
+    if let Some(presets) = TEST_PRESETS.with(|test| *test.borrow()) {
+        return presets;
+    }
     static PRESETS: OnceLock<Vec<Preset>> = OnceLock::new();
     PRESETS.get_or_init(|| {
         load_presets(include_str!("presets.json")).expect("checked-in network presets are valid")
@@ -170,6 +230,88 @@ pub fn presets() -> &'static [Preset] {
 
 pub fn preset(name: &str) -> Option<&'static Preset> {
     presets().iter().find(|preset| preset.name == name)
+}
+
+impl Preset {
+    /// The hosts a policy approved at `pin` gets from this preset, and the hosts the running
+    /// Silo's version adds that it does not get. The approved list stays in force until the
+    /// owner accepts the update; a version this Silo does not know allows nothing.
+    fn hosts_at(&self, pin: Option<u32>) -> (Vec<Allowed>, Vec<Allowed>) {
+        let pin = pin.unwrap_or(FIRST_PRESET_VERSION);
+        if pin == self.version {
+            return (self.hosts.clone(), Vec::new());
+        }
+        let approved = self
+            .history
+            .iter()
+            .find(|(version, _)| *version == pin)
+            .map(|(_, hosts)| hosts.as_slice());
+        let Some(approved) = approved else {
+            return (Vec::new(), Vec::new());
+        };
+        let approved: BTreeSet<Allowed> = approved.iter().cloned().collect();
+        let current: BTreeSet<Allowed> = self.hosts.iter().cloned().collect();
+        let added = uncovered(&current, &approved);
+        if added.is_empty() {
+            (self.hosts.clone(), Vec::new())
+        } else {
+            (approved.into_iter().collect(), added)
+        }
+    }
+}
+
+/// A policy with the preset versions it was approved at.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Held {
+    pub policy: NetworkPolicy,
+    pub pins: Pins,
+}
+
+impl Held {
+    /// `policy` approved now: its presets at the versions this Silo has.
+    pub fn latest(policy: NetworkPolicy) -> Self {
+        let pins = policy
+            .presets
+            .iter()
+            .filter_map(|name| preset(name).map(|preset| (name.clone(), preset.version)))
+            .collect();
+        Self { policy, pins }
+    }
+
+    /// The hosts of every preset of the policy as approved, and per preset the hosts an update
+    /// would add: `(name, title, added)`.
+    fn preset_hosts(&self) -> (Vec<(String, Vec<Allowed>)>, Vec<(String, String, Vec<Allowed>)>) {
+        let mut hosts = Vec::new();
+        let mut updates = Vec::new();
+        for name in &self.policy.presets {
+            if let Some(preset) = preset(name) {
+                let (approved, added) = preset.hosts_at(self.pins.get(name).copied());
+                hosts.push((name.clone(), approved));
+                if !added.is_empty() {
+                    updates.push((name.clone(), preset.title.clone(), added));
+                }
+            }
+        }
+        (hosts, updates)
+    }
+
+    /// The presets whose running version has hosts this policy was not approved with.
+    pub fn preset_updates(&self) -> Vec<NetworkPresetUpdate> {
+        self.preset_hosts()
+            .1
+            .into_iter()
+            .map(|(name, title, added)| NetworkPresetUpdate {
+                name,
+                title,
+                added_hosts: added
+                    .iter()
+                    .map(|allowed| allowed.host.clone())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect(),
+            })
+            .collect()
+    }
 }
 
 /// The presets as the API lists them.
@@ -227,7 +369,43 @@ pub fn validate_host(host: &str) -> Result<(), String> {
     if RESERVED_TOP_LEVEL.contains(&top) {
         return refuse("that name stays on this device or its network");
     }
+    if host.starts_with("*.") && is_public_suffix(name) {
+        return refuse("a name under which anyone can get a host would allow all of them");
+    }
     Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SuffixFile {
+    version: u8,
+    #[allow(dead_code)]
+    note: String,
+    suffixes: Vec<String>,
+}
+
+/// The common multi-label public suffixes from `public_suffixes.json`: not the full public
+/// suffix list.
+fn public_suffixes() -> &'static BTreeSet<String> {
+    static SUFFIXES: OnceLock<BTreeSet<String>> = OnceLock::new();
+    SUFFIXES.get_or_init(|| {
+        let file: SuffixFile = serde_json::from_str(include_str!("public_suffixes.json"))
+            .expect("checked-in public suffixes are valid");
+        assert_eq!(file.version, 1, "unknown public suffix file version");
+        file.suffixes.into_iter().collect()
+    })
+}
+
+/// Whether `name` is one of the listed public suffixes.
+fn is_public_suffix(name: &str) -> bool {
+    public_suffixes().contains(name)
+}
+
+/// Whether `host` is a `*.` pattern a network rule refuses for being too wide, whatever else is
+/// wrong with it.
+pub fn is_too_wide_wildcard(host: &str) -> bool {
+    host.strip_prefix("*.")
+        .is_some_and(|name| !name.contains('.') || is_public_suffix(name))
 }
 
 /// Checks a policy and returns it in its stored form: hosts and presets sorted, each once.
@@ -263,20 +441,25 @@ pub fn validate(policy: &NetworkPolicy) -> Result<NetworkPolicy, String> {
 }
 
 /// What an allowlist policy lets through by itself: its own hosts on port 443 and its presets'
-/// hosts. Empty for the other modes.
+/// hosts. Empty for the other modes. Presets are taken at the latest version.
 pub fn expand(policy: &NetworkPolicy) -> BTreeSet<Allowed> {
-    if policy.mode != NetworkPolicyMode::Allowlist {
+    expand_held(&Held::latest(policy.clone()))
+}
+
+/// What an allowlist policy lets through by itself, with each preset at the version the policy
+/// was approved at.
+pub fn expand_held(held: &Held) -> BTreeSet<Allowed> {
+    if held.policy.mode != NetworkPolicyMode::Allowlist {
         return BTreeSet::new();
     }
-    let mut allowed: BTreeSet<Allowed> = policy
+    let mut allowed: BTreeSet<Allowed> = held
+        .policy
         .hosts
         .iter()
         .map(|host| Allowed::new(host, HTTPS_PORT))
         .collect();
-    for name in &policy.presets {
-        if let Some(preset) = preset(name) {
-            allowed.extend(preset.hosts.iter().cloned());
-        }
+    for (_, hosts) in held.preset_hosts().0 {
+        allowed.extend(hosts);
     }
     allowed
 }
@@ -293,11 +476,19 @@ fn uncovered(new: &BTreeSet<Allowed>, current: &BTreeSet<Allowed>) -> Vec<Allowe
 /// narrowest, open the widest; an allowlist is no wider than another when every host it allows
 /// is covered by the other. An allowlist is wider than closed: it resolves names.
 pub fn no_wider(new: &NetworkPolicy, current: &NetworkPolicy) -> bool {
+    no_wider_held(
+        &Held::latest(new.clone()),
+        &Held::latest(current.clone()),
+    )
+}
+
+/// [`no_wider`] with the preset versions each policy was approved at.
+pub fn no_wider_held(new: &Held, current: &Held) -> bool {
     use NetworkPolicyMode::*;
-    match (new.mode, current.mode) {
+    match (new.policy.mode, current.policy.mode) {
         (Closed, _) | (_, Open) => true,
         (Open, _) | (Allowlist, Closed) => false,
-        (Allowlist, Allowlist) => uncovered(&expand(new), &expand(current)).is_empty(),
+        (Allowlist, Allowlist) => uncovered(&expand_held(new), &expand_held(current)).is_empty(),
     }
 }
 
@@ -338,20 +529,29 @@ fn host_words(allowed: &[Allowed]) -> String {
 /// The summary of a request to widen `computer`'s policy from `current` to `new`, written from
 /// the two policies: the mode change and every host that is added.
 pub fn widening_summary(computer: &str, current: &NetworkPolicy, new: &NetworkPolicy) -> String {
-    let mut summary = if new.mode == current.mode {
+    widening_summary_held(
+        computer,
+        &Held::latest(current.clone()),
+        &Held::latest(new.clone()),
+    )
+}
+
+/// [`widening_summary`] with the preset versions each policy was approved at.
+pub fn widening_summary_held(computer: &str, current: &Held, new: &Held) -> String {
+    let mut summary = if new.policy.mode == current.policy.mode {
         format!("Widen the network of {computer}")
     } else {
         format!(
             "Change the network of {computer} from {} to {}",
-            mode_words(current.mode),
-            mode_words(new.mode)
+            mode_words(current.policy.mode),
+            mode_words(new.policy.mode)
         )
     };
-    if new.mode == NetworkPolicyMode::Allowlist {
-        let added = uncovered(&expand(new), &expand(current));
+    if new.policy.mode == NetworkPolicyMode::Allowlist {
+        let added = uncovered(&expand_held(new), &expand_held(current));
         if !added.is_empty() {
             summary.push_str(&format!(", adding {}", host_words(&added)));
-        } else if current.mode == NetworkPolicyMode::Closed {
+        } else if current.policy.mode == NetworkPolicyMode::Closed {
             summary.push_str(", which lets it look up names");
         }
     }
@@ -392,8 +592,24 @@ impl Grants {
         }
     }
 
+    /// The secrets' wildcard hosts too wide to be a network rule (over a public suffix), as
+    /// `(secret, host)`. The secret still works for those hosts; the computer just cannot reach
+    /// them by it.
+    pub fn too_wide(&self) -> Vec<(String, String)> {
+        self.secrets
+            .iter()
+            .flat_map(|(name, domains)| {
+                domains
+                    .iter()
+                    .filter(|domain| is_too_wide_wildcard(domain))
+                    .map(|domain| (name.clone(), domain.clone()))
+            })
+            .collect()
+    }
+
     /// The hosts these grants add, with where each comes from. A secret allowed to any host
-    /// adds nothing: an allowlist computer can send it only to hosts on its list.
+    /// adds nothing: an allowlist computer can send it only to hosts on its list. A wildcard
+    /// over a public suffix adds nothing either ([`Self::too_wide`]).
     fn hosts(&self) -> Vec<(Allowed, String)> {
         let mut hosts = Vec::new();
         if self.github {
@@ -509,8 +725,8 @@ impl Rule {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     pub mode: NetworkPolicyMode,
-    /// Whether connections to the computer's published ports are let in. Only an import that
-    /// has no stored policy yet keeps the deny-all it was imported with.
+    /// Whether connections to the computer's published ports are let in. An import, and the
+    /// copy an export makes, keep the deny-all they start with until the owner sets a policy.
     pub ingress_allowed: bool,
     pub rules: Vec<Rule>,
     pub strict: bool,
@@ -522,6 +738,12 @@ pub struct Plan {
 /// address. Allowlist: name lookups, each allowed host, Silo's rules, with strict off. Closed:
 /// Silo's rules only, so not even name lookups.
 pub fn plan(policy: &NetworkPolicy, grants: &Grants, extras: &[ExtraRule]) -> Plan {
+    plan_held(&Held::latest(policy.clone()), grants, extras)
+}
+
+/// [`plan`] with each preset at the version the policy was approved at.
+pub fn plan_held(held: &Held, grants: &Grants, extras: &[ExtraRule]) -> Plan {
+    let policy = &held.policy;
     let extra = extras.iter().map(|rule| match rule {
         ExtraRule::GatewayPort(port) => Rule::GatewayPort(*port),
     });
@@ -548,15 +770,12 @@ pub fn plan(policy: &NetworkPolicy, grants: &Grants, extras: &[ExtraRule]) -> Pl
             for host in &policy.hosts {
                 sources.push((Allowed::new(host, HTTPS_PORT), "list".into()));
             }
-            for name in &policy.presets {
-                if let Some(preset) = preset(name) {
-                    sources.extend(
-                        preset
-                            .hosts
-                            .iter()
-                            .map(|allowed| (allowed.clone(), format!("preset:{name}"))),
-                    );
-                }
+            for (name, hosts) in held.preset_hosts().0 {
+                sources.extend(
+                    hosts
+                        .into_iter()
+                        .map(|allowed| (allowed, format!("preset:{name}"))),
+                );
             }
             sources.extend(grants.hosts());
             let mut seen = BTreeSet::new();
@@ -739,28 +958,54 @@ pub fn effective(stored: Option<NetworkPolicy>, recorded: Option<&Value>) -> Net
     })
 }
 
-/// The plan for a computer: its stored policy (see [`effective`]), its grants and Silo's own
-/// rules.
-pub fn plan_for(computer_id: &str, computer_name: &str, recorded: Option<&Value>) -> Plan {
-    let stored = store::get(computer_id).ok().flatten();
-    let legacy = stored.is_none();
-    let policy = effective(stored, recorded);
-    let mut plan = plan(
-        &policy,
+/// What a computer runs with and the preset versions it was approved at: the stored policy,
+/// else what the runtime's recorded rules mean (see [`effective`]). The error is a stored
+/// policy that cannot be read: the computer must not start on a guess.
+pub fn held_for(
+    computer_id: &str,
+    recorded: Option<&Value>,
+) -> Result<(Held, bool), String> {
+    match store::get_stored(computer_id)? {
+        Some(stored) => Ok((stored.held(), stored.incoming_denied)),
+        None => {
+            let policy = effective(None, recorded);
+            // An import saved before policies were stored keeps the deny-all it was imported
+            // with until the owner sets one.
+            let denied = policy.mode == NetworkPolicyMode::Closed
+                && recorded
+                    .and_then(|recorded| recorded.get("default_ingress"))
+                    .and_then(Value::as_str)
+                    == Some("deny");
+            Ok((Held::latest(policy), denied))
+        }
+    }
+}
+
+/// The plan for a computer: its stored policy (see [`held_for`]), its grants and Silo's own
+/// rules. Refused when the stored policies cannot be read.
+pub fn plan_for(
+    computer_id: &str,
+    computer_name: &str,
+    recorded: Option<&Value>,
+) -> Result<Plan, String> {
+    let (held, incoming_denied) = held_for(computer_id, recorded)?;
+    let mut plan = plan_held(
+        &held,
         &Grants::of_computer(computer_name),
         &extra_rules(computer_id),
     );
-    // An import keeps the deny-all policy it was imported with until the owner sets one.
-    if legacy
-        && policy.mode == NetworkPolicyMode::Closed
-        && recorded
-            .and_then(|recorded| recorded.get("default_ingress"))
-            .and_then(Value::as_str)
-            == Some("deny")
-    {
+    if incoming_denied {
         plan.ingress_allowed = false;
     }
-    plan
+    Ok(plan)
+}
+
+/// [`plan_for`] for a computer behind a gateway, whose published ports are always let in.
+pub fn plan_for_gateway(computer_id: &str, computer_name: &str) -> Result<Plan, String> {
+    plan_for(computer_id, computer_name, None).map(|mut plan| {
+        plan.ingress_allowed = true;
+        plan
+    })
 }
 
 /// The policy as a macOS or container computer's gateway takes it at start, with its strict

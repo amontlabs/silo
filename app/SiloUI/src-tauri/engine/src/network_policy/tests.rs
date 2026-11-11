@@ -35,6 +35,9 @@ fn hosts_are_validated_strictly() {
     }
     for bad in [
         "",
+        "*.co.uk",
+        "*.github.io",
+        "*.s3.amazonaws.com",
         "Example.com",
         "example.com.",
         ".example.com",
@@ -127,10 +130,10 @@ fn presets_load_and_expand_to_their_hosts() {
     }
     assert!(!expanded.iter().any(|allowed| allowed.host == "registry.npmjs.org"));
     assert!(expand(&mode(NetworkPolicyMode::Open)).is_empty());
-    assert!(load_presets(r#"{"version":1,"presets":[{"name":"x","title":"X","hosts":["1.2.3.4"]}]}"#).is_err());
-    assert!(load_presets(r#"{"version":1,"presets":[{"name":"x","title":"X","hosts":[]}]}"#).is_err());
-    assert!(load_presets(r#"{"version":1,"presets":[{"name":"x","title":"X","hosts":["a.com"]},{"name":"x","title":"Y","hosts":["b.com"]}]}"#).is_err());
-    assert!(load_presets(r#"{"version":2,"presets":[]}"#).is_err());
+    assert!(load_presets(r#"{"version":2,"presets":[{"name":"x","title":"X","version":1,"hosts":["1.2.3.4"]}]}"#).is_err());
+    assert!(load_presets(r#"{"version":2,"presets":[{"name":"x","title":"X","version":1,"hosts":[]}]}"#).is_err());
+    assert!(load_presets(r#"{"version":2,"presets":[{"name":"x","title":"X","version":1,"hosts":["a.com"]},{"name":"x","title":"Y","version":1,"hosts":["b.com"]}]}"#).is_err());
+    assert!(load_presets(r#"{"version":3,"presets":[]}"#).is_err());
     let listed = preset_list();
     let ubuntu = listed.iter().find(|preset| preset.name == "ubuntu").unwrap();
     assert_eq!(ubuntu.hosts.len(), 3);
@@ -357,18 +360,251 @@ fn an_import_keeps_its_deny_all_policy_until_the_owner_sets_one() {
     let directory = tempfile::tempdir().unwrap();
     store::use_test_path(Some(directory.path().join("network-policy.json")));
     let imported = json!({"default_egress": "deny", "default_ingress": "deny", "rules": []});
-    let plan = plan_for("imported", "imported", Some(&imported));
+    let plan = plan_for("imported", "imported", Some(&imported)).unwrap();
     assert_eq!(plan.mode, NetworkPolicyMode::Closed);
     assert_eq!(plan.policy_value(), imported);
     assert!(plan.rule_args().windows(2).any(|pair| pair == ["--net-default-ingress", "deny"]));
     // Once the owner sets closed, published ports answer again.
     store::set("imported", &mode(NetworkPolicyMode::Closed)).unwrap();
-    let plan = plan_for("imported", "imported", Some(&imported));
+    let plan = plan_for("imported", "imported", Some(&imported)).unwrap();
     assert_eq!(plan.policy_value()["default_ingress"], "allow");
     // A computer saved before policies existed stays open.
     let github_default: Value =
         serde_json::from_str(include_str!("../../../guest/github-network-default.json")).unwrap();
-    let plan = plan_for("old", "old", Some(&github_default["policy"]));
+    let plan = plan_for("old", "old", Some(&github_default["policy"])).unwrap();
     assert_eq!(plan.policy_value(), github_default["policy"]);
     store::use_test_path(None);
+}
+
+fn view(network: Option<Value>, recorded: Option<Value>) -> crate::runtime::checkpoints::NetworkPolicyView {
+    crate::runtime::checkpoints::NetworkPolicyView {
+        name: "dev".into(),
+        container: false,
+        running: false,
+        pending: false,
+        network,
+        recorded,
+    }
+}
+
+fn deny_all() -> Value {
+    json!({"default_egress": "deny", "default_ingress": "deny", "rules": []})
+}
+
+#[test]
+fn the_judge_reads_a_computer_as_the_service_does() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    let github_default: Value =
+        serde_json::from_str(include_str!("../../../guest/github-network-default.json")).unwrap();
+    // An import that runs closed on deny-all rules and has no entry is closed, not open.
+    let imported = view(Some(json!({"policy": deny_all()})), Some(deny_all()));
+    let held = service::judged_from_view("imported", None, imported);
+    assert_eq!(held.policy.mode, NetworkPolicyMode::Closed);
+    assert!(!no_wider_held(&Held::latest(mode(NetworkPolicyMode::Open)), &held));
+    // An older computer with the open rules and no entry is still open.
+    let older = view(Some(github_default.clone()), None);
+    assert_eq!(
+        service::judged_from_view("older", None, older).policy.mode,
+        NetworkPolicyMode::Open
+    );
+    // A stored policy wins over the rules.
+    let list = allowlist(&["example.com"], &[]);
+    let stored = store::Stored::approved(&list);
+    let held = service::judged_from_view("c", Some(stored), view(Some(github_default), None));
+    assert_eq!(held.policy, list);
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_blocked_container_is_judged_closed_whatever_is_stored() {
+    let stored = store::Stored::approved(&mode(NetworkPolicyMode::Open));
+    let mut blocked = view(
+        Some(json!({"policy": crate::containers::secrets::blocked_policy()})),
+        None,
+    );
+    blocked.container = true;
+    let held = service::judged_from_view("c", Some(stored), blocked);
+    assert_eq!(held.policy.mode, NetworkPolicyMode::Closed);
+}
+
+#[test]
+fn an_import_saves_a_closed_entry_that_keeps_incoming_denied_until_the_owner_sets_a_policy() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    store::set_stored("imported", store::Stored::closed_without_incoming()).unwrap();
+    assert_eq!(store::get("imported").unwrap(), Some(mode(NetworkPolicyMode::Closed)));
+    let plan = plan_for("imported", "imported", Some(&deny_all())).unwrap();
+    assert_eq!(plan.mode, NetworkPolicyMode::Closed);
+    assert_eq!(plan.policy_value(), deny_all());
+    // The stored entry is the truth, whatever the recorded rules say.
+    let plan = plan_for("imported", "imported", None).unwrap();
+    assert_eq!(plan.policy_value(), deny_all());
+    // A gateway always lets its published ports in.
+    assert_eq!(plan_for_gateway("imported", "imported").unwrap().policy_value()["default_ingress"], "allow");
+    store::set("imported", &mode(NetworkPolicyMode::Closed)).unwrap();
+    assert_eq!(plan_for("imported", "imported", None).unwrap().policy_value()["default_ingress"], "allow");
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_fork_of_an_import_is_closed_and_a_closed_network_copy_denies_incoming() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    store::set_stored("imported", store::Stored::closed_without_incoming()).unwrap();
+    store::inherit("imported", "fork", None).unwrap();
+    assert_eq!(store::get("fork").unwrap(), Some(mode(NetworkPolicyMode::Closed)));
+    assert!(store::get_stored("fork").unwrap().unwrap().incoming_denied);
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_policy_file_that_cannot_be_read_refuses_instead_of_running_open() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("network-policy.json");
+    store::use_test_path(Some(file.clone()));
+    for contents in [
+        "{ not json".to_owned(),
+        r#"{"version": 2, "computers": {}}"#.to_owned(),
+        r#"{"version": 1, "computers": {"c": {"mode": "from-the-future"}}}"#.to_owned(),
+    ] {
+        std::fs::write(&file, &contents).unwrap();
+        assert!(plan_for("c", "c", None).is_err(), "{contents}");
+        assert!(plan_for_gateway("c", "c").is_err(), "{contents}");
+        assert!(held_for("c", None).is_err(), "{contents}");
+        assert!(store::set("c", &mode(NetworkPolicyMode::Closed)).is_err());
+        assert!(store::inherit("a", "c", None).is_err());
+        assert!(store::remove("c").is_err());
+        // Nothing was overwritten.
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), contents);
+    }
+    store::use_test_path(None);
+}
+
+fn version_two_presets() -> Vec<Preset> {
+    let at = |host: &str| Allowed::new(host, HTTPS_PORT);
+    vec![Preset {
+        name: "tools".into(),
+        title: "Tools".into(),
+        version: 2,
+        hosts: vec![at("a.example.com"), at("b.example.com")],
+        history: vec![(1, vec![at("a.example.com")])],
+    }]
+}
+
+#[test]
+fn a_preset_update_waits_for_the_owner_to_accept_it() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    use_test_presets(Some(version_two_presets()));
+    let policy = allowlist(&[], &["tools"]);
+    // Approved at version 1 (no pin saved is version 1).
+    let held = Held {
+        policy: policy.clone(),
+        pins: Pins::new(),
+    };
+    let hosts: Vec<String> = expand_held(&held).into_iter().map(|allowed| allowed.host).collect();
+    assert_eq!(hosts, ["a.example.com"]);
+    let updates = held.preset_updates();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0].name, "tools");
+    assert_eq!(updates[0].added_hosts, ["b.example.com"]);
+    let rules: Vec<String> = plan_held(&held, &Grants::default(), &[])
+        .rules
+        .iter()
+        .map(Rule::token)
+        .collect();
+    assert!(rules.contains(&"allow@a.example.com:tcp:443".to_owned()));
+    assert!(!rules.iter().any(|rule| rule.contains("b.example.com")), "{rules:?}");
+    // The same presets at the latest version are wider, so a computer's agent that sends them
+    // asks, and the summary names the new host.
+    let latest = Held::latest(policy.clone());
+    assert!(!no_wider_held(&latest, &held));
+    assert!(widening_summary_held("main", &held, &latest).contains("b.example.com"));
+    assert!(no_wider_held(&held, &latest));
+    // Setting the policy again approves the running version.
+    store::set("c", &policy).unwrap();
+    let stored = store::get_stored("c").unwrap().unwrap();
+    assert_eq!(stored.preset_versions.get("tools"), Some(&2));
+    assert!(stored.held().preset_updates().is_empty());
+    use_test_presets(None);
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_preset_version_this_silo_does_not_know_allows_nothing() {
+    use_test_presets(Some(version_two_presets()));
+    let policy = allowlist(&["x.example.com"], &["tools"]);
+    for pin in [0, 3] {
+        let held = Held {
+            policy: policy.clone(),
+            pins: Pins::from([("tools".to_owned(), pin)]),
+        };
+        let hosts: Vec<String> = expand_held(&held).into_iter().map(|allowed| allowed.host).collect();
+        assert_eq!(hosts, ["x.example.com"], "pin {pin}");
+    }
+    use_test_presets(None);
+}
+
+#[test]
+fn every_checked_in_preset_keeps_the_versions_it_replaced() {
+    for preset in presets() {
+        assert!(preset.version >= 1);
+        for (version, hosts) in &preset.history {
+            assert!(*version < preset.version && !hosts.is_empty());
+        }
+        for version in 1..preset.version {
+            assert!(
+                preset.history.iter().any(|(kept, _)| *kept == version),
+                "{} lost the list of version {version}",
+                preset.name
+            );
+        }
+    }
+}
+
+#[test]
+fn a_narrowing_is_saved_only_against_the_policy_it_was_judged_against() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    let target = || service::Target::Macos {
+        name: "dev".into(),
+        running: false,
+    };
+    let wide = allowlist(&["a.example.com", "b.example.com"], &[]);
+    let narrow = allowlist(&["a.example.com"], &[]);
+    store::set("c", &wide).unwrap();
+    // The owner narrows to nothing meanwhile: the agent's narrowing, judged against `wide`,
+    // does not put a list back.
+    store::set("c", &mode(NetworkPolicyMode::Closed)).unwrap();
+    let refused = service::set("c", &narrow, Some(&wide), target()).unwrap_err();
+    assert!(refused.contains("try") || refused.contains("retry"), "{refused}");
+    assert_eq!(store::get("c").unwrap(), Some(mode(NetworkPolicyMode::Closed)));
+    // Against the policy it was judged against, it is saved.
+    store::set("c", &wide).unwrap();
+    let state = service::set("c", &narrow, Some(&wide), target()).unwrap();
+    assert_eq!(state.policy, narrow);
+    assert_eq!(store::get("c").unwrap(), Some(narrow));
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_secret_wildcard_over_a_public_suffix_is_not_a_network_rule() {
+    let grants = Grants {
+        github: false,
+        secrets: vec![(
+            "WIDE".into(),
+            vec!["*.co.uk".into(), "*.com".into(), "api.example.com".into()],
+        )],
+    };
+    let list = plan(&allowlist(&[], &[]), &grants, &[]);
+    let tokens: Vec<String> = list.rules.iter().map(Rule::token).collect();
+    assert!(tokens.contains(&"allow@api.example.com:tcp:443".to_owned()));
+    assert!(!tokens.iter().any(|token| token.contains("co.uk") || token.contains("*.com")));
+    assert_eq!(
+        grants.too_wide(),
+        [("WIDE".to_owned(), "*.co.uk".to_owned()), ("WIDE".to_owned(), "*.com".to_owned())]
+    );
+    assert!(validate_host("*.example.co.uk").is_ok());
+    assert!(validate(&allowlist(&["*.co.uk"], &[])).is_err());
 }

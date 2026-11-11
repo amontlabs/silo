@@ -1973,12 +1973,17 @@ async fn network_policy(
     context: &HandlerContext,
     setting: bool,
 ) -> Result<HandlerOutput, DispatchError> {
-    let (computer_id, device_id, policy) = if setting {
+    let (computer_id, device_id, policy, expected) = if setting {
         let typed = context.decode_params::<network::NetworkPolicySetParams>(params)?;
-        (typed.computer_id, typed.device_id, Some(typed.policy))
+        (
+            typed.computer_id,
+            typed.device_id,
+            Some(typed.policy),
+            typed.expected,
+        )
     } else {
         let typed = context.decode_params::<network::NetworkTargetParams>(params)?;
-        (typed.computer_id, typed.device_id, None)
+        (typed.computer_id, typed.device_id, None, None)
     };
     if remote_target(context, device_id.as_deref()).is_some() {
         return Err(DispatchError {
@@ -1991,27 +1996,46 @@ async fn network_policy(
     let state = blocking(move || {
         use silo_engine::network_policy::service::{self, Target};
         let paths = local_paths()?;
-        let target = match macos_proxy::owning_context(&computer_id) {
-            Some(_) => {
-                let (name, stopped, _) = silo_engine::macos_computers::promote_view(&computer_id)
-                    .ok_or_else(|| "That computer was not found.".to_owned())?;
-                Target::Macos {
-                    name,
-                    running: !stopped,
-                }
-            }
-            None => {
-                computer_name(&paths, &computer_id)?;
-                Target::Linux(&paths)
-            }
-        };
+        let target = network_target(&paths, &computer_id)?;
         match &policy {
-            Some(policy) => service::set(&computer_id, policy, target),
+            Some(policy) => service::set(&computer_id, policy, expected.as_ref(), target),
             None => service::get(&computer_id, target),
         }
     })
     .await?;
     to_output(state)
+}
+
+/// Which kind of computer `computer_id` is, for the network policy service.
+fn network_target<'a>(
+    paths: &'a RuntimePaths,
+    computer_id: &str,
+) -> Result<silo_engine::network_policy::service::Target<'a>, String> {
+    use silo_engine::network_policy::service::Target;
+    match macos_proxy::owning_context(computer_id) {
+        Some(_) => {
+            let (name, stopped, _) = silo_engine::macos_computers::promote_view(computer_id)
+                .ok_or_else(|| "That computer was not found.".to_owned())?;
+            Ok(Target::Macos {
+                name,
+                running: !stopped,
+            })
+        }
+        None => {
+            computer_name(paths, computer_id)?;
+            Ok(Target::Linux(paths))
+        }
+    }
+}
+
+/// The policy the engine judges `computer_id`'s calls against (what `network.policy.get`
+/// reports); `None` when it cannot be read.
+pub(crate) fn judged_network_policy(
+    computer_id: &str,
+) -> Option<silo_engine::network_policy::Held> {
+    let paths = local_paths().ok()?;
+    let target = network_target(&paths, computer_id).ok()?;
+    silo_engine::network_policy::service::judged(computer_id, target)
 }
 
 async fn network_urls(

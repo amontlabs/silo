@@ -6666,7 +6666,11 @@ fn create_computer_with_progress(
     if runtime.is_some() {
         args.push("--net-strict=true".into());
     } else {
-        args.extend(crate::network_policy::plan_for(id, name, None).create_args());
+        args.extend(
+            crate::network_policy::plan_for(id, name, None)
+                .map_err(RuntimeError::Unavailable)?
+                .create_args(),
+        );
     }
     args.extend(["--env".into(), "GH_TOKEN=$MSB_SILO_GITHUB".into()]);
     args.extend([

@@ -1613,8 +1613,14 @@ pub fn import_pending_restore_with_environment(
         "default_ingress": "deny",
         "rules": []
     }));
-    // An import starts closed from that policy, whatever policy a computer of this id had here.
-    crate::network_policy::store::remove(computer_id).map_err(RuntimeError::Unavailable)?;
+    // An import starts closed, whatever policy a computer of this id had here, and keeps the
+    // deny-all in both directions until the owner sets one. The stored policy says so, so
+    // nothing has to infer it from the rules the computer carries.
+    crate::network_policy::store::set_stored(
+        computer_id,
+        crate::network_policy::store::Stored::closed_without_incoming(),
+    )
+    .map_err(RuntimeError::Unavailable)?;
     save(paths, computer_id, &record)
 }
 
@@ -1709,8 +1715,10 @@ fn changed_network_plan(
     if configuration.runtime.is_some() {
         return Ok(None);
     }
-    let Some(stored) =
-        crate::network_policy::store::get(configuration.id()).map_err(RuntimeError::Unavailable)?
+    // A computer with no saved policy keeps the rules it was made with. A saved policy that
+    // cannot be read is an error: the computer does not start on a guess.
+    let Some(stored) = crate::network_policy::store::get_stored(configuration.id())
+        .map_err(RuntimeError::Unavailable)?
     else {
         return Ok(None);
     };
@@ -1728,11 +1736,12 @@ fn changed_network_plan(
     {
         return Ok(None);
     }
-    let plan = crate::network_policy::plan(
-        &stored,
+    let mut plan = crate::network_policy::plan_held(
+        &stored.held(),
         &crate::network_policy::Grants::of_computer(configuration.name()),
         &crate::network_policy::extra_rules(configuration.id()),
     );
+    plan.ingress_allowed = !stored.incoming_denied;
     let network = inspected.config.get("network").cloned().unwrap_or(Value::Null);
     if plan.matches(&network) {
         return Ok(None);
@@ -1748,6 +1757,24 @@ pub(crate) fn network_policy_changed(
     configuration: &ComputerConfiguration,
 ) -> Result<bool, RuntimeError> {
     Ok(changed_network_plan(runner, paths, configuration)?.is_some())
+}
+
+/// Refuses to start a virtual machine whose runtime holds other rules than its saved network
+/// policy asks for. Starts that go through [`apply_network_policy_change`] never reach this with
+/// a difference; the others (a finished restore attempt, a recovered start) must not run the
+/// computer with rules the owner did not choose.
+pub(super) fn ensure_network_rules_current(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<(), RuntimeError> {
+    if changed_network_plan(runner, paths, configuration)?.is_some() {
+        return Err(RuntimeError::Invalid(format!(
+            "{} does not have the network rules its saved network policy asks for, so it was not started. Start it again from Silo to apply them.",
+            configuration.name()
+        )));
+    }
+    Ok(())
 }
 
 /// What `network.policy.get` needs to know about a Linux computer.
@@ -1935,7 +1962,8 @@ pub(super) fn start_pending(
         configuration.id(),
         configuration.name(),
         Some(&recorded),
-    );
+    )
+    .map_err(RuntimeError::Unavailable)?;
     let policy = plan.policy_value();
     let mut network_args = current_network_args(&serde_json::json!({"network":{"policy":policy}}))?;
     if !plan.strict {
@@ -2726,18 +2754,19 @@ fn fork_commit_with_metadata_writer(
     let mut copied_secrets = false;
     let result = (|| {
         crate::computer_use::inherit_settings(paths, source.id(), &child_id)?;
-        let closed = crate::network_policy::NetworkPolicy {
-            mode: crate::network_policy::NetworkPolicyMode::Closed,
-            ..Default::default()
-        };
-        crate::network_policy::store::inherit(
-            source.id(),
-            &child_id,
-            fork.options
-                .network_policy
-                .as_ref()
-                .or(fork.options.closed_network.then_some(&closed)),
-        )
+        // The copy an export makes refuses connections in both directions.
+        if fork.options.network_policy.is_none() && fork.options.closed_network {
+            crate::network_policy::store::set_stored(
+                &child_id,
+                crate::network_policy::store::Stored::closed_without_incoming(),
+            )
+        } else {
+            crate::network_policy::store::inherit(
+                source.id(),
+                &child_id,
+                fork.options.network_policy.as_ref(),
+            )
+        }
         .map_err(RuntimeError::Unavailable)?;
         // Nothing is copied unless the fork names it; GitHub access is always read-only.
         if fork.options.copies_github() {

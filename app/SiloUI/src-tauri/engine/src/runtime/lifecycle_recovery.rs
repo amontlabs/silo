@@ -192,6 +192,13 @@ fn advance(
         if command == "stop" {
             storage::before_stop(runner, paths, &observed);
         }
+        if command == "start" {
+            checkpoints::ensure_network_rules_current(
+                runner,
+                paths,
+                &computer_configuration(paths, &intent.name)?,
+            )?;
+        }
         let args = [command.into(), intent.name.clone(), "--quiet".into()];
         // Stop is not cancellable: a cancel during a restart's stop step is
         // honoured before the start step instead of killing `msb stop`.

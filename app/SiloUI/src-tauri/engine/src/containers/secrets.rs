@@ -65,10 +65,15 @@ pub fn gateway_network(name: &str, record: &ComputerRecord) -> (Option<Value>, O
         }
         return (Some(blocked_gateway_policy()), None);
     }
-    let Some(id) = record.label("silo.machine-id") else {
-        return (None, None);
+    // A record that cannot say which computer it is, or a policy that cannot be read, gets no
+    // way out rather than the gateway's own open policy.
+    let Some(plan) = record
+        .label("silo.machine-id")
+        .and_then(|id| crate::network_policy::plan_for_gateway(id, name).ok().map(|plan| (id, plan)))
+    else {
+        return (Some(blocked_gateway_policy()), None);
     };
-    let plan = crate::network_policy::plan_for(id, name, None);
+    let (id, plan) = plan;
     crate::network_policy::service::gateway_started(id, &plan.policy_value(), plan.strict);
     gateway_network_for(&plan)
 }

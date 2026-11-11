@@ -96,6 +96,7 @@ pub async fn network_policy(
                     serde_json::from_value(current["policy"].clone())
                         .map_err(|_| CliError::new("The engine returned an unreadable network policy."))?,
                 ),
+                expected: None,
             }))
             .await?
     };

@@ -1,6 +1,7 @@
 //! Each computer's network policy, keyed by the computer's id, in
-//! `<app data>/network-policy.json`. A computer without an entry is one saved before policies
-//! existed; [`super::effective`] decides what it runs with.
+//! `<app data>/network-policy.json`, with the preset versions it was approved at. A computer
+//! without an entry is one saved before policies existed; [`super::effective`] decides what it
+//! runs with. A file that cannot be read is an error, never an empty store.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,7 +12,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use super::NetworkPolicy;
+use super::{Held, NetworkPolicy, NetworkPolicyMode, Pins};
 
 const FILE: &str = "network-policy.json";
 const VERSION: u8 = 1;
@@ -22,7 +23,65 @@ const MAX_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
 struct Document {
     version: u8,
     #[serde(default)]
-    computers: BTreeMap<String, NetworkPolicy>,
+    computers: BTreeMap<String, Stored>,
+}
+
+/// One computer's saved policy.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Stored {
+    pub mode: NetworkPolicyMode,
+    #[serde(default)]
+    pub hosts: Vec<String>,
+    #[serde(default)]
+    pub presets: Vec<String>,
+    /// The version each preset was approved at; a preset without an entry was approved at the
+    /// first version.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub preset_versions: Pins,
+    /// Connections to the computer's published ports are refused, as for an import or the copy
+    /// an export makes, until the owner sets a policy.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub incoming_denied: bool,
+}
+
+impl Stored {
+    /// `policy` as approved now: its presets at the versions this Silo has.
+    pub fn approved(policy: &NetworkPolicy) -> Self {
+        Self::of(Held::latest(policy.clone()), false)
+    }
+
+    pub fn of(held: Held, incoming_denied: bool) -> Self {
+        Self {
+            mode: held.policy.mode,
+            hosts: held.policy.hosts,
+            presets: held.policy.presets,
+            preset_versions: held.pins,
+            incoming_denied,
+        }
+    }
+
+    /// Closed, with connections to the computer's ports refused too.
+    pub fn closed_without_incoming() -> Self {
+        Self::of(
+            Held::latest(NetworkPolicy {
+                mode: NetworkPolicyMode::Closed,
+                ..NetworkPolicy::default()
+            }),
+            true,
+        )
+    }
+
+    pub fn held(&self) -> Held {
+        Held {
+            policy: NetworkPolicy {
+                mode: self.mode,
+                hosts: self.hosts.clone(),
+                presets: self.presets.clone(),
+            },
+            pins: self.preset_versions.clone(),
+        }
+    }
 }
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -102,14 +161,14 @@ fn write(path: &PathBuf, document: &Document) -> Result<(), String> {
 }
 
 /// Changes the stored policies. Without an installed store (no engine) nothing is kept.
-fn update(change: impl FnOnce(&mut BTreeMap<String, NetworkPolicy>)) -> Result<(), String> {
+fn update(change: impl FnOnce(&mut BTreeMap<String, Stored>) -> Result<(), String>) -> Result<(), String> {
     let Some(path) = path() else {
         return Ok(());
     };
     let _held = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut document = read(&path)?;
     let before = document.clone();
-    change(&mut document.computers);
+    change(&mut document.computers)?;
     if document != before {
         document.version = VERSION;
         write(&path, &document)?;
@@ -117,8 +176,10 @@ fn update(change: impl FnOnce(&mut BTreeMap<String, NetworkPolicy>)) -> Result<(
     Ok(())
 }
 
-/// The stored policy of `computer_id`; `None` when it has none or no store is installed.
-pub fn get(computer_id: &str) -> Result<Option<NetworkPolicy>, String> {
+/// The stored policy of `computer_id` with its approvals; `None` when it has none or no store
+/// is installed. An error when the saved policies cannot be read: callers must not treat that
+/// as "no policy".
+pub fn get_stored(computer_id: &str) -> Result<Option<Stored>, String> {
     let Some(path) = path() else {
         return Ok(None);
     };
@@ -126,22 +187,55 @@ pub fn get(computer_id: &str) -> Result<Option<NetworkPolicy>, String> {
     Ok(read(&path)?.computers.get(computer_id).cloned())
 }
 
-/// Saves `policy` (already validated) for `computer_id`.
+/// The stored policy of `computer_id`; `None` when it has none or no store is installed.
+pub fn get(computer_id: &str) -> Result<Option<NetworkPolicy>, String> {
+    Ok(get_stored(computer_id)?.map(|stored| stored.held().policy))
+}
+
+/// Saves `policy` (already validated) for `computer_id`, approved now.
 pub fn set(computer_id: &str, policy: &NetworkPolicy) -> Result<(), String> {
+    set_stored(computer_id, Stored::approved(policy))
+}
+
+pub fn set_stored(computer_id: &str, stored: Stored) -> Result<(), String> {
     update(|computers| {
-        computers.insert(computer_id.to_owned(), policy.clone());
+        computers.insert(computer_id.to_owned(), stored);
+        Ok(())
     })
 }
 
-/// Gives `target` the policy `policy`, or `source`'s when `policy` is `None`. A source with
-/// no entry gives nothing, so the target is treated like its source.
+/// Saves `stored` for `computer_id` only if what is saved still equals `expected`; otherwise
+/// the policy changed since it was read and nothing is written.
+pub fn replace_if(
+    computer_id: &str,
+    expected: Option<&Stored>,
+    stored: Stored,
+) -> Result<(), String> {
+    update(|computers| {
+        if computers.get(computer_id) != expected {
+            return Err(CHANGED.to_owned());
+        }
+        computers.insert(computer_id.to_owned(), stored);
+        Ok(())
+    })
+}
+
+/// What a refused compare-and-set says.
+pub const CHANGED: &str =
+    "The network policy of this computer changed while this was being decided. Read it again and retry.";
+
+/// Gives `target` the policy `policy`, or `source`'s (with its approvals) when `policy` is
+/// `None`. A source with no entry gives nothing, so the target is treated like its source.
 pub fn inherit(
     source: &str,
     target: &str,
     policy: Option<&NetworkPolicy>,
 ) -> Result<(), String> {
     update(|computers| {
-        let chosen = policy.cloned().or_else(|| computers.get(source).cloned());
+        let chosen = match policy {
+            Some(policy) => Some(Stored::approved(policy)),
+            None => computers.get(source).cloned(),
+        };
         match chosen {
             Some(chosen) => {
                 computers.insert(target.to_owned(), chosen);
@@ -150,11 +244,13 @@ pub fn inherit(
                 computers.remove(target);
             }
         }
+        Ok(())
     })
 }
 
 pub fn remove(computer_id: &str) -> Result<(), String> {
     update(|computers| {
         computers.remove(computer_id);
+        Ok(())
     })
 }
