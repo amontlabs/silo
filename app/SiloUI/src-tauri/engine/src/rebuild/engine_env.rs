@@ -1,8 +1,10 @@
 //! The engine's [`RebuildEnv`]: computers are created and removed through the saved computer
-//! configuration (so the build sandbox is a computer like any other while it exists), checkpoints
-//! go through the checkpoint service, start and stop take the computer's operation gate, the
-//! workspace disk and the SSH folder move on the host, and the home folder travels as a tar file
-//! through `msb exec` and `msb cp`.
+//! configuration (so the build sandbox is a computer like any other while it exists), the
+//! checkpoint is captured directly, start and stop run the runtime's lifecycle, and all of it
+//! happens under the operation gate the rebuild holds for the old computer from first step to
+//! last (the gate does not nest, so none of these takes it again). The workspace disk and the
+//! SSH folder move on the host, and the home folder travels as a tar file through `msb exec`
+//! and `msb cp`.
 
 use std::{
     fs,
