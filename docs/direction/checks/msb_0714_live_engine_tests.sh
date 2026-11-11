@@ -22,7 +22,8 @@ export SILO_LIVE_TEST_CONFIRM=disposable-test-fixtures
 export SILO_T8_CONFIGS="$WORK/configs"; mkdir -p "$SILO_T8_CONFIGS"
 cd "$APP" || exit 1
 link="$APP/src-tauri/runtime/guest-image"   # symlink (ignored by git) to the Dev image dir, read only
-run() { # name, test filter
+run() { # name, test filter (only those in $ONLY when set)
+  [ -n "${ONLY:-}" ] && [[ " $ONLY " != *" $1 "* ]] && return
   say "== $1"
   cargo test -p silo-engine --locked --lib "$2" -- --ignored --nocapture --test-threads=1 > "$OUT/live-$1.log" 2>&1
   echo "exit $?" >> "$OUT/live-$1.log"

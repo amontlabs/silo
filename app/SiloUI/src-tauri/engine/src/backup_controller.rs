@@ -6932,10 +6932,21 @@ mod tests {
         runtime::create_disposable_test_computer(&paths, existing_name).unwrap();
         let cache_hashes = || {
             use sha2::{Digest, Sha256};
-            fs::read_dir(paths.home.join("cache/vmdk"))
-                .unwrap()
-                .map(|entry| {
+            fn files(directory: &Path, found: &mut Vec<PathBuf>) {
+                for entry in fs::read_dir(directory).unwrap() {
                     let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        files(&path, found);
+                    } else {
+                        found.push(path);
+                    }
+                }
+            }
+            let mut found = Vec::new();
+            files(&paths.home.join("cache/vmdk"), &mut found);
+            found
+                .into_iter()
+                .map(|path| {
                     let mut file = fs::File::open(&path).unwrap();
                     let mut hash = Sha256::new();
                     std::io::copy(&mut file, &mut hash).unwrap();

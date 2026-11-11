@@ -36,7 +36,30 @@ def connect(address, port):
         return "failed (%s)" % type(e).__name__
 print("direct public IP, TCP connect (1.1.1.1:443):", connect("1.1.1.1", 443))
 print("another resolver (1.1.1.1) for example.org:", ask("1.1.1.1", "example.org"))
+def exchange(address, port, payload):
+    try:
+        c = socket.create_connection((address, port), timeout=6)
+    except Exception as e:
+        return "failed (%s)" % type(e).__name__
+    try:
+        c.settimeout(5)
+        c.sendall(payload)
+        data = c.recv(512)
+        if not data:
+            return "connected, closed with no data"
+        if port == 53 and len(data) >= 14:
+            return "connected, DNS reply rcode=%d answers=%d" % (data[5] & 15, struct.unpack('>H', data[8:10])[0])
+        return "connected, %d bytes came back" % len(data)
+    except Exception as e:
+        return "connected, nothing came back (%s)" % type(e).__name__
+    finally:
+        c.close()
+query = b'\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03org\x00\x00\x01\x00\x01'
+print("unlisted IP, TCP connect (1.1.1.1:853):", exchange("1.1.1.1", 853, b'\x16\x03\x01\x00\x01\x00'))
+print("unlisted IP, TCP connect (8.8.8.8:53):", exchange("8.8.8.8", 53, struct.pack('>H', len(query)) + query))
 PY
+echo "unlisted IP, HTTP status (1.1.1.1): $(curl -s -o /dev/null -m 12 -w '%{http_code}' http://1.1.1.1/ 2>/dev/null || true)"
+echo "unlisted IP, HTTP body (1.1.1.1): $(curl -s -m 12 http://1.1.1.1/ 2>/dev/null | head -c 300 | tr '\n' ' ' || true)"
 "#;
 
 #[derive(Debug)]
@@ -47,6 +70,10 @@ struct Reach {
     github: String,
     gateway_name: String,
     resolver: String,
+    http_status: String,
+    http_body: String,
+    port_853: String,
+    port_53: String,
 }
 
 fn field(report: &str, label: &str) -> String {
@@ -70,11 +97,36 @@ fn probe(fixture: &Fixture, name: &str, label: &str) -> Reach {
         github: field(&report, "secret-covered host, HTTPS (api.github.com)"),
         gateway_name: field(&report, "name example.org through the gateway"),
         resolver: field(&report, "another resolver (1.1.1.1) for example.org"),
+        http_status: field(&report, "unlisted IP, HTTP status (1.1.1.1)"),
+        http_body: field(&report, "unlisted IP, HTTP body (1.1.1.1)"),
+        port_853: field(&report, "unlisted IP, TCP connect (1.1.1.1:853)"),
+        port_53: field(&report, "unlisted IP, TCP connect (8.8.8.8:53)"),
     }
 }
 
 fn reached(result: &str) -> bool {
     result != "000" && !result.is_empty() && !result.starts_with("failed")
+}
+
+/// A connection to an unlisted public IP may complete on ports 80 and 443 (the gateway answers
+/// there), but no data reaches the address: plain HTTP gets the gateway's own JSON 403 (never
+/// the address's response) and a payload sent to another port is refused or goes unanswered.
+fn nothing_reaches_unlisted_ip(reach: &Reach, label: &str) {
+    assert!(
+        reach.http_status == "403" && reach.http_body.trim_start().starts_with('{'),
+        "{label}: plain HTTP to an unlisted IP must get the gateway's JSON 403: {reach:?}"
+    );
+    let lower = reach.http_body.to_lowercase();
+    assert!(
+        !lower.contains("cloudflare") && !lower.contains("one.one.one.one") && !lower.contains("<html"),
+        "{label}: the unlisted address answered: {reach:?}"
+    );
+    assert!(
+        !reach.port_853.contains("bytes came back")
+            && !reach.port_53.contains("bytes came back")
+            && !answered(&reach.port_53.replace("DNS reply ", "")),
+        "{label}: an unlisted IP answered on a non-HTTP port: {reach:?}"
+    );
 }
 
 fn answered(resolver: &str) -> bool {
@@ -174,7 +226,8 @@ fn live_network_policy_modes_restore_and_fork() {
     assert!(!stopped_changed(&fixture, source), "the start applied the stored policy");
     let listed = probe(&fixture, source, "allowlist after the change");
     assert!(reached(&listed.example_com) && reached(&listed.github), "{listed:?}");
-    assert!(!reached(&listed.example_org) && !reached(&listed.public_ip), "{listed:?}");
+    assert!(!reached(&listed.example_org), "{listed:?}");
+    nothing_reaches_unlisted_ip(&listed, "allowlist");
     assert!(!answered(&listed.resolver), "{listed:?}");
     assert!(!listed.gateway_name.is_empty(), "names still resolve through the gateway: {listed:?}");
     keep_config(&fixture, source, "allowlist");
@@ -190,9 +243,10 @@ fn live_network_policy_modes_restore_and_fork() {
     super::super::super::start_disposable_test_computer(&fixture.paths, source).unwrap();
     let closed = probe(&fixture, source, "closed");
     assert!(
-        !reached(&closed.example_com) && !reached(&closed.example_org) && !reached(&closed.public_ip),
+        !reached(&closed.example_com) && !reached(&closed.example_org),
         "{closed:?}"
     );
+    nothing_reaches_unlisted_ip(&closed, "closed");
     assert!(!reached(&closed.github) && !answered(&closed.resolver), "{closed:?}");
     assert!(closed.gateway_name.is_empty(), "{closed:?}");
     keep_config(&fixture, source, "closed");
@@ -223,7 +277,8 @@ fn live_network_policy_modes_restore_and_fork() {
     super::super::super::start_disposable_test_import(&fixture.paths, fork_name).unwrap();
     let forked = probe(&fixture, fork_name, "fork of an allowlist computer");
     assert!(reached(&forked.example_com) && reached(&forked.github), "{forked:?}");
-    assert!(!reached(&forked.example_org) && !reached(&forked.public_ip), "{forked:?}");
+    assert!(!reached(&forked.example_org), "{forked:?}");
+    nothing_reaches_unlisted_ip(&forked, "fork");
     keep_config(&fixture, fork_name, "allowlist-fork");
     fixture.stop(fork_name);
 
@@ -232,7 +287,8 @@ fn live_network_policy_modes_restore_and_fork() {
     super::super::super::start_disposable_test_import(&fixture.paths, source).unwrap();
     let restored = probe(&fixture, source, "allowlist computer restored in place");
     assert!(reached(&restored.example_com) && reached(&restored.github), "{restored:?}");
-    assert!(!reached(&restored.example_org) && !reached(&restored.public_ip), "{restored:?}");
+    assert!(!reached(&restored.example_org), "{restored:?}");
+    nothing_reaches_unlisted_ip(&restored, "restore");
     keep_config(&fixture, source, "allowlist-restored");
     fixture.stop(source);
     use_test_grants(None);

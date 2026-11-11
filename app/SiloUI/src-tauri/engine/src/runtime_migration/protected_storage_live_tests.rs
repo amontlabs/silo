@@ -7,7 +7,7 @@ use super::{fresh, select_generation, write, Controller, CONVERTED, FILE};
 use crate::runtime::{self, ProcessRunner, RuntimePaths, RuntimeRunner};
 use std::{fs, path::PathBuf, time::Duration};
 
-const GOOD: [&str; 4] = ["e2e-mig-main", "e2e-mig-fork", "e2e-mig-disk", "e2e-mig-run"];
+const GOOD: [&str; 5] = ["e2e-mig-main", "e2e-mig-fork", "e2e-mig-disk", "e2e-mig-run", "e2e-mig-mfork"];
 const T: Duration = Duration::from_secs(300);
 
 fn inventory(names: &[&str]) -> runtime::ComputerConfigurationRequest {
@@ -107,12 +107,7 @@ fn live_old_home_moves_to_protected_storage() {
         let outcome = &report1.computers.iter().find(|c| c.name == name).unwrap().outcome;
         eprintln!("LAUNCH1 {name}: {outcome:?}");
     }
-    if !report1.complete() {
-        // Finding: while a legacy VM runs, `doctor` rates every other computer recovery_required.
-        eprintln!("FINDING launch 1 left computers needing attention; relaunching as the step intends");
-        let (_, report2) = launch("launch 2");
-        assert!(report2.complete(), "launch 2 finishes what launch 1 flagged");
-    }
+    assert!(report1.complete(), "the step finishes every computer in one launch: {report1:?}");
     let report = read_report(&storage).unwrap().unwrap();
     for name in GOOD {
         let outcome = &report.computers.iter().find(|c| c.name == name).unwrap().outcome;
@@ -121,7 +116,7 @@ fn live_old_home_moves_to_protected_storage() {
     }
     let covers: Vec<String> =
         serde_json::from_slice(&fs::read(backup.join("silo-backup-covers.json")).unwrap()).unwrap();
-    for name in ["e2e-mig-main", "e2e-mig-fork", "e2e-mig-disk"] {
+    for name in ["e2e-mig-main", "e2e-mig-fork", "e2e-mig-disk", "e2e-mig-mfork"] {
         assert!(covers.iter().any(|c| c == name), "{name} covered by the backup");
         assert!(!protected(&backup, name), "{name}: the backup was taken before its repair");
     }
@@ -133,7 +128,7 @@ fn live_old_home_moves_to_protected_storage() {
     assert_eq!(fs::read(storage.join(MARKER)).unwrap(), marker_before);
 
     // Every computer starts with its data.
-    let expect: [(&str, &str, &str); 9] = [
+    let expect: [(&str, &str, &str); 12] = [
         ("e2e-mig-main", "/workspace/a", "main-1"),
         ("e2e-mig-main", "/workspace/b", "main-2"),
         ("e2e-mig-main", "/workspace/c", "main-3"),
@@ -143,6 +138,9 @@ fn live_old_home_moves_to_protected_storage() {
         ("e2e-mig-disk", "/workspace/a", "main-1"),
         ("e2e-mig-disk", "/workspace/d", "disk-1"),
         ("e2e-mig-run", "/workspace/r", "run-1"),
+        ("e2e-mig-mfork", "/workspace/a", "main-1"),
+        ("e2e-mig-mfork", "/workspace/b", "main-2"),
+        ("e2e-mig-mfork", "/workspace/m", "mfork-1"),
     ];
     for name in GOOD {
         msb(&paths, &["start", name]).unwrap_or_else(|e| panic!("start {name}: {e}"));
@@ -151,6 +149,7 @@ fn live_old_home_moves_to_protected_storage() {
         assert_eq!(read(&paths, name, file), content, "{name}:{file}");
     }
     assert_eq!(read(&paths, "e2e-mig-disk", "/workspace/b"), "MISSING", "the restore predates b");
+    assert_eq!(read(&paths, "e2e-mig-mfork", "/workspace/c"), "MISSING", "the fork predates c");
     for name in GOOD {
         stopped(&paths, name);
     }

@@ -31,12 +31,14 @@ create_started e2e-mig-run; put e2e-mig-run /workspace/r run-1
 $M fork e2e-mig-run --name e2e-mig-fork --quiet; say "fork exit $?"
 put e2e-mig-fork /workspace/f fork-1
 $M stop e2e-mig-fork >/dev/null
-say "== e2e-mig-main (disk and full checkpoints; no fork of it: a full checkpoint plus a fork of the same computer makes the new runtime report recovery_required)"
+say "== e2e-mig-main (disk and full checkpoints, then a fork of the same running computer)"
 create_started e2e-mig-main; put e2e-mig-main /workspace/a main-1; put e2e-mig-main /root/a main-root-1
 $M stop e2e-mig-main >/dev/null
 $M snapshot create diskck --sandbox e2e-mig-main --quiet; say "disk checkpoint exit $?"
 $M start e2e-mig-main >/dev/null; put e2e-mig-main /workspace/b main-2
 $M snapshot create fullck --sandbox e2e-mig-main --full --quiet; say "full checkpoint exit $?"
+$M fork e2e-mig-main --name e2e-mig-mfork --quiet; say "fork of main exit $?"
+put e2e-mig-mfork /workspace/m mfork-1; $M stop e2e-mig-mfork >/dev/null
 put e2e-mig-main /workspace/c main-3
 $M stop e2e-mig-main >/dev/null
 say "== e2e-mig-disk (disk-only restore, then later writes)"
