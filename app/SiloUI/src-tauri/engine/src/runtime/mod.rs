@@ -13700,6 +13700,30 @@ exit 9
     }
 
     #[test]
+    fn a_computer_waiting_for_its_first_start_is_not_checked_flagged_or_kept_from_starting() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+
+        let checker = StubRunner::successful_json(vec![]);
+        crate::runtime_migration::check_protected_storage_of_arrival(&checker, &paths, "dev");
+        assert!(checker.calls.lock().unwrap().is_empty(), "no runtime folder, nothing to check");
+        assert!(!directory.path().join("computers.json").with_file_name("protected-storage.json").exists());
+
+        let mut computers = vec![unread_computer(computer())];
+        flag_unmoved_storage(&paths, &mut computers);
+        assert!(!computers[0].needs_storage_upgrade && computers[0].attention.is_none());
+
+        let runner = StubRunner::successful_json(vec![
+            inspect(&paths, "Stopped"),
+            json!(null),
+            inspect(&paths, "Running"),
+        ]);
+        computer_action_with(&runner, &paths, &generous_device(), "start", "dev").unwrap();
+    }
+
+    #[test]
     fn lifecycle_refuses_a_runtime_row_without_silo_ownership() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
