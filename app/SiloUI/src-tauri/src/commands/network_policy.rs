@@ -3,7 +3,7 @@
 //! both address a computer of this device by its name.
 use serde_json::Value;
 use silo_api::methods::{
-    guest_client::GuestClientComputerParams,
+    guest_client::{GuestClientComputerParams, GuestClientEnableParams},
     network::{NetworkPolicy, NetworkPolicySetParams},
     requests,
 };
@@ -74,9 +74,10 @@ pub(crate) async fn enable_tools(
     computer: &str,
 ) -> Result<Value, EngineError> {
     engine
-        .call(requests::guest_client_enable(
-            tools_params(engine, computer).await?,
-        ))
+        .call(requests::guest_client_enable(GuestClientEnableParams {
+            computer_id: engine.computer_id(computer).await?,
+            binary_path: None,
+        }))
         .await
 }
 
