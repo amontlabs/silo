@@ -788,7 +788,7 @@ impl SiloMcp {
     }
 
     #[tool(
-        description = "Copy a computer into a new fork to try something without risking the original, and start it. `count` makes several forks at once; `command` runs in each and returns its exit code and output. Look at the result with `diff`, then `merge` it back or `drop` it."
+        description = "Copy a computer into a new fork to try something without risking the original, and start it. `count` makes several at once and `command` runs in each; look at the result with `diff`, then `merge` or `drop` it."
     )]
     async fn fork(&self, Parameters(params): Parameters<ForkParams>) -> Result<String, String> {
         show(
@@ -887,7 +887,7 @@ impl SiloMcp {
     }
 
     #[tool(
-        description = "Merge a fork's changes into the computer it came from (or `into`); the person is asked first when you are inside a computer. Returns status merged, dry-run or refused. When it needs answers (reason `choices-needed`) it lists each conflict with an id and the answers allowed (`fork`, `main`, or `branch` for a repository): run it again with `choices` mapping each id to an answer. A checkpoint of the target is taken first and `undo` puts it back. With `request` nothing is merged: a review request is recorded."
+        description = "Merge a fork's changes into the computer it came from (or `into`); inside a computer the person is asked first. A refusal with reason `choices-needed` lists each conflict with an id and its allowed answers (`fork`, `main`, or `branch` for a repository): run it again with `choices` mapping ids to answers, and `undo` takes a merge back."
     )]
     async fn merge(&self, Parameters(params): Parameters<MergeParams>) -> Result<String, String> {
         show(
@@ -919,7 +919,7 @@ impl SiloMcp {
     }
 
     #[tool(
-        description = "Replace main with a fork: the fork takes main's name and settings and the old main is kept aside. This restarts main and ends whatever runs there, so the person is always asked. `undo` swaps back."
+        description = "Replace main with a fork: the fork takes main's name and settings and the old main is kept aside. It restarts main, so the person is always asked; `undo` swaps back."
     )]
     async fn replace_main(
         &self,
@@ -1458,7 +1458,7 @@ impl SiloMcp {
     }
 
     #[tool(
-        description = "Fork a computer (default your own, or main on the device), start the fork and wait until its desktop and computer-use driver are ready. Returns the fork's name and its computer-use status. The computer_use_* tools then drive the fork. A fork made through this server keeps asking before its agents drive the desktop."
+        description = "Fork a computer (default your own, or main on the device), start the fork and wait until its desktop and computer-use driver are ready; the computer_use_* tools then drive it. The fork keeps asking before its own agents drive the desktop."
     )]
     async fn fork_gui(
         &self,
@@ -1693,4 +1693,148 @@ pub async fn serve(transport: Transport, working_directory: PathBuf) -> Result<(
     server.close_sessions(|_| true).await;
     stopped.map_err(|error| CliError::new(format!("The MCP server stopped: {error}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tool_tests {
+    use super::*;
+    use crate::endpoint::Endpoint;
+
+    fn channel() -> Transport {
+        Transport::Channel(Endpoint {
+            host: "127.0.0.1".into(),
+            port: 9,
+            token: "silo_gc_x".into(),
+            computer_id: "c1".into(),
+        })
+    }
+
+    fn names(server: &SiloMcp) -> Vec<String> {
+        let mut names: Vec<String> = server
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// What an agent can do, on the device and inside a computer.
+    const SHARED: &[&str] = &[
+        "list",
+        "status",
+        "tree",
+        "resources",
+        "access",
+        "recipe_list",
+        "create",
+        "fork",
+        "start",
+        "stop",
+        "exec",
+        "diff",
+        "merge",
+        "replace_main",
+        "undo",
+        "drop",
+        "checkpoint",
+        "checkpoints",
+        "restore",
+        "steps_list",
+        "ports",
+        "publish",
+        "unpublish",
+        "network_policy",
+        "secrets_list",
+        "agents",
+        "approvals",
+        "requests_list",
+        "request_show",
+        "request_merge",
+        "request_decline",
+        "retry_setup",
+        "fork_gui",
+        "computer_use_ready",
+        "computer_use_screenshot",
+        "computer_use_click",
+        "computer_use_type",
+        "computer_use_key",
+        "computer_use_hotkey",
+        "computer_use_scroll",
+        "computer_use_move",
+        "computer_use_drag",
+        "computer_use_wait",
+        "computer_use_tools",
+        "computer_use_call",
+    ];
+
+    #[test]
+    fn the_device_offers_the_shared_tools_and_the_device_only_ones() {
+        let on_device = SiloMcp::new("/nowhere.sock".into(), std::env::temp_dir());
+        let offered = names(&on_device);
+        for name in SHARED.iter().chain(DEVICE_ONLY_TOOLS) {
+            assert!(offered.iter().any(|offered| offered == name), "{name}");
+        }
+        assert_eq!(offered.len(), SHARED.len() + DEVICE_ONLY_TOOLS.len(), "{offered:?}");
+    }
+
+    #[test]
+    fn inside_a_computer_the_device_only_tools_are_not_listed() {
+        let inside = SiloMcp::for_transport(channel(), std::env::temp_dir());
+        let offered = names(&inside);
+        for name in SHARED {
+            assert!(offered.iter().any(|offered| offered == name), "{name}");
+        }
+        for name in DEVICE_ONLY_TOOLS {
+            assert!(!offered.iter().any(|offered| offered == name), "{name}");
+        }
+        assert_eq!(offered.len(), SHARED.len(), "{offered:?}");
+    }
+
+    #[test]
+    fn the_set_aside_tools_and_the_old_words_are_gone() {
+        let on_device = SiloMcp::new("/nowhere.sock".into(), std::env::temp_dir());
+        for name in names(&on_device) {
+            for old in ["review", "fold", "keep", "throw_away", "promote"] {
+                assert!(!name.contains(old), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_description_is_one_or_two_plain_sentences_without_the_old_words() {
+        let on_device = SiloMcp::new("/nowhere.sock".into(), std::env::temp_dir());
+        for tool in on_device.tool_router.list_all() {
+            let text = tool.description.as_deref().unwrap_or_default().to_string();
+            assert!(!text.is_empty(), "{}", tool.name);
+            // A description says what the tool does and when to use it, in a few plain sentences.
+            let sentences = text.matches(". ").count() + 1;
+            assert!(sentences <= 3, "{}: {sentences} sentences: {text}", tool.name);
+            let lower = text.to_lowercase();
+            for old in ["fold", "promote", ".silo/", "auto_keep", "silo.yaml"] {
+                assert!(!lower.contains(old), "{}: {text}", tool.name);
+            }
+        }
+    }
+
+    #[test]
+    fn inside_a_computer_another_device_and_a_folder_are_refused() {
+        let inside = SiloMcp::for_transport(channel(), std::env::temp_dir());
+        assert!(inside.on_the_device_only(Some("laptop"), None).is_err());
+        assert!(inside.on_the_device_only(Some("local"), None).is_ok());
+        let path = "./repo".to_owned();
+        let refused = inside.on_the_device_only(None, Some(&path)).unwrap_err();
+        assert!(refused.message.contains("device"), "{}", refused.message);
+        let on_device = SiloMcp::new("/nowhere.sock".into(), std::env::temp_dir());
+        assert!(on_device
+            .on_the_device_only(Some("laptop"), Some(&path))
+            .is_ok());
+    }
+
+    #[test]
+    fn a_tool_that_waits_for_the_owner_gives_up_before_a_clients_time_out() {
+        assert!(DEFAULT_WAIT_SECS < MAX_WAIT_SECS);
+        assert!(MAX_WAIT_SECS < 120);
+    }
 }

@@ -1,4 +1,4 @@
-//! `silo fold <fork> --pr`: the fork's code on a new branch, pushed from this device, and a
+//! `silo merge <fork> --pr`: the fork's code on a new branch, pushed from this device, and a
 //! pull request that carries the review summary.
 //!
 //! The push and the API call run on the host with credentials the host already has: the
@@ -30,7 +30,7 @@ pub struct PrArgs {
     pub repo: Option<String>,
     /// The branch to merge into.
     pub base: Option<String>,
-    /// The host project's top folder (the one holding `.silo/`), whose `origin` names the
+    /// The folder the command runs in, whose git `origin` names the
     /// repository when nothing else does.
     pub host_root: Option<std::path::PathBuf>,
 }
@@ -750,7 +750,7 @@ async fn publish(
     };
     push(source, token, &env.git_base).await?;
     let title = format!("Changes from {fork}");
-    let body = format!("{text}\n\n---\nOpened by `silo fold --pr` from the fork {fork}.");
+    let body = format!("{text}\n\n---\nOpened by `silo merge --pr` from the fork {fork}.");
     let env = env.clone();
     let (token, head) = (token.to_owned(), source.branch.clone());
     let (repo, base_branch) = (repository.clone(), base.clone());

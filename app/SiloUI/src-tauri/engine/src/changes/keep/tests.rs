@@ -1243,7 +1243,7 @@ fn a_dry_run_reports_the_plan_and_leaves_main_as_it_was() {
     assert!(report
         .summary
         .iter()
-        .any(|l| l.contains("will keep packages: jq 1.7")));
+        .any(|l| l.contains("will merge packages: jq 1.7")));
     assert_eq!(world.logged("checkpoint"), 0);
     assert_eq!(world.logged("hold"), 0);
     assert_eq!(world.logged("pkg_install"), 0);

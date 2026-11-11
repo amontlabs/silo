@@ -1489,6 +1489,108 @@ async fn a_recipe_build_reads_the_computers_without_an_event_client() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn recipes_are_saved_read_listed_and_removed_by_the_engine() {
+    let fixture = fixture();
+    let recipe = json!({
+        "spec": {"os": "linux", "packages": {"apt": ["nginx"]},
+                 "services": [{"name": "web", "run": "python3 -m http.server"}]},
+        "quiet": ["web", "poller"], "scrub": ["/root/.env"],
+        "keep": {"restart": ["web"], "migrate": [], "after": ["make check"]},
+        "test": "make test", "files": ["/etc/app.conf"]
+    });
+    let saved = call(
+        &fixture,
+        MethodName::RecipesSave,
+        json!({"name": "web", "recipe": recipe}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved["name"], "web");
+    assert_eq!(saved["builtIn"], false);
+    assert_eq!(saved["recipe"], recipe);
+    assert!(saved["warnings"][0].as_str().unwrap().contains("service web"));
+
+    let got = call(&fixture, MethodName::RecipesGet, json!({"name": "web"}))
+        .await
+        .unwrap();
+    assert_eq!(got["recipe"], recipe);
+    assert_eq!(got["hash"], saved["hash"]);
+
+    let listed = call(&fixture, MethodName::RecipesList, json!({}))
+        .await
+        .unwrap();
+    let names: Vec<&str> = listed["saved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["linux-dev", "macos-xcode", "web"]);
+    assert_eq!(listed["saved"][0]["builtIn"], true);
+
+    // A recipe that ships with Silo can be read, and saved over until that copy is removed.
+    let shipped = call(&fixture, MethodName::RecipesGet, json!({"name": "linux-dev"}))
+        .await
+        .unwrap();
+    assert_eq!(shipped["builtIn"], true);
+    assert_eq!(shipped["recipe"]["spec"]["packages"]["apt"][0], "build-essential");
+
+    call(&fixture, MethodName::RecipesRemove, json!({"name": "web"}))
+        .await
+        .unwrap();
+    let gone = call(&fixture, MethodName::RecipesGet, json!({"name": "web"}))
+        .await
+        .unwrap_err();
+    assert!(gone.message.contains("no recipe named web"), "{}", gone.message);
+    let nothing = call(&fixture, MethodName::RecipesRemove, json!({"name": "linux-dev"}))
+        .await
+        .unwrap_err();
+    assert!(nothing.message.contains("ships with Silo"), "{}", nothing.message);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bad_recipe_is_refused_before_it_is_stored() {
+    let fixture = fixture();
+    for recipe in [
+        json!({"spec": {"os": "linux", "packages": {"brew": ["jq"]}}}),
+        json!({"spec": {"os": "linux"}, "scrub": ["relative"]}),
+        json!({"spec": {"os": "linux", "packages": {"apt": ["--evil"]}}}),
+    ] {
+        let refused = call(
+            &fixture,
+            MethodName::RecipesSave,
+            json!({"name": "bad", "recipe": recipe}),
+        )
+        .await;
+        assert!(refused.is_err(), "{recipe}");
+    }
+    let name = call(
+        &fixture,
+        MethodName::RecipesSave,
+        json!({"name": "Not A Name", "recipe": {"spec": {"os": "linux"}}}),
+    )
+    .await;
+    assert!(name.is_err());
+    let listed = call(&fixture, MethodName::RecipesList, json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed["saved"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computers_recipe_is_read_from_its_record_and_is_absent_when_it_has_none() {
+    let fixture = fixture();
+    let none = call(
+        &fixture,
+        MethodName::ComputersRecipe,
+        json!({"computerId": LINUX_ID}),
+    )
+    .await
+    .unwrap();
+    assert!(none.get("recipe").is_none() || none["recipe"].is_null());
+}
+
 // MARK: exports.transfer, exports.discard and the transfer area
 
 mod transfer {

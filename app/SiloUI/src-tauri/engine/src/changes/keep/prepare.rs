@@ -793,7 +793,7 @@ pub fn prepare(
                 fork_name,
                 "its changes differ from the first look",
             )],
-            "Let the fork finish, review it again with `silo diff`, and keep again.",
+            "Let the fork finish, review it again with `silo diff`, and merge again.",
         ));
     }
 
@@ -815,7 +815,7 @@ pub fn prepare(
                 "credentials",
                 message,
                 conflicts,
-                "Credentials are never kept into main. Remove them from the fork's commits and files and keep again.",
+                "Credentials are never merged into main. Remove them from the fork's commits and files and merge again.",
             ));
         }
         let message = format!(
@@ -836,7 +836,7 @@ pub fn prepare(
             "choices-needed",
             message,
             conflicts,
-            "Keep again with `choices`: an answer for each listed id, one of the answers it allows (`fork`, `main`, or `branch` for a repository). Add an id to `skip` to leave an item that does not conflict.",
+            "Merge again with `choices`: an answer for each listed id, one of the answers it allows (`fork`, `main`, or `branch` for a repository). Add an id to `skip` to leave an item that does not conflict.",
         ));
     }
     let migrating = !request.hooks.migrate.is_empty() && migrations_changed;
@@ -847,7 +847,7 @@ pub fn prepare(
             plan.databases.join(", ")
         );
         let hint = format!(
-            "A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise replace main with the fork: run `silo replace-main {}` and the fork becomes main with its database.",
+            "A merge carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise replace main with the fork: run `silo replace-main {}` and the fork becomes main with its database.",
             report.fork
         );
         return Ok(refuse(report, "database", message, Vec::new(), &hint));
@@ -870,7 +870,7 @@ pub fn prepare(
     report.summary.extend(
         plan.summary()
             .into_iter()
-            .map(|line| format!("will keep {line}")),
+            .map(|line| format!("will merge {line}")),
     );
     report.notes.extend(plan.notes.clone());
     Ok(Prepared::Ready(Ready {

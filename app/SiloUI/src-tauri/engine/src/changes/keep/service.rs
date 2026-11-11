@@ -90,9 +90,9 @@ fn note_recipe(context: &dyn EngineContext, report: &mut super::Report) {
             });
         }
         Ok(None) => {}
-        Err(error) => report
-            .notes
-            .push(format!("The recipe of {target} could not be updated: {error}")),
+        Err(error) => report.notes.push(format!(
+            "The recipe of {target} could not be updated: {error}"
+        )),
     }
 }
 

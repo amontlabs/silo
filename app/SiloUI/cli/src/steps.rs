@@ -248,7 +248,7 @@ pub async fn checkpoint_for(
         .any(|known| known["id"].as_str() == Some(checkpoint))
     {
         return Err(CliError::new(format!(
-            "The checkpoint of step {number} of {} was removed (only the newest step checkpoints are kept; step_checkpoints_keep sets how many).",
+            "The checkpoint of step {number} of {} was removed (only the newest step checkpoints are kept; --keep-steps sets how many).",
             found.name
         )));
     }

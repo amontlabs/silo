@@ -1,6 +1,6 @@
 //! The hosted reviewer (a Pro feature): sends the diff document of a fork to a service that
-//! reads it through three lenses and returns findings. Off until `reviewer.url` of
-//! `.silo/silo.yaml` or `SILO_REVIEWER_URL` is set. Only the diff document goes out
+//! reads it through three lenses and returns findings. Off until
+//! `SILO_REVIEWER_URL` or the user's reviewer file is set. Only the diff document goes out
 //! ([`document::review_document`]); the answer is filtered for wording before it is shown.
 
 pub mod codediff;

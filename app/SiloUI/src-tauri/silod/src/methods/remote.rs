@@ -679,8 +679,16 @@ mod tests {
             (MethodName::StepsList, "steps.list", by_computer),
             (MethodName::StepsRecord, "steps.record", record),
             (MethodName::ComputersTree, "computers.tree", json!({})),
-            (MethodName::ComputersRecipe, "computers.recipe", json!({ "computerId": COMPUTER })),
-            (MethodName::RecipesGet, "recipes.get", json!({ "name": "r" })),
+            (
+                MethodName::ComputersRecipe,
+                "computers.recipe",
+                json!({ "computerId": COMPUTER }),
+            ),
+            (
+                MethodName::RecipesGet,
+                "recipes.get",
+                json!({ "name": "r" }),
+            ),
             (
                 MethodName::RecipesSave,
                 "recipes.save",

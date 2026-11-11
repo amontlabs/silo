@@ -235,7 +235,7 @@ fn main_changed(request: &Request, target: &str, digest: &str, lines: Vec<String
                 .into_iter()
                 .map(|line| Conflict::new("main", target.to_owned(), line))
                 .collect(),
-            hint: "Keep again once nothing else is changing it.".into(),
+            hint: "Merge again once nothing else is changing it.".into(),
         },
     }
 }
