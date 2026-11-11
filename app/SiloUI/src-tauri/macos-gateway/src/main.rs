@@ -149,14 +149,14 @@ fn run() -> Result<(), GatewayError> {
     };
     let requested_ports = std::mem::take(&mut ready.loopback_ports);
     let bound_ports =
-        match network.start_and_wait_for_ports(runtime.handle().clone(), POLICY_CLOSE_TIMEOUT) {
+        match network.start_and_wait_for_ports(runtime.handle().clone()) {
             Ok(ports) => ports,
             Err(_) => {
                 let _ = control::write_response(
                     &mut control,
-                    &Response::Error(ErrorResponse::for_revision(None, "port_bind_timeout")),
+                    &Response::Error(ErrorResponse::for_revision(None, "port_bind_failed")),
                 );
-                return fail_closed(&frame_socket, GatewayError::PortBindTimeout);
+                return fail_closed(&frame_socket, GatewayError::PortBind);
             }
         };
     ready.loopback_ports = match network::map_bound_ports(&requested_ports, bound_ports) {
@@ -166,7 +166,7 @@ fn run() -> Result<(), GatewayError> {
                 &mut control,
                 &Response::Error(ErrorResponse::for_revision(None, "loopback_bind_failed")),
             );
-            return fail_closed(&frame_socket, GatewayError::PortBindTimeout);
+            return fail_closed(&frame_socket, GatewayError::PortBind);
         }
     };
     let backend = network.take_backend();
@@ -477,7 +477,7 @@ enum GatewayError {
     InvalidConfiguration,
     Runtime,
     NetworkInit,
-    PortBindTimeout,
+    PortBind,
     Poll,
     FramePeerClosed,
     ControlPeerClosed,
