@@ -432,7 +432,7 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
 - **The fork-time record travels** when the exported computer is a fork: the list of its files as
   they were at the fork, which paths and digests, not contents. Import stores it as the new
   computer's record, with no source and no origin, so the receiver names the target
-  (`silo fold <imported> --into main`).
+  (`silo merge <imported> --into main`).
 - **A Linux computer's known login files are removed from the exported computer, and traces
   may remain in the file.** An export of the current state of a Linux virtual machine is made from a
   hidden, short-lived copy of it (`silo-export-<8 hex>`, never listed): forked with no secrets, no
@@ -492,7 +492,7 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
 - **An export is a plain file.** Keep it where you would keep the secrets in it. Importing one
   from someone else adds a computer whose disk you did not make; it starts stopped and is as
   untrusted as any new agent computer.
-- **An imported computer is untrusted until it is kept.** `silo fold <imported> --into main`
+- **An imported computer is untrusted until it is kept.** `silo merge <imported> --into main`
   writes the sender's files into the computer that holds your secrets and network policy, and
   that includes shell startup files, agent settings and instructions, and a crontab: whatever
   the sender's agent changed runs in your main afterwards. Read `silo diff <imported>` before
@@ -557,7 +557,8 @@ process identity are not checked)
 That is the whole client check. **Any process running as the same user has the engine's full
 authority**: it can list, export or delete computers, change GitHub and secret assignments, and
 open the guest over SSH. There is no authenticated client identity (the handshake's client name
-is self-declared) and no audit log of which client asked for what. The guest is not such a
+is self-declared) and the audit log records only that name. Calls from a computer are not this
+caller (boundary 9, boundary 10). The guest is not such a
 process: the socket is on the Mac's filesystem, which the guest cannot see.
 
 A second path exists for Connections. With **Allow connections from other devices** on, a paired
@@ -713,6 +714,73 @@ What a compromised guest gains is unchanged by the transport: the agent already 
 computer, and the token adds the computer's policy-judged calls (forks of itself and the
 computers it made, their diffs and commands, review requests whose summary it wrote, and asks
 the owner must answer).
+
+### 10. Who calls the engine, and what a computer may do
+
+Every call carries who made it, set by the way it arrived and never by the program that sent it
+([`policy/`](../app/SiloUI/src-tauri/engine/src/policy/rules.rs), described in full in
+[the policy page](SiloUI-POLICY.md)):
+
+| Caller | Arrives through | Authority |
+| --- | --- | --- |
+| Owner | the engine's socket on this device (the app, the `silo` command on the device) | everything; any same-user process is this caller (boundary 7) |
+| Device | Connections, from another device of yours | the methods the Connections bridge serves (boundary 7) |
+| Computer | the computer's own channel (boundary 9) | the rules below |
+
+For a computer the rule is: it can do anything that gives it no more than it already has;
+anything that widens what it has asks the owner; it never touches a computer outside its tree.
+Its tree is itself and every computer it made, directly or through one it made. "Made" is
+recorded by the engine when the computer's agent creates or forks, not taken from lineage: a fork
+you made by hand from `main` may hold more access than `main` and is not `main`'s agent's to touch.
+A new method does not compile until the policy classifies it.
+
+| A computer may, alone | A computer must ask | A computer never |
+| --- | --- | --- |
+| Fork itself or a computer it made, make a new computer, with no more access, CPUs, memory or storage than it has | Merge into a computer it did not make, or replace main | Read a secret's value |
+| Hand a fork access it has itself | A new repository, write access, a new secret or an assignment | Touch a computer outside its tree |
+| Run commands in, read, checkpoint, restore, stop and delete computers it made; read its own files, logs and diff | A wider network policy, a published port, SSH access from outside | Change settings or Connections, export or import, answer an approval, read the event stream |
+| Narrow its network policy, unpublish a port | A container computer; a new computer larger than itself | Name another device |
+| Read what it holds (`computers.access`, names and hosts only), the device's resources, and the audit rows of its tree | | |
+
+A call that must ask returns at once, the engine writes what is asked from the call's own
+parameters (never from the agent's words), and the Silo app shows it. The agent's note is shown
+apart, as its own. Allowing it makes the engine check the call again as if the computer had just
+made it, then run the stored call itself; nothing a computer does changes the stored call. A
+call can be allowed once only. The agent's words are stored and printed as plain text: control
+characters, terminal escapes and direction overrides are removed. A computer creates at most 30
+approvals an hour and has at most 20 waiting; a waiting one expires after 7 days; a secret's value
+is removed from the stored file when the approval ends. Why the agent cannot answer for itself:
+approvals are shown by the Silo app, and `approvals.decide` is owner only.
+
+Every call that can change something, and every refused or held call, is a row in the audit log
+(who, method, computer, outcome; never parameters or results). A computer cannot push out any
+other caller's rows.
+
+**Resource floors.** A computer's agent cannot start, restart or create a computer, take or
+restore a checkpoint, or fork while the device's available memory or free disk is below a floor
+(by default the larger of 4 GiB and 10 % of memory, and of 10 GiB and 5 % of the disk; the owner
+can change them). Admitted starts hold their memory until they end, at most 5 minutes, and a start
+larger than the free memory above the floor is refused. This protects the device from being
+frozen or filled; it is not a cap on how many computers an agent makes. The owner's calls are not
+held back. A start the owner approved checks the floor but does not hold memory, so several approved
+starts at once can pass together.
+
+**Recipes.** Saving, removing and building recipes belongs to the owner. A computer reads in full
+only the recipe it was built from, because setup lines may hold a token the owner pasted; for
+the others it sees names, system and a one-way hash. A merge changes a saved recipe only when the
+owner runs it or approves it, and undoing the merge takes back exactly what it added. A merge
+into a computer built from a recipe runs that recipe's hooks, never hooks the caller supplied.
+See [Recipes](SiloUI-RECIPES.md).
+
+**What is trusted and what is the computer's own claim.** The engine trusts the channel the call
+arrived on, the engine's own records and what Silo ran itself. It does not trust what a computer
+says about itself. The tools receipt in the computer (`/var/lib/silo/components.json`), the hash of
+the `silo` program it reports, and a "tools OK" shown for it are the computer's own claim: an agent
+with root can write any of them. They only decide what Silo does next (send the program again,
+register again) and are never shown as proof; with the tools off, the receipt's explanations
+are not shown at all. The same holds for the results of tests a fork runs, which is why nothing is
+kept without asking when they pass. A summary shown to the owner names the computer by its id as
+well as its name, because an agent chooses the name.
 
 ## Linux hosts
 
@@ -1361,6 +1429,66 @@ last bullets cover a runner on a Linux host.
   and `linux-x64` and checks the one for the computer's architecture (`uname -m`) when it builds. The
   refresh reads both digests from the same release and rewrites the recipe only when both are there. It
   has the same trust as before: whoever controls the release feed controls both digests.
+## Known gaps
+
+Things that are open today, stated plainly. Each is also in the [roadmap](ROADMAP.md) where it is
+planned.
+
+**Calls from a computer**
+
+- A program on the device of any account can connect to a computer's port. It gets a nonce and a
+  closed connection, but it can keep that computer's 4 handshake places busy for 2 seconds at a
+  time. A port another program already holds when the engine starts stays reachable from the
+  computer until it restarts (boundary 9).
+- The wiring that ends a computer's token right after an export is not covered by a test.
+- A computer cannot read the event stream, notifications or the list of all jobs (only its own), because they are not
+  cut per computer yet; its agent polls instead. A job result too large to send in one piece is
+  withheld from it.
+- Any computer may fork a recipe's hidden build, and the fork records the recipe's full text, so
+  its agent can read that recipe through `computers.recipe` even though `recipes.get` refuses it.
+  Found by reading the code; not run.
+- A start the owner approved checks the memory floor but does not hold memory, so several approved
+  starts at once can pass together. The check and the hold are not under one lock.
+- A computer whose tools check keeps failing is checked less and then not until its next start; a
+  hostile computer can hold its own check slot for up to 90 seconds.
+- Declining a merge approval leaves the fork's review request open, so it appears again as its own
+  row. The engine can close a request only by keeping it or deleting the fork.
+
+**Merge and recipes**
+
+- A merge carries a `.env` that Git ignores without a check for credentials; the credential wall
+  covers Git history only.
+- Every computer can list the saved recipes' names, systems and hashes.
+- A merge changes a saved recipe only when the owner runs or approves it, so a recipe can fall
+  behind a computer an agent has changed; rebuilding from it makes the computer the recipe says.
+
+**Network**
+
+- Name lookups carry data out in open and allowlist modes, and with `strict` off traffic with no
+  TLS name is admitted to an address tied to an allowed name (see
+  [Network policy per computer](#network-policy-per-computer)). There is no DNS query log.
+- The allowlist has been run against a Linux virtual machine on a Mac. A Linux host's runtime is
+  built by CI and has not run it, and a live macOS or container gateway has not run it either.
+- A computer restored or forked from a memory checkpoint under an allowlist is refused by export
+  because of its pinned network interface.
+- A macOS computer made before the gateway existed boots once on Apple's NAT when it is converted,
+  and the Claude Code installer in a macOS computer still downloads inside it.
+
+**Logins, exports and updates**
+
+- A login in a Linux export is removed from the computer but its bytes can remain in the shared
+  disk layers (boundary 6). Checkpoint, macOS and container exports keep logins and warn first.
+- A fork keeps its parent's agent login, because the same agent already controls both.
+- Rebuilding a computer on the newest image, keeping its workspace and home, is not built yet.
+
+**The device**
+
+- Any process running as your user is the Owner (boundary 7). Programs on the device have no
+  identity or scope yet.
+- Silo's own releases are not signed or notarized.
+- The "cannot" column rests on code reading, unit tests and live checks of single features, not
+  on an adversarial test suite.
+
 ## What Silo does not protect
 
 These follow from the design today, not from bugs:
@@ -1413,8 +1541,9 @@ its own Keychain prompts. Silo does not
 ## Planned changes that will change this document
 
 - A DNS query log and a filter for lookups of names outside an allowlist.
-- Per-client socket authentication (macOS code signature, Linux `SO_PEERCRED`) and an audit log of
-  client, method and computer.
+- Per-client socket authentication for programs on the device (macOS code signature, Linux
+  `SO_PEERCRED`). The audit log of caller, method and computer exists; the client name in it is
+  still self-declared.
 - On a Linux host: signed engine archives (roadmap milestone 11), and the isolation evals run on a
   KVM host (roadmap milestone 9); the KVM CI job runs the computer lifecycle, not an eval.
 - A security review of the read-write `/.msb` share (boundary 6).

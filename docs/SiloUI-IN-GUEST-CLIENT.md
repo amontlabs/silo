@@ -370,6 +370,3 @@ by an earlier engine is ignored.
   connects then gives that program only a proof for its nonce on that port, which opens nothing,
   and every token is ended at the next engine start. If the program still holds the port at
   start, the computer can reach that program until it restarts (`restartNeeded`).
-- The live checks are `docs/direction/checks/t5_channel_check.sh` (the channel, output in
-  `docs/direction/evidence/T5a.txt`) and `docs/direction/checks/t5b_tools_check.sh` (the program and
-  the registration, output in `docs/direction/evidence/T5b.txt`).

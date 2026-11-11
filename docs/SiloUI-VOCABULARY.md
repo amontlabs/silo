@@ -17,6 +17,20 @@ older name on purpose.
 | **workspace** | Only the persistent `/workspace` folder and disk inside each computer. | Workspace files, `workspaceStorageGiB`, `read_workspace_storage` |
 | **sandboxed** | The isolation property of a computer, never the object itself. | "Each computer is sandboxed from your device." |
 | **computer use** | Agents controlling a computer's graphical desktop. | Computer use, `computerUseAutoApproval` |
+| **fork** | A new computer made from another computer's state. Its disks are a copy; nothing runs in it that was not run there. | `silo fork`, Fork |
+| **checkpoint** | A saved state of a computer that you can go back to or fork from. | `silo checkpoint`, `silo restore` |
+| **steps** | The commands run in a computer through Silo, in order. | `silo steps` |
+| **diff** | Everything a fork changed: code, packages, settings, files and databases. | `silo diff` |
+| **merge** | Bring a fork's changes into the computer it came from. Items only the fork changed come in; an item both changed is a conflict and you choose a side. Code goes through Git, so a conflict arrives as a branch. A database is never combined. | `silo merge`, Merge, the merge tool |
+| **fast-forward** | The kind of merge where main has not changed since the fork, so nothing can conflict and every change is applied. Main keeps running and no computer is swapped. | "Nothing can conflict" |
+| **replace main** | Take a fork wholesale and discard what main did since: the fork becomes main and the old main is kept under another name. It restarts main. Always a separate, explicit action. | `silo replace-main`, Replace main, the replace_main tool |
+| **undo** | Take a merge or a replace back. | `silo undo`, Undo |
+| **decline** | Turn a fork's merge request down: the request closes and the fork is dropped. Denying an agent's approval is a different action and keeps the fork. | `silo requests decline`, Decline |
+| **approval** | A request from a computer's agent to do something that widens what it has. Silo's app shows it; you allow or deny it. The agent cannot answer it. | Pending, `silo approvals`, `approval_required` |
+| **recipe** | The text description of a computer: system, packages, setup, services, ports. Silo stores it and a computer remembers the one it was built from. | `silo recipe`, [recipes](SiloUI-RECIPES.md) |
+| **Silo's tools** | The `silo` program and its MCP server inside a computer, which let its agent use the same commands you have, within what the engine allows. | `silo tools`, [Silo's tools in a computer](SiloUI-IN-GUEST-CLIENT.md) |
+| **network policy** | What a computer may reach: open, an allowlist of hosts, or closed. | `silo network policy` |
+| **owner** | You, at this device. A computer's agent is a **computer** caller and another device is a **device** caller; the engine tells them apart by how the call arrived. | [What an agent may do](SiloUI-POLICY.md) |
 
 **VM** remains acceptable in technical documentation where the virtualization
 itself matters (KVM, guest images, kernels). Code identifiers use `computer`.
@@ -44,6 +58,17 @@ installations and other programs read. They do not change.
 | The `/workspace` mount and `owned-volumes/workspace_<hash>` | Guest path and MicroSandbox layout derived from it. |
 | `<name>-<hash>.localhost` published-site origins | Changing an origin discards browser state for published sites. |
 | The `silo.runtime=container` label and `"runtime": "container"` in a computer's saved configuration | Stored in every container computer's record and written into its export file (format 6), where an older Silo reads it as a newer format. |
+
+## Words that went
+
+Fold, keep and promote are gone from what people and agents read; so are "divergent" (the
+reason a merge needs your choices is `choices-needed`) and keeping a fork without asking when its
+tests pass (the tests run inside the fork, so the fork can fake them). `silo fold` is a hidden alias
+that says what to type instead.
+
+The wire names `changes.keep`, `changes.promote` and `changes.requests.keep`, the journal files,
+the `before-keep` checkpoint kind and the `.silo-backup` format keep their spelling. Only the words
+a person or an agent reads were renamed.
 
 ## Saved data
 

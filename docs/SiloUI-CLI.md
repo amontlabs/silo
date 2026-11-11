@@ -65,7 +65,7 @@ owner denied it, 5 the owner has not answered, 6 the request ended without an an
 | `silo secrets set NAME [--computer C]... [--domain D]...` | add a secret or replace its value; the value is read from stdin, never an argument |
 | `silo secrets assign NAME COMPUTER` / `silo secrets unassign NAME COMPUTER` | change which computers have a secret |
 | `silo network policy <computer> [--mode open\|allowlist\|closed] [--allow HOST]... [--remove HOST]... [--preset NAME]...` | show or change what a computer may reach; see [Network policy](#network-policy) |
-| `silo create <name> [--linux\|--macos\|--container] [--cpus N --memory GiB --disk GiB]` | create a computer. `--container` makes a Linux computer that runs as a container. A container computer shares the host's kernel, so it is less isolated than a VM; use it for a dev-only machine with nothing sensitive on it. Linux hosts only. Its checkpoints save the disks only (never memory), also while it runs, and `silo fork`, `diff`, `merge`, `undo`, `export` and `import` work as for a VM. Its disk size is reported, not a bound: it shares the host's disk. Below 5 GiB free on the host, Silo refuses to start it, checkpoint it or fork it, and stops running container computers that are over their size, largest first ([the disk](SiloUI-ENGINE.md#container-computers-optional)). |
+| `silo create <name> [--linux\|--macos\|--container] [--cpus N --memory GiB --disk GiB] [--no-desktop]` | create a computer. `--no-desktop` starts no desktop in a Linux computer. `--container` makes a Linux computer that runs as a container. A container computer shares the host's kernel, so it is less isolated than a VM; use it for a dev-only machine with nothing sensitive on it. Linux hosts only. Its checkpoints save the disks only (never memory), also while it runs, and `silo fork`, `diff`, `merge`, `undo`, `export` and `import` work as for a VM. Its disk size is reported, not a bound: it shares the host's disk. Below 5 GiB free on the host, Silo refuses to start it, checkpoint it or fork it, and stops running container computers that are over their size, largest first ([the disk](SiloUI-ENGINE.md#container-computers-optional)). |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
 | `silo desktop on\|off <computer>` | turn a running Linux computer's desktop on (and start it) or off (and stop it); forks made later inherit the choice, and `--gui` and the computer-use tools refuse a computer with it off. A macOS computer is its own display and has no such setting |
 | `silo retry-setup <computer>` | finish the setup of a macOS computer that ended `failed` before it was ready |
@@ -109,6 +109,9 @@ A fork publishes the ports its source publishes (a recipe fork, the recipe's `po
 | `silo import FILE [--name NAME]` | add the computer in an export file as a new, stopped computer |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio ([MCP setup](#mcp-setup)) |
+
+**Coming:** `silo rebuild <computer>`, which makes a Linux computer again on the newest image and
+keeps its workspace and home. It is not in this version.
 
 `silo fold` is a hidden alias of `silo merge` that prints one line saying so (and `silo fold
 --promote` of `silo replace-main`); it is only there so an old script says what to change. The
