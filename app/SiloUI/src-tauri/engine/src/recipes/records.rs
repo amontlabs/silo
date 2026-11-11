@@ -121,13 +121,25 @@ fn update(change: impl FnOnce(&mut BTreeMap<String, RecipeRecord>)) -> Result<()
 
 /// The record of `computer_id`; `None` when it has none or no store is installed.
 pub fn get(computer_id: &str) -> Result<Option<RecipeRecord>, String> {
-    let Some(path) = path() else {
-        return Ok(None);
-    };
+    match path() {
+        Some(path) => get_in(&path, computer_id),
+        None => Ok(None),
+    }
+}
+
+/// The record of `computer_id` in the records kept under `app_data`.
+pub fn get_at(
+    app_data: &std::path::Path,
+    computer_id: &str,
+) -> Result<Option<RecipeRecord>, String> {
+    get_in(&app_data.join(FILE), computer_id)
+}
+
+fn get_in(path: &PathBuf, computer_id: &str) -> Result<Option<RecipeRecord>, String> {
     let _held = LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    Ok(read(&path)?.computers.get(computer_id).cloned())
+    Ok(read(path)?.computers.get(computer_id).cloned())
 }
 
 /// Records that `computer_id` was built from `record`.
