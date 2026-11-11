@@ -21,7 +21,8 @@
 #   S8  the engine restarts and the channel works again on the same port
 #   S9  a memory checkpoint is restored and the client reconnects
 #   S10 turning the tools off closes an open session at once
-#   S11 a computer whose tools were off gets them after `silo tools enable` and a restart
+#   S11 a computer whose tools were off gets them back with `silo tools enable` on the port that was
+#       held for it, without a restart, and keeps them across a restart
 # Added with the review fixes (challenge and response, ports held and tied to tokens):
 #   S4b what a fake listener on a freed port receives from a client holds neither the token nor
 #       its hash; S4c a proof made for another port is refused
@@ -388,7 +389,7 @@ try:
 except OSError as e: print("IN_USE", e.errno)' "$PORT_A" 2>&1)
 check "S10b no other program can take the old port" $(echo "$out" | grep -q IN_USE; echo $?) "$out"
 
-say "== S11 an existing computer gets the tools after enable and a restart"
+say "== S11 a computer whose tools were turned off gets them back on its held port, and keeps them across a restart"
 "$SILO" create $C --linux --cpus 1 --memory 2 --disk 8 --no-desktop >/dev/null 2>&1; check "create $C" $? ""
 "$SILO" tools disable $C >/dev/null 2>&1
 "$SILO" start $C >/dev/null 2>&1
@@ -401,13 +402,13 @@ E2=$!
 wait $E1; r1=$?; wait $E2; r2=$?
 check "S11b silo tools enable $C twice at once" $([ $r1 = 0 ] && [ $r2 = 0 ]; echo $?) "$(tr '\n' ' ' <"$WORK/enable1.txt") | $(tr '\n' ' ' <"$WORK/enable2.txt")"
 out=$("$SILO" tools enable $C --binary "$GUEST" 2>&1); check "S11 silo tools enable $C --binary while it runs" $? "$out"
-echo "$out" | grep -q "restart it"; check "S11 the answer says a restart is needed" $? ""
+echo "$out" | grep -q "it can reach them now"; check "S11 the answer says the computer can reach them now (its port was held)" $? ""
 p1=$(grep -oE 'port [0-9]+' "$WORK/enable1.txt" | head -1); p2=$(grep -oE 'port [0-9]+' "$WORK/enable2.txt" | head -1)
 PORT_C=$(status_port $C)
 out=$(python3 -I "$WORK/probe.py" 127.0.0.1 "$PORT_C" - challenge 2>&1)
 check "S11b both enables name the one record's port, and it is served" $([ "$p1" = "port $PORT_C" ] && [ "$p2" = "port $PORT_C" ] && echo "$out" | grep -q CHALLENGED; echo $?) "$p1 / $p2 / status $PORT_C / $out"
-out=$(inside $C "silo list" 2>&1); rc=$?
-check "S11 before the restart the computer cannot reach its port" $([ $rc -ne 0 ]; echo $?) "$(echo "$out" | tail -1)"
+seen=""; for _ in $(seq 1 10); do seen=$(names_inside $C); [ "$seen" = "$C" ] && break; sleep 3; done
+check "S11 before any restart silo list inside works" $([ "$seen" = "$C" ]; echo $?) "$seen"
 "$SILO" stop $C >/dev/null 2>&1; "$SILO" start $C >/dev/null 2>&1; check "S11 restart $C" $? ""
 echo "  $("$SILO" tools status $C 2>&1)"
 seen=""; for _ in $(seq 1 20); do seen=$(names_inside $C); [ "$seen" = "$C" ] && break; sleep 3; done
