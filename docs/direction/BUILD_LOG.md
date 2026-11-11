@@ -329,3 +329,12 @@ These were not asked of the owner. Each is open to change.
   create, stop and Quit fails with "The previous computer command is still finishing" until `msb
   stop` by hand ([evidence](evidence/T15-lock-finding.txt); `command_lock` in
   `runtime/configuration_recovery.rs`). Being fixed as R7.
+- **R7 engine lock fixed** (`fix/r7-command-lock-inheritance`): the runtime commands that take
+  the lock (`create`, `modify`, `remove`, `rename`, `stop`, `restore`, `adopt-disk`) were started
+  with the lock's descriptor deliberately kept open across exec (`pre_exec` clearing
+  close-on-exec), so every process they started, including a computer's VM process, held the
+  lock. The lock is now only the engine's descriptor and ends with it. The engine writes a
+  record of the command it started (`.silo-configuration-worker.child-<pid>`, with the process
+  start time) and a new lock holder waits for that command to exit, so a surviving command is
+  still never overlapped. Only a live run can confirm that real `msb` VMs no longer show the
+  file in `lsof` after a kill.

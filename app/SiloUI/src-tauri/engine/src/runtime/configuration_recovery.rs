@@ -197,35 +197,46 @@ pub(super) fn finish(paths: &RuntimePaths) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-/// A parent-held command lock releases the shared flock even when a concurrent
-/// fork temporarily inherited its descriptor before exec closed it.
+const CHILD_RECORD_PREFIX: &str = ".silo-configuration-worker.child-";
+
+/// The lock lives only in the engine's descriptor: the runtime commands it starts do not
+/// inherit it, so the computers those commands leave running never hold it, and it ends
+/// with the engine. A parent-held command lock releases the shared flock even when a
+/// concurrent fork temporarily inherited its descriptor before exec closed it.
 pub(crate) struct CommandLock {
     file: File,
-    inherited_by_child: bool,
+    home: PathBuf,
+    child_record: Option<PathBuf>,
     release_on_drop: bool,
 }
 
 impl CommandLock {
     /// A shutdown worker shares the parent's flock. Only the parent unlocks after
-    /// all workers have joined; each runtime child still inherits its own descriptor.
+    /// all workers have joined.
     pub(crate) fn duplicate_for_shutdown(&self) -> Result<Self, RuntimeError> {
         Ok(Self {
             file: self.file.try_clone().map_err(failure)?,
-            inherited_by_child: false,
+            home: self.home.clone(),
+            child_record: None,
             release_on_drop: false,
         })
     }
 
-    /// Keep the flock until the deliberately inheriting runtime child exits.
-    /// Call only after a child with the lock's close-on-exec flag cleared spawned.
-    pub(crate) fn mark_inherited_by_child(&mut self) {
-        self.inherited_by_child = true;
+    /// Note the runtime command this lock covers, so that a new engine started after this one
+    /// died waits for that command to exit before it takes the lock itself.
+    pub(crate) fn record_child(&mut self, pid: u32) -> Result<(), RuntimeError> {
+        let record = self.home.join(format!("{CHILD_RECORD_PREFIX}{pid}"));
+        let start = process_start(pid).map(|start| start.to_string());
+        fs::write(&record, start.unwrap_or_default()).map_err(failure)?;
+        self.child_record = Some(record);
+        Ok(())
     }
 
-    /// Once the child is reaped, the parent can release any copies temporarily
-    /// inherited by unrelated forks while that child was running.
+    /// The command exited, so nothing outlives this lock on its behalf.
     pub(crate) fn mark_child_exited(&mut self) {
-        self.inherited_by_child = false;
+        if let Some(record) = self.child_record.take() {
+            let _ = fs::remove_file(record);
+        }
     }
 }
 
@@ -237,7 +248,7 @@ impl AsRawFd for CommandLock {
 
 impl Drop for CommandLock {
     fn drop(&mut self) {
-        if self.release_on_drop && !self.inherited_by_child {
+        if self.release_on_drop {
             // SAFETY: this descriptor remains owned by self until after Drop.
             // LOCK_UN also releases copies inherited by unrelated forks.
             unsafe {
@@ -245,6 +256,80 @@ impl Drop for CommandLock {
             }
         }
     }
+}
+
+/// When the process started, in a unit that is only compared with itself. It tells a pid
+/// that was reused by another program from the process a record was written for.
+fn process_start(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // SAFETY: info is a writable buffer of exactly `size` bytes.
+        let written = unsafe {
+            libc::proc_pidinfo(
+                pid as libc::c_int,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                size,
+            )
+        };
+        (written == size).then(|| info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let after_name = &stat[stat.rfind(')')? + 1..];
+        after_name.split_whitespace().nth(19)?.parse().ok()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+fn process_exists(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 only checks that the process exists.
+    let status = unsafe { libc::kill(pid, 0) };
+    status == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Whether a runtime command that a dead engine started is still running. Records of
+/// commands that have exited, or whose pid now belongs to another program, are removed.
+fn child_command_running(home: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(home) else {
+        return false;
+    };
+    let mut running = false;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(CHILD_RECORD_PREFIX))
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let recorded = fs::read_to_string(entry.path())
+            .ok()
+            .and_then(|text| text.trim().parse::<u64>().ok());
+        let same_process = process_exists(pid)
+            && match (recorded, process_start(pid)) {
+                (Some(recorded), Some(current)) => recorded == current,
+                _ => true,
+            };
+        if same_process {
+            running = true;
+        } else {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+    running
 }
 
 pub fn command_lock(paths: &RuntimePaths, timeout: Duration) -> Result<CommandLock, RuntimeError> {
@@ -260,15 +345,21 @@ pub fn command_lock(paths: &RuntimePaths, timeout: Duration) -> Result<CommandLo
     loop {
         // SAFETY: the open file owns this descriptor until the lock is dropped.
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            return Ok(CommandLock {
-                file,
-                inherited_by_child: false,
-                release_on_drop: true,
-            });
-        }
-        let error = std::io::Error::last_os_error();
-        if error.kind() != std::io::ErrorKind::WouldBlock {
-            return Err(failure(error));
+            if !child_command_running(&paths.home) {
+                return Ok(CommandLock {
+                    file,
+                    home: paths.home.clone(),
+                    child_record: None,
+                    release_on_drop: true,
+                });
+            }
+            // SAFETY: as above.
+            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+        } else {
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::WouldBlock {
+                return Err(failure(error));
+            }
         }
         if started.elapsed() >= timeout {
             return Err(failure(
@@ -837,12 +928,8 @@ mod tests {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = super::super::tests::paths(&directory);
-        for completed_child in [false, true] {
-            let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
-            if completed_child {
-                lock.mark_inherited_by_child();
-                lock.mark_child_exited();
-            }
+        for _ in 0..2 {
+            let lock = command_lock(&paths, Duration::ZERO).unwrap();
             let mut ready = [0; 2];
             let mut release = [0; 2];
             // SAFETY: only async-signal-safe libc calls run in the child. The pipes
@@ -881,42 +968,55 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn deliberately_inherited_command_lock_survives_parent_release() {
+    fn command_lock_waits_for_a_recorded_command_that_is_still_running() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let mut child = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
+        lock.record_child(child.id()).unwrap();
+        drop(lock);
+        assert!(command_lock(&paths, Duration::ZERO).is_err());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        drop(command_lock(&paths, Duration::ZERO).unwrap());
+        assert!(!paths
+            .home
+            .join(format!("{CHILD_RECORD_PREFIX}{}", child.id()))
+            .exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_lock_ignores_a_record_whose_pid_belongs_to_another_program() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = super::super::tests::paths(&directory);
         let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
-        let mut ready = [0; 2];
-        let mut release = [0; 2];
-        // SAFETY: only async-signal-safe libc calls run in the child.
-        unsafe {
-            assert_eq!(libc::pipe(ready.as_mut_ptr()), 0);
-            assert_eq!(libc::pipe(release.as_mut_ptr()), 0);
-            let child = libc::fork();
-            assert!(child >= 0);
-            if child == 0 {
-                libc::close(ready[0]);
-                libc::close(release[1]);
-                let marker = [1u8];
-                libc::write(ready[1], marker.as_ptr().cast(), 1);
-                let mut finish = [0u8];
-                libc::read(release[0], finish.as_mut_ptr().cast(), 1);
-                libc::_exit(0);
-            }
-            libc::close(ready[1]);
-            libc::close(release[0]);
-            let mut marker = [0u8];
-            assert_eq!(libc::read(ready[0], marker.as_mut_ptr().cast(), 1), 1);
-            lock.mark_inherited_by_child();
-            drop(lock);
-            let held = command_lock(&paths, Duration::ZERO).is_err();
-            libc::write(release[1], marker.as_ptr().cast(), 1);
-            assert_eq!(libc::waitpid(child, std::ptr::null_mut(), 0), child);
-            libc::close(ready[0]);
-            libc::close(release[1]);
-            assert!(held, "the surviving child lost the command lock");
+        lock.record_child(std::process::id()).unwrap();
+        let record = paths
+            .home
+            .join(format!("{CHILD_RECORD_PREFIX}{}", std::process::id()));
+        drop(lock);
+        assert!(command_lock(&paths, Duration::ZERO).is_err());
+        if process_start(std::process::id()).is_some() {
+            fs::write(&record, b"1").unwrap();
             drop(command_lock(&paths, Duration::ZERO).unwrap());
+            assert!(!record.exists());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exiting_a_recorded_command_removes_its_record() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
+        lock.record_child(std::process::id()).unwrap();
+        lock.mark_child_exited();
+        drop(lock);
+        drop(command_lock(&paths, Duration::ZERO).unwrap());
     }
 
     #[test]

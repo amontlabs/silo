@@ -1894,19 +1894,6 @@ fn spawn_runtime(
         None
     };
     let mut command = runtime_command(&paths.executable);
-    if let Some(lock) = &worker_lock {
-        use std::os::{fd::AsRawFd, unix::process::CommandExt};
-        let fd = lock.as_raw_fd();
-        // SAFETY: only async-signal-safe fcntl runs between fork and exec.
-        unsafe {
-            command.pre_exec(move || {
-                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
     // Secret values never enter the runtime's environment (readable by other processes
     // of this user, and where a secret named like a host variable could change the
     // runtime's behaviour). The runtime reads them from standard input instead, and
@@ -1948,10 +1935,13 @@ fn spawn_runtime(
             let _ = stdin.write_all(&secret_values);
         });
     }
-    // Spawn succeeded with pre_exec clearing close-on-exec for this lock only.
-    // A surviving child must keep the flock if Silo exits before it does.
+    // The command does not inherit the lock. A record of it lets the next engine wait for
+    // it if this one dies first.
     if let Some(lock) = worker_lock.as_mut() {
-        lock.mark_inherited_by_child();
+        if let Err(error) = lock.record_child(child.id()) {
+            let _ = crate::child_process::terminate_child(&mut child, Duration::ZERO);
+            return Err(error);
+        }
     }
     let mut stop_child = |child: &mut std::process::Child| {
         // Quit and session end keep their own deadlines, so they kill without a grace.
@@ -10693,6 +10683,94 @@ exit 9
         fs::write(paths.home.join("release"), b"done\n").unwrap();
         worker.join().unwrap().unwrap();
         drop(configuration_recovery::command_lock(&paths, Duration::ZERO).unwrap());
+    }
+
+    #[cfg(unix)]
+    const LOCK_SURVIVAL_HELPER: &str = "SILO_TEST_LOCK_SURVIVAL_HOME";
+
+    /// Runs only inside the process `killed_engine_does_not_leave_its_lock_with_a_surviving_vm`
+    /// starts and kills. It is the "engine": it runs a locked runtime command whose program starts
+    /// a long-lived process, as `msb` starts a computer's VM.
+    #[cfg(unix)]
+    #[test]
+    fn lock_survival_helper_engine() {
+        let Some(home) = std::env::var_os(LOCK_SURVIVAL_HELPER) else {
+            return;
+        };
+        let mut paths = paths(&tempfile::tempdir().unwrap());
+        paths.home = home.clone().into();
+        paths.executable = paths.home.join("fake-msb");
+        paths.library = paths.home.join("fake-lib");
+        let _ = run_msb_process(
+            &paths,
+            &["create".into()],
+            Duration::from_secs(60),
+            &|_| {},
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn killed_engine_does_not_leave_its_lock_with_a_surviving_vm() {
+        let _test_state = crate::test_support::global_state();
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let mut paths = paths(&directory);
+        let home = directory.path().join("lock-survival");
+        fs::create_dir_all(&home).unwrap();
+        paths.home = home.clone();
+        paths.executable = home.join("fake-msb");
+        paths.library = home.join("fake-lib");
+        fs::write(&paths.library, b"test library").unwrap();
+        for name in ["ready", "release"] {
+            let fifo = std::ffi::CString::new(home.join(name).to_str().unwrap()).unwrap();
+            // SAFETY: fifo is a valid NUL-terminated path in this test directory.
+            assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        }
+        fs::write(
+            &paths.executable,
+            b"#!/bin/sh\ncat >/dev/null\nsleep 60 &\necho $! > \"$MSB_HOME/vm.pid\"\nprintf x > \"$MSB_HOME/ready\"\nread line < \"$MSB_HOME/release\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut engine = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "runtime::tests::lock_survival_helper_engine", "--nocapture"])
+            .env(LOCK_SURVIVAL_HELPER, &home)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let _ready = File::open(home.join("ready")).unwrap();
+        assert!(configuration_recovery::command_lock(&paths, Duration::ZERO).is_err());
+        engine.kill().unwrap();
+        engine.wait().unwrap();
+        let vm: libc::pid_t = fs::read_to_string(home.join("vm.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        // The command the dead engine started is still running, so a new holder waits for it.
+        assert!(configuration_recovery::command_lock(&paths, Duration::ZERO).is_err());
+        fs::write(home.join("release"), b"done\n").unwrap();
+        let started = Instant::now();
+        let reacquired = loop {
+            if let Ok(lock) = configuration_recovery::command_lock(&paths, Duration::ZERO) {
+                break Some(lock);
+            }
+            if started.elapsed() > Duration::from_secs(10) {
+                break None;
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        // SAFETY: signal 0 only checks that the process exists.
+        let vm_alive = unsafe { libc::kill(vm, 0) } == 0;
+        // SAFETY: the pid is the test's own `sleep`.
+        unsafe { libc::kill(vm, libc::SIGKILL) };
+        assert!(vm_alive, "the stand-in for the VM should still be running");
+        assert!(
+            reacquired.is_some(),
+            "a process the dead engine's command started kept the command lock"
+        );
     }
 
     #[test]
