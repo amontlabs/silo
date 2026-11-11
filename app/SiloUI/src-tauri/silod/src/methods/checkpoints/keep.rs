@@ -59,6 +59,10 @@ pub(super) async fn keep(
         migrate: h.migrate,
         after: h.after,
     });
+    let save_recipe = matches!(
+        context.caller(),
+        silo_engine::policy::Caller::Owner { .. } | silo_engine::policy::Caller::Device { .. }
+    );
     let request = Request {
         fork: params.fork_id,
         target: params.target_id,
@@ -67,6 +71,7 @@ pub(super) async fn keep(
         data_ok: params.data_ok.unwrap_or(false),
         reviewed: params.review_digest,
         choices: choices_of(params.choices, params.skip),
+        save_recipe,
     };
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());

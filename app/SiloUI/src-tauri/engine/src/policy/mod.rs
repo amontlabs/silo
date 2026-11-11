@@ -122,6 +122,13 @@ pub trait World {
     fn ssh_keys(&self, _computer: &str) -> Vec<String> {
         Vec::new()
     }
+    /// The recipe record of a computer, when it has one.
+    fn recipe_record(
+        &self,
+        computer: &str,
+    ) -> Result<Option<silo_api::methods::recipes::RecipeRecord>, String> {
+        crate::recipes::records::get(computer)
+    }
 }
 
 /// How a result is cut before it goes back to a computer.
@@ -808,13 +815,20 @@ impl<'a> Judge<'a> {
                         .parent(&fork)
                         .ok_or("That fork has no computer to merge into; name one (targetId).")?,
                 };
+                let record = self.world.recipe_record(&target)?;
                 if self.made.contains(&target) {
+                    if record.is_some() && has_keep_hooks(params)? {
+                        return Err(format!(
+                            "{} was built from a recipe; its keep hooks come from the recipe.",
+                            self.shown(&target)
+                        ));
+                    }
                     return Ok(allow_with(params.clone()));
                 }
                 if target != self.caller {
                     return Err("A merge can go only into this computer or one it made.".into());
                 }
-                let details = MergeDetails::of(params)?;
+                let details = MergeDetails::of(params, record.as_ref(), &self.shown(&target))?;
                 Ok(ask(
                     kind,
                     self.merge_summary(
@@ -840,10 +854,19 @@ impl<'a> Judge<'a> {
                     .as_ref()
                     .is_some_and(|target| self.made.contains(target))
                 {
+                    if let Some(target) = &target {
+                        if self.world.recipe_record(target)?.is_some() && has_keep_hooks(params)? {
+                            return Err(format!(
+                                "{} was built from a recipe; its keep hooks come from the recipe.",
+                                self.shown(target)
+                            ));
+                        }
+                    }
                     return Ok(allow_with(params.clone()));
                 }
-                let details = MergeDetails::of(params)?;
                 let target = target.unwrap_or_else(|| self.caller.to_owned());
+                let record = self.world.recipe_record(&target)?;
+                let details = MergeDetails::of(params, record.as_ref(), &self.shown(&target))?;
                 Ok(ask(
                     kind,
                     self.merge_summary(
@@ -1024,6 +1047,12 @@ impl<'a> Judge<'a> {
         }
         if !details.skipped.is_empty() {
             summary.push_str(&format!(" Not brought over: {}.", listed(&details.skipped)));
+        }
+        if let Some(recipe_name) = &details.recipe_name {
+            summary.push_str(&format!(
+                " The saved recipe {} will get the merged packages and files.",
+                quoted(recipe_name)
+            ));
         }
         summary
     }
@@ -1419,10 +1448,39 @@ struct MergeDetails {
     data_ok: bool,
     choices: Vec<String>,
     skipped: Vec<String>,
+    recipe_name: Option<String>,
+}
+
+fn has_keep_hooks(params: &Value) -> Result<bool, String> {
+    match params.get("keep") {
+        None | Some(Value::Null) => Ok(false),
+        Some(hooks @ Value::Object(_)) => {
+            let strings = |value: Option<&Value>, what: &str| -> Result<Vec<String>, String> {
+                match value {
+                    None | Some(Value::Null) => Ok(Vec::new()),
+                    Some(Value::Array(items)) => items
+                        .iter()
+                        .map(|item| item.as_str().map(str::to_owned))
+                        .collect::<Option<_>>()
+                        .ok_or_else(|| format!("{what} is a list of strings.")),
+                    Some(_) => Err(format!("{what} is a list of strings.")),
+                }
+            };
+            let restart = strings(hooks.get("restart"), "keep.restart")?;
+            let migrate = strings(hooks.get("migrate"), "keep.migrate")?;
+            let after = strings(hooks.get("after"), "keep.after")?;
+            Ok(!restart.is_empty() || !migrate.is_empty() || !after.is_empty())
+        }
+        Some(_) => Err("keep is an object of hooks.".into()),
+    }
 }
 
 impl MergeDetails {
-    fn of(params: &Value) -> Result<Self, String> {
+    fn of(
+        params: &Value,
+        record: Option<&silo_api::methods::recipes::RecipeRecord>,
+        target_shown: &str,
+    ) -> Result<Self, String> {
         let strings = |value: Option<&Value>, what: &str| -> Result<Vec<String>, String> {
             match value {
                 None | Some(Value::Null) => Ok(Vec::new()),
@@ -1435,23 +1493,43 @@ impl MergeDetails {
             }
         };
         let mut commands = Vec::new();
-        match params.get("keep") {
-            None | Some(Value::Null) => {}
-            Some(hooks @ Value::Object(_)) => {
-                let restart = strings(hooks.get("restart"), "keep.restart")?;
-                let migrate = strings(hooks.get("migrate"), "keep.migrate")?;
-                let after = strings(hooks.get("after"), "keep.after")?;
-                if !restart.is_empty() {
-                    commands.push(format!("restarts {}", listed(&restart)));
-                }
-                if !migrate.is_empty() {
-                    commands.push(format!("runs {} to migrate", listed(&migrate)));
-                }
-                if !after.is_empty() {
-                    commands.push(format!("runs {} last", listed(&after)));
-                }
+        let mut recipe_name = None;
+        if let Some(record) = record {
+            if has_keep_hooks(params)? {
+                return Err(format!(
+                    "{target_shown} was built from a recipe; its keep hooks come from the recipe."
+                ));
             }
-            Some(_) => return Err("keep is an object of hooks.".into()),
+            let keep = crate::recipes::hooks_of(&record.recipe);
+            if !keep.restart.is_empty() {
+                commands.push(format!("restarts {}", listed(&keep.restart)));
+            }
+            if !keep.migrate.is_empty() {
+                commands.push(format!("runs {} to migrate", listed(&keep.migrate)));
+            }
+            if !keep.after.is_empty() {
+                commands.push(format!("runs {} last", listed(&keep.after)));
+            }
+            recipe_name = Some(record.name.clone());
+        } else {
+            match params.get("keep") {
+                None | Some(Value::Null) => {}
+                Some(hooks @ Value::Object(_)) => {
+                    let restart = strings(hooks.get("restart"), "keep.restart")?;
+                    let migrate = strings(hooks.get("migrate"), "keep.migrate")?;
+                    let after = strings(hooks.get("after"), "keep.after")?;
+                    if !restart.is_empty() {
+                        commands.push(format!("restarts {}", listed(&restart)));
+                    }
+                    if !migrate.is_empty() {
+                        commands.push(format!("runs {} to migrate", listed(&migrate)));
+                    }
+                    if !after.is_empty() {
+                        commands.push(format!("runs {} last", listed(&after)));
+                    }
+                }
+                Some(_) => return Err("keep is an object of hooks.".into()),
+            }
         }
         let data_ok = match params.get("dataOk") {
             None | Some(Value::Null) => false,
@@ -1476,6 +1554,7 @@ impl MergeDetails {
             data_ok,
             choices,
             skipped: strings(params.get("skip"), "skip")?,
+            recipe_name,
         })
     }
 }

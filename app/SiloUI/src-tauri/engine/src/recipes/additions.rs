@@ -82,12 +82,22 @@ pub fn append(recipe: &RecipeDefinition, adds: &Additions) -> (RecipeDefinition,
         if !usable {
             continue;
         }
-        let Some(list) = packages_of(&mut out, key) else {
-            continue;
-        };
         for name in names {
-            if plain_word(name) && !list.contains(name) {
+            if plain_word(name) {
+                let Some(list) = packages_of(&mut out, key) else {
+                    break;
+                };
+                if list.contains(name) || list.len() >= super::library::MAX_LIST {
+                    continue;
+                }
                 list.push(name.clone());
+                let size = serde_json::to_vec(&out).map(|b| b.len()).unwrap_or(usize::MAX);
+                if size > super::library::MAX_BYTES {
+                    if let Some(list) = packages_of(&mut out, key) {
+                        list.pop();
+                    }
+                    continue;
+                }
                 fresh.add_package(key, name);
             }
         }
@@ -95,7 +105,15 @@ pub fn append(recipe: &RecipeDefinition, adds: &Additions) -> (RecipeDefinition,
     for path in &adds.files {
         let absolute = path.starts_with('/') && !path.contains(['\0', '\n', '\r']);
         if absolute && !out.files.contains(path) {
+            if out.files.len() >= super::library::MAX_LIST {
+                continue;
+            }
             out.files.push(path.clone());
+            let size = serde_json::to_vec(&out).map(|b| b.len()).unwrap_or(usize::MAX);
+            if size > super::library::MAX_BYTES {
+                out.files.pop();
+                continue;
+            }
             fresh.add_file(path);
         }
     }
@@ -106,13 +124,15 @@ pub fn append(recipe: &RecipeDefinition, adds: &Additions) -> (RecipeDefinition,
 }
 
 /// After a merge into `target`: appends what it brought to the recipe the computer was built
-/// from. The computer's record always gets it. The stored recipe of the same name gets it when
-/// the owner saved one; a recipe that ships with Silo is never edited. Returns the recipe's
-/// name and what was new; `None` when the computer has no recipe or nothing was new.
+/// from. The computer's record always gets it. When `save_recipe` is true, the stored recipe
+/// of the same name gets it when the owner saved one; a recipe that ships with Silo is never
+/// edited. Returns the recipe's name and what was new; `None` when the computer has no recipe
+/// or nothing was new.
 pub fn record_merge(
     library: &super::Library,
     target: &str,
     adds: &Additions,
+    save_recipe: bool,
 ) -> Result<Option<(String, Additions)>, String> {
     if adds.is_empty() {
         return Ok(None);
@@ -124,10 +144,13 @@ pub fn record_merge(
     if fresh.is_empty() {
         return Ok(None);
     }
-    if let Some(saved) = library.saved(&record.name)? {
-        let (appended, _) = append(&saved, adds);
-        library.save(&record.name, &appended)?;
-    }
     super::records::amend(target, |stored| stored.recipe = updated)?;
+    if save_recipe {
+        let _held = super::library::lock();
+        if let Some(saved) = library.saved(&record.name)? {
+            let (appended, _) = append(&saved, adds);
+            library.save_locked(&record.name, &appended)?;
+        }
+    }
     Ok(Some((record.name, fresh)))
 }

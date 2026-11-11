@@ -1275,3 +1275,53 @@ fn a_merge_summary_lists_the_hooks_database_changes_and_choices() {
     assert!(by_request.contains("runs “make install” last"), "{by_request}");
     assert!(refused(&check("changes.keep", json!({"forkId": "fork-1", "keep": "x"}))));
 }
+
+#[test]
+fn a_merge_summary_into_a_recipe_target_names_saved_recipe_and_rejects_caller_hooks() {
+    let dir = tempfile::tempdir().unwrap();
+    let records_path = dir.path().join("recipe-records.json");
+    crate::recipes::records::use_test_path(Some(records_path));
+    let record = silo_api::methods::recipes::RecipeRecord {
+        name: "linux-dev".to_owned(),
+        hash: "dummy-hash".to_owned(),
+        built_at: "2026-11-11T00:00:00Z".to_owned(),
+        recipe: silo_api::methods::recipes::RecipeDefinition {
+            spec: silo_api::methods::recipes::RecipeSpec {
+                os: silo_api::methods::recipes::RecipeOs::Linux,
+                cpus: None,
+                memory_gib: None,
+                disk_gib: None,
+                packages: silo_api::methods::recipes::RecipePackages::default(),
+                setup: Vec::new(),
+                services: Vec::new(),
+                ports: Vec::new(),
+                desktop: None,
+            },
+            quiet: Vec::new(),
+            scrub: Vec::new(),
+            keep: Some(silo_api::methods::keep::KeepHooks {
+                restart: vec!["db".into()],
+                migrate: Vec::new(),
+                after: vec!["cargo test".into()],
+            }),
+            test: None,
+            files: Vec::new(),
+        },
+    };
+    crate::recipes::records::set("main", &record).unwrap();
+
+    assert!(refused(&check(
+        "changes.keep",
+        json!({"forkId": "fork-1", "keep": {"restart": ["web"]}})
+    )));
+
+    let summary = ask_summary("changes.keep", json!({"forkId": "fork-1"}));
+    assert!(summary.contains("In “main-name” it restarts “db”; runs “cargo test” last."), "{summary}");
+    assert!(summary.contains("The saved recipe “linux-dev” will get the merged packages and files."), "{summary}");
+
+    let by_request = ask_summary("changes.requests.keep", json!({"requestId": "fr-mine"}));
+    assert!(by_request.contains("In “main-name” it restarts “db”; runs “cargo test” last."), "{by_request}");
+    assert!(by_request.contains("The saved recipe “linux-dev” will get the merged packages and files."), "{by_request}");
+
+    crate::recipes::records::use_test_path(None);
+}

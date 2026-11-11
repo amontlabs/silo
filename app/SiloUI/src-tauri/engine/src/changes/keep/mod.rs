@@ -46,6 +46,12 @@ pub struct Hooks {
     pub after: Vec<String>,
 }
 
+impl Hooks {
+    pub fn is_empty(&self) -> bool {
+        self.restart.is_empty() && self.migrate.is_empty() && self.after.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Request {
     pub fork: String,
@@ -59,6 +65,8 @@ pub struct Request {
     pub reviewed: Option<String>,
     /// How the caller settles items both sides changed, and which items to leave out.
     pub choices: Choices,
+    /// Whether to update the saved recipe in the library (true when approved by owner or caller is Device).
+    pub save_recipe: bool,
 }
 
 /// How long a keep or undo waits for another one on the same target.
@@ -281,9 +289,14 @@ fn main_moved(
 /// The request with the `keep` hooks of the recipe `target` was built from, when it has one:
 /// the engine applies the computer's own rules, whatever the caller sent. A computer built
 /// from no recipe runs the hooks the caller sent.
-fn with_recipe_hooks(request: &Request, target: &str) -> Request {
+fn with_recipe_hooks(request: &Request, target: &str) -> Result<Request, String> {
     let mut effective = request.clone();
-    if let Ok(Some(record)) = crate::recipes::records::get(target) {
+    if let Some(record) = crate::recipes::records::get(target)? {
+        if !request.hooks.is_empty() {
+            return Err(format!(
+                "{target} was built from a recipe; its keep hooks come from the recipe."
+            ));
+        }
         let keep = crate::recipes::hooks_of(&record.recipe);
         effective.hooks = Hooks {
             restart: keep.restart,
@@ -291,7 +304,7 @@ fn with_recipe_hooks(request: &Request, target: &str) -> Request {
             after: keep.after,
         };
     }
-    effective
+    Ok(effective)
 }
 
 /// Keeps `request.fork` into its target.
@@ -314,7 +327,7 @@ pub fn keep(
     if target == request.fork {
         return Err("A computer cannot be kept into itself.".into());
     }
-    let effective = with_recipe_hooks(request, &target);
+    let effective = with_recipe_hooks(request, &target)?;
     let request = &effective;
     let os = env.os(&target).map_err(|_| {
         format!("{target} is not a computer on this device. Name the computer to keep into.")

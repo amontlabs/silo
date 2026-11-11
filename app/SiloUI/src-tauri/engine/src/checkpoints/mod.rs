@@ -138,8 +138,11 @@ pub enum Platform {
 
 /// The fork's options with the `quiet` and `scrub` lists of the recipe its source was built
 /// from added to what the caller asked for. A source built from no recipe adds nothing.
-pub fn options_with_recipe_rules(source_id: &str, mut options: ForkOptions) -> ForkOptions {
-    if let Ok(Some(record)) = crate::recipes::records::get(source_id) {
+pub fn options_with_recipe_rules(
+    source_id: &str,
+    mut options: ForkOptions,
+) -> Result<ForkOptions, String> {
+    if let Some(record) = crate::recipes::records::get(source_id)? {
         for name in crate::recipes::quiet_names(&record.recipe) {
             if !options.stop.contains(&name) {
                 options.stop.push(name);
@@ -151,7 +154,7 @@ pub fn options_with_recipe_rules(source_id: &str, mut options: ForkOptions) -> F
             }
         }
     }
-    options
+    Ok(options)
 }
 
 #[derive(Clone)]
@@ -368,7 +371,8 @@ impl Service {
         if self.platform(new_name).is_ok() {
             return Err(Failure::from_message(crate::computer_names::TAKEN));
         }
-        let options = options_with_recipe_rules(computer_id, options);
+        let options = options_with_recipe_rules(computer_id, options)
+            .map_err(Failure::from_message)?;
         // Noted first: the fork's source is resolved on the job and replaces the key.
         crate::changes::fork_base::expect(
             self.context(),

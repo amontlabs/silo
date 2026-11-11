@@ -78,10 +78,10 @@ where
 
 /// Appends the packages and settings files a keep brought to the recipe of the computer it
 /// merged into, and says so in the report. A failure is a note: the merge is done.
-fn note_recipe(context: &dyn EngineContext, report: &mut super::Report) {
+fn note_recipe(context: &dyn EngineContext, report: &mut super::Report, save_recipe: bool) {
     let library = crate::recipes::Library::new(&context.paths().app_data);
     let target = report.target.clone();
-    match crate::recipes::record_merge(&library, &target, &report.additions) {
+    match crate::recipes::record_merge(&library, &target, &report.additions, save_recipe) {
         Ok(Some((name, added))) => {
             report.recipe = Some(super::RecipeUpdate {
                 name,
@@ -103,6 +103,7 @@ pub fn start_keep(
     store: Arc<dyn ManifestStore>,
     request: Request,
 ) -> Result<JobId, Failure> {
+    let save_recipe = request.save_recipe;
     start(host, "changes.keep", move |host| {
         let context = host.engine_context();
         let journal = journal_for(context.as_ref());
@@ -116,7 +117,7 @@ pub fn start_keep(
         )?;
         let mut outcome = outcome;
         if let super::Outcome::Kept(report) = &mut outcome {
-            note_recipe(context.as_ref(), report);
+            note_recipe(context.as_ref(), report, save_recipe);
             // The changes the open requests for this fork asked to review are in.
             Store::new(&context.paths().app_data).mark_kept_for(
                 &report.fork,
@@ -231,6 +232,7 @@ pub fn start_request_keep(
     request_id: String,
     hold: Claim,
 ) -> Result<JobId, Failure> {
+    let save_recipe = request.save_recipe;
     start(host, "changes.requests.keep", move |host| {
         let _hold = hold;
         let context = host.engine_context();
@@ -277,7 +279,7 @@ pub fn start_request_keep(
         };
         let mut outcome = outcome;
         if let super::Outcome::Kept(report) = &mut outcome {
-            note_recipe(context.as_ref(), report);
+            note_recipe(context.as_ref(), report, save_recipe);
         }
         let after = match &outcome {
             super::Outcome::Kept(report) => requests

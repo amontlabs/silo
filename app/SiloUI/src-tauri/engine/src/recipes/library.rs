@@ -3,7 +3,10 @@
 
 use std::{
     fs,
+    io::Write,
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 
 use silo_api::methods::{
@@ -17,9 +20,9 @@ use super::{valid_name, validate};
 pub const DEFAULT_RECIPE: &str = "linux-dev";
 
 /// The most bytes one stored recipe may take.
-const MAX_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_BYTES: usize = 256 * 1024;
 /// The most entries one list in a recipe may hold.
-const MAX_LIST: usize = 256;
+pub(crate) const MAX_LIST: usize = 256;
 /// The most process names and paths a recipe lists for a fork. A caller adds its own on top,
 /// and the engine allows 64 of each in all.
 const MAX_FORK_LIST: usize = 24;
@@ -153,6 +156,12 @@ pub fn hooks_of(recipe: &RecipeDefinition) -> KeepHooks {
     })
 }
 
+static LOCK: Mutex<()> = Mutex::new(());
+
+pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
+    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub struct Library {
     root: PathBuf,
 }
@@ -220,15 +229,37 @@ impl Library {
 
     /// Writes the recipe whole: a reader sees the old file or the new one.
     pub fn save(&self, name: &str, recipe: &RecipeDefinition) -> Result<(), String> {
+        let _held = lock();
+        self.save_locked(name, recipe)
+    }
+
+    pub(crate) fn save_locked(&self, name: &str, recipe: &RecipeDefinition) -> Result<(), String> {
         validate_definition(name, recipe)?;
         let path = self.file(name)?;
-        fs::create_dir_all(&self.root)
-            .map_err(|error| format!("Cannot create the recipe folder: {error}"))?;
-        let text = serde_json::to_string_pretty(recipe).map_err(|error| error.to_string())?;
-        let temporary = path.with_extension("json.tmp");
-        fs::write(&temporary, text)
-            .and_then(|()| fs::rename(&temporary, &path))
-            .map_err(|error| format!("Cannot save the recipe {name}: {error}"))
+        let io = |error: std::io::Error| format!("Cannot save the recipe {name}: {error}");
+        let directory = &self.root;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(directory)
+            .map_err(io)?;
+        let temporary = directory.join(format!("{name}-{}.tmp", uuid::Uuid::new_v4().simple()));
+        let bytes = serde_json::to_vec_pretty(recipe).map_err(|error| error.to_string())?;
+        let written = (|| {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temporary)?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            fs::rename(&temporary, &path)?;
+            fs::File::open(directory)?.sync_all()
+        })();
+        if written.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        written.map_err(io)
     }
 
     /// Forgets the saved recipe; the shipped one of the same name comes back. Whether one was

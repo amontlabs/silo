@@ -738,11 +738,24 @@ mod stored {
             scrub: vec!["/tmp/mine".into()],
             ..Default::default()
         };
-        let options = crate::checkpoints::options_with_recipe_rules("builder", asked.clone());
+        let options = crate::checkpoints::options_with_recipe_rules("builder", asked.clone()).unwrap();
         assert_eq!(options.stop, ["poller", "extra"]);
         assert_eq!(options.scrub, ["/tmp/mine", "/home/silo/.env"]);
-        let plain = crate::checkpoints::options_with_recipe_rules("someone-else", asked.clone());
+        let plain = crate::checkpoints::options_with_recipe_rules("someone-else", asked.clone()).unwrap();
         assert_eq!(plain, asked);
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn a_corrupt_records_file_refuses_options_with_recipe_rules() {
+        let app = folder();
+        let path = app.join("recipe-records.json");
+        std::fs::write(&path, "corrupt-json").unwrap();
+        records::use_test_path(Some(path));
+        let asked = crate::runtime::checkpoints::ForkOptions::default();
+        let result = crate::checkpoints::options_with_recipe_rules("builder", asked);
+        assert!(result.is_err());
         records::use_test_path(None);
         std::fs::remove_dir_all(app).unwrap();
     }
@@ -762,7 +775,7 @@ mod stored {
         adds.add_package("snap", "lxd");
         adds.add_file("/home/silo/.bashrc");
         adds.add_file("/home/silo/.gitconfig");
-        let (name, fresh) = record_merge(&library, "main", &adds).unwrap().unwrap();
+        let (name, fresh) = record_merge(&library, "main", &adds, true).unwrap().unwrap();
         assert_eq!(name, "web");
         assert_eq!(fresh.packages["apt"], ["jq"]);
         assert_eq!(fresh.packages["pip"], ["requests"]);
@@ -775,9 +788,31 @@ mod stored {
         let on_main = records::get("main").unwrap().unwrap();
         assert_eq!(on_main.recipe, stored);
         // The same again adds nothing.
-        assert!(record_merge(&library, "main", &adds).unwrap().is_none());
+        assert!(record_merge(&library, "main", &adds, true).unwrap().is_none());
         // A computer with no recipe has nothing to append to.
-        assert!(record_merge(&library, "nobody", &adds).unwrap().is_none());
+        assert!(record_merge(&library, "nobody", &adds, true).unwrap().is_none());
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn record_merge_skips_saving_recipe_when_save_recipe_is_false() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        library.save("web", &definition()).unwrap();
+        records::set("main", &record("web")).unwrap();
+
+        let mut adds = Additions::default();
+        adds.add_package("apt", "jq");
+        let (name, fresh) = record_merge(&library, "main", &adds, false).unwrap().unwrap();
+        assert_eq!(name, "web");
+        assert_eq!(fresh.packages["apt"], ["jq"]);
+
+        let stored = library.saved("web").unwrap().unwrap();
+        assert!(!stored.spec.packages.apt.contains(&"jq".to_owned()));
+        let on_main = records::get("main").unwrap().unwrap();
+        assert!(on_main.recipe.spec.packages.apt.contains(&"jq".to_owned()));
         records::use_test_path(None);
         std::fs::remove_dir_all(app).unwrap();
     }
@@ -792,7 +827,7 @@ mod stored {
         records::set("main", &main).unwrap();
         let mut adds = Additions::default();
         adds.add_package("npm", "typescript");
-        let (_, fresh) = record_merge(&library, "main", &adds).unwrap().unwrap();
+        let (_, fresh) = record_merge(&library, "main", &adds, true).unwrap().unwrap();
         assert_eq!(fresh.packages["npm"], ["typescript"]);
         assert!(library.saved("linux-dev").unwrap().is_none());
         assert_eq!(
@@ -805,6 +840,29 @@ mod stored {
         );
         records::use_test_path(None);
         std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn append_skips_additions_that_would_exceed_limits() {
+        let mut recipe = definition();
+        recipe.spec.packages.apt = (0..250).map(|i| format!("pkg{i}")).collect();
+        let mut adds = Additions::default();
+        for i in 250..270 {
+            adds.add_package("apt", &format!("pkg{i}"));
+        }
+        let (updated, fresh) = append(&recipe, &adds);
+        assert_eq!(updated.spec.packages.apt.len(), super::library::MAX_LIST);
+        assert_eq!(fresh.packages["apt"].len(), 6);
+
+        let recipe = definition();
+        let big_str = "a".repeat(100);
+        let mut adds = Additions::default();
+        for i in 0..3000 {
+            adds.add_package("apt", &format!("pkg{i}_{big_str}"));
+        }
+        let (updated, _) = append(&recipe, &adds);
+        let size = serde_json::to_vec(&updated).unwrap().len();
+        assert!(size <= super::library::MAX_BYTES);
     }
 
     #[test]
