@@ -282,7 +282,7 @@ fn headroom_calls(id: &str, fork: &str) -> Vec<(MethodName, Value)> {
         (
             MethodName::ComputersCreate,
             json!({"kind": "linux", "configuration": {"id": "x", "name": "gate-created",
-                "cpus": 2, "maxCPUs": 2, "memoryGiB": 4, "maxMemoryGiB": 4,
+                "cpus": 2, "maxCPUs": 2, "memoryGiB": 1, "maxMemoryGiB": 1,
                 "workspaceStorageGiB": 10, "runtimeStorageGiB": 10}}),
         ),
         (

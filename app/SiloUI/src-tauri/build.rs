@@ -8,11 +8,8 @@ fn main() {
     for key in github_build::KEYS {
         println!("cargo:rerun-if-env-changed={key}");
     }
-    let values = github_build::configuration(&config, |key| std::env::var(key).ok())
+    let _ = github_build::configuration(&config, |key| std::env::var(key).ok())
         .unwrap_or_else(|message| panic!("{message}"));
-    for (key, value) in values {
-        println!("cargo:rustc-env={key}={value}");
-    }
     // objc2-user-notifications declares a normal framework dependency. The
     // app still supports macOS 10.13, so override it at the final link step and
     // guard every framework call at runtime on macOS 10.14 or newer.
