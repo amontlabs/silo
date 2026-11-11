@@ -255,6 +255,10 @@ class Failure(Exception):
         self.reason = reason
 
 
+class Conflict(Failure):
+    """An agent already has a server of that name that Silo did not add; it is left alone."""
+
+
 def now():
     return int(time.time())
 
@@ -949,21 +953,32 @@ def strip_legacy_rules(settings):
     return changed
 
 
-def edit_claude(entry, approval, server=SERVER, remove=False):
-    """Claude Code: `mcpServers.cua-driver` in ~/.claude.json (`entry`; None leaves the
-    registration alone) and `mcp__cua-driver` in ~/.claude/settings.json `permissions.allow`
-    for the auto mode. LCU's entries are removed from both. Another `server` (Silo's own MCP
-    server) is only added to or, with `remove`, taken out of ~/.claude.json: it has no approval
-    rule and the settings file is left alone."""
-    state = read_object(CLAUDE_STATE)
-    if state is None:
-        raise Failure('setup-failed', f'{CLAUDE_STATE} is not a JSON object')
-    original = json.dumps(state, sort_keys=True)
+MANAGED_ENV = {'SILO_MANAGED': '1'}
+MANAGED_TOML = re.compile(r'\bSILO_MANAGED\s*=\s*"1"')
+
+
+def claude_owns(present, known):
+    """Whether `present`, Claude Code's entry for one of Silo's servers, is Silo's: marked, or the
+    unmarked entry an earlier Silo wrote (the same command and arguments as `known`)."""
+    if not isinstance(present, dict):
+        return False
+    env = present.get('env')
+    if isinstance(env, dict) and env.get('SILO_MANAGED') == '1':
+        return True
+    return (known is not None and present.get('command') == known['command']
+            and present.get('args') == known['args'])
+
+
+def claude_servers(state, entry, server, remove, known):
+    """Applies the change to the servers in the parsed ~/.claude.json."""
     servers = state.get('mcpServers')
     if servers is not None and not isinstance(servers, dict):
         raise Failure('setup-failed', 'mcpServers is not an object')
     if isinstance(servers, dict):
         servers.pop('lcu', None)
+        if (server != SERVER and (entry is not None or remove) and server in servers
+                and not claude_owns(servers[server], known)):
+            raise Conflict('conflict', f'Claude Code has its own {server} server')
         if remove:
             servers.pop(server, None)
     if entry is not None:
@@ -971,8 +986,29 @@ def edit_claude(entry, approval, server=SERVER, remove=False):
             # Absent or `null`: both mean no servers yet.
             servers = state['mcpServers'] = {}
         servers[server] = entry
+
+
+def edit_claude(entry, approval, server=SERVER, remove=False, known=None):
+    """Claude Code: `mcpServers.cua-driver` in ~/.claude.json (`entry`; None leaves the
+    registration alone) and `mcp__cua-driver` in ~/.claude/settings.json `permissions.allow`
+    for the auto mode. LCU's entries are removed from both. Another `server` (Silo's own MCP
+    server) is only added to or, with `remove`, taken out of ~/.claude.json, and only when the
+    entry there is Silo's (`known` is the entry an earlier Silo wrote); the settings file is left
+    alone. The file is read again right before it is replaced, so a change Claude Code made in
+    between is kept."""
+    state = read_object(CLAUDE_STATE)
+    if state is None:
+        raise Failure('setup-failed', f'{CLAUDE_STATE} is not a JSON object')
+    original = json.dumps(state, sort_keys=True)
+    claude_servers(state, entry, server, remove, known)
     if json.dumps(state, sort_keys=True) != original:
-        write_text(CLAUDE_STATE, json.dumps(state, indent=2) + '\n')
+        fresh = read_object(CLAUDE_STATE)
+        if fresh is None:
+            raise Failure('setup-failed', f'{CLAUDE_STATE} is not a JSON object')
+        fresh_original = json.dumps(fresh, sort_keys=True)
+        claude_servers(fresh, entry, server, remove, known)
+        if json.dumps(fresh, sort_keys=True) != fresh_original:
+            write_text(CLAUDE_STATE, json.dumps(fresh, indent=2) + '\n')
     if server != SERVER:
         return
     settings = read_object(CLAUDE_SETTINGS)
@@ -1042,16 +1078,47 @@ def codex_block(entry, approval, server=SERVER):
     return lines
 
 
-def edit_codex(entry, approval, server=SERVER, remove=False):
+def codex_owns(sections, server, known):
+    """Whether the tables of one server in Codex's configuration are Silo's: marked, or the
+    unmarked table an earlier Silo wrote (the same command and arguments as `known`)."""
+    if MANAGED_TOML.search('\n'.join(line for _, lines in sections for line in lines)):
+        return True
+    if known is None:
+        return False
+    command = args = None
+    for name, lines in sections:
+        if name.replace('"', '') != f'mcp_servers.{server}':
+            continue
+        for line in lines:
+            found = re.match(r'\s*command\s*=\s*("(?:[^"\\]|\\.)*")\s*(?:#.*)?$', line)
+            if found:
+                command = found.group(1)
+            found = re.match(r'\s*args\s*=\s*(\[.*\])\s*(?:#.*)?$', line)
+            if found:
+                args = found.group(1)
+    try:
+        return (command is not None and args is not None and json.loads(command) == known['command']
+                and json.loads(args) == known['args'])
+    except ValueError:
+        return False
+
+
+def edit_codex(entry, approval, server=SERVER, remove=False, known=None):
     """Codex: `[mcp_servers.cua-driver]` in ~/.codex/config.toml with its env table, and
     `default_tools_approval_mode = "approve"` for the auto mode. Silo owns that section and
     rewrites it; LCU's server table and hooks are removed. Another `server` has its own table
-    written (or, with `remove`, taken out) the same way. The result must parse as TOML."""
+    written (or, with `remove`, taken out) the same way, and only when the tables there are Silo's
+    (`known` is the entry an earlier Silo wrote). The result must parse as TOML."""
     own = own_server(server)
     try:
         original = CODEX_CONFIG.read_text()
     except FileNotFoundError:
         original = ''
+    if server != SERVER and (entry is not None or remove):
+        present = [(name, lines) for name, lines in toml_sections(original)
+                   if name is not None and own.match(name)]
+        if present and not codex_owns(present, server, known):
+            raise Conflict('conflict', f'Codex has its own {server} server')
     kept = []
     for name, lines in toml_sections(original):
         if name is not None:
@@ -1151,8 +1218,9 @@ SERVER_NAME = re.compile(r'[a-z][a-z0-9-]{0,31}')
 
 
 def plain_entry(command, args):
-    """A stdio server entry with no environment of its own, in the shape both agents take."""
-    return {'type': 'stdio', 'command': str(command), 'args': [str(a) for a in args], 'env': {}}
+    """A stdio server entry marked as Silo's, in the shape both agents take."""
+    return {'type': 'stdio', 'command': str(command), 'args': [str(a) for a in args],
+            'env': dict(MANAGED_ENV)}
 
 
 def valid_server(name, command=None, args=()):
@@ -1165,11 +1233,12 @@ def valid_server(name, command=None, args=()):
 
 def configure_server(name, command, args):
     """Registers the plain stdio MCP server `name` with the installed agents, the way the driver
-    is registered (`configure`): returns `(registered, pending, failed)`, pending being agents
-    that are not installed yet."""
+    is registered (`configure`): returns `(registered, pending, failed, conflicts)`, pending being
+    agents that are not installed yet and a conflict an agent that has a server of that name
+    which is not Silo's (left as it is)."""
     valid_server(name, command, args)
     entry = plain_entry(command, args)
-    registered, pending, failed = [], [], []
+    registered, pending, failed, conflicts = [], [], [], []
     repair_agent_files()
     for agent in sorted(AGENTS):
         if not binary_installed(AGENTS[agent]):
@@ -1177,29 +1246,37 @@ def configure_server(name, command, args):
             continue
         try:
             with editing(), as_user():
-                EDITORS[agent](entry, None, server=name)
+                EDITORS[agent](entry, None, server=name, known=entry)
             registered.append(agent)
+        except Conflict as error:
+            log(f'could not register {name} with {agent}: {error}')
+            conflicts.append(agent)
         except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
             log(f'could not register {name} with {agent}: {type(error).__name__}: {error}')
             failed.append(agent)
-    return registered, pending, failed
+    return registered, pending, failed, conflicts
 
 
-def remove_server(name):
-    """Takes the server `name` out of every agent's configuration (a file that does not exist
-    is not created). Returns `(removed, failed)`."""
-    valid_server(name)
-    removed, failed = [], []
+def remove_server(name, command=None, args=()):
+    """Takes the server `name` out of every agent's configuration when it is Silo's (a file that
+    does not exist is not created; `command` and `args` name the unmarked entry an earlier Silo
+    wrote). Returns `(removed, failed, conflicts)`."""
+    valid_server(name, command, args)
+    known = plain_entry(command, args) if command else None
+    removed, failed, conflicts = [], [], []
     repair_agent_files()
     for agent in sorted(AGENTS):
         try:
             with editing(), as_user():
-                EDITORS[agent](None, None, server=name, remove=True)
+                EDITORS[agent](None, None, server=name, remove=True, known=known)
             removed.append(agent)
+        except Conflict as error:
+            log(f'could not remove {name} from {agent}: {error}')
+            conflicts.append(agent)
         except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
             log(f'could not remove {name} from {agent}: {type(error).__name__}: {error}')
             failed.append(agent)
-    return removed, failed
+    return removed, failed, conflicts
 
 
 def remove_legacy_user_files():
@@ -1590,6 +1667,8 @@ def main(argv=None):
     add_parser.add_argument('--arg', action='append', default=[])
     remove_parser = commands.add_parser('server-remove', help="take a server registered by server-add out of the agents")
     remove_parser.add_argument('--name', required=True)
+    remove_parser.add_argument('--command', dest='command_path')
+    remove_parser.add_argument('--arg', action='append', default=[])
     apply_parser = commands.add_parser('apply')
     apply_parser.add_argument('--approval', choices=APPROVALS, required=True)
     apply_parser.add_argument('--force', action='store_true')
@@ -1607,14 +1686,16 @@ def main(argv=None):
         return 0
     try:
         if args.command == 'server-add':
-            registered, pending, failed = configure_server(args.name, args.command_path, args.arg)
-            result = {'server': args.name, 'registered': registered, 'pending': pending, 'failed': failed}
+            registered, pending, failed, conflicts = configure_server(args.name, args.command_path, args.arg)
+            result = {'server': args.name, 'registered': registered, 'pending': pending, 'failed': failed,
+                      'conflicts': conflicts}
             print(json.dumps(result, sort_keys=True))
-            return 1 if failed else 0
+            return 1 if failed or conflicts else 0
         if args.command == 'server-remove':
-            removed, failed = remove_server(args.name)
-            print(json.dumps({'server': args.name, 'removed': removed, 'failed': failed}, sort_keys=True))
-            return 1 if failed else 0
+            removed, failed, conflicts = remove_server(args.name, args.command_path, args.arg)
+            print(json.dumps({'server': args.name, 'removed': removed, 'failed': failed,
+                              'conflicts': conflicts}, sort_keys=True))
+            return 1 if failed or conflicts else 0
         if args.command == 'status':
             result = status()
         elif args.command == 'reconcile':

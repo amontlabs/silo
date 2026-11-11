@@ -268,6 +268,7 @@ fn enable(
         return Err("Start the computer first; the program is copied into it.".into());
     }
     let record = guest_client::turn_on_in(store, computer_id)?;
+    guest_components::standing::start_over(computer_id);
     let mut written = false;
     // A computer waiting for a restart gets its file once it runs with rules that match.
     if located.running && !record.restart_needed {

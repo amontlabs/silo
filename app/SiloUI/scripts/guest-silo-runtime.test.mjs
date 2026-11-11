@@ -160,3 +160,10 @@ test('the compiler wrapper drops the flags zig does not take and keeps the rest'
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('ZIG_VERSION matches the pinned version in .github/actions/prepare-release-runtime/action.yml', async () => {
+  const actionYaml = await readFile(join(import.meta.dirname, '../../../.github/actions/prepare-release-runtime/action.yml'), 'utf8')
+  const match = actionYaml.match(/ZIG_VERSION:\s*([0-9.]+)/)
+  assert.ok(match, 'ZIG_VERSION found in action.yml')
+  assert.equal(match[1], ZIG_VERSION)
+})

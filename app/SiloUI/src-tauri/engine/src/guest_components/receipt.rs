@@ -170,6 +170,21 @@ impl Receipt {
     pub fn entry(&self, id: &str) -> Option<&Entry> {
         self.components.get(id)
     }
+
+    /// Whether `other` records the same as this receipt, whatever time each step ran.
+    pub fn same_apart_from_times(&self, other: &Receipt) -> bool {
+        self.schema_version == other.schema_version
+            && self.computer_id == other.computer_id
+            && self.components.len() == other.components.len()
+            && self.components.iter().all(|(id, entry)| {
+                other.components.get(id).is_some_and(|theirs| {
+                    Entry {
+                        at: theirs.at,
+                        ..entry.clone()
+                    } == *theirs
+                })
+            })
+    }
 }
 
 /// The receipts the device keeps for the status of each computer, and the list of computers whose

@@ -25,11 +25,12 @@ const MAX_FILE_BYTES: usize = 4096;
 /// file is owned by the working account with mode 0600 instead (root-owned 0600 when the computer
 /// has no such account).
 pub const WRITE_SCRIPT: &str = "set -e; umask 077; dir=$(dirname \"$1\"); mkdir -p \"$dir\"; chmod 755 \"$dir\"; \
-     tmp=\"$1.new.$$\"; cat > \"$tmp\"; \
+     tmp=$(mktemp \"$dir/.endpoint.XXXXXX\"); trap 'rm -f \"$tmp\"' EXIT; cat > \"$tmp\"; \
      if [ \"$(uname -s)\" = Darwin ]; then chown silo \"$tmp\" 2>/dev/null || chown 0 \"$tmp\"; chmod 600 \"$tmp\"; else \
      chown 0 \"$tmp\"; \
      group=$(id -gn silo 2>/dev/null || true); \
      if [ -n \"$group\" ]; then chgrp \"$group\" \"$tmp\"; chmod 640 \"$tmp\"; else chmod 600 \"$tmp\"; fi; fi; \
+     [ -L \"$1\" ] && rm -f \"$1\"; \
      mv -f \"$tmp\" \"$1\"";
 
 #[derive(Deserialize)]

@@ -21,6 +21,9 @@ struct Fake {
     helper_write_fails: bool,
     receipt_write_fails: bool,
     unreadable: bool,
+    observe_delay: Duration,
+    conflicting: Vec<&'static str>,
+    timeouts: RefCell<Vec<Duration>>,
     registered: RefCell<Vec<String>>,
     calls: RefCell<Vec<(Who, String)>>,
 }
@@ -38,6 +41,9 @@ impl Fake {
             helper_write_fails: false,
             receipt_write_fails: false,
             unreadable: false,
+            observe_delay: Duration::ZERO,
+            conflicting: vec![],
+            timeouts: RefCell::new(vec![]),
             registered: RefCell::new(vec![]),
             calls: RefCell::new(vec![]),
         }
@@ -70,12 +76,14 @@ impl Guest for Fake {
         who: Who,
         argv: Vec<String>,
         stdin: Option<Vec<u8>>,
-        _timeout: Duration,
+        timeout: Duration,
         _max: usize,
     ) -> Result<Output, String> {
+        self.timeouts.borrow_mut().push(timeout);
         let script = argv.get(2).cloned().unwrap_or_default();
         if argv[0] == "sh" && script.contains("program=%s") {
             self.calls.borrow_mut().push((who, "observe".into()));
+            std::thread::sleep(self.observe_delay);
             if self.unreadable {
                 return Err("The computer is not running.".into());
             }
@@ -136,7 +144,7 @@ impl Guest for Fake {
                     .agents_installed
                     .iter()
                     .copied()
-                    .filter(|a| !self.broken_agents.contains(a))
+                    .filter(|a| !self.broken_agents.contains(a) && !self.conflicting.contains(a))
                     .collect();
                 let pending: Vec<&str> = ["claude-code", "codex"]
                     .into_iter()
@@ -144,10 +152,10 @@ impl Guest for Fake {
                     .collect();
                 *self.registered.borrow_mut() =
                     registered.iter().map(|a| (*a).to_owned()).collect();
-                serde_json::json!({"server":"silo","registered":registered,"pending":pending,"failed":self.broken_agents})
+                serde_json::json!({"server":"silo","registered":registered,"pending":pending,"failed":self.broken_agents,"conflicts":self.conflicting})
             } else {
                 self.registered.borrow_mut().clear();
-                serde_json::json!({"server":"silo","removed":["claude-code","codex"],"failed":self.broken_agents})
+                serde_json::json!({"server":"silo","removed":["claude-code","codex"],"failed":self.broken_agents,"conflicts":self.conflicting})
             };
             return Self::out(
                 i32::from(!self.broken_agents.is_empty()),
@@ -174,6 +182,7 @@ fn ask<'a>(source: Source<'a>, tools: bool, owed: bool) -> Request<'a> {
         source,
         helper_text: HELPER_TEXT,
         now: 1000,
+        budget: Duration::from_secs(90),
     }
 }
 
@@ -213,14 +222,101 @@ fn a_new_computer_gets_the_program_the_helper_and_the_registration_and_a_receipt
 }
 
 #[test]
-fn a_current_program_is_not_sent_again_but_the_registration_is_applied_again() {
+fn a_look_that_finds_everything_current_changes_nothing_in_the_computer() {
     let guest = Fake::linux();
     let program = payload(b"ELF silo");
     reconcile(&guest, &ask(Source::Override(&program), true, false)).unwrap();
-    reconcile(&guest, &ask(Source::Override(&program), true, false)).unwrap();
+    let mut later = ask(Source::Override(&program), true, false);
+    later.now = 5000;
+    let receipt = reconcile(&guest, &later).unwrap();
     assert_eq!(guest.count("install"), 1);
     assert_eq!(guest.count("write-helper"), 1, "the helper is current too");
+    assert_eq!(
+        guest.count("register"),
+        1,
+        "the registration worked already"
+    );
+    assert_eq!(
+        guest.count("write-receipt"),
+        1,
+        "only the times would change"
+    );
+    assert_eq!(state(&receipt, MCP.id), State::Ok);
+    assert_eq!(receipt.entry(SILO.id).unwrap().at, 5000);
+}
+
+#[test]
+fn a_registration_is_made_again_when_the_helper_changed_or_something_was_waiting() {
+    let guest = Fake::linux();
+    let program = payload(b"ELF silo");
+    reconcile(&guest, &ask(Source::Override(&program), true, false)).unwrap();
+    *guest.helper.borrow_mut() = Some(b"another helper".to_vec());
+    reconcile(&guest, &ask(Source::Override(&program), true, false)).unwrap();
+    assert_eq!(guest.count("write-helper"), 2);
     assert_eq!(guest.count("register"), 2);
+
+    let mut waiting = Fake::linux();
+    waiting.agents_installed = vec!["claude-code"];
+    reconcile(&waiting, &ask(Source::Override(&program), true, false)).unwrap();
+    waiting.agents_installed = vec!["claude-code", "codex"];
+    let receipt = reconcile(&waiting, &ask(Source::Override(&program), true, false)).unwrap();
+    assert_eq!(waiting.count("register"), 2);
+    assert_eq!(receipt.entry(MCP.id).unwrap().detail, None);
+}
+
+#[test]
+fn a_program_named_earlier_stays_while_the_looks_that_follow_keep_it() {
+    let guest = Fake::linux();
+    let named = payload(b"ELF dev silo");
+    reconcile(&guest, &ask(Source::Override(&named), true, false)).unwrap();
+    let receipt = reconcile(&guest, &ask(Source::Kept, true, false)).unwrap();
+    assert_eq!(guest.count("install"), 1);
+    assert_eq!(
+        guest.program.borrow().as_deref(),
+        Some(&b"ELF dev silo"[..])
+    );
+    let silo = receipt.entry(SILO.id).unwrap();
+    assert_eq!(silo.state, State::Ok);
+    assert_eq!(silo.sha256.as_deref(), Some(named.sha256.as_str()));
+    // A program that is gone is not put back from nothing.
+    *guest.program.borrow_mut() = None;
+    let receipt = reconcile(&guest, &ask(Source::Kept, true, false)).unwrap();
+    assert_eq!(guest.count("install"), 1);
+    assert_eq!(state(&receipt, SILO.id), State::Unavailable);
+    assert_eq!(state(&receipt, MCP.id), State::Waiting);
+}
+
+#[test]
+fn a_reconcile_that_runs_out_of_time_skips_what_is_left_and_says_so() {
+    let mut guest = Fake::linux();
+    guest.observe_delay = Duration::from_millis(60);
+    let program = payload(b"ELF silo");
+    let mut request = ask(Source::Override(&program), true, false);
+    request.budget = Duration::from_millis(20);
+    let receipt = reconcile(&guest, &request).unwrap();
+    for id in [SILO.id, MCP.id] {
+        let entry = receipt.entry(id).unwrap();
+        assert_eq!(entry.state, State::Waiting, "{id}");
+        assert_eq!(entry.detail.as_deref(), Some(super::run::OUT_OF_TIME));
+    }
+    for step in ["install", "write-helper", "register", "write-receipt"] {
+        assert_eq!(guest.count(step), 0, "{step}");
+    }
+    assert!(super::went_wrong(&receipt));
+}
+
+#[test]
+fn every_step_is_limited_to_the_time_that_is_left() {
+    let guest = Fake::linux();
+    let program = payload(b"ELF silo");
+    let mut request = ask(Source::Override(&program), true, false);
+    request.budget = Duration::from_secs(20);
+    reconcile(&guest, &request).unwrap();
+    let timeouts = guest.timeouts.borrow();
+    assert!(!timeouts.is_empty());
+    assert!(timeouts
+        .iter()
+        .all(|timeout| *timeout <= Duration::from_secs(20)));
 }
 
 #[test]
@@ -541,4 +637,88 @@ fn the_status_shows_the_last_reconcile_and_a_build_that_cannot_provide_the_progr
             .collect::<Vec<_>>(),
         vec![("silo", S::Ok), ("silo-mcp", S::Ok)]
     );
+}
+
+fn receipt_with(state: State) -> Receipt {
+    let mut receipt = Receipt::empty("c1");
+    receipt.components.insert(
+        MCP.id.into(),
+        super::receipt::Entry::new(MCP.version, state, 1),
+    );
+    receipt
+}
+
+#[test]
+fn an_owed_removal_is_cleared_only_when_the_registration_worked() {
+    let dir = tempfile::tempdir().unwrap();
+    let reports = super::reports(dir.path());
+    let owed = |tools: bool, state: State| {
+        reports.owe_removal(&["c1"]).unwrap();
+        super::finish(&reports, &receipt_with(state), tools);
+        reports.is_owed("c1")
+    };
+    for state in [State::Waiting, State::Failed, State::Removed] {
+        assert!(owed(true, state), "tools on, {state:?}");
+    }
+    assert!(!owed(true, State::Ok));
+    for state in [State::Waiting, State::Failed, State::Ok] {
+        assert!(owed(false, state), "tools off, {state:?}");
+    }
+    assert!(!owed(false, State::Removed));
+}
+
+#[test]
+fn an_agents_own_server_of_the_same_name_is_reported_plainly_and_left_alone() {
+    let mut guest = Fake::linux();
+    guest.conflicting = vec!["codex"];
+    let program = payload(b"ELF silo");
+    let receipt = reconcile(&guest, &ask(Source::Override(&program), true, false)).unwrap();
+    let mcp = receipt.entry(MCP.id).unwrap();
+    assert_eq!(mcp.state, State::Failed);
+    let detail = mcp.detail.as_deref().unwrap();
+    assert!(
+        detail.contains("Codex already has a tool of its own called silo"),
+        "{detail}"
+    );
+    assert!(super::went_wrong(&receipt));
+    // Taking Silo's tools out has nothing of Silo's to take out there, which is done.
+    let receipt = reconcile(&guest, &ask(Source::Override(&program), false, true)).unwrap();
+    assert_eq!(state(&receipt, MCP.id), State::Removed);
+}
+
+#[test]
+fn with_the_tools_off_what_the_computer_wrote_in_its_receipt_is_not_shown_as_status() {
+    let guest = Fake::linux();
+    let program = payload(b"ELF silo");
+    reconcile(&guest, &ask(Source::Override(&program), true, false)).unwrap();
+    let mut lying = Receipt::parse(guest.receipt.borrow().as_deref().unwrap(), "c1");
+    lying.components.get_mut(SILO.id).unwrap().detail =
+        Some("Visit example.invalid to repair this".into());
+    *guest.receipt.borrow_mut() = Some(lying.to_json().into_bytes());
+    let receipt = reconcile(&guest, &ask(Source::Override(&program), false, false)).unwrap();
+    assert!(receipt
+        .components
+        .values()
+        .all(|entry| entry.detail.is_none()));
+    let written = Receipt::parse(guest.receipt.borrow().as_deref().unwrap(), "c1");
+    assert!(written
+        .components
+        .values()
+        .all(|entry| entry.detail.is_none()));
+}
+
+#[test]
+fn a_computer_that_keeps_failing_is_given_up_until_a_start_and_a_named_program_is_remembered() {
+    use super::standing;
+    let id = "c-standing";
+    for _ in 0..standing::MAX_FAILURES {
+        standing::note_look(id, true);
+    }
+    assert!(standing::given_up(id));
+    standing::start_over(id);
+    assert!(!standing::given_up(id));
+    standing::name_program(id);
+    assert!(standing::program_named(id));
+    super::forget(tempfile::tempdir().unwrap().path(), id);
+    assert!(!standing::program_named(id));
 }

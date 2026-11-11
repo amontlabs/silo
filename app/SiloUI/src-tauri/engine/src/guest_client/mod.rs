@@ -268,9 +268,17 @@ pub fn inherit(source_id: &str, child_id: &str) -> Result<(), String> {
     let Some(store) = TokenStore::current() else {
         return Ok(());
     };
+    inherit_in(&store, source_id, child_id)
+}
+
+/// [`inherit`] with the store given.
+pub fn inherit_in(store: &TokenStore, source_id: &str, child_id: &str) -> Result<(), String> {
     match store.status(source_id)? {
-        Some(_) => turn_on_in(&store, child_id).map(|_| ()),
-        None => Ok(()),
+        Some(_) => turn_on_in(store, child_id).map(|_| ()),
+        None => {
+            crate::guest_components::owe_removal(store.directory(), &[child_id]);
+            Ok(())
+        }
     }
 }
 
@@ -591,6 +599,19 @@ mod tests {
         end_token("c").unwrap();
         assert_eq!(*fake.ended.lock().unwrap(), ["c"]);
         assert!(store.status("c").unwrap().unwrap().hash.is_empty());
+        reset();
+    }
+
+    #[test]
+    fn a_fork_whose_tools_are_off_owes_removal_at_fork_time() {
+        use crate::guest_components::receipt::Reports;
+        let directory = tempfile::tempdir().unwrap();
+        let (store, _fake) = with_fake(directory.path());
+        inherit_in(&store, "parent-without-tools", "fork-child").unwrap();
+        assert_eq!(
+            Reports::new(store.directory()).owed(),
+            vec!["fork-child".to_owned()]
+        );
         reset();
     }
 }

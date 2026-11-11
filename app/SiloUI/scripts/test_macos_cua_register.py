@@ -62,10 +62,12 @@ class RegisterTest(unittest.TestCase):
         code, result = self.main('server-add', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp')
         self.assertEqual((code, result['registered'], result['failed']), (0, ['claude-code', 'codex'], []))
         servers = json.loads(self.module.CLAUDE_STATE.read_text())['mcpServers']
-        self.assertEqual(servers['silo'], {'type': 'stdio', 'command': '/usr/local/bin/silo', 'args': ['mcp'], 'env': {}})
+        self.assertEqual(servers['silo'], {'type': 'stdio', 'command': '/usr/local/bin/silo', 'args': ['mcp'],
+                                           'env': {'SILO_MANAGED': '1'}})
         self.assertIn('cua-driver', servers)
         codex = tomllib.loads(self.module.CODEX_CONFIG.read_text())['mcp_servers']
         self.assertEqual((codex['silo']['command'], codex['silo']['args']), ('/usr/local/bin/silo', ['mcp']))
+        self.assertEqual(codex['silo']['env'], {'SILO_MANAGED': '1'})
         self.assertIn('cua-driver', codex)
         code, result = self.main('server-remove', '--name', 'silo')
         self.assertEqual((code, result['removed']), (0, ['claude-code', 'codex']))
@@ -73,6 +75,54 @@ class RegisterTest(unittest.TestCase):
         self.assertIn('cua-driver', json.loads(self.module.CLAUDE_STATE.read_text())['mcpServers'])
         self.assertNotIn('silo', tomllib.loads(self.module.CODEX_CONFIG.read_text())['mcp_servers'])
         self.assertIn('cua-driver', tomllib.loads(self.module.CODEX_CONFIG.read_text())['mcp_servers'])
+
+    def test_a_server_the_user_added_under_silos_name_is_left_alone_and_reported(self):
+        self.module.CLAUDE_STATE.write_text(json.dumps({'mcpServers': {'silo': {'command': 'mine'}}}))
+        self.module.CODEX_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        self.module.CODEX_CONFIG.write_text('[mcp_servers.silo]\ncommand = "mine"\nargs = []\n')
+        before = (self.module.CLAUDE_STATE.read_text(), self.module.CODEX_CONFIG.read_text())
+        code, result = self.main('server-add', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp')
+        self.assertEqual((code, result['registered'], result['conflicts']), (1, [], ['claude-code', 'codex']))
+        code, result = self.main('server-remove', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp')
+        self.assertEqual((code, result['removed'], result['conflicts']), (1, [], ['claude-code', 'codex']))
+        self.assertEqual(before, (self.module.CLAUDE_STATE.read_text(), self.module.CODEX_CONFIG.read_text()))
+
+    def test_the_unmarked_entry_an_earlier_silo_wrote_is_marked_and_removable(self):
+        old = {'type': 'stdio', 'command': '/usr/local/bin/silo', 'args': ['mcp'], 'env': {}}
+        old_toml = '[mcp_servers.silo]\ncommand = "/usr/local/bin/silo"\nargs = ["mcp"]\n'
+        self.module.CLAUDE_STATE.write_text(json.dumps({'mcpServers': {'silo': old}}))
+        self.module.CODEX_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        self.module.CODEX_CONFIG.write_text(old_toml)
+        code, result = self.main('server-add', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp')
+        self.assertEqual((code, result['registered'], result['conflicts']), (0, ['claude-code', 'codex'], []))
+        self.assertEqual(json.loads(self.module.CLAUDE_STATE.read_text())['mcpServers']['silo']['env'],
+                         {'SILO_MANAGED': '1'})
+        self.assertEqual(tomllib.loads(self.module.CODEX_CONFIG.read_text())['mcp_servers']['silo']['env'],
+                         {'SILO_MANAGED': '1'})
+        self.module.CLAUDE_STATE.write_text(json.dumps({'mcpServers': {'silo': old}}))
+        self.module.CODEX_CONFIG.write_text(old_toml)
+        code, result = self.main('server-remove', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp')
+        self.assertEqual((code, result['removed'], result['conflicts']), (0, ['claude-code', 'codex'], []))
+        self.assertEqual(json.loads(self.module.CLAUDE_STATE.read_text())['mcpServers'], {})
+        self.assertNotIn('silo', tomllib.loads(self.module.CODEX_CONFIG.read_text()).get('mcp_servers', {}))
+
+    def test_a_change_claude_code_made_while_silo_edited_is_kept(self):
+        self.module.CLAUDE_STATE.write_text(json.dumps({'userID': '1'}))
+        read = self.module.read_object
+        reads = []
+
+        def read_then_change(path):
+            found = read(path)
+            reads.append(path)
+            if path == self.module.CLAUDE_STATE and len(reads) == 1:
+                path.write_text(json.dumps({'userID': '1', 'projects': {'a': 1}}))
+            return found
+
+        with mock.patch.object(self.module, 'read_object', side_effect=read_then_change):
+            code, result = self.main('server-add', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp')
+        saved = json.loads(self.module.CLAUDE_STATE.read_text())
+        self.assertEqual(saved['projects'], {'a': 1})
+        self.assertIn('silo', saved['mcpServers'])
 
     def test_a_server_name_or_command_that_is_not_plain_is_refused(self):
         for name, command in (('cua-driver', '/x'), ('Silo', '/x'), ('silo', 'silo')):

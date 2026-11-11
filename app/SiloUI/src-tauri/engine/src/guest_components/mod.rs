@@ -14,6 +14,7 @@ pub mod plan;
 pub mod receipt;
 pub mod run;
 mod scripts;
+pub mod standing;
 
 use std::{
     collections::HashMap,
@@ -55,7 +56,7 @@ pub const SILO: Component = Component {
 /// `silo mcp` registered with Claude Code and Codex.
 pub const MCP: Component = Component {
     id: "silo-mcp",
-    version: 1,
+    version: 2,
 };
 /// Every component, in the order they are reconciled.
 pub const COMPONENTS: &[Component] = &[SILO, MCP];
@@ -106,8 +107,10 @@ fn helper_text(macos: bool) -> &'static str {
 
 /// Reconciles a running computer: installs or replaces the program when the computer's copy is
 /// not the wanted one, registers (or, with the tools off, removes) the MCP server, and records
-/// every result. `override_program` is a development program named by the owner. An `Err` means
-/// the computer could not be read at all; step failures are in the returned receipt.
+/// every result. `override_program` is a development program named by the owner; it stays in the
+/// computer, whatever later looks find, until the computer starts again or the tools are turned
+/// on again. An `Err` means the computer could not be read at all; step failures are in the
+/// returned receipt.
 pub fn reconcile(
     target: &Target,
     app_data: &Path,
@@ -130,24 +133,46 @@ pub fn reconcile(
         removal_owed: reports.is_owed(target.id()),
         source: match override_program {
             Some(payload) => Source::Override(payload),
+            None if standing::program_named(target.id()) => Source::Kept,
             None => Source::Located(&located),
         },
         helper_text: helper_text(target.is_macos()),
         now: now_secs(),
+        budget: run::RECONCILE_BUDGET,
     };
-    let receipt = run::reconcile(target, &request)?;
+    let receipt = match run::reconcile(target, &request) {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            standing::note_look(target.id(), true);
+            return Err(error);
+        }
+    };
+    standing::note_look(target.id(), went_wrong(&receipt));
+    if override_program.is_some()
+        && receipt
+            .entry(SILO.id)
+            .is_some_and(|entry| entry.state == State::Ok)
+    {
+        standing::name_program(target.id());
+    }
     finish(&reports, &receipt, tools);
     Ok(receipt)
 }
 
+/// Whether a step failed or ran out of time.
+fn went_wrong(receipt: &Receipt) -> bool {
+    receipt.components.values().any(|entry| {
+        entry.state == State::Failed || entry.detail.as_deref() == Some(run::OUT_OF_TIME)
+    })
+}
+
 fn finish(reports: &Reports, receipt: &Receipt, tools: bool) {
-    // A removal stays owed until it worked; with the tools on again the registration was made
-    // anew, so nothing is owed.
-    if tools
-        || receipt
-            .entry(MCP.id)
-            .is_none_or(|entry| entry.state != State::Failed)
-    {
+    // A removal stays owed until the registration worked: made anew with the tools on, taken
+    // out with them off. A step that is only waiting, failed or ran out of time changes nothing.
+    let worked = receipt
+        .entry(MCP.id)
+        .is_some_and(|entry| entry.state == if tools { State::Ok } else { State::Removed });
+    if worked {
         reports.clear_owed(&[receipt.computer_id.as_str()]);
     }
     if let Err(error) = reports.save(receipt) {
@@ -184,6 +209,7 @@ pub fn owe_removal(guest_client_directory: &Path, computer_ids: &[&str]) {
 
 /// Forgets what is kept about a computer that no longer exists.
 pub fn forget(guest_client_directory: &Path, computer_id: &str) {
+    standing::start_over(computer_id);
     Reports::new(guest_client_directory).forget(computer_id);
 }
 

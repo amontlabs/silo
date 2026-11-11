@@ -2,7 +2,7 @@
 //! happened. A step that fails is recorded and the next one still runs; only a computer that
 //! cannot be read at all returns an error, so its caller tries again soon.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -18,6 +18,33 @@ const OBSERVE_TIMEOUT: Duration = Duration::from_secs(30);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(170);
 const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 const SMALL_OUTPUT: usize = 64 * 1024;
+/// All of one reconcile, which holds its computer's lock and one of the watcher's places.
+pub const RECONCILE_BUDGET: Duration = Duration::from_secs(90);
+/// The explanation of a step left undone because the reconcile ran out of time.
+pub const OUT_OF_TIME: &str =
+    "Silo ran out of time on this computer; it tries again when the computer next starts.";
+
+/// The time a reconcile has left.
+struct Clock {
+    end: Instant,
+}
+
+impl Clock {
+    fn new(budget: Duration) -> Self {
+        Self {
+            end: Instant::now() + budget,
+        }
+    }
+
+    fn over(&self) -> bool {
+        Instant::now() >= self.end
+    }
+
+    /// `step`, or what is left of the time when that is less.
+    fn limit(&self, step: Duration) -> Duration {
+        step.min(self.end.saturating_duration_since(Instant::now()))
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Who {
@@ -98,6 +125,8 @@ pub enum Source<'a> {
     Located(&'a Located),
     /// A program the owner named for development, already read.
     Override(&'a Payload),
+    /// The program the owner named earlier stays in the computer.
+    Kept,
 }
 
 /// What is asked of a reconcile.
@@ -109,6 +138,8 @@ pub struct Request<'a> {
     /// The text of the registration helper to keep in the computer.
     pub helper_text: &'a str,
     pub now: u64,
+    /// The most time the whole reconcile may take.
+    pub budget: Duration,
 }
 
 struct Places {
@@ -152,16 +183,15 @@ fn failure_text(output: &Output) -> String {
 
 struct Seen {
     observed: Observed,
-    helper_sha256: Option<String>,
 }
 
-fn observe(guest: &dyn Guest, computer_id: &str) -> Result<Seen, String> {
+fn observe(guest: &dyn Guest, computer_id: &str, clock: &Clock) -> Result<Seen, String> {
     let places = places(guest.kind());
     let output = guest.run(
         Who::Account,
         argv(&["sh", "-c", &scripts::observe(places.helper, places.receipt)]),
         None,
-        OBSERVE_TIMEOUT,
+        clock.limit(OBSERVE_TIMEOUT),
         MAX_RECEIPT_BYTES + 4096,
     )?;
     if output.code != Some(0) {
@@ -192,14 +222,15 @@ fn observe(guest: &dyn Guest, computer_id: &str) -> Result<Seen, String> {
     Ok(Seen {
         observed: Observed {
             program_sha256: field("program="),
+            helper_sha256: field("helper="),
             receipt: Receipt::parse(&output.stdout[split + marker.len()..], computer_id),
         },
-        helper_sha256: field("helper="),
     })
 }
 
 fn put_file(
     guest: &dyn Guest,
+    clock: &Clock,
     who: Who,
     place: Place,
     mode: &str,
@@ -209,7 +240,7 @@ fn put_file(
         who,
         argv(&["sh", "-c", &scripts::write_file(place), "silo-write", mode]),
         Some(bytes.to_vec()),
-        STEP_TIMEOUT,
+        clock.limit(STEP_TIMEOUT),
         4096,
     )?;
     if output.code == Some(0) {
@@ -219,7 +250,7 @@ fn put_file(
     }
 }
 
-fn install_program(guest: &dyn Guest, payload: &Payload) -> Result<(), String> {
+fn install_program(guest: &dyn Guest, clock: &Clock, payload: &Payload) -> Result<(), String> {
     let output = guest.run(
         Who::Root,
         argv(&[
@@ -232,7 +263,7 @@ fn install_program(guest: &dyn Guest, payload: &Payload) -> Result<(), String> {
             "0:0",
         ]),
         Some(payload.bytes.clone()),
-        INSTALL_TIMEOUT,
+        clock.limit(INSTALL_TIMEOUT),
         4096,
     )?;
     if output.code == Some(0) {
@@ -247,6 +278,8 @@ struct Registration {
     registered: Vec<String>,
     pending: Vec<String>,
     failed: Vec<String>,
+    /// Agents that have a server of that name which is not Silo's.
+    conflicts: Vec<String>,
 }
 
 fn names(value: &Value, key: &str) -> Vec<String> {
@@ -263,14 +296,14 @@ fn names(value: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn register(guest: &dyn Guest, add: bool) -> Result<Registration, String> {
+fn register(guest: &dyn Guest, clock: &Clock, add: bool) -> Result<Registration, String> {
     let macos = guest.kind() == Kind::Macos;
     let who = if macos { Who::Account } else { Who::Root };
     let output = guest.run(
         who,
         scripts::registration(macos, add),
         None,
-        STEP_TIMEOUT,
+        clock.limit(STEP_TIMEOUT),
         SMALL_OUTPUT,
     )?;
     let last_line = String::from_utf8_lossy(&output.stdout)
@@ -284,6 +317,7 @@ fn register(guest: &dyn Guest, add: bool) -> Result<Registration, String> {
             registered: names(&value, if add { "registered" } else { "removed" }),
             pending: names(&value, "pending"),
             failed: names(&value, "failed"),
+            conflicts: names(&value, "conflicts"),
         }),
         None => Err(failure_text(&output)),
     }
@@ -304,11 +338,14 @@ fn agent_words(names: &[String]) -> String {
 /// One reconcile. Returns the computer's new receipt, which it has also been given when it could
 /// take it.
 pub fn reconcile(guest: &dyn Guest, request: &Request<'_>) -> Result<Receipt, String> {
-    let seen = observe(guest, request.computer_id)?;
+    let clock = Clock::new(request.budget);
+    let seen = observe(guest, request.computer_id, &clock)?;
+    let helper_sha256 = super::artifact::sha256_hex(request.helper_text.as_bytes());
     // The program Silo has to give. A file whose checksum the manifest records is read only when
     // it is sent; the device's own program is read now, to know its checksum.
     let mut read: Option<Payload> = None;
     let program = match &request.source {
+        Source::Kept => Program::OverrideActive,
         Source::Override(payload) => Program::Available {
             sha256: payload.sha256.clone(),
         },
@@ -338,25 +375,47 @@ pub fn reconcile(guest: &dyn Guest, request: &Request<'_>) -> Result<Receipt, St
         tools: request.tools,
         program,
         removal_owed: request.removal_owed,
+        helper_sha256: helper_sha256.clone(),
     };
     let steps = plan(&wanted, &seen.observed);
     let at = request.now;
     let mut receipt = seen.observed.receipt.clone();
+    if !request.tools {
+        // With the tools off, what the computer wrote in its receipt is its own claim; only what
+        // this run records is shown as status.
+        for entry in receipt.components.values_mut() {
+            entry.detail = None;
+        }
+    }
     receipt.computer_id = request.computer_id.to_owned();
     let mut program_present = seen.observed.program_sha256.is_some();
 
     match &steps.program {
         ProgramStep::Current => {
-            if let Program::Available { sha256 } = &wanted.program {
+            let sha256 = match &wanted.program {
+                Program::Available { sha256 } => Some(sha256.clone()),
+                Program::OverrideActive => seen.observed.program_sha256.clone(),
+                Program::Unavailable { .. } => None,
+            };
+            if let Some(sha256) = sha256 {
                 receipt.components.insert(
                     SILO.id.into(),
                     Entry::new(SILO.version, State::Ok, at).with_sha256(sha256),
                 );
             }
         }
+        ProgramStep::Install if clock.over() => {
+            receipt.components.insert(
+                SILO.id.into(),
+                Entry::new(SILO.version, State::Waiting, at).with_detail(OUT_OF_TIME),
+            );
+        }
         ProgramStep::Install => {
             let payload = match (&request.source, read.as_ref()) {
                 (Source::Override(payload), _) => Ok(*payload),
+                (Source::Kept, _) => {
+                    Err("The program named for development is not in the computer.".to_owned())
+                }
                 (_, Some(payload)) => Ok(payload),
                 (Source::Located(located), None) => {
                     read = located.load().ok();
@@ -367,7 +426,7 @@ pub fn reconcile(guest: &dyn Guest, request: &Request<'_>) -> Result<Receipt, St
                 }
             };
             let result = payload.and_then(|payload| {
-                install_program(guest, payload).map(|()| payload.sha256.clone())
+                install_program(guest, &clock, payload).map(|()| payload.sha256.clone())
             });
             match result {
                 Ok(sha256) => {
@@ -400,10 +459,9 @@ pub fn reconcile(guest: &dyn Guest, request: &Request<'_>) -> Result<Receipt, St
         RegistrationStep::Apply | RegistrationStep::Remove
     );
     let mut helper_error: Option<String> = None;
-    if needs_helper {
+    if needs_helper && !clock.over() {
         let places = places(guest.kind());
-        let wanted_sha = super::artifact::sha256_hex(request.helper_text.as_bytes());
-        if seen.helper_sha256.as_deref() != Some(wanted_sha.as_str()) {
+        if seen.observed.helper_sha256.as_deref() != Some(helper_sha256.as_str()) {
             let who = if guest.kind() == Kind::Macos {
                 Who::Account
             } else {
@@ -411,6 +469,7 @@ pub fn reconcile(guest: &dyn Guest, request: &Request<'_>) -> Result<Receipt, St
             };
             helper_error = put_file(
                 guest,
+                &clock,
                 who,
                 places.helper,
                 places.helper_mode,
@@ -422,6 +481,9 @@ pub fn reconcile(guest: &dyn Guest, request: &Request<'_>) -> Result<Receipt, St
 
     let mcp = match steps.registration {
         RegistrationStep::Nothing => None,
+        RegistrationStep::Apply | RegistrationStep::Remove if clock.over() => {
+            Some(Entry::new(MCP.version, State::Waiting, at).with_detail(OUT_OF_TIME))
+        }
         RegistrationStep::WaitForProgram => {
             Some(Entry::new(MCP.version, State::Waiting, at).with_detail(
                 "Silo's program is not in the computer, so there is nothing to register.",
@@ -441,9 +503,17 @@ pub fn reconcile(guest: &dyn Guest, request: &Request<'_>) -> Result<Receipt, St
                 Some(error) => Err(format!(
                     "the registration helper could not be put in place: {error}"
                 )),
-                None => register(guest, add),
+                None => register(guest, &clock, add),
             };
             Some(match result {
+                Ok(done) if add && !done.conflicts.is_empty() => {
+                    Entry::new(MCP.version, State::Failed, at).with_detail(format!(
+                        "{} already has a tool of its own called {}; Silo left it as it is and did \
+                         not add its own.",
+                        agent_words(&done.conflicts),
+                        super::MCP_SERVER_NAME
+                    ))
+                }
                 Ok(done) if !done.failed.is_empty() => Entry::new(MCP.version, State::Failed, at)
                     .with_detail(format!(
                         "Silo's tools could not be {} {}.",
@@ -492,6 +562,10 @@ pub fn reconcile(guest: &dyn Guest, request: &Request<'_>) -> Result<Receipt, St
         .all(|id| COMPONENTS.iter().any(|c| c.id == id)));
 
     // Written last, so it records this run; a computer that cannot take it is still reconciled.
+    // A receipt that differs only in when each step ran is not written again.
+    if receipt.same_apart_from_times(&seen.observed.receipt) || clock.over() {
+        return Ok(receipt);
+    }
     let places = places(guest.kind());
     let who = if guest.kind() == Kind::Macos {
         Who::Account
@@ -500,6 +574,7 @@ pub fn reconcile(guest: &dyn Guest, request: &Request<'_>) -> Result<Receipt, St
     };
     if let Err(error) = put_file(
         guest,
+        &clock,
         who,
         places.receipt,
         "644",

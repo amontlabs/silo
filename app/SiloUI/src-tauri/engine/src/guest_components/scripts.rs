@@ -57,10 +57,11 @@ got=$(hash \"$tmp/program\")\n\
 if [ \"$got\" != \"$want\" ]; then echo 'The program that arrived does not match its checksum; nothing was replaced.' >&2; exit 1; fi\n\
 if [ -d \"$dest\" ] && [ ! -L \"$dest\" ]; then echo \"$dest is a folder; nothing was replaced.\" >&2; exit 1; fi\n\
 dir=$(dirname \"$dest\"); mkdir -p \"$dir\"\n\
-staged=\"$dir/.silo-install.$$\"\n\
+staged=$(mktemp \"$dir/.silo-install.XXXXXX\")\n\
 cp \"$tmp/program\" \"$staged\"\n\
 if [ -n \"$owner\" ]; then chown \"$owner\" \"$staged\"; fi\n\
 chmod 0755 \"$staged\"\n\
+[ -L \"$dest\" ] && rm -f \"$dest\"\n\
 mv -f \"$staged\" \"$dest\"\n\
 staged=\n";
 
@@ -68,26 +69,30 @@ staged=\n";
 pub fn write_file(place: Place) -> String {
     format!(
         "set -eu\numask 022\npath={}; dir=$(dirname \"$path\"); mkdir -p \"$dir\"\n\
-         tmp=\"$path.new.$$\"; trap 'rm -f \"$tmp\"' EXIT\n\
-         cat > \"$tmp\"; chmod \"$1\" \"$tmp\"; mv -f \"$tmp\" \"$path\"\n",
+         tmp=$(mktemp \"$dir/.silo-write.XXXXXX\"); trap 'rm -f \"$tmp\"' EXIT\n\
+         cat > \"$tmp\"; chmod \"$1\" \"$tmp\"\n\
+         [ -L \"$path\" ] && rm -f \"$path\"\n\
+         mv -f \"$tmp\" \"$path\"\n",
         place.0
     )
 }
 
 /// The command that registers (`server-add`) or removes (`server-remove`) Silo's MCP server with
-/// the agents. Linux runs the helper as root; macOS runs the register script as the working
+/// the agents; an agent's own server of that name is left alone and reported. Linux runs the helper as root; macOS runs the register script as the working
 /// account.
 pub fn registration(macos: bool, add: bool) -> Vec<String> {
     let verb = if add { "server-add" } else { "server-remove" };
-    let mut tail = vec![verb.to_owned(), "--name".into(), MCP_SERVER_NAME.into()];
-    if add {
-        tail.extend([
-            "--command".into(),
-            PROGRAM_PATH.into(),
-            "--arg".into(),
-            "mcp".into(),
-        ]);
-    }
+    // Removal names the command too, so an entry an earlier Silo wrote without its mark is
+    // recognised as Silo's.
+    let tail = vec![
+        verb.to_owned(),
+        "--name".into(),
+        MCP_SERVER_NAME.into(),
+        "--command".into(),
+        PROGRAM_PATH.into(),
+        "--arg".into(),
+        "mcp".into(),
+    ];
     let mut argv: Vec<String> = if macos {
         vec![
             "sh".into(),
@@ -266,6 +271,39 @@ mod tests {
             std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
             1
         );
+
+        // A symlink at path is unlinked and replaced, never followed
+        let victim = dir.path().join("victim.txt");
+        std::fs::write(&victim, b"untouched").unwrap();
+        let symlink_path = dir.path().join("var/lib/silo/link.json");
+        std::os::unix::fs::symlink(&victim, &symlink_path).unwrap();
+        let link_script = write_file(Place(Box::leak(
+            format!("'{}'", symlink_path.display()).into_boxed_str(),
+        )));
+        let third = run_script(&link_script, &["644"], b"new content");
+        assert!(third.status.success());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"untouched");
+        assert_eq!(std::fs::read(&symlink_path).unwrap(), b"new content");
+        assert!(!std::fs::symlink_metadata(&symlink_path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        // A link to a folder is replaced too; nothing lands inside the folder it names.
+        let folder = dir.path().join("elsewhere");
+        std::fs::create_dir(&folder).unwrap();
+        let folder_link = dir.path().join("var/lib/silo/folder.json");
+        std::os::unix::fs::symlink(&folder, &folder_link).unwrap();
+        let fourth = run_script(
+            &write_file(Place(Box::leak(
+                format!("'{}'", folder_link.display()).into_boxed_str(),
+            ))),
+            &["644"],
+            b"data",
+        );
+        assert!(fourth.status.success());
+        assert_eq!(std::fs::read(&folder_link).unwrap(), b"data");
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
     }
 
     #[test]
@@ -324,7 +362,16 @@ mod tests {
         );
         assert_eq!(
             registration(false, false),
-            vec![LINUX_HELPER, "server-remove", "--name", "silo"]
+            vec![
+                LINUX_HELPER,
+                "server-remove",
+                "--name",
+                "silo",
+                "--command",
+                "/usr/local/bin/silo",
+                "--arg",
+                "mcp"
+            ]
         );
         let mac = registration(true, true);
         assert_eq!(&mac[..2], ["sh", "-c"]);
