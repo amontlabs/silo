@@ -494,8 +494,18 @@ export const networkPolicyStateSchema = z.object({
 })
 export type NetworkPolicyState = z.infer<typeof networkPolicyStateSchema>
 
+/** How one piece Silo keeps in a computer fared at its last check. */
+export const guestComponentStates = ["ok", "failed", "unavailable", "waiting", "removed"] as const
+export type GuestComponentState = (typeof guestComponentStates)[number]
+export const guestComponentSchema = z.object({
+  id: z.string(), state: tolerantEnum(guestComponentStates, "failed"), detail: optionalText,
+})
+export type GuestComponent = z.infer<typeof guestComponentSchema>
+
 /** The port, address and token of the channel are not read: the page says only whether the tools are on. */
 export const computerToolsSchema = z.object({
   computerId: z.string(), enabled: z.boolean(), network: networkTimingShape.optional(),
+  restartNeeded: z.boolean().catch(false),
+  components: tolerantArray(guestComponentSchema).catch([]),
 })
 export type ComputerTools = z.infer<typeof computerToolsSchema>
