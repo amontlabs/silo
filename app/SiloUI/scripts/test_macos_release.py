@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
         self.sign_helper({'cdhash': self.digest})
         self.sign_gateway_helper({'cdhash': self.digest})
         resources = self.app / 'Contents/Resources'
-        for directory in ('microsandbox', 'git-support'):
+        for directory in ('microsandbox', 'git-support', 'guest-support'):
             (resources / directory).mkdir(parents=True)
             (resources / directory / 'manifest.json').write_text('{}')
         (resources / 'THIRD-PARTY-NOTICES.md').write_text('notices')

@@ -110,6 +110,28 @@ runs:
       env:
         RUNTIME_ARCHIVE_SHA256: ${{ inputs.artifact-sha256 }}
       run: python3 app/SiloUI/scripts/release-runtime-cache.py unpack --archive "$RUNNER_TEMP/shared-runtime/runtime-cache.tar.gz" --sha256 "$RUNTIME_ARCHIVE_SHA256"
+    # The Linux `silo` that Silo installs in its Linux computers is built with Zig as its C
+    # compiler (scripts/guest-silo-runtime.mjs; ZIG_VERSION there is this version). The download
+    # is pinned to the release digest listed in https://ziglang.org/download/index.json.
+    - name: Install Zig for the Linux program of Silo's tools
+      if: inputs.lookup-only != 'true'
+      shell: bash
+      env:
+        ZIG_VERSION: 0.15.2
+        RUNTIME_TARGET: ${{ inputs.target }}
+      run: |
+        case "$RUNTIME_TARGET" in
+          aarch64-apple-darwin) ZIG_ASSET=aarch64-macos; ZIG_SHA256=3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b ;;
+          x86_64-unknown-linux-gnu) ZIG_ASSET=x86_64-linux; ZIG_SHA256=02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239 ;;
+          aarch64-unknown-linux-gnu) ZIG_ASSET=aarch64-linux; ZIG_SHA256=958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f ;;
+          *) echo "No pinned Zig for $RUNTIME_TARGET" >&2; exit 1 ;;
+        esac
+        curl -fsSL --retry 3 -o "$RUNNER_TEMP/zig.tar.xz" "https://ziglang.org/download/$ZIG_VERSION/zig-$ZIG_ASSET-$ZIG_VERSION.tar.xz"
+        echo "$ZIG_SHA256  $RUNNER_TEMP/zig.tar.xz" | shasum -a 256 --check --strict -
+        mkdir -p "$RUNNER_TEMP/zig"
+        tar -xJf "$RUNNER_TEMP/zig.tar.xz" --strip-components=1 -C "$RUNNER_TEMP/zig"
+        echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/zig/zig" version
     # Always verify and re-stage cached inputs, and regenerate release-info.json.
     - name: Prepare native resources
       if: inputs.lookup-only != 'true'
@@ -117,6 +139,7 @@ runs:
       working-directory: app/SiloUI
       env:
         GOTOOLCHAIN: local
+        SILO_REQUIRE_GUEST_SILO: '1'
       run: python3 scripts/measure-command.py runtime-prepare -- npm run runtime:prepare
     - name: Warm application dependency downloads
       if: inputs.lookup-only != 'true' && inputs.save == 'true' && github.ref == 'refs/heads/main'

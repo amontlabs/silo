@@ -78,6 +78,7 @@ LINUX_RESOURCE_TREES = (
     ('git/share', 'git-support/share'),
     ('git/ssl', 'git-support/ssl'),
     ('lfs-transfer', 'git-support/lfs-transfer'),
+    ('guest-silo', 'guest-support/silo'),
 )
 GUEST_ARCHITECTURES = {'x86_64-unknown-linux-gnu': 'amd64', 'aarch64-unknown-linux-gnu': 'arm64'}
 
@@ -214,9 +215,18 @@ def linux_runtime_files(target, tauri=TAURI):
     microsandbox = read_json(runtime / 'microsandbox/manifest.json', 'The MicroSandbox runtime manifest')
     git = read_json(runtime / 'git/manifest.json', 'The bundled Git manifest')
     transfer = read_json(runtime / 'lfs-transfer/manifest.json', 'The Git LFS transfer manifest')
+    guest_silo = read_json(runtime / 'guest-silo/manifest.json', "The Linux program of Silo's tools")
+    if not guest_silo.get('available'):
+        raise RuntimeError("The staged runtime has no Linux program for Silo's tools: "
+                           f"{guest_silo.get('reason', 'it was not built')} A release needs Zig; run `npm run runtime:prepare` "
+                           'with SILO_REQUIRE_GUEST_SILO=1.')
+    guest_binary = runtime / 'guest-silo/silo'
+    if not guest_binary.is_file() or sha256_of(guest_binary) != guest_silo.get('binarySha256'):
+        raise RuntimeError(f"{guest_binary} does not match the guest silo manifest. Run `npm run runtime:prepare` again.")
     for label, found, wanted in (('MicroSandbox runtime', microsandbox.get('targetTriple'), target),
                                  ('bundled Git', git.get('targetTriple'), target),
-                                 ('Git LFS transfer server', transfer.get('architecture'), GUEST_ARCHITECTURES[target])):
+                                 ('Git LFS transfer server', transfer.get('architecture'), GUEST_ARCHITECTURES[target]),
+                                 ("Linux program of Silo's tools", guest_silo.get('architecture'), GUEST_ARCHITECTURES[target])):
         if found != wanted:
             raise RuntimeError(f'The staged {label} is for {found}, not {wanted}; prepare the runtime on this architecture.')
     files = {}
@@ -239,6 +249,7 @@ def linux_runtime_files(target, tauri=TAURI):
     # Every Linux Git build verifies HTTPS against the bundled bundle (git-runtime.mjs,
     # needsCertificateBundle; host_push reads git-support/ssl/cacert.pem).
     for required in ('resources/git-support/share/git-core/templates', 'resources/git-support/lfs-transfer/git-lfs-transfer',
+                     'resources/guest-support/silo/silo', 'resources/guest-support/silo/manifest.json',
                      'resources/git-support/ssl/cacert.pem',
                      'resources/microsandbox/licenses', 'resources/git-support/licenses'):
         if not any(name == required or name.startswith(f'{required}/') for name in files):
@@ -280,7 +291,8 @@ def package_linux(out_dir, *, platform, commit, silod_binary, cli_binary, runner
         if not source.is_file():
             raise RuntimeError(f'{source} is missing. Build silo-container-shim for the platform.')
         files[helper] = (source, 0o755)
-    for executable in ('silod', 'silo', 'silo-runner', *CONTAINER_HELPERS, *LINUX_ENGINE_TOOLS, 'resources/git-support/lfs-transfer/git-lfs-transfer'):
+    for executable in ('silod', 'silo', 'silo-runner', *CONTAINER_HELPERS, *LINUX_ENGINE_TOOLS, 'resources/git-support/lfs-transfer/git-lfs-transfer',
+                       'resources/guest-support/silo/silo'):
         found = elf_machine(files[executable][0])
         if found != machine:
             raise RuntimeError(f'{executable} is not a {platform} executable (ELF machine {found}, wanted {machine}).')
