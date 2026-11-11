@@ -81,3 +81,49 @@ binaries/msb-aarch64-apple-darwin --version   -> msb 0.7.14
  Private homes (~/.m14, ~/.m14b, /tmp/m14*, /tmp/m14t, /tmp/m14u, /tmp/m14p) and the two guest-image symlinks deleted; two orphaned
  e2e VMs from a failed intermediate run were stopped by PID (SIGTERM, command line checked). Dev guest image untouched.
  Heavy: runtime:prepare 8m50s CPU; step 2 ~6 min with 1-GiB VMs one at a time; step 3 about 10 s per run.
+
+
+==================== SECOND RUN, 2026-11-11, branch feat/msb-0.7.15 (94f5d41bc + live test changes) ====================
+Same rules: private homes (~/.m14, /tmp/m14, /tmp/m14t; deleted afterwards), e2e-* computers, guest image = Dev image
+read-only via symlinks (src-tauri/runtime/guest-image and engine/runtime/guest-image, removed). Logs (untracked):
+app/SiloUI/src-tauri/target/verification/msb-0714-live/run2, run2b, run2c.
+
+== Step 1: runtime:prepare   PASS  msb 0.7.14; --silo-storage-repair-protocol, --silo-restore-strict-protocol,
+   --silo-runtime-instance-protocol, --silo-secret-values-protocol all print 1.
+
+== Steps 2-3: engine live tests
+ PASS  live_checkpoint_restore_and_fork_use_the_runtimes_names
+ PASS  live_start_sets_up_the_silo_account_of_new_and_older_computers
+ PASS  lifecycle_recovery_survives_real_worker_exit_without_repeating_restart
+ PASS  live_export_accepts_each_network_policy                      (was FAIL: http settings)
+ PASS  real_checkpoint_export_imports_and_cold_boots_checkpoint_time_disk   (was FAIL)
+ PASS  live_secret_adapter_uses_refs_and_preserves_boot_for_live_updates   (first pass failed on setup only: it reads the image
+       from engine/runtime/guest-image, a second link; passes in run2b)
+ PASS  real_backup_restore_preserves_root_and_computer_without_original_cache   (was FAIL: http settings)
+       Test bug found on the way and fixed: the cache check hashed cache/vmdk entries and failed with "Is a directory"
+       (backup_controller.rs:6941); it now hashes files recursively. Same intent, run2b.
+ PASS  live_network_policy_modes_restore_and_fork (run2c): open, allowlist after the change, closed, open again, fork of an
+       allowlist computer, restore in place. Test updated per OWNER_REVIEW 27 (probe + nothing_reaches_unlisted_ip):
+       allowlist/closed/fork/restore all show, for an unlisted public IP:
+         plain HTTP GET http://1.1.1.1/  -> 403, body {"code":"network_policy_denied","domain":"1.1.1.1","message":"Request blocked by network policy."}
+         (open mode: 301 from Cloudflare, so the 403 is the gateway's, not the address's)
+         TCP 1.1.1.1:853 + payload      -> connect completes, nothing comes back (timeout)
+         TCP 8.8.8.8:53 + DNS query     -> connect completes, reply is the gateway's own rcode=3 answers=0 (open mode: rcode=0 answers=2)
+         1.1.1.1:443 connect            -> completes (accepted by the test)
+   DEVIATION from OWNER_REVIEW 27 ("other ports are still refused"): on 0.7.14 the TCP connect to an unlisted IP completes on
+   non-HTTP ports too (853, 53). No data reaches the address (silent / gateway-answered DNS), but the connection is not refused.
+   The first version of the test asserted "failed" and tripped on exactly this (run2/live-network.log, run2b); the test now
+   asserts "no data from the address". OWNER_REVIEW 27 wording should change.
+ Resolver check: another resolver over UDP (1.1.1.1) rcode=3 answers=0 in allowlist/closed, as before.
+
+== Step 4: live_old_home_moves_to_protected_storage   PASS (step4-run.log, 8.3 s)
+ Home built by the 0.7.6 runtime (script updated): e2e-mig-main with disk checkpoint + FULL checkpoint taken while running, a
+ FORK of that same running computer (e2e-mig-mfork), e2e-mig-run left RUNNING at launch with its own fork, disk restore, late, bad.
+ One launch (scripted engine step, no relaunch, no FINDING line): stages Stopping computers -> Checking 1..5 -> Backing up ->
+ Upgrading 1..5 -> Migration complete; main, fork, disk, run, mfork all Repaired. Report complete.
+ Data intact on every computer (incl. mfork a/b/m, c absent), 0.7.6 checkpoints restore (cold disk, full with memory, full --disk-only),
+ second launch holds nothing and leaves the report byte-identical, arrival of e2e-mig-late flagged, e2e-mig-bad still refused with
+ files kept. F1 (relaunch needed) and F2 (full checkpoint + fork recovery_required) are both fixed.
+
+== Skipped: GitHub live tests, Keychain-approval secrets, computer-use/v4 desktop tests, storage reclaim, macOS-computer probes (as in run 1).
+== Cleanup: /tmp/m14, /tmp/m14t, ~/.m14 and both guest-image symlinks removed; no leftover processes.
