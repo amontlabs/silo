@@ -232,11 +232,40 @@ fn locate(previous: &Path, selected: &Path) -> Backup {
     }
 }
 
+/// The clone of the storage folder taken before computers were moved to protected storage
+/// (`runtime_migration::PROTECTED_STORAGE_BACKUP`). Unlike the previous generation it can exist
+/// without it, and is never in use: only a real folder counts, a link is left alone.
+fn protected_storage_backup(app_data: &Path) -> Option<PathBuf> {
+    let folder = app_data.join(runtime_migration::PROTECTED_STORAGE_BACKUP);
+    fs::symlink_metadata(&folder)
+        .ok()
+        .filter(|metadata| metadata.is_dir())
+        .map(|_| folder)
+}
+
 fn inspect(app_data: &Path) -> Backup {
-    match runtime_migration::backup_locations(app_data) {
+    let previous = match runtime_migration::backup_locations(app_data) {
         Some(at) => locate(&at.previous, &at.selected),
         None => Backup::NotABackup,
+    };
+    match (previous, protected_storage_backup(app_data)) {
+        (Backup::Gone | Backup::NotABackup, Some(folder)) => Backup::Present(folder),
+        (previous, _) => previous,
     }
+}
+
+/// Every folder the backup consists of, given the one `inspect` found.
+fn backup_folders(app_data: &Path, found: PathBuf) -> Vec<PathBuf> {
+    let mut folders = vec![found];
+    folders.extend(protected_storage_backup(app_data).filter(|extra| *extra != folders[0]));
+    folders
+}
+
+/// Starts the 14 days again. A new clone is a new backup: it must not be deleted on the window
+/// of an older one.
+pub(crate) fn restart_window(app_data: &Path) {
+    let _held = lock(&RECORD);
+    forget(app_data);
 }
 
 /// The start of the window for a backup that is present, recording it now when this is the
@@ -356,9 +385,11 @@ fn allocated_bytes(root: &Path) -> io::Result<u64> {
 
 fn measure(app_data: &Path) -> Result<Option<u64>, String> {
     match inspect(app_data) {
-        Backup::Present(previous) => allocated_bytes(&previous)
+        Backup::Present(found) => backup_folders(app_data, found)
+            .iter()
+            .try_fold(0, |total, folder| Ok(total + allocated_bytes(folder)?))
             .map(Some)
-            .map_err(|_| "Silo could not measure the pre-upgrade backup.".into()),
+            .map_err(|_: io::Error| "Silo could not measure the pre-upgrade backup.".into()),
         _ => Ok(None),
     }
 }
@@ -428,8 +459,8 @@ fn tidy_alias_of_deleted_backup(app_data: &Path, user_home: Option<&Path>) {
 /// was already gone.
 fn delete_backup(app_data: &Path, user_home: Option<&Path>) -> Result<bool, String> {
     let _deletion = lock(&DELETION);
-    let previous = match inspect(app_data) {
-        Backup::Present(previous) => previous,
+    let found = match inspect(app_data) {
+        Backup::Present(found) => found,
         Backup::Gone => {
             remove_previous_alias(app_data, user_home);
             forget(app_data);
@@ -438,12 +469,19 @@ fn delete_backup(app_data: &Path, user_home: Option<&Path>) -> Result<bool, Stri
         Backup::NotABackup => return Err(NOT_A_BACKUP.into()),
         Backup::Refused(reason) => return Err(reason.into()),
     };
-    ensure_converted_runtime_is_independent(app_data, &previous)?;
+    // The clone is deleted first: the previous generation's checks and alias come after the
+    // part that cannot make a converted computer depend on it.
+    let folders = backup_folders(app_data, found);
+    if folders.contains(&app_data.join("runtime")) {
+        ensure_converted_runtime_is_independent(app_data, &app_data.join("runtime"))?;
+    }
     // `remove_dir_all` unlinks symlinks instead of following them. A failure part-way keeps
     // the rest, the record and the row, so the user can retry.
-    fs::remove_dir_all(&previous).map_err(|error| {
-        format!("Silo could not finish deleting the pre-upgrade backup: {error}. Your computers were not affected. Try again.")
-    })?;
+    for folder in folders.iter().rev() {
+        fs::remove_dir_all(folder).map_err(|error| {
+            format!("Silo could not finish deleting the pre-upgrade backup: {error}. Your computers were not affected. Try again.")
+        })?;
+    }
     let _ = fs::File::open(app_data).and_then(|directory| directory.sync_all());
     remove_previous_alias(app_data, user_home);
     let _held = lock(&RECORD);

@@ -807,6 +807,9 @@ struct ApplicationComputer {
     /// Silo's own records (checkpoints, failures, secrets) stay current. Omitted when false.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     settling: bool,
+    /// Its storage could not be moved to the protected layout; it cannot start. Omitted when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    needs_storage_upgrade: bool,
     repositories: Vec<Value>,
     files: Vec<Value>,
     ports: Vec<Value>,
@@ -3229,6 +3232,22 @@ enum Repositories {
 /// Add what the runtime read does not carry: push operations, each fresh running computer's
 /// repositories, and GitHub state. A settling or stale row keeps the repositories of its
 /// last known reading instead of scanning a guest that is changing or unreadable.
+/// A computer whose storage could not be moved to the protected layout cannot start; its row
+/// says so, replacing any lesser notice.
+fn flag_unmoved_storage(computers: &mut [ApplicationComputer]) {
+    for computer in computers {
+        if let Some(message) = crate::runtime_migration::protected_storage_attention(
+            computer.configuration.name(),
+        ) {
+            computer.needs_storage_upgrade = true;
+            computer.attention = Some(ComputerAttention {
+                level: AttentionLevel::Error,
+                message: format!("Needs attention: {message}"),
+            });
+        }
+    }
+}
+
 fn enrich_application_state(
     host: &dyn RuntimeHost,
     paths: &RuntimePaths,
@@ -3237,6 +3256,7 @@ fn enrich_application_state(
 ) {
     source.repository_push_operations =
         host.repository_push_operations(crate::host_push::operations());
+    flag_unmoved_storage(&mut source.computers);
     match repositories {
         Repositories::LastKnown => keep_last_known_repositories(paths, &mut source.computers),
         Repositories::Discover { refresh } => {
@@ -5591,6 +5611,7 @@ fn unread_computer(configuration: ComputerConfiguration) -> ApplicationComputer 
         attention: None,
         freshness: Freshness::Fresh,
         settling: false,
+        needs_storage_upgrade: false,
         repositories: Vec::new(),
         files: Vec::new(),
         ports: Vec::new(),
@@ -6059,6 +6080,7 @@ fn application_computer(
         attention,
         freshness: Freshness::Fresh,
         settling: false,
+        needs_storage_upgrade: false,
         repositories: Vec::new(),
         files: Vec::new(),
         ports: Vec::new(),
@@ -6316,6 +6338,11 @@ fn computer_action_with(
                     configuration.name(),
                 )));
             }
+        }
+    }
+    if matches!(action, "start" | "restart") {
+        if let Some(message) = crate::runtime_migration::protected_storage_attention(name) {
+            return Err(RuntimeError::Invalid(message));
         }
     }
     if action == "dismiss-error" {

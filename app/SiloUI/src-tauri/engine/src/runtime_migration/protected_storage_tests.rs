@@ -34,6 +34,8 @@ fn computer(status: &'static str, running: bool) -> Fake {
 struct Runtime {
     computers: RefCell<HashMap<String, Fake>>,
     calls: RefCell<Vec<String>>,
+    /// What `--silo-storage-repair-protocol` prints; `None` fails as an unknown option.
+    probe: Option<&'static str>,
 }
 
 impl Runtime {
@@ -46,7 +48,13 @@ impl Runtime {
                     .collect(),
             ),
             calls: RefCell::default(),
+            probe: Some("1\n"),
         }
+    }
+
+    fn without_repair_protocol(mut self, probe: Option<&'static str>) -> Self {
+        self.probe = probe;
+        self
     }
 
     fn calls(&self) -> Vec<String> {
@@ -80,6 +88,10 @@ impl runtime::RuntimeRunner for Runtime {
         };
         let mut computers = self.computers.borrow_mut();
         match args[0].as_str() {
+            "--silo-storage-repair-protocol" => self
+                .probe
+                .map(|text| output(text.into()))
+                .ok_or_else(|| failed(2)),
             "doctor" => {
                 let fake = &computers[&args[2]];
                 let report = serde_json::json!({"sandboxes":[{"name":args[2],"status":fake.status,"running":fake.running}]})
@@ -325,4 +337,31 @@ fn the_report_round_trips_and_a_damaged_one_is_not_replaced() {
     assert_eq!(read_report(directory.path()).unwrap(), Some(report));
     fs::write(directory.path().join(MARKER), b"{").unwrap();
     assert!(read_report(directory.path()).is_err());
+}
+
+#[test]
+fn a_runtime_without_the_repair_protocol_moves_nothing_and_takes_no_backup() {
+    for probe in [None, Some("0\n"), Some("2\n")] {
+        let fake = Runtime::new(&[
+            ("a", computer("maintenance_required", false)),
+            ("ok", computer("ready", false)),
+        ])
+        .without_repair_protocol(probe);
+        let report = run(&fake, &["a", "ok"], true, Ok(())).unwrap();
+        assert!(matches!(outcome(&report, "a"), Outcome::NeedsAttention(_)));
+        assert_eq!(outcome(&report, "ok"), &Outcome::AlreadyReady);
+        let calls = fake.calls();
+        assert!(!calls.iter().any(|call| call.starts_with("self repair")));
+        assert!(!calls.contains(&"<backup>".to_string()));
+    }
+}
+
+#[test]
+fn the_repair_protocol_is_not_probed_when_nothing_needs_repair() {
+    let fake = Runtime::new(&[("ok", computer("ready", false))]);
+    run(&fake, &["ok"], true, Ok(())).unwrap();
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.starts_with("--silo-")));
 }

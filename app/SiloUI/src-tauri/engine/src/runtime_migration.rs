@@ -186,10 +186,104 @@ impl Controller {
     }
 
     pub fn snapshot(&self) -> Result<MigrationState, String> {
-        self.state
+        let mut state = self
+            .state
             .lock()
             .map(|state| state.clone())
-            .map_err(|_| "Migration state is unavailable.".to_string())
+            .map_err(|_| "Migration state is unavailable.".to_string())?;
+        // While computers are being moved to protected storage nothing else may use them, so
+        // every gate that asks sees a running migration.
+        if let Some(stage) = protected_storage::running_stage(&self.app_data) {
+            state.status = "running".into();
+            state.stage = stage;
+            state.can_continue = false;
+            state.error = None;
+        }
+        Ok(state)
+    }
+
+    /// Closes the computers of a finished migration until [`Self::run_protected_storage`] has
+    /// moved them to protected storage. Call at engine start, before anything uses them.
+    /// False when there is nothing to move, or a conversion that has not finished holds them
+    /// back already.
+    pub fn hold_for_protected_storage(&self) -> bool {
+        let settled = self.writable
+            && self
+                .state
+                .lock()
+                .is_ok_and(|state| matches!(state.status.as_str(), "complete" | "not-required"));
+        let pending = settled
+            && selected_runtime_storage(&self.app_data).is_ok_and(|storage| {
+                protected_storage::pending(&storage)
+                    && runtime::read_metadata(&storage.join("computers.json"))
+                        .is_ok_and(|inventory| !protected_computers(&inventory).is_empty())
+            });
+        if pending {
+            protected_storage::hold(&self.app_data, "Checking computer storage");
+        }
+        pending
+    }
+
+    /// Opens the computers again if [`Self::hold_for_protected_storage`] held them.
+    pub fn release_protected_storage(&self) {
+        protected_storage::release(&self.app_data);
+    }
+
+    /// Moves the computers created before protected storage to it (see
+    /// `docs/direction/MSB-0.7.15-MIGRATION.md`), if [`Self::hold_for_protected_storage`] held
+    /// them. Always opens the computers again when it ends; computers that could not be moved
+    /// stay unusable with their reason. `changed` is called after every step.
+    pub fn run_protected_storage(
+        &self,
+        runner: &dyn runtime::RuntimeRunner,
+        paths: &runtime::RuntimePaths,
+        changed: &dyn Fn(),
+    ) -> Result<(), String> {
+        if protected_storage::running_stage(&self.app_data).is_none() {
+            return Ok(());
+        }
+        let held = protected_storage::Held(&self.app_data);
+        let result = self.move_to_protected_storage(runner, paths, changed);
+        drop(held);
+        changed();
+        result
+    }
+
+    fn move_to_protected_storage(
+        &self,
+        runner: &dyn runtime::RuntimeRunner,
+        paths: &runtime::RuntimePaths,
+        changed: &dyn Fn(),
+    ) -> Result<(), String> {
+        let storage = selected_runtime_storage(&self.app_data)?;
+        let names = protected_computers(
+            &runtime::read_metadata(&storage.join("computers.json"))
+                .map_err(|_| "Silo's saved computer configuration is invalid.".to_string())?,
+        );
+        let backup = || protected_storage::clone_backup(&self.app_data, &storage);
+        let progress = |step: protected_storage::Step| {
+            protected_storage::hold(&self.app_data, &protected_storage::stage_text(&step));
+            changed();
+        };
+        let options = protected_storage::Options {
+            confirm_maintenance: cfg!(target_os = "macos"),
+            backup: &backup,
+            progress: &progress,
+        };
+        match protected_storage::upgrade(runner, paths, &names, &options) {
+            Ok(report) => {
+                protected_storage::set_attention(protected_storage::attention_of(&report));
+                protected_storage::write_report(&storage, &report)
+            }
+            Err(message) => {
+                let message =
+                    format!("{message} Its files were kept untouched. Relaunch Silo to try again.");
+                protected_storage::set_attention(
+                    names.into_iter().map(|name| (name, message.clone())).collect(),
+                );
+                Err(message)
+            }
+        }
     }
 
     pub fn ensure_ready(&self) -> Result<(), String> {
@@ -362,6 +456,23 @@ fn read(path: &Path) -> Result<Option<MigrationState>, String> {
     }
     Ok(Some(state))
 }
+
+/// The VM computers of an inventory, by runtime name: the ones a protected-storage move applies to.
+fn protected_computers(inventory: &runtime::ComputerConfigurationRequest) -> Vec<String> {
+    inventory
+        .computers
+        .iter()
+        .filter(|computer| !computer.is_container())
+        .map(|computer| computer.name().to_owned())
+        .collect()
+}
+
+/// The clone of the storage folder taken before computers are moved to protected storage, in the
+/// app data folder. `pre_upgrade_backup` retains and deletes it with the previous generation.
+pub(crate) use protected_storage::BACKUP as PROTECTED_STORAGE_BACKUP;
+
+/// Why this computer cannot be used until a later launch finishes moving its storage.
+pub use protected_storage::attention_message as protected_storage_attention;
 
 /// The inventory in `folder`, the previous generation's, in whichever vocabulary it was
 /// saved. An empty one when `folder` has none.
@@ -1019,13 +1130,7 @@ fn usable_storage(app_data: &Path, writable: bool, status: &str) -> Result<PathB
 /// is the likely cause of the failed copy), so Retry and Continue stay
 /// available for this session. The persistence error is returned.
 pub async fn migration_snapshot(controller: Arc<Controller>) -> Result<MigrationState, String> {
-    tokio::task::spawn_blocking(move || {
-        controller
-            .state
-            .lock()
-            .map(|state| state.clone())
-            .map_err(|_| "Migration state is unavailable.".to_string())
-    })
+    tokio::task::spawn_blocking(move || controller.snapshot())
     .await
     .map_err(|_| "Migration state is unavailable.".to_string())?
 }
