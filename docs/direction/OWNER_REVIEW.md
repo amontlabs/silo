@@ -110,4 +110,7 @@ was chosen and why; any can be changed. Older items are also in the build log un
     connection to an unlisted address on port 80 or 443 now completes, and the gateway answers
     it with a 403 itself; nothing is sent to that address. Silo keeps upstream's behaviour rather
     than carrying a patch to turn it off (branch `silo/0714-fix-net` has that patch if wanted).
-    Other ports are still refused. The live network test checks that no data reaches the address.
+    The live check found other ports behave the same way: a connection to an unlisted address
+    completes but gets nothing back (DNS over TCP gets the gateway's own "no such name"), so a
+    program sees a silent connection or a timeout rather than an immediate refusal. The live
+    network test checks that no data comes back from the unlisted address.

@@ -113,3 +113,10 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   v0.7.14 (`root_name` rejects a fork's `layer_<id>.qcow2`), fixed by the new patch
   `fork-layer-names` (23 patches). Upstream issue draft:
   `~/code/projects/msb-upstream/fork-checkpoint-repair-issue.md` (not filed). Live re-run started.
+- 2026-11-11: live re-run ([evidence](evidence/MSB-0.7.14.txt), second run): all 8 engine live
+  tests pass, network modes run to completion (unlisted addresses get Silo's JSON 403 on HTTP and
+  no data elsewhere), the three export tests pass, and a 0.7.6 home with a running computer and a
+  full checkpoint plus a fork of the same computer moves to protected storage in one launch.
+  Skipped: GitHub live tests, Keychain-approval secrets, computer-use/desktop, storage reclaim,
+  macOS computers. Not done: the GUI on the Dev build (the storage upgrade is one-way and the
+  shared Dev home still serves the direction build on 0.7.6), a Codex review.
