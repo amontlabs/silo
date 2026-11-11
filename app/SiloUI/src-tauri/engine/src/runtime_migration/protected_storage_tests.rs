@@ -494,3 +494,14 @@ fn containers_are_not_part_of_the_move() {
     ]})).unwrap();
     assert_eq!(protected_computers(&inventory), ["vm"]);
 }
+
+#[test]
+fn a_blocked_repair_reads_its_diagnosis_from_stdout() {
+    assert!(blocked_message_for_test(&blocked_detail("recovery_required")).contains("manual decision"));
+    assert!(blocked_message_for_test(&blocked_detail("running")).contains("stopping"));
+    assert!(blocked_message_for_test("not json").contains("refused"));
+}
+
+fn blocked_detail(status: &str) -> String {
+    format!(r#"{{"sandbox":{{"status":"{status}"}},"next_step":"x"}}"#)
+}

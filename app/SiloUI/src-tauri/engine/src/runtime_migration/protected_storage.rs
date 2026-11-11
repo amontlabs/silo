@@ -85,6 +85,7 @@ pub(super) struct Options<'a> {
     pub progress: &'a dyn Fn(Step),
 }
 
+const RECOVERY: &str = "This computer's disks need a manual decision that Silo cannot make for you. Its files were kept untouched. Report this problem before using the computer.";
 const UNSUPPORTED: &str = "This version of Silo cannot move this computer to the new storage. Its files were kept untouched. Update Silo, then relaunch it.";
 
 fn repair_supported(runner: &dyn runtime::RuntimeRunner, paths: &runtime::RuntimePaths) -> bool {
@@ -132,9 +133,7 @@ fn diagnose(
         Some("eligible" | "maintenance_required" | "in_progress") => {
             Diagnosis::Repairable { running }
         }
-        Some("recovery_required") => Diagnosis::Blocked(
-            "This computer's disks need a manual decision that Silo cannot make for you. Its files were kept untouched. Report this problem before using the computer.".into(),
-        ),
+        Some("recovery_required") => Diagnosis::Blocked(RECOVERY.into()),
         _ => Diagnosis::Blocked(
             "Silo could not establish the state of this computer's disks. Its files were kept untouched. Relaunch Silo to try again.".into(),
         ),
@@ -153,6 +152,27 @@ fn stop(
         .map_err(|_| "Silo could not stop this computer for the storage upgrade.".to_string())
 }
 
+fn blocked_message(detail: &str) -> String {
+    let status = serde_json::from_str::<serde_json::Value>(detail)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/sandbox/status")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        });
+    match status.as_deref() {
+        Some("recovery_required") => RECOVERY.into(),
+        Some("running" | "stopping") => "This computer did not finish stopping. Its files were kept untouched. Relaunch Silo to try again.".into(),
+        _ => "The storage upgrade of this computer was refused. Its original files were kept untouched. Relaunch Silo to try again.".into(),
+    }
+}
+
+#[cfg(test)]
+pub(super) fn blocked_message_for_test(detail: &str) -> String {
+    blocked_message(detail)
+}
+
 fn repair(
     runner: &dyn runtime::RuntimeRunner,
     paths: &runtime::RuntimePaths,
@@ -165,9 +185,17 @@ fn repair(
     if confirm_maintenance {
         args.push(MAINTENANCE_FLAG.into());
     }
-    let output = runner
-        .run(paths, &args, REPAIR_TIMEOUT)
-        .map_err(|_| "The storage upgrade of this computer did not finish. Its original files were kept.".to_string())?;
+    let output = match runner.run(paths, &args, REPAIR_TIMEOUT) {
+        Ok(output) => output,
+        // Exit 2 (blocked) and 3 (unavailable) print `{"sandbox": <diagnosis>, "next_step"}`
+        // and change nothing; any other failure has no JSON.
+        Err(runtime::RuntimeError::Failed {
+            exit_code: Some(2 | 3),
+            detail,
+            ..
+        }) => return Err(blocked_message(&detail)),
+        Err(_) => return Err("The storage upgrade of this computer did not finish. Its original files were kept.".to_string()),
+    };
     let result: serde_json::Value = serde_json::from_str(&output.stdout)
         .map_err(|_| "The storage upgrade returned an unreadable result.".to_string())?;
     if result.get("ready").and_then(serde_json::Value::as_bool) != Some(true) {
