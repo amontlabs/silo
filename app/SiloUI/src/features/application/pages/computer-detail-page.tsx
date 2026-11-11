@@ -47,6 +47,8 @@ import { PortStateLabel } from "@/features/application/components/application-ui
 import { AgentsSection } from "@/features/agents/components/agents-section"
 import { openableAgents, openAgentLabel } from "@/features/agents/model/agents"
 import { useComputerAgents } from "@/features/agents/model/use-computer-agents"
+import { NetworkPolicySection } from "@/features/network-policy/components/network-policy-section"
+import { SilosToolsSection } from "@/features/network-policy/components/silos-tools-section"
 import { cn } from "@/lib/utils"
 
 /** Everything the detail page needs to edit or delete this computer in place, sharing the
@@ -272,7 +274,7 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
   </Section>
 }
 
-function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, computerUse, agentsSection }: { computerUse?: ReactNode; agentsSection?: ReactNode; computer: ApplicationComputer; source: ApplicationSource; actions: ApplicationActions; active: boolean; onEdit?: () => void; onNavigate?: (route: ApplicationInitialRoute) => void }) {
+function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, computerUse, agentsSection, toolsSection, networkSection }: { computerUse?: ReactNode; agentsSection?: ReactNode; toolsSection?: ReactNode; networkSection?: ReactNode; computer: ApplicationComputer; source: ApplicationSource; actions: ApplicationActions; active: boolean; onEdit?: () => void; onNavigate?: (route: ApplicationInitialRoute) => void }) {
   const { configuration } = computer
   const repositories = computer.repositories ?? []
   const extraGithub = (computer.githubRepositories ?? []).filter(name => !repositories.some(repo => repo.path.endsWith(name)))
@@ -297,6 +299,8 @@ function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, co
 
     {agentsSection}
 
+    {toolsSection}
+
     <Section label="Repositories" action={onNavigate ? <ViewAllAction label="View all files for this computer" onClick={() => onNavigate({ computerSection: "files", computer: configuration.id })} /> : undefined}>
       <ListCard divided={repositories.length + extraGithub.length > 1}>
         {hasRepositories ? <>
@@ -317,6 +321,8 @@ function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, co
     </Section>
 
     <SecretsSection computer={computer} source={source} actions={actions} onNavigate={onNavigate} />
+
+    {networkSection}
 
     <PortsSection computer={computer} source={source} actions={actions} browser={source.preferences.browser} active={active} onNavigate={onNavigate} />
   </div>
@@ -419,6 +425,18 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
 
   const reasons = controls.disabledReasons ?? {}
   const restartAvailability = computerAvailability(computer, source)
+  const overviewActive = activeTab === "overview" && controls.pageActive !== false
+  const restartFor = (reason: string) => <LifecycleControl guard={controls.lifecycleGuard} computer={computer} action="restart" disabled={controls.readOnly || !restartAvailability.canRestart} reason={controls.readOnly ? undefined : restartAvailability.reasons.restart}>
+    {({ onClick, disabled }) => <Button type="button" variant="outline" size="xs" aria-label={`Restart ${configuration.name} ${reason}`} disabled={disabled} onClick={onClick}><RotateCw aria-hidden="true" data-icon="inline-start" />Restart</Button>}
+  </LifecycleControl>
+  // The policy and the tools belong to the device that runs the computer, so a computer of another device has neither here.
+  const local = !computer.device && !(computer.macos && macosNeedsSetup(computer.macos))
+  const networkSection = local && actions.readNetworkPolicy
+    ? <NetworkPolicySection key={`network:${target}`} target={target} computerName={configuration.name} running={state === "running"} readOnly={controls.readOnly} enabled={overviewActive} refreshKey={state} actions={actions} restart={restartFor("to apply the network change")} />
+    : undefined
+  const toolsSection = local && actions.readComputerTools
+    ? <SilosToolsSection key={`tools:${target}`} target={target} computerName={configuration.name} running={state === "running"} readOnly={controls.readOnly} enabled={overviewActive} refreshKey={state} actions={actions} restart={restartFor("for Silo's tools")} />
+    : undefined
 
   return <TooltipProvider delayDuration={150}>
     <div className="flex h-full min-h-0 flex-col">
@@ -499,7 +517,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
         </div>
         <ScrollArea className="min-h-0 flex-1">
           <div className="pt-4">
-            <TabsContent value="overview"><OverviewTab computer={computer} source={source} actions={actions} active={activeTab === "overview" && controls.pageActive !== false} onEdit={canEdit ? () => editing.startEdit(configuration) : canEditMacos ? () => setPanelRequest({ token: Date.now(), panel: "resources" }) : undefined} onNavigate={controls.onNavigate} agentsSection={agentsAvailable ? <AgentsSection target={target} computerName={configuration.name} running={state === "running"} offline={computer.freshness === "stale" && Boolean(computer.device)} agents={agents.agents} error={agents.error} loading={agents.loading} onReload={() => void agents.reload()} actions={actions} /> : undefined} computerUse={configuration.desktop || computer.macos?.setupComplete ? <>{configuration.runtime === "container" && <ContainerBrowserNotice className="mb-3" />}<ComputerUseSection key={target} computer={target} active={activeTab === "overview" && controls.pageActive !== false} /></> : undefined} /></TabsContent>
+            <TabsContent value="overview"><OverviewTab computer={computer} source={source} actions={actions} active={activeTab === "overview" && controls.pageActive !== false} onEdit={canEdit ? () => editing.startEdit(configuration) : canEditMacos ? () => setPanelRequest({ token: Date.now(), panel: "resources" }) : undefined} onNavigate={controls.onNavigate} networkSection={networkSection} toolsSection={toolsSection} agentsSection={agentsAvailable ? <AgentsSection target={target} computerName={configuration.name} running={state === "running"} offline={computer.freshness === "stale" && Boolean(computer.device)} agents={agents.agents} error={agents.error} loading={agents.loading} onReload={() => void agents.reload()} actions={actions} /> : undefined} computerUse={configuration.desktop || computer.macos?.setupComplete ? <>{configuration.runtime === "container" && <ContainerBrowserNotice className="mb-3" />}<ComputerUseSection key={target} computer={target} active={activeTab === "overview" && controls.pageActive !== false} /></> : undefined} /></TabsContent>
             <TabsContent value="checkpoints">
               {computer.macos && macosStore ? <MacosCheckpointPanel computer={computer.macos} store={macosStore} takenNames={computerNamesOnDevice(source.computers, undefined, macosNames)} onStart={() => controls.lifecycleGuard.request(computer, "start")} onExport={controls.onCheckpointExport && ((_name, checkpoint) => { if (checkpoint) controls.onCheckpointExport!(checkpoint) })} /> : <>
               <CheckpointPanel computer={computer} target={target} actions={actions} takenNames={computerNamesOnDevice(source.computers, computer.device?.id, macosNames)} disabled={controls.configurationLocked || Boolean(computer.lifecycleAction) || Boolean(computer.device?.busy) || computer.freshness === "stale"} onExport={controls.onCheckpointExport} exportDisabled={controls.checkpointExportDisabled} forkedAction={controls.onCheckpointForkedAction} restoredAction={controls.onCheckpointRestoredAction} />

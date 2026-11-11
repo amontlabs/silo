@@ -7,14 +7,15 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ComputerBadge, PortStateLabel } from "@/features/application/components/application-ui"
+import { NetworkModes } from "@/features/network-policy/components/network-modes"
 import { NetworkPortForm, NetworkPortRowActions } from "@/features/application/components/network-ports"
 import { networkAddress, networkPortState, useNetworkPorts } from "@/features/application/components/network-ports-state"
 import type { ApplicationActions, ApplicationComputer, NetworkState } from "../model/application-source"
 
 const grid = "grid grid-cols-[3.5rem_6rem_minmax(0,1fr)_8.5rem] items-center gap-2 px-3 py-2 sm:grid-cols-[6rem_minmax(0,1fr)_8rem_7rem_8.5rem] sm:gap-3"
 
-export function NetworkPage({ computers, browser, network, error, actions, active }: {
-  computers: ApplicationComputer[]; browser: string; network?: NetworkState; error?: string | null; actions: ApplicationActions; active: boolean
+export function NetworkPage({ computers, browser, network, error, actions, active, onOpenComputer }: {
+  computers: ApplicationComputer[]; browser: string; network?: NetworkState; error?: string | null; actions: ApplicationActions; active: boolean; onOpenComputer?: (computerId: string) => void
 }) {
   const fieldID = useId()
   const controller = useNetworkPorts({ computers, network, error, actions, active })
@@ -25,6 +26,8 @@ export function NetworkPage({ computers, browser, network, error, actions, activ
     <div className="flex h-7 items-center justify-end">{addDisabledReason
       ? <Tooltip><TooltipTrigger asChild><span tabIndex={0}><Button variant="outline" size="xs" disabled><Plus />Add port</Button></span></TooltipTrigger><TooltipContent>{addDisabledReason}</TooltipContent></Tooltip>
       : <Button variant="outline" size="xs" disabled={!actions.saveNetworkPort || !runningLocalComputers.length || busy} onClick={() => controller.add()}><Plus />Add port</Button>}</div>
+
+    <NetworkModes computers={computers} read={actions.readNetworkPolicy} active={active} onOpenComputer={onOpenComputer} />
 
     {(statusError || errors.length > 0) && <InlineAlert className="flex items-center justify-between gap-3"><span>{statusError || errors.join(" · ")}</span><Button size="sm" variant="ghost" onClick={() => void actions.refreshNetwork?.()}>Retry</Button></InlineAlert>}
     {controller.loading && rows.length === 0 && !statusError && errors.length === 0 && !draft ? <div role="status" aria-label="Loading network" className="space-y-2 rounded-lg border border-border p-3">{[0, 1, 2].map(i => <Skeleton key={i} className="h-7" />)}</div>

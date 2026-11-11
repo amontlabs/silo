@@ -28,6 +28,10 @@ export const settingSchemas = {
   notifyApprovals: z.boolean(),
   /** The agent the person uses, which later computers suggest; null until chosen, "none" for one they set up themselves. */
   agent: z.enum(["claude-code", "codex", "none"]).nullable(),
+  /** The memory, in GiB, that must stay free for an agent in a computer to start or create another one; null keeps the default. */
+  memoryFloorGib: z.number().int().min(1).max(1_048_576).nullable(),
+  /** The disk, in GiB, that must stay free for an agent in a computer to start or create another one; null keeps the default. */
+  diskFloorGib: z.number().int().min(2).max(1_048_576).nullable(),
   onboardingComplete: z.boolean(),
   alphaNoticeDismissed: z.boolean(),
   /** The SSH `Include` line whose notice was dismissed; a different needed line shows it again. */
@@ -62,6 +66,8 @@ export const defaultSettings: Settings = {
   notifyCompletions: true,
   notifyApprovals: true,
   agent: null,
+  memoryFloorGib: null,
+  diskFloorGib: null,
   onboardingComplete: false,
   alphaNoticeDismissed: false,
   editorIncludeNoticeDismissed: null,

@@ -39,6 +39,7 @@ import { applicationPreferenceChanges, type ApplicationPreferenceSelection } fro
 import { useStableCallback } from "@/lib/use-stable-callback"
 import { useRunningComputerAgents } from "@/features/agents/model/use-computer-agents"
 import { AgentInstallSupport, usePlannedAgentInstalls } from "@/features/agents/model/planned-installs"
+import { NetworkPolicySupport, usePlannedNetworkModes } from "@/features/network-policy/model/planned-network"
 import { SettingsProvider, useSettings } from "@/features/preferences/settings-store"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { selectableMacosIds, useMacosApplication } from "@/features/application/model/macos-application-computers"
@@ -369,6 +370,7 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
   const navigationLoading = useMemo(() => navigationLoadingState(navigationSource, githubBusy, backupBusy), [navigationSource, githubBusy, backupBusy])
   const { agentsOf } = useRunningComputerAgents(applicationSource, actions.listAgents)
   usePlannedAgentInstalls(applicationSource, actions.installAgent)
+  usePlannedNetworkModes(applicationSource, actions.saveNetworkPolicy)
   const commands = useMemo(() => [...applicationCommands(applicationSource, actions, navigateCommand, {
     onImportComputer: canImport ? openImport : undefined,
     onNewComputer: canCreateComputer ? requestNewComputer : undefined,
@@ -411,6 +413,7 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
   return (
     // Keeps unsaved computer edits while navigating between sections (I-37).
     <AgentInstallSupport value={Boolean(actions.installAgent)}>
+    <NetworkPolicySupport value={Boolean(actions.saveNetworkPolicy)}>
     <ComputerEditorDraftsProvider>
     <FileTransfersProvider api={actions.fileTransfers}>
     <ApplicationShell
@@ -480,6 +483,7 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
             onDismissRepositoryPush={dismissRepositoryPush}
             onCreateComputer={canCreateComputer && !installingUpdate ? requestNewComputer : undefined}
             onOpenApproval={(id) => { navigation.selectTab("changes"); setOpenApproval({ id, token: nextRequestToken() }) }}
+            onOpenComputer={(id) => navigation.openComputer(id)}
           />
         )}
       </section>
@@ -521,6 +525,7 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
     </ApplicationShell>
     </FileTransfersProvider>
     </ComputerEditorDraftsProvider>
+    </NetworkPolicySupport>
     </AgentInstallSupport>
   )
 }

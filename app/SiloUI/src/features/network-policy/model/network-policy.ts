@@ -67,7 +67,7 @@ export function useNetworkPolicy({ read, save, target, enabled, refreshKey }: {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const requests = useRef(0)
-  const base = useRef<NetworkPolicy>()
+  const base = useRef<NetworkPolicy | undefined>(undefined)
 
   const adopt = useCallback((next: NetworkPolicyState, discard: boolean) => {
     const previous = base.current
