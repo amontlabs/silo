@@ -3,9 +3,10 @@ import type {
   SiloPreflightCheck,
   SiloProgressEvent,
 } from "@/contracts/silo"
+import type { AgentId, AgentInstallStep } from "@/desktop/production-schemas"
 import type { GitHubConnectionState, OnboardingSource } from "@/features/onboarding/model/onboarding-source"
 
-export const onboardingSteps = ["dependencies", "computers", "github", "review"] as const
+export const onboardingSteps = ["dependencies", "computers", "agent", "github", "review"] as const
 export type OnboardingStep = (typeof onboardingSteps)[number]
 
 export type PresentationStatus = "waiting" | "running" | "succeeded" | "failed"
@@ -54,7 +55,18 @@ export interface ReviewQueueItemView {
   failure?: string
 }
 
+/** The agent install of setup. It is not in `queueItems`: its failure never blocks Finish. */
+export interface AgentSetupView {
+  computer: string
+  agent: AgentId
+  status: "queued" | "running" | "succeeded" | "failed"
+  step?: AgentInstallStep
+  detail?: string
+  failure?: string
+}
+
 export interface OnboardingViewModel {
+  agent: AgentSetupView | null
   dependencies: DependencyGroupView[]
   dependencyStatus: PresentationStatus
   computerProgress: ComputerProgressView
@@ -116,12 +128,13 @@ const queueLabels: Record<SetupQueueItemID, string> = {
   githubVerify: "Check GitHub access",
   identityRun: "Save Git identities",
   identityVerify: "Verify Git identities",
+  agentInstall: "Install agent",
   completion: "Finish setup",
 }
 
 function projectQueue(source: OnboardingSource): ReviewQueueItemView[] {
-  if (source.setupQueue) return source.setupQueue.map((item) => ({ ...item, label: queueLabels[item.id] }))
-  const ids = Object.keys(queueLabels) as SetupQueueItemID[]
+  if (source.setupQueue) return source.setupQueue.filter(({ id }) => id !== "agentInstall").map((item) => ({ ...item, label: queueLabels[item.id] }))
+  const ids = (Object.keys(queueLabels) as SetupQueueItemID[]).filter(id => id !== "agentInstall")
   const completedPhases = new Set(source.bootstrapState.completedPhases)
   const computerBoundaryComplete = completedPhases.has("computers") && source.bootstrapResult?.phase === "complete"
   const allSetupComplete = completedPhases.has("complete") && computerBoundaryComplete && !source.error
@@ -244,9 +257,11 @@ export function projectOnboarding(source: OnboardingSource, githubConnectionStat
     : dependencies.some(({ status }) => status === "failed") ? "failed" : "succeeded"
   const queueItems = projectQueue(source)
   const computerProgress = projectComputerProgress(source, queueItems)
+  const agent = source.agentSetup ?? null
   const stepStatus = {
     dependencies: dependencyStatus,
     computers: computerProgress.status,
+    agent: agent?.status === "running" ? "running" : agent?.status === "succeeded" ? "succeeded" : agent?.status === "failed" ? "failed" : "waiting",
     github: source.setupQueue ? combineQueueStatus(queueItems.filter(({ id }) => ["githubRun", "githubVerify", "identityRun", "identityVerify"].includes(id))) : githubConnectionState === "connected"
       ? "succeeded"
       : githubConnectionState === "connecting" ? "running" : "waiting",
@@ -254,6 +269,7 @@ export function projectOnboarding(source: OnboardingSource, githubConnectionStat
   } satisfies Record<OnboardingStep, PresentationStatus>
 
   return {
+    agent,
     dependencies,
     dependencyStatus,
     computerProgress,

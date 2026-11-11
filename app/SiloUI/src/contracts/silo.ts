@@ -151,6 +151,8 @@ export const setupQueueItemIdSchema = z.enum([
   "githubVerify",
   "identityRun",
   "identityVerify",
+  /** Installing the chosen agent in the first computer. Its failure never fails setup. */
+  "agentInstall",
   "completion",
 ])
 

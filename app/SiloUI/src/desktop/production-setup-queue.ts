@@ -85,6 +85,7 @@ export function createSetupQueue({ snapshot, publish, disposed }: ProductionCont
     const pending = new Set(jobs.flatMap((job) => job.items.filter(({ status }) => status === "running" || status === "queued").map(({ id }) => id)))
     const steps = [
       (pending.has("computerRun") || pending.has("computerVerify")) && "creating computers",
+      pending.has("agentInstall") && "installing the agent",
       (pending.has("identityRun") || pending.has("identityVerify")) && "applying Git identities",
       (pending.has("githubRun") || pending.has("githubVerify")) && "verifying GitHub access",
       pending.has("completion") && "saving setup",

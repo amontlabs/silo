@@ -4,6 +4,7 @@ import { SiloWindow } from "@/components/silo-window"
 import { Tabs } from "@/components/ui/tabs"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { WindowToolbar } from "@/components/window-toolbar"
+import type { AgentChoice } from "@/features/agents/model/agents"
 import { OnboardingFooter } from "@/features/onboarding/components/onboarding-footer"
 import { OnboardingUpdates } from "@/features/onboarding/components/onboarding-updates"
 import { StepNavigation } from "@/features/onboarding/components/step-navigation"
@@ -19,11 +20,13 @@ interface OnboardingShellProps {
   onContinue: () => void
   completed?: boolean
   onOpenApp?: () => void
+  agentChoice?: AgentChoice | null
+  completedAction?: { label: string; onClick: () => void }
   reduceMotion?: boolean
   children: ReactNode
 }
 
-export function OnboardingShell({ activeStep, viewModel, onStepChange, onBack, onContinue, completed = false, onOpenApp, reduceMotion = false, children }: OnboardingShellProps) {
+export function OnboardingShell({ activeStep, viewModel, onStepChange, onBack, onContinue, completed = false, onOpenApp, agentChoice, completedAction, reduceMotion = false, children }: OnboardingShellProps) {
   const {
     collapsed: pinnedCollapsed,
     previewing,
@@ -60,7 +63,7 @@ export function OnboardingShell({ activeStep, viewModel, onStepChange, onBack, o
         />
         <div className="flex min-h-0 min-w-0 flex-col">
           <div className="relative min-h-0 flex-1 overflow-hidden">{children}<OnboardingUpdates /></div>
-          <OnboardingFooter activeStep={activeStep} viewModel={viewModel} onBack={onBack} onContinue={onContinue} completed={completed} onOpenApp={onOpenApp} />
+          <OnboardingFooter activeStep={activeStep} viewModel={viewModel} onBack={onBack} onContinue={onContinue} completed={completed} onOpenApp={onOpenApp} agentChoice={agentChoice} completedAction={completedAction} />
         </div>
       </Tabs>
     </SiloWindow>

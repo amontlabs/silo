@@ -2,6 +2,7 @@ import { AlertCircle, Check, Clock3 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { agentName, type AgentChoice } from "@/features/agents/model/agents"
 import type { OnboardingStep, OnboardingViewModel } from "@/features/onboarding/model/onboarding-state"
 
 interface OnboardingFooterProps {
@@ -11,11 +12,17 @@ interface OnboardingFooterProps {
   onContinue: () => void
   completed?: boolean
   onOpenApp?: () => void
+  /** The agent chosen on the agent step; Continue waits for one. */
+  agentChoice?: AgentChoice | null
+  /** The main action of the finished screen, ahead of Open Silo: opening the installed agent. */
+  completedAction?: { label: string; onClick: () => void }
 }
 
-export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, completed = false, onOpenApp }: OnboardingFooterProps) {
+export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, completed = false, onOpenApp, agentChoice, completedAction }: OnboardingFooterProps) {
   const isReview = activeStep === "review"
   const dependenciesBlocked = activeStep === "dependencies" && viewModel.dependencyStatus !== "succeeded"
+  const agentBlocked = activeStep === "agent" && !agentChoice
+  const agentLabel = viewModel.agent ? agentName[viewModel.agent.agent] : undefined
   const failedItem = viewModel.queueItems.find(({ status }) => status === "failed")
   const runningItem = viewModel.queueItems.find(({ status }) => status === "running")
   const queued = viewModel.queueItems.some(({ status }) => status === "queued")
@@ -24,6 +31,7 @@ export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, co
   const complete = completed || (viewModel.dependencyStatus === "succeeded" && viewModel.queueItems.length > 0 && viewModel.queueItems.every(({ status }) => status === "succeeded"))
   const completedStepMessage = viewModel.stepStatus[activeStep] === "succeeded"
     ? activeStep === "computers" ? "Complete · Computers are ready"
+      : activeStep === "agent" ? `Complete · ${agentLabel ?? "Your agent"} is ready`
       : activeStep === "github" ? "Complete · Git identity setup is complete" : null
     : null
   const stepComplete = !!completedStepMessage && !checkingDependencies && !failed && !runningItem && !queued
@@ -43,11 +51,13 @@ export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, co
           ? "Complete · Ready to finish setup"
           : runningItem
             ? `In progress · ${runningItem.label}`
+            : viewModel.agent?.status === "running" ? `In progress · Installing ${agentLabel} in ${viewModel.agent.computer}`
             : queued ? "Waiting · Setup tasks are queued"
               : completedStepMessage ? completedStepMessage
               : isReview && viewModel.finishEnabled ? "Ready · Finish setup"
               : activeStep === "dependencies" && viewModel.dependencyStatus === "succeeded" ? "Ready · Continue to configure computers"
                 : activeStep === "computers" ? "Not started · Continue to create your computers. The first time can take a few minutes."
+                : activeStep === "agent" ? (agentChoice ? (agentChoice === "none" ? "Ready · Continue without installing an agent" : `Ready · Continue to install ${agentName[agentChoice]}`) : "Choose your agent, or set it up yourself, to continue")
                 : activeStep === "github" ? "Not started · Continue to save GitHub access and Git identities"
                 : "Not started · Continue to begin this step"
 
@@ -61,9 +71,12 @@ export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, co
         <span className="break-words">{statusText}</span>
       </div>
       <div className="ml-auto flex shrink-0 gap-2">
-        {completed ? <Button onClick={onOpenApp} disabled={!onOpenApp}>Open Silo</Button> : <>
+        {completed ? <>
+          {completedAction && <Button onClick={completedAction.onClick}>{completedAction.label}</Button>}
+          <Button variant={completedAction ? "outline" : "default"} onClick={onOpenApp} disabled={!onOpenApp}>Open Silo</Button>
+        </> : <>
           <Button variant="outline" onClick={onBack} disabled={activeStep === "dependencies"}>Back</Button>
-          <Button onClick={onContinue} disabled={isReview ? !viewModel.finishEnabled : dependenciesBlocked}>
+          <Button onClick={onContinue} disabled={isReview ? !viewModel.finishEnabled : dependenciesBlocked || agentBlocked}>
             {isReview ? "Finish" : "Continue"}
           </Button>
         </>}

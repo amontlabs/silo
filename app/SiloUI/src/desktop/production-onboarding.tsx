@@ -85,8 +85,14 @@ export function productionOnboardingSource(application: ApplicationSource | null
       : startingComputer
         ? { computer: startingComputer.configuration.name, action: null, message: `Waiting for ${startingComputer.configuration.name} to start…` }
         : null
+  // The agent install is shown on its own: its queue item never reaches the items Finish waits for.
+  const agentItem = setup?.setupQueue.find(({ id }) => id === "agentInstall")
+  const agentSetup: OnboardingSource["agentSetup"] = setup?.setupAgent && agentItem && agentItem.status !== "idle"
+    ? { computer: setup.setupAgent.computer, agent: setup.setupAgent.agent, status: agentItem.status, ...(setup.setupAgent.step && { step: setup.setupAgent.step }), ...(setup.setupAgent.detail && { detail: setup.setupAgent.detail }), ...(agentItem.failure && { failure: agentItem.failure }) }
+    : null
   return {
-    ...(setup && { setupQueue: setup.setupQueue.map((item) => configured && item.status === "idle" && ["computerRun", "computerVerify"].includes(item.id) ? { ...item, status: "succeeded" as const } : item) }),
+    ...(setup && { setupQueue: setup.setupQueue.filter(({ id }) => id !== "agentInstall").map((item) => configured && item.status === "idle" && ["computerRun", "computerVerify"].includes(item.id) ? { ...item, status: "succeeded" as const } : item) }),
+    agentSetup,
     readyToFinish: configured && !computerSetupPending,
     finishBlocker,
     configurationsAuthoritative: configurationsAuthoritative || Boolean(setup?.setupCandidate ?? operation),
@@ -236,6 +242,9 @@ export function ProductionOnboarding({ application, dependencies, source, onOpen
       saveComputerConfiguration: (request, options) => {
         submit(configurationSubmission(request, options))
       },
+      retryAgentInstall: () => source.retryAgentInstall(),
+      openAgent: (computer, agent) => source.applicationActions.openAgent?.(computer, agent),
+      ensureSshName: source.applicationActions.ensureSshName,
       retryComputerSetup: (request, options) => {
         if (finishing) return
         const previous = lastSubmission.current

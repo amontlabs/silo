@@ -11,9 +11,9 @@ export const agentName: Record<AgentId, string> = { "claude-code": "Claude Code"
 
 /** One plain sentence each, for the choice in onboarding and the create form. */
 export const agentSentence: Record<AgentChoice, string> = {
-  "claude-code": "Anthropic's coding agent. Silo installs it in your computer.",
-  codex: "OpenAI's coding agent. Silo installs it in your computer.",
-  none: "Install nothing. You set up your own agent in the computer.",
+  "claude-code": "Anthropic's coding agent, installed in your computer and ready to open.",
+  codex: "OpenAI's coding agent, installed in your computer and ready to open.",
+  none: "Silo installs nothing. You set up the agent you use yourself.",
 }
 
 export function agentChoiceLabel(choice: AgentChoice): string {

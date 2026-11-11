@@ -83,7 +83,7 @@ describe("onboarding with computers that already exist", () => {
     expect(handlers.submitStep).toHaveBeenCalledOnce()
     expect(handlers.submitStep).toHaveBeenCalledWith("computers", expect.objectContaining({ computerConfiguration: { schemaVersion: 1, computers: [real] } }))
     expect(store.getSnapshot().onboardingDraft?.computers).toEqual([real])
-    expect(screen.getByRole("tab", { name: /GitHub/ })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: /Your agent/ })).toHaveAttribute("aria-selected", "true")
     expect(screen.queryByRole("alert", { name: "Confirm computer deletion" })).not.toBeInTheDocument()
   })
 

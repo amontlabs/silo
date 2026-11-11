@@ -55,7 +55,7 @@ export function ApplicationPreview({ source, actions, backupPreviewMode, initial
   unseenResult?: FixtureUnseenResult
   /** What the agents inside computers have asked for. Without it the preview lists no approvals and no review requests. */
   approvals?: ApprovalFixtureMode
-  /** The state of the agents in every computer; Claude Code ready and Codex not installed when omitted. */
+  /** The state of the agents in every computer. Without it the preview has no agents to list or install. */
   agents?: AgentFixtureMode
 }) {
   const { store } = useSettings(source.preferences)
@@ -116,10 +116,7 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       readComputerTree: async () => fixtureComputerTree,
       listComputerDirectory,
       ...approvalFixture?.actions,
-      listAgents: agentFixture.listAgents,
-      installAgent: agentFixture.installAgent,
-      ensureSshName: agentFixture.ensureSshName,
-      openAgent: () => undefined,
+      ...(agents && { listAgents: agentFixture.listAgents, installAgent: agentFixture.installAgent, ensureSshName: agentFixture.ensureSshName, openAgent: () => undefined }),
       fileTransfers,
       queryLogs,
       ...actions,

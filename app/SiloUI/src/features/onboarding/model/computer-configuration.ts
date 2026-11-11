@@ -16,11 +16,11 @@ export function computerCapacityError(configurationCount: number, originalID?: s
   }
 }
 
-// Fresh onboarding offers one dev computer; creation waits for Continue.
+// Fresh onboarding offers one main computer; creation waits for Continue.
 export const productionComputerDefaults: readonly SetupComputerConfiguration[] = [
   {
     id: "00000000-0000-4000-8000-000000000001",
-    name: "dev",
+    name: "main",
     cpus: 8,
     maxCPUs: 12,
     memoryGiB: 32,
