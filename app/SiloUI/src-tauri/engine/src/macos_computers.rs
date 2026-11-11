@@ -3286,6 +3286,9 @@ fn capture_archive_sources(
         let computer_use_fingerprint = source_computer_use_fingerprint.ok_or_else(|| {
             "This computer has no Computer Use fingerprint. Use Retry setup before exporting it.".to_string()
         })?;
+        // The archive describes the disk it carries, whatever an older record or checkpoint
+        // said after a disk expansion that failed.
+        let source_disk_gib = store::disk_file_gib(&capture.path().join("disk.img"), source_disk_gib);
         let hardware_model_digest = digest_file(&capture.path().join("hardware-model.bin"))?;
         let config = crate::backup::MacosArchiveConfig {
             payload_version: 1,
@@ -9644,6 +9647,44 @@ mod tests {
             std::fs::read(checkpoints::state_file(&layout, &checkpoint_id)).unwrap(),
             b"saved memory"
         );
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
+    fn an_export_describes_the_disk_file_it_carries() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (app, source_id, checkpoint_id) = export_fixture(directory.path());
+        let layout = Layout::new(directory.path(), &source_id);
+        // The records say 64 GiB; the disks, after a disk expansion that failed, are larger.
+        for disk in [
+            layout.disk(),
+            checkpoints::dir(&layout, &checkpoint_id).join("disk.img"),
+        ] {
+            let file = std::fs::OpenOptions::new().write(true).open(disk).unwrap();
+            file.set_len(128 * 1024 * 1024 * 1024).unwrap();
+        }
+        for checkpoint in [None, Some(checkpoint_id.as_str())] {
+            let (sources, _captures) = capture_archive_sources(
+                &app,
+                &["source-mac".into()],
+                checkpoint,
+                &Default::default(),
+                None,
+                &|_, _, _| {
+                    Box::new(ExportedMachine {
+                        data: directory.path().to_path_buf(),
+                        calls: Arc::new(Mutex::new(Vec::new())),
+                        fail_flush: false,
+                    })
+                },
+            )
+            .unwrap();
+            assert_eq!(sources[0].runtime_config.disk_gib, 128);
+        }
     }
 
     #[test]

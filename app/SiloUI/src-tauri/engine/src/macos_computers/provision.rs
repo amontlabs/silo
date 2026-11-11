@@ -440,7 +440,6 @@ impl Provision<'_> {
         let template_gib = lease.template.meta.disk_gib;
         let grow = requested > template_gib;
         let mut unallocated = None;
-        let mut reconciled = None;
         // The copy still has the template's password hash; it is replaced on the stopped disk.
         offline_setup::ensure_detached(&self.layout.disk())?;
         offline_setup::run_template_rekey(&self.layout.disk(), &own)?;
@@ -489,7 +488,6 @@ impl Provision<'_> {
                 self.log("personalization: the disk could not be expanded");
                 shortfall = Some(disk_shortfall(requested, disk.gib));
             }
-            reconciled = Some(disk.gib);
         }
         self.shut_down()?;
         guest_access::reset_host_keys(self.layout)?;
@@ -509,11 +507,7 @@ impl Provision<'_> {
             })?;
         }
         self.shut_down()?;
-        // Only a verified computer records the size it really has.
-        if let Some(gib) = reconciled.filter(|gib| *gib != record.disk_gib) {
-            record.disk_gib = gib;
-        }
-        record.disk_note = shortfall;
+        settle_disk_record(record, grow.then_some(requested), shortfall);
         self.mark(record, |setup| {
             setup.needs_personalizing = false;
             setup.proxy_bootstrap = staged;
@@ -990,7 +984,16 @@ fn sip_disabled(csrutil_status: &str) -> bool {
 /// Whether the working account has no SecureToken after an import. Anything but a
 /// confirmed token counts as missing: the note is informational, never a setup failure.
 fn disk_shortfall(requested: u64, actual: u64) -> String {
-    format!("Silo could not expand the disk to {requested} GiB, so the computer has {actual} GiB. It is otherwise ready to start.")
+    format!("Silo could not make macOS use all of the {requested} GiB disk, so the computer can use only {actual} GiB of it. It is otherwise ready to start.")
+}
+
+/// Records the disk after personalization. The record has the backing file's size whether or
+/// not the guest could use all of it; what it can use is told only in the note.
+fn settle_disk_record(record: &mut Record, file_gib: Option<u64>, note: Option<String>) {
+    if let Some(gib) = file_gib {
+        record.disk_gib = gib;
+    }
+    record.disk_note = note;
 }
 
 fn secure_token_missing(token: personalize::SecureToken) -> bool {
@@ -1131,7 +1134,7 @@ mod tests {
         let message = disk_shortfall(64, 40);
         assert_eq!(
             message,
-            "Silo could not expand the disk to 64 GiB, so the computer has 40 GiB. It is otherwise ready to start."
+            "Silo could not make macOS use all of the 64 GiB disk, so the computer can use only 40 GiB of it. It is otherwise ready to start."
         );
         // The copy's remaining steps run: the shortfall is stored on the record, which setup
         // completeness does not read.
@@ -1139,6 +1142,28 @@ mod tests {
         record.disk_note = Some(message);
         record.setup.proxy_bootstrap = true;
         assert!(setup_finished(&record, &developer_tools::version()));
+    }
+
+    #[test]
+    fn a_failed_expansion_leaves_the_record_with_the_files_size() {
+        let mut record = finished_record();
+        // A copy of a 40 GiB template whose file was made 64 GiB.
+        record.disk_gib = 64;
+        let disk = personalize::reconcile_disk(64, 40, Some(24 * (1 << 30)));
+        assert_eq!(disk, personalize::Disk { gib: 40, short: true });
+        settle_disk_record(&mut record, Some(64), Some(disk_shortfall(64, disk.gib)));
+        assert_eq!(record.disk_gib, 64);
+        assert_eq!(
+            record.disk_note.as_deref(),
+            Some("Silo could not make macOS use all of the 64 GiB disk, so the computer can use only 40 GiB of it. It is otherwise ready to start.")
+        );
+        // A record an earlier attempt lowered is put back to the file's size.
+        record.disk_gib = 40;
+        settle_disk_record(&mut record, Some(64), None);
+        assert_eq!((record.disk_gib, record.disk_note.as_deref()), (64, None));
+        // A copy that asked for no growth keeps its record.
+        settle_disk_record(&mut record, None, None);
+        assert_eq!(record.disk_gib, 64);
     }
 
     #[test]
