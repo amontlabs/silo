@@ -28,7 +28,7 @@ T=${T:-$HOME/code/projects/silo-wt-targets/T5a}
 SILO=${SILO:-$T/debug/silo}
 GUEST=${GUEST:-$T/guest/aarch64-unknown-linux-musl/release/silo}
 BUNDLE=${BUNDLE:-$T/debug/bundle/macos/Silo Dev.app}
-SILOD="$BUNDLE/Contents/MacOS/silod"
+SILOD="$BUNDLE/Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silod"
 LOG=${LOG:-$REPO/app/SiloUI/src-tauri/target/verification/silod-dev-t5a.log}
 SOCK="$HOME/.silo-dev/engine.sock"
 A=e2e-t5-a; B=e2e-t5-b; C=e2e-t5-c; F=e2e-t5-af; G=e2e-t5-ag
@@ -38,8 +38,9 @@ ts() { date +%H:%M:%S; }
 say() { echo "[$(ts)] $*"; }
 check() { local name=$1 ok=$2; shift 2; if [ "$ok" = 0 ]; then echo "[$(ts)] PASS  $name  -- $*"; PASS=$((PASS+1)); else echo "[$(ts)] FAIL  $name  -- $*"; FAILN=$((FAILN+1)); fi; }
 # In a computer: as its `silo` account, or as root.
-inside() { local c=$1; shift; "$SILO" exec "$c" --timeout 170 -- sudo -u silo -H bash -c "$*"; }
-root() { local c=$1; shift; "$SILO" exec "$c" --timeout 170 -- sudo bash -c "$*"; }
+# The device's `silo exec` adds a "step N" line of its own; it is left out.
+inside() { local c=$1; shift; "$SILO" exec "$c" --timeout 170 -- sudo -u silo -H bash -c "$*" 2>&1 | sed -u '/^step [0-9]*$/d'; return "${PIPESTATUS[0]}"; }
+root() { local c=$1; shift; "$SILO" exec "$c" --timeout 170 -- sudo bash -c "$*" 2>&1 | sed -u '/^step [0-9]*$/d'; return "${PIPESTATUS[0]}"; }
 our_engine() { pgrep -f "^$SILOD --agent" | head -1; }
 engine_answers() { "$SILO" list >/dev/null 2>&1; }
 start_engine() {
@@ -60,7 +61,7 @@ names_inside() { inside "$1" 'silo --json list' 2>&1 | python3 -c '
 import json,sys
 text=sys.stdin.read()
 try:
-    v=json.loads(text)
+    v,_=json.JSONDecoder().raw_decode(text.lstrip())
 except Exception:
     print("ERROR: "+text.strip().replace("\n"," ")[:300]); sys.exit()
 rows=v if isinstance(v,list) else v.get("computers",[])
@@ -137,8 +138,8 @@ from engine_client import EngineClient
 sock, op = sys.argv[1], sys.argv[2]
 with EngineClient(sock, client_name="t5-check") as e:
     if op == "audit":
-        rows = e.call("audit.list", {"computerId": sys.argv[3], "limit": 60})["rows"]
-        for r in rows:
+        rows = e.call("audit.list", {"callerKind": "computer", "limit": 200})["entries"]
+        for r in [r for r in rows if r.get("callerId") == sys.argv[3]]:
             print("%-10s %-14s %-34s %-9s %-20s count=%s" % (r.get("callerKind"), (r.get("callerId") or "-")[:12], r.get("method"), r.get("outcome"), r.get("errorCode") or "", r.get("count", 1)))
     elif op == "restore":
         job = e.call("checkpoints.restore", {"computerId": sys.argv[3], "checkpointId": sys.argv[4]})["jobId"]
@@ -171,7 +172,7 @@ done
 PORT_A=$(status_port $A); PORT_B=$(status_port $B)
 echo "ports: $A=$PORT_A $B=$PORT_B"
 ls_out=$(root $A 'stat -c "%U:%G %a" /etc/silo/endpoint.json' 2>&1 | tr -d '\r')
-check "S1 endpoint file is root's, group silo, 0640" $([ "$ls_out" = "root:silo 640" ]; echo $?) "$ls_out"
+check "S1 endpoint file is root's, group silo, 0640" $(echo "$ls_out" | grep -qx "root:silo 640"; echo $?) "$ls_out"
 FILE_PORT=$(field $A port); FILE_HOST=$(field $A host); TOKEN_A=$(field $A token)
 check "S1 file names host.microsandbox.internal and the computer's port" $([ "$FILE_HOST" = host.microsandbox.internal ] && [ "$FILE_PORT" = "$PORT_A" ]; echo $?) "host=$FILE_HOST port=$FILE_PORT token=${TOKEN_A:0:8}... (${#TOKEN_A} chars)"
 seen=$(names_inside $A)
@@ -179,9 +180,11 @@ check "S1 silo list inside $A shows only $A" $([ "$seen" = "$A" ]; echo $?) "$se
 
 say "== S2 from inside: fork itself, run in the fork, diff, stop, drop"
 out=$(inside $A "silo fork $A --name $F" 2>&1); check "S2 fork $A from inside" $? "$(echo "$out" | tail -2 | tr '\n' ' ')"
+out=$(inside $A "silo start $F" 2>&1); check "S2 start the fork from inside" $? "$(echo "$out" | tail -1)"
 out=$(inside $A "silo exec $F -- echo hello-from-the-fork" 2>&1); echo "$out" | grep -q hello-from-the-fork; check "S2 exec in the fork" $? "$out"
 out=$(inside $A "silo diff $F" 2>&1); check "S2 diff of the fork" $? "$(echo "$out" | head -3 | tr '\n' ' ')"
-seen=$(names_inside $A); echo "inside $A now: $seen"
+seen=$(names_inside $A)
+check "S2 silo list inside shows $A and its fork" $([ "$seen" = "$A $F" ]; echo $?) "$seen"
 out=$(inside $A "silo stop $F && silo drop $F" 2>&1); check "S2 stop and drop the fork from inside" $? "$(echo "$out" | tail -1)"
 "$SILO" status $F >/dev/null 2>&1; check "S2 the fork is gone on the device" $([ $? -ne 0 ]; echo $?) ""
 
@@ -194,7 +197,9 @@ sleep 2
 out=$(inside $A "silo approvals show $ID" 2>&1); echo "$out" | sed 's/^/  inside: /' | head -12
 echo "$out" | grep -qi "allowed\|ran\|done\|8080"; check "S3 the computer reads the outcome" $? ""
 out=$("$SILO" ports $A 2>&1); echo "$out" | grep -q 8080; check "S3 port 8080 is published" $? "$(echo "$out" | tr '\n' ' ')"
-out=$(inside $A "silo unpublish $A 8080" 2>&1); check "S3 unpublish (narrowing) needs no approval" $? "$out"
+# `silo unpublish` then reads the ports with network.state, which is the owner's; the device checks.
+out=$(inside $A "silo unpublish $A 8080" 2>&1); echo "  inside: $out"
+out=$("$SILO" ports $A 2>&1); check "S3 unpublish from inside (narrowing) needed no approval" $(! echo "$out" | grep -q 8080; echo $?) "$(echo "$out" | tr '\n' ' ')"
 
 say "== S4 isolation of the port and the token"
 put_probe $A; put_probe $B
@@ -251,11 +256,18 @@ seen=""; for _ in $(seq 1 20); do seen=$(names_inside $A); [ "$seen" = "$A" ] &&
 check "S8 silo list inside works after the restart" $([ "$seen" = "$A" ]; echo $?) "$seen"
 
 say "== S9 a memory checkpoint restore, and the client reconnects"
-out=$("$SILO" --json checkpoint $A --name t5mem 2>&1)
-CP=$(echo "$out" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v.get("id") or v.get("checkpoint",{}).get("id",""))' 2>/dev/null)
-scope=$("$SILO" checkpoints $A 2>&1 | grep t5mem); echo "  $scope"
-check "S9 a checkpoint with memory of the running computer" $([ -n "$CP" ]; echo $?) "$CP"
-out=$(engine restore "$ID_A" "$CP" 2>&1); echo "  restore: $out"
+"$SILO" checkpoint $A --name t5mem >/dev/null 2>&1
+CP=$("$SILO" --json checkpoints $A 2>/dev/null | python3 -c '
+import json,sys
+v=json.load(sys.stdin); rows=v if isinstance(v,list) else v.get("checkpoints",[])
+for r in rows:
+    if r.get("name")=="t5mem": print(r.get("id",""), r.get("scope",""))')
+echo "  checkpoint: $CP"
+check "S9 a checkpoint with memory of the running computer" $(echo "$CP" | grep -q " full$"; echo $?) "$CP"
+CP=${CP%% *}
+out=$(engine restore "$ID_A" "$CP" 2>&1); echo "  restore: $(echo "$out" | cut -c1-200)"
+# A restored computer waits for its next start, which resumes the saved memory.
+"$SILO" start $A >/dev/null 2>&1; check "S9 start $A from its restored memory" $? ""
 seen=""; for _ in $(seq 1 20); do seen=$(names_inside $A); [ "$seen" = "$A" ] && break; sleep 3; done
 check "S9 silo list inside works after the restore" $([ "$seen" = "$A" ]; echo $?) "$seen"
 

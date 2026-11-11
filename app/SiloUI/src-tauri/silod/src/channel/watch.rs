@@ -223,9 +223,7 @@ impl Watcher {
                 // got a token, missing for a while, is a creation that failed and is forgotten; a
                 // computer that was deleted is forgotten by its delete.
                 let since = *seen.missing_since.get_or_insert(now);
-                if !seen.listed
-                    && record.hash.is_empty()
-                    && now.duration_since(since) >= GONE_AFTER
+                if !seen.listed && record.hash.is_empty() && now.duration_since(since) >= GONE_AFTER
                 {
                     eprintln!("silod: channel of {id}: the computer is gone; its tools are off");
                     let _ = guest_client::turn_off(&[id.as_str()]);
@@ -311,7 +309,9 @@ pub fn start(context: Arc<SilodContext>) {
         seen: HashMap::new(),
     };
     let (wake, woken) = std::sync::mpsc::sync_channel::<()>(1);
-    watcher.handle.spawn(follow_changes(watcher.context.clone(), wake));
+    watcher
+        .handle
+        .spawn(follow_changes(watcher.context.clone(), wake));
     let spawned = std::thread::Builder::new()
         .name("silod-channels".into())
         .spawn(move || {
@@ -341,7 +341,9 @@ async fn follow_changes(context: Arc<SilodContext>, wake: std::sync::mpsc::SyncS
         .subscribe_events(&client, vec!["computers.*".into(), "checkpoints.*".into()])
         .and_then(|subscription| context.activate_events(&client, &subscription));
     if let Err(error) = subscribed {
-        eprintln!("silod: the channel watcher follows no events ({error}); it looks every {TICK:?}");
+        eprintln!(
+            "silod: the channel watcher follows no events ({error}); it looks every {TICK:?}"
+        );
         return;
     }
     while events.recv().await.is_some() {
