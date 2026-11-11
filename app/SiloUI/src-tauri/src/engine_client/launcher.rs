@@ -89,12 +89,23 @@ impl JobDetails {
             };
             let value = value.trim();
             match key.trim() {
-                "program" if details.program.is_none() => {
-                    details.program = Some(value.to_owned());
+                "program" | "program identifier" if details.program.is_none() => {
+                    // `program identifier` ends with the launch mode, as in `... (mode: 2)`.
+                    let program = match value.rsplit_once(" (mode: ") {
+                        Some((program, mode)) if mode.ends_with(')') => program,
+                        _ => value,
+                    };
+                    details.program = Some(program.to_owned());
                 }
                 "state" => details.running = value == "running",
                 "pid" => details.running = true,
-                "last exit code" => details.last_exit_code = value.parse().ok(),
+                // A code may carry its name, as in `78: EX_CONFIG`.
+                "last exit code" => {
+                    details.last_exit_code = value
+                        .split(':')
+                        .next()
+                        .and_then(|code| code.trim().parse().ok());
+                }
                 _ => {}
             }
         }
@@ -1041,6 +1052,40 @@ mod tests {
         assert!(running.running);
         assert_eq!(running.last_exit_code, None);
         assert_eq!(running.program.as_deref(), Some("/a/silod"));
+    }
+
+    /// Output of macOS 26 for a job registered from another copy of the app that cannot start.
+    const SPAWN_FAILED_PRINT_OUTPUT: &str = "gui/501/org.silo.dev.engine = {
+\tactive count = 0
+\tpath = (submitted by smd)
+\ttype = LaunchAgent
+\tstate = spawn scheduled
+\tprogram identifier = Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silod (mode: 2)
+\targuments = {
+\t\tsilod
+\t\t--agent
+\t}
+\tjob state = spawn failed
+\truns = 18
+\tlast exit code = 78: EX_CONFIG
+}
+";
+
+    #[test]
+    fn launchctl_print_reads_the_program_identifier_and_a_named_exit_code() {
+        let details = JobDetails::parse(SPAWN_FAILED_PRINT_OUTPUT);
+        assert_eq!(
+            details,
+            job(
+                Some("Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silod"),
+                false,
+                Some(78)
+            )
+        );
+        assert_eq!(
+            details.stale_reason(Some(Path::new(OUR_ENGINE))),
+            Some("launchd cannot run its program")
+        );
     }
 
     struct FakeLaunchctl {
