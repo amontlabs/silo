@@ -609,7 +609,9 @@ fn execute<'a>(
             Some((Decision::Allow(allowed), tree)) => (tree, allowed.params),
         };
         if gate::takes_headroom(method) {
-            if let Some(message) = gate::short_of_resources(context) {
+            if let Some(message) =
+                gate::short_of_resources(context, method, &approval.params, &std::collections::HashMap::new())
+            {
                 return failed(format!("Nothing was run: {message}"));
             }
         }

@@ -34,3 +34,27 @@ was chosen and why; any can be changed. Older items are also in the build log un
    not slow down tools for every other computer.
 8. **"Tools OK" for a computer is the computer's own claim.** An agent with root inside can fake
    it; that is accepted, since the agent already controls that computer. Documented.
+
+## App (T10, T13 review)
+
+9. **Saving a computer's network settings never accepts a preset update.** Updates to a preset
+   (for example npm adding hosts) are accepted only with their own Accept button, which shows
+   the hosts they add (being built, R4). Why: Save used to accept them silently.
+10. **Approvals show the computer's id beside its name** and strip invisible characters from what
+    an agent wrote (R4). Why: an agent could name a computer to look like another one.
+
+## Rebuild on the newest image (T15)
+
+11. **A rebuild is refused when `/home/silo` is over 45% of the root disk** (about 1.8 GiB on a
+    4 GiB disk), because the home is packed inside the computer before it moves.
+12. **On a device whose disk cannot make instant copies, only layered disks are refused**; a
+    single-file disk is copied normally (slower, uses space).
+13. **The old computer stays, stopped, as `<name>-undo`**, so it can be inspected, restored or
+    deleted with the usual commands.
+
+## Resources (R2)
+
+14. **A start's memory is held for it until the start ends, at most 5 minutes**, and a start that
+    asks for more than the free memory above the floor is refused. A start the owner approved
+    checks the floor but does not hold memory, so several approved starts at once can still pass
+    together. Left as is: the owner approved each one.
