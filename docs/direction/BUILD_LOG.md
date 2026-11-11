@@ -295,3 +295,8 @@ These were not asked of the owner. Each is open to change.
   hostname rules, `restore` has no `--net-strict`, and `portable_export_network` refuses a
   computer whose strict is off. A memory-restored test computer reported a pinned `interface`
   that made export refuse; not checked whether the engine clears it.
+
+- **Reviewer quota (2026-11-11, ~11:00):** the lastdrop `reviewer` chain answered "Individual
+  quota reached, resets in 153h"; Fable 5.2 is also at its limit. Reviews run on Claude Sonnet
+  (high effort) through `delegate_task` until then. Implementing agents whose self-review cannot
+  start stop and report; the orchestrator gets their work reviewed on Sonnet before merging.
