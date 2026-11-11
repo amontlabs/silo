@@ -306,9 +306,7 @@ fn reread_endpoint() -> Option<crate::endpoint::Endpoint> {
     let path = std::env::var_os(crate::endpoint::ENV)
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(silo_api::methods::guest_client::GUEST_ENDPOINT_PATH)
-        });
+        .unwrap_or_else(|| PathBuf::from(silo_api::methods::guest_client::GUEST_ENDPOINT_PATH));
     crate::endpoint::Endpoint::load(&path).ok()
 }
 

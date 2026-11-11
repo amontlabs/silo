@@ -1682,8 +1682,15 @@ fn export_and_drop_copies(
         Vec::new()
     };
     let Some(env) = env.filter(|_| !targets.is_empty()) else {
-        let result =
-            backup_work(controller, archive_path, names, names, &[], checkpoint_id, cancellation);
+        let result = backup_work(
+            controller,
+            archive_path,
+            names,
+            names,
+            &[],
+            checkpoint_id,
+            cancellation,
+        );
         end_tokens(controller, names, &[]);
         return result.map(|archive| (archive, None));
     };
@@ -1751,7 +1758,9 @@ fn end_tokens(controller: &Controller, names: &[String], copied: &[(String, Stri
             });
         if let Some(id) = id {
             if let Err(error) = crate::guest_client::end_token(&id) {
-                eprintln!("silo-engine: the token of {name} was not ended after its export: {error}");
+                eprintln!(
+                    "silo-engine: the token of {name} was not ended after its export: {error}"
+                );
             }
         }
     }

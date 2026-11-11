@@ -115,7 +115,11 @@ pub(super) fn due(seen: &Seen, running: bool, generation: u64, now: Instant) -> 
 
 /// Prepares the channels at engine start: adopts what the earlier client recorded, forgets
 /// every token hash, and rebinds the ports.
-pub(super) fn prepare(store: &TokenStore, policy: &PolicyStore, channels: &dyn guest_client::Channels) {
+pub(super) fn prepare(
+    store: &TokenStore,
+    policy: &PolicyStore,
+    channels: &dyn guest_client::Channels,
+) {
     adopt_earlier_records(store, policy);
     if let Err(error) = store.clear_hashes() {
         eprintln!("silod: the tokens of Silo's tools could not be reset: {error}");
@@ -296,9 +300,12 @@ impl Checker {
     }
 
     fn endpoint(&self, computer_id: &str) -> Outcome {
-        let target =
-            silo_engine::guest::resolve(self.runtime(), &self.context.paths().app_data, computer_id)
-                .map_err(|error| error.message)?;
+        let target = silo_engine::guest::resolve(
+            self.runtime(),
+            &self.context.paths().app_data,
+            computer_id,
+        )
+        .map_err(|error| error.message)?;
         endpoint::ensure(&target, &self.store())
     }
 
@@ -348,7 +355,9 @@ pub(super) fn serve_after_restart(
     else {
         return Ok(());
     };
-    let port = record.port.ok_or("Silo's tools are not on in that computer.")?;
+    let port = record
+        .port
+        .ok_or("Silo's tools are not on in that computer.")?;
     if !channels.serve_held(computer_id, port) {
         let listener = guest_client::bind_exact(port)
             .map_err(|error| format!("its port {port} is not free: {error}"))?;
@@ -371,9 +380,10 @@ pub(super) fn release_held(
     }
     held.retain(|other| other != entry);
     locked.save_held(&held)?;
-    let live = locked.records()?.iter().any(|record| {
-        record.computer_id == entry.computer_id && record.port == Some(entry.port)
-    });
+    let live = locked
+        .records()?
+        .iter()
+        .any(|record| record.computer_id == entry.computer_id && record.port == Some(entry.port));
     if !live && channels.bound(entry.port).as_deref() == Some(entry.computer_id.as_str()) {
         channels.release(entry.port);
     }

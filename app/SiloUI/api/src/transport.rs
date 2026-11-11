@@ -208,7 +208,12 @@ mod tests {
         assert!(channel_proof_matches(&key, &nonce, 41234, &proof));
         assert!(!channel_proof_matches(&key, &nonce, 41235, &proof));
         assert!(!channel_proof_matches(&key, &[8_u8; 32], 41234, &proof));
-        assert!(!channel_proof_matches(&channel_key("silo_gc_abd"), &nonce, 41234, &proof));
+        assert!(!channel_proof_matches(
+            &channel_key("silo_gc_abd"),
+            &nonce,
+            41234,
+            &proof
+        ));
         assert!(!channel_proof_matches(&key, &nonce[..31], 41234, &proof));
         assert!(!channel_proof_matches(&key, &nonce, 41234, &proof[..31]));
         assert_eq!(from_hex::<32>(&to_hex(&proof)), Some(proof));

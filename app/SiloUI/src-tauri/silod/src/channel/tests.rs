@@ -15,8 +15,8 @@ use super::{
         adopt_earlier_records, due, prepare, rebind, release_held, retry_after,
         serve_after_restart, Running, Seen, MAX_CHECKS,
     },
-    Channels, Refusal, Refusals, HANDSHAKE_TIMEOUT, MAX_CONNECTIONS, MAX_HANDSHAKE_BYTES, MAX_PENDING,
-    REFUSAL_DELAY,
+    Channels, Refusal, Refusals, HANDSHAKE_TIMEOUT, MAX_CONNECTIONS, MAX_HANDSHAKE_BYTES,
+    MAX_PENDING, REFUSAL_DELAY,
 };
 use crate::{
     dispatcher::{
@@ -184,12 +184,9 @@ async fn caller_of(stream: &mut TcpStream, id: &str) -> String {
 }
 
 async fn ends(stream: &mut TcpStream) -> bool {
-    let ended = tokio::time::timeout(
-        Duration::from_secs(5),
-        read_json_frame::<_, Value>(stream),
-    )
-    .await
-    .expect("the connection ends in time");
+    let ended = tokio::time::timeout(Duration::from_secs(5), read_json_frame::<_, Value>(stream))
+        .await
+        .expect("the connection ends in time");
     !matches!(ended, Ok(Some(_)))
 }
 
@@ -247,8 +244,14 @@ async fn nothing_but_the_proof_and_the_port_chooses_the_computer() {
         r#"Computer { id: "computer-a" }"#
     );
     // A's token on B's port, and B's on A's, are refused.
-    assert!(connect(port_b, TOKEN_A, port_b, json!({})).await.1.is_none());
-    assert!(connect(port_a, TOKEN_B, port_a, json!({})).await.1.is_none());
+    assert!(connect(port_b, TOKEN_A, port_b, json!({}))
+        .await
+        .1
+        .is_none());
+    assert!(connect(port_a, TOKEN_B, port_a, json!({}))
+        .await
+        .1
+        .is_none());
 }
 
 #[tokio::test]
@@ -339,7 +342,10 @@ async fn a_computer_holds_a_bounded_number_of_sessions() {
     assert!(begun.elapsed() < REFUSAL_DELAY, "closed at once, not held");
     // Another computer's places are its own.
     let port_b = serve(&channels, B, TOKEN_B);
-    assert!(connect(port_b, TOKEN_B, port_b, json!({})).await.1.is_some());
+    assert!(connect(port_b, TOKEN_B, port_b, json!({}))
+        .await
+        .1
+        .is_some());
     drop(held);
 }
 
@@ -359,7 +365,12 @@ async fn connections_that_never_prove_anything_cannot_lock_sessions_out() {
     loop {
         let (stream, nonce) = challenged(port).await;
         if let Some(nonce) = nonce {
-            let answer = send_first(stream, &handshake(Some(proof(TOKEN_A, &nonce, port)), json!({}))).await.1;
+            let answer = send_first(
+                stream,
+                &handshake(Some(proof(TOKEN_A, &nonce, port)), json!({})),
+            )
+            .await
+            .1;
             assert!(answer.is_some(), "a proved client is served");
             break;
         }
@@ -451,7 +462,11 @@ fn refusals_get_a_row_at_most_each_second_and_a_line_at_most_each_minute() {
     assert!((59..=61).contains(&rows), "{rows} rows in a minute");
     assert_eq!(lines, 1, "one line a minute");
     let (_, line) = refusals.note(start + Duration::from_secs(121));
-    assert_eq!(line, Some(1), "the line counts the refusals since the last one");
+    assert_eq!(
+        line,
+        Some(1),
+        "the line counts the refusals since the last one"
+    );
 }
 
 #[tokio::test]
@@ -605,7 +620,10 @@ fn at_start_every_token_is_dead_and_held_ports_are_bound_again() {
     }
     let recorded = Recorded::default();
     prepare(&store, &policy, &recorded);
-    assert!(!accepts(&store, &token, A, port), "a token from before the start is dead");
+    assert!(
+        !accepts(&store, &token, A, port),
+        "a token from before the start is dead"
+    );
     assert_eq!(recorded.serving(A), Some(port), "the tools stay on");
     assert_eq!(recorded.bound(old_port).as_deref(), Some(B));
     assert_eq!(recorded.serving(B), None);

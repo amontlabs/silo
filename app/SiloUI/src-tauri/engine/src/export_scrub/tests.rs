@@ -195,7 +195,10 @@ fn the_copy_always_loses_the_endpoint_file_of_silos_tools() {
         assert_eq!(prepared.left_out.is_empty(), logins.is_empty());
         assert!(env.called("run copy remove"));
         let removed = String::from_utf8(env.removed.lock().unwrap().clone()).unwrap();
-        let removed: Vec<&str> = removed.split('\0').filter(|path| !path.is_empty()).collect();
+        let removed: Vec<&str> = removed
+            .split('\0')
+            .filter(|path| !path.is_empty())
+            .collect();
         assert!(removed.contains(&"/etc/silo/endpoint.json"), "{removed:?}");
         assert!(removed.contains(&"/etc/silo/guest-client.json"));
         for login in logins {

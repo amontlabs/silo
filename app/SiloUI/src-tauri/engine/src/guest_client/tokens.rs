@@ -15,7 +15,6 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-
 const PREFIX: &str = "silo_gc_";
 /// The longest token the store looks at; a minted one is 72 characters.
 pub const MAX_TOKEN_BYTES: usize = 200;
@@ -357,7 +356,13 @@ impl TokenStore {
     /// The record whose token made `proof` for `nonce` on `port`, only when that is
     /// `computer_id`'s record, its tools are on, its channel is on `port` and is not waiting for
     /// a restart: a token is valid on its own computer's port alone.
-    pub fn verify(&self, computer_id: &str, port: u16, nonce: &[u8], proof: &str) -> Option<Record> {
+    pub fn verify(
+        &self,
+        computer_id: &str,
+        port: u16,
+        nonce: &[u8],
+        proof: &str,
+    ) -> Option<Record> {
         let proof = silo_api::transport::from_hex::<32>(proof)?;
         let _held = lock();
         self.read().ok()?.into_iter().find(|record| {
@@ -490,7 +495,12 @@ pub(crate) mod tests {
         assert!(accepts(&store, &minted.token, "main", 40001));
         assert!(!accepts(&store, &minted.token, "fork-1", 40002));
         assert!(!accepts(&store, "silo_gc_nope", "main", 40001));
-        assert!(!accepts(&store, &minted.token[PREFIX.len()..], "main", 40001));
+        assert!(!accepts(
+            &store,
+            &minted.token[PREFIX.len()..],
+            "main",
+            40001
+        ));
         let mode = fs::metadata(store.file()).unwrap();
         assert_eq!(
             std::os::unix::fs::PermissionsExt::mode(&mode.permissions()) & 0o777,
@@ -508,9 +518,8 @@ pub(crate) mod tests {
         assert!(!accepts(&store, &minted.token, "main", 40009));
         let key = silo_api::transport::channel_key(&minted.token);
         let nonce = [3_u8; 32];
-        let elsewhere = silo_api::transport::to_hex(&silo_api::transport::channel_proof(
-            &key, &nonce, 40009,
-        ));
+        let elsewhere =
+            silo_api::transport::to_hex(&silo_api::transport::channel_proof(&key, &nonce, 40009));
         assert!(store.verify("main", 40001, &nonce, &elsewhere).is_none());
         let here =
             silo_api::transport::to_hex(&silo_api::transport::channel_proof(&key, &nonce, 40001));
@@ -533,7 +542,12 @@ pub(crate) mod tests {
         let store = TokenStore::new(dir.path());
         store.enable("main", 40001).unwrap();
         // The hash of an empty record never matches any token.
-        assert!(!accepts(&store, &format!("{PREFIX}{}", "0".repeat(64)), "main", 40001));
+        assert!(!accepts(
+            &store,
+            &format!("{PREFIX}{}", "0".repeat(64)),
+            "main",
+            40001
+        ));
         assert!(!accepts(&store, "", "main", 40001));
         assert!(store.status("main").unwrap().unwrap().hash.is_empty());
     }

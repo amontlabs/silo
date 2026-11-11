@@ -101,8 +101,7 @@ pub fn write(target: &Target, store: &TokenStore) -> Result<(), String> {
         .is_some_and(|record| record.restart_needed)
     {
         return Err(
-            "the computer must restart before it can reach Silo's tools (its port changed)."
-                .into(),
+            "the computer must restart before it can reach Silo's tools (its port changed).".into(),
         );
     }
     let minted = store.mint(target.id())?;

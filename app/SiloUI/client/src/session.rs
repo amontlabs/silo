@@ -236,10 +236,13 @@ impl Client {
         .await
         .map_err(|_| ClientError::TimedOut)??;
         let _ = stream.set_nodelay(true);
-        let challenge = time::timeout(options.handshake_timeout, read_frame::<_, Value>(&mut stream))
-            .await
-            .map_err(|_| ClientError::TimedOut)??
-            .ok_or(ClientError::Disconnected)?;
+        let challenge = time::timeout(
+            options.handshake_timeout,
+            read_frame::<_, Value>(&mut stream),
+        )
+        .await
+        .map_err(|_| ClientError::TimedOut)??
+        .ok_or(ClientError::Disconnected)?;
         let challenge: silo_api::transport::ChannelChallenge = serde_json::from_value(challenge)
             .map_err(|error| {
                 ClientError::Protocol(format!("malformed channel challenge: {error}"))
@@ -771,11 +774,8 @@ mod tests {
             let request: Value = read_frame(&mut stream).await.unwrap().unwrap();
             write_frame(&mut stream, &handshake_reply(8)).await.unwrap();
             let mut rest = Vec::new();
-            let _ = tokio::time::timeout(
-                Duration::from_millis(200),
-                stream.read_to_end(&mut rest),
-            )
-            .await;
+            let _ = tokio::time::timeout(Duration::from_millis(200), stream.read_to_end(&mut rest))
+                .await;
             let mut sent = serde_json::to_vec(&request).unwrap();
             sent.extend(rest);
             (request, sent)
@@ -798,10 +798,18 @@ mod tests {
         client.close().await;
         let (request, sent) = seen.await.unwrap();
         let key = silo_api::transport::channel_key(TOKEN);
-        let proof = silo_api::transport::from_hex::<32>(request["params"]["proof"].as_str().unwrap())
-            .unwrap();
-        assert!(silo_api::transport::channel_proof_matches(&key, &nonce, port, &proof));
-        assert!(!silo_api::transport::channel_proof_matches(&key, &nonce, port ^ 1, &proof));
+        let proof =
+            silo_api::transport::from_hex::<32>(request["params"]["proof"].as_str().unwrap())
+                .unwrap();
+        assert!(silo_api::transport::channel_proof_matches(
+            &key, &nonce, port, &proof
+        ));
+        assert!(!silo_api::transport::channel_proof_matches(
+            &key,
+            &nonce,
+            port ^ 1,
+            &proof
+        ));
         let sent = String::from_utf8_lossy(&sent);
         assert!(request["params"].get("token").is_none());
         assert!(!sent.contains(TOKEN) && !sent.contains("abc"));

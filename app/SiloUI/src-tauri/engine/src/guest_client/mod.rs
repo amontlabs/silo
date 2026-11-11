@@ -161,12 +161,13 @@ pub fn turn_on_in(store: &TokenStore, computer_id: &str) -> Result<Record, Strin
             (port, false, false)
         }
     };
-    let saved = set_port_in(&mut records, &mut held, computer_id, port, restart_needed)
-        .and_then(|record| {
+    let saved = set_port_in(&mut records, &mut held, computer_id, port, restart_needed).and_then(
+        |record| {
             locked.save_held(&held)?;
             locked.save(&records)?;
             Ok(record)
-        });
+        },
+    );
     if saved.is_err() {
         if let Some(channels) = &channels {
             channels.close(computer_id);
@@ -212,8 +213,10 @@ pub fn turn_off_in(store: &TokenStore, computer_ids: &[&str]) -> Result<usize, S
     let mut held = locked.held()?;
     let before = records.len();
     for record in &records {
-        if let (true, Some(port)) = (computer_ids.contains(&record.computer_id.as_str()), record.port)
-        {
+        if let (true, Some(port)) = (
+            computer_ids.contains(&record.computer_id.as_str()),
+            record.port,
+        ) {
             tokens::hold(&mut held, &record.computer_id, port);
         }
     }
@@ -402,7 +405,9 @@ mod tests {
     static PORTS: Mutex<()> = Mutex::new(());
 
     fn ports() -> std::sync::MutexGuard<'static, ()> {
-        PORTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        PORTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn with_fake(directory: &std::path::Path) -> (TokenStore, Arc<Fake>) {
@@ -477,7 +482,11 @@ mod tests {
         assert_eq!(fake.serving("c"), Some(port));
         turn_off_in(&store, &["c"]).unwrap();
         assert_eq!(fake.serving("c"), None);
-        assert_eq!(fake.bound(port).as_deref(), Some("c"), "the port stays bound");
+        assert_eq!(
+            fake.bound(port).as_deref(),
+            Some("c"),
+            "the port stays bound"
+        );
         assert_eq!(
             store.locked().held().unwrap(),
             vec![HeldPort {
