@@ -1,4 +1,4 @@
-import { Activity, Bell, Boxes, CircleAlert, Code, Download, File, GitFork, GitPullRequestArrow, History, KeyRound, Monitor, Network, Play, Plus, RotateCw, Settings2, Square, Terminal, Trash2, Upload, type LucideIcon } from "lucide-react"
+import { Activity, Bell, Bot, Boxes, CircleAlert, Code, Download, File, GitFork, GitPullRequestArrow, History, KeyRound, Monitor, Network, Play, Plus, RotateCw, Settings2, Square, Terminal, Trash2, Upload, type LucideIcon } from "lucide-react"
 
 import type { ApplicationActions, ApplicationSource } from "@/features/application/model/application-source"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
@@ -6,6 +6,7 @@ import { computerTarget } from "@/features/application/model/connections"
 import { computerAvailability } from "@/features/application/model/computer-availability"
 import { computerCan, kindOf, type ComputerCapability } from "@/features/computers/model/computer-capabilities"
 import { lifecycleGuard, type LifecycleAction } from "@/features/application/model/lifecycle-guard"
+import { openableAgents, type AgentInfo } from "@/features/agents/model/agents"
 
 /** A question the palette asks, in place, before running a command. */
 export interface CommandConfirmation {
@@ -37,6 +38,8 @@ export interface ApplicationCommandOptions {
   onExportComputer?: (computerName: string) => void
   /** Opens the computer's page and there its editor folder picker, Fork or Delete popover. */
   onComputerRequest?: (computerId: string, request: ComputerCommandRequest) => void
+  /** The agents a computer is known to have, by its target; each installed one gets an "Open" command. */
+  agentsOf?: (target: string) => readonly AgentInfo[] | undefined
 }
 
 const computerSections = [
@@ -46,7 +49,7 @@ const computerSections = [
   { section: "activity", label: "Activity", icon: Activity, keywords: ["history", "events"] },
 ] as readonly { section: "files" | "logs" | "network" | "activity"; label: string; icon: LucideIcon; keywords: string[]; needs?: ComputerCapability }[]
 
-export function applicationCommands(source: ApplicationSource, actions: ApplicationActions, navigate: (route: ApplicationInitialRoute) => void, { onImportComputer, onNewComputer, onExportComputer, onComputerRequest }: ApplicationCommandOptions = {}): ApplicationCommand[] {
+export function applicationCommands(source: ApplicationSource, actions: ApplicationActions, navigate: (route: ApplicationInitialRoute) => void, { onImportComputer, onNewComputer, onExportComputer, onComputerRequest, agentsOf }: ApplicationCommandOptions = {}): ApplicationCommand[] {
   // Lifecycle commands use the same guard as the pages: unavailable operations are reported,
   // and a request that needs a prompt asks it inside the palette.
   const guard = lifecycleGuard(source, actions)
@@ -97,6 +100,11 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
       commands.push(
         { id: `${id}:terminal`, label: `Open ${name} in ${source.preferences.terminal}`, icon: Terminal, group: "Actions", keywords: [...computerKeywords, "terminal", "shell"], run: () => actions.openTerminal(target) },
       )
+    }
+    if (availability.canOpen && computerCan(kindOf(computer), "terminal") && actions.openAgent) {
+      for (const agent of openableAgents(agentsOf?.(target))) {
+        commands.push({ id: `${id}:agent:${agent.id}`, label: `Open ${agent.name} in ${name}`, icon: Bot, group: "Actions", keywords: [...computerKeywords, "agent", "terminal", agent.name], run: () => actions.openAgent?.(target, agent.id) })
+      }
     }
     if (availability.canOpen && computerCan(kindOf(computer), "editor")) {
       commands.push(

@@ -1027,8 +1027,8 @@ async fn terminal_command(
     let argv = blocking(move || {
         let target = resolve(&engine, &params.computer_id)?;
         match target {
-            Target::Macos(_) => guest::macos::terminal_command(&macos, &target),
-            Target::Linux { .. } => guest::terminal_command(&target),
+            Target::Macos(_) => guest::macos::terminal_command(&macos, &target, params.agent),
+            Target::Linux { .. } => guest::terminal_command(&target, params.agent),
         }
     })
     .await?;
@@ -2052,6 +2052,43 @@ exit 2
             argv[5..].join(" "),
             "exec dev --user silo --env USER=silo --env LOGNAME=silo --no-start --workdir /workspace --tty"
         );
+        // With an agent the same terminal runs that agent's fixed command in the workspace.
+        for (agent, program) in [("claude-code", "claude"), ("codex", "codex")] {
+            let with_agent = fixture
+                .ok(
+                    MethodName::TerminalCommand,
+                    json!({"computerId": COMPUTER, "agent": agent}),
+                )
+                .await;
+            let words: Vec<&str> = with_agent["argv"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|word| word.as_str().unwrap())
+                .collect();
+            assert_eq!(words[..argv.len()], argv[..]);
+            assert_eq!(
+                words[argv.len()..argv.len() + 3],
+                ["--", "/bin/bash", "-lc"]
+            );
+            assert_eq!(words.len(), argv.len() + 4);
+            let script = words[argv.len() + 3];
+            assert!(script.starts_with("cd /workspace "));
+            assert!(script.contains(&format!("exec /usr/local/bin/{program}; fi;")));
+        }
+        // A name that is not a known agent never reaches the command.
+        for refused in ["pi", "claude", "rm -rf /", ""] {
+            assert!(
+                fixture
+                    .call(
+                        MethodName::TerminalCommand,
+                        json!({"computerId": COMPUTER, "agent": refused})
+                    )
+                    .await
+                    .is_err(),
+                "{refused}"
+            );
+        }
         // The settings store belongs to the installed engine context, which a unit test lacks.
         assert!(fixture
             .call(MethodName::EditorCommand, json!({"computerId": COMPUTER}))

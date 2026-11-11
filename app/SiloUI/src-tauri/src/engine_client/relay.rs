@@ -70,6 +70,7 @@ fn progress_events(payload: &Value) -> Vec<(&'static str, Value)> {
     match payload.get("source").and_then(Value::as_str) {
         Some("setup") => vec![("silo://computer-configuration-progress", data)],
         Some("lifecycle") => vec![("silo://lifecycle-progress", data)],
+        Some("agent") => vec![("silo://agent-install-progress", data)],
         Some("transfer") => vec![("silo://transfer-progress", data)],
         Some("macos" | "backup" | "push") => vec![(APPLICATION_STATE, Value::Null)],
         _ => Vec::new(),
@@ -168,6 +169,8 @@ mod tests {
         );
         assert_eq!(progress("lifecycle")[0].0, "silo://lifecycle-progress");
         assert_eq!(progress("transfer")[0].0, "silo://transfer-progress");
+        assert_eq!(progress("agent")[0].0, "silo://agent-install-progress");
+        assert_eq!(progress("agent")[0].1, json!({"step": "x"}));
         assert_eq!(progress("backup")[0].0, "silo://application-state-changed");
         assert!(progress("update").is_empty());
     }

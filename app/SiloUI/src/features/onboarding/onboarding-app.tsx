@@ -23,6 +23,8 @@ import { GitHubStep } from "@/features/onboarding/steps/github-step"
 import type { GitHubTokenOption } from "@/features/github/components/github-access-editor"
 import { ReviewStep } from "@/features/onboarding/steps/review-step"
 import { ComputersStep } from "@/features/onboarding/steps/computers-step"
+import { AgentStep } from "@/features/onboarding/steps/agent-step"
+import { agentName, type AgentChoice } from "@/features/agents/model/agents"
 import type { OnboardingDraft } from "@/features/onboarding/model/onboarding-draft"
 import { useSettings } from "@/features/preferences/settings-store"
 import { SettingsSaveNotice } from "@/features/preferences/components/settings-save-notice"
@@ -207,10 +209,11 @@ export function OnboardingApp({
     ...(settings.editorPath && { editorPath: settings.editorPath }),
     ...(settings.browserPath && { browserPath: settings.browserPath }),
   }), [settings])
-  const completionInputs = useRef({ applications: applicationPreferences, githubConnectionState })
+  const agentChoice: AgentChoice | null = settings.agent
+  const completionInputs = useRef({ applications: applicationPreferences, githubConnectionState, agent: agentChoice })
   useEffect(() => {
-    completionInputs.current = { applications: applicationPreferences, githubConnectionState }
-  }, [applicationPreferences, githubConnectionState])
+    completionInputs.current = { applications: applicationPreferences, githubConnectionState, agent: agentChoice }
+  }, [applicationPreferences, githubConnectionState, agentChoice])
   const availableRepositories = useMemo(
     () => uniqueRepositoryOptions(repositoryOptions ?? defaultRepositoryOptions(source)),
     [repositoryOptions, source],
@@ -422,8 +425,9 @@ export function OnboardingApp({
   function completionRequest(): OnboardingCompletionRequest {
     // A deletion confirmation can retain this callback across settings and
     // connection changes. Read the latest inputs when the user confirms.
-    const { applications, githubConnectionState } = completionInputs.current
+    const { applications, githubConnectionState, agent } = completionInputs.current
     return {
+      ...(agent && { agent }),
       computerConfiguration: { schemaVersion: 1, computers: [...currentDraft.current.computers] },
       applications,
       github: {
@@ -448,7 +452,8 @@ export function OnboardingApp({
       if (viewModel.finishEnabled) submitChecked(() => actions.finishSetup(completionRequest(), ...submissionOptions()))
       return
     }
-    if (activeStep === "computers" || activeStep === "github") {
+    if (activeStep === "agent" && !agentChoice) return
+    if (activeStep === "computers" || activeStep === "agent" || activeStep === "github") {
       const step = activeStep
       const next = onboardingSteps[onboardingSteps.indexOf(step) + 1]
       submitChecked(() => { actions.submitStep?.(step, completionRequest(), ...submissionOptions()); setActiveStep(next) })
@@ -505,6 +510,10 @@ export function OnboardingApp({
       onContinue={continueSetup}
       completed={completed}
       onOpenApp={onOpenApp}
+      agentChoice={agentChoice}
+      completedAction={completed && viewModel.agent?.status === "succeeded" && actions.openAgent
+        ? { label: `Open ${agentName[viewModel.agent.agent]} in ${viewModel.agent.computer}`, onClick: () => actions.openAgent?.(viewModel.agent!.computer, viewModel.agent!.agent) }
+        : undefined}
       reduceMotion={settings.reduceMotion}
     >
       <OnboardingPanel step="dependencies" activeStep={activeStep} notice={deletionNotice}>
@@ -520,6 +529,15 @@ export function OnboardingApp({
       </OnboardingPanel>
       <OnboardingPanel step="computers" activeStep={activeStep} notice={deletionNotice}>
         <ComputersStep onConnectDevice={onConnectDevice} configurations={computers} existingConfigurations={source.existingConfigurations} existingConfigurationIds={source.existingConfigurationIds} progress={viewModel.computerProgress} onConfigurationsChange={saveConfigurations} onRetry={retrySetup} initialEditorDraft={draft.unfinishedComputerEditor} onEditorDraftChange={(unfinishedComputerEditor) => updateDraft({ unfinishedComputerEditor })} />
+      </OnboardingPanel>
+      <OnboardingPanel step="agent" activeStep={activeStep} notice={deletionNotice}>
+        <AgentStep
+          choice={agentChoice}
+          onChoose={(choice) => { void updateSettings({ agent: choice }) }}
+          computerName={computers[0]?.name ?? "your computer"}
+          setup={viewModel.agent}
+          onRetry={actions.retryAgentInstall}
+        />
       </OnboardingPanel>
       <OnboardingPanel step="github" activeStep={activeStep} notice={deletionNotice}>
         <GitHubStep
@@ -548,7 +566,7 @@ export function OnboardingApp({
         />
       </OnboardingPanel>
       <OnboardingPanel step="review" activeStep={activeStep} notice={deletionNotice}>
-        {completed ? <SetupComplete configurations={computers} githubSummary={githubSummary} /> : <ReviewStep
+        {completed ? <SetupComplete configurations={computers} githubSummary={githubSummary} agent={viewModel.agent} agentChoice={agentChoice} onRetryAgent={actions.retryAgentInstall} ensureSshName={actions.ensureSshName} /> : <ReviewStep
           onEditStep={setActiveStep}
           computerRetryable={viewModel.computerProgress.retryable}
           queueItems={viewModel.queueItems}

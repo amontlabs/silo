@@ -76,8 +76,9 @@ export function createSetupQueue({ snapshot, publish, disposed }: ProductionCont
     })
   }
 
-  function isBusy() {
-    return jobs.some((job) => job.items.some(({ status }) => status === "running" || status === "queued"))
+  /** Whether setup work runs or waits, not counting the jobs that only hold the items in `except`. */
+  function isBusy(except: readonly SetupQueueItemID[] = []) {
+    return jobs.some((job) => job.items.some(({ id, status }) => !except.includes(id) && (status === "running" || status === "queued")))
   }
 
   /** What Quit is waiting for while setup drains, for the shutdown overlay. */
@@ -85,6 +86,7 @@ export function createSetupQueue({ snapshot, publish, disposed }: ProductionCont
     const pending = new Set(jobs.flatMap((job) => job.items.filter(({ status }) => status === "running" || status === "queued").map(({ id }) => id)))
     const steps = [
       (pending.has("computerRun") || pending.has("computerVerify")) && "creating computers",
+      pending.has("agentInstall") && "installing the agent",
       (pending.has("identityRun") || pending.has("identityVerify")) && "applying Git identities",
       (pending.has("githubRun") || pending.has("githubVerify")) && "verifying GitHub access",
       pending.has("completion") && "saving setup",

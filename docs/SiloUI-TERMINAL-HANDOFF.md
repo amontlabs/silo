@@ -59,3 +59,25 @@ were not inspected. The independent real PTY check above verified interactive
 command execution. Native status tray interaction was not driven; route delivery
 and dismissal were verified through native and frontend tests. No fixture mode
 was used for the launcher test.
+
+## Open with an agent (2026-11-11)
+
+`terminal.command` takes an optional `agent`, one of the known agents (`claude-code`, `codex`;
+anything else is refused when the request is read). With it the same terminal opens on the
+computer with that agent started in the workspace folder instead of the shell. The engine maps
+the agent to a fixed command and takes nothing else from the caller: `cd /workspace` (macOS:
+`/Users/silo/workspace`), then `exec /usr/local/bin/claude` or `/usr/local/bin/codex`, the links
+`agents.install` makes on both systems. If the program is missing it says so and leaves a login
+shell, so the terminal does not close on an unread message.
+
+- **Linux computers** append `-- /bin/bash -lc <command>` to the `msb exec ... --tty` argv, after
+  the existing options (a container computer takes the same argv through its runtime).
+- **macOS computers and computers on another device** pass the command as the one argument after
+  `ssh -F <alias config> -t <alias>`.
+
+Silo does not sign in to an agent. An agent that is not signed in says so itself in the terminal.
+The app offers the action for each installed agent on the computer's page, in its menu, in the
+command palette and on its row in the menu bar panel. The Agents section on the page lists the
+agents with `agents.list` and installs with `agents.install`, and the last screen of setup and
+that section can show the computer's SSH host name through `guest.sshAlias.ensure`, the alias
+Open editor already uses, when the person asks for it.

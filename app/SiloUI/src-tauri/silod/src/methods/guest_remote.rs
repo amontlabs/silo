@@ -228,7 +228,8 @@ pub(super) async fn terminal_command(
             true,
             false,
         )?;
-        editor::remote_terminal_argv(&alias.config, &alias.alias).map_err(plain)
+        editor::remote_terminal_argv(&alias.config, &alias.alias, params.agent, owner.macos)
+            .map_err(plain)
     })
     .await?;
     output(CommandResult { argv })

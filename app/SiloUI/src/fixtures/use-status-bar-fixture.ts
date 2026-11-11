@@ -7,6 +7,7 @@ import { statusBarSourceForFixture, type StatusBarFixtureMode } from "./status-b
 import { useSettings } from "@/features/preferences/settings-store"
 
 import { fixtureDirectoryLoader } from "./directory-loader"
+import { agentFixtureModeFromSearch, createAgentFixture } from "./agents"
 
 interface PreviewOperation {
   name: string
@@ -146,6 +147,8 @@ export function useStatusBarFixture(source: ApplicationSource, mode: StatusBarFi
   }, [])
 
   const listComputerDirectory = useMemo(() => fixtureDirectoryLoader(snapshot.computers), [snapshot.computers])
+  const [agentFixture] = useState(() => createAgentFixture({ mode: agentFixtureModeFromSearch(window.location.search) }))
+  useEffect(() => agentFixture.setComputers(snapshot.computers), [agentFixture, snapshot.computers])
   const actions: StatusBarActions = {
     listComputerDirectory,
     openSilo: (route) => onOpenSilo(settleOperations(), route),
@@ -162,6 +165,8 @@ export function useStatusBarFixture(source: ApplicationSource, mode: StatusBarFi
     stopComputer: (name) => updateComputer(name, "stopped", "stopped"),
     restartComputer: (name) => updateComputer(name, "running", "restarted"),
     openTerminal: (name) => setAcknowledgement(`Preview: open ${snapshot.preferences.terminal} in ${name}.`),
+    openAgent: (name, agent) => setAcknowledgement(`Preview: open ${agent === "codex" ? "Codex" : "Claude Code"} in ${name}.`),
+    listAgents: agentFixture.listAgents,
     openEditor: (name, path) => setAcknowledgement(`Preview: open ${path} in ${snapshot.preferences.editor} on ${name}.`),
     openSite: (name, port) => setAcknowledgement(`Preview: open ${name} port ${port} in ${snapshot.preferences.browser}.`),
     pushRepository,

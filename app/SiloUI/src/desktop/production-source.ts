@@ -7,7 +7,7 @@ import { useMemo, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { showOperationFailure } from "@/lib/operation-toast"
 import { approvalJobSchema, approvalListSchema, approvalShape, auditListSchema, computerTreeSchema, deviceResourcesSchema, directoryPageShape, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
-import type { Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, ComputerStep, ComputerTreeNode, DeviceResources, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
+import type { AgentId, Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, ComputerStep, ComputerTreeNode, DeviceResources, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
 export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
 import { siloProgressEventSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
@@ -26,6 +26,8 @@ import type { ProductionContext } from "./production-context"
 import { createBackupControls } from "./production-backup"
 import { createDeviceServices } from "./production-services"
 import { createSetupQueue } from "./production-setup-queue"
+import * as agents from "./production-agents"
+import { agentToInstall } from "@/features/agents/model/agents"
 import type { EventHandler, ListedDevice, ProductionBridge, ProductionSnapshot } from "./production-types"
 import { PUSH_STATUS_ATTEMPTS, PUSH_STATUS_INTERVAL_MS, PUSH_STATUS_MAX_INTERVAL_MS, REFRESH_GATE_TIMEOUT_MS, REMOTE_READ_WAIT_MS, RETURN_REFRESH_MIN_AGE_MS, canonicalKey, derivePorts, errorMessage, isUpdateInProgress, lastCancelledLifecycle, pushKey, reportedCancellation, shareStructure, unavailableBackup } from "./production-helpers"
 
@@ -138,6 +140,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   let lastVerificationKey: string | undefined
   let lastGitHubJob: { key: string; promise: Promise<void> } | undefined
   let lastIdentityJob: { key: string; promise: Promise<void> } | undefined
+  /** The agent install setup last queued, and what a retry installs again. */
+  let lastAgentJob: { key: string; computer: string; computerId: string; agent: AgentId } | undefined
   let activeConfiguration: ApplicationSource["computerConfigurationOperation"] = null
   let activeRequestId: string | null = null
   let operationSequence = 0
@@ -868,6 +872,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     lastVerificationKey = undefined
     lastIdentityJob = undefined
     lastGitHubJob = undefined
+    lastAgentJob = undefined
+    publish({ ...snapshot, setupAgent: undefined, setupQueue: snapshot.setupQueue.filter(({ id }) => id !== "agentInstall") })
     setSetupStatus(["identityRun", "identityVerify", "githubRun", "githubVerify", "completion"], "idle")
     const promise = enqueueSetup(["computerRun", "computerVerify"], async (job) => {
       setup.activeComputerJob = job
@@ -948,13 +954,54 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     }
   }
 
-  function submitSetupStep(step: "computers" | "github", request: OnboardingCompletionRequest): Promise<unknown> {
+  /**
+   * Queues installing the chosen agent in the first computer, behind the computer's creation.
+   * Setup never fails because of it: a failed install is left in the queue item for the final
+   * screen to offer a retry.
+   */
+  function queueAgentInstall(request: OnboardingCompletionRequest, computerJob: Promise<unknown>) {
+    const agent = agentToInstall(request.agent)
+    const computer = request.computerConfiguration.computers[0]
+    if (!agent || !computer) {
+      if (lastAgentJob || snapshot.setupAgent) { lastAgentJob = undefined; publish({ ...snapshot, setupAgent: undefined, setupQueue: snapshot.setupQueue.filter(({ id }) => id !== "agentInstall") }) }
+      return
+    }
+    const key = `${computer.id}:${agent}`
+    if (lastAgentJob?.key === key) return
+    runAgentInstall({ key, computer: computer.name, computerId: computer.id, agent }, computerJob)
+  }
+
+  function runAgentInstall(job: NonNullable<typeof lastAgentJob>, computerJob: Promise<unknown>) {
+    const { key, computer, computerId, agent } = job
+    lastAgentJob = job
+    // The agent has a queue item only while one was chosen, so "every item succeeded" still means setup is done.
+    const setupQueue = snapshot.setupQueue.some(({ id }) => id === "agentInstall") ? snapshot.setupQueue : [...snapshot.setupQueue, { id: "agentInstall" as const, status: "idle" as const }]
+    publish({ ...snapshot, setupAgent: { computer, agent }, setupQueue })
+    const promise = enqueueSetup(["agentInstall"], async () => {
+      await computerJob
+      // A computer that already has the agent needs nothing.
+      const listed = await agents.listAgents(native, computer)
+      if (listed.some(({ id, state }) => id === agent && state === "ready")) return
+      await agents.installAgent(native, computer, computerId, agent, progress => {
+        if (lastAgentJob?.key === key) publish({ ...snapshot, setupAgent: { computer, agent, step: progress.step, detail: progress.detail } })
+      })
+    })
+    void promise.catch(() => {})
+  }
+
+  /** Installs the chosen agent again after a failure. */
+  function retryAgentInstall() {
+    if (setup.isAccepting() && lastAgentJob) runAgentInstall(lastAgentJob, Promise.resolve())
+  }
+
+  function submitSetupStep(step: "computers" | "agent" | "github", request: OnboardingCompletionRequest): Promise<unknown> {
     if (!setup.isAccepting()) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
     ++identityVerificationSequence
     const current = snapshot.source
     const configurationsUnchanged = current && current.computers.length > 0
       && !current.computerConfigurationOperation && !activeConfiguration
-      && !setup.isBusy()
+      // Installing the agent does not make the computers unsettled.
+      && !setup.isBusy(["agentInstall"])
       && current.computers.every(({ freshness, state }) => freshness === "fresh" && state !== "failed" && state !== "starting")
       && JSON.stringify(current.computers.map(({ configuration }) => setupComputerConfigurationSchema.parse(configuration))) === JSON.stringify(request.computerConfiguration.computers.map((configuration) => setupComputerConfigurationSchema.parse(configuration)))
     // Initial setup and continues send the specific creations/edits as one batch. When
@@ -967,6 +1014,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       ? Promise.resolve(current)
       : configureConfigurations(request.computerConfiguration, changes.length > 0 ? { kind: "changes", changes } : { kind: "retry" })
     if (step === "computers") return computerJob
+    queueAgentInstall(request, computerJob)
+    if (step === "agent") return computerJob
     const activityId = crypto.randomUUID()
     const identities = request.github.computers.map(({ computer, identity }) => ({ computer, ...identity }))
     const identityKey = JSON.stringify([request.computerConfiguration, identities])
@@ -1228,6 +1277,9 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     decideApproval: answer => decideApproval(answer, native),
     watchApprovals: onChange => watchApprovals(onChange, native),
     readApprovalJob: jobId => readApprovalJob(jobId, native),
+    listAgents: computer => agents.listAgents(native, computer),
+    installAgent: (computer, agent, onProgress) => agents.installAgent(native, computer, view.source?.computers.find(item => computerTarget(item) === computer)?.configuration.id ?? computer, agent, onProgress),
+    ensureSshName: computer => agents.ensureSshName(native, computer),
     listAudit: options => listAudit(options, native),
     readDeviceResources: deviceId => readDeviceResources(deviceId, native),
     sshConnection: (computer, download, network) => {
@@ -1364,6 +1416,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       catch (cause) { reportActionFailure(`open-desktop:${computer}`, "Could not open the Linux desktop", errorMessage(cause)) }
     },
     openTerminal: (name) => computerAction("open-terminal", name),
+    openAgent: (name, agent) => computerAction("open-agent", name, { agent }),
     openEditor: (name, path) => computerAction("open-editor", name, path ? { path } : undefined),
     connectGitHub: () => { void githubMutation("connect_github").catch(() => {}) },
     cancelGitHubConnection: () => { void githubMutation("cancel_github_connection").catch(() => {}) },
@@ -1396,6 +1449,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     stopComputer: applicationActions.stopComputer,
     restartComputer: applicationActions.restartComputer,
     openTerminal: applicationActions.openTerminal,
+    openAgent: applicationActions.openAgent,
+    listAgents: applicationActions.listAgents,
     pushRepository: applicationActions.pushRepository,
     openSilo: (route?: StatusBarRoute) => { void native.invoke("open_main", { route: route ?? null }).catch((cause) => console.error("Silo main window:", errorMessage(cause))) },
     quit: (choice) => { void native.invoke("quit_app", { choice: choice ?? null }).catch((cause: unknown) => reportActionFailure("quit", "Could not quit Silo", errorMessage(cause))) },
@@ -1450,6 +1505,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     watchNetwork: services.watchNetwork,
     configureConfigurations,
     submitSetupStep,
+    retryAgentInstall,
     verifySetupIdentities,
     finishSetup,
     drainSetup,

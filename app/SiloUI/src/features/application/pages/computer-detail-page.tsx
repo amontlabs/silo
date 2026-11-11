@@ -1,4 +1,4 @@
-import { ChevronRight, Code, Cpu, GitBranch, Globe, Monitor, Play, Plus, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
+import { Bot, ChevronRight, Code, Cpu, GitBranch, Globe, Monitor, Play, Plus, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
 import { useId, useState, type MouseEvent, type ReactNode } from "react"
 
 import { ActionsMenu, type MenuAction, type MenuPopovers } from "@/components/actions-menu"
@@ -44,6 +44,9 @@ import { NetworkPortForm, NetworkPortRowActions } from "@/features/application/c
 import { networkAddress, networkPortState, useNetworkPorts } from "@/features/application/components/network-ports-state"
 import { ComputerUseSection } from "@/desktop/computer-use-panel"
 import { PortStateLabel } from "@/features/application/components/application-ui"
+import { AgentsSection } from "@/features/agents/components/agents-section"
+import { openableAgents, openAgentLabel } from "@/features/agents/model/agents"
+import { useComputerAgents } from "@/features/agents/model/use-computer-agents"
 import { cn } from "@/lib/utils"
 
 /** Everything the detail page needs to edit or delete this computer in place, sharing the
@@ -269,7 +272,7 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
   </Section>
 }
 
-function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, computerUse }: { computerUse?: ReactNode; computer: ApplicationComputer; source: ApplicationSource; actions: ApplicationActions; active: boolean; onEdit?: () => void; onNavigate?: (route: ApplicationInitialRoute) => void }) {
+function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, computerUse, agentsSection }: { computerUse?: ReactNode; agentsSection?: ReactNode; computer: ApplicationComputer; source: ApplicationSource; actions: ApplicationActions; active: boolean; onEdit?: () => void; onNavigate?: (route: ApplicationInitialRoute) => void }) {
   const { configuration } = computer
   const repositories = computer.repositories ?? []
   const extraGithub = (computer.githubRepositories ?? []).filter(name => !repositories.some(repo => repo.path.endsWith(name)))
@@ -291,6 +294,8 @@ function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, co
     </Section>
 
     {computerUse}
+
+    {agentsSection}
 
     <Section label="Repositories" action={onNavigate ? <ViewAllAction label="View all files for this computer" onClick={() => onNavigate({ computerSection: "files", computer: configuration.id })} /> : undefined}>
       <ListCard divided={repositories.length + extraGithub.length > 1}>
@@ -332,6 +337,9 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
   const kind = kindOf(computer)
   const target = computerTarget(computer)
   const state = computer.state
+  const agentsAvailable = Boolean(actions.listAgents) && computerCan(kind, "terminal") && !(computer.macos && macosNeedsSetup(computer.macos)) && !(computer.device && computer.device.connected === false)
+  const agents = useComputerAgents(actions.listAgents, target, agentsAvailable && controls.pageActive !== false, state)
+  const openAgents = actions.openAgent ? openableAgents(agents.agents) : []
   const canStop = state === "running" || state === "starting"
   // A starting or stopping computer can be neither edited nor deleted until it settles.
   const busyReason = computerBusyReason(computer)
@@ -424,6 +432,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
         subtitle={<span data-slot="computer-detail-status"><DetailSubtitle computer={computer} source={source} readOnly={controls.readOnly} pendingSecrets={pendingSecrets} sshAccess={access} sshStale={sshStale} onCancel={actions.cancelOperation} onOpenSsh={showAccess ? () => controls.onSelectTab("access") : undefined} /></span>}
         actions={<div className="flex shrink-0 items-center gap-1">
           {computerCan(kind, "terminal") && <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.terminal}`} disabled={!controls.canOpen} onClick={controls.onTerminal}><Terminal aria-hidden="true" data-icon="inline-start" />Terminal</Button></DisabledReason>}
+          {openAgents.map(agent => <DisabledReason key={agent.id} reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={openAgentLabel(agent.id, configuration.name)} disabled={!controls.canOpen} onClick={() => actions.openAgent?.(target, agent.id)}><Bot aria-hidden="true" data-icon="inline-start" />{agent.name}</Button></DisabledReason>)}
           {computerCan(kind, "editor") && <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.editor}`} disabled={!controls.canOpen} onClick={controls.onEditor}><Code aria-hidden="true" data-icon="inline-start" />Editor</Button></DisabledReason>}
           {controls.desktop && <Button type="button" variant="outline" size="xs" aria-label={controls.desktop.label ? `${controls.desktop.label} of ${configuration.name}` : `Open ${configuration.name} desktop`} disabled={controls.desktop.disabled} onClick={controls.desktop.onClick}><Monitor aria-hidden="true" data-icon="inline-start" />{controls.desktop.label ?? "Desktop"}</Button>}
           {canStop
@@ -490,7 +499,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
         </div>
         <ScrollArea className="min-h-0 flex-1">
           <div className="pt-4">
-            <TabsContent value="overview"><OverviewTab computer={computer} source={source} actions={actions} active={activeTab === "overview" && controls.pageActive !== false} onEdit={canEdit ? () => editing.startEdit(configuration) : canEditMacos ? () => setPanelRequest({ token: Date.now(), panel: "resources" }) : undefined} onNavigate={controls.onNavigate} computerUse={configuration.desktop || computer.macos?.setupComplete ? <>{configuration.runtime === "container" && <ContainerBrowserNotice className="mb-3" />}<ComputerUseSection key={target} computer={target} active={activeTab === "overview" && controls.pageActive !== false} /></> : undefined} /></TabsContent>
+            <TabsContent value="overview"><OverviewTab computer={computer} source={source} actions={actions} active={activeTab === "overview" && controls.pageActive !== false} onEdit={canEdit ? () => editing.startEdit(configuration) : canEditMacos ? () => setPanelRequest({ token: Date.now(), panel: "resources" }) : undefined} onNavigate={controls.onNavigate} agentsSection={agentsAvailable ? <AgentsSection target={target} computerName={configuration.name} running={state === "running"} offline={computer.freshness === "stale" && Boolean(computer.device)} agents={agents.agents} error={agents.error} loading={agents.loading} onReload={() => void agents.reload()} actions={actions} /> : undefined} computerUse={configuration.desktop || computer.macos?.setupComplete ? <>{configuration.runtime === "container" && <ContainerBrowserNotice className="mb-3" />}<ComputerUseSection key={target} computer={target} active={activeTab === "overview" && controls.pageActive !== false} /></> : undefined} /></TabsContent>
             <TabsContent value="checkpoints">
               {computer.macos && macosStore ? <MacosCheckpointPanel computer={computer.macos} store={macosStore} takenNames={computerNamesOnDevice(source.computers, undefined, macosNames)} onStart={() => controls.lifecycleGuard.request(computer, "start")} onExport={controls.onCheckpointExport && ((_name, checkpoint) => { if (checkpoint) controls.onCheckpointExport!(checkpoint) })} /> : <>
               <CheckpointPanel computer={computer} target={target} actions={actions} takenNames={computerNamesOnDevice(source.computers, computer.device?.id, macosNames)} disabled={controls.configurationLocked || Boolean(computer.lifecycleAction) || Boolean(computer.device?.busy) || computer.freshness === "stale"} onExport={controls.onCheckpointExport} exportDisabled={controls.checkpointExportDisabled} forkedAction={controls.onCheckpointForkedAction} restoredAction={controls.onCheckpointRestoredAction} />

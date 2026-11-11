@@ -50,13 +50,15 @@ pub fn remove_alias(context: &MacosContext, target: &Target) -> Result<(), Guest
     Ok(macos_computers::remove_ssh_alias(context, id)?)
 }
 
-/// `terminal.command` for a macOS computer: `ssh -F <alias config> -t <alias>`.
+/// `terminal.command` for a macOS computer: `ssh -F <alias config> -t <alias>`, followed by
+/// the agent's fixed command line when an `agent` is named.
 pub fn terminal_command(
     context: &MacosContext,
     target: &Target,
+    agent: Option<silo_api::methods::agents::AgentId>,
 ) -> Result<Vec<String>, GuestError> {
     let id = computer(target, "Terminals")?;
-    Ok(macos_computers::terminal_command(context, id)?.argv)
+    Ok(macos_computers::terminal_command(context, id, agent)?.argv)
 }
 
 /// `editor.command` for a macOS computer: prepares the alias and returns the argv that opens
@@ -105,7 +107,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let target = test_support::target(directory.path());
         let context = context(directory.path());
-        let error = terminal_command(&context, &target).unwrap_err();
+        let error = terminal_command(&context, &target, None).unwrap_err();
         assert_eq!(error.code, ErrorCode::Internal);
         assert!(error.message.contains("does not use the macOS adapters"));
         assert!(remove_alias(&context, &target).is_err());
@@ -120,7 +122,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let target = test_support::macos_target(directory.path());
         let context = context(directory.path());
-        let error = terminal_command(&context, &target).unwrap_err();
+        let error = terminal_command(&context, &target, None).unwrap_err();
         assert!(
             !error.message.contains("pending parity-2"),
             "{}",

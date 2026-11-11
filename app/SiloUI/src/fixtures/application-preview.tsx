@@ -1,6 +1,6 @@
 import { computerTarget } from "@/features/application/model/connections"
 import { fixtureLogPage, type LogLoader } from "@/features/application/model/logs"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { macosApplicationComputers } from "@/features/application/model/macos-application-computers"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { withMacosFixtureContents } from "./macos-computers"
@@ -8,6 +8,7 @@ import { fixtureDirectoryLoader } from "./directory-loader"
 import { fixtureComputerSteps, fixtureComputerTree } from "./computer-steps"
 import { fixtureFileTransfers } from "./file-transfers"
 import { createApprovalFixture, type ApprovalFixtureMode } from "./approvals"
+import { createAgentFixture, type AgentFixtureMode } from "./agents"
 import { useApplicationFixture } from "@/fixtures/application-state"
 import { ApplicationApp } from "@/features/application/application-app"
 import type { ApplicationActions, ApplicationSource, SshAccessRequest, SshAccessComputer } from "@/features/application/model/application-source"
@@ -40,7 +41,7 @@ const inactiveApplicationActions: ApplicationActions = {
   disconnectGitHub: () => undefined,
 }
 
-export function ApplicationPreview({ source, actions, backupPreviewMode, initialRoute, nativeOperations = false, preUpgradeBackup, editorInclude, unseenResult, approvals }: {
+export function ApplicationPreview({ source, actions, backupPreviewMode, initialRoute, nativeOperations = false, preUpgradeBackup, editorInclude, unseenResult, approvals, agents }: {
   source: ApplicationSource
   actions?: Partial<ApplicationActions>
   backupPreviewMode?: BackupFixtureMode
@@ -54,19 +55,23 @@ export function ApplicationPreview({ source, actions, backupPreviewMode, initial
   unseenResult?: FixtureUnseenResult
   /** What the agents inside computers have asked for. Without it the preview lists no approvals and no review requests. */
   approvals?: ApprovalFixtureMode
+  /** The state of the agents in every computer. Without it the preview has no agents to list or install. */
+  agents?: AgentFixtureMode
 }) {
   const { store } = useSettings(source.preferences)
   const [systemIntegrations] = useState(() => createFixtureSystemIntegrationStore(store))
   const application = nativeOperations
     ? <UnavailableApplicationPreview source={source} actions={actions} initialRoute={initialRoute} />
-    : <FixtureApplicationPreview source={source} actions={actions} backupPreviewMode={backupPreviewMode} initialRoute={initialRoute} unseenResult={unseenResult} approvals={approvals} />
+    : <FixtureApplicationPreview source={source} actions={actions} backupPreviewMode={backupPreviewMode} initialRoute={initialRoute} unseenResult={unseenResult} approvals={approvals} agents={agents} />
   const withBackup = preUpgradeBackup ? <PreUpgradeBackupProvider backend={preUpgradeBackup}>{application}</PreUpgradeBackupProvider> : application
   const withInclude = editorInclude ? <EditorIncludeProvider backend={editorInclude}>{withBackup}</EditorIncludeProvider> : withBackup
   return <SettingsProvider store={store}><SystemIntegrationProvider store={systemIntegrations}>{withInclude}</SystemIntegrationProvider></SettingsProvider>
 }
 
-function FixtureApplicationPreview({ source, actions, backupPreviewMode, initialRoute, unseenResult, approvals }: Parameters<typeof ApplicationPreview>[0]) {
+function FixtureApplicationPreview({ source, actions, backupPreviewMode, initialRoute, unseenResult, approvals, agents }: Parameters<typeof ApplicationPreview>[0]) {
   const fixture = useApplicationFixture(source)
+  const [agentFixture] = useState(() => createAgentFixture({ mode: agents }))
+  useEffect(() => agentFixture.setComputers(fixture.source.computers), [agentFixture, fixture.source.computers])
   const [approvalFixture] = useState(() => approvals && createApprovalFixture({ mode: approvals, computers: source.computers.map(({ configuration }) => ({ id: configuration.id, name: configuration.name })) }))
   const [sshSettings, setSshSettings] = useState(() => new Map<string, SshAccessRequest>())
   const sshAccess = { computers: fixture.source.computers.map((w, index): SshAccessComputer => {
@@ -111,6 +116,7 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       readComputerTree: async () => fixtureComputerTree,
       listComputerDirectory,
       ...approvalFixture?.actions,
+      ...(agents && { listAgents: agentFixture.listAgents, installAgent: agentFixture.installAgent, ensureSshName: agentFixture.ensureSshName, openAgent: () => undefined }),
       fileTransfers,
       queryLogs,
       ...actions,

@@ -1,3 +1,4 @@
+pub(crate) mod agents;
 pub(crate) mod applications;
 pub(crate) mod approvals;
 pub(crate) mod backup_controller;

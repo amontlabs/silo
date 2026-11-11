@@ -15,7 +15,7 @@ import type {
   SiloProgressEvent,
   SiloProtocolError,
 } from "@/contracts/silo"
-import type { Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, DeviceResources, RequestList } from "@/desktop/production-schemas"
+import type { AgentId, AgentInfo, AgentInstallProgress, Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, DeviceResources, RequestList, SshName } from "@/desktop/production-schemas"
 import type { ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 
 export type ApplicationTab = "computers" | "changes" | "github" | "secrets" | "system" | "settings"
@@ -360,6 +360,14 @@ export interface ApplicationActions {
   listAudit?: (options?: { computerId?: string; callerKind?: AuditCallerKind; beforeId?: number; limit?: number }) => Promise<AuditPage>
   /** What the device has left in memory and disk. */
   readDeviceResources?: (deviceId?: string) => Promise<DeviceResources>
+  /** The agents Silo can install in a computer, each with its state; `unknown` while the computer is stopped. */
+  listAgents?: (computer: string) => Promise<AgentInfo[]>
+  /** Installs an agent in a running computer. `onProgress` hears each step; it resolves with the computer's agents. */
+  installAgent?: (computer: string, agent: AgentId, onProgress?: (progress: AgentInstallProgress) => void) => Promise<AgentInfo[]>
+  /** Opens the person's terminal on a running computer with the agent started in its workspace folder. */
+  openAgent?: (computer: string, agent: AgentId) => void
+  /** The SSH host name this device's desktop apps use to reach the computer. Adds it to the SSH configuration. */
+  ensureSshName?: (computer: string) => Promise<SshName>
   createCheckpoint?: (computer: string, name: string) => Promise<void>
   forkCheckpoint?: (computer: string, checkpointId: string | null, newName: string) => Promise<void>
   restoreCheckpoint?: (computer: string, checkpointId: string) => Promise<void>

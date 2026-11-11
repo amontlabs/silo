@@ -133,6 +133,9 @@ fn migration_and_checkpoint_commands_are_allowlisted_for_the_main_window() {
         "abandon_restore",
         "read_checkpoint_usage",
         "remote_checkpoint_action",
+        "list_agents",
+        "install_agent",
+        "ensure_ssh_name",
         "list_approvals",
         "get_approval",
         "decide_approval",
@@ -295,4 +298,22 @@ fn file_transfer_commands_are_limited_to_the_main_window_and_the_viewer_shell() 
     assert!(capabilities["desktop-transfer"]["windows"]
         .as_array()
         .is_none_or(Vec::is_empty));
+}
+
+#[test]
+fn agents_are_listed_by_the_status_panel_and_installed_from_the_main_window_only() {
+    let capabilities: Value =
+        serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();
+    let granted = |window: &str, permission: &str| {
+        capabilities[window]["permissions"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::String(permission.into()))
+    };
+    assert!(granted("preview", "allow-list-agents"));
+    assert!(granted("preview", "allow-install-agent"));
+    assert!(granted("status", "allow-list-agents"));
+    assert!(!granted("status", "allow-install-agent"));
+    assert!(granted("preview", "allow-ensure-ssh-name"));
+    assert!(!granted("status", "allow-ensure-ssh-name"));
 }

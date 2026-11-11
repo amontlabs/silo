@@ -64,6 +64,7 @@ exports[`native command permissions > pins every non-main window grant 1`] = `
       "allow-device-snapshot",
       "allow-dismiss-repository-push",
       "allow-hide-status",
+      "allow-list-agents",
       "allow-list-applications",
       "allow-list-computer-directory",
       "allow-open-main",

@@ -95,6 +95,23 @@
       ],
       "type": "string"
     },
+    "AgentPreference": {
+      "description": "Which agent the person uses, or that they set one up themselves.",
+      "oneOf": [
+        {
+          "enum": [
+            "claude-code",
+            "codex"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Silo installs no agent; the person sets it up themselves.",
+          "type": "string"
+        }
+      ]
+    },
     "AgentState": {
       "oneOf": [
         {
@@ -17922,6 +17939,17 @@
       "additionalProperties": false,
       "description": "Known settings exposed by 60 §2.3. Unknown keys are rejected by the API;\ndisk migration and legacy preservation remain engine concerns.",
       "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentPreference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The agent the person uses; computers made later suggest it. `null` until chosen."
+        },
         "alphaNoticeDismissed": {
           "type": "boolean"
         },
@@ -18544,6 +18572,17 @@
     },
     "TerminalCommandParams": {
       "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Start this agent in the computer's workspace folder instead of a plain shell. The\nengine runs the agent's fixed command; nothing else can be named."
+        },
         "computerId": {
           "type": "string"
         },

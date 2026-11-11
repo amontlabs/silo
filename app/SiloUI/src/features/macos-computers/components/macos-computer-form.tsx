@@ -1,9 +1,12 @@
-import { useId, type ReactNode } from "react"
+import { useId, useState, type ReactNode } from "react"
 import { Monitor } from "lucide-react"
 
 import { ConfirmPopover } from "@/components/confirm-popover"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { AgentChoiceField } from "@/features/agents/components/agent-choice-field"
+import { planAgentInstall, useAgentInstallSupport, useRememberedAgentChoice } from "@/features/agents/model/planned-installs"
+import type { AgentChoice } from "@/features/agents/model/agents"
 import type { DeviceCapacity } from "@/features/computers/model/computer-limits"
 import { showActionFailure } from "@/lib/operation-toast"
 import {
@@ -38,6 +41,9 @@ export function MacosComputerForm({ fields, onChange, creating, existingNames, o
   onCreate: (request: MacosComputerRequest) => void
 }) {
   const noticeId = useId()
+  const offersAgent = useAgentInstallSupport() && !runOnField
+  const rememberedAgent = useRememberedAgentChoice()
+  const [agentChoice, setAgentChoice] = useState<AgentChoice | null>(null)
   const request = macosRequestFrom(fields)
   const errors = validateMacosRequest(request, existingNames, { maxCPUs: capacity?.logicalCPUs, maxMemoryGiB: capacity?.memoryGiB, minDiskGiB, otherNames })
   const invalid = Object.keys(errors).length > 0
@@ -67,6 +73,7 @@ export function MacosComputerForm({ fields, onChange, creating, existingNames, o
         {field("Memory (GiB)", "memoryGiB", true)}
         {field("Disk (GiB)", "diskGiB", true)}
       </div>
+      {offersAgent && <AgentChoiceField value={agentChoice ?? rememberedAgent} onChange={setAgentChoice} />}
       <p className="text-caption text-muted-foreground">{macosLicenseNotice}</p>
       {template && <div className="grid justify-items-start gap-1 text-caption text-muted-foreground" data-testid="macos-template-notice">
         <p>{template.current
@@ -87,7 +94,7 @@ export function MacosComputerForm({ fields, onChange, creating, existingNames, o
     </fieldset>
     <div className="flex justify-end gap-2">
       <Button type="button" variant="outline" size="sm" disabled={creating} onClick={onCancel}>Cancel</Button>
-      <Button type="button" size="sm" disabled={creating || invalid} onClick={() => onCreate(request)}>{creating ? "Creating…" : "Create"}</Button>
+      <Button type="button" size="sm" disabled={creating || invalid} onClick={() => { if (offersAgent) planAgentInstall(request.name, agentChoice ?? rememberedAgent); onCreate(request) }}>{creating ? "Creating…" : "Create"}</Button>
     </div>
   </div>
 }
