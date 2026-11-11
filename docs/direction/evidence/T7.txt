@@ -1,0 +1,143 @@
+[14:33:16] == header
+commit 789eda940 on check/t7-macos-live; silo 0.1.0; host 26.5 arm64; 2026-11-11T13:33:16Z
+disk record of e2e-t7-base now 64 GiB (unchanged)
+[14:33:17] PASS  the Dev engine starts from the bundle  -- pid 19484, log /Users/polarzero/.t3/worktrees/microsandbox-workspaces/t3-5dc9d60f/app/SiloUI/src-tauri/target/verification/silod-dev-t7.log
+computers before: workspace-1 e2e-relay silo-eval-a silo-eval-b e2e-t7-base 
+free disk: 73 GiB
+[14:33:19] == setup: the source computer e2e-t7-base and its stale checkpoint
+e2e-t7-base: state stopped, tools version now 3b6e8590057963d0; checkpoint cp-stale (9468bf70-b3a4-4f75-b1b7-7cd9a78d6812) says tools version stale-tools-0.0.1
+[14:33:20] PASS  the source is complete and its checkpoint's tools are stale  -- 
+[14:33:20] == S1 fork a complete computer whose tools are stale
+[14:33:22] PASS  S1 fork e2e-t7-base at cp-stale  -- 
+[14:34:32] PASS  S1 the fork's setup settles  -- state stopped
+--- setup log of e2e-t7-f1:
+  2026-11-11T13:33:21.249864Z setup started
+  2026-11-11T13:33:21.256376Z step: Personalizing the computer
+  2026-11-11T13:33:26.6605Z step: Starting macOS
+  2026-11-11T13:33:27.101609Z boot 1: first Start
+  2026-11-11T13:33:51.331313Z step: Installing developer tools
+  2026-11-11T13:34:11.809712Z step: Updating Computer Use
+  2026-11-11T13:34:22.336955Z step: Setting up network and trust
+  2026-11-11T13:34:22.371776Z step: Shutting down
+  2026-11-11T13:34:28.800002Z setup finished
+[14:34:36] PASS  S1 the setup ended complete (stopped, no failure, all steps done, not imported, first Start done)  -- state stopped; setup {'account': True, 'sip': True, 'developerTools': True, 'computerUse': True, 'clipboard': True, 'roots': True, 'needsPersonalizing': False, 'proxyBootstrap': True}
+[14:34:36] PASS  S1 the tools were brought up to date in the guest (version stale-tools-0.0.1 -> 3b6e8590057963d0)  -- 
+[14:34:36] PASS  S1 the setup log has no NAT boot (no setup boot, no first-install boot)  -- boots: boot 1: first Start;
+[14:34:36] PASS  S1 the guest came up on the first Start behind the gateway  -- 
+[14:35:01] PASS  S1 start e2e-t7-f1  -- running
+[14:35:02] PASS  S1 the engine logs in with the computer's key (exec as silo) and sudo -n works  -- silo sudo-ok 
+address and gateway inside: 172.30.100.198 172.30.100.197  (recorded: 172.30.100.198 via 172.30.100.197)
+[14:35:02] PASS  S1 its only address is the gateway's (172.30.100.198), its route goes to 172.30.100.197  -- 
+[14:35:02] PASS  S1 no Apple NAT address (192.168.64.x) inside  -- 
+tools inside: 2.1.287 (Claude Code)|v24.21.0|git version 2.50.1 (Apple Git-155)|1|
+[14:35:03] PASS  S1 Claude Code, Node and Git run, and the tools receipt names Claude Code  -- 
+[14:35:11] PASS  S1 the Mac's NAT never leased an address to the fork (ba:90:fe:27:0f:92) during its setup and Start  -- leases seen: 
+[14:35:16] PASS  S1 control: the fork's own login files differ from its source's (the offline setup did run)  -- kcpassword source db98acb1ba1236ad, fork c7bea3dcd0eedf9f
+[14:35:16] == S3 a fork of a disk that lacks one bootstrap file is refused and the disk is left as it was
+[14:35:18] PASS  S3 remove silo-network-bootstrap from e2e-t7-f1's disk  -- 
+[14:35:21] PASS  S3 the disk lacks only silo-network-bootstrap  -- 
+[14:35:23] PASS  S3 fork e2e-t7-f1 (without silo-network-bootstrap) is accepted for setup  -- 
+state failed; detail: This computer's disk does not have the network setup Silo puts on every computer it sets up, so Silo will not start it on the Mac's own network. Delete it and make it again from a computer or checkpoint that this version of Silo has set up, or import an export of one.
+[14:35:29] PASS  S3 the fork is refused: failed, naming the missing network setup  -- 
+[14:35:29] PASS  S3 the refused fork never booted  -- 
+[14:35:31] PASS  S3 the refused disk is unchanged (account, key, host key, bootstrap files all as in the source)  -- 7 files, same checksums
+[14:35:33] PASS  S3 drop the refused fork  -- 
+[14:35:35] PASS  S3 put silo-network-bootstrap back  -- 
+[14:35:37] PASS  S3 remove com.silo.network-bootstrap.plist from e2e-t7-f1's disk  -- 
+[14:35:40] PASS  S3 the disk lacks only com.silo.network-bootstrap.plist  -- 
+[14:35:42] PASS  S3 fork e2e-t7-f1 (without com.silo.network-bootstrap.plist) is accepted for setup  -- 
+state failed; detail: This computer's disk does not have the network setup Silo puts on every computer it sets up, so Silo will not start it on the Mac's own network. Delete it and make it again from a computer or checkpoint that this version of Silo has set up, or import an export of one.
+[14:35:48] PASS  S3 the fork is refused: failed, naming the missing network setup  -- 
+[14:35:48] PASS  S3 the refused fork never booted  -- 
+[14:35:50] PASS  S3 the refused disk is unchanged (account, key, host key, bootstrap files all as in the source)  -- 7 files, same checksums
+[14:35:52] PASS  S3 drop the refused fork  -- 
+[14:35:54] PASS  S3 put com.silo.network-bootstrap.plist back  -- 
+[14:35:56] PASS  S3 remove config.json from e2e-t7-f1's disk  -- 
+[14:35:58] PASS  S3 the disk lacks only config.json  -- 
+[14:36:00] PASS  S3 fork e2e-t7-f1 (without config.json) is accepted for setup  -- 
+state failed; detail: This computer's disk does not have the network setup Silo puts on every computer it sets up, so Silo will not start it on the Mac's own network. Delete it and make it again from a computer or checkpoint that this version of Silo has set up, or import an export of one.
+[14:36:06] PASS  S3 the fork is refused: failed, naming the missing network setup  -- 
+[14:36:06] PASS  S3 the refused fork never booted  -- 
+[14:36:09] PASS  S3 the refused disk is unchanged (account, key, host key, bootstrap files all as in the source)  -- 7 files, same checksums
+[14:36:10] PASS  S3 drop the refused fork  -- 
+[14:36:12] PASS  S3 put config.json back  -- 
+[14:36:14] PASS  S1/S3 drop e2e-t7-f1  -- 
+[14:36:14] == S2 export the stale checkpoint and import it
+export file goes to /Volumes/ModelVault/e2e-t7-export.mhyKPe (same disk as the Dev data: no); free disk: 73 GiB
+[14:48:54] PASS  S2 export e2e-t7-base at cp-stale  -- Silo could not check it for logins (the files of a checkpoint cannot be listed, only its fork-time record). 20.8 GiB
+free disk before the import: 73 GiB
+[14:53:47] PASS  S2 import the file as e2e-t7-i1  -- Start it with `silo start e2e-t7-i1`. If it was a fork, bring its work into main with `silo merge e2e-t7-i1 --into main`.
+export file deleted; free disk: 41 GiB
+after the import: state stopped, imported True, needs personalizing True
+[14:54:54] PASS  S2 Retry setup finishes the imported computer  -- Set up e2e-t7-i1 (stopped)
+[14:54:55] PASS  S2 the import's setup settles  -- state stopped
+--- setup log of e2e-t7-i1:
+  2026-11-11T13:53:49.568344Z setup started
+  2026-11-11T13:53:49.569146Z step: Personalizing the imported computer
+  2026-11-11T13:53:51.638392Z step: Starting macOS
+  2026-11-11T13:53:52.096843Z boot 1: first Start
+  2026-11-11T13:54:16.13187Z step: Installing developer tools
+  2026-11-11T13:54:37.743998Z step: Installing computer use
+  2026-11-11T13:54:47.641989Z step: Setting up the clipboard
+  2026-11-11T13:54:47.656977Z step: Creating workspace folders
+  2026-11-11T13:54:47.788391Z step: Setting up network and trust
+  2026-11-11T13:54:47.824351Z step: Shutting down
+  2026-11-11T13:54:54.038155Z setup finished
+[14:54:59] PASS  S2 the setup ended complete (stopped, no failure, all steps done, not imported, first Start done)  -- state stopped; setup {'account': True, 'sip': True, 'developerTools': True, 'computerUse': True, 'clipboard': True, 'roots': True, 'needsPersonalizing': False, 'proxyBootstrap': True}
+[14:54:59] PASS  S2 the tools were brought up to date in the guest (version stale-tools-0.0.1 -> 3b6e8590057963d0)  -- 
+[14:54:59] PASS  S2 the setup log has no NAT boot (no setup boot, no first-install boot)  -- boots: boot 1: first Start;
+[14:54:59] PASS  S2 the guest came up on the first Start behind the gateway  -- 
+[14:55:00] PASS  S2 the import was prepared offline on its stopped disk  -- 
+[14:55:22] PASS  S2 start e2e-t7-i1  -- running
+[14:55:23] PASS  S2 the engine logs in with the computer's key (exec as silo) and sudo -n works  -- silo sudo-ok 
+address and gateway inside: 172.30.194.182 172.30.194.181  (recorded: 172.30.194.182 via 172.30.194.181)
+[14:55:23] PASS  S2 its only address is the gateway's (172.30.194.182), its route goes to 172.30.194.181  -- 
+[14:55:23] PASS  S2 no Apple NAT address (192.168.64.x) inside  -- 
+tools inside: 2.1.287 (Claude Code)|v24.21.0|git version 2.50.1 (Apple Git-155)|1|
+[14:55:24] PASS  S2 Claude Code, Node and Git run, and the tools receipt names Claude Code  -- 
+[14:55:32] PASS  S2 the Mac's NAT never leased an address to the import (a2:17:59:df:3b:93)  -- leases seen: 
+connections to the gateway's loopback listeners during the import:
+  ssh -> 127.0.0.1:49789
+[14:55:32] PASS  S2 the tools (968 MB in the engine's cache) were copied over the gateway's SSH port (an ssh/scp connection to a gateway listener was seen)  -- ssh -> 127.0.0.1:49789;
+[14:55:35] PASS  S2 drop e2e-t7-i1  -- 
+[14:55:35] == S4 Recovery has no network card
+[14:55:35] SKIPPED  S4 Recovery with no network card  -- Recovery starts only inside a fresh install's SIP step, which drives the visible Setting up window and reads the screen; no engine method starts a finished computer in Recovery, and every Dev computer here already has SIP off (csrutil status: disabled in the setup log of e2e-t7-base). Covered by the unit test engine::tests::only_the_bootstrap_boots_get_apple_network_and_recovery_gets_none
+[14:55:35] == S5 a template copy still uses Apple's NAT; a first install too
+[14:55:35] SKIPPED  S5 first install  -- a macOS template already exists on the Dev engine, so a new computer copies it; a first install runs only when no template matches and installs from the restore image, which takes hours and would replace the Dev engine's template
+[14:56:47] PASS  S5 create e2e-t7-tpl from the template  -- 
+[14:56:47] PASS  S5 the copy's setup settles  -- state stopped
+--- setup log of e2e-t7-tpl:
+  2026-11-11T13:55:35.497639Z setup started
+  2026-11-11T13:55:35.507394Z step: Personalizing the computer
+  2026-11-11T13:55:42.807818Z boot 1: setup boot
+  2026-11-11T13:56:00.041859Z step: Shutting down
+  2026-11-11T13:56:06.526876Z step: Checking the computer
+  2026-11-11T13:56:06.777155Z boot 2: setup boot
+  2026-11-11T13:56:18.397071Z step: Shutting down
+  2026-11-11T13:56:25.175172Z step: Starting macOS
+  2026-11-11T13:56:25.424556Z boot 1: setup boot
+  2026-11-11T13:56:30.848827Z step: Creating workspace folders
+  2026-11-11T13:56:31.030319Z step: Setting up network and trust
+  2026-11-11T13:56:39.97613Z step: Shutting down
+  2026-11-11T13:56:46.342431Z setup finished
+[14:56:48] PASS  S5 the template copy's setup boots were setup boots (Apple NAT)  -- setup boots: 3
+[14:56:48] PASS  S5 the Mac's NAT leased the copy (fa:7f:13:5e:b5:93) an address while it was set up  -- leases seen: 192.168.64.113 
+[14:56:49] PASS  S5 the copy ended complete  -- state stopped
+[14:57:10] PASS  S5 and its first Start after setup is behind the gateway (172.30.18.138), not on NAT  -- 172.30.18.138
+[14:57:21] PASS  S5 drop e2e-t7-tpl  -- 
+[14:57:21] == summary: 64 passed, 0 failed, 2 skipped
+[14:57:21] cleanup (drops only the e2e-t7-* computers this run made, then stops the Dev engine it started)
+[14:57:34] silo list after cleanup:
+NAME         STATE      KIND       SIZE
+workspace-1  stopped    linux      8 cpu, 32 GiB
+e2e-relay    stopped    linux      8 cpu, 32 GiB
+silo-eval-a  stopped    linux      2 cpu, 2 GiB
+silo-eval-b  stopped    linux      2 cpu, 2 GiB
+[14:57:35] Dev engine stopped
+
+== notes written after the run (not script output)
+- Left by the earlier agent: the engine it started (pid 23902) was dead, so a new `silod --agent` was started from the bundle. Its start reported the interrupted export ("A macOS computer record in .../.silo-macos-export-ede915f5-... could not be read") and listed the job exports:ede915f5-... as finished/failed ("Export interrupted: No export file was saved"). It was acknowledged with operations.job.acknowledge; no file was edited. backup-operation.json stays as the engine's record of the last operation (now the finished import: terminal outcome success).
+- The base computer's disk could not be expanded when it was made from the template (diskNote: "could not expand the disk to 64 GiB, so the computer has 40 GiB"), so its disk file is 64 GiB while its record says 40. Export refuses that ("Invalid Silo export: the disk component size does not match diskGiB"). That is not T7; before the engine starts, the script sets diskGiB to 64 in the base's computer.json and in its checkpoint's checkpoint.json (the first output line "disk record of e2e-t7-base now 64 GiB"). The script made no other file edit; cp-stale's old tools version was written into its checkpoint.json by the earlier agent.
+- The export file (20.8 GiB) went to /Volumes/ModelVault (EXPORT_ROOT): the import stages 65 GiB beside it and the internal disk had 73 GiB free. The script deleted it right after the import; nothing of this run is left there.
+- S4, supplementary unit check (cargo test --manifest-path app/SiloUI/Cargo.toml -p silo-engine --locked only_the_bootstrap_boots_get_apple_network): 1 passed. Boot::Recovery maps to BootNetwork::Disconnected, the two bootstrap boots to AppleNat, Normal to Gateway.
+- Earlier partial runs of the same script (same commit) found script mistakes only, all fixed before this run: guest address read from the wrong file, an import that must be finished with Retry setup (`silo retry-setup`, which waits for the setup), and a wait for 72 GiB free before the import because the export's staging space comes back to the disk late.
