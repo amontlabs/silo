@@ -96,3 +96,11 @@ was chosen and why; any can be changed. Older items are also in the build log un
     recipe line.
     A merge you approved also shows step numbers instead of commands in its report, since the
     asking computer reads the same report; the commands stay readable in the recipe.
+
+## macOS disk size (R6)
+
+26. **When Silo cannot make macOS use a larger disk, the computer keeps the larger disk file and
+    says macOS can use only part of it**, instead of failing the copy. The record now always
+    matches the disk file, so export works. The real fix (moving the Recovery partition out of
+    the way before growing the disk, if that is the cause) is not scheduled; nothing retries the
+    expansion later.
