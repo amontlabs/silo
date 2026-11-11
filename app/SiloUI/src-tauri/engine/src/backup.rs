@@ -3952,11 +3952,12 @@ fn with_profile_defaults(network: &Value) -> Value {
     let mut network = network.clone();
     // MicroSandbox 0.7.5 and later save two more fields, both at their runtime
     // defaults for a computer Silo created or restored: readable denial responses
-    // (opt-in, off) and the NAT64 prefix. Earlier runtimes save neither, so the
-    // profile omits them and a default value counts as absent. A changed value
-    // stays and fails the comparison as a custom network setting.
+    // (off in 0.7.5 to 0.7.6, on with a JSON body from 0.7.14) and the NAT64
+    // prefix. Earlier runtimes save neither, so the profile omits them and a
+    // default value counts as absent. A changed value stays and fails the
+    // comparison as a custom network setting.
     if let Some(object) = network.as_object_mut() {
-        if object.get("http") == Some(&serde_json::json!({"deny_response": false})) {
+        if object.get("http").is_some_and(runtime_default_http) {
             object.remove("http");
         }
         if object.get("nat64_prefixes") == Some(&serde_json::json!(["64:ff9b::/96"])) {
@@ -3973,6 +3974,15 @@ fn with_profile_defaults(network: &Value) -> Value {
         }
     }
     network
+}
+
+/// The `http` section a runtime saves for a computer Silo created, restored or
+/// forked: 0.7.5 and 0.7.6 save readable denial responses off, 0.7.14 saves them
+/// on with a JSON body. Silo sets neither, so both count as the runtime default;
+/// any other value is a custom setting.
+fn runtime_default_http(http: &Value) -> bool {
+    http == &serde_json::json!({"deny_response": false})
+        || http == &serde_json::json!({"deny_response": true, "deny_response_format": "json"})
 }
 
 /// The network an import starts from: Silo's profile with a deny-all policy.
@@ -6865,6 +6875,7 @@ mod tests {
     /// that migration runs.
     fn captured_network(origin: &str) -> Value {
         let text = match origin {
+            "created-0.7.14" => include_str!("test_support/msb-inspect/created-0.7.14.json"),
             "created-0.7.6" => include_str!("test_support/msb-inspect/created-0.7.6.json"),
             "restored-0.7.6" => include_str!("test_support/msb-inspect/restored-0.7.6.json"),
             "forked-0.7.6" => include_str!("test_support/msb-inspect/forked-0.7.6.json"),
@@ -6888,8 +6899,9 @@ mod tests {
         serde_json::from_str(text).unwrap()
     }
 
-    const CAPTURED_NETWORKS: [(&str, Option<bool>); 12] = [
+    const CAPTURED_NETWORKS: [(&str, Option<bool>); 13] = [
         // Created by Silo's own `msb create`: the runtime's current default.
+        ("created-0.7.14", Some(true)),
         ("created-0.7.6", Some(true)),
         ("restored-0.7.6", Some(true)),
         ("forked-0.7.6", Some(true)),
@@ -6937,6 +6949,21 @@ mod tests {
             );
             // Whatever the source carried, the archive carries the profile's value.
             assert_eq!(network["strict"], profile_strict, "{origin}");
+        }
+    }
+
+    #[test]
+    fn export_refuses_custom_http_settings_of_either_runtime() {
+        for http in [
+            serde_json::json!({"deny_response": true, "deny_response_format": "text"}),
+            serde_json::json!({"deny_response": false, "deny_response_format": "json"}),
+            serde_json::json!({"deny_response": true, "network_deny_message": "no"}),
+        ] {
+            let mut config = managed_config("dev");
+            config["network"] = captured_network("created-0.7.14");
+            config["network"]["http"] = http.clone();
+            let error = export_with_runtime(config).err().unwrap().to_string();
+            assert!(error.contains("custom network http settings"), "{http}: {error}");
         }
     }
 
