@@ -32,6 +32,7 @@ pub fn mark(path: &Path, now: SystemTime) -> io::Result<()> {
             .to_string(),
     )
 }
+#[allow(clippy::collapsible_if)]
 pub fn started(path: &Path) -> io::Result<SystemTime> {
     if fs::symlink_metadata(marker(path)).is_ok_and(|m| m.is_file()) {
         if let Ok(value) = fs::read_to_string(marker(path)) {

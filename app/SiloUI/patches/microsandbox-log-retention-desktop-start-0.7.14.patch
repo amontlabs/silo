@@ -216,10 +216,10 @@ index 31ca85811af308a22caa932f38aef27a93fbbc7e..f43c7e11c0c8ffe36caa8d9e745b29a4
 +//--------------------------------------------------------------------------------------------------
 diff --git a/crates/runtime/lib/runner/logging_retention.rs b/crates/runtime/lib/runner/logging_retention.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..613bb755a794ecc462314ddd5589fe952b5ce1f8
+index 0000000000000000000000000000000000000000..d3a3ae36d6635ed63f84324ec48f86fb1aac855c
 --- /dev/null
 +++ b/crates/runtime/lib/runner/logging_retention.rs
-@@ -0,0 +1,289 @@
+@@ -0,0 +1,292 @@
 +//! Shared with the pinned runtime patch. Only call from Silo for stopped VMs.
 +//! Live runtime writers serialize retention and writes with their process lock.
 +use std::{
@@ -254,13 +254,16 @@ index 0000000000000000000000000000000000000000..613bb755a794ecc462314ddd5589fe95
 +            .to_string(),
 +    )
 +}
++#[allow(clippy::collapsible_if)]
 +pub fn started(path: &Path) -> io::Result<SystemTime> {
-+    if fs::symlink_metadata(marker(path)).is_ok_and(|m| m.is_file())
-+        && let Ok(value) = fs::read_to_string(marker(path))
-+        && let Ok(seconds) = value.parse::<u64>()
-+        && let Some(time) = UNIX_EPOCH.checked_add(Duration::from_secs(seconds))
-+    {
-+        return Ok(time);
++    if fs::symlink_metadata(marker(path)).is_ok_and(|m| m.is_file()) {
++        if let Ok(value) = fs::read_to_string(marker(path)) {
++            if let Ok(seconds) = value.parse::<u64>() {
++                if let Some(time) = UNIX_EPOCH.checked_add(Duration::from_secs(seconds)) {
++                    return Ok(time);
++                }
++            }
++        }
 +    }
 +    let metadata = fs::metadata(path)?;
 +    // Legacy files have no segment marker. Creation is conservative where available.

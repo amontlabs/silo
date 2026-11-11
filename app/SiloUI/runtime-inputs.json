@@ -126,7 +126,7 @@
     },
     {
       "path": "patches/microsandbox-log-retention-desktop-start-0.7.14.patch",
-      "sha256": "789bb37b6682afa3ce262c1ccde33e15756f00cced0ce9384e7c8acf29aa8921"
+      "sha256": "b39190cb4d8ff57e0f3cb8636194bedaabb9e504e71e475fa73c838b0f293d2c"
     },
     {
       "path": "patches/microsandbox-storage-repair-confirm-0.7.14.patch",
