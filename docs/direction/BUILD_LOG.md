@@ -344,3 +344,8 @@ These were not asked of the owner. Each is open to change.
   start time) and a new lock holder waits for that command to exit, so a surviving command is
   still never overlapped. Only a live run can confirm that real `msb` VMs no longer show the
   file in `lsof` after a kill.
+- **A silod test depends on the host's free disk:**
+  `approvals::tests::a_computer_an_allowed_call_makes_is_the_askers` fails when the Mac has less
+  than about 46 GiB free (the 5% free-disk floor is measured on the real disk). Treat that
+  failure as the environment until the test injects its own measurement. Merged worktrees'
+  ignored build output is removed after each merge (`git clean -fdXq`).
