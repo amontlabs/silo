@@ -68,3 +68,17 @@ was chosen and why; any can be changed. Older items are also in the build log un
     bite; raise it if a slow computer shows "waiting" for its tools.
 17. **After 5 failed tools checks in a row, Silo stops checking that computer until its next
     start.** The count is forgotten when the engine restarts.
+
+## App and rebuild details (R4, T15 round 2)
+
+18. **The app keeps the last 50 finished approval jobs in memory** to share their results
+    between windows; older ones are dropped.
+19. **A computer's network settings are never re-pinned to new preset versions by a plain Save**,
+    with or without the compare-and-set check; only Accept does it.
+20. **The "Before rebuild" checkpoint is kept** after a successful or rolled-back rebuild, as a
+    way back on the same computer. Delete it by hand when no longer needed.
+21. **While a rebuild runs, device-wide actions such as Quit or an update wait for it.**
+22. **A rebuild on a computer already on the newest image is refused unless forced**
+    (`silo rebuild --force`).
+23. **Writes to `/home/silo` in the few seconds between packing it and stopping the old computer
+    are only in `<name>-undo`.**
