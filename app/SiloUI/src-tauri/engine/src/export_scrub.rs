@@ -128,8 +128,9 @@ pub fn prepare(
             .with_cleanup(cleanup));
         }
     };
-    // The copy has no use for Silo's tools, so the engine writes no endpoint file into it.
-    if let Err(error) = crate::guest_client::turn_off(&[copy_id.as_str()]) {
+    // The copy has no use for Silo's tools: the engine writes no endpoint file into it and does
+    // not reconcile it.
+    if let Err(error) = crate::guest_client::turn_off_copy(&copy_id) {
         let cleanup = env.delete(&copy_id);
         return Err(Failure::failed(format!(
             "Silo could not turn off Silo's tools in the temporary copy: {error}."

@@ -208,6 +208,19 @@ pub fn turn_off(computer_ids: &[&str]) -> Result<usize, String> {
 
 /// [`turn_off`] with the store given.
 pub fn turn_off_in(store: &TokenStore, computer_ids: &[&str]) -> Result<usize, String> {
+    end_tools(store, computer_ids, true)
+}
+
+/// Turns Silo's tools off in a closed copy (the temporary copy an export makes): like
+/// [`turn_off`], but nothing is owed to the copy and the engine never reconciles it.
+pub fn turn_off_copy(computer_id: &str) -> Result<usize, String> {
+    match TokenStore::current() {
+        Some(store) => end_tools(&store, &[computer_id], false),
+        None => Ok(0),
+    }
+}
+
+fn end_tools(store: &TokenStore, computer_ids: &[&str], owe_removal: bool) -> Result<usize, String> {
     // Silo's MCP server is registered with the agents of every computer that had the tools; it is
     // taken out when the computer next runs (at once for a running one, see `guestClient.revoke`).
     let had: Vec<&str> = computer_ids
@@ -221,7 +234,7 @@ pub fn turn_off_in(store: &TokenStore, computer_ids: &[&str]) -> Result<usize, S
                 .is_some_and(|record| record.enabled())
         })
         .collect();
-    if !had.is_empty() {
+    if owe_removal && !had.is_empty() {
         crate::guest_components::owe_removal(store.directory(), &had);
     }
     let locked = store.locked();
@@ -529,6 +542,22 @@ mod tests {
         assert!(store.locked().held().unwrap().is_empty());
         forget_in(&store, "c").unwrap();
         assert_eq!(fake.bound(port), None, "a deleted computer's port goes");
+        reset();
+    }
+
+    #[test]
+    fn turning_off_owes_the_registration_removal_and_a_closed_copy_owes_none() {
+        use crate::guest_components::receipt::Reports;
+        let _ports = ports();
+        let directory = tempfile::tempdir().unwrap();
+        let (store, fake) = with_fake(directory.path());
+        let port = turn_on_in(&store, "c").unwrap().port.unwrap();
+        turn_on_in(&store, "copy").unwrap();
+        turn_off_in(&store, &["c"]).unwrap();
+        end_tools(&store, &["copy"], false).unwrap();
+        assert_eq!(Reports::new(store.directory()).owed(), vec!["c".to_owned()]);
+        assert_eq!(fake.bound(port).as_deref(), Some("c"), "its port is still held");
+        assert!(store.status("copy").unwrap().is_none());
         reset();
     }
 
