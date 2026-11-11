@@ -90,3 +90,7 @@ was chosen and why; any can be changed. Older items are also in the build log un
     fork carried the recipe's full text, so the earlier "only its own recipe" rule could be
     sidestepped. Whatever a setup command writes to disk is in every computer built from that
     recipe anyway, so the docs now say: never put tokens in setup lines; use secrets.
+25. **A recipe's `test` command and service names stay visible to computers**; only setup, service
+    `run`, and the keep `migrate`/`after` commands are hidden, and a merge's report names a
+    recipe hook step without its command text (R5). The docs say never to put a secret in any
+    recipe line.
