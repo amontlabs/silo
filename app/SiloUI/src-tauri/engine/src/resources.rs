@@ -146,6 +146,35 @@ pub fn refusal(host: &Host, floors: &Floors) -> Option<String> {
     (assessment.state == ResourceState::Critical).then_some(assessment.message)
 }
 
+/// The reason an agent's call that starts or creates a computer with `requested` bytes must fail,
+/// taking into account the floor, existing `reserved` bytes from starts already admitted, and whether
+/// the request exceeds the free headroom.
+pub fn refusal_for(
+    host: &Host,
+    floors: &Floors,
+    reserved: u64,
+    requested: u64,
+) -> Option<String> {
+    if let Some(refusal) = refusal(host, floors) {
+        return Some(refusal);
+    }
+    if requested > 0 {
+        if let Some(available) = host.memory_available {
+            let free_headroom = available.saturating_sub(floors.memory);
+            let remaining_headroom = free_headroom.saturating_sub(reserved);
+            if requested > remaining_headroom {
+                return Some(format!(
+                    "This computer needs {} of memory, but only {} is free above the {} safety floor. Stop a computer first, or ask the person who runs Silo.",
+                    amount(requested),
+                    amount(remaining_headroom),
+                    amount(floors.memory)
+                ));
+            }
+        }
+    }
+    None
+}
+
 // MARK: Measuring
 
 /// The memory in the pages `vm_stat` lists as free, inactive, purgeable and speculative: what
@@ -427,6 +456,33 @@ mod tests {
             low.message,
             "About 6.0 GiB of memory is free. Starting another computer may slow this device."
         );
+    }
+
+    #[test]
+    fn refusal_for_detects_below_floor_and_oversized_requests_and_reservations() {
+        let floors = Floors {
+            memory: 4 * GIB,
+            disk: 25 * GIB,
+        };
+        // 1. Below floor
+        let low_host = host(Some(3 * GIB), 400 * GIB);
+        let error = refusal_for(&low_host, &floors, 0, 1 * GIB).unwrap();
+        assert!(error.contains("3.0 GiB of memory available; Silo keeps 4.0 GiB free"));
+
+        // 2. Headroom is 2 GiB (6 GiB available - 4 GiB floor). Request for 4 GiB is oversized.
+        let ample_host = host(Some(6 * GIB), 400 * GIB);
+        let error = refusal_for(&ample_host, &floors, 0, 4 * GIB).unwrap();
+        assert!(error.contains("This computer needs 4.0 GiB of memory, but only 2.0 GiB is free above the 4.0 GiB safety floor. Stop a computer first, or ask the person who runs Silo."));
+
+        // 3. Request for 2 GiB fits in 2 GiB headroom.
+        assert!(refusal_for(&ample_host, &floors, 0, 2 * GIB).is_none());
+
+        // 4. With 1 GiB reservation, remaining headroom is 1 GiB. Request for 2 GiB exceeds it.
+        let error = refusal_for(&ample_host, &floors, 1 * GIB, 2 * GIB).unwrap();
+        assert!(error.contains("This computer needs 2.0 GiB of memory, but only 1.0 GiB is free above the 4.0 GiB safety floor. Stop a computer first, or ask the person who runs Silo."));
+
+        // 5. With 1 GiB reservation, request for 1 GiB fits.
+        assert!(refusal_for(&ample_host, &floors, 1 * GIB, 1 * GIB).is_none());
     }
 
     #[test]

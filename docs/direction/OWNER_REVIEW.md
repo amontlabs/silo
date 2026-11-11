@@ -23,3 +23,48 @@ was chosen and why; any can be changed. Older items are also in the build log un
 5. **Starts admitted but not yet booted reserve their memory**, and a request larger than the
    free headroom is refused rather than admitted (being built, R2). Why: a burst of starts could
    each pass the floor before any computer took memory.
+
+## Silo's tools inside a computer (T5b review)
+
+6. **Silo marks its own MCP entry and never touches a user's entry named `silo`.** If the user
+   registered their own `silo` server, Silo leaves it and shows a conflict instead (being built,
+   R3). Why: overwriting a user's config silently is worse than a visible conflict.
+7. **A computer that keeps failing its tools check is retried less, then not until its next
+   start**, and one check has an overall time limit (R3). Why: a broken or hostile computer must
+   not slow down tools for every other computer.
+8. **"Tools OK" for a computer is the computer's own claim.** An agent with root inside can fake
+   it; that is accepted, since the agent already controls that computer. Documented.
+
+## App (T10, T13 review)
+
+9. **Saving a computer's network settings never accepts a preset update.** Updates to a preset
+   (for example npm adding hosts) are accepted only with their own Accept button, which shows
+   the hosts they add (being built, R4). Why: Save used to accept them silently.
+10. **Approvals show the computer's id beside its name** and strip invisible characters from what
+    an agent wrote (R4). Why: an agent could name a computer to look like another one.
+
+## Rebuild on the newest image (T15)
+
+11. **A rebuild is refused when `/home/silo` is over 45% of the root disk** (about 1.8 GiB on a
+    4 GiB disk), because the home is packed inside the computer before it moves.
+12. **On a device whose disk cannot make instant copies, only layered disks are refused**; a
+    single-file disk is copied normally (slower, uses space).
+13. **The old computer stays, stopped, as `<name>-undo`**, so it can be inspected, restored or
+    deleted with the usual commands.
+
+## Resources (R2)
+
+14. **A start's memory is held for it until the start ends, at most 5 minutes**, and a start that
+    asks for more than the free memory above the floor is refused. A start the owner approved
+    checks the floor but does not hold memory, so several approved starts at once can still pass
+    together. Left as is: the owner approved each one.
+
+## Recipes and tools (R1, R3)
+
+15. **A computer still sees each recipe's hash in the list.** It is a one-way digest of the
+    recipe, kept so agents can tell when a recipe changed; it does not reveal setup lines.
+16. **One tools check has 90 seconds in total**, which also caps sending the `silo` program
+    (it used to have 170 s alone). Sending 13 MB inside the device is fast, so this should not
+    bite; raise it if a slow computer shows "waiting" for its tools.
+17. **After 5 failed tools checks in a row, Silo stops checking that computer until its next
+    start.** The count is forgotten when the engine restarts.

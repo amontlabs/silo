@@ -460,25 +460,27 @@ mod tests {
         let (first, port) = bind(None).unwrap();
         assert_eq!(first.local_addr().unwrap().ip(), Ipv4Addr::LOCALHOST);
         assert_ne!(port, 0);
-        // While `first` holds the port no bind can have it, whatever else runs at the same time.
-        let (second, other) = bind(Some(port)).unwrap();
-        assert_ne!(other, port, "a taken port is not shared");
-        assert!(bind_exact(port).is_err());
-        drop(second);
-        // Once it is freed, the port is kept when nothing else took it in the meantime. Another
-        // test binding port 0 can be handed the freed number, so a few tries are made; each try
-        // that fails only shows that the port was taken, which is the case that falls back.
         drop(first);
-        let kept = (0..100).any(|_| {
-            let (again, same) = bind(Some(port)).unwrap();
-            let kept = same == port;
-            drop(again);
-            if !kept {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            kept
-        });
-        assert!(kept, "a free port is kept");
+
+        // Pick a non-ephemeral port that parallel tests binding port 0 cannot be handed.
+        let test_port = (20000..32000)
+            .find(|&candidate| {
+                TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, candidate)).is_ok()
+            })
+            .expect("a free non-ephemeral port");
+
+        // Hold the port with a listener the test owns.
+        let held = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, test_port)).unwrap();
+        let (second, other) = bind(Some(test_port)).unwrap();
+        assert_ne!(other, test_port, "a taken port is not shared");
+        assert!(bind_exact(test_port).is_err());
+        drop(second);
+
+        // Drop the listener: the port is now free and no parallel test binding 0 can race for it.
+        drop(held);
+        let (again, same) = bind(Some(test_port)).unwrap();
+        assert_eq!(same, test_port, "a free port is kept");
+        drop(again);
     }
 
     #[test]
