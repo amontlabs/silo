@@ -315,3 +315,9 @@ These were not asked of the owner. Each is open to change.
   fails in every parallel run of `cargo test -p silo-engine --lib -- macos_computers` (3 of 3) and
   passes alone; `processes_match_by_exact_name_not_by_prefix_or_pattern` failed once. The
   integration filter `macos_computers::` never ran the `macos_computers_engine` tests. To fix.
+- **Flaky macOS engine tests fixed** (`fix/flaky-macos-engine-tests`, `44f2fd34f`, merged
+  2026-11-11): a stale entry in the process-wide `MACOS_JOBS` map from an earlier test (job ids
+  restart at `job:1` per registry) and a copied `/bin/sleep` killed at launch for its broken
+  signature. Tests only; 10 clean runs. The full engine suite has 8 failures in
+  `host_push::protocol_tests`, which need the bundled Git runtime prepared (environment).
+  Which test leaves the stale `MACOS_JOBS` entry is not known.
