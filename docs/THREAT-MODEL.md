@@ -771,7 +771,9 @@ commands, the migrate and after hooks), because they may hold a token the owner 
 the others it sees names, system and a one-way hash. Whatever a setup command writes is on every
 computer built from the recipe, so tokens belong in secrets, never in setup lines. A merge changes a saved recipe only when the
 owner runs it or approves it, and undoing the merge takes back exactly what it added. A merge
-into a computer built from a recipe runs that recipe's hooks, never hooks the caller supplied.
+into a computer built from a recipe runs that recipe's hooks, never hooks the caller supplied;
+its result tells the agent that asked only "Ran the recipe's migrate step 2", and a failing hook
+only its step and exit code, never the command or its output.
 See [Recipes](SiloUI-RECIPES.md).
 
 **What is trusted and what is the computer's own claim.** The engine trusts the channel the call
@@ -1446,8 +1448,6 @@ planned.
 - A computer cannot read the event stream, notifications or the list of all jobs (only its own), because they are not
   cut per computer yet; its agent polls instead. A job result too large to send in one piece is
   withheld from it.
-- A merge into a computer built from a recipe reports each hook command it ran, and a failing one
-  with its output, to the agent that asked, so a hook line can reach it that way.
 - A start the owner approved checks the memory floor but does not hold memory, so several approved
   starts at once can pass together. The check and the hold are not under one lock.
 - A computer whose tools check keeps failing is checked less and then not until its next start; a

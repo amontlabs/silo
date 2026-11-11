@@ -231,11 +231,10 @@ pub fn apply(
             "Migrations changed; no migrate: step is set, so run them on main's database.".into(),
         );
     }
-    for command in &request.hooks.migrate {
-        env.note(&format!("Migrating: {command}"));
-        env.run(target, RunAs::Account, &scripts::hook(command, &cwd))?
-            .success(&format!("migrate `{command}`"))?;
-        done.steps.push(format!("migrate: {command}"));
+    for (index, command) in request.hooks.migrate.iter().enumerate() {
+        run_hook(
+            env, target, &cwd, request.hooks_hidden, "migrate", index, command, &mut done,
+        )?;
     }
 
     // Restart services and check that each one is a new, running process.
@@ -271,13 +270,50 @@ pub fn apply(
             .push(format!("restart {service}: pid {before} -> {after}"));
     }
 
-    for command in &request.hooks.after {
-        env.note(&format!("Running: {command}"));
-        env.run(target, RunAs::Account, &scripts::hook(command, &cwd))?
-            .success(&format!("after `{command}`"))?;
-        done.steps.push(format!("after: {command}"));
+    for (index, command) in request.hooks.after.iter().enumerate() {
+        run_hook(
+            env, target, &cwd, request.hooks_hidden, "after", index, command, &mut done,
+        )?;
     }
     Ok(done)
+}
+
+/// Runs one `migrate` or `after` hook and records it. A hidden hook (one from a recipe, for a
+/// caller that may not read it) is named by its step number, and a failure gives only the exit
+/// code, never the command line or its output.
+#[allow(clippy::too_many_arguments)]
+fn run_hook(
+    env: &dyn KeepEnv,
+    target: &str,
+    cwd: &str,
+    hidden: bool,
+    kind: &str,
+    index: usize,
+    command: &str,
+    done: &mut Applied,
+) -> Result<(), String> {
+    let number = index + 1;
+    if !hidden {
+        let verb = if kind == "migrate" { "Migrating" } else { "Running" };
+        env.note(&format!("{verb}: {command}"));
+        env.run(target, RunAs::Account, &scripts::hook(command, cwd))?
+            .success(&format!("{kind} `{command}`"))?;
+        done.steps.push(format!("{kind}: {command}"));
+        return Ok(());
+    }
+    env.note(&format!("Running the recipe's {kind} step {number}"));
+    let out = env
+        .run(target, RunAs::Account, &scripts::hook(command, cwd))
+        .map_err(|_| format!("The recipe's {kind} step {number} could not run."))?;
+    if out.code != 0 {
+        return Err(format!(
+            "The recipe's {kind} step {number} failed (exit {}).",
+            out.code
+        ));
+    }
+    done.steps
+        .push(format!("Ran the recipe's {kind} step {number}"));
+    Ok(())
 }
 
 fn pid(env: &dyn KeepEnv, computer: &str, os: Os, service: &str) -> Result<String, String> {

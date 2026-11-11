@@ -901,6 +901,127 @@ fn caller_supplied_hooks_into_a_recipe_target_are_rejected() {
     crate::recipes::records::use_test_path(None);
 }
 
+fn recipe_with_hooks(migrate: &str, after: &str) {
+    crate::recipes::records::set(
+        "main",
+        &main_recipe(Some(silo_api::methods::keep::KeepHooks {
+            restart: vec![],
+            migrate: vec![migrate.into()],
+            after: vec![after.into()],
+        })),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_computer_caller_does_not_see_the_recipe_hook_commands_in_the_steps() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::recipes::records::use_test_path(Some(dir.path().join("recipe-records.json")));
+    recipe_with_hooks("psql -c 'set password=hunter2'", "curl -u admin:hunter2 https://x");
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let mut asked = request(Hooks::default());
+    asked.hide_recipe_commands = true;
+    let outcome = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &asked,
+    )
+    .unwrap();
+    let Outcome::Kept(report) = outcome else {
+        panic!("{outcome:?}")
+    };
+    let shown = serde_json::to_string(&report).unwrap();
+    assert!(!shown.contains("hunter2"), "{shown}");
+    assert!(report
+        .steps
+        .contains(&"Ran the recipe's migrate step 1".to_owned()));
+    assert!(report
+        .steps
+        .contains(&"Ran the recipe's after step 1".to_owned()));
+    world.with("main", |c| {
+        assert_eq!(
+            c.hooks,
+            ["psql -c 'set password=hunter2'", "curl -u admin:hunter2 https://x"]
+        )
+    });
+    crate::recipes::records::use_test_path(None);
+}
+
+#[test]
+fn the_owner_still_sees_the_recipe_hook_commands_in_the_steps() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::recipes::records::use_test_path(Some(dir.path().join("recipe-records.json")));
+    recipe_with_hooks("npm run migrate", "npm test");
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let outcome = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &request(Hooks::default()),
+    )
+    .unwrap();
+    let Outcome::Kept(report) = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert!(report.steps.contains(&"migrate: npm run migrate".to_owned()));
+    assert!(report.steps.contains(&"after: npm test".to_owned()));
+    crate::recipes::records::use_test_path(None);
+}
+
+#[test]
+fn a_failing_recipe_hook_names_its_step_and_exit_code_for_a_computer_caller() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::recipes::records::use_test_path(Some(dir.path().join("recipe-records.json")));
+    recipe_with_hooks("true", "fail --token=hunter2");
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let mut asked = request(Hooks::default());
+    asked.hide_recipe_commands = true;
+    let error = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &asked,
+    )
+    .unwrap_err();
+    assert!(!error.contains("hunter2") && !error.contains("fail --"), "{error}");
+    assert!(!error.contains("boom"), "{error}");
+    assert!(
+        error.contains("The recipe's after step 1 failed (exit 2)"),
+        "{error}"
+    );
+    crate::recipes::records::use_test_path(None);
+}
+
+#[test]
+fn hooks_a_computer_caller_sent_to_a_target_without_a_recipe_stay_visible_to_it() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::recipes::records::use_test_path(Some(dir.path().join("recipe-records.json")));
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let mut asked = request(Hooks {
+        restart: vec![],
+        migrate: vec![],
+        after: vec!["npm test".into()],
+    });
+    asked.hide_recipe_commands = true;
+    let outcome = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &asked,
+    )
+    .unwrap();
+    let Outcome::Kept(report) = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert!(report.steps.contains(&"after: npm test".to_owned()));
+    crate::recipes::records::use_test_path(None);
+}
+
 #[test]
 fn a_target_built_from_no_recipe_runs_the_hooks_the_caller_sent() {
     let dir = tempfile::tempdir().unwrap();

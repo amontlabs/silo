@@ -512,6 +512,8 @@ pub(super) async fn keep(
         reviewed: Some(request.review_digest.clone()),
         choices: super::keep::choices_of(params.choices, params.skip),
         save_recipe,
+        hide_recipe_commands: crate::methods::approvals::result_goes_to_computer(context),
+        ..Request::default()
     };
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());

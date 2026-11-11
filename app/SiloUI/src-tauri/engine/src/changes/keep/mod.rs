@@ -67,6 +67,12 @@ pub struct Request {
     pub choices: Choices,
     /// Whether to update the saved recipe in the library (true when approved by owner or caller is Device).
     pub save_recipe: bool,
+    /// Whether the caller is a computer, which reads the recipe's hook steps by number and
+    /// never by command line.
+    pub hide_recipe_commands: bool,
+    /// Set by the keep itself when the hooks came from the target's recipe and the caller may
+    /// not read them; callers leave it false.
+    pub hooks_hidden: bool,
 }
 
 /// How long a keep or undo waits for another one on the same target.
@@ -303,6 +309,7 @@ fn with_recipe_hooks(request: &Request, target: &str) -> Result<Request, String>
             migrate: keep.migrate,
             after: keep.after,
         };
+        effective.hooks_hidden = request.hide_recipe_commands;
     }
     Ok(effective)
 }
