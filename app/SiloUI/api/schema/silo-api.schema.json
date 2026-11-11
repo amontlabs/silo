@@ -17399,6 +17399,13 @@
         },
         "recipe": {
           "$ref": "#/$defs/RecipeDefinition"
+        },
+        "warnings": {
+          "description": "Things worth knowing about the recipe, such as a quiet service whose process name\ncannot be derived.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [

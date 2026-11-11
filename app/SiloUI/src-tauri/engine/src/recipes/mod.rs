@@ -9,6 +9,7 @@ mod additions;
 mod build;
 mod cache;
 mod library;
+mod quiet;
 pub mod records;
 mod scripts;
 
@@ -20,6 +21,7 @@ pub use build::{build, remove, BuildEnv, BuildOutcome, Created, ExecOut, RunAs, 
 use build::{builder_name, is_builder_of};
 pub use additions::{append, manager_key, record_merge, Additions};
 pub use cache::Cache;
+pub use quiet::{quiet_names, quiet_warnings};
 pub use library::{
     built_in, built_in_names, hooks_of, validate_definition, Library, DEFAULT_RECIPE,
 };

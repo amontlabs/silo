@@ -137,6 +137,8 @@ pub struct Engine {
     device: Option<String>,
     /// Whether the engine serves requests for another device (older engines ignore `deviceId`).
     routes_devices: bool,
+    /// What a call does when the engine answers that it needs the owner's approval.
+    approvals: crate::approvals::WaitOptions,
     _closer: Arc<Closer>,
 }
 
@@ -337,6 +339,7 @@ impl Engine {
             memory,
             device: None,
             routes_devices,
+            approvals: crate::approvals::WaitOptions::default(),
         })
     }
 
@@ -542,7 +545,34 @@ impl Engine {
         format!("The job {job_id} keeps running in the engine. Re-attach with `silo job {job_id}`.")
     }
 
+    /// The same connection with this behaviour for calls that need the owner's approval.
+    pub fn with_approvals(&self, approvals: crate::approvals::WaitOptions) -> Engine {
+        Engine {
+            approvals,
+            ..self.clone()
+        }
+    }
+
+    /// A call. When the engine answers that the owner must approve it (a call from inside a
+    /// computer that widens what the computer has), this says what was asked, waits for the
+    /// answer, and returns what the call would have returned: a job's start, or its result.
+    /// A deny, a request that ended and a wait that ran out are errors with their own exit
+    /// codes.
     pub async fn call<K: Kind>(&self, request: Request<K>) -> Result<Value, CliError> {
+        match self.call_unattended(request).await {
+            Err(error) => match error.approval_request {
+                Some((id, summary)) => {
+                    crate::approvals::follow(self, &id, &summary, &self.approvals).await
+                }
+                None => Err(error),
+            },
+            ok => ok,
+        }
+    }
+
+    /// A call that returns the engine's `approval_required` as an error carrying the request,
+    /// without waiting for it.
+    pub async fn call_unattended<K: Kind>(&self, request: Request<K>) -> Result<Value, CliError> {
         if self.device.is_some()
             && !is_routed(request.name())
             && !request.name().starts_with("connections.")
@@ -553,7 +583,10 @@ impl Engine {
             )));
         }
         let params = routed_params(request.name(), request.params_value(), self.device());
-        Ok(self.client.request(request.name(), params).await?)
+        self.client
+            .request(request.name(), params)
+            .await
+            .map_err(CliError::from)
     }
 
     /// The computers a person works with: the throwaway computers that measure baselines, build

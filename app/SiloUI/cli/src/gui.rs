@@ -14,7 +14,6 @@ use silo_api::methods::{
 };
 
 use crate::{
-    config::Settings,
     engine::{Computer, Engine, Progress},
     error::CliError,
     ops::{self, ForkArgs, MAIN},
@@ -35,21 +34,13 @@ pub fn parse_approval(text: &str) -> Result<ApprovalMode, CliError> {
     }
 }
 
-/// `auto` is a choice the user makes for unattended forks. A person typing the flag has made
-/// it; an agent (MCP, or the CLI run with `--agent`/`SILO_AGENT`) needs `computer_use_auto` in
-/// the project's settings. That file is one an agent can edit, so this is a convenience that
-/// stops a casual `auto`, not a gate.
-pub fn check_auto(
-    mode: ApprovalMode,
-    settings: Option<&Settings>,
-    asked_by_agent: bool,
-) -> Result<(), CliError> {
-    if mode == ApprovalMode::Auto
-        && asked_by_agent
-        && !settings.is_some_and(|settings| settings.computer_use_auto)
-    {
+/// `auto` is a choice the owner makes for unattended forks. A person typing the flag on the
+/// device has made it; an agent (the MCP tools, or the command line inside a computer) keeps
+/// the fork asking, and the owner can change that for a computer in the app.
+pub fn check_auto(mode: ApprovalMode, asked_by_agent: bool) -> Result<(), CliError> {
+    if mode == ApprovalMode::Auto && asked_by_agent {
         return Err(CliError::new(
-            "A fork made by an agent keeps asking for computer-use approval. To let agents make forks that run without asking, set computer_use_auto: true in .silo/silo.yaml.",
+            "A fork made by an agent keeps asking for computer-use approval. Only the owner can let a computer drive its desktop without asking; they can turn that on for the fork in Silo.",
         ));
     }
     Ok(())
@@ -265,20 +256,13 @@ pub struct GuiArgs {
 pub async fn fork_gui(
     engine: &Engine,
     args: &GuiArgs,
-    settings: Option<&Settings>,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     // A fork starts the desktop its source has, so refuse before making one that cannot show it.
-    match (&args.fork.recipe_name, &args.fork.recipe) {
-        (Some(recipe_name), Some(recipe)) if recipe.desktop == Some(false) => {
-            return Err(CliError::new(format!(
-                "The recipe {recipe_name} has desktop: false, so its computers have no desktop; remove that line to use --gui."
-            )))
-        }
-        (Some(_), _) => {}
-        (None, _) => ensure_desktop(&engine.computer(&args.fork.source).await?)?,
+    if args.fork.recipe_name.is_none() {
+        ensure_desktop(&engine.computer(&args.fork.source).await?)?;
     }
-    let mut fork = ops::fork(engine, &args.fork, settings, progress).await?;
+    let mut fork = ops::fork(engine, &args.fork, progress).await?;
     let name = fork["name"].as_str().unwrap_or_default().to_owned();
     let computer = engine.computer(&name).await?;
     // Before the start, so the first boot applies the mode.
@@ -343,15 +327,10 @@ mod tests {
     }
 
     #[test]
-    fn auto_needs_the_settings_when_an_agent_asks() {
-        assert!(check_auto(ApprovalMode::Auto, None, false).is_ok());
-        assert!(check_auto(ApprovalMode::Auto, None, true).is_err());
-        assert!(check_auto(ApprovalMode::Ask, None, true).is_ok());
-        let allowed = Settings {
-            computer_use_auto: true,
-            ..Settings::default()
-        };
-        assert!(check_auto(ApprovalMode::Auto, Some(&allowed), true).is_ok());
+    fn auto_is_refused_when_an_agent_asks() {
+        assert!(check_auto(ApprovalMode::Auto, false).is_ok());
+        assert!(check_auto(ApprovalMode::Auto, true).is_err());
+        assert!(check_auto(ApprovalMode::Ask, true).is_ok());
     }
 
     #[test]

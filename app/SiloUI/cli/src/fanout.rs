@@ -12,10 +12,10 @@ use silo_api::methods::{
 };
 
 use crate::{
-    config::Settings,
     engine::{find, Computer, Engine, Progress},
     error::CliError,
-    ops::{self, ForkArgs, MAIN},
+    ops::{self, ForkArgs},
+    steps::StepSettings,
 };
 
 /// Most forks one command makes.
@@ -34,21 +34,14 @@ pub type Output<'a> = &'a (dyn Fn(&str, bool, &[u8]) + Sync);
 
 #[derive(Clone, Debug, Default)]
 pub struct ManyArgs {
-    /// The source, the name (a prefix when several), checkpoint, secrets and recipe.
+    /// The source, the name (a prefix when several), checkpoint and secrets.
     pub fork: ForkArgs,
     pub count: u32,
     /// Run in each fork once it is started; empty means none.
     pub command: Vec<String>,
     pub cwd: Option<String>,
-}
-
-fn gib(bytes: u64) -> String {
-    let tenths = (bytes as f64 / (1u64 << 30) as f64 * 10.0).round() as u64;
-    if tenths % 10 == 0 {
-        format!("{} GiB", tenths / 10)
-    } else {
-        format!("{}.{} GiB", tenths / 10, tenths % 10)
-    }
+    /// Whether the command's steps are checkpointed.
+    pub steps: StepSettings,
 }
 
 /// The names for `count` forks: the source name plus a short id each, the given name alone
@@ -77,17 +70,10 @@ pub fn fork_names(
     Ok(names)
 }
 
-/// Refuses forks that do not fit: Apple's two macOS virtual machines, then `fork_ram_budget`.
-///
-/// The engine does not report how much memory a running computer uses, so a running fork
-/// counts as the memory it was created with, and so does each new one. Running forks are
-/// every running computer except `main`.
-pub fn check_capacity(
-    source: &Computer,
-    all: &[Computer],
-    count: u32,
-    budget: Option<u64>,
-) -> Result<(), CliError> {
+/// Refuses forks that do not fit under Apple's limit of two macOS virtual machines. Other
+/// computers have no count to stay under: `silo resources` says what the device has left, and
+/// the engine adds a warning to a computer started when memory or disk is running short.
+pub fn check_capacity(source: &Computer, all: &[Computer], count: u32) -> Result<(), CliError> {
     if source.kind == "macos" {
         let running = all
             .iter()
@@ -102,43 +88,7 @@ pub fn check_capacity(
             )));
         }
     }
-    let Some(budget) = budget else {
-        return Ok(());
-    };
-    let each = source.memory_gib << 30;
-    let running: Vec<&Computer> = all
-        .iter()
-        .filter(|computer| computer.state == "running" && computer.name != MAIN)
-        .collect();
-    let used: u64 = running
-        .iter()
-        .map(|computer| computer.memory_gib << 30)
-        .sum();
-    let needed = used + each * u64::from(count);
-    if needed <= budget {
-        return Ok(());
-    }
-    let fits = if each == 0 {
-        0
-    } else {
-        budget.saturating_sub(used) / each
-    };
-    let fits = match fits {
-        0 => "none fits".to_owned(),
-        1 => "1 fits".to_owned(),
-        n => format!("{n} fit"),
-    };
-    Err(CliError::new(format!(
-        "fork_ram_budget is {}: {} running fork{} use {} and {count} more at {} each need {}, so {fits}. \
-         Lower -n, stop forks you no longer need, or raise fork_ram_budget in .silo/silo.yaml. \
-         The sizes are the memory the computers were created with.",
-        gib(budget),
-        running.len(),
-        if running.len() == 1 { "" } else { "s" },
-        gib(used),
-        gib(each),
-        gib(each * u64::from(count)),
-    )))
+    Ok(())
 }
 
 /// The URLs of a computer's published websites. None for a computer on another device: its
@@ -287,22 +237,19 @@ async fn make_one(
     source: &Computer,
     name: &str,
     checkpoint: Option<String>,
-    extras: &ops::ForkExtras,
-    recipe_hash: Option<String>,
-    recipe: Option<&crate::config::Recipe>,
+    secrets: &[String],
     progress: Progress<'_>,
 ) -> Result<(Computer, Result<Vec<u16>, CliError>), CliError> {
-    let mut params = CheckpointForkParams {
+    let params = CheckpointForkParams {
         computer_id: source.id.clone(),
         device_id: None,
         checkpoint_id: checkpoint,
         new_name: name.to_owned(),
-        secrets: Vec::new(),
+        secrets: secrets.to_vec(),
         quiet: None,
-        recipe_hash,
+        recipe_hash: None,
         network_policy: None,
     };
-    ops::apply_fork_extras(&mut params, extras)?;
     engine
         .run_job(
             &format!("Forking {} into {name}", source.name),
@@ -313,27 +260,23 @@ async fn make_one(
     // Same as a single fork: the fork reaches the ports its source publishes, each on a host
     // port of its own.
     let forked = engine.computer(name).await?;
-    let published = publish_for_fork(engine, source, &forked, recipe).await;
+    let published = publish_for_fork(engine, source, &forked).await;
     ops::start(engine, name, progress).await?;
     Ok((engine.computer(name).await?, published))
 }
 
-/// Publishes on a new fork the ports its recipe names, else those its source publishes.
-/// Nothing for a fork on another device: ports are published by the device they are reached
-/// from, and `network.*` stays on this one.
+/// Publishes on a new fork the ports its source publishes. Nothing for a fork on another
+/// device: ports are published by the device they are reached from, and `network.*` stays on
+/// this one.
 pub async fn publish_for_fork(
     engine: &Engine,
     source: &Computer,
     fork: &Computer,
-    recipe: Option<&crate::config::Recipe>,
 ) -> Result<Vec<u16>, CliError> {
     if engine.device().is_some() {
         return Ok(Vec::new());
     }
-    match recipe {
-        Some(recipe) => crate::access::publish_recipe_ports(engine, fork, &recipe.ports).await,
-        None => crate::access::inherit_ports(engine, source, fork).await,
-    }
+    crate::access::inherit_ports(engine, source, fork).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -342,21 +285,19 @@ async fn one(
     source: &Computer,
     name: &str,
     checkpoint: Option<String>,
-    extras: &ops::ForkExtras,
     args: &ManyArgs,
-    steps: crate::config::StepSettings,
+    steps: StepSettings,
     progress: Progress<'_>,
     output: Output<'_>,
 ) -> Value {
     let mut entry = json!({"name": name, "source": source.name});
-    // A fork of a recipe publishes the recipe's ports; -n forks of a computer, its source's.
-    let recipe = args
-        .fork
-        .recipe_name
-        .as_ref()
-        .and(args.fork.recipe.as_ref());
     let (fork, published) = match make_one(
-        engine, source, name, checkpoint, extras, None, recipe, progress,
+        engine,
+        source,
+        name,
+        checkpoint,
+        &args.fork.secrets,
+        progress,
     )
     .await
     {
@@ -371,7 +312,6 @@ async fn one(
         Err(error) => entry["portsError"] = json!(error.message),
     }
     entry["id"] = json!(fork.id);
-    crate::flows::inherit_recipe(engine, &source.id, &fork.id);
     entry["state"] = json!(fork.state);
     entry["kind"] = json!(fork.kind);
     entry["urls"] = json!(urls(engine, &fork).await);
@@ -426,7 +366,6 @@ async fn one(
 pub async fn fork_many(
     engine: &Engine,
     args: &ManyArgs,
-    settings: Option<&Settings>,
     progress: Progress<'_>,
     output: Output<'_>,
 ) -> Result<Value, CliError> {
@@ -436,18 +375,12 @@ pub async fn fork_many(
             args.count
         )));
     }
-    Settings::check_fork_secrets(settings, &args.fork.secrets)?;
-    ops::fork_then_sweep(
-        engine,
-        fork_many_now(engine, args, settings, progress, output),
-    )
-    .await
+    ops::fork_then_sweep(engine, fork_many_now(engine, args, progress, output)).await
 }
 
 async fn fork_many_now(
     engine: &Engine,
     args: &ManyArgs,
-    settings: Option<&Settings>,
     progress: Progress<'_>,
     output: Output<'_>,
 ) -> Result<Value, CliError> {
@@ -460,12 +393,7 @@ async fn fork_many_now(
         &all,
         ops::short_id,
     )?;
-    check_capacity(
-        &source,
-        &all,
-        args.count,
-        settings.and_then(Settings::fork_ram_budget_bytes),
-    )?;
+    check_capacity(&source, &all, args.count)?;
     let mut checkpoint = args.fork.checkpoint.clone();
     if checkpoint.is_none() && args.count > 1 {
         // The forks share one capture of the source as it is now: its disks, not its memory.
@@ -479,20 +407,14 @@ async fn fork_many_now(
         .await?;
         checkpoint = made["id"].as_str().map(str::to_owned);
     }
-    let extras = ops::fork_extras(args.fork.recipe.as_ref(), &args.fork.secrets);
-    for warning in args.fork.recipe.iter().flat_map(ops::quiet_warnings) {
-        progress(&warning);
-    }
-    let step_settings = Settings::step_settings(settings);
     let forks = futures::future::join_all(names.iter().map(|name| {
         one(
             engine,
             &source,
             name,
             checkpoint.clone(),
-            &extras,
             args,
-            step_settings,
+            args.steps,
             progress,
             output,
         )

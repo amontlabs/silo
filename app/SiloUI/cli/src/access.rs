@@ -11,6 +11,7 @@ use std::{
 
 use serde_json::{json, Value};
 use silo_api::methods::{
+    approvals::ComputersAccessParams,
     common::{ComputerTargetParams, DeviceParams},
     guest::GuestSshAliasEnsureParams,
     network::{
@@ -92,16 +93,36 @@ pub async fn network_policy(
             .call(requests::network_policy_set(NetworkPolicySetParams {
                 computer_id: computer.id.clone(),
                 device_id: None,
-                policy: change.apply(
-                    serde_json::from_value(current["policy"].clone())
-                        .map_err(|_| CliError::new("The engine returned an unreadable network policy."))?,
-                ),
+                policy: change.apply(serde_json::from_value(current["policy"].clone()).map_err(
+                    |_| CliError::new("The engine returned an unreadable network policy."),
+                )?),
             }))
             .await?
     };
     let mut value = state;
     value["computer"] = json!(computer.name);
     Ok(value)
+}
+
+// MARK: What a computer holds
+
+/// `computers.access` for one computer, or for every computer the caller can see.
+pub async fn held(engine: &Engine, name: Option<&str>) -> Result<Value, CliError> {
+    let computers = match name {
+        Some(name) => vec![engine.computer(name).await?],
+        None => engine.computers().await?,
+    };
+    let mut rows = Vec::new();
+    for computer in &computers {
+        rows.push(
+            engine
+                .call(requests::computers_access(ComputersAccessParams {
+                    computer_id: computer.id.clone(),
+                }))
+                .await?,
+        );
+    }
+    Ok(json!({ "computers": rows }))
 }
 
 // MARK: Ports
@@ -114,18 +135,16 @@ fn scheme_of(name: &str) -> Option<NetworkScheme> {
     }
 }
 
-/// The saved published ports of a computer, as the engine lists them.
+/// The saved published ports of a computer, as `computers.access` lists them: the read a
+/// computer may make of itself and of the computers it made, unlike `network.state`.
 async fn saved_ports(engine: &Engine, computer: &Computer) -> Result<Vec<Value>, CliError> {
-    let state = engine
-        .call(requests::network_state(DeviceParams { device_id: None }))
+    let held = engine
+        .call(requests::computers_access(ComputersAccessParams {
+            computer_id: computer.id.clone(),
+        }))
         .await?;
-    let row = state["computers"].as_array().and_then(|rows| {
-        rows.iter().find(|row| {
-            row["computerId"] == computer.id.as_str() || row["computer"] == computer.name.as_str()
-        })
-    });
-    Ok(row
-        .and_then(|row| row["ports"].as_array())
+    Ok(held["ports"]
+        .as_array()
         .map(|ports| {
             ports
                 .iter()

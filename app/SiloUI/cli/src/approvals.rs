@@ -1,22 +1,251 @@
 //! `silo approvals`: the requests computers' agents made that wait for your answer. Listing,
 //! showing, allowing and denying them; allowing runs the request's call in the engine.
 
-use serde_json::Value;
+use std::time::{Duration, Instant};
+
+use serde_json::{json, Value};
 use silo_api::methods::{
     approvals::{
         ApprovalDecision, ApprovalIdParams, ApprovalState, ApprovalsDecideParams,
-        ApprovalsListParams,
+        ApprovalsListParams, ApprovalsNoteParams,
     },
     requests,
 };
 
-use crate::{engine::Engine, error::CliError};
+use crate::{
+    engine::Engine,
+    error::{exit, CliError},
+};
+
+/// How long a command waits for the owner to answer a request it made, unless told otherwise.
+pub const DEFAULT_WAIT: Duration = Duration::from_secs(120);
+
+/// How a command that gets `approval_required` behaves: it says what was asked, then waits.
+#[derive(Clone, Debug)]
+pub struct WaitOptions {
+    /// The longest to wait; zero does not wait at all.
+    pub wait: Duration,
+    /// Added to the request as the caller's own note right after asking.
+    pub reason: Option<String>,
+    /// Say on standard error what was asked and that the command is waiting.
+    pub announce: bool,
+    /// How often the request is looked at.
+    pub poll: Duration,
+}
+
+impl Default for WaitOptions {
+    fn default() -> Self {
+        Self {
+            wait: DEFAULT_WAIT,
+            reason: None,
+            announce: true,
+            poll: Duration::from_millis(1500),
+        }
+    }
+}
+
+/// Parses `90`, `90s`, `2m` or `1h30m` into a duration.
+pub fn parse_duration(text: &str) -> Result<Duration, CliError> {
+    let bad = || CliError::new(format!("`{text}` is not a duration like 90s, 2m or 1h."));
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(bad());
+    }
+    if let Ok(seconds) = text.parse::<u64>() {
+        return Ok(Duration::from_secs(seconds));
+    }
+    let mut total = 0u64;
+    let mut digits = String::new();
+    for c in text.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            continue;
+        }
+        let amount: u64 = digits.parse().map_err(|_| bad())?;
+        digits.clear();
+        total += amount
+            * match c {
+                's' => 1,
+                'm' => 60,
+                'h' => 3600,
+                _ => return Err(bad()),
+            };
+    }
+    if !digits.is_empty() {
+        return Err(bad());
+    }
+    Ok(Duration::from_secs(total))
+}
+
+fn state_of(approval: &Value) -> &str {
+    approval
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+/// The exit code that stands for where a request is: done, denied, waiting or ended.
+pub fn exit_for(state: &str) -> i32 {
+    match state {
+        "allowed" => 0,
+        "denied" => exit::DENIED,
+        "pending" => exit::WAITING,
+        _ => exit::ENDED,
+    }
+}
+
+/// What a call that asked for an answer returns once the owner allowed it: the job it started,
+/// or its result.
+fn allowed_result(approval: &Value) -> Result<Option<Value>, CliError> {
+    let outcome = &approval["outcome"];
+    if !outcome.is_object() {
+        return Ok(None);
+    }
+    if let Some(error) = outcome.get("error").and_then(Value::as_str) {
+        return Err(CliError::new(format!(
+            "You allowed it, but it did not run: {}",
+            silo_api::plain_text(error)
+        )));
+    }
+    Ok(Some(match outcome.get("jobId").and_then(Value::as_str) {
+        Some(job) => json!({ "jobId": job }),
+        None => outcome.get("result").cloned().unwrap_or(Value::Null),
+    }))
+}
+
+fn waiting_error(id: &str, summary: &str) -> CliError {
+    CliError::new(format!(
+        "Still waiting for the owner to answer request {id} ({summary}). Nothing has run. Check it later with `silo approvals status {id}`, or wait for it with `silo approvals wait {id}`."
+    ))
+    .with_exit(exit::WAITING)
+    .for_approval(id)
+}
+
+/// The error a request that did not end in an allow becomes.
+fn ended_error(approval: &Value) -> CliError {
+    let id = text(approval, "id");
+    let summary = text(approval, "summary");
+    match state_of(approval) {
+        "denied" => {
+            let mut message = format!("The owner denied this: {summary}");
+            if let Some(note) = approval.get("decisionNote").and_then(Value::as_str) {
+                message.push_str(&format!(" Their note: {}", plain(note)));
+            }
+            CliError::new(message)
+                .with_exit(exit::DENIED)
+                .for_approval(id)
+        }
+        state => {
+            let why = approval
+                .get("reason")
+                .and_then(Value::as_str)
+                .map_or_else(|| format!("it was {state}"), plain);
+            CliError::new(format!(
+                "The request ended without an answer ({why}): {summary}"
+            ))
+            .with_exit(exit::ENDED)
+            .for_approval(id)
+        }
+    }
+}
+
+/// Follows a request until the owner answers, or `options.wait` passes. An allow returns what
+/// the call returns: the job it started (follow it as usual) or its result. A deny, an end and
+/// a wait that ran out are errors with their own exit codes.
+pub async fn follow(
+    engine: &Engine,
+    id: &str,
+    summary: &str,
+    options: &WaitOptions,
+) -> Result<Value, CliError> {
+    let summary = silo_api::plain_text(summary);
+    if let Some(reason) = options.reason.as_deref().filter(|r| !r.trim().is_empty()) {
+        let noted = engine
+            .call_unattended(requests::approvals_note(ApprovalsNoteParams {
+                id: id.to_owned(),
+                note: reason.to_owned(),
+            }))
+            .await;
+        if let Err(error) = noted {
+            eprintln!("silo: could not add your reason to the request: {error}");
+        }
+    }
+    if options.announce {
+        eprintln!("This needs the owner's answer in Silo: {summary} (request {id}).");
+    }
+    if options.wait.is_zero() {
+        return Err(waiting_error(id, &summary));
+    }
+    if options.announce {
+        eprintln!(
+            "Waiting up to {}s for the owner. Check later with `silo approvals status {id}`.",
+            options.wait.as_secs()
+        );
+    }
+    let deadline = Instant::now() + options.wait;
+    loop {
+        let approval = engine
+            .call_unattended(requests::approvals_get(ApprovalIdParams {
+                id: id.to_owned(),
+            }))
+            .await?;
+        match state_of(&approval) {
+            "pending" => {}
+            "allowed" => {
+                if let Some(result) = allowed_result(&approval)? {
+                    return Ok(result);
+                }
+            }
+            _ => return Err(ended_error(&approval)),
+        }
+        if Instant::now() >= deadline {
+            return Err(waiting_error(id, &summary));
+        }
+        tokio::time::sleep(options.poll).await;
+    }
+}
+
+/// `silo approvals wait`: the request as it stands once the owner answered, or after `wait`.
+pub async fn wait(
+    engine: &Engine,
+    id: &str,
+    wait: Duration,
+    poll: Duration,
+) -> Result<Value, CliError> {
+    let deadline = Instant::now() + wait;
+    loop {
+        let approval = show(engine, id).await?;
+        let state = state_of(&approval);
+        let answered =
+            state != "pending" && (state != "allowed" || approval["outcome"].is_object());
+        if answered || Instant::now() >= deadline {
+            return Ok(approval);
+        }
+        tokio::time::sleep(poll).await;
+    }
+}
+
+/// `silo approvals note`: the caller's own words on why it asked.
+pub async fn note(engine: &Engine, id: &str, note: &str) -> Result<Value, CliError> {
+    engine
+        .call(requests::approvals_note(ApprovalsNoteParams {
+            id: id.to_owned(),
+            note: note.to_owned(),
+        }))
+        .await
+}
 
 /// The pending approvals, newest first.
 pub async fn list(engine: &Engine) -> Result<Value, CliError> {
+    list_state(engine, Some(ApprovalState::Pending)).await
+}
+
+/// The approvals in `state` (any, when `None`), newest first. A computer's agent sees its own
+/// and those of the computers it made.
+pub async fn list_state(engine: &Engine, state: Option<ApprovalState>) -> Result<Value, CliError> {
     engine
         .call(requests::approvals_list(ApprovalsListParams {
-            state: Some(ApprovalState::Pending),
+            state,
             computer_id: None,
         }))
         .await

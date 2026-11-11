@@ -12,7 +12,6 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::{
-    config::Settings,
     engine::{Engine, Progress},
     error::CliError,
     ops::{self, DiffArgs},
@@ -73,6 +72,14 @@ pub fn check_url(text: &str) -> Result<String, CliError> {
     Ok(text.trim().to_owned())
 }
 
+/// `~/.config/silo/reviewer.yaml`. The token is never kept there: it is SILO_REVIEWER_TOKEN.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewerSettings {
+    #[serde(default)]
+    url: Option<String>,
+}
+
 /// The URL in `~/.config/silo/reviewer.yaml` (`url: https://...`), if the file exists.
 fn user_url() -> Result<Option<String>, CliError> {
     let Some(home) = std::env::var_os("HOME") else {
@@ -82,45 +89,27 @@ fn user_url() -> Result<Option<String>, CliError> {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Ok(None);
     };
-    let settings: crate::config::ReviewerSettings = serde_yaml_ng::from_str(&text)
+    let settings: ReviewerSettings = serde_yaml_ng::from_str(&text)
         .map_err(|error| CliError::new(format!("{}: {error}", path.display())))?;
     Ok(settings.url)
 }
 
 impl Reviewer {
-    /// The reviewer `SILO_REVIEWER_URL` or the user-level file names. A URL in the project's
-    /// `.silo/silo.yaml` is used only when it is the same address, because a project file
-    /// comes with the repository and the token does not.
-    pub fn resolve(settings: Option<&Settings>) -> Result<Self, CliError> {
+    /// The reviewer `SILO_REVIEWER_URL` or the user-level file names.
+    pub fn resolve() -> Result<Self, CliError> {
         let from_env = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
-        let project = settings
-            .and_then(|s| s.reviewer.as_ref())
-            .and_then(|r| r.url.clone());
-        let trusted = match from_env("SILO_REVIEWER_URL") {
-            Some(url) => Some(url),
-            None => user_url()?,
+        let url = match from_env("SILO_REVIEWER_URL") {
+            Some(url) => url,
+            None => user_url()?.ok_or_else(|| {
+                CliError::new(
+                    "The hosted reviewer is off. Set SILO_REVIEWER_URL (or url: in ~/.config/silo/reviewer.yaml) and SILO_REVIEWER_TOKEN.",
+                )
+            })?,
         };
-        let mut notes = Vec::new();
-        if let Some(project) = &project {
-            let same = trusted.as_deref().map(|t| t.trim().trim_end_matches('/'))
-                == Some(project.trim().trim_end_matches('/'));
-            if !same {
-                notes.push(
-                    "reviewer.url in .silo/silo.yaml was ignored: set the URL with SILO_REVIEWER_URL or ~/.config/silo/reviewer.yaml."
-                        .to_owned(),
-                );
-            }
-        }
-        let url = trusted.ok_or_else(|| {
-            CliError::new(format!(
-                "The hosted reviewer is off. Set SILO_REVIEWER_URL (or url: in ~/.config/silo/reviewer.yaml) and SILO_REVIEWER_TOKEN.{}",
-                notes.first().map(|n| format!(" Note: {n}")).unwrap_or_default()
-            ))
-        })?;
         Ok(Self {
             url: check_url(&url)?,
             token: from_env("SILO_REVIEWER_TOKEN"),
-            notes,
+            notes: Vec::new(),
         })
     }
 
@@ -250,12 +239,11 @@ pub fn shape(answer: &Value, lenses: &[String]) -> Value {
 /// Reviews `target`: a request id (`fr-` and 8 hex digits) or a computer.
 pub async fn review_target(
     engine: &Engine,
-    settings: Option<&Settings>,
     target: &str,
     lenses: &[String],
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
-    let reviewer = Reviewer::resolve(settings)?;
+    let reviewer = Reviewer::resolve()?;
     let (mut document, hidden, code_sent) = if is_request_id(target) {
         let shown = review::show(engine, target, progress).await?;
         match shown["diff"].as_object() {

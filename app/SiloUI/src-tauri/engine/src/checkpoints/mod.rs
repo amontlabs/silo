@@ -140,7 +140,7 @@ pub enum Platform {
 /// from added to what the caller asked for. A source built from no recipe adds nothing.
 pub fn options_with_recipe_rules(source_id: &str, mut options: ForkOptions) -> ForkOptions {
     if let Ok(Some(record)) = crate::recipes::records::get(source_id) {
-        for name in record.recipe.quiet {
+        for name in crate::recipes::quiet_names(&record.recipe) {
             if !options.stop.contains(&name) {
                 options.stop.push(name);
             }

@@ -353,6 +353,7 @@ fn document(
         name: name.to_owned(),
         built_in,
         hash,
+        warnings: recipes::quiet_warnings(&recipe),
         recipe,
         built,
     }

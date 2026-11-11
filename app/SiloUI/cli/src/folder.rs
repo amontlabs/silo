@@ -11,7 +11,6 @@ use silo_api::methods::{
 };
 
 use crate::{
-    config::{Recipe, Settings},
     engine::{Computer, Engine, Progress},
     error::CliError,
     ops::{self, ForkArgs},
@@ -433,8 +432,6 @@ pub async fn fork_folder(
     engine: &Engine,
     dir: &Path,
     name: Option<&str>,
-    recipe: &Recipe,
-    settings: Option<&Settings>,
     secrets: &[String],
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
@@ -468,10 +465,7 @@ pub async fn fork_folder(
         clean_up(&bundle);
         return Err(error);
     }
-    let result = send(
-        engine, &bundle, &name, &label, recipe, settings, secrets, progress,
-    )
-    .await;
+    let result = send(engine, &bundle, &name, &label, secrets, progress).await;
     clean_up(&bundle);
     let (fork, guest_path) = result?;
     let record = Record {
@@ -497,8 +491,6 @@ async fn send(
     bundle: &Path,
     name: &str,
     label: &str,
-    recipe: &Recipe,
-    settings: Option<&Settings>,
     secrets: &[String],
     progress: Progress<'_>,
 ) -> Result<(Computer, String), CliError> {
@@ -509,10 +501,9 @@ async fn send(
             name: Some(name.to_owned()),
             checkpoint: None,
             secrets: secrets.to_vec(),
-            recipe: Some(recipe.clone()),
-            recipe_name: Some(crate::config::DEFAULT_RECIPE.to_owned()),
+            recipe_name: Some(crate::recipe_file::DEFAULT_RECIPE.to_owned()),
+            no_start: false,
         },
-        settings,
         progress,
     )
     .await?;

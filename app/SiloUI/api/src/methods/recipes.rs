@@ -138,6 +138,10 @@ wire_struct! {
         /// The build forks start from, when one exists for this exact spec.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         built: Option<RecipeEntry>,
+        /// Things worth knowing about the recipe, such as a quiet service whose process name
+        /// cannot be derived.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
     }
 }
 
