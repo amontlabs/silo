@@ -432,6 +432,24 @@ pub fn network_policy(value: &Value) -> String {
         .filter_map(|preset| preset["name"].as_str())
         .collect();
     lines.push(format!("Presets: {}", presets.join(", ")));
+    for update in value["presetUpdates"].as_array().into_iter().flatten() {
+        let added: Vec<&str> = update["addedHosts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        lines.push(format!(
+            "The {} list has new hosts ({}). The computer keeps the list it was approved with until you set its policy again with this preset.",
+            text(update, "name"),
+            added.join(", ")
+        ));
+    }
+    for notice in value["notices"].as_array().into_iter().flatten() {
+        if let Some(notice) = notice.as_str() {
+            lines.push(format!("Note: {notice}"));
+        }
+    }
     lines.join("\n")
 }
 
@@ -648,6 +666,26 @@ pub fn tree(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_network_policy_shows_its_notices_and_preset_updates() {
+        let text = network_policy(&json!({
+            "computer": "main",
+            "policy": {"mode": "open", "hosts": [], "presets": ["npm"]},
+            "allowedHosts": [], "timing": "applied",
+            "presets": [{"name": "npm"}],
+            "presetUpdates": [{"name": "npm", "title": "npm", "addedHosts": ["registry.example"]}],
+            "notices": ["A secret for *.example.com is not on the list."]
+        }));
+        assert!(
+            text.contains("The npm list has new hosts (registry.example)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Note: A secret for *.example.com is not on the list."),
+            "{text}"
+        );
+    }
+
     #[test]
     fn credentials_line_names_used_and_blocked() {
         let usage = json!({"used": [{"secret": "OPENAI_API_KEY", "host": "api.openai.com", "method": "POST", "count": 3}],

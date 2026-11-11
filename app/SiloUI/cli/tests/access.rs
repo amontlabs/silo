@@ -269,3 +269,66 @@ async fn access_lists_what_each_computer_holds() {
     );
     assert!(text.contains("SSH: off"), "{text}");
 }
+
+fn policy_engine(saved: Arc<Mutex<Vec<Value>>>) -> FakeEngine {
+    FakeEngine::start(move |method, params| match method {
+        "computers.list" => Ok(listing(&[("main", "running")])),
+        "network.policy.get" => Ok(json!({
+            "computerId": params["computerId"],
+            "policy": {"mode": "allowlist", "hosts": ["a.example.com"], "presets": ["npm"]},
+            "allowedHosts": [],
+            "timing": "applied",
+            "presets": [{"name": "npm", "title": "npm", "hosts": []}],
+            "presetUpdates": [],
+            "notices": []
+        })),
+        "network.policy.set" => {
+            saved.lock().unwrap().push(params.clone());
+            Ok(json!({
+                "computerId": params["computerId"],
+                "policy": params["policy"],
+                "allowedHosts": [],
+                "timing": "applied",
+                "presets": [],
+                "presetUpdates": [],
+                "notices": []
+            }))
+        }
+        other => panic!("unexpected {other}"),
+    })
+}
+
+#[tokio::test]
+async fn a_policy_change_is_judged_against_the_policy_that_was_read() {
+    let saved = Arc::new(Mutex::new(Vec::new()));
+    let engine = policy_engine(saved.clone());
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let change = access::PolicyChange {
+        allow: vec!["b.example.com".into()],
+        ..access::PolicyChange::default()
+    };
+    access::network_policy(&connected, "main", &change)
+        .await
+        .unwrap();
+    let sent = saved.lock().unwrap()[0].clone();
+    assert_eq!(
+        sent["expected"],
+        json!({"mode": "allowlist", "hosts": ["a.example.com"], "presets": ["npm"]})
+    );
+    assert_eq!(
+        sent["policy"]["hosts"],
+        json!(["a.example.com", "b.example.com"])
+    );
+}
+
+#[tokio::test]
+async fn reading_a_policy_saves_nothing() {
+    let saved = Arc::new(Mutex::new(Vec::new()));
+    let engine = policy_engine(saved.clone());
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = access::network_policy(&connected, "main", &access::PolicyChange::default())
+        .await
+        .unwrap();
+    assert_eq!(value["computer"], "main");
+    assert!(saved.lock().unwrap().is_empty());
+}
