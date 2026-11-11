@@ -652,6 +652,7 @@ fn production_launcher(app: &AppHandle, home: &std::path::Path) -> Arc<dyn Launc
         socket: channel.engine_socket(home),
         owner_record: channel.engine_owner_record(home),
         bundled: launcher::bundled_manifest(&resources),
+        engine_program: Some(launcher::bundled_engine_program(&resources)),
         service,
         product: channel.product_name(),
         patience: Duration::from_secs(15),

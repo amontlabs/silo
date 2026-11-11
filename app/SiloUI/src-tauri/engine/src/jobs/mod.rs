@@ -3,7 +3,7 @@
 mod registry;
 
 pub use registry::{
-    Acceptance, CancelRoute, JobRegistry, RegistryError, RegistryErrorKind,
+    Acceptance, Acknowledgement, CancelRoute, JobRegistry, RegistryError, RegistryErrorKind,
     DISCOVERY_ID_BUDGET_BYTES, MAX_INLINE_JOB_OUTCOME_BYTES, MAX_JOB_OUTCOME_CHUNK_BYTES,
 };
 

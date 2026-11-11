@@ -7,10 +7,14 @@
 //! Connections, so the owner keeps the job and its outcome until a client acknowledges it,
 //! and the controller never holds a second copy under a different id.
 
+use std::{collections::BTreeSet, path::Path};
+
+use silo_engine::context::EngineContext as _;
+
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use silo_api::{
-    jobs::{ErrorCode, JobLookupResult},
+    jobs::{ErrorCode, JobId, JobLookupResult},
     methods::{
         operations::{
             AcknowledgeJobParams, CancelJobParams, GetJobParams, OperationQueue,
@@ -18,6 +22,11 @@ use silo_api::{
         },
         MethodName,
     },
+};
+
+use silo_engine::{
+    jobs::{Acknowledgement, JobRegistry, RegistryError},
+    policy::{store::PolicyStore, Caller},
 };
 
 use super::{access::call_owner, HandlerContext};
@@ -123,15 +132,66 @@ async fn acknowledge(
         .await
         .map(output);
     }
-    context
-        .job_registry()?
-        .acknowledge(&typed.job_id)
-        .map_err(HandlerContext::map_registry_error)?;
-    // The outcome is saved and acknowledged: the replay of an exec job is no longer needed
-    // (and does nothing for any other job).
-    silo_engine::guest::forget_finished(&typed.job_id);
-    context.engine_context().job_queue_changed();
+    let released = acknowledge_shared(
+        context.job_registry()?.as_ref(),
+        &context.silod_context().paths().app_data,
+        &reader_of(context.caller()),
+        &typed.job_id,
+    )
+    .map_err(|error| match error {
+        SharedAcknowledgeError::Registry(error) => HandlerContext::map_registry_error(error),
+        SharedAcknowledgeError::Policy(message) => DispatchError::internal(message),
+    })?;
+    if released {
+        // The outcome is saved and every reader has acknowledged it: the replay of an exec
+        // job is no longer needed (and does nothing for any other job).
+        silo_engine::guest::forget_finished(&typed.job_id);
+        context.engine_context().job_queue_changed();
+    }
     Ok(output(Value::Null))
+}
+
+/// The reader key under which a caller's acknowledgement of a job is counted: every
+/// computer is its own reader, and the app and other devices together are the owner side.
+pub(crate) fn reader_of(caller: &Caller) -> String {
+    match caller {
+        Caller::Computer { id } => id.clone(),
+        Caller::Owner { .. } | Caller::Device { .. } => OWNER_READER.to_owned(),
+    }
+}
+
+const OWNER_READER: &str = "@owner";
+
+pub(crate) enum SharedAcknowledgeError {
+    Registry(RegistryError),
+    Policy(String),
+}
+
+/// Acknowledges a job for `reader`. The result is kept for every other reader entitled to it,
+/// the owner side and each computer whose agent started the job, until that reader has
+/// acknowledged it too or the retention passes. Returns whether the result was released.
+pub(crate) fn acknowledge_shared(
+    registry: &JobRegistry,
+    app_data: &Path,
+    reader: &str,
+    job_id: &JobId,
+) -> Result<bool, SharedAcknowledgeError> {
+    let document = PolicyStore::new(app_data)
+        .snapshot()
+        .map_err(SharedAcknowledgeError::Policy)?;
+    let entitled: BTreeSet<String> = std::iter::once(OWNER_READER.to_owned())
+        .chain(
+            document
+                .jobs
+                .iter()
+                .filter(|job| job.id == job_id.as_str())
+                .map(|job| job.caller.clone()),
+        )
+        .collect();
+    registry
+        .acknowledge_shared(job_id, reader, &entitled)
+        .map(|acknowledgement| acknowledgement == Acknowledgement::Released)
+        .map_err(SharedAcknowledgeError::Registry)
 }
 
 async fn cancel(params: &Value, context: &HandlerContext) -> Result<HandlerOutput, DispatchError> {
@@ -179,6 +239,7 @@ mod tests {
 
     use super::*;
     use crate::methods::access::tests::{fixture, request_context, stub_owner};
+    use silo_engine::context::EngineContext as _;
 
     const UNKNOWN: &str = "88888888-8888-4888-8888-8888888888ff";
 
@@ -385,5 +446,176 @@ mod tests {
         .unwrap();
         assert!(queue["running"].is_array());
         assert!(queue["unacknowledgedJobIds"].is_array());
+    }
+
+    fn caller_context(caller: silo_engine::policy::Caller) -> HandlerContext {
+        HandlerContext::new(
+            fixture().context.clone(),
+            crate::dispatcher::RequestContext {
+                client_id: "access-test-client".to_owned(),
+                protocol: 8,
+                client: None,
+                caller,
+            },
+        )
+    }
+
+    async fn call_as(
+        caller: silo_engine::policy::Caller,
+        method: MethodName,
+        params: Value,
+    ) -> Result<Value, DispatchError> {
+        handle(method, &params, &caller_context(caller))
+            .await
+            .expect("operations owns this method")
+            .map(|output| output.value)
+    }
+
+    /// A finished job that `computer` started and has not acknowledged.
+    fn finished_job_of(computer: &str) -> silo_api::jobs::JobId {
+        let context = fixture().context.as_ref();
+        let job_id = silo_engine::jobs::allocate(context, "changes.merge")
+            .unwrap()
+            .job_id;
+        context
+            .job_registry()
+            .unwrap()
+            .finish(
+                &job_id,
+                &silo_api::jobs::JobFinished {
+                    job_id: job_id.clone(),
+                    result: Some(json!({"merged": true})),
+                    error: None,
+                    outcome_chunked: false,
+                },
+            )
+            .unwrap();
+        silo_engine::policy::store::PolicyStore::new(&context.paths().app_data)
+            .note_job(computer, job_id.as_str())
+            .unwrap();
+        job_id
+    }
+
+    #[tokio::test]
+    async fn a_computer_still_reads_its_job_after_the_owner_acknowledged_it() {
+        use silo_engine::policy::Caller;
+        let job = finished_job_of("computer-merge");
+        let params = json!({"jobId": job.as_str()});
+        let computer = || Caller::Computer {
+            id: "computer-merge".to_owned(),
+        };
+
+        call_as(
+            Caller::owner("app"),
+            MethodName::OperationsJobAcknowledge,
+            params.clone(),
+        )
+        .await
+        .unwrap();
+
+        let seen = call_as(computer(), MethodName::OperationsJobGet, params.clone())
+            .await
+            .unwrap();
+        assert_eq!(seen["state"], "finished");
+        assert_eq!(seen["outcome"]["result"]["merged"], true);
+        // The app asking again still finds it too, until the computer has read it.
+        call_as(
+            Caller::owner("app"),
+            MethodName::OperationsJobGet,
+            params.clone(),
+        )
+        .await
+        .unwrap();
+
+        call_as(computer(), MethodName::OperationsJobAcknowledge, params.clone())
+            .await
+            .unwrap();
+        let gone = call_as(computer(), MethodName::OperationsJobGet, params)
+            .await
+            .unwrap_err();
+        assert_eq!(gone.code, ErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn the_owner_can_acknowledge_last_and_a_job_nobody_else_holds_goes_at_once() {
+        use silo_engine::policy::Caller;
+        let job = finished_job_of("computer-first");
+        let params = json!({"jobId": job.as_str()});
+        call_as(
+            Caller::Computer {
+                id: "computer-first".to_owned(),
+            },
+            MethodName::OperationsJobAcknowledge,
+            params.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(call_as(
+            Caller::owner("app"),
+            MethodName::OperationsJobGet,
+            params.clone()
+        )
+        .await
+        .is_ok());
+        // Once the computer's own record of the job is dropped, the owner is the last reader.
+        silo_engine::policy::store::PolicyStore::new(&fixture().context.paths().app_data)
+            .drop_job("computer-first", job.as_str())
+            .unwrap();
+        call_as(
+            Caller::owner("app"),
+            MethodName::OperationsJobAcknowledge,
+            params.clone(),
+        )
+        .await
+        .unwrap();
+        let gone = call_as(Caller::owner("app"), MethodName::OperationsJobGet, params)
+            .await
+            .unwrap_err();
+        assert_eq!(gone.code, ErrorCode::NotFound);
+
+        let own = silo_engine::jobs::allocate(fixture().context.as_ref(), "changes.merge")
+            .unwrap()
+            .job_id;
+        fixture()
+            .context
+            .job_registry()
+            .unwrap()
+            .finish(
+                &own,
+                &silo_api::jobs::JobFinished {
+                    job_id: own.clone(),
+                    result: Some(json!({})),
+                    error: None,
+                    outcome_chunked: false,
+                },
+            )
+            .unwrap();
+        let own_params = json!({"jobId": own.as_str()});
+        call(MethodName::OperationsJobAcknowledge, own_params.clone())
+            .await
+            .unwrap();
+        let gone = call(MethodName::OperationsJobGet, own_params)
+            .await
+            .unwrap_err();
+        assert_eq!(gone.code, ErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn the_owner_bridge_keeps_a_computers_result_when_the_owner_acknowledges() {
+        let job = finished_job_of("computer-bridge");
+        let params = json!({"jobId": job.as_str()});
+        crate::methods::access::owner_job_operation_for_tests(
+            fixture().context.as_ref(),
+            "operations.job.acknowledge",
+            &params,
+        )
+        .unwrap();
+        let seen = crate::methods::access::owner_job_operation_for_tests(
+            fixture().context.as_ref(),
+            "operations.job.get",
+            &params,
+        )
+        .unwrap();
+        assert_eq!(seen["state"], "finished");
     }
 }

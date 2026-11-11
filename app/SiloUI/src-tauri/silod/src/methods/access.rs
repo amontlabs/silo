@@ -1329,12 +1329,25 @@ fn owner_job_operation(
             Ok(Value::Null)
         }
         _ => {
-            ctx.job_registry()?
-                .acknowledge(&job_id)
-                .map_err(registry_error)?;
-            // The outcome is acknowledged: the replay of an exec job is no longer needed.
-            silo_engine::guest::forget_finished(&job_id);
-            ctx.job_queue_changed();
+            let released = super::operations::acknowledge_shared(
+                ctx.job_registry()?.as_ref(),
+                &ctx.paths().app_data,
+                &super::operations::reader_of(&silo_engine::policy::Caller::owner("device")),
+                &job_id,
+            )
+            .map_err(|error| match error {
+                super::operations::SharedAcknowledgeError::Registry(error) => {
+                    registry_error(error)
+                }
+                super::operations::SharedAcknowledgeError::Policy(message) => {
+                    BridgeError::from(message)
+                }
+            })?;
+            if released {
+                // The outcome is acknowledged: the replay of an exec job is no longer needed.
+                silo_engine::guest::forget_finished(&job_id);
+                ctx.job_queue_changed();
+            }
             Ok(Value::Null)
         }
     }
