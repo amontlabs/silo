@@ -1,0 +1,182 @@
+diff --git a/crates/cli/bin/main.rs b/crates/cli/bin/main.rs
+index 72a49f4a811951bc17a273149f8d5a5dc456bd4d..a3562288327a3775241cc9d1b99f02508a72e1e8 100644
+--- a/crates/cli/bin/main.rs
++++ b/crates/cli/bin/main.rs
+@@ -272,7 +272,8 @@ fn silo_protocol_probe(arguments: &[std::ffi::OsString]) -> Option<&'static str>
+                 || flag == "--silo-working-account-protocol"
+                 || flag == "--silo-secret-values-protocol"
+                 || flag == "--silo-runtime-instance-protocol"
+-                || flag == "--silo-restore-strict-protocol" =>
++                || flag == "--silo-restore-strict-protocol"
++                || flag == "--silo-storage-repair-protocol" =>
+         {
+             Some("1")
+         }
+@@ -871,6 +872,7 @@ mod command_tests {
+             "--silo-secret-values-protocol",
+             "--silo-runtime-instance-protocol",
+             "--silo-restore-strict-protocol",
++            "--silo-storage-repair-protocol",
+         ] {
+             assert_eq!(silo_protocol_probe(&[flag.into()]), Some("1"));
+         }
+diff --git a/crates/cli/lib/commands/self_cmd/repair.rs b/crates/cli/lib/commands/self_cmd/repair.rs
+index b5eaad3b53d96423abb01b8a1e2a92b94431449f..80695fac71552646722644db708b19e50778dfa3 100644
+--- a/crates/cli/lib/commands/self_cmd/repair.rs
++++ b/crates/cli/lib/commands/self_cmd/repair.rs
+@@ -44,6 +44,10 @@ pub struct RepairArgs {
+     /// Print a machine-readable result without interactive prompts.
+     #[arg(long, value_enum, requires = "repair_target")]
+     pub format: Option<OutputFormat>,
++
++    /// Attest that every legacy VM in every home has stopped and none will write until repair ends.
++    #[arg(long, hide = true, requires_all = ["sandbox", "format"])]
++    pub legacy_writers_stopped: bool,
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+@@ -51,6 +55,16 @@ pub struct RepairArgs {
+ //--------------------------------------------------------------------------------------------------
+ 
+ impl RepairArgs {
++    fn validate_attestation(&self) -> anyhow::Result<()> {
++        // The attestation is meaningful only for a named --sandbox in scripted JSON mode.
++        anyhow::ensure!(
++            !self.legacy_writers_stopped
++                || (self.sandbox.is_some() && self.format == Some(OutputFormat::Json)),
++            "--legacy-writers-stopped requires --sandbox and --format json"
++        );
++        Ok(())
++    }
++
+     fn normalize_target(mut self) -> Self {
+         // Normalize before choosing interactive or scripted execution. Both spellings
+         // must select the same sandbox and retain the same automation requirements.
+@@ -64,6 +78,7 @@ impl RepairArgs {
+ //--------------------------------------------------------------------------------------------------
+ 
+ pub(super) async fn run(args: RepairArgs) -> anyhow::Result<()> {
++    args.validate_attestation()?;
+     let args = args.normalize_target();
+     // JSON and redirected input never supply consent. The terminal flow asks for
+     // required shutdown and macOS maintenance confirmations before repairing storage.
+@@ -79,6 +94,7 @@ pub(super) async fn run(args: RepairArgs) -> anyhow::Result<()> {
+ 
+ async fn run_scripted(args: RepairArgs) -> anyhow::Result<()> {
+     let json = args.format == Some(OutputFormat::Json);
++    let legacy_writers_stopped = args.legacy_writers_stopped;
+     let name = args
+         .name
+         .context("provide a sandbox name: msb self repair --sandbox SANDBOX")?;
+@@ -157,9 +173,9 @@ async fn run_scripted(args: RepairArgs) -> anyhow::Result<()> {
+             "Storage needs investigation. Run repair in an interactive terminal without --format json to review a diagnostic report.",
+         );
+     }
+-    if cfg!(target_os = "macos") {
++    if requires_maintenance_confirmation(cfg!(target_os = "macos"), legacy_writers_stopped) {
+         // Never infer cross-home writer safety from this home's inventory or redirected
+-        // input. The interactive path is the only CLI source of maintenance consent.
++        // input. Consent comes from the interactive path or the explicit attestation flag.
+         return blocked(
+             &item,
+             2,
+@@ -168,10 +184,21 @@ async fn run_scripted(args: RepairArgs) -> anyhow::Result<()> {
+         );
+     }
+ 
+-    let result = Sandbox::recover_storage(&name, StorageRecoveryOptions::default()).await?;
++    let result = Sandbox::recover_storage(
++        &name,
++        StorageRecoveryOptions {
++            legacy_writers_stopped,
++            ..Default::default()
++        },
++    )
++    .await?;
+     done(result, json)
+ }
+ 
++fn requires_maintenance_confirmation(macos: bool, legacy_writers_stopped: bool) -> bool {
++    macos && !legacy_writers_stopped
++}
++
+ fn done(result: StorageRecovery, json: bool) -> anyhow::Result<()> {
+     if json {
+         println!("{}", serde_json::to_string_pretty(&result)?);
+@@ -242,11 +269,7 @@ mod tests {
+     #[test]
+     fn removed_selection_and_confirmation_flags_are_rejected() {
+         for target in [vec!["api"], vec!["--sandbox", "api"]] {
+-            for flag in [
+-                "--select=root=view-a",
+-                "--accept-selected-view",
+-                "--legacy-writers-stopped",
+-            ] {
++            for flag in ["--select=root=view-a", "--accept-selected-view"] {
+                 let mut arguments = vec!["repair"];
+                 arguments.extend_from_slice(&target);
+                 arguments.push(flag);
+@@ -256,6 +279,63 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn legacy_writers_stopped_is_hidden_and_needs_json_and_an_explicit_sandbox() {
++        let args = Command::try_parse_from([
++            "repair",
++            "--sandbox",
++            "api",
++            "--format",
++            "json",
++            "--legacy-writers-stopped",
++        ])
++        .unwrap()
++        .args;
++        assert!(args.legacy_writers_stopped);
++        args.validate_attestation().unwrap();
++        assert!(
++            !Command::try_parse_from(["repair", "--sandbox", "api"])
++                .unwrap()
++                .args
++                .legacy_writers_stopped
++        );
++
++        for arguments in [
++            vec!["repair", "--legacy-writers-stopped"],
++            vec!["repair", "--sandbox", "api", "--legacy-writers-stopped"],
++            vec!["repair", "--format", "json", "--legacy-writers-stopped"],
++        ] {
++            assert!(
++                Command::try_parse_from(arguments.clone()).is_err(),
++                "{arguments:?}"
++            );
++        }
++
++        let positional = Command::try_parse_from([
++            "repair",
++            "api",
++            "--format",
++            "json",
++            "--legacy-writers-stopped",
++        ]);
++        assert!(positional.unwrap().args.validate_attestation().is_err());
++
++        let command = <Command as clap::CommandFactory>::command();
++        let argument = command
++            .get_arguments()
++            .find(|argument| argument.get_id() == "legacy_writers_stopped")
++            .unwrap();
++        assert!(argument.is_hide_set());
++    }
++
++    #[test]
++    fn macos_scripted_repair_needs_the_attestation_and_other_platforms_never_do() {
++        assert!(requires_maintenance_confirmation(true, false));
++        assert!(!requires_maintenance_confirmation(true, true));
++        assert!(!requires_maintenance_confirmation(false, false));
++        assert!(!requires_maintenance_confirmation(false, true));
++    }
++
+     #[test]
+     fn sandbox_flag_and_positional_target_use_the_same_repair_path() {
+         for target in [vec!["api"], vec!["--sandbox", "api"]] {

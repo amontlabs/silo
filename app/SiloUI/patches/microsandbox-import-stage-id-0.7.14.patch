@@ -1,8 +1,8 @@
 diff --git a/crates/cli/lib/commands/snapshot.rs b/crates/cli/lib/commands/snapshot.rs
-index 124312d3..1b54c9e4 100644
+index e9e2b59df2cd09b6779c67feacda8fae48aa21dd..9ac8f9a44acbb5578004fd8077bc853c2329d407 100644
 --- a/crates/cli/lib/commands/snapshot.rs
 +++ b/crates/cli/lib/commands/snapshot.rs
-@@ -250,6 +250,10 @@ pub struct SnapshotLoadArgs {
+@@ -251,6 +251,10 @@ pub struct SnapshotLoadArgs {
      /// Select the batch's unique tip as head even if it is not a fast-forward.
      #[arg(long)]
      pub set_head: bool,
@@ -13,7 +13,7 @@ index 124312d3..1b54c9e4 100644
  }
  
  /// Arguments for `msb snapshot head`.
-@@ -617,6 +621,7 @@ async fn load(args: SnapshotLoadArgs) -> anyhow::Result<()> {
+@@ -625,6 +629,7 @@ async fn load(args: SnapshotLoadArgs) -> anyhow::Result<()> {
              base: args.base,
              group: args.group,
              set_head: args.set_head,
@@ -22,10 +22,10 @@ index 124312d3..1b54c9e4 100644
      )
      .await?;
 diff --git a/sdk/go/native/src/lib.rs b/sdk/go/native/src/lib.rs
-index aa751011..80248a13 100644
+index f624403b5fcd7e5e01146a9fa8f41dbe180624d4..084e8d91bdc101548670d83c67fb9e3c69d8d91f 100644
 --- a/sdk/go/native/src/lib.rs
 +++ b/sdk/go/native/src/lib.rs
-@@ -6968,6 +6968,7 @@ pub unsafe extern "C" fn msb_snapshot_import_with_options(
+@@ -7067,6 +7067,7 @@ pub unsafe extern "C" fn msb_snapshot_import_with_options(
                      base: opts.base,
                      group: opts.group,
                      set_head: opts.set_head,
@@ -33,7 +33,7 @@ index aa751011..80248a13 100644
                  },
              )
              .await
-@@ -7001,6 +7002,7 @@ pub unsafe extern "C" fn msb_snapshot_import_many(
+@@ -7100,6 +7101,7 @@ pub unsafe extern "C" fn msb_snapshot_import_many(
                      base: opts.base,
                      group: opts.group,
                      set_head: opts.set_head,
@@ -42,10 +42,10 @@ index aa751011..80248a13 100644
              )
              .await
 diff --git a/sdk/node-ts/native/snapshot.rs b/sdk/node-ts/native/snapshot.rs
-index 4b09e926..b3cd8c62 100644
+index 09f251b639122efc94cad3ee6ad44786cc66f5d5..619b8629d138c53d39eb36dac18a7f0602747cd4 100644
 --- a/sdk/node-ts/native/snapshot.rs
 +++ b/sdk/node-ts/native/snapshot.rs
-@@ -202,6 +202,7 @@ impl JsSnapshot {
+@@ -203,6 +203,7 @@ impl JsSnapshot {
                  base: opts.base,
                  group: opts.group,
                  set_head: opts.set_head.unwrap_or(false),
@@ -53,7 +53,7 @@ index 4b09e926..b3cd8c62 100644
              },
          )
          .await
-@@ -224,6 +225,7 @@ impl JsSnapshot {
+@@ -225,6 +226,7 @@ impl JsSnapshot {
                  base: opts.base,
                  group: opts.group,
                  set_head: opts.set_head.unwrap_or(false),
@@ -62,10 +62,10 @@ index 4b09e926..b3cd8c62 100644
          )
          .await
 diff --git a/sdk/python/src/snapshot.rs b/sdk/python/src/snapshot.rs
-index e145ef4d..8968ad61 100644
+index 75de081461045802c2986ec9e869f2309160f28a..8e87bb576e54594b093ed3f8e574be20015143f5 100644
 --- a/sdk/python/src/snapshot.rs
 +++ b/sdk/python/src/snapshot.rs
-@@ -291,6 +291,7 @@ impl PySnapshot {
+@@ -300,6 +300,7 @@ impl PySnapshot {
                      base,
                      group,
                      set_head,
@@ -73,7 +73,7 @@ index e145ef4d..8968ad61 100644
                  },
              )
              .await
-@@ -318,6 +319,7 @@ impl PySnapshot {
+@@ -327,6 +328,7 @@ impl PySnapshot {
                      base,
                      group,
                      set_head,
@@ -82,7 +82,7 @@ index e145ef4d..8968ad61 100644
              )
              .await
 diff --git a/sdk/rust/lib/backend/local/snapshot/archive/batch.rs b/sdk/rust/lib/backend/local/snapshot/archive/batch.rs
-index 18266c55..79549334 100644
+index a3e04c3ec32441a2b6fc0bbbb6bf983cd753fd6f..4b06dd6225a31859dbbfed7850e0f8985cb881b9 100644
 --- a/sdk/rust/lib/backend/local/snapshot/archive/batch.rs
 +++ b/sdk/rust/lib/backend/local/snapshot/archive/batch.rs
 @@ -28,6 +28,9 @@ pub(super) async fn load(
@@ -115,7 +115,7 @@ index 18266c55..79549334 100644
      }
      let unpack_us = started.elapsed().as_micros();
      let has_dependencies = staged.iter().try_fold(false, |found, item| {
-@@ -113,7 +125,12 @@ pub(super) async fn load(
+@@ -117,7 +129,12 @@ pub(super) async fn load(
          }
          match opts.base.as_deref().filter(|_| !complete(&sources)) {
              Some(base) => {
@@ -129,16 +129,16 @@ index 18266c55..79549334 100644
                  sources
                      .add(opened.snapshot.manifest(), opened.snapshot.path(), None)
                      .await?;
-@@ -206,7 +223,7 @@ pub(super) async fn load(
+@@ -214,7 +231,7 @@ pub(super) async fn load(
  
      let publication = tempfile::Builder::new()
          .prefix(".msb-snapshot-batch-")
 -        .tempdir_in(&snapshots_dir)?;
 +        .tempdir_in(operation_snapshots.path())?;
+     let mut image_operations = Vec::new();
      for ((item, snapshots), candidate) in staged.iter().zip(&imported).zip(&candidates) {
          let head = snapshots
-             .iter()
-@@ -261,6 +278,36 @@ pub(super) async fn load(
+@@ -306,6 +323,36 @@ pub(super) async fn load(
      Ok(handles)
  }
  
@@ -175,7 +175,7 @@ index 18266c55..79549334 100644
  async fn unpack(
      archive: &Path,
      root: &Path,
-@@ -403,6 +450,58 @@ fn handle(
+@@ -448,6 +495,58 @@ fn handle(
  mod tests {
      use super::*;
  
@@ -235,10 +235,10 @@ index 18266c55..79549334 100644
      fn member_alias_cannot_refer_to_snapshot_outside_its_archive() {
          let existing = SnapshotId::new(format!("snap_{:032x}", 1)).unwrap();
 diff --git a/sdk/rust/lib/backend/local/snapshot/archive/delta.rs b/sdk/rust/lib/backend/local/snapshot/archive/delta.rs
-index 012fd49e..6a57d231 100644
+index 86cfa80ab966f30c802dbf4913bb51d56ad195b5..4f740fb0ff080b9ee0af1d66ed804c1fc19ffa81 100644
 --- a/sdk/rust/lib/backend/local/snapshot/archive/delta.rs
 +++ b/sdk/rust/lib/backend/local/snapshot/archive/delta.rs
-@@ -1113,6 +1113,14 @@ fn physical_layers(
+@@ -1134,6 +1134,14 @@ fn physical_layers(
  pub(super) async fn open_base(
      local: &LocalBackend,
      input: &str,
@@ -253,7 +253,7 @@ index 012fd49e..6a57d231 100644
  ) -> MicrosandboxResult<BaseSnapshot> {
      let path = Path::new(input);
      // Admission has already anchored archive filenames. A remaining bare selector
-@@ -1127,7 +1135,10 @@ pub(super) async fn open_base(
+@@ -1148,7 +1156,10 @@ pub(super) async fn open_base(
              _stage: None,
          });
      }
@@ -266,7 +266,7 @@ index 012fd49e..6a57d231 100644
      let cache_dir = stage.path().join("cache");
      tokio::fs::create_dir_all(&snapshots_dir).await?;
 diff --git a/sdk/rust/lib/snapshot/types.rs b/sdk/rust/lib/snapshot/types.rs
-index 6e87e7fa..e5e9bf93 100644
+index 6e87e7faa27ea0499f4b9055a5aefa8206e9c63f..e5e9bf93bbcf68776f5ccd0a680ebc8b94c69823 100644
 --- a/sdk/rust/lib/snapshot/types.rs
 +++ b/sdk/rust/lib/snapshot/types.rs
 @@ -48,6 +48,11 @@ pub struct LoadOpts {

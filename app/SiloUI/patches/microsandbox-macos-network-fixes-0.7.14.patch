@@ -1,5 +1,5 @@
 diff --git a/crates/network/lib/engine/dns/forwarder.rs b/crates/network/lib/engine/dns/forwarder.rs
-index 822e09b..a66ad7b 100644
+index d76dbc28029fd6e8e3adb5d2c5200881409814d0..559fbdad795c642010c43a3a68b83648ed14b290 100644
 --- a/crates/network/lib/engine/dns/forwarder.rs
 +++ b/crates/network/lib/engine/dns/forwarder.rs
 @@ -44,7 +44,7 @@ use super::common::config::NormalizedDnsConfig;
@@ -60,7 +60,7 @@ index 822e09b..a66ad7b 100644
      /// Native Windows DNS Client used only when no nameserver was explicitly configured.
      #[cfg(windows)]
      WindowsSystem(WindowsSystemResolver),
-@@ -391,18 +419,20 @@ impl DnsForwarder {
+@@ -396,18 +424,20 @@ impl DnsForwarder {
          response_msg.metadata.id = guest_id;
          let response_bytes = response_msg.to_bytes().ok()?;
  
@@ -88,7 +88,7 @@ index 822e09b..a66ad7b 100644
                  );
                  return build_truncated_response(&query_msg).map(Bytes::from);
              }
-@@ -455,23 +485,16 @@ impl DnsForwarder {
+@@ -460,23 +490,16 @@ impl DnsForwarder {
      ) -> Option<Message> {
          match &self.configured {
              ConfiguredResolver::Direct(upstreams) => {
@@ -122,7 +122,7 @@ index 822e09b..a66ad7b 100644
              }
              #[cfg(windows)]
              ConfiguredResolver::WindowsSystem(resolver) => {
-@@ -500,6 +523,33 @@ impl DnsForwarder {
+@@ -505,6 +528,33 @@ impl DnsForwarder {
          }
      }
  
@@ -156,7 +156,7 @@ index 822e09b..a66ad7b 100644
      /// Send one query to one upstream. `None` means this upstream did
      /// not produce a usable answer, which is what makes the caller fall
      /// over to the next one: a per-query timeout and a transport error
-@@ -578,6 +628,7 @@ impl DnsForwarder {
+@@ -583,6 +633,7 @@ impl DnsForwarder {
          platform_policy: Option<Arc<NetworkPolicy>>,
          shared: Arc<SharedState>,
          gateway: GatewayIps,
@@ -164,7 +164,7 @@ index 822e09b..a66ad7b 100644
      ) -> DnsForwarderHandle {
          let (forwarder_tx, forwarder_rx) = watch::channel(None);
          handle.spawn(async move {
-@@ -588,6 +639,7 @@ impl DnsForwarder {
+@@ -593,6 +644,7 @@ impl DnsForwarder {
                  platform_policy,
                  shared,
                  gateway,
@@ -172,7 +172,7 @@ index 822e09b..a66ad7b 100644
              )
              .await
              else {
-@@ -610,47 +662,137 @@ impl DnsForwarder {
+@@ -615,47 +667,137 @@ impl DnsForwarder {
          platform_policy: Option<Arc<NetworkPolicy>>,
          shared: Arc<SharedState>,
          gateway: GatewayIps,
@@ -345,7 +345,7 @@ index 822e09b..a66ad7b 100644
          Some(Arc::new(Self {
              configured,
              gateway_ips,
-@@ -659,6 +801,7 @@ impl DnsForwarder {
+@@ -664,6 +806,7 @@ impl DnsForwarder {
              shared,
              gateway,
              config,
@@ -353,15 +353,15 @@ index 822e09b..a66ad7b 100644
          }))
      }
  
-@@ -737,10 +880,119 @@ impl DnsForwarder {
+@@ -742,8 +885,117 @@ impl DnsForwarder {
              shared,
              gateway,
              config,
 +            mtu: 1500,
-         })
-     }
- }
- 
++        })
++    }
++}
++
 +#[cfg(not(windows))]
 +impl HostRouting {
 +    /// Build the upstreams of every resolver in `table`. `None` when none can be built.
@@ -389,8 +389,8 @@ index 822e09b..a66ad7b 100644
 +            table,
 +            default,
 +            scoped,
-+        })
-+    }
+         })
+     }
 +
 +    /// The upstreams that answer `name`: those of the scoped resolver that claims it, else the
 +    /// default ones.
@@ -468,12 +468,10 @@ index 822e09b..a66ad7b 100644
 +        Some(IpAddr::V6(_)) | None => 40,
 +    };
 +    advertised.min(mtu.saturating_sub(ip_header + UDP_HEADER))
-+}
-+
+ }
+ 
  /// Return whether a private/reserved DNS answer was explicitly made reachable.
- ///
- /// Rebind protection remains fail-closed unless an address-only TCP or UDP
-@@ -1012,9 +1264,11 @@ fn build_truncated_response(query: &Message) -> Option<Vec<u8>> {
+@@ -1017,9 +1269,11 @@ fn build_truncated_response(query: &Message) -> Option<Vec<u8>> {
  
  #[cfg(test)]
  mod tests {
@@ -485,7 +483,7 @@ index 822e09b..a66ad7b 100644
      use hickory_net::proto::rr::{DNSClass, Name, RecordType};
      use std::net::Ipv4Addr;
      use std::sync::atomic::{AtomicUsize, Ordering};
-@@ -1113,6 +1367,7 @@ mod tests {
+@@ -1118,6 +1372,7 @@ mod tests {
                  ipv6: None,
              },
              config,
@@ -493,7 +491,7 @@ index 822e09b..a66ad7b 100644
          })
      }
  
-@@ -1250,6 +1505,301 @@ mod tests {
+@@ -1465,6 +1720,301 @@ mod tests {
          assert_eq!(msg.metadata.id, 0x4242, "guest transaction id is preserved");
      }
  
@@ -797,7 +795,7 @@ index 822e09b..a66ad7b 100644
          response.metadata.response_code = ResponseCode::NoError;
 diff --git a/crates/network/lib/engine/dns/host_resolvers.rs b/crates/network/lib/engine/dns/host_resolvers.rs
 new file mode 100644
-index 0000000..cc7b91e
+index 0000000000000000000000000000000000000000..a2598d8e944eb8bd8a7fefad5e4b1ee58e0566cc
 --- /dev/null
 +++ b/crates/network/lib/engine/dns/host_resolvers.rs
 @@ -0,0 +1,357 @@
@@ -1024,6 +1022,46 @@ index 0000000..cc7b91e
 +    })
 +}
 +
++/// A change source for tests and embedders: the counter moves when `notify` is called.
++#[cfg(test)]
++pub(crate) struct ManualSource {
++    table: std::sync::Mutex<io::Result<HostResolverTable>>,
++    sender: watch::Sender<u64>,
++}
++
++#[cfg(test)]
++impl ManualSource {
++    pub(crate) fn new(table: HostResolverTable) -> std::sync::Arc<Self> {
++        std::sync::Arc::new(Self {
++            table: std::sync::Mutex::new(Ok(table)),
++            sender: watch::channel(0).0,
++        })
++    }
++
++    /// Replace the configuration and announce the change.
++    pub(crate) fn change(&self, table: io::Result<HostResolverTable>) {
++        *self.table.lock().unwrap() = table;
++        self.sender.send_modify(|count| *count += 1);
++    }
++}
++
++#[cfg(test)]
++impl HostResolverSource for ManualSource {
++    fn read(&self) -> io::Result<HostResolverTable> {
++        match &*self.table.lock().unwrap() {
++            Ok(table) => Ok(table.clone()),
++            Err(error) => Err(io::Error::new(error.kind(), error.to_string())),
++        }
++    }
++
++    fn watch(&self) -> Option<HostResolverWatch> {
++        Some(HostResolverWatch {
++            changes: self.sender.subscribe(),
++            _guard: Box::new(()),
++        })
++    }
++}
++
 +//--------------------------------------------------------------------------------------------------
 +// Tests
 +//--------------------------------------------------------------------------------------------------
@@ -1118,48 +1156,8 @@ index 0000000..cc7b91e
 +        assert!(parse_resolver_file("", "nameserver 192.0.2.1\n").is_none());
 +    }
 +}
-+
-+/// A change source for tests and embedders: the counter moves when `notify` is called.
-+#[cfg(test)]
-+pub(crate) struct ManualSource {
-+    table: std::sync::Mutex<io::Result<HostResolverTable>>,
-+    sender: watch::Sender<u64>,
-+}
-+
-+#[cfg(test)]
-+impl ManualSource {
-+    pub(crate) fn new(table: HostResolverTable) -> std::sync::Arc<Self> {
-+        std::sync::Arc::new(Self {
-+            table: std::sync::Mutex::new(Ok(table)),
-+            sender: watch::channel(0).0,
-+        })
-+    }
-+
-+    /// Replace the configuration and announce the change.
-+    pub(crate) fn change(&self, table: io::Result<HostResolverTable>) {
-+        *self.table.lock().unwrap() = table;
-+        self.sender.send_modify(|count| *count += 1);
-+    }
-+}
-+
-+#[cfg(test)]
-+impl HostResolverSource for ManualSource {
-+    fn read(&self) -> io::Result<HostResolverTable> {
-+        match &*self.table.lock().unwrap() {
-+            Ok(table) => Ok(table.clone()),
-+            Err(error) => Err(io::Error::new(error.kind(), error.to_string())),
-+        }
-+    }
-+
-+    fn watch(&self) -> Option<HostResolverWatch> {
-+        Some(HostResolverWatch {
-+            changes: self.sender.subscribe(),
-+            _guard: Box::new(()),
-+        })
-+    }
-+}
 diff --git a/crates/network/lib/engine/dns/interceptor.rs b/crates/network/lib/engine/dns/interceptor.rs
-index 7ca6702..607b8d6 100644
+index 7ca67021afee06e969710b9623718ccc4380215e..607b8d6eb718cb72b1b95ba80dd59bcdf82c7edf 100644
 --- a/crates/network/lib/engine/dns/interceptor.rs
 +++ b/crates/network/lib/engine/dns/interceptor.rs
 @@ -100,6 +100,7 @@ impl DnsInterceptor {
@@ -1179,7 +1177,7 @@ index 7ca6702..607b8d6 100644
          let proxy = UdpProxy::new(
              query_rx,
 diff --git a/crates/network/lib/engine/dns/mod.rs b/crates/network/lib/engine/dns/mod.rs
-index 62ed30b..d36bd62 100644
+index 62ed30ba199bf889c04193dfe56f55219c22c383..d36bd62b88ae2393d6d8f947fe535e570ec0110f 100644
 --- a/crates/network/lib/engine/dns/mod.rs
 +++ b/crates/network/lib/engine/dns/mod.rs
 @@ -7,6 +7,7 @@
@@ -1191,7 +1189,7 @@ index 62ed30b..d36bd62 100644
  pub(crate) mod nameserver;
  pub(crate) mod proxies;
 diff --git a/crates/network/lib/engine/dns/nameserver.rs b/crates/network/lib/engine/dns/nameserver.rs
-index 629c3d4..fa00b11 100644
+index 629c3d44aad1573d1d19e163a9bcf2c8bc685de0..fa00b1168f540a2b79588f4adfcd20fcf9f990cc 100644
 --- a/crates/network/lib/engine/dns/nameserver.rs
 +++ b/crates/network/lib/engine/dns/nameserver.rs
 @@ -12,7 +12,7 @@ use resolv_conf::Config as ResolvConfig;
@@ -1292,7 +1290,7 @@ index 629c3d4..fa00b11 100644
      }
  }
 diff --git a/crates/network/lib/engine/dns/nameserver/scdynamicstore.rs b/crates/network/lib/engine/dns/nameserver/scdynamicstore.rs
-index c59c702..6d36874 100644
+index c59c7023d309420192f5b175a42d8d4889b766e2..6d368744127971ff98c464ca2c28090db5fc8a55 100644
 --- a/crates/network/lib/engine/dns/nameserver/scdynamicstore.rs
 +++ b/crates/network/lib/engine/dns/nameserver/scdynamicstore.rs
 @@ -12,22 +12,47 @@
@@ -1671,7 +1669,7 @@ index c59c702..6d36874 100644
 +    }
 +}
 diff --git a/crates/network/lib/engine/netstack/backend.rs b/crates/network/lib/engine/netstack/backend.rs
-index 4ca0e92..4f1c4b8 100644
+index 4ca0e9214b18b4176f9173c100c66484bf041c8e..4f1c4b8806ff44809be6a13f769319cdce818371 100644
 --- a/crates/network/lib/engine/netstack/backend.rs
 +++ b/crates/network/lib/engine/netstack/backend.rs
 @@ -58,6 +58,19 @@ impl SmoltcpBackend {
@@ -1748,22 +1746,22 @@ index 4ca0e92..4f1c4b8 100644
      fn write_frame_enqueues_guest_frame_and_wakes_poll_loop() {
          let shared = Arc::new(SharedState::new(1));
 diff --git a/crates/network/lib/engine/netstack/poll.rs b/crates/network/lib/engine/netstack/poll.rs
-index 1b9a794..7dda7b1 100644
+index 8c02cf069c6fcc1fa29085047a1492e18c931479..f9971f16b8be7f5617399d056ec79fdf0986bb54 100644
 --- a/crates/network/lib/engine/netstack/poll.rs
 +++ b/crates/network/lib/engine/netstack/poll.rs
-@@ -326,6 +326,7 @@ pub(crate) fn smoltcp_poll_loop_with_options(
+@@ -327,6 +327,7 @@ pub(crate) fn smoltcp_poll_loop_with_options(
          config.gateway,
          config.gateway_mac,
          config.guest_mac,
 +        config.mtu,
      );
-     let mut port_publisher = PortPublisher::new_with_readiness(
-         &published_ports,
+     let mut port_publisher = PortPublisher::new(
+         published_ports,
 diff --git a/crates/network/lib/engine/network.rs b/crates/network/lib/engine/network.rs
-index 9158774..c64f8c7 100644
+index fb814d27fe2b00a9363f099d0c009eb858627544..b8ac9d0bced3030b944a63abca5ffa733dd59809 100644
 --- a/crates/network/lib/engine/network.rs
 +++ b/crates/network/lib/engine/network.rs
-@@ -45,6 +45,35 @@ pub fn generate_intercept_ca_pair() -> Result<(Vec<u8>, Vec<u8>), rcgen::Error>
+@@ -44,6 +44,35 @@ pub fn generate_intercept_ca_pair() -> Result<(Vec<u8>, Vec<u8>), rcgen::Error>
      Ok((ca.cert_pem(), ca.key_pem()))
  }
  
@@ -1799,7 +1797,7 @@ index 9158774..c64f8c7 100644
  //--------------------------------------------------------------------------------------------------
  // Constants
  //--------------------------------------------------------------------------------------------------
-@@ -1359,6 +1388,55 @@ mod tests {
+@@ -1407,6 +1436,55 @@ mod tests {
          ));
      }
  

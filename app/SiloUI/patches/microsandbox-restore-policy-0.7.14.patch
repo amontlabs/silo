@@ -1,8 +1,8 @@
 diff --git a/crates/cli/lib/commands/common.rs b/crates/cli/lib/commands/common.rs
-index a2a0466d..c7e45fcd 100644
+index e1ff38a46e544885431e6588e1f883122b205076..53c69ab1a828371a875bd25b285178a8fb3bb07e 100644
 --- a/crates/cli/lib/commands/common.rs
 +++ b/crates/cli/lib/commands/common.rs
-@@ -2998,7 +2998,7 @@ fn extend_unique(target: &mut Vec<String>, values: impl IntoIterator<Item = Stri
+@@ -3339,7 +3339,7 @@ fn extend_unique(target: &mut Vec<String>, values: impl IntoIterator<Item = Stri
  }
  
  #[cfg(feature = "net")]
@@ -12,19 +12,19 @@ index a2a0466d..c7e45fcd 100644
      host: &str,
  ) -> microsandbox::sandbox::SecretBuilder {
 diff --git a/crates/cli/lib/commands/restore.rs b/crates/cli/lib/commands/restore.rs
-index 0756be9a..4f19a27d 100644
+index 88c6f572142e2dba0f6a44bc67d09a4c500394a1..234a0eaf7c3168ff95f288d37b0dd1fdd922e6b1 100644
 --- a/crates/cli/lib/commands/restore.rs
 +++ b/crates/cli/lib/commands/restore.rs
-@@ -8,6 +8,8 @@ use microsandbox::sandbox::{
+@@ -10,6 +10,8 @@ use microsandbox::{
+ 
  #[cfg(feature = "net")]
  use super::common::parse_port_mapping;
- use super::common::{display_restore_warnings, parse_restore_volume, parse_vsock_route};
 +#[cfg(feature = "net")]
 +use super::common::{allow_secret_host, parse_secret};
- use crate::ui;
- 
- //--------------------------------------------------------------------------------------------------
-@@ -43,6 +45,16 @@ pub struct RestoreArgs {
+ use super::common::{
+     display_restore_warnings, guest_clock_parser, parse_explicit_disk_mount, parse_restore_volume,
+     parse_vsock_route,
+@@ -49,6 +51,16 @@ pub struct RestoreArgs {
      /// Destination controls applied before the restored workload can run.
      #[command(flatten)]
      pub controls: RestoreControlArgs,
@@ -41,7 +41,7 @@ index 0756be9a..4f19a27d 100644
      /// Suppress progress output, but not unavailable-resource warnings.
      #[arg(short, long)]
      pub quiet: bool,
-@@ -102,6 +114,14 @@ pub struct RestoreControlArgs {
+@@ -119,6 +131,14 @@ pub struct RestoreControlArgs {
      #[cfg(feature = "net")]
      #[arg(long, value_parser = ["allow", "deny"])]
      pub net_default: Option<String>,
@@ -56,21 +56,21 @@ index 0756be9a..4f19a27d 100644
      /// Destination host policy rules, using the same syntax as create/run (repeatable).
      /// Requires --net-default or --no-net so the complete replacement policy is explicit.
      #[cfg(feature = "net")]
-@@ -169,14 +189,21 @@ impl RestoreControlArgs {
+@@ -189,14 +209,19 @@ impl RestoreControlArgs {
      fn network_policy(
          &self,
      ) -> anyhow::Result<Option<microsandbox_network::policy::NetworkPolicy>> {
 -        if !self.net_rule.is_empty() && !self.no_net && self.net_default.is_none() {
+-            anyhow::bail!(
+-                "restore --net-rule requires --net-default or --no-net to select an explicit destination policy"
+-            );
 +        if !self.net_rule.is_empty()
 +            && !self.no_net
 +            && self.net_default.is_none()
 +            && self.net_default_egress.is_none()
 +            && self.net_default_ingress.is_none()
 +        {
-             anyhow::bail!(
--                "restore --net-rule requires --net-default or --no-net to select an explicit destination policy"
-+                "restore --net-rule requires explicit destination policy defaults"
-             );
++            anyhow::bail!("restore --net-rule requires explicit destination policy defaults");
          }
          super::common::SandboxOpts {
              no_net: self.no_net,
@@ -80,7 +80,7 @@ index 0756be9a..4f19a27d 100644
              net_rule: self.net_rule.clone(),
              ..Default::default()
          }
-@@ -214,6 +241,49 @@ pub async fn run(
+@@ -234,6 +259,52 @@ pub async fn run(
      }
      builder = args.resources.apply_restore(builder)?;
      builder = args.controls.apply(builder)?;
@@ -111,13 +111,16 @@ index 0756be9a..4f19a27d 100644
 +        let source = microsandbox::sandbox::SecretSource::Env {
 +            var: parsed.env_var.clone(),
 +        };
++        let rule = parsed.substitution.unwrap_or_default();
 +        builder = builder.secret(|mut secret| {
++            secret = secret.env(&parsed.env_var).source(source);
++            if !rule.header_fields.is_empty() {
++                secret = secret.substitute_in_header_fields(rule.header_fields);
++            }
 +            secret = secret
-+                .env(&parsed.env_var)
-+                .source(source)
-+                .substitute_in_headers(parsed.substitute_headers)
-+                .substitute_in_query(parsed.substitute_query)
-+                .substitute_in_body(parsed.substitute_body);
++                .substitute_in_headers(rule.headers)
++                .substitute_in_query(rule.query)
++                .substitute_in_body(rule.body);
 +            for host in parsed.allowed_hosts {
 +                secret = allow_secret_host(secret, &host);
 +            }
@@ -130,7 +133,7 @@ index 0756be9a..4f19a27d 100644
      let (mut progress, task) = builder.restore_with_progress()?;
      let mut display = if args.quiet {
          ui::PullProgressDisplay::quiet(&args.snapshot)
-@@ -504,8 +574,18 @@ mod tests {
+@@ -676,8 +747,25 @@ mod tests {
                  .network_policy()
                  .unwrap_err()
                  .to_string()
@@ -138,11 +141,18 @@ index 0756be9a..4f19a27d 100644
 +                .contains("explicit destination policy defaults")
          );
 +        let asymmetric = TestCli::try_parse_from([
-+            "restore", "ready", "--name", "worker",
-+            "--net-default-egress", "deny",
-+            "--net-default-ingress", "allow",
-+            "--net-rule", "allow:egress@public",
-+        ]).unwrap();
++            "restore",
++            "ready",
++            "--name",
++            "worker",
++            "--net-default-egress",
++            "deny",
++            "--net-default-ingress",
++            "allow",
++            "--net-rule",
++            "allow:egress@public",
++        ])
++        .unwrap();
 +        let policy = asymmetric.args.controls.network_policy().unwrap().unwrap();
 +        assert_eq!(policy.default_egress, Action::Deny);
 +        assert_eq!(policy.default_ingress, Action::Allow);
@@ -151,10 +161,10 @@ index 0756be9a..4f19a27d 100644
              no_net: true,
              ..rule_only
 diff --git a/sdk/rust/lib/sandbox/restore_builder.rs b/sdk/rust/lib/sandbox/restore_builder.rs
-index 8e0c921f..e0352839 100644
+index f280c5f03066c9b3686fdbcabdd2a036e7c40a12..d6cdf7d32b753b73c0c04bf2b2f4cd0ea5733259 100644
 --- a/sdk/rust/lib/sandbox/restore_builder.rs
 +++ b/sdk/rust/lib/sandbox/restore_builder.rs
-@@ -112,6 +112,29 @@ impl RestoreBuilder {
+@@ -102,6 +102,29 @@ impl RestoreBuilder {
          self
      }
  

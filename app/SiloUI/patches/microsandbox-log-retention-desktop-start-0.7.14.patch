@@ -1,5 +1,5 @@
 diff --git a/crates/runtime/lib/runner/exec_log.rs b/crates/runtime/lib/runner/exec_log.rs
-index 3423dc84..2886334a 100644
+index 66cdbfff0d0694ab24244f36c35ec5d4ddf05210..db36b1e17a67b1880bf5fb39778576f13eb070c8 100644
 --- a/crates/runtime/lib/runner/exec_log.rs
 +++ b/crates/runtime/lib/runner/exec_log.rs
 @@ -14,7 +14,7 @@
@@ -12,7 +12,7 @@ index 3423dc84..2886334a 100644
  use std::path::Path;
  use std::sync::Mutex;
 diff --git a/crates/runtime/lib/runner/logging.rs b/crates/runtime/lib/runner/logging.rs
-index 31ca8581..847c26af 100644
+index 31ca85811af308a22caa932f38aef27a93fbbc7e..847c26af3efbf98c468a5c63378cee8e1c213caa 100644
 --- a/crates/runtime/lib/runner/logging.rs
 +++ b/crates/runtime/lib/runner/logging.rs
 @@ -13,7 +13,11 @@ use crate::RuntimeResult;
@@ -207,7 +207,7 @@ index 31ca8581..847c26af 100644
          self.file = OpenOptions::new()
 diff --git a/crates/runtime/lib/runner/logging_retention.rs b/crates/runtime/lib/runner/logging_retention.rs
 new file mode 100644
-index 00000000..8c674fc3
+index 0000000000000000000000000000000000000000..8c674fc3cf1b5ea4f772b045af4f0480fdb6a222
 --- /dev/null
 +++ b/crates/runtime/lib/runner/logging_retention.rs
 @@ -0,0 +1,291 @@
@@ -503,7 +503,7 @@ index 00000000..8c674fc3
 +    }
 +}
 diff --git a/sdk/rust/lib/logs/mod.rs b/sdk/rust/lib/logs/mod.rs
-index e895f6c3..ffbafd3d 100644
+index 60257dc7d62d957c875e85e8da2e0fd6d361806b..52f90664dc9cf10ca728ff3df787ef01f77bf276 100644
 --- a/sdk/rust/lib/logs/mod.rs
 +++ b/sdk/rust/lib/logs/mod.rs
 @@ -14,7 +14,7 @@
@@ -515,7 +515,7 @@ index e895f6c3..ffbafd3d 100644
  //!   JSON Lines, captured stdout / stderr / pty output written by
  //!   the runtime relay tap. Rotates at 10 MiB per file, retains up
  //!   to four historical files on disk (~40 MiB ceiling).
-@@ -114,13 +114,13 @@ const LOG_FILES: &[LogFileConfig] = &[
+@@ -115,13 +115,13 @@ const LOG_FILES: &[LogFileConfig] = &[
      LogFileConfig {
          filename: "runtime.log",
          format: LogFileFormat::Text,
@@ -532,7 +532,7 @@ index e895f6c3..ffbafd3d 100644
      },
  ];
 diff --git a/sdk/rust/lib/logs/stream.rs b/sdk/rust/lib/logs/stream.rs
-index 01bfa406..0d7495ea 100644
+index fdda820f0c589df0cabcae355e543780281a223d..f1c57b740cec7bf9cc29c976b37f6c0a1ef60f9a 100644
 --- a/sdk/rust/lib/logs/stream.rs
 +++ b/sdk/rust/lib/logs/stream.rs
 @@ -51,7 +51,7 @@ pub(crate) struct LogFileConfig {
