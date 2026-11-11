@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::OnceLock;
 
+use microsandbox_network::config::builder::HttpBuilder;
 use microsandbox_network::config::{
     EnvNetworkSecretResolver, InterfaceOverrides, NetworkBuilder,
     PortProtocol as NetworkPortProtocol,
@@ -16,7 +17,6 @@ pub use microsandbox_network::network::{
     PublishedPortBinding, SmoltcpNetwork, generate_intercept_ca_pair,
 };
 use microsandbox_network::policy::{NetworkPolicy, NetworkProfile};
-use microsandbox_network::config::builder::HttpBuilder;
 use microsandbox_types::{DeploymentProfile, HttpDenyResponseFormat};
 use tempfile::TempDir;
 use zeroize::{Zeroize, Zeroizing};
