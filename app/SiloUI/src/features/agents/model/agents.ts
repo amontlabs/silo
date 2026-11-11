@@ -1,4 +1,4 @@
-import type { AgentId, AgentInfo, AgentState } from "@/desktop/production-schemas"
+import type { AgentId, AgentInfo, AgentInstallStep, AgentState } from "@/desktop/production-schemas"
 
 export type { AgentId, AgentInfo, AgentInstallProgress, AgentInstallStep, AgentState, SshName } from "@/desktop/production-schemas"
 
@@ -48,6 +48,15 @@ export function agentStateText(agent: AgentInfo): string {
     case "installing": return "Installing…"
     case "unknown": return "Start the computer to see this"
   }
+}
+
+/** Where an install is, in a few plain words. */
+export const installStepText: Record<AgentInstallStep, string> = {
+  waiting: "Waiting to start…",
+  downloading: "Downloading…",
+  installing: "Installing…",
+  registering: "Setting up Silo's tools…",
+  done: "Finishing…",
 }
 
 /** Shown in the label of every open-the-agent action. */

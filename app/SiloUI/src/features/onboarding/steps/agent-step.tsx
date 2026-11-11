@@ -4,27 +4,9 @@ import { useId } from "react"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { agentChoiceLabel, agentChoices, agentName, agentSentence, type AgentChoice } from "@/features/agents/model/agents"
+import { agentChoiceLabel, agentChoices, agentSentence, type AgentChoice } from "@/features/agents/model/agents"
+import { agentSetupText } from "@/features/onboarding/model/agent-setup-text"
 import type { AgentSetupView } from "@/features/onboarding/model/onboarding-state"
-
-const stepText = {
-  waiting: "Waiting to start…",
-  downloading: "Downloading…",
-  installing: "Installing…",
-  registering: "Setting up Silo's tools…",
-  done: "Finishing…",
-} as const
-
-/** What the install of the chosen agent is doing, in one plain line. */
-export function agentSetupText(setup: AgentSetupView): string {
-  const name = agentName[setup.agent]
-  switch (setup.status) {
-    case "queued": return `Waiting to install ${name} in ${setup.computer}.`
-    case "running": return `Installing ${name} in ${setup.computer}: ${setup.detail ?? stepText[setup.step ?? "waiting"]}`
-    case "succeeded": return `${name} is ready in ${setup.computer}.`
-    case "failed": return `${name} could not be installed in ${setup.computer}${setup.failure ? `: ${setup.failure}` : "."}`
-  }
-}
 
 /**
  * The agent the person uses. Silo installs it in the first computer when they continue, shows

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect } from "react"
 
+import { useSettingsSelector } from "@/features/preferences/settings-store"
 import { showActionFailure } from "@/lib/operation-toast"
 
 import type { ApplicationActions, ApplicationSource } from "@/features/application/model/application-source"
@@ -13,6 +14,11 @@ export const AgentInstallSupport = createContext(false)
 
 export function useAgentInstallSupport() {
   return useContext(AgentInstallSupport)
+}
+
+/** The agent remembered in Settings, "none" until one was chosen: what a create form preselects. */
+export function useRememberedAgentChoice(): AgentChoice {
+  return useSettingsSelector(view => view.settings.agent) ?? "none"
 }
 
 /**

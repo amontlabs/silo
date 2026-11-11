@@ -13,7 +13,7 @@ import { SshNameLine } from "@/features/agents/components/ssh-name-line"
 import type { AgentChoice } from "@/features/agents/model/agents"
 import type { ApplicationActions } from "@/features/application/model/application-source"
 import type { AgentSetupView } from "@/features/onboarding/model/onboarding-state"
-import { agentSetupText } from "@/features/onboarding/steps/agent-step"
+import { agentSetupText } from "@/features/onboarding/model/agent-setup-text"
 
 const notificationCategories = [
   { id: "notifyFailures", label: "Failures", icon: CircleAlert },

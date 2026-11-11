@@ -10,17 +10,9 @@ import { DisabledReason } from "@/features/application/components/disabled-reaso
 import type { ApplicationActions } from "@/features/application/model/application-source"
 import { errorMessage } from "@/lib/error-message"
 
-import { agentActionLabel, agentName, agentStateText, type AgentId, type AgentInfo, type AgentInstallProgress } from "../model/agents"
+import { agentActionLabel, agentName, agentStateText, installStepText, type AgentId, type AgentInfo, type AgentInstallProgress } from "../model/agents"
 import { setComputerAgents } from "../model/use-computer-agents"
 import { SshNameLine } from "./ssh-name-line"
-
-const stepText: Record<AgentInstallProgress["step"], string> = {
-  waiting: "Waiting to start…",
-  downloading: "Downloading…",
-  installing: "Installing…",
-  registering: "Setting up Silo's tools…",
-  done: "Finishing…",
-}
 
 type Install = { status: "running"; progress?: AgentInstallProgress } | { status: "failed"; message: string }
 
@@ -69,7 +61,7 @@ export function AgentsSection({ target, computerName, running, offline = false, 
         const current = installs[agent.id]
         const installing = current?.status === "running" || agent.state === "installing"
         const action = agentActionLabel(agent.state)
-        const detail = current?.status === "running" ? (current.progress?.detail ?? stepText[current.progress?.step ?? "waiting"])
+        const detail = current?.status === "running" ? (current.progress?.detail ?? installStepText[current.progress?.step ?? "waiting"])
           : current?.status === "failed" ? `Could not install ${agentName[agent.id]}: ${current.message}`
             : agentStateText(agent)
         const label = current?.status === "failed" ? "Try again" : action

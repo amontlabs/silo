@@ -1,11 +1,9 @@
 import { useId } from "react"
 
 import { fieldVariants } from "@/components/ui/field"
-import { useSettingsSelector } from "@/features/preferences/settings-store"
 import { cn } from "@/lib/utils"
 
 import { agentChoiceLabel, type AgentChoice } from "../model/agents"
-import { useAgentInstallSupport } from "../model/planned-installs"
 
 const options: readonly AgentChoice[] = ["none", "claude-code", "codex"]
 
@@ -20,10 +18,3 @@ export function AgentChoiceField({ value, onChange }: { value: AgentChoice; onCh
     <span className="font-normal">Silo installs it when the computer is running. You sign in to it yourself.</span>
   </label>
 }
-
-/** The remembered choice, used to preselect the field. */
-export function useRememberedAgentChoice(): AgentChoice {
-  return useSettingsSelector(view => view.settings.agent) ?? "none"
-}
-
-export { useAgentInstallSupport }
