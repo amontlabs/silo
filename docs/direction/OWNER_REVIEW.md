@@ -34,3 +34,11 @@ was chosen and why; any can be changed. Older items are also in the build log un
    not slow down tools for every other computer.
 8. **"Tools OK" for a computer is the computer's own claim.** An agent with root inside can fake
    it; that is accepted, since the agent already controls that computer. Documented.
+
+## App (T10, T13 review)
+
+9. **Saving a computer's network settings never accepts a preset update.** Updates to a preset
+   (for example npm adding hosts) are accepted only with their own Accept button, which shows
+   the hosts they add (being built, R4). Why: Save used to accept them silently.
+10. **Approvals show the computer's id beside its name** and strip invisible characters from what
+    an agent wrote (R4). Why: an agent could name a computer to look like another one.
