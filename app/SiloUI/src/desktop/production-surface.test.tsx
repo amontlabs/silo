@@ -12,6 +12,8 @@ vi.mock("./runtime-migration-boundary", () => ({ RuntimeMigrationBoundary: ({ ch
 const state = vi.hoisted(() => ({ source: {} as object | null, loading: false, error: null as string | null, checks: [] as Array<{ id: string; title: string; status: string; detail: string; remediation: string | null }>, retry: vi.fn(), setupDrain: undefined as string | undefined, localUpdating: false }))
 vi.mock("./production-source", () => ({ localUpdatingNotice: "Local computers are updating.", useProductionSource: () => ({ source: state.source, backup: {}, loading: state.loading, error: state.error, setupDrain: state.setupDrain, localUpdating: state.localUpdating, savedConfigurations: [{ id: "saved", name: "saved-computer", kind: "ssh", host: "host", user: "user", port: 22 }] }) }))
 vi.mock("./dependencies", () => ({ useDependencyStore: () => ({ checks: state.checks, retry: state.retry }) }))
+const engine = vi.hoisted(() => ({ handlers: new Set<() => void>() }))
+vi.mock("./engine-connection", () => ({ onEngineConnected: (handler: () => void) => { engine.handlers.add(handler); return () => { engine.handlers.delete(handler) } } }))
 vi.mock("./production-onboarding", () => ({ ProductionOnboarding: ({ onOpenApp }: { onOpenApp: () => void }) => <button onClick={onOpenApp}>Open Silo</button> }))
 vi.mock("@/features/application/application-app", () => ({ ApplicationApp: ({ source, actions }: { source: { runtimeRepair?: { reason: string; recovery: string; checking: boolean } }; actions: { retryRuntimeChecks: () => void } }) => <div>Main app{source.runtimeRepair && <div role="alert">{source.runtimeRepair.reason}{source.runtimeRepair.recovery}<button disabled={source.runtimeRepair.checking} onClick={actions.retryRuntimeChecks}>Retry checks</button></div>}</div> }))
 vi.mock("./status-panel", () => ({ StatusPanel: ({ notice }: { notice?: string }) => <div>Status panel{notice && <p>Tray notice: {notice}</p>}</div> }))
@@ -19,7 +21,7 @@ vi.mock("./status-panel", () => ({ StatusPanel: ({ notice }: { notice?: string }
 const source = { applicationActions: {}, statusActions: {}, refresh: vi.fn(), initialize: vi.fn(() => Promise.resolve()) } as unknown as ProductionSource
 const dependencyStore = {} as DependencyStore
 
-beforeEach(() => { state.source = {}; state.loading = false; state.error = null; state.checks = []; state.setupDrain = undefined; state.localUpdating = false; vi.clearAllMocks() })
+beforeEach(() => { state.source = {}; state.loading = false; state.error = null; state.checks = []; state.setupDrain = undefined; state.localUpdating = false; engine.handlers.clear(); vi.clearAllMocks() })
 
 describe("production completion routing", () => {
   it("shows the actual shell and saved rows while live state loads, then replaces skeletons", async () => {
@@ -195,5 +197,45 @@ describe("production dependency recovery", () => {
     state.checks = [{ ...failure, status: "pending" }]
     await act(async () => { application.rerender(view()) })
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+})
+
+describe("engine connection", () => {
+  const failure = { id: "runtime-microsandbox", title: "Computer runtime", status: "unavailable", detail: "Dependency checks are unavailable because the desktop bridge did not respond.", remediation: "Retry checks." }
+  const surface = () => <SettingsProvider store={createMemorySettingsStore({ onboardingComplete: true })}><ProductionSurface source={source} dependencyStore={dependencyStore} /></SettingsProvider>
+  const connect = () => act(async () => { engine.handlers.forEach(handler => handler()) })
+
+  it("runs the failed checks and the load again when the engine becomes reachable", async () => {
+    state.checks = [failure]
+    await act(async () => { render(surface()) })
+    await connect()
+    expect(state.retry).toHaveBeenCalledOnce()
+    expect(source.initialize).toHaveBeenCalledOnce()
+  })
+  it("loads the application again when the engine appears after Silo could not load", async () => {
+    state.source = null
+    state.error = "Silo's engine is not reachable yet. Retry in a moment."
+    await act(async () => { render(surface()) })
+    await connect()
+    expect(source.initialize).toHaveBeenCalledOnce()
+  })
+  it("leaves a healthy application alone when the engine reconnects", async () => {
+    state.checks = [{ ...failure, status: "pass" }]
+    await act(async () => { render(surface()) })
+    await connect()
+    expect(state.retry).not.toHaveBeenCalled()
+    expect(source.initialize).not.toHaveBeenCalled()
+  })
+  it("checks again when the engine appears while a check is still running", async () => {
+    state.checks = [{ ...failure, status: "pending" }]
+    await act(async () => { render(surface()) })
+    await connect()
+    expect(state.retry).toHaveBeenCalledOnce()
+  })
+  it("stops listening when the surface goes away", async () => {
+    state.checks = [failure]
+    const view = render(surface())
+    await act(async () => { view.unmount() })
+    expect(engine.handlers.size).toBe(0)
   })
 })

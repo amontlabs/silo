@@ -99,24 +99,34 @@ type Opened =
  * a fork's changes to review sit side by side; a merge a computer asked for is one row. A row
  * opens its detail; approvals answered lately stay below so their outcome can be read.
  */
-export function PendingChangesPage({ pending, actions, reviewActions, openApproval, onOpenRequest }: {
+export function PendingChangesPage({ pending, actions, reviewActions, openApproval, listRequest, onOpenRequest }: {
   pending: PendingState
   actions: ApprovalActions
   /** What the review screen runs; the desktop's by default. */
   reviewActions?: ReviewRequestActions
   /** An approval to open, from a notification or the menu bar. */
   openApproval?: { id: string; token: number }
+  /** Changes each time the person asks for the list (the sidebar's Pending, clicked on this page). */
+  listRequest?: number
   /** Told when a review request is opened, naming the device when it is not this one. */
   onOpenRequest?: (requestId: string, deviceId?: string) => void
 }) {
   const [opened, setOpened] = useState<Opened | null>(null)
   const [handledToken, setHandledToken] = useState(0)
+  const [handledListRequest, setHandledListRequest] = useState(listRequest)
   const { waiting, answered, unreachable, error, loaded, loading, refresh } = pending
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
     if (openApproval && openApproval.token !== handledToken) { setHandledToken(openApproval.token); setOpened({ kind: "approval", id: openApproval.id }) }
   }, [openApproval, handledToken])
+
+  useEffect(() => {
+    if (listRequest === handledListRequest) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setHandledListRequest(listRequest)
+    setOpened(null)
+  }, [listRequest, handledListRequest])
 
   const approvalById = (id: string) =>
     waiting.flatMap(row => row.kind === "approval" && row.approval.id === id ? [row] : [])[0]

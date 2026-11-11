@@ -329,12 +329,13 @@ function ActivityLog({ computers, sourceActivities, filtered, onShowLogs }: { co
 }
 
 /** The Activity section: what happened to the computers, and, where the engine keeps it, who did what. */
-function ActivityView({ events, auditRead, computers, active, onOpenApproval }: {
+function ActivityView({ events, auditRead, computers, active, onOpenApproval, openableApprovals }: {
   events: ReactNode
   auditRead: ApplicationActions["listAudit"]
   computers: readonly ApplicationComputer[]
   active: boolean
   onOpenApproval?: (approvalId: string) => void
+  openableApprovals?: ReadonlySet<string>
 }) {
   const [view, setView] = useState<"events" | "audit">("events")
   if (!auditRead) return events
@@ -347,7 +348,7 @@ function ActivityView({ events, auditRead, computers, active, onOpenApproval }: 
         </TabsList>
       </Tabs>
       <div className="min-h-0 flex-1">
-        {view === "events" ? events : <AuditLog read={auditRead} computers={computers} active={active} onOpenApproval={onOpenApproval} />}
+        {view === "events" ? events : <AuditLog read={auditRead} computers={computers} active={active} onOpenApproval={onOpenApproval} openableApprovals={openableApprovals} />}
       </div>
     </div>
   )
@@ -374,6 +375,7 @@ export function ComputersPage({
   onCreateComputer,
   operationQueue,
   onOpenApproval,
+  openableApprovals,
   onOpenComputer,
   notifyOperations = true,
 }: {
@@ -402,6 +404,7 @@ export function ComputersPage({
   onCreateComputer?: () => void
   /** Opens an approval on the Pending page, from a row of Who did what. */
   onOpenApproval?: (approvalId: string) => void
+  openableApprovals?: ReadonlySet<string>
   /** Opens a computer's page, from its network mode on the Network page. */
   onOpenComputer?: (computerId: string) => void
   /** Standalone pages own notifications; ApplicationApp owns them across navigation. */
@@ -484,7 +487,7 @@ export function ComputersPage({
       {section === "network" && <LazyBoundary><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} onOpenComputer={onOpenComputer} /></LazyBoundary>}
       {section === "activity" && <ActivityView
         events={<ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selection.size > 0} onShowLogs={showActivityLogs} />}
-        auditRead={networkActions.listAudit} computers={listed} active={active} onOpenApproval={onOpenApproval}
+        auditRead={networkActions.listAudit} computers={listed} active={active} onOpenApproval={onOpenApproval} openableApprovals={openableApprovals}
       />}
     </PageContainer>
   )

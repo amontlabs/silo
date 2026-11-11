@@ -434,8 +434,10 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
   const networkSection = local && actions.readNetworkPolicy
     ? <NetworkPolicySection key={`network:${target}`} target={target} computerName={configuration.name} running={state === "running"} readOnly={controls.readOnly} enabled={overviewActive} refreshKey={state} actions={actions} restart={restartFor("to apply the network change")} />
     : undefined
+  // The tools' status names the agents it found, so it is read again when an agent's state changes.
+  const toolsRefreshKey = `${state}:${agents.agents?.map(({ id, state: agentState }) => `${id}=${agentState}`).join(",") ?? ""}`
   const toolsSection = local && actions.readComputerTools
-    ? <SilosToolsSection key={`tools:${target}`} target={target} computerName={configuration.name} running={state === "running"} readOnly={controls.readOnly} enabled={overviewActive} refreshKey={state} actions={actions} restart={restartFor("for Silo's tools")} />
+    ? <SilosToolsSection key={`tools:${target}`} target={target} computerName={configuration.name} running={state === "running"} readOnly={controls.readOnly} enabled={overviewActive} refreshKey={toolsRefreshKey} actions={actions} restart={restartFor("for Silo's tools")} />
     : undefined
 
   return <TooltipProvider delayDuration={150}>
