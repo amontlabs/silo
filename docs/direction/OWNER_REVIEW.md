@@ -104,3 +104,10 @@ was chosen and why; any can be changed. Older items are also in the build log un
     matches the disk file, so export works. The real fix (moving the Recovery partition out of
     the way before growing the disk, if that is the cause) is not scheduled; nothing retries the
     expansion later.
+
+27. **Blocked web requests from a computer get Silo's JSON "blocked by policy" answer instead of
+    a refused connection** (MicroSandbox 0.7.14, upstream #1825). In allowlist mode a direct
+    connection to an unlisted address on port 80 or 443 now completes, and the gateway answers
+    it with a 403 itself; nothing is sent to that address. Silo keeps upstream's behaviour rather
+    than carrying a patch to turn it off (branch `silo/0714-fix-net` has that patch if wanted).
+    Other ports are still refused. The live network test checks that no data reaches the address.
