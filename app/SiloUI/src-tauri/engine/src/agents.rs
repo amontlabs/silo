@@ -279,6 +279,18 @@ pub(crate) fn failed_in(output: &str) -> Vec<AgentId> {
         .collect()
 }
 
+/// The guest command that registers computer use and Silo's own MCP server with agents installed
+/// since they were set up; every install path ends with it.
+pub(crate) fn register_after_install_command() -> String {
+    format!(
+        "{}\n{}",
+        crate::computer_use::register_installed_agents_command(),
+        crate::guest_components::register_after_install_command(
+            crate::guest_components::run::Kind::Linux
+        )
+    )
+}
+
 /// The guest script that installs `agents` in a Linux computer and then registers computer use
 /// and Silo's own MCP server with them. An install that fails does not stop the others; it prints a [`FAILED_PREFIX`]
 /// line naming the agent.
@@ -291,11 +303,7 @@ pub(crate) fn linux_install_all_script(agents: &[AgentId]) -> String {
             agent.as_str()
         ));
     }
-    script.push_str(&crate::computer_use::register_installed_agents_command());
-    script.push('\n');
-    script.push_str(&crate::guest_components::register_after_install_command(
-        crate::guest_components::run::Kind::Linux,
-    ));
+    script.push_str(&register_after_install_command());
     script.push_str("\nexit $status\n");
     script
 }

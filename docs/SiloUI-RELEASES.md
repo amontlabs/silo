@@ -17,7 +17,10 @@ Normal branch pushes do not release the app.
 
 Run these commands from `app/SiloUI`. Install dependencies with `npm ci` first.
 Use Node.js 24, Python 3.11 or newer, Go 1.25 or newer for cold native runtime
-preparation, Git, and GitHub CLI (`gh auth login` for
+preparation, Zig 0.15.2 (the C compiler for the Linux `silo` Silo installs in Linux
+computers; the release workflows install it pinned by checksum, see
+[runtime packaging](SiloUI-RUNTIME-PACKAGING.md#the-silo-program-for-linux-computers)),
+Git, and GitHub CLI (`gh auth login` for
 publication). Your Git remote `origin` must point to the Silo repository, and
 your account needs push and Actions permissions. CI holds the signing keys;
 local release preparation needs no signing credentials or VM runtime.

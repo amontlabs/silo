@@ -506,6 +506,49 @@ That MicroSandbox work did not test Linux Tauri bundling, KVM access, VM startup
 Tauri's AppImage source path was inspected: it creates Debian-style data first, so the external Git executables are in `usr/bin` before linuxdeploy scans existing ELF files. This coverage does not include a produced Linux Tauri bundle, so it does not prove the final AppImage's libcurl chain. It also excludes an actual HTTPS or GitHub push, real credentials, VM forwarding, KVM, a VM, native preflight commands, oldest supported hosts, notarization, and release-identity signing. It does not implement either approved push route. No user repository changed, and no installer, repair flow, sandbox command, or `msb doctor` ran.
 
 
+## The `silo` program for Linux computers
+
+The engine puts a Linux `silo` into every Linux computer that has Silo's tools on
+([guest components](SiloUI-GUEST-IMAGES.md#guest-components),
+[how it arrives](SiloUI-IN-GUEST-CLIENT.md#how-the-program-and-the-registration-arrive)). It is a
+build input of the app, prepared with the runtime:
+
+- `npm run runtime:prepare` (`scripts/guest-silo-runtime.mjs`) builds the CLI crate
+  (`cargo build --release -p silo-cli --target <arch>-unknown-linux-musl --locked`, with the
+  toolchain of `runtime-inputs.json`) as a static executable for the guest's architecture, which
+  is the host's: `arm64` for `aarch64-apple-darwin` and `aarch64-unknown-linux-gnu`, `amd64` for
+  `x86_64-unknown-linux-gnu`. A dependency (`ring`) has C code, so Zig stands in for the C
+  compiler, archiver and linker (`zig cc -target <arch>-linux-musl`).
+- The result is staged in `src-tauri/runtime/guest-silo/` as `silo` and `manifest.json`
+  (`schemaVersion`, `available`, `architecture`, `target`, `binarySha256`, `size`, `zigVersion`,
+  `toolchain`). Tauri packages the folder as `resources/guest-support/silo/`, the macOS engine
+  bundle carries it (`embed_engine.py`, `ENGINE_RESOURCES`), and the Linux engine archive holds it
+  under `resources/guest-support/silo/` (`package-engine.py` checks the manifest, the file's
+  checksum, its architecture and its ELF machine, and refuses an archive without the program).
+- The engine reads `manifest.json`, checks the file against `binarySha256` when it reads it
+  to send it, and the computer checks the same checksum again as root before the program replaces
+  the old one (`engine/src/guest_components/artifact.rs`).
+- **Zig.** A build that ships (the environment has `CI=true`, or `SILO_REQUIRE_GUEST_SILO=1`) needs
+  Zig 0.15.2 and fails with a message that says so when it is missing, has another version, or the
+  build fails; it adds the Rust musl target itself. A development build without Zig (or without
+  `rustup target add --toolchain 1.94.0 aarch64-unknown-linux-musl`) goes on: it prints that
+  "Silo's tools cannot be installed in Linux computers by this build", stages a manifest with
+  `available: false` and the reason, and the engine reports the same in a computer's status
+  (`guestClient.status`, component `silo`, state `unavailable`) instead of installing anything.
+  `scripts/build-guest-silo.sh` runs the same build and prints the program's path, which
+  `silo tools enable <computer> --binary <path>` sends as a development override.
+- **Workflows.** `.github/actions/prepare-release-runtime/action.yml`, which every workflow that
+  prepares the runtime uses (`release.yml`, `release-platform.yml`, `engine-release.yml`,
+  `linux-host.yml`, `ci.yml`, `containers-c1.yml`, `warm-release-caches.yml`,
+  `benchmark-dependency-platform.yml`), installs Zig 0.15.2 pinned by the release digest from
+  `ziglang.org/download/index.json` for `aarch64-macos`, `x86_64-linux` and `aarch64-linux`, the
+  way `ci.yml` pins cargo-nextest, and sets `SILO_REQUIRE_GUEST_SILO=1` for the preparation step.
+  These workflow changes have not been run: they were checked as YAML and by the workflow script
+  tests only. The program is built on every preparation (about 45 seconds on a development
+  Mac, more on a cold runner); it is not part of the runtime cache.
+- A macOS computer does not use this file: it gets the device's own `silo`, which is in the engine
+  distribution and already signed, copied over SSH.
+
 ## Git LFS pure SSH publishing server (2026-09-16)
 
 Host-authorized publishing stages a Linux guest helper from

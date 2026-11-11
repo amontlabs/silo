@@ -63,6 +63,7 @@ Alternatives, and why not:
 | The session (shared with `engine.sock`) and its caller | `app/SiloUI/src-tauri/silod/src/socket.rs`, `dispatcher.rs` |
 | The three methods | `app/SiloUI/src-tauri/silod/src/methods/guest_client.rs` |
 | What each call may do, and who made which computer | `app/SiloUI/src-tauri/engine/src/policy/` |
+| The `silo` program and its MCP registration in a computer, kept current | `app/SiloUI/src-tauri/engine/src/guest_components/`; the watcher's call in `silod/src/channel/watch.rs`; the build in `app/SiloUI/scripts/guest-silo-runtime.mjs` |
 | The transport choice in `silo`, `silo tools`, `silo mcp` inside a computer | `app/SiloUI/cli/src/endpoint.rs`, `tools.rs`, `mcp.rs`; `app/SiloUI/client/src/session.rs` |
 
 ## Turning the tools on
@@ -88,13 +89,13 @@ silo tools disable <computer>
   written once it runs.
 - for a stopped macOS or container computer, the gateway takes the rule at its next start.
 
-With `--binary`, the CLI first sends a `silo` built for Linux into a running Linux computer as
-`/usr/local/bin/silo`: the file is uploaded under a fresh name to `/workspace`, root refuses a link
-or a non-regular file, copies the bytes into a `0700` folder under `/root`, checks their sha256
-against the one the device computed, and installs them; the account removes the upload. A macOS
-computer uses the device's own `silo`. Until the engine provides the binary itself, build one with
-`app/SiloUI/scripts/build-guest-silo.sh` (needs `rustup target add aarch64-unknown-linux-musl` and
-`zig`).
+The program and the registration arrive without anyone passing a file
+([below](#how-the-program-and-the-registration-arrive)). `--binary PATH` is an override for
+development: the CLI names a Linux `silo` on the device (`guestClient.enable` takes `binaryPath`,
+and only the owner at this device may name one), the engine reads it, and it goes into the running
+computer through the same path as the shipped program, checked inside by root against the SHA-256 of
+the bytes that were sent. The computer's next start puts the shipped program back. A macOS computer
+refuses `--binary`; it uses the device's own `silo`.
 
 `disable` (`guestClient.revoke`) forgets the port and the token hash and closes every open
 connection of the computer at once. The rule stays in the computer's network until its next start
@@ -104,6 +105,51 @@ No answer carries the token. `status` gives the host name, the port, the endpoin
 tools were turned on, and when the computer's network lets it reach them (`applied`, `nextStart`,
 `nextRestart`).
 
+## How the program and the registration arrive
+
+Nothing is passed by hand. The engine keeps two pieces current in every computer whose tools are on
+(the mechanism is [guest components](SiloUI-GUEST-IMAGES.md#guest-components)):
+
+1. **The `silo` program** at `/usr/local/bin/silo`.
+   - **Linux:** the static musl build the engine ships (`resources/guest-support/silo/`, built by
+     `npm run runtime:prepare` and listed with its SHA-256 in a manifest; see
+     [runtime packaging](SiloUI-RUNTIME-PACKAGING.md#the-silo-program-for-linux-computers)). The engine
+     reads the file, checks it against the manifest, and sends the bytes through the guest agent
+     to a root command that writes them into a folder only root can enter, checks the SHA-256
+     there, and renames the file over the old one.
+   - **macOS:** the device's own `silo` (the one beside the engine, already signed), sent over
+     SSH the same way.
+   - A build made without Zig has no Linux program. The engine says so in the computer's status
+     (component `silo`, `unavailable`, "Silo's tools cannot be installed in Linux computers by this
+     build") and installs nothing; a program already in the computer stays.
+2. **The registration** of `silo mcp` as an MCP server named `silo` in Claude Code and Codex, the way
+   computer use registers Cua Driver (same helper, same editors; the command is
+   `/usr/local/bin/silo mcp`, which reads `/etc/silo/endpoint.json` when an agent starts it). It is
+   applied again at each reconcile, and right after `agents.install` finishes (beside computer use's
+   registration). An agent that is not installed yet is registered when it is.
+
+**When.** The engine's watcher reconciles a computer with the tools on whenever it sees it running
+after it was not (every start, the engine's own start, a new computer's first start, a fork's first
+start), and every ten minutes while it runs; `guestClient.enable` does it at once for a running
+computer. Each reconcile follows the endpoint file's check. The computer's receipt
+(`/var/lib/silo/components.json`) and its status list each piece's result; a failed step is shown
+there (`silo tools status`) and does not stop the computer. A program that was deleted, replaced by
+an agent or old is replaced at the next start; a registration an agent edited out is made again.
+
+**Forks.** A fork has its own port, token and endpoint file. Its first start also reconciles it:
+the receipt it copied from its parent names another computer, so it is ignored, the program is
+checked, and the registration is applied. A registration only names `silo mcp`, and `silo` reads the
+fork's own endpoint file, so the fork's agents talk to the fork's channel; the parent's port is not
+reachable from the fork and the parent's token is refused on the fork's port.
+
+**Turning the tools off.** The registration is taken out of both agents (at once for a running
+computer; a stopped one has the removal owed and gets it at its next start, also after a promote or
+undo turned the tools off). The program stays in the computer, but the token in the endpoint file is no longer
+accepted, so `silo` there refuses: inside a computer it reads only that file, never a socket.
+
+**Not in the list yet.** Computer use (`cua-driver`, its helper and approval switch) and the desktop
+streamer keep their own paths; they are not guest components for now.
+
 ## The endpoint file
 
 `/etc/silo/endpoint.json` in the computer:
@@ -112,9 +158,14 @@ tools were turned on, and when the computer's network lets it reach them (`appli
 {"version": 1, "host": "host.microsandbox.internal", "port": 41234, "token": "silo_gc_…", "computerId": "…"}
 ```
 
-Root-owned, mode `0640` with the `silo` account's group (`0600` when the computer has no such
-account), written atomically by the engine as root through the guest agent (SSH for a macOS
-computer). On a macOS computer the `silo` account's group is `staff`.
+Written atomically by the engine as root through the guest agent (SSH for a macOS computer).
+
+- **Linux:** root-owned, mode `0640`, group `silo`, which holds only the `silo` account (`0600`
+  when the computer has no such account).
+- **macOS:** owned by the working account with mode `0600`. The account's group there is `staff`,
+  which every account of the computer is in, so a group-readable file would show the token to all of
+  them; a file only the working account (and root) can read does not. (Root-owned `0600` when the
+  computer has no such account, in which case the `silo` command cannot read it.)
 
 The engine checks the file whenever it sees the computer running after it was not (every start,
 including the engine's own start), at most every 30 seconds after the computer changed, and every
@@ -214,7 +265,6 @@ by an earlier engine is ignored.
 - While the engine is not running, another program can bind a computer's port and receive the
   token from a client that connects. A port found taken at start gets a new token; a port that
   was taken and released while the engine was down is not detected.
-- The engine does not yet put the `silo` binary into a computer or register `silo mcp` with the
-  agents (item T5b).
-- The live check is `docs/direction/checks/t5_channel_check.sh`, with its output in
-  `docs/direction/evidence/T5a.txt`.
+- The live checks are `docs/direction/checks/t5_channel_check.sh` (the channel, output in
+  `docs/direction/evidence/T5a.txt`) and `docs/direction/checks/t5b_tools_check.sh` (the program and
+  the registration, output in `docs/direction/evidence/T5b.txt`).
