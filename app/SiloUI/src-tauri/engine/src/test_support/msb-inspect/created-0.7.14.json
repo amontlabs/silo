@@ -1,0 +1,106 @@
+{
+  "dns": {
+    "nameservers": [],
+    "query_timeout_ms": 5000,
+    "rebind_protection": true
+  },
+  "enabled": true,
+  "http": {
+    "deny_response": true,
+    "deny_response_format": "json"
+  },
+  "interface": {},
+  "max_connections": null,
+  "nat64_prefixes": [
+    "64:ff9b::/96"
+  ],
+  "policy": {
+    "default_egress": "deny",
+    "default_ingress": "allow",
+    "rules": [
+      {
+        "action": "allow",
+        "destination": {
+          "group": "host"
+        },
+        "direction": "egress",
+        "ports": [
+          {
+            "end": 53,
+            "start": 53
+          }
+        ],
+        "protocols": [
+          "udp",
+          "tcp"
+        ]
+      },
+      {
+        "action": "allow",
+        "destination": {
+          "group": "public"
+        },
+        "direction": "egress",
+        "ports": [],
+        "protocols": []
+      }
+    ]
+  },
+  "ports": [],
+  "secrets": {
+    "secrets": [
+      {
+        "allowed_hosts": [
+          {
+            "exact": "github.com"
+          },
+          {
+            "exact": "api.github.com"
+          },
+          {
+            "exact": "uploads.github.com"
+          }
+        ],
+        "env_var": "SILO_GITHUB",
+        "passthrough_hosts": [
+          "any"
+        ],
+        "placeholder": "$MSB_SILO_GITHUB",
+        "require_tls_identity": true,
+        "source": {
+          "kind": "env",
+          "var": "SILO_GITHUB"
+        },
+        "substitution": {
+          "body": false,
+          "headers": true,
+          "query": false
+        },
+        "value": ""
+      }
+    ],
+    "violation_action": "block-and-log"
+  },
+  "strict": true,
+  "tls": {
+    "block_quic_on_intercept": true,
+    "bypass": [],
+    "cache": {
+      "capacity": 1000,
+      "validity_hours": 24
+    },
+    "enabled": true,
+    "intercept_ca": {
+      "cert_path": null,
+      "key_path": null
+    },
+    "intercepted_ports": [
+      443
+    ],
+    "scoped_upstream_ca_cert": [],
+    "scoped_verify_upstream": [],
+    "upstream_ca_cert": [],
+    "verify_upstream": true
+  },
+  "trust_host_cas": false
+}

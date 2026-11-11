@@ -49,6 +49,8 @@ struct Runtime {
     calls: RefCell<Vec<String>>,
     /// What `--silo-storage-repair-protocol` prints; `None` fails as an unknown option.
     probe: Option<&'static str>,
+    /// The macOS `doctor`: while any computer runs, every stopped one is `recovery_required`.
+    running_blocks_others: bool,
 }
 
 impl Runtime {
@@ -62,7 +64,13 @@ impl Runtime {
             ),
             calls: RefCell::default(),
             probe: Some("1\n"),
+            running_blocks_others: false,
         }
+    }
+
+    fn macos_doctor(mut self) -> Self {
+        self.running_blocks_others = true;
+        self
     }
 
     fn without_repair_protocol(mut self, probe: Option<&'static str>) -> Self {
@@ -100,7 +108,13 @@ impl runtime::RuntimeRunner for Runtime {
             stderr: String::new(),
         };
         let mut computers = self.computers.borrow_mut();
+        let any_running = computers.values().any(|fake| fake.running);
         match args[0].as_str() {
+            "inspect" => {
+                let fake = computers.get(&args[1]).unwrap();
+                let status = if fake.running { "Running" } else { "Stopped" };
+                Ok(output(serde_json::json!({"name":args[1],"status":status}).to_string()))
+            }
             "--silo-storage-repair-protocol" => self
                 .probe
                 .map(|text| output(text.into()))
@@ -114,7 +128,12 @@ impl runtime::RuntimeRunner for Runtime {
                         *left -= 1;
                     }
                 }
-                let mut item = serde_json::json!({"name":args[2],"status":fake.status,"running":fake.running});
+                let status = if self.running_blocks_others && any_running && !fake.running {
+                    "recovery_required"
+                } else {
+                    fake.status
+                };
+                let mut item = serde_json::json!({"name":args[2],"status":status,"running":fake.running});
                 match fake.running_field {
                     RunningField::Bool => {}
                     RunningField::Missing => {
@@ -124,7 +143,7 @@ impl runtime::RuntimeRunner for Runtime {
                 }
                 let report = serde_json::json!({"sandboxes":[item]}).to_string();
                 // The real `doctor` prints the report and exits non-zero unless ready.
-                match fake.status {
+                match status {
                     "ready" => Ok(output(report)),
                     "unavailable" => Err(failed_with(3, report)),
                     _ => Err(failed_with(2, report)),
@@ -243,7 +262,10 @@ fn ready_computers_are_left_alone_and_cost_no_backup() {
     let report = run(&fake, &["a"], true, Ok(())).unwrap();
     assert_eq!(outcome(&report, "a"), &Outcome::AlreadyReady);
     assert!(report.complete());
-    assert_eq!(fake.calls(), ["doctor --sandbox a --format json"]);
+    assert_eq!(
+        fake.calls(),
+        ["inspect a --format json", "doctor --sandbox a --format json"]
+    );
 }
 
 #[test]
@@ -255,6 +277,25 @@ fn a_running_computer_is_stopped_before_the_backup_and_the_repair() {
     let position = |prefix: &str| calls.iter().position(|call| call.starts_with(prefix)).unwrap();
     assert!(position("stop a") < position("<backup>"));
     assert!(position("<backup>") < position("self repair"));
+}
+
+#[test]
+fn one_launch_finishes_when_a_running_computer_makes_doctor_rate_the_others_recovery_required() {
+    let fake = Runtime::new(&[
+        ("run", computer("maintenance_required", true)),
+        ("other", computer("eligible", false)),
+        ("ready", computer("ready", false)),
+    ])
+    .macos_doctor();
+    let report = run(&fake, &["other", "run", "ready"], true, Ok(())).unwrap();
+    assert!(report.complete(), "{:?}", report.computers);
+    assert_eq!(outcome(&report, "run"), &Outcome::Repaired);
+    assert_eq!(outcome(&report, "other"), &Outcome::Repaired);
+    assert_eq!(outcome(&report, "ready"), &Outcome::AlreadyReady);
+    let calls = fake.calls();
+    let stop = calls.iter().position(|call| call == "stop run").unwrap();
+    let first_doctor = calls.iter().position(|call| call.starts_with("doctor")).unwrap();
+    assert!(stop < first_doctor, "everything running is stopped before any doctor call");
 }
 
 #[test]

@@ -148,6 +148,24 @@ fn diagnose(
     })
 }
 
+/// Whether the runtime says the computer is running, from `inspect` rather than `doctor`: on
+/// macOS `doctor` rates every computer `recovery_required` while any legacy computer runs, so its
+/// verdict cannot be asked before the running ones are stopped. `None` when it cannot be told.
+fn is_running(
+    runner: &dyn runtime::RuntimeRunner,
+    paths: &runtime::RuntimePaths,
+    name: &str,
+) -> Option<bool> {
+    let args: Vec<String> = ["inspect", name, "--format", "json"].map(String::from).into();
+    let output = runner.run(paths, &args, DIAGNOSE_TIMEOUT).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&output.stdout).ok()?;
+    match value.get("status")?.as_str()? {
+        "Created" | "Stopped" | "Crashed" => Some(false),
+        "Running" | "Draining" | "Paused" | "Stopping" => Some(true),
+        _ => None,
+    }
+}
+
 fn stop(
     runner: &dyn runtime::RuntimeRunner,
     paths: &runtime::RuntimePaths,
@@ -229,8 +247,25 @@ pub(super) fn upgrade(
 ) -> Result<Report, String> {
     let total = names.len();
     let mut outcomes: Vec<Option<Outcome>> = vec![None; total];
+    // Running computers go first: while any legacy computer runs, the macOS `doctor` cannot
+    // exclude its writer and rates every other computer `recovery_required`. A stop that fails
+    // or does not settle leaves that computer untouched and out of the rest of the step.
+    for (index, name) in names.iter().enumerate() {
+        if is_running(runner, paths, name) != Some(true) {
+            continue;
+        }
+        (options.progress)(Step::Stopping { name: name.clone() });
+        if let Err(message) = stop(runner, paths, name) {
+            outcomes[index] = Some(Outcome::NeedsAttention(message));
+        } else if is_running(runner, paths, name) != Some(false) {
+            outcomes[index] = Some(Outcome::NeedsAttention(NOT_STOPPED.into()));
+        }
+    }
     let mut pending = Vec::new();
     for (index, name) in names.iter().enumerate() {
+        if outcomes[index].is_some() {
+            continue;
+        }
         (options.progress)(Step::Inspecting { index, total });
         match diagnose(runner, paths, name) {
             Ok(Diagnosis::Ready) => outcomes[index] = Some(Outcome::AlreadyReady),
@@ -240,7 +275,8 @@ pub(super) fn upgrade(
             }
         }
     }
-    // A running computer holds its disks; the clone and the repair need them quiet.
+    // A computer that `inspect` did not show as running but `doctor` does is stopped here; the
+    // clone and the repair need the disks quiet.
     let mut repairable = Vec::new();
     for (index, running) in pending {
         let name = &names[index];
