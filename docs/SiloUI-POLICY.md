@@ -62,7 +62,7 @@ to answer in one piece cannot be cut, so it is withheld.
 | `checkpoints.restore`, `.delete`, `.abandonRestore`, `steps.record` | What it made | Its own checkpoints and steps are your history of it. |
 | `desktop.action`, `computerUse.setup`, `clipboard.write` | What it made | |
 | `changes.request`, `changes.requests.throwAway` | What it made | A review request can target only its tree. |
-| `checkpoints.fork` | Makes a computer | Source: itself or one it made. The fork may have any secret the caller has (see [Secrets in a fork](#secrets-in-a-fork)), and a read-only copy of GitHub access the caller's own access covers; anything more asks you. Forking an earlier checkpoint of itself asks you, since it can hold what you have since taken away. The fork keeps the network policy of the computer it comes from when that is no wider than the caller's own, else it gets the caller's; a wider one the caller asks for asks you. The token file of the in-guest client is always scrubbed; a recipe hash is never passed on (it names a baseline other forks share). |
+| `checkpoints.fork` | Makes a computer | Source: itself or one it made. The fork may have any secret the caller has (see [Secrets in a fork](#secrets-in-a-fork)), and a read-only copy of GitHub access the caller's own access covers; anything more asks you. Forking an earlier checkpoint of itself asks you, since it can hold what you have since taken away. The fork keeps the network policy of the computer it comes from when that is no wider than the caller's own, else it gets the caller's; a wider one the caller asks for asks you. The token file of the in-guest client is always scrubbed; a recipe hash is never passed on (it names a baseline other forks share). The one source outside its tree that is allowed is the hidden computer a recipe was built in (its name starts with `silo-build-`, a name no agent can give a computer): any computer may fork it to make a computer from that recipe, and the rule for secrets, GitHub access and network above applies as for any fork, so the new computer gets nothing beyond what the caller has. |
 | `computers.create` | Makes a computer | The engine chooses a Linux computer's id, and a macOS computer is recorded as the caller's by the id the create returned, never by its name. A Linux name must satisfy the runtime's rule (lowercase letters, digits and hyphens, at most 32), any other name is plain text of at most 64 characters. A container computer asks you: it shares the device's kernel. A computer with more CPUs, maximum CPUs, memory, maximum memory or storage than the caller has (a macOS one: CPUs, memory or disk) asks you, with the sizes in the request. Of a Linux computer's `desktop` settings only whether the desktop starts with the computer is passed on (Silo decides the rest). Names Silo reserves (`silo-build-`, `silo-baseline-`) are refused. A new computer gets the caller's network policy, or a narrower one the caller asks for; a wider one asks you. |
 | `changes.keep` | Asks you | Free when both the fork and the computer it merges into are ones it made; asks when it merges into itself; refused anywhere else. The request lists the commands the merge's `keep` hooks run in the target, says when database changes are accepted without a migration (`dataOk`), and lists the choices and skipped items. |
 | `changes.requests.keep` | Asks you | Only for a request about a computer it made; free when the request merges into a computer it made too, asks when it merges into itself. |
@@ -82,8 +82,11 @@ to answer in one piece cannot be cut, so it is withheld.
 | `network.state`, `sshAccess.state`, `sshAccess.connection` | Never | They list every computer. |
 | `secrets.list`, `secrets.remove`, `secrets.retry` | Never | A computer never reads a secret's value, and the list shows every computer's secrets. |
 | `github.*` other than the configuration save | Never | Your GitHub account and sign-in. |
+| `recipes.get`, `recipes.list` | Free | The stored recipes and the builds that exist. |
+| `recipes.save`, `recipes.remove`, `recipes.build` | Never | Storing, removing and building recipes is yours. |
+| `computers.recipe` | Its tree | The recipe the computer was built from, as it was when it was built. |
 | `guestClient.*` | Never | Turning Silo's tools on or off in a computer is yours. |
-| `settings.*`, `connections.*`, `exports.*`, `storage.*`, `updates.*`, `migration.*`, `preparation.*`, `recipes.*`, `engine.shutdown`, `engine.update.*`, `engine.credentials.*`, `device.dependencies` | Never | Engine settings, Connections, exports and imports, updates. |
+| `settings.*`, `connections.*`, `exports.*`, `storage.*`, `updates.*`, `migration.*`, `preparation.*`, `engine.shutdown`, `engine.update.*`, `engine.credentials.*`, `device.dependencies` | Never | Engine settings, Connections, exports and imports, updates. |
 
 ## Asking you
 
@@ -171,11 +174,10 @@ turns the system notifications off. Approvals are answered on the device whose c
 
 ## Secrets in a fork
 
-A fork may carry any secret its maker holds, whatever that maker's agent was set up to share.
-The old per-agent `fork_secrets` list no longer limits it, and the engine does not read it: it was
-a setting of the friendly `silo` client, which an agent that wants more simply does not use. The
-direction's rule is the limit instead: a computer hands on only what it has, and anything more
-asks you.
+A fork may carry any secret its maker holds. No list set up beforehand limits it: the command
+line used to have a per-agent list of secret names, and it is gone, because an agent that wants
+more simply would not use that client. The limit is the rule at the top of this page: a computer
+hands on only what it has, and anything more asks you.
 
 ## The audit log
 
