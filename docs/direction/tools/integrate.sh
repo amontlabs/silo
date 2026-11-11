@@ -1,8 +1,7 @@
 #!/bin/bash
 # Regenerates the API files and runs the focused suites on the integration branch.
 cd ~/code/projects/silo-direction/app/SiloUI || exit 1
-export CARGO_TARGET_DIR=$HOME/code/projects/silo-wt-targets/integration
-LOG=$HOME/code/projects/silo-wt-targets/integration.log
+LOG=$HOME/code/projects/silo-direction/app/SiloUI/target/integration.log
 : > "$LOG"
 run() { echo "== $*" >> "$LOG"; "$@" >> "$LOG" 2>&1; echo "== exit $? : $*" >> "$LOG"; }
 run cargo run -q -p silo-api --example generate_requests

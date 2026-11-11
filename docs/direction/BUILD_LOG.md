@@ -83,6 +83,18 @@ These were not asked of the owner. Each is open to change.
 
 ## Found during the build
 
+- **Build folders changed on 2026-11-11** (another session, after the disk lost 80 GB in a day): a
+  local `post-checkout` hook clones the main checkout's `app/SiloUI/target` into every new
+  worktree (copy-on-write), agents build there and must not set `CARGO_TARGET_DIR`, and
+  `~/code/projects/silo-wt-targets` is gone. The integration worktree builds in its own
+  `app/SiloUI/target` (cloned the same way); logs are `app/SiloUI/target/merge.log` and
+  `integration.log` there. That session committed its note on `main`'s copy of these documents,
+  which is older than this branch's; this branch's copy is the current one.
+- **Second Claude API rate limit** (2026-11-11, about 02:05): T6, T13b and the T5b merge were
+  stopped mid-work. T6's work is saved as `578761ee6` on `feat/direction-build-cli` (four
+  finished commits plus documents in progress); T13b has one commit on `feat/network-policy-ui`
+  (commands and schemas, no screens yet); the T5b merge was half done and is restarted.
+
 - **T5b:** `agents.install` for Codex fails in a real Linux computer: `/opt/silo/codex/<version>`
   is created mode 0700, so the `silo` account cannot run `codex` (fix in
   `guest/agent-tools.py`; Claude Code installs fine). The guest `silo` is rebuilt on every
