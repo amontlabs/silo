@@ -3420,6 +3420,30 @@
       },
       "type": "object"
     },
+    "ComputerRebuildResult": {
+      "description": "The final result of `computers.rebuild`.",
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "undoName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId",
+        "name",
+        "undoName",
+        "image"
+      ],
+      "type": "object"
+    },
     "ComputerRecipeResult": {
       "properties": {
         "recipe": {
@@ -8530,6 +8554,9 @@
         "push": {
           "$ref": "#/$defs/PushOperation"
         },
+        "rebuild": {
+          "$ref": "#/$defs/ComputerRebuildResult"
+        },
         "recipe_build": {
           "$ref": "#/$defs/RecipeBuildResult"
         },
@@ -8583,7 +8610,8 @@
         "engine_update_prepare",
         "push",
         "storage",
-        "update"
+        "update",
+        "rebuild"
       ],
       "type": "object"
     },
@@ -9610,6 +9638,7 @@
         "computers.launch",
         "computers.list",
         "computers.restart",
+        "computers.rebuild",
         "computers.shell",
         "computers.start",
         "computers.stop",
@@ -10513,6 +10542,22 @@
           "properties": {
             "method": {
               "const": "computers.restart",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.rebuild",
               "type": "string"
             },
             "params": {
@@ -13560,6 +13605,22 @@
           "properties": {
             "method": {
               "const": "computers.restart",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.rebuild",
               "type": "string"
             },
             "result": {
@@ -19884,6 +19945,10 @@
       "resultType": "ApplicationSource | null"
     },
     {
+      "method": "computers.rebuild",
+      "resultType": "ComputerRebuildResult"
+    },
+    {
       "method": "computers.delete",
       "resultType": "ApplicationSource | null | MacosComputersState"
     },
@@ -20258,6 +20323,12 @@
     {
       "kind": "job",
       "name": "computers.restart",
+      "paramsType": "common::ComputerTargetParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "computers.rebuild",
       "paramsType": "common::ComputerTargetParams",
       "resultType": "common::JobStartResult"
     },

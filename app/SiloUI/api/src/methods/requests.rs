@@ -307,6 +307,11 @@ pub fn computers_restart(params: common::ComputerTargetParams) -> Request<kind::
     Request::new(MethodParams::ComputersRestart(params))
 }
 
+/// `computers.rebuild`
+pub fn computers_rebuild(params: common::ComputerTargetParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ComputersRebuild(params))
+}
+
 /// `computers.shell`
 pub fn computers_shell(params: computers::ComputerShellParams) -> Request<kind::Query> {
     Request::new(MethodParams::ComputersShell(params))

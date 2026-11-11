@@ -1537,6 +1537,25 @@ pub async fn replace_main(
         .await
 }
 
+/// Rebuilds a Linux computer on the newest guest image, keeping its workspace and home.
+pub async fn rebuild(
+    engine: &Engine,
+    computer: &str,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let computer = engine.computer(computer).await?;
+    engine
+        .run_job(
+            &format!("Rebuilding {}", computer.name),
+            requests::computers_rebuild(ComputerTargetParams {
+                device_id: None,
+                computer_id: computer.id,
+            }),
+            progress,
+        )
+        .await
+}
+
 /// Puts a computer back to before its latest merge.
 pub async fn undo(
     engine: &Engine,

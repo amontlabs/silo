@@ -70,6 +70,7 @@ pub fn rule(method: MethodName) -> Rule {
         | M::ComputersIdentitiesConfigure
         | M::ComputersIdentitiesVerify
         | M::ComputersLaunch
+        | M::ComputersRebuild
         | M::ComputersShell
         | M::ActivitySetupRead => OwnerOnly,
         M::MacosSetupRetry => Made,

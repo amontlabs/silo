@@ -112,6 +112,7 @@ define_registry! {
     ComputersLaunch => ("computers.launch", Query, computers::ComputerLaunchParams, computers::LaunchStatus);
     ComputersList => ("computers.list", Query, computers::ComputerListParams, computers::ComputersListResult);
     ComputersRestart => ("computers.restart", Job, common::ComputerTargetParams, common::JobStartResult);
+    ComputersRebuild => ("computers.rebuild", Job, common::ComputerTargetParams, common::JobStartResult);
     ComputersShell => ("computers.shell", Query, computers::ComputerShellParams, computers::ApplicationSource);
     ComputersStart => ("computers.start", Job, common::ComputerTargetParams, common::JobStartResult);
     ComputersStop => ("computers.stop", Job, common::ComputerTargetParams, common::JobStartResult);
@@ -266,7 +267,7 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 190);
+        assert_eq!(METHOD_REGISTRY.len(), 191);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
@@ -286,7 +287,7 @@ mod tests {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            43
+            44
         );
         assert_eq!(
             METHOD_REGISTRY

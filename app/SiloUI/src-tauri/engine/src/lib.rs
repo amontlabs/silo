@@ -78,6 +78,7 @@ pub mod policy;
 pub mod pre_upgrade_backup;
 pub mod preparation;
 pub mod recipes;
+pub mod rebuild;
 pub mod remote;
 pub mod remote_access;
 pub mod remote_events;

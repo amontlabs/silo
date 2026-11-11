@@ -145,6 +145,8 @@ pub enum Command {
     Merge(MergeCommand),
     /// Replace main with a fork: it takes main's place and the old main is kept aside.
     ReplaceMain(ReplaceMainCommand),
+    /// Rebuild a Linux computer on the newest guest image, keeping its workspace and home.
+    Rebuild(RebuildCommand),
     /// Now `silo merge`.
     #[command(hide = true)]
     Fold(MergeCommand),
@@ -509,6 +511,12 @@ pub struct ReplaceMainCommand {
     /// Report what would happen and what would stop it, changing nothing.
     #[arg(long)]
     pub dry_run: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RebuildCommand {
+    /// The computer to rebuild on the newest image.
+    pub computer: String,
 }
 
 #[derive(Args, Debug)]
@@ -1118,6 +1126,9 @@ async fn dispatch(
             )
             .await;
         }
+        Command::Rebuild(rebuild) => {
+            return rebuild_command(engine, &rebuild.computer, json).await;
+        }
         Command::Fold(merge) => {
             eprintln!("`silo fold` is now `silo merge`; `silo replace-main` replaces main.");
             return merge_command(engine, merge, json, working_directory).await;
@@ -1696,6 +1707,13 @@ async fn replace_main(
     })
 }
 
+/// `silo rebuild`.
+async fn rebuild_command(engine: &Engine, computer: &str, json: bool) -> Result<i32, CliError> {
+    let value = ops::rebuild(engine, computer, &stderr_progress).await?;
+    emit(json, &value, render::rebuild);
+    Ok(0)
+}
+
 /// Prints an exec result and returns the process exit code. The text mode writes the
 /// output bytes as they are; `--json` carries them as text with invalid UTF-8 replaced.
 fn print_exec(json: bool, output: &ops::ExecOutput, step: &Value) -> i32 {
@@ -1921,6 +1939,10 @@ mod tests {
         assert!(matches!(
             parse(&["replace-main", "try"]).command,
             Command::ReplaceMain(_)
+        ));
+        assert!(matches!(
+            parse(&["rebuild", "dev"]).command,
+            Command::Rebuild(_)
         ));
         assert!(matches!(
             parse(&["undo", "main"]).command,

@@ -964,6 +964,43 @@ pub fn install_credential_source(context: Arc<SilodContext>) {
 
 // MARK: Lifecycle
 
+async fn begin_rebuild(
+    context: &HandlerContext,
+    params: ComputerTargetParams,
+) -> Result<HandlerOutput, DispatchError> {
+    require_local_device(context, params.device_id.as_deref())?;
+    let host = SilodRuntimeHost::new(context);
+    let paths = silo_engine::runtime::runtime_paths(&host).map_err(invalid)?;
+    let metadata = silo_engine::runtime::read_metadata(&paths.metadata).map_err(invalid)?;
+    if is_macos_computer(&host, &params.computer_id) {
+        return Err(unsupported(
+            "Rebuild on the newest image is currently only supported for Linux computers.",
+        ));
+    }
+    let computer = metadata
+        .computers
+        .into_iter()
+        .find(|c| c.id() == params.computer_id || c.name() == params.computer_id)
+        .ok_or_else(|| not_found("This computer no longer exists on this device."))?;
+    let target_id = computer.id().to_owned();
+    let target_name = computer.name().to_owned();
+
+    let job = context.start_job("computers.rebuild")?;
+    let job_id = job.job_id.clone();
+    let engine = host.context.clone();
+    let host_arc = Arc::new(host);
+    run_owned_job(engine, job_id, move || {
+        let env = silo_engine::rebuild::engine_env::EngineRebuildEnv::new(host_arc.clone());
+        let journal = silo_engine::rebuild::Journal::new(
+            host_arc.engine_context().paths().app_data.join("rebuild"),
+        );
+        let recipe = silo_engine::recipes::records::get(&target_id)
+            .map_err(|e| format!("Failed to read recipe records: {e}"))?;
+        silo_engine::rebuild::rebuild(&env, &journal, &target_name, recipe.as_ref())
+    });
+    job_output(job)
+}
+
 /// Linux start/stop/restart, and macOS start/stop, as jobs.
 async fn begin_lifecycle(
     context: &HandlerContext,
@@ -1819,6 +1856,7 @@ async fn route(
         MethodName::ComputersRestart => {
             begin_lifecycle(context, decoded!(), "computers.restart").await
         }
+        MethodName::ComputersRebuild => begin_rebuild(context, decoded!()).await,
         MethodName::ComputersForceStop => force_stop(context, decoded!()).await,
         MethodName::ComputersDismissError => dismiss_error(context, decoded!()).await,
         MethodName::ComputersConfigurationChange => {

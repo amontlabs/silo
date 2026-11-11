@@ -760,7 +760,7 @@ fn status_leaves_out_computer_use_for_a_computer_with_no_desktop() {
 fn keep_engine(result: Value) -> FakeEngine {
     FakeEngine::start(move |method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
-        "changes.keep" | "changes.undo" | "changes.promote" => Ok(json!({"jobId": "job:1"})),
+        "changes.keep" | "changes.undo" | "changes.promote" | "computers.rebuild" => Ok(json!({"jobId": "job:1"})),
         "operations.job.get" => Ok(finished(result.clone())),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
@@ -1310,6 +1310,36 @@ async fn replace_main_sends_changes_promote_and_prints_the_archive_name() {
         "{text}"
     );
     assert!(!text.contains("promot"), "{text}");
+}
+
+#[tokio::test]
+async fn rebuild_sends_computers_rebuild_and_prints_result() {
+    let engine = keep_engine(json!({
+        "computerId": "id-main",
+        "name": "main",
+        "undoName": "main-undo",
+        "image": "ubuntu-24.04-v5",
+    }));
+    let socket = engine.socket.to_str().unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "rebuild",
+        "main",
+    ])
+    .unwrap();
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    let sent = &engine.calls("computers.rebuild")[0];
+    assert_eq!(sent["computerId"], "id-main");
+    let text = silo_cli::render::rebuild(&json!({
+        "name": "main",
+        "undoName": "main-undo",
+        "image": "ubuntu-24.04-v5",
+    }));
+    assert!(text.contains("Rebuilt main on ubuntu-24.04-v5"), "{text}");
+    assert!(text.contains("main-undo (stopped)"), "{text}");
 }
 
 #[tokio::test]

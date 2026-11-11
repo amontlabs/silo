@@ -434,6 +434,7 @@ pub const OWNER_METHODS: &[(&str, bool)] = &[
     ("computers.identities.verify", false),
     ("computers.launch", false),
     ("computers.list", false),
+    ("computers.rebuild", true),
     ("computers.restart", true),
     ("computers.start", true),
     ("computers.stop", true),

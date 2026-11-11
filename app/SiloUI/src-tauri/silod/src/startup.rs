@@ -234,7 +234,8 @@ fn start_keep_recovery(context: Arc<SilodContext>) {
             Err(error) => eprintln!("silod: could not start the keep recovery: {error}"),
         }
     }
-    started += start_promote_recovery(context, host, &held_tx);
+    started += start_promote_recovery(context, host.clone(), &held_tx);
+    started += start_rebuild_recovery(host, &held_tx);
     drop(held_tx);
     // Startup goes on once every computer is held, or after a short wait when it cannot be.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -289,6 +290,33 @@ fn start_promote_recovery(
         match spawned {
             Ok(_) => started += 1,
             Err(error) => eprintln!("silod: could not start the promote recovery: {error}"),
+        }
+    }
+    started
+}
+
+fn start_rebuild_recovery(
+    host: Arc<dyn RuntimeHost>,
+    held: &std::sync::mpsc::Sender<()>,
+) -> usize {
+    let journal = silo_engine::rebuild::Journal::new(
+        host.engine_context().paths().app_data.join("rebuild"),
+    );
+    let mut started = 0;
+    for record in journal.all() {
+        if record.state == silo_engine::rebuild::RebuildState::Rebuilding {
+            let (host, journal, held) = (host.clone(), journal.clone(), held.clone());
+            let spawned = std::thread::Builder::new()
+                .name("silod-rebuild-recovery".into())
+                .spawn(move || {
+                    let env = silo_engine::rebuild::engine_env::EngineRebuildEnv::new(host);
+                    let _ = held.send(());
+                    let _ = silo_engine::rebuild::resume_or_rollback(&env, &journal, &record);
+                });
+            match spawned {
+                Ok(_) => started += 1,
+                Err(error) => eprintln!("silod: could not start the rebuild recovery: {error}"),
+            }
         }
     }
     started

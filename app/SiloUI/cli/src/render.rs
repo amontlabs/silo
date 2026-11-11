@@ -1123,6 +1123,14 @@ pub fn replace_main(value: &Value) -> String {
     out
 }
 
+/// `silo rebuild`: report what happened.
+pub fn rebuild(value: &Value) -> String {
+    let name = text(value, "name");
+    let undo = text(value, "undoName");
+    let image = text(value, "image");
+    format!("Rebuilt {name} on {image}. The previous computer is {undo} (stopped).")
+}
+
 /// The conflicts of a merge that needs answers, one per item with the id to answer by and the
 /// answers that settle it.
 fn conflict_lines(refusal: &Value) -> String {
