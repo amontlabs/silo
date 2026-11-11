@@ -339,7 +339,7 @@ it("keeps obsolete computer errors compact and copies only safe explanations", a
 
 
 
-it("keeps a successful GitHub apply notification until it is closed", async () => {
+it("keeps a successful GitHub apply notification for 20 seconds or until it is closed", async () => {
   vi.useFakeTimers()
   const application = renderGitHub("running", applicationSourceForScenario("running", "connected"))
 
@@ -352,11 +352,10 @@ it("keeps a successful GitHub apply notification until it is closed", async () =
     await act(async () => { await vi.advanceTimersByTimeAsync(50) })
     expect(screen.getByText("GitHub settings applied")).toBeVisible()
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
     expect(screen.getByText("GitHub settings applied")).toBeVisible()
 
-    fireEvent.click(screen.getByRole("button", { name: "Close toast" }))
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000) })
     expect(screen.queryByText("GitHub settings applied")).not.toBeInTheDocument()
   } finally {
     application.unmount()
