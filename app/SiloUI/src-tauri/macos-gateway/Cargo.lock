@@ -1333,7 +1333,7 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-network"
-version = "0.7.15"
+version = "0.7.14"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -1380,7 +1380,7 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-protocol"
-version = "0.7.15"
+version = "0.7.14"
 dependencies = [
  "bytes",
  "chrono",
@@ -1396,7 +1396,7 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-types"
-version = "0.7.15"
+version = "0.7.14"
 dependencies = [
  "chrono",
  "hex",
@@ -1412,7 +1412,7 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-types-macros"
-version = "0.7.15"
+version = "0.7.14"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1421,7 +1421,7 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-utils"
-version = "0.7.15"
+version = "0.7.14"
 dependencies = [
  "dirs",
  "libc",

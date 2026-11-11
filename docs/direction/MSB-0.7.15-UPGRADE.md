@@ -73,3 +73,7 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   "port in use"). #1735: disk restores now add `--allow-missing-resources` unless legacy `-v`
   mounts are passed; the container shim accepts the flag. #1688/#2030 stdin: Silo never uses
   `msb run`; every exec through `run_msb` keeps `--no-stdin`.
+- 2026-11-11: base changed to v0.7.14 (v0.7.15 has no release assets) plus our patches and #2032 on
+  `silo/0714-integration`. Engine pin is now v0.7.14 (`60fc5071b34e6cc2671c84c8dc07709795d45d27`);
+  gateway lock regenerated and its 36 tests pass against that tree on 1.95.0. The Rust toolchain pin
+  (1.95.0 in the entries above) is to be reset to 1.94.0 if v0.7.14 builds on it.
