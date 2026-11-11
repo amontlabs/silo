@@ -251,6 +251,7 @@ pub(crate) async fn checkpoint_action(
             secrets: Vec::new(),
             quiet: None,
             recipe_hash: None,
+            network_policy: None,
         }),
         "restore" => requests::checkpoints_restore(CheckpointTargetParams {
             computer_id,

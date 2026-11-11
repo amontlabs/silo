@@ -25,7 +25,11 @@ use crate::{
     methods::{self, HandlerContext},
 };
 
-const TICK: Duration = Duration::from_secs(2);
+/// The watcher looks after every change the engine announces about computers or checkpoints,
+/// and at least this often.
+const TICK: Duration = Duration::from_secs(15);
+/// Changes announced together are looked at once, this long after the first.
+const SETTLE: Duration = Duration::from_millis(500);
 /// A computer that changed is looked at again after this long at the soonest.
 const AFTER_CHANGE: Duration = Duration::from_secs(30);
 /// A running computer is looked at again after this long whatever happened.
@@ -46,6 +50,8 @@ pub(super) struct Seen {
     checked: Option<Instant>,
     retry_at: Option<Instant>,
     missing_since: Option<Instant>,
+    /// Whether the watcher has seen the computer in the engine's list.
+    listed: bool,
 }
 
 #[cfg(test)]
@@ -62,6 +68,7 @@ impl Seen {
             checked: Some(checked),
             retry_at,
             missing_since: None,
+            listed: true,
         }
     }
 }
@@ -212,9 +219,14 @@ impl Watcher {
             let id = record.computer_id;
             let mut seen = self.seen.get(&id).cloned().unwrap_or_default();
             let Some(&running) = states.get(&id) else {
-                // A computer being created is not listed yet; one gone for a while is forgotten.
+                // A computer being created is not listed yet. One that was never listed and never
+                // got a token, missing for a while, is a creation that failed and is forgotten; a
+                // computer that was deleted is forgotten by its delete.
                 let since = *seen.missing_since.get_or_insert(now);
-                if !states.is_empty() && now.duration_since(since) >= GONE_AFTER {
+                if !seen.listed
+                    && record.hash.is_empty()
+                    && now.duration_since(since) >= GONE_AFTER
+                {
                     eprintln!("silod: channel of {id}: the computer is gone; its tools are off");
                     let _ = guest_client::turn_off(&[id.as_str()]);
                     self.seen.remove(&id);
@@ -224,6 +236,7 @@ impl Watcher {
                 continue;
             };
             seen.missing_since = None;
+            seen.listed = true;
             let generation = silo_engine::generation::generation(&id);
             if due(&seen, running, generation, now) {
                 match self.check(&id) {
@@ -297,12 +310,17 @@ pub fn start(context: Arc<SilodContext>) {
         policy,
         seen: HashMap::new(),
     };
+    let (wake, woken) = std::sync::mpsc::sync_channel::<()>(1);
+    watcher.handle.spawn(follow_changes(watcher.context.clone(), wake));
     let spawned = std::thread::Builder::new()
         .name("silod-channels".into())
         .spawn(move || {
             let mut housekept = Instant::now();
             loop {
-                std::thread::sleep(TICK);
+                if woken.recv_timeout(TICK).is_ok() {
+                    std::thread::sleep(SETTLE);
+                    while woken.try_recv().is_ok() {}
+                }
                 watcher.tick();
                 if housekept.elapsed() > HOUSEKEEPING {
                     watcher.reap();
@@ -312,5 +330,22 @@ pub fn start(context: Arc<SilodContext>) {
         });
     if let Err(error) = spawned {
         eprintln!("silod: could not start the channel watcher: {error}");
+    }
+}
+
+/// Wakes the watcher on every event about computers or checkpoints (a start, a stop, a restore).
+async fn follow_changes(context: Arc<SilodContext>, wake: std::sync::mpsc::SyncSender<()>) {
+    let client = silo_engine::context::ClientId::new("silo-tools-watch".to_owned());
+    let mut events = context.connect_event_stream(client.clone());
+    let subscribed = context
+        .subscribe_events(&client, vec!["computers.*".into(), "checkpoints.*".into()])
+        .and_then(|subscription| context.activate_events(&client, &subscription));
+    if let Err(error) = subscribed {
+        eprintln!("silod: the channel watcher follows no events ({error}); it looks every {TICK:?}");
+        return;
+    }
+    while events.recv().await.is_some() {
+        // A full queue already holds a wake.
+        let _ = wake.try_send(());
     }
 }
