@@ -108,7 +108,8 @@ impl runtime::RuntimeRunner for Runtime {
             stderr: String::new(),
         };
         let mut computers = self.computers.borrow_mut();
-        let any_running = computers.values().any(|fake| fake.running);
+        // A running computer with protected storage is no legacy writer.
+        let any_running = computers.values().any(|fake| fake.running && fake.status != "ready");
         match args[0].as_str() {
             "inspect" => {
                 let fake = computers.get(&args[1]).unwrap();
@@ -207,6 +208,46 @@ fn run(
         &Options {
             confirm_maintenance,
             backup: &record,
+            progress: &|_| {},
+        },
+    )
+}
+
+/// Paths whose runtime home has one sandbox folder per listed computer; `true` marks the
+/// protected layout as ready in it, as the runtime writes it.
+fn paths_with_sandboxes(directory: &Path, sandboxes: &[(&str, bool)]) -> runtime::RuntimePaths {
+    let storage_home = directory.join("microsandbox");
+    for (name, ready) in sandboxes {
+        let sandbox = storage_home.join("sandboxes").join(name);
+        fs::create_dir_all(&sandbox).unwrap();
+        if *ready {
+            fs::write(
+                sandbox.join("state-layout.json"),
+                br#"{"schema":"silo.sandbox-layout.v1","phase":"ready","binding":null,"root":null}"#,
+            )
+            .unwrap();
+        }
+    }
+    runtime::RuntimePaths {
+        home: storage_home.clone(),
+        storage_home: Some(storage_home),
+        metadata: directory.join("computers.json"),
+        ..paths()
+    }
+}
+
+fn run_in(
+    fake: &Runtime,
+    paths: &runtime::RuntimePaths,
+    list: &[&str],
+) -> Result<Report, String> {
+    upgrade(
+        fake,
+        paths,
+        &names(list),
+        &Options {
+            confirm_maintenance: true,
+            backup: &|_| Ok(()),
             progress: &|_| {},
         },
     )
@@ -558,6 +599,9 @@ fn launched(names: &[&str]) -> tempfile::TempDir {
     let converted = dir.path().join(CONVERTED);
     fs::create_dir_all(converted.join("microsandbox")).unwrap();
     fs::write(converted.join("microsandbox/db"), b"catalogue").unwrap();
+    for name in names {
+        fs::create_dir_all(converted.join("microsandbox/sandboxes").join(name)).unwrap();
+    }
     let computers: Vec<_> = names
         .iter()
         .enumerate()
@@ -659,7 +703,15 @@ fn a_computer_that_arrives_after_the_move_is_checked_and_flagged_until_it_is_rea
     controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
     assert!(read_report(&dir.path().join(CONVERTED)).unwrap().unwrap().complete());
 
-    let arrival_paths = runtime::RuntimePaths { metadata: metadata.clone(), ..paths() };
+    let storage_home = dir.path().join(CONVERTED).join("microsandbox");
+    for name in ["new-ready", "new-old", "new-odd"] {
+        fs::create_dir_all(storage_home.join("sandboxes").join(name)).unwrap();
+    }
+    let arrival_paths = runtime::RuntimePaths {
+        metadata: metadata.clone(),
+        storage_home: Some(storage_home),
+        ..paths()
+    };
     let fake = Runtime::new(&[
         ("new-ready", computer("ready", false)),
         ("new-old", computer("maintenance_required", false)),
@@ -735,4 +787,115 @@ fn a_blocked_repair_reads_its_diagnosis_from_stdout() {
 
 fn blocked_detail(status: &str) -> String {
     format!(r#"{{"sandbox":{{"status":"{status}"}},"next_step":"x"}}"#)
+}
+
+#[test]
+fn a_running_computer_with_protected_storage_is_never_stopped_beside_one_that_needs_attention() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths_with_sandboxes(directory.path(), &[("healthy", true), ("odd", false)]);
+    let fake = Runtime::new(&[
+        ("healthy", computer("ready", true)),
+        ("odd", computer("recovery_required", false)),
+    ])
+    .macos_doctor();
+    for launch in 0..2 {
+        let report = run_in(&fake, &paths, &["healthy", "odd"]).unwrap();
+        assert!(!report.complete(), "launch {launch}");
+        assert_eq!(outcome(&report, "healthy"), &Outcome::AlreadyReady);
+        assert!(matches!(outcome(&report, "odd"), Outcome::NeedsAttention(_)));
+        assert!(
+            !fake.calls().iter().any(|call| call.starts_with("stop healthy")),
+            "launch {launch}: {:?}",
+            fake.calls()
+        );
+        assert!(fake.computers.borrow()["healthy"].running, "launch {launch}");
+    }
+}
+
+#[test]
+fn only_a_running_computer_with_legacy_storage_is_stopped() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths_with_sandboxes(directory.path(), &[("healthy", true), ("old", false)]);
+    let fake = Runtime::new(&[
+        ("healthy", computer("ready", true)),
+        ("old", computer("maintenance_required", true)),
+    ])
+    .macos_doctor();
+    let report = run_in(&fake, &paths, &["healthy", "old"]).unwrap();
+    assert!(report.complete(), "{:?}", report.computers);
+    assert_eq!(outcome(&report, "old"), &Outcome::Repaired);
+    assert!(fake.calls().iter().any(|call| call == "stop old"));
+    assert!(!fake.calls().iter().any(|call| call == "stop healthy"));
+}
+
+#[test]
+fn a_ready_record_that_doctor_contradicts_does_not_keep_a_running_computer_untouched() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths_with_sandboxes(directory.path(), &[("odd", true)]);
+    let fake = Runtime::new(&[("odd", computer("maintenance_required", true))]);
+    let report = run_in(&fake, &paths, &["odd"]).unwrap();
+    assert_eq!(outcome(&report, "odd"), &Outcome::Repaired);
+    assert!(fake.calls().iter().any(|call| call == "stop odd"));
+}
+
+/// Adds computers to the saved inventory of a `launched` folder, without runtime folders.
+fn add_saved_computers(dir: &Path, names: &[&str]) {
+    let metadata = dir.join(CONVERTED).join("computers.json");
+    let mut inventory = serde_json::to_value(runtime::read_metadata(&metadata).unwrap()).unwrap();
+    for (index, name) in names.iter().enumerate() {
+        inventory["computers"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": format!("00000000-0000-4000-8000-0000000001{index:02}"), "name": name,
+            "cpus": 1, "maxCPUs": 1, "memoryGiB": 1, "maxMemoryGiB": 1,
+            "workspaceStorageGiB": 1, "runtimeStorageGiB": 1
+        }));
+    }
+    runtime::write_metadata(&metadata, &serde_json::from_value(inventory).unwrap()).unwrap();
+}
+
+#[test]
+fn computers_that_were_never_started_are_neither_inspected_nor_flagged_across_launches() {
+    let dir = launched(&["drv-a"]);
+    // A restore waiting for its first Start and an unstarted checkpoint fork: saved, no folder.
+    add_saved_computers(dir.path(), &["pending-import", "unstarted-fork"]);
+    let metadata = dir.path().join(CONVERTED).join("computers.json");
+    for launch in 0..2 {
+        let controller = Controller::new(dir.path().to_path_buf());
+        // Only the existing computer is known to the fake runtime: asking about another panics.
+        let fake = Runtime::new(&[("drv-a", computer("maintenance_required", false))]);
+        let held = controller.hold_for_protected_storage();
+        assert_eq!(held, launch == 0, "launch {launch}");
+        if held {
+            controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
+        }
+        controller.release_protected_storage();
+        for name in ["pending-import", "unstarted-fork"] {
+            assert_eq!(attention_message(&metadata, name), None, "{name}, launch {launch}");
+        }
+        let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
+        assert!(report.complete(), "launch {launch}: {:?}", report.computers);
+        assert!(report.computers.iter().all(|computer| computer.name == "drv-a"));
+    }
+}
+
+#[test]
+fn a_saved_computer_without_a_runtime_folder_alone_leaves_nothing_to_hold() {
+    let dir = launched(&[]);
+    add_saved_computers(dir.path(), &["fork"]);
+    assert!(!Controller::new(dir.path().to_path_buf()).hold_for_protected_storage());
+}
+
+#[test]
+fn a_computer_without_a_runtime_folder_is_not_checked_when_it_arrives() {
+    let dir = launched(&["drv-a"]);
+    let metadata = dir.path().join(CONVERTED).join("computers.json");
+    let arrival_paths = runtime::RuntimePaths {
+        metadata: metadata.clone(),
+        storage_home: Some(dir.path().join(CONVERTED).join("microsandbox")),
+        ..paths()
+    };
+    let fake = Runtime::new(&[]);
+    check_arrival(&fake, &arrival_paths, "restore-waiting-for-start");
+    assert!(fake.calls().is_empty());
+    assert_eq!(attention_message(&metadata, "restore-waiting-for-start"), None);
+    assert!(read_report(&dir.path().join(CONVERTED)).unwrap().is_none());
 }

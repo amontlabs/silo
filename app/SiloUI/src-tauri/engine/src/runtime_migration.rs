@@ -218,8 +218,12 @@ impl Controller {
         let pending = settled
             && selected_runtime_storage(&self.app_data).is_ok_and(|storage| {
                 protected_storage::pending(&storage)
-                    && runtime::read_metadata(&storage.join("computers.json"))
-                        .is_ok_and(|inventory| !protected_computers(&inventory).is_empty())
+                    && runtime::read_metadata(&storage.join("computers.json")).is_ok_and(
+                        |inventory| {
+                            !protected_storage::existing(&storage, protected_computers(&inventory))
+                                .is_empty()
+                        },
+                    )
             });
         if pending {
             protected_storage::hold(&self.app_data, "Checking computer storage");
@@ -259,9 +263,12 @@ impl Controller {
         changed: &dyn Fn(),
     ) -> Result<(), String> {
         let storage = selected_runtime_storage(&self.app_data)?;
-        let names = protected_computers(
-            &runtime::read_metadata(&storage.join("computers.json"))
-                .map_err(|_| "Silo's saved computer configuration is invalid.".to_string())?,
+        let names = protected_storage::existing(
+            &storage,
+            protected_computers(
+                &runtime::read_metadata(&storage.join("computers.json"))
+                    .map_err(|_| "Silo's saved computer configuration is invalid.".to_string())?,
+            ),
         );
         let backup = |covered: &[String]| protected_storage::clone_backup(&self.app_data, &storage, covered);
         let progress = |step: protected_storage::Step| {

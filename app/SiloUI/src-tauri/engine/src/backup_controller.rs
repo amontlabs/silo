@@ -5910,6 +5910,39 @@ mod tests {
     }
 
     #[test]
+    fn an_import_waiting_for_its_first_start_is_not_flagged_as_needing_attention() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = import_paths(directory.path());
+        fs::create_dir_all(paths.metadata.parent().unwrap()).unwrap();
+        let controller = history_controller(directory.path().join("backup-history.json"));
+        recovery::begin(
+            &controller,
+            recovery::Journal::restore(completed_archive(), "copy".into(), Some("dev".into())),
+        )
+        .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let original = runtime::read_metadata(&paths.metadata).unwrap();
+        commit_import(
+            &paths,
+            &controller,
+            original,
+            imported_computer(&id),
+            &id,
+            GROUP,
+            MEMBER,
+            &serde_json::json!({}),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::runtime_migration::protected_storage_attention(&paths.metadata, "copy"),
+            None
+        );
+        assert!(!paths.metadata.with_file_name("protected-storage.json").exists());
+    }
+
+    #[test]
     fn a_failed_readback_keeps_a_possibly_committed_import() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();

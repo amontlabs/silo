@@ -148,6 +148,47 @@ fn diagnose(
     })
 }
 
+/// Where the runtime keeps a computer's folder.
+fn sandbox_dir(storage_home: &Path, name: &str) -> PathBuf {
+    storage_home.join("sandboxes").join(name)
+}
+
+fn runtime_home(paths: &runtime::RuntimePaths) -> &Path {
+    paths.storage_home.as_deref().unwrap_or(&paths.home)
+}
+
+/// Whether the runtime has made a folder for the computer. A saved computer has none until it
+/// first starts (a restore waiting for Start, a checkpoint fork), and there is nothing to
+/// inspect or move before then.
+pub(super) fn sandbox_exists(storage_home: &Path, name: &str) -> bool {
+    match fs::symlink_metadata(sandbox_dir(storage_home, name)) {
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+        Ok(_) => true,
+    }
+}
+
+/// The names whose computer has a folder in the storage folder `storage`.
+pub(super) fn existing(storage: &Path, names: Vec<String>) -> Vec<String> {
+    let storage_home = storage.join("microsandbox");
+    names
+        .into_iter()
+        .filter(|name| sandbox_exists(&storage_home, name))
+        .collect()
+}
+
+/// Whether the computer's own record says its protected storage is complete. Read from the
+/// folder, so it holds while the runtime cannot be asked: on macOS `doctor` rates every computer
+/// `recovery_required` while any legacy computer runs.
+fn recorded_ready(paths: &runtime::RuntimePaths, name: &str) -> bool {
+    fs::read(sandbox_dir(runtime_home(paths), name).join("state-layout.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|record| {
+            record.get("schema").is_some_and(serde_json::Value::is_string)
+                && record.get("phase").and_then(serde_json::Value::as_str) == Some("ready")
+        })
+}
+
 /// Whether the runtime says the computer is running, from `inspect` rather than `doctor`: on
 /// macOS `doctor` rates every computer `recovery_required` while any legacy computer runs, so its
 /// verdict cannot be asked before the running ones are stopped. `None` when it cannot be told.
@@ -247,11 +288,13 @@ pub(super) fn upgrade(
 ) -> Result<Report, String> {
     let total = names.len();
     let mut outcomes: Vec<Option<Outcome>> = vec![None; total];
-    // Running computers go first: while any legacy computer runs, the macOS `doctor` cannot
-    // exclude its writer and rates every other computer `recovery_required`. A stop that fails
-    // or does not settle leaves that computer untouched and out of the rest of the step.
+    // Running legacy computers go first: while any legacy computer runs, the macOS `doctor`
+    // cannot exclude its writer and rates every other computer `recovery_required`. A computer
+    // whose protected storage is recorded as ready has no legacy writer and keeps running. A
+    // stop that fails or does not settle leaves that computer untouched and out of the rest of
+    // the step.
     for (index, name) in names.iter().enumerate() {
-        if is_running(runner, paths, name) != Some(true) {
+        if recorded_ready(paths, name) || is_running(runner, paths, name) != Some(true) {
             continue;
         }
         (options.progress)(Step::Stopping { name: name.clone() });
@@ -478,6 +521,9 @@ pub(super) fn check_arrival(
     paths: &runtime::RuntimePaths,
     name: &str,
 ) {
+    if !sandbox_exists(runtime_home(paths), name) {
+        return;
+    }
     let message = match diagnose(runner, paths, name) {
         Ok(Diagnosis::Ready) => return,
         Ok(Diagnosis::Repairable { .. }) => ARRIVED.to_owned(),
