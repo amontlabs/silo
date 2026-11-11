@@ -47,3 +47,8 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
 ## Log
 
 - 2026-11-11: plan written; chains A–E started.
+- 2026-11-11: chain D done on `silo/0715-snapshot` (6 commits, tests pass). Found: v0.7.15's
+  lockfile needs rustc 1.95+ (`lock_api`, `parking_lot`), so `runtime-inputs.json` `toolchain`
+  1.94.0 must move; the v0.7.15 agentd download URL returned 404 (builds used
+  `MSB_EMBED_ARTIFACTS_DIR=~/code/projects/msb-upstream/check-artifacts`, check-only copies).
+  Capture dirs moved to `<sandbox>/checkpoints` in 0.7.15. `grow-retire-old-root-chain` included.
