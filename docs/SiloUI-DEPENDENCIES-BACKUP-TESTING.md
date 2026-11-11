@@ -11,8 +11,8 @@ From the repository root:
 npm --prefix app/SiloUI test
 npm --prefix app/SiloUI run typecheck
 npm --prefix app/SiloUI run lint
-cargo +1.94.0 test --manifest-path app/SiloUI/src-tauri/Cargo.toml --locked
-RUSTUP_TOOLCHAIN=1.94.0 npm --prefix app/SiloUI run desktop:build:debug
+cargo +1.95.0 test --manifest-path app/SiloUI/src-tauri/Cargo.toml --locked
+RUSTUP_TOOLCHAIN=1.95.0 npm --prefix app/SiloUI run desktop:build:debug
 codesign --verify --deep --strict \
   'app/SiloUI/src-tauri/target/debug/bundle/macos/Silo Dev.app'
 open 'app/SiloUI/src-tauri/target/debug/bundle/macos/Silo Dev.app'
@@ -25,7 +25,7 @@ Do not interrupt the user's app or computers. Quitting a test-owned Dev instance
 stops its local computers, so use only disposable state for this walkthrough.
 
 The first build downloads pinned build inputs and compiles the patched runtime.
-It requires Rust 1.94.0. Users of the finished app need none of those build tools.
+It requires Rust 1.95.0. Users of the finished app need none of those build tools.
 The debug build already uses the development channel, with separate app data,
 credentials, runtime aliases and remote bridge names. See
 [build channels](SiloUI-BUILD-CHANNELS.md). Use deterministic frontend fixtures
@@ -150,7 +150,7 @@ cannot boot a computer on macOS:
 SILO_LIVE_TEST_CONFIRM=disposable-test-fixtures \
 SILO_TEST_MSB="$PWD/app/SiloUI/src-tauri/target/debug/bundle/macos/Silo Dev.app/Contents/MacOS/msb" \
 SILO_TEST_LIBKRUNFW="$PWD/app/SiloUI/src-tauri/target/debug/bundle/macos/Silo Dev.app/Contents/Frameworks/libkrunfw.5.dylib" \
-cargo +1.94.0 test --manifest-path app/SiloUI/src-tauri/Cargo.toml --locked \
+cargo +1.95.0 test --manifest-path app/SiloUI/src-tauri/Cargo.toml --locked \
   real_backup_restore_preserves_root_and_computer_without_original_cache \
   -- --ignored --nocapture
 ```
