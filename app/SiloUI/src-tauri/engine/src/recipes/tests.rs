@@ -625,8 +625,8 @@ mod stored {
 
     use super::*;
     use crate::recipes::{
-        additions::manager_key, append, built_in, hooks_of, record_merge, records, Additions,
-        Library,
+        additions::manager_key, append, built_in, hooks_of, record_merge, records, unrecord_merge,
+        Additions, Library,
     };
 
     fn definition() -> RecipeDefinition {
@@ -775,8 +775,11 @@ mod stored {
         adds.add_package("snap", "lxd");
         adds.add_file("/home/silo/.bashrc");
         adds.add_file("/home/silo/.gitconfig");
-        let (name, fresh) = record_merge(&library, "main", &adds, true).unwrap().unwrap();
-        assert_eq!(name, "web");
+        let recorded = record_merge(&library, "main", &adds, true)
+            .unwrap()
+            .unwrap();
+        let fresh = recorded.record;
+        assert_eq!(recorded.name, "web");
         assert_eq!(fresh.packages["apt"], ["jq"]);
         assert_eq!(fresh.packages["pip"], ["requests"]);
         assert!(!fresh.packages.contains_key("snap"));
@@ -805,9 +808,11 @@ mod stored {
 
         let mut adds = Additions::default();
         adds.add_package("apt", "jq");
-        let (name, fresh) = record_merge(&library, "main", &adds, false).unwrap().unwrap();
-        assert_eq!(name, "web");
-        assert_eq!(fresh.packages["apt"], ["jq"]);
+        let recorded = record_merge(&library, "main", &adds, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recorded.name, "web");
+        assert_eq!(recorded.record.packages["apt"], ["jq"]);
 
         let stored = library.saved("web").unwrap().unwrap();
         assert!(!stored.spec.packages.apt.contains(&"jq".to_owned()));
@@ -827,8 +832,10 @@ mod stored {
         records::set("main", &main).unwrap();
         let mut adds = Additions::default();
         adds.add_package("npm", "typescript");
-        let (_, fresh) = record_merge(&library, "main", &adds, true).unwrap().unwrap();
-        assert_eq!(fresh.packages["npm"], ["typescript"]);
+        let recorded = record_merge(&library, "main", &adds, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recorded.record.packages["npm"], ["typescript"]);
         assert!(library.saved("linux-dev").unwrap().is_none());
         assert_eq!(
             built_in("linux-dev").unwrap().spec.packages.npm,
@@ -838,6 +845,92 @@ mod stored {
             records::get("main").unwrap().unwrap().recipe.spec.packages.npm,
             ["typescript"]
         );
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn undoing_a_merge_removes_exactly_what_it_appended() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        library.save("web", &definition()).unwrap();
+        records::set("main", &record("web")).unwrap();
+
+        let mut adds = Additions::default();
+        adds.add_package("apt", "git");
+        adds.add_package("apt", "jq");
+        adds.add_package("pip", "requests");
+        adds.add_file("/home/silo/.bashrc");
+        adds.add_file("/home/silo/.gitconfig");
+        let recorded = record_merge(&library, "main", &adds, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recorded.record.packages["apt"], ["jq"]);
+        assert_eq!(recorded.saved, recorded.record);
+
+        // Something the owner added to the saved recipe after the merge stays.
+        let mut saved = library.saved("web").unwrap().unwrap();
+        saved.spec.packages.apt.push("tmux".into());
+        library.save("web", &saved).unwrap();
+
+        unrecord_merge(&library, "main", &recorded).unwrap();
+        let after = library.saved("web").unwrap().unwrap();
+        assert_eq!(after.spec.packages.apt, ["git", "curl", "tmux"]);
+        assert!(after.spec.packages.pip.is_empty());
+        assert_eq!(after.files, ["/home/silo/.bashrc"]);
+        let on_main = records::get("main").unwrap().unwrap();
+        assert_eq!(on_main.recipe.spec.packages.apt, ["git", "curl"]);
+        assert!(on_main.recipe.spec.packages.pip.is_empty());
+        assert_eq!(on_main.recipe.files, ["/home/silo/.bashrc"]);
+        // Undoing again, or after the entries are gone, changes nothing.
+        unrecord_merge(&library, "main", &recorded).unwrap();
+        assert_eq!(library.saved("web").unwrap().unwrap(), after);
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn undoing_a_merge_leaves_the_saved_recipe_alone_when_the_merge_did_not_save() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        let mut saved = definition();
+        saved.spec.packages.apt.push("jq".into());
+        library.save("web", &saved).unwrap();
+        records::set("main", &record("web")).unwrap();
+
+        let mut adds = Additions::default();
+        adds.add_package("apt", "jq");
+        let recorded = record_merge(&library, "main", &adds, false)
+            .unwrap()
+            .unwrap();
+        assert!(recorded.saved.is_empty());
+        unrecord_merge(&library, "main", &recorded).unwrap();
+        assert_eq!(library.saved("web").unwrap().unwrap(), saved);
+        let on_main = records::get("main").unwrap().unwrap();
+        assert!(!on_main.recipe.spec.packages.apt.contains(&"jq".to_owned()));
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn undoing_a_merge_does_not_touch_a_record_of_another_recipe() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        records::set("main", &record("web")).unwrap();
+        let mut adds = Additions::default();
+        adds.add_package("npm", "eslint");
+        let recorded = record_merge(&library, "main", &adds, true)
+            .unwrap()
+            .unwrap();
+        // The computer was rebuilt from another recipe that happens to list the same package.
+        let mut other = record("other");
+        other.recipe.spec.packages.npm.push("eslint".into());
+        records::set("main", &other).unwrap();
+        unrecord_merge(&library, "main", &recorded).unwrap();
+        assert_eq!(records::get("main").unwrap().unwrap(), other);
         records::use_test_path(None);
         std::fs::remove_dir_all(app).unwrap();
     }

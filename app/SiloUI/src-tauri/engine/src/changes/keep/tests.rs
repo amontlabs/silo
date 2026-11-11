@@ -936,6 +936,90 @@ fn a_keep_reports_the_packages_and_settings_files_the_recipe_should_learn() {
     assert_eq!(report.additions.files, ["/root/.bashrc"]);
 }
 
+/// A recipe `web` saved in a temporary app folder and `main` built from it.
+fn recipe_world() -> (tempfile::TempDir, crate::recipes::Library) {
+    let dir = tempfile::tempdir().unwrap();
+    crate::recipes::records::use_test_path(Some(dir.path().join("recipe-records.json")));
+    let record = main_recipe(None);
+    let library = crate::recipes::Library::new(dir.path());
+    library.save("web", &record.recipe).unwrap();
+    crate::recipes::records::set("main", &record).unwrap();
+    (dir, library)
+}
+
+#[test]
+fn undoing_a_keep_takes_back_what_it_added_to_the_recipes() {
+    let (app, library) = recipe_world();
+    let world = simple_world();
+    let env = Fake(world.clone());
+    let (_dir, journal) = journal();
+    let mut st = store(BASE, FORK, BASE);
+    let mut asked = request(Hooks::default());
+    asked.data_ok = true;
+    let mut outcome = run(&world, &st, &journal, &asked).unwrap();
+    st.manifests
+        .insert("main".into(), mt("F\t/root/.bashrc\t12\t2\tbb\n"));
+    let Outcome::Kept(report) = &mut outcome else {
+        panic!("{outcome:?}")
+    };
+    super::service::note_recipe(app.path(), &journal, report, true);
+    assert!(report.recipe.is_some());
+    let record = crate::recipes::records::get("main").unwrap().unwrap();
+    assert_eq!(record.recipe.spec.packages.apt, ["jq"]);
+    assert_eq!(record.recipe.files, ["/root/.bashrc"]);
+    assert_eq!(
+        library.saved("web").unwrap().unwrap().spec.packages.apt,
+        ["jq"]
+    );
+
+    let mut undone = super::undo(&env, &st, &journal, "main", WAIT).unwrap();
+    super::service::undo_recipe(app.path(), &journal, &mut undone);
+    let UndoOutcome::Undone { notes, .. } = &undone else {
+        panic!("{undone:?}")
+    };
+    assert!(notes.is_empty(), "{notes:?}");
+    let record = crate::recipes::records::get("main").unwrap().unwrap();
+    assert!(record.recipe.spec.packages.apt.is_empty());
+    assert!(record.recipe.files.is_empty());
+    let saved = library.saved("web").unwrap().unwrap();
+    assert!(saved.spec.packages.apt.is_empty());
+    assert!(saved.files.is_empty());
+    crate::recipes::records::use_test_path(None);
+}
+
+#[test]
+fn undoing_a_keep_that_changed_no_recipe_leaves_the_recipes_alone() {
+    let (app, library) = recipe_world();
+    let mut saved = library.saved("web").unwrap().unwrap();
+    saved.spec.packages.apt.push("jq".into());
+    library.save("web", &saved).unwrap();
+    let world = simple_world();
+    let env = Fake(world.clone());
+    let (_dir, journal) = journal();
+    let mut st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    st.manifests
+        .insert("main".into(), mt("F\t/root/.bashrc\t12\t2\tbb\n"));
+    run(&world, &st, &journal, &request(Hooks::default())).unwrap();
+    let mut undone = super::undo(&env, &st, &journal, "main", WAIT).unwrap();
+    super::service::undo_recipe(app.path(), &journal, &mut undone);
+    assert_eq!(library.saved("web").unwrap().unwrap(), saved);
+    crate::recipes::records::use_test_path(None);
+}
+
+#[test]
+fn a_journal_written_before_recipe_updates_were_recorded_still_loads() {
+    let (_dir, journal) = journal();
+    let target = "main";
+    std::fs::create_dir_all(_dir.path().join("keep")).unwrap();
+    std::fs::write(
+        _dir.path().join("keep").join("main.checkpoints.json"),
+        r#"[{"checkpoint":{"id":"cp1","name":"before-keep","created_at":"","scope":"full"},"state":"undoable"}]"#,
+    )
+    .unwrap();
+    assert_eq!(journal.latest_undoable(target).unwrap().id, "cp1");
+    assert_eq!(journal.recipe_update(target, "cp1"), None);
+}
+
 #[test]
 fn a_plain_keep_runs_in_order_migrates_and_restarts_with_new_process_ids() {
     let world = simple_world();

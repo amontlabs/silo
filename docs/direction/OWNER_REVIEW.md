@@ -58,3 +58,13 @@ was chosen and why; any can be changed. Older items are also in the build log un
     asks for more than the free memory above the floor is refused. A start the owner approved
     checks the floor but does not hold memory, so several approved starts at once can still pass
     together. Left as is: the owner approved each one.
+
+## Recipes and tools (R1, R3)
+
+15. **A computer still sees each recipe's hash in the list.** It is a one-way digest of the
+    recipe, kept so agents can tell when a recipe changed; it does not reveal setup lines.
+16. **One tools check has 90 seconds in total**, which also caps sending the `silo` program
+    (it used to have 170 s alone). Sending 13 MB inside the device is fast, so this should not
+    bite; raise it if a slow computer shows "waiting" for its tools.
+17. **After 5 failed tools checks in a row, Silo stops checking that computer until its next
+    start.** The count is forgotten when the engine restarts.
