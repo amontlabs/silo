@@ -56,3 +56,8 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   Integrator owes: silo-network's `legacy_changes`/`subscribe()` hunks in `secrets/handle.rs`
   (left out of C); gateway must handle `start()` -> `Result` and `start_and_wait_for_ports(handle)`
   (no timeout, new `PortStartupError`). Live ports now share the global inbound budget.
+- 2026-11-11: chain A done on `silo/0715-cli-secrets` (7 commits; network 754, CLI restore, ssh
+  tests pass). sftp-user keeps the `/usr/lib/openssh/sftp-server` branch for non-root sessions:
+  #1713 runs only open/mkdir/symlink as the session user, while rename/remove/chmod/readdir still
+  run as root. New probe flag `--silo-restore-strict-protocol`. `should_bypass` means a host with
+  no matching secret gets a closed connection, not the #1825 JSON deny page (same as 0.7.6).
