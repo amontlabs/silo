@@ -76,8 +76,9 @@ export function createSetupQueue({ snapshot, publish, disposed }: ProductionCont
     })
   }
 
-  function isBusy() {
-    return jobs.some((job) => job.items.some(({ status }) => status === "running" || status === "queued"))
+  /** Whether setup work runs or waits, not counting the jobs that only hold the items in `except`. */
+  function isBusy(except: readonly SetupQueueItemID[] = []) {
+    return jobs.some((job) => job.items.some(({ id, status }) => !except.includes(id) && (status === "running" || status === "queued")))
   }
 
   /** What Quit is waiting for while setup drains, for the shutdown overlay. */

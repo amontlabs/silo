@@ -2,7 +2,7 @@ import { ComputerUseSettings } from "@/features/application/components/computer-
 import { UpdatesCard } from "@/features/updates/updates"
 import { StorageSection } from "@/features/storage/storage-section"
 import { useLayoutEffect } from "react"
-import { Accessibility, Paintbrush, Power } from "lucide-react"
+import { Accessibility, Bot, Paintbrush, Power } from "lucide-react"
 
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { PageContainer, PageHeader, SectionHeading } from "@/components/page"
@@ -19,6 +19,7 @@ import type { ApplicationPreferenceSelection } from "@/features/preferences/mode
 import { useTheme } from "@/features/preferences/theme"
 import { useSettings } from "@/features/preferences/settings-store"
 import { useSystemIntegrations } from "@/features/preferences/system-integrations-store"
+import { agentChoiceLabel, agentChoices, type AgentChoice } from "@/features/agents/model/agents"
 
 function SettingRow({ icon: Icon, title, description, control }: { icon: typeof Power; title: string; description: string; control: React.ReactNode }) {
   return (
@@ -120,6 +121,20 @@ export function GeneralPage({
             )}
           </div>
         </ListCard>
+      </section>
+      <section className="grid gap-2">
+        <SectionHeading>Agent</SectionHeading>
+        <ListCard><SettingRow icon={Bot} title="Your agent" description="The agent you use. New computers suggest it, and Open starts it in the computer." control={
+          <div className="w-44 max-w-[50%] shrink-0">
+            <Select value={settings.agent ?? "unset"} onValueChange={value => { void updateSettings({ agent: value as AgentChoice }) }}>
+              <SelectTrigger size="sm" aria-label="Your agent"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {settings.agent === null && <SelectItem value="unset" disabled>Not chosen yet</SelectItem>}
+                {agentChoices.map(choice => <SelectItem key={choice} value={choice}>{agentChoiceLabel(choice)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        } /></ListCard>
       </section>
       <section className="grid gap-2">
         <SectionHeading>Applications</SectionHeading>

@@ -1000,7 +1000,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     const current = snapshot.source
     const configurationsUnchanged = current && current.computers.length > 0
       && !current.computerConfigurationOperation && !activeConfiguration
-      && !setup.isBusy()
+      // Installing the agent does not make the computers unsettled.
+      && !setup.isBusy(["agentInstall"])
       && current.computers.every(({ freshness, state }) => freshness === "fresh" && state !== "failed" && state !== "starting")
       && JSON.stringify(current.computers.map(({ configuration }) => setupComputerConfigurationSchema.parse(configuration))) === JSON.stringify(request.computerConfiguration.computers.map((configuration) => setupComputerConfigurationSchema.parse(configuration)))
     // Initial setup and continues send the specific creations/edits as one batch. When

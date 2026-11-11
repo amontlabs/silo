@@ -155,6 +155,7 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
           onRetryDependencies={nativeDependencies?.retry ?? (scenario === "dependency-failure" ? () => setDependencyFixtureRecovered(true) : undefined)}
           initialGitHubConnectionState={githubState}
           repositoryOptions={repositoryFixtures}
+          agents={agentMode}
           initialCompleted={nativeOnboardingComplete}
           onOpenApp={() => {
             const url = new URL(window.location.href)
