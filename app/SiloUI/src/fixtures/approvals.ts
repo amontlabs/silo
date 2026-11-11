@@ -41,7 +41,7 @@ const resources: DeviceResources = {
 
 const mergeDetail = (id: string, forkName: string, text: string): RequestDetail => ({
   request: { id, forkId: `${id}-fork`, target: "main", createdAt: "2026-11-11T09:00:00Z", reviewDigest: "d1", summary: "", status: "open", counts: { code: 2, settings: 1 }, keepId: undefined, resolvedAt: undefined, keepingSinceMs: undefined, closedReason: undefined, approvalId: undefined },
-  forkName, forkState: "running", stale: false, reviewDigest: "d1", fresh: true, diff: null, text, counts: { code: 2, settings: 1 }, credentials: { used: [], blocked: [] },
+  forkName, forkState: "running", targetName: undefined, stale: false, reviewDigest: "d1", fresh: true, diff: null, text, counts: { code: 2, settings: 1 }, credentials: { used: [], blocked: [] },
 })
 
 /**

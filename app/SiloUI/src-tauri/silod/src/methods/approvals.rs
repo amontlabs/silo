@@ -15,7 +15,7 @@ use silo_api::{
             ApprovalsDecideParams, ApprovalsListParams, ApprovalsListResult, ApprovalsNoteParams,
             ComputerAccess, ComputerAccessSsh, ComputersAccessParams,
         },
-        keep::{ChangesKeepParams, FoldRequestStatus},
+        keep::{ChangesKeepParams, FoldRequest, FoldRequestStatus},
         network::{NetworkPolicyState, NetworkState},
         ssh_access::SshAccessState,
         MethodName,
@@ -140,8 +140,8 @@ fn approval_required(record: &Record) -> DispatchError {
     DispatchError {
         code: ErrorCode::ApprovalRequired,
         message: format!(
-            "This needs the approval of the person who runs Silo: {} The request is {}; read its answer with approvals.get.",
-            approval.summary, approval.id
+            "This needs the approval of the person who runs Silo: {} The request is {}; read its answer with `silo approvals status {}`.",
+            approval.summary, approval.id, approval.id
         ),
         details: Some(ApprovalRequiredDetails {
             kind: approval.kind,
@@ -196,17 +196,35 @@ fn refused(message: impl Into<String>) -> DispatchError {
 }
 
 /// The review request a merge approval shows its changes with, and the digest it is pinned to.
+/// The number of changes in each bucket of a reviewed diff.
+type Counts = std::collections::BTreeMap<String, u64>;
+
+/// The changes of a fork the engine counts from the captures its last diff stored, when they
+/// still give `digest`; what the computer wrote about them is never used.
+async fn engine_counts(context: &HandlerContext, fork: &str, digest: &str) -> Counts {
+    let engine = context.silod_context().clone();
+    let (fork, digest) = (fork.to_owned(), digest.to_owned());
+    tokio::task::spawn_blocking(move || {
+        let store = silo_engine::changes::store::Store::for_engine(&engine);
+        silo_engine::changes::service::review_counts(&store, &fork, &digest)
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default()
+}
+
 async fn review_request(
     context: &HandlerContext,
     asked: &Asked<'_>,
-) -> Result<Option<(String, String)>, DispatchError> {
+) -> Result<Option<(String, String, Counts)>, DispatchError> {
     match asked.method {
         MethodName::ChangesKeep => {
             let keep: ChangesKeepParams = serde_json::from_value(asked.params.clone())
                 .map_err(|error| refused(format!("Invalid params: {error}")))?;
             if keep.dry_run == Some(true) {
                 return Err(refused(
-                    "A dry run of a merge into this computer is not offered; changes.diff shows what the merge would bring.",
+                    "A dry run of a merge into this computer is not offered; `silo diff` shows what the merge would bring.",
                 ));
             }
             let digest = keep
@@ -214,10 +232,11 @@ async fn review_request(
                 .filter(|digest| !digest.is_empty())
                 .ok_or_else(|| {
                     refused(format!(
-                        "Run the diff first: changes.diff on {} gives a reviewDigest. Pass it as reviewDigest, so the person who runs Silo sees exactly those changes.",
+                        "Run the diff first: `silo diff {}` gives a review digest. Merge with that digest, so the person who runs Silo sees exactly those changes.",
                         keep.fork_id
                     ))
                 })?;
+            let counts = engine_counts(context, &keep.fork_id, &digest).await;
             let mut request = json!({
                 "forkId": keep.fork_id,
                 "reviewDigest": digest,
@@ -234,7 +253,7 @@ async fn review_request(
                 .pointer("/request/id")
                 .and_then(Value::as_str)
                 .ok_or_else(|| DispatchError::internal("The review request was not recorded."))?;
-            Ok(Some((id.to_owned(), digest)))
+            Ok(Some((id.to_owned(), digest, counts)))
         }
         MethodName::ChangesRequestsKeep => {
             let id = asked
@@ -252,7 +271,8 @@ async fn review_request(
                     "A merge can go only into this computer or one it made.",
                 ));
             }
-            Ok(Some((request.id, request.review_digest)))
+            let counts = engine_counts(context, &request.fork_id, &request.review_digest).await;
+            Ok(Some((request.id, request.review_digest, counts)))
         }
         _ => Ok(None),
     }
@@ -300,7 +320,7 @@ pub(crate) async fn request(
         }
     }
     let linked = review_request(context, &asked).await?;
-    if let Some((request_id, digest)) = &linked {
+    if let Some((request_id, digest, _)) = &linked {
         // The review request now shows these changes, so an earlier ask about other changes
         // can no longer be kept as asked; it is withdrawn before the new one counts.
         for older in store.pending_for_request(request_id) {
@@ -330,14 +350,14 @@ pub(crate) async fn request(
             source: creation.source.clone(),
         }),
         pin,
-        review_request_id: linked.as_ref().map(|(id, _)| id.clone()),
-        review_digest: linked.as_ref().map(|(_, digest)| digest.clone()),
+        review_request_id: linked.as_ref().map(|(id, _, _)| id.clone()),
+        review_digest: linked.as_ref().map(|(_, digest, _)| digest.clone()),
     });
     let (record, created) = match made {
         Ok(made) => made,
         Err(AskError::Limit) => {
             return Err(refused(format!(
-                "{} already has {} requests waiting for an answer. Wait for an answer, or withdraw one with approvals.cancel, before asking again.",
+                "{} already has {} requests waiting for an answer. Wait for an answer, or withdraw one, before asking again.",
                 shown_name(&asked.computer_name),
                 approvals::PENDING_LIMIT
             )))
@@ -352,11 +372,12 @@ pub(crate) async fn request(
         Err(AskError::Store(message)) => return Err(DispatchError::internal(message)),
     };
     if created {
-        if let Some((request_id, _)) = &linked {
+        if let Some((request_id, _, counts)) = &linked {
             if let Err(message) = fold_requests::Store::new(&app_data(context)).link_approval(
                 request_id,
                 record.id(),
                 &record.approval.summary,
+                counts.clone(),
             ) {
                 eprintln!("silod: approval {}: {message}", record.id());
             }
@@ -561,6 +582,42 @@ fn merge_call(
         }
     }
     Ok((MethodName::ChangesRequestsKeep, keep))
+}
+
+/// The answers a computer recorded when it asked for the merge of `request`, which the owner
+/// is shown with the ask: the choices and the items to skip of the pending approval that wraps
+/// the request as it stands now. Merging from the review page applies them, so the page does
+/// not ask again what the ask already answered.
+pub(crate) fn recorded_answers(
+    context: &HandlerContext,
+    request: &FoldRequest,
+) -> (
+    std::collections::BTreeMap<String, silo_api::methods::keep::KeepAnswer>,
+    Vec<String>,
+) {
+    if matches!(context.caller(), Caller::Computer { .. }) {
+        return Default::default();
+    }
+    let Some(record) = store(context)
+        .pending_for_request(&request.id)
+        .into_iter()
+        .find(|record| record.approval.review_digest.as_ref() == Some(&request.review_digest))
+    else {
+        return Default::default();
+    };
+    let choices = record
+        .approval
+        .params
+        .get("choices")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or_default();
+    let skip = record
+        .approval
+        .params
+        .get("skip")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or_default();
+    (choices, skip)
 }
 
 /// The call that runs: a merge runs the review request it was shown; any other call runs as

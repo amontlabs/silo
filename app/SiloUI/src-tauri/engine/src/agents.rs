@@ -218,6 +218,43 @@ pub fn begin_install(computer_id: &str, agent: AgentId) -> Result<InstallGuard, 
     })
 }
 
+/// The hosts an agent's installer downloads from (Node.js and the agent itself).
+fn install_hosts(agent: AgentId) -> &'static [&'static str] {
+    match agent {
+        AgentId::ClaudeCode => &["nodejs.org", "downloads.claude.ai"],
+        AgentId::Codex => &["nodejs.org", "github.com"],
+    }
+}
+
+/// Plain words for a failed install when the computer's network policy keeps the installer
+/// from its download sites; `None` when the network is not the reason it can be told.
+pub fn network_reason(
+    held: &crate::network_policy::Held,
+    computer: &str,
+    agent: AgentId,
+) -> Option<String> {
+    use crate::network_policy::{reach_of, Reach};
+    let name = agent.display_name();
+    match reach_of(held, install_hosts(agent)) {
+        Reach::All => None,
+        Reach::Nothing => Some(format!(
+            "{name} could not be installed: {computer} has no network access, and {name} is downloaded from {}. Open its network, or allow those sites, then try again.",
+            install_hosts(agent).join(" and ")
+        )),
+        Reach::Missing(hosts) => Some(format!(
+            "{name} could not be installed: the network of {computer} does not allow {}, which {name} is downloaded from. Allow {} in its network settings, then try again.",
+            hosts.join(" and "),
+            if hosts.len() == 1 { "it" } else { "them" }
+        )),
+    }
+}
+
+/// [`network_reason`] for the policy the computer `id` runs with now.
+pub fn network_reason_for(id: &str, computer: &str, agent: AgentId) -> Option<String> {
+    let (held, _) = crate::network_policy::held_for(id, None).ok()?;
+    network_reason(&held, computer, agent)
+}
+
 /// Marks the agents being installed in the computer as `installing`.
 pub fn mark_installing(computer_id: &str, agents: &mut [AgentInfo]) {
     let set = installing();
@@ -436,6 +473,43 @@ mod tests {
         let agents = from_macos(true, false, Some(&newer), Some(Some(&newer)));
         assert_eq!(by_id(&agents, AgentId::ClaudeCode).state, AgentState::Ready);
         assert_eq!(by_id(&agents, AgentId::Codex).state, AgentState::Ready);
+    }
+
+    #[test]
+    fn a_blocked_network_is_named_as_the_reason_an_install_failed() {
+        use crate::network_policy::{Held, NetworkPolicy, NetworkPolicyMode};
+        let held = |mode, hosts: &[&str]| {
+            Held::latest(NetworkPolicy {
+                mode,
+                hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
+                ..NetworkPolicy::default()
+            })
+        };
+        assert_eq!(network_reason(&held(NetworkPolicyMode::Open, &[]), "dev", AgentId::Codex), None);
+        let closed = network_reason(&held(NetworkPolicyMode::Closed, &[]), "dev", AgentId::Codex).unwrap();
+        assert!(closed.contains("dev has no network access"), "{closed}");
+        let some = network_reason(
+            &held(NetworkPolicyMode::Allowlist, &["example.com"]),
+            "dev",
+            AgentId::Codex,
+        )
+        .unwrap();
+        assert!(some.contains("does not allow nodejs.org and github.com"), "{some}");
+        let partly = network_reason(
+            &held(NetworkPolicyMode::Allowlist, &["nodejs.org", "api.github.com"]),
+            "dev",
+            AgentId::Codex,
+        )
+        .unwrap();
+        assert!(partly.contains("does not allow github.com,"), "{partly}");
+        assert_eq!(
+            network_reason(
+                &held(NetworkPolicyMode::Allowlist, &["nodejs.org", "downloads.claude.ai"]),
+                "dev",
+                AgentId::ClaudeCode
+            ),
+            None
+        );
     }
 
     #[test]

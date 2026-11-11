@@ -1974,6 +1974,13 @@
             "null"
           ]
         },
+        "targetName": {
+          "description": "The name of the computer the request would be merged into, when it still exists.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "text": {
           "description": "The readable form of `diff`, or the request's own summary for a folder fork.",
           "type": "string"

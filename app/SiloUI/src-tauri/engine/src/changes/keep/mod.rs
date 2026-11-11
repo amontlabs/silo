@@ -208,7 +208,8 @@ impl UndoOutcome {
     }
 }
 
-fn refused_early(request: &Request, target: &str, digest: &str) -> Outcome {
+fn refused_early(env: &dyn KeepEnv, request: &Request, target: &str, digest: &str) -> Outcome {
+    let (fork_label, target_label) = (env.name_of(&request.fork), env.name_of(target));
     Outcome::Refused {
         report: Report {
             fork: request.fork.clone(),
@@ -219,12 +220,11 @@ fn refused_early(request: &Request, target: &str, digest: &str) -> Outcome {
         refusal: Refusal {
             reason: "changed".into(),
             message: format!(
-                "{} changed since it was reviewed. {target} was not changed.",
-                request.fork
+                "{fork_label} changed since it was reviewed. {target_label} was not changed."
             ),
             conflicts: vec![Conflict::new(
                 "fork",
-                request.fork.clone(),
+                fork_label.clone(),
                 "its changes differ from the reviewed diff",
             )],
             hint: "Review it again with `silo diff --json` and merge with the new digest.".into(),
@@ -232,7 +232,14 @@ fn refused_early(request: &Request, target: &str, digest: &str) -> Outcome {
     }
 }
 
-fn main_changed(request: &Request, target: &str, digest: &str, lines: Vec<String>) -> Outcome {
+fn main_changed(
+    env: &dyn KeepEnv,
+    request: &Request,
+    target: &str,
+    digest: &str,
+    lines: Vec<String>,
+) -> Outcome {
+    let target_label = env.name_of(target);
     Outcome::Refused {
         report: Report {
             fork: request.fork.clone(),
@@ -243,11 +250,11 @@ fn main_changed(request: &Request, target: &str, digest: &str, lines: Vec<String
         refusal: Refusal {
             reason: "main-changed".into(),
             message: format!(
-                "{target} changed while the keep was starting. {target} was not changed by the keep."
+                "{target_label} changed while the keep was starting. {target_label} was not changed by the keep."
             ),
             conflicts: lines
                 .into_iter()
-                .map(|line| Conflict::new("main", target.to_owned(), line))
+                .map(|line| Conflict::new("main", target_label.clone(), line))
                 .collect(),
             hint: "Merge again once nothing else is changing it.".into(),
         },
@@ -348,7 +355,7 @@ pub fn keep(
         .as_deref()
         .is_some_and(|reviewed| reviewed != view.digest)
     {
-        return Ok(refused_early(request, &target, &view.digest));
+        return Ok(refused_early(env, request, &target, &view.digest));
     }
     // The digest matched (or none was sent), so the diff in hand is the reviewed one. The
     // choices are checked against it and are not part of the digest: it pins what the fork
@@ -381,7 +388,7 @@ pub fn keep(
     let main_before = store.capture(&target)?;
     env.note("Saving a checkpoint of main");
     let checkpoint =
-        env.checkpoint_before_keep(&target, &format!("Before keep of {}", request.fork))?;
+        env.checkpoint_before_keep(&target, &format!("Before keep of {}", env.name_of(&request.fork)))?;
     journal.record_pending(&target, &checkpoint)?;
     journal.tag(
         &target,
@@ -403,7 +410,7 @@ pub fn keep(
 
     // From here to the end of the apply, main's lane is held.
     let applied = {
-        let _gate = match env.hold(&target, &format!("Keeping {}", request.fork)) {
+        let _gate = match env.hold(&target, &format!("Keeping {}", env.name_of(&request.fork))) {
             Ok(gate) => gate,
             Err(error) => {
                 consume(journal);
@@ -419,7 +426,7 @@ pub fn keep(
             Ok(None) => {}
             Ok(Some(lines)) => {
                 consume(journal);
-                return Ok(main_changed(request, &target, &view.digest, lines));
+                return Ok(main_changed(env, request, &target, &view.digest, lines));
             }
             Err(error) => {
                 consume(journal);

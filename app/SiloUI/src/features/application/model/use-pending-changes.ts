@@ -43,7 +43,15 @@ const time = (iso: string | undefined) => {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-const isLocal = (entry: RequestEntry) => !entry.deviceId || entry.deviceId === "local"
+/**
+ * Whether a review request is the one an approval wraps. The request records its approval; one
+ * made before that was recorded is found by its id, on this device only. The engine tags this
+ * device's own requests with the device's id, so the tag cannot tell them apart.
+ */
+const wrapsRequest = (approval: Approval, entry: RequestEntry) =>
+  entry.request.approvalId
+    ? entry.request.approvalId === approval.id
+    : entry.request.id === approval.reviewRequestId && (!entry.deviceId || entry.deviceId === "local")
 
 /**
  * Everything waiting for the person, newest first, and the approvals answered lately. A merge
@@ -55,7 +63,7 @@ export function pendingRows(approvals: readonly Approval[], requests: readonly R
   const wrapped = new Set<RequestEntry>()
   const rows: PendingRow[] = waitingApprovals.map((approval) => {
     const request = approval.reviewRequestId
-      ? requests.find((entry) => isLocal(entry) && (entry.request.id === approval.reviewRequestId || entry.request.approvalId === approval.id))
+      ? requests.find((entry) => wrapsRequest(approval, entry))
       : undefined
     if (request) wrapped.add(request)
     return { kind: "approval", key: `approval:${approval.id}`, approval, request, createdAt: time(approval.createdAt) }

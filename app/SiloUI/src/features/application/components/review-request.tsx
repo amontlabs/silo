@@ -10,6 +10,7 @@ import { statusLabels } from "@/features/application/model/use-pending-changes"
 import { errorMessage } from "@/lib/error-message"
 import { BucketCounts, CredentialsUsed } from "./review-request-parts"
 import { MergeConflicts } from "./merge-conflicts"
+import { refusalHint } from "@/features/application/model/merge-copy"
 import type { MergeChoice } from "@/desktop/production-source"
 
 export type ReviewRequestActions = {
@@ -89,7 +90,7 @@ export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onB
   const refusal = kept?.refusal
   const keptNow = kept && !refusal ? kept : null
   const request = keptNow?.request ?? detail.request
-  const targetLabel = targetName ?? request.target
+  const targetLabel = targetName ?? detail.targetName ?? request.target
   const resolved = request.status !== "open"
   const stale = detail.stale === true
   const keepDisabledReason = stale ? staleReason : resolved ? `This request is ${statusLabels[request.status].toLowerCase()}.` : keptNow ? "Already merged." : undefined
@@ -122,7 +123,7 @@ export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onB
       {refusal && (
         <div role="alert" className="grid gap-2 text-sm">
           <p className="whitespace-pre-wrap">{refusal.message}</p>
-          {refusal.hint && <p className="whitespace-pre-wrap text-muted-foreground">{refusal.hint}</p>}
+          {refusalHint(refusal) && <p className="whitespace-pre-wrap text-muted-foreground">{refusalHint(refusal)}</p>}
           {refusal.reason === "database" && (
             <ConfirmPopover title="Merge with the database change?" description="Database changes are carried into the target without a migration covering them." confirmLabel="Merge anyway" open={dataConfirm} onOpenChange={setDataConfirm} onConfirm={() => keep({ dataOk: true })}>
               <Button variant="outline" size="sm" className="w-fit" disabled={busy}>Merge with data changes</Button>

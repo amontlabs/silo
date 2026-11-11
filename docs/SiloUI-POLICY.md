@@ -85,7 +85,8 @@ to answer in one piece cannot be cut, so it is withheld.
 | `recipes.get`, `recipes.list` | Free | The stored recipes and the builds that exist. |
 | `recipes.save`, `recipes.remove`, `recipes.build` | Never | Storing, removing and building recipes is yours. |
 | `computers.recipe` | Its tree | The recipe the computer was built from, as it was when it was built. |
-| `guestClient.*` | Never | Turning Silo's tools on or off in a computer is yours. |
+| `guestClient.status` | Itself only | A computer reads whether Silo's tools are on in itself; it never reads another computer's. |
+| `guestClient.enable`, `guestClient.revoke` | Never | Turning Silo's tools on or off in a computer is yours. |
 | `settings.*`, `connections.*`, `exports.*`, `storage.*`, `updates.*`, `migration.*`, `preparation.*`, `engine.shutdown`, `engine.update.*`, `engine.credentials.*`, `device.dependencies` | Never | Engine settings, Connections, exports and imports, updates. |
 
 ## Asking you

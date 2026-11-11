@@ -18,7 +18,7 @@ const text = [
 ].join("\n")
 
 const base = (id: string, forkName: string): RequestDetail => ({
-  request: request(id, `${forkName}-id`), forkName, forkState: "running", stale: false, reviewDigest: "d1", fresh: true,
+  request: request(id, `${forkName}-id`), forkName, forkState: "running", targetName: undefined, stale: false, reviewDigest: "d1", fresh: true,
   diff: null, text, counts: { code: 1, packages: 1, settings: 1 }, credentials: { used: [], blocked: [] },
 })
 

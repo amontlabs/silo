@@ -252,10 +252,35 @@ fn owner_only_methods_are_refused_whatever_the_parameters() {
     ] {
         let decision = check(name, json!({"computerId": "fork-1", "forkId": "fork-1"}));
         match decision {
-            Decision::Refuse { reason } => assert!(reason.contains(name), "{name}: {reason}"),
+            Decision::Refuse { reason } => {
+                assert!(!reason.contains(name), "{name}: {reason}");
+                assert!(reason.contains("person who runs Silo"), "{name}: {reason}");
+            }
             other => panic!("{name}: {other:?}"),
         }
     }
+}
+
+#[test]
+fn a_refusal_names_the_command_not_the_wire_method() {
+    let Decision::Refuse { reason } = check("guestClient.enable", json!({"computerId": "main"})) else {
+        panic!("guestClient.enable was not refused");
+    };
+    assert!(reason.contains("silo tools enable"), "{reason}");
+    assert!(!reason.contains("guestClient"), "{reason}");
+}
+
+#[test]
+fn a_computer_reads_its_own_tools_status_and_no_other() {
+    assert!(allowed(&check("guestClient.status", json!({"computerId": "main"}))));
+    for target in ["fork-1", "grand", "stranger", "by-hand"] {
+        let Decision::Refuse { reason } = check("guestClient.status", json!({"computerId": target})) else {
+            panic!("{target} was not refused");
+        };
+        assert!(!reason.contains("guestClient"), "{reason}");
+        assert!(reason.contains("its own"), "{reason}");
+    }
+    assert!(refused(&check("guestClient.status", json!({}))));
 }
 
 #[test]

@@ -375,6 +375,7 @@ fn started(job_id: JobId) -> Result<HandlerOutput, DispatchError> {
 fn show_result(
     request: FoldRequest,
     fork: &Row,
+    target_name: Option<String>,
     diff: &Value,
     fresh: bool,
 ) -> Result<ChangesRequestsShowResult, String> {
@@ -390,6 +391,7 @@ fn show_result(
         credentials: fold_requests::credentials_for(&fork.id),
         fork_name: fork.name.clone(),
         fork_state: fork.state.clone(),
+        target_name,
         request,
     })
 }
@@ -418,6 +420,7 @@ pub(super) async fn show(
                 credentials: fold_requests::credentials_for(&request.fork_id),
                 fork_name: String::new(),
                 fork_state: "gone".to_owned(),
+                target_name: target_name(&computers, &request),
                 request,
             };
             let job_id = begin(context, "changes.requests.show")?;
@@ -438,6 +441,7 @@ pub(super) async fn show(
             credentials: fold_requests::credentials_for(&fork.id),
             fork_name: fork.name.clone(),
             fork_state: fork.state.clone(),
+            target_name: target_name(&computers, &request),
             request,
         };
         let job_id = begin(context, "changes.requests.show")?;
@@ -448,13 +452,14 @@ pub(super) async fn show(
     let engine = engine_context(context);
     let running = fork.state == "running";
     let finisher_fork = fork.clone();
+    let finisher_target = target_name(&computers, &request);
     let job_id = blocking(move || {
         let target = resolve_target(&silod, &finisher_fork.id).map_err(guest_error)?;
         if running {
             target.ensure_running().map_err(guest_error)?;
         }
         let finish: changes_service::Finish = Box::new(move |diff| {
-            show_result(request, &finisher_fork, &diff, running)
+            show_result(request, &finisher_fork, finisher_target, &diff, running)
                 .and_then(encode)
                 .map_err(silo_engine::guest::GuestError::invalid)
         });
@@ -503,6 +508,10 @@ pub(super) async fn keep(
         context.caller(),
         silo_engine::policy::Caller::Owner { .. } | silo_engine::policy::Caller::Device { .. }
     );
+    // What the computer's ask recorded applies unless the caller answers the same item.
+    let (mut choices, mut skip) = crate::methods::approvals::recorded_answers(context, &request);
+    choices.extend(params.choices.unwrap_or_default());
+    skip.extend(params.skip.unwrap_or_default());
     let keep_request = Request {
         fork: request.fork_id.clone(),
         target: Some(request.target.clone()),
@@ -510,7 +519,7 @@ pub(super) async fn keep(
         dry_run: false,
         data_ok: params.data_ok.unwrap_or(false),
         reviewed: Some(request.review_digest.clone()),
-        choices: super::keep::choices_of(params.choices, params.skip),
+        choices: super::keep::choices_of(Some(choices), Some(skip)),
         save_recipe,
         hide_recipe_commands: crate::methods::approvals::result_goes_to_computer(context),
         ..Request::default()

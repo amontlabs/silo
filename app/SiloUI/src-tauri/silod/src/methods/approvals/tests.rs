@@ -1003,6 +1003,77 @@ async fn a_merge_into_itself_needs_the_reviewed_digest_and_makes_the_review_requ
 }
 
 #[tokio::test]
+async fn the_review_request_of_a_merge_approval_counts_the_changes_that_were_reviewed() {
+    use silo_engine::changes::{
+        diff, keep::review_digest, store::{Slot, Store as Captures}, IgnoreList, Manifest,
+    };
+    let _lock = crate::methods::MACOS_REGISTRY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _serial = serial();
+    let tree = Tree::new();
+    use crate::methods::checkpoints::tests_rows;
+    tests_rows::set_empty();
+    tests_rows::set_sources(&[(tree.fork.as_str(), tree.me.as_str())]);
+    let base = "META\tformat\t2\nF\t/srv/data/a\t1\t1\t-\n";
+    let now = "META\tformat\t2\nF\t/srv/data/a\t2\t2\t-\nF\t/srv/data/c\t1\t1\t-\n";
+    let captures = Captures::for_engine(fixture().context.as_ref());
+    captures.put(&tree.fork, Slot::Base, base, None).unwrap();
+    captures.put(&tree.fork, Slot::Latest, now, None).unwrap();
+    let digest = review_digest(&diff(
+        &Manifest::parse(base).unwrap(),
+        &Manifest::parse(now).unwrap(),
+        None,
+        &IgnoreList::builtin(),
+    ));
+    let asked = ask(
+        &tree.me(),
+        MethodName::ChangesKeep,
+        json!({"forkId": tree.fork, "reviewDigest": digest}),
+    )
+    .await;
+    let approval = get(&owner(), &asked).await.unwrap();
+    let request = fold_requests::Store::new(&app_data())
+        .get(approval["reviewRequestId"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(request.counts["other"], 2);
+    tests_rows::set_sources(&[]);
+}
+
+#[tokio::test]
+async fn merging_from_the_review_page_applies_the_choices_the_ask_recorded() {
+    use silo_api::methods::keep::KeepAnswer;
+    let _lock = crate::methods::MACOS_REGISTRY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _serial = serial();
+    let tree = Tree::new();
+    use crate::methods::checkpoints::tests_rows;
+    tests_rows::set_empty();
+    tests_rows::set_sources(&[(tree.fork.as_str(), tree.me.as_str())]);
+    let asked = ask(
+        &tree.me(),
+        MethodName::ChangesKeep,
+        json!({"forkId": tree.fork, "reviewDigest": "d1",
+            "choices": {"file:/etc/silo/endpoint.json": "fork"}, "skip": ["cron:root"]}),
+    )
+    .await;
+    let approval = get(&owner(), &asked).await.unwrap();
+    let request = fold_requests::Store::new(&app_data())
+        .get(approval["reviewRequestId"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    let (choices, skip) = crate::methods::approvals::recorded_answers(&context(owner()), &request);
+    assert_eq!(choices["file:/etc/silo/endpoint.json"], KeepAnswer::Fork);
+    assert_eq!(skip, ["cron:root"]);
+    // The computer itself is never handed them back as if it were the owner.
+    let (none, _) = crate::methods::approvals::recorded_answers(&context(tree.me()), &request);
+    assert!(none.is_empty());
+    tests_rows::set_sources(&[]);
+}
+
+#[tokio::test]
 async fn denying_a_merge_approval_closes_its_review_request() {
     let _lock = crate::methods::MACOS_REGISTRY_TEST_LOCK
         .lock()

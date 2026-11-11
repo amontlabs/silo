@@ -305,7 +305,7 @@ export const credentialUsageSchema = z.object({
 export type CredentialUsage = z.infer<typeof credentialUsageSchema>
 
 export const requestDetailSchema = z.object({
-  request: foldRequestShape, forkName: z.string(), forkState: z.string(),
+  request: foldRequestShape, forkName: z.string(), forkState: z.string(), targetName: optionalText,
   stale: z.boolean().nullish().transform(value => value ?? undefined),
   reviewDigest: z.string(), fresh: z.boolean(),
   /** The `silo diff --json` document; null for a folder fork. */

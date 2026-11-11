@@ -827,7 +827,10 @@ pub fn install_agent_for_job(
         }
         return Err(match error {
             RuntimeError::Cancelled { .. } => error.to_string(),
-            _ => format!("{} could not be installed: {reason}", agent.display_name()),
+            _ => crate::agents::network_reason_for(configuration.id(), computer, agent)
+                .unwrap_or_else(|| {
+                    format!("{} could not be installed: {reason}", agent.display_name())
+                }),
         });
     }
     step(

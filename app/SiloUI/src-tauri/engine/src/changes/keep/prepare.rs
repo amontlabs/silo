@@ -218,6 +218,7 @@ pub fn prepare(
     read_files: bool,
 ) -> Result<Prepared, String> {
     let fork_name = request.fork.as_str();
+    let (fork_label, target_label) = (env.name_of(fork_name), env.name_of(target));
     let os = env.os(target)?;
     if env.os(fork_name)? != os {
         return Err("The fork and the computer it is kept into run different systems.".into());
@@ -787,10 +788,12 @@ pub fn prepare(
         return Ok(refuse(
             report,
             "changed",
-            format!("{fork_name} changed while it was being read. {target} was not changed."),
+            format!(
+                "{fork_label} changed while it was being read. {target_label} was not changed."
+            ),
             vec![Conflict::new(
                 "fork",
-                fork_name,
+                fork_label.as_str(),
                 "its changes differ from the first look",
             )],
             "Let the fork finish, review it again with `silo diff`, and merge again.",
@@ -802,7 +805,7 @@ pub fn prepare(
         report.notes.extend(plan.notes.clone());
         if conflicts.iter().any(|c| c.kind == "credentials") {
             let message = format!(
-                "Keep stopped: {} would bring credentials or ignored files. {target} was not changed.",
+                "The merge stopped: {} would bring credentials or ignored files. {target_label} was not changed.",
                 conflicts
                     .iter()
                     .filter(|c| c.kind == "credentials")
@@ -819,7 +822,7 @@ pub fn prepare(
             ));
         }
         let message = format!(
-            "{} changed on both sides and needs an answer before {fork_name} can be kept into {target}: {}. {target} was not changed.",
+            "{} changed on both sides and needs an answer before {fork_label} can be merged into {target_label}: {}. {target_label} was not changed.",
             if conflicts.len() == 1 {
                 "One item".to_owned()
             } else {
@@ -843,7 +846,7 @@ pub fn prepare(
     let covered = request.data_ok || migrating;
     if !plan.databases.is_empty() && !covered {
         let message = format!(
-            "Database changed ({}) and no migration covers it. {target} was not changed.",
+            "Database changed ({}) and no migration covers it. {target_label} was not changed.",
             plan.databases.join(", ")
         );
         let hint = format!(

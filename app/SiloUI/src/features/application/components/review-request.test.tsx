@@ -171,3 +171,29 @@ it("shows extra header buttons and the intro a caller gives", async () => {
   expect(await screen.findByRole("button", { name: "Deny" })).toBeInTheDocument()
   expect(screen.getByText("From the agent")).toBeInTheDocument()
 })
+
+it("names the target from the request itself when the list did not", async () => {
+  const fixture = createReviewRequestFixtureActions()
+  const show = vi.fn().mockImplementation(async (target) => ({ ...(await fixture.show(target)), targetName: "Main computer" }))
+  render(<ReviewRequest requestId="req-fresh" actions={createReviewRequestFixtureActions({ show })} />)
+  expect(await screen.findByText("login-fix → Main computer")).toBeInTheDocument()
+})
+
+it("says what to do in plain words for a refusal, not in the words of the command line", async () => {
+  const keep = vi.fn().mockImplementation(async () => ({
+    status: "refused",
+    report: { fork: "login-fix", target: "main", summary: [], steps: [], notes: [] },
+    refusal: {
+      reason: "choices-needed", message: "One item changed on both sides and needs an answer before login-fix can be merged into main: /etc/hosts. main was not changed.",
+      hint: "Merge again with `choices`: an answer for each listed id. Add an id to `skip` to leave an item that does not conflict.",
+      conflicts: [],
+    },
+    request: reviewRequestFixtures["req-fresh"].request,
+  }))
+  setup("req-fresh", { keep })
+  await keepConfirmed()
+  const alert = await screen.findByText(/needs an answer/)
+  expect(alert.closest("[role=alert]")).toHaveTextContent("Choose the version to keep for each item, then merge again.")
+  expect(alert.closest("[role=alert]")).not.toHaveTextContent("`")
+  expect(alert.closest("[role=alert]")).not.toHaveTextContent("skip")
+})
