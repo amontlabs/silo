@@ -39,7 +39,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | T5a review | running since 2026-11-11 | | id ends `3be27b51-e47e-40f0-816a-5265285905a6` (Opus, read-only) |
 | T5b | running since 2026-11-11 | | id ends `04e9fd94-9404-4826-b785-5c99ff2ee71c` (Sonnet): the engine ships and pushes the guest `silo`, guest components and receipt, MCP registration with agents, zig in the build; engine side only; holds the Dev engine for its live check |
 | T6 | running since 2026-11-11 | | id ends `13f0091a-1c46-42fd-9038-7f1083422ba4` (Sonnet): recipes in the engine, `.silo` removed, `silo merge` / `replace-main`, approval waiting, resources and access commands, the MCP tool set; owns everything under `cli/src` |
-| T13a | running since 2026-11-11 | | id ends `72236a72-7e02-4671-a224-a9209b1ec45d` (Sonnet): onboarding agent step, Agents section, Open with agent. T13b (network policy control in the app) waits for T8 |
+| T13a | merged 2026-11-11 | `feat/agent-install-onboarding` | focused suites passed after the merge; 3062 of 3063 frontend tests in the item (one runtime test timed out under load). No review; never run in the real app. It also brought `main`'s four commits (pull request #111 and the rebased direction documents) into `direction`. T13b (network policy control in the app) can start |
 | T10 | merged 2026-11-11 | `t3/60767d54` | 2989 frontend tests and the shell's command tests passed in the item; no review (quota); never run in the real app. The click-through list is under Found |
 | T14 | merged 2026-11-10 | `feat/exclude-logins-export` | 998 focused tests passed after the merge. **The canary failed**: the imported computer has no login files, but both markers are still in the export file, in the base disk layers (a fork's disks are layers over the source's and `msb` cannot flatten them; trimming reaches only the top layer). Shipped as best effort with the wording "removed, traces may remain". [evidence](evidence/T14.txt). Linux virtual machines only; checkpoint, macOS and container exports keep the old warning. The Dev engine is stopped and free |
 
@@ -81,6 +81,17 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **T13a click-through for the live run:** onboarding with `main`, each agent, an install that
+  works and one that fails (Retry); Open Claude Code and Open Codex from the header, the menu,
+  the palette and the menu bar, landing in `/workspace` (`/Users/silo/workspace` on macOS); the
+  Agents section's Install and Update; Show and copy the SSH name; create a computer with an
+  agent selected. Unverified: that `msb exec --tty -- /bin/bash -lc ...` and the macOS
+  `ssh -t alias '<script>'` really start the agent; that the menu bar panel's webview may call
+  `list_agents`.
+- **T13a, for the owner:** the create form installs the agent after creation from a plan held in
+  memory, lost if Silo restarts first. The SSH name is `silo-<computerId>` and is made only on
+  request because it writes to `~/.ssh/config`.
 
 - **T5a, open:** `guest_client::tests::a_port_is_on_the_loopback_and_a_taken_one_is_replaced` is
   flaky under parallel tests (another test can take the freed port); make it robust. `silo ports`
