@@ -203,15 +203,17 @@ describe("notification persistence", () => {
     expect(screen.queryByText("Port 8000 added")).not.toBeInTheDocument()
   })
 
-  it("keeps a success with an action until closed", async () => {
+  it("keeps a success with an action for 20 s", async () => {
     render(<Host />)
     act(() => showOperationSuccess("act", "Exported", { action: { label: "Show in Finder", onClick: vi.fn() } }))
     await tick()
     await settle(15_000)
     expect(screen.getByText("Exported")).toBeInTheDocument()
+    await settle(6_000)
+    expect(screen.queryByText("Exported")).not.toBeInTheDocument()
   })
 
-  it("keeps the success of a long operation until closed", async () => {
+  it("keeps the success of a long operation for 20 s", async () => {
     render(<Host />)
     act(() => showOperationProgress("long", { title: "Creating checkpoint", progress: null }))
     await tick()
@@ -220,14 +222,18 @@ describe("notification persistence", () => {
     await tick()
     await settle(15_000)
     expect(screen.getByText("Checkpoint created")).toBeInTheDocument()
+    await settle(6_000)
+    expect(screen.queryByText("Checkpoint created")).not.toBeInTheDocument()
   })
 
-  it("honours an explicit persist override", async () => {
+  it("honours an explicit persist override for 20 s", async () => {
     render(<Host />)
     act(() => showOperationSuccess("forced", "Pushed 1 commit", { persist: true }))
     await tick()
     await settle(15_000)
     expect(screen.getByText("Pushed 1 commit")).toBeInTheDocument()
+    await settle(6_000)
+    expect(screen.queryByText("Pushed 1 commit")).not.toBeInTheDocument()
   })
 
   it("keeps a failure until closed", async () => {

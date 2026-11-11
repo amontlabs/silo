@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react"
 import { listenForNotices, type Notice } from "@/desktop/notices"
 import { showOperationFailure, showOperationSuccess } from "@/lib/operation-toast"
 
-/** How long a failure or change notice stays on screen: the system notification already told the person. */
+/** How long a backend notice stays on screen: the system notification already told the person. */
 export const BACKEND_FAILURE_TOAST_MS = 20_000
 
 /**

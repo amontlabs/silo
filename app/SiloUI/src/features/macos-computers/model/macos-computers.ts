@@ -209,6 +209,13 @@ function failureMessage(error: unknown) {
 
 const unreadableMessage = "The state of the macOS computers was unreadable."
 
+/** How often this device's macOS computers are read while one is being prepared, started or stopped. */
+export const localMacosBusyPollMs = 3_000
+/** How often they are read otherwise, to follow changes made outside the app. */
+export const localMacosIdlePollMs = 30_000
+
+const settledStates: readonly MacosComputerState[] = ["stopped", "running", "failed"]
+
 const listenRetryMs = (attempt: number) => Math.min(30_000, 1_000 * 2 ** attempt)
 
 /**
@@ -232,10 +239,32 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
   const remoteReadAgain = new Set<string>()
   const remoteRevisions = new Map<string, number>()
   let remoteTimer: ReturnType<typeof setInterval> | undefined
+  let pollTimer: ReturnType<typeof setTimeout> | undefined
+  let detachReturn: (() => void) | undefined
 
   function publish(next: MacosComputersSnapshot) {
     snapshot = next
     listeners.forEach(listener => listener())
+  }
+
+  /** Reads again after a delay that is short while a computer is changing state; reading re-arms it. */
+  function armPoll(mine: number) {
+    clearTimeout(pollTimer)
+    if (mine !== generation || listeners.size === 0) return
+    const busy = snapshot.state?.computers.some(({ state }) => !settledStates.includes(state)) ?? false
+    pollTimer = setTimeout(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") { armPoll(mine); return }
+      void read(mine)
+    }, busy ? localMacosBusyPollMs : localMacosIdlePollMs)
+  }
+
+  /** Reads when the window gets focus or becomes visible again. */
+  function attachReturn(mine: number) {
+    if (typeof window === "undefined" || typeof document === "undefined") return
+    const onReturn = () => { if (document.visibilityState !== "hidden") void read(mine) }
+    window.addEventListener("focus", onReturn)
+    document.addEventListener("visibilitychange", onReturn)
+    detachReturn = () => { window.removeEventListener("focus", onReturn); document.removeEventListener("visibilitychange", onReturn) }
   }
 
   function accept(value: unknown, fromEvent: boolean) {
@@ -257,6 +286,8 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
       if (current()) accept(value, false)
     } catch (error) {
       if (current()) publish({ ...snapshot, error: failureMessage(error) })
+    } finally {
+      armPoll(mine)
     }
   }
 
@@ -266,6 +297,7 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
         if (mine !== generation) return
         eventCount++
         accept(payload, true)
+        armPoll(mine)
         // A malformed event leaves the state behind; read it again.
         if (!macosComputersStateSchema.safeParse(payload).success) void read(mine)
       })
@@ -284,6 +316,8 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
   function start() {
     const mine = ++generation
     listening = false
+    detachReturn?.()
+    attachReturn(mine)
     void register(mine, 0).then(() => read(mine))
     syncRemoteTimer()
     remoteDevices.forEach((connected, id) => { if (connected) void readRemote(id) })
@@ -383,6 +417,9 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
           remoteReadAgain.clear()
           syncRemoteTimer()
           clearTimeout(retry)
+          clearTimeout(pollTimer)
+          detachReturn?.()
+          detachReturn = undefined
           stop?.()
           stop = undefined
           listening = false

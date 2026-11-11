@@ -21,3 +21,9 @@ it("keeps a request from an agent until it is answered", () => {
   showBackendNotice(notice("approvals"), () => {})
   expect(warning.mock.calls[0]![1]).toMatchObject({ duration: Infinity })
 })
+
+it("closes a completion notice by itself", () => {
+  const success = vi.spyOn(toast, "success")
+  showBackendNotice(notice("completions"))
+  expect(success.mock.calls[0]![1]).toMatchObject({ duration: BACKEND_FAILURE_TOAST_MS, closeButton: true })
+})
