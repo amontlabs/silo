@@ -5,7 +5,7 @@ const kindLabels: Record<string, string> = {
   replace_main: "Replace main",
   github: "GitHub access",
   secret: "Secret",
-  network: "Network",
+  network: "Network access",
   port: "Published port",
   ssh: "SSH access",
   access: "Access for a fork",
@@ -40,7 +40,12 @@ function allowedOutcome(approval: Approval, job: ApprovalJob | undefined): Appro
     if (job.status === "refused") return { tone: "failed", text: job.message ? `Not done: ${job.message}` : "Not done: the engine refused it." }
     return { tone: "done", text: "Done." }
   }
-  const status = outcome.result && typeof outcome.result === "object" ? (outcome.result as { status?: unknown }).status : undefined
+  const result: { status?: unknown; timing?: unknown } = outcome.result && typeof outcome.result === "object" ? outcome.result : {}
+  if (approval.kind === "network" && !outcome.jobId) {
+    if (result.timing === "nextRestart") return { tone: "done", text: "Done. It applies when the computer restarts." }
+    if (result.timing === "nextStart") return { tone: "done", text: "Done. It applies when the computer next starts." }
+  }
+  const { status } = result
   return { tone: "done", text: typeof status === "string" && status ? `Done (${status}).` : "Done." }
 }
 

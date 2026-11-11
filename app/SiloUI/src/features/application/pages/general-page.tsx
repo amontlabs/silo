@@ -10,7 +10,7 @@ import { FilterCombobox } from "@/components/filter-combobox"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { ApplicationSource } from "@/features/application/model/application-source"
+import type { ApplicationActions, ApplicationSource } from "@/features/application/model/application-source"
 import { defaultStartupComputerIds, startupComputerCandidates } from "@/features/application/model/startup-computers"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { ApplicationPreferenceFields } from "@/features/preferences/components/application-preference-fields"
@@ -19,6 +19,7 @@ import type { ApplicationPreferenceSelection } from "@/features/preferences/mode
 import { useTheme } from "@/features/preferences/theme"
 import { useSettings } from "@/features/preferences/settings-store"
 import { useSystemIntegrations } from "@/features/preferences/system-integrations-store"
+import { KeepFreeSection } from "@/features/preferences/components/keep-free-section"
 import { agentChoiceLabel, agentChoices, type AgentChoice } from "@/features/agents/model/agents"
 
 function SettingRow({ icon: Icon, title, description, control }: { icon: typeof Power; title: string; description: string; control: React.ReactNode }) {
@@ -40,6 +41,8 @@ type GeneralPageProps = {
   onApplicationPreferencesChange: (preferences: ApplicationPreferenceSelection) => void
   reduceMotion: boolean
   onReduceMotionChange: (enabled: boolean) => void
+  /** Reads the device's memory and disk; the Keep free section is left out without it. */
+  readDeviceResources?: ApplicationActions["readDeviceResources"]
 }
 
 /** Uses the application's settings store; the startup default only ever names local computers. */
@@ -49,6 +52,7 @@ export function GeneralPage({
   onApplicationPreferencesChange,
   reduceMotion,
   onReduceMotionChange,
+  readDeviceResources,
 }: GeneralPageProps) {
   const { theme, setTheme } = useTheme()
   const { settings, store, updateSettings } = useSettings()
@@ -146,6 +150,7 @@ export function GeneralPage({
         <SectionHeading>Accessibility</SectionHeading>
         <ListCard><SettingRow icon={Accessibility} title="Reduce motion" description="Disable nonessential interface animation." control={<Switch checked={reduceMotion} onCheckedChange={onReduceMotionChange} aria-label="Reduce motion" />} /></ListCard>
       </section>
+      <KeepFreeSection read={readDeviceResources} />
       <div className="grid gap-4 empty:hidden"><ComputerUseSettings /></div>
       <StorageSection />
     </PageContainer>

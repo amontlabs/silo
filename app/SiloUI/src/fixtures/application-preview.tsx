@@ -9,6 +9,7 @@ import { fixtureComputerSteps, fixtureComputerTree } from "./computer-steps"
 import { fixtureFileTransfers } from "./file-transfers"
 import { createApprovalFixture, type ApprovalFixtureMode } from "./approvals"
 import { createAgentFixture, type AgentFixtureMode } from "./agents"
+import { createNetworkFixture, type NetworkFixtureMode } from "./network-policy"
 import { useApplicationFixture } from "@/fixtures/application-state"
 import { ApplicationApp } from "@/features/application/application-app"
 import type { ApplicationActions, ApplicationSource, SshAccessRequest, SshAccessComputer } from "@/features/application/model/application-source"
@@ -41,7 +42,7 @@ const inactiveApplicationActions: ApplicationActions = {
   disconnectGitHub: () => undefined,
 }
 
-export function ApplicationPreview({ source, actions, backupPreviewMode, initialRoute, nativeOperations = false, preUpgradeBackup, editorInclude, unseenResult, approvals, agents }: {
+export function ApplicationPreview({ source, actions, backupPreviewMode, initialRoute, nativeOperations = false, preUpgradeBackup, editorInclude, unseenResult, approvals, agents, network }: {
   source: ApplicationSource
   actions?: Partial<ApplicationActions>
   backupPreviewMode?: BackupFixtureMode
@@ -57,20 +58,24 @@ export function ApplicationPreview({ source, actions, backupPreviewMode, initial
   approvals?: ApprovalFixtureMode
   /** The state of the agents in every computer. Without it the preview has no agents to list or install. */
   agents?: AgentFixtureMode
+  /** The network of every computer and Silo's tools in it. Without it the preview sets neither. */
+  network?: NetworkFixtureMode
 }) {
   const { store } = useSettings(source.preferences)
   const [systemIntegrations] = useState(() => createFixtureSystemIntegrationStore(store))
   const application = nativeOperations
     ? <UnavailableApplicationPreview source={source} actions={actions} initialRoute={initialRoute} />
-    : <FixtureApplicationPreview source={source} actions={actions} backupPreviewMode={backupPreviewMode} initialRoute={initialRoute} unseenResult={unseenResult} approvals={approvals} agents={agents} />
+    : <FixtureApplicationPreview source={source} actions={actions} backupPreviewMode={backupPreviewMode} initialRoute={initialRoute} unseenResult={unseenResult} approvals={approvals} agents={agents} network={network} />
   const withBackup = preUpgradeBackup ? <PreUpgradeBackupProvider backend={preUpgradeBackup}>{application}</PreUpgradeBackupProvider> : application
   const withInclude = editorInclude ? <EditorIncludeProvider backend={editorInclude}>{withBackup}</EditorIncludeProvider> : withBackup
   return <SettingsProvider store={store}><SystemIntegrationProvider store={systemIntegrations}>{withInclude}</SystemIntegrationProvider></SettingsProvider>
 }
 
-function FixtureApplicationPreview({ source, actions, backupPreviewMode, initialRoute, unseenResult, approvals, agents }: Parameters<typeof ApplicationPreview>[0]) {
+function FixtureApplicationPreview({ source, actions, backupPreviewMode, initialRoute, unseenResult, approvals, agents, network }: Parameters<typeof ApplicationPreview>[0]) {
   const fixture = useApplicationFixture(source)
   const [agentFixture] = useState(() => createAgentFixture({ mode: agents }))
+  const [networkFixture] = useState(() => createNetworkFixture({ mode: network }))
+  useEffect(() => networkFixture.setComputers(fixture.source.computers), [networkFixture, fixture.source.computers])
   useEffect(() => agentFixture.setComputers(fixture.source.computers), [agentFixture, fixture.source.computers])
   const [approvalFixture] = useState(() => approvals && createApprovalFixture({ mode: approvals, computers: source.computers.map(({ configuration }) => ({ id: configuration.id, name: configuration.name })) }))
   const [sshSettings, setSshSettings] = useState(() => new Map<string, SshAccessRequest>())
@@ -116,6 +121,7 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       readComputerTree: async () => fixtureComputerTree,
       listComputerDirectory,
       ...approvalFixture?.actions,
+      ...(network && { readNetworkPolicy: networkFixture.readNetworkPolicy, saveNetworkPolicy: networkFixture.saveNetworkPolicy, readComputerTools: networkFixture.readComputerTools, setComputerTools: networkFixture.setComputerTools }),
       ...(agents && { listAgents: agentFixture.listAgents, installAgent: agentFixture.installAgent, ensureSshName: agentFixture.ensureSshName, openAgent: () => undefined }),
       fileTransfers,
       queryLogs,

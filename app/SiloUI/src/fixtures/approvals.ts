@@ -34,6 +34,7 @@ export interface ApprovalFixture {
 
 const resources: DeviceResources = {
   logicalCpus: 10, memoryTotalBytes: 16 * 2 ** 30, memoryAvailableBytes: 3.1 * 2 ** 30, diskFreeBytes: 214 * 2 ** 30, diskTotalBytes: 494 * 2 ** 30,
+  memoryFloorBytes: 6.4 * 2 ** 30, diskFloorBytes: 24.7 * 2 ** 30,
   runningComputers: 2, runningMemoryGib: 8, state: "low", message: "Starting another computer may slow this device.",
   computers: [],
 }

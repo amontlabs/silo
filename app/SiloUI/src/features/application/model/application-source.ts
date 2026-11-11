@@ -15,7 +15,7 @@ import type {
   SiloProgressEvent,
   SiloProtocolError,
 } from "@/contracts/silo"
-import type { AgentId, AgentInfo, AgentInstallProgress, Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, DeviceResources, RequestList, SshName } from "@/desktop/production-schemas"
+import type { AgentId, AgentInfo, AgentInstallProgress, Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, ComputerTools, DeviceResources, NetworkPolicy, NetworkPolicyState, RequestList, SshName } from "@/desktop/production-schemas"
 import type { ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 
 export type ApplicationTab = "computers" | "changes" | "github" | "secrets" | "system" | "settings"
@@ -368,6 +368,14 @@ export interface ApplicationActions {
   openAgent?: (computer: string, agent: AgentId) => void
   /** The SSH host name this device's desktop apps use to reach the computer. Adds it to the SSH configuration. */
   ensureSshName?: (computer: string) => Promise<SshName>
+  /** A computer's network policy: its mode and hosts, what Silo adds, and whether a change applies now or at the next start. Computers of this device only. */
+  readNetworkPolicy?: (computer: string) => Promise<NetworkPolicyState>
+  /** Saves a policy. `expected` is the one the person was looking at; the engine saves nothing if it has changed since. */
+  saveNetworkPolicy?: (computer: string, policy: NetworkPolicy, expected?: NetworkPolicy) => Promise<NetworkPolicyState>
+  /** Whether the agent inside a computer can use Silo's tools, and when a change takes effect. Computers of this device only. */
+  readComputerTools?: (computer: string) => Promise<ComputerTools>
+  /** Turns Silo's tools on or off for a computer. */
+  setComputerTools?: (computer: string, enabled: boolean) => Promise<ComputerTools>
   createCheckpoint?: (computer: string, name: string) => Promise<void>
   forkCheckpoint?: (computer: string, checkpointId: string | null, newName: string) => Promise<void>
   restoreCheckpoint?: (computer: string, checkpointId: string) => Promise<void>
