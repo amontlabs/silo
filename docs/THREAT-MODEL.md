@@ -616,14 +616,20 @@ one port, one computer. No other computer's rules contain that port.
 **What the port exposes on the device.** Any program on the device, of any account, can open a
 connection to a computer's port: it is a TCP port on `127.0.0.1`, not a socket file with an owner.
 The device side sees every peer as `127.0.0.1`, computers included, so the address says nothing
-about who connects. **The token is the identity.** Before anything is answered, the first frame
-must be `engine.handshake` (at most 16 KiB, within 10 seconds) carrying a token whose SHA-256 is
-the stored hash of the computer that port belongs to; the computer is taken from the port and no
-field of the frame can name another. Anything else gets no answer, an audit row (a refused
-`engine.handshake` by that computer, collapsed with its repeats) and a close after one second,
-during which the connection keeps one of the computer's 8 connection places, so guessing is slow
-and cannot exhaust another computer's places. A token is 32 bytes from `getentropy`; only its
-SHA-256 is stored (`<app data>/guest-client/tokens.json`, `0600`); comparison is constant-time.
+about who connects. **The token is the identity, and it never crosses the connection.** On
+accepting a connection the engine sends a fresh 32-byte nonce from `getentropy`. Within 2 seconds
+the client must answer with `engine.handshake` (at most 16 KiB) whose `proof` is HMAC-SHA-256,
+keyed by SHA-256 of the token, over a fixed context string, the nonce and the port the client
+believes it is connecting to. The engine keeps exactly SHA-256 of the token
+(`<app data>/guest-client/tokens.json`, `0600`), computes the same HMAC for the port the
+connection arrived on and compares in constant time; the record's port must be that port, so a
+token is valid on its own computer's port alone. The computer is taken from the port and no field
+of the frame can name another. Anything else gets no answer, an audit row (a refused
+`engine.handshake` by that computer, at most one a second, so the rows collapse and cannot fill
+the audit queue; one log line a minute) and a close after one second. Connections that have not
+finished their handshake have their own 4 places per computer, apart from the 8 places of
+sessions, so a program that opens connections and says nothing delays a computer's new sessions
+by at most the 2 seconds of each attempt and cannot take a session's place.
 
 What a holder of the token gets: the computer's own calls, judged by [the policy](SiloUI-POLICY.md)
 (free, asked of the owner, or refused; owner-only methods such as settings, Connections, exports,
@@ -634,26 +640,52 @@ token gets exactly that and nothing of the owner's.
 - **Where the token is.** In the computer, in `/etc/silo/endpoint.json`: root-owned, `0640` with
   the `silo` account's group (on a macOS computer that group is `staff`), written by the engine as
   root. Anything in the computer that can read the file can use the token; anything in the
-  computer could already act through the agent. The token never travels in an answer or a log.
+  computer could already act through the agent. The token never travels on the connection, in an
+  answer or in a log.
 - **Copies.** A token is valid on its own computer's port alone. A fork's copy of its parent's file
-  reaches nothing: the fork's rules do not allow the parent's port and the parent's token is
-  refused on the fork's port; the file is also scrubbed when a fork first starts, and the fork gets
-  its own token. An export carries the file of the computer it was made from; on import the
-  computer has no tools until the owner turns them on, so the copied token matches no port.
+  reaches nothing: the fork's rules do not allow the parent's port and the parent's proof is
+  refused on the fork's port. A Linux fork has the file scrubbed by its fork options and a macOS
+  fork in its offline preparation; either gets its own token at its first start. An export of a
+  Linux virtual machine is made from a hidden copy that has the file removed; any other export (a
+  checkpoint, a macOS or container computer, or with the logins kept) carries the file, and the
+  engine ends the computer's token right after it, so the copy proves nothing. On import a
+  computer has no tools until the owner turns them on.
 - **A program that takes the port.** While the engine is not running, another program can bind a
-  computer's port; a client in that computer that connects sends it the token. At start the
-  engine rebinds every port; one found taken moves to a new port, its token is ended and the
-  computer gets a new rule and a new file. A port taken and released while the engine was down is
-  not detected; the token sent there stays valid until the next file check replaces it, which
-  happens only if the file changed. The fix is the planned runtime patch that maps the gateway port
-  to a Unix socket in a private folder, so no port is open on the device.
+  computer's port. A client in that computer that connects is challenged by that program and
+  answers with a proof good for that program's nonce on that port only, which opens nothing. At
+  start the engine forgets every token hash, so a token learned while it was down is dead, and
+  each running computer gets a new one when its file is next checked (`silo` reads the file again
+  when a handshake is refused). It rebinds every port; one found taken moves to a new port that is
+  held (accepting and closing) and not served, the computer is marked as needing a restart
+  (`guestClient.status` shows `restartNeeded`), and only when it runs with rules naming the new
+  port is it served and its file written. Until that restart its network still allows the old
+  port, which the other program holds: from inside the computer that program is reachable, in any
+  network mode.
+- **A port that is no longer the computer's.** Turning the tools off, or a move, leaves the port in
+  the computer's rules until its next start. The engine keeps that port bound with a listener that
+  accepts and closes every connection without reading it, and saves it
+  (`<app data>/guest-client/held-ports.json`) so it is bound again at the next engine start, until
+  the computer runs with rules that no longer name it, or is deleted. A port another program took
+  while the engine was not running cannot be held.
 - **Promote and undo** turn the tools off in the computers they swap; **delete** and **disable**
-  forget the hash and close open sessions at once.
-- **Limits.** 8 connections and 16 running requests per computer, 4 MiB frames as on
-  `engine.sock`, at most 16 unacknowledged jobs; forks and running forks are not counted (the
-  device's memory and disk floors apply, see [the policy](SiloUI-POLICY.md#limits)).
+  forget the hash and close open sessions at once; a new token closes every session opened with the
+  old one.
+- **Limits.** 8 sessions, 4 connections waiting in the handshake and 16 running requests per
+  computer, 4 MiB frames as on `engine.sock`, at most 16 unacknowledged jobs; forks and running
+  forks are not counted (the device's memory and disk floors apply, see
+  [the policy](SiloUI-POLICY.md#limits)).
+- **The file check.** The engine reads and writes the endpoint file as root in the computer, with
+  an 8-second limit per command, at most 4 computers at once and one check per computer; a
+  computer whose check fails or stalls is tried again after 5 seconds, doubling up to 5 minutes,
+  and holds up no other computer's check.
 - **Parsing.** The engine parses the computer's frames with the same framing and envelope parser
   as `engine.sock`; it no longer parses any file a guest wrote for this purpose.
+- **What remains.** Any program on the device can still connect to a computer's port and be
+  refused, costing it nothing but a place for 2 seconds. A shared Linux host is a weaker place than
+  a single-user device: another account can connect, take a port while the engine is down (and so
+  be reachable from that computer until it restarts), and fill a computer's 4 handshake places so
+  its new sessions wait; it never gets a token or a usable proof. The planned runtime patch that
+  maps the gateway port to a Unix socket in a private folder removes the open port.
 
 What a compromised guest gains is unchanged by the transport: the agent already controls the
 computer, and the token adds the computer's policy-judged calls (forks of itself and the
@@ -829,9 +861,10 @@ Not defended on a Linux host:
   signed.
 - **A controller's key.** It is as good as the controller's engine: whoever holds it has the host
   engine's authority (above) until the host revokes it. Silo cannot tell a stolen key from its owner.
-- **Other local users reaching loopback listeners.** Published ports, SSH access to a computer and
-  host-push listen on the host's loopback, which every account on the host can reach. Use a
-  single-tenant host.
+- **Other local users reaching loopback listeners.** Published ports, SSH access to a computer,
+  host-push and the ports of Silo's tools ([boundary 9](#9-silos-tools-in-a-computer-a-port-and-a-token))
+  listen on the host's loopback, which every account on the host can reach. Use a single-tenant
+  host.
 - **The Secret Service backend**, which has never been exercised.
 
 ### Container computers
@@ -954,8 +987,8 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   local users); the authorized key is the whole check, as for a virtual machine's. SSH sessions do
   not survive the engine stopping the container or the listener; a container that an engine
   restart leaves running is taken back by the next engine (see Checkpoints and forks below).
-- **Silo's tools (boundary 9) in a container.** The same port, rule and token as a virtual
-  machine; the container's gateway takes the rule in the policy it is started with. The endpoint
+- **Silo's tools (boundary 9) in a container.** The same port, rule, token and handshake as a
+  virtual machine; the container's gateway takes the rule in the policy it is started with. The endpoint
   file is written through the container's own exec path. The per-computer share at `/.msb` is
   bound read-write (no exec, no devices), its parent `sandboxes/<name>` is `0700` and the runtime
   folder `0711`; Silo reads nothing from it.

@@ -6912,6 +6912,11 @@
             "null"
           ]
         },
+        "restartNeeded": {
+          "default": false,
+          "description": "The channel had to move to a new port while the computer's network still names the\nold one, which another program holds. The tools are not served, and no token is\nwritten, until the computer restarts.",
+          "type": "boolean"
+        },
         "written": {
           "default": false,
           "description": "Whether the endpoint file was written into the computer by this call. A computer\nthat is not running gets it when it next starts.",

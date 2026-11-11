@@ -474,6 +474,12 @@ impl Watcher {
                 continue;
             };
             match outcome {
+                // A computer still running with its old rules is looked at again soon after
+                // a start, then less and less often.
+                Ok(false) if !matches!(check, Check::Endpoint(_)) => {
+                    seen.failures = seen.failures.saturating_add(1);
+                    seen.retry_at = Some(now + retry_after(seen.failures));
+                }
                 Ok(changed) => {
                     if changed {
                         if let Check::Endpoint(id) = &check {
