@@ -122,3 +122,11 @@ was chosen and why; any can be changed. Older items are also in the build log un
     completes but gets nothing back (DNS over TCP gets the gateway's own "no such name"), so a
     program sees a silent connection or a timeout rather than an immediate refusal. The live
     network test checks that no data comes back from the unlisted address.
+
+## App timings (R13)
+
+31. **Recovery and refresh timings:** while Silo cannot load or a check fails, it retries after 2,
+    3 and 5 seconds, then every 10 seconds for about 5 minutes; the macOS list refreshes every
+    3 seconds while a computer is being prepared and every 30 seconds otherwise; toasts with a
+    button close after 20 seconds, quick ones after 4. Successful bookkeeping calls (job
+    acknowledgements, status polls) are hidden from Activity; failed ones show.
