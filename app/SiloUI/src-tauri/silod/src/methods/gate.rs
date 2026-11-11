@@ -51,6 +51,7 @@ pub(crate) struct Admitted {
     kind: MethodKind,
     /// The job an acknowledgement names.
     job: Option<String>,
+    pub(crate) reservation_id: Option<u64>,
 }
 
 impl Admitted {
@@ -231,6 +232,32 @@ pub(crate) mod test_nodes {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod test_resources {
+    use std::sync::Mutex;
+    use super::Resources;
+
+    static RESOURCES: Mutex<Vec<(String, Resources)>> = Mutex::new(Vec::new());
+
+    fn res() -> std::sync::MutexGuard<'static, Vec<(String, Resources)>> {
+        RESOURCES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn add(id: &str, resources: Resources) {
+        res().push((id.into(), resources));
+    }
+
+    pub(crate) fn clear() {
+        res().clear();
+    }
+
+    pub(crate) fn all() -> Vec<(String, Resources)> {
+        res().clone()
+    }
+}
+
 /// The device now and the floors that apply to an agent inside a computer.
 pub(crate) fn host_and_floors(
     context: &HandlerContext,
@@ -259,11 +286,119 @@ pub(crate) fn takes_headroom(method: MethodName) -> bool {
     )
 }
 
+#[derive(Clone, Debug)]
+struct Reservation {
+    id: u64,
+    computer_id: Option<String>,
+    job_id: Option<String>,
+    memory_bytes: u64,
+    created_at: std::time::Instant,
+}
+
+static RESERVATIONS: std::sync::Mutex<Vec<Reservation>> = std::sync::Mutex::new(Vec::new());
+static NEXT_RESERVATION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn current_reserved_memory(engine: &dyn EngineContext) -> u64 {
+    let mut reservations = RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    reservations.retain(|r| {
+        if r.created_at.elapsed() > std::time::Duration::from_secs(300) {
+            return false;
+        }
+        if let Some(job) = &r.job_id {
+            match job_state(engine, job) {
+                JobState::Succeeded | JobState::Failed | JobState::Unknown => false,
+                JobState::Running => true,
+            }
+        } else {
+            true
+        }
+    });
+    reservations.iter().map(|r| r.memory_bytes).sum()
+}
+
+fn reserve_memory(memory_bytes: u64, computer_id: Option<String>) -> u64 {
+    let id = NEXT_RESERVATION_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut reservations = RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    reservations.push(Reservation {
+        id,
+        computer_id,
+        job_id: None,
+        memory_bytes,
+        created_at: std::time::Instant::now(),
+    });
+    id
+}
+
+fn attach_reservation_job(id: u64, job_id: &str) {
+    let mut reservations = RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(r) = reservations.iter_mut().find(|r| r.id == id) {
+        r.job_id = Some(job_id.to_owned());
+    }
+}
+
+fn release_reservation(id: u64) {
+    let mut reservations = RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    reservations.retain(|r| r.id != id);
+}
+
+#[cfg(test)]
+pub(crate) fn clear_reservations() {
+    let mut reservations = RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    reservations.clear();
+}
+
+fn requested_memory_bytes(
+    method: MethodName,
+    params: &Value,
+    resources: &HashMap<String, Resources>,
+) -> u64 {
+    if !takes_headroom(method) {
+        return 0;
+    }
+    let explicit_gib = params
+        .pointer("/configuration/memoryGiB")
+        .or_else(|| params.pointer("/request/memoryGiB"))
+        .or_else(|| params.get("memoryGiB"))
+        .and_then(Value::as_u64);
+    if let Some(gib) = explicit_gib {
+        return gib.saturating_mul(silo_engine::resources::GIB);
+    }
+    let id = params
+        .get("computerId")
+        .or_else(|| params.get("id"))
+        .and_then(Value::as_str);
+    if let Some(id) = id {
+        if let Some(res) = resources.get(id) {
+            return res.memory_gib.saturating_mul(silo_engine::resources::GIB);
+        }
+    }
+    0
+}
+
 /// Why an agent's call that takes memory or disk must fail now: the device has less free than
-/// the floor, or the device cannot be measured so nobody can tell.
-pub(crate) fn short_of_resources(context: &HandlerContext) -> Option<String> {
+/// the floor, the requested memory exceeds remaining headroom, or the device cannot be measured so nobody can tell.
+pub(crate) fn short_of_resources(
+    context: &HandlerContext,
+    method: MethodName,
+    params: &Value,
+    resources: &HashMap<String, Resources>,
+) -> Option<String> {
     match host_and_floors(context) {
-        Ok((host, floors)) => resources::refusal(&host, &floors),
+        Ok((host, floors)) => {
+            let reserved = current_reserved_memory(context.engine_context());
+            let requested = requested_memory_bytes(method, params, resources);
+            resources::refusal_for(&host, &floors, reserved, requested)
+        }
         Err(_) => Some(
             "Silo cannot measure this device's memory and disk, so it cannot tell whether another computer fits. Ask the person who runs Silo."
                 .to_owned(),
@@ -298,7 +433,7 @@ pub(crate) async fn admit(
 ) -> Result<Admitted, DispatchError> {
     let caller = context.client_identity().caller.clone();
     let target = policy::target_computer(params);
-    let (decision, visible, name) = match &caller {
+    let (decision, visible, name, world_resources) = match &caller {
         Caller::Computer { id } => {
             let world = EngineWorld::load(context, method, Some((id, params))).await;
             let mut visible: BTreeSet<String> =
@@ -308,12 +443,14 @@ pub(crate) async fn admit(
                 policy::decide(&caller, method, params, &world),
                 Some(Arc::new(visible)),
                 policy::World::name(&world, id),
+                world.resources,
             )
         }
         _ => (
             policy::decide(&caller, method, params, &NoWorld),
             None,
             None,
+            HashMap::new(),
         ),
     };
     let seen = visible.clone();
@@ -338,7 +475,7 @@ pub(crate) async fn admit(
         && takes_headroom(method)
         && matches!(decision, Decision::Allow(_) | Decision::Ask { .. })
     {
-        if let Some(message) = short_of_resources(context) {
+        if let Some(message) = short_of_resources(context, method, params, &world_resources) {
             return refuse(
                 DispatchError::new(ErrorCode::ResourcesLow, message),
                 AuditOutcome::Refused,
@@ -386,6 +523,18 @@ pub(crate) async fn admit(
                         .map(str::to_owned)
                 })
                 .flatten();
+            let reservation_id = if matches!(caller, Caller::Computer { .. })
+                && takes_headroom(method)
+            {
+                let requested = requested_memory_bytes(method, params, &world_resources);
+                if requested > 0 {
+                    Some(reserve_memory(requested, target.clone()))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             Ok(Admitted {
                 params: allowed.params,
                 filter: allowed.filter,
@@ -394,6 +543,7 @@ pub(crate) async fn admit(
                 target,
                 kind: kind_of(method),
                 job,
+                reservation_id,
             })
         }
         Decision::Refuse { reason } => refuse(
@@ -445,6 +595,13 @@ pub(crate) fn finish(
         .and_then(|output| output.value.get("jobId"))
         .and_then(Value::as_str)
         .map(str::to_owned);
+    if let Some(res_id) = admitted.reservation_id {
+        if let Some(job_id) = &job {
+            attach_reservation_job(res_id, job_id);
+        } else {
+            release_reservation(res_id);
+        }
+    }
     if let Caller::Computer { id } = &context.client_identity().caller {
         let store = PolicyStore::new(&app_data(context));
         let mut noted = Vec::new();
@@ -603,7 +760,7 @@ impl EngineWorld {
             None
         };
         let mut resources = HashMap::new();
-        if method == MethodName::ComputersCreate {
+        if method == MethodName::ComputersCreate || takes_headroom(method) {
             let list = super::route(&internal, MethodName::ComputersList, &json!({}))
                 .await
                 .map(|output| output.value)
@@ -627,6 +784,10 @@ impl EngineWorld {
                     resources.insert(id.to_owned(), sizes);
                 }
             }
+        }
+        #[cfg(test)]
+        for (id, r) in test_resources::all() {
+            resources.insert(id, r);
         }
         let mut ssh = HashMap::new();
         let mut ssh_keys = HashMap::new();
