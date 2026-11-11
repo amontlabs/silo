@@ -14,6 +14,8 @@
 #       nobody passing a binary; `silo list` works inside; the status lists the components
 #   S2  agents.install (Claude Code) registers the `silo` MCP server beside the computer-use one; an MCP
 #       client started inside the computer gets a tool list from `silo mcp`
+#   S2b agents.install (Codex): /opt/silo/codex is enterable by the silo account, which runs codex; the
+#       silo MCP server is registered with it
 #   S3  a fork has its own endpoint and the registration works against the fork
 #   S4  turning the tools off removes the registration (also for a computer that is stopped at the
 #       time), keeps the program, and the program refuses
@@ -153,6 +155,13 @@ for line in sys.stdin:
     elif "tools" in v: print("tools:%d" % len(v["tools"]))'; }
 names=$(echo "$out" | mcp_names | tr '\n' ' ')
 echo "$names" | grep -q "tools:[1-9]" && echo "$names" | grep -qw -- "$A"; check "S2 an MCP client inside gets a tool list from silo mcp, and a call answers with $A" $? "$names"
+
+say "== S2b agents.install (Codex): the working account can run it, and silo's MCP server is registered with it"
+out=$(engine install "$ID_A" codex 2>&1); check "S2b agents.install codex" $? "$out"
+modes=$(root $A 'stat -c "%a %U" /opt/silo/codex /opt/silo/codex/*' | tr -d '\r' | tr '\n' ' ')
+check "S2b the Codex folders are enterable by others and not writable by them" $(echo "$modes" | grep -qE '^755 root 755 root $'; echo $?) "$modes"
+out=$(inside $A 'codex --version' | tr -d '\r' | tail -1); check "S2b the silo account runs codex" $(echo "$out" | grep -qi 'codex'; echo $?) "$out"
+out=$(inside $A 'grep -A3 "mcp_servers.silo" /home/silo/.codex/config.toml' | tr -d '\r' | tr '\n' ' '); check "S2b Codex's configuration lists the silo MCP server" $(echo "$out" | grep -q 'silo'; echo $?) "$out"
 
 say "== S3 a fork has its own endpoint and the registration works against it"
 "$SILO" fork $A --name $F >/dev/null 2>&1; check "S3 fork $A" $? ""
