@@ -16,7 +16,8 @@ pub use microsandbox_network::network::{
     PublishedPortBinding, SmoltcpNetwork, generate_intercept_ca_pair,
 };
 use microsandbox_network::policy::{NetworkPolicy, NetworkProfile};
-use microsandbox_types::DeploymentProfile;
+use microsandbox_network::config::builder::HttpBuilder;
+use microsandbox_types::{DeploymentProfile, HttpDenyResponseFormat};
 use tempfile::TempDir;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -188,6 +189,14 @@ pub fn validate_init(init: &InitRequest) -> Result<(), NetworkSetupError> {
     Ok(())
 }
 
+/// A denied HTTP request gets a JSON 403 naming the code and host, not a dropped connection,
+/// the same as the runtime's own sandboxes. Stated here so a change of the upstream default
+/// cannot change what a guest sees.
+fn json_denial_responses(http: HttpBuilder) -> HttpBuilder {
+    http.deny_response(true)
+        .deny_response_format(HttpDenyResponseFormat::Json)
+}
+
 pub fn build_network(mut init: InitRequest) -> Result<NetworkResources, NetworkSetupError> {
     install_crypto_provider();
     let github_hosts = GithubHosts::from_init(&init)?;
@@ -222,6 +231,7 @@ pub fn build_network(mut init: InitRequest) -> Result<NetworkResources, NetworkS
         })
         .policy(policy)
         .strict(init.strict.unwrap_or(true))
+        .http(json_denial_responses)
         .tls(|tls| {
             tls.enabled(true)
                 .intercepted_ports(init.intercepted_ports.clone())
@@ -575,6 +585,19 @@ mod tests {
         assert!(leaf.ends_with("-----END CERTIFICATE-----\n"));
         assert!(!leaf.contains("PRIVATE KEY"));
         assert_ne!(leaf, ca.cert_pem.as_str());
+    }
+
+    #[test]
+    fn denied_http_requests_get_a_json_403_not_a_closed_connection() {
+        let config = NetworkBuilder::new()
+            .http(json_denial_responses)
+            .build()
+            .unwrap();
+        assert!(config.http.deny_response);
+        assert_eq!(
+            config.http.deny_response_format,
+            HttpDenyResponseFormat::Json
+        );
     }
 
     #[test]
