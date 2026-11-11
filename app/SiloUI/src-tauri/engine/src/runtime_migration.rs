@@ -1269,6 +1269,9 @@ mod protected_storage;
 #[cfg(test)]
 #[path = "runtime_migration/protected_storage_tests.rs"]
 mod protected_storage_tests;
+#[cfg(test)]
+#[path = "runtime_migration/protected_storage_live_tests.rs"]
+mod protected_storage_live_tests;
 #[path = "runtime_migration/vocabulary.rs"]
 pub mod vocabulary;
 #[cfg(test)]
