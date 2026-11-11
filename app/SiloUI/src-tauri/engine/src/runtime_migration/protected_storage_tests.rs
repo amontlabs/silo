@@ -34,6 +34,8 @@ fn computer(status: &'static str, running: bool) -> Fake {
 struct Runtime {
     computers: RefCell<HashMap<String, Fake>>,
     calls: RefCell<Vec<String>>,
+    /// What `--silo-storage-repair-protocol` prints; `None` fails as an unknown option.
+    probe: Option<&'static str>,
 }
 
 impl Runtime {
@@ -46,7 +48,13 @@ impl Runtime {
                     .collect(),
             ),
             calls: RefCell::default(),
+            probe: Some("1\n"),
         }
+    }
+
+    fn without_repair_protocol(mut self, probe: Option<&'static str>) -> Self {
+        self.probe = probe;
+        self
     }
 
     fn calls(&self) -> Vec<String> {
@@ -80,6 +88,10 @@ impl runtime::RuntimeRunner for Runtime {
         };
         let mut computers = self.computers.borrow_mut();
         match args[0].as_str() {
+            "--silo-storage-repair-protocol" => self
+                .probe
+                .map(|text| output(text.into()))
+                .ok_or_else(|| failed(2)),
             "doctor" => {
                 let fake = &computers[&args[2]];
                 let report = serde_json::json!({"sandboxes":[{"name":args[2],"status":fake.status,"running":fake.running}]})
@@ -325,4 +337,160 @@ fn the_report_round_trips_and_a_damaged_one_is_not_replaced() {
     assert_eq!(read_report(directory.path()).unwrap(), Some(report));
     fs::write(directory.path().join(MARKER), b"{").unwrap();
     assert!(read_report(directory.path()).is_err());
+}
+
+#[test]
+fn a_runtime_without_the_repair_protocol_moves_nothing_and_takes_no_backup() {
+    for probe in [None, Some("0\n"), Some("2\n")] {
+        let fake = Runtime::new(&[
+            ("a", computer("maintenance_required", false)),
+            ("ok", computer("ready", false)),
+        ])
+        .without_repair_protocol(probe);
+        let report = run(&fake, &["a", "ok"], true, Ok(())).unwrap();
+        assert!(matches!(outcome(&report, "a"), Outcome::NeedsAttention(_)));
+        assert_eq!(outcome(&report, "ok"), &Outcome::AlreadyReady);
+        let calls = fake.calls();
+        assert!(!calls.iter().any(|call| call.starts_with("self repair")));
+        assert!(!calls.contains(&"<backup>".to_string()));
+    }
+}
+
+#[test]
+fn the_repair_protocol_is_not_probed_when_nothing_needs_repair() {
+    let fake = Runtime::new(&[("ok", computer("ready", false))]);
+    run(&fake, &["ok"], true, Ok(())).unwrap();
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.starts_with("--silo-")));
+}
+
+// MARK: Launch driver
+
+use super::{
+    fresh, protected_computers, select_generation, write, Controller, CONVERTED, FILE,
+};
+
+/// An app-data folder after a finished migration whose converted storage holds `names`.
+fn launched(names: &[&str]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let converted = dir.path().join(CONVERTED);
+    fs::create_dir_all(converted.join("microsandbox")).unwrap();
+    fs::write(converted.join("microsandbox/db"), b"catalogue").unwrap();
+    let computers: Vec<_> = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            serde_json::json!({"id":format!("00000000-0000-4000-8000-00000000000{index}"),"name":name,"cpus":1,"maxCPUs":1,"memoryGiB":1,"maxMemoryGiB":1,"workspaceStorageGiB":1,"runtimeStorageGiB":1})
+        })
+        .collect();
+    runtime::write_metadata(
+        &converted.join("computers.json"),
+        &serde_json::from_value(serde_json::json!({"schemaVersion":1,"computers":computers}))
+            .unwrap(),
+    )
+    .unwrap();
+    select_generation(dir.path(), CONVERTED).unwrap();
+    write(&dir.path().join(FILE), &fresh("complete", names.len())).unwrap();
+    dir
+}
+
+#[test]
+fn the_launch_driver_holds_the_computers_moves_them_and_opens_them_again() {
+    let dir = launched(&["drv-a", "drv-b"]);
+    let controller = Controller::new(dir.path().to_path_buf());
+    assert!(controller.hold_for_protected_storage());
+    assert_eq!(controller.snapshot().unwrap().status, "running");
+    assert!(controller.blocks_operations());
+
+    let fake = Runtime::new(&[
+        ("drv-a", computer("maintenance_required", false)),
+        ("drv-b", computer("ready", false)),
+    ]);
+    let stages = RefCell::new(Vec::new());
+    controller
+        .run_protected_storage(&fake, &paths(), &|| {
+            stages.borrow_mut().push(controller.snapshot().unwrap().stage)
+        })
+        .unwrap();
+
+    let stages = stages.into_inner();
+    assert!(stages.contains(&"Backing up computer storage".to_string()), "{stages:?}");
+    assert!(stages.contains(&"Upgrading computer storage (1 of 1)".to_string()), "{stages:?}");
+    assert_eq!(controller.snapshot().unwrap().status, "complete");
+    assert!(!controller.blocks_operations());
+    assert!(dir.path().join(BACKUP).join("microsandbox/db").is_file());
+    let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
+    assert!(report.complete());
+    assert_eq!(outcome(&report, "drv-a"), &Outcome::Repaired);
+    assert_eq!(outcome(&report, "drv-b"), &Outcome::AlreadyReady);
+    assert_eq!(attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-a"), None);
+    // Nothing left to do at the next launch.
+    assert!(!Controller::new(dir.path().to_path_buf()).hold_for_protected_storage());
+}
+
+#[test]
+fn a_computer_that_cannot_be_moved_is_refused_with_its_reason_and_retried_at_the_next_launch() {
+    let dir = launched(&["drv-odd", "drv-ok"]);
+    let controller = Controller::new(dir.path().to_path_buf());
+    assert!(controller.hold_for_protected_storage());
+    let fake = Runtime::new(&[
+        ("drv-odd", computer("recovery_required", false)),
+        ("drv-ok", computer("eligible", false)),
+    ]);
+    controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
+
+    assert!(!controller.blocks_operations(), "the other computers work");
+    let message = attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-odd").unwrap();
+    assert!(message.contains("kept untouched"), "{message}");
+    assert_eq!(attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-ok"), None);
+    let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
+    assert!(!report.complete());
+    assert!(Controller::new(dir.path().to_path_buf()).hold_for_protected_storage());
+}
+
+#[test]
+fn a_failed_backup_repairs_nothing_and_every_pending_computer_says_so() {
+    let dir = launched(&["drv-x"]);
+    // A link the clone refuses to copy.
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("/nonexistent", dir.path().join(CONVERTED).join("absolute")).unwrap();
+    let controller = Controller::new(dir.path().to_path_buf());
+    assert!(controller.hold_for_protected_storage());
+    let fake = Runtime::new(&[("drv-x", computer("maintenance_required", false))]);
+    let error = controller
+        .run_protected_storage(&fake, &paths(), &|| {})
+        .unwrap_err();
+    assert!(error.contains("Relaunch Silo"), "{error}");
+    assert!(!fake.calls().iter().any(|call| call.starts_with("self repair")));
+    assert!(attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-x").unwrap().contains("Relaunch Silo"));
+    assert!(!controller.blocks_operations());
+    assert!(!dir.path().join(BACKUP).exists());
+    assert!(!dir.path().join(CONVERTED).join(MARKER).exists());
+}
+
+#[test]
+fn nothing_is_held_without_a_finished_migration_computers_or_work() {
+    // No computers.
+    let empty = launched(&[]);
+    assert!(!Controller::new(empty.path().to_path_buf()).hold_for_protected_storage());
+    // A conversion that has not finished already holds everything back.
+    let scanning = launched(&["drv-s"]);
+    write(&scanning.path().join(FILE), &fresh("scanning", 1)).unwrap();
+    let controller = Controller::new(scanning.path().to_path_buf());
+    assert!(!controller.hold_for_protected_storage());
+    // Running without a hold does nothing.
+    let fake = Runtime::new(&[]);
+    controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
+    assert!(fake.calls().is_empty());
+}
+
+#[test]
+fn containers_are_not_part_of_the_move() {
+    let inventory = serde_json::from_value(serde_json::json!({"schemaVersion":1,"computers":[
+        {"id":"00000000-0000-4000-8000-000000000001","name":"vm","cpus":1,"maxCPUs":1,"memoryGiB":1,"maxMemoryGiB":1,"workspaceStorageGiB":1,"runtimeStorageGiB":1},
+        {"id":"00000000-0000-4000-8000-000000000002","name":"box","runtime":"container","cpus":1,"maxCPUs":1,"memoryGiB":1,"maxMemoryGiB":1,"workspaceStorageGiB":1,"runtimeStorageGiB":1}
+    ]})).unwrap();
+    assert_eq!(protected_computers(&inventory), ["vm"]);
 }

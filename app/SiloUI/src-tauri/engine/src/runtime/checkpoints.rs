@@ -1464,6 +1464,7 @@ pub(super) fn pending_computer(
         attention: None,
         freshness: Freshness::Fresh,
         settling: false,
+        needs_storage_upgrade: false,
         repositories: Vec::new(),
         files: Vec::new(),
         ports: Vec::new(),

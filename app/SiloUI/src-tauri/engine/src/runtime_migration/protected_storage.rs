@@ -6,17 +6,27 @@
 //! The caller holds the migration gate: no other runtime command runs, no previous Silo build
 //! can start, and the computers of this storage are Silo's own. Computers that cannot be moved
 //! are reported, never removed; the original disk files are always retained.
-#![allow(dead_code)]
 use super::{copy_runtime_tree, runtime};
 use serde::{Deserialize, Serialize};
-use std::{fs, io::Write, path::Path, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::{Mutex, MutexGuard, PoisonError},
+    time::Duration,
+};
 
 pub(super) const MARKER: &str = "protected-storage.json";
 /// A clone of the storage folder taken after the computers stopped and before the first repair.
-pub(super) const BACKUP: &str = "runtime-backup-before-protected-storage";
+pub(crate) const BACKUP: &str = "runtime-backup-before-protected-storage";
 /// Hidden option of the bundled `msb self repair`: the caller asserts that every legacy writer is
 /// stopped, as the macOS maintenance prompt asks. It is `StorageRecoveryOptions::legacy_writers_stopped`.
 const MAINTENANCE_FLAG: &str = "--legacy-writers-stopped";
+/// Answers `1` when the bundled `msb self repair` accepts [`MAINTENANCE_FLAG`] with
+/// `--format json`. Probed like the other `--silo-*-protocol` options before it is relied on.
+const REPAIR_PROBE: &str = "--silo-storage-repair-protocol";
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const VERSION: u32 = 1;
 const DIAGNOSE_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_TIMEOUT: Duration = Duration::from_secs(120);
@@ -40,7 +50,7 @@ pub(super) struct Computer {
     pub outcome: Outcome,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Report {
     version: u32,
@@ -73,6 +83,14 @@ pub(super) struct Options<'a> {
     /// first repair; a failure ends the upgrade with nothing repaired.
     pub backup: &'a dyn Fn() -> Result<(), String>,
     pub progress: &'a dyn Fn(Step),
+}
+
+const UNSUPPORTED: &str = "This version of Silo cannot move this computer to the new storage. Its files were kept untouched. Update Silo, then relaunch it.";
+
+fn repair_supported(runner: &dyn runtime::RuntimeRunner, paths: &runtime::RuntimePaths) -> bool {
+    runner
+        .run(paths, &[REPAIR_PROBE.into()], PROBE_TIMEOUT)
+        .is_ok_and(|output| output.stdout.trim() == "1")
 }
 
 enum Diagnosis {
@@ -202,6 +220,11 @@ pub(super) fn upgrade(
         }
         repairable.push(index);
     }
+    if !repairable.is_empty() && !repair_supported(runner, paths) {
+        for index in repairable.drain(..) {
+            outcomes[index] = Some(Outcome::NeedsAttention(UNSUPPORTED.into()));
+        }
+    }
     if !repairable.is_empty() {
         (options.progress)(Step::BackingUp);
         (options.backup)()?;
@@ -250,7 +273,9 @@ pub(super) fn clone_backup(app_data: &Path, storage: &Path) -> Result<(), String
     copy_runtime_tree(storage, &partial, &[])?;
     fs::rename(&partial, &backup)
         .and_then(|()| fs::File::open(app_data).and_then(|directory| directory.sync_all()))
-        .map_err(|_| "The backup could not be completed.".to_string())
+        .map_err(|_| "The backup could not be completed.".to_string())?;
+    crate::pre_upgrade_backup::restart_window(app_data);
+    Ok(())
 }
 
 pub(super) fn write_report(storage: &Path, report: &Report) -> Result<(), String> {
@@ -280,4 +305,89 @@ pub(super) fn read_report(storage: &Path) -> Result<Option<Report>, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err("The saved storage upgrade result could not be read.".into()),
     }
+}
+
+// MARK: Gate
+
+#[derive(Default)]
+struct Gate {
+    /// The step is running (or about to): the stage the owner sees.
+    running: HashMap<PathBuf, String>,
+    /// Computers the step could not move, with the text shown to the owner.
+    /// Per storage folder, as the runtime names it (`computers.json`'s folder).
+    attention: HashMap<PathBuf, BTreeMap<String, String>>,
+}
+
+static GATE: Mutex<Option<Gate>> = Mutex::new(None);
+
+fn gate() -> MutexGuard<'static, Option<Gate>> {
+    GATE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn with_gate<T>(change: impl FnOnce(&mut Gate) -> T) -> T {
+    change(gate().get_or_insert_with(Gate::default))
+}
+
+/// The stage shown while the step holds the computers of `app_data` back.
+pub(super) fn running_stage(app_data: &Path) -> Option<String> {
+    gate().as_ref()?.running.get(app_data).cloned()
+}
+
+pub(super) fn hold(app_data: &Path, stage: &str) {
+    with_gate(|gate| gate.running.insert(app_data.to_path_buf(), stage.into()));
+}
+
+pub(super) fn release(app_data: &Path) {
+    with_gate(|gate| gate.running.remove(app_data));
+}
+
+pub(super) fn set_attention(storage: &Path, attention: BTreeMap<String, String>) {
+    with_gate(|gate| gate.attention.insert(storage.to_path_buf(), attention));
+}
+
+/// Why this computer cannot start or be used until a later launch finishes moving its storage.
+/// `metadata` is the runtime's `computers.json` of the storage the computer lives in.
+pub fn attention_message(metadata: &Path, name: &str) -> Option<String> {
+    gate().as_ref()?.attention.get(metadata.parent()?)?.get(name).cloned()
+}
+
+/// What the owner sees as the stage while the step runs.
+pub(super) fn stage_text(step: &Step) -> String {
+    match step {
+        Step::Inspecting { index, total } => {
+            format!("Checking computer storage ({} of {total})", index + 1)
+        }
+        Step::Stopping { .. } => "Stopping computers for the storage upgrade".into(),
+        Step::BackingUp => "Backing up computer storage".into(),
+        Step::Repairing { index, total } => {
+            format!("Upgrading computer storage ({} of {total})", index + 1)
+        }
+    }
+}
+
+/// Every name in the report that needs attention, with its text.
+pub(super) fn attention_of(report: &Report) -> BTreeMap<String, String> {
+    report
+        .computers
+        .iter()
+        .filter_map(|computer| match &computer.outcome {
+            Outcome::NeedsAttention(message) => Some((computer.name.clone(), message.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Holds the gate for the step's whole run and releases it however the run ends.
+pub(super) struct Held<'a>(pub &'a Path);
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        release(self.0);
+    }
+}
+
+/// True when the step still has work for this storage: it has no report, or the report left
+/// computers that need attention.
+pub(super) fn pending(storage: &Path) -> bool {
+    !matches!(read_report(storage), Ok(Some(report)) if report.complete())
 }

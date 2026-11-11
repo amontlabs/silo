@@ -46,13 +46,15 @@ export function computerAvailability(computer: ApplicationComputer, source: Appl
   const canOpen = !blocked && !error && state === "running"
   // A macOS computer starts once it is installed and personalised, and has no restart.
   const macos = computer.macos
-  const canStart = !blocked && (state === "stopped" || state === "failed") && (!macos || (macos.installed && !macos.needsPersonalizing))
+  // A computer whose storage could not be moved is closed to Start and Restart; its notice says why.
+  const storageUpgrade = computer.needsStorageUpgrade ? computer.attention?.message ?? "This computer’s storage needs attention before it can start." : undefined
+  const canStart = !blocked && !storageUpgrade && (state === "stopped" || state === "failed") && (!macos || (macos.installed && !macos.needsPersonalizing))
   const canStop = !blocked && state === "running"
-  const canRestart = !blocked && !macos && (state === "running" || state === "failed")
+  const canRestart = !blocked && !storageUpgrade && !macos && (state === "running" || state === "failed")
   const reasons: ComputerAvailability["reasons"] = {}
   if (!canOpen) reasons.open = blocked ?? error ?? `Start ${configuration.name} to open it.`
-  if (!canStart) reasons.start = blocked ?? `${configuration.name} is already running.`
+  if (!canStart) reasons.start = blocked ?? storageUpgrade ?? `${configuration.name} is already running.`
   if (!canStop) reasons.stop = blocked ?? `${configuration.name} isn’t running.`
-  if (!canRestart) reasons.restart = blocked ?? (computer.macos ? "A macOS computer can’t be restarted. Stop it, then start it." : `${configuration.name} isn’t running.`)
+  if (!canRestart) reasons.restart = blocked ?? storageUpgrade ?? (computer.macos ? "A macOS computer can’t be restarted. Stop it, then start it." : `${configuration.name} isn’t running.`)
   return { busy, canOpen, canStart, canStop, canRestart, reasons }
 }
