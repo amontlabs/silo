@@ -6,8 +6,20 @@ import type { ApplicationActions } from "./application-source"
 /** How often a started job is read while it runs. */
 export const APPROVAL_JOB_INTERVAL_MS = 2_000
 
+/** How many finished jobs are remembered; the oldest are forgotten first. */
+export const FINISHED_JOBS_KEPT = 50
+
 /** Jobs seen finished, so every row showing the same approval does not read them again. */
 const finished = new Map<string, ApprovalJob>()
+
+function remember(id: string, job: ApprovalJob) {
+  finished.delete(id)
+  finished.set(id, job)
+  for (const oldest of finished.keys()) {
+    if (finished.size <= FINISHED_JOBS_KEPT) break
+    finished.delete(oldest)
+  }
+}
 
 /** Follows the job an allowed approval started until it ends. `undefined` while unknown or when the approval started no job. */
 export function useApprovalJob(read: ApplicationActions["readApprovalJob"], approval: Approval): ApprovalJob | undefined {
@@ -21,7 +33,7 @@ export function useApprovalJob(read: ApplicationActions["readApprovalJob"], appr
       try {
         const next = await read(jobId)
         if (disposed) return
-        if (next.state === "finished") finished.set(jobId, next)
+        if (next.state === "finished") remember(jobId, next)
         setJob({ id: jobId, job: next })
         if (next.state === "finished") return
       } catch {

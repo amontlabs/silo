@@ -99,7 +99,8 @@ impl From<ClientError> for EngineError {
     fn from(error: ClientError) -> Self {
         match error {
             ClientError::Remote(remote) => {
-                // The UI's contract knows eight codes; the engine's newer ones are plain failures.
+                // The UI's contract knows these codes (`changed` is a network policy save that lost a
+                // race); the engine's newer ones are plain failures.
                 let code = serde_json::to_value(remote.code)
                     .ok()
                     .and_then(|value| value.as_str().map(str::to_owned))
@@ -129,6 +130,7 @@ const UI_CODES: &[&str] = &[
     "not_found",
     "incompatible_version",
     "internal",
+    "changed",
 ];
 
 /// Where connection changes and engine events go. The app emits to the webview.

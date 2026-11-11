@@ -136,6 +136,10 @@ wire_struct! {
         /// meanwhile.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expected: Option<NetworkPolicy>,
+        /// When true, re-pins presets to their latest versions, accepting pending updates.
+        /// A normal save preserves existing pins.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        accept_presets: Option<bool>,
     }
 }
 

@@ -42,6 +42,16 @@ it("saves a floor, shows what applies, and returns to the default", async () => 
   await waitFor(() => expect(store.getSnapshot().settings.memoryFloorGib).toBeNull())
 })
 
+it("commits on Enter and does not save twice when the field blurs afterwards", async () => {
+  const { store, user } = setup()
+  const spy = vi.spyOn(store, "updateSettings")
+  const field = await screen.findByRole("textbox", { name: "Memory to keep free, in GiB" })
+  await user.type(field, "8{Enter}")
+  await user.tab()
+  expect(spy).toHaveBeenCalledTimes(1)
+  expect(store.getSnapshot().settings.memoryFloorGib).toBe(8)
+})
+
 it("refuses a number the engine would refuse, before saving", async () => {
   const { store, user } = setup()
   const field = await screen.findByRole("textbox", { name: "Disk to keep free, in GiB" })

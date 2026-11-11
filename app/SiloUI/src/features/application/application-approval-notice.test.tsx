@@ -39,3 +39,14 @@ it("drops the toast of a request once it is answered", async () => {
   await user.click(await screen.findByRole("button", { name: "Allow" }))
   await waitFor(() => expect(screen.queryByText("main asks: Publish port 8080")).toBeNull(), { timeout: 3000 })
 })
+
+it("does not open an approval detail for an approval notice with an empty id", async () => {
+  const user = userEvent.setup()
+  render(<><Toaster /><ApplicationPreview source={applicationSourceForScenario("running")} approvals="waiting" /></>)
+  await navigation().findByRole("button", { name: "Pending" })
+  act(() => notices.handler?.({ category: "approvals", key: "approval:", title: "Empty approval", body: "", computer: null }))
+  expect(await screen.findByText("Empty approval")).toBeInTheDocument()
+  await user.click(screen.getAllByRole("button", { name: "Review" })[0]!)
+  expect(navigation().getByRole("button", { name: "Pending" })).toHaveAttribute("aria-current", "page")
+  expect(screen.queryByLabelText("What is asked")).not.toBeInTheDocument()
+})

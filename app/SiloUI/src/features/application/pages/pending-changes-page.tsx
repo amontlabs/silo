@@ -13,6 +13,7 @@ import { bucketSummary, statusLabels, type PendingRow, type PendingState } from 
 import { useApprovalJob } from "@/features/application/model/use-approval-job"
 import { formatAbsoluteTime, formatRelativeTime } from "@/lib/relative-time"
 import { cn } from "@/lib/utils"
+import { sanitizeAgentText } from "@/lib/visible-text"
 
 const badgeClass = "inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground"
 
@@ -39,16 +40,18 @@ function Ago({ at }: { at: string }) {
 }
 
 function ApprovalRow({ approval, request, onOpen }: { approval: Approval; request?: RequestEntry; onOpen: () => void }) {
+  const computerName = sanitizeAgentText(approval.computerName || "A computer")
+  const summary = sanitizeAgentText(approval.summary || approvalKindLabel(approval.kind))
   return (
     <ListRow
       icon={<ListRowIcon><KindIcon kind={approval.kind} /></ListRowIcon>}
       onOpen={onOpen}
       title={<>
-        <button type="button" className="truncate text-left outline-none focus-visible:underline" onClick={onOpen}>{approval.computerName || "A computer"}</button>
+        <button type="button" className="truncate text-left outline-none focus-visible:underline" onClick={onOpen}>{computerName}</button>
         <span className="shrink-0 font-normal text-muted-foreground">asks</span>
         {request?.deviceName && <span className={badgeClass}>{request.deviceName}</span>}
       </>}
-      detail={<>{approval.summary || approvalKindLabel(approval.kind)} · <Ago at={approval.createdAt} /></>}
+      detail={<>{summary} · <Ago at={approval.createdAt} /></>}
       actions={<span className={badgeClass}>{approvalKindLabel(approval.kind)}</span>}
     />
   )
@@ -127,6 +130,7 @@ export function PendingChangesPage({ pending, actions, reviewActions, openApprov
     const row = approvalById(opened.id)
     if (row) {
       return <ApprovalDetail
+        key={row.approval.id}
         approval={row.approval}
         requestDeviceId={row.request?.deviceId}
         requestDeviceName={row.request?.deviceName}

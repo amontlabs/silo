@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import type { NetworkMode, NetworkPolicy, NetworkPolicyState } from "@/desktop/production-schemas"
 import type { ApplicationActions } from "@/features/application/model/application-source"
 
-import { addedByReason, hostCount, isStaleSave, modeChoices, timingText, useNetworkPolicy } from "../model/network-policy"
+import { addedByReason, hostCount, modeChoices, timingText, useNetworkPolicy, validateHost } from "../model/network-policy"
 
 const rowClassName = "flex min-w-0 items-start gap-2 px-3 py-2 text-xs"
 const detailsClassName = "grid gap-3 border-t border-border px-3 py-3 text-xs"
@@ -30,10 +30,17 @@ function ModeChoices({ draft, disabled, onChange }: { draft: NetworkPolicy; disa
 
 function HostList({ hosts, disabled, onChange }: { hosts: readonly string[]; disabled: boolean; onChange: (hosts: string[]) => void }) {
   const [typed, setTyped] = useState("")
+  const [error, setError] = useState<string | null>(null)
   const field = useId()
   const add = () => {
-    const host = typed.trim()
+    const host = typed.trim().toLowerCase()
     if (!host) return
+    const invalid = validateHost(host)
+    if (invalid) {
+      setError(invalid)
+      return
+    }
+    setError(null)
     if (!hosts.includes(host)) onChange([...hosts, host])
     setTyped("")
   }
@@ -46,9 +53,10 @@ function HostList({ hosts, disabled, onChange }: { hosts: readonly string[]; dis
       </li>)}</ul>
       : <p className="text-caption text-muted-foreground">No hosts yet.</p>}
     <form className="flex items-center gap-2" onSubmit={event => { event.preventDefault(); add() }}>
-      <Input id={field} technical size="sm" value={typed} disabled={disabled} placeholder="example.com or *.example.com" className="font-mono" onChange={event => setTyped(event.target.value)} />
+      <Input id={field} technical size="sm" value={typed} disabled={disabled} placeholder="example.com or *.example.com" className="font-mono" onChange={event => { setError(null); setTyped(event.target.value) }} />
       <Button type="submit" variant="outline" size="xs" disabled={disabled || !typed.trim()}>Add</Button>
     </form>
+    {error && <p role="alert" className="text-caption text-destructive">{error}</p>}
   </section>
 }
 
@@ -132,12 +140,12 @@ export function NetworkPolicySection({ target, computerName, running, readOnly, 
     {draft.mode === "allowlist" && <div className={detailsClassName}>
       <HostList hosts={draft.hosts} disabled={disabled} onChange={hosts => policy.setDraft({ ...draft, hosts })} />
       <PresetList state={state} draft={draft} disabled={disabled} onChange={presets => policy.setDraft({ ...draft, presets })} />
-      <PresetUpdates state={state} disabled={disabled} dirty={policy.dirty} onAccept={() => void policy.submit(state.policy)} />
+      <PresetUpdates state={state} disabled={disabled} dirty={policy.dirty} onAccept={() => void policy.submit(state.policy, { acceptPresets: true })} />
       <AddedBySilo state={state} />
     </div>}
-    {(policy.dirty || policy.saveError) && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-3 py-2">
+    {(policy.dirty || policy.saveError || policy.isStale) && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-3 py-2">
       {policy.saveError && <p role="alert" className="mr-auto min-w-0 text-xs break-words whitespace-pre-wrap text-destructive">{policy.saveError}</p>}
-      {policy.saveError && isStaleSave(policy.saveError)
+      {policy.isStale
         ? <Button type="button" size="xs" onClick={() => void policy.reload(true)}>Read again</Button>
         : <>
           <Button type="button" variant="ghost" size="xs" disabled={policy.saving || !policy.dirty} onClick={policy.discard}>Discard</Button>

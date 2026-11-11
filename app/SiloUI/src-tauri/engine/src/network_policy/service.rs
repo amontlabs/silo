@@ -204,22 +204,29 @@ pub fn set(
     computer_id: &str,
     policy: &NetworkPolicy,
     expected: Option<&NetworkPolicy>,
+    accept_presets: Option<bool>,
     target: Target<'_>,
 ) -> Result<NetworkPolicyState, String> {
     let policy = validate(policy)?;
     // The computer must exist before anything is saved for it.
     let before = resolve(computer_id, &target)?;
+    let incoming_denied = before
+        .stored
+        .as_ref()
+        .is_some_and(|stored| stored.incoming_denied);
+    let stored = if accept_presets.unwrap_or(false) {
+        let mut s = Stored::approved(&policy);
+        s.incoming_denied = incoming_denied;
+        s
+    } else {
+        Stored::preserving_pins(&policy, before.stored.as_ref(), incoming_denied)
+    };
     match expected {
-        None => store::set(computer_id, &policy)?,
+        None => store::set_stored(computer_id, stored)?,
         Some(expected) => {
             if &before.held.policy != expected {
                 return Err(store::CHANGED.to_owned());
             }
-            let mut stored = Stored::approved(&policy);
-            stored.incoming_denied = before
-                .stored
-                .as_ref()
-                .is_some_and(|stored| stored.incoming_denied);
             store::replace_if(computer_id, before.stored.as_ref(), stored)?;
         }
     }

@@ -371,7 +371,7 @@ export interface ApplicationActions {
   /** A computer's network policy: its mode and hosts, what Silo adds, and whether a change applies now or at the next start. Computers of this device only. */
   readNetworkPolicy?: (computer: string) => Promise<NetworkPolicyState>
   /** Saves a policy. `expected` is the one the person was looking at; the engine saves nothing if it has changed since. */
-  saveNetworkPolicy?: (computer: string, policy: NetworkPolicy, expected?: NetworkPolicy) => Promise<NetworkPolicyState>
+  saveNetworkPolicy?: (computer: string, policy: NetworkPolicy, expected?: NetworkPolicy, options?: { acceptPresets?: boolean }) => Promise<NetworkPolicyState>
   /** Whether the agent inside a computer can use Silo's tools, and when a change takes effect. Computers of this device only. */
   readComputerTools?: (computer: string) => Promise<ComputerTools>
   /** Turns Silo's tools on or off for a computer. */

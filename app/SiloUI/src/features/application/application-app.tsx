@@ -200,7 +200,8 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
   const [openApproval, setOpenApproval] = useState<{ id: string; token: number }>()
   useBackendNotices((notice) => {
     navigation.selectTab("changes")
-    if (notice.key.startsWith("approval:")) setOpenApproval({ id: notice.key.slice("approval:".length), token: nextRequestToken() })
+    const id = notice.key.startsWith("approval:") ? notice.key.slice("approval:".length) : undefined
+    if (id) setOpenApproval({ id, token: nextRequestToken() })
   })
   // An approval answered elsewhere, or gone, no longer needs its toast.
   const waitingIds = pending.waiting.flatMap(row => row.kind === "approval" ? [row.approval.id] : []).join("\n")

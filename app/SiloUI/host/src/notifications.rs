@@ -85,7 +85,7 @@ impl Notice {
     /// `desktop/use-main-route.ts`.
     pub fn route(&self) -> Value {
         if self.category == Category::Approvals {
-            return match self.key.strip_prefix("approval:") {
+            return match self.key.strip_prefix("approval:").filter(|id| !id.is_empty()) {
                 Some(id) => serde_json::json!({"tab": "changes", "approval": id}),
                 None => serde_json::json!({"tab": "changes"}),
             };
@@ -654,6 +654,8 @@ mod tests {
             json!({"tab": "changes", "approval": "ap-1"})
         );
         notice.key = "other".into();
+        assert_eq!(notice.route(), json!({"tab": "changes"}));
+        notice.key = "approval:".into();
         assert_eq!(notice.route(), json!({"tab": "changes"}));
     }
     #[test]
