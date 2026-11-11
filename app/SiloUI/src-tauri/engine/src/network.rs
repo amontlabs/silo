@@ -1129,6 +1129,14 @@ mod tests {
             conflict,
             "This local port is already in use. Choose another or use Automatic."
         );
+        let published = control_reply(
+            "{\"ok\":false,\"error\":\"failed to publish tcp port 127.0.0.1:8080: Address already in use (os error 48)\"}\n",
+        )
+        .unwrap_err();
+        assert_eq!(
+            published,
+            "This local port is already in use. Choose another or use Automatic."
+        );
         let unknown = control_reply("{\"ok\":false,\"error\":\"private runtime diagnostics\"}\n")
             .unwrap_err();
         assert!(!unknown.contains("private runtime diagnostics"));
