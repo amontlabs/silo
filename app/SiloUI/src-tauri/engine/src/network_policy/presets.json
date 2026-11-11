@@ -1,38 +1,81 @@
 {
-  "version": 1,
+  "version": 2,
   "presets": [
     {
       "name": "npm",
       "title": "npm registry",
-      "hosts": ["registry.npmjs.org", "registry.yarnpkg.com"]
+      "version": 1,
+      "hosts": [
+        "registry.npmjs.org",
+        "registry.yarnpkg.com"
+      ],
+      "history": []
     },
     {
       "name": "pypi",
       "title": "Python Package Index",
-      "hosts": ["pypi.org", "files.pythonhosted.org"]
+      "version": 1,
+      "hosts": [
+        "pypi.org",
+        "files.pythonhosted.org"
+      ],
+      "history": []
     },
     {
       "name": "crates",
       "title": "crates.io",
-      "hosts": ["crates.io", "index.crates.io", "static.crates.io"]
+      "version": 1,
+      "hosts": [
+        "crates.io",
+        "index.crates.io",
+        "static.crates.io"
+      ],
+      "history": []
     },
     {
       "name": "ubuntu",
       "title": "Ubuntu archives",
+      "version": 1,
       "hosts": [
-        { "host": "*.archive.ubuntu.com", "ports": [80, 443] },
-        { "host": "security.ubuntu.com", "ports": [80, 443] },
-        { "host": "ports.ubuntu.com", "ports": [80, 443] }
-      ]
+        {
+          "host": "*.archive.ubuntu.com",
+          "ports": [
+            80,
+            443
+          ]
+        },
+        {
+          "host": "security.ubuntu.com",
+          "ports": [
+            80,
+            443
+          ]
+        },
+        {
+          "host": "ports.ubuntu.com",
+          "ports": [
+            80,
+            443
+          ]
+        }
+      ],
+      "history": []
     },
     {
       "name": "homebrew",
       "title": "Homebrew",
-      "hosts": ["formulae.brew.sh", "ghcr.io", "pkg-containers.githubusercontent.com"]
+      "version": 1,
+      "hosts": [
+        "formulae.brew.sh",
+        "ghcr.io",
+        "pkg-containers.githubusercontent.com"
+      ],
+      "history": []
     },
     {
       "name": "github",
       "title": "GitHub",
+      "version": 1,
       "hosts": [
         "github.com",
         "api.github.com",
@@ -41,17 +84,30 @@
         "raw.githubusercontent.com",
         "objects.githubusercontent.com",
         "release-assets.githubusercontent.com"
-      ]
+      ],
+      "history": []
     },
     {
       "name": "anthropic",
       "title": "Anthropic API and sign-in",
-      "hosts": ["api.anthropic.com", "console.anthropic.com", "claude.ai"]
+      "version": 1,
+      "hosts": [
+        "api.anthropic.com",
+        "console.anthropic.com",
+        "claude.ai"
+      ],
+      "history": []
     },
     {
       "name": "openai",
       "title": "OpenAI API and sign-in",
-      "hosts": ["api.openai.com", "auth.openai.com", "chatgpt.com"]
+      "version": 1,
+      "hosts": [
+        "api.openai.com",
+        "auth.openai.com",
+        "chatgpt.com"
+      ],
+      "history": []
     }
   ]
 }

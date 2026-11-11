@@ -1231,7 +1231,14 @@ async fn begin_create(
                 silo_engine::network_policy::store::set(configuration.id(), policy)
                     .map_err(DispatchError::internal)?;
             }
-            let job = accept_linux_setup_job(context, "computers.create", &request_id)?;
+            let job = match accept_linux_setup_job(context, "computers.create", &request_id) {
+                Ok(job) => job,
+                Err(refused) => {
+                    // A refused creation leaves no policy behind for an id nothing uses.
+                    let _ = silo_engine::network_policy::store::remove(configuration.id());
+                    return Err(refused);
+                }
+            };
             // A new computer has Silo's tools, so its creation passes the channel's rule too.
             tools_for_new_computer(context, configuration.id());
             // Only an accepted creation remembers its agents; the job has not started yet.
@@ -1272,6 +1279,7 @@ async fn begin_create(
             let (row, job_id) = silo_engine::macos_computers::create_macos_computer_accepting(
                 host.macos_context(),
                 request,
+                network_policy,
                 move || {
                     silo_engine::jobs::allocate(engine.as_ref(), "computers.create")
                         .map(|accepted| accepted.job_id)
@@ -1283,12 +1291,6 @@ async fn begin_create(
             let value = with_kind(json!({"computers": [encode(row)?]}), "macos");
             if let Some(id) = value["computers"][0]["id"].as_str() {
                 tools_for_new_computer(context, id);
-            }
-            if let (Some(policy), Some(id)) =
-                (&network_policy, value["computers"][0]["id"].as_str())
-            {
-                silo_engine::network_policy::store::set(id, policy)
-                    .map_err(DispatchError::internal)?;
             }
             let computer = serde_json::from_value(value["computers"][0].clone())
                 .map_err(|error| DispatchError::internal(error.to_string()))?;

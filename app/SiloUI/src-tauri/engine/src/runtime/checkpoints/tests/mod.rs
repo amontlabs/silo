@@ -5886,6 +5886,160 @@ fn a_fork_starts_on_a_closed_network_only_when_asked_to() {
 }
 
 #[test]
+fn a_fork_has_its_own_channel_port_and_the_closed_copy_of_an_export_has_none() {
+    use crate::network_policy::{extra_rules, plan_for, ExtraRule, Rule};
+    let _test_state = crate::test_support::global_state();
+    let store_directory = tempfile::tempdir().unwrap();
+    crate::network_policy::store::use_test_path(Some(
+        store_directory.path().join("network-policy.json"),
+    ));
+    crate::guest_client::tokens::use_test_directory(Some(
+        store_directory.path().join("guest-client"),
+    ));
+    let tokens = crate::guest_client::TokenStore::current().unwrap();
+    crate::guest_client::turn_on(ID).unwrap();
+    let source_port = tokens.port_of(ID).unwrap();
+
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, fork) = fork_fixture(&directory);
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    let (child, _) = fork_child(&paths);
+    let child_port = tokens.port_of(&child).unwrap();
+    assert_ne!(child_port, source_port);
+    assert_eq!(extra_rules(&child), vec![ExtraRule::GatewayPort(child_port)]);
+    let plan = plan_for(&child, "branch", None).unwrap();
+    assert!(plan.rules.contains(&Rule::GatewayPort(child_port)));
+    assert!(!plan.rules.contains(&Rule::GatewayPort(source_port)));
+
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut closed) = fork_fixture(&directory);
+    closed.options = ForkOptions {
+        closed_network: true,
+        ..ForkOptions::default()
+    };
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &closed,
+        "branch",
+    )
+    .unwrap();
+    let (copy, _) = fork_child(&paths);
+    assert!(tokens.port_of(&copy).is_none(), "the closed copy has no channel");
+    assert!(extra_rules(&copy).is_empty());
+    let plan = plan_for(&copy, "branch", None).unwrap();
+    assert!(plan.rules.is_empty());
+    assert!(!plan.ingress_allowed);
+    crate::guest_client::tokens::use_test_directory(None);
+    crate::network_policy::store::use_test_path(None);
+}
+
+struct InspectRunner(Value);
+impl RuntimeRunner for InspectRunner {
+    fn run(
+        &self,
+        _paths: &RuntimePaths,
+        args: &[String],
+        _timeout: Duration,
+    ) -> Result<CommandOutput, RuntimeError> {
+        assert_eq!(args[0], "inspect", "{args:?}");
+        Ok(CommandOutput {
+            stdout: serde_json::json!({
+                "name": "dev",
+                "status": "Stopped",
+                "config": self.0,
+            })
+            .to_string(),
+            stderr: String::new(),
+        })
+    }
+}
+
+fn inspected_with_policy(policy: Option<Value>) -> InspectRunner {
+    let mut config = serde_json::json!({
+        "labels": {"silo.managed": "true", "silo.machine-id": ID},
+        "network": {"strict": true},
+    });
+    if let Some(policy) = policy {
+        config["network"]["policy"] = policy;
+    }
+    InspectRunner(config)
+}
+
+#[test]
+fn a_computer_with_no_saved_policy_gets_its_channel_rule_added_to_the_rules_it_was_made_with() {
+    use crate::network_policy::{plan, Grants, NetworkPolicy, Rule};
+    let _test_state = crate::test_support::global_state();
+    let store_directory = tempfile::tempdir().unwrap();
+    let file = store_directory.path().join("network-policy.json");
+    crate::network_policy::store::use_test_path(Some(file.clone()));
+    crate::guest_client::tokens::use_test_directory(Some(
+        store_directory.path().join("guest-client"),
+    ));
+    let directory = tempfile::tempdir().unwrap();
+    let paths = restore_fixture(&directory, None);
+    let configuration = computer_configuration();
+    let open = plan(&NetworkPolicy::default(), &Grants::default(), &[]);
+    let runner = inspected_with_policy(Some(open.policy_value()));
+
+    // No saved policy and no channel: the rules it was made with stay.
+    assert!(!network_policy_changed(&runner, &paths, &configuration).unwrap());
+    ensure_network_rules_current(&runner, &paths, &configuration).unwrap();
+
+    // With a channel the rule is added to the recorded rules, not to an assumed open policy.
+    crate::guest_client::turn_on(ID).unwrap();
+    let port = crate::guest_client::TokenStore::current().unwrap().port_of(ID).unwrap();
+    let (planned, _) = changed_network_plan(&runner, &paths, &configuration)
+        .unwrap()
+        .unwrap();
+    assert_eq!(planned.rules, vec![Rule::Dns, Rule::GatewayPort(port), Rule::Public]);
+    let refused = ensure_network_rules_current(&runner, &paths, &configuration).unwrap_err();
+    assert!(refused.to_string().contains("was not started"), "{refused}");
+    let closed = inspected_with_policy(Some(serde_json::json!({
+        "default_egress": "deny",
+        "default_ingress": "deny",
+        "rules": []
+    })));
+    let (planned, _) = changed_network_plan(&closed, &paths, &configuration)
+        .unwrap()
+        .unwrap();
+    assert_eq!(planned.rules, vec![Rule::GatewayPort(port)]);
+    assert!(!planned.ingress_allowed);
+
+    // Once the runtime holds the channel rule there is nothing to change.
+    let current = inspected_with_policy(Some(planned_value(&open, port)));
+    ensure_network_rules_current(&current, &paths, &configuration).unwrap();
+
+    // When the recorded rules cannot be read, nothing is guessed.
+    let mut record = load(&paths, ID).unwrap();
+    record.desired_network_policy = None;
+    save(&paths, ID, &record).unwrap();
+    let unknown = inspected_with_policy(None);
+    let refused = changed_network_plan(&unknown, &paths, &configuration).unwrap_err();
+    assert!(refused.to_string().contains("cannot read"), "{refused}");
+
+    // A saved policy that cannot be read is an error whatever else is known.
+    std::fs::write(&file, "{ not json").unwrap();
+    assert!(ensure_network_rules_current(&current, &paths, &configuration).is_err());
+    crate::guest_client::tokens::use_test_directory(None);
+    crate::network_policy::store::use_test_path(None);
+}
+
+fn planned_value(open: &crate::network_policy::Plan, port: u16) -> Value {
+    let mut plan = open.clone();
+    plan.rules.insert(1, crate::network_policy::Rule::GatewayPort(port));
+    plan.policy_value()
+}
+
+#[test]
 fn a_fork_records_what_it_was_quieted_with() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
@@ -6806,4 +6960,77 @@ fn an_imported_container_starts_from_the_deny_all_policy_like_a_virtual_machine(
         }
         assert!(!restore.iter().any(|arg| arg == "--net-rule"), "{restore:?}");
     }
+}
+
+#[test]
+fn an_import_saves_a_closed_policy_and_a_start_does_not_run_on_an_unreadable_one() {
+    let _test_state = crate::test_support::global_state();
+    struct Probe(Mutex<Vec<Vec<String>>>);
+    impl RuntimeRunner for Probe {
+        fn run(
+            &self,
+            _paths: &RuntimePaths,
+            args: &[String],
+            _timeout: Duration,
+        ) -> Result<CommandOutput, RuntimeError> {
+            self.0.lock().unwrap().push(args.to_vec());
+            let stdout = match args.first().map(String::as_str) {
+                Some("snapshot") => serde_json::json!([{
+                    "group":"silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9",
+                    "name":"silo-backup-0-330418-1790360984903",
+                    "scope":"disk", "availability":"ready"
+                }])
+                .to_string(),
+                Some("list") => "[]".into(),
+                _ => panic!("unexpected command: {args:?}"),
+            };
+            Ok(CommandOutput {
+                stdout,
+                stderr: String::new(),
+            })
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let file = directory.path().join("network-policy.json");
+    crate::network_policy::store::use_test_path(Some(file.clone()));
+    // A policy left over from a computer of this id is replaced by an explicit closed one.
+    crate::network_policy::store::set(
+        ID,
+        &crate::network_policy::NetworkPolicy::default(),
+    )
+    .unwrap();
+    crate::guest_client::tokens::use_test_directory(Some(directory.path().join("guest-client")));
+    // Silo's tools left over from a computer of this id are turned off by the import.
+    crate::guest_client::turn_on(ID).unwrap();
+    import_pending_restore(
+        &paths,
+        ID,
+        "silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9",
+        "silo-backup-0-330418-1790360984903",
+    )
+    .unwrap();
+    let stored = crate::network_policy::store::get_stored(ID).unwrap().unwrap();
+    assert_eq!(stored.mode, crate::network_policy::NetworkPolicyMode::Closed);
+    assert!(stored.incoming_denied);
+    assert!(crate::network_policy::extra_rules(ID).is_empty());
+    assert!(crate::guest_client::TokenStore::current()
+        .unwrap()
+        .port_of(ID)
+        .is_none());
+    // With the saved policies unreadable the start refuses before it asks the runtime for
+    // anything that changes it.
+    std::fs::write(&file, "{ not json").unwrap();
+    let runner = Probe(Mutex::new(Vec::new()));
+    let refused = start_pending(&runner, &paths, &computer_configuration()).unwrap_err();
+    assert!(refused.to_string().contains("unreadable"), "{refused}");
+    assert!(runner
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|args| args[0] != "restore" && args[0] != "remove"));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
+    crate::guest_client::tokens::use_test_directory(None);
+    crate::network_policy::store::use_test_path(None);
 }

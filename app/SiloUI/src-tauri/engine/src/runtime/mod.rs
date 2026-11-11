@@ -6667,7 +6667,11 @@ fn create_computer_with_progress(
     if runtime.is_some() {
         args.push("--net-strict=true".into());
     } else {
-        args.extend(crate::network_policy::plan_for(id, name, None).create_args());
+        args.extend(
+            crate::network_policy::plan_for(id, name, None)
+                .map_err(RuntimeError::Unavailable)?
+                .create_args(),
+        );
     }
     args.extend(["--env".into(), "GH_TOKEN=$MSB_SILO_GITHUB".into()]);
     args.extend([
@@ -12501,6 +12505,34 @@ exit 9
         assert!(crate::computer_use::settings(&paths, configuration.id())
             .last
             .is_none());
+    }
+
+    #[test]
+    fn a_computer_is_not_created_while_the_saved_network_policies_cannot_be_read() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let file = directory.path().join("network-policy.json");
+        std::fs::write(&file, "{ not json").unwrap();
+        crate::network_policy::store::use_test_path(Some(file.clone()));
+        let runner = StubRunner::successful_json(vec![
+            json!([]),
+            json!(1),
+            json!(1),
+            json!(1),
+            json!(1),
+            json!(1),
+        ]);
+        let refused = create_computer(&runner, &paths, &built_in_computer()).unwrap_err();
+        assert!(refused.to_string().contains("unreadable"), "{refused}");
+        assert!(!runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call.iter().any(|argument| argument == "create")));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
+        crate::network_policy::store::use_test_path(None);
     }
 
     #[test]

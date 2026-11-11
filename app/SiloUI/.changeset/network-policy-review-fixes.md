@@ -1,0 +1,5 @@
+---
+"silo-ui": patch
+---
+
+Network policies are stricter about what they cannot tell. A computer whose saved policy is missing is read from the rules it actually runs with (an imported computer is closed, and now has a closed policy saved), and if the saved policies cannot be read at all, a computer does not start and is not created instead of running open. A macOS computer's policy is saved before it is created. When an update of Silo adds hosts to a preset, computers keep the hosts they were approved with and the policy shows the update for you to accept; setting the policy again with the same presets accepts it. A `*.` pattern over a public suffix such as `*.co.uk` is refused, and a secret's wildcard over one is not added to a computer's list of allowed hosts. When an agent adds a secret, the request now says its hosts also become reachable from computers with a list. An agent that narrows its network can no longer undo a change you made in between. The threat model now says plainly that name lookups reach the internet in open and list modes, and what a list computer lets through without a TLS name.

@@ -82,7 +82,7 @@ fn main() -> Caller {
     Caller::Computer { id: "main".into() }
 }
 
-fn set(world: &World, computer: &str, policy: &NetworkPolicy) -> Decision {
+fn set(world: &dyn super::World, computer: &str, policy: &NetworkPolicy) -> Decision {
     decide(
         &main(),
         MethodName::NetworkPolicySet,
@@ -306,4 +306,154 @@ fn a_network_request_runs_the_checked_policy_and_names_the_computer_plainly() {
     assert!(summary.contains("“evil"), "{summary}");
     assert!(!summary.contains('\u{202e}'), "{summary}");
     assert_eq!(params["policy"]["hosts"], json!(["a.example.com", "b.example.com"]));
+}
+
+/// A world whose computers are judged the way the service reads them: from the saved policy
+/// and the runtime's rules.
+struct Served {
+    held: HashMap<&'static str, Held>,
+}
+
+impl super::World for Served {
+    fn made(&self, creator: &str) -> HashSet<String> {
+        match creator {
+            "main" => HashSet::from(["fork-1".to_owned()]),
+            _ => HashSet::new(),
+        }
+    }
+    fn parent(&self, computer: &str) -> Option<String> {
+        (computer == "fork-1").then(|| "main".to_owned())
+    }
+    fn name(&self, computer: &str) -> Option<String> {
+        Some(computer.to_owned())
+    }
+    fn owns_job(&self, _: &str, _: &str) -> bool {
+        false
+    }
+    fn request_fork(&self, _: &str) -> Option<String> {
+        None
+    }
+    fn request_target(&self, _: &str) -> Option<String> {
+        None
+    }
+    fn access(&self, _: &str) -> Access {
+        Access::default()
+    }
+    fn github_policies(&self) -> Option<Vec<Value>> {
+        Some(Vec::new())
+    }
+    fn new_id(&self) -> String {
+        "fresh-id".into()
+    }
+    fn resources(&self, _: &str) -> Option<Resources> {
+        Resources::of_linux(&json!({"cpus": 2, "maxCPUs": 4, "memoryGiB": 4,
+            "maxMemoryGiB": 8, "workspaceStorageGiB": 20, "runtimeStorageGiB": 10}))
+    }
+    fn ssh_settings(&self, _: &str) -> Option<(u16, String)> {
+        None
+    }
+    fn network_held(&self, computer: &str) -> Option<Held> {
+        self.held.get(computer).cloned()
+    }
+}
+
+fn view(network: Value) -> crate::runtime::checkpoints::NetworkPolicyView {
+    crate::runtime::checkpoints::NetworkPolicyView {
+        name: "main".into(),
+        container: false,
+        running: true,
+        pending: false,
+        network: Some(network),
+        recorded: None,
+    }
+}
+
+#[test]
+fn an_imported_computer_cannot_open_itself_or_hand_an_open_policy_to_a_fork() {
+    let directory = tempfile::tempdir().unwrap();
+    crate::network_policy::store::use_test_path(Some(directory.path().join("network-policy.json")));
+    let deny_all = json!({"default_egress": "deny", "default_ingress": "deny", "rules": []});
+    let github_default: Value =
+        serde_json::from_str(include_str!("../../../guest/github-network-default.json")).unwrap();
+    // The import ran closed on deny-all rules; however its entry got lost, it is judged closed.
+    let judged = |stored, network: &Value| {
+        crate::network_policy::service::judged_from_view("main", stored, view(network.clone()))
+    };
+    let imported = judged(None, &json!({"policy": deny_all}));
+    assert_eq!(imported.policy.mode, NetworkPolicyMode::Closed);
+    let world = Served {
+        held: HashMap::from([("main", imported.clone()), ("fork-1", imported.clone())]),
+    };
+    let summary = asked(set(&world, "main", &mode(NetworkPolicyMode::Open)));
+    assert!(summary.contains("open (any public address)"), "{summary}");
+    // A fork it makes without asking for a policy gets the closed one.
+    let params = allowed_params(decide(
+        &main(),
+        MethodName::CheckpointsFork,
+        &json!({"computerId": "main", "newName": "copy"}),
+        &world,
+    ));
+    assert_eq!(params["networkPolicy"]["mode"], "closed");
+    // An older computer with the open rules and no entry is still judged open.
+    let older = judged(None, &github_default);
+    assert_eq!(older.policy.mode, NetworkPolicyMode::Open);
+    let world = Served {
+        held: HashMap::from([("main", older.clone()), ("fork-1", older)]),
+    };
+    assert!(matches!(
+        set(&world, "main", &mode(NetworkPolicyMode::Open)),
+        Decision::Allow(_)
+    ));
+    // A computer whose policy cannot be read asks.
+    let world = Served { held: HashMap::new() };
+    assert!(matches!(
+        set(&world, "main", &mode(NetworkPolicyMode::Closed)),
+        Decision::Ask { .. }
+    ));
+    crate::network_policy::store::use_test_path(None);
+}
+
+#[test]
+fn a_free_narrowing_carries_the_policy_it_was_judged_against() {
+    let wide = allowlist(&["a.example.com", "b.example.com"]);
+    let world = World::with(wide.clone(), allowlist(&[]));
+    let params = allowed_params(set(&world, "main", &allowlist(&["a.example.com"])));
+    assert_eq!(params["expected"], json!(wide));
+    // A request the owner approves is exactly what was asked and carries no expectation.
+    let Decision::Ask { params, .. } = set(&world, "main", &mode(NetworkPolicyMode::Open)) else {
+        panic!("widening asks");
+    };
+    assert!(params.as_ref().and_then(|params| params.get("expected")).is_none());
+}
+
+#[test]
+fn a_preset_update_is_wider_for_a_computer_that_has_not_accepted_it() {
+    use crate::network_policy::{use_test_presets, Allowed, Pins, Preset};
+    let at = |host: &str| Allowed {
+        host: host.to_owned(),
+        port: 443,
+    };
+    use_test_presets(Some(vec![Preset {
+        name: "tools".into(),
+        title: "Tools".into(),
+        version: 2,
+        hosts: vec![at("a.example.com"), at("b.example.com")],
+        history: vec![(1, vec![at("a.example.com")])],
+    }]));
+    let policy = NetworkPolicy {
+        mode: NetworkPolicyMode::Allowlist,
+        hosts: Vec::new(),
+        presets: vec!["tools".into()],
+    };
+    let approved_at_one = Held {
+        policy: policy.clone(),
+        pins: Pins::new(),
+    };
+    let world = Served {
+        held: HashMap::from([("main", approved_at_one.clone()), ("fork-1", approved_at_one)]),
+    };
+    // Setting the same presets would take the update, so it asks and names the new host.
+    let summary = asked(set(&world, "main", &policy));
+    assert!(summary.contains("b.example.com") && !summary.contains("a.example.com"), "{summary}");
+    use_test_presets(None);
 }

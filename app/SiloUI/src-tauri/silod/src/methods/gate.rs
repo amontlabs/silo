@@ -200,7 +200,7 @@ pub(crate) fn settle_creation(
 
 /// A computer's name, when it exists.
 pub(crate) async fn computer_name(context: &HandlerContext, id: &str) -> Option<String> {
-    let world = EngineWorld::load(context, MethodName::ComputersAccess).await;
+    let world = EngineWorld::load(context, MethodName::ComputersAccess, None).await;
     policy::World::name(&world, id)
 }
 
@@ -280,7 +280,7 @@ pub(crate) async fn judge(
     method: MethodName,
     params: &Value,
 ) -> Option<(Decision, BTreeSet<String>)> {
-    let world = EngineWorld::load(context, method).await;
+    let world = EngineWorld::load(context, method, Some((computer, params))).await;
     policy::World::name(&world, computer)?;
     let caller = Caller::Computer {
         id: computer.to_owned(),
@@ -300,7 +300,7 @@ pub(crate) async fn admit(
     let target = policy::target_computer(params);
     let (decision, visible, name) = match &caller {
         Caller::Computer { id } => {
-            let world = EngineWorld::load(context, method).await;
+            let world = EngineWorld::load(context, method, Some((id, params))).await;
             let mut visible: BTreeSet<String> =
                 policy::World::made(&world, id).into_iter().collect();
             visible.insert(id.clone());
@@ -548,10 +548,17 @@ struct EngineWorld {
     ssh: HashMap<String, (u16, String)>,
     /// The saved SSH public keys of each computer, read with the above.
     ssh_keys: HashMap<String, Vec<String>>,
+    /// The network policy of the caller and of every computer the call names, read only for a
+    /// call that compares network policies. A computer whose policy could not be read is absent.
+    network: HashMap<String, silo_engine::network_policy::Held>,
 }
 
 impl EngineWorld {
-    async fn load(context: &HandlerContext, method: MethodName) -> Self {
+    async fn load(
+        context: &HandlerContext,
+        method: MethodName,
+        call: Option<(&str, &Value)>,
+    ) -> Self {
         let internal = HandlerContext::for_owner_bridge(
             context.engine.clone(),
             RequestContext::owner("policy"),
@@ -656,6 +663,30 @@ impl EngineWorld {
                 }
             }
         }
+        let mut network = HashMap::new();
+        if let (true, Some((caller, params))) = (compares_networks(method), call) {
+            let mut ids = vec![caller.to_owned()];
+            ids.extend(
+                params
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|object| object.values())
+                    .filter_map(Value::as_str)
+                    .filter(|value| names.contains_key(*value))
+                    .map(str::to_owned),
+            );
+            ids.sort();
+            ids.dedup();
+            network = tokio::task::spawn_blocking(move || {
+                ids.into_iter()
+                    .filter_map(|id| {
+                        super::access::judged_network_policy(&id).map(|held| (id, held))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .await
+            .unwrap_or_default();
+        }
         let app_data = app_data(context);
         let engine = context.engine.clone();
         let settled = {
@@ -684,8 +715,17 @@ impl EngineWorld {
             resources,
             ssh,
             ssh_keys,
+            network,
         }
     }
+}
+
+/// Whether a call's decision compares network policies.
+fn compares_networks(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::ComputersCreate | MethodName::CheckpointsFork | MethodName::NetworkPolicySet
+    )
 }
 
 fn job_state(engine: &dyn EngineContext, job: &str) -> JobState {
@@ -765,6 +805,9 @@ impl policy::World for EngineWorld {
     }
     fn ssh_keys(&self, computer: &str) -> Vec<String> {
         self.ssh_keys.get(computer).cloned().unwrap_or_default()
+    }
+    fn network_held(&self, computer: &str) -> Option<silo_engine::network_policy::Held> {
+        self.network.get(computer).cloned()
     }
     fn access(&self, computer: &str) -> Access {
         self.names

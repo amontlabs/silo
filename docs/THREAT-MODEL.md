@@ -120,10 +120,23 @@ the computer ([`network_policy/`](../app/SiloUI/src-tauri/engine/src/network_pol
 | `closed` | Silo's own rules only | nothing outbound, and no name lookups. A container's blocked state is the same mode. |
 
 Host patterns are lowercase DNS names of at least two labels, or `*.` and such a name (which also
-covers the name itself); addresses, ports, bare top-level names and names that stay on the device
-are refused. Presets (npm, PyPI, crates.io, Ubuntu, Homebrew, GitHub, Anthropic, OpenAI) expand to
-host lists from one data file in the engine. The policy follows the computer: a checkpoint restore
-and a fork keep it, an export drops it, an import starts closed, and a computer from before the
+covers the name itself); addresses, ports, bare top-level names, names that stay on the device and
+a `*.` pattern over a public suffix (`*.co.uk`, `*.github.io`) are refused. The suffixes come from
+a small fixed list kept next to the presets
+([`public_suffixes.json`](../app/SiloUI/src-tauri/engine/src/network_policy/public_suffixes.json));
+it holds the common multi-label suffixes and shared-hosting names, not the full public suffix
+list, so a wildcard over a suffix that is not on it is accepted. Presets (npm, PyPI, crates.io,
+Ubuntu, Homebrew, GitHub, Anthropic, OpenAI) expand to host lists from one data file in the engine.
+Each preset has a version and a policy stores the version it was approved at: when an update of
+Silo adds hosts to a preset, a computer keeps the list it was approved with until you accept the
+update (`network.policy.get` lists it as a preset update; setting the policy again with the same
+presets accepts it). The data file keeps the list of every earlier version of a preset for as long
+as a saved policy may name it; a version Silo does not know allows nothing. A policy is read from
+one file; when it cannot be read (damaged, or written by a newer Silo) a computer does not start,
+is not created, and its gateway gets no way out, and the file is left alone. A computer with no
+saved policy is judged and run by the rules its runtime holds (deny-all rules are closed), never
+as open by default; an import saves an explicit closed policy. The policy follows the computer: a
+checkpoint restore and a fork keep it, an export drops it, an import starts closed, and a computer from before the
 policy loads as open. A computer's agent may read its own policy and those of computers it made,
 may narrow either freely, and asks you to widen one (see [the policy page](SiloUI-POLICY.md)); a
 computer it makes gets its own policy or a narrower one.
@@ -139,16 +152,25 @@ What it does **not** stop, and why you should still treat the computer as hostil
 - **Sending data to an allowed host.** A gist, an issue, a package upload or an API call to a host
   on the list carries whatever the agent can read. The list limits where data can go, not what is
   sent. A GitHub grant adds GitHub's hosts, which include places the agent can publish to.
-- **Names resolve for hosts that are not on the list.** The gateway's resolver answers any name,
-  so a name outside the list still resolves and the query name itself is a narrow channel to the
-  Mac's resolver. A closed computer has no lookups at all.
+- **A name lookup reaches the internet, so DNS is a way to send data out.** In open and allowlist
+  modes the gateway's resolver answers any name by asking that name's authoritative server on the
+  internet. A guest can therefore put data in the name it looks up (a long label under a domain
+  whose server it or an attacker runs) and it arrives, whatever the list says. This is a usable
+  channel, not a narrow one. A closed computer has no lookups at all.
 - **With `strict` off, a host that shares an address with an allowed host may be reachable.**
   Hostname rules for hosts that no secret covers work only while the runtime's strict mode is off
   (under strict, a TLS connection the runtime does not intercept is refused when only a hostname
   rule admitted it, so allowed hosts would fail). An allowlist computer therefore runs with strict
   off. The connection is still checked against the name in the TLS request, but a service that
   answers on an allowed host's address for another name, or a name that resolves to the same
-  address, is not distinguished by address alone. Open and closed computers run with strict on.
+  address, is not distinguished by address alone. With strict off, traffic that carries no TLS
+  server name (raw TCP, or TLS without one) is admitted to an address the resolver's cache ties to
+  an allowed name, so an agent that can make an allowed name resolve to an address it controls
+  can open any TCP stream to it. Open and closed computers run with strict on.
+- **A secret's hosts are allowed hosts too.** The hosts a secret may be sent to (wildcards
+  included, unless over a public suffix) are added to the list of each computer it is assigned to,
+  and the approval for an agent adding a secret says so. A GitHub grant likewise adds GitHub's
+  hosts at the version of Silo that is running.
 - **The macOS gateway and containers** apply the same rules through their gateway's start-up
   request and take them when the gateway starts, so a running computer keeps its rules until it
   restarts; the answer to a change says when it applies. A Linux virtual machine changes by being
