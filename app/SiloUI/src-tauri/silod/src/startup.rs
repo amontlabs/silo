@@ -234,7 +234,7 @@ fn start_keep_recovery(context: Arc<SilodContext>) {
             Err(error) => eprintln!("silod: could not start the keep recovery: {error}"),
         }
     }
-    started += start_promote_recovery(context, host.clone(), &held_tx);
+    started += start_promote_recovery(context.clone(), host.clone(), &held_tx);
     started += start_rebuild_recovery(context, host, &held_tx);
     drop(held_tx);
     // Startup goes on once every computer is held, or after a short wait when it cannot be.
