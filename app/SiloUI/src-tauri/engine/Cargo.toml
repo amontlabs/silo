@@ -24,8 +24,8 @@ tokio = { version = "1", features = ["full"] }
 base64 = "0.23"
 libc = "0.2"
 rustix = { version = "1.1.4", default-features = false, features = ["fs", "std"] }
-microsandbox-image = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-image" }
-microsandbox-utils = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-utils" }
+microsandbox-image = { git = "https://github.com/superradcompany/microsandbox", rev = "f9ae8e23df767929d513348b3543210322a9723f", package = "microsandbox-image" }
+microsandbox-utils = { git = "https://github.com/superradcompany/microsandbox", rev = "f9ae8e23df767929d513348b3543210322a9723f", package = "microsandbox-utils" }
 oci-spec = { version = "0.10", default-features = false, features = ["runtime"] }
 sha2 = "0.10"
 zeroize = "1"
