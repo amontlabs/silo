@@ -1337,6 +1337,29 @@ mod tests {
         assert!(script.trim_end().ends_with("exit $fails"));
     }
 
+    /// Starts a copy of `cat` under the given name and returns once it has echoed a byte,
+    /// so the process is known to be running under that name. A copied system binary
+    /// keeps an invalid signature and is killed at launch until it is signed again.
+    fn spawn_running_copy_of_cat(path: &std::path::Path) -> std::process::Child {
+        use std::io::{Read, Write};
+        fs::copy("/bin/cat", path).unwrap();
+        let signed = std::process::Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-"])
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(signed.status.success(), "{signed:?}");
+        let mut child = std::process::Command::new(path)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.as_mut().unwrap().write_all(b"x").unwrap();
+        let mut echoed = [0u8; 1];
+        child.stdout.as_mut().unwrap().read_exact(&mut echoed).unwrap();
+        child
+    }
+
     fn matching_pids(name: &str) -> Vec<u32> {
         let script = format!("{PROCESS_FUNCTIONS}\npids_of {}\n", shell_quote(name));
         let output = std::process::Command::new("/bin/sh")
@@ -1356,8 +1379,7 @@ mod tests {
     fn processes_match_by_exact_name_not_by_prefix_or_pattern() {
         let dir = tempfile::tempdir().unwrap();
         let long = dir.path().join("silo-quiet-test-long-process-name");
-        fs::copy("/bin/sleep", &long).unwrap();
-        let mut child = std::process::Command::new(&long).arg("30").spawn().unwrap();
+        let mut child = spawn_running_copy_of_cat(&long);
         let pid = child.id();
         // The kernel's process name is cut at 16 characters; a name must match whole.
         let found = matching_pids("silo-quiet-test-long-process-name");
@@ -1375,8 +1397,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let name = "silo-quiet-test-stop-me";
         let path = dir.path().join(name);
-        fs::copy("/bin/sleep", &path).unwrap();
-        let mut child = std::process::Command::new(&path).arg("60").spawn().unwrap();
+        let mut child = spawn_running_copy_of_cat(&path);
         let script = format!(
             "{PROCESS_FUNCTIONS}\nstop_process {} && echo stopped\n",
             shell_quote(name)

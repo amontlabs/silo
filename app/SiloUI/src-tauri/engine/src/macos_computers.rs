@@ -10099,9 +10099,45 @@ mod tests {
         assert_eq!(names, ["operations.job.finished"]);
     }
 
+    /// Empties the process-wide job maps, which job ids like `job:1` repeat across
+    /// tests, and again when dropped so no entry outlives its test.
+    struct ClearedJobMaps;
+
+    impl ClearedJobMaps {
+        fn new() -> Self {
+            Self::clear();
+            Self
+        }
+
+        fn clear() {
+            MACOS_JOBS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+            MACOS_CHECKPOINT_JOBS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+            MACOS_PENDING_CHECKPOINT_JOBS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+        }
+    }
+
+    impl Drop for ClearedJobMaps {
+        fn drop(&mut self) {
+            Self::clear();
+        }
+    }
+
     #[test]
     fn checkpoint_completion_removes_both_progress_guards_under_the_publication_lock() {
         let _test_state = crate::test_support::global_state();
+        let _job_maps = ClearedJobMaps::new();
         let directory = tempfile::tempdir().unwrap();
         let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
         let app = macos_context(context.clone());
