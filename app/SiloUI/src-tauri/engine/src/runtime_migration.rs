@@ -272,13 +272,14 @@ impl Controller {
         };
         match protected_storage::upgrade(runner, paths, &names, &options) {
             Ok(report) => {
-                protected_storage::set_attention(protected_storage::attention_of(&report));
+                protected_storage::set_attention(&storage, protected_storage::attention_of(&report));
                 protected_storage::write_report(&storage, &report)
             }
             Err(message) => {
                 let message =
                     format!("{message} Its files were kept untouched. Relaunch Silo to try again.");
                 protected_storage::set_attention(
+                    &storage,
                     names.into_iter().map(|name| (name, message.clone())).collect(),
                 );
                 Err(message)
@@ -480,10 +481,16 @@ pub(crate) fn clone_protected_storage_backup_for_test(app_data: &Path, storage: 
 }
 
 #[cfg(test)]
-pub(crate) fn set_protected_storage_attention_for_test(name: &str, message: Option<&str>) {
-    let mut attention = protected_storage::attention_of(&protected_storage::Report::default());
-    attention.extend(message.map(|message| (name.to_owned(), message.to_owned())));
-    protected_storage::set_attention(attention);
+pub(crate) fn set_protected_storage_attention_for_test(
+    metadata: &Path,
+    name: &str,
+    message: Option<&str>,
+) {
+    let attention = message
+        .map(|message| (name.to_owned(), message.to_owned()))
+        .into_iter()
+        .collect();
+    protected_storage::set_attention(metadata.parent().unwrap(), attention);
 }
 
 /// The inventory in `folder`, the previous generation's, in whichever vocabulary it was

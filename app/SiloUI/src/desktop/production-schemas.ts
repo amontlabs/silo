@@ -130,6 +130,7 @@ const computerShape = z.object({
   unfinishedRestore: unfinishedRestoreShape.nullable().optional().catch(null),
   quiet: quietStateSchema.nullable().optional().catch(null),
   settling: z.boolean().optional(),
+  needsStorageUpgrade: z.boolean().optional(),
 }).passthrough().transform(computer => (computerStates as readonly string[]).includes(computer.state)
   ? { ...computer, state: computer.state as (typeof computerStates)[number] }
   : { ...computer, state: "stopped" as const, freshness: "stale" as const, attention: computer.attention ?? { level: "warning" as const, message: "This version of Silo cannot show this computer's current state. Update Silo to see it." } })

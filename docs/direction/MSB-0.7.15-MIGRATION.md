@@ -1,6 +1,6 @@
 # Moving existing computers to MicroSandbox 0.7.15 storage
 
-Status: facts verified 2026-11-11 against upstream `v0.7.15` and a throwaway 0.7.6 home; the engine step is built and unit-tested but not yet called from the launch driver.
+Status: facts verified 2026-11-11 against upstream `v0.7.15` and a throwaway 0.7.6 home; the engine step is built, unit-tested and called from the launch driver (`silod/src/startup.rs::move_to_protected_storage`). The bundled `msb` patch is still to be built (another agent).
 
 ## What upstream does (v0.7.15)
 
@@ -55,9 +55,15 @@ File `crates/cli/lib/commands/self_cmd/repair.rs`, patch name `repair-supervisor
 - Keep the other scripted refusals (running VM, `recovery_required`, `incomplete_creation`, `unavailable`). Update the test `removed_selection_and_confirmation_flags_are_rejected` so only `--select` and `--accept-selected-view` stay rejected, and add one test that the flag is refused without `--format json`.
 - The flag is the same attestation upstream asks the terminal user for; Silo's engine passes it only after step 3 and only inside the gate. It should be offered upstream as the supervising-app hook once it has a failing-first test.
 
+## Wiring (built)
+
+- `Controller::hold_for_protected_storage` (engine start, `agent.rs`) closes the computers when the migration is finished and `protected-storage.json` is missing or lists computers that need attention. `snapshot()` then reports `running` with the step's stage, so every existing gate (`ensure_ready`, `blocks_operations`) and `migration.changed` follow. The launch-pass thread runs `Controller::run_protected_storage` before `startup::install`, then opens the computers again however it ends.
+- The step probes `--silo-storage-repair-protocol` (must print `1`) before the backup; without it every repairable computer is `NeedsAttention` and nothing is changed. Repair is `msb self repair --sandbox X --format json --legacy-writers-stopped` (macOS only).
+- A computer that needs attention gets `needsStorageUpgrade: true` and an error `attention` ("Needs attention: ...") in the computers list; the UI disables Start and Restart with that text, and `start`/`restart` fail with the plain message instead of an `msb` error. Containers are not part of the step.
+- `pre_upgrade_backup.rs` treats `runtime-backup-before-protected-storage` as part of the pre-upgrade backup: measured and deleted with it (or alone when the previous generation is already gone), and a new clone restarts the 14-day window and the notice.
+
 ## Open items
 
-- Call `protected_storage::upgrade` from the launch driver (new `Controller` stage after conversion), build `Options` with `clone_backup`, pass `confirm_maintenance: cfg!(target_os = "macos")`, publish progress, write the report, and expose `NeedsAttention` computers in the computer list.
-- Teach `pre_upgrade_backup.rs` the new backup folder.
 - Real-image check once the 0.7.15 guest image is built: migrate a copy of a real 0.7.6 home (never `~/.silo`), start every computer, compare data.
 - Decide what to offer for `recovery_required` (it needs an owner choice between views; today Silo keeps the files and reports).
+- Nothing yet shows the clone's size separately, or the progress outside the migration screen (the computers list shows only the result).

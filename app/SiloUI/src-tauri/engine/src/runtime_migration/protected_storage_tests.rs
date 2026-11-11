@@ -425,7 +425,7 @@ fn the_launch_driver_holds_the_computers_moves_them_and_opens_them_again() {
     assert!(report.complete());
     assert_eq!(outcome(&report, "drv-a"), &Outcome::Repaired);
     assert_eq!(outcome(&report, "drv-b"), &Outcome::AlreadyReady);
-    assert_eq!(attention_message("drv-a"), None);
+    assert_eq!(attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-a"), None);
     // Nothing left to do at the next launch.
     assert!(!Controller::new(dir.path().to_path_buf()).hold_for_protected_storage());
 }
@@ -442,13 +442,12 @@ fn a_computer_that_cannot_be_moved_is_refused_with_its_reason_and_retried_at_the
     controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
 
     assert!(!controller.blocks_operations(), "the other computers work");
-    let message = attention_message("drv-odd").unwrap();
+    let message = attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-odd").unwrap();
     assert!(message.contains("kept untouched"), "{message}");
-    assert_eq!(attention_message("drv-ok"), None);
+    assert_eq!(attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-ok"), None);
     let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
     assert!(!report.complete());
     assert!(Controller::new(dir.path().to_path_buf()).hold_for_protected_storage());
-    set_attention(Default::default());
 }
 
 #[test]
@@ -465,11 +464,10 @@ fn a_failed_backup_repairs_nothing_and_every_pending_computer_says_so() {
         .unwrap_err();
     assert!(error.contains("Relaunch Silo"), "{error}");
     assert!(!fake.calls().iter().any(|call| call.starts_with("self repair")));
-    assert!(attention_message("drv-x").unwrap().contains("Relaunch Silo"));
+    assert!(attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-x").unwrap().contains("Relaunch Silo"));
     assert!(!controller.blocks_operations());
     assert!(!dir.path().join(BACKUP).exists());
     assert!(!dir.path().join(CONVERTED).join(MARKER).exists());
-    set_attention(Default::default());
 }
 
 #[test]

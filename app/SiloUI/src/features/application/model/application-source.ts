@@ -194,6 +194,8 @@ export interface ApplicationComputer {
   freshness: "fresh" | "stale"
   /** The native read overlapped an operation; runtime fields retain their last settled values. */
   settling?: boolean
+  /** Its storage could not be moved to the new runtime's protected layout; it cannot start. `attention` says why. */
+  needsStorageUpgrade?: boolean
   repositories: ApplicationRepository[]
   files: ApplicationFileEntry[]
   ports: ApplicationPort[]

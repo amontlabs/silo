@@ -28,6 +28,17 @@ it("offers Start and Restart, but not Open, for a crashed computer with its erro
   expect(availability.reasons.open).toBe("The computer runtime crashed. Restart it to retry.")
 })
 
+it("closes Start and Restart, with the notice as the reason, for a computer whose storage could not be moved", () => {
+  const message = "Needs attention: Its files were kept untouched. Report this problem before using the computer."
+  const availability = scenario((computer) => {
+    computer.state = "stopped"
+    computer.needsStorageUpgrade = true
+    computer.attention = { level: "error", message }
+  })
+  expect(availability).toMatchObject({ canOpen: false, canStart: false, canRestart: false })
+  expect(availability.reasons).toMatchObject({ start: message, restart: message, open: message })
+})
+
 it("keeps Stop available for a running computer with an error notice", () => {
   const availability = scenario((computer) => { computer.attention = { level: "error", message: "GitHub access could not be applied." } })
   expect(availability).toMatchObject({ canOpen: false, canStop: true, canRestart: true })

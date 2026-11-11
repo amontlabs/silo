@@ -314,7 +314,8 @@ struct Gate {
     /// The step is running (or about to): the stage the owner sees.
     running: HashMap<PathBuf, String>,
     /// Computers the step could not move, with the text shown to the owner.
-    attention: BTreeMap<String, String>,
+    /// Per storage folder, as the runtime names it (`computers.json`'s folder).
+    attention: HashMap<PathBuf, BTreeMap<String, String>>,
 }
 
 static GATE: Mutex<Option<Gate>> = Mutex::new(None);
@@ -340,13 +341,14 @@ pub(super) fn release(app_data: &Path) {
     with_gate(|gate| gate.running.remove(app_data));
 }
 
-pub(super) fn set_attention(attention: BTreeMap<String, String>) {
-    with_gate(|gate| gate.attention = attention);
+pub(super) fn set_attention(storage: &Path, attention: BTreeMap<String, String>) {
+    with_gate(|gate| gate.attention.insert(storage.to_path_buf(), attention));
 }
 
 /// Why this computer cannot start or be used until a later launch finishes moving its storage.
-pub fn attention_message(name: &str) -> Option<String> {
-    gate().as_ref()?.attention.get(name).cloned()
+/// `metadata` is the runtime's `computers.json` of the storage the computer lives in.
+pub fn attention_message(metadata: &Path, name: &str) -> Option<String> {
+    gate().as_ref()?.attention.get(metadata.parent()?)?.get(name).cloned()
 }
 
 /// What the owner sees as the stage while the step runs.

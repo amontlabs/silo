@@ -3234,9 +3234,10 @@ enum Repositories {
 /// last known reading instead of scanning a guest that is changing or unreadable.
 /// A computer whose storage could not be moved to the protected layout cannot start; its row
 /// says so, replacing any lesser notice.
-fn flag_unmoved_storage(computers: &mut [ApplicationComputer]) {
+fn flag_unmoved_storage(paths: &RuntimePaths, computers: &mut [ApplicationComputer]) {
     for computer in computers {
         if let Some(message) = crate::runtime_migration::protected_storage_attention(
+            &paths.metadata,
             computer.configuration.name(),
         ) {
             computer.needs_storage_upgrade = true;
@@ -3256,7 +3257,7 @@ fn enrich_application_state(
 ) {
     source.repository_push_operations =
         host.repository_push_operations(crate::host_push::operations());
-    flag_unmoved_storage(&mut source.computers);
+    flag_unmoved_storage(paths, &mut source.computers);
     match repositories {
         Repositories::LastKnown => keep_last_known_repositories(paths, &mut source.computers),
         Repositories::Discover { refresh } => {
@@ -6341,7 +6342,9 @@ fn computer_action_with(
         }
     }
     if matches!(action, "start" | "restart") {
-        if let Some(message) = crate::runtime_migration::protected_storage_attention(name) {
+        if let Some(message) =
+            crate::runtime_migration::protected_storage_attention(&paths.metadata, name)
+        {
             return Err(RuntimeError::Invalid(message));
         }
     }
@@ -13334,7 +13337,7 @@ exit 9
         let paths = paths(&directory);
         write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
         let reason = "Its files were kept untouched. Report this problem before using the computer.";
-        crate::runtime_migration::set_protected_storage_attention_for_test("dev", Some(reason));
+        crate::runtime_migration::set_protected_storage_attention_for_test(&paths.metadata, "dev", Some(reason));
         let runner = StubRunner::successful_json(vec![]);
 
         for action in ["start", "restart"] {
@@ -13345,15 +13348,15 @@ exit 9
         assert!(runner.calls.lock().unwrap().is_empty(), "msb is never asked");
 
         let mut computers = vec![unread_computer(computer())];
-        flag_unmoved_storage(&mut computers);
+        flag_unmoved_storage(&paths, &mut computers);
         assert!(computers[0].needs_storage_upgrade);
         let attention = computers[0].attention.as_ref().unwrap();
         assert!(matches!(attention.level, AttentionLevel::Error));
         assert_eq!(attention.message, format!("Needs attention: {reason}"));
 
-        crate::runtime_migration::set_protected_storage_attention_for_test("dev", None);
+        crate::runtime_migration::set_protected_storage_attention_for_test(&paths.metadata, "dev", None);
         let mut computers = vec![unread_computer(computer())];
-        flag_unmoved_storage(&mut computers);
+        flag_unmoved_storage(&paths, &mut computers);
         assert!(!computers[0].needs_storage_upgrade && computers[0].attention.is_none());
     }
 
