@@ -6,7 +6,7 @@
 //! The caller holds the migration gate: no other runtime command runs, no previous Silo build
 //! can start, and the computers of this storage are Silo's own. Computers that cannot be moved
 //! are reported, never removed; the original disk files are always retained.
-use super::{copy_runtime_tree_for_backup, runtime};
+use super::{copy_runtime_tree_for_backup, runtime, Disk, Flush};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -404,13 +404,39 @@ pub(super) fn upgrade(
 }
 
 /// Which computers a finished backup covers: the ones that were stopped in it.
-const COVERS: &str = "silo-backup-covers.json";
+pub(super) const COVERS: &str = "silo-backup-covers.json";
 
+/// The certificate names every covered computer and is at least as new as everything else in the
+/// backup: it is written last, so anything newer was added or changed after the copy finished.
 fn covers_all(backup: &Path, covered: &[String]) -> bool {
-    fs::read(backup.join(COVERS))
+    let listed = fs::read(backup.join(COVERS))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
-        .is_some_and(|have| covered.iter().all(|name| have.contains(name)))
+        .is_some_and(|have| covered.iter().all(|name| have.contains(name)));
+    listed && fs::metadata(backup.join(COVERS)).and_then(|meta| meta.modified()).is_ok_and(|written| !changed_after(backup, written))
+}
+
+/// Whether any entry below `root` (not the certificate itself) was modified after `moment`.
+fn changed_after(root: &Path, moment: std::time::SystemTime) -> bool {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&directory) else { return true };
+        for entry in entries {
+            let Ok(entry) = entry else { return true };
+            let path = entry.path();
+            if directory == root && entry.file_name() == COVERS {
+                continue;
+            }
+            let Ok(metadata) = fs::symlink_metadata(&path) else { return true };
+            if metadata.modified().map_or(true, |modified| modified > moment) {
+                return true;
+            }
+            if metadata.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    false
 }
 
 /// Clone `storage` to `<app_data>/BACKUP`, with `covered` stopped in it, unless an earlier run
@@ -426,6 +452,15 @@ pub(super) fn clone_backup(
     storage: &Path,
     covered: &[String],
 ) -> Result<(), String> {
+    clone_backup_with(app_data, storage, covered, &Disk)
+}
+
+pub(super) fn clone_backup_with(
+    app_data: &Path,
+    storage: &Path,
+    covered: &[String],
+    flush: &dyn Flush,
+) -> Result<(), String> {
     let backup = app_data.join(BACKUP);
     if covers_all(&backup, covered) {
         return Ok(());
@@ -435,9 +470,15 @@ pub(super) fn clone_backup(
         fs::remove_dir_all(&partial)
             .map_err(|_| "an unfinished backup could not be cleared".to_string())?;
     }
-    let made = copy_runtime_tree_for_backup(storage, &partial).and_then(|()| {
+    let made = copy_runtime_tree_for_backup(storage, &partial, flush).and_then(|()| {
         let covers = serde_json::to_vec(covered).map_err(|_| "the backup could not be recorded")?;
-        fs::write(partial.join(COVERS), covers).map_err(|_| "the backup could not be recorded".to_string())
+        // The certificate vouches for the copy, so it reaches the disk after everything it
+        // vouches for, and the rename that publishes the backup comes after it.
+        let certificate = partial.join(COVERS);
+        let recorded = fs::write(&certificate, covers)
+            .and_then(|()| flush.file(&certificate))
+            .and_then(|()| flush.directory(&partial));
+        recorded.map_err(|_| "the backup could not be recorded".to_string())
     });
     if let Err(reason) = made {
         let _ = fs::remove_dir_all(&partial);

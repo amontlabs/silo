@@ -899,3 +899,145 @@ fn a_computer_without_a_runtime_folder_is_not_checked_when_it_arrives() {
     assert_eq!(attention_message(&metadata, "restore-waiting-for-start"), None);
     assert!(read_report(&dir.path().join(CONVERTED)).unwrap().is_none());
 }
+
+// MARK: Backup durability
+
+use super::{Disk, Flush};
+use std::collections::BTreeSet;
+
+/// Flushes for real and records every flush, with whether the backup was already published.
+struct Recorder {
+    published: PathBuf,
+    events: RefCell<Vec<(&'static str, PathBuf)>>,
+    published_early: RefCell<bool>,
+}
+
+impl Recorder {
+    fn new(published: PathBuf) -> Self {
+        Self { published, events: RefCell::default(), published_early: RefCell::default() }
+    }
+
+    fn record(&self, kind: &'static str, path: &Path) {
+        *self.published_early.borrow_mut() |= self.published.exists();
+        self.events.borrow_mut().push((kind, path.to_path_buf()));
+    }
+}
+
+impl Flush for Recorder {
+    fn file(&self, path: &Path) -> std::io::Result<()> {
+        self.record("file", path);
+        Disk.file(path)
+    }
+
+    fn directory(&self, path: &Path) -> std::io::Result<()> {
+        self.record("directory", path);
+        Disk.directory(path)
+    }
+}
+
+fn walk(root: &Path) -> (BTreeSet<PathBuf>, BTreeSet<PathBuf>) {
+    let (mut files, mut directories) = (BTreeSet::new(), BTreeSet::new());
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        directories.insert(directory.clone());
+        for entry in fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            let kind = fs::symlink_metadata(&path).unwrap();
+            if kind.is_dir() {
+                stack.push(path);
+            } else if kind.is_file() {
+                files.insert(path);
+            }
+        }
+    }
+    (files, directories)
+}
+
+#[test]
+fn the_backup_is_flushed_files_then_folders_bottom_up_then_the_certificate_before_it_is_published() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = storage_with_a_disk(directory.path());
+    fs::create_dir_all(storage.join("microsandbox/sandboxes/dev/runtime/deep")).unwrap();
+    fs::write(storage.join("microsandbox/sandboxes/dev/runtime/deep/state"), b"s").unwrap();
+    fs::create_dir_all(storage.join("empty")).unwrap();
+    let backup = directory.path().join(BACKUP);
+    let recorder = Recorder::new(backup.clone());
+    clone_backup_with(directory.path(), &storage, &names(&["dev"]), &recorder).unwrap();
+    assert!(!*recorder.published_early.borrow(), "everything is flushed before the rename");
+    assert!(backup.is_dir());
+
+    let partial = directory.path().join(format!("{BACKUP}.partial"));
+    let events = recorder.events.borrow();
+    let position = |kind: &str, path: &Path, last: bool| {
+        let mut found = events.iter().enumerate().filter(|(_, (k, p))| *k == kind && p == path);
+        if last { found.last() } else { found.next() }.map(|(index, _)| index)
+    };
+    let certificate = position("file", &partial.join(COVERS), false).expect("certificate is flushed");
+    let (files, directories) = walk(&backup);
+    for file in files.iter().filter(|file| file.file_name().unwrap() != COVERS) {
+        let at = position("file", &partial.join(file.strip_prefix(&backup).unwrap()), false)
+            .unwrap_or_else(|| panic!("{} is flushed", file.display()));
+        assert!(at < certificate, "{} before the certificate", file.display());
+    }
+    let first_directory = events.iter().position(|(kind, _)| *kind == "directory").unwrap();
+    let last_file = events.iter().rposition(|(kind, path)| *kind == "file" && path != &partial.join(COVERS)).unwrap();
+    assert!(last_file < first_directory, "every file is flushed before any folder");
+    let flushed_folder = |path: &Path| {
+        events.iter().position(|(kind, p)| *kind == "directory" && p == path && true)
+    };
+    for folder in &directories {
+        let relative = folder.strip_prefix(&backup).unwrap();
+        let at = flushed_folder(&partial.join(relative)).unwrap_or_else(|| panic!("{} is flushed", relative.display()));
+        assert!(at < certificate, "{} before the certificate", relative.display());
+        for other in directories.iter().filter(|other| other.starts_with(folder) && *other != folder) {
+            let inside = flushed_folder(&partial.join(other.strip_prefix(&backup).unwrap())).unwrap();
+            assert!(inside < at, "{} before its parent {}", other.display(), folder.display());
+        }
+    }
+    let last = events.last().unwrap();
+    assert_eq!((last.0, &last.1), ("directory", &partial), "the folder holding the certificate is flushed last");
+    assert!(position("directory", &partial, true).unwrap() > certificate);
+}
+
+#[test]
+fn a_backup_whose_certificate_is_missing_or_older_than_its_contents_is_not_trusted() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = storage_with_a_disk(directory.path());
+    let disk = "microsandbox/sandboxes/dev/upper.ext4";
+    let backup = directory.path().join(BACKUP);
+    let covered = names(&["dev"]);
+    let remake = |what: &dyn Fn()| {
+        clone_backup(directory.path(), &storage, &covered).unwrap();
+        what();
+        fs::write(storage.join(disk), b"new").unwrap();
+        clone_backup(directory.path(), &storage, &covered).unwrap();
+        fs::read(backup.join(disk)).unwrap()
+    };
+    fs::write(storage.join(disk), b"old").unwrap();
+    // Untouched: trusted, so the later change in the storage is not copied.
+    assert_eq!(remake(&|| {}), b"old");
+    // No certificate.
+    assert_eq!(remake(&|| fs::remove_file(backup.join(COVERS)).unwrap()), b"new");
+    fs::write(storage.join(disk), b"old").unwrap();
+    fs::remove_dir_all(&backup).unwrap();
+    // A file written after the certificate.
+    assert_eq!(
+        remake(&|| {
+            let later = std::time::SystemTime::now() + Duration::from_secs(60);
+            let file = fs::File::options().write(true).open(backup.join(disk)).unwrap();
+            file.set_modified(later).unwrap();
+        }),
+        b"new"
+    );
+    fs::write(storage.join(disk), b"old").unwrap();
+    fs::remove_dir_all(&backup).unwrap();
+    // A certificate that predates the copied tree.
+    assert_eq!(
+        remake(&|| {
+            let earlier = std::time::SystemTime::now() - Duration::from_secs(3600);
+            let file = fs::File::options().write(true).open(backup.join(COVERS)).unwrap();
+            file.set_modified(earlier).unwrap();
+        }),
+        b"new"
+    );
+}

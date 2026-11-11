@@ -713,13 +713,36 @@ fn copy_runtime_tree(
     destination: &Path,
     excluded: &[PathBuf],
 ) -> Result<(), String> {
-    copy_tree(source, destination, excluded, false)
+    copy_tree(source, destination, excluded, false, &Disk)
 }
 
 /// Like [`copy_runtime_tree`] for a backup: an absolute symlink is recreated as it is (never
 /// followed), where a migrated generation must not carry one.
-fn copy_runtime_tree_for_backup(source: &Path, destination: &Path) -> Result<(), String> {
-    copy_tree(source, destination, &[], true)
+fn copy_runtime_tree_for_backup(
+    source: &Path,
+    destination: &Path,
+    flush: &dyn Flush,
+) -> Result<(), String> {
+    copy_tree(source, destination, &[], true, flush)
+}
+
+/// How copied files and folders reach stable storage.
+pub(crate) trait Flush {
+    fn file(&self, path: &Path) -> std::io::Result<()>;
+    fn directory(&self, path: &Path) -> std::io::Result<()>;
+}
+
+/// Flushes to the disk.
+pub(crate) struct Disk;
+
+impl Flush for Disk {
+    fn file(&self, path: &Path) -> std::io::Result<()> {
+        fs::File::open(path)?.sync_all()
+    }
+
+    fn directory(&self, path: &Path) -> std::io::Result<()> {
+        fs::File::open(path)?.sync_all()
+    }
 }
 
 fn copy_tree(
@@ -727,13 +750,17 @@ fn copy_tree(
     destination: &Path,
     excluded: &[PathBuf],
     keep_absolute_links: bool,
+    flush: &dyn Flush,
 ) -> Result<(), String> {
     if destination.exists() {
         return Err("The staged runtime already exists.".into());
     }
     let mut stack = vec![(source.to_path_buf(), destination.to_path_buf())];
+    // Parents before children; flushed in reverse once every file is on disk.
+    let mut created = Vec::new();
     while let Some((from, to)) = stack.pop() {
         fs::create_dir(&to).map_err(|_| "Runtime copy could not create a directory.")?;
+        created.push(to.clone());
         let entries =
             fs::read_dir(&from).map_err(|_| "Runtime copy could not read a directory.")?;
         for entry in entries {
@@ -761,6 +788,9 @@ fn copy_tree(
                 })?;
                 fs::set_permissions(&target, metadata.permissions())
                     .map_err(|_| "Runtime copy could not preserve file permissions.")?;
+                flush
+                    .file(&target)
+                    .map_err(|_| "Runtime copy could not sync a file.")?;
             } else if metadata.file_type().is_symlink() {
                 let link = fs::read_link(&path)
                     .map_err(|_| "Runtime copy could not inspect a symlink.")?;
@@ -776,8 +806,11 @@ fn copy_tree(
                 return Err("Runtime copy found an unsupported filesystem entry.".into());
             }
         }
-        fs::File::open(&to)
-            .and_then(|file| file.sync_all())
+    }
+    // A folder's entries are durable before the folder's own entry in its parent.
+    for directory in created.iter().rev() {
+        flush
+            .directory(directory)
             .map_err(|_| "Runtime copy could not sync a directory.")?;
     }
     Ok(())
