@@ -51,3 +51,10 @@ was chosen and why; any can be changed. Older items are also in the build log un
     single-file disk is copied normally (slower, uses space).
 13. **The old computer stays, stopped, as `<name>-undo`**, so it can be inspected, restored or
     deleted with the usual commands.
+
+## Resources (R2)
+
+14. **A start's memory is held for it until the start ends, at most 5 minutes**, and a start that
+    asks for more than the free memory above the floor is refused. A start the owner approved
+    checks the floor but does not hold memory, so several approved starts at once can still pass
+    together. Left as is: the owner approved each one.
