@@ -1853,6 +1853,48 @@ pub(crate) fn command_for(paths: &RuntimePaths, name: &str) -> Command {
     command
 }
 
+/// Stops a runtime command that has no record, so no later engine could wait for it. When
+/// the command cannot be reaped, the lock stays held until it exits.
+fn stop_unrecorded_command(
+    mut child: std::process::Child,
+    lock: Option<configuration_recovery::CommandLock>,
+) {
+    if crate::child_process::terminate_child(&mut child, RUNTIME_TERMINATE_GRACE).is_ok() {
+        if let Some(mut lock) = lock {
+            lock.mark_child_exited();
+        }
+        return;
+    }
+    hold_lock_until_exit(child, lock);
+}
+
+/// Keeps `lock` until `child` has exited, on a thread of its own, signalling the child again
+/// while it runs.
+fn hold_lock_until_exit(
+    mut child: std::process::Child,
+    lock: Option<configuration_recovery::CommandLock>,
+) {
+    thread::spawn(move || {
+        let mut lock = lock;
+        let mut last_signal = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(None) => {
+                    if last_signal.elapsed() >= Duration::from_secs(1) {
+                        let _ = child.kill();
+                        last_signal = Instant::now();
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Ok(Some(_)) | Err(_) => break,
+            }
+        }
+        if let Some(lock) = lock.as_mut() {
+            lock.mark_child_exited();
+        }
+    });
+}
+
 fn spawn_runtime(
     paths: &RuntimePaths,
     launch: RuntimeLaunch<'_>,
@@ -1925,9 +1967,27 @@ fn spawn_runtime(
     } else {
         command.stdout(Stdio::null()).stderr(Stdio::null());
     }
-    let mut child = command.spawn().map_err(|error| {
-        RuntimeError::Launch(format!("Silo could not start its bundled runtime: {error}"))
-    })?;
+    // The command does not inherit the lock. A record of it lets the next engine wait for
+    // it if this one dies first, so one is written before the command starts and replaced
+    // by the command's own once its pid is known.
+    if let Some(lock) = worker_lock.as_mut() {
+        lock.begin_command(timeout).map_err(|_| {
+            RuntimeError::Unavailable(
+                "Silo could not record the computer command, so it did not start it.".into(),
+            )
+        })?;
+    }
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            if let Some(lock) = worker_lock.as_mut() {
+                lock.mark_child_exited();
+            }
+            return Err(RuntimeError::Launch(format!(
+                "Silo could not start its bundled runtime: {error}"
+            )));
+        }
+    };
     // The runtime reads the whole document before anything else; a separate writer
     // never blocks this thread, even if the child exits without reading it.
     if let Some(mut stdin) = child.stdin.take() {
@@ -1935,12 +1995,12 @@ fn spawn_runtime(
             let _ = stdin.write_all(&secret_values);
         });
     }
-    // The command does not inherit the lock. A record of it lets the next engine wait for
-    // it if this one dies first.
     if let Some(lock) = worker_lock.as_mut() {
-        if let Err(error) = lock.record_child(child.id()) {
-            let _ = crate::child_process::terminate_child(&mut child, Duration::ZERO);
-            return Err(error);
+        if lock.record_child(child.id(), timeout).is_err() {
+            stop_unrecorded_command(child, worker_lock.take());
+            return Err(RuntimeError::Unavailable(
+                "Silo could not record the computer command, so it stopped it.".into(),
+            ));
         }
     }
     let mut stop_child = |child: &mut std::process::Child| {
@@ -10697,7 +10757,8 @@ exit 9
         let Some(home) = std::env::var_os(LOCK_SURVIVAL_HELPER) else {
             return;
         };
-        let mut paths = paths(&tempfile::tempdir().unwrap());
+        let directory = tempfile::tempdir().unwrap();
+        let mut paths = paths(&directory);
         paths.home = home.clone().into();
         paths.executable = paths.home.join("fake-msb");
         paths.library = paths.home.join("fake-lib");
@@ -10729,7 +10790,7 @@ exit 9
         }
         fs::write(
             &paths.executable,
-            b"#!/bin/sh\ncat >/dev/null\nsleep 60 &\necho $! > \"$MSB_HOME/vm.pid\"\nprintf x > \"$MSB_HOME/ready\"\nread line < \"$MSB_HOME/release\"\n",
+            b"#!/bin/sh\ncat >/dev/null\nwhile [ ! -f \"$MSB_HOME/.silo-configuration-worker.child-$$\" ]; do sleep 0.05; done\nsleep 60 &\necho $! > \"$MSB_HOME/vm.pid\"\nprintf x > \"$MSB_HOME/ready\"\nread line < \"$MSB_HOME/release\"\n",
         )
         .unwrap();
         fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
@@ -10771,6 +10832,68 @@ exit 9
             reacquired.is_some(),
             "a process the dead engine's command started kept the command lock"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_whose_record_cannot_be_written_is_stopped_and_releases_the_lock() {
+        let _test_state = crate::test_support::global_state();
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        fs::write(&paths.library, b"test library").unwrap();
+        fs::create_dir_all(&paths.home).unwrap();
+        fs::write(
+            &paths.executable,
+            b"#!/bin/sh\necho $$ > \"$MSB_HOME/command.pid\"\nexec sleep 60\n",
+        )
+        .unwrap();
+        fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        configuration_recovery::FAIL_CHILD_RECORD.store(true, Ordering::SeqCst);
+        let error = run_msb_process(
+            &paths,
+            &["create".into()],
+            Duration::from_secs(30),
+            &|_| {},
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Silo could not record the computer command, so it stopped it."),
+            "{error}"
+        );
+        // The command is gone and neither it nor its record holds the lock.
+        if let Ok(pid) = fs::read_to_string(paths.home.join("command.pid")) {
+            let pid: libc::pid_t = pid.trim().parse().unwrap();
+            // SAFETY: signal 0 only checks that the process exists.
+            assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "the command is still running");
+        }
+        drop(configuration_recovery::command_lock(&paths, Duration::ZERO).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_lock_stays_held_until_a_command_that_could_not_be_reaped_exits() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let mut lock = configuration_recovery::command_lock(&paths, Duration::ZERO).unwrap();
+        lock.begin_command(Duration::from_secs(60)).unwrap();
+        let child = Command::new("sleep").arg("1").spawn().unwrap();
+        hold_lock_until_exit(child, Some(lock));
+        assert!(configuration_recovery::command_lock(&paths, Duration::ZERO).is_err());
+        let started = Instant::now();
+        let reacquired = loop {
+            if let Ok(lock) = configuration_recovery::command_lock(&paths, Duration::ZERO) {
+                break Some(lock);
+            }
+            if started.elapsed() > Duration::from_secs(10) {
+                break None;
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        assert!(reacquired.is_some());
     }
 
     #[test]
