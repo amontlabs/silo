@@ -78,6 +78,58 @@ pub fn revert(sandboxes: &dyn Sandboxes, plan: &Plan) -> Result<(), String> {
     }
 }
 
+/// Puts the sandbox that was the computer before the rebuild back under the computer's name
+/// and id, reading who is who from the Silo identities the sandboxes carry. For the states
+/// `state` does not know: a sandbox dropped, a rename that did not finish. `swapping` is whether
+/// the swap had begun. A sandbox of the build left under the computer's name goes back to the
+/// build name. Fails, changing nothing, when the old sandbox cannot be told from the build.
+pub fn restore_original(
+    sandboxes: &dyn Sandboxes,
+    plan: &Plan,
+    swapping: bool,
+) -> Result<(), String> {
+    let mut owners = Vec::new();
+    for name in [&plan.old_name, &plan.undo_name, &plan.new_name] {
+        owners.push((name.as_str(), sandboxes.owner(name)?));
+    }
+    let named = |id: &str| {
+        owners
+            .iter()
+            .find(|(_, owner)| owner.as_deref() == Some(id))
+            .map(|(name, _)| *name)
+    };
+    let original = named(&plan.undo_id).or_else(|| match (named(&plan.old_id), named(&plan.new_id)) {
+        // The computer's id beside a build: nothing was relabelled yet.
+        (Some(name), Some(_)) => Some(name),
+        (Some(name), None) if name == plan.undo_name || !swapping => Some(name),
+        _ => None,
+    });
+    let Some(original) = original else {
+        return Err(format!(
+            "Silo cannot tell which of {}, {} and {} is the old computer. Nothing was changed.",
+            plan.old_name, plan.undo_name, plan.new_name
+        ));
+    };
+    if original != plan.old_name {
+        if sandboxes.owner(&plan.old_name)?.is_some() {
+            // The build sits under the computer's name.
+            if sandboxes.owner(&plan.new_name)?.is_some() {
+                return Err(format!(
+                    "{} and {} are both taken, so the old computer cannot be put back. Nothing was changed.",
+                    plan.old_name, plan.new_name
+                ));
+            }
+            sandboxes.rename(&plan.old_name, &plan.new_name)?;
+            sandboxes.relabel(&plan.new_name, &plan.new_id)?;
+        }
+        sandboxes.rename(original, &plan.old_name)?;
+    }
+    if sandboxes.owner(&plan.old_name)?.as_deref() != Some(plan.old_id.as_str()) {
+        sandboxes.relabel(&plan.old_name, &plan.old_id)?;
+    }
+    Ok(())
+}
+
 fn copy_of(
     computers: &[ComputerConfiguration],
     id: &str,

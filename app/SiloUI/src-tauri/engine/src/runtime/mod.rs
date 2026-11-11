@@ -4945,6 +4945,7 @@ fn apply_configuration_with_progress(
         operation_gate::held(),
         "configuration changes require the operation gate"
     );
+    let _locked = lock_metadata();
     let resources = device_resources().map_err(|e| e.to_string())?;
     let mut request = request;
     validate_request(&request).map_err(|e| e.to_string())?;
@@ -5248,6 +5249,7 @@ pub fn change_computer_configuration_while_held(
     let request_id = normalize_request_id(None)?;
     let paths = runtime_paths(host)?;
     shutdown::ensure_accepting_operations()?;
+    let _locked = lock_metadata();
     let mut request = read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
     let before = request.computers.clone();
     change.apply(&mut request.computers)?;
@@ -5917,6 +5919,7 @@ pub(crate) fn set_computer_names(
     paths: &RuntimePaths,
     renames: &[(&str, &str)],
 ) -> Result<(), RuntimeError> {
+    let _locked = lock_metadata();
     let mut inventory = read_metadata(&paths.metadata)?;
     let mut changed = false;
     for (id, name) in renames {
@@ -7375,6 +7378,59 @@ pub fn resolve_computer_id(paths: &RuntimePaths, name: &str) -> Result<String, R
         .find(|configuration| configuration.name() == name)
         .map(|configuration| configuration.id().to_owned())
         .ok_or_else(|| RuntimeError::Invalid("This computer no longer exists.".into()))
+}
+
+/// Serialises every read-modify-write of the saved computers in this process: a rename, a
+/// rebuild's swap and a configuration apply each read the file, change it and write it back, so
+/// without one lock the later write would drop the other's change.
+static METADATA_WRITERS: Mutex<()> = Mutex::new(());
+
+thread_local! {
+    static METADATA_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Held while the saved computers are read, changed and written. A thread that holds it may
+/// take it again (a configuration apply calls helpers that lock too).
+#[must_use = "the saved computers stay locked until the guard is dropped"]
+pub struct MetadataGuard {
+    _lock: Option<std::sync::MutexGuard<'static, ()>>,
+}
+
+impl Drop for MetadataGuard {
+    fn drop(&mut self) {
+        METADATA_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
+pub fn lock_metadata() -> MetadataGuard {
+    let nested = METADATA_DEPTH.with(|depth| {
+        let nested = depth.get() > 0;
+        depth.set(depth.get() + 1);
+        nested
+    });
+    let lock = (!nested).then(|| {
+        METADATA_WRITERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    });
+    MetadataGuard { _lock: lock }
+}
+
+/// Reads the saved computers, lets `change` edit them, and writes them back when they differ.
+/// Returns whether anything was written. Other writers wait for the whole read-change-write.
+pub fn edit_metadata(
+    path: &Path,
+    change: impl FnOnce(&mut Vec<ComputerConfiguration>) -> Result<(), RuntimeError>,
+) -> Result<bool, RuntimeError> {
+    let _locked = lock_metadata();
+    let mut request = read_metadata(path)?;
+    let before = request.computers.clone();
+    change(&mut request.computers)?;
+    if request.computers == before {
+        return Ok(false);
+    }
+    write_metadata(path, &request)?;
+    Ok(true)
 }
 
 pub fn write_metadata(
@@ -9858,6 +9914,68 @@ esac
             schema_version: 1,
             computers,
         }
+    }
+
+    #[test]
+    fn writers_of_the_saved_computers_do_not_lose_each_others_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths(&dir);
+        let numbered = |n: usize| {
+            let mut one = computer();
+            one.id = format!("00000000-0000-4000-8000-0000000001{n:02}");
+            one.name = format!("c{n}");
+            one
+        };
+        let writers = 6;
+        write_metadata(&paths.metadata, &request((0..writers).map(numbered).collect())).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(writers));
+        let threads: Vec<_> = (0..writers)
+            .map(|n| {
+                let (paths, barrier) = (paths.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let id = format!("00000000-0000-4000-8000-0000000001{n:02}");
+                    for round in 0..40 {
+                        if n % 2 == 0 {
+                            set_computer_names(&paths, &[(&id, &format!("w{n}-r{round}"))])
+                                .unwrap();
+                        } else {
+                            // A writer that edits through the shared helper, like a rebuild's swap.
+                            edit_metadata(&paths.metadata, |computers| {
+                                computers.iter_mut().find(|c| c.id() == id).unwrap().name =
+                                    format!("w{n}-r{round}");
+                                Ok(())
+                            })
+                            .unwrap();
+                        }
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let names: Vec<String> = read_metadata(&paths.metadata)
+            .unwrap()
+            .computers
+            .iter()
+            .map(|c| c.name().to_owned())
+            .collect();
+        let expected: Vec<String> = (0..writers).map(|n| format!("w{n}-r39")).collect();
+        assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn the_metadata_lock_can_be_taken_again_by_the_thread_that_holds_it() {
+        let outer = lock_metadata();
+        let inner = lock_metadata();
+        drop(inner);
+        drop(outer);
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths(&dir);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let _held = lock_metadata();
+        assert!(!edit_metadata(&paths.metadata, |_| Ok(())).unwrap());
     }
 
     fn generous_device() -> DeviceResources {

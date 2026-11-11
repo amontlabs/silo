@@ -15,6 +15,7 @@ use std::{
 };
 
 use silo_api::methods::checkpoints::CheckpointKind;
+use silo_api::methods::notifications::{Notice, NoticeCategory, NoticeComputer};
 
 use serde_json::Value;
 use silo_api::methods::recipes::RecipeSpec;
@@ -28,6 +29,7 @@ use crate::{
         promote::engine_env::stored_under_its_name,
     },
     checkpoints::Service,
+    context::Audience,
     guest::{self, ExecRequest, GuestUser},
     macos_computers,
     recipes::{self, BuildStep, ExecOut, RunAs},
@@ -37,6 +39,8 @@ use crate::{
     },
 };
 
+/// How long a rebuild is expected to take at most, for the operation queue to flag a slow one.
+const EXPECTED_DURATION: Duration = Duration::from_secs(45 * 60);
 /// The longest one recipe step may run.
 const STEP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// The longest packing or unpacking of the home folder may take.
@@ -44,21 +48,54 @@ const TAR_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const COPY_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Packs the home folder into the tar file named by the first argument, inside the old
-/// computer, and reports `<uid> <gid> <sha256>` of the working account and the file. Exit 1
-/// from `tar` means a file changed while it was read; the archive is still usable. Sparse
-/// files stay sparse, and owners, modes, links and extended attributes are kept. The file is
-/// created exclusively and readable by root only.
+/// computer, and reports `<uid> <gid> <sha256>` of the working account and the file. The second
+/// argument is the most bytes the home folder may have. The working account's processes are
+/// paused while `tar` reads, so nothing changes under it; afterwards nothing under the home
+/// folder may be newer than the pause, or the pack is made once more. A second attempt that
+/// still sees a change, or any `tar` exit other than 0, fails. The processes always continue
+/// when the script ends. Sparse files stay sparse, and owners, modes, links and extended
+/// attributes are kept. The file is created exclusively and readable by root only.
 pub(super) const PACK_HOME: &str = r#"set -eu
 umask 077
 file=$1
-rc=0
-set -C
-tar -C /home -cp --sparse --xattrs --acls --numeric-owner -f - silo > "$file" || rc=$?
-set +C
-[ "$rc" -le 1 ] || exit "$rc"
+limit=$2
+mark="$file.mark"
+uid=$(id -u silo)
+signal() {
+  for dir in /proc/[0-9]*; do
+    if [ "$(stat -c %u "$dir" 2>/dev/null)" = "$uid" ]; then
+      kill -"$1" "${dir#/proc/}" 2>/dev/null || true
+    fi
+  done
+}
+resume() { signal CONT; rm -f -- "$mark"; }
+trap resume EXIT
+used=$(du -sb /home/silo | cut -f1)
+if [ "$used" -gt "$limit" ]; then
+  echo "the home folder ($((used / 1048576)) MB) is too large for the new computer's root disk (up to $((limit / 1048576)) MB fits)" >&2
+  exit 6
+fi
+packed=0
+for attempt in 1 2; do
+  rm -f -- "$file"
+  signal STOP
+  : > "$mark"
+  rc=0
+  set -C
+  tar -C /home -cp --sparse --xattrs --acls --numeric-owner -f - silo > "$file" || rc=$?
+  set +C
+  newer=$(find /home/silo -cnewer "$mark" -print -quit 2>/dev/null || true)
+  signal CONT
+  [ "$rc" -le 1 ] || exit "$rc"
+  if [ "$rc" -eq 0 ] && [ -z "$newer" ]; then
+    packed=1
+    break
+  fi
+done
+[ "$packed" -eq 1 ] || { echo "files in the home folder kept changing while it was packed" >&2; exit 5; }
 [ -s "$file" ]
 tar -tf "$file" > /dev/null
-echo "$(id -u silo) $(id -g silo) $(sha256sum "$file" | cut -d' ' -f1)"
+echo "$uid $(id -g silo) $(sha256sum "$file" | cut -d' ' -f1)"
 "#;
 
 /// Unpacks the tar file named by the first argument over the new computer's home folder, which
@@ -84,7 +121,7 @@ rm -f -- "$file"
 sync
 "#;
 
-const REMOVE_TAR: &str = r#"rm -f -- "$1""#;
+const REMOVE_TAR: &str = r#"rm -f -- "$1" "$1.mark""#;
 
 /// What [`PACK_HOME`] reported: the working account's user and group id, and the file's
 /// SHA-256.
@@ -513,19 +550,30 @@ impl EngineRebuildEnv {
         Ok(())
     }
 
+    /// Changes the saved computers under the lock every writer of that file shares.
     fn write_inventory(
         &self,
         paths: &RuntimePaths,
         change: impl FnOnce(&mut Vec<ComputerConfiguration>),
     ) -> Result<(), String> {
-        let mut inventory =
-            runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
-        let before = inventory.computers.clone();
-        change(&mut inventory.computers);
-        if inventory.computers == before {
-            return Ok(());
+        runtime::edit_metadata(&paths.metadata, |computers| {
+            change(computers);
+            Ok(())
+        })
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+    }
+
+    /// Stops the sandbox of computer `id` if it runs, waiting for it to be down.
+    fn ensure_stopped(&self, id: &str) -> Result<(), String> {
+        let info = self.info(id)?;
+        if info.running {
+            return Err(format!(
+                "{} is running although the rebuild needs it stopped. Nothing more was changed.",
+                info.name
+            ));
         }
-        runtime::write_metadata(&paths.metadata, &inventory).map_err(|error| error.to_string())
+        Ok(())
     }
 }
 
@@ -538,7 +586,24 @@ impl RebuildEnv for EngineRebuildEnv {
             .kind(runtime::operation_gate::OperationKind::Other)
             .computer(id, &name, "Rebuilding on the newest image")
             .map_err(|error| error.to_string())?;
+        // The person can stop it between steps while it can still be rolled back, and the
+        // queue flags it when it takes longer than a rebuild should.
+        guard.allow_cancel();
+        guard.expect_within(EXPECTED_DURATION);
         Ok(Box::new(guard))
+    }
+
+    fn relabel(&self, label: &str) {
+        runtime::OPERATIONS.relabel_own(label);
+    }
+
+    fn check_cancelled(&self) -> Result<(), String> {
+        runtime::operation_gate::check_cancelled()
+            .map_err(|_| "The rebuild was cancelled.".to_owned())
+    }
+
+    fn shielded(&self, work: &mut dyn FnMut()) {
+        runtime::operation_gate::uncancellable(work);
     }
 
     fn info(&self, id: &str) -> Result<Info, String> {
@@ -641,17 +706,18 @@ impl RebuildEnv for EngineRebuildEnv {
             .map_err(|error| format!("Cannot read the saved recipe records: {error}"))
     }
 
-    fn home_bytes(&self, id: &str) -> Result<u64, String> {
+    fn home_bytes(&self, id: &str) -> Result<Option<u64>, String> {
         let info = self.info(id)?;
         if info.running {
             let out = checked(
                 "Measuring the home folder",
                 self.root_script(id, "du -sb /home/silo", &[], Duration::from_secs(120)),
             )?;
-            return parse_du(&out.stdout);
+            return parse_du(&out.stdout).map(Some);
         }
         // A stopped computer whose root disk holds less than the limit in total cannot hold a
-        // larger home folder, so it is not started for the measurement.
+        // larger home folder. Otherwise it is not started here (nothing is journaled yet): the
+        // packing measures it once the rebuild is under way.
         let paths = self.paths()?;
         let root = paths
             .home
@@ -662,19 +728,10 @@ impl RebuildEnv for EngineRebuildEnv {
             use std::os::unix::fs::MetadataExt;
             let used = meta.blocks() * 512;
             if used <= super::home_limit(info.root_disk_gib) {
-                return Ok(used);
+                return Ok(Some(used));
             }
         }
-        self.start(id)?;
-        let measured = checked(
-            "Measuring the home folder",
-            self.root_script(id, "du -sb /home/silo", &[], Duration::from_secs(120)),
-        )
-        .and_then(|out| parse_du(&out.stdout));
-        let stopped = self.stop(id);
-        let bytes = measured?;
-        stopped?;
-        Ok(bytes)
+        Ok(None)
     }
 
     fn newest_image(&self) -> Result<String, String> {
@@ -742,10 +799,12 @@ impl RebuildEnv for EngineRebuildEnv {
         let _ = fs::remove_file(&staged.0);
         let stage_path = staged.0.to_string_lossy().into_owned();
         let tar = guest_tar(plan);
+        let limit = super::home_limit(self.configuration(&plan.old_id)?.runtime_storage_gib);
+        let limit = limit.to_string();
         let carried = (|| -> Result<(), String> {
             let packed = checked(
                 "Packing the home folder",
-                self.root_script(&plan.old_id, PACK_HOME, &[&tar], TAR_TIMEOUT),
+                self.root_script(&plan.old_id, PACK_HOME, &[&tar, &limit], TAR_TIMEOUT),
             )?;
             let report = parse_pack_report(&packed.stdout)?;
             ProcessRunner
@@ -782,6 +841,8 @@ impl RebuildEnv for EngineRebuildEnv {
 
     fn move_workspace(&self, plan: &Plan) -> Result<(), String> {
         debug_assert!(runtime::operation_gate::held());
+        self.ensure_stopped(&plan.old_id)?;
+        self.ensure_stopped(&plan.new_id)?;
         let paths = self.paths()?;
         let (old, new) = (
             workspace_capacity_mib(&paths, &plan.old_name),
@@ -874,14 +935,24 @@ impl RebuildEnv for EngineRebuildEnv {
 
     fn settle_swapped(&self, plan: &Plan) -> Result<(), String> {
         let paths = self.paths()?;
+        // Each cleanup runs whatever the others did; the first failures are reported together
+        // and the whole of it runs again later.
+        let mut problems: Vec<String> = Vec::new();
+        let mut keep = |result: Result<(), String>| {
+            if let Err(error) = result {
+                problems.push(error);
+            }
+        };
         // The undo computer has the recipe record its computer had.
-        recipes::records::inherit(&plan.old_id, &plan.undo_id)?;
+        keep(recipes::records::inherit(&plan.old_id, &plan.undo_id).map_err(|e| e.to_string()));
         // What the build was given under its own id and name goes; the sandbox lives on as
         // the computer.
-        let mut gone = self.configuration(&plan.old_id)?;
-        gone.id = plan.new_id.clone();
-        gone.name = plan.new_name.clone();
-        runtime::forget_replaced_identity(&paths, &gone).map_err(|error| error.to_string())?;
+        keep((|| {
+            let mut gone = self.configuration(&plan.old_id)?;
+            gone.id = plan.new_id.clone();
+            gone.name = plan.new_name.clone();
+            runtime::forget_replaced_identity(&paths, &gone).map_err(|error| error.to_string())
+        })());
         // The blank workspace disk the clone replaced is of no use to anyone.
         let _ = fs::remove_dir_all(
             paths
@@ -891,7 +962,63 @@ impl RebuildEnv for EngineRebuildEnv {
                 .join(".workspace-before-swap"),
         );
         runtime::publish_computers_changed(self.host.as_ref(), &paths);
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(problems.join(" "))
+        }
+    }
+
+    fn clean_old_computer(&self, plan: &Plan) {
+        let running = self.info(&plan.old_id).map(|info| info.running).unwrap_or(false);
+        if !running && self.start(&plan.old_id).is_err() {
+            return;
+        }
+        let _ = self.root_script(
+            &plan.old_id,
+            REMOVE_TAR,
+            &[&guest_tar(plan)],
+            Duration::from_secs(60),
+        );
+        if !running {
+            let _ = self.stop(&plan.old_id);
+        }
+    }
+
+    fn restore_original(&self, plan: &Plan, swapping: bool) -> Result<(), String> {
+        debug_assert!(runtime::operation_gate::held());
+        let paths = self.paths()?;
+        self.write_inventory(&paths, |computers| swap::unswap_inventory(computers, plan))?;
+        swap::restore_original(&RuntimeSandboxes { paths: &paths }, plan, swapping)?;
+        crate::network_policy::computer_removed(&plan.undo_id);
+        let _ = crate::computer_use::forget(&paths, &plan.undo_id);
+        self.forget_state(&paths, plan);
         Ok(())
+    }
+
+    fn stuck_notice(&self, plan: &Plan, problem: Option<&str>) {
+        let context = self.host.engine_context();
+        let key = format!("rebuild:{}:stuck", plan.old_id);
+        let result = match problem {
+            Some(problem) => crate::notices::retain(
+                context.as_ref(),
+                &Notice {
+                    category: NoticeCategory::Failures,
+                    key,
+                    title: format!("{} was not rebuilt", plan.old_name),
+                    body: problem.to_owned(),
+                    computer: Some(NoticeComputer {
+                        id: plan.old_id.clone(),
+                        name: plan.old_name.clone(),
+                    }),
+                },
+                Audience::All,
+            ),
+            None => context.clear_notice(&key, &plan.old_id, Audience::All),
+        };
+        if let Err(error) = result {
+            eprintln!("rebuild: could not update the notice of {}: {error}", plan.old_name);
+        }
     }
 
     fn remove_build(&self, plan: &Plan) -> Result<(), String> {

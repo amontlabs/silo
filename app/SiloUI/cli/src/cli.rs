@@ -520,6 +520,10 @@ pub struct RebuildCommand {
     /// Rebuild it even when it is already on the newest image.
     #[arg(long)]
     pub force: bool,
+    /// Instead of rebuilding, throw away an interrupted rebuild Silo could not settle and put
+    /// the old computer back.
+    #[arg(long, conflicts_with = "force")]
+    pub abandon: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1130,7 +1134,14 @@ async fn dispatch(
             .await;
         }
         Command::Rebuild(rebuild) => {
-            return rebuild_command(engine, &rebuild.computer, rebuild.force, json).await;
+            return rebuild_command(
+                engine,
+                &rebuild.computer,
+                rebuild.force,
+                rebuild.abandon,
+                json,
+            )
+            .await;
         }
         Command::Fold(merge) => {
             eprintln!("`silo fold` is now `silo merge`; `silo replace-main` replaces main.");
@@ -1715,9 +1726,10 @@ async fn rebuild_command(
     engine: &Engine,
     computer: &str,
     force: bool,
+    abandon: bool,
     json: bool,
 ) -> Result<i32, CliError> {
-    let value = ops::rebuild(engine, computer, force, &stderr_progress).await?;
+    let value = ops::rebuild(engine, computer, force, abandon, &stderr_progress).await?;
     emit(json, &value, render::rebuild);
     Ok(0)
 }

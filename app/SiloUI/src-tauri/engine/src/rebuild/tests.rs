@@ -329,6 +329,20 @@ struct Fake {
     image: Option<String>,
     /// Makes the operation gate unavailable.
     hold_fails: bool,
+    /// Makes the next that many requests for the operation gate fail.
+    hold_failures: Mutex<usize>,
+    /// The home folder's size cannot be known without starting the computer.
+    home_unknown: bool,
+    /// The step label that makes the next cancellation check fail, once the label is shown.
+    cancel_on: Mutex<Option<String>>,
+    /// Asks to cancel from the moment the swap runs, as a person might while it does.
+    cancel_during_swap: bool,
+    cancelled: Mutex<bool>,
+    labels: Mutex<Vec<String>>,
+    notices: Mutex<Vec<Option<String>>>,
+    shield: Mutex<bool>,
+    /// The methods that ran without the environment's protection from cancellation.
+    unshielded: Mutex<Vec<String>>,
     /// Fails the next call to this method, once.
     fail_on: Mutex<Option<String>>,
     /// Makes every removal of the build fail.
@@ -360,6 +374,15 @@ impl Fake {
             calls: Arc::default(),
             image: Some("image-v4".into()),
             hold_fails: false,
+            hold_failures: Mutex::default(),
+            home_unknown: false,
+            cancel_on: Mutex::default(),
+            cancel_during_swap: false,
+            cancelled: Mutex::default(),
+            labels: Mutex::default(),
+            notices: Mutex::default(),
+            shield: Mutex::default(),
+            unshielded: Mutex::default(),
             fail_on: Mutex::default(),
             broken_remove: Mutex::default(),
             os: Os::Linux,
@@ -391,6 +414,13 @@ impl Fake {
 
     fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// Notes a method that must run protected from a request to cancel.
+    fn guarded(&self, what: &str) {
+        if !*self.shield.lock().unwrap() {
+            self.unshielded.lock().unwrap().push(what.into());
+        }
     }
 
     fn called(&self, name: &str) -> bool {
@@ -445,13 +475,50 @@ impl Drop for Gate {
 impl RebuildEnv for Fake {
     fn hold(&self, id: &str) -> Result<Box<dyn Any>, String> {
         self.calls.lock().unwrap().push(format!("hold {id}"));
-        if self.hold_fails {
+        let mut failures = self.hold_failures.lock().unwrap();
+        if self.hold_fails || *failures > 0 {
+            *failures = failures.saturating_sub(1);
             return Err("Another computer operation is still running.".into());
         }
         Ok(Box::new(Gate {
             calls: self.calls.clone(),
             id: id.into(),
         }))
+    }
+
+    fn relabel(&self, label: &str) {
+        self.labels.lock().unwrap().push(label.into());
+    }
+
+    fn check_cancelled(&self) -> Result<(), String> {
+        let wanted = self.cancel_on.lock().unwrap().clone();
+        let shown = self.labels.lock().unwrap().last().cloned().unwrap_or_default();
+        if *self.cancelled.lock().unwrap() || wanted.is_some_and(|label| shown.contains(&label)) {
+            return Err("The rebuild was cancelled.".into());
+        }
+        Ok(())
+    }
+
+    fn shielded(&self, work: &mut dyn FnMut()) {
+        let before = std::mem::replace(&mut *self.shield.lock().unwrap(), true);
+        work();
+        *self.shield.lock().unwrap() = before;
+    }
+
+    fn clean_old_computer(&self, plan: &Plan) {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("clean_old_computer {}", plan.old_id));
+    }
+
+    fn restore_original(&self, plan: &Plan, swapping: bool) -> Result<(), String> {
+        self.record("restore_original")?;
+        swap::restore_original(&self.table, plan, swapping)
+    }
+
+    fn stuck_notice(&self, _plan: &Plan, problem: Option<&str>) {
+        self.notices.lock().unwrap().push(problem.map(str::to_owned));
     }
 
     fn info(&self, id: &str) -> Result<Info, String> {
@@ -487,9 +554,9 @@ impl RebuildEnv for Fake {
         Ok(self.recipe.clone())
     }
 
-    fn home_bytes(&self, _id: &str) -> Result<u64, String> {
+    fn home_bytes(&self, _id: &str) -> Result<Option<u64>, String> {
         self.calls.lock().unwrap().push("home_bytes".into());
-        Ok(self.home)
+        Ok((!self.home_unknown).then_some(self.home))
     }
 
     fn newest_image(&self) -> Result<String, String> {
@@ -586,8 +653,12 @@ impl RebuildEnv for Fake {
     }
 
     fn swap_apply(&self, plan: &Plan) -> Result<(), String> {
+        self.guarded("swap_apply");
         self.record("swap_apply")?;
         assert!(!self.running(&plan.old_id) && !self.running(&plan.new_id));
+        if self.cancel_during_swap {
+            *self.cancelled.lock().unwrap() = true;
+        }
         swap::apply(&self.table, plan)?;
         // The rebuilt sandbox now answers to the computer's id.
         let mut machines = self.machines.lock().unwrap();
@@ -613,6 +684,7 @@ impl RebuildEnv for Fake {
     }
 
     fn swap_revert(&self, plan: &Plan) -> Result<(), String> {
+        self.guarded("swap_revert");
         self.record("swap_revert")?;
         swap::revert(&self.table, plan)?;
         let mut machines = self.machines.lock().unwrap();
@@ -637,10 +709,12 @@ impl RebuildEnv for Fake {
     }
 
     fn settle_swapped(&self, _plan: &Plan) -> Result<(), String> {
+        self.guarded("settle_swapped");
         self.record("settle_swapped")
     }
 
     fn remove_build(&self, plan: &Plan) -> Result<(), String> {
+        self.guarded("remove_build");
         self.record("remove_build")?;
         if *self.broken_remove.lock().unwrap() {
             return Err("the build cannot be removed".into());
@@ -923,7 +997,7 @@ fn the_journal_follows_the_steps() {
         fn recipe(&self, id: &str) -> Result<Option<RecipeSpec>, String> {
             self.inner.recipe(id)
         }
-        fn home_bytes(&self, id: &str) -> Result<u64, String> {
+        fn home_bytes(&self, id: &str) -> Result<Option<u64>, String> {
             self.inner.home_bytes(id)
         }
         fn newest_image(&self) -> Result<String, String> {
@@ -1053,6 +1127,7 @@ fn interrupted(id: &str, step: Step, was_running: bool) -> (Fake, tempfile::Temp
         fake.swap_apply(&plan).unwrap();
     }
     fake.calls.lock().unwrap().clear();
+    fake.unshielded.lock().unwrap().clear();
     let (dir, journal) = journal();
     journal
         .save(&Record {
@@ -1536,4 +1611,328 @@ fn the_ssh_folder_is_copied_with_its_modes_and_nothing_is_skipped() {
     // Anything but files is an error, not a silent skip.
     std::os::unix::fs::symlink("/etc/hosts", from.join("link")).unwrap();
     assert!(copy_folder(&from, &dir.path().join("third")).is_err());
+}
+
+// MARK: Pausing, cancelling, settling and abandoning
+
+#[test]
+fn the_home_folder_is_packed_while_the_working_accounts_processes_are_paused() {
+    let stop = PACK_HOME.find("signal STOP").unwrap();
+    let tar = PACK_HOME.find("tar -C /home -cp").unwrap();
+    let check = PACK_HOME.find("-cnewer").unwrap();
+    let resume = PACK_HOME.rfind("signal CONT").unwrap();
+    // Paused before tar reads, checked for later changes afterwards, and let go again.
+    assert!(stop < tar && tar < check && check < resume);
+    // The processes continue however the script ends.
+    assert!(PACK_HOME.contains("trap resume EXIT"));
+    // A change under the pause or a tar that saw one is tried once more, then fails.
+    assert!(PACK_HOME.contains("for attempt in 1 2"));
+    assert!(PACK_HOME.contains("kept changing while it was packed"));
+    assert!(PACK_HOME.contains("[ \"$rc\" -eq 0 ] && [ -z \"$newer\" ]"));
+    // The size limit is checked before anything is paused.
+    assert!(PACK_HOME.find("exit 6").unwrap() < stop);
+}
+
+#[test]
+fn a_person_can_cancel_between_the_steps_until_the_swap_begins() {
+    for label in [
+        "stopping the computer",
+        "building the new computer",
+        "carrying the home folder",
+        "copying the workspace disk",
+        "swapping the computers",
+    ] {
+        let id = format!("c-cancel-{}", label.len());
+        let fake = Fake::new(&id, true);
+        *fake.cancel_on.lock().unwrap() = Some(label.to_owned());
+        let (_dir, journal) = journal();
+        let error = rebuild(&fake, &journal, &id, false, WAIT).unwrap_err();
+        assert!(error.contains("cancelled"), "{label}: {error}");
+        assert!(error.contains("rolled back; dev is as it was"), "{label}: {error}");
+        assert!(!fake.called("swap_apply"), "{label}");
+        assert!(journal.all().is_empty(), "{label}");
+        assert_eq!(fake.table.named("dev").unwrap().label, id, "{label}");
+        assert_eq!(fake.table.named("silo-rebuild-aaaa1111"), None, "{label}");
+        assert!(fake.running(&id), "{label}");
+        assert!(fake.unshielded.lock().unwrap().is_empty(), "{label}");
+    }
+}
+
+#[test]
+fn a_cancel_asked_while_the_swap_runs_does_not_stop_it() {
+    let mut fake = Fake::new("c-late-cancel", true);
+    fake.cancel_during_swap = true;
+    let (_dir, journal) = journal();
+    rebuild(&fake, &journal, "c-late-cancel", false, WAIT).unwrap();
+    assert_eq!(after_tags(&fake.table), [Some("new"), Some("old"), None]);
+    assert!(fake.called("settle_swapped") && !fake.called("swap_revert"));
+    assert!(journal.all().is_empty());
+    assert!(fake.running("c-late-cancel"));
+}
+
+#[test]
+fn the_step_is_shown_where_the_rebuild_is_listed() {
+    let fake = Fake::new("c-labels", false);
+    let (_dir, journal) = journal();
+    rebuild(&fake, &journal, "c-labels", false, WAIT).unwrap();
+    let labels = fake.labels.lock().unwrap().clone();
+    let order = [
+        "Rebuilding dev: stopping the computer",
+        "Rebuilding dev: saving a checkpoint to go back to",
+        "Rebuilding dev: building the new computer",
+        "Rebuilding dev: carrying the home folder",
+        "Rebuilding dev: copying the workspace disk",
+        "Rebuilding dev: installing the recipe on the new image",
+        "Rebuilding dev: swapping the computers",
+    ];
+    assert_eq!(labels, order);
+}
+
+#[test]
+fn the_rollback_the_swap_and_the_cleanup_run_protected_from_a_cancel() {
+    // A rebuild that goes through, one rolled back, and the recoveries of both kinds.
+    let fake = Fake::new("c-shield-ok", true);
+    let (_dir, journal) = journal();
+    rebuild(&fake, &journal, "c-shield-ok", false, WAIT).unwrap();
+    assert_eq!(*fake.unshielded.lock().unwrap(), Vec::<String>::new());
+
+    let fake = Fake::new("c-shield-bad", true);
+    fake.fail_once_in("move_workspace");
+    rebuild(&fake, &journal, "c-shield-bad", false, WAIT).unwrap_err();
+    assert!(fake.called("remove_build"));
+    assert_eq!(*fake.unshielded.lock().unwrap(), Vec::<String>::new());
+
+    for (n, step) in [Step::Created, Step::Swapping, Step::Swapped].into_iter().enumerate() {
+        let id = format!("c-shield-rec-{n}");
+        let (fake, _dir, journal) = interrupted(&id, step, true);
+        recover_one(&fake, &journal, &id, &|| {}, 1, Duration::ZERO).unwrap();
+        assert_eq!(*fake.unshielded.lock().unwrap(), Vec::<String>::new(), "{step:?}");
+    }
+}
+
+#[test]
+fn a_failed_cleanup_after_the_swap_keeps_the_journal_and_never_undoes_the_rebuild() {
+    let fake = Fake::new("c-settle", true);
+    fake.fail_once_in("settle_swapped");
+    let (_dir, journal) = journal();
+    let error = rebuild(&fake, &journal, "c-settle", false, WAIT).unwrap_err();
+    assert!(error.contains("was rebuilt, but cleaning up"), "{error}");
+    assert!(error.contains("next time it starts"), "{error}");
+    // The swap stands, the computer runs, and the journal waits for the cleanup.
+    assert_eq!(after_tags(&fake.table), [Some("new"), Some("old"), None]);
+    assert!(!fake.called("swap_revert") && !fake.called("remove_build"));
+    assert!(fake.running("c-settle"));
+    let left = journal.get("c-settle").unwrap();
+    assert_eq!(left.step, Step::Swapped);
+
+    // The next start finishes it.
+    recover_one(&fake, &journal, "c-settle", &|| {}, 1, Duration::ZERO).unwrap();
+    assert!(journal.all().is_empty());
+    assert_eq!(
+        fake.calls().iter().filter(|c| *c == "settle_swapped").count(),
+        2
+    );
+    assert_eq!(after_tags(&fake.table), [Some("new"), Some("old"), None]);
+}
+
+#[test]
+fn the_computer_is_started_again_even_when_the_cleanup_fails() {
+    let fake = Fake::new("c-start-anyway", true);
+    fake.fail_once_in("settle_swapped");
+    let (_dir, journal) = journal();
+    rebuild(&fake, &journal, "c-start-anyway", false, WAIT).unwrap_err();
+    let calls = fake.calls();
+    let settled = calls.iter().position(|c| c == "settle_swapped").unwrap();
+    assert!(calls[settled..].iter().any(|c| c == "start c-start-anyway"), "{calls:?}");
+}
+
+#[test]
+fn a_home_folder_that_cannot_be_measured_without_starting_is_left_to_the_packing() {
+    let mut fake = Fake::new("c-unknown-home", false);
+    fake.home_unknown = true;
+    let (_dir, journal) = journal();
+    rebuild(&fake, &journal, "c-unknown-home", false, WAIT).unwrap();
+    // Nothing was started before the journal existed.
+    let calls = fake.calls();
+    let first_start = calls.iter().position(|c| c.starts_with("start")).unwrap();
+    let measured = calls.iter().position(|c| c == "home_bytes").unwrap();
+    let stopped = calls.iter().position(|c| c.starts_with("stop") || c.starts_with("checkpoint"));
+    assert!(measured < first_start, "{calls:?}");
+    assert!(stopped.is_some());
+}
+
+#[test]
+fn a_rollback_from_the_home_folder_step_cleans_the_old_computer() {
+    // A stop in the middle of carrying the home folder leaves the tar file in the old computer.
+    let (fake, _dir, journal) = interrupted("c-leftover", Step::Created, false);
+    recover_one(&fake, &journal, "c-leftover", &|| {}, 1, Duration::ZERO).unwrap();
+    assert!(fake.called("clean_old_computer"));
+    let calls = fake.calls();
+    let cleaned = calls.iter().position(|c| c.starts_with("clean_old_computer")).unwrap();
+    let removed = calls.iter().position(|c| c == "remove_build").unwrap();
+    assert!(cleaned < removed);
+    // Other steps never carried the home folder.
+    let (fake, _dir, journal) = interrupted("c-no-leftover", Step::WorkspaceMoved, false);
+    recover_one(&fake, &journal, "c-no-leftover", &|| {}, 1, Duration::ZERO).unwrap();
+    assert!(!fake.called("clean_old_computer"));
+}
+
+#[test]
+fn the_gate_is_taken_again_on_each_attempt_until_it_is_held() {
+    let (fake, _dir, journal) = interrupted("c-late-gate", Step::Created, false);
+    *fake.hold_failures.lock().unwrap() = 2;
+    let held = Mutex::new(0);
+    recover_one(
+        &fake,
+        &journal,
+        "c-late-gate",
+        &|| *held.lock().unwrap() += 1,
+        4,
+        Duration::ZERO,
+    )
+    .unwrap();
+    assert_eq!(*held.lock().unwrap(), 1);
+    assert_eq!(
+        fake.calls().iter().filter(|c| c.starts_with("hold")).count(),
+        3
+    );
+    assert!(journal.all().is_empty());
+    assert_eq!(*fake.notices.lock().unwrap(), [None]);
+}
+
+#[test]
+fn the_owner_is_told_how_to_get_out_when_the_last_attempt_fails() {
+    let (fake, _dir, journal) = interrupted("c-told", Step::Created, false);
+    *fake.broken_remove.lock().unwrap() = true;
+    recover_one(&fake, &journal, "c-told", &|| {}, 2, Duration::ZERO).unwrap_err();
+    let notices = fake.notices.lock().unwrap().clone();
+    assert_eq!(notices.len(), 1);
+    let told = notices[0].clone().unwrap();
+    assert!(told.contains("rebuild of dev was interrupted"), "{told}");
+    assert!(told.contains("silo rebuild dev --abandon"), "{told}");
+    assert!(told.contains("cannot be removed"), "{told}");
+    // A rebuild asked for meanwhile says the same instead of failing without a word.
+    let error = rebuild(&fake, &journal, "c-told", false, WAIT).unwrap_err();
+    assert!(error.contains("--abandon"), "{error}");
+}
+
+/// A device that stopped in the middle of the swap and then lost the build sandbox, so the
+/// swap is in none of the states it knows.
+fn lost_build(id: &str, was_running: bool) -> (Fake, tempfile::TempDir, Journal) {
+    let (fake, dir, journal) = interrupted(id, Step::Swapping, was_running);
+    let plan = journal.get(id).unwrap().plan;
+    // `dev` was renamed to `dev-undo` and the build is gone.
+    *fake.table.sandboxes.lock().unwrap() = vec![Sandbox {
+        name: plan.undo_name.clone(),
+        label: plan.old_id.clone(),
+        tag: "old",
+    }];
+    fake.machines.lock().unwrap().remove(&plan.new_id);
+    fake.machines.lock().unwrap().remove(&plan.undo_id);
+    fake.machines.lock().unwrap().get_mut(id).unwrap().running = false;
+    fake.calls.lock().unwrap().clear();
+    (fake, dir, journal)
+}
+
+#[test]
+fn a_swap_in_no_known_state_blocks_every_start_and_rebuild_until_it_is_abandoned() {
+    let (fake, _dir, journal) = lost_build("c-lost", true);
+    let error = recover_one(&fake, &journal, "c-lost", &|| {}, 2, Duration::ZERO).unwrap_err();
+    assert!(error.contains("not the computers the rebuild expected"), "{error}");
+    assert_eq!(journal.all().len(), 1);
+    let error = rebuild(&fake, &journal, "c-lost", false, WAIT).unwrap_err();
+    assert!(error.contains("--abandon"), "{error}");
+    assert_eq!(journal.all().len(), 1);
+    assert!(fake.notices.lock().unwrap().iter().any(Option::is_some));
+}
+
+#[test]
+fn abandoning_puts_the_old_computer_back_by_its_identity_and_starts_it() {
+    for was_running in [true, false] {
+        let id = format!("c-abandon-{was_running}");
+        let (fake, _dir, journal) = lost_build(&id, was_running);
+        let result = super::abandon(&fake, &journal, &id, WAIT).unwrap();
+        assert_eq!(result.name, "dev");
+        assert_eq!(result.computer_id, id);
+        assert!(result.undo_name.is_empty());
+        // The old sandbox is `dev` again, under the computer's id.
+        let dev = fake.table.named("dev").unwrap();
+        assert_eq!((dev.label.as_str(), dev.tag), (id.as_str(), "old"));
+        assert_eq!(fake.table.named("dev-undo"), None);
+        assert!(fake.called("swap_revert") && fake.called("restore_original"));
+        assert!(fake.called("remove_build"));
+        assert_eq!(fake.running(&id), was_running, "{was_running}");
+        assert!(journal.all().is_empty());
+        assert_eq!(fake.notices.lock().unwrap().last(), Some(&None));
+        assert_eq!(*fake.unshielded.lock().unwrap(), Vec::<String>::new());
+        // The computer can be rebuilt again.
+        let mut again = Fake::new(&id, was_running);
+        again.ids = Mutex::new(vec!["id-n2".into(), "id-n1".into()]);
+        let (_dir2, journal2) = self::journal();
+        rebuild(&again, &journal2, &id, false, WAIT).unwrap();
+    }
+}
+
+#[test]
+fn abandoning_a_rebuild_whose_swap_finished_returns_the_old_computer_too() {
+    let (fake, _dir, journal) = interrupted("c-abandon-done", Step::Swapped, true);
+    super::abandon(&fake, &journal, "c-abandon-done", WAIT).unwrap();
+    assert!(fake.called("swap_revert") && !fake.called("restore_original"));
+    assert_eq!(after_tags(&fake.table), [Some("old"), None, None]);
+    assert!(journal.all().is_empty());
+}
+
+#[test]
+fn nothing_is_abandoned_when_no_rebuild_waits() {
+    let fake = Fake::new("c-nothing", true);
+    let (_dir, journal) = journal();
+    let error = super::abandon(&fake, &journal, "c-nothing", WAIT).unwrap_err();
+    assert!(error.contains("No rebuild of this computer is waiting"), "{error}");
+    assert_eq!(fake.changes(), Vec::<String>::new());
+}
+
+#[test]
+fn the_old_sandbox_is_found_by_its_identity_in_every_state_a_crash_can_leave() {
+    let plan = plan();
+    let sandbox = |name: &str, label: &str, tag: &'static str| (name.to_owned(), label.to_owned(), tag);
+    // (the sandboxes, whether the swap had begun)
+    let cases: Vec<(Vec<(String, String, &'static str)>, bool)> = vec![
+        // The build was renamed away from its name.
+        (vec![sandbox("dev", "id-old", "old"), sandbox("other", "id-new", "new")], false),
+        // The undo name was dropped after the swap.
+        (vec![sandbox("dev-undo", "id-undo", "old"), sandbox("dev", "id-new", "new")], true),
+        // The old sandbox is under its undo name, labelled with the computer's id.
+        (vec![sandbox("dev-undo", "id-old", "old"), sandbox("silo-rebuild-aaaa1111", "id-new", "new")], true),
+        // Fully swapped.
+        (vec![sandbox("dev-undo", "id-undo", "old"), sandbox("dev", "id-old", "new")], true),
+    ];
+    for (n, (sandboxes, swapping)) in cases.into_iter().enumerate() {
+        let table = Table::default();
+        for (name, label, tag) in &sandboxes {
+            table.sandboxes.lock().unwrap().push(Sandbox {
+                name: name.clone(),
+                label: label.clone(),
+                tag,
+            });
+        }
+        swap::restore_original(&table, &plan, swapping).unwrap_or_else(|e| panic!("case {n}: {e}"));
+        let dev = table.named("dev").unwrap();
+        assert_eq!((dev.label.as_str(), dev.tag), ("id-old", "old"), "case {n}");
+        // The build keeps its own name and id.
+        let build = table
+            .sandboxes
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.tag == "new")
+            .cloned();
+        if let Some(build) = build {
+            assert!(build.label == "id-new" && build.name != "dev", "case {n}: {build:?}");
+        }
+    }
+    // With nothing to tell the old sandbox by, nothing is touched.
+    let table = Table::with(&[("dev", "id-old", "new")]);
+    let error = swap::restore_original(&table, &plan, true).unwrap_err();
+    assert!(error.contains("cannot tell which"), "{error}");
+    assert!(table.log.lock().unwrap().is_empty());
 }

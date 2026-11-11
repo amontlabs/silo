@@ -1540,21 +1540,32 @@ pub async fn replace_main(
 }
 
 /// Rebuilds a Linux computer on the newest guest image, keeping its workspace and home. A
-/// computer already on the newest image is refused unless `force` is set.
+/// computer already on the newest image is refused unless `force` is set. With `abandon`, an
+/// interrupted rebuild that Silo could not settle is thrown away and the old computer put back.
 pub async fn rebuild(
     engine: &Engine,
     computer: &str,
     force: bool,
+    abandon: bool,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let computer = engine.computer(computer).await?;
     engine
         .run_job(
-            &format!("Rebuilding {}", computer.name),
+            &format!(
+                "{} {}",
+                if abandon {
+                    "Abandoning the rebuild of"
+                } else {
+                    "Rebuilding"
+                },
+                computer.name
+            ),
             requests::computers_rebuild(ComputerRebuildParams {
                 device_id: None,
                 computer_id: computer.id,
                 force: force.then_some(true),
+                abandon: abandon.then_some(true),
             }),
             progress,
         )

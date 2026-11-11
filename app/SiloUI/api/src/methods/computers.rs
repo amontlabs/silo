@@ -33,13 +33,16 @@ pub type ComputerLifecycleParams = ComputerTargetParams;
 
 wire_struct! {
     /// `computers.rebuild`: the computer to rebuild, and whether to rebuild it although it is
-    /// already on the newest image.
+    /// already on the newest image. With `abandon`, nothing is rebuilt: an interrupted rebuild
+    /// that Silo could not settle is thrown away and the old computer is put back.
     ComputerRebuildParams {
         computer_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         force: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        abandon: Option<bool>,
     }
 }
 

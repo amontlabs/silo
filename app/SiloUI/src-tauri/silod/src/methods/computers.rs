@@ -985,6 +985,7 @@ async fn begin_rebuild(
             service,
             params.computer_id,
             params.force.unwrap_or(false),
+            params.abandon.unwrap_or(false),
         )
     })
     .await

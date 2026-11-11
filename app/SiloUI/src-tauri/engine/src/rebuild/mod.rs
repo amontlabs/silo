@@ -82,6 +82,18 @@ pub trait RebuildEnv: Send + Sync {
     fn hold(&self, _id: &str) -> Result<Box<dyn std::any::Any>, String> {
         Ok(Box::new(()))
     }
+    /// Shows the step the rebuild is on wherever the operation is listed.
+    fn relabel(&self, _label: &str) {}
+    /// Fails when the person asked for the rebuild to stop. Asked between the steps that can
+    /// still be rolled back, never after the swap begins.
+    fn check_cancelled(&self) -> Result<(), String> {
+        Ok(())
+    }
+    /// Runs `work` without letting a request to cancel cut it short: the rollback and the steps
+    /// after the swap began must run to the end.
+    fn shielded(&self, work: &mut dyn FnMut()) {
+        work();
+    }
     fn info(&self, id: &str) -> Result<Info, String>;
     /// Why this computer cannot be rebuilt on this device, when it cannot (no copy-on-write
     /// cloning on the host, a disk kept under the computer's name, a resized workspace).
@@ -94,9 +106,9 @@ pub trait RebuildEnv: Send + Sync {
     fn recipe(&self, _id: &str) -> Result<Option<RecipeSpec>, String> {
         Ok(None)
     }
-    /// The size of `/home/silo` in bytes. A stopped computer may be started for the
-    /// measurement and is stopped again.
-    fn home_bytes(&self, id: &str) -> Result<u64, String>;
+    /// The size of `/home/silo` in bytes, or `None` when it cannot be known without starting a
+    /// stopped computer (the packing checks the size then, once the rebuild is journaled).
+    fn home_bytes(&self, id: &str) -> Result<Option<u64>, String>;
     /// The reference of the newest guest image, ready to build computers from.
     fn newest_image(&self) -> Result<String, String>;
     fn fresh_id(&self) -> String {
@@ -136,6 +148,18 @@ pub trait RebuildEnv: Send + Sync {
     fn settle_swapped(&self, plan: &Plan) -> Result<(), String>;
     /// Removes the new sandbox and the staged home folder, whatever exists of them.
     fn remove_build(&self, plan: &Plan) -> Result<(), String>;
+    /// Removes the home folder's tar file from the old computer, which a stop in the middle of
+    /// carrying the home folder leaves there. Best effort.
+    fn clean_old_computer(&self, _plan: &Plan) {}
+    /// Puts the old sandbox back under the computer's name and id when the identities are in a
+    /// state the swap does not know (an abandoned rebuild). `swapping` is whether the swap had
+    /// begun.
+    fn restore_original(&self, plan: &Plan, _swapping: bool) -> Result<(), String> {
+        self.swap_revert(plan)
+    }
+    /// Tells the owner that the rebuild of this computer could not be settled, or (with
+    /// `None`) that nothing waits any more.
+    fn stuck_notice(&self, _plan: &Plan, _problem: Option<&str>) {}
     fn note(&self, _line: &str) {}
 }
 
@@ -208,6 +232,25 @@ pub fn home_limit(root_disk_gib: u32) -> u64 {
     u64::from(root_disk_gib) * 1024 * 1024 * 1024 * HOME_SHARE_PERCENT / 100
 }
 
+/// Runs `work` where a request to cancel cannot cut it short.
+fn shielded<T>(env: &dyn RebuildEnv, work: impl FnOnce() -> T) -> T {
+    let mut work = Some(work);
+    let mut out = None;
+    env.shielded(&mut || {
+        if let Some(work) = work.take() {
+            out = Some(work());
+        }
+    });
+    out.expect("the environment ran the work")
+}
+
+/// The message the owner sees when a rebuild cannot be settled by itself.
+fn stuck_message(name: &str, error: &str) -> String {
+    format!(
+        "The rebuild of {name} was interrupted and could not be settled: {error} Ask Silo to abandon it (silo rebuild {name} --abandon) to put the old computer back."
+    )
+}
+
 /// Rebuilds the Linux computer `computer_id` on the newest guest image. A computer already on
 /// it is refused unless `force` is set.
 pub fn rebuild(
@@ -222,7 +265,9 @@ pub fn rebuild(
     // A rebuild this one finds half done is settled first.
     if let Some(record) = journal.get(computer_id) {
         env.note("A rebuild was interrupted; settling it first");
-        recover_record(env, journal, &record)?;
+        env.relabel("Settling an interrupted rebuild");
+        shielded(env, || recover_record(env, journal, &record))
+            .map_err(|error| stuck_message(&record.plan.old_name, &error))?;
     }
 
     // Every refusal comes before the first change.
@@ -266,15 +311,10 @@ pub fn rebuild(
         )));
     }
     let limit = home_limit(info.root_disk_gib);
-    let home = env.home_bytes(computer_id)?;
-    if home > limit {
-        return Err(refuse(format!(
-            "The home folder of '{}' ({} MB) is too large to carry to a new {} GiB root disk (up to {} MB fits).",
-            info.name,
-            home / (1024 * 1024),
-            info.root_disk_gib,
-            limit / (1024 * 1024)
-        )));
+    if let Some(home) = env.home_bytes(computer_id)? {
+        if home > limit {
+            return Err(refuse(home_too_large(&info.name, home, info.root_disk_gib)));
+        }
     }
 
     let key = env.stage_key();
@@ -298,7 +338,7 @@ pub fn rebuild(
     journal.save(&record)?;
 
     if let Err(error) = advance(env, journal, &mut record, recipe.as_ref()) {
-        return Err(match roll_back(env, journal, &record) {
+        return Err(match shielded(env, || roll_back(env, journal, &record)) {
             Ok(()) => format!(
                 "{error} The rebuild was rolled back; {} is as it was.",
                 info.name
@@ -308,12 +348,26 @@ pub fn rebuild(
             ),
         });
     }
+    if let Err(error) = finish(env, journal, &record) {
+        return Err(format!(
+            "{} was rebuilt, but cleaning up after it did not finish: {error} Silo finishes it the next time it starts.",
+            info.name
+        ));
+    }
     Ok(ComputerRebuildResult {
         computer_id: info.id,
         name: info.name,
         undo_name,
         image,
     })
+}
+
+fn home_too_large(name: &str, home: u64, root_disk_gib: u32) -> String {
+    format!(
+        "The home folder of '{name}' ({} MB) is too large to carry to a new {root_disk_gib} GiB root disk (up to {} MB fits).",
+        home / (1024 * 1024),
+        home_limit(root_disk_gib) / (1024 * 1024)
+    )
 }
 
 fn save(
@@ -327,7 +381,15 @@ fn save(
     journal.save(record)
 }
 
-/// Runs the steps the record has not done yet.
+/// Starts a step: shows it, and stops here if the person cancelled.
+fn begin(env: &dyn RebuildEnv, name: &str, what: &str) -> Result<(), String> {
+    env.note(what);
+    env.relabel(&format!("Rebuilding {name}: {what}"));
+    env.check_cancelled()
+}
+
+/// Runs the steps the record has not done yet, up to the swap. A request to cancel is honoured
+/// between steps until the swap begins; from then on the rebuild runs to the end.
 fn advance(
     env: &dyn RebuildEnv,
     journal: &Journal,
@@ -335,19 +397,20 @@ fn advance(
     recipe: Option<&RecipeSpec>,
 ) -> Result<(), String> {
     let plan = record.plan.clone();
+    let name = plan.old_name.as_str();
     if record.step < Step::Stopped {
-        env.note(&format!("Stopping {}", plan.old_name));
+        begin(env, name, "stopping the computer")?;
         stop_and_wait(env, &plan.old_id)?;
         save(env, journal, record, Step::Stopped)?;
     }
     if record.step < Step::Checkpointed {
-        env.note("Saving a checkpoint to go back to");
+        begin(env, name, "saving a checkpoint to go back to")?;
         let checkpoint = env.checkpoint(&plan.old_id, "Before rebuild on the newest image")?;
         record.checkpoint = Some(checkpoint);
         save(env, journal, record, Step::Checkpointed)?;
     }
     if record.step < Step::Created {
-        env.note("Building the new computer");
+        begin(env, name, "building the new computer")?;
         env.create(&plan)?;
         // The first start sets up the working account before the home folder arrives.
         env.start(&plan.new_id)?;
@@ -355,7 +418,7 @@ fn advance(
         save(env, journal, record, Step::Created)?;
     }
     if record.step < Step::HomeCarried {
-        env.note("Carrying the home folder");
+        begin(env, name, "carrying the home folder")?;
         env.start(&plan.old_id)?;
         env.start(&plan.new_id)?;
         env.carry_home(&plan)?;
@@ -366,14 +429,17 @@ fn advance(
         save(env, journal, record, Step::HomeCarried)?;
     }
     if record.step < Step::WorkspaceMoved {
-        env.note("Copying the workspace disk");
+        begin(env, name, "copying the workspace disk")?;
+        // Nothing may run while the disk is cloned, whoever started it meanwhile.
+        stop_and_wait(env, &plan.old_id)?;
+        stop_and_wait(env, &plan.new_id)?;
         env.move_workspace(&plan)?;
         env.copy_ssh(&plan)?;
         save(env, journal, record, Step::WorkspaceMoved)?;
     }
     if record.step < Step::RecipeReplayed {
+        begin(env, name, "installing the recipe on the new image")?;
         if let Some(spec) = recipe.filter(|spec| spec.os == RecipeOs::Linux) {
-            env.note("Installing the recipe on the new image");
             env.start(&plan.new_id)?;
             env.replay_recipe(&plan.new_id, spec)?;
             stop_and_wait(env, &plan.new_id)?;
@@ -381,52 +447,78 @@ fn advance(
         save(env, journal, record, Step::RecipeReplayed)?;
     }
     if record.step < Step::Swapping {
+        begin(env, name, "swapping the computers")?;
         stop_and_wait(env, &plan.old_id)?;
         stop_and_wait(env, &plan.new_id)?;
         save(env, journal, record, Step::Swapping)?;
     }
     if record.step < Step::Swapped {
-        env.note("Swapping the computers");
-        env.swap_apply(&plan)?;
-        save(env, journal, record, Step::Swapped)?;
+        shielded(env, || {
+            env.swap_apply(&plan)?;
+            save(env, journal, record, Step::Swapped)
+        })?;
     }
-    finish(env, journal, record);
     Ok(())
 }
 
 /// What follows the swap: forget what the build left in the stores, bring the computer back
-/// if it was running, and close the journal. None of it undoes the rebuild.
-fn finish(env: &dyn RebuildEnv, journal: &Journal, record: &Record) {
-    if let Err(error) = env.settle_swapped(&record.plan) {
-        env.note(&format!(
-            "Some leftovers of the build were not cleaned up: {error}"
-        ));
-    }
-    if record.was_running {
-        env.note(&format!("Starting {}", record.plan.old_name));
-        if let Err(error) = env.start(&record.plan.old_id) {
-            env.note(&format!(
-                "{} was not started again: {error}",
-                record.plan.old_name
-            ));
+/// if it was running, and close the journal once the stores are settled. Bringing the computer
+/// back does not depend on the cleanup, and neither undoes the rebuild. When the cleanup fails
+/// the journal stays, so the next start (or the next rebuild) runs it again.
+fn finish(env: &dyn RebuildEnv, journal: &Journal, record: &Record) -> Result<(), String> {
+    shielded(env, || {
+        let settled = env.settle_swapped(&record.plan);
+        if record.was_running {
+            env.note(&format!("Starting {}", record.plan.old_name));
+            if let Err(error) = env.start(&record.plan.old_id) {
+                env.note(&format!(
+                    "{} was not started again: {error}",
+                    record.plan.old_name
+                ));
+            }
         }
-    }
-    journal.remove(&record.plan.old_id);
+        if settled.is_ok() {
+            journal.remove(&record.plan.old_id);
+            env.stuck_notice(&record.plan, None);
+        }
+        settled
+    })
 }
 
 /// Puts everything back: the identities if the swap had begun, then the build sandbox and its
 /// staged files go, and the computer runs again only if it did when the rebuild began (it is
 /// left stopped otherwise).
 fn roll_back(env: &dyn RebuildEnv, journal: &Journal, record: &Record) -> Result<(), String> {
+    undo_rebuild(env, journal, record, false)
+}
+
+/// `roll_back`, or with `abandon` also the way out of identities in a state the swap does not
+/// know: the old sandbox is found by the Silo identities it carries.
+fn undo_rebuild(
+    env: &dyn RebuildEnv,
+    journal: &Journal,
+    record: &Record,
+    abandon: bool,
+) -> Result<(), String> {
     let plan = &record.plan;
+    if record.step == Step::Created {
+        // The engine may have stopped while the home folder was being carried.
+        env.clean_old_computer(plan);
+    }
     for id in [&plan.new_id, &plan.old_id] {
         // A running computer cannot be renamed or removed.
         if env.info(id).map(|info| info.running).unwrap_or(false) {
             stop_and_wait(env, id)?;
         }
     }
-    if record.step >= Step::Swapping {
-        env.swap_revert(plan)?;
+    let swapping = record.step >= Step::Swapping;
+    if swapping || abandon {
+        if let Err(error) = env.swap_revert(plan) {
+            if !abandon {
+                return Err(error);
+            }
+            env.restore_original(plan, swapping)?;
+        }
     }
     env.remove_build(plan)?;
     if record.was_running {
@@ -435,6 +527,7 @@ fn roll_back(env: &dyn RebuildEnv, journal: &Journal, record: &Record) -> Result
         }
     }
     journal.remove(&plan.old_id);
+    env.stuck_notice(plan, None);
     Ok(())
 }
 
@@ -446,11 +539,35 @@ fn recover_record(env: &dyn RebuildEnv, journal: &Journal, record: &Record) -> R
         if record.step < Step::Swapped {
             env.swap_apply(&record.plan)?;
         }
-        finish(env, journal, record);
-        Ok(())
+        finish(env, journal, record)
     } else {
         roll_back(env, journal, record)
     }
+}
+
+/// Throws an interrupted rebuild away and puts the old computer back, whatever state the
+/// identities were left in. The owner asks for it when the next start cannot settle the
+/// rebuild by itself.
+pub fn abandon(
+    env: &dyn RebuildEnv,
+    journal: &Journal,
+    computer_id: &str,
+    wait: Duration,
+) -> Result<ComputerRebuildResult, String> {
+    let _lane = lane::acquire(computer_id, wait)?;
+    let _gate = env.hold(computer_id)?;
+    let record = journal.get(computer_id).ok_or_else(|| {
+        "No rebuild of this computer is waiting. Nothing was changed.".to_owned()
+    })?;
+    env.relabel(&format!("Abandoning the rebuild of {}", record.plan.old_name));
+    shielded(env, || undo_rebuild(env, journal, &record, true))
+        .map_err(|error| format!("The rebuild could not be abandoned: {error}"))?;
+    Ok(ComputerRebuildResult {
+        computer_id: record.plan.old_id.clone(),
+        name: record.plan.old_name.clone(),
+        undo_name: String::new(),
+        image: String::new(),
+    })
 }
 
 /// The computers with a rebuild to settle.
@@ -464,8 +581,10 @@ pub fn interrupted_ids(journal: &Journal) -> Vec<String> {
 
 /// Settles the interrupted rebuild of `computer_id` with its lane and operation gate held from
 /// the start. `held` runs once they are, so the caller can let startup go on knowing nothing
-/// can start, stop or change the computer meanwhile. It is tried up to `attempts` times, `pause` apart (the
-/// runtime may not be ready yet at engine start).
+/// can start, stop or change the computer meanwhile. It is tried up to `attempts` times, `pause`
+/// apart (the runtime may not be ready yet at engine start), and the lane and the gate are
+/// taken again on each attempt that does not have them. When the last attempt fails the owner
+/// is told, and can abandon the rebuild.
 pub fn recover_one(
     env: &dyn RebuildEnv,
     journal: &Journal,
@@ -474,21 +593,35 @@ pub fn recover_one(
     attempts: u32,
     pause: Duration,
 ) -> Result<(), String> {
-    let _lane = lane::acquire(computer_id, Duration::from_secs(30))?;
-    let _gate = env.hold(computer_id)?;
-    held();
-    let mut last = Ok(());
+    let mut holding: Option<(lane::LaneGuard, Box<dyn std::any::Any>)> = None;
+    let mut last = Err("The rebuild was not attempted.".to_owned());
     for attempt in 0..attempts.max(1) {
-        let Some(record) = journal.get(computer_id) else {
+        if journal.get(computer_id).is_none() {
             return Ok(());
-        };
-        last = recover_record(env, journal, &record);
-        if last.is_ok() {
-            return Ok(());
+        }
+        if holding.is_none() {
+            last = lane::acquire(computer_id, Duration::from_secs(30)).and_then(|lane| {
+                let gate = env.hold(computer_id)?;
+                holding = Some((lane, gate));
+                held();
+                Ok(())
+            });
+        }
+        if holding.is_some() {
+            let Some(record) = journal.get(computer_id) else {
+                return Ok(());
+            };
+            last = shielded(env, || recover_record(env, journal, &record));
+            if last.is_ok() {
+                return Ok(());
+            }
         }
         if attempt + 1 < attempts {
             std::thread::sleep(pause);
         }
+    }
+    if let (Err(error), Some(record)) = (&last, journal.get(computer_id)) {
+        env.stuck_notice(&record.plan, Some(&stuck_message(&record.plan.old_name, error)));
     }
     last
 }

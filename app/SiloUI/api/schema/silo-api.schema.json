@@ -3421,8 +3421,14 @@
       "type": "object"
     },
     "ComputerRebuildParams": {
-      "description": "`computers.rebuild`: the computer to rebuild, and whether to rebuild it although it is\nalready on the newest image.",
+      "description": "`computers.rebuild`: the computer to rebuild, and whether to rebuild it although it is\nalready on the newest image. With `abandon`, nothing is rebuilt: an interrupted rebuild\nthat Silo could not settle is thrown away and the old computer is put back.",
       "properties": {
+        "abandon": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "computerId": {
           "type": "string"
         },

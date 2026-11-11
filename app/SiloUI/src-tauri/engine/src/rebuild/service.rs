@@ -41,17 +41,23 @@ pub fn env_for(host: Arc<dyn RuntimeHost>, service: Service) -> EngineRebuildEnv
     )
 }
 
-/// `computers.rebuild`: rebuilds the Linux computer `computer_id` on the newest guest image.
+/// `computers.rebuild`: rebuilds the Linux computer `computer_id` on the newest guest image, or
+/// with `abandon` puts it back after a rebuild that could not be settled.
 pub fn start_rebuild(
     host: Arc<dyn RuntimeHost>,
     service: Service,
     computer_id: String,
     force: bool,
+    abandon: bool,
 ) -> Result<JobId, Failure> {
     keep_service::start(host, "computers.rebuild", move |host| {
         let journal = journal_for(host.engine_context().as_ref());
         let env = env_for(host.clone(), service);
-        let result = rebuild(&env, &journal, &computer_id, force, LANE_WAIT)?;
+        let result = if abandon {
+            super::abandon(&env, &journal, &computer_id, LANE_WAIT)?
+        } else {
+            rebuild(&env, &journal, &computer_id, force, LANE_WAIT)?
+        };
         serde_json::to_value(result).map_err(|error| error.to_string())
     })
 }

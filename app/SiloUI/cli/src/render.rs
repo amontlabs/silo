@@ -1128,6 +1128,9 @@ pub fn rebuild(value: &Value) -> String {
     let name = text(value, "name");
     let undo = text(value, "undoName");
     let image = text(value, "image");
+    if undo.is_empty() {
+        return format!("Abandoned the rebuild of {name}. {name} is as it was before the rebuild.");
+    }
     format!("Rebuilt {name} on {image}. The previous computer is {undo} (stopped).")
 }
 

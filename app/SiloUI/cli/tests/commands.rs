@@ -1367,6 +1367,35 @@ async fn rebuild_force_is_sent_when_asked_for() {
 }
 
 #[tokio::test]
+async fn rebuild_abandon_is_sent_when_asked_for_and_reads_plainly() {
+    let engine = keep_engine(json!({
+        "computerId": "id-main",
+        "name": "main",
+        "undoName": "",
+        "image": "",
+    }));
+    let socket = engine.socket.to_str().unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "rebuild",
+        "main",
+        "--abandon",
+    ])
+    .unwrap();
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    let sent = &engine.calls("computers.rebuild")[0];
+    assert_eq!(sent["abandon"], true);
+    assert!(sent.get("force").is_none(), "{sent}");
+    let text = silo_cli::render::rebuild(&json!({"name": "main", "undoName": "", "image": ""}));
+    assert!(text.contains("Abandoned the rebuild of main"), "{text}");
+    let both = ["silo", "rebuild", "main", "--abandon", "--force"];
+    assert!(<Cli as clap::Parser>::try_parse_from(both).is_err());
+}
+
+#[tokio::test]
 async fn fold_promote_still_replaces_main_through_the_old_name() {
     let engine = keep_engine(json!({
         "status": "promoted",
