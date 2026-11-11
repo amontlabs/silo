@@ -104,3 +104,11 @@ was chosen and why; any can be changed. Older items are also in the build log un
     matches the disk file, so export works. The real fix (moving the Recovery partition out of
     the way before growing the disk, if that is the cause) is not scheduled; nothing retries the
     expansion later.
+
+## From the end-to-end run (V)
+
+27. **A computer may read its own Silo's tools status**, not other computers'. Refusals shown to
+    agents use command words, not internal method names (being built, R8).
+28. **Silo's own per-computer files (the channel endpoint, the tools receipt, ids and tokens) are
+    never part of a merge**, so a fork's merge no longer conflicts on them (R8).
+29. **One merge ask is one row on Pending**; its review opens from that row (R8).
