@@ -492,6 +492,9 @@ async fn decide(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
                 .deny(found.id(), &by, note.as_deref())
                 .map_err(unchangeable)?;
             announce(context, &denied);
+            if let Some(request_id) = &found.approval.review_request_id {
+                let _ = fold_requests::Store::new(&app_data(context)).mark_thrown_away(request_id);
+            }
             output(denied.view())
         }
         ApprovalDecision::Allow => {

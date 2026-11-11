@@ -101,6 +101,7 @@ pub async fn network_policy(
                 device_id: None,
                 policy: change.apply(read_policy(&current)?),
                 expected: Some(read_policy(&current)?),
+                accept_presets: None,
             }))
             .await?
     };

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, expect, it, vi } from "vitest"
 
@@ -8,6 +8,7 @@ import { computerTarget } from "@/features/application/model/connections"
 import { OverviewPage } from "@/features/application/pages/overview-page"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import { createNetworkFixture, type NetworkFixtureMode } from "@/fixtures/network-policy"
+import { useNetworkPolicy } from "./model/network-policy"
 
 beforeEach(() => clearComputerAgents())
 
@@ -128,18 +129,28 @@ it("adds and removes hosts and ticks presets, and sends the whole list", async (
   expect(save.mock.calls[0]![2]).toEqual({ mode: "allowlist", hosts: ["example.com", "*.internal.example.org"], presets: ["npm", "pypi"] })
 })
 
-it("discards an edit and shows the engine's own message for a host it refuses, keeping the edit", async () => {
+it("lowercases added hosts and rejects invalid hosts at add time", async () => {
   const { user } = await openDetail("allowlist")
   const section = await network()
   const hosts = await within(section).findByRole("region", { name: "Allowed hosts" })
-  await user.type(within(hosts).getByLabelText("Hosts you allow"), "Bad Host:8080")
-  await user.click(within(hosts).getByRole("button", { name: "Add" }))
-  await user.click(within(section).getByRole("button", { name: "Save" }))
-  expect(await within(section).findByRole("alert")).toHaveTextContent('"Bad Host:8080" is not a host name.')
-  expect(within(hosts).getByText("Bad Host:8080")).toBeVisible()
-  await user.click(within(section).getByRole("button", { name: "Discard" }))
+  const input = within(hosts).getByLabelText("Hosts you allow")
+  const addButton = within(hosts).getByRole("button", { name: "Add" })
+
+  await user.type(input, "Bad Host:8080")
+  await user.click(addButton)
+  expect(await within(hosts).findByRole("alert")).toHaveTextContent("give a name without a port; port 443 is allowed")
   expect(within(hosts).queryByText("Bad Host:8080")).not.toBeInTheDocument()
-  expect(within(section).queryByRole("alert")).not.toBeInTheDocument()
+
+  await user.clear(input)
+  await user.type(input, "*.co.uk")
+  await user.click(addButton)
+  expect(await within(hosts).findByRole("alert")).toHaveTextContent("a name under which anyone can get a host would allow all of them")
+
+  await user.clear(input)
+  await user.type(input, "NEW-HOST.EXAMPLE.COM")
+  await user.click(addButton)
+  expect(within(hosts).queryByRole("alert")).not.toBeInTheDocument()
+  expect(within(hosts).getByText("new-host.example.com")).toBeVisible()
 })
 
 it("shows a preset update with its hosts and accepts it by saving the policy again", async () => {
@@ -151,7 +162,7 @@ it("shows a preset update with its hosts and accepts it by saving the policy aga
   expect(updates).toHaveTextContent("registry.npmmirror.com, npm.pkg.example")
   await user.click(within(updates).getByRole("button", { name: "Accept the update to npm packages" }))
   const policy = { mode: "allowlist", hosts: ["example.com", "*.internal.example.org"], presets: ["npm", "pypi"] }
-  await waitFor(() => expect(save).toHaveBeenCalledExactlyOnceWith(target, policy, policy))
+  await waitFor(() => expect(save).toHaveBeenCalledExactlyOnceWith(target, policy, policy, { acceptPresets: true }))
 })
 
 it("will not accept an update while there are unsaved edits", async () => {
@@ -175,6 +186,29 @@ it("tells the person the policy changed meanwhile and reads it again instead of 
   await waitFor(() => expect(read.mock.calls.length).toBe(reads + 1))
   await waitFor(() => expect(within(section).getByRole("radio", { name: /Allowlist/ })).toBeChecked())
   expect(within(section).queryByRole("alert")).not.toBeInTheDocument()
+})
+
+it("keeps the baseline the draft started from and shows read again when re-read changes policy under dirty draft", async () => {
+  let policy: { mode: "open" | "allowlist" | "closed"; hosts: string[]; presets: string[] } = { mode: "open", hosts: [], presets: [] }
+  const state = () => ({ computerId: "dev", policy, allowedHosts: [], presets: [], presetUpdates: [], timing: "applied" as const, notices: [] })
+  const read = vi.fn(async () => state())
+  const save = vi.fn(async () => state())
+  const { result, rerender } = renderHook(
+    ({ refreshKey }) => useNetworkPolicy({ read, save, target: "dev", enabled: true, refreshKey }),
+    { initialProps: { refreshKey: "1" } }
+  )
+  await waitFor(() => expect(result.current.state?.policy.mode).toBe("open"))
+
+  act(() => result.current.setDraft({ mode: "closed", hosts: [], presets: [] }))
+  expect(result.current.dirty).toBe(true)
+
+  policy = { mode: "allowlist", hosts: ["added.com"], presets: [] }
+  rerender({ refreshKey: "2" })
+  await waitFor(() => expect(result.current.isStale).toBe(true))
+  expect(result.current.saveError).toMatch(/changed/i)
+
+  await act(async () => { await result.current.submit(result.current.draft!) })
+  expect(save).toHaveBeenCalledWith("dev", { mode: "closed", hosts: [], presets: [] }, { mode: "open", hosts: [], presets: [] })
 })
 
 it("cannot be edited in a read-only Silo", async () => {

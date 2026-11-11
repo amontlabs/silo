@@ -84,11 +84,10 @@ export function createNetworkFixture({ mode = "mixed" }: { mode?: NetworkFixture
     readNetworkPolicy: async target => policyOf(target),
     saveNetworkPolicy: async (target, policy, expected) => {
       const current = policyOf(target)
-      if (refused) {
+      if (refused || (expected && JSON.stringify(expected) !== JSON.stringify(current.policy))) {
         refused = false
-        throw new Error("The network policy of this computer changed while this was being decided. Read it again and retry.")
+        throw Object.assign(new Error("The network policy of this computer changed while this was being decided. Read it again and retry."), { code: "changed" })
       }
-      if (expected && JSON.stringify(expected) !== JSON.stringify(current.policy)) throw new Error("The network policy of this computer changed while this was being decided. Read it again and retry.")
       if (policy.mode === "allowlist") {
         const bad = policy.hosts.find(host => host !== host.toLowerCase() || /[:/\s]/.test(host))
         if (bad) throw new Error(`"${bad}" is not a host name. Use a lowercase name like example.com or *.example.com, without a port or an address.`)

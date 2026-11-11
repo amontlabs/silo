@@ -32,6 +32,7 @@ pub(crate) async fn save_policy(
     computer: &str,
     policy: Value,
     expected: Option<Value>,
+    accept_presets: Option<bool>,
 ) -> Result<Value, EngineError> {
     let policy: NetworkPolicy = decode(policy, "network policy")?;
     let expected: Option<NetworkPolicy> = expected
@@ -43,6 +44,7 @@ pub(crate) async fn save_policy(
             device_id: None,
             policy,
             expected,
+            accept_presets,
         }))
         .await
 }
@@ -107,10 +109,9 @@ pub(crate) async fn save_network_policy(
     computer: String,
     policy: Value,
     expected: Option<Value>,
-) -> Result<Value, String> {
-    save_policy(&engine, &computer, policy, expected)
-        .await
-        .map_err(String::from)
+    accept_presets: Option<bool>,
+) -> Result<Value, EngineError> {
+    save_policy(&engine, &computer, policy, expected, accept_presets).await
 }
 
 #[tauri::command]
@@ -210,10 +211,10 @@ mod tests {
         assert_eq!(read["policy"]["mode"], "allowlist");
         let seen = json!({"mode": "allowlist", "hosts": ["example.com"], "presets": ["npm"]});
         let wanted = json!({"mode": "closed", "hosts": [], "presets": []});
-        save_policy(&engine, "dev", wanted.clone(), Some(seen.clone()))
+        save_policy(&engine, "dev", wanted.clone(), Some(seen.clone()), None)
             .await
             .unwrap();
-        save_policy(&engine, "dev", wanted.clone(), None)
+        save_policy(&engine, "dev", wanted.clone(), None, None)
             .await
             .unwrap();
         assert_eq!(
@@ -233,7 +234,7 @@ mod tests {
     async fn a_policy_the_engine_would_not_read_is_refused_before_the_call() {
         let fake = FakeEngine::start(|method, params| replies(method, params));
         let (engine, _) = connected_client(&fake).await;
-        let error = save_policy(&engine, "dev", json!({"mode": "everything"}), None)
+        let error = save_policy(&engine, "dev", json!({"mode": "everything"}), None, None)
             .await
             .unwrap_err();
         assert!(error.message.starts_with("Invalid network policy"));
@@ -257,9 +258,11 @@ mod tests {
             "dev",
             json!({"mode": "open"}),
             Some(json!({"mode": "closed"})),
+            None,
         )
         .await
         .unwrap_err();
+        assert_eq!(error.code, "changed");
         assert!(error.message.ends_with("Read it again and retry."));
     }
 

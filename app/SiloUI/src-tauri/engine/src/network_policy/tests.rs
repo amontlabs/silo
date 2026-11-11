@@ -587,6 +587,64 @@ fn a_preset_update_waits_for_the_owner_to_accept_it() {
 }
 
 #[test]
+fn saving_policy_keeps_current_pins_and_only_explicit_accept_repins() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    use_test_presets(Some(version_two_presets()));
+    let target = || service::Target::Macos {
+        name: "dev".into(),
+        running: false,
+    };
+    let policy = allowlist(&[], &["tools"]);
+    // Stored initially at version 1
+    store::set_stored(
+        "c",
+        store::Stored {
+            mode: NetworkPolicyMode::Allowlist,
+            hosts: Vec::new(),
+            presets: vec!["tools".into()],
+            preset_versions: Pins::from([("tools".to_owned(), 1)]),
+            incoming_denied: false,
+        },
+    )
+    .unwrap();
+    let initial = service::get("c", target()).unwrap();
+    assert_eq!(initial.preset_updates.len(), 1);
+
+    // Normal save with expected keeps version 1 pinned (update still pending)
+    let saved = service::set("c", &policy, Some(&policy), None, target()).unwrap();
+    assert_eq!(saved.preset_updates.len(), 1);
+    let stored = store::get_stored("c").unwrap().unwrap();
+    assert_eq!(stored.preset_versions.get("tools"), Some(&1));
+
+    // An entry saved with no pin (the first version) keeps waiting for an accept, with or
+    // without `expected`.
+    store::set_stored(
+        "c",
+        store::Stored {
+            mode: NetworkPolicyMode::Allowlist,
+            hosts: Vec::new(),
+            presets: vec!["tools".into()],
+            preset_versions: Pins::new(),
+            incoming_denied: false,
+        },
+    )
+    .unwrap();
+    let saved = service::set("c", &policy, None, None, target()).unwrap();
+    assert_eq!(saved.preset_updates.len(), 1);
+    assert!(store::get_stored("c").unwrap().unwrap().preset_versions.is_empty());
+
+    // Explicit accept re-pins to version 2
+    let accepted = service::set("c", &policy, Some(&policy), Some(true), target()).unwrap();
+    assert!(accepted.preset_updates.is_empty());
+    let stored = store::get_stored("c").unwrap().unwrap();
+    assert_eq!(stored.preset_versions.get("tools"), Some(&2));
+
+    use_test_presets(None);
+    store::use_test_path(None);
+}
+
+#[test]
 fn a_preset_version_this_silo_does_not_know_allows_nothing() {
     use_test_presets(Some(version_two_presets()));
     let policy = allowlist(&["x.example.com"], &["tools"]);
@@ -632,12 +690,12 @@ fn a_narrowing_is_saved_only_against_the_policy_it_was_judged_against() {
     // The owner narrows to nothing meanwhile: the agent's narrowing, judged against `wide`,
     // does not put a list back.
     store::set("c", &mode(NetworkPolicyMode::Closed)).unwrap();
-    let refused = service::set("c", &narrow, Some(&wide), target()).unwrap_err();
+    let refused = service::set("c", &narrow, Some(&wide), None, target()).unwrap_err();
     assert!(refused.contains("try") || refused.contains("retry"), "{refused}");
     assert_eq!(store::get("c").unwrap(), Some(mode(NetworkPolicyMode::Closed)));
     // Against the policy it was judged against, it is saved.
     store::set("c", &wide).unwrap();
-    let state = service::set("c", &narrow, Some(&wide), target()).unwrap();
+    let state = service::set("c", &narrow, Some(&wide), None, target()).unwrap();
     assert_eq!(state.policy, narrow);
     assert_eq!(store::get("c").unwrap(), Some(narrow));
     store::use_test_path(None);

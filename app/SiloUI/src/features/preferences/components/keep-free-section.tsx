@@ -1,5 +1,5 @@
 import { HardDrive, MemoryStick } from "lucide-react"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { SectionHeading } from "@/components/page"
@@ -25,14 +25,25 @@ function FloorField({ label, caption, minimum, saved, effective, onSave }: {
 }) {
   const [typed, setTyped] = useState(saved === null ? "" : String(saved))
   const [problem, setProblem] = useState<string | null>(null)
+  const lastCommitted = useRef<number | null>(saved)
   const message = useId()
   function commit() {
     const text = typed.trim()
-    if (text === "") { setProblem(null); if (saved !== null) onSave(null); return }
+    if (text === "") {
+      setProblem(null)
+      if (lastCommitted.current !== null) {
+        lastCommitted.current = null
+        onSave(null)
+      }
+      return
+    }
     const value = Number(text)
     if (!Number.isInteger(value) || value < minimum) { setProblem(`Enter a whole number of GiB, at least ${minimum}.`); return }
     setProblem(null)
-    if (value !== saved) onSave(value)
+    if (value !== lastCommitted.current) {
+      lastCommitted.current = value
+      onSave(value)
+    }
   }
   const now = effective === undefined ? "" : saved === null ? ` Now ${gib(effective)} (the default).` : ` Now ${gib(effective)}.`
   return <ListRow
@@ -44,7 +55,7 @@ function FloorField({ label, caption, minimum, saved, effective, onSave }: {
     actions={<div className="flex shrink-0 items-center gap-1.5">
       <Input technical size="sm" inputMode="numeric" className="w-20 text-right" aria-label={`${label} to keep free, in GiB`} aria-describedby={problem ? message : undefined} aria-invalid={problem ? true : undefined}
         placeholder="Default" value={typed} onChange={event => setTyped(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === "Enter") commit() }} />
-      <Button type="button" variant="ghost" size="xs" disabled={saved === null} aria-label={`Use the default ${label.toLowerCase()} to keep free`} onClick={() => { setProblem(null); onSave(null) }}>Default</Button>
+      <Button type="button" variant="ghost" size="xs" disabled={saved === null} aria-label={`Use the default ${label.toLowerCase()} to keep free`} onClick={() => { setProblem(null); lastCommitted.current = null; onSave(null) }}>Default</Button>
     </div>}
   />
 }

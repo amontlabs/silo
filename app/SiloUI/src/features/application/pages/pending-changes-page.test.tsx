@@ -157,6 +157,18 @@ it("opens a merge with the review view and its diff, and merging answers the app
   await waitFor(() => expect(fixture.approvals().find(({ id }) => id === "ap-fast-forward")?.state).toBe("allowed"))
 })
 
+it("switches from a non-merge approval to a merge approval and shows the review/diff state", async () => {
+  const fixture = createApprovalFixture({ now: NOW })
+  const { rerender } = render(<Harness fixture={fixture} openApproval={{ id: "ap-port", token: 1 }} />)
+  expect(await screen.findByText("Publish port 8080 on this device")).toBeInTheDocument()
+  expect(screen.queryByLabelText("Diff")).toBeNull()
+
+  // Switch to a merge approval while an approval is open
+  rerender(<Harness fixture={fixture} openApproval={{ id: "ap-fast-forward", token: 2 }} />)
+  expect(await screen.findByLabelText("Diff")).toBeInTheDocument()
+  expect(screen.getByText("api-docs → main")).toBeInTheDocument()
+})
+
 it("asks for a choice per conflict when a merge needs them, then merges with the choices", async () => {
   const user = userEvent.setup()
   const fixture = createApprovalFixture({ now: NOW })

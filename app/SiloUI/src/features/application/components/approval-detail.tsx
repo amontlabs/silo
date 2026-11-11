@@ -11,6 +11,7 @@ import { useApprovalJob } from "@/features/application/model/use-approval-job"
 import { errorMessage } from "@/lib/error-message"
 import { formatAbsoluteTime, formatRelativeTime } from "@/lib/relative-time"
 import { cn } from "@/lib/utils"
+import { sanitizeAgentText } from "@/lib/visible-text"
 
 export type ApprovalActions = Pick<ApplicationActions, "decideApproval" | "readApprovalJob" | "readDeviceResources">
 
@@ -18,16 +19,18 @@ const gib = (bytes: number) => `${(bytes / 2 ** 30).toFixed(1)} GiB`
 
 /** What an approval is, in the engine's words, and the agent's own note under a label that says whose words they are. */
 export function ApprovalFacts({ approval }: { approval: Approval }) {
+  const summary = sanitizeAgentText(approval.summary || approvalKindLabel(approval.kind), { preserveNewlines: true })
+  const note = approval.note ? sanitizeAgentText(approval.note, { preserveNewlines: true }) : undefined
   return (
     <div className="grid gap-3">
       <section className="grid gap-1" aria-label="What is asked">
         <SectionHeading>What is asked</SectionHeading>
-        <p className="text-sm">{approval.summary || approvalKindLabel(approval.kind)}</p>
+        <p className="text-sm whitespace-pre-line">{summary}</p>
       </section>
-      {approval.note && (
+      {note && (
         <section className="grid gap-1" aria-label="The agent's note">
           <SectionHeading>The agent's own words</SectionHeading>
-          <blockquote className="border-l-2 pl-3 text-sm whitespace-pre-wrap text-muted-foreground">{approval.note}</blockquote>
+          <blockquote className="border-l-2 pl-3 text-sm whitespace-pre-wrap text-muted-foreground">{note}</blockquote>
           <p className="text-caption text-muted-foreground">The agent wrote this note. Silo has not checked it.</p>
         </section>
       )}
@@ -144,9 +147,16 @@ export function ApprovalDetail({ approval, requestDeviceId, requestDeviceName, t
   }
 
   const subtitle = [approvalKindLabel(approval.kind), formatRelativeTime(approval.createdAt), approval.state === "pending" && approval.expiresAt ? `expires ${formatAbsoluteTime(approval.expiresAt)}` : ""].filter(Boolean).join(" · ")
+  const cleanComputerName = sanitizeAgentText(approval.computerName || "A computer")
+  const headerTitle = (
+    <span className="inline-flex items-baseline gap-2">
+      <span>{cleanComputerName} asks</span>
+      {approval.computerId && <span className="font-mono text-xs font-normal text-muted-foreground">{approval.computerId}</span>}
+    </span>
+  )
   return (
     <PageContainer className="grid gap-4">
-      <PageHeader title={`${approval.computerName || "A computer"} asks`} subtitle={subtitle} actions={
+      <PageHeader title={headerTitle} subtitle={subtitle} actions={
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" size="sm" onClick={onBack}>Back</Button>
           {waiting && <DenyButton disabled={busy} onDeny={note => decide("deny", note)} />}

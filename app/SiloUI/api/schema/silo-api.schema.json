@@ -16328,6 +16328,13 @@
     },
     "NetworkPolicySetParams": {
       "properties": {
+        "acceptPresets": {
+          "description": "When true, re-pins presets to their latest versions, accepting pending updates.\nA normal save preserves existing pins.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "computerId": {
           "type": "string"
         },
