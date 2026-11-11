@@ -898,6 +898,12 @@ fn capture_with_kind(
             paths,
             id,
             (snapshot_group.clone(), interrupted.native_id().to_owned()),
+        ) && !adopt_finished_capture(
+            runner,
+            paths,
+            &mut record,
+            &snapshot_group,
+            configuration.name(),
         ) {
             return Err(error("An interrupted checkpoint could not be removed. Retry after its dependencies are released."));
         }
@@ -4444,6 +4450,42 @@ fn queue_unowned_import_groups(
 
 /// Remove the member a failed capture may have published, unless something already
 /// builds on it. Returns true when it is gone. Runs even after a cancel.
+/// Keeps the capture an interrupted engine left in flight as a checkpoint when the runtime
+/// finished it and the computer already builds on it (its next capture would follow it), so
+/// that it cannot be discarded. Returns whether it did.
+fn adopt_finished_capture(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    record: &mut Record,
+    group: &str,
+    computer_name: &str,
+) -> bool {
+    let Some(finished) = record.inflight_checkpoint.clone() else {
+        return false;
+    };
+    let key = (group.to_owned(), finished.native_id().to_owned());
+    if snapshot_ready(runner, paths, group, &key.1, &finished.scope).is_err() {
+        return false;
+    }
+    let Ok(survey) = survey(runner, paths) else {
+        return false;
+    };
+    let Some(member) = survey
+        .inventory
+        .iter()
+        .find(|member| member.key().as_ref() == Some(&key))
+    else {
+        return false;
+    };
+    if survey.positions.get(&member.snapshot_id).map(String::as_str) != Some(computer_name) {
+        return false;
+    }
+    record.checkpoints.insert(0, finished);
+    record.inflight_checkpoint = None;
+    record.checkpoint_operation = None;
+    true
+}
+
 pub fn discard_failed_capture(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
@@ -4523,8 +4565,12 @@ pub(crate) fn recover_interrupted(
                 runner,
                 paths,
                 configuration.id(),
-                (group, inflight.native_id().to_owned()),
+                (group.clone(), inflight.native_id().to_owned()),
             ) {
+                if adopt_finished_capture(runner, paths, &mut record, &group, configuration.name())
+                {
+                    return save(paths, configuration.id(), &record);
+                }
                 return Err(error("Interrupted checkpoint data is still in use or could not be removed. It was preserved."));
             }
             record.inflight_checkpoint = None;

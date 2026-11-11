@@ -500,6 +500,25 @@ pub fn command_lock(paths: &RuntimePaths, timeout: Duration) -> Result<CommandLo
     }
 }
 
+/// Removes the storage folder reserved for a computer that was never saved. A folder Silo did
+/// not reserve for this computer is only removed when it is empty.
+fn discard_unsaved_storage(
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<(), RuntimeError> {
+    let folder = paths.volumes.join(configuration.name());
+    if !folder.exists() {
+        return Ok(());
+    }
+    if fs::read_to_string(folder.join(OWNER)).ok().as_deref() != Some(configuration.id()) {
+        if fs::remove_dir(&folder).is_ok() {
+            return Ok(());
+        }
+        return Err(failure("Incomplete storage ownership could not be verified. No files were removed."));
+    }
+    fs::remove_dir_all(folder).map_err(failure)
+}
+
 fn reconcile(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
@@ -545,7 +564,16 @@ fn reconcile(
                 .iter()
                 .any(|entry| entry.id() == configuration.id())
             {
-                verify_guest_tools(runner, paths, configuration.name())?;
+                if let Err(error) = settle_unsaved_computer(runner, paths, &inspected, configuration.name())
+                    .and_then(|()| verify_guest_tools(runner, paths, configuration.name()))
+                {
+                    // The computer was never saved: remove what the interrupted creation
+                    // left, so that the replay below creates it again.
+                    cleanup_failed_create(runner, paths, configuration.name(), configuration.id())
+                        .and_then(|()| discard_unsaved_storage(paths, configuration))
+                        .map_err(|cleanup| with_cleanup_error(error, Err(cleanup)))?;
+                    continue;
+                }
                 if let Some(desktop) = crate::desktop::configuration(configuration) {
                     crate::desktop::configure_with(
                         runner,
@@ -574,18 +602,7 @@ fn reconcile(
                     "A saved computer is missing from the runtime. Its disk files were preserved.",
                 ));
             }
-            let folder = paths.volumes.join(configuration.name());
-            if folder.exists() {
-                if fs::read_to_string(folder.join(OWNER)).ok().as_deref()
-                    != Some(configuration.id())
-                {
-                    if fs::remove_dir(&folder).is_ok() {
-                        continue;
-                    }
-                    return Err(failure("Incomplete storage ownership could not be verified. No files were removed."));
-                }
-                fs::remove_dir_all(folder).map_err(failure)?;
-            }
+            discard_unsaved_storage(paths, configuration)?;
         }
     }
     for configuration in journal.previous.computers.iter().filter(|configuration| {
@@ -1582,5 +1599,140 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("changed since"), "{error}");
+    }
+
+    /// A runtime holding the computer an interrupted creation made: it is `status` and keeps
+    /// it until it is stopped. An `exec` leaves the status as it is, as the real one does.
+    struct InterruptedCreation {
+        id: String,
+        status: Mutex<&'static str>,
+        tools_fail: bool,
+        removed: AtomicBool,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl InterruptedCreation {
+        fn new(id: &str, status: &'static str, tools_fail: bool) -> Self {
+            Self {
+                id: id.into(),
+                status: Mutex::new(status),
+                tools_fail,
+                removed: AtomicBool::new(false),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn ran(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl RuntimeRunner for InterruptedCreation {
+        fn run(
+            &self,
+            _paths: &RuntimePaths,
+            args: &[String],
+            _timeout: Duration,
+        ) -> Result<CommandOutput, RuntimeError> {
+            self.calls.lock().unwrap().push(args[0].clone());
+            let value = match args[0].as_str() {
+                "list" if self.removed.load(Ordering::SeqCst) => json!([]),
+                "list" => json!([{"name":"dev"}]),
+                "inspect" => json!({"name":"dev","status":*self.status.lock().unwrap(),"config":{
+                    "image":{"Oci":{"root_disk":{"kind":"managed","size_mib":10240}}},
+                    "resources":{"cpus":1,"max_cpus":2,"memory_mib":4096,"max_memory_mib":8192},
+                    "labels":{"silo.managed":"true","silo.machine-id":self.id},
+                    "mounts":[{"type":"Owned","guest":"/workspace","storage":{"kind":"disk","capacity_mib":10240}}]
+                }}),
+                "stop" => {
+                    *self.status.lock().unwrap() = "Stopped";
+                    Value::Null
+                }
+                "exec" if self.tools_fail => {
+                    return Err(RuntimeError::Unavailable("The tools check failed.".into()))
+                }
+                "exec" => Value::Null,
+                "remove" => {
+                    self.removed.store(true, Ordering::SeqCst);
+                    Value::Null
+                }
+                other => panic!("Unexpected recovery operation: {other}"),
+            };
+            Ok(CommandOutput {
+                stdout: value.to_string(),
+                stderr: String::new(),
+            })
+        }
+    }
+
+    fn interrupted_creation(
+        directory: &tempfile::TempDir,
+    ) -> (RuntimePaths, ComputerConfiguration, ComputerConfigurationRequest) {
+        let root = directory.path();
+        let paths = RuntimePaths {
+            executable: root.join("msb"),
+            library: root.join("library"),
+            home: root.join("home"),
+            storage_home: None,
+            guest_image: root.join("image"),
+            metadata: root.join("computers.json"),
+            volumes: root.join("volumes"),
+        };
+        let configuration = computer(&uuid::Uuid::new_v4().to_string(), "dev");
+        let configuration = ComputerConfiguration {
+            cpus: 1,
+            max_cpus: 2,
+            workspace_storage_gib: 10,
+            runtime_storage_gib: 10,
+            ..configuration
+        };
+        let request = ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![configuration.clone()],
+        };
+        begin(&paths, &request).unwrap();
+        claim(&paths, &configuration).unwrap();
+        (paths, configuration, request)
+    }
+
+    #[test]
+    fn recovery_stops_the_running_computer_an_interrupted_creation_left() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, configuration, request) = interrupted_creation(&directory);
+        let runtime = InterruptedCreation::new(configuration.id(), "Running", false);
+        prepare_retry(&runtime, &paths, None).unwrap();
+        assert_eq!(read_metadata(&paths.metadata).unwrap(), request);
+        let calls = runtime.ran();
+        let position = |command: &str| calls.iter().position(|call| call == command).unwrap();
+        assert!(position("stop") < position("exec"), "{calls:?}");
+        assert!(!calls.iter().any(|call| call == "remove"), "{calls:?}");
+    }
+
+    #[test]
+    fn recovery_removes_an_interrupted_creation_whose_tools_cannot_be_checked() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, configuration, request) = interrupted_creation(&directory);
+        let runtime = InterruptedCreation::new(configuration.id(), "Running", true);
+        prepare_retry(&runtime, &paths, None).unwrap();
+        // The computer was never saved, so nothing of it stays; the replay creates it again.
+        assert!(runtime.removed.load(Ordering::SeqCst));
+        assert!(read_metadata(&paths.metadata).unwrap().computers.is_empty());
+        assert!(!paths.volumes.join("dev").exists());
+        assert_eq!(pending_request(&paths).unwrap(), Some(request));
+    }
+
+    #[test]
+    fn recovery_never_removes_a_saved_computer_whose_tools_cannot_be_checked() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, configuration, request) = interrupted_creation(&directory);
+        write_metadata(&paths.metadata, &request).unwrap();
+        let runtime = InterruptedCreation::new(configuration.id(), "Running", true);
+        prepare_retry(&runtime, &paths, None).unwrap();
+        let calls = runtime.ran();
+        assert!(!calls.iter().any(|call| matches!(call.as_str(), "stop" | "exec" | "remove")), "{calls:?}");
+        assert_eq!(read_metadata(&paths.metadata).unwrap(), request);
     }
 }

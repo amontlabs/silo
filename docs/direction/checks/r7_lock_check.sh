@@ -2,15 +2,17 @@
 # R7 live check: running computers must not keep the engine's command lock after an engine crash.
 # Dev engine only (~/.silo-dev), throwaway e2e-r7-* computers. Run:
 #   bash docs/direction/checks/r7_lock_check.sh 2>&1 | tee docs/direction/evidence/R7.txt
+# CREATE_KILL_AFTER=<seconds> moves the kill point of the create scenario (default 4); T=<folder> uses
+# another build folder (it must hold debug/silo and debug/bundle/macos/Silo Dev.app).
 set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-T=$REPO/app/SiloUI/target
+T=${T:-$REPO/app/SiloUI/target}
 SILO_BIN=$T/debug/silo
 BUNDLE="$T/debug/bundle/macos/Silo Dev.app"
 SILOD="$BUNDLE/Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silod"
 MSB="$BUNDLE/Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/msb"
 SOCK="$HOME/.silo-dev/engine.sock"
-LOG=$T/verification/silod-dev-r7.log
+LOG=${LOG:-$REPO/app/SiloUI/target/verification/silod-dev-r7.log}
 silo() { "$SILO_BIN" --socket "$SOCK" "$@"; }
 say() { echo "[$(date +%H:%M:%S)] $*"; }
 PASS=0; FAILN=0
@@ -76,7 +78,7 @@ S=$SECONDS; silo create e2e-r7-d >/dev/null 2>&1; check "create after the crash"
 S=$SECONDS; silo stop e2e-r7-b >/dev/null 2>&1; check "stop after the crash" $? "$((SECONDS-S))s"
 S=$SECONDS; silo start e2e-r7-b >/dev/null 2>&1; check "start after the crash" $? "$((SECONDS-S))s"
 # 2: a create of another computer is in flight
-KILL_AFTER=4 crash "kill during silo create e2e-r7-c" silo create e2e-r7-c
+KILL_AFTER=${CREATE_KILL_AFTER:-4} crash "kill during silo create e2e-r7-c" silo create e2e-r7-c
 S=$SECONDS; silo create e2e-r7-e >/dev/null 2>&1; check "create after the second crash" $? "$((SECONDS-S))s"
 S=$SECONDS; silo stop e2e-r7-a >/dev/null 2>&1; check "stop the computer that ran through both crashes" $? "$((SECONDS-S))s"
 say "== Quit (TERM to the engine)"

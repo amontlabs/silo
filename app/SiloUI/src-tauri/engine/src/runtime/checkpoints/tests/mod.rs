@@ -3719,6 +3719,65 @@ fn a_failed_capture_removes_its_published_member_unless_the_computer_builds_on_i
 }
 
 #[test]
+fn a_capture_the_runtime_finished_and_the_computer_builds_on_is_kept_at_launch() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, vec![entry(A, "Kept", "manual")], None);
+    let mut record = load(&paths, ID).unwrap();
+    record.inflight_checkpoint = Some(entry(B, "Interrupted", "manual"));
+    record.checkpoint_operation = Some(Operation {
+        kind: "capture".into(),
+        status: "running".into(),
+        stage: "Capturing computer state".into(),
+        error: None,
+    });
+    save(&paths, ID, &record).unwrap();
+    let store = Store::new(vec![("dev", None)])
+        .with("dev", A, "snap_a", None)
+        .with("dev", B, "snap_b", Some("snap_a"));
+    cursor(&paths, "dev", "snap_b");
+    let recovery = recover_interrupted(&store, &paths).unwrap();
+    assert!(recovery.unresolved.is_empty());
+    assert_eq!(store.names(), [A, B]);
+    let recovered = load(&paths, ID).unwrap();
+    assert!(recovered.inflight_checkpoint.is_none());
+    assert!(recovered.checkpoint_operation.is_none());
+    let ids: Vec<_> = recovered.checkpoints.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, [B, A]);
+}
+
+#[test]
+fn only_a_ready_capture_the_computer_builds_on_is_adopted() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = restore_fixture(&directory, None);
+    let mut record = load(&paths, ID).unwrap();
+    record.snapshot_group = Some("dev".into());
+    record.inflight_checkpoint = Some(Checkpoint {
+        scope: "disk".into(),
+        ..entry(B, "Interrupted", "manual")
+    });
+    save(&paths, ID, &record).unwrap();
+    let store = Store::new(vec![("dev", None)]).with("dev", B, "snap_b", None);
+    cursor(&paths, "dev", "snap_b");
+    let mut adopted = load(&paths, ID).unwrap();
+    assert!(adopt_finished_capture(&store, &paths, &mut adopted, "dev", "dev"));
+    assert!(adopted.inflight_checkpoint.is_none());
+    assert_eq!(adopted.checkpoints[0].id, B);
+    // A capture nothing builds on is not adopted (it is discarded instead).
+    let other = tempfile::tempdir().unwrap();
+    let paths = restore_fixture(&other, None);
+    let mut record = load(&paths, ID).unwrap();
+    record.inflight_checkpoint = Some(Checkpoint {
+        scope: "disk".into(),
+        ..entry(B, "Interrupted", "manual")
+    });
+    let store = Store::new(vec![("dev", None)]).with("dev", B, "snap_b", None);
+    assert!(!adopt_finished_capture(&store, &paths, &mut record, "dev", "dev"));
+    assert!(record.inflight_checkpoint.is_some());
+}
+
+#[test]
 fn launch_cleanup_removes_only_the_capture_identified_by_its_journal() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();

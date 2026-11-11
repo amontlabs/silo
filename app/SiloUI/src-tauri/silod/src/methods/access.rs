@@ -2818,6 +2818,20 @@ pub(crate) mod tests {
     /// Tests that create or remove this engine's Connections key must not overlap.
     static KEY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    /// Takes the Connections key for one test and starts it without the pending removals and
+    /// controller keys earlier tests left in the shared settings file.
+    async fn key_lock() -> tokio::sync::MutexGuard<'static, ()> {
+        let guard = KEY_LOCK.lock().await;
+        call(MethodName::ConnectionsStatus, json!({}))
+            .await
+            .unwrap();
+        edit_connections_config(|config| {
+            config["removals"] = json!([]);
+            config["controllerKeys"] = json!({});
+        });
+        guard
+    }
+
     fn connections_config_path() -> PathBuf {
         silo_engine::channel::current()
             .state_dir(&fixture().home)
@@ -3810,7 +3824,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn connections_status_list_and_enabled_state() {
         // Turning Connections off rewrites the settings file other tests edit.
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let status = call(MethodName::ConnectionsStatus, json!({}))
             .await
             .unwrap();
@@ -3832,7 +3846,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn connections_health_is_a_side_effect_free_projection() {
         // Removals rewrite the settings file; a save that overlaps one could be lost.
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "66666666-6666-4666-8666-666666666666";
         save_device(device, "ssh://user@127.0.0.1:9").await;
         let health = call(MethodName::ConnectionsDevicesHealth, json!({}))
@@ -3864,7 +3878,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn connections_ssh_commands_are_local_text() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let authorization = call(
             MethodName::ConnectionsSshAuthorizationCommand,
             json!({"address": "user@host.example"}),
@@ -3917,7 +3931,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn keys_revoke_leaves_unrelated_keys_alone_and_succeeds_when_absent() {
         // The authorize test writes the same authorized_keys.
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let path = fixture().home.join(".ssh/authorized_keys");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFakeFak";
@@ -3952,7 +3966,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn keys_authorize_and_list_are_this_devices_own() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let path = fixture().home.join(".ssh/authorized_keys");
         let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIAuthAuthAuthAuthAuthAuthAuthAuthAuthAuthAut";
         let offered = format!("ssh-ed25519 {blob} laptop");
@@ -4130,7 +4144,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn events_subscribe_relays_saved_devices_only_and_ends_with_the_device() {
         use crate::dispatcher::{CoreMethodRegistry, MethodRegistry};
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "77777777-7777-4777-8777-777777777771";
         save_device(device, "owner.example").await;
         let link = Arc::new(UnreachableOwner(Default::default()));
@@ -4213,7 +4227,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn removing_a_device_revokes_its_key_first_and_keeps_it_when_that_fails() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "77777777-7777-4777-8777-777777777777";
         // The address cannot be used, so the owner can never confirm the revocation.
         save_device(device, "not an address").await;
@@ -4239,7 +4253,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn removing_a_device_after_its_private_key_was_deleted_still_needs_the_owner() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "99999999-9999-4999-8999-999999999999";
         // The owner holds the public key recorded for this device; the private key is gone.
         save_device(device, "not an address").await;
@@ -4283,8 +4297,33 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn a_test_holding_the_key_lock_starts_without_the_removals_and_keys_of_earlier_tests() {
+        let device = "55555555-5555-4555-8555-555555555555";
+        {
+            // A removal the owner cannot confirm stays pending, as another test may leave it.
+            let _key = KEY_LOCK.lock().await;
+            save_device(device, "not an address").await;
+            edit_connections_config(|config| {
+                config["controllerKeys"] =
+                    json!({device: ["ssh-ed25519 AAAAstale Silo remote management"]});
+            });
+            expect_error(
+                MethodName::ConnectionsDevicesRemove,
+                json!({"deviceId": device}),
+            )
+            .await;
+        }
+        let _key = key_lock().await;
+        let config: Value =
+            serde_json::from_slice(&std::fs::read(connections_config_path()).unwrap()).unwrap();
+        assert_eq!(config["removals"], json!([]));
+        assert_eq!(config["controllerKeys"], json!({}));
+        config_without_device(device);
+    }
+
+    #[tokio::test]
     async fn removing_a_device_without_a_connections_key_forgets_it() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "88888888-8888-4888-8888-888888888888";
         save_device(device, "ssh://user@127.0.0.1:9").await;
         let key = silo_engine::remote::connections_public_key().unwrap();

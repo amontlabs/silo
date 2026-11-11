@@ -5362,7 +5362,23 @@ fn read_rows(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<Vec<Row
         .iter()
         .map(ComputerConfiguration::name)
         .collect();
-    if listed_names.iter().any(|name| !configured.contains(name)) {
+    // A computer an interrupted configuration was still creating is Silo's own: recovery
+    // finishes or removes it, and meanwhile it does not fail the reading of every other computer.
+    let being_created: HashSet<String> = configuration_recovery::pending_request(paths)
+        .ok()
+        .flatten()
+        .map(|request| {
+            request
+                .computers
+                .iter()
+                .map(|computer| computer.name().to_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    if listed_names
+        .iter()
+        .any(|name| !configured.contains(name) && !being_created.contains(*name))
+    {
         return Err(RuntimeError::Malformed(INVENTORY_MISMATCH.into()));
     }
     // Whether each computer is read from Silo's pending-restore record rather than the runtime.
@@ -6625,6 +6641,35 @@ fn validate_computer_update(
         Ok(())
     } else {
         Err(RuntimeError::Invalid("Storage disks cannot be resized in place. Keep both saved sizes or create a new computer.".into()))
+    }
+}
+
+/// Brings a computer the runtime made but Silo never saved to rest. An interrupted creation
+/// can leave it starting or running, and the runtime does not stop it when the engine dies.
+/// `inspected` is the computer as just read.
+fn settle_unsaved_computer(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    inspected: &InspectedSandbox,
+    name: &str,
+) -> Result<(), RuntimeError> {
+    let at_rest = |status: &str| matches!(status, "Created" | "Stopped" | "Crashed");
+    if at_rest(&inspected.status) {
+        return Ok(());
+    }
+    runner.run(
+        paths,
+        &["stop".into(), name.into(), "--quiet".into()],
+        STOP_TIMEOUT,
+    )?;
+    let stopped = inspect_computer(runner, paths, name)?;
+    ensure_managed(&stopped)?;
+    if at_rest(&stopped.status) {
+        Ok(())
+    } else {
+        Err(RuntimeError::Malformed(format!(
+            "Computer '{name}' did not stop after its creation was interrupted."
+        )))
     }
 }
 
@@ -12602,6 +12647,32 @@ exit 9
             serde_json::to_value(read_application_state_with(&runner, &paths).unwrap()).unwrap();
         assert!(encoded.get("preferences").is_none());
         assert!(encoded.get("backup").is_none());
+    }
+
+    #[test]
+    fn a_computer_still_being_created_does_not_fail_the_reading_of_the_others() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let mut created = second_computer();
+        created.name = "made".into();
+        configuration_recovery::begin(&paths, &request(vec![computer(), created])).unwrap();
+        let listing = || {
+            StubRunner::successful_json(vec![
+                json!([
+                    {"name":"dev","status":"Running","image":"ubuntu"},
+                    {"name":"made","status":"Running","image":"ubuntu"}
+                ]),
+                inspect(&paths, "Running"),
+            ])
+        };
+        let state = read_application_state_with(&listing(), &paths).unwrap();
+        assert_eq!(state.computers.len(), 1);
+        // A managed computer no journal names is still refused.
+        configuration_recovery::finish(&paths).unwrap();
+        let error = read_application_state_with(&listing(), &paths).unwrap_err();
+        assert!(error.to_string().contains("does not match"), "{error}");
     }
 
     #[test]
