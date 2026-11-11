@@ -67,6 +67,20 @@ fn quiet_lists(record: &Record) -> (&[String], &[String]) {
         .unwrap_or_default()
 }
 
+/// What a fork's offline preparation deletes: what its recipe asked for, and the source's
+/// endpoint file of Silo's tools (and the earlier client's token file), which the fork never
+/// keeps. The fork gets its own file at its first start when it has the tools.
+fn fork_scrub(record: &Record) -> Vec<String> {
+    use silo_api::methods::guest_client::{GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH};
+    let mut scrub = quiet_lists(record).0.to_vec();
+    for path in [GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH] {
+        if !scrub.iter().any(|existing| existing == path) {
+            scrub.push(path.to_owned());
+        }
+    }
+    scrub
+}
+
 /// Adds scheduled work that was moved aside to the fork's record of what it was made quiet
 /// with. A repeated run parks nothing new and keeps what the first run recorded.
 fn note_parked(record: &mut Record, parked: &[String], still_scheduled: &[String]) {
@@ -527,11 +541,12 @@ impl Provision<'_> {
         self.say("Personalizing the computer")?;
         let bootstrap = super::proxy::prepare_offline_bootstrap(self.app, record, self.layout)?;
         offline_setup::ensure_detached(&self.layout.disk())?;
+        let scrub = fork_scrub(record);
         let rekey = offline_setup::run_fork_rekey(
             &self.layout.disk(),
             &own,
             Some(&bootstrap),
-            Some(quiet_lists(record)),
+            Some((&scrub, quiet_lists(record).1)),
         )?;
         self.check()?;
         note_parked(record, &rekey.parked, &rekey.still_scheduled);
@@ -1216,6 +1231,36 @@ mod tests {
         assert!(waits_for_first_start(&fork));
         fork.first_boot = false;
         assert!(!waits_for_first_start(&fork));
+    }
+
+    #[test]
+    fn a_forks_offline_preparation_deletes_the_sources_endpoint_file() {
+        let mut fork = finished_record();
+        let scrub = fork_scrub(&fork);
+        assert_eq!(
+            scrub,
+            ["/etc/silo/endpoint.json", "/etc/silo/guest-client.json"]
+        );
+        fork.quiet = Some(super::super::quiet::QuietRecord {
+            scrub: vec!["/Users/silo/.env".into(), "/etc/silo/endpoint.json".into()],
+            ..Default::default()
+        });
+        assert_eq!(
+            fork_scrub(&fork),
+            [
+                "/Users/silo/.env",
+                "/etc/silo/endpoint.json",
+                "/etc/silo/guest-client.json"
+            ]
+        );
+        let root = tempfile::tempdir().unwrap();
+        let silo = root.path().join("private/etc/silo");
+        std::fs::create_dir_all(&silo).unwrap();
+        std::fs::write(silo.join("endpoint.json"), "{\"token\":\"silo_gc_x\"}").unwrap();
+        std::fs::write(silo.join("other.conf"), "kept").unwrap();
+        super::super::quiet::apply_offline(root.path(), &scrub, &[]).unwrap();
+        assert!(!silo.join("endpoint.json").exists());
+        assert!(silo.join("other.conf").exists());
     }
 
     #[test]

@@ -1682,8 +1682,17 @@ fn export_and_drop_copies(
         Vec::new()
     };
     let Some(env) = env.filter(|_| !targets.is_empty()) else {
-        return backup_work(controller, archive_path, names, names, &[], checkpoint_id, cancellation)
-            .map(|archive| (archive, None));
+        let result = backup_work(
+            controller,
+            archive_path,
+            names,
+            names,
+            &[],
+            checkpoint_id,
+            cancellation,
+        );
+        end_tokens(controller, names, &[]);
+        return result.map(|archive| (archive, None));
     };
     let copies = scrub::make_copies(controller, env, &targets, cancellation)?;
     let result = backup_work(
@@ -1695,6 +1704,8 @@ fn export_and_drop_copies(
         checkpoint_id,
         cancellation,
     );
+    // A computer exported from its own disk or a checkpoint carries its endpoint file.
+    end_tokens(controller, names, &targets);
     let dropped = copies.drop_all();
     match (result, dropped) {
         (Ok(archive), dropped) => Ok((
@@ -1715,6 +1726,44 @@ fn export_and_drop_copies(
             Err(error)
         }
         (Err(error), Ok(())) => Err(error),
+    }
+}
+
+/// Ends the token of Silo's tools of each of `names` that was not exported from a hidden copy
+/// (`copied`, as (name, id)), once the export is written: its file holds the computer's endpoint
+/// file, and the copy of the token in it must prove nothing. A copy never holds one
+/// (`export_scrub` removes it).
+fn end_tokens(controller: &Controller, names: &[String], copied: &[(String, String)]) {
+    let Ok(host) = controller.runtime_host() else {
+        return;
+    };
+    let macos = host.macos_context();
+    let metadata = runtime::runtime_paths(host)
+        .ok()
+        .and_then(|paths| runtime::read_metadata(&paths.metadata).ok());
+    for name in names {
+        if copied.iter().any(|(copied, _)| copied == name) {
+            continue;
+        }
+        let id = macos
+            .as_ref()
+            .and_then(|context| crate::macos_computers::id_for_name(context, name))
+            .or_else(|| {
+                metadata.as_ref().and_then(|metadata| {
+                    metadata
+                        .computers
+                        .iter()
+                        .find(|configuration| configuration.name() == name)
+                        .map(|configuration| configuration.id().to_owned())
+                })
+            });
+        if let Some(id) = id {
+            if let Err(error) = crate::guest_client::end_token(&id) {
+                eprintln!(
+                    "silo-engine: the token of {name} was not ended after its export: {error}"
+                );
+            }
+        }
     }
 }
 

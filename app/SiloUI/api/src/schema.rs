@@ -283,7 +283,7 @@ mod tests {
                 name: "Silo".into(),
                 version: "0.1".into(),
             }),
-            token: None,
+            proof: None,
         };
         assert_eq!(
             serde_json::from_str::<HandshakeParams>(&serde_json::to_string(&handshake).unwrap())
@@ -314,19 +314,23 @@ mod tests {
     }
 
     #[test]
-    fn protocol_8_carries_the_channel_token_in_the_handshake() {
+    fn protocol_8_answers_the_channel_challenge_with_a_proof_never_the_token() {
         assert_eq!(crate::transport::PROTOCOL_VERSION, 8);
         let params: HandshakeParams = serde_json::from_value(serde_json::json!({
             "protocol": { "min": 8, "max": 8 },
-            "token": "silo_gc_x",
+            "proof": "ab",
         }))
         .unwrap();
-        assert_eq!(params.token.as_deref(), Some("silo_gc_x"));
+        assert_eq!(params.proof.as_deref(), Some("ab"));
         let without = HandshakeParams {
-            token: None,
+            proof: None,
             ..params
         };
-        assert!(!serde_json::to_string(&without).unwrap().contains("token"));
+        let text = serde_json::to_string(&without).unwrap();
+        assert!(!text.contains("proof") && !text.contains("token"));
+        let challenge: crate::transport::ChannelChallenge =
+            serde_json::from_value(serde_json::json!({ "nonce": "00" })).unwrap();
+        assert_eq!(challenge.nonce, "00");
     }
 
     #[test]

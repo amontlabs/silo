@@ -93,6 +93,17 @@ fn locate(
     })
 }
 
+/// When the computer's network takes the rules its plan asks for now: `Applied` when it runs
+/// with them.
+pub(crate) fn network_now(
+    runtime: &Result<silo_engine::runtime::RuntimePaths, String>,
+    computer_id: &str,
+) -> Result<NetworkPolicyTiming, String> {
+    let located = locate(runtime, computer_id)?;
+    network_timing(runtime, computer_id, &located)
+        .ok_or_else(|| "the computer's network could not be read.".to_owned())
+}
+
 /// When the computer's network lets it reach its channel.
 fn network_timing(
     runtime: &Result<silo_engine::runtime::RuntimePaths, String>,
@@ -131,6 +142,7 @@ fn status(
         host: record.as_ref().map(|_| GUEST_ENDPOINT_HOST.to_owned()),
         port: record.as_ref().and_then(|record| record.port),
         endpoint_path: record.as_ref().map(|_| GUEST_ENDPOINT_PATH.to_owned()),
+        restart_needed: record.as_ref().is_some_and(|record| record.restart_needed),
         enabled_at: record.map(|record| record.minted_at),
         network,
         written,
@@ -145,9 +157,10 @@ fn enable(
 ) -> Result<GuestClientStatus, String> {
     // The computer must exist on this device before anything is opened for it.
     let located = locate(runtime, computer_id)?;
-    guest_client::turn_on_in(store, computer_id)?;
+    let record = guest_client::turn_on_in(store, computer_id)?;
     let mut written = false;
-    if located.running {
+    // A computer waiting for a restart gets its file once it runs with rules that match.
+    if located.running && !record.restart_needed {
         let target = silo_engine::guest::resolve(runtime.clone(), app_data, computer_id)
             .map_err(|error| error.message)?;
         endpoint::write(&target, store).map_err(|error| {

@@ -656,7 +656,7 @@ fn a_fork_gets_its_own_port_and_no_token_and_an_import_gets_none_until_turned_on
     let child_port = tokens.port_of("child").unwrap();
     assert_ne!(child_port, parent_port);
     assert!(
-        tokens.verify(&parent_token, "child").is_none(),
+        !crate::guest_client::tokens::tests::accepts(&tokens, &parent_token, "child", child_port),
         "a copied token proves nothing"
     );
     assert!(tokens.status("child").unwrap().unwrap().hash.is_empty());

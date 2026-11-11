@@ -6912,6 +6912,11 @@
             "null"
           ]
         },
+        "restartNeeded": {
+          "default": false,
+          "description": "The channel had to move to a new port while the computer's network still names the\nold one, which another program holds. The tools are not served, and no token is\nwritten, until the computer restarts.",
+          "type": "boolean"
+        },
         "written": {
           "default": false,
           "description": "Whether the endpoint file was written into the computer by this call. A computer\nthat is not running gets it when it next starts.",
@@ -7818,7 +7823,7 @@
       "type": "string"
     },
     "HandshakeParams": {
-      "description": "`engine.handshake` parameters. `sshKey` is used by the Connections bridge\nto install the restricted key; local engine clients omit it. `token` is the computer's\ntoken on the channel inside a computer, and is required there; `engine.sock` ignores it.",
+      "description": "`engine.handshake` parameters. `sshKey` is used by the Connections bridge\nto install the restricted key; local engine clients omit it. `proof` answers the channel's\n[`ChannelChallenge`] on the channel inside a computer, and is required there (lowercase hex of\n[`channel_proof`]); `engine.sock` ignores it.",
       "properties": {
         "client": {
           "anyOf": [
@@ -7830,16 +7835,16 @@
             }
           ]
         },
-        "protocol": {
-          "$ref": "#/$defs/ProtocolRange"
-        },
-        "sshKey": {
+        "proof": {
           "type": [
             "string",
             "null"
           ]
         },
-        "token": {
+        "protocol": {
+          "$ref": "#/$defs/ProtocolRange"
+        },
+        "sshKey": {
           "type": [
             "string",
             "null"

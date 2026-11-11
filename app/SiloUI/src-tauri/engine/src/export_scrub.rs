@@ -128,6 +128,14 @@ pub fn prepare(
             .with_cleanup(cleanup));
         }
     };
+    // The copy has no use for Silo's tools, so the engine writes no endpoint file into it.
+    if let Err(error) = crate::guest_client::turn_off(&[copy_id.as_str()]) {
+        let cleanup = env.delete(&copy_id);
+        return Err(Failure::failed(format!(
+            "Silo could not turn off Silo's tools in the temporary copy: {error}."
+        ))
+        .with_cleanup(cleanup));
+    }
     let mut prepared = Prepared {
         copy_id,
         copy_name: name,
@@ -162,10 +170,11 @@ fn strip(
     let paths = env.login_paths(&id).map_err(|error| {
         Failure::failed(format!("Silo could not look for logins in the copy: {error}."))
     })?;
-    if !paths.is_empty() {
-        progress("Removing the logins from the copy");
-        step("Silo could not remove the logins", remove(env, &id, &paths))?;
-    }
+    progress("Removing the logins from the copy");
+    step(
+        "Silo could not remove the logins",
+        remove(env, &id, &with_silo_files(&paths)),
+    )?;
     prepared.left_out = paths
         .iter()
         .filter_map(|path| login_label(path))
@@ -175,6 +184,19 @@ fn strip(
     proceed()?;
     progress("Stopping the copy");
     step("Silo could not stop the temporary copy", env.stop(&id))
+}
+
+/// `paths` and the files of Silo's tools in a computer: the endpoint file with its token, and
+/// the earlier client's token file.
+fn with_silo_files(paths: &[String]) -> Vec<String> {
+    use silo_api::methods::guest_client::{GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH};
+    let mut all = paths.to_vec();
+    for path in [GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH] {
+        if !all.iter().any(|existing| existing == path) {
+            all.push(path.to_owned());
+        }
+    }
+    all
 }
 
 fn nul_separated(paths: &[String]) -> Vec<u8> {

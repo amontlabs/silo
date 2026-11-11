@@ -13,7 +13,8 @@ computer                                device
 --------                                ------
 silo  ──TCP──>  host.microsandbox.internal:<port>  ──(runtime maps the gateway to loopback)──>
                                          127.0.0.1:<port>  silod listener for this computer
-                                         handshake carries the computer's token
+                                         silod sends a nonce; the handshake answers with
+                                         HMAC(SHA-256(token), nonce, port), never the token
                                          every request runs as Caller::Computer { id }
 ```
 
@@ -31,13 +32,18 @@ silo  ──TCP──>  host.microsandbox.internal:<port>  ──(runtime maps t
   (`<app data>/guest-client/tokens.json`, `0600`). The token is valid on that computer's port
   alone. The device side always sees `127.0.0.1`, so the token, not the address, is what tells
   computers apart.
+- **A challenge, not the token.** The token never crosses the connection. The engine speaks first
+  with a fresh random nonce, and the client answers with HMAC-SHA-256 keyed by SHA-256 of the
+  token over a fixed context string, the nonce and the port it believes it is connecting to. A
+  program that collects what a client sends learns nothing it can use again, and an answer made
+  for one port is useless on another.
 
 ## Choices
 
 | Need | Choice | Why |
 | --- | --- | --- |
 | Transport | A loopback TCP port per computer on the device, reached through the gateway address. | The runtime already maps the gateway to the device's loopback and its rules can open one port; no runtime patch, the same for Linux virtual machines, containers and macOS computers. |
-| Identity | A per-computer token in the handshake, checked against the port's computer. | The peer address is always `127.0.0.1`. The port says which computer the connection claims to be; the token proves it. |
+| Identity | A per-computer token, proved in the handshake by an HMAC over the engine's nonce and the port, checked against the port's computer. | The peer address is always `127.0.0.1`. The port says which computer the connection claims to be; the proof shows the token without sending it. |
 | Client | The ordinary `silo` binary and `silo mcp`. | One CLI, one set of commands; the engine's answer decides what is allowed. |
 
 Alternatives, and why not:
@@ -56,14 +62,14 @@ Alternatives, and why not:
 | Piece | Where |
 | --- | --- |
 | `guestClient.enable`, `.revoke`, `.status` and the endpoint path | `app/SiloUI/api/src/methods/guest_client.rs` |
-| The handshake's `token`, protocol 8 | `app/SiloUI/api/src/transport.rs` |
-| Ports and token hashes, the endpoint file, turning the tools on and off | `app/SiloUI/src-tauri/engine/src/guest_client/` |
+| The challenge, the handshake's `proof` and how it is made, protocol 8 | `app/SiloUI/api/src/transport.rs` (`ChannelChallenge`, `channel_proof`) |
+| Ports, token hashes and held ports, the endpoint file, turning the tools on and off | `app/SiloUI/src-tauri/engine/src/guest_client/` |
 | The rule in every network mode | `app/SiloUI/src-tauri/engine/src/network_policy/mod.rs` (`extra_rules`) |
 | The listeners, the order of checks, the start-time file check | `app/SiloUI/src-tauri/silod/src/channel.rs`, `channel/watch.rs` |
 | The session (shared with `engine.sock`) and its caller | `app/SiloUI/src-tauri/silod/src/socket.rs`, `dispatcher.rs` |
 | The three methods | `app/SiloUI/src-tauri/silod/src/methods/guest_client.rs` |
 | What each call may do, and who made which computer | `app/SiloUI/src-tauri/engine/src/policy/` |
-| The transport choice in `silo`, `silo tools`, `silo mcp` inside a computer | `app/SiloUI/cli/src/endpoint.rs`, `tools.rs`, `mcp.rs`; `app/SiloUI/client/src/session.rs` |
+| The transport choice in `silo`, `silo tools`, `silo mcp` inside a computer; reading the file again after a refusal | `app/SiloUI/cli/src/endpoint.rs`, `engine.rs`, `tools.rs`, `mcp.rs`; `app/SiloUI/client/src/session.rs` |
 
 ## Turning the tools on
 
@@ -96,13 +102,18 @@ computer uses the device's own `silo`. Until the engine provides the binary itse
 `app/SiloUI/scripts/build-guest-silo.sh` (needs `rustup target add aarch64-unknown-linux-musl` and
 `zig`).
 
-`disable` (`guestClient.revoke`) forgets the port and the token hash and closes every open
-connection of the computer at once. The rule stays in the computer's network until its next start
-without it; nothing listens on the port any more.
+`disable` (`guestClient.revoke`) forgets the token hash and closes every open connection of the
+computer at once. The rule stays in the computer's network until its next start without it, so
+the engine keeps the port bound with a listener that accepts every connection and closes it at
+once, reading nothing, until the computer runs with rules that no longer name it or is deleted
+(the port is kept in `<app data>/guest-client/held-ports.json` and bound again at engine start).
+No other program can take it in the meantime and become reachable from the computer. Turning the
+tools on again reuses that port.
 
 No answer carries the token. `status` gives the host name, the port, the endpoint path, when the
-tools were turned on, and when the computer's network lets it reach them (`applied`, `nextStart`,
-`nextRestart`).
+tools were turned on, when the computer's network lets it reach them (`applied`, `nextStart`,
+`nextRestart`), and `restartNeeded` when the channel had to move to a new port (below) and is not
+served until the computer restarts.
 
 ## The endpoint file
 
@@ -117,31 +128,49 @@ account), written atomically by the engine as root through the guest agent (SSH 
 computer). On a macOS computer the `silo` account's group is `staff`.
 
 The engine checks the file whenever it sees the computer running after it was not (every start,
-including the engine's own start), at most every 30 seconds after the computer changed, and every
-ten minutes: it reads the file as root and compares the host, the port, the computer's id and the
-SHA-256 of the token with what it keeps. A file that is missing or does not match is replaced
-with a new token; the old token stops working at once. A computer whose file could not be checked
-is tried again five seconds later.
+including the engine's own start), at most every 30 seconds after the computer changed, every ten
+minutes, and as soon as it can for a running computer without a token: it reads the file as root
+and compares the host, the port, the computer's id and the SHA-256 of the token with what it
+keeps. A file that is missing or does not match is replaced with a new token; the old token stops
+working at once and every session opened with it ends. Each check runs on its own thread, at most
+four at once and one per computer, and each command in the computer has 8 seconds, so a computer
+that stalls its check holds up no other. A computer whose check failed is tried again after five
+seconds, then ten, doubling up to five minutes.
 
 `silo` uses the channel when `/etc/silo/endpoint.json` exists, or when `SILO_ENDPOINT` names
 another file; `--socket` always means the engine socket. A file it cannot read is an error, never
-a silent fall back to a socket.
+a silent fall back to a socket. When the engine refuses its handshake (closes without an answer),
+`silo` reads the file again and retries with the new one, waiting 1, 2, 4 and 8 seconds while the
+file has not changed: after an engine restart or an export the engine writes a new token within
+seconds. `silo mcp` remembers the newer file for its later calls.
 
 ## The listener
 
 On a new connection, in this order and before anything is answered:
 
-1. The connection takes one of the computer's 8 connection places, or is closed at once.
-2. The first frame is read within 10 seconds and at most 16 KiB.
-3. It must be `engine.handshake` with a `token` whose SHA-256 matches the stored hash **of the
-   computer the port belongs to**. The computer comes from the port; no field of the frame
-   (`computerId`, the client's name, an SSH key) selects or changes it.
-4. Anything else (no token, another computer's token, a wrong one, another method first, an
-   oversized or malformed frame) gets no answer: the refusal is written to the audit log as a
-   refused `engine.handshake` by that computer (collapsed with its repeats, as refused calls are),
-   and the connection is closed after one second, holding its place meanwhile.
-5. The session is then served exactly as an `engine.sock` session, with every request made as
-   `Caller::Computer { id }`. It ends when the tools are turned off.
+1. The connection takes one of the computer's 4 handshake places, or is closed at once.
+   Connections that have not proved anything never take one of the 8 places of sessions.
+2. The engine sends `{"nonce": "<64 hex digits>"}`: 32 fresh bytes from the operating system's
+   random source.
+3. The first frame is read within 2 seconds (sending the nonce included) and at most 16 KiB.
+4. It must be `engine.handshake` with a `proof`: lowercase hex of HMAC-SHA-256 keyed by the
+   stored SHA-256 of the token **of the computer the port belongs to**, over the context string
+   `silo channel handshake v1\0`, the nonce and the port (two bytes, big-endian), compared in
+   constant time. The computer's record must name this port. The computer comes from the port;
+   no field of the frame (`computerId`, the client's name, an SSH key, a `token`) selects or
+   changes it.
+5. Anything else (no proof, a proof for another computer, port or nonce, a wrong one, another
+   method first, an oversized or malformed frame) gets no answer: the refusal is written to the
+   audit log as a refused `engine.handshake` by that computer, at most once a second per
+   computer so the rows collapse and cannot fill the audit queue, a line goes to the engine's log
+   at most once a minute per computer, and the connection is closed after one second, holding its
+   handshake place meanwhile.
+6. The session then takes one of the computer's 8 session places, or is closed at once, and is
+   served exactly as an `engine.sock` session, with every request made as
+   `Caller::Computer { id }`. It ends when the tools are turned off or the token is minted again.
+
+A held port (a computer whose tools were turned off, or whose channel moved) accepts and closes
+every connection at once, with no challenge, no audit row and no log line.
 
 Limits besides those: 16 requests running at once per computer over all its connections (2 more
 kept for `engine.state`), the socket's 4 MiB frame size, and at most 16 jobs the computer has not
@@ -151,9 +180,13 @@ acknowledged is acknowledged for it once it has finished.
 `events.subscribe` is owner-only, so a client on the channel follows jobs by polling
 `operations.job.get`, as `silo` already does.
 
-At engine start each computer's port is bound again. A port another program took in the meantime
-is replaced by a new one, the token is ended (it may have been sent to that program), and the
-computer gets the new rule at its next start and a new file once it runs.
+At engine start every token hash is forgotten: a token learned while the engine was not running
+is dead, and each running computer gets a new one at its first check. Each computer's port is
+bound again, and each held port that is free. A port another program took in the meantime is
+replaced by a new one; the computer is marked `restartNeeded`, its new port is held rather than
+served, and no file is written for it, because its network still names the old port. Once the
+computer runs with rules that name the new port (its next start), the port is served and the file
+written.
 
 ## What the engine allows
 
@@ -173,12 +206,20 @@ hosted reviewer (`review`), SSH names (`ssh_name`) and reaching a review request
   fork and its target; `changes.undo`: both computers of the promote it takes back). A failure
   stops the operation before anything changes. Turn them on again for the computer that should
   have them.
-- **Delete** forgets the computer's port and token hash. A record whose computer has been missing
-  from the engine's list for ten minutes is forgotten too (a creation that failed).
+- **Delete** forgets the computer's port and token hash and lets every port kept for it go. A
+  record whose computer has been missing from the engine's list for ten minutes is forgotten too
+  (a creation that failed), and so is a held port whose computer is missing for that long.
 - **Forks.** A fork's copy of its parent's file is useless by construction: the fork cannot reach
-  the parent's port (no rule for it) and the parent's token is refused on the fork's port. Every
-  fork also has the file (and the earlier client's `/etc/silo/guest-client.json`) scrubbed when it
-  first starts, and gets its own file afterwards when it has the tools.
+  the parent's port (no rule for it) and the parent's proof is refused on the fork's port. Every
+  fork also has the file (and the earlier client's `/etc/silo/guest-client.json`) removed: a Linux
+  fork by its fork options, a macOS fork in the offline preparation of its disk. It gets its own
+  file at its first start when it has the tools.
+- **Exports.** An export of a Linux virtual machine is made from a hidden copy, which has the file
+  removed with the known login files (whether or not the logins are kept, the copy is also kept
+  without Silo's tools). Every other export (a checkpoint, a macOS or a container computer, or one
+  that keeps the logins) holds the computer's file; right after it, the engine ends the
+  computer's token, so the copy in the file proves nothing, and the computer gets a new one at its
+  next check.
 - **Restore.** A memory restore keeps the computer's processes but resets their TCP connections
   through the gateway, so an open session ends. Each `silo` command connects anew, and `silo mcp`
   reconnects on its next call.
@@ -207,13 +248,16 @@ by an earlier engine is ignored.
 ## Open items
 
 - **A port is open on the device's loopback** for each computer with the tools. Any program on
-  the device can connect to it; without the token it gets nothing but an audit row and a closed
-  connection ([threat model, boundary 9](THREAT-MODEL.md#9-silos-tools-in-a-computer-a-port-and-a-token)).
-  The later hardening is a runtime patch mapping the gateway port to a Unix socket in a private
-  folder.
-- While the engine is not running, another program can bind a computer's port and receive the
-  token from a client that connects. A port found taken at start gets a new token; a port that
-  was taken and released while the engine was down is not detected.
+  the device can connect to it; without the token it gets a nonce, a closed connection and a
+  collapsed audit row, and it can keep a computer's 4 handshake places busy so that computer's
+  new sessions wait ([threat model, boundary 9](THREAT-MODEL.md#9-silos-tools-in-a-computer-a-port-and-a-token)).
+  On a shared Linux host every account can do this, so a shared host is a weaker place than a
+  single-user device. The later hardening is a runtime patch mapping the gateway port to a Unix
+  socket in a private folder.
+- While the engine is not running, another program can bind a computer's port. A client that
+  connects then gives that program only a proof for its nonce on that port, which opens nothing,
+  and every token is ended at the next engine start. If the program still holds the port at
+  start, the computer can reach that program until it restarts (`restartNeeded`).
 - The engine does not yet put the `silo` binary into a computer or register `silo mcp` with the
   agents (item T5b).
 - The live check is `docs/direction/checks/t5_channel_check.sh`, with its output in

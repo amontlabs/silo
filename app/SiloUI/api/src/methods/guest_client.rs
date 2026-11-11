@@ -1,6 +1,6 @@
 //! Silo's tools in a computer: the channel a computer's own agent reaches the engine on. The
 //! engine listens on one loopback port per computer, the computer's network allows exactly that
-//! port on its gateway address, and the handshake carries a token minted for that computer only.
+//! port on its gateway address, and the handshake proves a token minted for that computer only.
 //! The engine writes the address and the token into the computer itself; no answer carries the
 //! token. See `docs/SiloUI-IN-GUEST-CLIENT.md`.
 
@@ -45,5 +45,10 @@ wire_struct! {
         /// that is not running gets it when it next starts.
         #[serde(default)]
         written: bool,
+        /// The channel had to move to a new port while the computer's network still names the
+        /// old one, which another program holds. The tools are not served, and no token is
+        /// written, until the computer restarts.
+        #[serde(default)]
+        restart_needed: bool,
     }
 }

@@ -289,6 +289,75 @@ pub fn find<'a>(computers: &'a [Computer], name: &str) -> Result<&'a Computer, C
         .ok_or_else(|| CliError::new(format!("No computer is called {name}.")))
 }
 
+/// How long a client waits before each new try when the engine refuses its handshake without
+/// a new endpoint file: the engine writes one soon after it starts or ends a token.
+const CHANNEL_WAITS: &[Duration] = &[
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+];
+
+/// The endpoint this process last reached the engine with, newer than the one it started with.
+static LATEST_ENDPOINT: Mutex<Option<crate::endpoint::Endpoint>> = Mutex::new(None);
+
+/// The endpoint file as it is now, from where this process found it.
+fn reread_endpoint() -> Option<crate::endpoint::Endpoint> {
+    let path = std::env::var_os(crate::endpoint::ENV)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(silo_api::methods::guest_client::GUEST_ENDPOINT_PATH));
+    crate::endpoint::Endpoint::load(&path).ok()
+}
+
+/// Connects over a computer's channel. A handshake the engine refuses (it closes without an
+/// answer) usually means the token changed: the engine started again, or ended the token. The
+/// endpoint file is read again and the connection tried again, waiting `waits` in turn while
+/// the file has not changed.
+async fn connect_channel(
+    given: &crate::endpoint::Endpoint,
+    mut options: ConnectOptions,
+    reread: &(dyn Fn() -> Option<crate::endpoint::Endpoint> + Sync),
+    waits: &[Duration],
+) -> Result<(Client, silo_client::EventFeed), (crate::endpoint::Endpoint, silo_client::ClientError)>
+{
+    let latest = LATEST_ENDPOINT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+        .filter(|latest| latest.computer_id == given.computer_id);
+    let mut endpoint = latest.unwrap_or_else(|| given.clone());
+    let mut waits = waits.iter();
+    loop {
+        options.token = Some(endpoint.token.clone());
+        match Client::connect_channel(&endpoint.host, endpoint.port, options.clone()).await {
+            Err(silo_client::ClientError::Disconnected) => {
+                let fresh = reread().filter(|fresh| fresh != &endpoint);
+                if let Some(fresh) = fresh {
+                    endpoint = fresh;
+                    continue;
+                }
+                let Some(wait) = waits.next() else {
+                    return Err((endpoint, silo_client::ClientError::Disconnected));
+                };
+                tokio::time::sleep(*wait).await;
+                if let Some(fresh) = reread() {
+                    endpoint = fresh;
+                }
+            }
+            Err(error) => return Err((endpoint, error)),
+            Ok(connected) => {
+                if &endpoint != given {
+                    *LATEST_ENDPOINT
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(endpoint);
+                }
+                return Ok(connected);
+            }
+        }
+    }
+}
+
 impl Engine {
     pub async fn connect(socket: &Path) -> Result<Self, CliError> {
         Self::connect_to(&crate::endpoint::Transport::Socket(socket.to_owned())).await
@@ -314,9 +383,9 @@ impl Engine {
             Transport::Channel(endpoint) => {
                 options.token = Some(endpoint.token.clone());
                 (
-                    Client::connect_channel(&endpoint.host, endpoint.port, options)
+                    connect_channel(endpoint, options, &reread_endpoint, CHANNEL_WAITS)
                         .await
-                        .map_err(|error| {
+                        .map_err(|(endpoint, error)| {
                             CliError::new(format!(
                                 "Cannot reach Silo at {}:{}: {error}. Silo may be closed, or this computer's tools were turned off or need a restart of the computer.",
                                 endpoint.host, endpoint.port
@@ -805,6 +874,79 @@ fn outcome_result(outcome: &Value) -> Result<Value, CliError> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A channel on `port` that serves only `token`, answering like the engine: a challenge,
+    /// then a reply to a valid proof or a close without one.
+    async fn channel_serving(
+        listener: tokio::net::TcpListener,
+        token: &'static str,
+    ) -> tokio::task::JoinHandle<usize> {
+        use silo_api::transport::{channel_key, channel_proof_matches, from_hex, to_hex};
+        use silo_client::{read_frame, write_frame};
+        tokio::spawn(async move {
+            let port = listener.local_addr().unwrap().port();
+            let mut refused = 0;
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let nonce = [refused as u8; 32];
+                write_frame(&mut stream, &json!({ "nonce": to_hex(&nonce) }))
+                    .await
+                    .unwrap();
+                let request: Value = read_frame(&mut stream).await.unwrap().unwrap();
+                let proof = request["params"]["proof"]
+                    .as_str()
+                    .and_then(from_hex::<32>)
+                    .unwrap_or_default();
+                if !channel_proof_matches(&channel_key(token), &nonce, port, &proof) {
+                    refused += 1;
+                    continue;
+                }
+                let reply = json!({"id": "handshake", "result": {
+                    "deviceId": "dev", "name": "Mac", "protocol": 8,
+                    "capabilities": [], "clientId": "c1"
+                }});
+                write_frame(&mut stream, &reply).await.unwrap();
+                return refused;
+            }
+        })
+    }
+
+    fn endpoint(port: u16, token: &str, computer: &str) -> crate::endpoint::Endpoint {
+        serde_json::from_value(json!({
+            "host": "127.0.0.1", "port": port, "token": token, "computerId": computer
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_refused_handshake_reads_the_endpoint_file_again_and_recovers() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = channel_serving(listener, "silo_gc_new").await;
+        let options = ConnectOptions::new(ClientMetadata {
+            name: "test".into(),
+            version: "0".into(),
+        });
+        let old = endpoint(port, "silo_gc_old", "c-recover");
+        let fresh = endpoint(port, "silo_gc_new", "c-recover");
+        let reread = || Some(fresh.clone());
+        let (client, _) = connect_channel(&old, options.clone(), &reread, &[])
+            .await
+            .map_err(|(_, error)| error)
+            .unwrap();
+        assert_eq!(client.handshake().client_id.as_deref(), Some("c1"));
+        assert_eq!(server.await.unwrap(), 1, "one refusal, then the new token");
+        // Without a new file and with no waits left, the refusal is the answer.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _server = channel_serving(listener, "silo_gc_other").await;
+        let stale = endpoint(port, "silo_gc_stale", "c-stale");
+        let same = || Some(stale.clone());
+        assert!(matches!(
+            connect_channel(&stale, options, &same, &[]).await,
+            Err((_, silo_client::ClientError::Disconnected))
+        ));
+    }
 
     #[test]
     fn the_channel_is_development_unless_built_with_the_production_identifier() {

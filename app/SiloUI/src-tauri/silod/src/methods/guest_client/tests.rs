@@ -53,7 +53,14 @@ async fn status_names_the_channel_and_never_the_token() {
     .unwrap();
     assert_eq!(revoked["enabled"], false);
     assert!(revoked.get("port").is_none());
-    assert!(store().verify(&token, COMPUTER).is_none());
+    let nonce = [1_u8; 32];
+    let proof = silo_api::transport::to_hex(&silo_api::transport::channel_proof(
+        &silo_api::transport::channel_key(&token),
+        &nonce,
+        45123,
+    ));
+    assert!(store().verify(COMPUTER, 45123, &nonce, &proof).is_none());
+    assert_eq!(revoked["restartNeeded"], false);
 }
 
 #[tokio::test]

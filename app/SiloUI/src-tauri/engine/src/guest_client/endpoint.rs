@@ -2,6 +2,8 @@
 //! computer's id. The engine writes it as root through the guest agent (SSH for a macOS
 //! computer), readable by the `silo` account's group, and checks it at every start: a file that
 //! is missing, or whose token does not hash to the stored one, is replaced with a new token.
+//! Each command in the computer is bounded by [`EXEC_TIMEOUT`], so a computer that stalls it
+//! holds up only its own check.
 
 use std::time::Duration;
 
@@ -14,7 +16,7 @@ use crate::guest::{self, ExecRequest, GuestUser, Target};
 
 /// The file's format version.
 pub const VERSION: u32 = 1;
-const EXEC_TIMEOUT: Duration = Duration::from_secs(30);
+pub const EXEC_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_FILE_BYTES: usize = 4096;
 
 /// Writes standard input to `$1` atomically: root-owned, mode 0640 with the `silo` account's
@@ -92,8 +94,16 @@ fn read(target: &Target) -> Option<Vec<u8>> {
 }
 
 /// Mints a new token for the computer and writes the file into it. The computer must be
-/// running.
+/// running, and its network must name its channel's port (no restart pending).
 pub fn write(target: &Target, store: &TokenStore) -> Result<(), String> {
+    if store
+        .status(target.id())?
+        .is_some_and(|record| record.restart_needed)
+    {
+        return Err(
+            "the computer must restart before it can reach Silo's tools (its port changed).".into(),
+        );
+    }
     let minted = store.mint(target.id())?;
     let text = file_text(&minted.record, &minted.token)?;
     let output = run_as_root(

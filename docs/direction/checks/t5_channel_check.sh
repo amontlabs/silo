@@ -22,6 +22,13 @@
 #   S9  a memory checkpoint is restored and the client reconnects
 #   S10 turning the tools off closes an open session at once
 #   S11 a computer whose tools were off gets them after `silo tools enable` and a restart
+# Added with the review fixes (challenge and response, ports held and tied to tokens):
+#   S4b what a fake listener on a freed port receives from a client holds neither the token nor
+#       its hash; S4c a proof made for another port is refused
+#   S8b after an engine restart the old token is refused and the client recovers on its own; a
+#       port another program holds at start moves, the computer waits for a restart, then works
+#   S10b after the tools are turned off the old port stays bound and accepts and closes
+#   S11b two enables at once leave one record on a served port
 set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 T=${T:-$HOME/code/projects/silo-wt-targets/T5a}
@@ -85,21 +92,20 @@ trap cleanup EXIT
 # A raw client of the channel, run in a computer or on the device: connects, sends a handshake
 # with the token given ("-" for none) and says whether anything answered. `hold` keeps an
 # answered session open and reports when it ends.
+# A raw client of the channel, run in a computer or on the device: connects, takes the engine's
+# challenge, answers with a proof made from the token given ("-" for none) for the port given (or
+# another port, as a fifth argument) and says whether anything answered. `hold` keeps an answered
+# session open and reports when it ends; `challenge` only says whether a challenge came.
 cat >"$WORK/probe.py" <<'PY'
-import json, socket, struct, sys, time
+import hashlib, hmac, json, socket, struct, sys, time
 host, port, token = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 mode = sys.argv[4] if len(sys.argv) > 4 else "once"
+proof_port = int(sys.argv[5]) if len(sys.argv) > 5 else port
 start = time.time()
 try:
     s = socket.create_connection((host, port), timeout=5)
 except Exception as error:
     print("CONNECT_FAIL", type(error).__name__); sys.exit(0)
-params = {"protocol": {"min": 8, "max": 8}}
-if token != "-":
-    params["token"] = token
-body = json.dumps({"id": "h", "method": "engine.handshake", "params": params}).encode()
-s.sendall(struct.pack(">I", len(body)) + body)
-s.settimeout(None if mode == "hold" else 8)
 def frame():
     head = b""
     while len(head) < 4:
@@ -110,8 +116,27 @@ def frame():
     (n,) = struct.unpack(">I", head)
     data = b""
     while len(data) < n:
-        data += s.recv(n - len(data))
+        chunk = s.recv(n - len(data))
+        if not chunk:
+            return None
+        data += chunk
     return json.loads(data)
+try:
+    challenge = frame()
+except (socket.timeout, ConnectionResetError):
+    challenge = None
+if not challenge or "nonce" not in challenge:
+    print("CLOSED_NO_CHALLENGE after %.1fs" % (time.time() - start)); sys.exit(0)
+if mode == "challenge":
+    print("CHALLENGED nonce=%s..." % challenge["nonce"][:8]); sys.exit(0)
+params = {"protocol": {"min": 8, "max": 8}}
+if token != "-":
+    key = hashlib.sha256(token.encode()).digest()
+    message = b"silo channel handshake v1\0" + bytes.fromhex(challenge["nonce"]) + struct.pack(">H", proof_port)
+    params["proof"] = hmac.new(key, message, hashlib.sha256).hexdigest()
+body = json.dumps({"id": "h", "method": "engine.handshake", "params": params}).encode()
+s.sendall(struct.pack(">I", len(body)) + body)
+s.settimeout(None if mode == "hold" else 8)
 try:
     reply = frame()
 except socket.timeout:
@@ -129,6 +154,35 @@ if mode == "hold":
     except Exception:
         pass
     print("SESSION_ENDED after %.1fs" % (time.time() - held), flush=True)
+PY
+# A fake channel on the device: sends a challenge to every connection and appends every byte it
+# receives to a file, for the given number of seconds.
+cat >"$WORK/capture.py" <<'PY'
+import json, os, socket, struct, sys, time
+port, out, seconds = int(sys.argv[1]), sys.argv[2], float(sys.argv[3])
+server = socket.socket(); server.bind(("127.0.0.1", port)); server.listen(8); server.settimeout(0.5)
+print("LISTENING", port, flush=True)
+end = time.time() + seconds
+while time.time() < end:
+    try:
+        connection, _ = server.accept()
+    except socket.timeout:
+        continue
+    body = json.dumps({"nonce": os.urandom(32).hex()}).encode()
+    connection.sendall(struct.pack(">I", len(body)) + body)
+    connection.settimeout(3)
+    data = b""
+    try:
+        while True:
+            chunk = connection.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    except Exception:
+        pass
+    connection.close()
+    with open(out, "ab") as file:
+        file.write(data)
 PY
 # The device's engine socket, for what the CLI has no command for (audit, restore).
 cat >"$WORK/engine.py" <<PY
@@ -223,6 +277,30 @@ check "S4 a copy of $A's token in the fork is refused on the fork's port" $(echo
 out=$(inside $G "python3 /usr/local/bin/t5probe.py host.microsandbox.internal $PORT_A $TOKEN_A" 2>&1)
 check "S4 the fork cannot reach $A's port" $(echo "$out" | grep -q CONNECT_FAIL; echo $?) "$out"
 "$SILO" stop $G >/dev/null 2>&1; "$SILO" drop $G --force >/dev/null 2>&1
+out=$(inside $A "python3 /usr/local/bin/t5probe.py host.microsandbox.internal $PORT_A $TOKEN_A once $((PORT_A + 1))" 2>&1)
+check "S4c a proof $A made for another port is refused on its own port" $(echo "$out" | grep -q CLOSED_NO_ANSWER; echo $?) "$out"
+
+say "== S4b the handshake carries no token: a fake channel on a freed port records what silo sends"
+FAKE=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+python3 -I "$WORK/capture.py" "$FAKE" "$WORK/captured.bin" 25 >"$WORK/capture.log" 2>&1 &
+CAPTURE=$!
+for _ in $(seq 1 20); do grep -q LISTENING "$WORK/capture.log" && break; sleep 0.2; done
+printf '{"version":1,"host":"127.0.0.1","port":%s,"token":"%s","computerId":"x"}' "$FAKE" "$TOKEN_A" >"$WORK/fake-endpoint.json"
+out=$(SILO_ENDPOINT="$WORK/fake-endpoint.json" "$SILO" list 2>&1); echo "  silo against the fake: $(echo "$out" | tail -1 | cut -c1-160)"
+kill "$CAPTURE" 2>/dev/null; wait "$CAPTURE" 2>/dev/null
+verdict=$(python3 -I - "$WORK/captured.bin" "$TOKEN_A" <<'PY'
+import hashlib, sys
+data = open(sys.argv[1], "rb").read() if __import__("os").path.exists(sys.argv[1]) else b""
+token = sys.argv[2]
+digest = hashlib.sha256(token.encode())
+needles = {"token": token.encode(), "token hex": token[8:].encode(), "sha256 hex": digest.hexdigest().encode(), "sha256 bytes": digest.digest()}
+found = [name for name, needle in needles.items() if needle in data]
+print("bytes=%d frames=%d found=%s first=%s" % (len(data), data.count(b"engine.handshake"), ",".join(found) or "none", data[4:200].decode("utf-8", "replace")))
+PY
+)
+echo "  captured: $verdict"
+check "S4b the fake received handshakes" $(echo "$verdict" | grep -q 'frames=[1-9]'; echo $?) "$(echo "$verdict" | cut -d' ' -f1-2)"
+check "S4b neither the token nor its hash crossed" $(echo "$verdict" | grep -q 'found=none'; echo $?) "$(echo "$verdict" | grep -o 'found=[^ ]*')"
 
 say "== S5 an owner-only call is refused"
 out=$(inside $A "silo secrets list" 2>&1); rc=$?
@@ -248,12 +326,32 @@ echo "$rows" | grep -E '^computer' | grep -q 'network.publish.*asked'; check "S7
 echo "$rows" | grep -E '^computer' | grep -q 'engine.handshake.*refused'; check "S7 the refused handshakes are recorded" $? ""
 
 say "== S8 the engine restarts and the channel works again"
+OLD_TOKEN_A=$(field $A token)
 stop_engine; check "S8 the Dev engine stops" $? ""
+# Another program takes B's port while the engine is down.
+python3 -I -c 'import socket,sys,time; s=socket.socket(); s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(1); print("HOLDING",flush=True); time.sleep(600)' "$PORT_B" >"$WORK/holder.log" 2>&1 &
+HOLDER=$!
+sleep 1
 start_engine; check "S8 the Dev engine starts again" $? "pid $(our_engine)"
 "$SILO" start $A >/dev/null 2>&1
 P2=$(status_port $A); check "S8 $A keeps its port" $([ "$P2" = "$PORT_A" ]; echo $?) "$P2"
 seen=""; for _ in $(seq 1 20); do seen=$(names_inside $A); [ "$seen" = "$A" ] && break; sleep 3; done
-check "S8 silo list inside works after the restart" $([ "$seen" = "$A" ]; echo $?) "$seen"
+check "S8b silo list inside recovers on its own after the restart" $([ "$seen" = "$A" ]; echo $?) "$seen"
+NEW_TOKEN_A=$(field $A token)
+check "S8b the engine wrote a new token at its start" $([ -n "$NEW_TOKEN_A" ] && [ "$NEW_TOKEN_A" != "$OLD_TOKEN_A" ]; echo $?) ""
+out=$(inside $A "python3 /usr/local/bin/t5probe.py host.microsandbox.internal $PORT_A $OLD_TOKEN_A" 2>&1)
+check "S8b the token from before the restart is refused" $(echo "$out" | grep -q CLOSED_NO_ANSWER; echo $?) "$out"
+st=$("$SILO" --json tools status $B 2>&1); echo "  $B: $st"
+P_B=$(echo "$st" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v.get("port",""), v.get("restartNeeded"))' 2>/dev/null)
+check "S8b $B's taken port moved and $B waits for a restart" $([ "${P_B%% *}" != "$PORT_B" ] && [ "${P_B##* }" = True ]; echo $?) "$P_B"
+NEW_PORT_B=${P_B%% *}
+out=$(python3 -I "$WORK/probe.py" 127.0.0.1 "$NEW_PORT_B" - challenge 2>&1)
+check "S8b $B's new port is held, not served, until the restart" $(echo "$out" | grep -q CLOSED_NO_CHALLENGE; echo $?) "$out"
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+"$SILO" stop $B >/dev/null 2>&1; "$SILO" start $B >/dev/null 2>&1; check "S8b restart $B" $? ""
+seen=""; for _ in $(seq 1 20); do seen=$(names_inside $B); [ "$seen" = "$B" ] && break; sleep 3; done
+st=$("$SILO" --json tools status $B 2>&1 | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v.get("port"), v.get("restartNeeded"))' 2>&1)
+check "S8b after its restart $B is served on its new port" $([ "$seen" = "$B" ] && [ "$st" = "$NEW_PORT_B False" ]; echo $?) "$seen; $st"
 
 say "== S9 a memory checkpoint restore, and the client reconnects"
 "$SILO" checkpoint $A --name t5mem >/dev/null 2>&1
@@ -282,14 +380,32 @@ wait $HOLD 2>/dev/null
 check "S10 the open session ended" $(grep -q SESSION_ENDED "$WORK/hold.txt"; echo $?) "$(tr '\n' ' ' <"$WORK/hold.txt")"
 out=$(inside $A "silo list" 2>&1); rc=$?
 check "S10 silo inside no longer reaches Silo" $([ $rc -ne 0 ]; echo $?) "$(echo "$out" | tail -1)"
+out=$(inside $A "python3 /usr/local/bin/t5probe.py host.microsandbox.internal $PORT_A $NEW_TOKEN_A" 2>&1)
+check "S10b from inside, the old port accepts and closes with nothing sent" $(echo "$out" | grep -q CLOSED_NO_CHALLENGE; echo $?) "$out"
+out=$(python3 -I -c 'import socket,sys; s=socket.socket()
+try:
+    s.bind(("127.0.0.1",int(sys.argv[1]))); print("BOUND")
+except OSError as e: print("IN_USE", e.errno)' "$PORT_A" 2>&1)
+check "S10b no other program can take the old port" $(echo "$out" | grep -q IN_USE; echo $?) "$out"
 
 say "== S11 an existing computer gets the tools after enable and a restart"
 "$SILO" create $C --linux --cpus 1 --memory 2 --disk 8 --no-desktop >/dev/null 2>&1; check "create $C" $? ""
 "$SILO" tools disable $C >/dev/null 2>&1
 "$SILO" start $C >/dev/null 2>&1
 echo "  $("$SILO" tools status $C 2>&1)"
-out=$("$SILO" tools enable $C --binary "$GUEST" 2>&1); check "S11 silo tools enable $C while it runs" $? "$out"
+# Two enables at once, then one that also sends the binary.
+"$SILO" tools enable $C >"$WORK/enable1.txt" 2>&1 &
+E1=$!
+"$SILO" tools enable $C >"$WORK/enable2.txt" 2>&1 &
+E2=$!
+wait $E1; r1=$?; wait $E2; r2=$?
+check "S11b silo tools enable $C twice at once" $([ $r1 = 0 ] && [ $r2 = 0 ]; echo $?) "$(tr '\n' ' ' <"$WORK/enable1.txt") | $(tr '\n' ' ' <"$WORK/enable2.txt")"
+out=$("$SILO" tools enable $C --binary "$GUEST" 2>&1); check "S11 silo tools enable $C --binary while it runs" $? "$out"
 echo "$out" | grep -q "restart it"; check "S11 the answer says a restart is needed" $? ""
+p1=$(grep -oE 'port [0-9]+' "$WORK/enable1.txt" | head -1); p2=$(grep -oE 'port [0-9]+' "$WORK/enable2.txt" | head -1)
+PORT_C=$(status_port $C)
+out=$(python3 -I "$WORK/probe.py" 127.0.0.1 "$PORT_C" - challenge 2>&1)
+check "S11b both enables name the one record's port, and it is served" $([ "$p1" = "port $PORT_C" ] && [ "$p2" = "port $PORT_C" ] && echo "$out" | grep -q CHALLENGED; echo $?) "$p1 / $p2 / status $PORT_C / $out"
 out=$(inside $C "silo list" 2>&1); rc=$?
 check "S11 before the restart the computer cannot reach its port" $([ $rc -ne 0 ]; echo $?) "$(echo "$out" | tail -1)"
 "$SILO" stop $C >/dev/null 2>&1; "$SILO" start $C >/dev/null 2>&1; check "S11 restart $C" $? ""
