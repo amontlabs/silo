@@ -61,3 +61,10 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   #1713 runs only open/mkdir/symlink as the session user, while rename/remove/chmod/readdir still
   run as root. New probe flag `--silo-restore-strict-protocol`. `should_bypass` means a host with
   no matching secret gets a closed connection, not the #1825 JSON deny page (same as 0.7.6).
+- 2026-11-11: chain E done: every 0.7.6 sandbox is refused on macOS until `msb self repair`;
+  design and engine step in [MSB-0.7.15-MIGRATION.md](MSB-0.7.15-MIGRATION.md). Repair must run in
+  place (absolute paths). Needs a hidden `--legacy-writers-stopped` msb option (branch
+  `silo/0715-repair`) and wiring (branch `feat/msb-0715-migration-wiring`).
+- 2026-11-11: A, C, D stacked on `silo/0715-integration` (16 commits; one conflict in
+  `secrets/handle.rs` resolved to the 0.7.6 stack's final shape). Gateway, toolchain, engine pins
+  and behaviour changes on `feat/msb-0715-gateway`.
