@@ -208,6 +208,35 @@ pub fn turn_off(computer_ids: &[&str]) -> Result<usize, String> {
 
 /// [`turn_off`] with the store given.
 pub fn turn_off_in(store: &TokenStore, computer_ids: &[&str]) -> Result<usize, String> {
+    end_tools(store, computer_ids, true)
+}
+
+/// Turns Silo's tools off in a closed copy (the temporary copy an export makes): like
+/// [`turn_off`], but nothing is owed to the copy and the engine never reconciles it.
+pub fn turn_off_copy(computer_id: &str) -> Result<usize, String> {
+    match TokenStore::current() {
+        Some(store) => end_tools(&store, &[computer_id], false),
+        None => Ok(0),
+    }
+}
+
+fn end_tools(store: &TokenStore, computer_ids: &[&str], owe_removal: bool) -> Result<usize, String> {
+    // Silo's MCP server is registered with the agents of every computer that had the tools; it is
+    // taken out when the computer next runs (at once for a running one, see `guestClient.revoke`).
+    let had: Vec<&str> = computer_ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            store
+                .status(id)
+                .ok()
+                .flatten()
+                .is_some_and(|record| record.enabled())
+        })
+        .collect();
+    if owe_removal && !had.is_empty() {
+        crate::guest_components::owe_removal(store.directory(), &had);
+    }
     let locked = store.locked();
     let mut records = locked.records()?;
     let mut held = locked.held()?;
@@ -251,6 +280,9 @@ pub fn computer_removed(computer_id: &str) {
         if let Err(error) = forget_in(&store, computer_id) {
             eprintln!("silo-engine: {error}");
         }
+    }
+    if let Some(store) = TokenStore::current() {
+        crate::guest_components::forget(store.directory(), computer_id);
     }
 }
 
@@ -428,14 +460,25 @@ mod tests {
         let (first, port) = bind(None).unwrap();
         assert_eq!(first.local_addr().unwrap().ip(), Ipv4Addr::LOCALHOST);
         assert_ne!(port, 0);
+        // While `first` holds the port no bind can have it, whatever else runs at the same time.
         let (second, other) = bind(Some(port)).unwrap();
         assert_ne!(other, port, "a taken port is not shared");
         assert!(bind_exact(port).is_err());
-        drop(first);
         drop(second);
-        let (again, same) = bind(Some(port)).unwrap();
-        assert_eq!(same, port, "a free port is kept");
-        drop(again);
+        // Once it is freed, the port is kept when nothing else took it in the meantime. Another
+        // test binding port 0 can be handed the freed number, so a few tries are made; each try
+        // that fails only shows that the port was taken, which is the case that falls back.
+        drop(first);
+        let kept = (0..100).any(|_| {
+            let (again, same) = bind(Some(port)).unwrap();
+            let kept = same == port;
+            drop(again);
+            if !kept {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            kept
+        });
+        assert!(kept, "a free port is kept");
     }
 
     #[test]
@@ -499,6 +542,22 @@ mod tests {
         assert!(store.locked().held().unwrap().is_empty());
         forget_in(&store, "c").unwrap();
         assert_eq!(fake.bound(port), None, "a deleted computer's port goes");
+        reset();
+    }
+
+    #[test]
+    fn turning_off_owes_the_registration_removal_and_a_closed_copy_owes_none() {
+        use crate::guest_components::receipt::Reports;
+        let _ports = ports();
+        let directory = tempfile::tempdir().unwrap();
+        let (store, fake) = with_fake(directory.path());
+        let port = turn_on_in(&store, "c").unwrap().port.unwrap();
+        turn_on_in(&store, "copy").unwrap();
+        turn_off_in(&store, &["c"]).unwrap();
+        end_tools(&store, &["copy"], false).unwrap();
+        assert_eq!(Reports::new(store.directory()).owed(), vec!["c".to_owned()]);
+        assert_eq!(fake.bound(port).as_deref(), Some("c"), "its port is still held");
+        assert!(store.status("copy").unwrap().is_none());
         reset();
     }
 

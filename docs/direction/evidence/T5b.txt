@@ -1,0 +1,212 @@
+[02:04:33] == header
+commit bcdcc6110 on feat/guest-silo-components; silo 0.1.0; host 26.5 arm64; 2026-11-11T01:04:35Z
+bundled guest silo: manifest sha256 e13374b359662aa510f9d6d4f0afad654d7be2f25b430276bc15257f64258252; file sha256 e13374b359662aa510f9d6d4f0afad654d7be2f25b430276bc15257f64258252; ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically l
+[02:04:40] PASS  the Dev engine starts from the bundle  -- pid 56397, log /Users/polarzero/.t3/worktrees/microsandbox-workspaces/t3-ddefb92e/app/SiloUI/src-tauri/target/verification/silod-dev-t5b.log
+computers before: workspace-1 e2e-relay silo-eval-a silo-eval-b 
+[02:04:41] == S1 a new Linux computer gets the program, the receipt and the registration by itself
+[02:04:51] PASS  create e2e-t5b-a  -- 
+[02:04:55] PASS  start e2e-t5b-a  -- 
+[02:05:00] PASS  S1 /usr/local/bin/silo has the bundled file's checksum, nobody passed a binary  -- e13374b359662aa510f9d6d4f0afad654d7be2f25b430276bc15257f64258252
+ls: -rwxr-xr-x 1 root root 12824920 Nov 11 01:04 /usr/local/bin/silo;-rwxr-xr-x 1 root root    73235 Nov 11 01:04 /usr/local/libexec/silo-computer-use;
+receipt: {"components":{"silo":{"at":1794359096,"sha256":"e13374b359662aa510f9d6d4f0afad654d7be2f25b430276bc15257f64258252","state":"ok","version":1},"silo-mcp":{"at":1794359096,"detail":"Claude Code and Codex not installed yet; Silo's tools are registered when it is.","state":"waiting","version":1}},"computerId":"414de01b-b2d0-45af-99f9-05639d7b053b","schemaVersion":1}
+[02:05:00] PASS  S1 the receipt in the computer lists the silo program as ok with that checksum  -- 
+status: e2e-t5b-a: Silo's tools are on (port 60900); it can reach them now|  silo: ok|  silo-mcp: waiting (Claude Code and Codex not installed yet; Silo's tools are registered when it is.)|
+[02:05:01] PASS  S1 the status lists the program as ok  -- 
+[02:05:02] PASS  S1 silo list inside works and shows e2e-t5b-a  -- e2e-t5b-a
+[02:05:02] == S2 agents.install (Claude Code) registers silo's MCP server beside computer use
+[02:05:04] PASS  S2 computer use has finished setting up in e2e-t5b-a (so its registration exists to sit beside)  -- 
+agents before: {"agents": [{"expectedVersion": "2.1.287", "id": "claude-code", "name": "Claude Code", "state": "missing", "version": null}, {"expectedVersion": "0.167.0", "id": "codex", "name": "Codex", "state": "missing", "version": null}]}
+[02:05:20] PASS  S2 agents.install claude-code  -- {"agents": [{"expectedVersion": "2.1.287", "id": "claude-code", "name": "Claude Code", "state": "ready", "version": "2.1.287"}, {"expectedVersion": "0.167.0", "id": "codex", "name": "Codex", "state": "missing", "version": null}]}
+--- mcpServers in ~/.claude.json of e2e-t5b-a:
+      "mcpServers": {
+          "cua-driver": {
+              "type": "stdio",
+              "command": "/usr/local/libexec/silo-cua-driver-mcp",
+              "args": [],
+              "env": {
+                  "CUA_DRIVER_RS_TELEMETRY_ENABLED": "0",
+                  "CUA_DRIVER_RS_UPDATE_CHECK": "false"
+              }
+          },
+          "silo": {
+              "type": "stdio",
+              "command": "/usr/local/bin/silo",
+              "args": [
+                  "mcp"
+              ],
+              "env": {}
+          }
+      }
+[02:05:21] PASS  S2 the configuration lists the silo MCP server  -- cua-driver silo
+[02:05:21] PASS  S2 ... next to the computer-use one  -- 
+registered command: /usr/local/bin/silo mcp
+  mcp: {"step": 0, "tools": ["checkpoint", "checkpoints", "computer_use_call", "computer_use_click", "computer_use_drag", "computer_use_hotkey", "computer_use_key", "computer_use_move", "computer_use_ready", "computer_use_screenshot", "computer_use_scroll", "computer_use_tools", "computer_use_type", "computer_use_wait", "diff", "drop", "exec", "fold", "fork", "fork_gui", "list", "ports", "publish", "recipe_list", "request_keep", "request_show", "request_throw_away", "requests_list", "retry_setup", "sec
+  mcp: {"step": 1, "call": "list", "secs": 0.5, "isError": false, "text": "{\n  \"computers\": [\n    {\n      \"checkpoints\": 0,\n      \"cpus\": 2,\n      \"desktop\": true,\n      \"detail\": \"Running\",\n      \"diskGiB\": 12,\n      \"id\": \"414de01b-b2d0-45af-99f9-05639d7b053b\",\n      \"kind\": \"linux\",\n      \"memoryGiB\": 4,\n      \"name\": \"e2e-t5b-a\",\n      \"state\": \"running\"\n    }\n  ]\n}", "images": []}
+[02:05:23] PASS  S2 an MCP client inside gets a tool list from silo mcp, and a call answers with e2e-t5b-a  -- tools:36 e2e-t5b-a 
+[02:05:23] == S3 a fork has its own endpoint and the registration works against it
+[02:05:26] PASS  S3 fork e2e-t5b-a  -- 
+[02:05:31] PASS  S3 start the fork  -- 
+[02:05:33] PASS  S3 the fork's first start wrote its own receipt (computer id ae690b00-82a8-4856-97ec-cc7fd52c96ed)  -- 
+endpoint e2e-t5b-a: 60900 414de01b-b2d0-45af-99f9-05639d7b053b; endpoint e2e-t5b-af: 61642 ae690b00-82a8-4856-97ec-cc7fd52c96ed
+[02:05:33] PASS  S3 the fork's endpoint is its own (another port, its own computer id)  -- 
+[02:05:34] PASS  S3 the fork is registered  -- cua-driver silo
+  mcp in fork: {"step": 0, "tools": ["checkpoint", "checkpoints", "computer_use_call", "computer_use_click", "computer_use_drag", "computer_use_hotkey", "computer_use_key", "computer_use_move", "computer_use_ready", "computer_use_screenshot", "computer_use_scroll", "computer_use_tools", "computer_use_type", "compu
+  mcp in fork: {"step": 1, "call": "list", "secs": 0.6, "isError": false, "text": "{\n  \"computers\": [\n    {\n      \"checkpoints\": 0,\n      \"cpus\": 2,\n      \"desktop\": true,\n      \"detail\": \"Running\",\n      \"diskGiB\": 12,\n      \"id\": \"ae690b00-82a8-4856-97ec-cc7fd52c96ed\",\n      \"kind\": 
+names in the fork: tools:36 e2e-t5b-af 
+[02:05:35] PASS  S3 silo mcp in the fork answers as e2e-t5b-af, not as e2e-t5b-a  -- tools:36 e2e-t5b-af 
+[02:05:35] == S4 turning the tools off removes the registration, keeps the program, and the program refuses
+[02:05:36] PASS  S4 silo tools disable e2e-t5b-a  -- e2e-t5b-a: Silo's tools are off
+[02:05:40] PASS  S4 the silo MCP server is gone from the running computer's configuration  -- cua-driver
+[02:05:40] PASS  S4 computer use's registration is still there  -- 
+[02:05:41] PASS  S4 the program is still in the computer  -- 
+[02:05:41] PASS  S4 silo inside now refuses  -- silo: Cannot reach Silo at host.microsandbox.internal:60900: The engine connection failed: Connection reset by peer (os error 104). Silo may be closed, or this computer's tools were turned off or need a restart of the computer.
+status: e2e-t5b-a: Silo's tools are off|
+[02:05:43] PASS  S4 silo tools disable e2e-t5b-af while it is stopped  -- e2e-t5b-af: Silo's tools are off
+[02:05:51] PASS  S4 the registration is taken out at the stopped computer's next start  -- 
+[02:05:51] PASS  S4 silo tools enable e2e-t5b-a again  -- e2e-t5b-a: Silo's tools are on (port 61672); restart it so it can reach them; /etc/silo/endpoint.json was written|  silo: ok|  silo-mcp: ok (Registered with Claude Code; Codex not installed yet.)|
+[02:05:52] PASS  S4 the registration is back  -- cua-driver silo
+[02:05:53] == S5 a deleted or replaced program comes back at the next start
+[02:05:54] PASS  S5 the program is deleted  -- 
+[02:06:04] PASS  S5 the right program is back after a restart  -- e13374b359662aa510f9d6d4f0afad654d7be2f25b430276bc15257f64258252
+[02:06:05] PASS  S5 the program is replaced by an agent  -- ca5212ff2740
+[02:06:14] PASS  S5 the right program is back after a restart  -- 
+[02:06:14] == S6 a reconcile that fails leaves the computer running and shows the failure
+chattr: rc=0
+[02:06:23] PASS  S6 the status shows the program as failed  -- 
+status: e2e-t5b-a: Silo's tools are on (port 61672); it can reach them now|  silo: failed (The silo program could not be put in place: mv: cannot move '/usr/local/bin/.silo-install.400' to '/usr/local/bin/silo': Operation not permitted (exit 1))|  silo-mcp: ok (Registered with Claude Code; Codex not installed yet.)|
+[02:06:23] PASS  S6 the computer is running and answers  -- still-running
+computer status: e2e-t5b-a (linux): running|2 cpu, 4 GiB memory, 12 GiB disk|
+[02:06:33] PASS  S6 after the fix the next start recovers the program  -- 
+[02:06:34] PASS  S6 and the status is ok again  -- 
+[02:06:34] == S7 --binary goes through the engine's path and the next start puts the shipped program back
+[02:06:35] PASS  S7 silo tools enable --binary  -- e2e-t5b-a: Silo's tools are on (port 61672); it can reach them now; /etc/silo/endpoint.json was written|  silo: ok|  silo-mcp: ok (Registered with Claude Code; Codex not installed yet.)|
+[02:06:36] PASS  S7 the computer has the program that was named (checked inside by root)  -- 0155e6302b8f
+[02:06:44] PASS  S7 the next start puts the shipped program back  -- 
+[02:06:44] == S8 macOS computers on the Dev engine
+no macOS computer exists on the Dev engine; the macOS push over SSH and the macOS registration are not verified live
+[02:06:45] == engine log lines about the channels and tools
+  silod: channel of 0f19832b-d257-40e2-8226-c344b878c942: wrote the endpoint file
+  silod: channel of 88111bb0-6cdc-4b8b-ad4d-5abe48c7afaa: wrote the endpoint file
+  silod: channel of 53505272-7498-4757-874e-4b5aaf98186e: wrote the endpoint file
+  silod: channel of 21e53692-9d8a-4ebc-a1f5-2c2bb52aeb33: wrote the endpoint file
+  silod: channel of 414de01b-b2d0-45af-99f9-05639d7b053b: wrote the endpoint file
+  silod: channel of ae690b00-82a8-4856-97ec-cc7fd52c96ed: wrote the endpoint file
+[02:06:45] == summary: 38 passed, 0 failed
+[02:06:45] cleanup (drops only the e2e-t5b-* computers this run made, then stops the Dev engine it started)
+[02:06:59] silo list after cleanup:
+NAME         STATE      KIND       SIZE
+workspace-1  stopped    linux      8 cpu, 32 GiB
+e2e-relay    stopped    linux      8 cpu, 32 GiB
+silo-eval-a  stopped    linux      2 cpu, 2 GiB
+silo-eval-b  stopped    linux      2 cpu, 2 GiB
+[02:07:00] Dev engine stopped
+
+
+===== 2026-11-11: after the merge of the channel fixes and the tools =====
+(includes the new S2b: a Codex install in a real Linux computer)
+
+[05:35:19] == header
+commit b5782f992 on merge/t5b-into-direction-2; silo 0.1.0; host 26.5 arm64; 2026-11-11T04:35:19Z
+bundled guest silo: manifest sha256 be8886804479df10a192d69ba9297baa3307093c9712df84834df2b311f31526; file sha256 be8886804479df10a192d69ba9297baa3307093c9712df84834df2b311f31526; ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically l
+[05:35:20] PASS  the Dev engine starts from the bundle  -- pid 34341, log /Users/polarzero/.t3/worktrees/microsandbox-workspaces/t3-12099f66/app/SiloUI/src-tauri/target/verification/silod-dev-t5b.log
+computers before: workspace-1 e2e-relay silo-eval-a silo-eval-b 
+[05:35:21] == S1 a new Linux computer gets the program, the receipt and the registration by itself
+[05:35:29] PASS  create e2e-t5b-a  -- 
+[05:35:32] PASS  start e2e-t5b-a  -- 
+[05:35:37] PASS  S1 /usr/local/bin/silo has the bundled file's checksum, nobody passed a binary  -- be8886804479df10a192d69ba9297baa3307093c9712df84834df2b311f31526
+ls: -rwxr-xr-x 1 root root 12913640 Nov 11 04:35 /usr/local/bin/silo;-rwxr-xr-x 1 root root    73235 Nov 11 04:35 /usr/local/libexec/silo-computer-use;
+receipt: {"components":{"silo":{"at":1794371733,"sha256":"be8886804479df10a192d69ba9297baa3307093c9712df84834df2b311f31526","state":"ok","version":1},"silo-mcp":{"at":1794371733,"detail":"Claude Code and Codex not installed yet; Silo's tools are registered when it is.","state":"waiting","version":1}},"computerId":"32238976-cc01-43b6-bd36-e87f169ae893","schemaVersion":1}
+[05:35:37] PASS  S1 the receipt in the computer lists the silo program as ok with that checksum  -- 
+status: e2e-t5b-a: Silo's tools are on (port 55176); it can reach them now|  silo: ok|  silo-mcp: waiting (Claude Code and Codex not installed yet; Silo's tools are registered when it is.)|
+[05:35:38] PASS  S1 the status lists the program as ok  -- 
+[05:35:39] PASS  S1 silo list inside works and shows e2e-t5b-a  -- e2e-t5b-a
+[05:35:39] == S2 agents.install (Claude Code) registers silo's MCP server beside computer use
+[05:35:40] PASS  S2 computer use has finished setting up in e2e-t5b-a (so its registration exists to sit beside)  -- 
+agents before: {"agents": [{"expectedVersion": "2.1.287", "id": "claude-code", "name": "Claude Code", "state": "missing", "version": null}, {"expectedVersion": "0.167.0", "id": "codex", "name": "Codex", "state": "missing", "version": null}]}
+[05:35:48] PASS  S2 agents.install claude-code  -- {"agents": [{"expectedVersion": "2.1.287", "id": "claude-code", "name": "Claude Code", "state": "ready", "version": "2.1.287"}, {"expectedVersion": "0.167.0", "id": "codex", "name": "Codex", "state": "missing", "version": null}]}
+--- mcpServers in ~/.claude.json of e2e-t5b-a:
+      "mcpServers": {
+          "cua-driver": {
+              "type": "stdio",
+              "command": "/usr/local/libexec/silo-cua-driver-mcp",
+              "args": [],
+              "env": {
+                  "CUA_DRIVER_RS_TELEMETRY_ENABLED": "0",
+                  "CUA_DRIVER_RS_UPDATE_CHECK": "false"
+              }
+          },
+          "silo": {
+              "type": "stdio",
+              "command": "/usr/local/bin/silo",
+              "args": [
+                  "mcp"
+              ],
+              "env": {}
+          }
+      }
+[05:35:49] PASS  S2 the configuration lists the silo MCP server  -- cua-driver silo
+[05:35:50] PASS  S2 ... next to the computer-use one  -- 
+registered command: /usr/local/bin/silo mcp
+  mcp: {"step": 0, "tools": ["checkpoint", "checkpoints", "computer_use_call", "computer_use_click", "computer_use_drag", "computer_use_hotkey", "computer_use_key", "computer_use_move", "computer_use_ready", "computer_use_screenshot", "computer_use_scroll", "computer_use_tools", "computer_use_type", "computer_use_wait", "diff", "drop", "exec", "fold", "fork", "fork_gui", "list", "ports", "publish", "recipe_list", "request_keep", "request_show", "request_throw_away", "requests_list", "retry_setup", "sec
+  mcp: {"step": 1, "call": "list", "secs": 0.6, "isError": false, "text": "{\n  \"computers\": [\n    {\n      \"checkpoints\": 0,\n      \"cpus\": 2,\n      \"desktop\": true,\n      \"detail\": \"Running\",\n      \"diskGiB\": 12,\n      \"id\": \"32238976-cc01-43b6-bd36-e87f169ae893\",\n      \"kind\": \"linux\",\n      \"memoryGiB\": 4,\n      \"name\": \"e2e-t5b-a\",\n      \"state\": \"running\"\n    }\n  ]\n}", "images": []}
+[05:35:52] PASS  S2 an MCP client inside gets a tool list from silo mcp, and a call answers with e2e-t5b-a  -- tools:36 e2e-t5b-a 
+[05:35:52] == S2b agents.install (Codex): the working account can run it, and silo's MCP server is registered with it
+[05:35:57] PASS  S2b agents.install codex  -- {"agents": [{"expectedVersion": "2.1.287", "id": "claude-code", "name": "Claude Code", "state": "ready", "version": "2.1.287"}, {"expectedVersion": "0.167.0", "id": "codex", "name": "Codex", "state": "ready", "version": "0.167.0"}]}
+[05:35:57] PASS  S2b the Codex folders are enterable by others and not writable by them  -- 755 root 755 root 
+[05:35:57] PASS  S2b the silo account runs codex  -- codex-cli 0.167.0
+[05:35:58] PASS  S2b Codex's configuration lists the silo MCP server  -- [mcp_servers.silo] command = "/usr/local/bin/silo" args = ["mcp"] 
+[05:35:58] == S3 a fork has its own endpoint and the registration works against it
+[05:36:00] PASS  S3 fork e2e-t5b-a  -- 
+[05:36:06] PASS  S3 start the fork  -- 
+[05:36:07] PASS  S3 the fork's first start wrote its own receipt (computer id 81d5939e-03f6-4398-81dc-bb3f72fe4da0)  -- 
+endpoint e2e-t5b-a: 55176 32238976-cc01-43b6-bd36-e87f169ae893; endpoint e2e-t5b-af: 55199 81d5939e-03f6-4398-81dc-bb3f72fe4da0
+[05:36:08] PASS  S3 the fork's endpoint is its own (another port, its own computer id)  -- 
+[05:36:09] PASS  S3 the fork is registered  -- cua-driver silo
+  mcp in fork: {"step": 0, "tools": ["checkpoint", "checkpoints", "computer_use_call", "computer_use_click", "computer_use_drag", "computer_use_hotkey", "computer_use_key", "computer_use_move", "computer_use_ready", "computer_use_screenshot", "computer_use_scroll", "computer_use_tools", "computer_use_type", "compu
+  mcp in fork: {"step": 1, "call": "list", "secs": 0.6, "isError": false, "text": "{\n  \"computers\": [\n    {\n      \"checkpoints\": 0,\n      \"cpus\": 2,\n      \"desktop\": true,\n      \"detail\": \"Running\",\n      \"diskGiB\": 12,\n      \"id\": \"81d5939e-03f6-4398-81dc-bb3f72fe4da0\",\n      \"kind\": 
+names in the fork: tools:36 e2e-t5b-af 
+[05:36:10] PASS  S3 silo mcp in the fork answers as e2e-t5b-af, not as e2e-t5b-a  -- tools:36 e2e-t5b-af 
+[05:36:10] == S4 turning the tools off removes the registration, keeps the program, and the program refuses
+[05:36:11] PASS  S4 silo tools disable e2e-t5b-a  -- e2e-t5b-a: Silo's tools are off
+[05:36:15] PASS  S4 the silo MCP server is gone from the running computer's configuration  -- cua-driver
+[05:36:15] PASS  S4 computer use's registration is still there  -- 
+[05:36:16] PASS  S4 the program is still in the computer  -- 
+[05:36:56] PASS  S4 silo inside now refuses  -- silo: Cannot reach Silo at host.microsandbox.internal:55176: The engine connection ended.. Silo may be closed, or this computer's tools were turned off or need a restart of the computer.
+status: e2e-t5b-a: Silo's tools are off|
+[05:36:59] PASS  S4 silo tools disable e2e-t5b-af while it is stopped  -- e2e-t5b-af: Silo's tools are off
+[05:37:06] PASS  S4 the registration is taken out at the stopped computer's next start  -- 
+[05:37:07] PASS  S4 silo tools enable e2e-t5b-a again  -- e2e-t5b-a: Silo's tools are on (port 55176); it can reach them now; /etc/silo/endpoint.json was written|  silo: ok|  silo-mcp: ok|
+[05:37:08] PASS  S4 the registration is back  -- cua-driver silo
+[05:37:09] == S5 a deleted or replaced program comes back at the next start
+[05:37:09] PASS  S5 the program is deleted  -- 
+[05:37:19] PASS  S5 the right program is back after a restart  -- be8886804479df10a192d69ba9297baa3307093c9712df84834df2b311f31526
+[05:37:20] PASS  S5 the program is replaced by an agent  -- ca5212ff2740
+[05:37:29] PASS  S5 the right program is back after a restart  -- 
+[05:37:29] == S6 a reconcile that fails leaves the computer running and shows the failure
+chattr: rc=0
+[05:37:38] PASS  S6 the status shows the program as failed  -- 
+status: e2e-t5b-a: Silo's tools are on (port 55176); it can reach them now|  silo: failed (The silo program could not be put in place: mv: cannot move '/usr/local/bin/.silo-install.400' to '/usr/local/bin/silo': Operation not permitted (exit 1))|  silo-mcp: ok|
+[05:37:39] PASS  S6 the computer is running and answers  -- still-running
+computer status: e2e-t5b-a (linux): running|2 cpu, 4 GiB memory, 12 GiB disk|
+[05:37:50] PASS  S6 after the fix the next start recovers the program  -- 
+[05:37:50] PASS  S6 and the status is ok again  -- 
+[05:37:50] == S7 --binary goes through the engine's path and the next start puts the shipped program back
+[05:37:51] PASS  S7 silo tools enable --binary  -- e2e-t5b-a: Silo's tools are on (port 55176); it can reach them now; /etc/silo/endpoint.json was written|  silo: ok|  silo-mcp: ok|
+[05:37:52] PASS  S7 the computer has the program that was named (checked inside by root)  -- d206ded9bf14
+[05:38:01] PASS  S7 the next start puts the shipped program back  -- 
+[05:38:01] == S8 macOS computers on the Dev engine
+no macOS computer exists on the Dev engine; the macOS push over SSH and the macOS registration are not verified live
+[05:38:01] == engine log lines about the channels and tools
+  silod: channel of 0301f855-4d93-4631-a161-2f5545698589: wrote the endpoint file
+  silod: channel of 8fb9becb-27d8-407b-8986-ca26a2142e27: wrote the endpoint file
+  silod: channel of 32238976-cc01-43b6-bd36-e87f169ae893: wrote the endpoint file
+  silod: channel of 81d5939e-03f6-4398-81dc-bb3f72fe4da0: wrote the endpoint file
+[05:38:01] == summary: 42 passed, 0 failed
+[05:38:01] cleanup (drops only the e2e-t5b-* computers this run made, then stops the Dev engine it started)
+[05:38:15] silo list after cleanup:
+NAME         STATE      KIND       SIZE
+workspace-1  stopped    linux      8 cpu, 32 GiB
+e2e-relay    stopped    linux      8 cpu, 32 GiB
+silo-eval-a  stopped    linux      2 cpu, 2 GiB
+silo-eval-b  stopped    linux      2 cpu, 2 GiB
+[05:38:16] Dev engine stopped

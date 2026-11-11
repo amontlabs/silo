@@ -269,6 +269,7 @@ def install_codex(lock, work):
     archive_path = Path(work) / asset['url'].rsplit('/', 1)[-1]
     download(asset['url'], asset['sha256'], archive_path, asset['bytes'], asset['bytes'])
     CODEX_ROOT.mkdir(parents=True, exist_ok=True)
+    CODEX_ROOT.chmod(0o755)
     staging = Path(tempfile.mkdtemp(prefix='.codex-', dir=CODEX_ROOT))
     try:
         with tarfile.open(archive_path, 'r:gz') as archive:
@@ -280,6 +281,8 @@ def install_codex(lock, work):
             with open(binary, 'wb') as target:
                 shutil.copyfileobj(source, target, 1 << 20)
             binary.chmod(0o755)
+        # The temporary folder is private; the working account must be able to run the program.
+        staging.chmod(0o755)
         target = CODEX_ROOT / version
         if target.exists():
             shutil.rmtree(target)

@@ -56,6 +56,31 @@ class RegisterTest(unittest.TestCase):
         self.assertNotIn('default_tools_approval_mode', section)
         self.assertEqual(section['env']['CUA_DRIVER_RS_TELEMETRY_ENABLED'], '0')
 
+    def test_silos_own_server_is_added_beside_the_driver_and_removed_alone(self):
+        self.install('claude')
+        self.apply('ask')
+        code, result = self.main('server-add', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp')
+        self.assertEqual((code, result['registered'], result['failed']), (0, ['claude-code', 'codex'], []))
+        servers = json.loads(self.module.CLAUDE_STATE.read_text())['mcpServers']
+        self.assertEqual(servers['silo'], {'type': 'stdio', 'command': '/usr/local/bin/silo', 'args': ['mcp'], 'env': {}})
+        self.assertIn('cua-driver', servers)
+        codex = tomllib.loads(self.module.CODEX_CONFIG.read_text())['mcp_servers']
+        self.assertEqual((codex['silo']['command'], codex['silo']['args']), ('/usr/local/bin/silo', ['mcp']))
+        self.assertIn('cua-driver', codex)
+        code, result = self.main('server-remove', '--name', 'silo')
+        self.assertEqual((code, result['removed']), (0, ['claude-code', 'codex']))
+        self.assertNotIn('silo', json.loads(self.module.CLAUDE_STATE.read_text())['mcpServers'])
+        self.assertIn('cua-driver', json.loads(self.module.CLAUDE_STATE.read_text())['mcpServers'])
+        self.assertNotIn('silo', tomllib.loads(self.module.CODEX_CONFIG.read_text())['mcp_servers'])
+        self.assertIn('cua-driver', tomllib.loads(self.module.CODEX_CONFIG.read_text())['mcp_servers'])
+
+    def test_a_server_name_or_command_that_is_not_plain_is_refused(self):
+        for name, command in (('cua-driver', '/x'), ('Silo', '/x'), ('silo', 'silo')):
+            with mock.patch('sys.stdout', new=io.StringIO()), mock.patch('sys.stderr', new=io.StringIO()):
+                code = self.module.main(['server-add', '--name', name, '--command', command])
+            self.assertEqual(code, 1, (name, command))
+        self.assertFalse(self.module.CLAUDE_STATE.exists())
+
     def test_auto_adds_the_approval_lines_and_ask_removes_only_those(self):
         self.install('claude')
         self.install('codex')

@@ -192,7 +192,7 @@ define_registry! {
     GuestFilesWatch => ("guest.files.watch", Subscription, guest::GuestFilesWatchParams, guest::GuestFilesWatchResult);
     GuestFilesWrite => ("guest.files.write", Command, guest::GuestFilesWriteParams, guest::GuestFilesWriteResult);
     GuestPrepare => ("guest.prepare", Command, guest::GuestPrepareParams, guest::GuestPrepareResult);
-    GuestClientEnable => ("guestClient.enable", Command, guest_client::GuestClientComputerParams, guest_client::GuestClientStatus);
+    GuestClientEnable => ("guestClient.enable", Command, guest_client::GuestClientEnableParams, guest_client::GuestClientStatus);
     GuestClientRevoke => ("guestClient.revoke", Command, guest_client::GuestClientComputerParams, guest_client::GuestClientStatus);
     GuestClientStatus => ("guestClient.status", Query, guest_client::GuestClientComputerParams, guest_client::GuestClientStatus);
     GuestSsh => ("guest.ssh", Stream, guest::GuestSshParams, ());

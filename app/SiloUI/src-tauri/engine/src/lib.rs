@@ -52,6 +52,7 @@ pub mod github_http;
 pub mod github_tokens;
 pub mod guest;
 pub mod guest_client;
+pub mod guest_components;
 pub mod health_watch;
 pub mod host_push;
 pub mod host_push_cache;

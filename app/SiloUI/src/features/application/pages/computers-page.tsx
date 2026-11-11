@@ -374,6 +374,7 @@ export function ComputersPage({
   onCreateComputer,
   operationQueue,
   onOpenApproval,
+  onOpenComputer,
   notifyOperations = true,
 }: {
   /** The application source, for the same availability rules as the other surfaces. */
@@ -401,6 +402,8 @@ export function ComputersPage({
   onCreateComputer?: () => void
   /** Opens an approval on the Pending page, from a row of Who did what. */
   onOpenApproval?: (approvalId: string) => void
+  /** Opens a computer's page, from its network mode on the Network page. */
+  onOpenComputer?: (computerId: string) => void
   /** Standalone pages own notifications; ApplicationApp owns them across navigation. */
   notifyOperations?: boolean
   /** Lets a running push be cancelled from its notification. */
@@ -478,7 +481,7 @@ export function ComputersPage({
       {hasComputers && <ComputerFilterBar computers={listed} selectedComputerIds={selection} onChange={changeFilter} />}
       {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
       {section === "logs" && <LazyBoundary><Logs key={logTargetsKey} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} /></LazyBoundary>}
-      {section === "network" && <LazyBoundary><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} /></LazyBoundary>}
+      {section === "network" && <LazyBoundary><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} onOpenComputer={onOpenComputer} /></LazyBoundary>}
       {section === "activity" && <ActivityView
         events={<ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selection.size > 0} onShowLogs={showActivityLogs} />}
         auditRead={networkActions.listAudit} computers={listed} active={active} onOpenApproval={onOpenApproval}
