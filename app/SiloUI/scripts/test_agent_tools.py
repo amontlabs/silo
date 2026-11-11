@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tarfile
 import tempfile
@@ -228,6 +229,23 @@ class AgentToolsTests(unittest.TestCase):
             self.assertEqual((bin_dir / 'codex').resolve(), binary.resolve())
             asset = lock['codex']['assets']['linux-arm64']
             self.assertEqual(self.downloads, [(asset['bytes'], asset['bytes'])])
+
+    def test_the_codex_folders_can_be_entered_and_the_program_run_by_the_working_account(self):
+        lock = tools.read_lock(LOCK)
+        member = lock['codex']['assets']['linux-arm64']['member']
+        with tempfile.TemporaryDirectory() as directory:
+            old = os.umask(0o077)
+            try:
+                self.install_codex_from(self.codex_archive(directory, member), lock, directory,
+                                        iter([None, lock['codex']['version']]))
+            finally:
+                os.umask(old)
+            root = Path(directory) / 'codex'
+            version = root / lock['codex']['version']
+            for folder in (root, version):
+                self.assertEqual(folder.stat().st_mode & 0o755, 0o755, folder)
+                self.assertFalse(folder.stat().st_mode & 0o022, f'{folder} is writable by others')
+            self.assertEqual((version / 'codex').stat().st_mode & 0o755, 0o755)
 
     def test_a_newer_codex_stays_and_an_older_one_is_replaced(self):
         lock = tools.read_lock(LOCK)
