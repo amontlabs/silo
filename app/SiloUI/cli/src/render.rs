@@ -886,6 +886,11 @@ pub fn recipe_shown(value: &Value) -> String {
     } else {
         ", not built"
     });
+    if value["recipe"]["commandsHidden"] == true {
+        out.push_str(
+            "\nThe setup commands, service commands and keep commands are hidden from a computer; the engine runs them. Put tokens in secrets, never in them.",
+        );
+    }
     for warning in lines(value, "warnings") {
         out.push_str(&format!("\nwarning: {warning}"));
     }

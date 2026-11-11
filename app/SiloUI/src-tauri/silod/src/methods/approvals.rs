@@ -769,20 +769,37 @@ tokio::task_local! {
     pub(crate) static TEST_RUN: TestRun;
 }
 
+tokio::task_local! {
+    /// Set while an allowed call runs for the computer that asked, so a merge hides the
+    /// recipe's command lines from the job that computer reads.
+    static FOR_COMPUTER: bool;
+}
+
+/// Whether a merge's result goes to a computer: it is the caller, or it asked for the call an
+/// owner allowed.
+pub(crate) fn result_goes_to_computer(context: &HandlerContext) -> bool {
+    matches!(context.caller(), Caller::Computer { .. })
+        || FOR_COMPUTER.try_with(|asked| *asked).unwrap_or(false)
+}
+
 /// Runs an allowed call as the owner.
 async fn run_call(
     context: &HandlerContext,
     method: MethodName,
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
-    #[cfg(test)]
-    if let Ok(run) = TEST_RUN.try_with(Clone::clone) {
-        return run(method, params).map(|value| HandlerOutput {
-            value,
-            event_barrier: None,
-        });
-    }
-    super::run(context, method, params).await
+    FOR_COMPUTER
+        .scope(true, async {
+            #[cfg(test)]
+            if let Ok(run) = TEST_RUN.try_with(Clone::clone) {
+                return run(method, params).map(|value| HandlerOutput {
+                    value,
+                    event_barrier: None,
+                });
+            }
+            super::run(context, method, params).await
+        })
+        .await
 }
 
 async fn cancel(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {

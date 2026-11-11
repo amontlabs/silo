@@ -24,7 +24,7 @@ that every platform or live VM workflow has been exercised.
 | Area | Documents |
 | --- | --- |
 | Security | [Threat model](THREAT-MODEL.md): attacker, assets, trust boundaries with code references, and non-goals |
-| Vocabulary | [Silo vocabulary](SiloUI-VOCABULARY.md): the terms (computer, device, Connections, workspace, sandboxed) and the identifiers that keep older names |
+| Vocabulary | [Silo vocabulary](SiloUI-VOCABULARY.md): the terms (computer, device, Connections, workspace, merge, replace main, approval, recipe) and the identifiers that keep older names |
 | Build and release | [Build from source](SiloUI-BUILD-FROM-SOURCE.md), [build channels (production and Dev)](SiloUI-BUILD-CHANNELS.md), [release workflow and CI](SiloUI-RELEASES.md), [historical Linux system updates](SiloUI-LINUX-UPDATES.md), [historical distribution acceptance](SiloUI-DISTRIBUTION-PLAN.md), [release history](releases/) |
 | Command line | [`silo` CLI and MCP server](SiloUI-CLI.md): commands, `.silo/` files, and MCP setup |
 | Silo's tools in a computer | [`silo` inside a computer](SiloUI-IN-GUEST-CLIENT.md): a loopback port and a token per computer, so an agent inside it uses Silo as that computer; what it may and may not do is [the policy](SiloUI-POLICY.md) |

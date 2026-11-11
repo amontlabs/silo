@@ -20,7 +20,7 @@ use silo_engine::{
     policy::{store::PolicyStore, Caller},
 };
 
-use super::{request_answered, TestRun, TEST_RUN};
+use super::{request_answered, result_goes_to_computer, TestRun, FOR_COMPUTER, TEST_RUN};
 use crate::{
     dispatcher::{DispatchError, RequestContext},
     methods::{access::tests::fixture, dispatch, gate::test_nodes, HandlerContext},
@@ -614,6 +614,36 @@ async fn a_call_that_would_now_ask_for_something_else_is_not_run() {
         "{error}"
     );
     assert!(runs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_allowed_call_runs_knowing_its_result_goes_to_a_computer() {
+    let _serial = serial();
+    let tree = Tree::new();
+    let id = ask(&tree.me(), MethodName::PushStart, push_params(&tree.fork)).await;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let noted = seen.clone();
+    let (run, _runs) = runner(move |_, _| {
+        noted
+            .lock()
+            .unwrap()
+            .push(FOR_COMPUTER.try_with(|asked| *asked).unwrap_or(false));
+        Ok(json!({"jobId": "job:765433"}))
+    });
+    TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
+    assert_eq!(*seen.lock().unwrap(), [true]);
+}
+
+#[tokio::test]
+async fn only_a_computer_caller_or_an_allowed_call_for_one_hides_recipe_commands() {
+    let tree = Tree::new();
+    let owner = context(owner());
+    let computer = context(tree.me());
+    assert!(!result_goes_to_computer(&owner));
+    assert!(FOR_COMPUTER
+        .scope(true, async { result_goes_to_computer(&owner) })
+        .await);
+    assert!(result_goes_to_computer(&computer));
 }
 
 #[tokio::test]

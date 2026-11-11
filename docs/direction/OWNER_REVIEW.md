@@ -82,3 +82,17 @@ was chosen and why; any can be changed. Older items are also in the build log un
     (`silo rebuild --force`).
 23. **Writes to `/home/silo` in the few seconds between packing it and stopping the old computer
     are only in `<name>-undo`.**
+
+## Recipe setup lines (found by T16)
+
+24. **A computer never sees a recipe's setup commands, not even for its own recipe** (being built,
+    R5). Any computer may fork a recipe's hidden build to get a computer from that recipe, and the
+    fork carried the recipe's full text, so the earlier "only its own recipe" rule could be
+    sidestepped. Whatever a setup command writes to disk is in every computer built from that
+    recipe anyway, so the docs now say: never put tokens in setup lines; use secrets.
+25. **A recipe's `test` command and service names stay visible to computers**; only setup, service
+    `run`, and the keep `migrate`/`after` commands are hidden, and a merge's report names a
+    recipe hook step without its command text (R5). The docs say never to put a secret in any
+    recipe line.
+    A merge you approved also shows step numbers instead of commands in its report, since the
+    asking computer reads the same report; the commands stay readable in the recipe.

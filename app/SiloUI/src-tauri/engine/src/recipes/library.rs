@@ -52,6 +52,7 @@ fn definition(spec: RecipeSpec) -> RecipeDefinition {
         keep: None,
         test: None,
         files: Vec::new(),
+        commands_hidden: None,
     }
 }
 
@@ -154,6 +155,22 @@ pub fn hooks_of(recipe: &RecipeDefinition) -> KeepHooks {
         migrate: Vec::new(),
         after: Vec::new(),
     })
+}
+
+/// The definition as a computer's agent may read it: the command lines (`setup`, each service's
+/// `run`, the `migrate` and `after` hooks) are left out, because an owner may have pasted a
+/// secret into one, and `commands_hidden` says so. The engine runs them itself.
+pub fn hide_commands(mut recipe: RecipeDefinition) -> RecipeDefinition {
+    recipe.spec.setup.clear();
+    for service in &mut recipe.spec.services {
+        service.run.clear();
+    }
+    if let Some(keep) = &mut recipe.keep {
+        keep.migrate.clear();
+        keep.after.clear();
+    }
+    recipe.commands_hidden = Some(true);
+    recipe
 }
 
 static LOCK: Mutex<()> = Mutex::new(());

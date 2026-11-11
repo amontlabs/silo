@@ -4,7 +4,7 @@ This is the work planned after the current release, in order. It starts from wha
 do today, as stated in the [threat model](THREAT-MODEL.md) and measured by the [isolation evals](evals/README.md), and says which
 milestone closes or narrows each gap.
 
-Last updated 2026-11-07. When a milestone lands, its section here is shortened to a line under
+Last updated 2026-11-11. When a milestone lands, its section here is shortened to a line under
 [Done](#done) and the threat model and evals are updated in the same change.
 
 **Order.** *Next* is work that needs no funding and starts now. *Funded* is work that starts once
@@ -16,10 +16,10 @@ unpaid.
 | Milestone | Closes or narrows | Order |
 | --- | --- | --- |
 | [1. Cua Driver for computer use](#1-cua-driver-for-computer-use) | ChatGPT-for-Linux download, two host shares in every Linux computer | In progress |
-| [2. Egress policy per computer](#2-egress-policy-per-computer) | Open egress, DNS as an unlogged channel | Next |
+| [2. Egress policy per computer](#2-egress-policy-per-computer) | Open egress (narrowed by the policy), DNS as an unlogged channel | Built; DNS log next |
 | [3. Reflected-secret redaction](#3-reflected-secret-redaction) | Allowed host echoing a secret back | Next |
-| [4. Socket client identity and audit log](#4-socket-client-identity-and-audit-log) | Any same-user process drives the engine, no record of who did what | Next |
-| [5. Review of the `/.msb` runtime share](#5-review-of-the-msb-runtime-share) | Read-write host share with no security review | Next |
+| [4. Socket client identity and audit log](#4-socket-client-identity-and-audit-log) | Any same-user process drives the engine; the audit log exists, client identity does not | Audit log built; identity next |
+| [5. Review of the `/.msb` runtime share](#5-review-of-the-msb-runtime-share) | Read-write host share with no security review (Silo no longer uses it for requests) | Next |
 | [6. Linux host daemon](#6-linux-host-daemon) | Engine embeddable on macOS only | Next |
 | [7. Protocol reference and examples](#7-protocol-reference-and-examples) | Embedding needs reading the source | Next |
 | [8. Project governance and docs cleanup](#8-project-governance-and-docs-cleanup) | No contribution or decision process | Next |
@@ -27,6 +27,7 @@ unpaid.
 | [10. External security review](#10-external-security-review) | Every boundary checked only by its author | Funded |
 | [11. Signed and notarized releases](#11-signed-and-notarized-releases) | Unsigned app and engine, Gatekeeper override | Funded |
 | [12. Published crates and bindings](#12-published-crates-and-bindings) | Embedding outside Rust means generating types yourself | Funded |
+| [13. After the direction build](#13-after-the-direction-build) | Open items left by the agent-inside-the-computer work | Next |
 
 ## 1. Cua Driver for computer use
 
@@ -51,9 +52,9 @@ Done when:
 ## 2. Egress policy per computer
 
 **Status.** Built: a computer has a network policy of three modes, stored with it, set through
-`network.policy.set` and `silo network policy`, and applied to Linux virtual machines, macOS
-computers and containers. The app's control for it, the `open-egress` eval in allowlist mode and
-the DNS query log are still open.
+`network.policy.set`, `silo network policy` and a control in the app, and applied to Linux virtual
+machines, macOS computers and containers. The `open-egress` eval in allowlist mode and the DNS
+query log are still open.
 
 **Gap before.** A computer could open any connection to any public address, TCP or UDP, and DNS
 queries went out unfiltered through the host's resolvers. The `open-egress` eval posts a file from
@@ -74,9 +75,9 @@ queries went out unfiltered through the host's resolvers. The `open-egress` eval
 - A small runtime patch lets `msb restore` take `--net-strict`, so a restored or forked allowlist
   computer keeps its hostname rules working.
 
-**Still to do.** The app's control for the policy; a DNS query log per computer, readable through
-the API and shown in Activity, with a filter for names that are not on the list; the `open-egress`
-eval passing on a computer in allowlist mode.
+**Still to do.** A DNS query log per computer, readable through the API and shown in Activity, with
+a filter for names that are not on the list; the `open-egress` eval passing on a computer in
+allowlist mode; running the allowlist on a Linux host and on a live macOS or container gateway.
 
 **Still open after it.** An allowlist does not stop sending data to an allowed host (a gist, an
 issue, a package upload). DNS queries to names that are not on the list still resolve, and a host
@@ -98,10 +99,15 @@ a boundary with its limit: a value the server transforms (encoded, split, hashed
 
 ## 4. Socket client identity and audit log
 
+**Status.** The audit log is built: every call that can change something, and every refused or
+held call, is a row with the caller (owner, device or computer), the method and the computer,
+readable through `audit.list` and shown under Activity. A computer's identity is its channel.
+What is left is the identity of programs on the device.
+
 **Gap today.** `silod` checks only that a client runs as the same user. Any process of that user
 can create, export or delete computers, run commands as root in them, and change GitHub and secret
-assignments. The `same-user-client` eval does this from an unsigned script. Nothing records which
-client asked for what.
+assignments. The `same-user-client` eval does this from an unsigned script. The client name in
+the audit log is self-declared.
 
 **Plan.**
 
@@ -109,11 +115,10 @@ client asked for what.
   against a code requirement). On Linux, by `SO_PEERCRED` (PID, UID) and the executable it maps to.
 - A list of allowed clients, managed by the user. Unknown clients are refused or limited to
   read-only methods, depending on a setting.
-- An append-only audit log of client identity, method and computer for every state-changing
-  request, readable through the API and exportable with logs.
+- Client identity in the audit log rows that exist today.
 
-Done when an unsigned script is refused by default, every state-changing call appears in the audit
-log, and the `same-user-client` eval passes.
+Done when an unsigned script is refused by default, the audit log names a verified client, and the
+`same-user-client` eval passes.
 
 **Still open after it.** Malware running as the same user can still tamper with an allowed client
 or the user's files; same-user malware stays a non-goal. This milestone stops casual and
@@ -122,9 +127,10 @@ accidental use of the socket and makes every action attributable.
 ## 5. Review of the `/.msb` runtime share
 
 **Gap today.** Every Linux computer sees MicroSandbox's own runtime directory read-write at
-`/.msb`. The host writes scripts and certificates there and reads a heartbeat file the guest
-writes. The eval could not reach a host canary through it, but the share has had no security
-review.
+`/.msb`. MicroSandbox writes scripts and certificates there and keeps its checkpoint state and a
+heartbeat file in it. Silo no longer puts requests or answers in the share and reads nothing a
+guest wrote there for its own use. The eval could not reach a host canary through it, but the share
+has had no security review.
 
 **Plan.** Read the passthrough file system and every host read from that directory. Make the
 share read-only from the guest where the runtime allows it, and move the heartbeat to a separate,
@@ -221,6 +227,40 @@ macOS archive, and a published signature (for example Sigstore) for Linux archiv
 Publish `silo-api` and `silo-client` on crates.io under the versioning policy from milestone 7.
 Generate and publish Python and TypeScript clients from the JSON schema.
 
+## 13. After the direction build
+
+**Status.** The agent now lives in a computer with Silo's tools, asks for what widens its access,
+merges back, and works under a per-computer network policy (see [the direction](DIRECTION.md#what-is-built)).
+These are the next steps it left, in rough order.
+
+- **Rebuild on the newest image**, keeping the workspace and home: `silo rebuild`, Linux first
+  (a macOS rebuild later). The design is settled; homes over about 45 % of the root disk are
+  refused, and the old computer stays stopped as `<name>-undo`.
+- **Live checks on a real device** of what was built from unit tests and the Dev engine alone: the
+  app screens (Pending, onboarding, network policy, macOS computers, tools), Open for each agent,
+  macOS forks and imports behind the gateway, the allowlist on a Linux host, and a Codex install in
+  a real computer.
+- **Fix:** declining a merge approval leaves the fork's review request open; a failed create-time
+  agent install shows a generic message; a creating computer may not accept a network policy
+  change; the network page's link does not scroll to the section.
+- **Close the loopback port**: map the gateway port to a Unix socket in a private folder so no port
+  is open on the device, and detect a port another program holds when the engine starts.
+- **Recipes:** stop a fork of a recipe's build from carrying the recipe's full text to a computer
+  that may not read it; decide whether every computer should see every recipe's name.
+- **Limits:** hold the memory of approved starts too; measure disk at the storage location the
+  owner chose, not only at app data.
+- **Computers' views:** cut the event stream, notifications and the job list per computer so an
+  agent need not poll.
+- **Exports:** flatten a fork's disk layers in the runtime, so a login removed from an export is
+  gone from the file and not only from the imported computer.
+- **Tokens:** let the old single-token methods find tokens by any name, and let a fork copy token
+  access.
+- **Merge:** check an ignored `.env` for credentials the way Git history is checked.
+- **First install of a macOS computer** still uses Apple's network; closing the window needs the
+  bootstrap files inside the template.
+- **Not scheduled from this work:** the DNS query log (milestone 2), reflected-secret redaction
+  (milestone 3), one helper process per macOS computer, and signed releases (milestone 11).
+
 ## Considered, not scheduled
 
 These gaps are in the threat model and stay there. Each would need its own design first:
@@ -253,5 +293,9 @@ Product ideas that are not gaps in the threat model. Each needs its own design f
 
 ## Done
 
+- 2026-11: The agent inside a computer: callers and a policy, approvals, the audit log, a channel
+  and the `silo` tools in each computer, merge and replace main, recipes in the engine, a network
+  policy per computer, macOS computers on the same page, personal tokens as secrets, agent install
+  and onboarding, and export without logins (best effort). See [the direction](DIRECTION.md#what-is-built).
 - 2026-11: `silo-engine` builds and passes its tests on Linux in CI.
 - 2026-11: Every crate declares its MIT licence and repository.

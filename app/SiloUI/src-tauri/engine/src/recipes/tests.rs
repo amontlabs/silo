@@ -625,7 +625,7 @@ mod stored {
 
     use super::*;
     use crate::recipes::{
-        additions::manager_key, append, built_in, hooks_of, record_merge, records, unrecord_merge,
+        additions::manager_key, append, built_in, hide_commands, hooks_of, record_merge, records, unrecord_merge,
         Additions, Library,
     };
 
@@ -641,6 +641,7 @@ mod stored {
             }),
             test: Some("npm test".into()),
             files: vec!["/home/silo/.bashrc".into()],
+            commands_hidden: None,
         }
     }
 
@@ -657,6 +658,29 @@ mod stored {
             built_at: "2026-11-11T00:00:00Z".into(),
             recipe: definition(),
         }
+    }
+
+    #[test]
+    fn hiding_commands_keeps_names_packages_and_files() {
+        let mut recipe = definition();
+        recipe.spec.setup = vec!["export TOKEN=hunter2".into()];
+        recipe.spec.services = vec![RecipeService {
+            name: "web".into(),
+            run: "web --token hunter2".into(),
+        }];
+        let shown = hide_commands(recipe.clone());
+        assert_eq!(shown.commands_hidden, Some(true));
+        assert!(shown.spec.setup.is_empty());
+        assert_eq!(shown.spec.services[0].name, "web");
+        assert!(shown.spec.services[0].run.is_empty());
+        let keep = shown.keep.unwrap();
+        assert_eq!(keep.restart, ["web"]);
+        assert!(keep.migrate.is_empty() && keep.after.is_empty());
+        assert_eq!(shown.test, recipe.test);
+        assert_eq!(shown.files, recipe.files);
+        assert_eq!(shown.spec.packages, recipe.spec.packages);
+        assert_eq!(shown.quiet, recipe.quiet);
+        assert_eq!(recipe.commands_hidden, None);
     }
 
     #[test]

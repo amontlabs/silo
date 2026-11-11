@@ -141,6 +141,7 @@ mod tests {
             keep: None,
             test: None,
             files: Vec::new(),
+            commands_hidden: None,
         }
     }
 
