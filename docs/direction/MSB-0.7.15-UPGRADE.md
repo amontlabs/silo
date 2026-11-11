@@ -101,3 +101,9 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   Known flaky under load: two `audit::...trimmed` tests, `dependency_hash_fifo_is_rejected_without_waiting_for_a_writer`.
   Next: live check in a private home (never the shared Dev home: the storage upgrade is one-way
   and the direction build still runs 0.7.6 on Dev).
+- 2026-11-11: live check ([evidence](evidence/MSB-0.7.14.txt)): migration of a real 0.7.6 home
+  passes end to end; checkpoints, ports, rename, lifecycle pass. Open, being fixed:
+  allowlist mode lets a raw-IP TCP connect complete (`silo/0714-fix-net`); every export refused
+  over the new default `http` deny settings and the repair step must stop running VMs before
+  diagnosing (`fix/msb-0714-live`); a full checkpoint plus a fork of the same 0.7.6 computer is
+  `recovery_required` (`silo/0714-fix-forkckpt`).
