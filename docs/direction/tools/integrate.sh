@@ -9,6 +9,6 @@ run cargo run -q -p silo-api --example generate_schema
 run cargo test -p silo-api --locked
 run cargo test -p silod --locked
 run cargo test -p silo-cli --locked
-run cargo test -p silo-engine --locked --lib -- policy:: audit:: guest_client:: changes:: macos_computers::
+run cargo test -p silo-engine --locked --lib -- policy:: audit:: guest_client:: changes:: macos_computers rebuild guest_components recipes network_policy resources checkpoints
 run cargo +1.94.0 fmt --manifest-path src-tauri/Cargo.toml --check
 echo "== DONE" >> "$LOG"
