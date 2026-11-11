@@ -1107,6 +1107,11 @@ mod guard_tests;
 #[cfg(test)]
 #[path = "runtime_migration/interrupted_tests.rs"]
 mod interrupted_tests;
+#[path = "runtime_migration/protected_storage.rs"]
+mod protected_storage;
+#[cfg(test)]
+#[path = "runtime_migration/protected_storage_tests.rs"]
+mod protected_storage_tests;
 #[path = "runtime_migration/vocabulary.rs"]
 pub mod vocabulary;
 #[cfg(test)]

@@ -52,3 +52,7 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   1.94.0 must move; the v0.7.15 agentd download URL returned 404 (builds used
   `MSB_EMBED_ARTIFACTS_DIR=~/code/projects/msb-upstream/check-artifacts`, check-only copies).
   Capture dirs moved to `<sandbox>/checkpoints` in 0.7.15. `grow-retire-old-root-chain` included.
+- 2026-11-11: chain C done on `silo/0715-network` (3 commits; network crate 760 tests pass).
+  Integrator owes: silo-network's `legacy_changes`/`subscribe()` hunks in `secrets/handle.rs`
+  (left out of C); gateway must handle `start()` -> `Result` and `start_and_wait_for_ports(handle)`
+  (no timeout, new `PortStartupError`). Live ports now share the global inbound budget.
