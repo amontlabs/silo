@@ -91,3 +91,13 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   `silo/0714-integration`. Engine pin is now v0.7.14 (`60fc5071b34e6cc2671c84c8dc07709795d45d27`);
   gateway lock regenerated and its 36 tests pass against that tree on 1.95.0. The Rust toolchain pin
   (1.95.0 in the entries above) is to be reset to 1.94.0 if v0.7.14 builds on it.
+- 2026-11-11: merged gateway/pins/behaviour (`feat/msb-0715-gateway`), storage wiring and its
+  review fixes (`feat/msb-0715-migration-wiring`). Patches regenerated from
+  `silo/0714-integration` (clippy `-D warnings` clean on 1.95.0 except one upstream test).
+  Toolchain 1.95.0 everywhere. Reviews (Sonnet; Codex was out of quota): Silo side 7 findings,
+  6 fixed (`2162744c9`), the 7th (restore drops recorded mounts only for computers that have none)
+  judged intended; patch stack: no security issue, one lint fix. Full suites: cargo workspace 5093
+  passed, vitest 3122 passed, test:release 138 passed / 17 skipped, typecheck, lint, fmt clean.
+  Known flaky under load: two `audit::...trimmed` tests, `dependency_hash_fifo_is_rejected_without_waiting_for_a_writer`.
+  Next: live check in a private home (never the shared Dev home: the storage upgrade is one-way
+  and the direction build still runs 0.7.6 on Dev).
