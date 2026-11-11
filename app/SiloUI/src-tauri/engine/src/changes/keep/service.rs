@@ -1,6 +1,6 @@
 //! The `changes.keep` and `changes.undo` jobs.
 
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use silo_api::{
     jobs::JobId,
@@ -77,22 +77,62 @@ where
 }
 
 /// Appends the packages and settings files a keep brought to the recipe of the computer it
-/// merged into, and says so in the report. A failure is a note: the merge is done.
-fn note_recipe(context: &dyn EngineContext, report: &mut super::Report, save_recipe: bool) {
-    let library = crate::recipes::Library::new(&context.paths().app_data);
+/// merged into, and says so in the report. What was appended goes into the journal, so an undo
+/// takes it back. A failure is a note: the merge is done.
+pub(crate) fn note_recipe(
+    app_data: &Path,
+    journal: &Journal,
+    report: &mut super::Report,
+    save_recipe: bool,
+) {
+    let library = crate::recipes::Library::new(app_data);
     let target = report.target.clone();
     match crate::recipes::record_merge(&library, &target, &report.additions, save_recipe) {
-        Ok(Some((name, added))) => {
+        Ok(Some(recorded)) => {
             report.recipe = Some(super::RecipeUpdate {
-                name,
-                packages: added.packages,
-                files: added.files,
+                name: recorded.name.clone(),
+                packages: recorded.record.packages.clone(),
+                files: recorded.record.files.clone(),
             });
+            let kept = report
+                .checkpoint
+                .as_deref()
+                .map(|id| journal.set_recipe_update(&target, id, Some(&recorded)));
+            if let Some(Err(error)) = kept {
+                report.notes.push(format!(
+                    "Undo will not take these back out of the recipe of {target}: {error}"
+                ));
+            }
         }
         Ok(None) => {}
         Err(error) => report.notes.push(format!(
             "The recipe of {target} could not be updated: {error}"
         )),
+    }
+}
+
+/// After an undo restored a computer: takes out of its recipes what the merge it undid
+/// appended. A failure is a note: the computer is back.
+pub(crate) fn undo_recipe(app_data: &Path, journal: &Journal, outcome: &mut super::UndoOutcome) {
+    let super::UndoOutcome::Undone {
+        computer,
+        checkpoint,
+        notes,
+        ..
+    } = outcome
+    else {
+        return;
+    };
+    let Some(recorded) = journal.recipe_update(computer, &checkpoint.id) else {
+        return;
+    };
+    let library = crate::recipes::Library::new(app_data);
+    let taken = crate::recipes::unrecord_merge(&library, computer, &recorded)
+        .and_then(|()| journal.set_recipe_update(computer, &checkpoint.id, None));
+    if let Err(error) = taken {
+        notes.push(format!(
+            "The recipe of {computer} still lists what the merge added: {error}"
+        ));
     }
 }
 
@@ -117,7 +157,7 @@ pub fn start_keep(
         )?;
         let mut outcome = outcome;
         if let super::Outcome::Kept(report) = &mut outcome {
-            note_recipe(context.as_ref(), report, save_recipe);
+            note_recipe(&context.paths().app_data, &journal, report, save_recipe);
             // The changes the open requests for this fork asked to review are in.
             Store::new(&context.paths().app_data).mark_kept_for(
                 &report.fork,
@@ -279,7 +319,7 @@ pub fn start_request_keep(
         };
         let mut outcome = outcome;
         if let super::Outcome::Kept(report) = &mut outcome {
-            note_recipe(context.as_ref(), report, save_recipe);
+            note_recipe(&context.paths().app_data, &journal, report, save_recipe);
         }
         let after = match &outcome {
             super::Outcome::Kept(report) => requests
@@ -300,13 +340,18 @@ pub fn start_undo(
     start(host, "changes.undo", move |host| {
         let journal = journal_for(host.engine_context().as_ref());
         let env = GuestEnv::new(host.clone(), service, journal.clone(), Box::new(|_| {}));
-        super::undo(
+        let mut outcome = super::undo(
             &env as &dyn KeepEnv,
             store.as_ref(),
             &journal,
             &computer,
             LANE_WAIT,
-        )
-        .map(|outcome| outcome.to_json())
+        )?;
+        undo_recipe(
+            &host.engine_context().paths().app_data,
+            &journal,
+            &mut outcome,
+        );
+        Ok(outcome.to_json())
     })
 }
