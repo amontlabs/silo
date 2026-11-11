@@ -283,6 +283,7 @@ mod tests {
                 name: "Silo".into(),
                 version: "0.1".into(),
             }),
+            token: None,
         };
         assert_eq!(
             serde_json::from_str::<HandshakeParams>(&serde_json::to_string(&handshake).unwrap())
@@ -313,12 +314,28 @@ mod tests {
     }
 
     #[test]
+    fn protocol_8_carries_the_channel_token_in_the_handshake() {
+        assert_eq!(crate::transport::PROTOCOL_VERSION, 8);
+        let params: HandshakeParams = serde_json::from_value(serde_json::json!({
+            "protocol": { "min": 8, "max": 8 },
+            "token": "silo_gc_x",
+        }))
+        .unwrap();
+        assert_eq!(params.token.as_deref(), Some("silo_gc_x"));
+        let without = HandshakeParams {
+            token: None,
+            ..params
+        };
+        assert!(!serde_json::to_string(&without).unwrap().contains("token"));
+    }
+
+    #[test]
     fn incompatible_version_diagnostics_have_canonical_field_names() {
         let error = ErrorObject {
             code: ErrorCode::IncompatibleVersion,
             message: "No common protocol version".to_owned(),
             diagnostics: Some(crate::transport::IncompatibleVersionDiagnostics {
-                engine_protocol_range: crate::transport::ProtocolRange { min: 7, max: 7 },
+                engine_protocol_range: crate::transport::ProtocolRange { min: 8, max: 8 },
                 client_protocol_range: crate::transport::ProtocolRange { min: 5, max: 5 },
                 engine_app_version: "0.1.0".to_owned(),
                 client_app_version: Some("9.8.7".to_owned()),
@@ -333,7 +350,7 @@ mod tests {
                 "code": "incompatible_version",
                 "message": "No common protocol version",
                 "diagnostics": {
-                    "engineProtocolRange": { "min": 7, "max": 7 },
+                    "engineProtocolRange": { "min": 8, "max": 8 },
                     "clientProtocolRange": { "min": 5, "max": 5 },
                     "engineAppVersion": "0.1.0",
                     "clientAppVersion": "9.8.7"

@@ -6844,71 +6844,8 @@
       ],
       "type": "object"
     },
-    "GuestClientEnableParams": {
-      "properties": {
-        "computerId": {
-          "type": "string"
-        },
-        "policy": {
-          "$ref": "#/$defs/GuestClientPolicy"
-        }
-      },
-      "required": [
-        "computerId",
-        "policy"
-      ],
-      "type": "object"
-    },
-    "GuestClientEnableResult": {
-      "description": "The token is shown here once; the engine keeps only its hash.",
-      "properties": {
-        "computerId": {
-          "type": "string"
-        },
-        "mintedAt": {
-          "type": "string"
-        },
-        "spoolDir": {
-          "type": "string"
-        },
-        "token": {
-          "type": "string"
-        },
-        "tokenPath": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "computerId",
-        "token",
-        "tokenPath",
-        "spoolDir",
-        "mintedAt"
-      ],
-      "type": "object"
-    },
-    "GuestClientPolicy": {
-      "description": "What the project settings allow the agent, resolved on the host when the token is\nminted (the engine has no project folder of its own). The in-guest client never keeps,\nso `fold` and `auto_keep` are not part of it.",
-      "properties": {
-        "agent": {
-          "description": "The agent name the settings were resolved for.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "forkSecrets": {
-          "default": [],
-          "description": "Secret names (`github` included) a fork made from inside may name. Empty by default.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
     "GuestClientStatus": {
+      "description": "Whether a computer has Silo's tools, and where they answer.",
       "properties": {
         "computerId": {
           "type": "string"
@@ -6916,21 +6853,52 @@
         "enabled": {
           "type": "boolean"
         },
-        "mintedAt": {
+        "enabledAt": {
+          "description": "When the tools were turned on.",
           "type": [
             "string",
             "null"
           ]
         },
-        "policy": {
+        "endpointPath": {
+          "description": "Where the computer finds the address and its token.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "description": "The host name the computer reaches the channel by.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
           "anyOf": [
             {
-              "$ref": "#/$defs/GuestClientPolicy"
+              "$ref": "#/$defs/NetworkPolicyTiming"
             },
             {
               "type": "null"
             }
+          ],
+          "description": "When the computer's network lets it reach the channel: now, at its next start, or\nafter a restart."
+        },
+        "port": {
+          "description": "The channel's port on the device's loopback.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
           ]
+        },
+        "written": {
+          "default": false,
+          "description": "Whether the endpoint file was written into the computer by this call. A computer\nthat is not running gets it when it next starts.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -7833,7 +7801,7 @@
       "type": "string"
     },
     "HandshakeParams": {
-      "description": "`engine.handshake` parameters. `sshKey` is used by the Connections bridge\nto install the restricted key; local engine clients omit it.",
+      "description": "`engine.handshake` parameters. `sshKey` is used by the Connections bridge\nto install the restricted key; local engine clients omit it. `token` is the computer's\ntoken on the channel inside a computer, and is required there; `engine.sock` ignores it.",
       "properties": {
         "client": {
           "anyOf": [
@@ -7849,6 +7817,12 @@
           "$ref": "#/$defs/ProtocolRange"
         },
         "sshKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token": {
           "type": [
             "string",
             "null"
@@ -11689,7 +11663,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/GuestClientEnableParams"
+              "$ref": "#/$defs/GuestClientComputerParams"
             }
           },
           "required": [
@@ -14694,7 +14668,7 @@
               "type": "string"
             },
             "result": {
-              "$ref": "#/$defs/GuestClientEnableResult"
+              "$ref": "#/$defs/GuestClientStatus"
             }
           },
           "required": [
@@ -20256,8 +20230,8 @@
     {
       "kind": "command",
       "name": "guestClient.enable",
-      "paramsType": "guest_client::GuestClientEnableParams",
-      "resultType": "guest_client::GuestClientEnableResult"
+      "paramsType": "guest_client::GuestClientComputerParams",
+      "resultType": "guest_client::GuestClientStatus"
     },
     {
       "kind": "command",

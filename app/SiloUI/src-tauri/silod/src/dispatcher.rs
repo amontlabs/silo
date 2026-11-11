@@ -109,9 +109,20 @@ pub struct SessionState {
     protocol: Option<u32>,
     client: Option<ClientMetadata>,
     seen_ids: HashSet<String>,
+    /// The computer whose channel this session arrived on; `None` on `engine.sock`.
+    computer: Option<String>,
 }
 
 impl SessionState {
+    /// A session on `computer_id`'s channel: every request it makes is that computer's. Only
+    /// the channel's listener makes one, after the handshake's token was checked.
+    pub(crate) fn for_computer(computer_id: String) -> Self {
+        Self {
+            computer: Some(computer_id),
+            ..Self::default()
+        }
+    }
+
     pub fn client_id(&self) -> Option<&str> {
         self.client_id.as_deref()
     }
@@ -506,13 +517,17 @@ impl Dispatcher {
             .client_id
             .clone()
             .expect("negotiated session has client id");
-        // The engine's own socket is the owner's. The client's name is diagnostic only.
-        let caller = Caller::owner(
-            session
-                .client
-                .as_ref()
-                .map_or(client_id.as_str(), |client| client.name.as_str()),
-        );
+        // The engine's own socket is the owner's; a computer's channel is that computer's. The
+        // client's name is diagnostic only.
+        let caller = match &session.computer {
+            Some(id) => Caller::Computer { id: id.clone() },
+            None => Caller::owner(
+                session
+                    .client
+                    .as_ref()
+                    .map_or(client_id.as_str(), |client| client.name.as_str()),
+            ),
+        };
         let request_context = RequestContext {
             client_id,
             protocol: session.protocol.expect("negotiated session has protocol"),
@@ -1031,7 +1046,7 @@ mod tests {
         let dispatcher = dispatcher();
         let mut session = SessionState::default();
         let reply = dispatcher
-            .execute(dispatcher.prepare(handshake("one", 5, 7), &mut session))
+            .execute(dispatcher.prepare(handshake("one", 5, 8), &mut session))
             .await;
         assert!(matches!(
             reply.response,
@@ -1086,7 +1101,7 @@ mod tests {
         let dispatcher = dispatcher();
         let mut session = SessionState::default();
         let _ = dispatcher
-            .execute(dispatcher.prepare(handshake("one", 7, 7), &mut session))
+            .execute(dispatcher.prepare(handshake("one", 8, 8), &mut session))
             .await;
         let request = serde_json::json!({ "id": "two", "method": "engine.state", "params": {} });
         let _ = dispatcher
@@ -1096,6 +1111,34 @@ mod tests {
             dispatcher.prepare(request, &mut session),
             PreparedRequest::Close(Some(ResponseEnvelope::Error { .. }), _)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_computer_session_calls_as_that_computer_whatever_the_client_says() {
+        let dispatcher = dispatcher();
+        for (mut session, expected) in [
+            (
+                SessionState::for_computer("c1".into()),
+                Caller::Computer { id: "c1".into() },
+            ),
+            (SessionState::default(), Caller::owner("c1")),
+        ] {
+            let mut first = handshake("one", 8, 8);
+            first["params"]["client"] = serde_json::json!({ "name": "c1", "version": "0" });
+            let _ = dispatcher
+                .execute(dispatcher.prepare(first, &mut session))
+                .await;
+            let request = serde_json::json!({
+                "id": "two", "method": "engine.state", "params": { "computerId": "c2" }
+            });
+            let PreparedRequest::Invoke {
+                request_context, ..
+            } = dispatcher.prepare(request, &mut session)
+            else {
+                panic!("a request after the handshake is invoked");
+            };
+            assert_eq!(request_context.caller, expected);
+        }
     }
 
     #[test]

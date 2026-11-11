@@ -395,7 +395,7 @@ fn a_fork_of_itself_or_of_what_it_made_is_free_and_loses_the_token_file() {
     assert_eq!(rewritten["quiet"]["stop"], json!(["poller"]));
     assert_eq!(
         rewritten["quiet"]["scrub"],
-        json!(["/home/x", GUEST_TOKEN_PATH])
+        json!(["/home/x", GUEST_ENDPOINT_PATH])
     );
     assert!(rewritten.get("recipeHash").is_none());
     assert_eq!(rewritten["secrets"], json!(["npm", "github"]));
@@ -486,7 +486,7 @@ fn an_ask_that_makes_a_computer_carries_the_call_to_run_and_the_computer() {
             assert!(params["quiet"]["scrub"]
                 .as_array()
                 .unwrap()
-                .contains(&json!(GUEST_TOKEN_PATH)));
+                .contains(&json!(GUEST_ENDPOINT_PATH)));
             assert_eq!(creates.name, "x");
             assert_eq!(creates.source.as_deref(), Some("main"));
         }

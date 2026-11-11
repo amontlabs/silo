@@ -345,6 +345,27 @@ pub(crate) async fn admit(
             );
         }
     }
+    // A computer may have only so many jobs it has not acknowledged: a job nobody follows still
+    // takes a place in the engine's job admission.
+    if let Caller::Computer { id } = &caller {
+        if kind_of(method) == MethodKind::Job && matches!(decision, Decision::Allow(_)) {
+            let open = PolicyStore::new(&app_data(context))
+                .snapshot()
+                .map(|document| document.jobs_of(id).len());
+            if open.map_or(true, |open| open >= silo_engine::guest_client::MAX_JOBS) {
+                return refuse(
+                    DispatchError::new(
+                        ErrorCode::PermissionDenied,
+                        format!(
+                            "{} jobs of this computer are not finished and acknowledged yet.",
+                            silo_engine::guest_client::MAX_JOBS
+                        ),
+                    ),
+                    AuditOutcome::Refused,
+                );
+            }
+        }
+    }
     match decision {
         Decision::Allow(allowed) => {
             if let (Some(creation), Caller::Computer { id }) = (&allowed.creates, &caller) {

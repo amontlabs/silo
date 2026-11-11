@@ -425,9 +425,14 @@ pub enum ExtraRule {
     GatewayPort(u16),
 }
 
-/// The rules Silo needs for itself in `computer`'s network, in every mode.
-pub fn extra_rules(_computer_id: &str) -> Vec<ExtraRule> {
-    Vec::new()
+/// The rules Silo needs for itself in `computer`'s network, in every mode: the port of its
+/// channel to Silo's tools when they are on, and nothing else. Only the computer's own port.
+pub fn extra_rules(computer_id: &str) -> Vec<ExtraRule> {
+    crate::guest_client::TokenStore::current()
+        .and_then(|store| store.port_of(computer_id))
+        .map(ExtraRule::GatewayPort)
+        .into_iter()
+        .collect()
 }
 
 /// One rule in the runtime's terms.

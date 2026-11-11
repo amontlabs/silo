@@ -1,59 +1,21 @@
-//! `silo guest-client install|revoke|status <computer>`: the host side of the in-guest client.
-//! The settings are read here, from the project the command runs in, and travel to the engine
-//! as the token's policy, because the engine has no project folder of its own.
+//! `silo tools enable|disable|status <computer>`: Silo's tools in a computer. The engine opens
+//! the computer's channel and writes its address and token into the computer itself; this
+//! command can also send a `silo` program into a Linux computer (`--binary`).
 
 use std::path::Path;
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use silo_api::methods::{
     files::{ConflictPolicy, FileUploadParams},
     guest::{GuestExecParams, GuestExecUser},
-    guest_client::{
-        GuestClientComputerParams, GuestClientEnableParams, GuestClientPolicy, GUEST_TOKEN_PATH,
-    },
+    guest_client::GuestClientComputerParams,
     requests,
 };
 
 use crate::{
-    config::Settings,
     engine::{Engine, Progress},
     error::CliError,
 };
-
-/// The policy the settings give an agent: the secrets a fork made from inside may name. The
-/// in-guest client never keeps, so `fold` and `auto_keep` do not enter it.
-pub fn policy_from(settings: Option<&Settings>, agent: Option<&str>) -> GuestClientPolicy {
-    let settings = settings.cloned().unwrap_or_default();
-    GuestClientPolicy {
-        fork_secrets: settings.fork_secrets,
-        agent: agent.map(str::to_owned),
-    }
-}
-
-/// A warning when the settings now differ from what the token was minted with.
-pub fn stale_warning(status: &Value, current: &GuestClientPolicy) -> Option<String> {
-    let stored: Vec<String> = status["policy"]["forkSecrets"]
-        .as_array()?
-        .iter()
-        .filter_map(|name| name.as_str().map(str::to_owned))
-        .collect();
-    let (mut stored, mut now) = (stored, current.fork_secrets.clone());
-    stored.sort();
-    now.sort();
-    (stored != now).then(|| {
-        format!(
-            "The token was minted with fork_secrets {stored:?} but the settings now say {now:?}. Run `silo guest-client install` again to apply them."
-        )
-    })
-}
-
-fn valid_group(group: &str) -> bool {
-    !group.is_empty()
-        && group.len() <= 32
-        && group.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
-        })
-}
 
 async fn as_root(
     engine: &Engine,
@@ -100,75 +62,35 @@ async fn as_root(
     )))
 }
 
-pub async fn install(
+/// Turns Silo's tools on in `computer`. With `binary`, first sends that `silo` program into a
+/// running Linux computer as `/usr/local/bin/silo`.
+pub async fn enable(
     engine: &Engine,
     computer: &str,
-    policy: GuestClientPolicy,
     binary: Option<&Path>,
-    group: &str,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
-    if !valid_group(group) {
-        return Err(CliError::new("--group must be a Unix group name."));
-    }
     let target = engine.computer(computer).await?;
-    if target.kind == "macos" {
-        return Err(CliError::new(
-            "The in-guest client is available for Linux computers only.",
-        ));
-    }
-    if target.state != "running" {
-        return Err(CliError::new(format!(
-            "Start {computer} first; the token is written into it."
-        )));
-    }
-    // The binary goes first, so an upload that fails leaves no token behind.
     if let Some(binary) = binary {
+        if target.kind == "macos" {
+            return Err(CliError::new(
+                "--binary sends a Linux program; a macOS computer uses the device's own silo.",
+            ));
+        }
+        if target.state != "running" {
+            return Err(CliError::new(format!(
+                "Start {computer} first; the program is copied into it."
+            )));
+        }
         upload_binary(engine, &target.id, &target.name, binary, progress).await?;
     }
-    let enabled = engine
-        .call(requests::guest_client_enable(GuestClientEnableParams {
-            computer_id: target.id.clone(),
-            policy,
+    let mut status = engine
+        .call(requests::guest_client_enable(GuestClientComputerParams {
+            computer_id: target.id,
         }))
         .await?;
-    let file = json!({
-        "version": 1,
-        "token": enabled["token"],
-        "computerId": target.id,
-        "spool": enabled["spoolDir"],
-    });
-    let script = "set -e; umask 077; mkdir -p /etc/silo; chmod 755 /etc/silo; \
-        cat > \"$1.new\"; chmod 640 \"$1.new\"; \
-        if getent group \"$2\" >/dev/null 2>&1; then chgrp \"$2\" \"$1.new\"; else chmod 600 \"$1.new\"; fi; \
-        mv \"$1.new\" \"$1\"";
-    let written = as_root(
-        engine,
-        &target.id,
-        script,
-        &[GUEST_TOKEN_PATH, group],
-        Some(file.to_string().into_bytes()),
-    )
-    .await;
-    if let Err(error) = written {
-        // A token nobody could install is not left valid.
-        let _ = engine
-            .call(requests::guest_client_revoke(GuestClientComputerParams {
-                computer_id: target.id.clone(),
-            }))
-            .await;
-        return Err(error);
-    }
-    let mut installed = vec!["token"];
-    if binary.is_some() {
-        installed.push("silo binary at /usr/local/bin/silo");
-    }
-    Ok(json!({
-        "computer": target.name,
-        "installed": installed,
-        "tokenPath": GUEST_TOKEN_PATH,
-        "mintedAt": enabled["mintedAt"],
-    }))
+    status["computer"] = Value::String(target.name);
+    Ok(status)
 }
 
 /// Run as root after the upload. `$1` is the uploaded file in the account's `/workspace`, `$2`
@@ -260,22 +182,50 @@ async fn upload_binary(
     installed
 }
 
-pub async fn revoke(engine: &Engine, computer: &str) -> Result<Value, CliError> {
+pub async fn disable(engine: &Engine, computer: &str) -> Result<Value, CliError> {
     let target = engine.computer(computer).await?;
-    engine
+    let mut status = engine
         .call(requests::guest_client_revoke(GuestClientComputerParams {
             computer_id: target.id,
         }))
-        .await
+        .await?;
+    status["computer"] = Value::String(target.name);
+    Ok(status)
 }
 
 pub async fn status(engine: &Engine, computer: &str) -> Result<Value, CliError> {
     let target = engine.computer(computer).await?;
-    engine
+    let mut status = engine
         .call(requests::guest_client_status(GuestClientComputerParams {
             computer_id: target.id,
         }))
-        .await
+        .await?;
+    status["computer"] = Value::String(target.name);
+    Ok(status)
+}
+
+/// One line about a computer's tools.
+pub fn render(status: &Value) -> String {
+    let name = status["computer"]
+        .as_str()
+        .or(status["computerId"].as_str())
+        .unwrap_or_default();
+    if status["enabled"] != true {
+        return format!("{name}: Silo's tools are off");
+    }
+    let port = status["port"].as_u64().unwrap_or_default();
+    let reach = match status["network"].as_str() {
+        Some("applied") => "it can reach them now",
+        Some("nextStart") => "it can reach them once it starts",
+        Some("nextRestart") => "restart it so it can reach them",
+        _ => "its network is not known",
+    };
+    let file = if status["written"] == true {
+        "; /etc/silo/endpoint.json was written"
+    } else {
+        ""
+    };
+    format!("{name}: Silo's tools are on (port {port}); {reach}{file}")
 }
 
 #[cfg(test)]

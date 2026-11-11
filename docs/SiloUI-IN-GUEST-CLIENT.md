@@ -1,239 +1,220 @@
-# The in-guest client
+# Silo's tools in a computer
 
-A resident agent (OpenClaw, Hermes) that lives inside a computer, usually `main`, can fork that
-computer and ask for review from inside with `silo --in-guest`. It reaches the engine through a
-per-computer bridge folder and a token the engine minted for that computer. The engine runs only
-a short list of methods for it and refuses the rest, whatever the client sends.
+An agent that lives inside a computer (Claude Code, Codex, OpenClaw, Hermes) uses Silo from
+there with the same `silo` command and the same `silo mcp` server as on the device. Every call it
+makes is that computer's call: the engine knows which computer is calling from the channel the
+call arrives on, and [the policy](SiloUI-POLICY.md) decides what it may do, what asks the owner,
+and what is refused.
 
-What it does not do: keep, promote, undo, drop, change secrets or GitHub access, run commands
-in a computer, or touch a computer that is neither itself nor one of its own forks.
+## How a call reaches the engine
+
+```
+computer                                device
+--------                                ------
+silo  ──TCP──>  host.microsandbox.internal:<port>  ──(runtime maps the gateway to loopback)──>
+                                         127.0.0.1:<port>  silod listener for this computer
+                                         handshake carries the computer's token
+                                         every request runs as Caller::Computer { id }
+```
+
+- **One port per computer.** For each computer with the tools on, `silod` listens on its own
+  loopback port (`127.0.0.1` only) and serves the ordinary engine protocol on it: the same
+  framing, handshake and methods as `engine.sock`, with the caller fixed to that computer.
+- **One network rule.** The computer's network policy carries `allow@host:tcp:<port>`, which lets
+  it reach exactly that port on its gateway address; the runtime maps traffic to the gateway onto
+  the device's loopback ([S1](direction/evidence/S1.md), question 1). The rule is present in every
+  network mode (open, allowlist, closed) and only in that computer's rules
+  (`network_policy::extra_rules`). `host.microsandbox.internal` resolves to the gateway in every
+  computer.
+- **A token.** The engine mints 32 bytes from the operating system's random source for the
+  computer, writes them into the computer, and keeps only their SHA-256
+  (`<app data>/guest-client/tokens.json`, `0600`). The token is valid on that computer's port
+  alone. The device side always sees `127.0.0.1`, so the token, not the address, is what tells
+  computers apart.
 
 ## Choices
 
-Silo's guidance asks for a recorded choice before a new transport, credential broker or proxy
-([AGENTS.md](../AGENTS.md)). Silo's own code here is the policy (which methods, which computers);
-the transport and the guest binary are existing pieces.
-
 | Need | Choice | Why |
 | --- | --- | --- |
-| Guest-to-host transport | The runtime's per-computer `/.msb` share (virtiofs `msb_runtime`), which Linux computers already have read-write and the host already reads (heartbeat) and writes (scripts, certificates). The guest writes `req/<id>.json`, the engine answers `resp/<id>.json`. | No new listener, route or kernel device. The guest cannot reach the Mac's loopback or any private address by design ([threat model, boundary 2](THREAT-MODEL.md#2-network-egress-public-addresses-only)), so a TCP endpoint on the Mac would need a network exception. |
-| Credential | A token per computer, 32 bytes from the OS random source, only its SHA-256 stored in `<app data>/guest-client/tokens.json` (`0600`). | A bearer token is enough: the folder identifies the computer, the token proves the installer meant this computer to call. |
-| Guest client | The same `silo` binary in `--in-guest` mode, built for the guest. | One CLI, one set of flags and output. |
+| Transport | A loopback TCP port per computer on the device, reached through the gateway address. | The runtime already maps the gateway to the device's loopback and its rules can open one port; no runtime patch, the same for Linux virtual machines, containers and macOS computers. |
+| Identity | A per-computer token in the handshake, checked against the port's computer. | The peer address is always `127.0.0.1`. The port says which computer the connection claims to be; the token proves it. |
+| Client | The ordinary `silo` binary and `silo mcp`. | One CLI, one set of commands; the engine's answer decides what is allowed. |
 
 Alternatives, and why not:
 
-- **A TCP or Unix-socket listener reachable from the guest** (the gateway address, or the engine
-  socket forwarded in). Needs a patch to MicroSandbox's network policy (the gateway address is
-  deliberately not public) or a new port forward, and a macOS computer needs its own gateway change.
-  The folder needs neither.
-- **virtio-vsock.** Silo configures no vsock routes; MicroSandbox's own control channel is
-  virtio-serial (CBOR) and is host-initiated. A new vsock route is a patch to a pinned runtime for
-  the same effect.
-- **SSH from the guest to the Mac** or a reverse SSH tunnel. Needs the Mac's SSH server open to the
-  guest, which is the opposite of the egress rule, and a key the guest could use for a shell.
-- **`msb exec` stream opened by the host.** Host-initiated, so the engine would hold a long
-  exec per computer and parse its output. Polling a folder is simpler and survives restarts.
-- **A third-party gateway (an MCP gateway, a credential broker).** None keeps to "this computer
-  and its forks" or knows Silo's fork tree; the allow-list below is the product policy.
-
-Gaps accepted: polling adds up to about 300 ms to each call; Linux computers only, virtual machines and containers (macOS computers
-have no host folder, so `guestClient.enable` refuses them); and the `/.msb` share has not had a
-security review ([boundary 6](THREAT-MODEL.md#6-the-workspace-disk-and-host-folders)), so the
-engine bounds every read it makes there.
+- **The `/.msb` folder** (the previous transport: request files the engine polled). It needed the
+  engine to parse files a guest wrote in a share that has had no security review, a hold and a
+  cache-dropping workaround around every full checkpoint, and it did not exist for macOS
+  computers. Removed.
+- **A Unix socket per computer mapped to the gateway port.** Leaves no port open on the device, but
+  needs a runtime patch. It is the later hardening step (below).
+- **virtio-vsock** (`--vsock`, S1 question 5). Works for Linux virtual machines, not for
+  containers or macOS computers, and an export refuses a computer that has one.
 
 ## Pieces
 
 | Piece | Where |
 | --- | --- |
-| Typed methods `guestClient.enable`, `.revoke`, `.status`, and the frame types | `app/SiloUI/api/src/methods/guest_client.rs` |
-| Tokens and the bridge folder | `app/SiloUI/src-tauri/engine/src/guest_client/` |
+| `guestClient.enable`, `.revoke`, `.status` and the endpoint path | `app/SiloUI/api/src/methods/guest_client.rs` |
+| The handshake's `token`, protocol 8 | `app/SiloUI/api/src/transport.rs` |
+| Ports and token hashes, the endpoint file, turning the tools on and off | `app/SiloUI/src-tauri/engine/src/guest_client/` |
+| The rule in every network mode | `app/SiloUI/src-tauri/engine/src/network_policy/mod.rs` (`extra_rules`) |
+| The listeners, the order of checks, the start-time file check | `app/SiloUI/src-tauri/silod/src/channel.rs`, `channel/watch.rs` |
+| The session (shared with `engine.sock`) and its caller | `app/SiloUI/src-tauri/silod/src/socket.rs`, `dispatcher.rs` |
+| The three methods | `app/SiloUI/src-tauri/silod/src/methods/guest_client.rs` |
 | What each call may do, and who made which computer | `app/SiloUI/src-tauri/engine/src/policy/` |
-| The loop that serves the folders, and the three methods | `app/SiloUI/src-tauri/silod/src/guest_bridge.rs`, `methods/guest_client.rs` |
-| `silo --in-guest ...` and `silo guest-client ...` | `app/SiloUI/cli/src/guest_client.rs`, `guest_install.rs` |
+| The transport choice in `silo`, `silo tools`, `silo mcp` inside a computer | `app/SiloUI/cli/src/endpoint.rs`, `tools.rs`, `mcp.rs`; `app/SiloUI/client/src/session.rs` |
 
-## Install
+## Turning the tools on
 
-On the Mac, with the computer running, from the project folder whose `.silo/silo.yaml` should
-apply:
+New computers have the tools from the start: Linux virtual machines and containers (the rule is
+in their create arguments) and macOS computers (the rule is in their gateway's start policy). A
+fork of a computer that has them gets them too, on a port and with a token of its own. Existing
+computers and imported ones stay off until the owner turns them on:
 
 ```sh
-silo guest-client install main --agent openclaw --binary ~/.silo/guest/silo
+silo tools enable <computer> [--binary PATH]
+silo tools status <computer>
+silo tools disable <computer>
 ```
 
-1. The CLI resolves the settings for the agent (`fork_secrets`) and calls
-   `guestClient.enable` with them as the token's policy. The engine has no project folder of its
-   own, so the policy is stored with the token and read from there; run `install` again after
-   changing the settings (it mints a new token and the old one stops working).
-2. The engine creates `sandboxes/<name>/runtime/silo-bridge/{req,resp}` and returns the token once.
-3. With `--binary`, the binary goes first (below); a failed upload stops the install before any token exists.
-   The CLI then writes `/etc/silo/guest-client.json` as root in the computer (`0640`, group `silo`, or
-   `0600` when there is no such group; `--group` names another). If writing the file fails the
-   token is revoked. The binary is staged under a fresh name on the host and uploaded to `/workspace` like any file; root then refuses a link or a non-regular file, copies the bytes into a `0700` folder under `/root`, checks that copy's sha256 against the hash the host computed of the local binary, and installs it at `/usr/local/bin/silo` from there. Root changes nothing under `/workspace`; the account removes the uploaded file.
+`enable` (`guestClient.enable`) opens the computer's port, and:
 
-`silo guest-client status main` and `silo guest-client revoke main` read and remove the token.
+- for a **running** computer, writes the endpoint file now. If the computer's network does not
+  carry the rule yet, the answer says it can reach the tools after a restart (`network:
+  nextRestart`); `silo restart <computer>` does it.
+- for a **stopped** virtual machine, nothing more: its next start sees that its runtime lacks the
+  rule and restores it in place with the rule (as a network policy change does), then the file is
+  written once it runs.
+- for a stopped macOS or container computer, the gateway takes the rule at its next start.
 
-The guest binary is the `silo` crate built for the guest's architecture as a static musl binary.
-On an Apple silicon Mac, `app/SiloUI/scripts/build-guest-silo.sh` builds it with Zig as the C
-compiler and linker (needs `rustup target add aarch64-unknown-linux-musl` and `zig`) and prints its
-path. It is not built by Silo's release scripts yet; give `--binary` any build you made. Without `--binary` the computer must already have a `silo`.
+With `--binary`, the CLI first sends a `silo` built for Linux into a running Linux computer as
+`/usr/local/bin/silo`: the file is uploaded under a fresh name to `/workspace`, root refuses a link
+or a non-regular file, copies the bytes into a `0700` folder under `/root`, checks their sha256
+against the one the device computed, and installs them; the account removes the upload. A macOS
+computer uses the device's own `silo`. Until the engine provides the binary itself, build one with
+`app/SiloUI/scripts/build-guest-silo.sh` (needs `rustup target add aarch64-unknown-linux-musl` and
+`zig`).
 
-## What the client runs
+`disable` (`guestClient.revoke`) forgets the port and the token hash and closes every open
+connection of the computer at once. The rule stays in the computer's network until its next start
+without it; nothing listens on the port any more.
 
-`silo --in-guest <command>` (or `SILO_IN_GUEST=1`):
+No answer carries the token. `status` gives the host name, the port, the endpoint path, when the
+tools were turned on, and when the computer's network lets it reach them (`applied`, `nextStart`,
+`nextRestart`).
 
-| Command | Engine method(s) it calls |
-| --- | --- |
-| `list`, `tree`, `status` | `computers.tree` |
-| `fork <this computer> [--name N] [--secret S]` | `checkpoints.fork` on itself, then `computers.start` on the new fork |
-| `diff <fork>` | `changes.diff` |
-| `fold <fork> --request` | `changes.diff`, `changes.request` |
-| `requests`, `requests show <id>` | `changes.requests.list`, `changes.requests.show` |
-| `steps <computer>` | `steps.list` |
+## The endpoint file
 
-Everything else the CLI offers answers "not available from inside a computer" before anything is sent.
+`/etc/silo/endpoint.json` in the computer:
+
+```json
+{"version": 1, "host": "host.microsandbox.internal", "port": 41234, "token": "silo_gc_…", "computerId": "…"}
+```
+
+Root-owned, mode `0640` with the `silo` account's group (`0600` when the computer has no such
+account), written atomically by the engine as root through the guest agent (SSH for a macOS
+computer). On a macOS computer the `silo` account's group is `staff`.
+
+The engine checks the file whenever it sees the computer running after it was not (every start,
+including the engine's own start), at most every 30 seconds after the computer changed, and every
+ten minutes: it reads the file as root and compares the host, the port, the computer's id and the
+SHA-256 of the token with what it keeps. A file that is missing or does not match is replaced
+with a new token; the old token stops working at once. A computer whose file could not be checked
+is tried again five seconds later.
+
+`silo` uses the channel when `/etc/silo/endpoint.json` exists, or when `SILO_ENDPOINT` names
+another file; `--socket` always means the engine socket. A file it cannot read is an error, never
+a silent fall back to a socket.
+
+## The listener
+
+On a new connection, in this order and before anything is answered:
+
+1. The connection takes one of the computer's 8 connection places, or is closed at once.
+2. The first frame is read within 10 seconds and at most 16 KiB.
+3. It must be `engine.handshake` with a `token` whose SHA-256 matches the stored hash **of the
+   computer the port belongs to**. The computer comes from the port; no field of the frame
+   (`computerId`, the client's name, an SSH key) selects or changes it.
+4. Anything else (no token, another computer's token, a wrong one, another method first, an
+   oversized or malformed frame) gets no answer: the refusal is written to the audit log as a
+   refused `engine.handshake` by that computer (collapsed with its repeats, as refused calls are),
+   and the connection is closed after one second, holding its place meanwhile.
+5. The session is then served exactly as an `engine.sock` session, with every request made as
+   `Caller::Computer { id }`. It ends when the tools are turned off.
+
+Limits besides those: 16 requests running at once per computer over all its connections (2 more
+kept for `engine.state`), the socket's 4 MiB frame size, and at most 16 jobs the computer has not
+acknowledged (the gate refuses more). A job over half an hour old that the computer never
+acknowledged is acknowledged for it once it has finished.
+
+`events.subscribe` is owner-only, so a client on the channel follows jobs by polling
+`operations.job.get`, as `silo` already does.
+
+At engine start each computer's port is bound again. A port another program took in the meantime
+is replaced by a new one, the token is ended (it may have been sent to that program), and the
+computer gets the new rule at its next start and a new file once it runs.
 
 ## What the engine allows
 
-Each call from the folder runs as the computer's own call (`Caller::Computer`) through the
-engine's one choke point, `methods::dispatch`, where the policy decides it as it would for any
-other way a computer reaches Silo. [The policy](SiloUI-POLICY.md) lists what an agent inside a
-computer may do freely, what asks the owner (the call is answered `approval_required`), and what
-is never allowed (`permission_denied`). Every refused or held call, and every call that can change
-something, is written to the audit log with the computer's id.
+Every call runs through `methods::dispatch`, where [the policy](SiloUI-POLICY.md) decides it: free,
+asked of the owner (`approval_required` with an approval id), or refused (`permission_denied`, with
+the reason, which `silo` shows as it is). Every refused or held call, and every call that can
+change something, is written to the audit log with the computer as caller. `silo list` inside a
+computer shows that computer and the computers it made.
 
-The bridge adds its own limit before the call: at most 16 jobs a computer has not acknowledged.
-There is no cap on how many computers it makes or runs; the engine refuses a start, a fork or a
-checkpoint only while the device is short of memory or disk (`device.resources` shows how much is
-left, and the policy page has the floors). A job over half an hour old that the client never acknowledged is
-acknowledged for it once it has finished.
+Inside a computer, `silo mcp` does not list the tools that only make sense on the device: the
+hosted reviewer (`review`), SSH names (`ssh_name`) and reaching a review request's fork
+(`request_open`); a `device` argument and a folder as a fork's source are refused there.
 
-A computer made from inside is the maker's once it exists: a new Linux computer (whose id the
-engine chooses) once its job finished without error, a new macOS computer as soon as the call
-answers with it, and a fork once its job finished without error and a computer of that name exists
-with the source as its parent. A fork that failed, or never got a job within two minutes, is dropped. The
-record is the engine's (`<app data>/policy/computers.json`), kept across restarts and new tokens;
-a token minted by an earlier version hands the forks and jobs it recorded to it the first time the
-bridge serves the computer.
+## Lifecycle
 
-The token's `fork_secrets` no longer limits a fork: the policy lets a fork have any secret its
-maker has, and asks the owner for anything more.
+- **Promote and undo** turn the tools off in both computers involved (`changes.promote`: the
+  fork and its target; `changes.undo`: both computers of the promote it takes back). A failure
+  stops the operation before anything changes. Turn them on again for the computer that should
+  have them.
+- **Delete** forgets the computer's port and token hash. A record whose computer has been missing
+  from the engine's list for ten minutes is forgotten too (a creation that failed).
+- **Forks.** A fork's copy of its parent's file is useless by construction: the fork cannot reach
+  the parent's port (no rule for it) and the parent's token is refused on the fork's port. Every
+  fork also has the file (and the earlier client's `/etc/silo/guest-client.json`) scrubbed when it
+  first starts, and gets its own file afterwards when it has the tools.
+- **Restore.** A memory restore keeps the computer's processes but resets their TCP connections
+  through the gateway, so an open session ends. Each `silo` command connects anew, and `silo mcp`
+  reconnects on its next call.
+- **Imports** start without the tools, whatever the archive carried.
+- **Earlier tokens.** A token record of the earlier in-guest client hands the forks and jobs it
+  recorded to the policy's record at engine start and is then removed; the tools of that
+  computer are off until turned on.
 
-## Token lifecycle
+## Container and macOS computers
 
-- **Mint**: `guestClient.enable` for a Linux computer; 32 bytes from the operating system's random
-  source (`getentropy`), shown as 64 hex digits after `silo_gc_`. It replaces any earlier token;
-  the computers the computer made stay its own.
-- **Hash only**: the engine stores `sha256(token)`; `guestClient.status` never returns the token.
-  It does show the `fork_secrets` the token was minted with, and `silo guest-client status`
-  warns when the settings now say something else.
-- **Revoke**: `guestClient.revoke`, or any promote, undo or delete that involves the computer
-  (`changes.promote` revokes the fork's and its target's tokens; `changes.undo` revokes both
-  computers of the promote it takes back, read from the promote journal). A revoke that fails
-  fails the promote or undo before anything changes. The agent in the old main loses access on
-  purpose; run `install` again for the computer that should have it.
-- **Delete**: a token whose computer is no longer listed is removed the next time the bridge looks
-  at the computers, so it ends after the delete succeeded, not before.
-- **Forks**: a fork's own bridge folder is checked against the fork's id, and a token verifies only
-  for the computer it was minted for. A copy of the token file in a fork is therefore refused, and
-  every fork, made from inside or on the host, has the file scrubbed when it first starts.
+A container computer's gateway and a macOS computer's gateway take the computer's policy when
+they start (`network_policy::gateway_policy`), with the rule in it, and answer
+`host.microsandbox.internal` with the gateway address. The listener and the token are the same.
+The endpoint file is written through the container's guest agent, or over SSH as root on a macOS
+computer.
 
-## Folder handling and modes
+## The `/.msb` folder
 
-The guest controls everything under the runtime folder, so the engine opens `runtime`, then
-`silo-bridge`, `req` and `resp`, each with `openat(O_NOFOLLOW | O_DIRECTORY)` through the
-[`rustix`](https://crates.io/crates/rustix) directory-descriptor calls (chosen over `cap-std`
-because the workspace already builds `rustix`, and it needs only `openat`, `unlinkat`, `renameat`
-and `statat`), afresh in every pass. A guest that replaces one of them with a link makes the
-bridge stop serving that computer; it does not reach outside the folder. Each request file is
-opened without following links and checked with `fstat` (regular, at most 256 KiB). In `req/` only
-`<32 hex>.json` names are served; a `<id>.json.tmp` still being written is left for ten seconds and
-then removed, and anything else is removed. No more than 256 entries of `req/` or `resp/` are looked
-at in a pass, and every one counts: more than that in `resp/` counts as full, and in `req/` the rest
-waits for the next pass. In `resp/` the sweep removes every answer older than ten minutes and
-anything that is not `<id>.json` or `<id>.tmp`. At most 64 answers may wait unread, after which new
-requests are removed without an answer. A request with a bad token or one that cannot be read gets
-no answer at all, so a guest without a valid token cannot fill `resp/`; the client then reports that
-Silo did not answer.
-
-Modes and owners: the runtime folder itself is `0700` on the host and the guest sees it as the host
-user's, so a guest user other than root could not reach `silo-bridge`. The engine sets the runtime's
-stat override (`user.msb.override_stat`, 20 bytes: version 1, uid, gid, mode, rdev, as in
-MicroSandbox's `passthroughfs/stat_override.rs`) on the runtime folder to root, `0711`, so any guest user
-can search it but not list it, and on `silo-bridge` (`0755`), `req/` (`1733`) and `resp/` (`0711`) so
-the guest sees them owned by root. Every other entry in the runtime folder (`root-disk.json`, `rootfs`, scripts,
-certificates) is shown as root's too, `0700` for folders and `0600` for files, so the search permission reaches nothing
-but the bridge. MicroSandbox writes `root-disk.json` with the host umask (`0666`) and replaces it
-at start, restore and rename, so the bridge worker applies the overrides again on every pass (about
-every 300 ms), and a guest user could in principle touch a file during the moments before that.
-Making the runtime create it `0600` is an upstream request
-([draft](v1/upstream/msb-virtiofs-unlinked-checkpoint.md)); a separate share for the bridge would
-need a mount a running computer cannot get without a restart, so it was not chosen. The override changes what the guest is shown, not what the host file allows, and it is
-set only on the runtime folder, its entries and the bridge folders; nothing on the host follows a path the guest names.
-Host files otherwise show the host user's identity, so an answer would not be readable to a non-root
-agent. The engine therefore reads the override the guest wrote on the request file (the agent user's
-uid and gid) and writes the answer with an override naming that user, mode `0600`. The client writes
-requests `0600`. A guest user other than the requester cannot read the answer, and `1733` keeps users
-from removing each other's requests. If the host file system keeps no extended attributes, the
-setting is skipped and answers show the runtime's default owner (root's), which is the root-only case.
-Checked in a running Linux guest on MicroSandbox 0.7.6: `/.msb` shows as `drwx--x--x root root`, and the
-`silo` user reads its answers.
-
-## Container computers
-
-A container computer has the in-guest client too, with the same token, allow-list and folder
-parsing. Only the share differs, because a container sees real file owners and modes where a virtual
-machine's share is virtualized:
-
-- **The share.** The computer's runtime folder (`sandboxes/<name>/runtime`) is bound read-write at
-  `/.msb` (no exec, no devices), so the client finds `/.msb/silo-bridge` as in a virtual machine.
-  The Landlock ruleset the init shim applies lets the account write there.
-- **Owners.** No stat override is written or read. The container's id mapping makes the working
-  account (`silo`, 1001) the engine's own user ([threat model](THREAT-MODEL.md#container-computers)),
-  so the agent's `0600` request files are owned by the engine on disk and the engine's `0600` answers
-  are readable by the agent. The engine computes a request's owner from the file's real owner
-  through that mapping (`containers::idmap::KeepId`, used by `guest_client::Spool` when the
-  bridge folder belongs to a container; the worker names the kind, the spool does not look for
-  it). A request written by any other id (another guest user, root) has no owner, and the engine
-  usually cannot read it at all.
-- **Root is a difference from a virtual machine.** A virtual machine's answer is made readable to
-  the user that asked, root included. A container's answer to a request the engine could read from
-  root has no owner to give it to, so it stays the account's `0600` file, and a process that is
-  root in the container without `CAP_DAC_OVERRIDE` cannot read it. The root commands Silo starts
-  (`silo exec --user root`, account setup) have that capability and read it; a root process
-  without it (a service that dropped it, a shell opened another way) gets "permission denied" on
-  the answer. Giving the file to the container's root needs a helper in the holder's namespace
-  (a file cannot be handed to a sub-id otherwise), and a looser mode would show the answer to
-  every guest user that learns the request id, so neither is done: the client is meant for the
-  working account.
-- **Sealing.** `sandboxes/<name>` is `0700` on the host, the runtime folder `0711`, and
-  `silo-bridge`, `req/` and `resp/` get `0755`, `1733` and `0711`, restored on every pass of the
-  worker; the other guest users can search the runtime folder but not list it. The agent owns the
-  folders, which a virtual machine's guest does not, so it can change their modes; the bridge's
-  checks do not depend on them.
-- **A container made by an earlier build** (before the id mapping) is refused at start with a
-  message to recreate it.
-
-The live check installs the in-guest `silo` and runs a read call (`silo --in-guest list`) as the
-`silo` account.
-
-## Checkpoints of a running computer
-
-The engine removes every request and answer it has served. A running computer's full checkpoint
-serializes the share's entries the guest has looked up, and MicroSandbox refuses it ("control operation
-rejected by peer") when the host removed one of them, so a fork or a promote of a running computer
-failed after its first bridge call, until the computer restarted. Before a full checkpoint of a
-running computer that has a bridge folder, the engine runs `sync; echo 2 > /proc/sys/vm/drop_caches`
-in it as root, which makes the guest forget its cached entries; the call is best effort, and a
-checkpoint that still fails reports its own error. The same runs before the full capture a Restore
-makes of a running computer, before it pauses. While either capture runs the bridge worker neither takes
-requests nor answers (a per-computer hold), so no file is removed after the guest dropped its entries.
-A guest process that holds a removed file open pins it; the capture then fails and the message says to
-restart the computer. Disk-only checkpoints of a stopped computer are not affected. The upstream issue is
-drafted in [msb-virtiofs-unlinked-checkpoint.md](v1/upstream/msb-virtiofs-unlinked-checkpoint.md).
+Silo writes nothing request-shaped into a computer's `/.msb` share and reads nothing from it:
+there is no bridge folder, no stat override, no hold during captures and no cache dropping before
+a full checkpoint. MicroSandbox itself still uses the share for its own control files (scripts,
+TLS certificates, the heartbeat, checkpoint state), as described in
+[boundary 6](THREAT-MODEL.md#6-the-workspace-disk-and-host-folders). A `silo-bridge` folder left
+by an earlier engine is ignored.
 
 ## Open items
 
-- Auto-keep for requests made from inside runs host-side only, in a later slice.
-- Mac computers: no transport yet.
-- The VM check is `docs/v1/checks/phase5_inguest_check.sh`, with its output in
-  `docs/v1/evidence/phase-5/inguest-check.txt`.
+- **A port is open on the device's loopback** for each computer with the tools. Any program on
+  the device can connect to it; without the token it gets nothing but an audit row and a closed
+  connection ([threat model, boundary 9](THREAT-MODEL.md#9-silos-tools-in-a-computer-a-port-and-a-token)).
+  The later hardening is a runtime patch mapping the gateway port to a Unix socket in a private
+  folder.
+- While the engine is not running, another program can bind a computer's port and receive the
+  token from a client that connects. A port found taken at start gets a new token; a port that
+  was taken and released while the engine was down is not detected.
+- The engine does not yet put the `silo` binary into a computer or register `silo mcp` with the
+  agents (item T5b).
+- The live check is `docs/direction/checks/t5_channel_check.sh`, with its output in
+  `docs/direction/evidence/T5a.txt`.

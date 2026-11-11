@@ -179,11 +179,14 @@ impl ForkOptions {
             .collect()
     }
 
-    /// A fork never carries its parent's in-guest client token, whoever made the fork.
+    /// A fork never carries its parent's channel token, whoever made the fork: the endpoint
+    /// file and the earlier in-guest client's token file are scrubbed.
     pub(super) fn scrub_guest_client_token(&mut self) {
-        let path = silo_api::methods::guest_client::GUEST_TOKEN_PATH;
-        if !self.scrub.iter().any(|existing| existing == path) {
-            self.scrub.push(path.into());
+        use silo_api::methods::guest_client::{GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH};
+        for path in [GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH] {
+            if !self.scrub.iter().any(|existing| existing == path) {
+                self.scrub.push(path.into());
+            }
         }
     }
 
@@ -929,11 +932,6 @@ fn capture_with_kind(
         "--group".into(),
         snapshot_group.clone(),
     ];
-    let _bridge_hold = (scope == "full").then(|| {
-        let hold = crate::guest_client::hold_bridge(configuration.name());
-        release_stale_share_entries(runner, paths, configuration.name());
-        hold
-    });
     if scope == "full" {
         args.push("--full".into());
     }
@@ -949,14 +947,7 @@ fn capture_with_kind(
             }),
             "Verification failed",
         ),
-        Err(failure) => (
-            Err(explain_rejected_capture(
-                paths,
-                configuration.name(),
-                failure,
-            )),
-            "Checkpoint failed",
-        ),
+        Err(failure) => (Err(failure), "Checkpoint failed"),
     };
     match result {
         Ok(_) => {
@@ -1615,6 +1606,8 @@ pub fn import_pending_restore_with_environment(
     }));
     // An import starts closed from that policy, whatever policy a computer of this id had here.
     crate::network_policy::store::remove(computer_id).map_err(RuntimeError::Unavailable)?;
+    // An import has no Silo tools until the owner turns them on.
+    crate::guest_client::turn_off(&[computer_id]).map_err(RuntimeError::Unavailable)?;
     save(paths, computer_id, &record)
 }
 
@@ -1709,11 +1702,13 @@ fn changed_network_plan(
     if configuration.runtime.is_some() {
         return Ok(None);
     }
-    let Some(stored) =
-        crate::network_policy::store::get(configuration.id()).map_err(RuntimeError::Unavailable)?
-    else {
+    let stored =
+        crate::network_policy::store::get(configuration.id()).map_err(RuntimeError::Unavailable)?;
+    // A computer saved before policies existed is looked at only when Silo's own rules (its
+    // channel to Silo's tools) are missing from it.
+    if stored.is_none() && crate::network_policy::extra_rules(configuration.id()).is_empty() {
         return Ok(None);
-    };
+    }
     let record = load(paths, configuration.id())?;
     if record.pending_checkpoint_restore.is_some() || record.restore_journal.is_some() {
         return Ok(None);
@@ -1728,11 +1723,21 @@ fn changed_network_plan(
     {
         return Ok(None);
     }
-    let plan = crate::network_policy::plan(
-        &stored,
-        &crate::network_policy::Grants::of_computer(configuration.name()),
-        &crate::network_policy::extra_rules(configuration.id()),
-    );
+    let plan = match &stored {
+        Some(stored) => crate::network_policy::plan(
+            stored,
+            &crate::network_policy::Grants::of_computer(configuration.name()),
+            &crate::network_policy::extra_rules(configuration.id()),
+        ),
+        None => crate::network_policy::plan_for(
+            configuration.id(),
+            configuration.name(),
+            inspected
+                .config
+                .pointer("/network/policy")
+                .or(record.desired_network_policy.as_ref()),
+        ),
+    };
     let network = inspected.config.get("network").cloned().unwrap_or(Value::Null);
     if plan.matches(&network) {
         return Ok(None);
@@ -1790,8 +1795,8 @@ pub fn network_policy_view(paths: &RuntimePaths, computer_id: &str) -> Result<Ne
 /// cannot change a computer's rules, so the engine restores it in place: a disk checkpoint
 /// ("Before network policy change"), then the computer is replaced from that checkpoint with
 /// the new rules, as a Restore does. Returns whether it did this and started the computer.
-/// A computer with no stored policy, a container, a running computer and one whose runtime
-/// already holds the rules are left alone.
+/// A computer with no stored policy and no rule of Silo's own, a container, a running computer
+/// and one whose runtime already holds the rules are left alone.
 pub(super) fn apply_network_policy_change(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
@@ -2360,49 +2365,6 @@ fn quiet_labels(name: &str, quiet: &QuietRecord) -> Vec<String> {
     ]
 }
 
-/// Script run in a running guest before a full capture: writes back, then drops the kernel's
-/// cached directory entries.
-const RELEASE_ENTRIES_SCRIPT: &str = "sync; echo 2 > /proc/sys/vm/drop_caches";
-
-/// The arguments that run [`RELEASE_ENTRIES_SCRIPT`] as root in the computer.
-fn release_entries_args(name: &str) -> Vec<String> {
-    root_exec(name, "30s", &["sh", "-c", RELEASE_ENTRIES_SCRIPT])
-}
-
-/// A full capture of a running computer serializes the runtime share's open entries and is
-/// refused when the host removed a file the guest had looked up, which is what the engine does
-/// with every request and answer in the in-guest client's bridge folder. Dropping the guest's
-/// cached entries first lets the share forget them. Best effort, and only for a computer that has
-/// a bridge folder; a capture that still fails reports its own error.
-fn release_stale_share_entries(runner: &dyn RuntimeRunner, paths: &RuntimePaths, name: &str) {
-    if !crate::guest_client::spool_dir(&paths.home, name).exists() {
-        return;
-    }
-    let _ = runner.run(paths, &release_entries_args(name), Duration::from_secs(40));
-}
-
-/// What MicroSandbox says when the guest holds a file of the runtime share that the host removed
-/// and the guest cannot drop it (an open file keeps it): the capture cannot be made until the
-/// computer restarts.
-const REJECTED_BY_PEER: &str = "control operation rejected by peer";
-
-fn explain_rejected_capture(
-    paths: &RuntimePaths,
-    name: &str,
-    failure: RuntimeError,
-) -> RuntimeError {
-    let rejected = matches!(
-        &failure,
-        RuntimeError::Failed { detail, .. } if detail.contains(REJECTED_BY_PEER)
-    );
-    if rejected && crate::guest_client::spool_dir(&paths.home, name).exists() {
-        return error(
-            "The computer holds a file of the in-guest client that Silo has since removed, so its memory cannot be captured. Restart the computer and try again.",
-        );
-    }
-    failure
-}
-
 fn root_exec(name: &str, timeout: &str, command: &[&str]) -> Vec<String> {
     let mut args: Vec<String> = [
         "exec",
@@ -2739,6 +2701,8 @@ fn fork_commit_with_metadata_writer(
                 .or(fork.options.closed_network.then_some(&closed)),
         )
         .map_err(RuntimeError::Unavailable)?;
+        // A fork of a computer with Silo's tools has them too, on its own port and token.
+        crate::guest_client::inherit(source.id(), &child_id).map_err(RuntimeError::Unavailable)?;
         // Nothing is copied unless the fork names it; GitHub access is always read-only.
         if fork.options.copies_github() {
             assignments
@@ -2789,6 +2753,7 @@ fn fork_commit_with_metadata_writer(
         failed.extend(assignments.forget_github(new_name).err());
     }
     failed.extend(crate::network_policy::store::remove(&child_id).err());
+    failed.extend(crate::guest_client::turn_off(&[child_id.as_str()]).err());
     failed.extend(
         forget_removed(paths, &child_id)
             .err()
@@ -3179,12 +3144,6 @@ fn restore_steps(
     // retry (phase "secured") a container that is running again has writes the capture lacks.
     let captured_now = journal.phase == "capturing";
     if journal.phase == "capturing" {
-        let memory_capture = journal.prior_running && with_memory;
-        let _bridge_hold = (memory_capture && inspected.status == "Running")
-            .then(|| crate::guest_client::hold_bridge(configuration.name()));
-        if memory_capture && inspected.status == "Running" {
-            release_stale_share_entries(runner, paths, configuration.name());
-        }
         if journal.prior_running
             && matches!(inspected.status.as_str(), "Stopped" | "Created" | "Crashed")
         {
@@ -3248,7 +3207,6 @@ fn restore_steps(
         args.push("--integrity".into());
         let capture = runner
             .run(paths, &args, Duration::from_secs(900))
-            .map_err(|failure| explain_rejected_capture(paths, configuration.name(), failure))
             .and_then(|_| {
                 verify_snapshot(runner, paths, &lineage_group, &journal.recovery_checkpoint)
             });

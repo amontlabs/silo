@@ -38,10 +38,6 @@ pub struct Cli {
     /// The agent the settings in `agents:` of `.silo/silo.yaml` are read for (default: SILO_AGENT).
     #[arg(long, global = true, value_name = "NAME", env = "SILO_AGENT")]
     pub agent: Option<String>,
-    /// Run inside a computer: reach the engine through the bridge folder with the token the
-    /// person who runs Silo installed (default: SILO_IN_GUEST).
-    #[arg(long, global = true, env = "SILO_IN_GUEST", hide_env_values = true)]
-    pub in_guest: bool,
     /// Run the command on a connected device (its name or id) instead of this one, over
     /// Connections. Folders, ports, SSH names and secrets stay on this device.
     #[arg(long, global = true, value_name = "DEVICE")]
@@ -51,20 +47,19 @@ pub struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum GuestClientCommand {
-    /// Mint a token for a Linux computer and write it into the computer (it must be running).
-    Install {
+pub enum ToolsCommand {
+    /// Turn on Silo's tools in a computer: `silo` inside it reaches Silo, as that computer.
+    /// A running computer may need a restart before it can reach them.
+    Enable {
         computer: String,
-        /// A `silo` binary built for the guest to copy to /usr/local/bin/silo.
+        /// A `silo` program built for Linux computers to copy to /usr/local/bin/silo (the
+        /// computer must be running).
         #[arg(long, value_name = "PATH")]
         binary: Option<PathBuf>,
-        /// The guest group that may read the token file.
-        #[arg(long, default_value = "silo")]
-        group: String,
     },
-    /// Remove a computer's token; its agent can no longer reach the engine.
-    Revoke { computer: String },
-    /// Say whether a computer has a token and the settings it was minted with.
+    /// Turn off Silo's tools in a computer; its open connections close at once.
+    Disable { computer: String },
+    /// Say whether a computer has Silo's tools and whether it can reach them.
     Status { computer: String },
 }
 
@@ -163,9 +158,9 @@ pub enum Command {
     /// Manage the Silo secrets and which computers have them.
     #[command(subcommand)]
     Secrets(SecretsCommand),
-    /// Install, remove or read the token a computer's own agent uses (`silo --in-guest`).
+    /// Turn Silo's tools in a computer on or off, or say whether it has them.
     #[command(subcommand)]
-    GuestClient(GuestClientCommand),
+    Tools(ToolsCommand),
     /// Prepare this machine to host computers that other devices manage, or show its state.
     #[command(subcommand)]
     Host(crate::hosts::HostCommand),
@@ -552,35 +547,6 @@ fn trim_newline(mut value: String) -> String {
     value
 }
 
-fn render_guest_client(result: &Value) -> String {
-    if let Some(enabled) = result["enabled"].as_bool() {
-        let name = result["computerId"].as_str().unwrap_or_default();
-        let line = match (enabled, result["mintedAt"].as_str()) {
-            (true, Some(at)) => format!(
-                "{name}: token minted {at}; fork_secrets: {}",
-                result["policy"]["forkSecrets"]
-            ),
-            _ => format!("{name}: no token"),
-        };
-        return match result["warning"].as_str() {
-            Some(warning) => format!("{line}\nwarning: {warning}"),
-            None => line,
-        };
-    }
-    format!(
-        "Installed in {}: {}. Inside it, run: silo --in-guest list",
-        result["computer"].as_str().unwrap_or_default(),
-        result["installed"]
-            .as_array()
-            .map(|items| items
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(", "))
-            .unwrap_or_default()
-    )
-}
-
 fn stderr_progress(line: &str) {
     eprintln!("{line}");
 }
@@ -598,10 +564,6 @@ fn emit(json: bool, value: &Value, human: impl FnOnce(&Value) -> String) {
 
 /// Runs one command and returns the process exit code.
 pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
-    if cli.in_guest {
-        let link = crate::guest_client::Link::load(&crate::guest_client::token_path())?;
-        return crate::guest_client::run(cli.command, cli.json, &link).await;
-    }
     if matches!(cli.command, Command::Host(_) | Command::Devices(_)) {
         // They change this build's own engine and its SSH access, never another channel's.
         if cli.allow_other_channel {
@@ -612,9 +574,9 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
         let socket = default_socket(cli.socket.clone(), false)?;
         return run_connections(cli, socket).await;
     }
-    let socket = default_socket(cli.socket.clone(), cli.allow_other_channel)?;
+    let transport = crate::endpoint::for_this_process(cli.socket.clone(), cli.allow_other_channel)?;
     if matches!(cli.command, Command::Mcp) {
-        crate::mcp::serve(socket, working_directory.to_owned(), cli.agent.clone()).await?;
+        crate::mcp::serve(transport, working_directory.to_owned(), cli.agent.clone()).await?;
         return Ok(0);
     }
     let project = Project::discover(working_directory);
@@ -654,7 +616,7 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
         }) => ops::resolve_recipe(recipe_file.as_deref(), &project)?,
         _ => None,
     };
-    let engine = Engine::connect(&socket).await?;
+    let engine = Engine::connect_to(&transport).await?;
     let engine = match cli.device.as_deref() {
         None | Some("local") => engine,
         Some(name) => {
@@ -664,46 +626,15 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     };
     refuse_on_device(&cli.command, &engine)?;
     let json = cli.json;
-    if let Command::GuestClient(action) = &cli.command {
+    if let Command::Tools(action) = &cli.command {
         let result = match action {
-            GuestClientCommand::Install {
-                computer,
-                binary,
-                group,
-            } => {
-                let policy =
-                    crate::guest_install::policy_from(settings.as_ref(), cli.agent.as_deref());
-                crate::guest_install::install(
-                    &engine,
-                    computer,
-                    policy,
-                    binary.as_deref(),
-                    group,
-                    &stderr_progress,
-                )
-                .await?
+            ToolsCommand::Enable { computer, binary } => {
+                crate::tools::enable(&engine, computer, binary.as_deref(), &stderr_progress).await?
             }
-            GuestClientCommand::Revoke { computer } => {
-                crate::guest_install::revoke(&engine, computer).await?
-            }
-            GuestClientCommand::Status { computer } => {
-                let mut status = crate::guest_install::status(&engine, computer).await?;
-                let current =
-                    crate::guest_install::policy_from(settings.as_ref(), cli.agent.as_deref());
-                if let Some(warning) = crate::guest_install::stale_warning(&status, &current) {
-                    status["warning"] = serde_json::json!(warning);
-                }
-                status
-            }
+            ToolsCommand::Disable { computer } => crate::tools::disable(&engine, computer).await?,
+            ToolsCommand::Status { computer } => crate::tools::status(&engine, computer).await?,
         };
-        println!(
-            "{}",
-            if json {
-                serde_json::to_string_pretty(&result).unwrap_or_default()
-            } else {
-                render_guest_client(&result)
-            }
-        );
+        emit(json, &result, crate::tools::render);
         return Ok(0);
     }
     tokio::select! {
@@ -1372,7 +1303,7 @@ async fn dispatch(
                 serde_json::to_string_pretty(v).unwrap_or_default()
             });
         }
-        Command::Mcp | Command::GuestClient(_) | Command::Host(_) | Command::Devices(_) => {
+        Command::Mcp | Command::Tools(_) | Command::Host(_) | Command::Devices(_) => {
             unreachable!("handled above")
         }
     }

@@ -77,7 +77,7 @@ class FakeEngine:
 
     def handle(self, method: str, params: Dict[str, Any]) -> Any:
         if method == "engine.handshake":
-            return {"deviceId": "fake", "name": "fake", "protocol": 7, "capabilities": [], "clientId": "client:1"}
+            return {"deviceId": "fake", "name": "fake", "protocol": 8, "capabilities": [], "clientId": "client:1"}
         if method == "computers.list":
             return {"linux": {"computers": [self.computer("silo-eval-a", "id-a"), self.computer("silo-eval-b", "id-b")]}, "macos": {}}
         if method == "guest.exec":

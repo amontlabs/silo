@@ -88,14 +88,22 @@ the engine's message.
 | `silo tree` | the computers as a tree: what each was forked from, its state and pending review |
 
 A fork publishes the ports its source publishes (a recipe fork, the recipe's `ports`), each on a host port of its own. The engine does not copy published ports when it forks a computer, so `silo fork` does it with the same `publish` calls. The MCP server has `ports`, `publish`, `unpublish` and `ssh_name` tools.
-| `silo guest-client install <computer> [--binary PATH] [--group G]` / `revoke` / `status` | give a running Linux computer's own agent a scoped token, remove it, or read it; the token carries the agent's `fold` and `fork_secrets` settings ([in-guest client](SiloUI-IN-GUEST-CLIENT.md)) |
-| `silo --in-guest <list\|tree\|status\|fork\|diff\|fold --request\|requests\|steps>` | run inside a computer with its token: fork itself, diff and request review of its forks; never keeps, promotes, undoes or drops |
+| `silo tools enable <computer> [--binary PATH]` / `disable` / `status` | turn Silo's tools in a computer on or off, or say whether it has them and whether it can reach them now, at its next start or after a restart. New computers have them already; `--binary` first copies a `silo` built for Linux into a running Linux computer ([Silo's tools in a computer](SiloUI-IN-GUEST-CLIENT.md)) |
 | `silo host init [--authorize KEY\|FILE]...` / `silo host status` / `silo host revoke FINGERPRINT\|KEY\|FILE` | prepare this machine to host computers for other devices, show how it is set up, or stop accepting a controller's key ([details](#hosting-computers-for-other-devices)) |
 | `silo devices add <address> [--host-key FINGERPRINT\|KEY\|FILE] [--replace]` / `list` / `remove <device>` / `key` | connect, list or remove the devices this one manages, or print this device's Silo key ([details](#hosting-computers-for-other-devices)) |
 | `silo export <computer> [-o FILE] [--checkpoint ID\|NAME] [--include-logins] [--yes]` | save a whole computer as a `.silo-backup` file to share; a Linux computer's known login files are removed from it unless `--include-logins` (traces may remain) ([details](#sharing-a-computer-as-a-file)) |
 | `silo import FILE [--name NAME]` | add the computer in an export file as a new, stopped computer |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
+
+**Inside a computer.** When `/etc/silo/endpoint.json` exists (or `SILO_ENDPOINT` names another
+file), `silo` reaches Silo over that computer's own channel with the computer's token instead of
+the engine socket; `--socket` always means the socket. Every command is the same, and the engine
+decides what the computer may do ([the policy](SiloUI-POLICY.md)): a refused call prints the
+engine's reason, and a call that needs your approval prints the approval id. `silo list` shows the
+computer and the computers it made. `silo mcp` works there too, without the tools that only make
+sense on the device (the hosted reviewer, SSH names, reaching a review request's fork); a `device`
+argument or a folder as a fork's source is refused.
 
 ## Sharing a computer as a file
 
@@ -765,11 +773,11 @@ Set up, from the project folder, on the Mac:
 ```sh
 silo up --recipe openclaw      # or hermes: builds main, starts it, makes ssh main.silo work
 ssh main.silo                  # the agent's host harness reaches main this way
-silo guest-client install main --agent openclaw --binary ~/.silo/guest/silo
+silo tools enable main --binary ~/.silo/guest/silo
 ```
 
-`silo guest-client install` is a follow-up because it runs on the Mac, against a running
-computer, and needs the guest `silo` binary ([in-guest client](SiloUI-IN-GUEST-CLIENT.md)).
+`main` has Silo's tools already; `silo tools enable --binary` puts a `silo` built for the guest in
+it, which needs the computer running ([Silo's tools in a computer](SiloUI-IN-GUEST-CLIENT.md)).
 Onboarding (model keys, chat channel logins) is interactive and happens once in `main` over
 `ssh main.silo`; it is not part of the recipe.
 

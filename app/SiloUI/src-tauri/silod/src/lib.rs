@@ -4,6 +4,7 @@
 compile_error!("silod is an engine for macOS and Linux hosts");
 
 pub mod agent;
+pub mod channel;
 #[cfg(target_os = "macos")]
 pub mod app;
 /// The Linux run loop, under the name `entry` dispatches to on both platforms.
@@ -17,7 +18,6 @@ pub mod code_signature;
 pub mod context;
 pub mod dispatcher;
 pub mod framing;
-pub mod guest_bridge;
 pub mod identity;
 #[cfg(target_os = "linux")]
 pub mod install_trust;

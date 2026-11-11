@@ -955,8 +955,6 @@ fn a_fork_point_of_a_running_computer_saves_disks_only_after_a_guest_flush() {
         },
     )
     .unwrap();
-    // A bridge folder makes a capture with memory drop the guest's cached entries first.
-    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
     let runner = Runner {
         mount_type: "Owned",
         calls: Mutex::new(Vec::new()),
@@ -1042,83 +1040,45 @@ fn a_fork_point_of_a_stopped_computer_asks_for_no_guest_flush() {
 }
 
 #[test]
-fn a_full_capture_drops_the_guests_cached_entries_first_only_when_a_bridge_folder_exists() {
-    let _test_state = crate::test_support::global_state();
-    for bridge in [false, true] {
-        let directory = tempfile::tempdir().unwrap();
-        let paths = paths(&directory);
-        write_metadata(
-            &paths.metadata,
-            &ComputerConfigurationRequest {
-                schema_version: 1,
-                computers: vec![computer_configuration()],
-            },
-        )
-        .unwrap();
-        if bridge {
-            std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
-        }
-        let runner = Runner {
-            mount_type: "Owned",
-            calls: Mutex::new(Vec::new()),
-        };
-        capture_with(&runner, &paths, ID, "Before work", "manual").unwrap();
-        let calls = runner.calls.lock().unwrap();
-        let release = calls.iter().position(|call| {
-            call[0] == "exec" && call.iter().any(|arg| arg.contains("drop_caches"))
-        });
-        let create = calls
-            .iter()
-            .position(|call| call[..2] == ["snapshot", "create"])
-            .unwrap();
-        if bridge {
-            assert!(release.unwrap() < create);
-            assert!(calls[release.unwrap()]
-                .windows(2)
-                .any(|pair| pair == ["--user", "root"]));
-        } else {
-            assert!(release.is_none());
-        }
-    }
-}
-
-#[test]
-fn a_capture_the_share_rejects_says_to_restart_and_releases_the_bridge_hold() {
+fn a_full_capture_runs_nothing_in_the_guest_before_the_snapshot() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
-    let rejected = || RuntimeError::Failed {
-        operation: "snapshot".into(),
-        exit_code: Some(1),
-        detail: "control operation rejected by peer".into(),
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![computer_configuration()],
+        },
+    )
+    .unwrap();
+    // A folder an earlier engine left in the runtime share changes nothing.
+    std::fs::create_dir_all(paths.home.join("sandboxes/dev/runtime/silo-bridge/req")).unwrap();
+    let runner = Runner {
+        mount_type: "Owned",
+        calls: Mutex::new(Vec::new()),
     };
-    // Without a bridge folder the failure is reported as it is.
-    assert!(matches!(
-        explain_rejected_capture(&paths, "dev", rejected()),
-        RuntimeError::Failed { .. }
-    ));
-    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
-    let explained = explain_rejected_capture(&paths, "dev", rejected()).to_string();
-    assert!(explained.contains("Restart the computer"), "{explained}");
-    let hold = crate::guest_client::hold_bridge("dev");
-    assert!(crate::guest_client::bridge_held("dev"));
-    drop(hold);
-    assert!(!crate::guest_client::bridge_held("dev"));
+    capture_with(&runner, &paths, ID, "Before work", "manual").unwrap();
+    let calls = runner.calls.lock().unwrap();
+    assert!(!calls.iter().any(|call| call[0] == "exec"), "{calls:?}");
+    assert!(calls.iter().any(|call| call[..2] == ["snapshot", "create"]));
 }
 
 #[test]
 fn every_fork_scrubs_the_guest_client_token_once() {
-    let token = silo_api::methods::guest_client::GUEST_TOKEN_PATH;
+    use silo_api::methods::guest_client::{
+        GUEST_ENDPOINT_PATH as token, LEGACY_GUEST_TOKEN_PATH as legacy,
+    };
     let mut options = ForkOptions::default();
     options.scrub_guest_client_token();
     options.scrub_guest_client_token();
-    assert_eq!(options.scrub, [token]);
+    assert_eq!(options.scrub, [token, legacy]);
     let mut named = ForkOptions {
         scrub: vec!["/root/.bot.env".into(), token.into()],
         ..ForkOptions::default()
     };
     named.scrub_guest_client_token();
-    assert_eq!(named.scrub, ["/root/.bot.env", token]);
+    assert_eq!(named.scrub, ["/root/.bot.env", token, legacy]);
     assert!(named.validate().is_ok());
 }
 
@@ -6652,8 +6612,6 @@ fn a_running_container_is_captured_with_disks_only() {
         },
     )
     .unwrap();
-    // A bridge folder makes a capture with memory drop the guest's cached entries first.
-    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
     crate::containers::capability::make_container(&paths.home, "dev");
     let runner = Runner {
         mount_type: "Owned",

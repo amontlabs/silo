@@ -372,3 +372,96 @@ fn an_import_keeps_its_deny_all_policy_until_the_owner_sets_one() {
     assert_eq!(plan.policy_value(), github_default["policy"]);
     store::use_test_path(None);
 }
+
+#[test]
+fn the_channel_rule_is_the_computers_own_port_in_every_mode_and_no_other_computers() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    crate::guest_client::tokens::use_test_directory(Some(directory.path().join("guest-client")));
+    let tokens = crate::guest_client::TokenStore::current().unwrap();
+    tokens.enable("a", 47311).unwrap();
+    tokens.enable("b", 47312).unwrap();
+    assert_eq!(extra_rules("a"), vec![ExtraRule::GatewayPort(47311)]);
+    assert_eq!(extra_rules("b"), vec![ExtraRule::GatewayPort(47312)]);
+    assert!(
+        extra_rules("c").is_empty(),
+        "a computer without tools has no channel rule"
+    );
+    let opens = |plan: &Plan, port: u16| {
+        plan.rules.contains(&Rule::GatewayPort(port))
+            && plan.rule_args().contains(&format!("allow@host:tcp:{port}"))
+            && plan.policy_value()["rules"]
+                .as_array()
+                .unwrap()
+                .contains(&Rule::GatewayPort(port).saved())
+    };
+    for policy in [
+        mode(NetworkPolicyMode::Open),
+        allowlist(&["example.com"], &["npm"]),
+        mode(NetworkPolicyMode::Closed),
+    ] {
+        store::set("a", &policy).unwrap();
+        store::set("b", &policy).unwrap();
+        store::set("c", &policy).unwrap();
+        let (a, b, c) = (
+            plan_for("a", "a", None),
+            plan_for("b", "b", None),
+            plan_for("c", "c", None),
+        );
+        assert!(opens(&a, 47311), "{:?}", policy.mode);
+        assert!(!opens(&a, 47312));
+        assert!(opens(&b, 47312) && !opens(&b, 47311));
+        assert!(!opens(&c, 47311) && !opens(&c, 47312));
+        let (gateway, _) = gateway_policy(&a);
+        assert!(gateway["rules"]
+            .as_array()
+            .unwrap()
+            .contains(&Rule::GatewayPort(47311).saved()));
+        // No other rule of any mode reaches the gateway beyond name lookups.
+        for rule in &a.rules {
+            if let Rule::GatewayPort(port) = rule {
+                assert_eq!(*port, 47311);
+            }
+        }
+    }
+    crate::guest_client::tokens::use_test_directory(None);
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_fork_gets_its_own_port_and_no_token_and_an_import_gets_none_until_turned_on() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    crate::guest_client::tokens::use_test_directory(Some(directory.path().join("guest-client")));
+    let tokens = crate::guest_client::TokenStore::current().unwrap();
+    crate::guest_client::turn_on("parent").unwrap();
+    let parent_token = tokens.mint("parent").unwrap().token;
+    let parent_port = tokens.port_of("parent").unwrap();
+    crate::guest_client::inherit("parent", "child").unwrap();
+    let child_port = tokens.port_of("child").unwrap();
+    assert_ne!(child_port, parent_port);
+    assert!(
+        tokens.verify(&parent_token, "child").is_none(),
+        "a copied token proves nothing"
+    );
+    assert!(tokens.status("child").unwrap().unwrap().hash.is_empty());
+    assert_eq!(
+        plan_for("child", "child", None).rules,
+        vec![Rule::Dns, Rule::GatewayPort(child_port), Rule::Public]
+    );
+    // A fork of a computer without tools has none.
+    crate::guest_client::inherit("nothing", "other-child").unwrap();
+    assert!(tokens.status("other-child").unwrap().is_none());
+    // An import starts closed with no channel; turned on, it keeps its deny-all ingress.
+    let imported = json!({"default_egress": "deny", "default_ingress": "deny", "rules": []});
+    assert!(extra_rules("imported").is_empty());
+    crate::guest_client::turn_on("imported").unwrap();
+    let port = tokens.port_of("imported").unwrap();
+    let plan = plan_for("imported", "imported", Some(&imported));
+    assert_eq!(plan.rules, vec![Rule::GatewayPort(port)]);
+    assert_eq!(plan.policy_value()["default_ingress"], "deny");
+    crate::guest_client::computer_removed("imported");
+    assert!(extra_rules("imported").is_empty());
+    crate::guest_client::tokens::use_test_directory(None);
+    store::use_test_path(None);
+}

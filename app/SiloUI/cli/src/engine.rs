@@ -107,6 +107,25 @@ pub fn default_socket(flag: Option<PathBuf>, allow_other: bool) -> Result<PathBu
     Ok(socket)
 }
 
+/// Where the CLI keeps what it remembers between commands inside a computer, which has no
+/// engine socket beside it: `$XDG_STATE_HOME/silo`, else `~/.local/state/silo`.
+fn channel_memory() -> PathBuf {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
+        .unwrap_or_else(std::env::temp_dir);
+    let memory = base.join("silo");
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let _ = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&memory);
+    }
+    memory
+}
+
 /// A connection to the engine. Clones share it; it closes when the last clone is dropped.
 #[derive(Clone)]
 pub struct Engine {
@@ -272,16 +291,42 @@ pub fn find<'a>(computers: &'a [Computer], name: &str) -> Result<&'a Computer, C
 
 impl Engine {
     pub async fn connect(socket: &Path) -> Result<Self, CliError> {
-        let options = ConnectOptions::new(ClientMetadata {
+        Self::connect_to(&crate::endpoint::Transport::Socket(socket.to_owned())).await
+    }
+
+    /// Connects to the engine over the socket, or over a computer's channel with its token.
+    pub async fn connect_to(transport: &crate::endpoint::Transport) -> Result<Self, CliError> {
+        use crate::endpoint::Transport;
+        let mut options = ConnectOptions::new(ClientMetadata {
             name: "silo-cli".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
         });
-        let (client, events) = Client::connect(socket, options).await.map_err(|error| {
-            CliError::new(format!(
-                "Cannot reach the Silo engine at {}: {error}. Open Silo and try again.",
-                socket.display()
-            ))
-        })?;
+        let (connected, memory) = match transport {
+            Transport::Socket(socket) => (
+                Client::connect(socket, options).await.map_err(|error| {
+                    CliError::new(format!(
+                        "Cannot reach the Silo engine at {}: {error}. Open Silo and try again.",
+                        socket.display()
+                    ))
+                }),
+                socket.parent().map(Path::to_path_buf).unwrap_or_default(),
+            ),
+            Transport::Channel(endpoint) => {
+                options.token = Some(endpoint.token.clone());
+                (
+                    Client::connect_channel(&endpoint.host, endpoint.port, options)
+                        .await
+                        .map_err(|error| {
+                            CliError::new(format!(
+                                "Cannot reach Silo at {}:{}: {error}. Silo may be closed, or this computer's tools were turned off or need a restart of the computer.",
+                                endpoint.host, endpoint.port
+                            ))
+                        }),
+                    channel_memory(),
+                )
+            }
+        };
+        let (client, events) = connected?;
         // The commands read replies only; the event feed is dropped.
         drop(events);
         let routes_devices = client.supports("device.routing.v1");
@@ -289,7 +334,7 @@ impl Engine {
             _closer: Arc::new(Closer(client.clone())),
             client,
             last_job: Arc::new(Mutex::new(None)),
-            memory: socket.parent().map(Path::to_path_buf).unwrap_or_default(),
+            memory,
             device: None,
             routes_devices,
         })

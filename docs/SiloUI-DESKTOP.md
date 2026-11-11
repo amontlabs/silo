@@ -83,7 +83,7 @@ computer-use tools and their approvals. What differs:
   They cover those names only: any other Chromium-based program an agent starts with `--no-sandbox`
   (Playwright, Puppeteer, Electron) has the same exposure. The computer's page in the app says a web page that
   compromises the browser reaches everything in the computer and can act with its GitHub access and secrets
-  and use its in-guest `silo` client. The image has no browser; install one in the computer.
+  and use Silo's tools in it (its `silo`). The image has no browser; install one in the computer.
 - **The viewer** reaches the streamer on the container's loopback through the computer's own SSH server
   (`direct-tcpip` to the container's loopback only), as for a VM. `/run` is memory, as in a VM, so the
   display's authority cookie and the session file are not part of a checkpoint or a fork.

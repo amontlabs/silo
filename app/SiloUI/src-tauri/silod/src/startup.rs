@@ -68,7 +68,7 @@ pub fn start_background(
     crate::methods::computers::install_credential_source(context.clone());
     start_computer_use(context.clone());
     start_keep_recovery(context.clone());
-    crate::guest_bridge::start(context.clone());
+    crate::channel::start(context.clone());
     // The timers are the engine's own upkeep with no client connected (95 A-26).
     crate::timers::start(context.clone());
     let services = Arc::new(SilodStartupServices::new(

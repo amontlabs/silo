@@ -50,6 +50,7 @@ pub(crate) async fn create(
             request: decode(request, "macOS computer request")?,
             device_id: Some(device_id.to_owned()),
             agents: Vec::new(),
+            network_policy: None,
         }))
         .await?;
     created

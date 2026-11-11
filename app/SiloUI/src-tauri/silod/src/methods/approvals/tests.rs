@@ -660,7 +660,7 @@ async fn a_computer_an_allowed_call_makes_is_the_askers() {
     assert!(runs.lock().unwrap()[0].1["quiet"]["scrub"]
         .as_array()
         .unwrap()
-        .contains(&json!(silo_api::methods::guest_client::GUEST_TOKEN_PATH)));
+        .contains(&json!(silo_api::methods::guest_client::GUEST_ENDPOINT_PATH)));
     let snapshot = PolicyStore::new(&app_data()).snapshot().unwrap();
     let pending = snapshot
         .pending

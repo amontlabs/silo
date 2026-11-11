@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use silo_api::methods::MethodName;
-use silo_engine::context::EngineContext;
+use silo_engine::{context::EngineContext, guest_client::TokenStore};
 
 use super::handle;
 use crate::{
@@ -11,13 +11,6 @@ use crate::{
 /// The tests share one token file.
 static TOKENS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-pub(super) fn snapshot() -> crate::guest_bridge::Snapshot {
-    crate::guest_bridge::Snapshot::from_values(
-        &json!({"linux": {"computers": [{"configuration": {"id": COMPUTER}}]}}),
-        &json!({"nodes": [{"id": COMPUTER, "name": "dev", "parent": null}]}),
-    )
-}
-
 async fn call(method: MethodName, params: Value) -> Result<Value, DispatchError> {
     handle(method, &params, &request_context())
         .await
@@ -25,26 +18,17 @@ async fn call(method: MethodName, params: Value) -> Result<Value, DispatchError>
         .map(|output| output.value)
 }
 
-fn policy() -> Value {
-    json!({"forkSecrets": ["github"], "agent": "openclaw"})
+fn store() -> TokenStore {
+    TokenStore::new(&request_context().silod_context().paths().app_data)
 }
 
 #[tokio::test]
-async fn enable_returns_the_token_once_and_the_engine_keeps_only_its_hash() {
+async fn status_names_the_channel_and_never_the_token() {
     let _held = TOKENS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let enabled = call(
-        MethodName::GuestClientEnable,
-        json!({"computerId": COMPUTER, "policy": policy()}),
-    )
-    .await
-    .unwrap();
-    let token = enabled["token"].as_str().unwrap().to_owned();
-    assert!(token.starts_with("silo_gc_"));
-    assert_eq!(enabled["tokenPath"], "/etc/silo/guest-client.json");
-    assert_eq!(enabled["spoolDir"], "/.msb/silo-bridge");
-
+    store().enable(COMPUTER, 45123).unwrap();
+    let token = store().mint(COMPUTER).unwrap().token;
     let status = call(
         MethodName::GuestClientStatus,
         json!({"computerId": COMPUTER}),
@@ -52,20 +36,14 @@ async fn enable_returns_the_token_once_and_the_engine_keeps_only_its_hash() {
     .await
     .unwrap();
     assert_eq!(status["enabled"], true);
-    assert_eq!(status["policy"]["forkSecrets"], json!(["github"]));
+    assert_eq!(status["host"], "host.microsandbox.internal");
+    assert_eq!(status["port"], 45123);
+    assert_eq!(status["endpointPath"], "/etc/silo/endpoint.json");
+    assert_eq!(status["written"], false);
     assert!(!status.to_string().contains(&token));
-
     let app_data = request_context().silod_context().paths().app_data.clone();
     let stored = std::fs::read_to_string(app_data.join("guest-client/tokens.json")).unwrap();
     assert!(!stored.contains(&token));
-
-    let again = call(
-        MethodName::GuestClientEnable,
-        json!({"computerId": COMPUTER, "policy": policy()}),
-    )
-    .await
-    .unwrap();
-    assert_ne!(again["token"], enabled["token"]);
 
     let revoked = call(
         MethodName::GuestClientRevoke,
@@ -74,30 +52,31 @@ async fn enable_returns_the_token_once_and_the_engine_keeps_only_its_hash() {
     .await
     .unwrap();
     assert_eq!(revoked["enabled"], false);
+    assert!(revoked.get("port").is_none());
+    assert!(store().verify(&token, COMPUTER).is_none());
 }
 
 #[tokio::test]
-async fn enable_refuses_an_unknown_computer() {
-    let unknown = call(
-        MethodName::GuestClientEnable,
-        json!({"computerId": "no-such-computer", "policy": policy()}),
-    )
-    .await
-    .unwrap_err();
-    assert!(unknown.message.contains("Linux computers only"));
-}
-
-#[tokio::test]
-async fn a_promote_or_undo_revokes_through_one_helper_that_reports_failure() {
+async fn enable_refuses_an_unknown_computer_and_opens_nothing() {
     let _held = TOKENS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    call(
+    let unknown = call(
         MethodName::GuestClientEnable,
-        json!({"computerId": COMPUTER, "policy": policy()}),
+        json!({"computerId": "no-such-computer"}),
     )
     .await
-    .unwrap();
+    .unwrap_err();
+    assert!(unknown.message.contains("not found"), "{}", unknown.message);
+    assert!(store().status("no-such-computer").unwrap().is_none());
+}
+
+#[tokio::test]
+async fn a_promote_or_undo_turns_the_tools_off_through_one_helper() {
+    let _held = TOKENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    store().enable(COMPUTER, 45124).unwrap();
     super::revoke_for(&request_context(), &[COMPUTER]).unwrap();
     let status = call(
         MethodName::GuestClientStatus,

@@ -131,7 +131,7 @@ fn fixture_with(converted_backup: bool) -> Fixture {
         silod.clone(),
         RequestContext {
             client_id: "test-client".into(),
-            protocol: 7,
+            protocol: 8,
             client: None,
             caller: silo_engine::policy::Caller::owner("test"),
         },

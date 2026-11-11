@@ -22,7 +22,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use serde_json::{json, Value};
 use silo_api::{
-    methods::{audit::AuditCallerKind, guest_client::GUEST_TOKEN_PATH, MethodName},
+    methods::{audit::AuditCallerKind, guest_client::GUEST_ENDPOINT_PATH, MethodName},
     plain_text,
     transport::ApprovalKind,
 };
@@ -517,8 +517,8 @@ impl<'a> Judge<'a> {
         };
         let stop = list("stop")?;
         let mut scrub = list("scrub")?;
-        if !scrub.iter().any(|path| path == GUEST_TOKEN_PATH) {
-            scrub.push(json!(GUEST_TOKEN_PATH));
+        if !scrub.iter().any(|path| path == GUEST_ENDPOINT_PATH) {
+            scrub.push(json!(GUEST_ENDPOINT_PATH));
         }
         let mut rewritten = json!({
             "computerId": source,
