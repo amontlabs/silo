@@ -356,3 +356,6 @@ These were not asked of the owner. Each is open to change.
   than about 46 GiB free (the 5% free-disk floor is measured on the real disk). Treat that
   failure as the environment until the test injects its own measurement. Merged worktrees'
   ignored build output is removed after each merge (`git clean -fdXq`).
+- **Codex boundary pass (T1/T2, T5/T8), 2026-11-11 ~23:00:** started through lastdrop's
+  `reviewer`; the T5/T8 run hit Codex's usage limit ("try again at Nov 12th, 2026 2:30 AM").
+  A scheduled task reruns the owed reviews at 02:45 on 2026-11-12 in this thread.
