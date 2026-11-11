@@ -82,3 +82,11 @@ was chosen and why; any can be changed. Older items are also in the build log un
     (`silo rebuild --force`).
 23. **Writes to `/home/silo` in the few seconds between packing it and stopping the old computer
     are only in `<name>-undo`.**
+
+## Recipe setup lines (found by T16)
+
+24. **A computer never sees a recipe's setup commands, not even for its own recipe** (being built,
+    R5). Any computer may fork a recipe's hidden build to get a computer from that recipe, and the
+    fork carried the recipe's full text, so the earlier "only its own recipe" rule could be
+    sidestepped. Whatever a setup command writes to disk is in every computer built from that
+    recipe anyway, so the docs now say: never put tokens in setup lines; use secrets.
