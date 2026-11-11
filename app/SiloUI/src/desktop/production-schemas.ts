@@ -429,6 +429,7 @@ export const deviceResourcesSchema = z.object({
   logicalCpus: z.number().catch(0), memoryTotalBytes: z.number().catch(0),
   memoryAvailableBytes: z.number().nullish().transform(value => value ?? undefined),
   diskFreeBytes: z.number().catch(0), diskTotalBytes: z.number().catch(0),
+  memoryFloorBytes: z.number().catch(0), diskFloorBytes: z.number().catch(0),
   runningComputers: z.number().catch(0), runningMemoryGib: z.number().catch(0),
   state: tolerantEnum(["ok", "low", "critical"], "ok"), message: z.string().catch(""),
   computers: tolerantArray(z.object({ id: z.string(), name: z.string(), running: z.boolean(), cpus: z.number(), memoryGib: z.number() })).catch([]),
@@ -468,3 +469,33 @@ export const sshNameSchema = z.object({
   alias: z.string().min(1), includeInstalled: z.boolean().catch(true), includeLine: z.string().catch(""),
 })
 export type SshName = z.infer<typeof sshNameSchema>
+
+// A computer's network policy (`network.policy.get`, `network.policy.set`) and Silo's tools in it (`guestClient.*`).
+export const networkModes = ["open", "allowlist", "closed"] as const
+export type NetworkMode = (typeof networkModes)[number]
+export const networkPolicyShape = z.object({
+  mode: z.enum(networkModes), hosts: z.array(z.string()).catch([]), presets: z.array(z.string()).catch([]),
+})
+export type NetworkPolicy = z.infer<typeof networkPolicyShape>
+
+/** When a saved change is in force; a timing this Silo does not know reads as the cautious one. */
+export const networkTimings = ["applied", "nextStart", "nextRestart"] as const
+export type NetworkTiming = (typeof networkTimings)[number]
+const networkTimingShape = tolerantEnum(networkTimings, "nextRestart")
+
+export const networkPolicyStateSchema = z.object({
+  computerId: z.string(),
+  policy: networkPolicyShape,
+  allowedHosts: tolerantArray(z.object({ host: z.string(), ports: z.array(z.number()).catch([]), from: z.string().catch("") })).catch([]),
+  timing: networkTimingShape,
+  presets: tolerantArray(z.object({ name: z.string(), title: z.string().catch(""), hosts: z.array(z.string()).catch([]) })).catch([]),
+  presetUpdates: tolerantArray(z.object({ name: z.string(), title: z.string().catch(""), addedHosts: z.array(z.string()).catch([]) })).catch([]),
+  notices: tolerantArray(z.string()).catch([]),
+})
+export type NetworkPolicyState = z.infer<typeof networkPolicyStateSchema>
+
+/** The port, address and token of the channel are not read: the page says only whether the tools are on. */
+export const computerToolsSchema = z.object({
+  computerId: z.string(), enabled: z.boolean(), network: networkTimingShape.optional(),
+})
+export type ComputerTools = z.infer<typeof computerToolsSchema>

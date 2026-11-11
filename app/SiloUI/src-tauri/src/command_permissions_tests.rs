@@ -142,6 +142,11 @@ fn migration_and_checkpoint_commands_are_allowlisted_for_the_main_window() {
         "list_audit",
         "read_approval_job",
         "read_device_resources",
+        "read_network_policy",
+        "save_network_policy",
+        "read_computer_tools",
+        "enable_computer_tools",
+        "revoke_computer_tools",
         "list_review_requests",
         "show_review_request",
         "keep_review_request",
@@ -316,4 +321,26 @@ fn agents_are_listed_by_the_status_panel_and_installed_from_the_main_window_only
     assert!(!granted("status", "allow-install-agent"));
     assert!(granted("preview", "allow-ensure-ssh-name"));
     assert!(!granted("status", "allow-ensure-ssh-name"));
+}
+
+#[test]
+fn network_policy_and_silos_tools_are_for_the_main_window_only() {
+    let capabilities: Value =
+        serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();
+    let granted = |window: &str, permission: &str| {
+        capabilities[window]["permissions"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::String(permission.into()))
+    };
+    for permission in [
+        "allow-read-network-policy",
+        "allow-save-network-policy",
+        "allow-read-computer-tools",
+        "allow-enable-computer-tools",
+        "allow-revoke-computer-tools",
+    ] {
+        assert!(granted("preview", permission), "{permission}");
+        assert!(!granted("status", permission), "{permission}");
+    }
 }

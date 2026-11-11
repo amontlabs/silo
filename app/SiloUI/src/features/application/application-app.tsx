@@ -107,7 +107,7 @@ const SecretsPageView = memo(secretsPage.Component, (a, b) => a.source.secrets =
 const GeneralPageView = memo(generalPage.Component, (a, b) => a.source.preferences === b.source.preferences
   && a.source.computers === b.source.computers
   && a.applicationPreferences === b.applicationPreferences && a.onApplicationPreferencesChange === b.onApplicationPreferencesChange && a.reduceMotion === b.reduceMotion
-  && a.onReduceMotionChange === b.onReduceMotionChange)
+  && a.onReduceMotionChange === b.onReduceMotionChange && a.readDeviceResources === b.readDeviceResources)
 const ConnectionsSettingsView = memo(ConnectionsSettings, (a, b) => a.actions === b.actions
   && a.source.devices === b.source.devices && a.source.devicesError === b.source.devicesError
   && a.source.connections === b.source.connections && a.source.connectionsError === b.source.connectionsError)
@@ -506,7 +506,7 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
       <section id="application-panel-settings" role="region" aria-labelledby="application-nav-settings" hidden={visibleTab !== "settings"}>
         <div hidden={settingsSection !== "general"}>
           <PanelContent active={visibleTab === "settings" && settingsSection === "general"}>
-            <GeneralPageView source={nativeSource} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} />
+            <GeneralPageView source={nativeSource} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} readDeviceResources={actions.readDeviceResources} />
           </PanelContent>
         </div>
         <PageContainer hidden={settingsSection !== "connections"}>
