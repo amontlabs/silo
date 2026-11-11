@@ -68,3 +68,10 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
 - 2026-11-11: A, C, D stacked on `silo/0715-integration` (16 commits; one conflict in
   `secrets/handle.rs` resolved to the 0.7.6 stack's final shape). Gateway, toolchain, engine pins
   and behaviour changes on `feat/msb-0715-gateway`.
+- 2026-11-11: chain B done; the msb repair confirmation patch added. Full stack on
+  `silo/0715-integration` (21 commits): fmt clean, 4,000+ unit tests across 7 crates pass.
+- 2026-11-11: **base changed to v0.7.14.** Upstream's "Release v0.7.15" job failed, so v0.7.15 has
+  no release assets (agentd, libkrunfw). v0.7.14 is the latest published release; agentd source is
+  identical between the two tags, libkrunfw differs (223f1169 vs 83c74b91). The stack now sits on
+  `silo/0714-integration` = v0.7.14 + upstream #2032 (file-sharing speed-up, carried as a patch) +
+  our 21 commits, with no conflicts. Move to 0.7.15 or later once a release is published.
