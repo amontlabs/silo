@@ -383,7 +383,7 @@ Params: `forkId`, optional `targetId` (default: the computer the fork came from,
 fork-time record), `reviewDigest` (from `changes.diff`) and `summary`. The result is
 `{request: {id, forkId, target, createdAt, reviewDigest, summary, status}}` with `status: "open"`.
 The store is `fold_requests.rs` in the engine, one JSON file per request; a later request for
-the same fork and target updates the open one and keeps its id. The CLI and the MCP `fold` tool
+the same fork and target updates the open one and keeps its id. The CLI and the MCP `merge` tool
 (`request: true`) call it after a fresh diff, and pass `counts` (the number of changes in each
 bucket) so a list can show them without a diff.
 
@@ -400,10 +400,10 @@ the folder record the CLI keeps for that fork. A fork's source may be recorded a
 (no origin was stored); it counts as the computer that owns the checkpoint. The CLI writes the
 folder record into its channel's state directory (`~/.silo` or `~/.silo-dev`), where the engine
 reads it, even when it was given another socket. A keep made without the request
-(`changes.keep`) marks the open requests for that fork and target kept. A folder fold by the CLI
+(`changes.keep`) marks the open requests for that fork and target kept. A folder merge by the CLI
 does the same through `changes.requests.markKept` (`forkId`, `target: "folder:<path>"`, optional
 `keepId`, the folder's backup ref); the engine checks the fork is the folder's fork first, and a
-failure to close the request is a note in the fold's result, not a failed fold.
+failure to close the request is a note in the merge's result, not a failed merge.
 
 Five more methods work on one: `list` takes an optional `status` (`open` includes `keeping`);
 `show`, `keep`, `throwAway` and `open` take `requestId`. `keep` accepts an open or `keeping`
@@ -443,7 +443,7 @@ back, or never got going, with none pending for the target, makes the request `o
   `silo ssh-setup`) and `urls` from the URL proxy.
 
 Folder forks (`target: "folder:<path>"`): only the CLI reads the folder's git history, so the
-engine's `changes.requests.keep` refuses them with "Keep folder forks with `silo fold`", and
+engine's `changes.requests.keep` refuses them with "Merge folder forks with `silo merge`", and
 `changes.requests.show` returns `diff: null`, the request's own summary as `text` and
 `stale: null`; `silo requests show` reads the folder itself and fills the text, digest and `stale`.
 `throwAway` and `open` work for them like for any fork.
@@ -489,10 +489,9 @@ not a checkpoint is taken; a failure to record never fails the command (the resu
   goes with the computer. Command lines are stored as typed, so keep secrets out of them.
 - `silo steps <computer>` prints a table (`--json` the same data); the MCP tool is `steps_list`.
 
-**Step checkpoints.** `.silo/silo.yaml` has `step_checkpoints: true|false` (default false) and
-`step_checkpoints_keep` (default 20; 0 keeps every one). Both resolve through
-`Settings::step_settings` in the CLI, the one place a per-agent override will take effect.
-When on, the CLI saves a checkpoint of the computer after each step with the existing
+**Step checkpoints.** `silo exec` and `silo fork ... -- <cmd>` take `--step-checkpoints`
+(default off) and `--keep-steps N` (default 20; 0 keeps every one); the MCP `exec` and `fork`
+tools take the same. When on, the CLI saves a checkpoint of the computer after each step with the existing
 `checkpoints.create` job, kind `step` and `keepNewest` set to the keep count. `step` is a
 checkpoint kind like `automatic` and `before-keep` (`silo checkpoint --kind step` makes one by
 hand): after each step capture the engine runs the same retention pass as its own job, keeping
@@ -513,7 +512,7 @@ fork-point or warm checkpoint), `checkpoint` (`checkpointId`), `step` (`number`,
 record, the engine does not know folders). Parent and origin come from the fork-time record
 the engine already keeps (the changes store: the checkpoint and computer noted when the fork
 was created and kept in the base record once it starts), read through the promote journal
-(`lineage.rs`): after `silo fold --promote` the promoted fork is a root, or has the old main's own
+(`lineage.rs`): after `silo replace-main` the promoted fork is a root, or has the old main's own
 parent, and the old main's forks hang under it; `silo undo main` ends the record and every
 answer goes back. `pendingChanges` is `{requestId, buckets}`: the open review request of the
 fork, and `buckets` is always null for now (counting needs a capture). The hidden throwaways
@@ -521,27 +520,18 @@ fork, and `buckets` is always null for now (counting needs a capture). The hidde
 pending review; `--json` is the same data; the MCP tool is `tree`. Computers on other devices
 are not included.
 
-## Agent settings, auto-keep, recipe write-back and pull requests
+## Recipe additions and pull requests
 
-`silo.yaml` takes `agents:` overrides, `auto_keep:` rules and `fold: auto-code`; `silo fold`
-appends kept packages and settings files to the recipe the computer came from, and
-`silo fold --pr` opens a pull request. The settings and rule semantics are in the
-[CLI reference](SiloUI-CLI.md#settings-file-reference); this is how a keep behaves with them.
-
-- **Keep.** Write-back happens only after `changes.keep` returned `kept` (never for a dry run,
-  a refusal or a folder fork). The packages and files come from a diff of the fork taken after
-  the keep (a keep does not change the fork); when the keep was pinned to a review digest and
-  the new digest differs, the recipe is left alone and the result says so.
-  Packages are the diff's top-level added packages per manager (`dpkg` is `apt`, `npm -g` is
-  `npm`); dependencies are not listed.
-- **Auto-keep.** The rules read the diff document: a bucket counts as non-empty when it has
-  entries (`code`, `packages` with added, removed or upgraded names, any `settings` list,
-  `database`, `other`). The keep passes the digest of the diff just taken as `reviewDigest`, so
-  a fork that moves after the decision is refused by the engine; that refusal becomes a review
-  request. A fork made from a folder has only code changes (commits or uncommitted work).
-- **Pull request.** Reads the fork; changes nothing in the fork except committing its
-  uncommitted work, which a folder fold does as well.
-
+- **Recipe additions.** After a merge brings packages or settings files, the engine appends them to
+  the recipe the target computer was built from (the computer's record, and the owner's stored
+  recipe of the same name; a recipe that ships with Silo is never edited). The merge result lists
+  what was added. Packages are the diff's top-level added packages per manager (`dpkg` is `apt`,
+  `npm -g` is `npm`); dependencies are not listed; a manager recipes have no list for (`brew
+  cask`) is left out. Nothing is appended for a dry run, a refusal or a folder fork. See
+  [Recipes](SiloUI-RECIPES.md#what-a-computer-remembers).
+- **Pull request.** `silo merge <fork> --pr` reads the fork and changes nothing in it except
+  committing its uncommitted work, which a folder merge does as well. It is a device-only command;
+  [the CLI reference](SiloUI-CLI.md#pull-requests) says how it works.
 
 ## Credentials used: `computers.credentials`
 
