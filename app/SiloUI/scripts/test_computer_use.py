@@ -784,6 +784,66 @@ class Registration(Guest):
         self.assertIn('settings.json', names)
         self.assertEqual((outside / 'config.toml').stat().st_uid, os.getuid())
 
+    def test_silos_own_server_is_registered_beside_the_driver_and_removed_alone(self):
+        cu.apply('auto')
+        self.claude_settings.write_text(json.dumps({'permissions': {'allow': ['mcp__cua-driver', 'Bash(ls)']}}))
+        registered, pending, failed = cu.configure_server('silo', '/usr/local/bin/silo', ['mcp'])
+        self.assertEqual((registered, pending, failed), (['claude-code', 'codex'], [], []))
+        servers = self.claude()['mcpServers']
+        self.assertEqual(servers['silo'], {'type': 'stdio', 'command': '/usr/local/bin/silo', 'args': ['mcp'], 'env': {}})
+        self.assertIn('cua-driver', servers)
+        section = self.codex_config()['mcp_servers']
+        self.assertEqual((section['silo']['command'], section['silo']['args']), ('/usr/local/bin/silo', ['mcp']))
+        self.assertNotIn('env', section['silo'])
+        self.assertEqual(section['cua-driver']['default_tools_approval_mode'], 'approve')
+        # Registering again changes nothing, and the driver's approval rule is untouched.
+        before = (self.claude_state.read_text(), self.codex.read_text())
+        cu.configure_server('silo', '/usr/local/bin/silo', ['mcp'])
+        self.assertEqual(before, (self.claude_state.read_text(), self.codex.read_text()))
+        self.assertEqual(json.loads(self.claude_settings.read_text())['permissions']['allow'], ['mcp__cua-driver', 'Bash(ls)'])
+        removed, failed = cu.remove_server('silo')
+        self.assertEqual((removed, failed), (['claude-code', 'codex'], []))
+        self.assertNotIn('silo', self.claude()['mcpServers'])
+        self.assertIn('cua-driver', self.claude()['mcpServers'])
+        self.assertNotIn('silo', self.codex_config()['mcp_servers'])
+        self.assertIn('cua-driver', self.codex_config()['mcp_servers'])
+
+    def test_a_server_of_another_name_is_kept_when_silos_is_removed_and_a_missing_file_is_not_created(self):
+        self.claude_state.parent.mkdir(parents=True, exist_ok=True)
+        self.claude_state.write_text(json.dumps({'mcpServers': {'mine': {'command': 'x'}, 'silo': {'command': 'old'}}}))
+        cu.remove_server('silo')
+        self.assertEqual(self.claude()['mcpServers'], {'mine': {'command': 'x'}})
+        self.assertFalse(self.codex.exists())
+
+    def test_an_agent_that_is_not_installed_is_pending_for_silos_server(self):
+        self.installed_agents.discard('codex')
+        registered, pending, failed = cu.configure_server('silo', '/usr/local/bin/silo', ['mcp'])
+        self.assertEqual((registered, pending, failed), (['claude-code'], ['codex'], []))
+        self.assertFalse(self.codex.exists())
+
+    def test_only_a_plain_name_and_an_absolute_command_are_registered(self):
+        for name, command in (('cua-driver', '/x'), ('Silo', '/x'), ('a b', '/x'), ('', '/x'), ('silo', 'silo'), ('silo', '')):
+            with self.assertRaises(cu.Failure, msg=(name, command)):
+                cu.configure_server(name, command, ['mcp'])
+        with self.assertRaises(cu.Failure):
+            cu.remove_server('cua-driver')
+        self.assertFalse(self.claude_state.exists())
+
+    def test_the_command_line_registers_and_removes_and_reports_a_file_it_cannot_edit(self):
+        with mock.patch.object(cu.os, 'geteuid', return_value=0), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            code = cu.main(['server-add', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp'])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out.getvalue())['registered'], ['claude-code', 'codex'])
+        self.claude_state.write_text('[]')
+        with mock.patch.object(cu.os, 'geteuid', return_value=0), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            code = cu.main(['server-add', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp'])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out.getvalue())['failed'], ['claude-code'])
+        with mock.patch.object(cu.os, 'geteuid', return_value=0), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            code = cu.main(['server-remove', '--name', 'cua-driver'])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out.getvalue())['error'], 'invalid-server')
+
     def test_codex_gets_the_same_server_in_its_own_section(self):
         cu.apply('auto')
         server = self.codex_config()['mcp_servers']['cua-driver']
