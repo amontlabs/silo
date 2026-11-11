@@ -494,7 +494,7 @@ pub struct MergeCommand {
     #[arg(long, value_name = "BRANCH", requires = "pr")]
     pub base: Option<String>,
     /// Kept for `silo fold --promote`; use `silo replace-main`.
-    #[arg(long, hide = true)]
+    #[arg(long, hide = true, conflicts_with_all = ["request", "pr"])]
     pub promote: bool,
 }
 

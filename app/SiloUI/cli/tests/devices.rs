@@ -367,7 +367,7 @@ async fn fork_with_a_command_forks_and_runs_on_the_device() {
         json!(["make", "test"])
     );
     // Ports and URLs are this device's: nothing is published or read for a fork there.
-    for local in ["network.state", "network.publish", "network.urls"] {
+    for local in ["computers.access", "network.publish", "network.urls"] {
         assert!(engine.calls(local).is_empty(), "{local} was sent");
     }
 }

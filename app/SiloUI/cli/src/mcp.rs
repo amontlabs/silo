@@ -255,6 +255,13 @@ pub struct RequestIdParam {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct RequestOnlyParam {
+    /// The request's id, such as fr-ab12cd34.
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RequestMergeParams {
     /// The request's id, such as fr-ab12cd34.
     pub id: String,
@@ -1013,7 +1020,7 @@ impl SiloMcp {
     )]
     async fn request_decline(
         &self,
-        Parameters(RequestIdParam { id, .. }): Parameters<RequestIdParam>,
+        Parameters(RequestOnlyParam { id }): Parameters<RequestOnlyParam>,
     ) -> Result<String, String> {
         show(async { review::decline(&self.engine().await?, &id, &|_| {}).await }.await)
     }
@@ -1023,7 +1030,7 @@ impl SiloMcp {
     )]
     async fn request_open(
         &self,
-        Parameters(RequestIdParam { id, .. }): Parameters<RequestIdParam>,
+        Parameters(RequestOnlyParam { id }): Parameters<RequestOnlyParam>,
     ) -> Result<String, String> {
         show(async { review::open(&self.engine().await?, &id, &|_| {}).await }.await)
     }

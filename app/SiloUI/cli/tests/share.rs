@@ -124,8 +124,12 @@ async fn an_export_that_leaves_the_logins_out_asks_nothing_and_reports_what_it_l
     assert_eq!(value["logins"], json!([]));
     assert_eq!(value["unchecked"], Value::Null);
     assert_eq!(value["leftOut"], json!([CLAUDE]));
-    assert!(fake.calls("exports.check")[0].get("includeLogins").is_none());
-    assert!(fake.calls("exports.create")[0].get("includeLogins").is_none());
+    assert!(fake.calls("exports.check")[0]
+        .get("includeLogins")
+        .is_none());
+    assert!(fake.calls("exports.create")[0]
+        .get("includeLogins")
+        .is_none());
     let line = silo_cli::render::exported(&value);
     assert!(
         line.contains(&format!("Removed from the exported computer: {CLAUDE}")),
@@ -140,11 +144,20 @@ async fn including_logins_is_asked_for_to_the_engine_and_the_old_question_applie
     let asker = Answers::new(true, true);
     let mut with = args(false);
     with.include_logins = true;
-    let value = export(&connect(&fake).await, &with, Path::new("/"), &asker, &ignore)
-        .await
-        .unwrap();
+    let value = export(
+        &connect(&fake).await,
+        &with,
+        Path::new("/"),
+        &asker,
+        &ignore,
+    )
+    .await
+    .unwrap();
     assert_eq!(fake.calls("exports.check")[0]["includeLogins"], json!(true));
-    assert_eq!(fake.calls("exports.create")[0]["includeLogins"], json!(true));
+    assert_eq!(
+        fake.calls("exports.create")[0]["includeLogins"],
+        json!(true)
+    );
     assert_eq!(asker.asked.borrow().len(), 1);
     assert_eq!(value["logins"], json!([CLAUDE]));
     assert_eq!(value["leftOut"], json!([]));

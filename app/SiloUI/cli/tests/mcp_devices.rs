@@ -1,5 +1,5 @@
-//! MCP tools act on another device only when the call names it and the agent's `devices:`
-//! entry in `.silo/silo.yaml` lists it.
+//! MCP tools read from another device when the call names it. None changes anything there: only
+//! the owner, with `silo --device`, acts on a connected device.
 
 mod fake_engine;
 
@@ -23,20 +23,15 @@ fn engine() -> FakeEngine {
         "connections.devices.list" => Ok(json!([
             {"id": MINI, "name": "Mac mini", "address": "ssh://mini"}
         ])),
-        "changes.requests.throwAway" => Ok(json!({"jobId": "job:7"})),
-        "operations.job.get" => Ok(json!({"jobId": "job:7", "state": "finished",
-            "outcome": {"result": {"request": request(), "dropped": "try"}}})),
+        "computers.list" => Ok(listing(&[("main", "running")])),
+        "changes.requests.show" => Ok(json!({"jobId": "job:7"})),
+        "operations.job.get" => Ok(finished(json!({"request": request(), "forkName": "try"}))),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
     })
 }
 
-/// Calls `request_throw_away` and returns the tool's reply.
-async fn throw_away(engine: &FakeEngine, directory: &std::path::Path, arguments: Value) -> Value {
-    call_tool(engine, directory, "request_throw_away", arguments).await
-}
-
-/// Calls the tool `name` as the agent `bot` and returns the tool's reply.
+/// Calls the tool `name` and returns the tool's reply.
 async fn call_tool(
     engine: &FakeEngine,
     directory: &std::path::Path,
@@ -45,8 +40,7 @@ async fn call_tool(
 ) -> Value {
     let (server_side, client_side) = tokio::io::duplex(64 * 1024);
     let (server_read, server_write) = tokio::io::split(server_side);
-    let server = SiloMcp::new(engine.socket.clone(), directory.to_owned())
-        .with_agent(Some("bot".to_owned()));
+    let server = SiloMcp::new(engine.socket.clone(), directory.to_owned());
     tokio::spawn(async move {
         let running = server.serve((server_read, server_write)).await.unwrap();
         let _ = running.waiting().await;
@@ -81,110 +75,28 @@ async fn call_tool(
     serde_json::from_str(&line).unwrap()
 }
 
-fn project(settings: &str) -> tempfile::TempDir {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::create_dir(directory.path().join(".silo")).unwrap();
-    std::fs::write(directory.path().join(".silo/silo.yaml"), settings).unwrap();
-    directory
-}
-
 #[tokio::test]
-async fn an_agent_may_not_act_on_a_device_its_settings_do_not_list() {
+async fn a_read_names_the_device_and_goes_there() {
     let engine = engine();
-    let directory = project("recipes: [linux-dev]\n");
-    let reply = throw_away(
+    let directory = std::env::temp_dir();
+    let reply = call_tool(&engine, &directory, "list", json!({"device": "mac mini"})).await;
+    assert_ne!(reply["result"]["isError"], true, "{reply}");
+    assert_eq!(engine.calls("computers.list")[0]["deviceId"], MINI);
+    let shown = call_tool(
         &engine,
-        directory.path(),
+        &directory,
+        "request_show",
         json!({"id": "fr-1", "device": "mac mini"}),
     )
     .await;
-    let text = reply["result"]["content"][0]["text"].as_str().unwrap();
-    assert_eq!(reply["result"]["isError"], true, "{reply}");
-    assert!(text.contains("devices:"), "{text}");
-    assert!(engine.calls("changes.requests.throwAway").is_empty());
+    assert_ne!(shown["result"]["isError"], true, "{shown}");
+    assert_eq!(engine.calls("changes.requests.show")[0]["deviceId"], MINI);
 }
 
 #[tokio::test]
-async fn a_listed_device_is_acted_on_only_when_the_call_names_it() {
+async fn nothing_that_changes_a_computer_takes_a_device() {
     let engine = engine();
-    let directory = project("agents:\n  bot:\n    devices: [Mac mini]\n");
-    let reply = throw_away(
-        &engine,
-        directory.path(),
-        json!({"id": "fr-1", "device": "mac mini"}),
-    )
-    .await;
-    assert_ne!(reply["result"]["isError"], true, "{reply}");
-    assert_eq!(
-        engine.calls("changes.requests.throwAway")[0]["deviceId"],
-        MINI
-    );
-    // Without `device` the request is looked for on this device only.
-    throw_away(&engine, directory.path(), json!({"id": "fr-2"})).await;
-    assert!(engine.calls("changes.requests.throwAway")[1]
-        .get("deviceId")
-        .is_none());
-    assert!(engine.calls("changes.requests.list").is_empty());
-}
-
-/// An engine connected to the Mac mini, where `main` lives and `t1` appears once forked.
-fn host_engine() -> FakeEngine {
-    let forked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    FakeEngine::start(move |method, _| {
-        use std::sync::atomic::Ordering;
-        match method {
-            "connections.devices.list" => Ok(json!([
-                {"id": MINI, "name": "Mac mini", "address": "ssh://mini"}
-            ])),
-            "computers.list" if forked.load(Ordering::SeqCst) => {
-                Ok(listing(&[("main", "running"), ("t1", "running")]))
-            }
-            "computers.list" => Ok(listing(&[("main", "running")])),
-            "guest.exec" => Ok(json!({"exitCode": 0, "signal": null,
-                "stdout": b"hi\n".to_vec(), "stderr": []})),
-            "steps.record" => Ok(json!({"step": {"number": 1}})),
-            "checkpoints.fork" => {
-                forked.store(true, Ordering::SeqCst);
-                Ok(json!({"jobId": "job:1"}))
-            }
-            "computers.start" => Ok(json!({"jobId": "job:1"})),
-            "guest.exec.start" => Ok(json!({"jobId": "job:2"})),
-            "guest.exec.get" => Ok(
-                json!({"state": "exited", "exitCode": 0, "firstRetainedSeq": 1,
-                "output": [{"seq": 1, "stream": "stdout", "data": b"hi\n".to_vec()}]}),
-            ),
-            "operations.job.get" => Ok(finished(json!({"exitCode": 0}))),
-            "operations.job.acknowledge" => Ok(Value::Null),
-            other => Err(("internal", format!("unexpected {other}"))),
-        }
-    })
-}
-
-const ALLOWED: &str = "agents:\n  bot:\n    devices: [Mac mini]\n";
-
-#[tokio::test]
-async fn exec_runs_on_a_listed_device() {
-    let engine = host_engine();
-    let directory = project(ALLOWED);
-    let reply = call_tool(
-        &engine,
-        directory.path(),
-        "exec",
-        json!({"computer": "main", "command": ["ls"], "device": "mac mini"}),
-    )
-    .await;
-    assert_ne!(reply["result"]["isError"], true, "{reply}");
-    let text = reply["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("hi"), "{text}");
-    let ran = engine.calls("guest.exec");
-    assert_eq!(ran[0]["deviceId"], MINI);
-    assert_eq!(ran[0]["argv"], json!(["ls"]));
-}
-
-#[tokio::test]
-async fn exec_and_fork_with_a_command_are_refused_on_a_device_the_agent_may_not_act_on() {
-    let engine = host_engine();
-    let directory = project("recipes: [linux-dev]\n");
+    let directory = std::env::temp_dir();
     for (tool, arguments) in [
         (
             "exec",
@@ -194,44 +106,26 @@ async fn exec_and_fork_with_a_command_are_refused_on_a_device_the_agent_may_not_
             "fork",
             json!({"name": "t1", "command": ["make"], "device": "mac mini"}),
         ),
+        ("merge", json!({"fork": "t1", "device": "mac mini"})),
+        ("drop", json!({"computer": "t1", "device": "mac mini"})),
+        (
+            "request_decline",
+            json!({"id": "fr-1", "device": "mac mini"}),
+        ),
     ] {
-        let reply = call_tool(&engine, directory.path(), tool, arguments).await;
-        assert_eq!(reply["result"]["isError"], true, "{tool}: {reply}");
-        let text = reply["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("devices:"), "{tool}: {text}");
-    }
-    assert!(engine.calls("guest.exec").is_empty());
-    assert!(engine.calls("checkpoints.fork").is_empty());
-}
-
-#[tokio::test]
-async fn fork_with_a_command_runs_it_on_a_listed_device() {
-    let engine = host_engine();
-    let directory = project(ALLOWED);
-    let reply = call_tool(
-        &engine,
-        directory.path(),
-        "fork",
-        json!({"name": "t1", "command": ["make", "test"], "device": "mac mini"}),
-    )
-    .await;
-    assert_ne!(reply["result"]["isError"], true, "{reply}");
-    let text = reply["result"]["content"][0]["text"].as_str().unwrap();
-    let value: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(value["forks"][0]["exitCode"], 0, "{value}");
-    assert_eq!(value["forks"][0]["stdout"], "hi\n");
-    for method in [
-        "checkpoints.fork",
-        "computers.start",
-        "guest.exec.start",
-        "guest.exec.get",
-    ] {
-        let calls = engine.calls(method);
-        assert!(!calls.is_empty(), "{method} was not sent");
+        let reply = call_tool(&engine, &directory, tool, arguments).await;
         assert!(
-            calls.iter().all(|params| params["deviceId"] == MINI),
-            "{method}: {calls:?}"
+            reply["error"].is_object() || reply["result"]["isError"] == true,
+            "{tool}: {reply}"
         );
     }
-    assert!(engine.calls("network.state").is_empty());
+    for method in [
+        "guest.exec",
+        "checkpoints.fork",
+        "changes.keep",
+        "computers.delete",
+        "changes.requests.throwAway",
+    ] {
+        assert!(engine.calls(method).is_empty(), "{method} was sent");
+    }
 }

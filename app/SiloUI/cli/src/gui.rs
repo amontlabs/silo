@@ -259,10 +259,23 @@ pub async fn fork_gui(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     // A fork starts the desktop its source has, so refuse before making one that cannot show it.
-    if args.fork.recipe_name.is_none() {
-        ensure_desktop(&engine.computer(&args.fork.source).await?)?;
+    match &args.fork.recipe_name {
+        Some(recipe_name) => {
+            let stored = ops::recipe_show(engine, recipe_name).await?;
+            if stored["recipe"]["spec"]["desktop"] == false {
+                return Err(CliError::new(format!(
+                    "The recipe {recipe_name} has desktop: false, so its computers have no desktop; remove that line to use --gui."
+                )));
+            }
+        }
+        None => ensure_desktop(&engine.computer(&args.fork.source).await?)?,
     }
-    let mut fork = ops::fork(engine, &args.fork, progress).await?;
+    // The fork starts below, after its approval mode is set, so the first boot applies it.
+    let unstarted = ForkArgs {
+        no_start: true,
+        ..args.fork.clone()
+    };
+    let mut fork = ops::fork(engine, &unstarted, progress).await?;
     let name = fork["name"].as_str().unwrap_or_default().to_owned();
     let computer = engine.computer(&name).await?;
     // Before the start, so the first boot applies the mode.

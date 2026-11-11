@@ -507,7 +507,6 @@ async fn send(
         progress,
     )
     .await?;
-    ops::start(engine, name, progress).await?;
     let fork = engine.computer(name).await?;
     let home = guest(
         engine,
