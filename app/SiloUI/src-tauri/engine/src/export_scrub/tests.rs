@@ -15,6 +15,8 @@ struct Fake {
     /// Paths that survive the removal.
     survivors: Vec<String>,
     deleted: Mutex<BTreeSet<String>>,
+    /// What the removal was given on stdin.
+    removed: Mutex<Vec<u8>>,
 }
 
 impl Fake {
@@ -85,6 +87,9 @@ impl ScrubEnv for Fake {
             panic!("an unexpected command: {script}")
         };
         self.step(format!("run {id} {kind}"))?;
+        if kind == "remove" {
+            *self.removed.lock().unwrap() = stdin.to_vec();
+        }
         let mut out = ExecOut::default();
         if kind == "survivors" {
             assert!(!stdin.is_empty());
@@ -183,11 +188,20 @@ fn a_copy_without_logins_is_made_started_stripped_and_stopped() {
 }
 
 #[test]
-fn a_computer_with_no_logins_skips_the_removal() {
-    let env = Fake::new(&[]);
-    let prepared = prepare(&env, "src", &|_| {}, &|| false).unwrap();
-    assert!(prepared.left_out.is_empty());
-    assert!(!env.called("run copy remove"));
+fn the_copy_always_loses_the_endpoint_file_of_silos_tools() {
+    for logins in [&[][..], &LOGINS[..]] {
+        let env = Fake::new(logins);
+        let prepared = prepare(&env, "src", &|_| {}, &|| false).unwrap();
+        assert_eq!(prepared.left_out.is_empty(), logins.is_empty());
+        assert!(env.called("run copy remove"));
+        let removed = String::from_utf8(env.removed.lock().unwrap().clone()).unwrap();
+        let removed: Vec<&str> = removed.split('\0').filter(|path| !path.is_empty()).collect();
+        assert!(removed.contains(&"/etc/silo/endpoint.json"), "{removed:?}");
+        assert!(removed.contains(&"/etc/silo/guest-client.json"));
+        for login in logins {
+            assert!(removed.contains(login));
+        }
+    }
 }
 
 #[test]

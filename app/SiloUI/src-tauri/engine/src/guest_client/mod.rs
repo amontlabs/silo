@@ -398,6 +398,13 @@ mod tests {
         }
     }
 
+    /// The tests that bind ports run one at a time, so none takes a port another just freed.
+    static PORTS: Mutex<()> = Mutex::new(());
+
+    fn ports() -> std::sync::MutexGuard<'static, ()> {
+        PORTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn with_fake(directory: &std::path::Path) -> (TokenStore, Arc<Fake>) {
         let fake = Arc::new(Fake::default());
         use_test_channels(Some(fake.clone()));
@@ -412,6 +419,7 @@ mod tests {
 
     #[test]
     fn a_port_is_on_the_loopback_and_a_taken_one_is_replaced() {
+        let _ports = ports();
         let (first, port) = bind(None).unwrap();
         assert_eq!(first.local_addr().unwrap().ip(), Ipv4Addr::LOCALHOST);
         assert_ne!(port, 0);
@@ -427,6 +435,7 @@ mod tests {
 
     #[test]
     fn two_enables_at_once_leave_one_record_on_the_served_port() {
+        let _ports = ports();
         let directory = tempfile::tempdir().unwrap();
         let (store, fake) = with_fake(directory.path());
         *fake.first_waits.lock().unwrap() = Some(Duration::from_millis(400));
@@ -449,6 +458,7 @@ mod tests {
 
     #[test]
     fn when_serving_fails_the_tools_stay_off_and_the_call_fails() {
+        let _ports = ports();
         let directory = tempfile::tempdir().unwrap();
         let (store, fake) = with_fake(directory.path());
         *fake.fail_serve.lock().unwrap() = true;
@@ -460,6 +470,7 @@ mod tests {
 
     #[test]
     fn turning_off_holds_the_port_and_turning_on_again_serves_it() {
+        let _ports = ports();
         let directory = tempfile::tempdir().unwrap();
         let (store, fake) = with_fake(directory.path());
         let port = turn_on_in(&store, "c").unwrap().port.unwrap();
@@ -484,6 +495,7 @@ mod tests {
 
     #[test]
     fn a_port_another_program_took_moves_and_waits_for_a_restart() {
+        let _ports = ports();
         let directory = tempfile::tempdir().unwrap();
         let (store, fake) = with_fake(directory.path());
         let (taken, port) = bind(None).unwrap();
@@ -500,6 +512,7 @@ mod tests {
 
     #[test]
     fn minting_a_token_again_ends_the_computers_sessions() {
+        let _ports = ports();
         let directory = tempfile::tempdir().unwrap();
         let (store, fake) = with_fake(directory.path());
         turn_on_in(&store, "c").unwrap();
