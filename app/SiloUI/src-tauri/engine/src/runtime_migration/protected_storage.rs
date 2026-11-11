@@ -6,7 +6,7 @@
 //! The caller holds the migration gate: no other runtime command runs, no previous Silo build
 //! can start, and the computers of this storage are Silo's own. Computers that cannot be moved
 //! are reported, never removed; the original disk files are always retained.
-use super::{copy_runtime_tree, runtime};
+use super::{copy_runtime_tree_for_backup, runtime};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -55,6 +55,10 @@ pub(super) struct Computer {
 pub(super) struct Report {
     version: u32,
     pub computers: Vec<Computer>,
+    /// The computers the backup clone covers consistently: stopped when it was taken, before
+    /// they were repaired.
+    #[serde(default)]
+    pub backed_up: Vec<String>,
 }
 
 impl Report {
@@ -79,13 +83,17 @@ pub(super) struct Options<'a> {
     /// Pass the maintenance confirmation (macOS). The bundled runtime refuses to repair
     /// without it there.
     pub confirm_maintenance: bool,
-    /// Clone the storage folder. Called once, after every computer is stopped and before the
-    /// first repair; a failure ends the upgrade with nothing repaired.
-    pub backup: &'a dyn Fn() -> Result<(), String>,
+    /// Clone the storage folder with the named computers stopped in it. Called once, after
+    /// they are stopped and before the first repair. `Err` is the reason, in words for the
+    /// owner; those computers are then not repaired.
+    pub backup: &'a dyn Fn(&[String]) -> Result<(), String>,
     pub progress: &'a dyn Fn(Step),
 }
 
 const RECOVERY: &str = "This computer's disks need a manual decision that Silo cannot make for you. Its files were kept untouched. Report this problem before using the computer.";
+const UNKNOWN_RUNNING: &str = "Silo could not tell whether this computer is running. Its files were kept untouched. Relaunch Silo to try again.";
+const NOT_STOPPED: &str = "This computer did not finish stopping. Its files were kept untouched. Relaunch Silo to try again.";
+const ARRIVED: &str = "This computer arrived with the older storage layout. Its files were kept untouched. Relaunch Silo to move it.";
 const UNSUPPORTED: &str = "This version of Silo cannot move this computer to the new storage. Its files were kept untouched. Update Silo, then relaunch it.";
 
 fn repair_supported(runner: &dyn runtime::RuntimeRunner, paths: &runtime::RuntimePaths) -> bool {
@@ -124,14 +132,14 @@ fn diagnose(
     let item = value
         .pointer("/sandboxes/0")
         .ok_or("The storage report has no entry for this computer.")?;
-    let running = item
-        .get("running")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
     Ok(match item.get("status").and_then(serde_json::Value::as_str) {
         Some("ready") => Diagnosis::Ready,
         Some("eligible" | "maintenance_required" | "in_progress") => {
-            Diagnosis::Repairable { running }
+            // Not knowing whether the computer runs is not the same as it being stopped.
+            match item.get("running").and_then(serde_json::Value::as_bool) {
+                Some(running) => Diagnosis::Repairable { running },
+                None => Diagnosis::Blocked(UNKNOWN_RUNNING.into()),
+            }
         }
         Some("recovery_required") => Diagnosis::Blocked(RECOVERY.into()),
         _ => Diagnosis::Blocked(
@@ -204,8 +212,15 @@ fn repair(
     Ok(())
 }
 
-/// Upgrade every named computer. `Err` means nothing was repaired and the owner should retry;
-/// per-computer problems are in the report.
+fn backup_failed(reason: &str) -> String {
+    format!(
+        "Silo could not back up your computers before upgrading their storage: {}. Nothing was changed. Free some disk space if it is low, then relaunch Silo.",
+        reason.trim_end_matches('.')
+    )
+}
+
+/// Upgrade every named computer. Per-computer problems, including a backup that could not be
+/// made, are in the report; `Err` is reserved for a failure of the step itself.
 pub(super) fn upgrade(
     runner: &dyn runtime::RuntimeRunner,
     paths: &runtime::RuntimePaths,
@@ -239,9 +254,7 @@ pub(super) fn upgrade(
             match diagnose(runner, paths, name) {
                 Ok(Diagnosis::Repairable { running: false }) => {}
                 Ok(_) | Err(_) => {
-                    outcomes[index] = Some(Outcome::NeedsAttention(
-                        "This computer did not finish stopping. Its files were kept untouched. Relaunch Silo to try again.".into(),
-                    ));
+                    outcomes[index] = Some(Outcome::NeedsAttention(NOT_STOPPED.into()));
                     continue;
                 }
             }
@@ -253,9 +266,19 @@ pub(super) fn upgrade(
             outcomes[index] = Some(Outcome::NeedsAttention(UNSUPPORTED.into()));
         }
     }
+    let mut backed_up = Vec::new();
     if !repairable.is_empty() {
         (options.progress)(Step::BackingUp);
-        (options.backup)()?;
+        let covered: Vec<String> = repairable.iter().map(|&index| names[index].clone()).collect();
+        match (options.backup)(&covered) {
+            Ok(()) => backed_up = covered,
+            // Only the computers that still need the move wait; the others are not affected.
+            Err(reason) => {
+                for index in repairable.drain(..) {
+                    outcomes[index] = Some(Outcome::NeedsAttention(backup_failed(&reason)));
+                }
+            }
+        }
     }
     for (position, index) in repairable.iter().copied().enumerate() {
         (options.progress)(Step::Repairing {
@@ -263,6 +286,22 @@ pub(super) fn upgrade(
             total: repairable.len(),
         });
         let name = &names[index];
+        // Stopped now, not only when it was cloned: nothing may write the disks past the copy.
+        match diagnose(runner, paths, name) {
+            Ok(Diagnosis::Repairable { running: false }) => {}
+            Ok(Diagnosis::Ready) => {
+                outcomes[index] = Some(Outcome::AlreadyReady);
+                continue;
+            }
+            Ok(Diagnosis::Repairable { running: true }) => {
+                outcomes[index] = Some(Outcome::NeedsAttention(NOT_STOPPED.into()));
+                continue;
+            }
+            Ok(Diagnosis::Blocked(message)) | Err(message) => {
+                outcomes[index] = Some(Outcome::NeedsAttention(message));
+                continue;
+            }
+        }
         let outcome = repair(runner, paths, name, options.confirm_maintenance)
             .and_then(|()| match diagnose(runner, paths, name) {
                 Ok(Diagnosis::Ready) => Ok(()),
@@ -273,6 +312,7 @@ pub(super) fn upgrade(
     }
     Ok(Report {
         version: VERSION,
+        backed_up,
         computers: names
             .iter()
             .zip(outcomes)
@@ -284,26 +324,47 @@ pub(super) fn upgrade(
     })
 }
 
-/// Clone `storage` to `<app_data>/BACKUP` unless an earlier run already finished it. The copy is
-/// built beside its final name and renamed into place, so a crash never leaves a partial backup
-/// that a later run would trust. Restoring is a rename of the folders: the clone's files still
-/// name the original location, so it only works in place of the original.
-pub(super) fn clone_backup(app_data: &Path, storage: &Path) -> Result<(), String> {
+/// Which computers a finished backup covers: the ones that were stopped in it.
+const COVERS: &str = "silo-backup-covers.json";
+
+fn covers_all(backup: &Path, covered: &[String]) -> bool {
+    fs::read(backup.join(COVERS))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
+        .is_some_and(|have| covered.iter().all(|name| have.contains(name)))
+}
+
+/// Clone `storage` to `<app_data>/BACKUP`, with `covered` stopped in it, unless an earlier run
+/// already made a backup covering all of them. One that does not (those computers were
+/// running, blocked or failed then) is replaced, so every computer repaired has a copy taken
+/// while it was stopped and before its repair; the computers an earlier launch repaired keep
+/// their untouched original files on disk. The copy is built beside its final name and
+/// renamed into place, so a crash never leaves a partial backup that a later run would trust.
+/// Restoring is a rename of the folders: the clone's files still name the original location,
+/// so it only works in place of the original.
+pub(super) fn clone_backup(
+    app_data: &Path,
+    storage: &Path,
+    covered: &[String],
+) -> Result<(), String> {
     let backup = app_data.join(BACKUP);
-    if fs::symlink_metadata(&backup).is_ok() {
+    if covers_all(&backup, covered) {
         return Ok(());
     }
     let partial = app_data.join(format!("{BACKUP}.partial"));
     if fs::symlink_metadata(&partial).is_ok() {
         fs::remove_dir_all(&partial)
-            .map_err(|_| "An unfinished backup could not be cleared.".to_string())?;
+            .map_err(|_| "an unfinished backup could not be cleared".to_string())?;
     }
-    copy_runtime_tree(storage, &partial, &[])?;
-    fs::rename(&partial, &backup)
-        .and_then(|()| fs::File::open(app_data).and_then(|directory| directory.sync_all()))
-        .map_err(|_| "The backup could not be completed.".to_string())?;
-    crate::pre_upgrade_backup::restart_window(app_data);
-    Ok(())
+    let made = copy_runtime_tree_for_backup(storage, &partial).and_then(|()| {
+        let covers = serde_json::to_vec(covered).map_err(|_| "the backup could not be recorded")?;
+        fs::write(partial.join(COVERS), covers).map_err(|_| "the backup could not be recorded".to_string())
+    });
+    if let Err(reason) = made {
+        let _ = fs::remove_dir_all(&partial);
+        return Err(reason.trim_end_matches('.').trim_start_matches("Runtime copy ").to_owned());
+    }
+    crate::pre_upgrade_backup::install_clone(app_data, &partial, &backup)
 }
 
 pub(super) fn write_report(storage: &Path, report: &Report) -> Result<(), String> {
@@ -371,6 +432,39 @@ pub(super) fn release(app_data: &Path) {
 
 pub(super) fn set_attention(storage: &Path, attention: BTreeMap<String, String>) {
     with_gate(|gate| gate.attention.insert(storage.to_path_buf(), attention));
+}
+
+/// A computer that arrived after the step finished (an imported export, for one) is checked
+/// at once. Unless its storage is ready it cannot start, says why, and is recorded so the next
+/// launch moves it with the step.
+pub(super) fn check_arrival(
+    runner: &dyn runtime::RuntimeRunner,
+    paths: &runtime::RuntimePaths,
+    name: &str,
+) {
+    let message = match diagnose(runner, paths, name) {
+        Ok(Diagnosis::Ready) => return,
+        Ok(Diagnosis::Repairable { .. }) => ARRIVED.to_owned(),
+        Ok(Diagnosis::Blocked(message)) | Err(message) => message,
+    };
+    let Some(storage) = paths.metadata.parent() else { return };
+    with_gate(|gate| {
+        gate.attention
+            .entry(storage.to_path_buf())
+            .or_default()
+            .insert(name.to_owned(), message.clone())
+    });
+    let mut report = match read_report(storage) {
+        Ok(Some(report)) => report,
+        Ok(None) => Report { version: VERSION, ..Report::default() },
+        Err(_) => return,
+    };
+    report.computers.retain(|computer| computer.name != name);
+    report.computers.push(Computer {
+        name: name.to_owned(),
+        outcome: Outcome::NeedsAttention(message),
+    });
+    let _ = write_report(storage, &report);
 }
 
 /// Why this computer cannot start or be used until a later launch finishes moving its storage.

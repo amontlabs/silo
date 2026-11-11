@@ -3139,6 +3139,7 @@ fn commit_import(
     if let Err(error) = store_fork_record(controller, id, record) {
         return discard(error);
     }
+    let name = configuration.name().to_owned();
     save_import_metadata(
         original,
         configuration,
@@ -3153,7 +3154,14 @@ fn commit_import(
             let _ = recovery::discard_uncommitted_import(paths, controller, id, Some(group));
         }
         error
-    })
+    })?;
+    // An export from an older Silo can bring a computer in the layout the move exists for.
+    crate::runtime_migration::check_protected_storage_of_arrival(
+        &runtime::ProcessRunner,
+        paths,
+        &name,
+    );
+    Ok(())
 }
 
 /// Stores the fork-time record an archive carried as the record of the imported computer `id`.

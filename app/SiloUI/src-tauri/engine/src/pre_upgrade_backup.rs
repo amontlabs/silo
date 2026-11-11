@@ -261,11 +261,30 @@ fn backup_folders(app_data: &Path, found: PathBuf) -> Vec<PathBuf> {
     folders
 }
 
-/// Starts the 14 days again. A new clone is a new backup: it must not be deleted on the window
-/// of an older one.
-pub(crate) fn restart_window(app_data: &Path) {
+/// Puts a finished protected-storage clone in place of any earlier one and starts the 14 days
+/// again: a new clone is a new backup and must not be deleted on the window of an older one.
+/// The whole swap holds the deletion lock, so a check that comes due cannot delete the fresh
+/// clone between the rename and the new window.
+pub(crate) fn install_clone(app_data: &Path, partial: &Path, backup: &Path) -> Result<(), String> {
+    let _deletion = lock(&DELETION);
+    match fs::symlink_metadata(backup) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(backup)
+            .map_err(|_| "the earlier backup could not be replaced".to_string())?,
+        Ok(_) => return Err("something else is in the backup's place".into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => return Err("the backup's place could not be read".into()),
+    }
+    fs::rename(partial, backup)
+        .and_then(|()| fs::File::open(app_data).and_then(|directory| directory.sync_all()))
+        .map_err(|_| "the backup could not be completed".to_string())?;
     let _held = lock(&RECORD);
     forget(app_data);
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn hold_deletion_for_test() -> MutexGuard<'static, ()> {
+    lock(&DELETION)
 }
 
 /// The start of the window for a backup that is present, recording it now when this is the

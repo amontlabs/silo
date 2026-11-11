@@ -147,6 +147,9 @@ pub fn drive_pending(
     .unwrap_or_else(|_| Err("Migration stopped unexpectedly. Retry the migration.".into()));
     match outcome {
         Ok(()) => {
+            // The engine restarts into the converted generation, whose launch moves the
+            // computers to protected storage. Until then they are closed, not startable.
+            controller.hold_for_protected_storage();
             publish_state(context, controller);
             Ok(LaunchDrive::Converted)
         }
@@ -260,7 +263,7 @@ impl Controller {
             &runtime::read_metadata(&storage.join("computers.json"))
                 .map_err(|_| "Silo's saved computer configuration is invalid.".to_string())?,
         );
-        let backup = || protected_storage::clone_backup(&self.app_data, &storage);
+        let backup = |covered: &[String]| protected_storage::clone_backup(&self.app_data, &storage, covered);
         let progress = |step: protected_storage::Step| {
             protected_storage::hold(&self.app_data, &protected_storage::stage_text(&step));
             changed();
@@ -475,9 +478,19 @@ pub(crate) use protected_storage::BACKUP as PROTECTED_STORAGE_BACKUP;
 /// Why this computer cannot be used until a later launch finishes moving its storage.
 pub use protected_storage::attention_message as protected_storage_attention;
 
+/// Checks the storage of a computer that was brought in after the move (an import) and flags
+/// it when it is not ready; see `protected_storage::check_arrival`.
+pub fn check_protected_storage_of_arrival(
+    runner: &dyn runtime::RuntimeRunner,
+    paths: &runtime::RuntimePaths,
+    name: &str,
+) {
+    protected_storage::check_arrival(runner, paths, name);
+}
+
 #[cfg(test)]
 pub(crate) fn clone_protected_storage_backup_for_test(app_data: &Path, storage: &Path) {
-    protected_storage::clone_backup(app_data, storage).unwrap();
+    protected_storage::clone_backup(app_data, storage, &[]).unwrap();
 }
 
 #[cfg(test)]
@@ -681,6 +694,21 @@ fn copy_runtime_tree(
     destination: &Path,
     excluded: &[PathBuf],
 ) -> Result<(), String> {
+    copy_tree(source, destination, excluded, false)
+}
+
+/// Like [`copy_runtime_tree`] for a backup: an absolute symlink is recreated as it is (never
+/// followed), where a migrated generation must not carry one.
+fn copy_runtime_tree_for_backup(source: &Path, destination: &Path) -> Result<(), String> {
+    copy_tree(source, destination, &[], true)
+}
+
+fn copy_tree(
+    source: &Path,
+    destination: &Path,
+    excluded: &[PathBuf],
+    keep_absolute_links: bool,
+) -> Result<(), String> {
     if destination.exists() {
         return Err("The staged runtime already exists.".into());
     }
@@ -705,14 +733,19 @@ fn copy_runtime_tree(
             } else if metadata.is_file() && excluded.contains(&path) {
                 continue;
             } else if metadata.is_file() {
-                microsandbox_utils::copy::fast_copy(&path, &target)
-                    .map_err(|_| "Runtime copy could not copy a file.")?;
+                microsandbox_utils::copy::fast_copy(&path, &target).map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::StorageFull {
+                        "there is not enough free disk space"
+                    } else {
+                        "Runtime copy could not copy a file."
+                    }
+                })?;
                 fs::set_permissions(&target, metadata.permissions())
                     .map_err(|_| "Runtime copy could not preserve file permissions.")?;
             } else if metadata.file_type().is_symlink() {
                 let link = fs::read_link(&path)
                     .map_err(|_| "Runtime copy could not inspect a symlink.")?;
-                if link.is_absolute() {
+                if link.is_absolute() && !keep_absolute_links {
                     return Err("Runtime copy found an absolute symlink; migration stopped before changing data.".into());
                 }
                 #[cfg(unix)]

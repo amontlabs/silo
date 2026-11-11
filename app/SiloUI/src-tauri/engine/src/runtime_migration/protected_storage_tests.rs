@@ -13,6 +13,10 @@ use std::{
 struct Fake {
     status: &'static str,
     running: bool,
+    /// `doctor` leaves out `running`, or prints it as a string.
+    running_field: RunningField,
+    /// After this many `doctor` calls the computer is running again (something started it).
+    starts_after_doctors: Option<usize>,
     /// `repair` fails with this exit code instead of repairing.
     repair_exit: Option<i32>,
     /// `repair` reports success but leaves the status unchanged.
@@ -21,10 +25,19 @@ struct Fake {
     stays_running: bool,
 }
 
+#[derive(Clone, Copy)]
+enum RunningField {
+    Bool,
+    Missing,
+    NotBoolean,
+}
+
 fn computer(status: &'static str, running: bool) -> Fake {
     Fake {
         status,
         running,
+        running_field: RunningField::Bool,
+        starts_after_doctors: None,
         repair_exit: None,
         repair_is_a_no_op: false,
         stays_running: false,
@@ -93,9 +106,23 @@ impl runtime::RuntimeRunner for Runtime {
                 .map(|text| output(text.into()))
                 .ok_or_else(|| failed(2)),
             "doctor" => {
-                let fake = &computers[&args[2]];
-                let report = serde_json::json!({"sandboxes":[{"name":args[2],"status":fake.status,"running":fake.running}]})
-                    .to_string();
+                let fake = computers.get_mut(&args[2]).unwrap();
+                if let Some(left) = fake.starts_after_doctors.as_mut() {
+                    if *left == 0 {
+                        fake.running = true;
+                    } else {
+                        *left -= 1;
+                    }
+                }
+                let mut item = serde_json::json!({"name":args[2],"status":fake.status,"running":fake.running});
+                match fake.running_field {
+                    RunningField::Bool => {}
+                    RunningField::Missing => {
+                        item.as_object_mut().unwrap().remove("running");
+                    }
+                    RunningField::NotBoolean => item["running"] = "false".into(),
+                }
+                let report = serde_json::json!({"sandboxes":[item]}).to_string();
                 // The real `doctor` prints the report and exits non-zero unless ready.
                 match fake.status {
                     "ready" => Ok(output(report)),
@@ -150,7 +177,7 @@ fn run(
     confirm_maintenance: bool,
     backup: Result<(), &'static str>,
 ) -> Result<Report, String> {
-    let record = || {
+    let record = |_: &[String]| {
         fake.calls.borrow_mut().push("<backup>".into());
         backup.map_err(String::from)
     };
@@ -277,11 +304,67 @@ fn a_repair_whose_result_cannot_be_verified_does_not_count() {
 }
 
 #[test]
-fn a_failed_backup_ends_the_upgrade_before_any_repair() {
-    let fake = Runtime::new(&[("a", computer("eligible", false))]);
-    let error = run(&fake, &["a"], true, Err("no space")).unwrap_err();
-    assert_eq!(error, "no space");
+fn a_failed_backup_blocks_only_the_computers_that_needed_repair_and_says_why() {
+    let fake = Runtime::new(&[
+        ("a", computer("eligible", false)),
+        ("ok", computer("ready", false)),
+    ]);
+    let report = run(&fake, &["a", "ok"], true, Err("there is not enough free disk space")).unwrap();
+    assert_eq!(outcome(&report, "ok"), &Outcome::AlreadyReady);
+    let Outcome::NeedsAttention(message) = outcome(&report, "a") else { panic!() };
+    assert!(message.contains("not enough free disk space"), "{message}");
+    assert!(!message.starts_with("Relaunch"), "{message}");
+    assert!(report.backed_up.is_empty());
     assert!(!fake.calls().iter().any(|call| call.starts_with("self repair")));
+}
+
+#[test]
+fn a_missing_or_unreadable_running_flag_is_never_taken_for_stopped() {
+    for field in [RunningField::Missing, RunningField::NotBoolean] {
+        let mut unsure = computer("maintenance_required", false);
+        unsure.running_field = field;
+        let fake = Runtime::new(&[("unsure", unsure), ("b", computer("eligible", false))]);
+        let report = run(&fake, &["unsure", "b"], true, Ok(())).unwrap();
+        let Outcome::NeedsAttention(message) = outcome(&report, "unsure") else { panic!() };
+        assert!(message.contains("whether this computer is running"), "{message}");
+        assert_eq!(outcome(&report, "b"), &Outcome::Repaired);
+        assert!(!fake.calls().iter().any(|call| call.contains("repair --sandbox unsure")));
+    }
+}
+
+#[test]
+fn a_computer_that_runs_again_before_its_repair_is_not_repaired() {
+    let mut restarted = computer("eligible", false);
+    // Inspect, then the check right before the repair.
+    restarted.starts_after_doctors = Some(1);
+    let fake = Runtime::new(&[("late", restarted), ("b", computer("eligible", false))]);
+    let report = run(&fake, &["late", "b"], true, Ok(())).unwrap();
+    assert!(matches!(outcome(&report, "late"), Outcome::NeedsAttention(_)));
+    assert_eq!(outcome(&report, "b"), &Outcome::Repaired);
+    assert!(!fake.calls().iter().any(|call| call.contains("repair --sandbox late")));
+}
+
+#[test]
+fn the_report_records_which_computers_the_backup_covers() {
+    let fake = Runtime::new(&[
+        ("a", computer("eligible", false)),
+        ("stuck", computer("recovery_required", false)),
+        ("ok", computer("ready", false)),
+    ]);
+    let seen = RefCell::new(Vec::new());
+    let backup = |covered: &[String]| {
+        seen.borrow_mut().extend(covered.iter().cloned());
+        Ok(())
+    };
+    let report = upgrade(
+        &fake,
+        &paths(),
+        &names(&["a", "stuck", "ok"]),
+        &Options { confirm_maintenance: true, backup: &backup, progress: &|_| {} },
+    )
+    .unwrap();
+    assert_eq!(report.backed_up, ["a"]);
+    assert_eq!(*seen.borrow(), ["a"]);
 }
 
 fn storage_with_a_disk(directory: &Path) -> PathBuf {
@@ -296,15 +379,16 @@ fn storage_with_a_disk(directory: &Path) -> PathBuf {
 fn the_backup_is_a_complete_clone_made_once() {
     let directory = tempfile::tempdir().unwrap();
     let storage = storage_with_a_disk(directory.path());
-    clone_backup(directory.path(), &storage).unwrap();
+    let covered = names(&["dev"]);
+    clone_backup(directory.path(), &storage, &covered).unwrap();
     let backup = directory.path().join(BACKUP);
     assert_eq!(
         fs::read(backup.join("microsandbox/sandboxes/dev/upper.ext4")).unwrap(),
         b"disk"
     );
-    // A later run never replaces a finished backup with the storage as it is then.
+    // A later run never replaces a finished backup that covers the same computers.
     fs::write(storage.join("microsandbox/sandboxes/dev/upper.ext4"), b"changed").unwrap();
-    clone_backup(directory.path(), &storage).unwrap();
+    clone_backup(directory.path(), &storage, &covered).unwrap();
     assert_eq!(
         fs::read(backup.join("microsandbox/sandboxes/dev/upper.ext4")).unwrap(),
         b"disk"
@@ -318,10 +402,65 @@ fn an_unfinished_backup_is_discarded_not_trusted() {
     let partial = directory.path().join(format!("{BACKUP}.partial"));
     fs::create_dir_all(&partial).unwrap();
     fs::write(partial.join("half"), b"x").unwrap();
-    clone_backup(directory.path(), &storage).unwrap();
+    clone_backup(directory.path(), &storage, &names(&["dev"])).unwrap();
     assert!(!partial.exists());
     assert!(directory.path().join(BACKUP).join("computers.json").is_file());
     assert!(!directory.path().join(BACKUP).join("half").exists());
+}
+
+#[test]
+fn a_backup_that_misses_a_computer_is_replaced_by_one_taken_while_it_is_stopped() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = storage_with_a_disk(directory.path());
+    let disk = "microsandbox/sandboxes/dev/upper.ext4";
+    clone_backup(directory.path(), &storage, &names(&["dev"])).unwrap();
+    fs::write(storage.join(disk), b"stopped later").unwrap();
+    // "late" was running when the first backup was taken, so that backup cannot serve it.
+    clone_backup(directory.path(), &storage, &names(&["dev", "late"])).unwrap();
+    let backup = directory.path().join(BACKUP);
+    assert_eq!(fs::read(backup.join(disk)).unwrap(), b"stopped later");
+    clone_backup(directory.path(), &storage, &names(&["late"])).unwrap();
+    assert_eq!(fs::read(backup.join(disk)).unwrap(), b"stopped later");
+    assert!(!directory.path().join(format!("{BACKUP}.partial")).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_backup_keeps_absolute_links_as_they_are_and_names_a_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = storage_with_a_disk(directory.path());
+    std::os::unix::fs::symlink("/nonexistent", storage.join("absolute")).unwrap();
+    clone_backup(directory.path(), &storage, &names(&["dev"])).unwrap();
+    let link = directory.path().join(BACKUP).join("absolute");
+    assert_eq!(fs::read_link(link).unwrap(), Path::new("/nonexistent"));
+
+    let other = tempfile::tempdir().unwrap();
+    let storage = storage_with_a_disk(other.path());
+    assert!(std::process::Command::new("mkfifo").arg(storage.join("pipe")).status().unwrap().success());
+    let error = clone_backup(other.path(), &storage, &names(&["dev"])).unwrap_err();
+    assert!(error.contains("unsupported filesystem entry"), "{error}");
+    assert!(!other.path().join(BACKUP).exists());
+    assert!(!other.path().join(format!("{BACKUP}.partial")).exists());
+}
+
+#[test]
+fn a_fresh_backup_is_not_deleted_by_a_check_that_came_due_before_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = storage_with_a_disk(directory.path());
+    clone_backup(directory.path(), &storage, &names(&["dev"])).unwrap();
+    let backup = directory.path().join(BACKUP);
+    // Hold the deletion lock as a due check does: the swap waits for it instead of racing it.
+    let swapped = std::thread::scope(|scope| {
+        let guard = crate::pre_upgrade_backup::hold_deletion_for_test();
+        let handle = scope.spawn(|| clone_backup(directory.path(), &storage, &names(&["dev", "x"])));
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(!handle.is_finished(), "the swap waits for the deletion lock");
+        assert_eq!(fs::read(backup.join("computers.json")).unwrap(), b"{}");
+        drop(guard);
+        handle.join().unwrap()
+    });
+    swapped.unwrap();
+    assert!(backup.join("computers.json").is_file());
 }
 
 #[test]
@@ -453,21 +592,72 @@ fn a_computer_that_cannot_be_moved_is_refused_with_its_reason_and_retried_at_the
 #[test]
 fn a_failed_backup_repairs_nothing_and_every_pending_computer_says_so() {
     let dir = launched(&["drv-x"]);
-    // A link the clone refuses to copy.
+    // An entry the clone refuses to copy.
     #[cfg(unix)]
-    std::os::unix::fs::symlink("/nonexistent", dir.path().join(CONVERTED).join("absolute")).unwrap();
+    assert!(std::process::Command::new("mkfifo").arg(dir.path().join(CONVERTED).join("pipe")).status().unwrap().success());
     let controller = Controller::new(dir.path().to_path_buf());
     assert!(controller.hold_for_protected_storage());
     let fake = Runtime::new(&[("drv-x", computer("maintenance_required", false))]);
-    let error = controller
-        .run_protected_storage(&fake, &paths(), &|| {})
-        .unwrap_err();
-    assert!(error.contains("Relaunch Silo"), "{error}");
+    controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
     assert!(!fake.calls().iter().any(|call| call.starts_with("self repair")));
-    assert!(attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-x").unwrap().contains("Relaunch Silo"));
+    let message = attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-x").unwrap();
+    assert!(message.contains("could not back up") && message.contains("unsupported filesystem entry"), "{message}");
     assert!(!controller.blocks_operations());
     assert!(!dir.path().join(BACKUP).exists());
-    assert!(!dir.path().join(CONVERTED).join(MARKER).exists());
+    let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
+    assert!(!report.complete(), "retried at the next launch");
+}
+
+#[test]
+fn a_computer_that_arrives_after_the_move_is_checked_and_flagged_until_it_is_ready() {
+    let dir = launched(&["drv-a"]);
+    let metadata = dir.path().join(CONVERTED).join("computers.json");
+    let controller = Controller::new(dir.path().to_path_buf());
+    assert!(controller.hold_for_protected_storage());
+    let fake = Runtime::new(&[("drv-a", computer("ready", false))]);
+    controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
+    assert!(read_report(&dir.path().join(CONVERTED)).unwrap().unwrap().complete());
+
+    let arrival_paths = runtime::RuntimePaths { metadata: metadata.clone(), ..paths() };
+    let fake = Runtime::new(&[
+        ("new-ready", computer("ready", false)),
+        ("new-old", computer("maintenance_required", false)),
+        ("new-odd", computer("recovery_required", false)),
+    ]);
+    check_arrival(&fake, &arrival_paths, "new-ready");
+    assert_eq!(attention_message(&metadata, "new-ready"), None);
+    assert!(read_report(&dir.path().join(CONVERTED)).unwrap().unwrap().complete());
+
+    check_arrival(&fake, &arrival_paths, "new-old");
+    check_arrival(&fake, &arrival_paths, "new-odd");
+    assert!(attention_message(&metadata, "new-old").unwrap().contains("Relaunch Silo"));
+    assert!(attention_message(&metadata, "new-odd").unwrap().contains("manual decision"));
+    assert_eq!(attention_message(&metadata, "drv-a"), None);
+    assert!(!fake.calls().iter().any(|call| call.starts_with("self repair")));
+    let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
+    assert!(!report.complete(), "the next launch runs the step again");
+    assert_eq!(outcome(&report, "drv-a"), &Outcome::AlreadyReady);
+}
+
+#[test]
+fn a_conversion_that_finishes_closes_the_computers_until_the_move_has_run() {
+    use crate::runtime_migration::{drive_pending, LaunchDrive};
+    let dir = launched(&["drv-a"]);
+    let controller = Controller {
+        app_data: dir.path().to_path_buf(),
+        path: dir.path().join(FILE),
+        state: std::sync::Mutex::new(fresh("scanning", 1)),
+        writable: true,
+    };
+    let context = crate::context::test_support::RecordingContext::default();
+    let result = drive_pending(&context, &controller, |_| {
+        controller.state.lock().unwrap().status = "complete".into();
+        Ok(())
+    });
+    assert_eq!(result, Ok(LaunchDrive::Converted));
+    assert_eq!(controller.snapshot().unwrap().status, "running");
+    assert!(controller.blocks_operations());
+    controller.release_protected_storage();
 }
 
 #[test]
