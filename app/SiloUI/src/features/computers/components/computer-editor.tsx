@@ -25,6 +25,8 @@ import { useComputerUseBridge } from "@/desktop/computer-use-bridge"
 import { AgentChoiceField } from "@/features/agents/components/agent-choice-field"
 import { planAgentInstall, useAgentInstallSupport, useRememberedAgentChoice } from "@/features/agents/model/planned-installs"
 import type { AgentChoice } from "@/features/agents/model/agents"
+import { NetworkModeField } from "@/features/network-policy/components/network-mode-field"
+import { planNetworkMode, useNetworkPolicySupport, type NetworkChoice } from "@/features/network-policy/model/planned-network"
 import type { ComputerEditorDraft } from "@/features/onboarding/model/onboarding-draft"
 import { computerFieldLabel, type ComputerReview } from "@/features/computers/model/computer-review"
 import { parseWholeNumber, presetsWithin, resourceFields, resourceMaximums, runtimeLimits, validateComputerResources, type DeviceCapacity } from "@/features/computers/model/computer-limits"
@@ -164,6 +166,8 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
   const rememberedAgent = useRememberedAgentChoice()
   const [agentChoice, setAgentChoice] = useState<AgentChoice | null>(null)
   const chosenAgent = agentChoice ?? rememberedAgent
+  const offersNetwork = useNetworkPolicySupport() && !editor.originalID && !deviceId
+  const [networkChoice, setNetworkChoice] = useState<NetworkChoice>("default")
   // Every Linux computer on a build with computer use gets the built-in desktop.
   const newVmSupport = computerUse ? "yes" : "no"
   const builtInNewVm = !created && newVmSupport === "yes"
@@ -240,6 +244,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
     else if (requiresStop && !stopConfirmed) setConfirmingStop(true)
     else {
       if (offersAgent) planAgentInstall(draft.name, chosenAgent)
+      if (offersNetwork) planNetworkMode(draft.name, networkChoice)
       onSave(draft)
     }
   }
@@ -320,6 +325,8 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
       </div>
 
       {offersAgent && <AgentChoiceField value={chosenAgent} onChange={setAgentChoice} />}
+
+      {offersNetwork && <NetworkModeField value={networkChoice} onChange={setNetworkChoice} />}
 
       {builtIn && <section aria-label="Linux desktop" className="grid gap-2 border-t border-border pt-3">
         <label className="flex items-center justify-between gap-3 text-xs">
