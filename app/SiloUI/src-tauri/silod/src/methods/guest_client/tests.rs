@@ -86,3 +86,72 @@ async fn a_promote_or_undo_turns_the_tools_off_through_one_helper() {
     .unwrap();
     assert_eq!(status["enabled"], false);
 }
+
+#[tokio::test]
+async fn turning_the_tools_off_owes_the_removal_of_the_registration_until_it_is_done() {
+    let _held = TOKENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let app_data = request_context().silod_context().paths().app_data.clone();
+    store().enable(COMPUTER, 45125).unwrap();
+    call(
+        MethodName::GuestClientRevoke,
+        json!({"computerId": COMPUTER}),
+    )
+    .await
+    .unwrap();
+    // The computer in the test engine is not running, so the removal waits for its next start.
+    assert!(silo_engine::guest_components::owed_removals(&app_data).contains(&COMPUTER.to_owned()));
+    // A computer that never had the tools owes nothing.
+    call(
+        MethodName::GuestClientRevoke,
+        json!({"computerId": "never-had-the-tools"}),
+    )
+    .await
+    .unwrap();
+    assert!(!silo_engine::guest_components::owed_removals(&app_data)
+        .contains(&"never-had-the-tools".to_owned()));
+    silo_engine::guest_components::forget(&app_data.join("guest-client"), COMPUTER);
+}
+
+#[tokio::test]
+async fn the_status_lists_what_silo_keeps_in_the_computer_and_names_a_program_it_cannot_provide() {
+    let _held = TOKENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    store().enable(COMPUTER, 45126).unwrap();
+    let status = call(
+        MethodName::GuestClientStatus,
+        json!({"computerId": COMPUTER}),
+    )
+    .await
+    .unwrap();
+    let components = status["components"].as_array().unwrap();
+    // The test engine ships no program, so the status says the build cannot give one.
+    let silo = components.iter().find(|c| c["id"] == "silo").unwrap();
+    assert_eq!(silo["state"], "unavailable");
+    assert!(silo["detail"].as_str().unwrap().contains("Linux"));
+    store().revoke(&[COMPUTER]).unwrap();
+}
+
+#[tokio::test]
+async fn a_program_to_send_is_read_before_anything_is_opened() {
+    let _held = TOKENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let error = call(
+        MethodName::GuestClientEnable,
+        json!({"computerId": COMPUTER, "binaryPath": "/no/such/silo"}),
+    )
+    .await
+    .unwrap_err();
+    // Either the computer is not running or the file is missing; in both cases nothing is opened.
+    assert!(
+        error.message.contains("could not be read")
+            || error.message.contains("Start the computer first")
+            || error.message.contains("not found"),
+        "{}",
+        error.message
+    );
+    assert!(store().status(COMPUTER).unwrap().is_none());
+}

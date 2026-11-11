@@ -116,6 +116,15 @@ fn script(agent: AgentId, plan: &Plan) -> String {
 /// helper tries again at the next login.
 const REGISTER_COMMAND: &str = "REGISTER=\"$HOME/Library/Application Support/Silo/silo-cua-register.py\"; if [ -f \"$REGISTER\" ]; then /usr/bin/python3 \"$REGISTER\" reconcile >/dev/null 2>&1 || true; fi";
 
+/// Computer use's registration, then Silo's own MCP server's (a computer without the tools has
+/// neither the program nor the endpoint file, and the second does nothing).
+fn register_command() -> String {
+    format!(
+        "{REGISTER_COMMAND}\n{}",
+        crate::guest_components::register_after_install_command(crate::guest_components::run::Kind::Macos)
+    )
+}
+
 /// Prints the receipt of each agent on its own line: Claude Code, then Codex.
 const READ_RECEIPTS: &str = "for a in claude-code codex; do /bin/cat \"/Library/Application Support/Silo/agents/$a.json\" 2>/dev/null | /usr/bin/tr -d '\\n'; echo; done";
 
@@ -298,7 +307,7 @@ pub(super) fn install(
     let _ = guest_access::run_cancellable(
         &layout,
         &record,
-        REGISTER_COMMAND,
+        &register_command(),
         Duration::from_secs(120),
         &cancelled,
     );
@@ -472,5 +481,14 @@ mod tests {
         assert!(REGISTER_COMMAND.contains("if [ -f \"$REGISTER\" ]"));
         assert!(REGISTER_COMMAND.contains(" reconcile "));
         assert!(REGISTER_COMMAND.ends_with("fi"));
+    }
+
+    #[test]
+    fn silos_own_server_is_registered_beside_computer_use_after_an_install() {
+        let command = register_command();
+        let computer_use = command.find(" reconcile ").unwrap();
+        let silo = command.find("server-add --name silo").unwrap();
+        assert!(computer_use < silo);
+        assert!(command.contains("[ -f /etc/silo/endpoint.json ]"));
     }
 }

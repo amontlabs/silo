@@ -6844,9 +6844,34 @@
       ],
       "type": "object"
     },
+    "GuestClientEnableParams": {
+      "properties": {
+        "binaryPath": {
+          "description": "A `silo` program for Linux on this device to send into the computer instead of the one\nthis build ships (for development). It is checked inside the computer by its SHA-256\nlike the shipped one, and replaced by the shipped one at the computer's next start.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "computerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
     "GuestClientStatus": {
       "description": "Whether a computer has Silo's tools, and where they answer.",
       "properties": {
+        "components": {
+          "description": "What Silo keeps in the computer and how each piece fared at its last reconcile.",
+          "items": {
+            "$ref": "#/$defs/GuestComponentStatus"
+          },
+          "type": "array"
+        },
         "computerId": {
           "type": "string"
         },
@@ -6904,6 +6929,73 @@
       "required": [
         "computerId",
         "enabled"
+      ],
+      "type": "object"
+    },
+    "GuestComponentState": {
+      "description": "How one piece Silo keeps in a computer ended its last reconcile.",
+      "oneOf": [
+        {
+          "const": "ok",
+          "description": "In place and current.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "The step failed; the detail says why.",
+          "type": "string"
+        },
+        {
+          "const": "unavailable",
+          "description": "This build of Silo cannot provide the piece.",
+          "type": "string"
+        },
+        {
+          "const": "waiting",
+          "description": "Waiting for something else, such as an agent that is not installed yet.",
+          "type": "string"
+        },
+        {
+          "const": "removed",
+          "description": "Taken out on purpose because the tools were turned off.",
+          "type": "string"
+        }
+      ]
+    },
+    "GuestComponentStatus": {
+      "description": "A piece Silo puts into a computer and keeps current, with the result of its last reconcile\n(at every start of the computer, and when the tools are turned on or off).",
+      "properties": {
+        "at": {
+          "description": "Seconds since the epoch of that reconcile.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "detail": {
+          "description": "Why it failed or is waiting, in words for a person.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "`silo` (the program at `/usr/local/bin/silo`) or `silo-mcp` (its registration as an\nMCP server in Claude Code and Codex).",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/GuestComponentState"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "state",
+        "at"
       ],
       "type": "object"
     },
@@ -11663,7 +11755,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/GuestClientComputerParams"
+              "$ref": "#/$defs/GuestClientEnableParams"
             }
           },
           "required": [
@@ -20230,7 +20322,7 @@
     {
       "kind": "command",
       "name": "guestClient.enable",
-      "paramsType": "guest_client::GuestClientComputerParams",
+      "paramsType": "guest_client::GuestClientEnableParams",
       "resultType": "guest_client::GuestClientStatus"
     },
     {

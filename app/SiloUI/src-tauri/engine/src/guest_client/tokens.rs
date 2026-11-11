@@ -155,6 +155,11 @@ impl TokenStore {
         crate::context::current().map(|context| Self::new(&context.paths().app_data))
     }
 
+    /// The folder the store and the records beside it (`guest_components`) live in.
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     fn file(&self) -> PathBuf {
         self.directory.join("tokens.json")
     }

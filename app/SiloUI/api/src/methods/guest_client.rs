@@ -21,6 +21,52 @@ wire_struct! {
 }
 
 wire_struct! {
+    GuestClientEnableParams {
+        computer_id: String,
+        /// A `silo` program for Linux on this device to send into the computer instead of the one
+        /// this build ships (for development). It is checked inside the computer by its SHA-256
+        /// like the shipped one, and replaced by the shipped one at the computer's next start.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binary_path: Option<String>,
+    }
+}
+
+/// How one piece Silo keeps in a computer ended its last reconcile.
+#[derive(
+    Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, serde::Serialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum GuestComponentState {
+    /// In place and current.
+    Ok,
+    /// The step failed; the detail says why.
+    Failed,
+    /// This build of Silo cannot provide the piece.
+    Unavailable,
+    /// Waiting for something else, such as an agent that is not installed yet.
+    Waiting,
+    /// Taken out on purpose because the tools were turned off.
+    Removed,
+}
+
+wire_struct! {
+    /// A piece Silo puts into a computer and keeps current, with the result of its last reconcile
+    /// (at every start of the computer, and when the tools are turned on or off).
+    GuestComponentStatus {
+        /// `silo` (the program at `/usr/local/bin/silo`) or `silo-mcp` (its registration as an
+        /// MCP server in Claude Code and Codex).
+        id: String,
+        version: u32,
+        state: GuestComponentState,
+        /// Why it failed or is waiting, in words for a person.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        /// Seconds since the epoch of that reconcile.
+        at: u64,
+    }
+}
+
+wire_struct! {
     /// Whether a computer has Silo's tools, and where they answer.
     GuestClientStatus {
         computer_id: String,
@@ -45,5 +91,8 @@ wire_struct! {
         /// that is not running gets it when it next starts.
         #[serde(default)]
         written: bool,
+        /// What Silo keeps in the computer and how each piece fared at its last reconcile.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        components: Vec<GuestComponentStatus>,
     }
 }

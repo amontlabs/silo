@@ -280,7 +280,7 @@ pub(crate) fn failed_in(output: &str) -> Vec<AgentId> {
 }
 
 /// The guest script that installs `agents` in a Linux computer and then registers computer use
-/// with them. An install that fails does not stop the others; it prints a [`FAILED_PREFIX`]
+/// and Silo's own MCP server with them. An install that fails does not stop the others; it prints a [`FAILED_PREFIX`]
 /// line naming the agent.
 pub(crate) fn linux_install_all_script(agents: &[AgentId]) -> String {
     let mut script = String::from("status=0\n");
@@ -292,6 +292,10 @@ pub(crate) fn linux_install_all_script(agents: &[AgentId]) -> String {
         ));
     }
     script.push_str(&crate::computer_use::register_installed_agents_command());
+    script.push('\n');
+    script.push_str(&crate::guest_components::register_after_install_command(
+        crate::guest_components::run::Kind::Linux,
+    ));
     script.push_str("\nexit $status\n");
     script
 }
@@ -547,12 +551,13 @@ mod tests {
     }
 
     #[test]
-    fn installing_several_agents_runs_each_script_then_registers_computer_use() {
+    fn installing_several_agents_runs_each_script_then_registers_computer_use_and_silos_tools() {
         let script = linux_install_all_script(&[AgentId::Codex, AgentId::ClaudeCode]);
         let codex = script.find("setup codex").unwrap();
         let claude = script.find("setup claude-code").unwrap();
         let register = script.find("silo-computer-use reconcile").unwrap();
-        assert!(codex < claude && claude < register);
+        let silo = script.find("server-add --name silo").unwrap();
+        assert!(codex < claude && claude < register && register < silo);
         assert!(script.trim_end().ends_with("exit $status"));
         assert_eq!(script.matches("status=1; }").count(), 2);
     }

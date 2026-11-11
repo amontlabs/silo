@@ -15,6 +15,7 @@ use silo_api::methods::MethodName;
 use silo_engine::{
     context::EngineContext,
     guest_client::{self, endpoint, now_secs, TokenStore},
+    guest_components,
     policy::store::PolicyStore,
 };
 
@@ -22,7 +23,7 @@ use super::Channels;
 use crate::{
     context::SilodContext,
     dispatcher::{DispatchError, RequestContext},
-    methods::{self, HandlerContext},
+    methods::{self, guest_client::Places, HandlerContext},
 };
 
 /// The watcher looks after every change the engine announces about computers or checkpoints,
@@ -164,6 +165,8 @@ struct Watcher {
     store: TokenStore,
     policy: PolicyStore,
     seen: HashMap<String, Seen>,
+    /// When a computer whose registration is owed a removal may be tried again.
+    removal_retry: HashMap<String, Instant>,
 }
 
 impl Watcher {
@@ -196,24 +199,68 @@ impl Watcher {
         )
     }
 
+    /// Looks at a running computer whose tools are on: its endpoint file, then what Silo keeps in
+    /// it (the program and its registration with the agents). Returns whether the file was
+    /// written. A piece that fails to install is recorded in the computer's status; only a
+    /// computer that cannot be read at all is an error, which is tried again soon.
     fn check(&self, computer_id: &str) -> Result<bool, String> {
         let runtime = silo_engine::runtime::runtime_paths(self.context.runtime_host().as_ref());
-        let target =
-            silo_engine::guest::resolve(runtime, &self.context.paths().app_data, computer_id)
-                .map_err(|error| error.message)?;
-        endpoint::ensure(&target, &self.store)
+        let places = Places::of(&self.context, &runtime);
+        let app_data = self.context.paths().app_data.clone();
+        let target = silo_engine::guest::resolve(runtime, &app_data, computer_id)
+            .map_err(|error| error.message)?;
+        let written = endpoint::ensure(&target, &self.store)?;
+        guest_components::reconcile(&target, &app_data, &places.sources(), None)?;
+        Ok(written)
+    }
+
+    /// Takes Silo's MCP server out of the agents of running computers whose tools were turned off
+    /// while they were not running (or did not answer).
+    fn remove_owed(&mut self, states: &HashMap<String, bool>) {
+        let app_data = self.context.paths().app_data.clone();
+        let now = Instant::now();
+        for id in guest_components::owed_removals(&app_data) {
+            if states.get(&id) != Some(&true)
+                || self.removal_retry.get(&id).is_some_and(|at| now < *at)
+            {
+                continue;
+            }
+            let runtime = silo_engine::runtime::runtime_paths(self.context.runtime_host().as_ref());
+            let places = Places::of(&self.context, &runtime);
+            let outcome = silo_engine::guest::resolve(runtime, &app_data, &id)
+                .map_err(|error| error.message)
+                .and_then(|target| {
+                    guest_components::remove_registration(&target, &app_data, &places.sources())
+                });
+            match outcome {
+                Ok(_) => {
+                    self.removal_retry.remove(&id);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "silod: tools of {id}: the registration is not taken out yet: {error}"
+                    );
+                    self.removal_retry.insert(id, now + RETRY);
+                }
+            }
+        }
+        self.removal_retry.retain(|id, _| states.contains_key(id));
     }
 
     fn tick(&mut self) {
         let enabled = self.store.enabled();
         self.seen
             .retain(|id, _| enabled.iter().any(|record| &record.computer_id == id));
-        if enabled.is_empty() {
+        let owed = !guest_components::owed_removals(&self.context.paths().app_data).is_empty();
+        if enabled.is_empty() && !owed {
             return;
         }
         let Some(states) = self.states() else {
             return;
         };
+        if owed {
+            self.remove_owed(&states);
+        }
         let now = Instant::now();
         for record in enabled {
             let id = record.computer_id;
@@ -307,6 +354,7 @@ pub fn start(context: Arc<SilodContext>) {
         store,
         policy,
         seen: HashMap::new(),
+        removal_retry: HashMap::new(),
     };
     let (wake, woken) = std::sync::mpsc::sync_channel::<()>(1);
     watcher
