@@ -322,6 +322,11 @@ pub fn computers_stop(params: common::ComputerTargetParams) -> Request<kind::Job
     Request::new(MethodParams::ComputersStop(params))
 }
 
+/// `computers.recipe`
+pub fn computers_recipe(params: common::ComputerTargetParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ComputersRecipe(params))
+}
+
 /// `computers.tree`
 pub fn computers_tree(params: steps::ComputersTreeParams) -> Request<kind::Query> {
     Request::new(MethodParams::ComputersTree(params))
@@ -936,6 +941,11 @@ pub fn recipes_build(params: recipes::RecipeBuildParams) -> Request<kind::Job> {
     Request::new(MethodParams::RecipesBuild(params))
 }
 
+/// `recipes.get`
+pub fn recipes_get(params: recipes::RecipeGetParams) -> Request<kind::Query> {
+    Request::new(MethodParams::RecipesGet(params))
+}
+
 /// `recipes.list`
 pub fn recipes_list(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::RecipesList(params))
@@ -944,6 +954,11 @@ pub fn recipes_list(params: common::DeviceParams) -> Request<kind::Query> {
 /// `recipes.remove`
 pub fn recipes_remove(params: recipes::RecipeRemoveParams) -> Request<kind::Command> {
     Request::new(MethodParams::RecipesRemove(params))
+}
+
+/// `recipes.save`
+pub fn recipes_save(params: recipes::RecipeSaveParams) -> Request<kind::Command> {
+    Request::new(MethodParams::RecipesSave(params))
 }
 
 /// `secrets.list`

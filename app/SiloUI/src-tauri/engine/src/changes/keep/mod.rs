@@ -89,6 +89,23 @@ pub struct Report {
     /// Whether main was unchanged since the fork was made, so nothing could conflict. Unknown
     /// (`None`) when the keep stopped before main was looked at.
     pub fast_forward: Option<bool>,
+    /// The packages and settings files this keep brings over, as the recipe of the target would
+    /// list them.
+    #[serde(skip)]
+    pub additions: crate::recipes::Additions,
+    /// What was appended to the recipe of the target after the keep; absent when nothing was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<RecipeUpdate>,
+}
+
+/// What a keep added to the recipe of the computer it merged into.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecipeUpdate {
+    /// The recipe's name.
+    pub name: String,
+    pub packages: std::collections::BTreeMap<String, Vec<String>>,
+    pub files: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -196,7 +213,7 @@ fn refused_early(request: &Request, target: &str, digest: &str) -> Outcome {
                 request.fork.clone(),
                 "its changes differ from the reviewed diff",
             )],
-            hint: "Review it again with `silo diff --json` and keep with the new digest.".into(),
+            hint: "Review it again with `silo diff --json` and merge with the new digest.".into(),
         },
     }
 }
@@ -261,6 +278,22 @@ fn main_moved(
     Some(lines)
 }
 
+/// The request with the `keep` hooks of the recipe `target` was built from, when it has one:
+/// the engine applies the computer's own rules, whatever the caller sent. A computer built
+/// from no recipe runs the hooks the caller sent.
+fn with_recipe_hooks(request: &Request, target: &str) -> Request {
+    let mut effective = request.clone();
+    if let Ok(Some(record)) = crate::recipes::records::get(target) {
+        let keep = crate::recipes::hooks_of(&record.recipe);
+        effective.hooks = Hooks {
+            restart: keep.restart,
+            migrate: keep.migrate,
+            after: keep.after,
+        };
+    }
+    effective
+}
+
 /// Keeps `request.fork` into its target.
 pub fn keep(
     env: &dyn KeepEnv,
@@ -281,6 +314,8 @@ pub fn keep(
     if target == request.fork {
         return Err("A computer cannot be kept into itself.".into());
     }
+    let effective = with_recipe_hooks(request, &target);
+    let request = &effective;
     let os = env.os(&target).map_err(|_| {
         format!("{target} is not a computer on this device. Name the computer to keep into.")
     })?;

@@ -69,7 +69,7 @@ wire_struct! {
         /// Seconds between the base capture and this capture.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         elapsed_seconds: Option<u64>,
-        /// A digest of the changes a keep acts on; `silo fold --reviewed` pins a keep to it.
+        /// A digest of the changes a keep acts on; `silo merge --reviewed` pins a merge to it.
         #[serde(default)]
         review_digest: String,
     }

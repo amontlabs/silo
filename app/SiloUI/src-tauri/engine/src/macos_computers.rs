@@ -6746,6 +6746,7 @@ fn fork_checkpoint_with_workflow(
         // The fork keeps its source's network policy unless the call gave it another.
         crate::network_policy::store::inherit(id, &record.id, options.network_policy.as_ref())?;
         crate::guest_client::inherit(id, &record.id)?;
+        crate::recipes::records::inherit(id, &record.id)?;
         let entry = Entry::new(record.clone(), State::Copying, None);
         let cancel = entry.cancel.clone();
         registry.entries.push(entry);

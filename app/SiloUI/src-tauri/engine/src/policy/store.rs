@@ -454,4 +454,5 @@ pub fn computer_removed(id: &str) {
         eprintln!("silo-engine: {error}");
     }
     crate::approvals::computer_removed(id);
+    crate::recipes::records::computer_removed(id);
 }

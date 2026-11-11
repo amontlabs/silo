@@ -616,3 +616,206 @@ fn macos_recipes_install_homebrew_before_they_need_it() {
     });
     assert!(!linux[0].script.contains("brew"));
 }
+
+mod stored {
+    use silo_api::methods::{
+        keep::KeepHooks,
+        recipes::{RecipeDefinition, RecipeRecord},
+    };
+
+    use super::*;
+    use crate::recipes::{
+        additions::manager_key, append, built_in, hooks_of, record_merge, records, Additions,
+        Library,
+    };
+
+    fn definition() -> RecipeDefinition {
+        RecipeDefinition {
+            spec: spec(),
+            quiet: vec!["poller".into()],
+            scrub: vec!["/home/silo/.env".into()],
+            keep: Some(KeepHooks {
+                restart: vec!["web".into()],
+                migrate: vec!["npm run migrate".into()],
+                after: vec!["npm test".into()],
+            }),
+            test: Some("npm test".into()),
+            files: vec!["/home/silo/.bashrc".into()],
+        }
+    }
+
+    fn folder() -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("silo-recipes-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn record(name: &str) -> RecipeRecord {
+        RecipeRecord {
+            name: name.into(),
+            hash: "h".into(),
+            built_at: "2026-11-11T00:00:00Z".into(),
+            recipe: definition(),
+        }
+    }
+
+    #[test]
+    fn a_saved_recipe_keeps_every_key_and_replaces_the_shipped_one() {
+        let app = folder();
+        let library = Library::new(&app);
+        assert!(library.get("web").unwrap().is_none());
+        library.save("web", &definition()).unwrap();
+        let (got, built_in_flag) = library.get("web").unwrap().unwrap();
+        assert_eq!(got, definition());
+        assert!(!built_in_flag);
+
+        assert!(library.get("linux-dev").unwrap().unwrap().1);
+        let mut mine = definition();
+        mine.spec.packages.apt = vec!["vim".into()];
+        library.save("linux-dev", &mine).unwrap();
+        assert!(!library.get("linux-dev").unwrap().unwrap().1);
+        assert!(library.remove("linux-dev").unwrap());
+        assert_eq!(
+            library.get("linux-dev").unwrap().unwrap().0,
+            built_in("linux-dev").unwrap()
+        );
+        assert!(!library.remove("linux-dev").unwrap());
+
+        let names: Vec<String> = library.list().into_iter().map(|(name, _, _)| name).collect();
+        assert_eq!(names, ["linux-dev", "macos-xcode", "web"]);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn a_recipe_with_a_bad_name_or_entry_is_not_stored() {
+        let library = Library::new(&folder());
+        assert!(library.save("Bad Name", &definition()).is_err());
+        let mut bad = definition();
+        bad.scrub = vec!["relative/path".into()];
+        assert!(library.save("web", &bad).unwrap_err().contains("absolute"));
+        let mut bad = definition();
+        bad.keep.as_mut().unwrap().after = vec!["one\ntwo".into()];
+        assert!(library.save("web", &bad).is_err());
+        let mut bad = definition();
+        bad.spec.packages.apt = vec!["--evil".into()];
+        assert!(library.save("web", &bad).is_err());
+        assert_eq!(built_in_names(), ["linux-dev", "macos-xcode"]);
+    }
+
+    #[test]
+    fn a_record_is_inherited_by_forks_and_forgotten_with_the_computer() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        records::set("builder", &record("web")).unwrap();
+        records::inherit("builder", "fork").unwrap();
+        assert_eq!(records::get("fork").unwrap().unwrap().name, "web");
+        // A fork of a computer with no record has none, even if its id had one before.
+        records::inherit("nothing", "fork").unwrap();
+        assert!(records::get("fork").unwrap().is_none());
+        records::computer_removed("builder");
+        assert!(records::get("builder").unwrap().is_none());
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn the_hooks_of_a_recipe_are_its_keep_section() {
+        let hooks = hooks_of(&definition());
+        assert_eq!(hooks.restart, ["web"]);
+        assert_eq!(hooks.migrate, ["npm run migrate"]);
+        let mut none = definition();
+        none.keep = None;
+        assert!(hooks_of(&none).after.is_empty());
+    }
+
+    #[test]
+    fn a_fork_gets_the_quiet_and_scrub_lists_of_its_sources_recipe_once() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        records::set("builder", &record("web")).unwrap();
+        let asked = crate::runtime::checkpoints::ForkOptions {
+            stop: vec!["poller".into(), "extra".into()],
+            scrub: vec!["/tmp/mine".into()],
+            ..Default::default()
+        };
+        let options = crate::checkpoints::options_with_recipe_rules("builder", asked.clone());
+        assert_eq!(options.stop, ["poller", "extra"]);
+        assert_eq!(options.scrub, ["/tmp/mine", "/home/silo/.env"]);
+        let plain = crate::checkpoints::options_with_recipe_rules("someone-else", asked.clone());
+        assert_eq!(plain, asked);
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn a_merge_appends_new_packages_and_files_to_the_recipe_and_the_record() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        library.save("web", &definition()).unwrap();
+        records::set("main", &record("web")).unwrap();
+
+        let mut adds = Additions::default();
+        adds.add_package("dpkg", "jq");
+        adds.add_package("apt", "git");
+        adds.add_package("pip3", "requests");
+        adds.add_package("snap", "lxd");
+        adds.add_file("/home/silo/.bashrc");
+        adds.add_file("/home/silo/.gitconfig");
+        let (name, fresh) = record_merge(&library, "main", &adds).unwrap().unwrap();
+        assert_eq!(name, "web");
+        assert_eq!(fresh.packages["apt"], ["jq"]);
+        assert_eq!(fresh.packages["pip"], ["requests"]);
+        assert!(!fresh.packages.contains_key("snap"));
+        assert_eq!(fresh.files, ["/home/silo/.gitconfig"]);
+
+        let stored = library.saved("web").unwrap().unwrap();
+        assert!(stored.spec.packages.apt.contains(&"jq".to_owned()));
+        assert!(stored.files.contains(&"/home/silo/.gitconfig".to_owned()));
+        let on_main = records::get("main").unwrap().unwrap();
+        assert_eq!(on_main.recipe, stored);
+        // The same again adds nothing.
+        assert!(record_merge(&library, "main", &adds).unwrap().is_none());
+        // A computer with no recipe has nothing to append to.
+        assert!(record_merge(&library, "nobody", &adds).unwrap().is_none());
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn a_recipe_that_ships_with_silo_is_never_edited_by_a_merge() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        let mut main = record("linux-dev");
+        main.recipe = built_in("linux-dev").unwrap();
+        records::set("main", &main).unwrap();
+        let mut adds = Additions::default();
+        adds.add_package("npm", "typescript");
+        let (_, fresh) = record_merge(&library, "main", &adds).unwrap().unwrap();
+        assert_eq!(fresh.packages["npm"], ["typescript"]);
+        assert!(library.saved("linux-dev").unwrap().is_none());
+        assert_eq!(
+            built_in("linux-dev").unwrap().spec.packages.npm,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            records::get("main").unwrap().unwrap().recipe.spec.packages.npm,
+            ["typescript"]
+        );
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn packages_a_system_cannot_install_are_not_appended() {
+        let mut adds = Additions::default();
+        adds.add_package("brew", "wget");
+        adds.add_package("cargo", "ripgrep");
+        let (linux, fresh) = append(&definition(), &adds);
+        assert!(linux.spec.packages.brew.is_empty());
+        assert_eq!(fresh.packages.keys().collect::<Vec<_>>(), ["cargo"]);
+        assert_eq!(manager_key("dpkg"), Some("apt"));
+        assert_eq!(manager_key("snap"), None);
+    }
+}

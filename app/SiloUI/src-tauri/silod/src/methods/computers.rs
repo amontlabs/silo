@@ -58,8 +58,10 @@ use crate::{
 use super::{ownership::owns_prefix, HandlerContext};
 
 pub(super) fn owns(method: MethodName) -> bool {
-    // `computers.access` reads what a computer holds, beside approvals.
+    // `computers.access` reads what a computer holds, beside approvals; `computers.recipe`
+    // reads the recipe a computer was built from, beside the recipes.
     method != MethodName::ComputersAccess
+        && method != MethodName::ComputersRecipe
         && owns_prefix(
             method,
             &["computers.", "activity.", "logs.", "storage.", "macos."],

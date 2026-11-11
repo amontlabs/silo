@@ -1606,6 +1606,8 @@ pub fn import_pending_restore_with_environment(
     }));
     // An import starts closed from that policy, whatever policy a computer of this id had here.
     crate::network_policy::store::remove(computer_id).map_err(RuntimeError::Unavailable)?;
+    // An import was built from no recipe of this device.
+    crate::recipes::records::remove(computer_id).map_err(RuntimeError::Unavailable)?;
     // An import has no Silo tools until the owner turns them on.
     crate::guest_client::turn_off(&[computer_id]).map_err(RuntimeError::Unavailable)?;
     save(paths, computer_id, &record)
@@ -2703,6 +2705,9 @@ fn fork_commit_with_metadata_writer(
         .map_err(RuntimeError::Unavailable)?;
         // A fork of a computer with Silo's tools has them too, on its own port and token.
         crate::guest_client::inherit(source.id(), &child_id).map_err(RuntimeError::Unavailable)?;
+        // A fork was built from the recipe its source was built from.
+        crate::recipes::records::inherit(source.id(), &child_id)
+            .map_err(RuntimeError::Unavailable)?;
         // Nothing is copied unless the fork names it; GitHub access is always read-only.
         if fork.options.copies_github() {
             assignments
@@ -2753,6 +2758,7 @@ fn fork_commit_with_metadata_writer(
         failed.extend(assignments.forget_github(new_name).err());
     }
     failed.extend(crate::network_policy::store::remove(&child_id).err());
+    failed.extend(crate::recipes::records::remove(&child_id).err());
     failed.extend(crate::guest_client::turn_off(&[child_id.as_str()]).err());
     failed.extend(
         forget_removed(paths, &child_id)

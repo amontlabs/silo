@@ -614,6 +614,11 @@ mod tests {
                     "changes.requests.list" => json!({ "requests": [] }),
                     "changes.requests.markKept" => json!({ "requests": [request] }),
                     "computers.tree" => json!({ "nodes": [] }),
+                    "computers.recipe" => json!({}),
+                    "recipes.get" | "recipes.save" => json!({
+                        "name": "r", "builtIn": false, "hash": "h",
+                        "recipe": { "spec": { "os": "linux", "packages": {} } }
+                    }),
                     "recipes.list" => json!({ "recipes": [] }),
                     "recipes.remove" => Value::Null,
                     "steps.list" => json!({ "steps": [] }),
@@ -674,6 +679,13 @@ mod tests {
             (MethodName::StepsList, "steps.list", by_computer),
             (MethodName::StepsRecord, "steps.record", record),
             (MethodName::ComputersTree, "computers.tree", json!({})),
+            (MethodName::ComputersRecipe, "computers.recipe", json!({ "computerId": COMPUTER })),
+            (MethodName::RecipesGet, "recipes.get", json!({ "name": "r" })),
+            (
+                MethodName::RecipesSave,
+                "recipes.save",
+                json!({ "name": "r", "recipe": { "spec": { "os": "linux" } } }),
+            ),
             (MethodName::CheckpointsFork, "checkpoints.fork", fork),
             (MethodName::RecipesBuild, "recipes.build", build),
             (MethodName::RecipesList, "recipes.list", json!({})),

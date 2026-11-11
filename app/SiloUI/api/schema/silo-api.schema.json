@@ -3403,6 +3403,22 @@
       },
       "type": "object"
     },
+    "ComputerRecipeResult": {
+      "properties": {
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent for a computer that was not built from a recipe."
+        }
+      },
+      "type": "object"
+    },
     "ComputerResources": {
       "properties": {
         "cpus": {
@@ -9483,6 +9499,7 @@
         "computers.shell",
         "computers.start",
         "computers.stop",
+        "computers.recipe",
         "computers.tree",
         "connections.devices.connect",
         "connections.devices.health",
@@ -9597,8 +9614,10 @@
         "push.start",
         "push.status",
         "recipes.build",
+        "recipes.get",
         "recipes.list",
         "recipes.remove",
+        "recipes.save",
         "secrets.list",
         "secrets.remove",
         "secrets.retry",
@@ -10428,6 +10447,22 @@
           "properties": {
             "method": {
               "const": "computers.stop",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.recipe",
               "type": "string"
             },
             "params": {
@@ -12267,6 +12302,22 @@
         {
           "properties": {
             "method": {
+              "const": "recipes.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RecipeGetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "recipes.list",
               "type": "string"
             },
@@ -12288,6 +12339,22 @@
             },
             "params": {
               "$ref": "#/$defs/RecipeRemoveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.save",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RecipeSaveParams"
             }
           },
           "required": [
@@ -13431,6 +13498,22 @@
             },
             "result": {
               "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.recipe",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ComputerRecipeResult"
             }
           },
           "required": [
@@ -15297,6 +15380,22 @@
         {
           "properties": {
             "method": {
+              "const": "recipes.get",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/RecipeDocument"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "recipes.list",
               "type": "string"
             },
@@ -15318,6 +15417,22 @@
             },
             "result": {
               "type": "null"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.save",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/RecipeDocument"
             }
           },
           "required": [
@@ -17169,16 +17284,23 @@
           ]
         },
         "name": {
-          "description": "The recipe's name (`linux-dev`, or a file under `.silo/recipes/`).",
+          "description": "The recipe's name: a stored recipe (`linux-dev` is always there).",
           "type": "string"
         },
         "spec": {
-          "$ref": "#/$defs/RecipeSpec"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Build this spec instead of the stored recipe's."
         }
       },
       "required": [
-        "name",
-        "spec"
+        "name"
       ],
       "type": "object"
     },
@@ -17196,6 +17318,94 @@
       "required": [
         "recipe",
         "built"
+      ],
+      "type": "object"
+    },
+    "RecipeDefinition": {
+      "description": "A stored recipe: what builds the computer, and the rules that go with it.",
+      "properties": {
+        "files": {
+          "description": "Settings files merged into the computer from forks. Merging appends to it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "keep": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeepHooks"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Run when changes are merged into a computer built from this recipe."
+        },
+        "quiet": {
+          "description": "Process names and units stopped in a fork of a computer built from this recipe.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scrub": {
+          "description": "Absolute paths removed from such a fork.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "spec": {
+          "$ref": "#/$defs/RecipeSpec"
+        },
+        "test": {
+          "description": "The command that tests the project; a note for people and agents, never run by Silo.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "spec"
+      ],
+      "type": "object"
+    },
+    "RecipeDocument": {
+      "description": "A stored recipe with what the engine knows about it.",
+      "properties": {
+        "built": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeEntry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The build forks start from, when one exists for this exact spec."
+        },
+        "builtIn": {
+          "description": "Shipped with Silo (`linux-dev`) and not saved by anyone. Saving a recipe with this\nname replaces it until that recipe is removed.",
+          "type": "boolean"
+        },
+        "hash": {
+          "description": "Content hash of the normalized spec on the current image.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeDefinition"
+        }
+      },
+      "required": [
+        "name",
+        "builtIn",
+        "hash",
+        "recipe"
       ],
       "type": "object"
     },
@@ -17250,6 +17460,24 @@
       ],
       "type": "object"
     },
+    "RecipeGetParams": {
+      "properties": {
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "RecipeOs": {
       "enum": [
         "linux",
@@ -17299,6 +17527,31 @@
       },
       "type": "object"
     },
+    "RecipeRecord": {
+      "description": "The recipe a computer was built from, as it was when it was built. Forks have their\nsource's record.",
+      "properties": {
+        "builtAt": {
+          "type": "string"
+        },
+        "hash": {
+          "description": "Content hash of the normalized spec the computer was built from.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeDefinition"
+        }
+      },
+      "required": [
+        "name",
+        "hash",
+        "builtAt",
+        "recipe"
+      ],
+      "type": "object"
+    },
     "RecipeRemoveParams": {
       "properties": {
         "deviceId": {
@@ -17314,6 +17567,29 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "RecipeSaveParams": {
+      "properties": {
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Lowercase letters, digits, `-` and `_`. Saving over a name replaces that recipe;\ncomputers already built from it keep the text they were built from.",
+          "type": "string"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeDefinition"
+        }
+      },
+      "required": [
+        "name",
+        "recipe"
       ],
       "type": "object"
     },
@@ -17403,11 +17679,49 @@
       ],
       "type": "object"
     },
+    "RecipeSummary": {
+      "description": "One line of the recipe list.",
+      "properties": {
+        "built": {
+          "description": "A build of this exact spec exists.",
+          "type": "boolean"
+        },
+        "builtIn": {
+          "type": "boolean"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "os": {
+          "$ref": "#/$defs/RecipeOs"
+        }
+      },
+      "required": [
+        "name",
+        "builtIn",
+        "os",
+        "hash",
+        "built"
+      ],
+      "type": "object"
+    },
     "RecipesListResult": {
       "properties": {
         "recipes": {
+          "description": "The builds forks start from.",
           "items": {
             "$ref": "#/$defs/RecipeEntry"
+          },
+          "type": "array"
+        },
+        "saved": {
+          "default": [],
+          "description": "Every stored recipe, built or not.",
+          "items": {
+            "$ref": "#/$defs/RecipeSummary"
           },
           "type": "array"
         }
@@ -19773,6 +20087,12 @@
     },
     {
       "kind": "query",
+      "name": "computers.recipe",
+      "paramsType": "common::ComputerTargetParams",
+      "resultType": "recipes::ComputerRecipeResult"
+    },
+    {
+      "kind": "query",
       "name": "computers.tree",
       "paramsType": "steps::ComputersTreeParams",
       "resultType": "steps::ComputersTreeResult"
@@ -20457,6 +20777,12 @@
     },
     {
       "kind": "query",
+      "name": "recipes.get",
+      "paramsType": "recipes::RecipeGetParams",
+      "resultType": "recipes::RecipeDocument"
+    },
+    {
+      "kind": "query",
       "name": "recipes.list",
       "paramsType": "common::DeviceParams",
       "resultType": "recipes::RecipesListResult"
@@ -20466,6 +20792,12 @@
       "name": "recipes.remove",
       "paramsType": "recipes::RecipeRemoveParams",
       "resultType": "()"
+    },
+    {
+      "kind": "command",
+      "name": "recipes.save",
+      "paramsType": "recipes::RecipeSaveParams",
+      "resultType": "recipes::RecipeDocument"
     },
     {
       "kind": "query",

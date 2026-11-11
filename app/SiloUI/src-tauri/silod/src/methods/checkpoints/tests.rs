@@ -562,8 +562,8 @@ async fn requests_keep_refuses_what_the_engine_cannot_keep() {
         json!({"requestId": folder["id"]}),
     )
     .await
-    .expect_err("a folder fork is kept with silo fold");
-    assert!(error.message.contains("silo fold"), "{}", error.message);
+    .expect_err("a folder fork is merged with silo merge");
+    assert!(error.message.contains("silo merge"), "{}", error.message);
     let undigested = call(
         &fixture,
         MethodName::ChangesRequest,

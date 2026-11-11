@@ -319,6 +319,15 @@ pub fn prepare(
         }
     }
 
+    for op in &plan.packages {
+        report.additions.add_package(&op.manager, &op.name);
+    }
+    for op in &plan.files {
+        if op.action != FileAction::Delete && plan.settings_files.contains(&op.path) {
+            report.additions.add_file(&op.path);
+        }
+    }
+
     // Git: history first, so nothing sensitive reaches main.
     let mut bundles = Vec::new();
     let mut bundle_data = BTreeMap::new();
@@ -838,7 +847,7 @@ pub fn prepare(
             plan.databases.join(", ")
         );
         let hint = format!(
-            "A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise use \"Make this main\": run `silo fold {} --promote` and the fork becomes main with its database.",
+            "A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise replace main with the fork: run `silo replace-main {}` and the fork becomes main with its database.",
             report.fork
         );
         return Ok(refuse(report, "database", message, Vec::new(), &hint));

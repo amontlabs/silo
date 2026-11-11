@@ -136,6 +136,24 @@ pub enum Platform {
     Macos,
 }
 
+/// The fork's options with the `quiet` and `scrub` lists of the recipe its source was built
+/// from added to what the caller asked for. A source built from no recipe adds nothing.
+pub fn options_with_recipe_rules(source_id: &str, mut options: ForkOptions) -> ForkOptions {
+    if let Ok(Some(record)) = crate::recipes::records::get(source_id) {
+        for name in record.recipe.quiet {
+            if !options.stop.contains(&name) {
+                options.stop.push(name);
+            }
+        }
+        for path in record.recipe.scrub {
+            if !options.scrub.contains(&path) {
+                options.scrub.push(path);
+            }
+        }
+    }
+    options
+}
+
 #[derive(Clone)]
 pub struct Service {
     host: Arc<dyn RuntimeHost>,
@@ -350,6 +368,7 @@ impl Service {
         if self.platform(new_name).is_ok() {
             return Err(Failure::from_message(crate::computer_names::TAKEN));
         }
+        let options = options_with_recipe_rules(computer_id, options);
         // Noted first: the fork's source is resolved on the job and replaces the key.
         crate::changes::fork_base::expect(
             self.context(),
