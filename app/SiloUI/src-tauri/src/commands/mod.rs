@@ -15,6 +15,7 @@ pub(crate) mod macos_computers;
 pub(crate) mod macos_remote;
 pub(crate) mod macos_remote_viewer;
 pub(crate) mod network;
+pub(crate) mod network_policy;
 pub(crate) mod notifications;
 pub(crate) mod pre_upgrade_backup;
 pub(crate) mod preparation;

@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event"
 import { useMemo, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { showOperationFailure } from "@/lib/operation-toast"
-import { approvalJobSchema, approvalListSchema, approvalShape, auditListSchema, computerTreeSchema, deviceResourcesSchema, directoryPageShape, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
+import { approvalJobSchema, approvalListSchema, approvalShape, auditListSchema, computerTreeSchema, computerToolsSchema, deviceResourcesSchema, directoryPageShape, networkPolicyStateSchema, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
 import type { AgentId, Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, ComputerStep, ComputerTreeNode, DeviceResources, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
 export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
@@ -1282,6 +1282,10 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     ensureSshName: computer => agents.ensureSshName(native, computer),
     listAudit: options => listAudit(options, native),
     readDeviceResources: deviceId => readDeviceResources(deviceId, native),
+    readNetworkPolicy: async computer => networkPolicyStateSchema.parse(await native.invoke("read_network_policy", { computer })),
+    saveNetworkPolicy: async (computer, policy, expected) => networkPolicyStateSchema.parse(await native.invoke("save_network_policy", { computer, policy, ...(expected ? { expected } : {}) })),
+    readComputerTools: async computer => computerToolsSchema.parse(await native.invoke("read_computer_tools", { computer })),
+    setComputerTools: async (computer, enabled) => computerToolsSchema.parse(await native.invoke(enabled ? "enable_computer_tools" : "revoke_computer_tools", { computer })),
     sshConnection: (computer, download, network) => {
       const remote = parseRemoteComputerTarget(computer)
       return native.invoke<string | null>("ssh_connection", remote ? { ...remote, download, ...(network === undefined ? {} : { network }) } : { computer, download, ...(network === undefined ? {} : { network }) })

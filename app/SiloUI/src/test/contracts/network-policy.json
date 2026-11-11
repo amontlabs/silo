@@ -1,0 +1,50 @@
+{
+  "open": {
+    "computerId": "main-1",
+    "policy": { "mode": "open", "hosts": [], "presets": [] },
+    "allowedHosts": [],
+    "timing": "applied",
+    "presets": [
+      { "name": "npm", "title": "npm packages", "hosts": ["registry.npmjs.org"] },
+      { "name": "pypi", "title": "Python packages", "hosts": ["pypi.org", "files.pythonhosted.org"] },
+      { "name": "anthropic", "title": "Anthropic API", "hosts": ["api.anthropic.com"] }
+    ],
+    "presetUpdates": [],
+    "notices": []
+  },
+  "allowlist": {
+    "computerId": "main-1",
+    "policy": { "mode": "allowlist", "hosts": ["example.com", "*.internal.example.org"], "presets": ["npm", "pypi"] },
+    "allowedHosts": [
+      { "host": "example.com", "ports": [443], "from": "list" },
+      { "host": "*.internal.example.org", "ports": [443], "from": "list" },
+      { "host": "registry.npmjs.org", "ports": [443], "from": "preset:npm" },
+      { "host": "pypi.org", "ports": [443], "from": "preset:pypi" },
+      { "host": "files.pythonhosted.org", "ports": [443], "from": "preset:pypi" },
+      { "host": "github.com", "ports": [443], "from": "github" },
+      { "host": "api.stripe.com", "ports": [443], "from": "secret:stripe-key" }
+    ],
+    "timing": "nextRestart",
+    "presets": [
+      { "name": "npm", "title": "npm packages", "hosts": ["registry.npmjs.org"] },
+      { "name": "pypi", "title": "Python packages", "hosts": ["pypi.org", "files.pythonhosted.org"] },
+      { "name": "anthropic", "title": "Anthropic API", "hosts": ["api.anthropic.com"] }
+    ],
+    "presetUpdates": [
+      { "name": "npm", "title": "npm packages", "addedHosts": ["registry.npmmirror.com", "npm.pkg.example"] }
+    ],
+    "notices": ["The secret stripe-key allows *.stripe.com, which is not used as a network rule. Only api.stripe.com is reachable."]
+  },
+  "closed": {
+    "computerId": "main-1",
+    "policy": { "mode": "closed", "hosts": [], "presets": [] },
+    "allowedHosts": [],
+    "timing": "nextStart",
+    "presets": [],
+    "presetUpdates": [],
+    "notices": []
+  },
+  "toolsOn": { "computerId": "main-1", "enabled": true, "host": "host.microsandbox.internal", "port": 41234, "endpointPath": "/etc/silo/endpoint.json", "enabledAt": "2026-11-11T09:00:00Z", "network": "nextStart", "written": false },
+  "toolsOff": { "computerId": "main-1", "enabled": false, "written": false },
+  "staleSave": { "code": "changed", "message": "The network policy of this computer changed while this was being decided. Read it again and retry." }
+}
