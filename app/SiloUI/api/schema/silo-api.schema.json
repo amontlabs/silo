@@ -16125,6 +16125,17 @@
             "null"
           ]
         },
+        "expected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The policy the caller judged the change against. When it is given and the computer's\npolicy is now another, nothing is saved. The engine fills it in for a computer's\nagent narrowing its own network, so a narrowing cannot undo a change the owner made\nmeanwhile."
+        },
         "policy": {
           "$ref": "#/$defs/NetworkPolicy"
         }
@@ -16147,8 +16158,24 @@
         "computerId": {
           "type": "string"
         },
+        "notices": {
+          "default": [],
+          "description": "Things to tell the owner about this policy, in plain words: a secret wildcard that is\nnot added to the list, or a policy that could not be read.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "policy": {
           "$ref": "#/$defs/NetworkPolicy"
+        },
+        "presetUpdates": {
+          "default": [],
+          "description": "Presets of the policy that have an update to accept.",
+          "items": {
+            "$ref": "#/$defs/NetworkPresetUpdate"
+          },
+          "type": "array"
         },
         "presets": {
           "items": {
@@ -16209,6 +16236,30 @@
         "name",
         "title",
         "hosts"
+      ],
+      "type": "object"
+    },
+    "NetworkPresetUpdate": {
+      "description": "A preset whose list in this Silo has hosts the computer's policy was not approved with.\nThe computer keeps its approved list until the owner sets the policy again with the\nsame presets.",
+      "properties": {
+        "addedHosts": {
+          "description": "The hosts the update would add.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "addedHosts"
       ],
       "type": "object"
     },

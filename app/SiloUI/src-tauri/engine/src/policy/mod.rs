@@ -28,7 +28,7 @@ use silo_api::{
 };
 
 pub use access::{Access, GitHubAccess};
-use crate::network_policy::{NetworkPolicy, NetworkPolicyMode};
+use crate::network_policy::{Held, NetworkPolicy, NetworkPolicyMode};
 pub use resources::Resources;
 pub use rules::{rule, Rule};
 use summary::{github_access, github_identity, github_writes, listed, quoted};
@@ -109,10 +109,14 @@ pub trait World {
     fn ssh_settings(&self, computer: &str) -> Option<(u16, String)>;
     /// The network policy a computer runs with; `None` when it cannot be read, so a check
     /// against it asks.
-    fn network_policy(&self, computer: &str) -> Option<NetworkPolicy> {
-        crate::network_policy::store::get(computer)
-            .ok()
-            .map(|stored| crate::network_policy::effective(stored, None))
+    fn network_policy(&self, _computer: &str) -> Option<NetworkPolicy> {
+        None
+    }
+    /// The policy a computer runs with and the preset versions it was approved at, which must
+    /// be the answer `network.policy.get` gives for that computer; `None` when it cannot be
+    /// read, so a check against it asks.
+    fn network_held(&self, computer: &str) -> Option<Held> {
+        self.network_policy(computer).map(Held::latest)
     }
     /// The public keys saved for a computer's SSH access.
     fn ssh_keys(&self, _computer: &str) -> Vec<String> {
@@ -570,7 +574,7 @@ impl<'a> Judge<'a> {
         let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
         match self.new_computer_network(
             asked_network.clone(),
-            self.world.network_policy(source),
+            self.world.network_held(source),
             new_name,
         ) {
             Ok(policy) => rewritten["networkPolicy"] = json!(policy),
@@ -907,57 +911,73 @@ impl<'a> Judge<'a> {
     fn new_computer_network(
         &self,
         asked: Option<NetworkPolicy>,
-        inherited: Option<NetworkPolicy>,
+        inherited: Option<Held>,
         new_name: &str,
     ) -> Result<NetworkPolicy, String> {
-        let Some(own) = self.world.network_policy(self.caller) else {
+        let Some(own) = self.world.network_held(self.caller) else {
             return Err(format!(
                 "Give {} a network policy; the network policy of {} could not be read to compare.",
                 quoted(new_name),
                 self.shown(self.caller)
             ));
         };
+        // The new computer is approved at the preset versions of this Silo, so it is compared
+        // that way against the caller's own policy.
         let chosen = match asked {
-            Some(asked) => asked,
+            Some(asked) => Held::latest(asked),
             None => match inherited {
-                Some(inherited) if crate::network_policy::no_wider(&inherited, &own) => inherited,
-                _ => own.clone(),
+                Some(inherited)
+                    if crate::network_policy::no_wider_held(
+                        &Held::latest(inherited.policy.clone()),
+                        &own,
+                    ) =>
+                {
+                    Held::latest(inherited.policy)
+                }
+                _ => Held::latest(own.policy.clone()),
             },
         };
-        if crate::network_policy::no_wider(&chosen, &own) {
-            Ok(chosen)
+        if crate::network_policy::no_wider_held(&chosen, &own) {
+            Ok(chosen.policy)
         } else {
-            Err(crate::network_policy::widening_summary(&quoted(new_name), &own, &chosen))
+            Err(crate::network_policy::widening_summary_held(
+                &quoted(new_name),
+                &own,
+                &chosen,
+            ))
         }
     }
 
     /// Narrowing a network policy is free; anything wider than the target's current policy, or
-    /// for a computer it made wider than the caller's own, asks.
+    /// for a computer it made wider than the caller's own, asks. A free change carries the
+    /// policy it was judged against, so it is saved only if that is still the policy.
     fn network_policy_set(&self, kind: ApprovalKind, params: &Value) -> Result<Decision, String> {
         let target = self.tree_target(params, "computerId")?;
         let asked = Self::asked_network_policy(params, "policy")?
             .ok_or("The call must give a policy (policy).")?;
-        let rewritten = json!({ "computerId": target, "policy": asked });
-        let current = self.world.network_policy(&target);
-        let own = self.world.network_policy(self.caller);
+        let mut rewritten = json!({ "computerId": target, "policy": asked });
+        let current = self.world.network_held(&target);
+        let own = self.world.network_held(self.caller);
+        let asked_held = Held::latest(asked.clone());
         let within_current = current
             .as_ref()
-            .is_some_and(|current| crate::network_policy::no_wider(&asked, current));
+            .is_some_and(|current| crate::network_policy::no_wider_held(&asked_held, current));
         let within_own = target == self.caller
             || own
                 .as_ref()
-                .is_some_and(|own| crate::network_policy::no_wider(&asked, own));
-        if within_current && within_own {
+                .is_some_and(|own| crate::network_policy::no_wider_held(&asked_held, own));
+        if let (true, true, Some(current)) = (within_current, within_own, &current) {
+            rewritten["expected"] = json!(current.policy);
             return Ok(allow_with(rewritten));
         }
-        let closed = NetworkPolicy {
+        let closed = Held::latest(NetworkPolicy {
             mode: NetworkPolicyMode::Closed,
             ..NetworkPolicy::default()
-        };
+        });
         let base = if within_current { own } else { current }.unwrap_or(closed);
         Ok(ask_with(
             kind,
-            crate::network_policy::widening_summary(&self.shown(&target), &base, &asked),
+            crate::network_policy::widening_summary_held(&self.shown(&target), &base, &asked_held),
             rewritten,
         ))
     }
@@ -1259,14 +1279,33 @@ impl<'a> Judge<'a> {
         } else {
             format!("Sent only to {}", listed(&domains))
         };
-        Ok(ask(
-            kind,
-            format!(
-                "{sent}: add the secret {} for {}.",
-                quoted(name),
-                listed(&names)
-            ),
-        ))
+        let mut summary = format!(
+            "{sent}: add the secret {} for {}.",
+            quoted(name),
+            listed(&names)
+        );
+        if !any && !wildcard {
+            let reachable: Vec<String> = domains
+                .iter()
+                .filter(|domain| crate::network_policy::validate_host(domain).is_ok())
+                .cloned()
+                .collect();
+            if !reachable.is_empty() {
+                summary.push_str(&format!(
+                    " A computer whose network is a list of allowed hosts can also reach {} because of it.",
+                    listed(&reachable)
+                ));
+            }
+            if domains
+                .iter()
+                .any(|domain| crate::network_policy::is_too_wide_wildcard(domain))
+            {
+                summary.push_str(
+                    " A pattern that covers a whole public domain is not added to a list of allowed hosts.",
+                );
+            }
+        }
+        Ok(ask(kind, summary))
     }
 
     /// A GitHub configuration replaces every computer's policy, so it may change only the

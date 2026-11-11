@@ -2033,13 +2033,15 @@ pub async fn create_macos_computer(
 pub async fn create_macos_computer_accepting(
     app: MacosContext,
     request: CreateRequest,
+    network_policy: Option<crate::network_policy::NetworkPolicy>,
     allocate_job: impl FnOnce() -> Result<silo_api::jobs::JobId, String> + Send + 'static,
 ) -> Result<(MacosComputer, silo_api::jobs::JobId), String> {
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || {
-        create_accepting(
+        create_accepting_with(
             &app,
             request,
+            network_policy.as_ref(),
             require_supported,
             allocate_job,
             &runtime::OPERATIONS,
@@ -4239,6 +4241,31 @@ fn create_accepting(
     workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
     spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
 ) -> Result<(MacosComputer, silo_api::jobs::JobId), String> {
+    create_accepting_with(
+        app,
+        request,
+        None,
+        support_check,
+        allocate_job,
+        gate,
+        workflow,
+        spawn,
+    )
+}
+
+/// [`create_accepting`] that saves `network_policy` for the new computer before anything can
+/// start it, and removes it again when the creation is refused.
+#[allow(clippy::too_many_arguments)]
+fn create_accepting_with(
+    app: &MacosContext,
+    request: CreateRequest,
+    network_policy: Option<&crate::network_policy::NetworkPolicy>,
+    support_check: impl FnOnce() -> Result<(), String>,
+    allocate_job: impl FnOnce() -> Result<silo_api::jobs::JobId, String>,
+    gate: &'static runtime::operation_gate::OperationGate,
+    workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
+) -> Result<(MacosComputer, silo_api::jobs::JobId), String> {
     support_check()?;
     let data = app_data(app)?;
     let admitted = admission()?;
@@ -4260,7 +4287,16 @@ fn create_accepting(
     let registry_handle = app.engine.job_registry()?;
     let job = accept_macos_job_with_id(registry_handle.clone(), job_id.clone(), gate)?;
     let record = store::new_record(&request, engine::random_mac());
+    if let Some(policy) = network_policy {
+        if let Err(message) = crate::network_policy::store::set(&record.id, policy) {
+            abandon_macos_job(app.engine.as_ref(), &job, &message);
+            return Err(message);
+        }
+    }
     if let Err(message) = store::save(&Layout::new(&data, &record.id), &record) {
+        if network_policy.is_some() {
+            let _ = crate::network_policy::store::remove(&record.id);
+        }
         abandon_macos_job(app.engine.as_ref(), &job, &message);
         return Err(message);
     }
@@ -8829,6 +8865,86 @@ mod tests {
         drop(held);
         assert_eq!(turn_rx.recv().unwrap(), row.id);
         worker.join().unwrap();
+        reset_macos_registry();
+    }
+
+    #[test]
+    fn a_new_computers_network_policy_is_saved_before_its_creation_can_start() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        reset_macos_registry();
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("network-policy.json");
+        crate::network_policy::store::use_test_path(Some(file.clone()));
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let gate = isolated_operation_gate();
+        let closed = crate::network_policy::NetworkPolicy {
+            mode: crate::network_policy::NetworkPolicyMode::Closed,
+            ..Default::default()
+        };
+        let request = |name: &str| CreateRequest {
+            name: name.into(),
+            cpus: 2,
+            memory_gib: 4,
+            disk_gib: 64,
+        };
+        // The worker is handed over only after the policy is saved for the new id.
+        let jobs = context.job_registry().unwrap();
+        let seen = Arc::new(Mutex::new(None));
+        let observed = seen.clone();
+        let (row, _) = create_accepting_with(
+            &app,
+            request("first"),
+            Some(&closed),
+            || Ok(()),
+            move || {
+                jobs.allocate("computers.create")
+                    .map(|accepted| accepted.job_id)
+                    .map_err(|error| error.to_string())
+            },
+            gate,
+            |_, _, _, _| {},
+            |_work| {
+                *observed.lock().unwrap() = Some(
+                    crate::network_policy::store::get_stored_ids_for_test().unwrap(),
+                );
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(seen.lock().unwrap().clone().unwrap(), vec![row.id.clone()]);
+        assert_eq!(
+            crate::network_policy::store::get(&row.id).unwrap(),
+            Some(closed.clone())
+        );
+        reset_macos_registry();
+        // A policy that cannot be saved refuses the creation: no computer, no worker.
+        std::fs::write(&file, "{ not json").unwrap();
+        let refused = create_accepting_with(
+            &app,
+            request("second"),
+            Some(&closed),
+            || Ok(()),
+            || {
+                context
+                    .job_registry()
+                    .unwrap()
+                    .allocate("computers.create")
+                    .map(|accepted| accepted.job_id)
+                    .map_err(|error| error.to_string())
+            },
+            gate,
+            |_, _, _, _| panic!("nothing runs"),
+            |_| panic!("no worker"),
+        );
+        assert!(refused.is_err());
+        assert!(registry()
+            .entries
+            .iter()
+            .all(|entry| entry.record.name != "second"));
+        crate::network_policy::store::use_test_path(None);
         reset_macos_registry();
     }
 

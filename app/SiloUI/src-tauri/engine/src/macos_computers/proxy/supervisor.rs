@@ -381,7 +381,7 @@ pub(in crate::macos_computers_engine) fn prepare(
     // The stored network policy is read at every gateway start; a change applies at the next
     // start of the computer.
     let (network_policy, strict) = crate::network_policy::gateway_policy(
-        &crate::network_policy::plan_for(&record.id, &record.name, None),
+        &crate::network_policy::plan_for_gateway(&record.id, &record.name)?,
     );
     crate::network_policy::service::gateway_started(&record.id, &network_policy, strict);
     let request = InitRequest {

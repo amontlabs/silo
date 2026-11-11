@@ -65,10 +65,15 @@ pub fn gateway_network(name: &str, record: &ComputerRecord) -> (Option<Value>, O
         }
         return (Some(blocked_gateway_policy()), None);
     }
-    let Some(id) = record.label("silo.machine-id") else {
-        return (None, None);
+    // A record that cannot say which computer it is, or a policy that cannot be read, gets no
+    // way out rather than the gateway's own open policy.
+    let Some(plan) = record
+        .label("silo.machine-id")
+        .and_then(|id| crate::network_policy::plan_for_gateway(id, name).ok().map(|plan| (id, plan)))
+    else {
+        return (Some(blocked_gateway_policy()), None);
     };
-    let plan = crate::network_policy::plan_for(id, name, None);
+    let (id, plan) = plan;
     crate::network_policy::service::gateway_started(id, &plan.policy_value(), plan.strict);
     gateway_network_for(&plan)
 }
@@ -293,6 +298,25 @@ mod tests {
             gateway_network("dev", &blocked),
             (Some(blocked_gateway_policy()), None)
         );
+    }
+
+    #[test]
+    fn a_container_that_cannot_say_which_computer_it_is_or_whose_policy_cannot_be_read_gets_no_way_out(
+    ) {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("network-policy.json");
+        crate::network_policy::store::use_test_path(Some(file.clone()));
+        let no_way_out = (Some(blocked_gateway_policy()), None);
+        let mut unlabelled = record();
+        unlabelled.labels.retain(|(key, _)| key != "silo.machine-id");
+        assert_eq!(gateway_network("dev", &unlabelled), no_way_out);
+        let mut labelled = record();
+        labelled.labels.push(("silo.machine-id".into(), "c1".into()));
+        assert_eq!(gateway_network("dev", &labelled), (None, None));
+        std::fs::write(&file, "{ not json").unwrap();
+        assert_eq!(gateway_network("dev", &labelled), no_way_out);
+        crate::network_policy::store::use_test_path(None);
     }
 
     #[test]

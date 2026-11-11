@@ -124,6 +124,9 @@ impl super::World for World {
     fn ssh_keys(&self, _computer: &str) -> Vec<String> {
         self.ssh_keys.clone()
     }
+    fn network_policy(&self, _computer: &str) -> Option<NetworkPolicy> {
+        Some(NetworkPolicy::default())
+    }
     fn access(&self, computer: &str) -> Access {
         self.access.get(computer).cloned().unwrap_or_default()
     }
@@ -1098,6 +1101,14 @@ fn what_the_agent_chose_is_quoted_cut_and_never_the_start_of_the_sentence() {
         "{summary}"
     );
     assert!(summary.contains("and 3 more"), "{summary}");
+    // The secret's hosts also become reachable from a computer that has a list of hosts.
+    let summary = ask_summary("secrets.save", secret("API_KEY", json!(["api.example.com"])));
+    assert!(
+        summary.ends_with("A computer whose network is a list of allowed hosts can also reach “api.example.com” because of it."),
+        "{summary}"
+    );
+    let summary = ask_summary("secrets.save", secret("API_KEY", json!(["*.co.uk", "api.example.com"])));
+    assert!(summary.contains("not added to a list of allowed hosts"), "{summary}");
     let any = json!({"request": {"operation": "add", "name": "API_KEY", "value": "v",
         "computerIds": ["fork-1"], "allowedDomains": ["*"], "allowAnyDestination": true}});
     assert!(ask_summary("secrets.save", any).starts_with("Sent to any destination: add the secret “API_KEY”"));
