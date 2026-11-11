@@ -329,10 +329,10 @@ index a50feb73dc01626ca0857483ba7ae72632ee69e7..84c74ce43418c581446d328dc0877efd
  crossbeam-queue = { workspace = true, optional = true }
 diff --git a/crates/network/lib/engine/secrets/github.rs b/crates/network/lib/engine/secrets/github.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..762c6dbbcf26d7f919594eff24e9abdad377d94c
+index 0000000000000000000000000000000000000000..1f05bf366dacdb0650745245b253ded25db553a5
 --- /dev/null
 +++ b/crates/network/lib/engine/secrets/github.rs
-@@ -0,0 +1,1047 @@
+@@ -0,0 +1,1046 @@
 +//! Credential selection only. GitHub-issued tokens enforce repository authority.
 +//! Never split, replay, or authorize GraphQL fields here.
 +use crate::secrets::config::SecretViolationAction as ViolationAction;
@@ -793,10 +793,10 @@ index 0000000000000000000000000000000000000000..762c6dbbcf26d7f919594eff24e9abda
 +        .unwrap_or_else(|| serde_json::json!({}));
 +    let mut work = Vec::new();
 +    for definition in definitions {
-+        if variables.get(&definition.name).is_none() {
-+            if let Some(default) = &definition.default_value {
-+                variables[&definition.name] = input_value(default, &variables)?;
-+            }
++        if variables.get(&definition.name).is_none()
++            && let Some(default) = &definition.default_value
++        {
++            variables[&definition.name] = input_value(default, &variables)?;
 +        }
 +        if let Some(value) = variables.get(&definition.name) {
 +            work.push((variable_type(&definition.var_type), value.clone(), 0usize));
@@ -813,12 +813,11 @@ index 0000000000000000000000000000000000000000..762c6dbbcf26d7f919594eff24e9abda
 +            match item {
 +                Selection::Field(field) => {
 +                    for (name, value) in &field.arguments {
-+                        if name == "owner" {
-+                            if let Ok(serde_json::Value::String(owner)) =
++                        if name == "owner"
++                            && let Ok(serde_json::Value::String(owner)) =
 +                                input_value(value, &variables)
-+                            {
-+                                hints.insert(owner.to_ascii_lowercase());
-+                            }
++                        {
++                            hints.insert(owner.to_ascii_lowercase());
 +                        }
 +                        if matches!(value, graphql_parser::query::Value::Variable(_)) {
 +                            continue;
@@ -1455,7 +1454,7 @@ index d4ed6d254775203f03d770320d8a65d5b55df8d0..44a4c3139949ef4b93d35d0b590adedf
 +    }
  }
 diff --git a/crates/network/lib/engine/secrets/handler.rs b/crates/network/lib/engine/secrets/handler.rs
-index ed97e80b1f98ed060f65531d4a25a8160f15a4d2..09de35c83e561d4fa4294bb37cf46fa405b151c9 100644
+index ed97e80b1f98ed060f65531d4a25a8160f15a4d2..64e9d499ba40de80303e232288e5dcde3a9e241a 100644
 --- a/crates/network/lib/engine/secrets/handler.rs
 +++ b/crates/network/lib/engine/secrets/handler.rs
 @@ -3,8 +3,9 @@
@@ -1553,17 +1552,17 @@ index ed97e80b1f98ed060f65531d4a25a8160f15a4d2..09de35c83e561d4fa4294bb37cf46fa4
 +            self.unsupported_body_tail.clone(),
 +        );
 +        let result = self.substitute_inner(data);
-+        if result.is_err() {
-+            if let Some(lookup) = self.github_lookup.as_mut() {
-+                (
-+                    self.http_state,
-+                    self.http_pending,
-+                    self.http1_request_summary,
-+                    self.prev_tail,
-+                    self.unsupported_body_tail,
-+                ) = snapshot;
-+                lookup.retry_input = data.to_vec();
-+            }
++        if result.is_err()
++            && let Some(lookup) = self.github_lookup.as_mut()
++        {
++            (
++                self.http_state,
++                self.http_pending,
++                self.http1_request_summary,
++                self.prev_tail,
++                self.unsupported_body_tail,
++            ) = snapshot;
++            lookup.retry_input = data.to_vec();
 +        }
 +        result
 +    }

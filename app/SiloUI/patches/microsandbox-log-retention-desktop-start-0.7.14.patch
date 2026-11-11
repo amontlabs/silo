@@ -12,7 +12,7 @@ index 66cdbfff0d0694ab24244f36c35ec5d4ddf05210..db36b1e17a67b1880bf5fb39778576f1
  use std::path::Path;
  use std::sync::Mutex;
 diff --git a/crates/runtime/lib/runner/logging.rs b/crates/runtime/lib/runner/logging.rs
-index 31ca85811af308a22caa932f38aef27a93fbbc7e..847c26af3efbf98c468a5c63378cee8e1c213caa 100644
+index 31ca85811af308a22caa932f38aef27a93fbbc7e..f43c7e11c0c8ffe36caa8d9e745b29a465d831d9 100644
 --- a/crates/runtime/lib/runner/logging.rs
 +++ b/crates/runtime/lib/runner/logging.rs
 @@ -13,7 +13,11 @@ use crate::RuntimeResult;
@@ -99,10 +99,54 @@ index 31ca85811af308a22caa932f38aef27a93fbbc7e..847c26af3efbf98c468a5c63378cee8e
          Ok(())
      }
  
-@@ -78,6 +125,70 @@ impl RotatingLog {
+@@ -78,26 +125,29 @@ impl RotatingLog {
      }
  }
  
+-//--------------------------------------------------------------------------------------------------
+-// Methods: Helpers
+-//--------------------------------------------------------------------------------------------------
+-
+ impl RotatingLog {
+     fn rotate(&mut self) -> RuntimeResult<()> {
+         self.file.flush()?;
+ 
+-        // Shift existing rotated files: .log.2 → .log.3, .log.1 → .log.2, etc.
+-        for i in (1..=MAX_ROTATED_FILES).rev() {
+-            let from = format!("{}.{i}", self.path.display());
+-            let to = format!("{}.{}", self.path.display(), i + 1);
+-            if Path::new(&from).exists() {
+-                fs::rename(&from, &to)?;
++        // Enumerate archives instead of silently keeping an extra fixed backup.
++        // Independent execution/console budgets and shared age limits choose what survives.
++        let prefix = format!("{}.", self.path.file_name().unwrap().to_string_lossy());
++        let mut suffixes: Vec<u64> = fs::read_dir(self.path.parent().unwrap())?
++            .filter_map(Result::ok)
++            .filter_map(|e| e.file_name().to_str()?.strip_prefix(&prefix)?.parse().ok())
++            .collect();
++        suffixes.sort_unstable_by(|a, b| b.cmp(a));
++        for i in suffixes {
++            let from = PathBuf::from(format!("{}.{i}", self.path.display()));
++            let to = PathBuf::from(format!("{}.{}", self.path.display(), i + 1));
++            fs::rename(&from, &to)?;
++            if retention::marker(&from).exists() {
++                fs::rename(retention::marker(&from), retention::marker(&to))?;
+             }
+         }
+-
+-        // Rename current log to .log.1
+-        let rotated = format!("{}.1", self.path.display());
++        let rotated = PathBuf::from(format!("{}.1", self.path.display()));
+         fs::rename(&self.path, &rotated)?;
++        fs::rename(retention::marker(&self.path), retention::marker(&rotated))?;
+ 
+         // Open a fresh log file
+         self.file = OpenOptions::new()
+@@ -109,3 +159,71 @@ impl RotatingLog {
+         Ok(())
+     }
+ }
++
 +#[cfg(test)]
 +mod tests {
 +    use super::*;
@@ -167,50 +211,15 @@ index 31ca85811af308a22caa932f38aef27a93fbbc7e..847c26af3efbf98c468a5c63378cee8e
 +    }
 +}
 +
- //--------------------------------------------------------------------------------------------------
- // Methods: Helpers
- //--------------------------------------------------------------------------------------------------
-@@ -86,18 +197,25 @@ impl RotatingLog {
-     fn rotate(&mut self) -> RuntimeResult<()> {
-         self.file.flush()?;
- 
--        // Shift existing rotated files: .log.2 → .log.3, .log.1 → .log.2, etc.
--        for i in (1..=MAX_ROTATED_FILES).rev() {
--            let from = format!("{}.{i}", self.path.display());
--            let to = format!("{}.{}", self.path.display(), i + 1);
--            if Path::new(&from).exists() {
--                fs::rename(&from, &to)?;
-+        // Enumerate archives instead of silently keeping an extra fixed backup.
-+        // Independent execution/console budgets and shared age limits choose what survives.
-+        let prefix = format!("{}.", self.path.file_name().unwrap().to_string_lossy());
-+        let mut suffixes: Vec<u64> = fs::read_dir(self.path.parent().unwrap())?
-+            .filter_map(Result::ok)
-+            .filter_map(|e| e.file_name().to_str()?.strip_prefix(&prefix)?.parse().ok())
-+            .collect();
-+        suffixes.sort_unstable_by(|a, b| b.cmp(a));
-+        for i in suffixes {
-+            let from = PathBuf::from(format!("{}.{i}", self.path.display()));
-+            let to = PathBuf::from(format!("{}.{}", self.path.display(), i + 1));
-+            fs::rename(&from, &to)?;
-+            if retention::marker(&from).exists() {
-+                fs::rename(retention::marker(&from), retention::marker(&to))?;
-             }
-         }
--
--        // Rename current log to .log.1
--        let rotated = format!("{}.1", self.path.display());
-+        let rotated = PathBuf::from(format!("{}.1", self.path.display()));
-         fs::rename(&self.path, &rotated)?;
-+        fs::rename(retention::marker(&self.path), retention::marker(&rotated))?;
- 
-         // Open a fresh log file
-         self.file = OpenOptions::new()
++//--------------------------------------------------------------------------------------------------
++// Methods: Helpers
++//--------------------------------------------------------------------------------------------------
 diff --git a/crates/runtime/lib/runner/logging_retention.rs b/crates/runtime/lib/runner/logging_retention.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..8c674fc3cf1b5ea4f772b045af4f0480fdb6a222
+index 0000000000000000000000000000000000000000..613bb755a794ecc462314ddd5589fe952b5ce1f8
 --- /dev/null
 +++ b/crates/runtime/lib/runner/logging_retention.rs
-@@ -0,0 +1,291 @@
+@@ -0,0 +1,289 @@
 +//! Shared with the pinned runtime patch. Only call from Silo for stopped VMs.
 +//! Live runtime writers serialize retention and writes with their process lock.
 +use std::{
@@ -246,14 +255,12 @@ index 0000000000000000000000000000000000000000..8c674fc3cf1b5ea4f772b045af4f0480
 +    )
 +}
 +pub fn started(path: &Path) -> io::Result<SystemTime> {
-+    if fs::symlink_metadata(marker(path)).is_ok_and(|m| m.is_file()) {
-+        if let Ok(value) = fs::read_to_string(marker(path)) {
-+            if let Ok(seconds) = value.parse::<u64>() {
-+                if let Some(time) = UNIX_EPOCH.checked_add(Duration::from_secs(seconds)) {
-+                    return Ok(time);
-+                }
-+            }
-+        }
++    if fs::symlink_metadata(marker(path)).is_ok_and(|m| m.is_file())
++        && let Ok(value) = fs::read_to_string(marker(path))
++        && let Ok(seconds) = value.parse::<u64>()
++        && let Some(time) = UNIX_EPOCH.checked_add(Duration::from_secs(seconds))
++    {
++        return Ok(time);
 +    }
 +    let metadata = fs::metadata(path)?;
 +    // Legacy files have no segment marker. Creation is conservative where available.
@@ -532,7 +539,7 @@ index 60257dc7d62d957c875e85e8da2e0fd6d361806b..52f90664dc9cf10ca728ff3df787ef01
      },
  ];
 diff --git a/sdk/rust/lib/logs/stream.rs b/sdk/rust/lib/logs/stream.rs
-index fdda820f0c589df0cabcae355e543780281a223d..f1c57b740cec7bf9cc29c976b37f6c0a1ef60f9a 100644
+index fdda820f0c589df0cabcae355e543780281a223d..254fc5e74895c310a40478eaca14043c3b0ffe36 100644
 --- a/sdk/rust/lib/logs/stream.rs
 +++ b/sdk/rust/lib/logs/stream.rs
 @@ -51,7 +51,7 @@ pub(crate) struct LogFileConfig {
@@ -544,7 +551,7 @@ index fdda820f0c589df0cabcae355e543780281a223d..f1c57b740cec7bf9cc29c976b37f6c0a
      /// the bare name is the only one ever read; on inode change
      /// the reader silently resets to the new file.
      pub(crate) max_rotation_index: usize,
-@@ -88,11 +88,38 @@ impl RotationConfig {
+@@ -88,11 +88,37 @@ impl RotationConfig {
          }
      }
  
@@ -565,10 +572,9 @@ index fdda820f0c589df0cabcae355e543780281a223d..f1c57b740cec7bf9cc29c976b37f6c0a
 +                .to_str()
 +                .and_then(|name| name.strip_prefix(&prefix))
 +                .and_then(|suffix| suffix.parse::<usize>().ok())
++                && index > 0
 +            {
-+                if index > 0 {
-+                    indices.push(index);
-+                }
++                indices.push(index);
 +            }
 +        }
 +        indices.sort_unstable();
@@ -584,7 +590,7 @@ index fdda820f0c589df0cabcae355e543780281a223d..f1c57b740cec7bf9cc29c976b37f6c0a
              if let Some(found) = FileHandle::generation_of_path(&self.path(index)).await
                  && found == wanted
              {
-@@ -109,7 +136,13 @@ impl RotationConfig {
+@@ -109,7 +135,13 @@ impl RotationConfig {
          &self,
          backfill: &mut VecDeque<FileHandle>,
      ) -> MicrosandboxResult<()> {
@@ -599,7 +605,7 @@ index fdda820f0c589df0cabcae355e543780281a223d..f1c57b740cec7bf9cc29c976b37f6c0a
              if let Some(src) = FileHandle::open(&self.path(index)).await? {
                  backfill.push_back(src);
              }
-@@ -924,10 +957,10 @@ mod tests {
+@@ -924,10 +956,10 @@ mod tests {
      }
  
      #[tokio::test]

@@ -95,7 +95,7 @@ index 65112ab91189895a9ad09d5783dd912f21271d81..db3a111db2f0e3505d43baa44103adad
      pub async fn list() -> MicrosandboxResult<SandboxPage> {
          Self::list_with(|list| list).await
 diff --git a/sdk/rust/lib/sandbox/modify/local.rs b/sdk/rust/lib/sandbox/modify/local.rs
-index 44a8c98ead352d7f86d944779120c79e7f4520b9..33a604930b6b34292acc2ac6479deebd34682728 100644
+index 44a8c98ead352d7f86d944779120c79e7f4520b9..9111b22d4f3b35920201e750b2bb4cb9dca0d98b 100644
 --- a/sdk/rust/lib/sandbox/modify/local.rs
 +++ b/sdk/rust/lib/sandbox/modify/local.rs
 @@ -3,14 +3,16 @@
@@ -191,7 +191,7 @@ index 44a8c98ead352d7f86d944779120c79e7f4520b9..33a604930b6b34292acc2ac6479deebd
 +        return Err(invalid("external disk image must not be a symlink"));
 +    }
 +    let original = host.clone();
-+    let options = options.clone();
++    let options = *options;
 +    let source = source_override.unwrap_or(&original).to_path_buf();
 +    if std::fs::symlink_metadata(&source)?.file_type().is_symlink() {
 +        return Err(invalid("source disk image must not be a symlink"));

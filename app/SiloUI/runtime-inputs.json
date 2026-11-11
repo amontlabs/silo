@@ -66,7 +66,7 @@
     },
     {
       "path": "patches/microsandbox-silo-network-0.7.14.patch",
-      "sha256": "4c910d22be74551a26ae84a3ddede926ae82230ee25cd349d0b2b8e194cc62be"
+      "sha256": "e451c16d1c75e67e504f793014ed40c5c32dd5e9c2bc06e6043b21e12914dab2"
     },
     {
       "path": "patches/microsandbox-restore-policy-0.7.14.patch",
@@ -90,7 +90,7 @@
     },
     {
       "path": "patches/microsandbox-secret-usage-events-0.7.14.patch",
-      "sha256": "968b60d20f952f44a65154175736443b10b129dd370b991e62237c04360ce81e"
+      "sha256": "b2d765ea6fd417acfbaef3c8ff7ce1dad518e26b191e59ee97f516d867409b03"
     },
     {
       "path": "patches/microsandbox-live-public-ports-0.7.14.patch",
@@ -110,7 +110,7 @@
     },
     {
       "path": "patches/microsandbox-checkpoint-fs-state-0.7.14.patch",
-      "sha256": "10b2ae2407189f96c3b9fd4f1a279298187472d3ac0865d56ea7efcbf70fbbec"
+      "sha256": "193dce615c60e36129a837a8a3badf58e8ad51b6557d6a01ef8d63b7fda0bb02"
     },
     {
       "path": "patches/microsandbox-reclaim-capture-dirs-0.7.14.patch",
@@ -126,7 +126,7 @@
     },
     {
       "path": "patches/microsandbox-log-retention-desktop-start-0.7.14.patch",
-      "sha256": "e9af0dc65ad8dd5e293d3e99470daee9887e3858ed0d8195b234623a049531e2"
+      "sha256": "789bb37b6682afa3ce262c1ccde33e15756f00cced0ce9384e7c8acf29aa8921"
     },
     {
       "path": "patches/microsandbox-storage-repair-confirm-0.7.14.patch",
@@ -138,7 +138,7 @@
     },
     {
       "path": "patches/microsandbox-adopt-owned-disk-0.7.14.patch",
-      "sha256": "2b90808877e2195db811777b4ba5d8981a7d6717702436bad4c9c282f7df5eff"
+      "sha256": "89bc781a9caa6cc574d60a64e2b854e4469637b0a6ceb281790e87b6f8ab2823"
     },
     {
       "path": "patches/microsandbox-restore-root-capacity-0.7.14.patch",
