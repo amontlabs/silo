@@ -51,6 +51,10 @@ export function Unavailable({ message, retry, retryLabel = "Retry checks", check
   )
 }
 
+const MAX_RECOVERY_TRIES = 30
+/** Waits between automatic re-runs: quick at first, then every 10 seconds (about 5 minutes in all). */
+function recoveryDelayMs(tries: number) { return [2_000, 3_000, 5_000][tries] ?? 10_000 }
+
 type ProductionSurfaceProps = { source: ProductionSource; dependencyStore: DependencyStore | null; statusPanel?: boolean }
 export function ProductionSurface(props: ProductionSurfaceProps) {
   return props.statusPanel ? <ProductionContent {...props} /> : <MainSurface {...props} />
@@ -92,8 +96,25 @@ function ProductionContent({ source, dependencyStore, statusPanel = false }: Pro
   const retryChecks = useStableCallback(() => { dependencies?.retry(); void source.initialize().catch((error: unknown) => console.error("Silo live updates:", error)) })
   // The engine can start after the app: checks and loads that ran before it was there failed
   // for that reason alone, so run them again when it connects instead of waiting for Retry.
-  const recoverOnEngineConnected = useStableCallback(() => { if (!current.source || current.error || checking || failures.length) retryChecks() })
+  // A connection made while the engine is still starting or upgrading storage can be answered
+  // with errors and no second event follows, so the same re-run also repeats on a timer.
+  const [recoveryTries, setRecoveryTries] = useState(0)
+  const recoverOnEngineConnected = useStableCallback(() => {
+    if (!current.source || current.error || checking || failures.length) { setRecoveryTries(1); retryChecks() } else setRecoveryTries(0)
+  })
   useEffect(() => onEngineConnected(recoverOnEngineConnected), [recoverOnEngineConnected])
+  const unhealthy = !current.source || failures.length > 0
+  const settling = current.loading || checking
+  useEffect(() => {
+    if (!unhealthy) {
+      // oxlint-disable-next-line react/set-state-in-effect
+      setRecoveryTries(0)
+      return
+    }
+    if (settling || recoveryTries >= MAX_RECOVERY_TRIES) return
+    const timer = globalThis.setTimeout(() => { setRecoveryTries((tries) => tries + 1); retryChecks() }, recoveryDelayMs(recoveryTries))
+    return () => globalThis.clearTimeout(timer)
+  }, [unhealthy, settling, recoveryTries, retryChecks])
   // Finish persists completion; keep this session on its preferences screen until Open Silo.
   // Settings that could not be read (or a damaged, write-protected file) report defaults,
   // so a missing completion flag is unknown, not "new user": never route to onboarding

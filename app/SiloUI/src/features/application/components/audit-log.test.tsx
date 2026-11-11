@@ -4,7 +4,7 @@ import { expect, it, vi } from "vitest"
 
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import { createApprovalFixture } from "@/fixtures/approvals"
-import { auditAction } from "../model/audit-copy"
+import { auditAction, isAuditBookkeeping } from "../model/audit-copy"
 import { AUDIT_PAGE_SIZE } from "../model/use-audit-log"
 import { AuditLog } from "./audit-log"
 
@@ -35,9 +35,28 @@ it("shows time, who, what in plain words, the computer, the outcome and a repeat
   expect(within(table).getAllByText("Another device").length).toBeGreaterThan(0)
 })
 
-it("falls back to the method name for a call it has no phrase for", () => {
+it("never prints a method name: unknown calls read as a request about their area", () => {
   expect(auditAction("computers.start")).toBe("Started a computer")
-  expect(auditAction("future.method")).toBe("future.method")
+  expect(auditAction("guestClient.status")).toBe("Checked Silo's tools in a computer")
+  expect(auditAction("steps.record")).toBe("Recorded a step")
+  expect(auditAction("changes.diff")).toBe("Looked at a computer's changes")
+  expect(auditAction("changes.requests.show")).toBe("Opened a review")
+  expect(auditAction("computers.somethingNew")).toBe("Made a request about computers")
+  expect(auditAction("future.method")).toBe("Made a request")
+  expect(auditAction("")).toBe("Made a request")
+  for (const method of ["operations.job.acknowledge", "a.b.c.d", "guestClient.enable"]) expect(auditAction(method)).not.toMatch(/\w\.\w/)
+})
+
+it("leaves out bookkeeping calls that went fine, but keeps them when they failed", async () => {
+  expect(isAuditBookkeeping({ method: "operations.job.acknowledge", outcome: "ok" })).toBe(true)
+  expect(isAuditBookkeeping({ method: "operations.job.acknowledge", outcome: "error" })).toBe(false)
+  expect(isAuditBookkeeping({ method: "computers.start", outcome: "ok" })).toBe(false)
+  const entry = (id: number, method: string, outcome: "ok" | "error") => ({ id, at: "2026-11-11T12:00:00Z", callerKind: "owner" as const, callerId: undefined, client: undefined, method, computerId: undefined, outcome, errorCode: undefined, jobId: undefined, approvalId: undefined, count: 1, lastAt: undefined })
+  render(<AuditLog read={async () => ({ entries: [entry(3, "operations.job.acknowledge", "ok"), entry(2, "operations.job.acknowledge", "error"), entry(1, "computers.start", "ok")], nextBeforeId: undefined })} computers={computers} active />)
+  const table = await screen.findByRole("table", { name: "Who did what" })
+  const rows = within(table).getAllByRole("row").slice(1)
+  expect(rows.map(row => within(row).getAllByRole("cell")[2]?.textContent)).toEqual(["Marked a background job as seen", "Started a computer"])
+  expect(table).not.toHaveTextContent(/operations\.|guestClient\./)
 })
 
 it("links a row to the request it belonged to", async () => {

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createMemorySettingsStore, createSettingsStore, SettingsProvider } from "@/features/preferences/settings-store"
 import type { ProductionSource } from "./production-source"
 import type { DependencyStore } from "./dependencies"
@@ -231,6 +231,68 @@ describe("engine connection", () => {
     await act(async () => { render(surface()) })
     await connect()
     expect(state.retry).toHaveBeenCalledOnce()
+  })
+  describe("without an engine event", () => {
+    // Each timer's state update renders between steps, as it does in the app.
+    const advance = async (ms: number) => { for (let elapsed = 0; elapsed < ms; elapsed += 1_000) await act(async () => { await vi.advanceTimersByTimeAsync(Math.min(1_000, ms - elapsed)) }) }
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+
+    it("keeps loading again after the engine connected too early, until Silo loads", async () => {
+      state.source = null
+      state.error = "Silo's engine is not reachable yet. Retry in a moment."
+      const view = render(surface())
+      await act(async () => {})
+      await connect()
+      expect(source.initialize).toHaveBeenCalledTimes(1)
+      await advance(30_000)
+      expect(vi.mocked(source.initialize).mock.calls.length).toBeGreaterThan(2)
+      const tries = vi.mocked(source.initialize).mock.calls.length
+      state.source = {}
+      state.error = null
+      await act(async () => { view.rerender(surface()) })
+      await advance(60_000)
+      expect(source.initialize).toHaveBeenCalledTimes(tries)
+    })
+    it("runs the failed checks again on its own until the runtime answers", async () => {
+      state.checks = [failure]
+      const view = render(surface())
+      await act(async () => {})
+      await advance(30_000)
+      expect(vi.mocked(state.retry).mock.calls.length).toBeGreaterThan(2)
+      const tries = vi.mocked(state.retry).mock.calls.length
+      state.checks = [{ ...failure, status: "pass" }]
+      await act(async () => { view.rerender(surface()) })
+      await advance(60_000)
+      expect(state.retry).toHaveBeenCalledTimes(tries)
+    })
+    it("waits while a check is running instead of starting another", async () => {
+      state.checks = [{ ...failure, status: "pending" }]
+      await act(async () => { render(surface()) })
+      await advance(60_000)
+      expect(state.retry).not.toHaveBeenCalled()
+    })
+    it("gives up after a bounded number of tries and starts again on the next engine event", async () => {
+      state.source = null
+      state.error = "Silo's engine is not reachable yet. Retry in a moment."
+      await act(async () => { render(surface()) })
+      await advance(30 * 60_000)
+      const bound = vi.mocked(source.initialize).mock.calls.length
+      expect(bound).toBeGreaterThan(3)
+      expect(bound).toBeLessThan(60)
+      await advance(30 * 60_000)
+      expect(source.initialize).toHaveBeenCalledTimes(bound)
+      await connect()
+      expect(source.initialize).toHaveBeenCalledTimes(bound + 1)
+      await advance(30_000)
+      expect(vi.mocked(source.initialize).mock.calls.length).toBeGreaterThan(bound + 2)
+    })
+    it("does not poll a healthy application", async () => {
+      await act(async () => { render(surface()) })
+      await advance(60_000)
+      expect(state.retry).not.toHaveBeenCalled()
+      expect(source.initialize).not.toHaveBeenCalled()
+    })
   })
   it("stops listening when the surface goes away", async () => {
     state.checks = [failure]

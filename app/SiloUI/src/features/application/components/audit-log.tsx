@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/empty-state"
 import { Button } from "@/components/ui/button"
 import type { AuditCallerKind, AuditEntry } from "@/desktop/production-schemas"
 import type { ApplicationActions, ApplicationComputer } from "@/features/application/model/application-source"
-import { auditAction, auditOutcome, auditTarget, auditWho } from "@/features/application/model/audit-copy"
+import { auditAction, auditOutcome, auditTarget, auditWho, isAuditBookkeeping } from "@/features/application/model/audit-copy"
 import { useAuditLog } from "@/features/application/model/use-audit-log"
 import { formatLocalActivityTime } from "@/lib/format-date"
 import { cn } from "@/lib/utils"
@@ -66,6 +66,7 @@ export function AuditLog({ read, computers, active, onOpenApproval, openableAppr
   const [computerId, setComputerId] = useState("")
   const [callerKind, setCallerKind] = useState<AuditCallerKind | "">("")
   const log = useAuditLog(read, { computerId: computerId || undefined, callerKind: callerKind || undefined }, active)
+  const entries = log.entries.filter(entry => !isAuditBookkeeping(entry))
   if (!read) return <EmptyState icon={<ScrollText />} title="Not available" description="This version of Silo cannot read who did what." />
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
@@ -84,7 +85,7 @@ export function AuditLog({ read, computers, active, onOpenApproval, openableAppr
         <Button size="icon-xs" variant="outline" aria-label="Refresh" title="Refresh" disabled={log.loading} onClick={log.refresh}><RefreshCw aria-hidden="true" className={log.loading ? "motion-safe:animate-spin motion-reduce:animate-none" : undefined} /></Button>
       </div>
       {log.error && <p role="alert" className="text-xs text-destructive">{log.error}</p>}
-      {log.entries.length === 0 && !log.loading && !log.error
+      {entries.length === 0 && !log.hasMore && !log.loading && !log.error
         ? <EmptyState icon={<ScrollText />} title="Nothing recorded yet" description="Calls that change something, and the ones Silo refuses or holds for you, appear here." />
         : (
           <div className="min-h-0 flex-1 overflow-auto overscroll-contain rounded-md border border-border">
@@ -100,7 +101,7 @@ export function AuditLog({ read, computers, active, onOpenApproval, openableAppr
                 </tr>
               </thead>
               <tbody>
-                {log.entries.map(entry => <Row key={entry.id} entry={entry} computers={computers} onOpenApproval={onOpenApproval} openableApprovals={openableApprovals} />)}
+                {entries.map(entry => <Row key={entry.id} entry={entry} computers={computers} onOpenApproval={onOpenApproval} openableApprovals={openableApprovals} />)}
               </tbody>
             </table>
             {log.hasMore && (
