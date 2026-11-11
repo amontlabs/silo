@@ -1695,8 +1695,6 @@ fn export_and_drop_copies(
         return result.map(|archive| (archive, None));
     };
     let copies = scrub::make_copies(controller, env, &targets, cancellation)?;
-    // A computer exported from its own disk or a checkpoint carries its endpoint file.
-    end_tokens(controller, names, &targets);
     let result = backup_work(
         controller,
         archive_path,
@@ -1706,6 +1704,8 @@ fn export_and_drop_copies(
         checkpoint_id,
         cancellation,
     );
+    // A computer exported from its own disk or a checkpoint carries its endpoint file.
+    end_tokens(controller, names, &targets);
     let dropped = copies.drop_all();
     match (result, dropped) {
         (Ok(archive), dropped) => Ok((
@@ -1730,8 +1730,9 @@ fn export_and_drop_copies(
 }
 
 /// Ends the token of Silo's tools of each of `names` that was not exported from a hidden copy
-/// (`copied`, as (name, id)): its file holds the computer's endpoint file, and the copy of the
-/// token in it must prove nothing. A copy never holds one (`export_scrub` removes it).
+/// (`copied`, as (name, id)), once the export is written: its file holds the computer's endpoint
+/// file, and the copy of the token in it must prove nothing. A copy never holds one
+/// (`export_scrub` removes it).
 fn end_tokens(controller: &Controller, names: &[String], copied: &[(String, String)]) {
     let Ok(host) = controller.runtime_host() else {
         return;
