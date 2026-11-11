@@ -464,6 +464,41 @@ pub fn expand_held(held: &Held) -> BTreeSet<Allowed> {
     allowed
 }
 
+/// What a policy keeps a computer from reaching among some hosts, each over https.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Reach {
+    /// All of them can be reached.
+    All,
+    /// Nothing can be reached: the policy is closed.
+    Nothing,
+    /// These cannot: the policy is an allowlist that does not cover them.
+    Missing(Vec<String>),
+}
+
+/// Whether `held` lets a computer reach `hosts`. The hosts its grants need are not counted.
+pub fn reach_of(held: &Held, hosts: &[&str]) -> Reach {
+    match held.policy.mode {
+        NetworkPolicyMode::Open => Reach::All,
+        NetworkPolicyMode::Closed => Reach::Nothing,
+        NetworkPolicyMode::Allowlist => {
+            let allowed = expand_held(held);
+            let missing: Vec<String> = hosts
+                .iter()
+                .filter(|host| {
+                    let wanted = Allowed::new(host, HTTPS_PORT);
+                    !allowed.iter().any(|have| have.covers(&wanted))
+                })
+                .map(|host| (*host).to_owned())
+                .collect();
+            if missing.is_empty() {
+                Reach::All
+            } else {
+                Reach::Missing(missing)
+            }
+        }
+    }
+}
+
 /// Entries of `new` that nothing in `current` covers.
 fn uncovered(new: &BTreeSet<Allowed>, current: &BTreeSet<Allowed>) -> Vec<Allowed> {
     new.iter()

@@ -123,6 +123,9 @@ wire_struct! {
         request: FoldRequest,
         fork_name: String,
         fork_state: String,
+        /// The name of the computer the request would be merged into, when it still exists.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_name: Option<String>,
         /// `true` when the fork's changes differ from the ones the request was made from; a
         /// keep of the request refuses. `None` when this cannot be told (a folder fork).
         #[serde(default, skip_serializing_if = "Option::is_none")]

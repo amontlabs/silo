@@ -256,6 +256,18 @@ pub fn decide(caller: &Caller, method: MethodName, params: &Value, world: &dyn W
     }
 }
 
+/// `words` as the start of a sentence: a command in code quotes, a phrase with a capital.
+fn sentence_start(words: &str) -> String {
+    if words.starts_with("silo ") {
+        return format!("`{words}`");
+    }
+    let mut chars = words.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+        .unwrap_or_default()
+}
+
 /// The longest name a computer made by an agent may have.
 const NAME_MAX_CHARS: usize = 64;
 
@@ -368,10 +380,14 @@ impl<'a> Judge<'a> {
             Rule::Made => self.made(method, &params),
             Rule::Create => self.create(method, &params),
             Rule::Ask(kind) => self.ask(method, kind, &params),
-            Rule::OwnerOnly => Err(format!(
-                "{} is for the person who runs Silo; a computer's agent cannot call it.",
-                method.name()
-            )),
+            Rule::OwnerOnly => Err(match rules::command_words(method) {
+                Some(command) => format!(
+                    "{} is for the person who runs Silo; a computer's agent cannot do it.",
+                    sentence_start(command)
+                ),
+                None => "This is for the person who runs Silo; a computer's agent cannot do it."
+                    .into(),
+            }),
         };
         decided.unwrap_or_else(refuse)
     }
@@ -432,6 +448,18 @@ impl<'a> Judge<'a> {
                     }
                 }
                 Ok(allow_with(params))
+            }
+            // The status says whether the tools are on and how they fared; it is read for the
+            // computer asking and for no other.
+            MethodName::GuestClientStatus => {
+                match text(&params, "computerId") {
+                    Some(id) if id == self.caller => {}
+                    Some(_) => {
+                        return Err("A computer's agent can read the tools status of its own computer only.".into())
+                    }
+                    None => return Err("The call must name a computer (computerId).".into()),
+                }
+                Ok(allow_with(json!({ "computerId": self.caller })))
             }
             _ => {
                 self.tree_target(&params, "computerId")?;

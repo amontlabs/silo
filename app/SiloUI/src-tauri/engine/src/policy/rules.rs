@@ -127,7 +127,9 @@ pub fn rule(method: MethodName) -> Rule {
         | M::GuestSshAliasRemove => OwnerOnly,
         // Prepares the device-wide authorized_keys file every computer shares.
         M::GuestPrepare => OwnerOnly,
-        M::GuestClientEnable | M::GuestClientRevoke | M::GuestClientStatus => OwnerOnly,
+        // A computer reads its own tools status; turning them on or off is the owner's.
+        M::GuestClientStatus => Tree,
+        M::GuestClientEnable | M::GuestClientRevoke => OwnerOnly,
         // The agents a computer has: reading is like its other status, installing runs in it.
         M::AgentsList => Tree,
         M::AgentsInstall => Made,
@@ -200,5 +202,36 @@ pub fn rule(method: MethodName) -> Rule {
         // Recipes: a computer may read them; saving, removing and building them is the owner's.
         M::RecipesGet | M::RecipesList => Open,
         M::RecipesBuild | M::RecipesRemove | M::RecipesSave => OwnerOnly,
+    }
+}
+
+/// The command that runs `method`, for a refusal a person or an agent reads: it names what was
+/// attempted in the command's words and never the engine's wire name. `None` when no command
+/// is worth naming.
+pub fn command_words(method: MethodName) -> Option<&'static str> {
+    use MethodName as M;
+    match method {
+        M::GuestClientEnable => Some("silo tools enable"),
+        M::GuestClientRevoke => Some("silo tools disable"),
+        M::GuestClientStatus => Some("silo tools status"),
+        M::SecretsList | M::SecretsRemove | M::SecretsRetry => Some("silo secrets"),
+        M::ExportsCreate | M::ExportsTransfer | M::ExportsCheck | M::ExportsDiscard => {
+            Some("silo export")
+        }
+        M::ExportsImport | M::ExportsInspect => Some("silo import"),
+        M::RecipesBuild | M::RecipesSave | M::RecipesRemove => Some("silo recipe"),
+        M::ComputersRebuild => Some("silo rebuild"),
+        M::ComputersConfigurationChange | M::ComputersConfigurationRead => {
+            Some("changing a computer's settings")
+        }
+        M::ConnectionsDevicesConnect
+        | M::ConnectionsDevicesHealth
+        | M::ConnectionsDevicesList
+        | M::ConnectionsDevicesRemove => Some("silo devices"),
+        M::SettingsRead | M::SettingsUpdate | M::SettingsFlush => Some("changing Silo's settings"),
+        M::ComputersShell | M::ComputersLaunch | M::TerminalCommand => {
+            Some("opening a terminal or an app")
+        }
+        _ => None,
     }
 }

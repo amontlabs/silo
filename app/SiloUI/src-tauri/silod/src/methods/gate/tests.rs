@@ -74,7 +74,8 @@ async fn a_computers_call_outside_its_rules_is_refused_before_any_handler_and_re
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::PermissionDenied);
-    assert!(error.message.contains("settings.read"), "{}", error.message);
+    assert!(error.message.contains("person who runs Silo"), "{}", error.message);
+    assert!(!error.message.contains("settings.read"), "{}", error.message);
     // A computer it did not make, such as one the owner forked by hand.
     let error = call(
         &caller,

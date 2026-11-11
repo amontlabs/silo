@@ -42,6 +42,13 @@ it("shows a merge a computer asked for as one row, not two", async () => {
   expect(waiting.textContent?.match(/Merge auth-redirect into main/g)).toHaveLength(1)
 })
 
+it("wraps the review request of a merge approval when the engine tags it with this device's own id", () => {
+  const approvals = approvalListSchema.parse({ approvals: [{ id: "ap-1", kind: "merge", computerId: "c", computerName: "main", summary: "Merge x", state: "pending", createdAt: "2026-11-11T11:00:00Z", reviewRequestId: "req-1" }] }).approvals
+  const request = { request: { id: "req-1", forkId: "f", target: "t", createdAt: "2026-11-11T11:00:00Z", reviewDigest: "d", summary: "", status: "open" as const, counts: {}, approvalId: "ap-1", keepId: undefined, resolvedAt: undefined, keepingSinceMs: undefined, closedReason: undefined }, forkName: "x", forkState: undefined, targetName: "main", deviceId: "a1b2c3d4-this-device", deviceName: "My Mac" }
+  const rows = pendingRows(approvals, [request])
+  expect(rows.waiting.map(row => row.kind)).toEqual(["approval"])
+})
+
 it("keeps a review request whose approval was answered as a row of its own", () => {
   const approvals = approvalListSchema.parse({ approvals: [{ id: "ap-1", kind: "merge", computerId: "c", computerName: "main", summary: "Merge x", state: "denied", createdAt: "2026-11-11T11:00:00Z", reviewRequestId: "req-1" }] }).approvals
   const request = { request: { id: "req-1", forkId: "f", target: "t", createdAt: "2026-11-11T11:00:00Z", reviewDigest: "d", summary: "", status: "open" as const, counts: {}, approvalId: "ap-1", keepId: undefined, resolvedAt: undefined, keepingSinceMs: undefined, closedReason: undefined }, forkName: "x", forkState: undefined, targetName: "main", deviceId: undefined, deviceName: undefined }

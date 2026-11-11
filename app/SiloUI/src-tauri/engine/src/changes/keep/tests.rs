@@ -1220,6 +1220,39 @@ fn the_lane_is_held_for_the_whole_apply_and_not_while_restoring() {
 }
 
 #[test]
+fn a_fork_and_its_parent_each_with_their_own_silo_files_merge_without_a_conflict() {
+    let world = simple_world();
+    let silo_files = [
+        ("/etc/silo/endpoint.json", "fork-endpoint", "main-endpoint"),
+        ("/etc/silo/guest-client.json", "fork-token", "main-token"),
+        ("/var/lib/silo/components.json", "fork-receipt", "main-receipt"),
+    ];
+    let mut fork_manifest = SIMPLE_FORK.to_owned();
+    let mut main_manifest = SIMPLE_BASE.to_owned();
+    for (path, fork_text, main_text) in silo_files {
+        world.put("fork", path, fork_text);
+        world.put("main", path, main_text);
+        fork_manifest.push_str(&format!("F\t{path}\t12\t2\tf{}\n", fork_text.len()));
+        main_manifest.push_str(&format!("F\t{path}\t12\t2\tm{}\n", main_text.len()));
+    }
+    let (_dir, journal) = journal();
+    let outcome = run(
+        &world,
+        &store(SIMPLE_BASE, &fork_manifest, &main_manifest),
+        &journal,
+        &request(Hooks::default()),
+    )
+    .unwrap();
+    assert!(matches!(outcome, Outcome::Kept(_)), "{outcome:?}");
+    world.with("main", |c| {
+        assert_eq!(c.files["/root/.bashrc"].0, b"export X=1\n");
+        for (path, _, main_text) in silo_files {
+            assert_eq!(c.files[path].0, main_text.as_bytes(), "{path}");
+        }
+    });
+}
+
+#[test]
 fn a_divergent_keep_stops_before_anything_changes() {
     let world = simple_world();
     world.put("main", "/root/.bashrc", "main edited");
@@ -2086,6 +2119,7 @@ fn a_request_keep_result_has_the_typed_shape_for_kept_and_refused_outcomes() {
     let typed: ChangesRequestsKeepResult = serde_json::from_value(value).unwrap();
     assert_eq!((typed.status.as_str(), typed.request), ("kept", request));
     let refused = super::refused_early(
+        &Fake(World::new(Os::Linux, &["fork", "main"])),
         &Request {
             fork: "fork".into(),
             ..Default::default()

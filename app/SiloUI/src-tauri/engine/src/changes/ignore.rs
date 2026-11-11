@@ -110,6 +110,16 @@ pub const BUILTIN_IGNORE: &str = "\
 /Users/*/Library/Application Support/Silo/computer-use-receipt.json
 /Users/*/Library/Application Support/Silo/Recordings
 
+# Silo's own per-computer files: the channel endpoint and token, the tools receipt, the
+# working account record, the package update marker, the quiet-restore state and the machine id.
+# Each computer has its own; they are never part of a review or merge.
+/etc/silo
+/var/lib/silo
+/var/lib/silo-quiet
+/etc/machine-id
+/var/lib/dbus/machine-id
+/Users/*/Library/Application Support/Silo/components.json
+
 # agent session data
 */.claude/projects
 .claude.json.backup*
@@ -457,6 +467,23 @@ mod tests {
         let list = IgnoreList::builtin();
         assert!(list.matches("/Users/a/Movies/TV/TV Library.tvlibrary/library.tvdb"));
         assert!(!list.matches("/Users/a/Movies/film.mov"));
+    }
+
+    #[test]
+    fn silos_per_computer_files_are_not_a_change() {
+        let list = IgnoreList::builtin();
+        for path in [
+            "/etc/silo/endpoint.json",
+            "/etc/silo/guest-client.json",
+            "/var/lib/silo/components.json",
+            "/var/lib/silo/working-account.json",
+            "/etc/machine-id",
+            "/Users/silo/Library/Application Support/Silo/components.json",
+        ] {
+            assert!(list.matches(path), "{path} should be ignored");
+        }
+        assert!(!list.matches("/etc/silo-notes.conf"));
+        assert!(!list.matches("/Users/silo/Library/Application Support/Silo/notes.txt"));
     }
 
     #[test]

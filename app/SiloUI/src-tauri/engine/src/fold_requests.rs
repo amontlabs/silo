@@ -155,18 +155,19 @@ impl Store {
     }
 
     /// Records the approval that asks the owner to merge the request, which must be open. The
-    /// request's text becomes the engine's `summary` and its counts are cleared, so nothing
-    /// the computer wrote stays in what the owner reads.
+    /// request's text becomes the engine's `summary` and its counts the ones the engine
+    /// counted, so nothing the computer wrote stays in what the owner reads.
     pub fn link_approval(
         &self,
         id: &str,
         approval_id: &str,
         summary: &str,
+        counts: std::collections::BTreeMap<String, u64>,
     ) -> Result<FoldRequest, String> {
         self.modify(id, false, |request| {
             request.approval_id = Some(approval_id.to_owned());
             request.summary = summary.to_owned();
-            request.counts.clear();
+            request.counts = counts;
         })
     }
 
@@ -609,7 +610,12 @@ mod tests {
         let store = Store::new(dir.path());
         let made = store.create(new("f1", "s")).unwrap();
         let linked = store
-            .link_approval(&made.id, "ap-0123456789abcdef", "the engine's words")
+            .link_approval(
+                &made.id,
+                "ap-0123456789abcdef",
+                "the engine's words",
+                Default::default(),
+            )
             .unwrap();
         assert_eq!(linked.approval_id.as_deref(), Some("ap-0123456789abcdef"));
         assert_eq!(linked.summary, "the engine's words");
@@ -624,7 +630,7 @@ mod tests {
         assert_eq!(again.approval_id.as_deref(), Some("ap-0123456789abcdef"));
         store.mark_thrown_away(&made.id).unwrap();
         assert!(store
-            .link_approval(&made.id, "ap-1111111111111111", "x")
+            .link_approval(&made.id, "ap-1111111111111111", "x", Default::default())
             .is_err());
     }
 
@@ -640,10 +646,15 @@ mod tests {
             .unwrap();
         assert_eq!(made.summary, "written by the agent");
         let linked = store
-            .link_approval(&made.id, "ap-0123456789abcdef", "Merge f1 into main.")
+            .link_approval(
+                &made.id,
+                "ap-0123456789abcdef",
+                "Merge f1 into main.",
+                [("settings".to_owned(), 2)].into(),
+            )
             .unwrap();
         assert_eq!(linked.summary, "Merge f1 into main.");
-        assert!(linked.counts.is_empty(), "{:?}", linked.counts);
+        assert_eq!(linked.counts, [("settings".to_owned(), 2)].into());
         // The same digest asked again with other text and counts changes neither.
         let again = store
             .create(NewRequest {
@@ -652,7 +663,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(again.summary, "Merge f1 into main.");
-        assert!(again.counts.is_empty(), "{:?}", again.counts);
+        assert_eq!(again.counts, linked.counts);
         assert_eq!(again.review_digest, "d1");
     }
 

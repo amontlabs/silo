@@ -133,6 +133,11 @@ impl KeepEnv for GuestEnv {
         })
     }
 
+    fn name_of(&self, computer: &str) -> String {
+        self.target(computer)
+            .map_or_else(|_| computer.to_owned(), |target| target.name().to_owned())
+    }
+
     fn after_kept(&self, computer: &str) {
         let Ok(target) = self.target(computer) else {
             return;

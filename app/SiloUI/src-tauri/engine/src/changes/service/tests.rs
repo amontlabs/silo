@@ -433,3 +433,29 @@ fn a_baseline_measured_on_one_fork_applies_to_another_fork_of_the_same_computer(
     let result = run(&guest, &store, "fork3", diff_work(true, true), &options).unwrap();
     assert_eq!(result["baselineAvailable"], false);
 }
+
+#[test]
+fn the_counts_of_a_reviewed_diff_come_from_the_stored_captures() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    let guest = ScriptedGuest::new(&[
+        &manifest(&[("/srv/data/a", "1\t1\t-")]),
+        &manifest(&[("/srv/data/a", "2\t2\t-"), ("/srv/data/c", "1\t1\t-")]),
+    ]);
+    let options = Options::default();
+    run(
+        &guest,
+        &store,
+        "c1",
+        capture_work(ChangesRole::Base, Some("cp1")),
+        &options,
+    )
+    .unwrap();
+    assert_eq!(review_counts(&store, "c1", "any"), None);
+    let result = run(&guest, &store, "c1", diff_work(true, true), &options).unwrap();
+    let digest = result["reviewDigest"].as_str().unwrap();
+    let counts = review_counts(&store, "c1", digest).unwrap();
+    assert_eq!(counts["other"], 2);
+    assert_eq!(counts["settings"], 0);
+    assert_eq!(review_counts(&store, "c1", "another-digest"), None);
+}
