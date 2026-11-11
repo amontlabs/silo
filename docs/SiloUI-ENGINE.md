@@ -45,7 +45,11 @@ used to call the engine in-process forwards to the canonical `silod` method over
   engine already serves the socket, whichever app supplied it. With none, it registers the
   LaunchAgent that `Silo.app/Contents/Library/LaunchAgents/<identifier>.engine.plist`
   describes (`SMAppService`, from the calling bundle) and waits for the socket. If the agent
-  needs approval it opens Login Items and says so. The connection is kept for the life of the
+  needs approval it opens Login Items and says so. The agent restarts only after a crash
+  (`KeepAlive` on an unsuccessful exit), so a job that is loaded but idle after a clean exit is
+  started with `launchctl kickstart` (a no-op for a running job). When the engine becomes
+  reachable after the app started, the frontend runs the failed dependency checks and the
+  application load again (`silo://engine-connection`). The connection is kept for the life of the
   app: it reconnects with backoff, resubscribes, and reconnects before the engine's per-connection
   request-id limit.
 - **Commands.** Command names, argument names and result shapes are unchanged, so the React

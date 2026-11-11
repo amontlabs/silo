@@ -36,6 +36,19 @@ it("opens the Pending page, titled Pending, from the sidebar", async () => {
   expect(await panel.findByLabelText("Waiting for you")).toBeInTheDocument()
 })
 
+it("returns to the list when Pending is clicked in the sidebar while a request is open", async () => {
+  const user = userEvent.setup()
+  render(<ApplicationPreview source={applicationSourceForScenario("running")} approvals="waiting" />)
+  await user.click(await navigation().findByRole("button", { name: "Pending" }))
+  const panel = within(screen.getByRole("region", { name: "Pending" }))
+  const list = await panel.findByLabelText("Waiting for you")
+  await user.click(within(list).getAllByRole("button")[0]!)
+  expect(await screen.findByLabelText("What is asked")).toBeInTheDocument()
+  await user.click(navigation().getByRole("button", { name: "Pending" }))
+  expect(await panel.findByLabelText("Waiting for you")).toBeInTheDocument()
+  expect(screen.queryByLabelText("What is asked")).toBeNull()
+})
+
 it("shows the request a toast names with its Review button", async () => {
   render(<><Toaster /><ApplicationPreview source={applicationSourceForScenario("running")} approvals="waiting" /></>)
   await navigation().findByRole("button", { name: "Pending" })

@@ -48,6 +48,27 @@ it("links a row to the request it belonged to", async () => {
   expect(onOpenApproval).toHaveBeenCalledWith("ap-port")
 })
 
+it("opens a request Silo still lists", async () => {
+  const onOpenApproval = vi.fn()
+  const { user } = setup({ onOpenApproval, openableApprovals: new Set(["ap-port"]) })
+  const table = await screen.findByRole("table", { name: "Who did what" })
+  const button = within(table).getAllByRole("button", { name: "Open request" })[0]!
+  expect(button).toBeEnabled()
+  await user.click(button)
+  expect(onOpenApproval).toHaveBeenCalledWith("ap-port")
+})
+
+it("disables Open request with the reason for a request Silo no longer lists", async () => {
+  const onOpenApproval = vi.fn()
+  const { user } = setup({ onOpenApproval, openableApprovals: new Set() })
+  const table = await screen.findByRole("table", { name: "Who did what" })
+  const button = within(table).getAllByRole("button", { name: "Open request" })[0]!
+  expect(button).toBeDisabled()
+  expect(button.parentElement).toHaveAttribute("title", expect.stringMatching(/no longer in the list/))
+  await user.click(button)
+  expect(onOpenApproval).not.toHaveBeenCalled()
+})
+
 it("filters by computer and by who", async () => {
   const { user, read } = setup()
   await screen.findByRole("table", { name: "Who did what" })

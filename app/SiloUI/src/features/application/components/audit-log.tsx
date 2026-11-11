@@ -19,7 +19,9 @@ const callers: ReadonlyArray<{ value: AuditCallerKind | ""; label: string }> = [
   { value: "computer", label: "Computers" },
 ]
 
-function Row({ entry, computers, onOpenApproval }: { entry: AuditEntry; computers: readonly ApplicationComputer[]; onOpenApproval?: (id: string) => void }) {
+const unopenableReason = "This request is no longer in the list. Silo keeps only the ones waiting and the ones answered lately."
+
+function Row({ entry, computers, onOpenApproval, openableApprovals }: { entry: AuditEntry; computers: readonly ApplicationComputer[]; onOpenApproval?: (id: string) => void; openableApprovals?: ReadonlySet<string> }) {
   const when = entry.lastAt ?? entry.at
   const target = auditTarget(entry, computers)
   return (
@@ -39,7 +41,9 @@ function Row({ entry, computers, onOpenApproval }: { entry: AuditEntry; computer
       </td>
       <td className="px-3 py-1.5 text-right">
         {entry.approvalId && (onOpenApproval
-          ? <Button variant="link" size="xs" onClick={() => onOpenApproval(entry.approvalId!)}>Open request</Button>
+          ? openableApprovals && !openableApprovals.has(entry.approvalId)
+            ? <span title={unopenableReason}><Button variant="link" size="xs" disabled>Open request</Button></span>
+            : <Button variant="link" size="xs" onClick={() => onOpenApproval(entry.approvalId!)}>Open request</Button>
           : <span className="text-caption text-muted-foreground">Request {entry.approvalId}</span>)}
       </td>
     </tr>
@@ -49,13 +53,15 @@ function Row({ entry, computers, onOpenApproval }: { entry: AuditEntry; computer
 /**
  * Who did what: the engine's record of the calls that changed something and of the ones it
  * refused or held for an answer, newest first, as a plain table. Filters by computer and by who;
- * older rows load from the cursor.
+ * older rows load from the cursor. A row opens its request when `openableApprovals` (the ones
+ * the Pending page can show) has it, or always when that is not known.
  */
-export function AuditLog({ read, computers, active, onOpenApproval }: {
+export function AuditLog({ read, computers, active, onOpenApproval, openableApprovals }: {
   read: ApplicationActions["listAudit"]
   computers: readonly ApplicationComputer[]
   active: boolean
   onOpenApproval?: (approvalId: string) => void
+  openableApprovals?: ReadonlySet<string>
 }) {
   const [computerId, setComputerId] = useState("")
   const [callerKind, setCallerKind] = useState<AuditCallerKind | "">("")
@@ -94,7 +100,7 @@ export function AuditLog({ read, computers, active, onOpenApproval }: {
                 </tr>
               </thead>
               <tbody>
-                {log.entries.map(entry => <Row key={entry.id} entry={entry} computers={computers} onOpenApproval={onOpenApproval} />)}
+                {log.entries.map(entry => <Row key={entry.id} entry={entry} computers={computers} onOpenApproval={onOpenApproval} openableApprovals={openableApprovals} />)}
               </tbody>
             </table>
             {log.hasMore && (

@@ -149,7 +149,7 @@ export function showOperationSuccess(id: string, title: string, options: Operati
   if (long) mirror("completions", id, title, options)
 }
 
-export function showOperationFailure(id: string, title: string, options: OperationResultOptions & { retry?: () => void; tone?: "error" | "warning" } = {}) {
+export function showOperationFailure(id: string, title: string, options: OperationResultOptions & { retry?: () => void; tone?: "error" | "warning"; duration?: number } = {}) {
   const action = options.action ?? (options.retry ? {
     label: "Retry",
     onClick: (event: MouseEvent<HTMLButtonElement>) => { event.preventDefault(); options.retry?.() },
@@ -160,7 +160,7 @@ export function showOperationFailure(id: string, title: string, options: Operati
   notify(title, {
     id,
     description: options.description,
-    duration: Infinity,
+    duration: options.duration ?? Infinity,
     closeButton: true,
     ...callbacks,
   })

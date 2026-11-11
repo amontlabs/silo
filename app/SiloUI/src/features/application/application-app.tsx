@@ -21,7 +21,7 @@ import { ComputerConfigurationToast } from "@/features/application/components/co
 import { OperationQueueToast } from "@/features/application/components/operation-queue-panel"
 import { QuitRequestConfirmation, type ConnectQuitConfirmation } from "@/features/application/components/quit-request-confirmation"
 import { applicationCommands, type ComputerCommandRequest } from "@/features/application/components/application-commands"
-import type { ApplicationActions, ApplicationSource, RepositoryPushOperation, RepositoryPushTarget, ComputerConfigurationOperation } from "@/features/application/model/application-source"
+import type { ApplicationActions, ApplicationTab, ApplicationSource, RepositoryPushOperation, RepositoryPushTarget, ComputerConfigurationOperation } from "@/features/application/model/application-source"
 import { useApplicationNavigation, type ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
 import { defaultStartupComputerIds } from "@/features/application/model/startup-computers"
 import { AlphaNotice } from "@/features/application/components/alpha-notice"
@@ -198,6 +198,16 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
   const visibleTab = activeTab
   const pending = usePending(actions, visibleTab === "changes")
   const [openApproval, setOpenApproval] = useState<{ id: string; token: number }>()
+  // Pending, clicked while its page is already showing a request, goes back to the list.
+  const [pendingListRequest, setPendingListRequest] = useState(0)
+  const selectTabOrList = (tab: ApplicationTab) => {
+    if (tab === "changes" && visibleTab === "changes") setPendingListRequest(request => request + 1)
+    navigation.selectTab(tab)
+  }
+  // The approvals the Pending page can open: the ones waiting and the ones answered lately.
+  const openableApprovals = useMemo(() => pending.loaded
+    ? new Set([...pending.waiting.flatMap(row => row.kind === "approval" ? [row.approval.id] : []), ...pending.answered.map(({ id }) => id)])
+    : undefined, [pending.loaded, pending.waiting, pending.answered])
   useBackendNotices((notice) => {
     navigation.selectTab("changes")
     const id = notice.key.startsWith("approval:") ? notice.key.slice("approval:".length) : undefined
@@ -430,7 +440,7 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
       computerAttention={computerAttention}
       navigationLoading={navigationLoading}
       pendingCount={pending.count}
-      onTabChange={navigation.selectTab}
+      onTabChange={selectTabOrList}
       onComputerSectionChange={navigation.selectComputerSection}
       onSettingsSectionChange={navigation.selectSettingsSection}
       canGoBack={navigation.canGoBack}
@@ -484,13 +494,14 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
             onDismissRepositoryPush={dismissRepositoryPush}
             onCreateComputer={canCreateComputer && !installingUpdate ? requestNewComputer : undefined}
             onOpenApproval={(id) => { navigation.selectTab("changes"); setOpenApproval({ id, token: nextRequestToken() }) }}
+            openableApprovals={openableApprovals}
             onOpenComputer={(id) => navigation.openComputer(id)}
           />
         )}
       </section>
       <section id="application-panel-changes" role="region" aria-labelledby="application-nav-changes" hidden={visibleTab !== "changes"}>
         <PanelContent active={visibleTab === "changes"}>
-          <PendingChangesPage pending={pending} actions={actions} reviewActions={actions.reviewRequestActions} openApproval={openApproval} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
+          <PendingChangesPage pending={pending} actions={actions} reviewActions={actions.reviewRequestActions} openApproval={openApproval} listRequest={pendingListRequest} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
         </PanelContent>
       </section>
       <section id="application-panel-github" role="region" aria-labelledby="application-nav-github" hidden={visibleTab !== "github"} className="h-full min-h-0 overflow-hidden">
