@@ -15,8 +15,8 @@ use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, Recipe
 use super::{
     engine_env::{
         bind_undo_policy, can_clone, clone_workspace, copy_folder, forget_build_policies, parse_du,
-        parse_pack_report, replay_steps, save_build_policies, swap_with_policy, PACK_HOME,
-        UNPACK_HOME,
+        parse_pack_report, replay_steps, save_build_policies, settle_undo_policy, swap_with_policy,
+        PACK_HOME, UNPACK_HOME,
     },
     journal::{Journal, Plan, Record, Step},
     rebuild, recover_one, swap, undo_name, Info, RebuildEnv,
@@ -2599,15 +2599,17 @@ fn the_original_is_found_under_whichever_name_the_swap_left_it() {
 }
 
 #[test]
-fn settling_a_swap_binds_the_undo_policy_and_keeps_one_it_has() {
+fn settling_a_swap_binds_the_rules_the_original_held_and_keeps_a_policy_the_undo_computer_has() {
     let _dir = policy_store();
     let plan = plan();
+    // The rebuilt computer has a policy of its own by now; the undo computer does not take it.
     store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
-    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    settle_undo_policy(&plan, &|| Ok(Some(closed_runtime_policy()))).unwrap();
     assert_eq!(
         store::get_stored(&plan.undo_id).unwrap(),
-        Some(allowlist_stored())
+        Some(Stored::closed_without_incoming())
     );
+    assert!(!store::is_unresolved(&plan.undo_id).unwrap());
     // A policy the undo computer already holds is not replaced by a later change to the computer.
     let held = Stored::preserving_pins(
         &NetworkPolicy {
@@ -2619,7 +2621,103 @@ fn settling_a_swap_binds_the_undo_policy_and_keeps_one_it_has() {
         false,
     );
     store::set_stored(&plan.undo_id, held.clone()).unwrap();
-    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    settle_undo_policy(&plan, &|| Ok(Some(closed_runtime_policy()))).unwrap();
     assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(held));
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_policy_the_rebuilt_computer_gains_later_does_not_reach_the_undo_computer() {
+    let _dir = policy_store();
+    let plan = plan();
+    let table = before();
+    // The computer has no saved policy and its sandbox holds open rules.
+    let open = serde_json::json!({"default_egress": "allow"});
+    save_build_policies(&plan, Some(&open)).unwrap();
+    // The rules cannot be read at the swap or after it.
+    swap_with_policy(&plan, &table, &|| Err("unreadable".into()), &|| Ok(())).unwrap();
+    let kept = store::get_stored(&plan.undo_id).unwrap().unwrap();
+    assert_eq!(kept.mode, NetworkPolicyMode::Open);
+    // The owner narrows the rebuilt computer, and the rebuild is settled.
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    settle_undo_policy(&plan, &|| Err("unreadable".into())).unwrap_err();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(kept.clone())
+    );
+    // Once the original's rules can be read they are what the undo computer takes.
+    settle_undo_policy(&plan, &|| Ok(Some(open.clone()))).unwrap();
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(kept));
+    assert!(!store::is_unresolved(&plan.undo_id).unwrap());
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_swap_published_before_retrying_does_not_read_the_policy_from_the_rebuilt_computer() {
+    let _dir = policy_store();
+    let plan = plan();
+    let table = before();
+    save_build_policies(&plan, Some(&closed_runtime_policy())).unwrap();
+    swap::apply(&table, &plan).unwrap();
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    // The undo computer has only the policy the build gave it, and the original's rules can
+    // not be read: the retry keeps what it has instead of taking the rebuilt computer's.
+    swap_with_policy(&plan, &table, &|| Err("unreadable".into()), &|| Ok(())).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap().unwrap().mode,
+        NetworkPolicyMode::Closed
+    );
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_swap_that_cannot_save_the_undo_policy_does_not_publish() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = policy_store();
+    let plan = plan();
+    let table = before();
+    // The computer was open when the build was made and is narrowed before the swap.
+    store::set_stored(
+        &plan.old_id,
+        Stored::approved(&NetworkPolicy {
+            mode: NetworkPolicyMode::Open,
+            hosts: Vec::new(),
+            presets: Vec::new(),
+        }),
+    )
+    .unwrap();
+    save_build_policies(&plan, None).unwrap();
+    let wide = store::get_stored(&plan.undo_id).unwrap().unwrap();
+    assert_eq!(wide.mode, NetworkPolicyMode::Open);
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    // The saved policies cannot be written.
+    let locked = std::fs::Permissions::from_mode(0o555);
+    std::fs::set_permissions(dir.path(), locked).unwrap();
+    let probe = dir.path().join("probe");
+    if std::fs::write(&probe, b"").is_ok() {
+        // The process ignores folder permissions (it runs as root), so the failure cannot be made.
+        let _ = std::fs::remove_file(&probe);
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        store::use_test_path(None);
+        return;
+    }
+    let published = Mutex::new(false);
+    let error = swap_with_policy(&plan, &table, &|| Ok(None), &|| {
+        *published.lock().unwrap() = true;
+        Ok(())
+    })
+    .unwrap_err();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(error.contains("Cannot save"), "{error}");
+    assert!(!*published.lock().unwrap());
+    assert_eq!(swap::state(&table, &plan).unwrap(), 0);
+    // The undo computer is not left with the wider policy as if it were its own.
+    assert!(store::is_unresolved(&plan.undo_id).unwrap());
+    // The retry takes the policy the computer has.
+    swap_with_policy(&plan, &table, &|| Ok(None), &|| Ok(())).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(allowlist_stored())
+    );
     store::use_test_path(None);
 }

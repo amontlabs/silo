@@ -1007,18 +1007,22 @@ pub fn held_for(
 ) -> Result<(Held, bool), String> {
     match store::get_stored(computer_id)? {
         Some(stored) => Ok((stored.held(), stored.incoming_denied)),
-        None => {
-            let policy = effective(None, recorded);
-            // An import saved before policies were stored keeps the deny-all it was imported
-            // with until the owner sets one.
-            let denied = policy.mode == NetworkPolicyMode::Closed
-                && recorded
-                    .and_then(|recorded| recorded.get("default_ingress"))
-                    .and_then(Value::as_str)
-                    == Some("deny");
-            Ok((Held::latest(policy), denied))
-        }
+        None => Ok(held_from_recorded(recorded)),
     }
+}
+
+/// What the runtime's recorded rules mean for a computer with no stored policy (see
+/// [`effective`]), and whether its incoming connections are denied.
+pub fn held_from_recorded(recorded: Option<&Value>) -> (Held, bool) {
+    let policy = effective(None, recorded);
+    // An import saved before policies were stored keeps the deny-all it was imported with
+    // until the owner sets one.
+    let denied = policy.mode == NetworkPolicyMode::Closed
+        && recorded
+            .and_then(|recorded| recorded.get("default_ingress"))
+            .and_then(Value::as_str)
+            == Some("deny");
+    (Held::latest(policy), denied)
 }
 
 /// The plan for a computer: its stored policy (see [`held_for`]), its grants and Silo's own
