@@ -1364,6 +1364,30 @@ async fn a_promote_is_refused_when_the_fork_changed_after_it_was_asked_and_askin
 }
 
 #[tokio::test]
+async fn an_allowed_call_carries_the_state_it_was_approved_for_into_its_job() {
+    let _serial = serial();
+    let tree = Tree::new();
+    let id = ask(
+        &tree.me(),
+        MethodName::ChangesPromote,
+        json!({"forkId": tree.fork, "targetId": tree.me}),
+    )
+    .await;
+    let pinned = get(&owner(), &id).await.unwrap();
+    assert!(pinned["state"] == "pending");
+    let seen: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+    let record = seen.clone();
+    let (run, _runs) = runner(move |_, _| {
+        record.lock().unwrap().push(super::expected_pin());
+        Ok(json!({"jobId": "job:700001"}))
+    });
+    TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
+    let expected = silo_engine::changes::promote::service::promote_pin(&tree.fork);
+    assert_eq!(*seen.lock().unwrap(), vec![Some(expected)]);
+    assert_eq!(super::expected_pin(), None);
+}
+
+#[tokio::test]
 async fn an_undo_is_refused_when_another_merge_happened_after_it_was_asked() {
     use silo_engine::changes::keep::{env::CheckpointRef, journal::State, service::journal_for};
     let _serial = serial();

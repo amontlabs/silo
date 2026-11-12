@@ -503,6 +503,10 @@ pub fn keep(
     }
 }
 
+/// A check a job makes once it holds its lane, before it changes anything; its error is the
+/// refusal.
+pub type UnderLane<'a> = &'a dyn Fn() -> Result<(), String>;
+
 /// Puts main back from the latest before-keep checkpoint a successful keep made.
 pub fn undo(
     env: &dyn KeepEnv,
@@ -511,7 +515,20 @@ pub fn undo(
     computer: &str,
     wait: Duration,
 ) -> Result<UndoOutcome, String> {
+    undo_checked(env, store, journal, computer, wait, &|| Ok(()))
+}
+
+/// [`undo`], after `under_lane` accepts what the undo would take back.
+pub fn undo_checked(
+    env: &dyn KeepEnv,
+    store: &dyn ManifestStore,
+    journal: &Journal,
+    computer: &str,
+    wait: Duration,
+    under_lane: UnderLane<'_>,
+) -> Result<UndoOutcome, String> {
     let _lane = lane::acquire(computer, wait)?;
+    under_lane()?;
     if let Some(entry) = journal.pending(computer)? {
         let checkpoint = CheckpointRef {
             id: entry.checkpoint_id.clone(),

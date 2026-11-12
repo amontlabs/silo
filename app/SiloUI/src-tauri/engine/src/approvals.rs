@@ -66,6 +66,9 @@ pub struct Record {
     /// The digest of the method and the parameters as the computer sent them: the same call
     /// asked again finds this approval.
     pub request_key: String,
+    /// The summary a computer reads when the stored one holds what only the owner may see.
+    #[serde(default)]
+    pub computer_summary: Option<String>,
     #[serde(default)]
     pub creates: Option<Creation>,
     /// What the call acts on as it was when it was asked (the last merge to undo, the state of
@@ -105,6 +108,20 @@ impl Record {
             .is_some_and(|request| request.remove("value").is_some())
     }
 
+    /// The summary the computer that asked may read.
+    pub fn summary_for_computer(&self) -> &str {
+        self.computer_summary
+            .as_deref()
+            .unwrap_or(&self.approval.summary)
+    }
+
+    /// The approval as a computer sees it: the view, with the summary cut for a computer.
+    pub fn view_for_computer(&self) -> Approval {
+        let mut approval = self.view();
+        approval.summary = self.summary_for_computer().to_owned();
+        approval
+    }
+
     /// The approval as callers see it: a secret's value never leaves the store.
     pub fn view(&self) -> Approval {
         let mut approval = self.approval.clone();
@@ -128,6 +145,9 @@ pub struct NewApproval {
     /// The parameters as the computer sent them, for finding the same request again.
     pub asked: Value,
     pub summary: String,
+    /// What the computer may read of the summary, when the summary holds what only the owner
+    /// may see.
+    pub computer_summary: Option<String>,
     pub creates: Option<Creation>,
     pub pin: Option<String>,
     pub review_request_id: Option<String>,
@@ -482,6 +502,7 @@ impl Store {
                     review_digest: new.review_digest,
                 },
                 request_key: key,
+                computer_summary: new.computer_summary.map(|text| plain_text(&text)),
                 creates: new.creates,
                 pin: new.pin,
                 created_ms: now,

