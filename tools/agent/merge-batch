@@ -19,13 +19,20 @@ current branch is the integration branch: --into, else $BOARD_INTEGRATION, else 
    when done, so edits or merges here cannot change what is tested): cargo nextest run
    --workspace --no-fail-fast (else cargo test --workspace --locked --no-fail-fast), vitest (a
    missing node_modules is a failure), the Python and script suites and the patched updater
-   tests that .github/workflows/ci.yml runs. A second suite for a SHA is refused while one
-   runs. It writes
+   tests that .github/workflows/ci.yml runs. The prepared native runtime comes from
+   tools/agent/runtime-cache on a hit, else a copy-on-write clone of this checkout's
+   src-tauri/binaries and src-tauri/runtime; github-build.local.json is copied from this checkout
+   when present (never printed), else the synthetic SILO_GITHUB_* test values are used. Steps CI
+   runs only on Linux (the isolation evals) or with packages this machine lacks (reviewer-service
+   needs pytest: a cached venv from reviewer-service/requirements-dev.txt, else skipped) are
+   skipped with a note in the log and a "skipped:" line in the verdict, not failed. A second suite
+   for a SHA is refused while one runs. It writes
    app/SiloUI/target/agent/full-suite.<sha>.log, .merged (branch<TAB>file lines) and, when it
    ends, .done (first line PASS or FAIL). Do not change the checkout's files while it runs.
 --suite takes no branches: after a merge done by hand, it makes the same branch and clean-tree checks,
 merges nothing, skips the foreground check and starts step 4 on the current HEAD.
---last prints the newest full-suite verdict; on failure also the failing tests and, for each,
+--last prints the newest full-suite verdict; on failure also the failing tests (nextest, cargo test,
+Python unittest and pytest, vitest, node --test, and cargo build errors) with their step and, for each,
 the merged branches that touched that crate or file.
 """
 import argparse, glob, json, os, re, subprocess, sys, tempfile
@@ -69,14 +76,7 @@ def last(args):
     print("\n".join(lines[1:]))
     if lines[0] == "PASS":
         return
-    log = open(base + ".log", errors="replace").read()
-    tests = set()
-    for m in re.finditer(r"^\s*FAIL\s+\[[^\]]*\]\s+(\S+)\s+(\S+)", log, re.M):  # nextest
-        tests.add(("crate", m.group(1).split("::")[0], m.group(2)))
-    for m in re.finditer(r"^test (\S+) \.\.\. FAILED", log, re.M):  # cargo test
-        tests.add(("crate", "", m.group(1)))
-    for m in re.finditer(r"^\s*(?:FAIL|×)\s+(\S+\.(?:test|spec)\.\w+)", log, re.M):  # vitest
-        tests.add(("file", m.group(1), m.group(1)))
+    tests = parse_failures(open(base + ".log", errors="replace").read())
     merged = {}
     try:
         for l in open(base + ".merged"):
@@ -85,19 +85,112 @@ def last(args):
     except OSError:
         pass
     crates = crate_dirs()
+    failed_steps = []
+    for l in lines[1:]:
+        if l.startswith("failed:"):
+            failed_steps = l[len("failed:"):].split()
     print("\nFailing tests:")
-    if not tests:
+    seen_steps = {t[0].split("/")[0] for t in tests}
+    if not tests and not failed_steps:
         print("  (none recognised; read %s.log)" % base)
-    for kind, key, name in sorted(tests):
+    for step, kind, key, name, files in sorted(tests):
         if kind == "crate":
             d_ = crates.get(key.replace("_", "-"))
             hit = [b for b, fs in merged.items() if d_ and any(f.startswith(d_ + "/") for f in fs)]
             where = "crate %s" % (d_ or key or "?")
+        elif kind == "build":
+            d_ = crates.get(key)
+            hit = [b for b, fs in merged.items() if d_ and any(f.startswith(d_ + "/") for f in fs)]
+            where = "build of %s" % (d_ or key or "?")
         else:
-            hit = [b for b, fs in merged.items() if any(key.endswith(f) or f.startswith(os.path.dirname(key) + "/") for f in fs)]
-            where = "file " + key
-        print("  %s  (%s) <- %s" % (name, where, ", ".join(hit) or "no merged branch touched it: pre-existing or flaky?"))
+            pre = STEP_PATHS.get(step.split("/")[0], ())
+            hit = [b for b, fs in merged.items()
+                   if any((key and os.path.basename(f) == key) or f in files or f.startswith(pre) for f in fs)]
+            where = "file " + key if key else "step " + step
+        print("  [%s] %s  (%s) <- %s" % (step, name, where, ", ".join(hit) or "no merged branch touched it: pre-existing or flaky?"))
+    for step in failed_steps:
+        if step not in seen_steps:
+            print("  [%s] (step failed; no test names recognised: read %s.log, section '== %s')" % (step, base, step))
     sys.exit(1)
+
+
+# Where a step's tests and code live, for blaming merged branches when the log names no file.
+STEP_PATHS = {
+    "script-tests": ("app/SiloUI/scripts/",), "macos-release": ("app/SiloUI/scripts/",),
+    "release-version": ("app/SiloUI/scripts/", "app/SiloUI/package.json"),
+    "command-manifest": ("app/SiloUI/scripts/", "app/SiloUI/src-tauri/build.rs"),
+    "release-tests": ("app/SiloUI/scripts/",), "evals": ("docs/evals/",),
+    "reviewer-service": ("reviewer-service/",), "updater-tests": ("app/SiloUI/src-tauri/vendor/tauri-plugin-updater/",),
+}
+
+
+def parse_failures(log):
+    """Failing tests named in a suite log: a set of (step, kind, key, name, files).
+
+    kind "crate": key is the crate (nextest) or "" (cargo test); "file": key is a test file or module
+    file; "build": key is the crate whose build failed. A step is the "== name" line above."""
+    out = set()
+    step, group = "", ""
+    lines = log.splitlines()
+    for i, l in enumerate(lines):
+        m = re.match(r"^== (\S+)", l)
+        if m:
+            step, group = m.group(1), ""
+            continue
+        m = re.match(r"^::group::(\S+) \(FAILED\)", l)
+        if m:
+            group = m.group(1)
+            continue
+        if l.startswith("::group::") or l.startswith("::endgroup::"):
+            group = ""
+            continue
+        label = step + ("/" + group if group else "")
+        m = re.match(r"^\s*(?:FAIL|TIMEOUT|SIGABRT|SIGSEGV|SIGKILL|LEAK-FAIL)\s+\[[^\]]*\]\s+(\S+)\s+(\S+)", l)  # nextest
+        if m:
+            out.add((label, "crate", m.group(1).split("::")[0], m.group(2), ()))
+            continue
+        m = re.match(r"^test (\S+) \.\.\. FAILED", l)  # cargo test
+        if m:
+            out.add((label, "crate", "", m.group(1), ()))
+            continue
+        m = re.match(r"^(FAIL|ERROR): (\S+) \(([\w.]+)\)(.*)", l)  # Python unittest
+        if m:
+            mod = m.group(3).split(".")[0]
+            f = re.search(r"file='([^']+)'", m.group(4))
+            out.add((label, "file", (group or mod) if (group or mod).endswith(".py") else (group or mod) + ".py",
+                     "%s (%s)" % (m.group(2), ".".join(m.group(3).split(".")[:-1]) or m.group(3)),
+                     (f.group(1),) if f else ()))
+            continue
+        m = re.match(r"^(?:FAILED|ERROR) (\S+?\.py)(?:::(\S+))?(?: - .*)?$", l)  # pytest summary
+        if m:
+            out.add((label, "file", os.path.basename(m.group(1)), (m.group(2) or m.group(1)), ()))
+            continue
+        m = re.match(r"^\s*(?:FAIL|×)\s+(\S+\.(?:test|spec)\.\w+)(?:\s+>\s+(.*))?", l)  # vitest
+        if m:
+            out.add((label, "file", m.group(1), (m.group(2) or m.group(1)).strip(), ()))
+            continue
+        m = re.match(r"^\s*✖ (.+?)(?: \([\d.]+ms\))?$", l)  # node --test
+        if m and not re.match(r"(failing tests|\d+)", m.group(1)):
+            out.add((label, "file", "", m.group(1), ()))
+            continue
+        m = re.match(r"^error(?:\[E\d+\])?: (.+)", l)  # cargo build
+        if m:
+            msg = m.group(1)
+            if msg.startswith(("command `", "test failed", "build failed", "aborting due to")):
+                continue
+            c = re.match(r"could not compile `([\w-]+)`", msg)
+            crate = c or re.search(r"`([\w-]+)(?: v[\d.]+)?[ `]", msg)
+            msg = re.sub(r" \([^)]*\)`", "`", msg)
+            detail = ""
+            for j in range(i + 1, min(i + 60, len(lines))):  # a build script's panic message
+                if "panicked at" in lines[j] and j + 1 < len(lines):
+                    detail = lines[j + 1].strip()
+                    break
+            out.add((label, "build", crate.group(1) if crate else "", (msg + (" -- " + detail if detail else ""))[:220], ()))
+    merged = {}
+    for step_, kind, key, name, files in out:
+        merged.setdefault((step_, kind, key, name), set()).update(files)
+    return {(*k, tuple(sorted(v))) for k, v in merged.items()}
 
 
 def crate_dirs():
@@ -210,8 +303,27 @@ made=1
 src="$root/app/SiloUI"; dst="$wt/app/SiloUI"
 cp -cR "$src/target" "$dst/target" 2>/dev/null && rm -rf "$dst/target/agent"
 [ -d "$src/node_modules" ] && { cp -cR "$src/node_modules" "$dst/node_modules" 2>/dev/null || ln -s "$src/node_modules" "$dst/node_modules"; }
-[ -d "$src/src-tauri/runtime" ] && { cp -cR "$src/src-tauri/runtime" "$dst/src-tauri/runtime" 2>/dev/null || cp -R "$src/src-tauri/runtime" "$dst/src-tauri/runtime"; }
-export SILO_GITHUB_APP_SLUG=silo-ci-test SILO_GITHUB_CLIENT_ID=test-client SILO_GITHUB_CLIENT_SECRET=test-secret
+export SILO_AGENT_CACHE="${SILO_AGENT_CACHE:-$([ "$(uname -s)" = Darwin ] && echo "$HOME/Library/Caches/silo-agent" || echo "$HOME/.cache/silo-agent")}"
+skipped=""
+skip() { echo "== $1: skipped ($2)" >> "$log"; skipped="$skipped""skipped: $1 ($2)"$'\n'; }
+# The native runtime (bundled msb and the other tools) is ignored build output that silo-ui's build script needs.
+# A runtime-cache hit restores it; otherwise it is cloned from the integration checkout.
+rt=""
+if [ -x "$wt/tools/agent/runtime-cache" ] && (cd "$wt" && ./tools/agent/runtime-cache --status 2>/dev/null) | grep -qx hit; then
+  (cd "$wt" && ./tools/agent/runtime-cache) >> "$log" 2>&1 && rt=1
+fi
+if [ -z "$rt" ]; then
+  for d in binaries runtime; do
+    [ -d "$src/src-tauri/$d" ] && { cp -cR "$src/src-tauri/$d" "$dst/src-tauri/$d" 2>/dev/null || cp -R "$src/src-tauri/$d" "$dst/src-tauri/$d"; }
+  done
+  [ -d "$dst/src-tauri/binaries" ] || echo "note: no prepared native runtime (runtime-cache miss and none in $src/src-tauri); the silo-ui build will fail" >> "$log"
+fi
+# The private GitHub build file is copied, never printed; without it the synthetic test values apply.
+if [ -f "$src/github-build.local.json" ]; then
+  cp "$src/github-build.local.json" "$dst/github-build.local.json"
+else
+  export SILO_GITHUB_APP_SLUG=silo-ci-test SILO_GITHUB_CLIENT_ID=test-client SILO_GITHUB_CLIENT_SECRET=test-secret
+fi
 cd "$dst" || { printf 'FAIL\nfailed: no app/SiloUI at %s\n' "$sha" > "$base.done"; exit 1; }
 step() { name="$1"; shift; echo "== $name" >> "$log"; "$@" >> "$log" 2>&1 || fail="$fail $name"; }
 if cargo nextest --version >/dev/null 2>&1; then
@@ -224,11 +336,27 @@ step release-version python3 scripts/validate-release-version.py
 step command-manifest python3 scripts/check-command-manifest.py
 step script-tests python3 scripts/run-script-tests.py
 step macos-release python3 -m unittest discover -s scripts -p test_macos_release.py
-step evals python3 -m unittest discover -s ../../docs/evals -p "test_*.py"
-step reviewer-service python3 -m pytest -q ../../reviewer-service
+if [ "$(uname -s)" = Linux ]; then step evals python3 -m unittest discover -s ../../docs/evals -p "test_*.py"
+else skip evals "ci.yml runs the isolation evals on Linux only; they read /proc/self/mountinfo"; fi
+# ci.yml installs reviewer-service/requirements-dev.txt; here that goes into a venv cached by the file's hash.
+py=python3
+if ! python3 -c "import pytest" >/dev/null 2>&1; then
+  req=../../reviewer-service/requirements-dev.txt
+  key=$(shasum -a 256 "$req" | cut -c1-16)
+  venv="$SILO_AGENT_CACHE/venv/reviewer-service-$key"
+  if [ ! -x "$venv/bin/python" ]; then
+    mkdir -p "$SILO_AGENT_CACHE/venv"
+    tmpv="$venv.$$"
+    if python3 -m venv "$tmpv" >> "$log" 2>&1 && "$tmpv/bin/python" -m pip install --quiet -r "$req" >> "$log" 2>&1 && mv "$tmpv" "$venv" 2>/dev/null; then :; else rm -rf "$tmpv"; fi
+  fi
+  [ -x "$venv/bin/python" ] && py="$venv/bin/python" || py=""
+fi
+if [ -n "$py" ]; then step reviewer-service "$py" -m pytest -q ../../reviewer-service
+else skip reviewer-service "pytest is not installed and a venv from reviewer-service/requirements-dev.txt could not be built"; fi
 step release-tests npm run test:release
 step updater-tests cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib
 if [ -z "$fail" ]; then echo PASS > "$base.done"; else echo FAIL > "$base.done"; echo "failed:$fail" >> "$base.done"; fi
+[ -n "$skipped" ] && printf %s "$skipped" >> "$base.done"
 echo "sha $sha" >> "$base.done"
 echo "finished $(date)" >> "$base.done"
 '''
