@@ -308,6 +308,11 @@ fn a_network_request_runs_the_checked_policy_and_names_the_computer_plainly() {
     assert_eq!(params["policy"]["hosts"], json!(["a.example.com", "b.example.com"]));
 }
 
+thread_local! {
+    /// Whether every computer of a `Served` world holds read-only GitHub access.
+    static GITHUB_ACCESS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// A world whose computers are judged the way the service reads them: from the saved policy
 /// and the runtime's rules.
 struct Served {
@@ -337,7 +342,17 @@ impl super::World for Served {
         None
     }
     fn access(&self, _: &str) -> Access {
-        Access::default()
+        let github = GITHUB_ACCESS.with(std::cell::Cell::get).then(|| {
+            crate::policy::access::GitHubAccess {
+                method: "oauth".into(),
+                all: true,
+                repositories: Default::default(),
+            }
+        });
+        Access {
+            github,
+            ..Access::default()
+        }
     }
     fn github_policies(&self) -> Option<Vec<Value>> {
         Some(Vec::new())
@@ -456,4 +471,97 @@ fn a_preset_update_is_wider_for_a_computer_that_has_not_accepted_it() {
     let summary = asked(set(&world, "main", &policy));
     assert!(summary.contains("b.example.com") && !summary.contains("a.example.com"), "{summary}");
     use_test_presets(None);
+}
+
+fn github_lists() -> Vec<crate::network_policy::Preset> {
+    use crate::network_policy::{Allowed, Preset};
+    let at = |host: &str| Allowed {
+        host: host.to_owned(),
+        port: 443,
+    };
+    vec![Preset {
+        name: "github".into(),
+        title: "GitHub".into(),
+        version: 2,
+        hosts: vec![at("github.com"), at("new.github.example")],
+        history: vec![(1, vec![at("github.com")])],
+    }]
+}
+
+fn held_with_grant_at(policy: NetworkPolicy, version: u32) -> Held {
+    Held {
+        policy,
+        pins: crate::network_policy::Pins::from([(
+            crate::network_policy::GITHUB_GRANT_PIN.to_owned(),
+            version,
+        )]),
+    }
+}
+
+#[test]
+fn a_computer_pinned_to_an_older_github_list_forks_with_its_pin_not_the_newest_list() {
+    use crate::network_policy::{store, use_test_presets, GITHUB_GRANT_PIN};
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    use_test_presets(Some(github_lists()));
+    GITHUB_ACCESS.with(|access| access.set(true));
+    let policy = allowlist(&["example.com"]);
+    let pinned = held_with_grant_at(policy.clone(), 1);
+    store::set_stored("main", store::Stored::of(pinned.clone(), false)).unwrap();
+    let world = Served {
+        held: HashMap::from([("main", pinned.clone()), ("fork-1", pinned)]),
+    };
+    // It forks itself with its GitHub access and no policy of its own to give.
+    let params = allowed_params(decide(
+        &main(),
+        MethodName::CheckpointsFork,
+        &json!({"computerId": "main", "newName": "copy", "secrets": ["github"]}),
+        &world,
+    ));
+    let given: NetworkPolicy = serde_json::from_value(params["networkPolicy"].clone()).unwrap();
+    // The engine saves what the decision rewrote; no approval came, so no newer list arrives.
+    store::inherit("main", "copy", Some(&given)).unwrap();
+    let copy = store::get_stored("copy").unwrap().unwrap().held();
+    assert_eq!(copy.pins.get(GITHUB_GRANT_PIN), Some(&1), "{:?}", copy.pins);
+    // Asking for a policy changes nothing about the versions either.
+    store::inherit("main", "asked", Some(&allowlist(&["other.example.com"]))).unwrap();
+    let asked = store::get_stored("asked").unwrap().unwrap().held();
+    assert_eq!(asked.pins.get(GITHUB_GRANT_PIN), Some(&1));
+    GITHUB_ACCESS.with(|access| access.set(false));
+    use_test_presets(None);
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_fork_that_would_hold_a_newer_github_list_than_its_maker_asks() {
+    use crate::network_policy::{store, use_test_presets};
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    use_test_presets(Some(github_lists()));
+    GITHUB_ACCESS.with(|access| access.set(true));
+    let policy = allowlist(&["example.com"]);
+    // `main` was approved at the first list, its fork at the second.
+    let world = Served {
+        held: HashMap::from([
+            ("main", held_with_grant_at(policy.clone(), 1)),
+            ("fork-1", held_with_grant_at(policy, 2)),
+        ]),
+    };
+    let summary = asked(decide(
+        &main(),
+        MethodName::CheckpointsFork,
+        &json!({"computerId": "fork-1", "newName": "copy", "secrets": ["github"]}),
+        &world,
+    ));
+    assert!(summary.contains("new.github.example"), "{summary}");
+    // Without the GitHub access the newer list reaches nothing, so nothing is asked.
+    allowed_params(decide(
+        &main(),
+        MethodName::CheckpointsFork,
+        &json!({"computerId": "fork-1", "newName": "copy"}),
+        &world,
+    ));
+    GITHUB_ACCESS.with(|access| access.set(false));
+    use_test_presets(None);
+    store::use_test_path(None);
 }

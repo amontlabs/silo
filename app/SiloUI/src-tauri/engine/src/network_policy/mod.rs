@@ -295,6 +295,32 @@ impl Held {
         Self { policy, pins }
     }
 
+    /// `policy` handed on from a computer that holds `source`: a preset the source lists keeps
+    /// the version the source was approved at (none means the first), the GitHub grant keeps
+    /// the source's version, and a preset added now is pinned to the version this Silo has.
+    /// With no `source` nothing was approved yet: the grant holds the first version.
+    pub fn inheriting(policy: NetworkPolicy, source: Option<&Held>) -> Self {
+        let mut held = Self::latest(policy);
+        match source.and_then(|source| source.pins.get(GITHUB_GRANT_PIN)) {
+            Some(version) => held.pins.insert(GITHUB_GRANT_PIN.to_owned(), *version),
+            None => held.pins.remove(GITHUB_GRANT_PIN),
+        };
+        if let Some(source) = source {
+            for name in source
+                .policy
+                .presets
+                .iter()
+                .filter(|name| held.policy.presets.contains(name))
+            {
+                match source.pins.get(name) {
+                    Some(version) => held.pins.insert(name.clone(), *version),
+                    None => held.pins.remove(name),
+                };
+            }
+        }
+        held
+    }
+
     /// `policy` for a computer with no saved entry: every preset and the GitHub grant hold the
     /// first version, like an entry saved before versions existed, so a newer list reaches it
     /// only when the owner accepts it.
@@ -577,17 +603,47 @@ fn uncovered(new: &BTreeSet<Allowed>, current: &BTreeSet<Allowed>) -> Vec<Allowe
 /// narrowest, open the widest; an allowlist is no wider than another when every host it allows
 /// is covered by the other. An allowlist is wider than closed: it resolves names.
 pub fn no_wider(new: &NetworkPolicy, current: &NetworkPolicy) -> bool {
-    no_wider_held(&Held::latest(new.clone()), &Held::latest(current.clone()))
+    no_wider_held(
+        &Held::latest(new.clone()),
+        &Grants::default(),
+        &Held::latest(current.clone()),
+        &Grants::default(),
+    )
 }
 
-/// [`no_wider`] with the preset versions each policy was approved at.
-pub fn no_wider_held(new: &Held, current: &Held) -> bool {
+/// [`no_wider`] with the preset versions each policy was approved at and the hosts each
+/// computer's grants add at the version it holds them.
+pub fn no_wider_held(
+    new: &Held,
+    new_grants: &Grants,
+    current: &Held,
+    current_grants: &Grants,
+) -> bool {
     use NetworkPolicyMode::*;
     match (new.policy.mode, current.policy.mode) {
         (Closed, _) | (_, Open) => true,
         (Open, _) | (Allowlist, Closed) => false,
-        (Allowlist, Allowlist) => uncovered(&expand_held(new), &expand_held(current)).is_empty(),
+        (Allowlist, Allowlist) => uncovered(
+            &expand_with_grants(new, new_grants),
+            &expand_with_grants(current, current_grants),
+        )
+        .is_empty(),
     }
+}
+
+/// What an allowlist lets through with its grants: [`expand_held`] and the hosts the grants add
+/// at the versions `held` pins.
+fn expand_with_grants(held: &Held, grants: &Grants) -> BTreeSet<Allowed> {
+    let mut allowed = expand_held(held);
+    if held.policy.mode == NetworkPolicyMode::Allowlist {
+        allowed.extend(
+            grants
+                .hosts(&held.pins)
+                .into_iter()
+                .map(|(allowed, _)| allowed),
+        );
+    }
+    allowed
 }
 
 fn mode_words(mode: NetworkPolicyMode) -> &'static str {
@@ -630,12 +686,21 @@ pub fn widening_summary(computer: &str, current: &NetworkPolicy, new: &NetworkPo
     widening_summary_held(
         computer,
         &Held::latest(current.clone()),
+        &Grants::default(),
         &Held::latest(new.clone()),
+        &Grants::default(),
     )
 }
 
-/// [`widening_summary`] with the preset versions each policy was approved at.
-pub fn widening_summary_held(computer: &str, current: &Held, new: &Held) -> String {
+/// [`widening_summary`] with the preset versions each policy was approved at and the grants
+/// each computer holds.
+pub fn widening_summary_held(
+    computer: &str,
+    current: &Held,
+    current_grants: &Grants,
+    new: &Held,
+    new_grants: &Grants,
+) -> String {
     let mut summary = if new.policy.mode == current.policy.mode {
         format!("Widen the network of {computer}")
     } else {
@@ -646,7 +711,10 @@ pub fn widening_summary_held(computer: &str, current: &Held, new: &Held) -> Stri
         )
     };
     if new.policy.mode == NetworkPolicyMode::Allowlist {
-        let added = uncovered(&expand_held(new), &expand_held(current));
+        let added = uncovered(
+            &expand_with_grants(new, new_grants),
+            &expand_with_grants(current, current_grants),
+        );
         if !added.is_empty() {
             summary.push_str(&format!(", adding {}", host_words(&added)));
         } else if current.policy.mode == NetworkPolicyMode::Closed {
@@ -677,6 +745,14 @@ pub(crate) fn use_test_grants(grants: Option<Grants>) {
 }
 
 impl Grants {
+    /// Only GitHub access, for comparing the hosts it adds.
+    pub fn github_only(github: bool) -> Self {
+        Self {
+            github,
+            secrets: Vec::new(),
+        }
+    }
+
     /// The grants of the computer named `name`, read from the GitHub and secret stores.
     pub fn of_computer(name: &str) -> Self {
         #[cfg(test)]

@@ -275,9 +275,12 @@ fn read_capped(mut stream: impl Read, limit: usize, discard_excess: bool) -> (Ve
         bytes.extend_from_slice(&step[..take]);
         if take < count {
             over = true;
-            if !discard_excess {
-                break;
-            }
+        }
+        // One byte past the allowance is enough to know: stop at once instead of waiting
+        // for more output or for the pipe to close. (Only a read without `discard_excess`
+        // can hold that byte.)
+        if bytes.len() > limit {
+            break;
         }
     }
     if bytes.len() > limit {
@@ -512,6 +515,37 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(outcome, Err(Stopped::StderrOverflow)));
+    }
+
+    #[test]
+    fn one_byte_past_an_allowance_stops_the_run_while_the_writer_stays_open() {
+        for (script, stderr_limit, stdout_limit) in [
+            ("printf 123456 >&2; exec sleep 300", 5, 1024),
+            ("printf 123456; exec sleep 300", 1024, 5),
+        ] {
+            let started = Instant::now();
+            let outcome = run_collect(
+                &shell(script),
+                None,
+                Duration::from_secs(60),
+                stdout_limit,
+                StderrLimit::Stop(stderr_limit),
+                None,
+                &|| {},
+            )
+            .unwrap();
+            let expected = if stdout_limit == 5 {
+                matches!(outcome, Err(Stopped::Overflow))
+            } else {
+                matches!(outcome, Err(Stopped::StderrOverflow))
+            };
+            assert!(expected, "{script}");
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "{script} waited for the writer: {:?}",
+                started.elapsed()
+            );
+        }
     }
 
     #[test]

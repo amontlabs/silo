@@ -28,7 +28,7 @@ use silo_api::{
 };
 
 pub use access::{Access, GitHubAccess};
-use crate::network_policy::{Held, NetworkPolicy, NetworkPolicyMode};
+use crate::network_policy::{Grants, Held, NetworkPolicy, NetworkPolicyMode, GITHUB_GRANT_PIN};
 pub use resources::Resources;
 pub use rules::{rule, Rule};
 use summary::{github_access, github_identity, github_writes, listed, quoted};
@@ -619,6 +619,7 @@ impl<'a> Judge<'a> {
         match self.new_computer_network(
             asked_network.clone(),
             self.world.network_held(source),
+            named.iter().any(|name| name == "github"),
             new_name,
         ) {
             Ok(policy) => rewritten["networkPolicy"] = json!(policy),
@@ -697,7 +698,7 @@ impl<'a> Judge<'a> {
                     source: None,
                 };
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
-                let network = self.new_computer_network(asked_network, None, name);
+                let network = self.new_computer_network(asked_network, None, false, name);
                 if let Ok(policy) = &network {
                     rewritten["networkPolicy"] = json!(policy);
                 }
@@ -747,7 +748,7 @@ impl<'a> Judge<'a> {
                 let asked = Resources::of_macos(request)
                     .ok_or("A macOS computer's CPUs, memory and disk are numbers.")?;
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
-                let network = self.new_computer_network(asked_network, None, name);
+                let network = self.new_computer_network(asked_network, None, false, name);
                 if let Some(more) = self.more_than_it_has(&asked) {
                     let mut summary = format!(
                         "More resources: make {}{}",
@@ -968,10 +969,16 @@ impl<'a> Judge<'a> {
     /// The network policy a computer the caller makes gets: the one asked for, else
     /// `inherited` when it is no wider than the caller's own, else the caller's own. `Err` holds
     /// the summary of what is wider than the caller's own policy, for a request.
+    ///
+    /// A fork (`inherited` is the source's policy) is judged with the versions the engine will
+    /// save for it: presets and the GitHub grant keep the source's, so a fork never reaches
+    /// hosts a newer list added unless the owner approves it. `github` is whether the new
+    /// computer gets the source's GitHub access.
     fn new_computer_network(
         &self,
         asked: Option<NetworkPolicy>,
         inherited: Option<Held>,
+        github: bool,
         new_name: &str,
     ) -> Result<NetworkPolicy, String> {
         let Some(own) = self.world.network_held(self.caller) else {
@@ -981,29 +988,33 @@ impl<'a> Judge<'a> {
                 self.shown(self.caller)
             ));
         };
-        // The new computer is approved at the preset versions of this Silo, so it is compared
-        // that way against the caller's own policy.
+        let own_grants = Grants::github_only(self.world.access(self.caller).github.is_some());
+        let new_grants = Grants::github_only(github);
+        // What the engine saves for the new computer: a fork keeps its source's versions, a
+        // computer made new is approved at the versions of this Silo.
+        let held = |policy: NetworkPolicy| match &inherited {
+            Some(source) => Held::inheriting(policy, Some(source)),
+            None => Held::latest(policy),
+        };
+        let within_own = |chosen: &Held| {
+            crate::network_policy::no_wider_held(chosen, &new_grants, &own, &own_grants)
+        };
         let chosen = match asked {
-            Some(asked) => Held::latest(asked),
-            None => match inherited {
-                Some(inherited)
-                    if crate::network_policy::no_wider_held(
-                        &Held::latest(inherited.policy.clone()),
-                        &own,
-                    ) =>
-                {
-                    Held::latest(inherited.policy)
-                }
-                _ => Held::latest(own.policy.clone()),
+            Some(asked) => held(asked),
+            None => match inherited.as_ref().map(|source| held(source.policy.clone())) {
+                Some(inherited) if within_own(&inherited) => inherited,
+                _ => held(own.policy.clone()),
             },
         };
-        if crate::network_policy::no_wider_held(&chosen, &own) {
+        if within_own(&chosen) {
             Ok(chosen.policy)
         } else {
             Err(crate::network_policy::widening_summary_held(
                 &quoted(new_name),
                 &own,
+                &own_grants,
                 &chosen,
+                &new_grants,
             ))
         }
     }
@@ -1018,14 +1029,33 @@ impl<'a> Judge<'a> {
         let mut rewritten = json!({ "computerId": target, "policy": asked });
         let current = self.world.network_held(&target);
         let own = self.world.network_held(self.caller);
-        let asked_held = Held::latest(asked.clone());
-        let within_current = current
+        // Presets are judged at this Silo's versions, so setting a policy never takes a preset
+        // update unasked. The GitHub grant keeps the version the target was approved at, which
+        // is what the engine saves for it.
+        let mut asked_held = Held::latest(asked.clone());
+        match current
             .as_ref()
-            .is_some_and(|current| crate::network_policy::no_wider_held(&asked_held, current));
+            .and_then(|held| held.pins.get(GITHUB_GRANT_PIN))
+        {
+            Some(version) => asked_held
+                .pins
+                .insert(GITHUB_GRANT_PIN.to_owned(), *version),
+            None => asked_held.pins.remove(GITHUB_GRANT_PIN),
+        };
+        let target_grants = Grants::github_only(self.world.access(&target).github.is_some());
+        let own_grants = Grants::github_only(self.world.access(self.caller).github.is_some());
+        let within_current = current.as_ref().is_some_and(|current| {
+            crate::network_policy::no_wider_held(
+                &asked_held,
+                &target_grants,
+                current,
+                &target_grants,
+            )
+        });
         let within_own = target == self.caller
-            || own
-                .as_ref()
-                .is_some_and(|own| crate::network_policy::no_wider_held(&asked_held, own));
+            || own.as_ref().is_some_and(|own| {
+                crate::network_policy::no_wider_held(&asked_held, &target_grants, own, &own_grants)
+            });
         if let (true, true, Some(current)) = (within_current, within_own, &current) {
             rewritten["expected"] = json!(current.policy);
             return Ok(allow_with(rewritten));
@@ -1034,10 +1064,21 @@ impl<'a> Judge<'a> {
             mode: NetworkPolicyMode::Closed,
             ..NetworkPolicy::default()
         });
-        let base = if within_current { own } else { current }.unwrap_or(closed);
+        let (base, base_grants) = if within_current {
+            (own, own_grants)
+        } else {
+            (current, target_grants.clone())
+        };
+        let base = base.unwrap_or(closed);
         Ok(ask_with(
             kind,
-            crate::network_policy::widening_summary_held(&self.shown(&target), &base, &asked_held),
+            crate::network_policy::widening_summary_held(
+                &self.shown(&target),
+                &base,
+                &base_grants,
+                &asked_held,
+                &target_grants,
+            ),
             rewritten,
         ))
     }

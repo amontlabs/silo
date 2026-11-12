@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Held, NetworkPolicy, NetworkPolicyMode, Pins, GITHUB_GRANT_PIN};
+use super::{Held, NetworkPolicy, NetworkPolicyMode, Pins};
 
 const FILE: &str = "network-policy.json";
 const VERSION: u8 = 1;
@@ -60,25 +60,8 @@ impl Stored {
         before: Option<&Stored>,
         incoming_denied: bool,
     ) -> Self {
-        let mut pins = Held::latest(policy.clone()).pins;
-        // Without an entry nothing was approved yet: the grant holds the first version.
-        let grant_pin = before.and_then(|before| before.preset_versions.get(GITHUB_GRANT_PIN));
-        match grant_pin {
-            Some(version) => pins.insert(GITHUB_GRANT_PIN.to_owned(), *version),
-            None => pins.remove(GITHUB_GRANT_PIN),
-        };
-        if let Some(before) = before {
-            for preset in before
-                .presets
-                .iter()
-                .filter(|name| policy.presets.contains(name))
-            {
-                match before.preset_versions.get(preset) {
-                    Some(version) => pins.insert(preset.clone(), *version),
-                    None => pins.remove(preset),
-                };
-            }
-        }
+        let source = before.map(Stored::held);
+        let pins = Held::inheriting(policy.clone(), source.as_ref()).pins;
         Self {
             mode: policy.mode,
             hosts: policy.hosts.clone(),
@@ -268,11 +251,17 @@ pub const CHANGED: &str =
     "The network policy of this computer changed while this was being decided. Read it again and retry.";
 
 /// Gives `target` the policy `policy`, or `source`'s (with its approvals) when `policy` is
-/// `None`. A source with no entry gives nothing, so the target is treated like its source.
+/// `None`. A policy given keeps the versions `source` was approved at ([`Held::inheriting`]):
+/// handing a policy on never advances a preset or the GitHub grant, which takes an approval
+/// of its own. A source with no entry gives nothing, so the target is treated like its source.
 pub fn inherit(source: &str, target: &str, policy: Option<&NetworkPolicy>) -> Result<(), String> {
     update(|computers| {
         let chosen = match policy {
-            Some(policy) => Some(Stored::approved(policy)),
+            Some(policy) => Some(Stored::preserving_pins(
+                policy,
+                computers.get(source),
+                false,
+            )),
             None => computers.get(source).cloned(),
         };
         match chosen {

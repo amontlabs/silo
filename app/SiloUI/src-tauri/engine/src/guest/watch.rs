@@ -12,17 +12,24 @@
 //! own metadata only, which still reports additions and removals. The number of watches per
 //! computer is bounded too.
 //!
+//! What the helper prints is untrusted: only the watched folders count as hints, a hint
+//! waits at most once per folder in a small queue, and a separate thread hands them to `emit`
+//! no faster than one per [`HINT_GAP`]. A guest that prints without end therefore costs the
+//! host neither memory nor work beyond reading it, and `emit` being slow never delays the
+//! watch from ending.
+//!
 //! `start_watch` returns only once the helper has recorded every folder's baseline, so a
 //! change made after the response is always reported.
 use super::{
     exec::{self, perl_argv, terminate},
+    hints::HintQueue,
     process::{self, StreamKind},
     target::Target,
     GuestError,
 };
 use silo_api::jobs::ErrorCode;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex, OnceLock,
@@ -38,6 +45,9 @@ const MAX_WATCHES_PER_COMPUTER: usize = 16;
 #[cfg(test)]
 const MAX_WATCHES_PER_COMPUTER: usize = 3;
 const LIVENESS_POLL: Duration = Duration::from_millis(250);
+/// The least time between two hints handed to `emit`: a folder that changes again within it
+/// is reported once, after it.
+const HINT_GAP: Duration = Duration::from_millis(100);
 /// How long the helper may take to record its baselines (a very large folder, a slow channel).
 const READY_DEADLINE: Duration = Duration::from_secs(30);
 
@@ -168,11 +178,14 @@ pub fn start_watch(
     let plan = target.plan(&argv, &[], false, false)?;
     let records = Arc::new(Mutex::new(Records::default()));
     let overflowed = Arc::new(AtomicBool::new(false));
+    let watched: HashSet<String> = paths.iter().cloned().collect();
+    let queue = Arc::new(HintQueue::default());
     let (armed, ready) = mpsc::channel::<()>();
     let stderr_head = Arc::new(Mutex::new(Vec::<u8>::new()));
     let chunks = {
         let stderr_head = stderr_head.clone();
         let overflowed = overflowed.clone();
+        let queue = queue.clone();
         Arc::new(move |kind: StreamKind, data: Vec<u8>| {
             if kind == StreamKind::Stderr {
                 let mut head = stderr_head
@@ -189,8 +202,10 @@ pub fn start_watch(
                 if path.is_empty() {
                     // The empty record: every baseline is recorded.
                     let _ = armed.send(());
-                } else {
-                    emit(String::from_utf8_lossy(path).into_owned());
+                } else if let Ok(folder) = std::str::from_utf8(path) {
+                    if watched.contains(folder) {
+                        queue.push(folder);
+                    }
                 }
             });
             if records.overflowed {
@@ -240,6 +255,7 @@ pub fn start_watch(
         }
     };
     if let Some(message) = failure {
+        queue.close();
         let _ = terminate(target, false, &token);
         let _ = streaming.child.kill();
         let _ = streaming.child.wait();
@@ -248,6 +264,19 @@ pub fn start_watch(
     let stop = Arc::new(AtomicBool::new(false));
     let handle = WatchHandle { stop: stop.clone() };
     let target = target.clone();
+    {
+        let queue = queue.clone();
+        thread::spawn(move || loop {
+            match queue.recv_timeout(LIVENESS_POLL) {
+                Ok(folder) => {
+                    emit(folder);
+                    thread::sleep(HINT_GAP);
+                }
+                Err(false) => {}
+                Err(true) => break,
+            }
+        });
+    }
     thread::spawn(move || {
         let _slot = slot;
         loop {
@@ -264,6 +293,7 @@ pub fn start_watch(
         }
         let _ = streaming.child.wait();
         streaming.finish_output();
+        queue.close();
     });
     Ok(handle)
 }
@@ -517,6 +547,50 @@ esac"#,
         for handle in handles {
             handle.stop();
         }
+    }
+
+    #[test]
+    fn a_flooding_guest_yields_only_a_trickle_of_hints_inside_the_watched_folders() {
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().join("flood");
+        std::fs::create_dir(&folder).unwrap();
+        let path = folder.to_string_lossy().into_owned();
+        // After the baseline record the fake helper prints, as fast as it can, a path that is
+        // not watched and the watched folder.
+        let prelude = format!(
+            r#"case " $* " in *" watch "*) printf '\0'; while :; do printf '/elsewhere\0{path}\0'; done;; esac"#
+        );
+        let paths = test_support::runtime_with_exec_prelude(directory.path(), &prelude);
+        let target =
+            crate::guest::resolve(Ok(paths), directory.path(), test_support::COMPUTER_ID).unwrap();
+        let (seen, emit) = collector();
+        let handle = start_watch(&target, &[path.clone()], emit, Arc::new(|| true)).unwrap();
+        thread::sleep(Duration::from_millis(1500));
+        let count = seen.lock().unwrap().len();
+        let stopping = Instant::now();
+        handle.stop();
+        assert!(
+            seen.lock().unwrap().iter().all(|hint| *hint == path),
+            "only watched folders are reported: {:?}",
+            seen.lock().unwrap().iter().take(3).collect::<Vec<_>>()
+        );
+        assert!(
+            (1..=40).contains(&count),
+            "repeated hints are coalesced, got {count}"
+        );
+        // Cancellation does not wait for the flood.
+        let settled = loop {
+            let before = seen.lock().unwrap().len();
+            thread::sleep(Duration::from_millis(600));
+            if seen.lock().unwrap().len() == before {
+                break before;
+            }
+            assert!(
+                stopping.elapsed() < Duration::from_secs(10),
+                "never stopped"
+            );
+        };
+        assert!(settled >= count);
     }
 
     #[test]

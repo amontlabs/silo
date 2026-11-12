@@ -133,7 +133,7 @@ Silo adds hosts to a preset, a computer keeps the list it was approved with unti
 update (`network.policy.get` lists it as a preset update; setting the policy again with the same
 presets accepts it). The hosts that GitHub access adds are pinned the same way, under their own
 entry that follows the GitHub preset's version; a policy saved before that entry existed holds the
-first version, which is the list GitHub access has always added, so nothing changes when it loads. The data file keeps the list of every earlier version of a preset for as long
+first version, which is the list GitHub access has always added, so nothing changes when it loads. A fork keeps the versions of its source, whatever policy it is given, and a decision to make a fork or change a policy counts the GitHub hosts at the version each computer holds, so only an approval moves a computer to a newer list. The data file keeps the list of every earlier version of a preset for as long
 as a saved policy may name it; a version Silo does not know allows nothing. A policy is read from
 one file; when it cannot be read (damaged, or written by a newer Silo) a computer does not start,
 is not created, and its gateway gets no way out, and the file is left alone. A computer with no
@@ -414,12 +414,12 @@ requests; read-only is enforced on the host side.
 The commands the engine runs in a guest and reads back (checks, file helpers, a bounded run) are
 held in memory on the host with a limit on both standard output and standard error
 ([`process.rs`](../app/SiloUI/src-tauri/engine/src/guest/process.rs)): a command that prints past
-its limit is stopped and the call fails with "printed too much" (standard error of a bounded run:
+its limit (one byte over, even while it keeps its pipe open) is stopped and the call fails with "printed too much" (standard error of a bounded run:
 one response's worth). A helper command keeps the first 64 KiB of its standard error and the engine
 reads and drops the rest, so a hostile guest cannot make file operations fail by printing a lot;
 its standard output stays bounded. The file helper runs under the guest supervisor, so when the
 engine stops it (deadline, overflow) the helper is ended in the guest too. A folder watch refuses
-output that is not a path (a record over 8 KiB) and ends. Nothing the guest prints is written to
+output that is not a path (a record over 8 KiB) and ends. It reports only the watched folders, holds each at most once in a short queue and hands them on at most ten times a second, so a guest that prints without end costs the device neither memory nor work, on this device or across devices. Nothing the guest prints is written to
 the device's disk by the engine.
 
 Imported Linux computer archives are parsed on the Mac: a zstd-compressed tar is streamed through

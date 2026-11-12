@@ -14,6 +14,7 @@
 mod commands;
 mod exec;
 mod files;
+mod hints;
 pub mod macos;
 mod process;
 mod session;
@@ -32,6 +33,7 @@ pub use session::{
 };
 pub use ssh_alias::{ensure_alias, remove_alias, AliasEnsure, AliasOutcome};
 pub use target::{resolve, Account, Target};
+pub(crate) use hints::HintQueue;
 pub use watch::{start_watch, WatchHandle};
 
 use silo_api::jobs::ErrorCode;

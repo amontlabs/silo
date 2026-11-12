@@ -583,9 +583,12 @@ fn the_judge_reads_a_computer_as_the_service_does() {
     let imported = view(Some(json!({"policy": deny_all()})), Some(deny_all()));
     let held = service::judged_from_view("imported", None, imported);
     assert_eq!(held.policy.mode, NetworkPolicyMode::Closed);
+    let none = Grants::default();
     assert!(!no_wider_held(
         &Held::latest(mode(NetworkPolicyMode::Open)),
-        &held
+        &none,
+        &held,
+        &none
     ));
     // An older computer with the open rules and no entry is still open.
     let older = view(Some(github_default.clone()), None);
@@ -726,9 +729,10 @@ fn a_preset_update_waits_for_the_owner_to_accept_it() {
     // The same presets at the latest version are wider, so a computer's agent that sends them
     // asks, and the summary names the new host.
     let latest = Held::latest(policy.clone());
-    assert!(!no_wider_held(&latest, &held));
-    assert!(widening_summary_held("main", &held, &latest).contains("b.example.com"));
-    assert!(no_wider_held(&held, &latest));
+    let none = Grants::default();
+    assert!(!no_wider_held(&latest, &none, &held, &none));
+    assert!(widening_summary_held("main", &held, &none, &latest, &none).contains("b.example.com"));
+    assert!(no_wider_held(&held, &none, &latest, &none));
     // Setting the policy again approves the running version.
     store::set("c", &policy).unwrap();
     let stored = store::get_stored("c").unwrap().unwrap();
@@ -1125,12 +1129,16 @@ fn a_computer_with_no_policy_entry_holds_the_first_github_list_until_the_owner_a
         service::get("copy", macos()).unwrap().preset_updates.len(),
         1
     );
-    // A copy given a policy now is approved at the running list.
+    // A copy given a policy holds its source's versions too: handing a policy on takes no
+    // update.
     store::inherit("legacy", "chosen", Some(&allowlist(&["example.com"], &[]))).unwrap();
-    assert!(service::get("chosen", macos())
-        .unwrap()
-        .preset_updates
-        .is_empty());
+    assert_eq!(
+        service::get("chosen", macos())
+            .unwrap()
+            .preset_updates
+            .len(),
+        1
+    );
     use_test_grants(None);
     use_test_presets(None);
     store::use_test_path(None);
@@ -1247,4 +1255,25 @@ fn the_names_silo_always_refused_stay_refused_whether_or_not_the_list_carries_th
         assert!(is_too_wide_wildcard(&format!("*.{suffix}")), "{suffix}");
     }
     assert!(validate_host("*.amazonaws.com").is_err());
+}
+
+#[test]
+fn counting_what_a_policy_reaches_includes_the_hosts_its_github_grant_adds() {
+    use_test_presets(Some(github_version_two()));
+    let policy = allowlist(&["example.com"], &[]);
+    let at = |version: u32| Held {
+        policy: policy.clone(),
+        pins: Pins::from([(GITHUB_GRANT_PIN.to_owned(), version)]),
+    };
+    let github = github_grant();
+    let none = Grants::default();
+    // Holding the newer list reaches more than holding the first one, but only for a computer
+    // that has the grant.
+    assert!(!no_wider_held(&at(2), &github, &at(1), &github));
+    assert!(no_wider_held(&at(1), &github, &at(2), &github));
+    assert!(no_wider_held(&at(2), &none, &at(1), &github));
+    assert!(no_wider_held(&at(2), &none, &at(1), &none));
+    let summary = widening_summary_held("copy", &at(1), &github, &at(2), &github);
+    assert!(summary.contains("new.github.example"), "{summary}");
+    use_test_presets(None);
 }
