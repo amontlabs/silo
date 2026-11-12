@@ -5,7 +5,7 @@
 //! starts; the engine remembers what each running gateway was started with
 //! ([`gateway_started`]).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Mutex;
 
 use serde_json::Value;
@@ -172,18 +172,17 @@ pub fn judged(computer_id: &str, target: Target<'_>) -> Option<Held> {
 }
 
 fn state(computer_id: &str, resolved: Resolved) -> NetworkPolicyState {
-    let notices = super::shared_hosting_warnings(&resolved.held.policy.hosts)
+    let mut notices: Vec<String> = super::shared_hosting_warnings(&resolved.held.policy.hosts)
         .into_iter()
-        .chain(resolved
-        .grants
-        .too_wide()
-        .into_iter()
-        .map(|(secret, host)| {
+        .chain(resolved.grants.shared_hosting_warnings())
+        .chain(resolved.grants.too_wide().into_iter().map(|(secret, host)| {
             format!(
                 "The secret {secret} may be sent to {host}, which covers too many hosts to allow here, so a list does not let this computer reach them."
             )
         }))
         .collect();
+    let mut seen = BTreeSet::new();
+    notices.retain(|notice| seen.insert(notice.clone()));
     NetworkPolicyState {
         computer_id: computer_id.to_owned(),
         preset_updates: resolved

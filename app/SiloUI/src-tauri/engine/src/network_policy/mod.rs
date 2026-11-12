@@ -793,6 +793,8 @@ pub struct Grants {
     pub github: bool,
     /// Each assigned secret's name and the hosts it may be sent to.
     pub secrets: Vec<(String, Vec<String>)>,
+    /// The secrets whose wildcard hosts over shared hosting the owner approved as network rules.
+    pub shared_hosting: BTreeSet<String>,
 }
 
 #[cfg(test)]
@@ -811,7 +813,7 @@ impl Grants {
     pub fn github_only(github: bool) -> Self {
         Self {
             github,
-            secrets: Vec::new(),
+            ..Self::default()
         }
     }
 
@@ -825,28 +827,55 @@ impl Grants {
         Self {
             github: access.github.is_some(),
             secrets: crate::secrets::assigned_hosts(name).unwrap_or_default(),
+            shared_hosting: crate::secrets::shared_hosting_approved(name).unwrap_or_default(),
         }
     }
 
-    /// The secrets' wildcard hosts too wide to be a network rule (over a public suffix), as
-    /// `(secret, host)`. The secret still works for those hosts; the computer just cannot reach
-    /// them by it.
+    /// Whether the hosts of `secret` include `domain` as a network rule: a host the list accepts,
+    /// and for a wildcard over shared hosting, one the owner approved for that secret.
+    fn adds(&self, secret: &str, domain: &str) -> bool {
+        validate_host(domain).is_ok()
+            && (shared_hosting_warning(domain).is_none() || self.shared_hosting.contains(secret))
+    }
+
+    /// The secrets' wildcard hosts too wide to be a network rule (over a public suffix, or over
+    /// shared hosting the owner has not approved for the secret), as `(secret, host)`. The secret
+    /// still works for those hosts; the computer just cannot reach them by it.
     pub fn too_wide(&self) -> Vec<(String, String)> {
         self.secrets
             .iter()
             .flat_map(|(name, domains)| {
                 domains
                     .iter()
-                    .filter(|domain| is_too_wide_wildcard(domain))
+                    .filter(|domain| {
+                        is_too_wide_wildcard(domain)
+                            || (validate_host(domain).is_ok() && !self.adds(name, domain))
+                    })
                     .map(|domain| (name.clone(), domain.clone()))
             })
             .collect()
     }
 
+    /// The warnings for the shared-hosting wildcards the secrets add as network rules.
+    pub fn shared_hosting_warnings(&self) -> Vec<String> {
+        let hosts: Vec<String> = self
+            .secrets
+            .iter()
+            .flat_map(|(name, domains)| {
+                domains
+                    .iter()
+                    .filter(|domain| self.adds(name, domain))
+                    .cloned()
+            })
+            .collect();
+        shared_hosting_warnings(&hosts)
+    }
+
     /// The hosts these grants add, with where each comes from. GitHub access adds the GitHub
     /// list at the version `pins` holds. A secret allowed to any host adds nothing: an
     /// allowlist computer can send it only to hosts on its list. A wildcard over a public
-    /// suffix adds nothing either ([`Self::too_wide`]).
+    /// suffix adds nothing either, nor does one over shared hosting the owner has not approved
+    /// ([`Self::too_wide`]).
     fn hosts(&self, pins: &Pins) -> Vec<(Allowed, String)> {
         let mut hosts = Vec::new();
         if self.github {
@@ -861,7 +890,7 @@ impl Grants {
         }
         for (name, domains) in &self.secrets {
             for domain in domains {
-                if validate_host(domain).is_ok() {
+                if self.adds(name, domain) {
                     hosts.push((Allowed::new(domain, HTTPS_PORT), format!("secret:{name}")));
                 }
             }

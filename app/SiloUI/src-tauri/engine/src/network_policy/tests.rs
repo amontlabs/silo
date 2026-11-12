@@ -308,6 +308,7 @@ fn grants_add_github_and_secret_hosts_only_in_allowlist_mode() {
                 vec!["*.example.net".into(), "10.0.0.1".into()],
             ),
         ],
+        ..Grants::default()
     };
     let list = plan(&allowlist(&["example.com"], &[]), &grants, &[]);
     let tokens: Vec<String> = list.rules.iter().map(Rule::token).collect();
@@ -920,6 +921,7 @@ fn a_secret_wildcard_over_a_public_suffix_is_not_a_network_rule() {
             "WIDE".into(),
             vec!["*.co.uk".into(), "*.com".into(), "api.example.com".into()],
         )],
+        ..Grants::default()
     };
     let list = plan(&allowlist(&[], &[]), &grants, &[]);
     let tokens: Vec<String> = list.rules.iter().map(Rule::token).collect();
@@ -952,7 +954,7 @@ fn github_version_two() -> Vec<Preset> {
 fn github_grant() -> Grants {
     Grants {
         github: true,
-        secrets: Vec::new(),
+        ..Grants::default()
     }
 }
 
@@ -1233,6 +1235,48 @@ fn approving_a_widening_to_shared_hosting_carries_the_warning() {
         &allowlist(&["example.com", "api.example.org"], &[]),
     );
     assert!(!plain.contains("anyone can publish"), "{plain}");
+}
+
+fn netlify_grants(approved: bool) -> Grants {
+    Grants {
+        secrets: vec![("SITE".into(), vec!["*.netlify.app".into()])],
+        shared_hosting: approved.then(|| "SITE".to_owned()).into_iter().collect(),
+        ..Grants::default()
+    }
+}
+
+#[test]
+fn a_secret_saved_before_shared_hosting_was_allowed_does_not_widen_the_list() {
+    let grants = netlify_grants(false);
+    let tokens: Vec<String> = plan(&allowlist(&["example.com"], &[]), &grants, &[])
+        .rules
+        .iter()
+        .map(Rule::token)
+        .collect();
+    assert!(!tokens.iter().any(|token| token.contains("netlify")), "{tokens:?}");
+    assert_eq!(
+        grants.too_wide(),
+        [("SITE".to_owned(), "*.netlify.app".to_owned())]
+    );
+    assert!(grants.shared_hosting_warnings().is_empty());
+}
+
+#[test]
+fn an_approved_secret_over_shared_hosting_widens_the_list_with_a_notice() {
+    let grants = netlify_grants(true);
+    let tokens: Vec<String> = plan(&allowlist(&["example.com"], &[]), &grants, &[])
+        .rules
+        .iter()
+        .map(Rule::token)
+        .collect();
+    assert!(
+        tokens.contains(&"allow@*.netlify.app:tcp:443".to_owned()),
+        "{tokens:?}"
+    );
+    assert!(grants.too_wide().is_empty());
+    let warnings = grants.shared_hosting_warnings();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("*.netlify.app"), "{warnings:?}");
 }
 
 #[test]

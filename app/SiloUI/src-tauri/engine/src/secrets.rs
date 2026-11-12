@@ -121,6 +121,10 @@ struct Secret {
     account: Option<String>,
     computers: Vec<String>,
     allowed_domains: Vec<String>,
+    /// Set when the owner saved the secret knowing a wildcard over shared hosting among its
+    /// domains also becomes an allowed host; secrets saved before that never have it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    shared_hosting_approved: bool,
     #[serde(default)]
     affected: Vec<String>,
     #[serde(default)]
@@ -553,6 +557,7 @@ pub(crate) fn import_github_token(
             account: Some(account.to_owned()),
             computers: Vec::new(),
             allowed_domains: Vec::new(),
+            shared_hosting_approved: false,
             affected: Vec::new(),
             pending_computers: Vec::new(),
             errors: BTreeMap::new(),
@@ -650,6 +655,17 @@ pub(crate) fn assigned_hosts(computer: &str) -> Result<Vec<(String, Vec<String>)
         .iter()
         .filter(|s| generic_on(s, computer))
         .map(|s| (s.name.clone(), s.allowed_domains.clone()))
+        .collect())
+}
+
+/// The names of the generic secrets assigned to `computer` that were saved with their shared-hosting
+/// wildcards approved as allowed hosts.
+pub(crate) fn shared_hosting_approved(computer: &str) -> Result<BTreeSet<String>, String> {
+    Ok(load()?
+        .secrets
+        .iter()
+        .filter(|s| generic_on(s, computer) && s.shared_hosting_approved)
+        .map(|s| s.name.clone())
         .collect())
 }
 
@@ -1292,6 +1308,7 @@ pub fn save_secret<G>(
             account,
             computers: request.computers,
             allowed_domains: request.allowed_domains,
+            shared_hosting_approved: true,
             affected,
             pending_computers: Vec::new(),
             errors: BTreeMap::new(),
@@ -1460,6 +1477,7 @@ mod tests {
             name: "work".into(),
             computers: Vec::new(),
             allowed_domains: Vec::new(),
+            shared_hosting_approved: false,
             affected: Vec::new(),
             ..secret()
         }
@@ -1587,6 +1605,16 @@ mod tests {
         use_test_store(None);
         use_test_vault(None);
     }
+    #[test]
+    fn shared_hosting_approval_is_absent_on_secrets_saved_before_it_existed() {
+        let mut stored = serde_json::to_value(secret()).unwrap();
+        assert!(stored.get("sharedHostingApproved").is_none());
+        let old: Secret = serde_json::from_value(stored.clone()).unwrap();
+        assert!(!old.shared_hosting_approved);
+        stored["sharedHostingApproved"] = true.into();
+        let approved: Secret = serde_json::from_value(stored).unwrap();
+        assert!(approved.shared_hosting_approved);
+    }
     fn secret() -> Secret {
         Secret {
             id: "id".into(),
@@ -1596,6 +1624,7 @@ mod tests {
             account: None,
             computers: vec!["dev".into()],
             allowed_domains: vec!["api.example.com".into()],
+            shared_hosting_approved: false,
             affected: vec!["dev".into()],
             pending_computers: Vec::new(),
             errors: BTreeMap::new(),

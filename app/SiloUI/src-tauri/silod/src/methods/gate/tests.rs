@@ -1304,6 +1304,72 @@ async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_
 }
 
 #[tokio::test]
+async fn a_restart_keeps_its_computers_memory_reserved_while_it_is_stopped() {
+    // 10 GiB above the 4 GiB floor.
+    let _device = device(14 * GIB, 400 * GIB);
+    let (id, big) = computer();
+    let other = format!("{id}-other");
+    sized(&big, 8);
+    sized(&other, 8);
+    let context = context(Caller::owner("app"));
+    let restart = {
+        let _resident = Resident::new(&big);
+        let held = super::reserve_now(
+            &context,
+            MethodName::ComputersRestart,
+            &json!({"computerId": big}),
+        )
+        .await
+        .unwrap();
+        held.settle(Some(&running_job()), None);
+        held
+    };
+    let start_other = || async {
+        super::reserve_now(
+            &context,
+            MethodName::ComputersStart,
+            &json!({"computerId": other}),
+        )
+        .await
+    };
+    // The list the restart was admitted on shows the computer running: nothing is counted twice.
+    assert_eq!(super::reserved_memory_of(&big), 0);
+    {
+        let _resident = Resident::new(&big);
+        let held = start_other().await.unwrap();
+        held.settle(Some(&running_job()), None);
+    }
+    super::clear_reservations();
+    let restart_again = {
+        let _resident = Resident::new(&big);
+        let held = super::reserve_now(
+            &context,
+            MethodName::ComputersRestart,
+            &json!({"computerId": big}),
+        )
+        .await
+        .unwrap();
+        held.settle(Some(&running_job()), None);
+        held
+    };
+    // Between the stop and the boot a list read afterwards no longer shows it: its memory is
+    // taken from the headroom, so another start of that size is refused.
+    let error = start_other()
+        .await
+        .err()
+        .expect("refused while the computer is stopped");
+    assert!(error.contains("memory"), "{error}");
+    // Resident again: its memory is in the device's measurement and counts once.
+    {
+        let _resident = Resident::new(&big);
+        let held = start_other().await.unwrap();
+        held.settle(Some(&running_job()), None);
+    }
+    drop((restart, restart_again));
+    super::clear_reservations();
+}
+
+#[tokio::test]
 async fn a_macos_creation_reservation_follows_the_computer_its_answer_names() {
     let _device = device(32 * GIB, 400 * GIB);
     let (id, _fork) = computer();

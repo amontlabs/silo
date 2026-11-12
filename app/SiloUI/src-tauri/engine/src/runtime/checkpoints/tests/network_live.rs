@@ -204,7 +204,7 @@ fn live_network_policy_modes_restore_and_fork() {
     // in allowlist mode: api.github.com stands for a host a secret covers.
     use_test_grants(Some(Grants {
         github: true,
-        secrets: Vec::new(),
+        ..Grants::default()
     }));
     let source = "e2e-t8-main";
     let configuration = create(&mut fixture, source, &of_mode(NetworkPolicyMode::Open));
