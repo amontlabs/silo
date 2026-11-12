@@ -85,7 +85,7 @@ See `docs/SiloUI-BUILD-CHANNELS.md`.
 Binding rules for every agent; the details are in [docs/workflow/](docs/workflow/ORCHESTRATOR.md).
 
 - **No CI waits.** Never push to wait for CI, never poll `gh run` or `gh pr checks`, never rerun CI.
-- **Tests prove or find something.** Run `tools/agent/check` (or `tools/agent/affected` to see what a diff touches) instead of full suites; narrower commands are fine when faster. Children never run `--workspace` or the whole frontend suite. The full suites run once per merge batch, in the background, started by `tools/agent/merge-batch`.
+- **Tests prove or find something.** Run `tools/agent/check` (or `tools/agent/affected` to see what a diff touches) instead of full suites; narrower commands are fine when faster. Children never run `--workspace` or the whole frontend suite. The full suites run once per merge batch, in the background, started by `tools/agent/merge-batch`; `rust-toolchain.toml` pins Rust, so use plain `cargo` (no `+toolchain`) and cargo-nextest 0.9.149.
 - **Flaky tests get fixed, not retried.** Log a test that fails then passes in [docs/workflow/FLAKY.md](docs/workflow/FLAKY.md).
 - **Only the orchestrator starts reviews.** Children never review their own work.
 - **Agents are chosen by lastdrop name** (`build`, `build-hard`, `review`, `judge`, `live`, `scout`, `computer-use`; `cheap` only when the owner asks), never by provider model. See [docs/workflow/ROLES.md](docs/workflow/ROLES.md).
