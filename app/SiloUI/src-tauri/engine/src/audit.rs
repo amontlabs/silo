@@ -15,7 +15,9 @@
 //! of the owner's rows. A repeat of a caller's newest waiting row is counted there before
 //! anything is queued, each caller may have only so many rows waiting, and the rows that find
 //! the buffer full are counted into one summary row per caller, so computer or device traffic
-//! cannot take a place in the owner's queue. Waiting for the log to catch up queues nothing.
+//! cannot take a place in the owner's queue. Computers and devices each have a share of the
+//! buffer, so a flood from one kind never fills the other's. Waiting for the log to catch up
+//! queues nothing.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -38,8 +40,10 @@ use silo_api::methods::audit::{
 pub const FILE_NAME: &str = "audit.sqlite3";
 const SCHEMA_VERSION: i64 = 2;
 const QUEUE: usize = 4096;
-/// Rows of all computers and devices together that may wait to be written.
+/// Rows of all computers together that may wait to be written.
 const COMPUTER_WAITING: usize = 1024;
+/// Rows of all devices together that may wait to be written.
+const DEVICE_WAITING: usize = 256;
 /// Rows of one computer or device that may wait to be written.
 const PER_COMPUTER_WAITING: usize = 64;
 /// How long the writer waits for a message before it looks at the buffered rows.
@@ -118,6 +122,8 @@ type Caller = (AuditCallerKind, Option<String>);
 struct BufferedRows {
     next: u64,
     waiting: BTreeMap<u64, Waiting>,
+    /// How many of the waiting rows are devices'.
+    device_rows: usize,
     newest: HashMap<Caller, u64>,
     per_caller: HashMap<Caller, usize>,
     /// The rows each caller lost to a full buffer and the time of the latest.
@@ -148,7 +154,12 @@ impl BufferedRows {
             }
         }
         let held = self.per_caller.get(&caller).copied().unwrap_or(0);
-        if self.waiting.len() >= COMPUTER_WAITING || held >= PER_COMPUTER_WAITING {
+        let share_full = if caller.0 == AuditCallerKind::Device {
+            self.device_rows >= DEVICE_WAITING
+        } else {
+            self.waiting.len() - self.device_rows >= COMPUTER_WAITING
+        };
+        if share_full || held >= PER_COMPUTER_WAITING {
             // A flood of ids must not grow the summary either: past one entry per place in
             // the buffer the rest are counted together.
             let key = if self.dropped.contains_key(&caller) || self.dropped.len() < COMPUTER_WAITING
@@ -165,6 +176,9 @@ impl BufferedRows {
         let seq = self.next;
         self.next += 1;
         *self.per_caller.entry(caller.clone()).or_default() += 1;
+        if caller.0 == AuditCallerKind::Device {
+            self.device_rows += 1;
+        }
         self.newest.insert(caller, seq);
         let last_at = row.at_ms;
         self.waiting.insert(
@@ -182,6 +196,7 @@ impl BufferedRows {
         let mut rows: Vec<Waiting> = std::mem::take(&mut self.waiting).into_values().collect();
         self.newest.clear();
         self.per_caller.clear();
+        self.device_rows = 0;
         for ((caller_kind, caller), (count, last_at)) in std::mem::take(&mut self.dropped) {
             rows.push(Waiting {
                 row: Row {
@@ -233,6 +248,21 @@ impl Shared {
         self.progress
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Records that no writer is running, so nobody waits for rows that will not be written.
+    fn writer_stopped(&self) {
+        self.progress().stopped = true;
+        self.advanced.notify_all();
+    }
+}
+
+/// Marks the writer stopped when the writer thread ends, however it ends.
+struct StopOnExit(Arc<Shared>);
+
+impl Drop for StopOnExit {
+    fn drop(&mut self) {
+        self.0.writer_stopped();
     }
 }
 
@@ -582,6 +612,7 @@ fn write_loop(
     shared: Arc<Shared>,
     queue: Receiver<Message>,
 ) {
+    let _stopped = StopOnExit(shared.clone());
     let mut writer = Writer {
         path,
         retention,
@@ -600,8 +631,6 @@ fn write_loop(
             Ok(Message::Wake) | Err(mpsc::RecvTimeoutError::Timeout) => writer.drain_buffered(),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 writer.drain_buffered();
-                writer.shared.progress().stopped = true;
-                writer.shared.advanced.notify_all();
                 return;
             }
         }
@@ -635,6 +664,7 @@ impl AuditLog {
         };
         if let Err(error) = writer {
             warn_once(&warned, &error.to_string());
+            shared.writer_stopped();
         }
         Self {
             path,
@@ -1365,5 +1395,89 @@ mod tests {
         );
         assert!(computer.iter().all(|entry| entry.method == "guest.exec"));
         assert!(rows.entries.iter().any(|entry| entry.method == "owner"));
+    }
+
+    #[test]
+    fn a_flood_of_computers_leaves_the_devices_their_share_of_the_buffer() {
+        let mut buffer = BufferedRows::default();
+        for number in 0..(COMPUTER_WAITING * 2) {
+            buffer.add(row(
+                "flood",
+                AuditCallerKind::Computer,
+                Some(&format!("computer{number}")),
+                None,
+            ));
+        }
+        for number in 0..DEVICE_WAITING {
+            buffer.add(row(
+                "call",
+                AuditCallerKind::Device,
+                Some(&format!("device{number}")),
+                None,
+            ));
+        }
+        let rows = buffer.take();
+        let devices: Vec<&Waiting> = rows
+            .iter()
+            .filter(|waiting| waiting.row.caller_kind == AuditCallerKind::Device)
+            .collect();
+        assert_eq!(devices.len(), DEVICE_WAITING);
+        assert!(devices
+            .iter()
+            .all(|waiting| waiting.row.method != DROPPED_METHOD));
+    }
+
+    #[test]
+    fn a_flood_of_devices_leaves_the_computers_their_share_of_the_buffer() {
+        let mut buffer = BufferedRows::default();
+        for number in 0..(DEVICE_WAITING * 2) {
+            buffer.add(row(
+                "flood",
+                AuditCallerKind::Device,
+                Some(&format!("device{number}")),
+                None,
+            ));
+        }
+        for number in 0..COMPUTER_WAITING {
+            buffer.add(row(
+                "call",
+                AuditCallerKind::Computer,
+                Some(&format!("computer{number}")),
+                None,
+            ));
+        }
+        let rows = buffer.take();
+        let rows_of = |kind| {
+            rows.iter()
+                .filter(|waiting| {
+                    waiting.row.caller_kind == kind && waiting.row.method != DROPPED_METHOD
+                })
+                .count()
+        };
+        assert_eq!(rows_of(AuditCallerKind::Computer), COMPUTER_WAITING);
+        assert_eq!(rows_of(AuditCallerKind::Device), DEVICE_WAITING);
+        assert_eq!(buffer.device_rows, 0, "taking the rows empties the share");
+    }
+
+    #[test]
+    fn a_writer_that_ended_for_any_reason_makes_a_list_return_at_once() {
+        let shared = Arc::new(Shared::default());
+        let ended = {
+            let shared = shared.clone();
+            std::thread::spawn(move || {
+                let _stopped = StopOnExit(shared);
+                panic!("the writer failed");
+            })
+            .join()
+        };
+        assert!(ended.is_err());
+        assert!(shared.progress().stopped);
+
+        let (_directory, log) = trimmed_log(100, 100);
+        log.shared.writer_stopped();
+        log.record(row("computer", AuditCallerKind::Computer, Some("a"), None));
+        let began = std::time::Instant::now();
+        log.flush(Duration::from_secs(30));
+        assert!(began.elapsed() < Duration::from_secs(5));
     }
 }

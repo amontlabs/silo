@@ -324,12 +324,37 @@ struct Reservation {
 static RESERVATIONS: std::sync::Mutex<Vec<Reservation>> = std::sync::Mutex::new(Vec::new());
 static NEXT_RESERVATION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// Longest a start takes, after which a reservation that nothing settled is dropped.
+/// Longest a start takes, after which a reservation that nothing settled is dropped. One tied
+/// to a job is kept for as long as the job runs.
 const RESERVATION_LIFE: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Drops the reservations whose job is over or that outlived the longest a start takes. The
-/// job registry is read with no lock held; a reservation whose job ends meanwhile is dropped by
-/// the next call.
+/// Whether a reservation is still wanted: it is tied to a job that has not ended, or nothing
+/// has settled it for less than [`RESERVATION_LIFE`].
+fn reservation_alive(reservation: &Reservation, over: &[u64]) -> bool {
+    if over.contains(&reservation.id) {
+        return false;
+    }
+    reservation.job_id.is_some() || reservation.created_at.elapsed() <= RESERVATION_LIFE
+}
+
+/// Whether the job registry still has `job` waiting or running. A registry that cannot be read
+/// says nothing about the job, so the job is taken to run.
+fn job_runs(engine: &dyn EngineContext, job: &str) -> bool {
+    let Ok(job) = JobId::new(job) else {
+        return false;
+    };
+    let Ok(registry) = engine.job_registry() else {
+        return true;
+    };
+    !matches!(
+        registry.state_of(&job),
+        Ok(None | Some(ApiJobState::Finished))
+    )
+}
+
+/// Drops the reservations whose job is over or that no job holds and that outlived the longest
+/// a start takes. The job registry is read with no lock held; a reservation whose job ends
+/// meanwhile is dropped by the next call.
 fn prune_reservations(engine: &dyn EngineContext) {
     let jobs: Vec<(u64, String)> = RESERVATIONS
         .lock()
@@ -339,13 +364,13 @@ fn prune_reservations(engine: &dyn EngineContext) {
         .collect();
     let over: Vec<u64> = jobs
         .into_iter()
-        .filter(|(_, job)| job_state(engine, job) != JobState::Running)
+        .filter(|(_, job)| !job_runs(engine, job))
         .map(|(id, _)| id)
         .collect();
     RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .retain(|r| r.created_at.elapsed() <= RESERVATION_LIFE && !over.contains(&r.id));
+        .retain(|r| reservation_alive(r, &over));
 }
 
 fn current_reserved_memory(engine: &dyn EngineContext) -> u64 {
@@ -373,7 +398,7 @@ fn reserve_if_fits(
     let mut reservations = RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    reservations.retain(|r| r.created_at.elapsed() <= RESERVATION_LIFE);
+    reservations.retain(|r| reservation_alive(r, &[]));
     let reserved: u64 = reservations.iter().map(|r| r.memory_bytes).sum();
     if let Some(refusal) = resources::refusal_for(host, floors, reserved, memory_bytes) {
         return Err(refusal);
@@ -489,6 +514,19 @@ pub(crate) fn test_exclusive() -> std::sync::MutexGuard<'static, ()> {
     EXCLUSIVE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Makes the reservation `id` look `age` old.
+#[cfg(test)]
+pub(crate) fn backdate_reservation(id: u64, age: std::time::Duration) {
+    let mut reservations = RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(r) = reservations.iter_mut().find(|r| r.id == id) {
+        r.created_at = std::time::Instant::now()
+            .checked_sub(age)
+            .expect("the machine has been up for longer than the age");
+    }
 }
 
 #[cfg(test)]
@@ -703,12 +741,15 @@ pub(crate) fn reserved_memory() -> u64 {
 const MAX_COMPUTER_JOBS: usize = 512;
 
 /// Whether the job registry has let go of `job`: it holds no result or record of it any more.
-/// A registry that cannot be read has not let go of anything.
+/// A registry that cannot be read has not let go of anything. Only the job's state is read, so
+/// no result is loaded.
 fn released(engine: &dyn EngineContext, job: &str) -> bool {
     let Ok(job) = JobId::new(job) else {
         return true;
     };
-    matches!(silo_engine::jobs::get_at(engine, &job, None), Ok(None))
+    engine
+        .job_registry()
+        .is_ok_and(|registry| matches!(registry.state_of(&job), Ok(None)))
 }
 
 /// The record of the jobs computers hold, with every job the registry has released forgotten,

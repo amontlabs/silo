@@ -176,9 +176,17 @@ pub(crate) fn acknowledge_shared(
     reader: &str,
     job_id: &JobId,
 ) -> Result<bool, SharedAcknowledgeError> {
-    let document = PolicyStore::new(app_data)
-        .snapshot()
-        .map_err(SharedAcknowledgeError::Policy)?;
+    acknowledge_shared_in(registry, &PolicyStore::new(app_data), reader, job_id)
+}
+
+/// [`acknowledge_shared`] with the record of who started jobs in `store`.
+pub(crate) fn acknowledge_shared_in(
+    registry: &JobRegistry,
+    store: &PolicyStore,
+    reader: &str,
+    job_id: &JobId,
+) -> Result<bool, SharedAcknowledgeError> {
+    let document = store.snapshot().map_err(SharedAcknowledgeError::Policy)?;
     let entitled: BTreeSet<String> = std::iter::once(OWNER_READER.to_owned())
         .chain(
             document
@@ -192,6 +200,50 @@ pub(crate) fn acknowledge_shared(
         .acknowledge_shared(job_id, reader, &entitled)
         .map(|acknowledgement| acknowledgement == Acknowledgement::Released)
         .map_err(SharedAcknowledgeError::Registry)
+}
+
+/// Lets go of the open jobs of the computers `gone` names, which no longer exist and can
+/// acknowledge nothing. A finished job is acknowledged for the owner side alone, so its result
+/// and its place among the jobs are freed at once; one the registry no longer holds is only
+/// forgotten. A job still running keeps counting until it has finished.
+pub(crate) fn release_jobs_of_gone_computers(
+    engine: &dyn silo_engine::context::EngineContext,
+    store: &PolicyStore,
+    gone: &dyn Fn(&str) -> bool,
+) {
+    let Ok(document) = store.snapshot() else {
+        return;
+    };
+    let Ok(registry) = engine.job_registry() else {
+        return;
+    };
+    for job in document.jobs.iter().filter(|job| gone(&job.caller)) {
+        let Ok(id) = JobId::new(&job.id) else {
+            let _ = store.drop_job(&job.caller, &job.id);
+            continue;
+        };
+        match registry.state_of(&id) {
+            Ok(None) => {
+                let _ = store.drop_job(&job.caller, &job.id);
+            }
+            Ok(Some(silo_api::jobs::JobState::Finished)) => {
+                if store.drop_job(&job.caller, &job.id).is_err() {
+                    continue;
+                }
+                match acknowledge_shared_in(registry.as_ref(), store, OWNER_READER, &id) {
+                    Ok(true) => {
+                        silo_engine::guest::forget_finished(&id);
+                        engine.job_queue_changed();
+                    }
+                    Ok(false) => {}
+                    Err(_) => {
+                        let _ = store.note_job_about(&job.caller, &job.id, job.computer.as_deref());
+                    }
+                }
+            }
+            Ok(Some(_)) | Err(_) => {}
+        }
+    }
 }
 
 async fn cancel(params: &Value, context: &HandlerContext) -> Result<HandlerOutput, DispatchError> {
@@ -527,9 +579,13 @@ mod tests {
         .await
         .unwrap();
 
-        call_as(computer(), MethodName::OperationsJobAcknowledge, params.clone())
-            .await
-            .unwrap();
+        call_as(
+            computer(),
+            MethodName::OperationsJobAcknowledge,
+            params.clone(),
+        )
+        .await
+        .unwrap();
         let gone = call_as(computer(), MethodName::OperationsJobGet, params)
             .await
             .unwrap_err();

@@ -939,6 +939,67 @@ async fn an_approved_undo_or_promote_reserves_memory_for_both_computers() {
 }
 
 #[test]
+fn a_reservation_tied_to_a_running_job_outlasts_the_longest_a_start_takes_and_ends_with_the_job() {
+    use silo_engine::resources::{Floors, Host};
+    let host = Host {
+        logical_cpus: 8,
+        memory_total: 32 * GIB,
+        memory_available: Some(20 * GIB),
+        pressure: None,
+        disk_free: 400 * GIB,
+        disk_total: 500 * GIB,
+    };
+    let floors = Floors::resolve(&host, None, None);
+    let _exclusive = super::test_exclusive();
+    let (id, _fork) = computer();
+    let reserve = |bytes: u64| {
+        super::reserve_if_fits(engine(), &host, &floors, Some(id.clone()), bytes)
+            .unwrap()
+            .unwrap()
+    };
+    let registry = engine().job_registry().unwrap();
+    let job = silo_engine::jobs::allocate(engine(), "computers.start")
+        .unwrap()
+        .job_id;
+    let tied = reserve(2 * GIB);
+    super::attach_reservation_job(tied, job.as_str());
+    let untied = reserve(GIB);
+    super::backdate_reservation(tied, 2 * super::RESERVATION_LIFE);
+    super::backdate_reservation(untied, 2 * super::RESERVATION_LIFE);
+
+    // The job is still running: its reservation stays, and the one nothing settled is dropped.
+    super::current_reserved_memory(engine());
+    assert_eq!(super::reserved_memory_of(&id), 2 * GIB);
+    let next = reserve(GIB);
+    assert_eq!(super::reserved_memory_of(&id), 3 * GIB);
+    super::release_reservation(next);
+
+    // The job ends: the memory goes back, and the same when the registry lets the job go.
+    registry
+        .finish(
+            &job,
+            &silo_api::jobs::JobFinished {
+                job_id: job.clone(),
+                result: Some(json!({"started": true})),
+                error: None,
+                outcome_chunked: false,
+            },
+        )
+        .unwrap();
+    super::current_reserved_memory(engine());
+    assert_eq!(super::reserved_memory_of(&id), 0);
+    let released = reserve(GIB);
+    super::attach_reservation_job(released, job.as_str());
+    registry.acknowledge(&job).unwrap();
+    super::current_reserved_memory(engine());
+    assert_eq!(super::reserved_memory_of(&id), 0);
+    let unknown = reserve(GIB);
+    super::attach_reservation_job(unknown, "job:700000099");
+    super::current_reserved_memory(engine());
+    assert_eq!(super::reserved_memory_of(&id), 0);
+}
+
+#[test]
 fn a_kept_result_from_before_a_restart_gets_a_deadline_again_and_its_charge_clears_with_it() {
     let (_directory, store) = own_store();
     let job = finished_job();
@@ -976,6 +1037,7 @@ fn open_jobs_the_registry_has_released_stop_counting_toward_any_limit() {
 
 #[test]
 fn the_jobs_of_a_deleted_computer_count_until_the_registry_releases_them() {
+    let _exclusive = super::test_exclusive();
     let (_directory, store) = own_store();
     let jobs: Vec<String> = (0..super::MAX_COMPUTER_JOBS)
         .map(|_| finished_job())
@@ -985,11 +1047,14 @@ fn the_jobs_of_a_deleted_computer_count_until_the_registry_releases_them() {
     store.remove_computers(&["gate-gone"]).unwrap();
     let error = super::reserve_job_slot(engine(), &store, "gate-other").unwrap_err();
     assert!(error.contains("together"), "{error}");
-    // The registry letting one go makes room for one more.
+    // The registry letting some go makes room for another computer's job. Places other tests
+    // hold for a moment count too, so more than one is freed.
     let registry = engine().job_registry().unwrap();
-    registry
-        .acknowledge(&silo_api::jobs::JobId::new(&jobs[0]).unwrap())
-        .unwrap();
+    for job in &jobs[..8] {
+        registry
+            .acknowledge(&silo_api::jobs::JobId::new(job).unwrap())
+            .unwrap();
+    }
     let slot = super::reserve_job_slot(engine(), &store, "gate-other").unwrap();
     super::release_job_slot(slot);
     for job in &jobs {
@@ -1000,8 +1065,77 @@ fn the_jobs_of_a_deleted_computer_count_until_the_registry_releases_them() {
 }
 
 #[test]
+fn the_jobs_of_deleted_computers_stop_counting_once_they_are_over() {
+    let _exclusive = super::test_exclusive();
+    let (_directory, store) = own_store();
+    let registry = engine().job_registry().unwrap();
+    let state_of = |job: &str| {
+        registry
+            .state_of(&silo_api::jobs::JobId::new(job).unwrap())
+            .unwrap()
+    };
+    let mut jobs: Vec<String> = (0..super::MAX_COMPUTER_JOBS - 1)
+        .map(|_| finished_job())
+        .collect();
+    let running = silo_engine::jobs::allocate(engine(), "changes.merge")
+        .unwrap()
+        .job_id;
+    jobs.push(running.as_str().to_owned());
+    let owned: Vec<(String, u64)> = jobs.iter().map(|job| (job.clone(), 1)).collect();
+    store.import_legacy("gate-gone", &[], &owned).unwrap();
+    let live = finished_job();
+    store.note_job("gate-live", &live).unwrap();
+    store.remove_computers(&["gate-gone"]).unwrap();
+    let error = super::reserve_job_slot(engine(), &store, "gate-other").unwrap_err();
+    assert!(error.contains("together"), "{error}");
+
+    let gone = |computer: &str| computer == "gate-gone";
+    crate::methods::operations::release_jobs_of_gone_computers(engine(), &store, &gone);
+    // The finished jobs are acknowledged and forgotten; the one still running keeps counting,
+    // and so does a job of a computer that still exists.
+    for job in &jobs[..jobs.len() - 1] {
+        assert_eq!(state_of(job), None, "{job}");
+    }
+    assert!(state_of(running.as_str()).is_some());
+    assert!(state_of(&live).is_some());
+    let held: Vec<String> = store
+        .snapshot()
+        .unwrap()
+        .jobs
+        .into_iter()
+        .map(|job| job.id)
+        .collect();
+    assert_eq!(held.len(), 2);
+    assert!(held.contains(&live) && held.contains(&running.as_str().to_owned()));
+    let slot = super::reserve_job_slot(engine(), &store, "gate-other").unwrap();
+    super::release_job_slot(slot);
+
+    // Once it has finished, the last job of the deleted computer goes too.
+    registry
+        .finish(
+            &running,
+            &silo_api::jobs::JobFinished {
+                job_id: running.clone(),
+                result: Some(json!({"merged": true})),
+                error: None,
+                outcome_chunked: false,
+            },
+        )
+        .unwrap();
+    crate::methods::operations::release_jobs_of_gone_computers(engine(), &store, &gone);
+    assert_eq!(state_of(running.as_str()), None);
+    let held = store.snapshot().unwrap().jobs;
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].id, live);
+    registry
+        .acknowledge(&silo_api::jobs::JobId::new(&live).unwrap())
+        .unwrap();
+}
+
+#[test]
 fn computers_starting_jobs_at_the_same_moment_cannot_all_take_the_last_places() {
     use silo_engine::guest_client::MAX_JOBS;
+    let _exclusive = super::test_exclusive();
     let (_directory, store) = own_store();
     let store = std::sync::Arc::new(store);
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(3 * MAX_JOBS));

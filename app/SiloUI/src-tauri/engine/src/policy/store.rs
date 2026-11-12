@@ -356,7 +356,7 @@ impl PolicyStore {
     /// maker's, so the agent that could reach it before still can; one whose maker was not
     /// made by a computer is forgotten with it. The jobs a removed computer had open stay
     /// recorded, since the job registry still holds them and they count toward what computers
-    /// together may hold, until `release_jobs` forgets them.
+    /// together may hold, until `release_jobs` or `drop_job` forgets them.
     pub fn remove_computers(&self, ids: &[&str]) -> Result<(), String> {
         if ids.is_empty() {
             return Ok(());
