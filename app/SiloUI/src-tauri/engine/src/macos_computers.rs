@@ -4341,8 +4341,13 @@ fn create_accepting_with(
     emit(app);
 
     let worker_app = app.clone();
-    let work: Box<dyn FnOnce() + Send> =
-        Box::new(move || create_admitted_work(&worker_app, data, record, job, cancel, workflow));
+    let layout = Layout::new(&data, &record.id);
+    let work: Box<dyn FnOnce() + Send> = Box::new(move || {
+        let id = record.id.clone();
+        end_workflow_on_panic(&worker_app, &id, &layout, || {
+            create_admitted_work(&worker_app, data, record, job, cancel, workflow);
+        });
+    });
     if let Err(message) = spawn(work) {
         // No thread will wait for the turn: end the preparing computer and its job.
         let message = format!("Could not start the computer creation: {message}");
@@ -4470,7 +4475,8 @@ fn create_job_worker(
         }
         emit(app);
         let _ = response.send(Ok(row));
-        workflow(app, &data, record, &cancel);
+        let (id, layout) = (record.id.clone(), Layout::new(&data, &record.id));
+        end_workflow_on_panic(app, &id, &layout, || workflow(app, &data, record, &cancel));
         Ok(())
     })();
     if let Err(message) = result {
@@ -4534,6 +4540,26 @@ fn setup_workflow(
     let layout = Layout::new(data, &id);
     let result = run_setup(app, &layout, &mut record, cancel, None);
     end_workflow(app, &id, &layout, result);
+}
+
+/// Runs a computer's background work and, if it panics, ends the computer's workflow and its
+/// job as failed, so neither stays running with nothing behind it.
+fn end_workflow_on_panic(app: &MacosContext, id: &str, layout: &Layout, work: impl FnOnce()) {
+    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
+        let detail = panic
+            .downcast_ref::<&str>()
+            .map(|text| (*text).to_owned())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        end_workflow(
+            app,
+            id,
+            layout,
+            Err(Stop::Failed(format!(
+                "The work on this computer stopped unexpectedly: {detail}"
+            ))),
+        );
+    }
 }
 
 fn end_workflow(app: &MacosContext, id: &str, layout: &Layout, result: Result<(), Stop>) {
@@ -5750,7 +5776,9 @@ fn setup_job_worker(
     };
     emit(app);
     let _ = response.send(Ok(()));
-    setup_workflow(app, &data, record, &cancel);
+    end_workflow_on_panic(app, &id, &Layout::new(&data, &id), || {
+        setup_workflow(app, &data, record, &cancel);
+    });
 }
 
 /// Reserves a Retry request without publishing `SettingUp` before the operation queue admits it.
@@ -8988,6 +9016,35 @@ mod tests {
         drop(held);
         assert_eq!(turn_rx.recv().unwrap(), row.id);
         worker.join().unwrap();
+        reset_macos_registry();
+    }
+
+    #[test]
+    fn a_creation_whose_work_panics_ends_its_job_and_keeps_the_computer_failed() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        reset_macos_registry();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let gate = isolated_operation_gate();
+        let (row, job_id, work) =
+            accept_creation(&app, &context, gate, "panic-mac", |_, _, _, _| {
+                panic!("installer exploded")
+            })
+            .unwrap();
+        let worker = std::thread::spawn(work.recv().unwrap());
+        worker.join().expect("the panic is caught by the worker");
+        let registry = context.job_registry().unwrap();
+        let finished = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(finished.state, silo_api::jobs::JobState::Finished);
+        let message = finished.outcome.unwrap().error.unwrap().message;
+        assert!(
+            message.contains("stopped unexpectedly: installer exploded"),
+            "{message}"
+        );
+        assert_eq!(registry_row(&row.id)["state"], "failed");
         reset_macos_registry();
     }
 

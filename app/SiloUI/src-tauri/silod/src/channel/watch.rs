@@ -428,6 +428,9 @@ struct Watcher {
     wake: mpsc::SyncSender<()>,
     /// Computers whose registration is owed a removal: the look in progress or the next try.
     removal_seen: HashMap<String, Seen>,
+    /// Computers that started jobs and were missing from the engine's list at the last
+    /// housekeeping.
+    absent: HashSet<String>,
 }
 
 impl Watcher {
@@ -640,9 +643,34 @@ impl Watcher {
         }
     }
 
+    /// Lets go of the jobs of computers that were deleted: they can acknowledge nothing, so the
+    /// finished ones are acknowledged for the owner side. A computer counts as deleted when the
+    /// engine's list lacked it at two housekeepings in a row.
+    fn reap_gone(&mut self) {
+        let (Some(states), Ok(document)) = (self.states(), self.policy.snapshot()) else {
+            return;
+        };
+        let absent: HashSet<String> = document
+            .jobs
+            .iter()
+            .filter(|job| !states.contains_key(&job.caller))
+            .map(|job| job.caller.clone())
+            .collect();
+        let gone: HashSet<String> = absent.intersection(&self.absent).cloned().collect();
+        if !gone.is_empty() {
+            crate::methods::operations::release_jobs_of_gone_computers(
+                self.context.as_ref(),
+                &self.policy,
+                &|computer| gone.contains(computer),
+            );
+        }
+        self.absent = absent;
+    }
+
     /// Acknowledges, for a computer that never did, the jobs it started long ago and that are
     /// over, so no job of a computer stays in the engine's queue.
-    fn reap(&self) {
+    fn reap(&mut self) {
+        self.reap_gone();
         let Ok(document) = self.policy.snapshot() else {
             return;
         };
@@ -701,6 +729,7 @@ pub fn start(context: Arc<SilodContext>) {
         report,
         wake: wake.clone(),
         removal_seen: HashMap::new(),
+        absent: HashSet::new(),
     };
     watcher
         .handle

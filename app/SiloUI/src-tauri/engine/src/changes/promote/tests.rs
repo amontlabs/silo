@@ -160,6 +160,7 @@ impl Fake {
                 job("job:self", Some(MAIN)),
                 job("job:unknown", None),
             ],
+            kept: Vec::new(),
         };
         Arc::new(Self {
             _serial: Serial::take(),
@@ -285,7 +286,12 @@ impl PromoteEnv for Fake {
     }
 
     fn export_makers(&self, fork_id: &str, target_id: &str) -> Result<Handoff, String> {
-        Ok(self.device.lock().unwrap().makers.handoff(fork_id, target_id))
+        Ok(self
+            .device
+            .lock()
+            .unwrap()
+            .makers
+            .handoff(fork_id, target_id))
     }
 
     fn apply(&self, step: Step, swap: &Swap) -> Result<(), String> {
@@ -1503,7 +1509,10 @@ fn job_callers(device: &Device) -> BTreeMap<String, String> {
 }
 
 fn assert_moved_to_the_fork(after: &Device) {
-    assert!(made_by(after, MAIN).is_empty(), "the old main makes nothing");
+    assert!(
+        made_by(after, MAIN).is_empty(),
+        "the old main makes nothing"
+    );
     assert_eq!(
         made_by(after, FORK),
         ids(&["kid", "grandkid", "fork-kid"]),
@@ -1565,7 +1574,12 @@ fn a_computer_deleted_while_promoted_stays_deleted_after_an_undo() {
     let fake = Fake::new(Os::Linux);
     let (_dir, journal) = scratch_journal();
     promoted(&fake, &journal);
-    fake.device.lock().unwrap().makers.created.retain(|r| r.id != "kid");
+    fake.device
+        .lock()
+        .unwrap()
+        .makers
+        .created
+        .retain(|r| r.id != "kid");
     undo(fake.as_ref(), &journal, FORK, Duration::from_secs(1))
         .unwrap()
         .unwrap();

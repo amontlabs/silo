@@ -668,6 +668,35 @@ impl JobRegistry {
         }))
     }
 
+    /// The state of a job the registry still holds, read without its outcome and without
+    /// freeing anything. `None` when the registry holds no record of the job: it never had one,
+    /// the job was acknowledged, or its kept result's retention has passed.
+    pub fn state_of(&self, job_id: &JobId) -> Result<Option<JobState>, RegistryError> {
+        let state: Option<String> = self
+            .lock_connection()?
+            .query_row(
+                "SELECT state FROM jobs WHERE job_id = ?1",
+                [job_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(state) = state else {
+            return Ok(None);
+        };
+        match state.as_str() {
+            "acknowledged" => Ok(None),
+            "waiting" => Ok(Some(JobState::Waiting)),
+            "running" => Ok(Some(JobState::Running)),
+            "finished" => Ok(self
+                .retention_deadline_ms(job_id)
+                .is_none_or(|deadline| deadline > now_ms())
+                .then_some(JobState::Finished)),
+            _ => Err(RegistryError::invalid(
+                "Job registry contains an invalid state.",
+            )),
+        }
+    }
+
     /// The method that created `job_id`, or `None` when the registry has no such job.
     pub fn method_of(&self, job_id: &JobId) -> Result<Option<String>, RegistryError> {
         let connection = self.lock_connection()?;
@@ -743,6 +772,55 @@ impl JobRegistry {
         }
         self.acknowledge(job_id)?;
         Ok(Acknowledgement::Released)
+    }
+
+    /// Keeps a finished result whose hold an earlier run lost: it expires `KEPT_RESULT_RETENTION_MS`
+    /// from now, with the readers that had acknowledged it still counted. Does nothing for a job
+    /// that is not finished or is already kept.
+    pub fn restore_hold(
+        &self,
+        job_id: &JobId,
+        acknowledged_by: &[String],
+    ) -> Result<(), RegistryError> {
+        self.restore_hold_at(job_id, acknowledged_by, now_ms())
+    }
+
+    fn restore_hold_at(
+        &self,
+        job_id: &JobId,
+        acknowledged_by: &[String],
+        now_ms: i64,
+    ) -> Result<(), RegistryError> {
+        let state: Option<String> = self
+            .lock_connection()?
+            .query_row(
+                "SELECT state FROM jobs WHERE job_id = ?1",
+                [job_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if state.as_deref() != Some("finished") {
+            return Ok(());
+        }
+        self.held_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(job_id.clone())
+            .or_insert_with(|| KeptResult {
+                acknowledged_by: acknowledged_by.iter().cloned().collect(),
+                expires_at_ms: now_ms.saturating_add(KEPT_RESULT_RETENTION_MS),
+            });
+        Ok(())
+    }
+
+    /// When a kept result is freed if nobody acknowledges it, in milliseconds since the epoch;
+    /// `None` when the registry holds no deadline for the job.
+    pub fn retention_deadline_ms(&self, job_id: &JobId) -> Option<i64> {
+        self.held_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(job_id)
+            .map(|kept| kept.expires_at_ms)
     }
 
     /// Frees the kept results whose retention has passed.
@@ -1858,6 +1936,35 @@ mod tests {
     }
 
     #[test]
+    fn the_state_of_a_job_is_read_without_its_outcome_and_none_means_released() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let running = JobId::new("job:9001").unwrap();
+        registry.accept(running.clone(), "changes.merge").unwrap();
+        registry.mark_running(&running).unwrap();
+        assert_eq!(
+            registry.state_of(&running).unwrap(),
+            Some(JobState::Running)
+        );
+        let job_id = finished_job(&registry, "job:9002");
+        assert_eq!(
+            registry.state_of(&job_id).unwrap(),
+            Some(JobState::Finished)
+        );
+        // A kept result whose retention has passed counts as released before it is freed.
+        registry
+            .restore_hold_at(&job_id, &[], now_ms() - KEPT_RESULT_RETENTION_MS - 1)
+            .unwrap();
+        assert_eq!(registry.state_of(&job_id).unwrap(), None);
+        registry.release_expired(now_ms());
+        assert_eq!(registry.state_of(&job_id).unwrap(), None);
+        assert_eq!(
+            registry.state_of(&JobId::new("job:9003").unwrap()).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn a_job_with_one_entitled_reader_is_released_at_once() {
         let temporary = tempfile::tempdir().unwrap();
         let registry = JobRegistry::open(temporary.path()).unwrap();
@@ -1894,6 +2001,58 @@ mod tests {
                 .unwrap(),
             Acknowledgement::Released
         );
+    }
+
+    #[test]
+    fn a_result_kept_before_a_restart_is_held_again_and_freed_when_its_retention_passes() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = finished_job(&registry, "job:8");
+        // The reopened registry knows nothing of the hold the earlier run gave the result.
+        assert_eq!(registry.retention_deadline_ms(&job_id), None);
+        let start = now_ms();
+        registry
+            .restore_hold_at(&job_id, &["computer-1".to_owned()], start)
+            .unwrap();
+        assert_eq!(
+            registry.retention_deadline_ms(&job_id),
+            Some(start + KEPT_RESULT_RETENTION_MS)
+        );
+        // A second restore keeps the deadline of the first.
+        registry
+            .restore_hold_at(&job_id, &[], start + 1000)
+            .unwrap();
+        assert_eq!(
+            registry.retention_deadline_ms(&job_id),
+            Some(start + KEPT_RESULT_RETENTION_MS)
+        );
+        registry.release_expired(start + KEPT_RESULT_RETENTION_MS);
+        assert!(registry.get(&job_id).unwrap().is_none());
+        // The owner's acknowledgement frees a restored hold once the computer had acknowledged.
+        let other = finished_job(&registry, "job:9");
+        registry
+            .restore_hold_at(&other, &["computer-1".to_owned()], start)
+            .unwrap();
+        assert_eq!(
+            registry
+                .acknowledge_shared(&other, "owner", &readers(&["owner", "computer-1"]))
+                .unwrap(),
+            Acknowledgement::Released
+        );
+    }
+
+    #[test]
+    fn only_a_finished_result_is_held_again() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let running = JobId::new("job:10").unwrap();
+        registry.accept(running.clone(), "changes.merge").unwrap();
+        registry.mark_running(&running).unwrap();
+        let unknown = JobId::new("job:11").unwrap();
+        for job in [&running, &unknown] {
+            registry.restore_hold_at(job, &[], now_ms()).unwrap();
+            assert_eq!(registry.retention_deadline_ms(job), None);
+        }
     }
 
     #[test]

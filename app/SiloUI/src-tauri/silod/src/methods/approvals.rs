@@ -699,13 +699,6 @@ fn execute<'a>(
             }
             rewritten
         });
-        if gate::takes_headroom(method) {
-            if let Some(message) =
-                gate::short_of_resources(context, method, &approval.params, &std::collections::HashMap::new())
-            {
-                return failed(format!("Nothing was run: {message}"));
-            }
-        }
         if let Some(pinned) = &record.pin {
             if pin_of(context, method, &approval.params).as_ref() != Some(pinned) {
                 return failed(pin_moved_message(method));
@@ -720,6 +713,16 @@ fn execute<'a>(
         ) {
             Ok(call) => call,
             Err(message) => return failed(message),
+        };
+        // The memory of the call that runs is set aside before it starts and stays set aside
+        // while the job it starts is running.
+        let held = if gate::takes_headroom(run_method) {
+            match gate::reserve_now(context, run_method, &run_params).await {
+                Ok(held) => Some(held),
+                Err(message) => return failed(format!("Nothing was run: {message}")),
+            }
+        } else {
+            None
         };
         let app_data = app_data(context);
         let creation = record.creates.as_ref().map(|creation| policy::Creation {
@@ -750,6 +753,9 @@ fn execute<'a>(
             .and_then(|output| output.value.get("jobId"))
             .and_then(Value::as_str)
             .map(str::to_owned);
+        if let Some(held) = &held {
+            held.settle(job.as_deref(), gate::computer_made(&result).as_deref());
+        }
         let policy_store = PolicyStore::new(&app_data);
         let mut noted = Vec::new();
         if let Some(creation) = &creation {
