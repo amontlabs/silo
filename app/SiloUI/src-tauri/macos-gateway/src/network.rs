@@ -189,11 +189,11 @@ pub fn validate_init(init: &InitRequest) -> Result<(), NetworkSetupError> {
     Ok(())
 }
 
-/// A denied HTTP request gets a JSON 403 naming the code and host, not a dropped connection,
-/// the same as the runtime's own sandboxes. Stated here so a change of the upstream default
-/// cannot change what a guest sees.
-fn json_denial_responses(http: HttpBuilder) -> HttpBuilder {
-    http.deny_response(true)
+/// A connection to an address policy denies is refused (reset), not accepted and answered
+/// with an HTTP 403, the same as the runtime's own sandboxes. Stated here so a change of the
+/// upstream default cannot change what a guest sees.
+fn refuse_denied_connections(http: HttpBuilder) -> HttpBuilder {
+    http.deny_response(false)
         .deny_response_format(HttpDenyResponseFormat::Json)
 }
 
@@ -231,7 +231,7 @@ pub fn build_network(mut init: InitRequest) -> Result<NetworkResources, NetworkS
         })
         .policy(policy)
         .strict(init.strict.unwrap_or(true))
-        .http(json_denial_responses)
+        .http(refuse_denied_connections)
         .tls(|tls| {
             tls.enabled(true)
                 .intercepted_ports(init.intercepted_ports.clone())
@@ -588,12 +588,12 @@ mod tests {
     }
 
     #[test]
-    fn denied_http_requests_get_a_json_403_not_a_closed_connection() {
+    fn denied_connections_are_refused_not_answered_with_a_403() {
         let config = NetworkBuilder::new()
-            .http(json_denial_responses)
+            .http(refuse_denied_connections)
             .build()
             .unwrap();
-        assert!(config.http.deny_response);
+        assert!(!config.http.deny_response);
         assert_eq!(
             config.http.deny_response_format,
             HttpDenyResponseFormat::Json

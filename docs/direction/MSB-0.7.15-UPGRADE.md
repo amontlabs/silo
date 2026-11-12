@@ -120,3 +120,12 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   Skipped: GitHub live tests, Keychain-approval secrets, computer-use/desktop, storage reclaim,
   macOS computers. Not done: the GUI on the Dev build (the storage upgrade is one-way and the
   shared Dev home still serves the direction build on 0.7.6), a Codex review.
+- 2026-11-12 (R20, OWNER_REVIEW 30): owner chose instant refusal over the gateway's 403. New patch
+  `refuse-unlisted` (24th, after `fork-layer-names`, built in
+  `~/code/projects/msb-upstream/r20-refuse-unlisted`): `http.deny_response` defaults to off again
+  (from `silo/0714-fix-net`), and TCP SYNs to ports 53 and 853 are no longer accepted for every
+  address: the netstack accepted DNS ports without an egress check, so an unlisted address
+  completed the handshake there; only the computer's own gateway is accepted unchecked now, other
+  addresses follow the policy (Reject = RST). Failing-first tests in `netstack/poll.rs` for ports
+  443, 53, 853, 8080 and the gateway still accepted. The macOS gateway sets `deny_response(false)`
+  and export accepts the `deny_response:false` + `json` http section the patched runtime saves.

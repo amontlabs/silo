@@ -108,24 +108,18 @@ fn reached(result: &str) -> bool {
     result != "000" && !result.is_empty() && !result.starts_with("failed")
 }
 
-/// A connection to an unlisted public IP may complete on ports 80 and 443 (the gateway answers
-/// there), but no data reaches the address: plain HTTP gets the gateway's own JSON 403 (never
-/// the address's response) and a payload sent to another port is refused or goes unanswered.
-fn nothing_reaches_unlisted_ip(reach: &Reach, label: &str) {
+/// A connection to an unlisted public IP is refused at once on every port (HTTP, HTTPS, DNS,
+/// DNS-over-TLS): the program gets a reset, never a handshake, a gateway answer or a hang, and
+/// nothing is sent to the address.
+fn unlisted_ip_is_refused(reach: &Reach, label: &str) {
+    const REFUSED: &str = "failed (ConnectionRefusedError)";
     assert!(
-        reach.http_status == "403" && reach.http_body.trim_start().starts_with('{'),
-        "{label}: plain HTTP to an unlisted IP must get the gateway's JSON 403: {reach:?}"
-    );
-    let lower = reach.http_body.to_lowercase();
-    assert!(
-        !lower.contains("cloudflare") && !lower.contains("one.one.one.one") && !lower.contains("<html"),
-        "{label}: the unlisted address answered: {reach:?}"
-    );
-    assert!(
-        !reach.port_853.contains("bytes came back")
-            && !reach.port_53.contains("bytes came back")
-            && !answered(&reach.port_53.replace("DNS reply ", "")),
-        "{label}: an unlisted IP answered on a non-HTTP port: {reach:?}"
+        reach.public_ip == REFUSED
+            && reach.port_853 == REFUSED
+            && reach.port_53 == REFUSED
+            && reach.http_status == "000"
+            && reach.http_body.trim().is_empty(),
+        "{label}: a connection to an unlisted IP must be refused on every port: {reach:?}"
     );
 }
 
@@ -227,7 +221,7 @@ fn live_network_policy_modes_restore_and_fork() {
     let listed = probe(&fixture, source, "allowlist after the change");
     assert!(reached(&listed.example_com) && reached(&listed.github), "{listed:?}");
     assert!(!reached(&listed.example_org), "{listed:?}");
-    nothing_reaches_unlisted_ip(&listed, "allowlist");
+    unlisted_ip_is_refused(&listed, "allowlist");
     assert!(!answered(&listed.resolver), "{listed:?}");
     assert!(!listed.gateway_name.is_empty(), "names still resolve through the gateway: {listed:?}");
     keep_config(&fixture, source, "allowlist");
@@ -246,7 +240,7 @@ fn live_network_policy_modes_restore_and_fork() {
         !reached(&closed.example_com) && !reached(&closed.example_org),
         "{closed:?}"
     );
-    nothing_reaches_unlisted_ip(&closed, "closed");
+    unlisted_ip_is_refused(&closed, "closed");
     assert!(!reached(&closed.github) && !answered(&closed.resolver), "{closed:?}");
     assert!(closed.gateway_name.is_empty(), "{closed:?}");
     keep_config(&fixture, source, "closed");
@@ -278,7 +272,7 @@ fn live_network_policy_modes_restore_and_fork() {
     let forked = probe(&fixture, fork_name, "fork of an allowlist computer");
     assert!(reached(&forked.example_com) && reached(&forked.github), "{forked:?}");
     assert!(!reached(&forked.example_org), "{forked:?}");
-    nothing_reaches_unlisted_ip(&forked, "fork");
+    unlisted_ip_is_refused(&forked, "fork");
     keep_config(&fixture, fork_name, "allowlist-fork");
     fixture.stop(fork_name);
 
@@ -288,7 +282,7 @@ fn live_network_policy_modes_restore_and_fork() {
     let restored = probe(&fixture, source, "allowlist computer restored in place");
     assert!(reached(&restored.example_com) && reached(&restored.github), "{restored:?}");
     assert!(!reached(&restored.example_org), "{restored:?}");
-    nothing_reaches_unlisted_ip(&restored, "restore");
+    unlisted_ip_is_refused(&restored, "restore");
     keep_config(&fixture, source, "allowlist-restored");
     fixture.stop(source);
     use_test_grants(None);
