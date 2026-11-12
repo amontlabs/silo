@@ -2,7 +2,8 @@
 # live: step-runner for live checks (checks that drive a real Dev engine or the Linux machine).
 usage() { cat <<'U'
 usage: live <check> [--from STEP] [--host mac|linux] [--state DIR]
-       live wait <state-dir> [--timeout SECONDS]
+       live start <check> [args]            (background run; prints "<state-dir> <run-id>")
+       live wait <state-dir> [<run-id>] [--timeout SECONDS]
        live list
 
 Runs tools/agent/live.d/<check>.sh: an ordered list STEPS=(...) of step_<name> functions.
@@ -12,8 +13,12 @@ after it. Logs: <state>/logs/<step>.log. Every exit writes <state>/VERDICT:
 Exit codes: 0 pass, 1 fail, 2 usage, 3 skipped (also: --host linux and the machine is offline).
 State dir default: ${TMPDIR}/silo-agent/[$SILO_AGENT_ITEM/]live/<check> (set SILO_AGENT_ITEM so `clean <item>` removes it). Throwaway computers are listed in
 <state>/computers and temporary directories in <state>/tempdirs (for `clean`).
-`live wait` blocks until a verdict written after the wait began exists (or the runner died), prints it, exits with
-its code. A verdict already there when it starts is ignored (read <state>/VERDICT for a finished run).
+`live start <check> [args]` runs the same in the background and returns once the runner holds the lock and has
+written its new run id (or has already ended, e.g. a config error or a busy state dir: then it prints why and exits
+with the runner's code); it prints "<state-dir> <run-id>". `live wait <state-dir> [<run-id>]` blocks until the
+verdict of that run (default: the run id in <state>/run) exists, or the runner died, prints it, exits with its code;
+an existing matching verdict is returned at once, a verdict of another run never. Use `live start` + `live wait`,
+never `live <check> &` + `live wait` (the wait could still see the previous run).
 Check files may define cleanup(); it runs on every exit. Env: LIVE_D (check dir), LIVE_SSH,
 LIVE_LINUX_HOST. Never starts anything by itself: the checks decide what to run.
 U
@@ -34,20 +39,21 @@ write_verdict() { # verdict step reason
 }
 
 cmd_wait() {
-  local state=${1:-} timeout=0
+  local state=${1:-} timeout=0 want="" cr vr lp start=$SECONDS
   [ -d "$state" ] || { echo "live wait: no such state dir: $state" >&2; exit 2; }
-  [ "${2:-}" = --timeout ] && timeout=${3:-0}
-  local start=$SECONDS cr vr lp old
-  # A verdict already there when the wait began belongs to an earlier run, whatever its run id: only a
-  # verdict written after the wait began (a new run id) is an answer.
-  old=$(sed -n 's/^run: //p' "$state/VERDICT" 2>/dev/null)
+  shift; [ "${1:-}" != --timeout ] && [ -n "${1:-}" ] && { want=$1; shift; }
+  [ "${1:-}" = --timeout ] && timeout=${2:-0}
+  vrun() { sed -n 's/^run: //p' "$state/VERDICT" 2>/dev/null; }
   while :; do
-    cr=$(cat "$state/run" 2>/dev/null); vr=$(sed -n 's/^run: //p' "$state/VERDICT" 2>/dev/null)
-    if [ -s "$state/VERDICT" ] && [ "$vr" != "$old" ] && { [ -z "$cr" ] || [ "$vr" = "$cr" ]; }; then break; fi
+    cr=${want:-$(cat "$state/run" 2>/dev/null)}; vr=$(vrun)
+    if [ -n "$cr" ] && [ -s "$state/VERDICT" ] && [ "$vr" = "$cr" ]; then break; fi
+    if [ -n "$want" ] && [ -s "$state/run" ] && [ "$(cat "$state/run")" != "$want" ]; then
+      echo "live wait: run $want was replaced by run $(cat "$state/run")" >&2; exit 1
+    fi
     lp=$(cat "$state/lock/pid" 2>/dev/null)
-    if [ -d "$state/lock" ] && [ -n "$lp" ] && ! kill -0 "$lp" 2>/dev/null; then
+    if [ -n "$cr" ] && [ -d "$state/lock" ] && [ -n "$lp" ] && ! kill -0 "$lp" 2>/dev/null; then
       sleep 1  # the runner may have just written it
-      vr=$(sed -n 's/^run: //p' "$state/VERDICT" 2>/dev/null); [ -s "$state/VERDICT" ] && [ "$vr" != "$old" ] && [ "$vr" = "$(cat "$state/run" 2>/dev/null)" ] && break
+      [ -s "$state/VERDICT" ] && [ "$(vrun)" = "$cr" ] && break
       STATE=$state LOGS=$state/logs CHECK=$(cat "$state/check" 2>/dev/null || echo "?") HOST=$(cat "$state/host" 2>/dev/null || echo "?")
       write_verdict fail "$(cat "$state/current" 2>/dev/null || echo -)" "runner died without a verdict"
       break
@@ -58,6 +64,30 @@ cmd_wait() {
   cat "$state/VERDICT"; code_of "$state/VERDICT"; exit $?
 }
 
+# Default state dir of a check (also used by `live start`, which must name it before the runner does).
+default_state() {
+  local st=${TMPDIR:-/tmp}/silo-agent/${SILO_AGENT_ITEM:+$SILO_AGENT_ITEM/}live/$1; st=${st%/}
+  case "$st" in /*) ;; *) st=$PWD/$st;; esac; echo "$st"
+}
+
+cmd_start() {
+  local check=${1:-} st="" a prev="" pid run rc
+  [ -n "$check" ] || { usage >&2; exit 2; }
+  for a in "$@"; do [ "$prev" = --state ] && st=$a; prev=$a; done
+  [ -n "$st" ] || { st=$(default_state "$check"); set -- "$@" --state "$st"; }
+  case "$st" in /*) ;; *) st=$PWD/$st; set -- "${@:1:$#-1}" "$st";; esac
+  mkdir -p "$st" || exit 2
+  nohup "$HERE/live" "$@" >"$st/runner.log" 2>&1 </dev/null & pid=$!
+  while :; do
+    run=$(cat "$st/run" 2>/dev/null)
+    case "$run" in "$pid"-*) echo "$st $run"; exit 0;; esac
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid"; rc=$?; cat "$st/runner.log" >&2; echo "live start: the runner ended (exit $rc) before taking the state dir" >&2; exit "$rc"
+    fi
+    sleep 0.1
+  done
+}
+
 cmd_list() {
   local f
   for f in "$LIVE_D"/*.sh; do [ -e "$f" ] || continue
@@ -65,7 +95,7 @@ cmd_list() {
   done
 }
 
-case "${1:-}" in -h|--help|"") usage; exit 0;; wait) shift; cmd_wait "$@";; list) cmd_list; exit 0;; esac
+case "${1:-}" in -h|--help|"") usage; exit 0;; wait) shift; cmd_wait "$@";; start) shift; cmd_start "$@";; list) cmd_list; exit 0;; esac
 
 CHECK=$1; shift; FROM=""; HOST=mac; STATE=""
 while [ $# -gt 0 ]; do case "$1" in
@@ -75,7 +105,7 @@ esac; done
 case "$HOST" in mac|linux) ;; *) echo "live: --host must be mac or linux" >&2; exit 2;; esac
 CHECK_FILE=$LIVE_D/$CHECK.sh
 [ -f "$CHECK_FILE" ] || { echo "live: no check '$CHECK' in $LIVE_D (try: live list)" >&2; exit 2; }
-STATE=${STATE:-${TMPDIR:-/tmp}/silo-agent/${SILO_AGENT_ITEM:+$SILO_AGENT_ITEM/}live/$CHECK}; STATE=${STATE%/}
+STATE=${STATE:-$(default_state "$CHECK")}; STATE=${STATE%/}
 case "$STATE" in /*) ;; *) STATE=$PWD/$STATE;; esac
 LOGS=$STATE/logs
 mkdir -p "$STATE/steps" "$LOGS" || exit 2

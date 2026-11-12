@@ -40,7 +40,7 @@ You are one agent building one item. Your task message names it and gives a base
 
 - Run long commands in the foreground and block until they finish. Never end a turn to wait, never sleep-poll.
 - Never push to see CI. Never run `gh run` or `gh pr checks`.
-- Live checks: `SILO_AGENT_ITEM=<item> tools/agent/live <check> [--host mac|linux]` blocks until done; its exit code is 0 pass, 1 fail, 2 usage, 3 skipped. A check's `cleanup()` must stop the computers it started.
+- Live checks: `SILO_AGENT_ITEM=<item> tools/agent/live <check> [--host mac|linux]` blocks until done; its exit code is 0 pass, 1 fail, 2 usage, 3 skipped. To keep working meanwhile, `live start <check> ...` (prints `<state-dir> <run-id>`) then `live wait <state-dir> [<run-id>]` (same exit codes; never `live <check> &` + `live wait`). A check's `cleanup()` must stop the computers it started.
 
 ## Changesets and comments
 
