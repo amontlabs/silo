@@ -3716,10 +3716,7 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
             MacosArchiveImportError::Failed(message)
         });
     }
-    std::fs::rename(&stage, &final_dir)
-        .map_err(|error| store::io_error("publish the imported computer", &error))?;
-    store::sync_dir(&root)
-        .map_err(|error| store::io_error("save the imported computer", &error))?;
+    publish_import_folder(&stage, &final_dir, &root, &id)?;
     {
         let mut registry = registry();
         if registry.entries.iter().any(|entry| entry.record.id == id) {
@@ -3736,6 +3733,27 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     }
     emit(app);
     Ok(imported_source_name)
+}
+
+/// Saves the imported computer's closed network policy, then moves its staging folder into
+/// place. The policy exists before the computer can, so a published import never runs without
+/// one (a computer with no saved policy is not treated as closed); a folder that could not be
+/// moved leaves no policy behind.
+fn publish_import_folder(
+    stage: &std::path::Path,
+    final_dir: &std::path::Path,
+    root: &std::path::Path,
+    id: &str,
+) -> Result<(), String> {
+    crate::network_policy::store::set_stored(
+        id,
+        crate::network_policy::store::Stored::closed_without_incoming(),
+    )?;
+    if let Err(error) = std::fs::rename(stage, final_dir) {
+        let _ = crate::network_policy::store::remove(id);
+        return Err(store::io_error("publish the imported computer", &error));
+    }
+    store::sync_dir(root).map_err(|error| store::io_error("save the imported computer", &error))
 }
 
 /// Settle a journaled archive import. Returns true only when the final record
@@ -3763,10 +3781,19 @@ fn recover_archive_import_in(
     };
     if committed {
         discard_import_folder(&stage, detach)?;
+        // The policy is saved before the folder is published; one that is missing is closed
+        // again rather than left to be read as open.
+        if crate::network_policy::store::get_stored(&id)?.is_none() {
+            crate::network_policy::store::set_stored(
+                &id,
+                crate::network_policy::store::Stored::closed_without_incoming(),
+            )?;
+        }
         return Ok(true);
     }
     discard_import_folder(&stage, detach)?;
     discard_import_folder(&final_dir, detach)?;
+    crate::network_policy::store::remove(&id)?;
     Ok(false)
 }
 
@@ -7963,6 +7990,98 @@ mod tests {
         assert!(recover_archive_import_in(directory.path(), &id, &accept).unwrap());
         assert!(!stage.exists());
         assert!(root.join(&id).join("computer.json").exists());
+    }
+
+    fn import_policy_file(directory: &std::path::Path) {
+        crate::network_policy::store::use_test_path(Some(directory.join("network-policy.json")));
+    }
+
+    #[test]
+    fn a_published_import_has_a_closed_policy_that_refuses_incoming_connections() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        let stage = root.join(format!(".partial-import-{id}"));
+        let final_dir = root.join(&id);
+        std::fs::create_dir_all(&stage).unwrap();
+
+        publish_import_folder(&stage, &final_dir, &root, &id).unwrap();
+
+        assert!(final_dir.exists() && !stage.exists());
+        assert_eq!(
+            crate::network_policy::store::get_stored(&id).unwrap(),
+            Some(crate::network_policy::store::Stored::closed_without_incoming())
+        );
+        crate::network_policy::store::use_test_path(None);
+    }
+
+    #[test]
+    fn an_import_that_could_not_be_published_leaves_no_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        std::fs::create_dir_all(&root).unwrap();
+        // The staging folder is gone, so the move fails.
+        let missing = root.join(format!(".partial-import-{id}"));
+        assert!(publish_import_folder(&missing, &root.join(&id), &root, &id).is_err());
+        assert_eq!(crate::network_policy::store::get_stored(&id).unwrap(), None);
+        crate::network_policy::store::use_test_path(None);
+    }
+
+    #[test]
+    fn import_recovery_drops_the_policy_of_an_import_that_was_not_published() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        crate::network_policy::store::set_stored(
+            &id,
+            crate::network_policy::store::Stored::closed_without_incoming(),
+        )
+        .unwrap();
+        let accept = |_: &std::path::Path| Ok(());
+        assert!(!recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(crate::network_policy::store::get_stored(&id).unwrap(), None);
+        crate::network_policy::store::use_test_path(None);
+    }
+
+    #[test]
+    fn import_recovery_keeps_the_policy_of_a_published_import_and_closes_one_without() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "imported".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:0a".into(),
+        );
+        record.id = id.clone();
+        store::save(&Layout::new(directory.path(), &id), &record).unwrap();
+        let accept = |_: &std::path::Path| Ok(());
+
+        // The engine stopped after the folder was published but before anything else was
+        // written, from an older Silo that saved no policy: the import is closed.
+        assert!(recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        let closed = crate::network_policy::store::Stored::closed_without_incoming();
+        assert_eq!(
+            crate::network_policy::store::get_stored(&id).unwrap(),
+            Some(closed)
+        );
+
+        // A policy the owner set since stays.
+        let open = crate::network_policy::NetworkPolicy::default();
+        crate::network_policy::store::set(&id, &open).unwrap();
+        assert!(recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(
+            crate::network_policy::store::get(&id).unwrap(),
+            Some(open)
+        );
+        crate::network_policy::store::use_test_path(None);
     }
 
     #[test]

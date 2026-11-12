@@ -494,6 +494,41 @@ impl swap::Sandboxes for RuntimeSandboxes<'_> {
     }
 }
 
+/// Saves the network policy the computer runs with under the build and under the undo computer,
+/// so neither is ever treated as a computer without a policy (which runs open). `recorded` is
+/// the network policy the computer's sandbox holds, read when the computer has no saved policy.
+/// Neither copy has the computer's channel rule: that rule is planned for a computer's own port.
+pub(super) fn save_build_policies(plan: &Plan, recorded: Option<&Value>) -> Result<(), String> {
+    use crate::network_policy::store;
+    let (held, incoming_denied) = crate::network_policy::held_for(&plan.old_id, recorded)?;
+    let stored = store::Stored::of(held, incoming_denied);
+    store::set_stored(&plan.new_id, stored.clone())?;
+    store::set_stored(&plan.undo_id, stored)
+}
+
+/// Gives the undo computer the policy of the computer it was, with its approvals. A computer
+/// with no saved policy leaves the one saved for the undo computer when the build was made, so
+/// the undo computer always has a policy of its own and its start applies it over the rules of
+/// the sandbox it was.
+pub(super) fn bind_undo_policy(plan: &Plan) -> Result<(), String> {
+    use crate::network_policy::store;
+    if store::get_stored(&plan.old_id)?.is_some() {
+        return store::inherit(&plan.old_id, &plan.undo_id, None);
+    }
+    if store::get_stored(&plan.undo_id)?.is_some() {
+        return Ok(());
+    }
+    let (held, incoming_denied) = crate::network_policy::held_for(&plan.old_id, None)?;
+    store::set_stored(&plan.undo_id, store::Stored::of(held, incoming_denied))
+}
+
+/// Forgets the policies the build and the undo computer were given.
+pub(super) fn forget_build_policies(plan: &Plan) -> Result<(), String> {
+    use crate::network_policy::store;
+    store::remove(&plan.new_id)?;
+    store::remove(&plan.undo_id)
+}
+
 impl EngineRebuildEnv {
     /// Starts or stops the sandbox of computer `id` under the gate the rebuild holds.
     fn lifecycle(&self, action: &str, id: &str) -> Result<(), String> {
@@ -778,6 +813,11 @@ impl RebuildEnv for EngineRebuildEnv {
         let mut configuration = self.configuration(&plan.old_id)?;
         configuration.id = plan.new_id.clone();
         configuration.name = plan.new_name.clone();
+        // The build is created, and runs the recipe, under the policy of the computer.
+        let paths = self.paths()?;
+        let original = runtime::inspect_computer(&ProcessRunner, &paths, &plan.old_name)
+            .map_err(|error| error.to_string())?;
+        save_build_policies(plan, original.config.pointer("/network/policy"))?;
         runtime::change_computer_configuration_while_held(
             self.host.as_ref(),
             ComputerConfigurationChange::Upsert {
@@ -911,7 +951,7 @@ impl RebuildEnv for EngineRebuildEnv {
         self.write_inventory(&paths, |computers| swap::swap_inventory(computers, plan))?;
         // What the undo computer is bound by follows the computer it was: the same network
         // policy and computer-use approval, never its secrets, ports or Silo's tools.
-        crate::network_policy::store::inherit(&plan.old_id, &plan.undo_id, None)?;
+        bind_undo_policy(plan)?;
         crate::computer_use::inherit_settings(&paths, &plan.old_id, &plan.undo_id)
             .map_err(|error| error.to_string())?;
         // The rebuilt computer applies its approval again on its first start, and gets a token
@@ -1029,6 +1069,7 @@ impl RebuildEnv for EngineRebuildEnv {
     fn remove_build(&self, plan: &Plan) -> Result<(), String> {
         let _ = fs::remove_file(self.stage_file(plan));
         let paths = self.paths()?;
+        forget_build_policies(plan)?;
         match self
             .inventory()?
             .into_iter()

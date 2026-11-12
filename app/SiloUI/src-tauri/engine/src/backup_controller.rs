@@ -1691,7 +1691,7 @@ fn export_and_drop_copies(
             checkpoint_id,
             cancellation,
         );
-        end_tokens(controller, names, &[]);
+        let result = refuse_unrevoked(result, end_tokens(controller, names), archive_path);
         return result.map(|archive| (archive, None));
     };
     let copies = scrub::make_copies(controller, env, &targets, cancellation)?;
@@ -1704,8 +1704,9 @@ fn export_and_drop_copies(
         checkpoint_id,
         cancellation,
     );
-    // A computer exported from its own disk or a checkpoint carries its endpoint file.
-    end_tokens(controller, names, &targets);
+    // A hidden copy has no endpoint file, but the token it held is still in the layers beneath
+    // the copy's disk, so every exported computer's token ends, copied or not.
+    let result = refuse_unrevoked(result, end_tokens(controller, names), archive_path);
     let dropped = copies.drop_all();
     match (result, dropped) {
         (Ok(archive), dropped) => Ok((
@@ -1729,42 +1730,89 @@ fn export_and_drop_copies(
     }
 }
 
-/// Ends the token of Silo's tools of each of `names` that was not exported from a hidden copy
-/// (`copied`, as (name, id)), once the export is written: its file holds the computer's endpoint
-/// file, and the copy of the token in it must prove nothing. A copy never holds one
-/// (`export_scrub` removes it).
-fn end_tokens(controller: &Controller, names: &[String], copied: &[(String, String)]) {
-    let Ok(host) = controller.runtime_host() else {
-        return;
-    };
+/// Ends the token of Silo's tools of each of `names` once the export is written, whether the
+/// computer was exported from its own disk, from a checkpoint or from a hidden copy: the
+/// archive holds the computer's endpoint file or, for a copy, the bytes of it that remain in the
+/// layers beneath, and the token in them must prove nothing. A computer whose tools are on gets
+/// a new token the next time it runs: the engine checks the endpoint file of each running
+/// computer every few seconds and of each computer when it starts, and writes a new token
+/// where the file does not match.
+fn end_tokens(controller: &Controller, names: &[String]) -> Result<(), String> {
+    let host = controller.runtime_host()?;
     let macos = host.macos_context();
     let metadata = runtime::runtime_paths(host)
         .ok()
         .and_then(|paths| runtime::read_metadata(&paths.metadata).ok());
-    for name in names {
-        if copied.iter().any(|(copied, _)| copied == name) {
-            continue;
-        }
-        let id = macos
-            .as_ref()
-            .and_then(|context| crate::macos_computers::id_for_name(context, name))
-            .or_else(|| {
-                metadata.as_ref().and_then(|metadata| {
-                    metadata
-                        .computers
-                        .iter()
-                        .find(|configuration| configuration.name() == name)
-                        .map(|configuration| configuration.id().to_owned())
+    end_tokens_of(
+        names,
+        &|name| {
+            macos
+                .as_ref()
+                .and_then(|context| crate::macos_computers::id_for_name(context, name))
+                .or_else(|| {
+                    metadata.as_ref().and_then(|metadata| {
+                        metadata
+                            .computers
+                            .iter()
+                            .find(|configuration| configuration.name() == name)
+                            .map(|configuration| configuration.id().to_owned())
+                    })
                 })
-            });
-        if let Some(id) = id {
-            if let Err(error) = crate::guest_client::end_token(&id) {
-                eprintln!(
-                    "silo-engine: the token of {name} was not ended after its export: {error}"
-                );
-            }
-        }
+        },
+        &crate::guest_client::end_token,
+    )
+}
+
+/// [`end_tokens`] with the lookup of a computer's id and the ending of its token given. Every
+/// computer is tried; the ones that failed are named together.
+fn end_tokens_of(
+    names: &[String],
+    id_of: &dyn Fn(&str) -> Option<String>,
+    end: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let problems: Vec<String> = names
+        .iter()
+        .filter_map(|name| match id_of(name) {
+            Some(id) => end(&id)
+                .err()
+                .map(|error| format!("The access of {name} to Silo's tools was not ended: {error}")),
+            None => Some(format!(
+                "Silo could not find {name} to end its access to Silo's tools."
+            )),
+        })
+        .collect();
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join(" "))
     }
+}
+
+/// An export whose computers' tokens could not all be ended is not handed over: the file
+/// is removed, because it may hold a token that still works.
+fn refuse_unrevoked(
+    result: Result<Archive, TransferError>,
+    revoked: Result<(), String>,
+    archive_path: &Path,
+) -> Result<Archive, TransferError> {
+    let Err(problem) = revoked else {
+        return result;
+    };
+    let _ = fs::remove_file(archive_path);
+    Err(match result {
+        Ok(_) => TransferError::from(format!(
+            "The export was removed because it may hold a login that still works. {problem}"
+        )),
+        Err(mut error) if error.cancelled => {
+            error.cancelled = false;
+            error.message = problem;
+            error
+        }
+        Err(mut error) => {
+            error.message = format!("{} {problem}", error.message);
+            error
+        }
+    })
 }
 
 /// The name, size and sha256 of a finished export that sits in the transfer area, so the other
@@ -6003,6 +6051,71 @@ mod tests {
             !error.preserve_import,
             "verified absence must still clean up failed imports"
         );
+    }
+
+    fn written_archive() -> (tempfile::TempDir, PathBuf, Archive) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("export.silo");
+        fs::write(&path, b"archive").unwrap();
+        let archive = Archive {
+            name: "export".into(),
+            archive_path: path.to_string_lossy().into_owned(),
+            completed_label: String::new(),
+            size: String::new(),
+            destination: String::new(),
+            computers: vec!["dev".into()],
+            checkpoint_name: None,
+            transfer: None,
+            left_out: Vec::new(),
+        };
+        (directory, path, archive)
+    }
+
+    #[test]
+    fn the_token_of_every_exported_computer_ends_and_a_failure_is_reported() {
+        let ended = std::cell::RefCell::new(Vec::new());
+        let names = vec!["dev".to_owned(), "scrubbed".to_owned()];
+        let id_of = |name: &str| Some(format!("id-{name}"));
+        end_tokens_of(&names, &id_of, &|id| {
+            ended.borrow_mut().push(id.to_owned());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(*ended.borrow(), ["id-dev", "id-scrubbed"]);
+
+        let error = end_tokens_of(&names, &id_of, &|id| {
+            if id == "id-dev" {
+                Err("the store is locked".into())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert!(error.contains("dev") && error.contains("the store is locked"));
+        assert!(!error.contains("scrubbed"));
+
+        let error = end_tokens_of(&names, &|_| None, &|_| Ok(())).unwrap_err();
+        assert!(error.contains("dev") && error.contains("scrubbed"));
+    }
+
+    #[test]
+    fn an_export_whose_token_could_not_be_ended_is_removed_and_fails() {
+        let (_directory, path, archive) = written_archive();
+        let error = refuse_unrevoked(Ok(archive.clone()), Err("locked".into()), &path).unwrap_err();
+        assert!(error.message.contains("locked") && !error.cancelled);
+        assert!(!path.exists());
+
+        let (_directory, path, archive) = written_archive();
+        assert_eq!(refuse_unrevoked(Ok(archive.clone()), Ok(()), &path).unwrap(), archive);
+        assert!(path.exists());
+
+        let (_directory, path, _) = written_archive();
+        let failed = TransferError::from("The export failed.".to_string());
+        let error = refuse_unrevoked(Err(failed), Err("locked".into()), &path).unwrap_err();
+        assert!(error.message.starts_with("The export failed.") && error.message.contains("locked"));
+        let error = refuse_unrevoked(Err(TransferError::cancelled()), Err("locked".into()), &path)
+            .unwrap_err();
+        assert!(!error.cancelled && error.message.contains("locked"));
     }
 
     #[test]

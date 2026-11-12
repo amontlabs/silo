@@ -14,7 +14,7 @@ use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, Recipe
 
 use super::{
     engine_env::{
-        can_clone, clone_workspace, copy_folder, parse_du, parse_pack_report, replay_steps,
+        bind_undo_policy, can_clone, forget_build_policies, save_build_policies, clone_workspace, copy_folder, parse_du, parse_pack_report, replay_steps,
         PACK_HOME, UNPACK_HOME,
     },
     journal::{Journal, Plan, Record, Step},
@@ -1611,6 +1611,134 @@ fn the_ssh_folder_is_copied_with_its_modes_and_nothing_is_skipped() {
     // Anything but files is an error, not a silent skip.
     std::os::unix::fs::symlink("/etc/hosts", from.join("link")).unwrap();
     assert!(copy_folder(&from, &dir.path().join("third")).is_err());
+}
+
+// MARK: The build's network policy
+
+use crate::network_policy::{
+    self,
+    store::{self, Stored},
+    ExtraRule, Grants, NetworkPolicy, NetworkPolicyMode,
+};
+
+fn policy_store() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(dir.path().join("network-policy.json")));
+    dir
+}
+
+fn allowlist_stored() -> Stored {
+    Stored::preserving_pins(
+        &NetworkPolicy {
+            mode: NetworkPolicyMode::Allowlist,
+            hosts: vec!["example.com".into()],
+            presets: Vec::new(),
+        },
+        None,
+        true,
+    )
+}
+
+fn closed_runtime_policy() -> serde_json::Value {
+    serde_json::json!({"default_egress": "deny", "default_ingress": "deny", "rules": []})
+}
+
+#[test]
+fn the_build_and_the_undo_computer_get_the_saved_policy_of_the_computer() {
+    let _dir = policy_store();
+    let plan = plan();
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    save_build_policies(&plan, None).unwrap();
+    assert_eq!(store::get_stored(&plan.new_id).unwrap(), Some(allowlist_stored()));
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(allowlist_stored()));
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_computer_without_a_saved_policy_gives_its_effective_one_to_the_build() {
+    let _dir = policy_store();
+    let plan = plan();
+    // An import that has not started yet carries its closed rules and no saved policy.
+    save_build_policies(&plan, Some(&closed_runtime_policy())).unwrap();
+    let built = store::get_stored(&plan.new_id).unwrap().expect("the build has a policy");
+    assert_eq!(built.mode, NetworkPolicyMode::Closed);
+    assert!(built.incoming_denied);
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(built));
+    // A computer saved before policies existed runs open, and the build says so explicitly.
+    let open_plan = Plan {
+        new_id: "id-new-2".into(),
+        undo_id: "id-undo-2".into(),
+        ..plan
+    };
+    save_build_policies(&open_plan, Some(&serde_json::json!({"default_egress": "allow"}))).unwrap();
+    let built = store::get_stored(&open_plan.new_id).unwrap().expect("the build has a policy");
+    assert_eq!(built.mode, NetworkPolicyMode::Open);
+    assert!(!built.incoming_denied);
+    store::use_test_path(None);
+}
+
+#[test]
+fn the_build_policy_is_not_saved_when_the_computers_policy_cannot_be_read() {
+    let dir = policy_store();
+    let plan = plan();
+    std::fs::write(dir.path().join("network-policy.json"), b"not json").unwrap();
+    assert!(save_build_policies(&plan, None).is_err());
+    store::use_test_path(None);
+}
+
+#[test]
+fn the_undo_computer_keeps_an_explicit_policy_when_the_original_had_none() {
+    let _dir = policy_store();
+    let plan = plan();
+    save_build_policies(&plan, Some(&closed_runtime_policy())).unwrap();
+    let saved = store::get_stored(&plan.undo_id).unwrap();
+    assert!(saved.is_some());
+    // The swap binds it again on every retry, and the original still has no saved policy.
+    bind_undo_policy(&plan).unwrap();
+    bind_undo_policy(&plan).unwrap();
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), saved);
+    assert_eq!(store::get_stored(&plan.old_id).unwrap(), None);
+    // An original with a saved policy gives it, with its approvals.
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    bind_undo_policy(&plan).unwrap();
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(allowlist_stored()));
+    store::use_test_path(None);
+}
+
+#[test]
+fn the_undo_computer_does_not_keep_the_channel_rule_of_the_original() {
+    let _dir = policy_store();
+    let plan = plan();
+    save_build_policies(&plan, Some(&closed_runtime_policy())).unwrap();
+    bind_undo_policy(&plan).unwrap();
+    // The original's sandbox holds the rule for its channel port.
+    let held = store::get_stored(&plan.old_id).unwrap().unwrap_or_else(|| {
+        Stored::of(network_policy::held_for(&plan.old_id, Some(&closed_runtime_policy())).unwrap().0, true)
+    });
+    let mut original = network_policy::plan_held(&held.held(), &Grants::of_computer("dev"), &[ExtraRule::GatewayPort(40001)]);
+    original.ingress_allowed = !held.incoming_denied;
+    let runtime = serde_json::json!({"policy": original.policy_value(), "strict": original.strict});
+    // The undo computer's saved policy plans no such rule, so its start finds the difference
+    // and applies the plan.
+    let undo = store::get_stored(&plan.undo_id).unwrap().expect("the undo computer has a policy");
+    let mut wanted = network_policy::plan_held(&undo.held(), &Grants::of_computer("dev-undo"), &[]);
+    wanted.ingress_allowed = !undo.incoming_denied;
+    assert!(original.matches(&runtime));
+    assert!(!wanted.matches(&runtime));
+    store::use_test_path(None);
+}
+
+#[test]
+fn the_policies_of_a_discarded_build_are_forgotten() {
+    let _dir = policy_store();
+    let plan = plan();
+    save_build_policies(&plan, Some(&closed_runtime_policy())).unwrap();
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    forget_build_policies(&plan).unwrap();
+    assert_eq!(store::get_stored(&plan.new_id).unwrap(), None);
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), None);
+    assert_eq!(store::get_stored(&plan.old_id).unwrap(), Some(allowlist_stored()));
+    store::use_test_path(None);
 }
 
 // MARK: Pausing, cancelling, settling and abandoning
