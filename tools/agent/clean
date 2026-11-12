@@ -4,17 +4,18 @@
   clean [--file F] [--into BRANCH] [--yes] <item>
 
 Refuses while an unmerged item depends on <item> (or while <item> is not merged/cleaned).
-Otherwise: stops and drops the throwaway computers listed in the item's live state file,
-removes its worktree (`git worktree remove`, then prune), deletes its branch only if merged
+Otherwise: removes its worktree (`git worktree remove`, then prune), deletes its branch only if merged
 into the integration branch, removes its temp data, marks the item `cleaned`, and reports the
 bytes freed. Run it from any checkout of the repository; it never touches the repository's
 main checkout or a checkout of the integration branch.
 
-Temp data = $TMPDIR/silo-agent/<item> plus the comma list in the board's `temp` column; every
-path must sit under $TMPDIR (or /tmp) and is deleted only there, never anything else.
-Live state file (written by the live harness): $TMPDIR/silo-agent/<item>/computers.txt, one
-computer name per line. Only names starting with `e2e-` are stopped and dropped
-(`silo stop`, `silo drop`; binary from $SILO_BIN, else `silo` on PATH).
+Temp data = $TMPDIR/silo-agent/<item> (where `live` keeps its state when SILO_AGENT_ITEM is set),
+the short temp homes listed in any `tempdirs` file under it, and the comma list in the board's
+`temp` column; every path must sit under $TMPDIR (or /tmp) and is deleted only there.
+Computers: clean never stops or deletes a computer (it cannot tell which engine one belongs to).
+A live check stops what it started in its own cleanup(); if a `computers` file under the item's
+temp data still lists computers, clean prints them and refuses until they are gone or
+--leave-computers is given (the list is then removed with the rest).
 The board file is --file, else $BOARD; integration branch --into, else $BOARD_INTEGRATION, else main.
 """
 import argparse, importlib.machinery, importlib.util, os, shutil, subprocess, sys
@@ -51,6 +52,8 @@ def main():
     ap.add_argument("--file")
     ap.add_argument("--into")
     ap.add_argument("--yes", action="store_true", help="act (default is a dry run)")
+    ap.add_argument("--leave-computers", action="store_true",
+                    help="clean even though a live state still lists computers")
     ap.add_argument("item")
     args = ap.parse_args()
     path = board.path_of(args)
@@ -80,22 +83,20 @@ def main():
 
     freed = 0
 
-    # 1. throwaway computers started by the item's live test
-    state_file = os.path.join(item_tmp, "computers.txt")
-    if os.path.exists(state_file):
-        silo = os.environ.get("SILO_BIN") or shutil.which("silo")
-        for name in [l.strip() for l in open(state_file) if l.strip()]:
-            if not name.startswith("e2e-"):
-                say("skip computer %r (not e2e-*)" % name)
-            elif not silo:
-                say("cannot drop %s: no silo binary (set SILO_BIN)" % name)
-            else:
-                say("stop and drop computer %s" % name)
-                if act:
-                    subprocess.run([silo, "stop", name], capture_output=True)
-                    p = subprocess.run([silo, "drop", name], capture_output=True, text=True)
-                    if p.returncode:
-                        print("  drop failed: " + p.stderr.strip())
+    # 1. live state: leftover computers are reported, short temp homes join the temp data
+    leftovers = []
+    for root, _, files in os.walk(item_tmp):
+        for f in files:
+            full = os.path.join(root, f)
+            if f == "computers":
+                leftovers += [l.strip() for l in open(full) if l.strip()]
+            elif f == "tempdirs":
+                temps += [l.strip() for l in open(full) if l.strip()]
+    if leftovers:
+        print("live checks of %s list computers: %s" % (args.item, ", ".join(leftovers)))
+        print("  stop and delete them with the Dev engine that ran the check, or rerun the check's cleanup")
+        if not args.leave_computers:
+            board.die("refusing: computers may still exist (use --leave-computers once they are gone)")
 
     # 2. worktree
     wt = r["worktree"] or wts.get(r["branch"], "")

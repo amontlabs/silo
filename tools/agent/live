@@ -10,7 +10,7 @@ A finished step leaves <state>/steps/<name>.ok; a rerun skips those. --from STEP
 after it. Logs: <state>/logs/<step>.log. Every exit writes <state>/VERDICT:
   verdict: pass|fail|skipped, check, host, step, reason, log, at
 Exit codes: 0 pass, 1 fail, 2 usage, 3 skipped (also: --host linux and the machine is offline).
-State dir default: ${TMPDIR}/silo-agent/live/<check>. Throwaway computers are listed in
+State dir default: ${TMPDIR}/silo-agent/[$SILO_AGENT_ITEM/]live/<check> (set SILO_AGENT_ITEM so `clean <item>` removes it). Throwaway computers are listed in
 <state>/computers and temporary directories in <state>/tempdirs (for `clean`).
 `live wait` blocks until VERDICT exists (or the runner died), prints it, exits with its code.
 Check files may define cleanup(); it runs on every exit. Env: LIVE_D (check dir), LIVE_SSH,
@@ -69,7 +69,7 @@ esac; done
 case "$HOST" in mac|linux) ;; *) echo "live: --host must be mac or linux" >&2; exit 2;; esac
 CHECK_FILE=$LIVE_D/$CHECK.sh
 [ -f "$CHECK_FILE" ] || { echo "live: no check '$CHECK' in $LIVE_D (try: live list)" >&2; exit 2; }
-STATE=${STATE:-${TMPDIR:-/tmp}/silo-agent/live/$CHECK}; STATE=${STATE%/}
+STATE=${STATE:-${TMPDIR:-/tmp}/silo-agent/${SILO_AGENT_ITEM:+$SILO_AGENT_ITEM/}live/$CHECK}; STATE=${STATE%/}
 case "$STATE" in /*) ;; *) STATE=$PWD/$STATE;; esac
 LOGS=$STATE/logs
 mkdir -p "$STATE/steps" "$LOGS" || exit 2
