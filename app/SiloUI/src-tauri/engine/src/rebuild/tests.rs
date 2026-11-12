@@ -14,9 +14,9 @@ use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, Recipe
 
 use super::{
     engine_env::{
-        bind_undo_policy, can_clone, clone_workspace, copy_folder, ensure_undo_policy,
-        forget_build_policies, parse_du, parse_pack_report, replay_steps, save_build_policies,
-        swap_with_policy, PACK_HOME, UNPACK_HOME,
+        bind_undo_policy, can_clone, clone_workspace, copy_folder, forget_build_policies, parse_du,
+        parse_pack_report, replay_steps, save_build_policies, swap_with_policy, PACK_HOME,
+        UNPACK_HOME,
     },
     journal::{Journal, Plan, Record, Step},
     rebuild, recover_one, swap, undo_name, Info, RebuildEnv,
@@ -1855,13 +1855,91 @@ fn the_undo_computer_keeps_an_explicit_policy_when_the_original_had_none() {
     bind_undo_policy(&plan, &|| Ok(Some(closed_runtime_policy()))).unwrap();
     assert_eq!(store::get_stored(&plan.undo_id).unwrap(), saved);
     assert_eq!(store::get_stored(&plan.old_id).unwrap(), None);
-    // An original with a saved policy gives it, with its approvals.
+    // A policy the original gains later does not replace the one the undo computer has.
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), saved);
+    // An undo computer with no policy takes the original's, with its approvals.
+    store::remove(&plan.undo_id).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(allowlist_stored())
+    );
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_closed_policy_the_undo_computer_was_given_is_not_replaced_by_a_wider_one() {
+    let _dir = policy_store();
+    let plan = plan();
+    // The computer is closed on purpose (an import not yet opened up), and so is its undo
+    // computer, which is the same value as the stand-in used while the rules cannot be read.
+    store::set_stored(&plan.old_id, Stored::closed_without_incoming()).unwrap();
+    save_build_policies(&plan, None).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(Stored::closed_without_incoming())
+    );
+    // The rebuilt computer is given a wider policy afterwards, and the swap is settled again.
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    bind_undo_policy(&plan, &|| Err("unreadable".into())).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(Stored::closed_without_incoming())
+    );
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_stand_in_policy_gives_way_once_and_a_policy_set_over_it_stays() {
+    let _dir = policy_store();
+    let plan = plan();
+    bind_undo_policy(&plan, &|| Err("unreadable".into())).unwrap_err();
+    assert!(store::is_unresolved(&plan.undo_id).unwrap());
+    // A person sets the closed policy on the undo computer themselves: it is theirs now.
+    store::set_stored(&plan.undo_id, Stored::closed_without_incoming()).unwrap();
+    assert!(!store::is_unresolved(&plan.undo_id).unwrap());
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(Stored::closed_without_incoming())
+    );
+    // The stand-in itself is replaced by the rules once they can be read, and not again.
+    store::remove(&plan.undo_id).unwrap();
+    store::remove(&plan.old_id).unwrap();
+    bind_undo_policy(&plan, &|| Err("unreadable".into())).unwrap_err();
     store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
     bind_undo_policy(&plan, &|| Ok(None)).unwrap();
     assert_eq!(
         store::get_stored(&plan.undo_id).unwrap(),
         Some(allowlist_stored())
     );
+    assert!(!store::is_unresolved(&plan.undo_id).unwrap());
+    store::set_stored(&plan.old_id, Stored::closed_without_incoming()).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(allowlist_stored())
+    );
+    store::use_test_path(None);
+}
+
+#[test]
+fn saved_policies_without_a_stand_in_list_read_and_are_written_as_before() {
+    let dir = policy_store();
+    let file = dir.path().join("network-policy.json");
+    std::fs::write(
+        &file,
+        br#"{"version":1,"computers":{"a":{"mode":"closed","incomingDenied":true}}}"#,
+    )
+    .unwrap();
+    assert!(!store::is_unresolved("a").unwrap());
+    store::set_stored("b", allowlist_stored()).unwrap();
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(!written.contains("standIn"), "{written}");
     store::use_test_path(None);
 }
 
@@ -2323,14 +2401,14 @@ fn an_undo_computer_is_closed_to_the_network_when_the_rules_cannot_be_read() {
         store::get_stored(&plan.undo_id).unwrap(),
         Some(Stored::closed_without_incoming())
     );
-    assert!(ensure_undo_policy(&plan, &|| Err("no such sandbox".into())).is_err());
+    assert!(bind_undo_policy(&plan, &|| Err("no such sandbox".into())).is_err());
     assert_eq!(
         store::get_stored(&plan.undo_id).unwrap(),
         Some(Stored::closed_without_incoming())
     );
     // The rules replace the closed policy once they can be read.
     let open = serde_json::json!({"default_egress": "allow"});
-    ensure_undo_policy(&plan, &|| Ok(Some(open.clone()))).unwrap();
+    bind_undo_policy(&plan, &|| Ok(Some(open.clone()))).unwrap();
     let bound = store::get_stored(&plan.undo_id).unwrap().unwrap();
     assert_eq!(bound.mode, NetworkPolicyMode::Open);
     store::use_test_path(None);
@@ -2458,7 +2536,7 @@ fn settling_a_swap_binds_the_undo_policy_and_keeps_one_it_has() {
     let _dir = policy_store();
     let plan = plan();
     store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
-    ensure_undo_policy(&plan, &|| Ok(None)).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
     assert_eq!(
         store::get_stored(&plan.undo_id).unwrap(),
         Some(allowlist_stored())
@@ -2474,7 +2552,7 @@ fn settling_a_swap_binds_the_undo_policy_and_keeps_one_it_has() {
         false,
     );
     store::set_stored(&plan.undo_id, held.clone()).unwrap();
-    ensure_undo_policy(&plan, &|| Ok(None)).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
     assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(held));
     store::use_test_path(None);
 }

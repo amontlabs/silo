@@ -508,51 +508,34 @@ pub(super) fn save_build_policies(plan: &Plan, recorded: Option<&Value>) -> Resu
     store::set_stored(&plan.undo_id, stored)
 }
 
-/// Gives the undo computer the policy of the computer it was, with its approvals. A computer
-/// with no saved policy leaves the one saved for the undo computer when the build was made.
-/// When neither exists (a rebuild begun before the build was given one), the undo computer takes
-/// the rules its own sandbox holds, which `recorded` reads: they are what the computer ran
-/// under. When they cannot be read the undo computer is given a closed policy (no network, no
-/// connections to its ports), so that starting it is safe, and the error is returned; the rules
-/// are bound when a later attempt can read them.
+/// Gives the undo computer the policy of the computer it was, with its approvals, when it has
+/// none of its own. A computer with no saved policy leaves the one saved for the undo computer
+/// when the build was made. When neither exists (a rebuild begun before the build was given
+/// one), the undo computer takes the rules its own sandbox holds, which `recorded` reads: they
+/// are what the computer ran under. When they cannot be read the undo computer is given a
+/// closed policy (no network, no connections to its ports) marked as a stand-in, so that
+/// starting it is safe, and the error is returned; the rules are bound when a later attempt
+/// can read them. A policy the undo computer has, other than that stand-in, is never replaced.
 pub(super) fn bind_undo_policy(
     plan: &Plan,
     recorded: &dyn Fn() -> Result<Option<Value>, String>,
 ) -> Result<(), String> {
     use crate::network_policy::store;
-    if store::get_stored(&plan.old_id)?.is_some() {
-        return store::inherit(&plan.old_id, &plan.undo_id, None);
-    }
-    ensure_undo_policy(plan, recorded)
-}
-
-/// [`bind_undo_policy`] that keeps a policy the undo computer already has, other than the
-/// closed one it is given while the rules cannot be read.
-pub(super) fn ensure_undo_policy(
-    plan: &Plan,
-    recorded: &dyn Fn() -> Result<Option<Value>, String>,
-) -> Result<(), String> {
-    use crate::network_policy::store;
-    let held = store::get_stored(&plan.undo_id)?;
-    if held
-        .as_ref()
-        .is_some_and(|held| *held != store::Stored::closed_without_incoming())
-    {
+    if !store::is_unresolved(&plan.undo_id)? {
         return Ok(());
     }
-    if store::get_stored(&plan.old_id)?.is_some() {
-        return store::inherit(&plan.old_id, &plan.undo_id, None);
+    if store::resolve_from(&plan.old_id, &plan.undo_id)? {
+        return Ok(());
     }
     match recorded() {
         Ok(recorded) => {
             let (held, incoming_denied) =
                 crate::network_policy::held_for(&plan.old_id, recorded.as_ref())?;
-            store::set_stored(&plan.undo_id, store::Stored::of(held, incoming_denied))
+            store::resolve(&plan.undo_id, store::Stored::of(held, incoming_denied))?;
+            Ok(())
         }
         Err(error) => {
-            if held.is_none() {
-                store::set_stored(&plan.undo_id, store::Stored::closed_without_incoming())?;
-            }
+            store::set_stand_in(&plan.undo_id)?;
             Err(error)
         }
     }
@@ -1089,7 +1072,7 @@ impl RebuildEnv for EngineRebuildEnv {
             }
         };
         // The undo computer has the network policy its computer had, wherever the swap stopped.
-        keep(ensure_undo_policy(plan, &|| {
+        keep(bind_undo_policy(plan, &|| {
             self.original_recorded_policy(&paths, plan)
         }));
         // The undo computer has the recipe record its computer had.

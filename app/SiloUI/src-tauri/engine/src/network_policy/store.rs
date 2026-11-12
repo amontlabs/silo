@@ -3,7 +3,7 @@
 //! without an entry is one saved before policies existed; [`super::effective`] decides what it
 //! runs with. A file that cannot be read is an error, never an empty store.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -24,6 +24,11 @@ struct Document {
     version: u8,
     #[serde(default)]
     computers: BTreeMap<String, Stored>,
+    /// Computers whose saved policy is the closed one given while their real rules could not
+    /// be read. Any other write for a computer ends that; a policy not listed here is the
+    /// computer's own, whatever it holds. Omitted when empty, so the file reads as before.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    stand_in: BTreeSet<String>,
 }
 
 /// One computer's saved policy.
@@ -185,20 +190,36 @@ fn write(path: &PathBuf, document: &Document) -> Result<(), String> {
     written.map_err(io)
 }
 
-/// Changes the stored policies. Without an installed store (no engine) nothing is kept.
-fn update(change: impl FnOnce(&mut BTreeMap<String, Stored>) -> Result<(), String>) -> Result<(), String> {
+/// Changes the stored policies and the stand-in marks. Without an installed store (no engine)
+/// nothing is kept.
+fn update_document(change: impl FnOnce(&mut Document) -> Result<(), String>) -> Result<(), String> {
     let Some(path) = path() else {
         return Ok(());
     };
-    let _held = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _held = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut document = read(&path)?;
     let before = document.clone();
-    change(&mut document.computers)?;
+    change(&mut document)?;
     if document != before {
         document.version = VERSION;
         write(&path, &document)?;
     }
     Ok(())
+}
+
+/// Changes the policy of `computer_id`: whatever it holds afterwards is the computer's own, so
+/// it is no longer a stand-in.
+fn update_computer(
+    computer_id: &str,
+    change: impl FnOnce(&mut BTreeMap<String, Stored>) -> Result<(), String>,
+) -> Result<(), String> {
+    update_document(|document| {
+        change(&mut document.computers)?;
+        document.stand_in.remove(computer_id);
+        Ok(())
+    })
 }
 
 /// The stored policy of `computer_id` with its approvals; `None` when it has none or no store
@@ -223,7 +244,7 @@ pub fn set(computer_id: &str, policy: &NetworkPolicy) -> Result<(), String> {
 }
 
 pub fn set_stored(computer_id: &str, stored: Stored) -> Result<(), String> {
-    update(|computers| {
+    update_computer(computer_id, |computers| {
         computers.insert(computer_id.to_owned(), stored);
         Ok(())
     })
@@ -236,7 +257,7 @@ pub fn replace_if(
     expected: Option<&Stored>,
     stored: Stored,
 ) -> Result<(), String> {
-    update(|computers| {
+    update_computer(computer_id, |computers| {
         if computers.get(computer_id) != expected {
             return Err(CHANGED.to_owned());
         }
@@ -256,7 +277,7 @@ pub fn inherit(
     target: &str,
     policy: Option<&NetworkPolicy>,
 ) -> Result<(), String> {
-    update(|computers| {
+    update_computer(target, |computers| {
         let chosen = match policy {
             Some(policy) => Some(Stored::approved(policy)),
             None => computers.get(source).cloned(),
@@ -273,8 +294,72 @@ pub fn inherit(
     })
 }
 
+/// Whether `computer_id` has no policy of its own yet: it has none saved, or only the closed
+/// one [`set_stand_in`] gave it.
+pub fn is_unresolved(computer_id: &str) -> Result<bool, String> {
+    let Some(path) = path() else {
+        return Ok(false);
+    };
+    let _held = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let document = read(&path)?;
+    Ok(!document.computers.contains_key(computer_id) || document.stand_in.contains(computer_id))
+}
+
+/// Saves the closed policy for `computer_id` while its real rules cannot be read, and marks it
+/// as a stand-in. A computer that already has a policy of its own keeps it.
+pub fn set_stand_in(computer_id: &str) -> Result<(), String> {
+    update_document(|document| {
+        if document.computers.contains_key(computer_id) && !document.stand_in.contains(computer_id)
+        {
+            return Ok(());
+        }
+        document
+            .computers
+            .insert(computer_id.to_owned(), Stored::closed_without_incoming());
+        document.stand_in.insert(computer_id.to_owned());
+        Ok(())
+    })
+}
+
+/// Gives `target` the policy `chosen`, only if `target` has no policy of its own yet (see
+/// [`is_unresolved`]). Returns whether it was saved; a policy the computer has stays, whatever
+/// it holds.
+pub fn resolve(target: &str, chosen: Stored) -> Result<bool, String> {
+    let mut saved = false;
+    update_document(|document| {
+        if document.computers.contains_key(target) && !document.stand_in.contains(target) {
+            return Ok(());
+        }
+        document.computers.insert(target.to_owned(), chosen);
+        document.stand_in.remove(target);
+        saved = true;
+        Ok(())
+    })?;
+    Ok(saved)
+}
+
+/// [`resolve`] with the policy `source` has saved, with its approvals. Returns whether `source`
+/// had one and `target` took it.
+pub fn resolve_from(source: &str, target: &str) -> Result<bool, String> {
+    let mut saved = false;
+    update_document(|document| {
+        if document.computers.contains_key(target) && !document.stand_in.contains(target) {
+            return Ok(());
+        }
+        if let Some(chosen) = document.computers.get(source).cloned() {
+            document.computers.insert(target.to_owned(), chosen);
+            document.stand_in.remove(target);
+            saved = true;
+        }
+        Ok(())
+    })?;
+    Ok(saved)
+}
+
 pub fn remove(computer_id: &str) -> Result<(), String> {
-    update(|computers| {
+    update_computer(computer_id, |computers| {
         computers.remove(computer_id);
         Ok(())
     })
