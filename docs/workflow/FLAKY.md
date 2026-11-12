@@ -16,3 +16,5 @@ The orchestrator puts a fix item on the board and appends ` — fix: <item>` to 
 
 ## Entries
 
+- 2026-11-12 `silo-engine audit::tests::old_rows_and_rows_beyond_the_cap_are_trimmed` failed, then passed on retry (`cargo nextest run --config-file /Users/polarzero/code/projects/silo-direction/app/SiloUI/target/agent-check/20261112-180622-84926.nextest.toml --manifest-path /Users/polarzero/code/projects/silo-direction/app/SiloUI/Cargo.toml --locked --profile check --no-fail-fast --workspace -E all()`)
+- 2026-11-12 `silo-engine audit::tests::owner_and_device_rows_are_trimmed_among_themselves` failed, then passed on retry (`cargo nextest run --config-file /Users/polarzero/code/projects/silo-direction/app/SiloUI/target/agent-check/20261112-180622-84926.nextest.toml --manifest-path /Users/polarzero/code/projects/silo-direction/app/SiloUI/Cargo.toml --locked --profile check --no-fail-fast --workspace -E all()`)
