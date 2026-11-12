@@ -130,3 +130,16 @@ was chosen and why; any can be changed. Older items are also in the build log un
     3 seconds while a computer is being prepared and every 30 seconds otherwise; toasts with a
     button close after 20 seconds, quick ones after 4. Successful bookkeeping calls (job
     acknowledgements, status polls) are hidden from Activity; failed ones show.
+
+## Allowlist wildcards (R16)
+
+32. **Shared-hosting wildcards are refused:** the allowlist now checks wildcards against the
+    full Public Suffix List (the `psl` crate, compiled in), so `*.cloudfront.net`,
+    `*.githubusercontent.com`, `*.pages.dev`, `*.netlify.app` and `*.duckdns.org` are refused:
+    anyone can host a site under them. Exact names (`raw.githubusercontent.com`) still work.
+    Saved lists that already contain such a wildcard keep working until they are saved again.
+    The list is as fresh as the `psl` version in the build; refreshing it each release is a
+    possible routine. Decide whether these stay refused and whether to refresh per release.
+33. **Guest output limits:** a command the engine runs in a computer is stopped when it prints
+    more than 64 KiB of errors (helper runs) or 960 KiB (other runs); nothing it prints is
+    written to the device's disk.
