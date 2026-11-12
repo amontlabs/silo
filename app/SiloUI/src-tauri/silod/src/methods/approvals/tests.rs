@@ -1523,7 +1523,10 @@ async fn an_approval_saved_without_a_network_policy_runs_with_the_one_the_second
         .unwrap();
     // The same ask as an earlier version of the engine saved it: no network policy in the call.
     let mut legacy_params = modern.approval.params.clone();
-    legacy_params.as_object_mut().unwrap().remove("networkPolicy");
+    legacy_params
+        .as_object_mut()
+        .unwrap()
+        .remove("networkPolicy");
     let (legacy, _) = store
         .ask(approvals::NewApproval {
             kind: modern.approval.kind,
