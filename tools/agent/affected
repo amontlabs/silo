@@ -32,6 +32,45 @@ READ_BY_RUST = (
     (f'{APP}/src/features/application/model/reserved-secret-names.json', ['silo-engine']),
     (f'{APP}/src/features/computers/model/container-unavailable.json', ['silo-engine']),
 )
+# Files one crate's build or tests read from another crate's directory (found with grep for
+# include_str!/include_bytes!/CARGO_MANIFEST_DIR/#[path]); add a row when a new cross-reading appears.
+READ_ACROSS = (
+    (f'{APP}/src-tauri/guest/', ['silo-engine']),
+    (f'{APP}/src-tauri/github_build.rs', ['silo-engine', 'silo-ui']),
+    (f'{APP}/src-tauri/tauri', ['silo-host', 'silo-ui']),  # tauri*.conf.json
+    (f'{APP}/src-tauri/src/commands/remote.rs', ['silo-engine', 'silo-ui']),
+    (f'{APP}/src-tauri/macos-gateway/src/network.rs', ['silo-engine']),
+    (f'{APP}/src-tauri/macos-gateway/reserved-secret-names.json', ['silo-engine']),
+    (f'{APP}/guest-image/', ['silo-engine']),
+    (f'{APP}/patches/', ['silo-engine']),
+    ('reviewer-service/', ['silo-cli']),
+)
+# Files that frontend (Vitest) tests read from disk, so `vitest related` cannot see them.
+DESKTOP_TESTS = f'{APP}/src/desktop/*.test.ts'
+FRONTEND_READERS = (
+    (f'{APP}/src/test/contracts/', [f'{APP}/src/desktop/native-contracts.test.ts', f'{APP}/src/desktop/production-source.test.ts',
+                                   f'{APP}/src/contracts/bridge-error.test.ts']),
+    (f'{APP}/src-tauri/engine/src/bridge_error.rs', [f'{APP}/src/contracts/bridge-error.test.ts']),
+    (f'{APP}/src-tauri/engine/src/desktop_bridge_contract.json', [f'{APP}/src/desktop/linux-desktop-bridge.test.ts']),
+    (f'{APP}/src-tauri/engine/src/log_retention.rs', [f'{APP}/src/test/microsandbox-runtime.test.ts']),
+    (f'{APP}/src-tauri/macos-gateway/', [f'{APP}/src/test/microsandbox-runtime.test.ts']),
+    (f'{APP}/runtime-inputs.json', [f'{APP}/src/test/microsandbox-runtime.test.ts']),
+    (f'{APP}/patches/', [f'{APP}/src/test/microsandbox-runtime.test.ts']),
+    (f'{APP}/scripts/microsandbox-runtime.mjs', [f'{APP}/src/test/microsandbox-runtime.test.ts']),
+    (f'{APP}/scripts/git-runtime.mjs', [f'{APP}/src/test/git-runtime.test.ts']),
+    (f'{APP}/docs/', [f'{APP}/src/test/bundled-help.test.ts']),
+    # Native capability, permission and config files: every Tauri permission test reads them.
+    (f'{APP}/src-tauri/', [DESKTOP_TESTS, f'{APP}/src/test/native-permissions.test.ts',
+                           f'{APP}/src/test/git-runtime.test.ts', f'{APP}/src/contracts/bridge-error.test.ts']),
+)
+CSS_TESTS = [f'{APP}/src/test/text-selection.test.tsx', f'{APP}/src/test/transition-styles.test.ts',
+             f'{APP}/src/test/stylesheets.test.tsx', f'{APP}/src/desktop/status-panel-size.test.ts',
+             f'{APP}/src/components/reduce-motion.test.tsx', f'{APP}/src/components/theme-contrast.test.ts']
+AGENT_TESTS = 'tools/agent/tests'
+# Native configuration files every Tauri permission test reads.
+NATIVE_CONFIG = tuple(f'{APP}/src-tauri/{n}' for n in ('build.rs', 'src/main.rs', 'tauri.conf.json', 'tauri.dev.conf.json',
+                                                      'tauri.linux.conf.json', 'tauri.macos.conf.json', 'tauri.linux.package.conf.json'))
+NATIVE_CONFIG_DIRS = tuple(f'{APP}/src-tauri/{n}/' for n in ('capabilities', 'permissions'))
 # No Rust test reads these (ci-native-changes.py is deliberately stricter than we need here).
 NO_RUST = (f'{APP}/scripts/', '.github/', 'tools/', 'reviewer-service/')
 API_SOURCES = (f'{APP}/api/src/', f'{APP}/api/schema/', f'{APP}/api/examples/')
@@ -60,9 +99,9 @@ def default_base(root):
 
 
 def changed_files(root, base):
-    tracked = git('diff', '--name-only', '--no-renames', base, cwd=root).splitlines()
-    untracked = git('ls-files', '--others', '--exclude-standard', cwd=root).splitlines()
-    return sorted(set(tracked + untracked))
+    tracked = git('diff', '-z', '--name-only', '--no-renames', base, cwd=root).split('\0')
+    untracked = git('ls-files', '-z', '--others', '--exclude-standard', cwd=root).split('\0')
+    return sorted(set(tracked + untracked) - {''})
 
 
 def load_classifier(root):
@@ -119,6 +158,19 @@ def nearest_manifest(root, path):
     return None
 
 
+def nested_manifest(root, path, info):
+    """Directory of a Cargo.toml nearer to the file than its workspace member (a separate crate such
+    as src-tauri/macos-gateway), or None."""
+    members = {c['dir'] for c in info.values()}
+    for parent in Path(path).parents:
+        directory = str(parent)
+        if directory in members or directory == APP or not directory.startswith(APP):
+            return None
+        if (root / parent / 'Cargo.toml').exists():
+            return directory
+    return None
+
+
 def analyse(root, base):
     files = changed_files(root, base)
     info, rdeps = workspace(root)
@@ -132,34 +184,73 @@ def analyse(root, base):
         direct.update(names)
         why.append((path, reason))
 
+    scripts = root / APP / 'scripts'
+    all_script_tests = sorted(f'{APP}/scripts/{p.name}' for pattern in ('test_*.py', '*.test.mjs') for p in scripts.glob(pattern))
+
+    def reading_tests(path):
+        """Script tests whose source mentions the file's name (shared helpers, guest recipes)."""
+        name = Path(path).name
+        found = []
+        for test in all_script_tests:
+            if name in (root / test).read_text(errors='replace'):
+                found.append(test)
+        return found
+
+    def desktop_tests(patterns):
+        found = sorted({str(p.relative_to(root)) for pattern in patterns for p in root.glob(pattern)})
+        return found
+
     for path in files:
+        exists = (root / path).exists()
         is_rust = path.endswith(('.rs', 'Cargo.toml', 'build.rs'))
         if path in RUST_EVERYTHING:
             result['everything'] = True
             why.append((path, 'changes every crate: all Rust checks and tests'))
             continue
-        if path.startswith(API_SOURCES) and path not in API_GENERATED:
-            result['api_generators'] = True
-        elif path in API_GENERATED:
+        if path.startswith(API_SOURCES):
             result['api_generators'] = True
         if path.startswith(f'{APP}/scripts/'):
-            why.append((path, 'script: related script tests only'))
+            why.append((path, 'script: related script tests'))
         # Frontend.
         if path.startswith(f'{APP}/src/') and path.endswith(FRONTEND_EXTENSIONS):
-            result['frontend'].append(path)
-            why.append((path, 'frontend: typecheck, oxlint, vitest related'))
+            if exists:
+                result['frontend'].append(path)
+                why.append((path, 'frontend: typecheck, oxlint, vitest related'))
+            else:
+                result['frontend_all'] = True
+                why.append((path, 'deleted frontend file: full frontend run'))
         elif path in FRONTEND_CONFIG:
             result['frontend_all'] = True
             why.append((path, 'frontend configuration: typecheck, oxlint, full vitest run'))
+        if path.endswith('.css') and path.startswith(f'{APP}/'):
+            result['frontend'].extend(t for t in CSS_TESTS if (root / t).exists())
+            why.append((path, 'stylesheet: the tests that read CSS from disk'))
+        for prefix, tests in FRONTEND_READERS:
+            if path.startswith(prefix) and (prefix != f'{APP}/src-tauri/' or path in NATIVE_CONFIG or
+                                            path.startswith(NATIVE_CONFIG_DIRS)):
+                found = desktop_tests(tests)
+                result['frontend'].extend(found)
+                why.append((path, f'read by {len(found)} frontend test file(s)'))
+        # Workflow and agent tooling.
+        if path.startswith('.github/'):
+            result['script_tests'].extend(t for t in all_script_tests if '.github' in (root / t).read_text(errors='replace'))
+            why.append((path, 'workflow: the script tests that read .github'))
+        if path.startswith(AGENT_TESTS) or path.startswith('tools/agent/'):
+            result['script_tests'].extend(str(p.relative_to(root)) for p in sorted((root / AGENT_TESTS).glob('*.sh')))
+            why.append((path, 'agent tooling: tools/agent/tests'))
         # Rust.
-        reader = next((crates for prefix, crates in READ_BY_RUST if path.startswith(prefix)), None)
-        if reader:
-            seeded(path, reader, f'read by Rust tests of {", ".join(reader)}')
-            continue
+        readers = [crate for prefix, names in READ_BY_RUST + READ_ACROSS if path.startswith(prefix) for crate in names]
+        if readers:
+            seeded(path, readers, f'read by Rust code or tests of {", ".join(sorted(set(readers)))}')
         crate = owning_crate(path, info)
+        nested = nested_manifest(root, path, info) if path.startswith(f'{APP}/') else None
         if '/vendor/' in path:
             result['everything'] = True
             why.append((path, 'vendored dependency patched into the workspace: all Rust checks and tests'))
+        elif nested:
+            if nested not in result['other_manifests']:
+                result['other_manifests'].append(nested)
+            why.append((path, f'separate crate ({nested}): cargo check and test --manifest-path'))
         elif crate:
             seeded(path, [crate], f'file of crate {crate}')
         elif is_rust:
@@ -167,10 +258,12 @@ def analyse(root, base):
             if manifest:
                 if manifest not in result['other_manifests']:
                     result['other_manifests'].append(manifest)
-                why.append((path, f'crate outside the workspace ({manifest}): cargo check --manifest-path'))
+                why.append((path, f'crate outside the workspace ({manifest}): cargo check and test --manifest-path'))
             else:
                 result['everything'] = True
                 why.append((path, 'Rust file outside any crate: all Rust checks and tests'))
+        elif readers or path.startswith(('.github/', 'tools/agent/')):
+            pass
         elif path.startswith(NO_RUST):
             ignored.append(path)
         elif classifier.skippable(path):
@@ -178,15 +271,13 @@ def analyse(root, base):
         elif path not in {p for p, _ in why}:
             result['everything'] = True
             why.append((path, 'read by Rust tests per ci-native-changes.py but no crate known: all Rust tests'))
-    # Script tests, by naming convention.
-    scripts = root / APP / 'scripts'
+    # Script tests: by naming convention, then by tests that mention the file (also for deleted files).
     for path in files:
-        if not path.startswith(f'{APP}/scripts/') or not (root / path).exists():
+        if not path.startswith((f'{APP}/scripts/', f'{APP}/src-tauri/guest/', f'{APP}/runner/')):
             continue
         name = Path(path).name
-        if name.startswith('test_') and name.endswith('.py'):
-            candidate = name
-        elif name.endswith('.test.mjs'):
+        exists = (root / path).exists()
+        if name.startswith('test_') and name.endswith('.py') or name.endswith('.test.mjs'):
             candidate = name
         elif name.endswith('.py'):
             candidate = 'test_' + name[:-3].replace('-', '_') + '.py'
@@ -194,8 +285,18 @@ def analyse(root, base):
             candidate = name[:-4] + '.test.mjs'
         else:
             candidate = None
+        selected = []
         if candidate and (scripts / candidate).exists():
-            result['script_tests'].append(f'{APP}/scripts/{candidate}')
+            selected.append(f'{APP}/scripts/{candidate}')
+        if path.startswith(f'{APP}/scripts/') or path.endswith(('.py', '.sh', '.mjs')) or not exists:
+            selected += reading_tests(path)
+        if not selected and path.startswith(f'{APP}/scripts/') and (not exists or name.endswith(('.py', '.mjs', '.sh'))) \
+                and not name.startswith('test_') and not name.endswith('.test.mjs'):
+            # Unknown consumers (or a deleted file): broader is safer than nothing.
+            selected = all_script_tests if not exists else []
+            if selected:
+                why.append((path, 'deleted script: no test names it, so all script tests'))
+        result['script_tests'].extend(selected)
     if f'{APP}/runtime-inputs.json' in files or 'rust-toolchain.toml' in files:
         result['script_tests'].append(f'{APP}/scripts/test_rust_toolchain.py')
     result['script_tests'] = sorted(set(result['script_tests']))
@@ -207,6 +308,7 @@ def analyse(root, base):
     if not crates:
         result['filterset'] = ''
     result['frontend'] = sorted(set(result['frontend']))
+    result['other_manifests'] = sorted(result['other_manifests'])
     result['docs_only'] = bool(files) and not (crates or result['frontend'] or result['frontend_all']
                                                or result['script_tests'] or result['other_manifests'])
     result['changed'] = files
