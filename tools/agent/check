@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""Prove a change: run only the checks the diff calls for, print only failures and one verdict.
+
+  check [--base REF] [--quick]
+
+Steps, using `affected` to choose them (base: see `affected --help`):
+  1. rustfmt --check on the touched Rust files (the pinned toolchain from rust-toolchain.toml)
+  2. cargo check --tests -p <affected crates>
+  3. cargo nextest run -E <filterset> --no-fail-fast --profile check
+     (cargo test -p <crates> when cargo-nextest is not installed)
+  4. script tests the diff touches
+  5. frontend, only if frontend files changed: typecheck, oxlint on those files, vitest related
+--quick stops after cargo check and typecheck. The full log goes to
+app/SiloUI/target/agent-check/<time>.log. A run that already passed for the same tree, toolchain,
+affected set and mode is skipped ("already green"). Tests that fail and then pass on nextest's
+retry are recorded in docs/workflow/FLAKY.md. Exit code: 0 green, 1 a step failed.
+"""
+import argparse
+import datetime
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+APP = 'app/SiloUI'
+SYNTHETIC_GITHUB = {'SILO_GITHUB_APP_SLUG': 'silo-test', 'SILO_GITHUB_CLIENT_ID': 'test-client',
+                    'SILO_GITHUB_CLIENT_SECRET': 'test-secret'}
+NEXTEST_VERSION = '0.9.149'  # the version CI pins
+
+
+def run(command, cwd, env=None):
+    started = time.time()
+    try:
+        proc = subprocess.run(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True, errors='replace')
+        return proc.returncode, proc.stdout, time.time() - started
+    except FileNotFoundError as error:
+        return 127, f'{error}\n', time.time() - started
+
+
+def tree_hash(root):
+    """Hash of the working tree (tracked, staged, untracked, not ignored), without touching the index."""
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {**os.environ, 'GIT_INDEX_FILE': str(Path(tmp) / 'index')}
+        head = subprocess.run(['git', 'rev-parse', '--verify', '-q', 'HEAD'], cwd=root, capture_output=True, text=True)
+        if head.returncode == 0:
+            subprocess.run(['git', 'read-tree', 'HEAD'], cwd=root, env=env, check=True)
+        subprocess.run(['git', 'add', '-A'], cwd=root, env=env, check=True, capture_output=True)
+        return subprocess.run(['git', 'write-tree'], cwd=root, env=env, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+
+def excerpt(name, output, limit=60):
+    lines = output.splitlines()
+    if name == 'tests':
+        keep = [l for l in lines if any(k in l for k in ('FAIL', 'SIGABRT', 'SIGSEGV', 'TIMEOUT', 'panicked', 'error'))
+                or l.startswith(('failures:', '    ', 'test result'))]
+        lines = keep or lines
+    elif name == 'cargo check':
+        start = next((i for i, l in enumerate(lines) if l.startswith('error')), 0)
+        lines = lines[start:]
+    return '\n'.join(lines[:limit] if name == 'cargo check' else lines[-limit:])
+
+
+def record_flaky(root, junit, command):
+    """Append tests that failed and then passed (JUnit <flakyFailure>/<flakyError>) to FLAKY.md."""
+    if not junit.exists():
+        return []
+    flaky = []
+    for case in ET.parse(junit).getroot().iter('testcase'):
+        if case.find('flakyFailure') is not None or case.find('flakyError') is not None:
+            flaky.append(f"{case.get('classname')} {case.get('name')}")
+    if not flaky:
+        return []
+    path = root / 'docs/workflow/FLAKY.md'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text() if path.exists() else '# Flaky tests\n\n'
+    today = datetime.date.today().isoformat()
+    added = [t for t in flaky if f'`{t}`' not in existing]
+    if added:
+        with path.open('w') as out:
+            out.write(existing.rstrip('\n') + '\n')
+            for test in added:
+                out.write(f'- {today} `{test}` failed, then passed on retry (`{command}`)\n')
+    return flaky
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--base', help='diff against this ref (default: merge base with the integration branch)')
+    parser.add_argument('--quick', action='store_true', help='stop after cargo check / typecheck')
+    args = parser.parse_args()
+    root = Path(subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True,
+                               check=True).stdout.strip())
+    app = root / APP
+    affected_cmd = [str(Path(__file__).resolve().parent / 'affected'), '--json'] + (['--base', args.base] if args.base else [])
+    code, out, _ = run(affected_cmd, root)
+    if code:
+        print(f'check: RED — affected failed:\n{out.strip()}')
+        return 1
+    plan = json.loads(out)
+    crates, frontend = plan['crates'], plan['frontend']
+    run_frontend = bool(frontend) or plan['frontend_all']
+    if not (crates or plan['other_manifests'] or run_frontend or plan['script_tests']):
+        print('check: nothing to check — the diff touches no Rust crate, frontend file or script test')
+        return 0
+
+    toolchain = run(['rustc', '-vV'], root)[1]
+    toolchain_id = hashlib.sha256(toolchain.encode()).hexdigest()[:8]
+    version = next((l.split()[1] for l in toolchain.splitlines() if l.startswith('release:')), '?')
+    mode = 'quick' if args.quick else 'full'
+    tree = tree_hash(root)
+    key_text = json.dumps([tree, toolchain_id, plan['crates'], plan['filterset'], frontend, plan['frontend_all'],
+                           plan['script_tests'], plan['other_manifests']])
+    key = hashlib.sha256(key_text.encode()).hexdigest()[:24]
+    state = app / 'target/agent-check'
+    markers = state / 'green'
+    markers.mkdir(parents=True, exist_ok=True)
+    marker = markers / f'{key}.{mode}'
+    if marker.exists() or (args.quick and (markers / f'{key}.full').exists()):
+        print(f'check: already green — same tree {tree[:9]}, rustc {version}, {mode} — skipped')
+        return 0
+
+    env = {**os.environ, 'CARGO_TERM_COLOR': 'never', 'NO_COLOR': '1'}
+    if not (app / 'github-build.local.json').exists():
+        for name, value in SYNTHETIC_GITHUB.items():
+            env.setdefault(name, value)
+    log = state / f'{datetime.datetime.now():%Y%m%d-%H%M%S}.log'
+    notes, failed, steps = [], [], []
+    manifest = str(app / 'Cargo.toml')
+
+    def step(name, command, cwd=root):
+        code, output, seconds = run(command, cwd, env)
+        with log.open('a') as f:
+            f.write(f'$ {" ".join(command)}\n{output}\n[exit {code}, {seconds:.1f}s]\n\n')
+        steps.append(f'{name} {seconds:.0f}s')
+        if code:
+            failed.append(name)
+            print(f'--- {name} FAILED (exit {code}); command: {" ".join(command)}')
+            print(excerpt(name, output))
+        return code, output
+
+    # 1. rustfmt on touched Rust files.
+    rust_files = [f for f in plan['changed'] if f.endswith('.rs') and (root / f).exists()]
+    if rust_files:
+        step('fmt', ['rustfmt', '--check', '--edition', '2021'] + rust_files)
+        if 'fmt' in failed:
+            print('fix with: rustfmt --edition 2021 ' + ' '.join(rust_files))
+    # 2. cargo check.
+    if crates:
+        scope = ['--workspace'] if plan['everything'] else [a for c in crates for a in ('-p', c)]
+        step('cargo check', ['cargo', 'check', '--tests', '--locked', '--manifest-path', manifest] + scope)
+    for other in plan['other_manifests']:
+        step(f'cargo check {other}', ['cargo', 'check', '--tests', '--locked', '--manifest-path', f'{other}/Cargo.toml'])
+    # 5a. typecheck (frontend).
+    if run_frontend:
+        if not (app / 'node_modules').exists():
+            failed.append('frontend')
+            print(f'--- frontend FAILED: {APP}/node_modules is missing; run: npm --prefix {APP} ci')
+        else:
+            step('typecheck', ['npm', '--prefix', str(app), 'run', '--silent', 'typecheck'])
+    if args.quick:
+        return finish(failed, steps, log, root, marker, 'quick', crates, frontend, notes)
+    # 3. tests.
+    if crates and 'cargo check' not in failed:
+        junit = app / 'target/nextest/check/junit.xml'
+        junit.unlink(missing_ok=True)
+        has_nextest = run(['cargo', 'nextest', '--version'], root)[0] == 0
+        if has_nextest:
+            command = ['cargo', 'nextest', 'run', '--manifest-path', manifest, '--locked', '--profile', 'check',
+                       '--no-fail-fast', '-E', plan['filterset']]
+        else:
+            notes.append(f'cargo-nextest is not installed: ran cargo test (install: cargo install cargo-nextest --locked --version {NEXTEST_VERSION})')
+            command = ['cargo', 'test', '--manifest-path', manifest, '--locked', '--no-fail-fast'] + \
+                [a for c in crates for a in ('-p', c)]
+        step('tests', command)
+        if has_nextest:
+            flaky = record_flaky(root, junit, ' '.join(command))
+            if flaky:
+                notes.append(f'{len(flaky)} flaky test(s) failed then passed on retry, recorded in docs/workflow/FLAKY.md: '
+                             + ', '.join(flaky))
+    # 4. script tests.
+    for test in plan['script_tests']:
+        command = ['node', '--test', test] if test.endswith('.mjs') else \
+            [sys.executable, '-m', 'unittest', '-q', Path(test).name]
+        code, output, seconds = run(command, root if test.endswith('.mjs') else app / 'scripts', env)
+        with log.open('a') as f:
+            f.write(f'$ {" ".join(command)}\n{output}\n[exit {code}, {seconds:.1f}s]\n\n')
+        steps.append(f'{Path(test).name} {seconds:.0f}s')
+        if code:
+            failed.append(Path(test).name)
+            print(f'--- script test {test} FAILED\n' + '\n'.join(output.splitlines()[-40:]))
+    # 5b. oxlint and vitest.
+    if run_frontend and (app / 'node_modules').exists():
+        rel = [str(Path(f).relative_to(APP)) for f in frontend]
+        lint = ['npm', '--prefix', str(app), 'run', '--silent', 'lint'] + (['--'] + rel if rel and not plan['frontend_all'] else [])
+        step('oxlint', lint)
+        if plan['frontend_all']:
+            step('vitest', ['npm', '--prefix', str(app), 'test'])
+        elif rel:
+            step('vitest', ['npx', 'vitest', 'related', '--run'] + rel, cwd=app)
+    return finish(failed, steps, log, root, marker, mode, crates, frontend, notes)
+
+
+def finish(failed, steps, log, root, marker, mode, crates, frontend, notes):
+    for note in notes:
+        print(f'note: {note}')
+    rel_log = log.relative_to(root) if log.exists() else None
+    scope = f'{len(crates)} crate(s), {len(frontend)} frontend file(s)'
+    timing = ', '.join(steps)
+    if failed:
+        print(f'check: RED ({mode}) — failed: {", ".join(failed)} · {scope} · {timing} · log {rel_log}')
+        return 1
+    marker.touch()
+    print(f'check: GREEN ({mode}) — {scope} · {timing} · log {rel_log}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
