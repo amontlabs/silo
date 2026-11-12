@@ -48,6 +48,7 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 # The SSH server of container computers (`containers/ssh.rs`). Apache-2.0. ed25519 and ECDSA keys only: the
 # `rsa` feature would bring the `rsa` crate, which has an unfixed timing side channel (RUSTSEC-2023-0071).
 russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
+psl = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Not the full public suffix list: the common names under which unrelated people get their own hosts. A `*.` pattern over one of these (or over a bare top-level name) is refused, because it would allow every host under it.",
+  "note": "Names under which unrelated people get their own hosts, refused for a `*.` pattern in addition to the Public Suffix List the engine compiles in (the `psl` crate). The user interface uses this list for an early answer; the engine decides.",
   "suffixes": [
     "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk", "net.uk", "sch.uk",
     "com.au", "net.au", "org.au", "edu.au", "gov.au", "id.au",

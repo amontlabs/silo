@@ -29,6 +29,33 @@ and published endpoints before reporting success, so a concurrent change cannot
 publish an old reachable endpoint. Work is bounded and computer reads run in batches
 of three. No extra Silo proxy or database is introduced.
 
+## Public suffix list for allowlist wildcards
+
+A `*.` host in a network policy is refused when its base is a public suffix, because the
+rule would allow every host anyone registers under it (`*.duckdns.org`, `*.github.io`). The
+engine decides this with the Public Suffix List (ICANN and private sections) from the `psl`
+crate, which compiles Mozilla's list into the build. The bundled `public_suffixes.json` stays
+as an addition for shared-hosting names the list does not carry (`amazonaws.com`,
+`wordpress.com` and others Silo already refused) and as the early answer in the settings view.
+A base is also refused when every name directly under it is a suffix (`*.sch.uk`, which the
+list covers with a `*.` rule).
+
+Compared on 2026-11-12:
+
+| Crate | License | Last release | The list |
+| --- | --- | --- | --- |
+| `psl` 2.1.251 | MIT or Apache-2.0 | published most days, following the list | compiled in (no fetch, no `std`, no unsafe code); ICANN and private |
+| `publicsuffix` 2.3.0 | MIT or Apache-2.0 | 2024-11 | parses a list text that Silo would have to bundle or download and refresh |
+| `addr` 0.15.6 | MIT or Apache-2.0 | 2022-08 | a wrapper over an old `psl` |
+
+`psl` was chosen: maintained, permissive, nothing to fetch at run time, two small crates
+(`psl`, `psl-types`) with no further dependencies. Its cost is that the list is as old as the
+locked version, so the list is refreshed by raising `psl` in `Cargo.lock` (`cargo update -p psl`
+with the lock file otherwise unchanged), and a Silo release carries the list it was built with.
+Adding it changed `app/SiloUI/Cargo.lock` by `psl`, `psl-types` and the engine's dependency
+entry only (a plain `cargo add` also rewrote unrelated `windows` entries, which were left out).
+`--locked` builds work offline once the crates are in the Cargo cache like any other dependency.
+
 ## UI
 
 Network retains cached rows during five-second refreshes and uses skeletons for

@@ -121,16 +121,19 @@ the computer ([`network_policy/`](../app/SiloUI/src-tauri/engine/src/network_pol
 
 Host patterns are lowercase DNS names of at least two labels, or `*.` and such a name (which also
 covers the name itself); addresses, ports, bare top-level names, names that stay on the device and
-a `*.` pattern over a public suffix (`*.co.uk`, `*.github.io`) are refused. The suffixes come from
-a small fixed list kept next to the presets
+a `*.` pattern over a public suffix (`*.co.uk`, `*.github.io`, `*.duckdns.org`) are refused. The
+suffixes are those of the Public Suffix List, ICANN and private, compiled into the engine from the
+`psl` crate, plus a few shared-hosting names Silo has always refused that the list does not carry
 ([`public_suffixes.json`](../app/SiloUI/src-tauri/engine/src/network_policy/public_suffixes.json));
-it holds the common multi-label suffixes and shared-hosting names, not the full public suffix
-list, so a wildcard over a suffix that is not on it is accepted. Presets (npm, PyPI, crates.io,
+see [the choice](SiloUI-NETWORK-PLAN.md#public-suffix-list-for-allowlist-wildcards). A policy saved
+before a name was refused keeps working until it is saved again. Presets (npm, PyPI, crates.io,
 Ubuntu, Homebrew, GitHub, Anthropic, OpenAI) expand to host lists from one data file in the engine.
 Each preset has a version and a policy stores the version it was approved at: when an update of
 Silo adds hosts to a preset, a computer keeps the list it was approved with until you accept the
 update (`network.policy.get` lists it as a preset update; setting the policy again with the same
-presets accepts it). The data file keeps the list of every earlier version of a preset for as long
+presets accepts it). The hosts that GitHub access adds are pinned the same way, under their own
+entry that follows the GitHub preset's version; a policy saved before that entry existed holds the
+first version, which is the list GitHub access has always added, so nothing changes when it loads. The data file keeps the list of every earlier version of a preset for as long
 as a saved policy may name it; a version Silo does not know allows nothing. A policy is read from
 one file; when it cannot be read (damaged, or written by a newer Silo) a computer does not start,
 is not created, and its gateway gets no way out, and the file is left alone. A computer with no
@@ -407,6 +410,13 @@ file transfers use `sftp` as the working account with sizes bounded on the host
 ([`transfer.rs`](../app/SiloUI/src-tauri/engine/src/transfer.rs)). The two read-only shares are
 served by the `msb` process on the Mac (virtiofs), so that process parses the guest's filesystem
 requests; read-only is enforced on the host side.
+
+The commands the engine runs in a guest and reads back (checks, file helpers, a bounded run) are
+held in memory on the host with a limit on both standard output and standard error
+([`process.rs`](../app/SiloUI/src-tauri/engine/src/guest/process.rs)): a command that prints past
+its limit is stopped and the call fails with "printed too much" (error output: 64 KiB for helper
+commands, one response's worth for a bounded run). Nothing the guest prints is written to the
+device's disk by the engine.
 
 Imported Linux computer archives are parsed on the Mac: a zstd-compressed tar is streamed through
 caps on entry types, paths, entry count and size

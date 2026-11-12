@@ -422,9 +422,9 @@ struct SuffixFile {
     suffixes: Vec<String>,
 }
 
-/// The common multi-label public suffixes from `public_suffixes.json`: not the full public
-/// suffix list.
-fn public_suffixes() -> &'static BTreeSet<String> {
+/// The names `public_suffixes.json` adds to the Public Suffix List: shared hosting Silo has
+/// always refused a `*.` pattern over, which the list does not carry as suffixes.
+fn extra_suffixes() -> &'static BTreeSet<String> {
     static SUFFIXES: OnceLock<BTreeSet<String>> = OnceLock::new();
     SUFFIXES.get_or_init(|| {
         let file: SuffixFile = serde_json::from_str(include_str!("public_suffixes.json"))
@@ -434,9 +434,16 @@ fn public_suffixes() -> &'static BTreeSet<String> {
     })
 }
 
-/// Whether `name` is one of the listed public suffixes.
+/// Whether a `*.` pattern over `name` would cover separately owned hosts: `name` is a public
+/// suffix on the Public Suffix List, ICANN or private (`co.uk`, `github.io`, `duckdns.org`), or
+/// every name directly under it is one (`sch.uk`, `compute.amazonaws.com`, which the list covers
+/// with a `*.` rule), or it is one of the [`extra_suffixes`]. The list is compiled into the
+/// build (`psl`). A name below a suffix, even one under a top-level name the list does not
+/// know, is not one.
 fn is_public_suffix(name: &str) -> bool {
-    public_suffixes().contains(name)
+    let name = name.to_ascii_lowercase();
+    let on_the_list = |name: &str| psl::domain(name.as_bytes()).is_none();
+    on_the_list(&name) || on_the_list(&format!("x.{name}")) || extra_suffixes().contains(&name)
 }
 
 /// Whether `host` is a `*.` pattern a network rule refuses for being too wide, whatever else is

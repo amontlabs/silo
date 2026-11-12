@@ -880,3 +880,51 @@ fn the_checked_in_github_list_is_what_an_unpinned_grant_has_always_added() {
     let current: BTreeSet<Allowed> = github.hosts.iter().cloned().collect();
     assert_eq!(unpinned, current, "an unpinned grant would widen or narrow on load");
 }
+
+#[test]
+fn a_wildcard_over_any_public_suffix_is_refused_and_ordinary_domains_are_not() {
+    for shared in [
+        "*.duckdns.org",
+        "*.blogspot.com",
+        "*.github.io",
+        "*.s3.amazonaws.com",
+        "*.herokuapp.com",
+        "*.co.uk",
+        "*.pages.dev",
+        "*.githubusercontent.com",
+        "*.ck",
+        "*.compute.amazonaws.com",
+        "*.sch.uk",
+        "*.kobe.jp",
+    ] {
+        assert!(validate_host(shared).is_err(), "{shared}");
+        assert!(is_too_wide_wildcard(shared), "{shared}");
+        assert!(validate(&allowlist(&[shared], &[])).is_err(), "{shared}");
+    }
+    // The same names as exact hosts, and names under them, are fine.
+    for fine in [
+        "duckdns.org",
+        "example.duckdns.org",
+        "*.example.duckdns.org",
+        "*.example.co.uk",
+        "*.example.com",
+        "*.archive.ubuntu.com",
+        "*.www.ck",
+        "*.city.kobe.jp",
+        "*.example.unknowntld",
+    ] {
+        assert!(validate_host(fine).is_ok(), "{fine}");
+        assert!(!is_too_wide_wildcard(fine), "{fine}");
+    }
+}
+
+#[test]
+fn the_names_silo_always_refused_stay_refused_whether_or_not_the_list_carries_them() {
+    let file: Value = serde_json::from_str(include_str!("public_suffixes.json")).unwrap();
+    for suffix in file["suffixes"].as_array().unwrap() {
+        let suffix = suffix.as_str().unwrap();
+        assert!(validate_host(&format!("*.{suffix}")).is_err(), "{suffix}");
+        assert!(is_too_wide_wildcard(&format!("*.{suffix}")), "{suffix}");
+    }
+    assert!(validate_host("*.amazonaws.com").is_err());
+}
