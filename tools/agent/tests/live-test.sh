@@ -24,7 +24,7 @@ ok "failing step exits 1" $([ $rc = 1 ] && echo 0 || echo 1)
 ok "verdict fail names step two" $([ "$(verdict $S verdict)/$(verdict $S step)" = fail/two ] && echo 0 || echo 1)
 ok "log path in verdict exists" $([ -f "$(verdict $S log)" ] && echo 0 || echo 1)
 ok "step one stamped, two not" $([ -e $S/steps/one.ok ] && [ ! -e $S/steps/two.ok ] && echo 0 || echo 1)
-ok "computers file has e2e-fake-1" $([ "$(cat $S/computers)" = e2e-fake-1 ] && echo 0 || echo 1)
+ok "computers file has e2e-fake-<runid>-1" $(grep -Eq '^e2e-fake-[0-9a-f]{6}-1$' $S/computers && echo 0 || echo 1)
 ok "cleanup ran" $([ "$(cnt $S/cleaned)" = 1 ] && echo 0 || echo 1)
 rm $S/break-two
 $LIVE fake --state $S >$W/out 2>&1; rc=$?
@@ -77,9 +77,91 @@ H=$(live_short_home); ok "short home is short and recorded" $([ ${#H} -lt 30 ] &
 rmdir "$H" 2>/dev/null
 ( live_check_sock_path "$H/.silo-dev/engine.sock" ) 2>/dev/null; ok "short socket path accepted" $?
 ( live_check_sock_path "$(printf 'a%.0s' $(seq 1 110))" ) >/dev/null 2>&1; ok "long socket path refused" $([ $? != 0 ] && echo 0 || echo 1)
-ok "computer names follow e2e-<check>-<n>" $([ "$(live_computer)/$(live_computer)" = e2e-my-check-1/e2e-my-check-2 ] && echo 0 || echo 1)
+RID=$(live_runid)
+ok "computer names follow e2e-<check>-<runid>-<n>" $([ "$(live_computer)/$(live_computer)" = e2e-my-check-$RID-1/e2e-my-check-$RID-2 ] && echo 0 || echo 1)
+STATE=$W/lib2; mkdir -p $STATE; ok "another run gets other computer names" $([ "$(live_computer)" != e2e-my-check-$RID-1 ] && echo 0 || echo 1)
+STATE=$W/lib
 mkdir $W/img; live_link $W/img $W/lnk; live_link $W/img $W/lnk; ok "live_link idempotent" $([ "$(readlink $W/lnk)" = $W/img ] && echo 0 || echo 1)
 ( live_link $W/nonexist $W/lnk2 ) >/dev/null 2>&1; ok "live_link refuses a missing target" $([ $? != 0 ] && echo 0 || echo 1)
 ( live_assert_dev_sock "$HOME/.silo/engine.sock" ) >/dev/null 2>&1; ok "production socket refused" $([ $? != 0 ] && echo 0 || echo 1)
 ( live_assert_dev_sock "$HOME/.silo-dev/engine.sock" ) >/dev/null 2>&1; ok "dev socket accepted" $?
+# canonical paths: a fake HOME, so nothing real is looked at
+FH=$W/home; mkdir -p $FH/.silo $FH/.silo-dev $W/shortbase; ln -s $FH/.silo $W/shortbase/sl-evil; ln -s $FH/.silo $FH/.silo-dev/viaink
+chk() { ( HOME=$FH LIVE_SHORT_BASE=$W/shortbase live_assert_dev_sock "$1" ) >/dev/null 2>&1; }
+chk "$FH/.silo-dev/../.silo/engine.sock"; ok "dotdot into ~/.silo refused" $([ $? != 0 ] && echo 0 || echo 1)
+chk "$W/shortbase/sl-evil/engine.sock"; ok "symlink under sl-* into ~/.silo refused" $([ $? != 0 ] && echo 0 || echo 1)
+chk "$FH/.silo-dev/viaink/engine.sock"; ok "symlink under ~/.silo-dev into ~/.silo refused" $([ $? != 0 ] && echo 0 || echo 1)
+chk "$FH/elsewhere/engine.sock"; ok "path outside the Dev locations refused" $([ $? != 0 ] && echo 0 || echo 1)
+chk "$FH/.silo-dev/engine.sock"; ok "plain Dev socket accepted under a fake HOME" $?
+mkdir -p "$W/Silo.app/Contents/MacOS"; touch "$W/Silo.app/Contents/MacOS/silod"; ln -s "$W/Silo.app/Contents/MacOS/silod" $W/linksilod
+( live_assert_dev_engine $W/linksilod ) >/dev/null 2>&1; ok "engine binary reached through a link into Silo.app refused" $([ $? != 0 ] && echo 0 || echo 1)
+# engine ownership: only the process this run launched counts
+FS=$W/fake-silod; cp /bin/sleep $FS 2>/dev/null
+bash -c 'exec -a "$0 --agent" sleep 30' $FS & MP=$!; bash -c 'exec -a "$0 --agent" sleep 30' $FS & OP=$!
+sleep 0.5; live_engine_record $MP
+ok "only the recorded engine is ours" $([ "$(live_our_engine $FS)" = $MP ] && echo 0 || echo 1)
+live_engine_record $$; ok "a recorded pid with another command is not ours" $([ -z "$(live_our_engine $FS)" ] && echo 0 || echo 1)
+kill $MP $OP 2>/dev/null; wait $MP $OP 2>/dev/null
+live_engine_record $MP; ok "a recorded pid that is gone is not ours" $([ -z "$(live_our_engine $FS)" ] && echo 0 || echo 1)
+# stamps carry a fingerprint
+S=$W/s8; mkdir -p $S
+$LIVE fake --state $S >/dev/null 2>&1; echo "# changed" >>$LIVE_D/fake.sh; $LIVE fake --state $S >/dev/null 2>&1
+ok "a changed check file drops the stamps" $([ "$(cnt $S/count-one)" = 2 ] && echo 0 || echo 1)
+$LIVE fake --state $S >/dev/null 2>&1; ok "unchanged inputs keep the stamps" $([ "$(cnt $S/count-one)" = 2 ] && echo 0 || echo 1)
+cat >"$LIVE_D/fp.sh" <<'C'
+STEPS=(a)
+step_a() { echo ran >>"$STATE/count-a"; }
+fingerprint_extra() { cat "$STATE/../engine-id" 2>/dev/null; }
+C
+S=$W/s9; mkdir -p $S; echo one >$W/engine-id
+$LIVE fp --state $S >/dev/null 2>&1; $LIVE fp --state $S >/dev/null 2>&1; echo two >$W/engine-id; $LIVE fp --state $S >/dev/null 2>&1
+ok "a different engine identity drops the stamps" $([ "$(cnt $S/count-a)" = 2 ] && echo 0 || echo 1)
+
+# cleanup that destroys the computers drops the stamps; a failing cleanup fails a pass
+cat >"$LIVE_D/wipe.sh" <<'C'
+STEPS=(make)
+step_make() { echo ran >>"$STATE/count-make"; live_computer >/dev/null; }
+cleanup() { for c in $(live_computers); do live_forget_computer "$c"; done; [ ! -e "$STATE/badclean" ]; }
+C
+S=$W/s10; mkdir -p $S
+$LIVE wipe --state $S >/dev/null 2>&1; $LIVE wipe --state $S >/dev/null 2>&1
+ok "destroyed resources drop the step stamp" $([ "$(cnt $S/count-make)" = 2 ] && [ ! -s $S/computers ] && echo 0 || echo 1)
+touch $S/badclean; $LIVE wipe --state $S >/dev/null 2>&1; rc=$?
+ok "cleanup failure turns pass into fail" $([ $rc = 1 ] && [ "$(verdict $S verdict)" = fail ] && grep -q 'cleanup failed' $S/VERDICT && echo 0 || echo 1)
+
+# lock
+S=$W/s11; mkdir -p $S; touch $S/hang-two
+$LIVE fake --state $S >$W/out 2>&1 & P=$!
+for _ in $(seq 1 50); do [ "$(cat $S/current 2>/dev/null)" = two ] && break; sleep 0.1; done
+$LIVE fake --state $S >$W/out2 2>&1; rc=$?
+ok "a second runner on the same state is refused" $([ $rc = 2 ] && grep -q 'already active' $W/out2 && [ ! -e $S/VERDICT ] && echo 0 || echo 1)
+kill -TERM $P; wait $P 2>/dev/null; rm -f $S/hang-two
+ok "the lock is released after the run" $([ ! -d $S/lock ] && echo 0 || echo 1)
+mkdir -p $S/lock; echo 999999 >$S/lock/pid
+$LIVE fake --state $S >/dev/null 2>&1; ok "a lock of a dead runner is taken over" $([ "$(verdict $S verdict)" = pass ] && echo 0 || echo 1)
+# parallel starts: exactly one runs
+S=$W/s12; mkdir -p $S; touch $S/hang-two; rm -f $W/r.*
+for i in 1 2 3 4; do ( $LIVE fake --state $S >/dev/null 2>&1; echo $? >$W/r.$i ) & done
+sleep 3; kill -TERM "$(cat $S/lock/pid)"; wait
+ok "of four parallel runners one runs and three are refused" $([ "$(cat $W/r.* | grep -c '^2$')" = 3 ] && echo 0 || echo 1)
+
+# wait ignores a verdict of an earlier run
+S=$W/s13; mkdir -p $S/lock; sleep 30 & SP=$!
+printf 'verdict: pass\nrun: old\n' >$S/VERDICT; echo new >$S/run; echo $SP >$S/lock/pid
+$LIVE wait $S --timeout 2 >$W/wout 2>&1; rc=$?
+ok "wait does not return a verdict of an earlier run" $([ $rc = 4 ] && echo 0 || echo 1)
+printf 'verdict: pass\nrun: new\n' >$S/VERDICT; $LIVE wait $S --timeout 5 >/dev/null 2>&1
+ok "wait returns the verdict of the current run" $([ $? = 0 ] && echo 0 || echo 1); kill $SP
+
+# interrupt stops what the step started before cleanup
+cat >"$LIVE_D/kids.sh" <<'C'
+STEPS=(go)
+step_go() { { sleep 2; touch "$STATE/late"; } & sleep 30; }
+cleanup() { [ ! -e "$STATE/late" ] && touch "$STATE/clean-before-late"; }
+C
+S=$W/s14; mkdir -p $S
+$LIVE kids --state $S >$W/out 2>&1 & P=$!
+for _ in $(seq 1 50); do [ "$(cat $S/current 2>/dev/null)" = go ] && break; sleep 0.1; done
+sleep 0.5; kill -TERM $P; wait $P; sleep 3
+ok "interrupt kills the step's children before cleanup" $([ ! -e $S/late ] && [ -e $S/clean-before-late ] && echo 0 || echo 1)
 echo "$N tests, $BAD failed"; [ $BAD = 0 ]

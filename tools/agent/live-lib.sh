@@ -48,35 +48,65 @@ live_link() {
   else mkdir -p "$(dirname "$link")" && ln -s "$target" "$link"; fi
 }
 
+# live_canon <path>: absolute path with symlinks and .. resolved (the path need not exist).
+live_canon() { python3 -I -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+# live_fileid <file>: size and mtime of the resolved file (changes when a binary is rebuilt).
+live_fileid() { python3 -I -c 'import os,sys; s=os.stat(sys.argv[1]); print(s.st_size, s.st_mtime_ns)' "$1" 2>/dev/null || echo missing; }
+
 # Engine identity: only the Dev engine of the bundle under test is ever used.
 live_dev_sock() { echo "${DEV_SOCK:-$HOME/.silo-dev/engine.sock}"; }
+# Refuses anything that resolves under ~/.silo or inside a production bundle.
+live_is_production() {
+  local c h; c=$(live_canon "$1"); h=$(live_canon "$HOME")
+  case "$c" in "$h/.silo"|"$h/.silo/"*|*/org.silo.app|*/org.silo.app/*|*/Silo.app/*|/Applications/Silo*) return 0;; esac
+  return 1
+}
+# live_assert_dev_engine <path>...: binaries of the engine under test must not be the production ones.
+live_assert_dev_engine() {
+  local p; for p in "$@"; do live_is_production "$p" && live_die "refusing a production engine binary: $p ($(live_canon "$p"))"; done; return 0
+}
 live_assert_dev_sock() {
-  case "$1" in
-    "$HOME/.silo/"*|*/org.silo.app/*|*/Silo.app/*) live_die "refusing the production engine path: $1" ;;
-  esac
-  case "$1" in *.silo-dev*|"$STATE"/*|/tmp/sl-*) ;; *) live_die "not a Dev engine path: $1" ;; esac
+  live_is_production "$1" && live_die "refusing the production engine path: $1 ($(live_canon "$1"))"
+  local c h st sb; c=$(live_canon "$1"); h=$(live_canon "$HOME"); st=$(live_canon "$STATE"); sb=$(live_canon "${LIVE_SHORT_BASE:-/tmp}")
+  case "$c" in "$h/.silo-dev/"*|"$st/"*|"$sb/sl-"*) ;; *) live_die "not a Dev engine path: $1 ($c)" ;; esac
 }
 # live_foreign_engines <silod>: pids of `silod --agent` processes that are not <silod> (never touched).
 live_foreign_engines() {
   ps -axo pid=,command= | awk -v mine="$1 --agent" 'index($0, "silod --agent") && !index($0, mine) {print $1}'
 }
-# live_our_engine <silod>: pid of the engine started from <silod>, if any.
-live_our_engine() { pgrep -f "^$1 --agent" | head -1; }
+# The only engine a check may stop or kill is one it launched: record its pid right after launching.
+live_engine_record() { echo "$1" >"$STATE/engine.pid"; }
+# live_our_engine <silod>: pid of the engine this run launched, if it is still that process.
+live_our_engine() {
+  local pid cmd; pid=$(cat "$STATE/engine.pid" 2>/dev/null); [ -n "$pid" ] || return 0
+  cmd=$(ps -o command= -p "$pid" 2>/dev/null)
+  case "$cmd" in "$1 --agent"*) echo "$pid";; esac
+}
 
-# Throwaway computers: e2e-<check>-<n>, one per line in $STATE/computers (read by `clean`).
+# Short id of this run's resources, kept with the stamps (dropped when they are).
+live_runid() {
+  [ -s "$STATE/runid" ] || { mkdir -p "$STATE"; LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 6 >"$STATE/runid"; }
+  cat "$STATE/runid"
+}
+# Throwaway computers: e2e-<check>-<runid>-<n>, one per line in $STATE/computers (read by `clean`).
+live_computer_base() { echo "e2e-$(printf %s "$CHECK" | tr -c 'a-z0-9\n' '-' | sed 's/-*$//')-$(live_runid)"; }
 live_computer() {
-  local base="e2e-$(printf %s "$CHECK" | tr -c 'a-z0-9\n' '-' | sed 's/-*$//')" n=1
+  local base n=1; base=$(live_computer_base)
   touch "$STATE/computers"
   while grep -qx "$base-$n" "$STATE/computers"; do n=$((n+1)); done
   echo "$base-$n" | tee -a "$STATE/computers"
 }
-# live_computer_named <suffix>: e2e-<check>-<suffix>, recorded once.
+# live_computer_named <suffix>: e2e-<check>-<runid>-<suffix>, recorded once (when first used).
 live_computer_named() {
-  local name="e2e-$(printf %s "$CHECK" | tr -c 'a-z0-9\n' '-' | sed 's/-*$//')-$1"
+  local name; name="$(live_computer_base)-$1"
   touch "$STATE/computers"; grep -qx "$name" "$STATE/computers" || echo "$name" >>"$STATE/computers"
   echo "$name"
 }
 live_computers() { cat "$STATE/computers" 2>/dev/null; }
+# live_forget_computer <name>: call from cleanup() once the computer is really gone.
+live_forget_computer() {
+  grep -vxF -- "$1" "$STATE/computers" >"$STATE/computers.tmp" 2>/dev/null; mv "$STATE/computers.tmp" "$STATE/computers"
+}
 
 # Linux machine: reachable in 3 s or the run is "skipped: offline".
 LIVE_LINUX_HOST=${LIVE_LINUX_HOST:-10.77.77.2}
