@@ -2,6 +2,7 @@
 """Clean up a finished board item. Dry run unless --yes.
 
   clean [--file F] [--into BRANCH] [--yes] <item>
+  clean [--file F] [--into BRANCH] [--yes] --merged
 
 Refuses while an unmerged item depends on <item> (or while <item> is not merged/cleaned).
 Otherwise: removes its worktree (`git worktree remove`, then prune), deletes its branch only if merged
@@ -16,7 +17,20 @@ Computers: clean never stops or deletes a computer (it cannot tell which engine 
 A live check stops what it started in its own cleanup(); if a `computers` file under the item's
 temp data still lists computers, clean prints them and refuses until they are gone or
 --leave-computers is given (the list is then removed with the rest).
-The board file is --file, else $BOARD; integration branch --into, else $BOARD_INTEGRATION, else main.
+The dry run reports exactly what the real run does (a branch checked out in the worktree it is about
+to remove is reported as deleted, and a worktree with local changes as a refusal).
+
+--merged (no item): every worktree of the repository other than the main checkout, the integration
+checkout and the `<integration checkout>.suite` worktree whose branch is merged into the integration
+branch or main, has local changes of none (tracked or untracked) and is not locked, is removed and its
+branch deleted (compare-and-delete). Detached worktrees, dirty ones, unmerged ones and branches that have
+no commit of their own yet (a child that just started) are listed and kept; so is a merged branch an
+unmerged board item still depends on (`restack` needs it). Board items of removed branches that are
+`merged` become `cleaned`. Reports the space freed.
+
+The board file is --file, else $BOARD, else $SILO_BUILD_STATE/board.tsv, else `board.tsv` in
+`<integration checkout>.state`; integration branch --into, else $BOARD_INTEGRATION, else the branch
+checked out in the repository's main worktree (see `board --help`).
 """
 import argparse, importlib.machinery, importlib.util, os, shutil, subprocess, sys
 
@@ -47,6 +61,31 @@ def human(n):
         n /= 1024
 
 
+def blocked(wt):
+    """Why `git worktree remove` would refuse (or lose work in) this worktree, else ''."""
+    st = board.git("status", "--porcelain", cwd=wt)
+    if st.returncode:
+        return "cannot be inspected: " + st.stderr.strip()
+    if st.stdout.strip():
+        return "has local changes"
+    return ""
+
+
+def locked_paths():
+    out = set()
+    for rec in board.git("worktree", "list", "--porcelain", "-z", check=True).stdout.split("\0\0"):
+        fields = rec.split("\0")
+        if any(f == "locked" or f.startswith("locked ") for f in fields):
+            out.add(os.path.realpath(fields[0][9:]))
+    return out
+
+
+def fresh(br):
+    """True when the branch has no commit of its own: its reflog holds only its creation."""
+    log = board.git("reflog", "show", "--format=%gs", "refs/heads/" + br).stdout.splitlines()
+    return len(log) == 1 and log[0].startswith("branch: Created from")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--file")
@@ -54,11 +93,15 @@ def main():
     ap.add_argument("--yes", action="store_true", help="act (default is a dry run)")
     ap.add_argument("--leave-computers", action="store_true",
                     help="clean even though a live state still lists computers")
-    ap.add_argument("item")
+    ap.add_argument("--merged", action="store_true",
+                    help="clean every merged, clean worktree of the repository (no item)")
+    ap.add_argument("item", nargs="?")
     args = ap.parse_args()
+    if bool(args.item) == args.merged:
+        ap.error("give an item, or --merged without one")
     path = board.path_of(args)
     with board.locked(path):
-        run(args, path)
+        (run_merged if args.merged else run)(args, path)
 
 
 def run(args, path):
@@ -124,25 +167,26 @@ def run(args, path):
         real = os.path.realpath(wt)
         if real in protected or br == into:
             board.die("refusing: %s is the main or integration checkout" % wt)
+        why = blocked(wt)
+        if why:
+            board.die("refusing: worktree %s %s" % (wt, why))
         freed += size(real)
         say("remove worktree %s (%s)" % (wt, human(size(real))))
         if act:
             p = board.git("worktree", "remove", wt)
             if p.returncode:
-                board.die("worktree remove failed (uncommitted work?): " + p.stderr.strip())
+                board.die("worktree remove failed: " + p.stderr.strip())
             board.git("worktree", "prune")
-        wt = ""
     elif wt:
         say("worktree %s already gone" % wt)
         if act:
             board.git("worktree", "prune")
+    wt = ""  # from here on the branch is not checked out anywhere (a dry run says what the real run will do)
 
     # 3. branch, only if merged into the integration branch; compare-and-delete on the checked sha
     sha = board.git("rev-parse", "--verify", "-q", "refs/heads/" + br).stdout.strip()
     if sha:
-        if wt or (br in wts and os.path.exists(wts[br])):
-            say("keep branch %s: checked out in %s" % (br, wts[br]))
-        elif board.git("merge-base", "--is-ancestor", sha, into).returncode == 0:
+        if board.git("merge-base", "--is-ancestor", sha, into).returncode == 0:
             say("delete branch %s (merged into %s)" % (br, into))
             if act:
                 p = board.git("update-ref", "-d", "refs/heads/" + br, sha)
@@ -177,6 +221,64 @@ def run(args, path):
         r["state"] = "cleaned"
         board.save(path, rows)
     say("freed %s (%d bytes)" % (human(freed), freed))
+
+
+def run_merged(args, path):
+    into = board.integration(args)
+    act = args.yes
+    say = (lambda m: print(("" if act else "[dry-run] ") + m))
+    wt_list = board.worktree_list()
+    protected = {os.path.realpath(wt_list[0][0]), os.path.realpath(board.integration_checkout(args))}
+    protected.add(os.path.realpath(board.integration_checkout(args) + ".suite"))
+    locked = locked_paths()
+    targets = [t for t in dict.fromkeys([into, "main"])
+               if board.git("rev-parse", "--verify", "-q", "refs/heads/" + t).returncode == 0]
+    rows = board.load(path) if os.path.exists(path) else []
+    needed = {r["branch"] for r in rows
+              if any(r["item"] in board.deps(o) and o["state"] not in board.DONE for o in rows)}
+    active = {r["branch"] for r in rows if r["state"] in ("planned", "running")}
+    freed, removed, kept = 0, [], []
+    for wt, br in wt_list[1:]:
+        real = os.path.realpath(wt)
+        if real in protected:
+            continue
+        if not br:
+            kept.append((wt, "detached HEAD"))
+            continue
+        sha = board.git("rev-parse", "--verify", "-q", "refs/heads/" + br).stdout.strip()
+        into_t = next((t for t in targets if board.git("merge-base", "--is-ancestor", sha, t).returncode == 0), None)
+        why = ("not merged into " + " or ".join(targets)) if not into_t else \
+            "no commit of its own yet" if fresh(br) else \
+            "an unmerged board item depends on it" if br in needed else \
+            "its board item is still planned or running" if br in active else \
+            "locked" if real in locked else \
+            blocked(wt) if os.path.exists(wt) else ""
+        if why:
+            kept.append((wt, "%s: %s" % (br, why)))
+            continue
+        n = size(real) if os.path.exists(wt) else 0
+        freed += n
+        say("remove worktree %s (%s), delete branch %s (merged into %s)" % (wt, human(n), br, into_t))
+        if act:
+            p = board.git("worktree", "remove", wt) if os.path.exists(wt) else None
+            if p is not None and p.returncode:
+                kept.append((wt, "%s: worktree remove failed: %s" % (br, p.stderr.strip())))
+                freed -= n
+                continue
+            board.git("worktree", "prune")
+            p = board.git("update-ref", "-d", "refs/heads/" + br, sha)
+            if p.returncode:
+                say("keep branch %s: it moved while cleaning (%s)" % (br, p.stderr.strip()))
+        removed.append(br)
+    for wt, why in kept:
+        print("keep %s (%s)" % (wt, why))
+    if act:
+        for r in rows:
+            if r["branch"] in removed and r["state"] == "merged":
+                r["state"] = "cleaned"
+        if rows:
+            board.save(path, rows)
+    say("%d worktree(s) removed, %d kept; freed %s (%d bytes)" % (len(removed), len(kept), human(freed), freed))
 
 
 if __name__ == "__main__":
