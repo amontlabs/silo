@@ -42,18 +42,7 @@ npm --prefix app/SiloUI run desktop
 
 `desktop` prepares runtime resources and launches native development mode. `npm --prefix app/SiloUI run dev` starts the browser UI preview only.
 
-Run checks appropriate to the change:
-
-```sh
-npm --prefix app/SiloUI run typecheck
-npm --prefix app/SiloUI run lint
-npm --prefix app/SiloUI test
-cargo +1.94.0 fmt --manifest-path app/SiloUI/src-tauri/Cargo.toml --check
-cargo test --manifest-path app/SiloUI/Cargo.toml --workspace --locked
-npm --prefix app/SiloUI run test:release
-```
-
-Frontend tests use Vitest. Use test file arguments to focus a frontend run and a Cargo test filter to focus backend behavior. Rust tests live beside the code in `app/SiloUI/src-tauri/src/` and run with the default parallel thread count. Tests that reach process-wide state take the shared isolation guard; cache-lock tests use separate child processes to isolate file descriptor inheritance. See [native test support](docs/SiloUI-RUST-TEST-SUPPORT.md) for the remaining internally serialized group. `.github/workflows/ci.yml` runs frontend checks, macOS Rust tests, the engine, `silod`, CLI, client and `silo-host` tests on Linux (`cargo nextest run -p silo-engine --locked --profile ci`, then `-p silod -p silo-cli -p silo-client -p silo-api`, then `-p silo-host` with and without its `desktop` feature) with a check that `silod` does not depend on GTK, release-tooling checks, and a relative-link check of Markdown documentation on every push to `main` and every pull request. CI runs the workspace suites with [cargo-nextest](https://nexte.st/), one process per test, so the shared isolation guard does not serialize them there (`app/SiloUI/.config/nextest.toml` keeps the SSH listener tests in one group); plain `cargo test` stays correct locally, and the workspace has no doctests, which nextest does not run. Pull requests that change only `website/`, `demo/`, `docs/`, `artifacts/`, `assets/`, top-level Markdown or frontend sources skip the two Rust jobs (`app/SiloUI/scripts/ci-native-changes.py`); `main` always runs them. When a Rust test starts reading a new file outside its crate, `test_ci_native_changes.py` fails until the classifier lists it. Keep opt-in live tests separate from ordinary unit tests. Release-tooling changes also need the relevant script tests and workflow checks.
+Frontend tests use Vitest; Rust tests live beside the code in `app/SiloUI/src-tauri/src/` and the other crates. Tests that reach process-wide state take the shared isolation guard (see [native test support](docs/SiloUI-RUST-TEST-SUPPORT.md)). `.github/workflows/ci.yml` runs on every push to `main` and every pull request: frontend checks, macOS Rust tests, the Linux engine, `silod`, CLI, client and `silo-host` tests with [cargo-nextest](https://nexte.st/) (one process per test; `app/SiloUI/.config/nextest.toml` keeps the SSH listener tests in one group; the workspace has no doctests), a check that `silod` does not depend on GTK, release-tooling checks, and a relative-link check of Markdown documentation. Pull requests that change only `website/`, `demo/`, `docs/`, `artifacts/`, `assets/`, top-level Markdown or frontend sources skip the two Rust jobs (`app/SiloUI/scripts/ci-native-changes.py`; `test_ci_native_changes.py` fails when a Rust test reads a new file outside its crate until the classifier lists it). Keep opt-in live tests separate from ordinary unit tests. Release-tooling changes also need the relevant script tests and workflow checks.
 
 For a local macOS debug bundle:
 
@@ -91,15 +80,18 @@ See `docs/SiloUI-BUILD-CHANNELS.md`.
 - Keep generated evidence under an ignored directory such as `app/SiloUI/src-tauri/target/verification/`. Keep private system logs in a temporary local path and do not publish credentials, computer data, or unredacted logs. Preserve the exact failing output before rerunning.
 - Report commands, results, the exact inspected bundle, and whether data was fixture or live. A frontend test proves UI behavior against its supplied data; a build proves compilation and packaging. Neither proves live computer health, two-device management, installed-app behavior, or release readiness.
 
-## Delegated work
+## Agent workflow
 
-For larger tasks, work in your own git worktree, split the work into
-independent slices and run them in parallel:
+Binding rules for every agent; the details are in [docs/workflow/](docs/workflow/ORCHESTRATOR.md).
 
-- Sonnet subagents implement.
-- Haiku subagents take small, tightly bounded slices.
-- Codex `gpt-6.1-sol` at high reasoning reviews each change, focused on that
-  change. Fix and re-review until it answers LGTM.
+- **No CI waits.** Never push to wait for CI, never poll `gh run` or `gh pr checks`, never rerun CI.
+- **Tests prove or find something.** Run `tools/agent/check` (or `tools/agent/affected` to see what a diff touches) instead of full suites; narrower commands are fine when faster. Children never run `--workspace` or the whole frontend suite. The full suites run once per merge batch, in the background, started by `tools/agent/merge-batch`.
+- **Flaky tests get fixed, not retried.** Log a test that fails then passes in [docs/workflow/FLAKY.md](docs/workflow/FLAKY.md).
+- **Only the orchestrator starts reviews.** Children never review their own work.
+- **Agents are chosen by lastdrop name** (`build`, `build-hard`, `review`, `judge`, `live`, `scout`, `computer-use`; `cheap` only when the owner asks), never by provider model. See [docs/workflow/ROLES.md](docs/workflow/ROLES.md).
+- **Block, do not poll.** Never end a turn to wait for a long command; run it in the foreground and report once.
+- **Clean up when nothing depends on it.** Run `tools/agent/clean <item>` once an item is merged; remove temporary data (logs, temp homes, test leftovers) at once.
+- **Workflow rules live in the repo.** Do not save them to memory.
 
 ## SiloUI release notes
 
