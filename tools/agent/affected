@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""Say what a diff touches: which crates to check and test, which frontend files to run, which
+script tests apply, and whether the API generators must run.
+
+  affected [--base REF] [--why] [--json]
+
+The diff is the base against the working tree (committed, staged, unstaged and untracked files).
+Without --base, the base is the merge base with the integration branch: $SILO_INTEGRATION_BRANCH
+if set, otherwise whichever of main, direction (and their origin/ copies) is nearest to HEAD.
+"""
+import argparse
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+APP = 'app/SiloUI'
+# Frontend sources and the configuration that changes how every frontend file builds or tests.
+FRONTEND_CONFIG = tuple(f'{APP}/{name}' for name in (
+    'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.app.json', 'tsconfig.node.json',
+    'vite.config.ts', 'vitest.config.ts', '.oxlintrc.json', 'index.html'))
+FRONTEND_EXTENSIONS = ('.ts', '.tsx', '.json', '.css', '.mjs')
+# Files that change what every Rust crate builds with or how every test runs.
+RUST_EVERYTHING = ('Cargo.lock', f'{APP}/Cargo.lock', f'{APP}/Cargo.toml', 'rust-toolchain.toml',
+                   f'{APP}/runtime-inputs.json', f'{APP}/.config/nextest.toml')
+# Non-Rust files that Rust tests read (the classifier's list), and the crates that read them.
+READ_BY_RUST = (
+    (f'{APP}/runner/recipes/', ['silo-cli']),
+    (f'{APP}/src/test/contracts/', ['silo-engine']),
+    (f'{APP}/src/features/application/model/reserved-secret-names.json', ['silo-engine']),
+    (f'{APP}/src/features/computers/model/container-unavailable.json', ['silo-engine']),
+)
+# No Rust test reads these (ci-native-changes.py is deliberately stricter than we need here).
+NO_RUST = (f'{APP}/scripts/', '.github/', 'tools/', 'reviewer-service/')
+API_SOURCES = (f'{APP}/api/src/', f'{APP}/api/schema/', f'{APP}/api/examples/')
+API_GENERATED = (f'{APP}/api/src/methods/requests.rs', f'{APP}/api/schema/silo-api.schema.json')
+
+
+def git(*args, cwd=None):
+    return subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
+
+
+def default_base(root):
+    candidates = [os.environ.get('SILO_INTEGRATION_BRANCH')] if os.environ.get('SILO_INTEGRATION_BRANCH') else \
+        ['main', 'direction', 'origin/main', 'origin/direction']
+    best = None
+    for name in candidates:
+        try:
+            merge_base = git('merge-base', 'HEAD', name, cwd=root).strip()
+            distance = int(git('rev-list', '--count', f'{merge_base}..HEAD', cwd=root))
+        except subprocess.CalledProcessError:
+            continue
+        if best is None or distance < best[0]:
+            best = (distance, merge_base, name)
+    if best is None:
+        sys.exit('affected: no integration branch found; pass --base REF')
+    return best[1], best[2]
+
+
+def changed_files(root, base):
+    tracked = git('diff', '--name-only', '--no-renames', base, cwd=root).splitlines()
+    untracked = git('ls-files', '--others', '--exclude-standard', cwd=root).splitlines()
+    return sorted(set(tracked + untracked))
+
+
+def load_classifier(root):
+    path = root / APP / 'scripts/ci-native-changes.py'
+    spec = importlib.util.spec_from_file_location('ci_native_changes', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def workspace(root):
+    """Members and their reverse dependencies, from `cargo metadata` (path dependencies only)."""
+    out = subprocess.run(['cargo', 'metadata', '--no-deps', '--format-version', '1', '--offline',
+                          '--manifest-path', str(root / APP / 'Cargo.toml')],
+                         cwd=root, capture_output=True, text=True)
+    if out.returncode:
+        sys.exit(f'affected: cargo metadata failed:\n{out.stderr.strip()}')
+    meta = json.loads(out.stdout)
+    members = {p['id']: p for p in meta['packages']}
+    by_name = {p['name']: p for p in members.values()}
+    rdeps = {name: set() for name in by_name}
+    for package in members.values():
+        for dep in package['dependencies']:
+            if dep.get('path') and dep['name'] in by_name:
+                rdeps[dep['name']].add(package['name'])
+    info = {name: {'dir': str(Path(p['manifest_path']).parent.relative_to(root)),
+                   'edition': p['edition']} for name, p in by_name.items()}
+    return info, rdeps
+
+
+def with_dependents(names, rdeps):
+    seen, todo = set(), list(names)
+    while todo:
+        name = todo.pop()
+        if name not in seen:
+            seen.add(name)
+            todo.extend(rdeps.get(name, ()))
+    return seen
+
+
+def owning_crate(path, info):
+    best = None
+    for name, crate in info.items():
+        prefix = crate['dir'] + '/'
+        if path.startswith(prefix) and (best is None or len(prefix) > len(info[best]['dir'])):
+            best = name
+    return best
+
+
+def nearest_manifest(root, path):
+    for parent in Path(path).parents:
+        if (root / parent / 'Cargo.toml').exists():
+            return str(parent)
+    return None
+
+
+def analyse(root, base):
+    files = changed_files(root, base)
+    info, rdeps = workspace(root)
+    classifier = load_classifier(root)
+    why, direct = [], set()
+    result = {'everything': False, 'frontend': [], 'frontend_all': False, 'script_tests': [],
+              'api_generators': False, 'other_manifests': [], 'notes': []}
+    ignored = []
+
+    def seeded(path, names, reason):
+        direct.update(names)
+        why.append((path, reason))
+
+    for path in files:
+        is_rust = path.endswith(('.rs', 'Cargo.toml', 'build.rs'))
+        if path in RUST_EVERYTHING:
+            result['everything'] = True
+            why.append((path, 'changes every crate: all Rust checks and tests'))
+            continue
+        if path.startswith(API_SOURCES) and path not in API_GENERATED:
+            result['api_generators'] = True
+        elif path in API_GENERATED:
+            result['api_generators'] = True
+        if path.startswith(f'{APP}/scripts/'):
+            why.append((path, 'script: related script tests only'))
+        # Frontend.
+        if path.startswith(f'{APP}/src/') and path.endswith(FRONTEND_EXTENSIONS):
+            result['frontend'].append(path)
+            why.append((path, 'frontend: typecheck, oxlint, vitest related'))
+        elif path in FRONTEND_CONFIG:
+            result['frontend_all'] = True
+            why.append((path, 'frontend configuration: typecheck, oxlint, full vitest run'))
+        # Rust.
+        reader = next((crates for prefix, crates in READ_BY_RUST if path.startswith(prefix)), None)
+        if reader:
+            seeded(path, reader, f'read by Rust tests of {", ".join(reader)}')
+            continue
+        crate = owning_crate(path, info)
+        if '/vendor/' in path:
+            result['everything'] = True
+            why.append((path, 'vendored dependency patched into the workspace: all Rust checks and tests'))
+        elif crate:
+            seeded(path, [crate], f'file of crate {crate}')
+        elif is_rust:
+            manifest = nearest_manifest(root, path)
+            if manifest:
+                if manifest not in result['other_manifests']:
+                    result['other_manifests'].append(manifest)
+                why.append((path, f'crate outside the workspace ({manifest}): cargo check --manifest-path'))
+            else:
+                result['everything'] = True
+                why.append((path, 'Rust file outside any crate: all Rust checks and tests'))
+        elif path.startswith(NO_RUST):
+            ignored.append(path)
+        elif classifier.skippable(path):
+            ignored.append(path)
+        elif path not in {p for p, _ in why}:
+            result['everything'] = True
+            why.append((path, 'read by Rust tests per ci-native-changes.py but no crate known: all Rust tests'))
+    # Script tests, by naming convention.
+    scripts = root / APP / 'scripts'
+    for path in files:
+        if not path.startswith(f'{APP}/scripts/') or not (root / path).exists():
+            continue
+        name = Path(path).name
+        if name.startswith('test_') and name.endswith('.py'):
+            candidate = name
+        elif name.endswith('.test.mjs'):
+            candidate = name
+        elif name.endswith('.py'):
+            candidate = 'test_' + name[:-3].replace('-', '_') + '.py'
+        elif name.endswith('.mjs'):
+            candidate = name[:-4] + '.test.mjs'
+        else:
+            candidate = None
+        if candidate and (scripts / candidate).exists():
+            result['script_tests'].append(f'{APP}/scripts/{candidate}')
+    if f'{APP}/runtime-inputs.json' in files or 'rust-toolchain.toml' in files:
+        result['script_tests'].append(f'{APP}/scripts/test_rust_toolchain.py')
+    result['script_tests'] = sorted(set(result['script_tests']))
+    # Crates.
+    everything = result['everything']
+    crates = sorted(info) if everything else sorted(with_dependents(direct, rdeps))
+    result['crates'] = crates
+    result['filterset'] = 'all()' if everything else ' | '.join(f'rdeps({n})' for n in sorted(direct))
+    if not crates:
+        result['filterset'] = ''
+    result['frontend'] = sorted(set(result['frontend']))
+    result['docs_only'] = bool(files) and not (crates or result['frontend'] or result['frontend_all']
+                                               or result['script_tests'] or result['other_manifests'])
+    result['changed'] = files
+    result['ignored'] = ignored
+    result['why'] = why
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--base', help='diff against this ref (default: merge base with the integration branch)')
+    parser.add_argument('--why', action='store_true', help='explain each changed file')
+    parser.add_argument('--json', action='store_true', help='machine-readable output')
+    args = parser.parse_args()
+    root = Path(git('rev-parse', '--show-toplevel').strip())
+    if args.base:
+        base, label = git('rev-parse', args.base, cwd=root).strip(), args.base
+    else:
+        base, label = default_base(root)
+    result = analyse(root, base)
+    result['base'] = base
+    result['base_label'] = label
+    if args.json:
+        json.dump(result, sys.stdout, indent=2)
+        print()
+        return
+    print(f'base: {label} ({base[:9]}), {len(result["changed"])} changed files')
+    if not result['changed']:
+        print('nothing changed: nothing to check')
+        return
+    if result['docs_only']:
+        print('nothing to run: no Rust crate, frontend file or script test reads these files')
+    if result['crates']:
+        scope = 'everything (' + ', '.join(w for p, w in result['why'] if 'every crate' in w or 'all Rust' in w)[:80] + ')' \
+            if result['everything'] else ''
+        print(f'crates{" — " + scope if scope else ""}: {" ".join(result["crates"])}')
+        print(f'  cargo check --tests {" ".join("-p " + c for c in result["crates"])}')
+        print(f'  nextest filterset: {result["filterset"]}')
+    for manifest in result['other_manifests']:
+        print(f'  cargo check --tests --manifest-path {manifest}/Cargo.toml')
+    if result['frontend_all']:
+        print('frontend: configuration changed: typecheck, oxlint, vitest run')
+    elif result['frontend']:
+        print('frontend (vitest related): ' + ' '.join(result['frontend']))
+    if result['script_tests']:
+        print('script tests: ' + ' '.join(result['script_tests']))
+    if result['api_generators']:
+        print('API generators must run: cargo run -p silo-api --example generate_schema; '
+              'cargo run -p silo-api --example generate_requests')
+    if args.why:
+        print('why:')
+        for path, reason in result['why']:
+            print(f'  {path}: {reason}')
+        listed = {p for p, _ in result['why']}
+        for path in (p for p in result['ignored'] if p not in listed):
+            print(f'  {path}: nothing Rust, frontend or script tests read it')
+
+
+if __name__ == '__main__':
+    main()

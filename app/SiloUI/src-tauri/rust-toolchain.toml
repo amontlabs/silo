@@ -1,6 +1,0 @@
-# Silo builds with the same Rust release as its bundled MicroSandbox runtime.
-# Keep this equal to "toolchain" in ../runtime-inputs.json (checked by
-# scripts/test_rust_toolchain.py). rustup applies it to Cargo commands run in
-# this directory, including those started by the Tauri CLI.
-[toolchain]
-channel = "1.94.0"
