@@ -16,7 +16,7 @@ Report correctness and security problems only, most severe first. For each probl
 - the concrete failure (input or state, then the wrong result)
 - the fix in one line
 
-No style notes, no "consider", no guesses without a failure. If you find nothing that matters, say "No findings." Do not run the full test suites; read the code and run only a narrow test if it settles a doubt.
+No style notes, no "consider", no guesses without a failure. If you find nothing that matters, say "No findings." Your final message is the whole review (stop any background wait first, never end a turn to wait). Do not run the full test suites; read the code and run only a narrow test if it settles a doubt.
 
 ## Round 2 (follow-up; use instead of Round 1 for later rounds)
 

@@ -2,6 +2,8 @@
 # Tests the live runner with a fake check: pass, fail, resume, --from, interrupt, offline Linux,
 # skip, failing checks, wait on a dead runner, short paths. Touches no engine.
 set -uo pipefail
+# Start from a clean environment for every variable the tools read.
+unset BOARD BOARD_INTEGRATION SILO_INTEGRATION_BRANCH SILO_AGENT_ITEM SILO_AGENT_CACHE RUNTIME_PREPARE_CMD SILO_BIN SILO_RUNTIME_TARGET LIVE_D LIVE_LINUX_HOST LIVE_SHORT_BASE LIVE_SSH LIVE_STEP
 LIVE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/live
 W=$(mktemp -d "${TMPDIR:-/tmp}/live-test.XXXXXX"); trap 'rm -rf "$W"' EXIT
 export LIVE_D=$W/d; mkdir -p "$LIVE_D"

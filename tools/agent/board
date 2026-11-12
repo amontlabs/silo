@@ -11,9 +11,12 @@
     restack <item>                 after <item>'s branch changed (or merged), rebase its
                                    dependents bottom-up, one branch at a time
 
-The file is --file, else $BOARD. Columns: item branch base depends_on worktree state note temp.
-States: planned running committed reviewed merged cleaned. --into (or $BOARD_INTEGRATION,
-default main) is the integration branch: what an item with no unmerged dependency starts from.
+The file is --file, else $BOARD, else $SILO_BUILD_STATE/board.tsv, else board.tsv in the build state
+directory next to the integration checkout: `<integration checkout>.state/` (the checkout of the
+integration branch, e.g. /code/silo-direction -> /code/silo-direction.state). Columns: item branch base depends_on worktree state note temp.
+States: planned running committed reviewed merged cleaned. --into (or $BOARD_INTEGRATION, else the
+branch checked out in the repository's main worktree) is the integration branch: what an item with no
+unmerged dependency starts from.
 A dependency counts as started once it is committed, reviewed or merged. An item with two
 unmerged dependencies is not ready (merge one first).
 `temp` is an optional comma list of extra temp paths for `clean`.
@@ -31,13 +34,6 @@ STARTED = ("committed", "reviewed", "merged", "cleaned")
 def die(msg, code=1):
     print("board: " + msg, file=sys.stderr)
     sys.exit(code)
-
-
-def path_of(args):
-    p = args.file or os.environ.get("BOARD")
-    if not p:
-        die("no board file: pass --file or set BOARD")
-    return p
 
 
 @contextlib.contextmanager
@@ -97,7 +93,32 @@ def git(*a, cwd=None, check=False):
 
 
 def integration(args):
-    return args.into or os.environ.get("BOARD_INTEGRATION") or "main"
+    """Integration branch: --into, else $BOARD_INTEGRATION, else the branch checked out in the main worktree."""
+    b = args.into or os.environ.get("BOARD_INTEGRATION")
+    if b:
+        return b
+    main = worktree_list()[0]
+    if not main[1]:
+        die("the main worktree %s has no branch checked out: pass --into or set BOARD_INTEGRATION" % main[0])
+    return main[1]
+
+
+def integration_checkout(args):
+    """Path of the worktree where the integration branch is checked out."""
+    b = integration(args)
+    for p, br in worktree_list():
+        if br == b:
+            return p.rstrip("/")
+    die("integration branch %s is not checked out in any worktree: set SILO_BUILD_STATE or BOARD" % b)
+
+
+def state_dir(args):
+    """Build state directory: $SILO_BUILD_STATE, else <integration checkout>.state."""
+    return os.environ.get("SILO_BUILD_STATE") or integration_checkout(args) + ".state"
+
+
+def path_of(args):
+    return args.file or os.environ.get("BOARD") or os.path.join(state_dir(args), "board.tsv")
 
 
 def start_base(rows, r, into):

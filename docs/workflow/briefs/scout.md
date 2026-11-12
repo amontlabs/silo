@@ -7,4 +7,4 @@ Read-only lookup. Change no files; run no builds or tests.
 
 {QUESTIONS}
 
-Answer in at most 200 words. Say "not found" rather than guess.
+Your final message is the whole answer (stop any background wait first, never end a turn to wait), at most 200 words. Say "not found" rather than guess.
