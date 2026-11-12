@@ -119,7 +119,7 @@ test("a failed preparation removes its own extracted source", async t => {
   assert.match(result.output, /Fixture compiler failure/)
   const builds = join(paths.root, "cache", "patched-builds")
   for (const name of await readdir(builds)) {
-    assert.deepEqual((await readdir(join(builds, name))).filter(entry => entry.startsWith("work-")), [])
+    assert.deepEqual((await readdir(join(builds, name))).filter(entry => entry.startsWith("work-") || entry.startsWith("publish-")), [])
   }
 })
 
@@ -171,16 +171,16 @@ for (const failure of ["permissions", "probe exit"]) {
     assert.equal(first.code, 0, first.output)
     const builds = join(paths.root, "cache", "patched-builds")
     const [key] = await readdir(builds)
-    const cached = join(builds, key, "msb")
+    const cached = join(builds, key, "published", "msb")
     if (failure === "permissions") await chmod(cached, 0o644)
     else {
       const broken = `#!${process.execPath}\nprocess.exit(17)\n`
       await writeFile(cached, broken)
-      await writeFile(join(builds, key, "msb.sha256"), sha256(broken))
+      await writeFile(join(builds, key, "published", "msb.sha256"), sha256(broken))
     }
     const result = await runWorker(t, paths, "second")
     assert.equal(result.code, 0, result.output)
-    assert.equal(sha256(await readFile(cached)), (await readFile(join(builds, key, "msb.sha256"), "utf8")).trim())
+    assert.equal(sha256(await readFile(cached)), (await readFile(join(builds, key, "published", "msb.sha256"), "utf8")).trim())
     execFileSync(cached, ["--version"])
   })
 }

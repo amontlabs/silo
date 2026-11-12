@@ -128,10 +128,12 @@ export async function buildPatchedExecutable({
     JSON.stringify(compilerFlags),
   ].join("\n")))
   const buildRoot = join(cacheRoot, "patched-builds", cacheKey)
-  const cachedExecutable = join(buildRoot, "msb")
-  const cachedDigest = join(buildRoot, "msb.sha256")
-  const cachedGateway = join(buildRoot, "silo-macos-gateway")
-  const cachedGatewayDigest = join(buildRoot, "silo-macos-gateway.sha256")
+  // The executable, the gateway and their digests are published together as this one directory.
+  const publishedRoot = join(buildRoot, "published")
+  const cachedExecutable = join(publishedRoot, "msb")
+  const cachedDigest = join(publishedRoot, "msb.sha256")
+  const cachedGateway = join(publishedRoot, "silo-macos-gateway")
+  const cachedGatewayDigest = join(publishedRoot, "silo-macos-gateway.sha256")
   const cachedGatewayValid = !gatewayInputs || await isVerifiedFile(
     cachedGateway,
     (await readFile(cachedGatewayDigest, "utf8").catch(() => "")).trim(),
@@ -156,7 +158,9 @@ export async function buildPatchedExecutable({
 
   await mkdir(buildRoot, { recursive: true })
   const workRoot = await mkdtemp(join(buildRoot, "work-"))
-  const cargoTarget = join(buildRoot, "cargo-target")
+  // Build scripts bake in CARGO_MANIFEST_DIR, so a target directory is only valid for this
+  // extraction of the source; it is not kept for a retry and not shared between processes.
+  const cargoTarget = `${workRoot}-target`
   try {
     runBuildTool("/usr/bin/tar", ["-xzf", sourceArchive, "-C", workRoot])
     const entries = await import("node:fs/promises").then(({ readdir }) => readdir(workRoot, { withFileTypes: true }))
@@ -216,21 +220,23 @@ export async function buildPatchedExecutable({
       ], { cwd: source[0], env: { ...process.env, CARGO_TARGET_DIR: cargoTarget } })
       gatewayBytes = await readFile(join(cargoTarget, targetTriple, "release/silo-macos-gateway"))
     }
-    await mkdir(buildRoot, { recursive: true })
-    await writeFile(`${cachedExecutable}.tmp-${process.pid}`, bytes, { mode: 0o755 })
-    await rename(`${cachedExecutable}.tmp-${process.pid}`, cachedExecutable)
-    await writeFile(cachedDigest, `${sha256(bytes)}\n`)
+    const stagedRoot = join(buildRoot, `publish-${process.pid}`)
+    await rm(stagedRoot, { recursive: true, force: true })
+    await mkdir(stagedRoot)
+    await writeFile(join(stagedRoot, "msb"), bytes, { mode: 0o755 })
+    await writeFile(join(stagedRoot, "msb.sha256"), `${sha256(bytes)}\n`)
     if (gatewayBytes) {
-      const gatewayTemporary = `${cachedGateway}.tmp-${process.pid}`
-      await writeFile(gatewayTemporary, gatewayBytes, { mode: 0o755 })
-      await chmod(gatewayTemporary, 0o755)
-      await rename(gatewayTemporary, cachedGateway)
-      await writeFile(cachedGatewayDigest, `${sha256(gatewayBytes)}\n`)
-      return { executable: bytes, macosGateway: gatewayBytes }
+      await writeFile(join(stagedRoot, "silo-macos-gateway"), gatewayBytes, { mode: 0o755 })
+      await writeFile(join(stagedRoot, "silo-macos-gateway.sha256"), `${sha256(gatewayBytes)}\n`)
     }
-    return bytes
+    const replacedRoot = `${publishedRoot}.old-${process.pid}`
+    await rename(publishedRoot, replacedRoot).catch(error => { if (error.code !== "ENOENT") throw error })
+    await rename(stagedRoot, publishedRoot)
+    await rm(replacedRoot, { recursive: true, force: true })
+    return gatewayBytes ? { executable: bytes, macosGateway: gatewayBytes } : bytes
   } finally {
     await rm(workRoot, { recursive: true, force: true })
+    await rm(cargoTarget, { recursive: true, force: true })
   }
 }
 
