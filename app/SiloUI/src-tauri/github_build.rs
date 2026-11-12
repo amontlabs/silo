@@ -6,6 +6,20 @@ pub const KEYS: [&str; 3] = [
     "SILO_GITHUB_CLIENT_SECRET",
 ];
 
+// Cargo treats a missing `rerun-if-changed` path as always stale, and a
+// directory is scanned recursively (the parent holds `target/` and
+// `node_modules/`). So the local file is watched only while it exists; without
+// it the build depends on the environment keys alone, and creating the file
+// takes effect with the next change to a build script or a key.
+pub fn watch(path: &Path) {
+    if path.exists() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+    for key in KEYS {
+        println!("cargo:rerun-if-env-changed={key}");
+    }
+}
+
 // Environment values override the ignored local file, including empty values:
 // an empty CI secret must fail rather than silently use another configuration.
 pub fn configuration(

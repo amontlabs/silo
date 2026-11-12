@@ -153,6 +153,8 @@ cp app/SiloUI/github-build.example.json app/SiloUI/github-build.local.json
 chmod 600 app/SiloUI/github-build.local.json
 ```
 
+If you add `github-build.local.json` after an engine build, touch `app/SiloUI/src-tauri/engine/build.rs` (or change a `SILO_GITHUB_*` variable) so the next build picks it up.
+
 Fill in `SILO_GITHUB_CLIENT_SECRET` using the existing GitHub App's client secret.
 You need access to that credential only when building with Silo's App; for your
 own App, replace all three values. The example contains Silo's two public identifiers:
