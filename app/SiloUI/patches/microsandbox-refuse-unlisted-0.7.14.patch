@@ -1,17 +1,16 @@
 diff --git a/crates/network/lib/engine/netstack/poll.rs b/crates/network/lib/engine/netstack/poll.rs
-index f9971f16..926215ff 100644
+index f9971f16..0c5b4980 100644
 --- a/crates/network/lib/engine/netstack/poll.rs
 +++ b/crates/network/lib/engine/netstack/poll.rs
-@@ -140,6 +140,48 @@ pub struct GatewayIps {
+@@ -140,6 +140,47 @@ pub struct GatewayIps {
  // Functions
  //--------------------------------------------------------------------------------------------------
  
-+/// Accept mode for a TCP SYN to a DNS port.
++/// Accept mode for a TCP SYN to the DNS-over-TLS port.
 +///
-+/// The DNS interceptor answers connections to the gateway itself without a
-+/// network egress check. A connection to any other address is a regular
-+/// outbound flow: if policy denies it the guest gets a reset instead of a
-+/// handshake with a resolver it may not reach.
++/// The DoT interceptor can only complete TLS as the gateway. A connection to
++/// any other address is a regular outbound flow: if policy denies it the guest
++/// gets a reset instead of a handshake that would hang.
 +fn dns_accept_mode(
 +    dst: SocketAddr,
 +    gateway: GatewayIps,
@@ -51,23 +50,7 @@ index f9971f16..926215ff 100644
  /// Classify a raw ethernet frame for pre-inspection.
  ///
  /// Uses smoltcp's wire module for zero-copy parsing. Returns
-@@ -427,7 +469,14 @@ pub(crate) fn smoltcp_poll_loop_with_options(
-                         // Plain DNS: the interceptor enforces policy at
-                         // the application layer (block list + rebind
-                         // protection); bypass the network egress check.
--                        DnsPortType::Dns => TcpAcceptMode::AcceptImmediately,
-+                        DnsPortType::Dns => dns_accept_mode(
-+                            dst,
-+                            config.gateway,
-+                            &network_policy,
-+                            platform_policy.as_deref(),
-+                            &shared,
-+                            TcpAcceptMode::AcceptImmediately,
-+                        ),
-                         // DoT: intercept only when TLS MITM is
-                         // configured. Without it, the block list can't
-                         // apply (traffic is encrypted end-to-end), so
-@@ -438,7 +487,14 @@ pub(crate) fn smoltcp_poll_loop_with_options(
+@@ -438,7 +479,14 @@ pub(crate) fn smoltcp_poll_loop_with_options(
                          // per query by the forwarder.
                          DnsPortType::EncryptedDns => {
                              if tls_state.is_some() {
@@ -83,7 +66,7 @@ index f9971f16..926215ff 100644
                              } else {
                                  tracing::debug!(%dst, "DoT port refused (TLS interception not configured); stub should fall back to TCP/53");
                                  TcpAcceptMode::Reject
-@@ -2040,9 +2096,21 @@ mod tests {
+@@ -2040,9 +2088,21 @@ mod tests {
          seq: i32,
          ack: Option<i32>,
          payload: &[u8],
@@ -106,7 +89,7 @@ index f9971f16..926215ff 100644
  
          let tcp_repr = TcpRepr {
              src_port,
-@@ -2229,6 +2297,179 @@ mod tests {
+@@ -2229,6 +2289,182 @@ mod tests {
          );
      }
  
@@ -230,15 +213,18 @@ index f9971f16..926215ff 100644
 +        );
 +    }
 +
-+    /// Plain DNS to an address other than the gateway must be reset too: the
-+    /// interceptor answers only for the gateway, not for any address a program
-+    /// dials on port 53.
++    /// Plain DNS over TCP to another resolver is still intercepted, exactly
++    /// like UDP 53: the handshake completes and the gateway's resolver answers.
 +    #[test]
-+    fn default_deny_resets_syn_to_unlisted_dns_port() {
++    fn unlisted_dns_port_is_still_intercepted() {
 +        run_in_child(
-+            "engine::netstack::poll::tests::default_deny_resets_syn_to_unlisted_dns_port",
++            "engine::netstack::poll::tests::unlisted_dns_port_is_still_intercepted",
 +            || {
-+                assert_unlisted_syn_reset(53);
++                let (syn, rst) = syn_reply_flags(SERVER_IP, 53);
++                assert!(
++                    syn && !rst,
++                    "SYN to port 53 of an unlisted address was not intercepted (syn={syn}, rst={rst})"
++                );
 +            },
 +        );
 +    }

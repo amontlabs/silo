@@ -114,17 +114,25 @@ was chosen and why; any can be changed. Older items are also in the build log un
 29. **One merge ask is one row on Pending**; its review opens from that row (R8).
 
 30. **A computer in allowlist mode gets an immediate refusal for any address it may not reach,
-    on every port** (owner decision, R20). MicroSandbox 0.7.14 (upstream #1825) had made a
-    connection to an unlisted address on port 80 or 443 complete so the gateway could answer
-    with a 403, and the DNS ports (53, 853) completed too; a program saw a blocked-request page
-    or a silent connection. Silo's build now refuses all of them (connection refused) and
-    nothing is ever sent to the unlisted address. Two patch changes: the readable-denial default
-    goes back to off (`http.deny_response`), and a connection to port 53 or 853 of any address
-    other than the computer's own gateway is checked against the policy like every other port
-    (the gateway's own resolver keeps working). Patch `refuse-unlisted`; the live network test
-    now expects "connection refused" on 80, 443, 853 and 53. Upstream's behaviour stays
-    available by setting `deny_response` explicitly. UDP DNS to another resolver is unchanged
-    (it gets the gateway's "no such name").
+    on web and DNS-over-TLS ports** (owner decision, R20). MicroSandbox 0.7.14 (upstream #1825)
+    had made a connection to an unlisted address on port 80 or 443 complete so the gateway could
+    answer with a 403, and DNS over TLS (853) completed too; a program saw a blocked-request page
+    or a silent connection. Silo's build now refuses them (connection refused) and nothing is
+    ever sent to the unlisted address. Two patch changes: the readable-denial default goes back
+    to off (`http.deny_response`), and a connection to port 853 of any address other than the
+    computer's own gateway is checked against the policy like every other port (the gateway
+    can't complete TLS as another resolver, so it would only hang). Patch `refuse-unlisted`; the
+    live network test expects "connection refused" at once on 80, 443 and 853.
+    - **DNS to another resolver** (`dig @8.8.8.8 ...`, UDP and TCP 53 alike) is answered by Silo's
+      own resolver: allowed names resolve, unlisted names get "no such name", and nothing leaves.
+      DNS over TLS to another resolver is refused.
+    - **Side effect:** the same setting governs the JSON answer for a secret sent to a host it
+      isn't allowed on; that connection now closes silently (the 0.7.6 behaviour) instead of
+      getting a JSON 403.
+    - **Known leftover:** computers created by an earlier 0.7.14 build saved
+      `deny_response: true` and keep the 403 on ports 80/443 until they are recreated; computers
+      migrated from 0.7.6 are fine. No code change.
+    - Upstream's behaviour stays available by setting `deny_response` explicitly.
 
 ## App timings (R13)
 

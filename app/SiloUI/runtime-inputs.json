@@ -154,7 +154,7 @@
     },
     {
       "path": "patches/microsandbox-refuse-unlisted-0.7.14.patch",
-      "sha256": "fa3bc49fb6a2ff537c3c037b2bca7a050905614af7d69e903bdb07d3487a1e82"
+      "sha256": "ed27fcad7b96a645c66c237def36bc61846e77f33301b96f51004ae1b56bae9e"
     }
   ]
 }
