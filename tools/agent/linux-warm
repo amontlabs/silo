@@ -4,11 +4,14 @@ usage() { cat <<'USAGE'
 usage: linux-warm [--ref REF] [--host HOST] [--dir DIR] [--no-build] [--dry-run] [-- NEXTEST_ARGS...]
 
 Syncs REF (default HEAD) to a persistent checkout on the Linux machine (default
-ssh 10.77.77.2, ~/silo-warm), builds `silod` and `silo-engine` there with the pinned toolchain
-(src-tauri/rust-toolchain.toml) into the checkout's persistent target/, and, if NEXTEST_ARGS
+ssh 10.77.77.2, ~/silo-warm; DIR is relative to the remote home, absolute, or ~/...; letters,
+digits and . _ / ~ + - only), builds `silod` and `silo-engine` there with the pinned toolchain
+(root rust-toolchain.toml) into the checkout's persistent target/, and, if NEXTEST_ARGS
 are given, runs `cargo nextest run -p silod -p silo-engine NEXTEST_ARGS` there.
 
 The sync is a git push over ssh to the checkout's own repository; nothing goes to GitHub.
+Checkout, build and tests run in DIR/wt under a remote flock, so parallel runs queue instead of
+mixing; the run refuses if DIR/wt has local changes (it never force-checks-out over them).
 If the machine is offline it prints "skipped: offline" and exits 0.
   --dry-run   print what would run, without touching the machine (offline probe still done)
   --no-build  sync only (and run the tests, if asked)
@@ -32,32 +35,46 @@ done
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 sha=$(git -C "$root" rev-parse --verify "$ref^{commit}")
-toolchain=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$root/app/SiloUI/src-tauri/rust-toolchain.toml")
+toolchain=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$root/rust-toolchain.toml" 2>/dev/null || true)
+[ -n "$toolchain" ] || { echo "linux-warm: no channel in $root/rust-toolchain.toml" >&2; exit 1; }
+case $dir in *[!A-Za-z0-9._/~+-]*|"") echo "linux-warm: unsupported characters in --dir '$dir'" >&2; exit 2 ;; esac
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=3)
 
 if ! ssh "${ssh_opts[@]}" "$host" true 2>/dev/null; then
   echo "skipped: offline"; exit 0
 fi
 
-pkgs="-p silod -p silo-engine"
-remote="set -euo pipefail; export PATH=\$HOME/.cargo/bin:\$PATH
-mkdir -p $dir && cd $dir && { [ -d .git ] || git init -q; }
-git checkout -q -f --detach $sha
-rustup toolchain list | grep -q '^$toolchain' || rustup toolchain install $toolchain --profile minimal
-cd app/SiloUI"
-[ "$build" = 1 ] && remote+="
-cargo +$toolchain build $pkgs"
-if [ ${#nextest[@]} -gt 0 ]; then
-  remote+="
-command -v cargo-nextest >/dev/null || cargo +$toolchain install --locked cargo-nextest
-cargo +$toolchain nextest run $pkgs $(printf '%q ' "${nextest[@]}")"
+# The remote script gets its values as arguments: dir sha toolchain build then nextest args.
+read -r -d '' remote <<'REMOTE' || true
+set -euo pipefail
+export PATH=$HOME/.cargo/bin:$PATH
+repo=$1 sha=$2 toolchain=$3 build=$4; shift 4
+cd "$repo"
+[ -d .git ] || git init -q
+if [ -d wt ]; then
+  [ -z "$(git -C wt status --porcelain)" ] || { echo "linux-warm: $repo/wt has local changes; not touching it" >&2; exit 1; }
+  git -C wt checkout -q --detach "$sha"
+else
+  git worktree add -q --detach wt "$sha"
 fi
+rustup toolchain list | grep -q "^$toolchain" || rustup toolchain install "$toolchain" --profile minimal
+cd wt/app/SiloUI
+[ "$build" = 1 ] && cargo "+$toolchain" build -p silod -p silo-engine
+if [ $# -gt 0 ]; then
+  command -v cargo-nextest >/dev/null || cargo "+$toolchain" install --locked cargo-nextest
+  cargo "+$toolchain" nextest run -p silod -p silo-engine "$@"
+fi
+REMOTE
+
+# Absolute remote path of DIR (relative means under the remote home).
+abs=$(ssh "${ssh_opts[@]}" "$host" "d=$(printf %q "$dir"); case \$d in '~/'*) d=\$HOME/\${d#'~/'};; /*) ;; *) d=\$HOME/\$d;; esac; printf %s \"\$d\"")
+args=$(printf '%q ' "$abs" "$sha" "$toolchain" "$build" ${nextest[@]+"${nextest[@]}"})
 
 if [ "$dry" = 1 ]; then
-  echo "would push $sha to $host:$dir (refs/warm/head), then on $host:"; echo "$remote"; exit 0
+  echo "would push $sha to $host:$abs (refs/warm/$sha), then on $host under flock $abs.lock, with arguments: $args"; echo "$remote"; exit 0
 fi
 
-ssh "${ssh_opts[@]}" "$host" "mkdir -p $dir && cd $dir && { [ -d .git ] || git init -q; }"
-git -C "$root" push -q --force "ssh://$host/~/$dir" "$sha:refs/warm/head"
-echo "linux-warm: synced ${sha:0:12} to $host:$dir"
-exec ssh "${ssh_opts[@]}" "$host" "$remote"
+ssh "${ssh_opts[@]}" "$host" "mkdir -p $(printf %q "$abs") && cd $(printf %q "$abs") && { [ -d .git ] || git init -q; }"
+git -C "$root" push -q --force "ssh://$host$abs" "$sha:refs/warm/$sha"
+echo "linux-warm: synced ${sha:0:12} to $host:$abs"
+exec ssh "${ssh_opts[@]}" "$host" "flock -w 7200 $(printf %q "$abs.lock") bash -s -- $args" <<<"$remote"

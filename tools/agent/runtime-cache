@@ -7,13 +7,17 @@ inputs match a saved copy restores it by copy-on-write instead of rebuilding (~9
 MicroSandbox release build is one LTO codegen unit).
 
 Cache key = sha256 of: runtime-inputs.json, the patch files, the toolchain (rustc +pinned
---version), the target triple, the staging scripts, the macOS gateway and network-bootstrap
-sources, and package.json (the app version goes into release-info.json).
+--version), the target triple, the Rust flag and release-profile environment, the Go compiler
+identity and recipe environment (as upstream preparation keys on them), the Swift compiler
+version, the staging scripts, the macOS gateway and network-bootstrap sources, and package.json
+(the app version goes into release-info.json).
 
 Store: $SILO_AGENT_CACHE/runtime/<key>/ (default ~/Library/Caches/silo-agent on macOS,
-~/.cache/silo-agent elsewhere). Nothing is ever committed.
+~/.cache/silo-agent elsewhere). Nothing is ever committed. An entry is saved only right after a
+successful prepare in the same run, published atomically, and carries a checksum of every file;
+a hit verifies them first and restores through a temporary folder inside src-tauri.
 """
-import argparse, hashlib, json, os, platform, shutil, subprocess, sys
+import argparse, hashlib, json, os, platform, shlex, shutil, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,10 +29,19 @@ KEY_FILES = [
     "scripts/linux-package-tools.mjs", "scripts/build-input.mjs", "scripts/preflight.mjs",
     "src-tauri/guest/macos/build-network-bootstrap.sh", "src-tauri/guest/macos/silo-network-bootstrap.swift",
 ]
+# Mirrors goRecipeEnvironment in scripts/lfs-transfer-runtime.mjs.
+GO_ENV = ["GOVERSION", "GOROOT", "GOTOOLCHAIN", "GOFLAGS", "GOEXPERIMENT", "GOAMD64", "GOARM64", "GOFIPS140"]
 
 
 def out(cmd, **kw):
     return subprocess.run(cmd, check=True, capture_output=True, text=True, **kw).stdout.strip()
+
+
+def try_out(cmd):
+    try:
+        return out(cmd)
+    except (OSError, subprocess.CalledProcessError):
+        return "unavailable"
 
 
 def target_triple():
@@ -36,14 +49,25 @@ def target_triple():
             or out(["rustc", "--print", "host-tuple"])).strip()
 
 
+def tool_identity(inputs, triple):
+    """Everything outside the repository that the upstream preparation scripts also key on."""
+    target_env = triple.upper().replace("-", "_")
+    names = ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_RUSTFLAGS", f"CARGO_TARGET_{target_env}_RUSTFLAGS"]
+    names += sorted(n for n in os.environ if n.startswith("CARGO_PROFILE_"))
+    lines = [f"{n}={os.environ.get(n)!r}" for n in names]
+    lines.append("rustc=" + out(["rustc", f"+{inputs['toolchain']}", "--version"]))
+    lines.append("go=" + try_out(["go", "env", "-json", *GO_ENV]))
+    lines.append("swiftc=" + try_out(["swiftc", "--version"]))
+    return lines
+
+
 def compute_key(triple):
     inputs = json.loads((APP / "runtime-inputs.json").read_text())
     files = list(KEY_FILES) + [p["path"] for p in inputs["patches"]]
     gateway = TAURI / "macos-gateway"
     files += sorted(str(p.relative_to(APP)) for p in gateway.rglob("*") if p.is_file() and "target" not in p.parts)
-    toolchain = out(["rustc", f"+{inputs['toolchain']}", "--version"])
     h = hashlib.sha256()
-    for line in (f"target={triple}", f"toolchain={toolchain}"):
+    for line in [f"target={triple}", *tool_identity(inputs, triple)]:
         h.update(line.encode() + b"\0")
     for name in files:
         h.update(name.encode() + b"\0" + hashlib.sha256((APP / name).read_bytes()).digest())
@@ -53,6 +77,22 @@ def compute_key(triple):
 def cache_root():
     default = Path.home() / ("Library/Caches" if platform.system() == "Darwin" else ".cache") / "silo-agent"
     return Path(os.environ.get("SILO_AGENT_CACHE", default)) / "runtime"
+
+
+def safe_rel(p):
+    """A manifest path must be relative, free of `..`, inside the worktree, with no symlinked parent."""
+    if not isinstance(p, str) or not p:
+        return False
+    rel = Path(p)
+    if rel.is_absolute() or ".." in rel.parts or "." in rel.parts:
+        return False
+    cur = TAURI
+    for part in rel.parts[:-1]:
+        cur = cur / part
+        if cur.is_symlink():
+            return False
+    root = ROOT.resolve()
+    return (TAURI / rel).resolve().is_relative_to(root) and (TAURI.resolve() / rel).parent.resolve().is_relative_to(TAURI.resolve())
 
 
 def outputs(triple):
@@ -65,45 +105,112 @@ def outputs(triple):
 
 
 def clone(src, dst):
-    """Copy a file or tree, copy-on-write where the filesystem supports it."""
+    """Copy a file or tree to a new path, copy-on-write where the filesystem supports it."""
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if dst.is_dir() and not dst.is_symlink():
-        shutil.rmtree(dst)
-    elif dst.exists() or dst.is_symlink():
-        dst.unlink()
     cmd = ["cp", "-cR", str(src), str(dst)] if platform.system() == "Darwin" else ["cp", "-a", "--reflink=auto", str(src), str(dst)]
     if subprocess.run(cmd, capture_output=True).returncode:
+        if dst.is_dir() and not dst.is_symlink():
+            shutil.rmtree(dst)
+        elif dst.exists() or dst.is_symlink():
+            dst.unlink()
         shutil.copytree(src, dst, symlinks=True) if src.is_dir() else shutil.copy2(src, dst)
 
 
+def remove(p):
+    if p.is_dir() and not p.is_symlink():
+        shutil.rmtree(p, ignore_errors=True)
+    elif p.exists() or p.is_symlink():
+        p.unlink()
+
+
+def checksums(base):
+    """{relative file: sha256, or "link:<target>"} for every file and symlink under base."""
+    sums = {}
+    for dirpath, dirs, names in os.walk(base):
+        for n in names + [d for d in dirs if (Path(dirpath) / d).is_symlink()]:
+            f = Path(dirpath) / n
+            rel = str(f.relative_to(base))
+            if f.is_symlink():
+                sums[rel] = "link:" + os.readlink(f)
+            else:
+                h = hashlib.sha256()
+                with open(f, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        h.update(chunk)
+                sums[rel] = h.hexdigest()
+    return sums
+
+
 def entry_paths(entry):
+    """The manifest paths of a complete, intact entry, or None."""
     try:
-        paths = json.loads((entry / "manifest.json").read_text())["paths"]
-    except (OSError, ValueError, KeyError):
+        m = json.loads((entry / "manifest.json").read_text())
+        paths, sums = m["paths"], m["checksums"]
+    except (OSError, ValueError, KeyError, TypeError):
         return None
-    ok = paths and all((entry / "files" / p).exists() for p in paths) \
-        and any(p.startswith("binaries/msb-") for p in paths) and "runtime/microsandbox" in paths
-    return paths if ok else None
+    if not (isinstance(paths, list) and paths and isinstance(sums, dict) and all(safe_rel(p) for p in paths)):
+        return None
+    if not (any(p.startswith("binaries/msb-") for p in paths) and "runtime/microsandbox" in paths):
+        return None
+    files = entry / "files"
+    if not all((files / p).exists() or (files / p).is_symlink() for p in paths):
+        return None
+    return paths if checksums(files) == sums else None
 
 
-def save(entry, triple):
+def save(entry, triple, replace):
     paths = [str(p) for p in outputs(triple)]
-    if not any(p.startswith("binaries/msb-") for p in paths) or "runtime/microsandbox" not in paths:
-        sys.exit("runtime-cache: runtime:prepare outputs are missing; nothing saved")
-    tmp = entry.with_name(entry.name + f".tmp-{os.getpid()}")
-    shutil.rmtree(tmp, ignore_errors=True)
-    for p in paths:
-        clone(TAURI / p, tmp / "files" / p)
-    (tmp / "manifest.json").write_text(json.dumps({"target": triple, "paths": paths}, indent=1) + "\n")
-    shutil.rmtree(entry, ignore_errors=True)
-    tmp.rename(entry)
+    if not any(p.startswith("binaries/msb-") for p in paths) or "runtime/microsandbox" not in paths or not all(safe_rel(p) for p in paths):
+        sys.exit("runtime-cache: runtime:prepare outputs are missing or unsafe; nothing saved")
+    entry.parent.mkdir(parents=True, exist_ok=True)
+    tmp = entry.with_name(f".tmp-{entry.name}-{os.getpid()}")
+    remove(tmp)
+    try:
+        for p in paths:
+            clone(TAURI / p, tmp / "files" / p)
+        manifest = {"target": triple, "paths": paths, "checksums": checksums(tmp / "files")}
+        (tmp / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
+        if entry.exists() and not replace and entry_paths(entry):
+            print(f"runtime-cache: {entry.name} already saved; keeping it")
+            return
+        old = None
+        if entry.exists():
+            old = entry.with_name(f".old-{entry.name}-{os.getpid()}")
+            entry.rename(old)
+        try:
+            tmp.rename(entry)
+        except OSError:
+            if old:
+                old.rename(entry)
+            raise
+        if old:
+            remove(old)
+    finally:
+        remove(tmp)
+
+
+def restore(entry, paths):
+    """Copy every path into a temporary folder inside src-tauri, then rename each into place."""
+    stage = TAURI / f".restore-{os.getpid()}"
+    remove(stage)
+    try:
+        for p in paths:
+            clone(entry / "files" / p, stage / "new" / p)
+        for p in paths:
+            dst = TAURI / p
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists() or dst.is_symlink():
+                (stage / "old" / p).parent.mkdir(parents=True, exist_ok=True)
+                dst.rename(stage / "old" / p)
+            (stage / "new" / p).rename(dst)
+    finally:
+        remove(stage)
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], epilog="Environment: SILO_AGENT_CACHE (store), SILO_RUNTIME_TARGET (target triple), RUNTIME_PREPARE_CMD (replaces the prepare command, for tests).")
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], epilog="Environment: SILO_AGENT_CACHE (store), SILO_RUNTIME_TARGET (target triple), RUNTIME_PREPARE_CMD (replaces the prepare command, split like a shell line but run without a shell; for tests).")
     ap.add_argument("--status", action="store_true", help="print the key and hit/miss, change nothing")
-    ap.add_argument("--force", action="store_true", help="ignore a hit: rebuild and overwrite the saved copy")
-    ap.add_argument("--save", action="store_true", help="save the current outputs under the current key without preparing")
+    ap.add_argument("--force", action="store_true", help="ignore a hit: rebuild and replace the saved copy")
     args = ap.parse_args()
 
     triple = target_triple()
@@ -113,20 +220,15 @@ def main():
     if args.status:
         print(f"key {key}\ntarget {triple}\nstore {entry}\n{'hit' if paths else 'miss'}")
         return
-    if args.save:
-        save(entry, triple)
-        print(f"saved {entry}")
-        return
     if paths and not args.force:
-        for p in paths:
-            clone(entry / "files" / p, TAURI / p)
+        restore(entry, paths)
         print(f"runtime-cache: hit {key}, restored {len(paths)} paths")
         return
     print(f"runtime-cache: miss {key}, running runtime:prepare", flush=True)
-    cmd = os.environ.get("RUNTIME_PREPARE_CMD") or f"npm --prefix {APP} run runtime:prepare"
-    if subprocess.run(cmd, shell=True, cwd=ROOT).returncode:
+    cmd = shlex.split(os.environ["RUNTIME_PREPARE_CMD"]) if os.environ.get("RUNTIME_PREPARE_CMD") else ["npm", "--prefix", str(APP), "run", "runtime:prepare"]
+    if subprocess.run(cmd, cwd=ROOT).returncode:
         sys.exit("runtime-cache: runtime:prepare failed; nothing saved")
-    save(entry, triple)
+    save(entry, triple, replace=args.force)
     print(f"runtime-cache: saved {entry}")
 
 
