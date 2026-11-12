@@ -691,6 +691,7 @@ async fn the_job_an_allowed_call_starts_is_the_askers_to_read() {
 #[tokio::test]
 async fn a_computer_an_allowed_call_makes_is_the_askers() {
     let _serial = serial();
+    let _host = ample();
     let tree = Tree::new();
     let unique = &tree.me[4..12];
     let name = format!("wide-{unique}");
@@ -1383,6 +1384,7 @@ async fn an_allowed_call_holds_its_memory_while_it_runs() {
 async fn a_promote_is_refused_when_the_fork_changed_after_it_was_asked_and_asking_again_makes_a_new_one(
 ) {
     let _serial = serial();
+    let _host = ample();
     let tree = Tree::new();
     let params = json!({"forkId": tree.fork, "targetId": tree.me});
     let first = ask(&tree.me(), MethodName::ChangesPromote, params.clone()).await;
@@ -1416,6 +1418,7 @@ async fn a_promote_is_refused_when_the_fork_changed_after_it_was_asked_and_askin
 #[tokio::test]
 async fn an_allowed_call_carries_the_state_it_was_approved_for_into_its_job() {
     let _serial = serial();
+    let _host = ample();
     let tree = Tree::new();
     let id = ask(
         &tree.me(),
@@ -1557,6 +1560,7 @@ async fn an_approval_saved_without_a_network_policy_runs_with_the_one_the_second
 async fn an_undo_is_refused_when_another_merge_happened_after_it_was_asked() {
     use silo_engine::changes::keep::{env::CheckpointRef, journal::State, service::journal_for};
     let _serial = serial();
+    let _host = ample();
     let tree = Tree::new();
     let checkpoint = |id: &str| CheckpointRef {
         id: id.into(),
