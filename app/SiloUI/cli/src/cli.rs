@@ -292,6 +292,11 @@ pub enum SecretsCommand {
         /// A domain the secret may be sent to (repeatable; required for a new secret).
         #[arg(long = "domain", value_name = "DOMAIN")]
         domains: Vec<String>,
+        /// Let the computers reach every site under each shared-hosting wildcard among the
+        /// domains (such as *.netlify.app), where anyone can publish a site. Without it such a
+        /// wildcard is saved but not opened.
+        #[arg(long = "allow-shared-hosting")]
+        allow_shared_hosting: bool,
     },
     /// Give a computer an existing secret.
     Assign { name: String, computer: String },
@@ -1479,9 +1484,18 @@ async fn dispatch(
                     name,
                     computers,
                     domains,
+                    allow_shared_hosting,
                 } => {
                     let value = read_secret_value()?;
-                    ops::secret_set(engine, &name, value, &computers, &domains).await?
+                    ops::secret_set(
+                        engine,
+                        &name,
+                        value,
+                        &computers,
+                        &domains,
+                        allow_shared_hosting,
+                    )
+                    .await?
                 }
                 SecretsCommand::Assign { name, computer } => {
                     ops::secret_assign(engine, &name, &computer, true).await?
@@ -1885,6 +1899,7 @@ mod tests {
             name,
             computers,
             domains,
+            allow_shared_hosting,
         }) = parse(&[
             "secrets",
             "set",
@@ -1902,6 +1917,23 @@ mod tests {
             (name.as_str(), computers.len(), domains.len()),
             ("API_KEY", 1, 1)
         );
+        assert!(!allow_shared_hosting);
+        let Command::Secrets(SecretsCommand::Set {
+            allow_shared_hosting,
+            ..
+        }) = parse(&[
+            "secrets",
+            "set",
+            "API_KEY",
+            "--domain",
+            "*.netlify.app",
+            "--allow-shared-hosting",
+        ])
+        .command
+        else {
+            panic!("not a secrets set")
+        };
+        assert!(allow_shared_hosting);
         assert!(Cli::try_parse_from(["silo", "secrets", "set", "API_KEY", "the-value"]).is_err());
         assert!(matches!(
             parse(&["secrets", "assign", "API_KEY", "fork"]).command,
