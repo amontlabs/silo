@@ -12,6 +12,10 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
   and deletes the item's target folder (`~/code/projects/silo-wt-targets/<item>`). `main` on
   GitHub accepts only pull requests with seven required checks (found 2026-11-10), so the build
   stays on `direction` and goes up as pull requests at the end.
+- **Build folders:** a local `post-checkout` hook in `.git/hooks` clones the main checkout's
+  `app/SiloUI/target` into each new worktree (APFS clone, no space until files change). After
+  merging, run `cargo build --manifest-path app/SiloUI/Cargo.toml --workspace --locked` in the main
+  checkout so new worktrees start from current dependency builds.
 - **Live checks** use the Dev engine, one item at a time. On 2026-11-10 a Dev app and engine from a
   deleted build (`silo-dev-target`) were still running; an item that needs the Dev engine
   replaces them with its own build.

@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+"""Prove a change: run only the checks the diff calls for, print only failures and one verdict.
+
+  check [--base REF] [--quick]
+
+Steps, using `affected` to choose them (base: see `affected --help`):
+  1. rustfmt --check on the touched Rust files (the pinned toolchain from rust-toolchain.toml)
+  2. cargo check --tests -p <affected crates>
+  3. cargo nextest run -E <filterset> --no-fail-fast --profile check
+     (cargo test -p <crates> when cargo-nextest is not installed)
+  4. script tests the diff touches
+  5. frontend, only if frontend files changed: typecheck, oxlint on those files, vitest related
+--quick stops after cargo check and typecheck. The full log goes to
+app/SiloUI/target/agent-check/<time>.log. A run that already passed for the same tree, toolchain,
+affected set and mode is skipped ("already green"). Tests that fail and then pass on nextest's
+retry are recorded in docs/workflow/FLAKY.md. Exit code: 0 green, 1 a step failed, 2 PARTIAL (a
+crate could not be checked, or the tree changed during the run): never green, no marker written.
+The green key covers the tree hash, rustc, nextest or cargo test, RUSTFLAGS/CARGO_*/SILO_GITHUB_*
+values, the GitHub build file's presence, whether the prepared runtime is present (when silo-ui is
+affected), node/npm/python versions (when frontend or script tests run), the touched files and the mode.
+"""
+import argparse
+import datetime
+import fcntl
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+APP = 'app/SiloUI'
+SYNTHETIC_GITHUB = {'SILO_GITHUB_APP_SLUG': 'silo-test', 'SILO_GITHUB_CLIENT_ID': 'test-client',
+                    'SILO_GITHUB_CLIENT_SECRET': 'test-secret'}
+NEXTEST_VERSION = '0.9.149'  # the version CI pins
+
+
+def run(command, cwd, env=None):
+    started = time.time()
+    try:
+        proc = subprocess.run(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True, errors='replace')
+        return proc.returncode, proc.stdout, time.time() - started
+    except FileNotFoundError as error:
+        return 127, f'{error}\n', time.time() - started
+
+
+def tree_hash(root):
+    """Hash of the working tree (tracked, staged, untracked, not ignored), without touching the index.
+    FLAKY.md is left out: check itself appends to it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {**os.environ, 'GIT_INDEX_FILE': str(Path(tmp) / 'index')}
+        head = subprocess.run(['git', 'rev-parse', '--verify', '-q', 'HEAD'], cwd=root, capture_output=True, text=True)
+        if head.returncode == 0:
+            subprocess.run(['git', 'read-tree', 'HEAD'], cwd=root, env=env, check=True)
+        subprocess.run(['git', 'add', '-A', '--', '.', ':!docs/workflow/FLAKY.md'], cwd=root, env=env, check=True, capture_output=True)
+        return subprocess.run(['git', 'write-tree'], cwd=root, env=env, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+
+def excerpt(name, output, limit=60):
+    lines = output.splitlines()
+    if name == 'tests':
+        keep = [l for l in lines if any(k in l for k in ('FAIL', 'SIGABRT', 'SIGSEGV', 'TIMEOUT', 'panicked'))]
+        lines = keep or lines
+    elif name == 'cargo check':
+        start = next((i for i, l in enumerate(lines) if l.startswith('error')), 0)
+        lines = lines[start:]
+    return '\n'.join(lines[:limit] if name == 'cargo check' else lines[-limit:])
+
+
+def record_flaky(root, junit, command):
+    """Append tests that failed and then passed (JUnit <flakyFailure>/<flakyError>) to FLAKY.md."""
+    if not junit.exists():
+        return []
+    flaky = []
+    for case in ET.parse(junit).getroot().iter('testcase'):
+        if case.find('flakyFailure') is not None or case.find('flakyError') is not None:
+            flaky.append(f"{case.get('classname')} {case.get('name')}")
+    if not flaky:
+        return []
+    path = root / 'docs/workflow/FLAKY.md'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    today = datetime.date.today().isoformat()
+    with path.open('a+') as out:
+        fcntl.flock(out, fcntl.LOCK_EX)  # concurrent checks append one after the other
+        out.seek(0)
+        existing = out.read() or '# Flaky tests\n\n'
+        if not existing.endswith('\n'):
+            existing += '\n'
+        lines = ''.join(f'- {today} `{t}` failed, then passed on retry (`{command}`)\n'
+                        for t in flaky if f'`{t}`' not in existing)
+        if lines:
+            out.seek(0)
+            out.truncate()
+            out.write(existing + lines)
+    return flaky
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--base', help='diff against this ref (default: merge base with the integration branch)')
+    parser.add_argument('--quick', action='store_true', help='stop after cargo check / typecheck')
+    args = parser.parse_args()
+    root = Path(subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True,
+                               check=True).stdout.strip())
+    app = root / APP
+    affected_cmd = [str(Path(__file__).resolve().parent / 'affected'), '--json'] + (['--base', args.base] if args.base else [])
+    code, out, _ = run(affected_cmd, root)
+    if code:
+        print(f'check: RED — affected failed:\n{out.strip()}')
+        return 1
+    plan = json.loads(out)
+    crates, frontend = plan['crates'], plan['frontend']
+    notes, partial, filterset = [], [], plan['filterset']
+    # silo-ui's build script needs the prepared MicroSandbox runtime (src-tauri/binaries, ignored by git).
+    skip_ui = 'silo-ui' in crates and not list((root / APP / 'src-tauri/binaries').glob('msb-*'))
+    if skip_ui:
+        crates = [c for c in crates if c != 'silo-ui']
+        filterset = f'({filterset}) & not package(silo-ui)'
+        partial.append('silo-ui was NOT checked or tested: the runtime is not prepared in this worktree '
+                       '(restore it with tools/agent/runtime-cache or npm --prefix app/SiloUI run runtime:prepare)')
+    run_frontend = bool(frontend) or plan['frontend_all']
+    if not (plan['crates'] or plan['other_manifests'] or run_frontend or plan['script_tests']):
+        print('check: nothing to check — the diff touches no Rust crate, frontend file or script test')
+        return 0
+
+    toolchain = run(['rustc', '-vV'], root)[1]
+    version = next((l.split()[1] for l in toolchain.splitlines() if l.startswith('release:')), '?')
+    mode = 'quick' if args.quick else 'full'
+    nextest = run(['cargo', 'nextest', '--version'], root)
+    has_nextest = nextest[0] == 0
+    runner = nextest[1].strip() if has_nextest else 'cargo test'
+    # Node, npm and Python run every frontend and script test, so they are part of the key whenever either runs.
+    tool_versions = [run(command, root)[1].strip() for command in (['node', '--version'], ['npm', '--version'])] \
+        if run_frontend or plan['script_tests'] else []
+    if plan['script_tests']:
+        tool_versions.append(f'{sys.executable} {sys.version}')
+    github_file = (app / 'github-build.local.json').exists()
+    relevant_env = sorted((k, v) for k, v in os.environ.items()
+                          if k in ('RUSTFLAGS', 'RUSTDOCFLAGS', 'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER', 'RUSTUP_TOOLCHAIN')
+                          or k.startswith(('CARGO_', 'SILO_GITHUB_')) and not k.startswith('CARGO_TERM_'))
+    tree = tree_hash(root)
+    key_text = json.dumps([tree, toolchain, runner, relevant_env, github_file, tool_versions, skip_ui, plan['changed'],
+                           plan['crates'], plan['filterset'], frontend, plan['frontend_all'],
+                           plan['script_tests'], plan['other_manifests'], plan['everything']])
+    key = hashlib.sha256(key_text.encode()).hexdigest()[:24]
+    state = app / 'target/agent-check'
+    markers = state / 'green'
+    markers.mkdir(parents=True, exist_ok=True)
+    marker = markers / f'{key}.{mode}'
+    if not partial and (marker.exists() or (args.quick and (markers / f'{key}.full').exists())):
+        print(f'check: already green — same tree {tree[:9]}, rustc {version}, {mode} — skipped')
+        return 0
+
+    env = {**os.environ, 'CARGO_TERM_COLOR': 'never', 'NO_COLOR': '1'}
+    if not (app / 'github-build.local.json').exists():
+        for name, value in SYNTHETIC_GITHUB.items():
+            env.setdefault(name, value)
+    run_id = f'{datetime.datetime.now():%Y%m%d-%H%M%S}-{os.getpid()}'
+    log = state / f'{run_id}.log'
+    failed, steps = [], []
+    manifest = str(app / 'Cargo.toml')
+
+    def step(name, command, cwd=root):
+        code, output, seconds = run(command, cwd, env)
+        with log.open('a') as f:
+            f.write(f'$ {" ".join(command)}\n{output}\n[exit {code}, {seconds:.1f}s]\n\n')
+        steps.append(f'{name} {seconds:.0f}s')
+        if code:
+            failed.append(name)
+            print(f'--- {name} FAILED (exit {code}); command: {" ".join(command)}')
+            print(excerpt(name, output))
+        return code, output
+
+    # 1. rustfmt on touched Rust files.
+    rust_files = [f for f in plan['changed'] if f.endswith('.rs') and (root / f).exists()]
+    if rust_files:
+        step('fmt', ['rustfmt', '--check', '--edition', '2021'] + rust_files)
+        if 'fmt' in failed:
+            print('fix with: rustfmt --edition 2021 ' + ' '.join(rust_files))
+    # 2. cargo check.
+    if crates:
+        scope = ['--workspace'] + (['--exclude', 'silo-ui'] if skip_ui else []) if plan['everything'] \
+            else [a for c in crates for a in ('-p', c)]
+        step('cargo check', ['cargo', 'check', '--tests', '--locked', '--manifest-path', manifest] + scope)
+    for other in plan['other_manifests']:
+        step(f'cargo check {other}', ['cargo', 'check', '--tests', '--locked', '--manifest-path', f'{other}/Cargo.toml'])
+    # 5a. typecheck (frontend).
+    if run_frontend:
+        if not (app / 'node_modules').exists():
+            failed.append('frontend')
+            print(f'--- frontend FAILED: {APP}/node_modules is missing; run: npm --prefix {APP} ci')
+        else:
+            step('typecheck', ['npm', '--prefix', str(app), 'run', '--silent', 'typecheck'])
+    if args.quick:
+        return finish(failed, partial, steps, log, root, marker, tree, 'quick', crates, frontend, notes)
+    # 3. tests.
+    if crates and 'cargo check' not in failed:
+        junit = state / f'{run_id}.junit.xml'
+        if has_nextest:
+            # A per-run copy of the nextest config, so concurrent checks never share one JUnit file.
+            config = state / f'{run_id}.nextest.toml'
+            config.write_text((app / '.config/nextest.toml').read_text().replace('path = "junit.xml"', f'path = "{junit}"'))
+            command = ['cargo', 'nextest', 'run', '--config-file', str(config), '--manifest-path', manifest, '--locked',
+                       '--profile', 'check', '--no-fail-fast'] + scope + ['-E', filterset]
+        else:
+            notes.append(f'cargo-nextest is not installed: ran cargo test (install: cargo install cargo-nextest --locked --version {NEXTEST_VERSION})')
+            command = ['cargo', 'test', '--manifest-path', manifest, '--locked', '--no-fail-fast', '--tests'] + \
+                [a for c in crates for a in ('-p', c)]
+        _, test_output = step('tests', command)
+        if 'prepare the bundled Git runtime' in test_output:
+            notes.append('some tests need the prepared runtime (bundled Git), which this worktree lacks: '
+                         'restore it with tools/agent/runtime-cache or npm --prefix app/SiloUI run runtime:prepare')
+        if has_nextest:
+            flaky = record_flaky(root, junit, ' '.join(command))
+            junit.unlink(missing_ok=True)
+            config.unlink(missing_ok=True)
+            if flaky:
+                notes.append(f'{len(flaky)} flaky test(s) failed then passed on retry, recorded in docs/workflow/FLAKY.md: '
+                             + ', '.join(flaky))
+    if not args.quick and 'cargo check' not in failed:
+        for other in plan['other_manifests']:
+            step(f'cargo test {other}', ['cargo', 'test', '--locked', '--manifest-path', f'{other}/Cargo.toml'])
+    # 4. script tests.
+    for test in plan['script_tests']:
+        command = ['node', '--test', test] if test.endswith('.mjs') else ['bash', test] if test.endswith('.sh') else \
+            [sys.executable, '-m', 'unittest', '-q', Path(test).name]
+        code, output, seconds = run(command, app / 'scripts' if test.endswith('.py') else root, env)
+        with log.open('a') as f:
+            f.write(f'$ {" ".join(command)}\n{output}\n[exit {code}, {seconds:.1f}s]\n\n')
+        steps.append(f'{Path(test).name} {seconds:.0f}s')
+        if code:
+            failed.append(Path(test).name)
+            print(f'--- script test {test} FAILED\n' + '\n'.join(output.splitlines()[-40:]))
+    # 5b. oxlint and vitest.
+    if run_frontend and (app / 'node_modules').exists():
+        rel = [str(Path(f).relative_to(APP)) for f in frontend]
+        lint = ['npm', '--prefix', str(app), 'run', '--silent', 'lint'] + (['--'] + rel if rel and not plan['frontend_all'] else [])
+        step('oxlint', lint)
+        if plan['frontend_all']:
+            step('vitest', ['npm', '--prefix', str(app), 'test'])
+        elif rel:
+            step('vitest', ['npx', 'vitest', 'related', '--run'] + rel, cwd=app)
+    return finish(failed, partial, steps, log, root, marker, tree, mode, crates, frontend, notes)
+
+
+def finish(failed, partial, steps, log, root, marker, tree, mode, crates, frontend, notes):
+    for note in notes:
+        print(f'note: {note}')
+    rel_log = log.relative_to(root) if log.exists() else None
+    scope = f'{len(crates)} crate(s), {len(frontend)} frontend file(s)'
+    timing = ', '.join(steps)
+    if failed:
+        print(f'check: RED ({mode}) — failed: {", ".join(failed)} · {scope} · {timing} · log {rel_log}')
+        return 1
+    if tree_hash(root) != tree:
+        partial.append('the working tree changed while the checks ran, so they do not prove the final tree')
+    if partial:
+        print(f'check: PARTIAL ({mode}) — NOT green: {"; ".join(partial)} · {scope} · {timing} · log {rel_log}')
+        return 2
+    marker.touch()
+    print(f'check: GREEN ({mode}) — {scope} · {timing} · log {rel_log}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

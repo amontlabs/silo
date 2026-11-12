@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""Work board: one TSV per build, edited only by the orchestrator.
+
+  board [--file F] [--into BRANCH] <command>
+    add <item> [--branch B] [--base B] [--depends a,b] [--worktree P] [--note T] [--temp p1,p2]
+    set <item> key=value...        change fields (state must be a valid state)
+    get <item> [field]             print one row (or one field)
+    status                         aligned table
+    ready                          planned items that can start now, with the branch to stack on
+    cleanable                      merged items nothing unmerged depends on
+    restack <item>                 after <item>'s branch changed (or merged), rebase its
+                                   dependents bottom-up, one branch at a time
+
+The file is --file, else $BOARD. Columns: item branch base depends_on worktree state note temp.
+States: planned running committed reviewed merged cleaned. --into (or $BOARD_INTEGRATION,
+default main) is the integration branch: what an item with no unmerged dependency starts from.
+A dependency counts as started once it is committed, reviewed or merged. An item with two
+unmerged dependencies is not ready (merge one first).
+`temp` is an optional comma list of extra temp paths for `clean`.
+Restack never forces: on a conflict it stops, exits 2, and reports the files. If the branch is
+checked out in a worktree the rebase is left in progress there; otherwise it is aborted.
+"""
+import argparse, contextlib, fcntl, os, subprocess, sys, tempfile
+
+COLS = ["item", "branch", "base", "depends_on", "worktree", "state", "note", "temp"]
+STATES = ["planned", "running", "committed", "reviewed", "merged", "cleaned"]
+DONE = ("merged", "cleaned")
+STARTED = ("committed", "reviewed", "merged", "cleaned")
+
+
+def die(msg, code=1):
+    print("board: " + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def path_of(args):
+    p = args.file or os.environ.get("BOARD")
+    if not p:
+        die("no board file: pass --file or set BOARD")
+    return p
+
+
+@contextlib.contextmanager
+def locked(path):
+    """Exclusive lock around a read-modify-write of the board (sidecar file <board>.lock)."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path + ".lock", "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        yield
+
+
+def load(path):
+    rows = []
+    if not os.path.exists(path):
+        return rows
+    with open(path) as f:
+        for n, line in enumerate(f.read().splitlines()):
+            if n == 0 or not line.strip():
+                continue
+            cells = line.split("\t")
+            cells += [""] * (len(COLS) - len(cells))
+            rows.append(dict(zip(COLS, cells)))
+    return rows
+
+
+def save(path, rows):
+    text = "\t".join(COLS) + "\n" + "".join("\t".join(r[c] for c in COLS) + "\n" for r in rows)
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".board.")
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def clean_cell(v):
+    return " ".join(str(v).replace("\t", " ").split())
+
+
+def find(rows, item):
+    for r in rows:
+        if r["item"] == item:
+            return r
+    die("unknown item: " + item)
+
+
+def deps(r):
+    return [d for d in r["depends_on"].split(",") if d]
+
+
+def git(*a, cwd=None, check=False):
+    p = subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True,
+                       encoding="utf-8", errors="surrogateescape")
+    if check and p.returncode:
+        die("git %s failed: %s" % (" ".join(a), p.stderr.strip()))
+    return p
+
+
+def integration(args):
+    return args.into or os.environ.get("BOARD_INTEGRATION") or "main"
+
+
+def start_base(rows, r, into):
+    """Branch an item should be stacked on, or None when it cannot start yet."""
+    parents = [find(rows, d) for d in deps(r)]
+    if any(p["state"] not in STARTED for p in parents):
+        return None
+    unmerged = [p for p in parents if p["state"] not in DONE]
+    if len(unmerged) > 1:
+        return None
+    return unmerged[0]["branch"] if unmerged else into
+
+
+def cmd_add(args, rows, path):
+    if any(r["item"] == args.item for r in rows):
+        die("item exists: " + args.item)
+    r = dict.fromkeys(COLS, "")
+    r.update(item=args.item, branch=args.branch or args.item, base=args.base or "",
+             depends_on=args.depends or "", worktree=args.worktree or "", state="planned",
+             note=clean_cell(args.note or ""), temp=args.temp or "")
+    for d in deps(r):
+        find(rows, d)
+    rows.append(r)
+    save(path, rows)
+
+
+def cmd_set(args, rows, path):
+    r = find(rows, args.item)
+    for kv in args.pairs:
+        k, eq, v = kv.partition("=")
+        if k not in COLS or k == "item" or not eq:
+            die("bad assignment %r (fields: %s)" % (kv, ", ".join(COLS[1:])))
+        if k == "state" and v not in STATES:
+            die("bad state %r (one of %s)" % (v, ", ".join(STATES)))
+        if k == "depends_on":
+            for d in v.split(","):
+                if d:
+                    find(rows, d)
+        r[k] = clean_cell(v)
+    save(path, rows)
+
+
+def cmd_get(args, rows, path):
+    r = find(rows, args.item)
+    if args.field:
+        if args.field not in COLS:
+            die("unknown field " + args.field)
+        print(r[args.field])
+    else:
+        for c in COLS:
+            print("%s=%s" % (c, r[c]))
+
+
+def cmd_status(args, rows, path):
+    cols = COLS[:7]
+    table = [cols] + [[r[c] or "-" for c in cols] for r in rows]
+    w = [max(len(row[i]) for row in table) for i in range(len(cols) - 1)]
+    for row in table:
+        print("  ".join(c.ljust(w[i]) for i, c in enumerate(row[:-1])) + "  " + row[-1])
+
+
+def cmd_ready(args, rows, path):
+    into = integration(args)
+    for r in rows:
+        if r["state"] == "planned":
+            b = start_base(rows, r, into)
+            if b:
+                print("%s\tstack-on=%s" % (r["item"], b))
+
+
+def cmd_cleanable(args, rows, path):
+    for r in rows:
+        if r["state"] == "merged" and not any(
+                r["item"] in deps(o) and o["state"] not in DONE for o in rows):
+            print(r["item"])
+
+
+def worktree_list():
+    """[(path, branch or None)] for every worktree of the repository in the cwd (first = main)."""
+    out = []
+    for rec in git("worktree", "list", "--porcelain", "-z", check=True).stdout.split("\0\0"):
+        path, branch = None, None
+        for field in rec.split("\0"):
+            if field.startswith("worktree "):
+                path = field[9:]
+            elif field.startswith("branch refs/heads/"):
+                branch = field[18:]
+        if path:
+            out.append((path, branch))
+    return out
+
+
+def worktrees():
+    """branch -> worktree path for the repository in the cwd."""
+    return {b: p for p, b in worktree_list() if b}
+
+
+def dependents_bottom_up(rows, item):
+    """Unmerged transitive dependents in topological order: each comes after all it depends on."""
+    members, changed = {item}, True
+    while changed:
+        changed = False
+        for r in rows:
+            if r["item"] not in members and r["state"] not in DONE and any(d in members for d in deps(r)):
+                members.add(r["item"])
+                changed = True
+    rest = [r for r in rows if r["item"] in members and r["item"] != item]
+    order, placed = [], {item}
+    while rest:
+        nxt = next((r for r in rest if all(d in placed or d not in members for d in deps(r))), None)
+        if nxt is None:
+            die("dependency cycle among: " + ", ".join(r["item"] for r in rest))
+        rest.remove(nxt)
+        placed.add(nxt["item"])
+        order.append(nxt)
+    return order
+
+
+def conflict(where, branch, new_base, extra):
+    files = [f for f in git("diff", "--name-only", "--diff-filter=U", "-z", cwd=where).stdout.split("\0") if f]
+    print("CONFLICT while rebasing %s onto %s" % (branch, new_base))
+    print("  conflicting files: " + (", ".join(files) or "unknown"))
+    print("  " + extra)
+
+
+def cmd_restack(args, rows, path):
+    into = integration(args)
+    find(rows, args.item)
+    wts = worktrees()
+    for r in dependents_bottom_up(rows, args.item):
+        parents = [find(rows, d) for d in deps(r)]
+        open_parents = [p for p in parents if p["state"] not in DONE]
+        if len(open_parents) > 1:
+            die("%s has several unmerged parents; merge one first" % r["item"], 2)
+        new_base = open_parents[0]["branch"] if open_parents else into
+        # the branch it was stacked on until now (still present after a merge)
+        old = next((p for p in parents if p["branch"] == r["base"]), None) or \
+            (open_parents[0] if open_parents else parents[0])
+        # old fork point: the newest old parent tip (reflog) that the branch contains, so a parent
+        # that was rewound or rewritten still gives the commits it used to have; else its current tip
+        tip = git("rev-parse", "--verify", "-q", old["branch"]).stdout.strip()
+        up = git("merge-base", "--fork-point", old["branch"], r["branch"]).stdout.strip()
+        if not up and tip and git("merge-base", "--is-ancestor", tip, r["branch"]).returncode == 0:
+            up = tip
+        if not up:
+            die("%s: cannot tell where %s was stacked on %s (its old tip is not in the reflog); "
+                "rebase it by hand with `git rebase --onto %s <old tip>`"
+                % (r["item"], r["branch"], old["branch"], new_base), 2)
+        if git("rev-list", "--merges", "-n", "1", "%s..%s" % (up, r["branch"])).stdout.strip():
+            die("%s: %s contains merge commits, which a rebase would drop; restack it by hand"
+                % (r["item"], r["branch"]), 2)
+        if up == git("rev-parse", new_base, check=True).stdout.strip():
+            print("%s: already on %s" % (r["item"], new_base))
+            r["base"] = new_base
+            continue
+        wt = wts.get(r["branch"])
+        if wt:
+            if git("status", "--porcelain", "--untracked-files=no", cwd=wt).stdout.strip():
+                save(path, rows)
+                die("worktree %s has uncommitted changes; commit them first" % wt, 2)
+            ok = git("rebase", "--onto", new_base, up, cwd=wt).returncode == 0
+            if not ok:
+                conflict(wt, r["branch"], new_base,
+                         "rebase left in progress in %s: resolve and `git rebase --continue`, "
+                         "or `git rebase --abort`; then rerun restack" % wt)
+        else:
+            tmp = tempfile.mkdtemp(prefix="board-restack-")
+            git("worktree", "add", "--detach", tmp, r["branch"], check=True)
+            ok = git("rebase", "--onto", new_base, up, r["branch"], cwd=tmp).returncode == 0
+            if not ok:
+                conflict(tmp, r["branch"], new_base, "aborted; the branch is unchanged")
+                git("rebase", "--abort", cwd=tmp)
+            git("worktree", "remove", "--force", tmp)
+            git("worktree", "prune")
+        if not ok:
+            save(path, rows)
+            sys.exit(2)
+        r["base"] = new_base
+        print("%s: rebased onto %s" % (r["item"], new_base))
+    save(path, rows)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--file")
+    ap.add_argument("--into")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    a = sub.add_parser("add")
+    a.add_argument("item")
+    for o in ("branch", "base", "depends", "worktree", "note", "temp"):
+        a.add_argument("--" + o)
+    s = sub.add_parser("set")
+    s.add_argument("item")
+    s.add_argument("pairs", nargs="+")
+    g = sub.add_parser("get")
+    g.add_argument("item")
+    g.add_argument("field", nargs="?")
+    for n in ("status", "ready", "cleanable"):
+        sub.add_parser(n)
+    r = sub.add_parser("restack")
+    r.add_argument("item")
+    args = ap.parse_args()
+    path = path_of(args)
+    if args.cmd in ("add", "set", "restack"):
+        with locked(path):
+            globals()["cmd_" + args.cmd](args, load(path), path)
+    else:
+        globals()["cmd_" + args.cmd](args, load(path), path)
+
+
+if __name__ == "__main__":
+    main()

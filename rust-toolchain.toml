@@ -1,0 +1,9 @@
+# One Rust release for every Cargo command in this repository, so build folders and sccache are
+# shared between worktrees. It sits at the root because rustup looks for this file upward from the
+# directory a command runs in, and agents run Cargo from the root, from app/SiloUI and from
+# src-tauri. Keep it equal to "toolchain" in app/SiloUI/runtime-inputs.json (checked by
+# scripts/test_rust_toolchain.py). `runtime:prepare` builds MicroSandbox with an explicit
+# `cargo +<toolchain>`, which takes precedence over this file.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
