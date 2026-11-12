@@ -13,10 +13,14 @@ Steps, using `affected` to choose them (base: see `affected --help`):
 --quick stops after cargo check and typecheck. The full log goes to
 app/SiloUI/target/agent-check/<time>.log. A run that already passed for the same tree, toolchain,
 affected set and mode is skipped ("already green"). Tests that fail and then pass on nextest's
-retry are recorded in docs/workflow/FLAKY.md. Exit code: 0 green, 1 a step failed.
+retry are recorded in docs/workflow/FLAKY.md. Exit code: 0 green, 1 a step failed, 2 PARTIAL (a
+crate could not be checked, or the tree changed during the run): never green, no marker written.
+The green key covers the tree hash, rustc, nextest or cargo test, RUSTFLAGS/CARGO_*/SILO_GITHUB_*
+values, the GitHub build file's presence, node/npm versions, the touched files and the mode.
 """
 import argparse
 import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -45,13 +49,14 @@ def run(command, cwd, env=None):
 
 
 def tree_hash(root):
-    """Hash of the working tree (tracked, staged, untracked, not ignored), without touching the index."""
+    """Hash of the working tree (tracked, staged, untracked, not ignored), without touching the index.
+    FLAKY.md is left out: check itself appends to it."""
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, 'GIT_INDEX_FILE': str(Path(tmp) / 'index')}
         head = subprocess.run(['git', 'rev-parse', '--verify', '-q', 'HEAD'], cwd=root, capture_output=True, text=True)
         if head.returncode == 0:
             subprocess.run(['git', 'read-tree', 'HEAD'], cwd=root, env=env, check=True)
-        subprocess.run(['git', 'add', '-A'], cwd=root, env=env, check=True, capture_output=True)
+        subprocess.run(['git', 'add', '-A', '--', '.', ':!docs/workflow/FLAKY.md'], cwd=root, env=env, check=True, capture_output=True)
         return subprocess.run(['git', 'write-tree'], cwd=root, env=env, check=True, capture_output=True,
                               text=True).stdout.strip()
 
@@ -79,14 +84,19 @@ def record_flaky(root, junit, command):
         return []
     path = root / 'docs/workflow/FLAKY.md'
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text() if path.exists() else '# Flaky tests\n\n'
     today = datetime.date.today().isoformat()
-    added = [t for t in flaky if f'`{t}`' not in existing]
-    if added:
-        with path.open('w') as out:
-            out.write(existing if existing.endswith('\n') else existing + '\n')
-            for test in added:
-                out.write(f'- {today} `{test}` failed, then passed on retry (`{command}`)\n')
+    with path.open('a+') as out:
+        fcntl.flock(out, fcntl.LOCK_EX)  # concurrent checks append one after the other
+        out.seek(0)
+        existing = out.read() or '# Flaky tests\n\n'
+        if not existing.endswith('\n'):
+            existing += '\n'
+        lines = ''.join(f'- {today} `{t}` failed, then passed on retry (`{command}`)\n'
+                        for t in flaky if f'`{t}`' not in existing)
+        if lines:
+            out.seek(0)
+            out.truncate()
+            out.write(existing + lines)
     return flaky
 
 
@@ -105,26 +115,35 @@ def main():
         return 1
     plan = json.loads(out)
     crates, frontend = plan['crates'], plan['frontend']
-    notes, filterset = [], plan['filterset']
+    notes, partial, filterset = [], [], plan['filterset']
     # silo-ui's build script needs the prepared MicroSandbox runtime (src-tauri/binaries, ignored by git).
     skip_ui = 'silo-ui' in crates and not list((root / APP / 'src-tauri/binaries').glob('msb-*'))
     if skip_ui:
         crates = [c for c in crates if c != 'silo-ui']
         filterset = f'({filterset}) & not package(silo-ui)'
-        notes.append('silo-ui was NOT checked or tested: the runtime is not prepared in this worktree '
-                     '(restore it with tools/agent/runtime-cache or npm --prefix app/SiloUI run runtime:prepare)')
+        partial.append('silo-ui was NOT checked or tested: the runtime is not prepared in this worktree '
+                       '(restore it with tools/agent/runtime-cache or npm --prefix app/SiloUI run runtime:prepare)')
     run_frontend = bool(frontend) or plan['frontend_all']
     if not (plan['crates'] or plan['other_manifests'] or run_frontend or plan['script_tests']):
         print('check: nothing to check — the diff touches no Rust crate, frontend file or script test')
         return 0
 
     toolchain = run(['rustc', '-vV'], root)[1]
-    toolchain_id = hashlib.sha256(toolchain.encode()).hexdigest()[:8]
     version = next((l.split()[1] for l in toolchain.splitlines() if l.startswith('release:')), '?')
     mode = 'quick' if args.quick else 'full'
+    nextest = run(['cargo', 'nextest', '--version'], root)
+    has_nextest = nextest[0] == 0
+    runner = nextest[1].strip() if has_nextest else 'cargo test'
+    tool_versions = [run(command, root)[1].strip() for command in (['node', '--version'], ['npm', '--version'])] \
+        if run_frontend else []
+    github_file = (app / 'github-build.local.json').exists()
+    relevant_env = sorted((k, v) for k, v in os.environ.items()
+                          if k in ('RUSTFLAGS', 'RUSTDOCFLAGS', 'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER', 'RUSTUP_TOOLCHAIN')
+                          or k.startswith(('CARGO_', 'SILO_GITHUB_')) and not k.startswith('CARGO_TERM_'))
     tree = tree_hash(root)
-    key_text = json.dumps([tree, toolchain_id, plan['crates'], plan['filterset'], frontend, plan['frontend_all'],
-                           plan['script_tests'], plan['other_manifests']])
+    key_text = json.dumps([tree, toolchain, runner, relevant_env, github_file, tool_versions, plan['changed'],
+                           plan['crates'], plan['filterset'], frontend, plan['frontend_all'],
+                           plan['script_tests'], plan['other_manifests'], plan['everything']])
     key = hashlib.sha256(key_text.encode()).hexdigest()[:24]
     state = app / 'target/agent-check'
     markers = state / 'green'
@@ -138,7 +157,8 @@ def main():
     if not (app / 'github-build.local.json').exists():
         for name, value in SYNTHETIC_GITHUB.items():
             env.setdefault(name, value)
-    log = state / f'{datetime.datetime.now():%Y%m%d-%H%M%S}.log'
+    run_id = f'{datetime.datetime.now():%Y%m%d-%H%M%S}-{os.getpid()}'
+    log = state / f'{run_id}.log'
     failed, steps = [], []
     manifest = str(app / 'Cargo.toml')
 
@@ -174,15 +194,16 @@ def main():
         else:
             step('typecheck', ['npm', '--prefix', str(app), 'run', '--silent', 'typecheck'])
     if args.quick:
-        return finish(failed, steps, log, root, marker, 'quick', crates, frontend, notes)
+        return finish(failed, partial, steps, log, root, marker, tree, 'quick', crates, frontend, notes)
     # 3. tests.
     if crates and 'cargo check' not in failed:
-        junit = app / 'target/nextest/check/junit.xml'
-        junit.unlink(missing_ok=True)
-        has_nextest = run(['cargo', 'nextest', '--version'], root)[0] == 0
+        junit = state / f'{run_id}.junit.xml'
         if has_nextest:
-            command = ['cargo', 'nextest', 'run', '--manifest-path', manifest, '--locked', '--profile', 'check',
-                       '--no-fail-fast'] + scope + ['-E', filterset]
+            # A per-run copy of the nextest config, so concurrent checks never share one JUnit file.
+            config = state / f'{run_id}.nextest.toml'
+            config.write_text((app / '.config/nextest.toml').read_text().replace('path = "junit.xml"', f'path = "{junit}"'))
+            command = ['cargo', 'nextest', 'run', '--config-file', str(config), '--manifest-path', manifest, '--locked',
+                       '--profile', 'check', '--no-fail-fast'] + scope + ['-E', filterset]
         else:
             notes.append(f'cargo-nextest is not installed: ran cargo test (install: cargo install cargo-nextest --locked --version {NEXTEST_VERSION})')
             command = ['cargo', 'test', '--manifest-path', manifest, '--locked', '--no-fail-fast', '--tests'] + \
@@ -193,14 +214,19 @@ def main():
                          'restore it with tools/agent/runtime-cache or npm --prefix app/SiloUI run runtime:prepare')
         if has_nextest:
             flaky = record_flaky(root, junit, ' '.join(command))
+            junit.unlink(missing_ok=True)
+            config.unlink(missing_ok=True)
             if flaky:
                 notes.append(f'{len(flaky)} flaky test(s) failed then passed on retry, recorded in docs/workflow/FLAKY.md: '
                              + ', '.join(flaky))
+    if not args.quick and 'cargo check' not in failed:
+        for other in plan['other_manifests']:
+            step(f'cargo test {other}', ['cargo', 'test', '--locked', '--manifest-path', f'{other}/Cargo.toml'])
     # 4. script tests.
     for test in plan['script_tests']:
-        command = ['node', '--test', test] if test.endswith('.mjs') else \
+        command = ['node', '--test', test] if test.endswith('.mjs') else ['bash', test] if test.endswith('.sh') else \
             [sys.executable, '-m', 'unittest', '-q', Path(test).name]
-        code, output, seconds = run(command, root if test.endswith('.mjs') else app / 'scripts', env)
+        code, output, seconds = run(command, app / 'scripts' if test.endswith('.py') else root, env)
         with log.open('a') as f:
             f.write(f'$ {" ".join(command)}\n{output}\n[exit {code}, {seconds:.1f}s]\n\n')
         steps.append(f'{Path(test).name} {seconds:.0f}s')
@@ -216,10 +242,10 @@ def main():
             step('vitest', ['npm', '--prefix', str(app), 'test'])
         elif rel:
             step('vitest', ['npx', 'vitest', 'related', '--run'] + rel, cwd=app)
-    return finish(failed, steps, log, root, marker, mode, crates, frontend, notes)
+    return finish(failed, partial, steps, log, root, marker, tree, mode, crates, frontend, notes)
 
 
-def finish(failed, steps, log, root, marker, mode, crates, frontend, notes):
+def finish(failed, partial, steps, log, root, marker, tree, mode, crates, frontend, notes):
     for note in notes:
         print(f'note: {note}')
     rel_log = log.relative_to(root) if log.exists() else None
@@ -228,6 +254,11 @@ def finish(failed, steps, log, root, marker, mode, crates, frontend, notes):
     if failed:
         print(f'check: RED ({mode}) — failed: {", ".join(failed)} · {scope} · {timing} · log {rel_log}')
         return 1
+    if tree_hash(root) != tree:
+        partial.append('the working tree changed while the checks ran, so they do not prove the final tree')
+    if partial:
+        print(f'check: PARTIAL ({mode}) — NOT green: {"; ".join(partial)} · {scope} · {timing} · log {rel_log}')
+        return 2
     marker.touch()
     print(f'check: GREEN ({mode}) — {scope} · {timing} · log {rel_log}')
     return 0
