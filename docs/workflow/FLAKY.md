@@ -4,25 +4,15 @@ A test that fails and then passes without a code change is logged here and becom
 
 ## Format
 
-One row per test, newest last. Open entries have an empty `Closed` column.
+One line per test, newest last:
 
-| Test | First seen | Failure (one line) | Evidence | Fix item | Closed |
-|---|---|---|---|---|---|
+- `DATE` `binary test` failed, then passed on retry (`command`)
 
-- **Test**: full nextest or Vitest name.
-- **First seen**: date and commit.
-- **Failure**: the first failing line, copied.
-- **Evidence**: path of the log or JUnit file (outside Git) or the command that showed it.
-- **Fix item**: board item or commit that fixes it.
-- **Closed**: date and commit of the fix, or `not reproducible` with the number of clean runs.
-
-## Adding
-
-The child or orchestrator who saw the failure adds the row in the same commit as their work, or `check` appends it from nextest's JUnit output when a test fails then passes. Then the orchestrator puts a fix item on the board.
+`tools/agent/check` appends the line itself when nextest reports a test that failed and then passed on retry (a test already listed is not added again). Add a line by hand in the same format for a flaky frontend or script test.
 
 ## Closing
 
-The child that fixes it fills `Closed` in the fixing commit. An entry with no fix item after a merge batch is a problem for the orchestrator to schedule.
+The orchestrator puts a fix item on the board and appends ` — fix: <item>` to the line. The child that fixes the test deletes the line in the fixing commit (git keeps the history); a later flake of the same test is added again as new.
 
 ## Entries
 

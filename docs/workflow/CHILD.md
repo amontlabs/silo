@@ -9,12 +9,13 @@ You are one agent building one item. Your task message names it and gives a base
 - Native builds need the private GitHub build file. Copy it once and never print or commit it:
   `cp /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/github-build.local.json app/SiloUI/`
 - Frontend: `npm --prefix app/SiloUI ci` once in your worktree.
+- Before anything builds `silo-ui`, run `tools/agent/runtime-cache` once in your worktree instead of `runtime:prepare` (`--status` shows hit or miss).
 
 ## Build folder
 
 - Build in your worktree's own `app/SiloUI/target`. Never set `CARGO_TARGET_DIR`.
 - A git post-checkout hook fills that folder at worktree creation with a copy-on-write clone of the main checkout's build, so dependencies are already built and the folder only takes space for what you change.
-- `sccache` is shared across worktrees (15 GiB). `rust-toolchain.toml` pins the toolchain: do not add `+1.94.0`, `+stable` or similar.
+- `sccache` is shared across worktrees (15 GiB). `rust-toolchain.toml` pins Rust 1.94.0: run plain `cargo`, never `+1.94.0`, `+stable` or similar. Tests run with cargo-nextest 0.9.149 (`cargo install cargo-nextest --locked --version 0.9.149`).
 - Do not delete the folder when you finish; the orchestrator does after the merge (`tools/agent/clean`).
 - Disk is tight. Send build and test output to a log file and read the summary lines. No release profiles unless your item needs one.
 
@@ -29,17 +30,17 @@ You are one agent building one item. Your task message names it and gives a base
 ## Proof
 
 - Run tests to prove your change or to find what broke, not as a ritual.
-- `tools/agent/affected` shows what your diff touches (`--why` explains). `tools/agent/check` runs fmt, `cargo check --tests`, the affected tests and, for frontend changes, typecheck, lint and related Vitest files, then prints failures and a verdict.
+- `tools/agent/affected [--base REF] [--why]` shows what your diff touches. `tools/agent/check [--base REF] [--quick]` runs fmt, `cargo check --tests`, the affected tests, touched script tests and, for frontend changes, typecheck, oxlint and related Vitest files, then prints failures and a verdict. `--quick` stops after compile and typecheck. The base defaults to the nearest of `main`/`direction` (`$SILO_INTEGRATION_BRANCH`). The full log is in `app/SiloUI/target/agent-check/`; "already green" means the same tree already passed.
 - Use a narrower command (one test, one file) when it proves the point faster.
 - Never run `--workspace` or the whole frontend suite; the orchestrator runs the full suites once per merge batch.
-- A test that fails then passes: add it to [FLAKY.md](FLAKY.md), do not loop on it.
-- Linux: check on the Linux machine only when it answers within 3 s; otherwise write "Linux skipped: offline".
+- A test that fails then passes: `check` logs it in [FLAKY.md](FLAKY.md); report it, do not loop on it.
+- Linux: `tools/agent/linux-warm [--ref REF] [-- NEXTEST_ARGS]` syncs and tests on the Linux machine; it prints `skipped: offline` and exits 0 when it does not answer. Report that as "Linux skipped: offline".
 
 ## Waiting
 
 - Run long commands in the foreground and block until they finish. Never end a turn to wait, never sleep-poll.
 - Never push to see CI. Never run `gh run` or `gh pr checks`.
-- Live checks: one blocking command on the verdict file of `tools/agent/live`.
+- Live checks: `SILO_AGENT_ITEM=<item> tools/agent/live <check> [--host mac|linux]` blocks until done; its exit code is 0 pass, 1 fail, 2 usage, 3 skipped. A check's `cleanup()` must stop the computers it started.
 
 ## Changesets and comments
 

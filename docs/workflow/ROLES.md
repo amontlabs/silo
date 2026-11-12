@@ -8,7 +8,7 @@ Pick by name. Models, fallbacks and limits belong to lastdrop and the owner; do 
 | `build-hard` | Cross-crate, concurrency, migration items | as `build`, `target.model` = `build-hard` | as `build` |
 | `review` | Code reviews of diffs and plans | `Agent`, `model` = `review`, background, read-only | [briefs/review.md](briefs/review.md): worktree path, `{DIFF_CMD}`, intent, risk areas |
 | `judge` | Design calls, disputed findings, advice | `Agent`, `model` = `judge`, background | [briefs/judge.md](briefs/judge.md): the question, the options, the facts, the files |
-| `live` | Runs `tools/agent/live <check>` and reads its logs | `delegate_task`, `target.model` = `live`, in the item's worktree | [briefs/live.md](briefs/live.md): check name, host, the Dev engine it may use |
+| `live` | Runs `SILO_AGENT_ITEM=<item> tools/agent/live <check>` and reads its logs | `delegate_task`, `target.model` = `live`, in the item's worktree | [briefs/live.md](briefs/live.md): check name, host, the Dev engine it may use |
 | `scout` | Read-only lookups, preflight facts | `Agent`, `model` = `scout`, background | [briefs/scout.md](briefs/scout.md): the questions and where to look |
 | `cheap` | Cheap build or review; **only when the owner asks** | as the role it replaces | as the role it replaces |
 | `computer-use` | GUI steps in macOS apps through LCU | `Agent`, `model` = `computer-use`; called by `live` or the orchestrator | One bounded task: app, steps, what to report |
