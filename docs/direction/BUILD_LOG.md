@@ -363,4 +363,7 @@ These were not asked of the owner. Each is open to change.
   on Codex gpt-6.1-sol: seven findings ([review](reviews/T5-T8-codex.md)). Findings 2-5 (rebuild
   staging and `-undo` policy, macOS import policy, export token) go to R15
   (`fix/r15-policy-carryover`); 1, 6, 7 (guest stderr cap, GitHub grant pins, public-suffix list)
-  to R16 (`fix/r16-guest-output-and-allowlist`). T1/T2 review running.
+  to R16 (`fix/r16-guest-output-and-allowlist`). T1/T2 ran on Codex gpt-6.1-sol: nine findings
+  ([review](reviews/T1-T2-codex.md)). Findings 1, 2, 4, 6, 9 (policy and approvals) go to R17
+  (`fix/r17-policy-approvals`); 3, 5, 7, 8 (gate admission, job quota, audit queue) to R18
+  (`fix/r18-gate-quotas`).
