@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# live: step-runner for live checks (checks that drive a real Dev engine or the Linux machine).
+usage() { cat <<'U'
+usage: live <check> [--from STEP] [--host mac|linux] [--state DIR]
+       live wait <state-dir> [--timeout SECONDS]
+       live list
+
+Runs tools/agent/live.d/<check>.sh: an ordered list STEPS=(...) of step_<name> functions.
+A finished step leaves <state>/steps/<name>.ok; a rerun skips those. --from STEP reruns STEP and all
+after it. Logs: <state>/logs/<step>.log. Every exit writes <state>/VERDICT:
+  verdict: pass|fail|skipped, check, host, step, reason, log, at
+Exit codes: 0 pass, 1 fail, 2 usage, 3 skipped (also: --host linux and the machine is offline).
+State dir default: ${TMPDIR}/silo-agent/live/<check>. Throwaway computers are listed in
+<state>/computers and temporary directories in <state>/tempdirs (for `clean`).
+`live wait` blocks until VERDICT exists (or the runner died), prints it, exits with its code.
+Check files may define cleanup(); it runs on every exit. Env: LIVE_D (check dir), LIVE_SSH,
+LIVE_LINUX_HOST. Never starts anything by itself: the checks decide what to run.
+U
+}
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO=$(cd "$HERE/../.." && pwd)
+LIVE_D=${LIVE_D:-$HERE/live.d}
+
+code_of() { case "$(sed -n 's/^verdict: //p' "$1")" in pass) return 0;; skipped) return 3;; *) return 1;; esac; }
+
+write_verdict() { # verdict step reason
+  local v=$1 step=${2:--} reason=${3:--} log=-
+  [ "$step" != - ] && log="$LOGS/$step.log"
+  [ "$step" = - ] && [ -f "$LOGS/cleanup.log" ] && [ "$v" = fail ] && log="$LOGS/cleanup.log"
+  printf 'verdict: %s\ncheck: %s\nhost: %s\nstep: %s\nreason: %s\nlog: %s\nat: %s\n' \
+    "$v" "$CHECK" "$HOST" "$step" "$reason" "$log" "$(date -u +%FT%TZ)" >"$STATE/VERDICT.tmp"
+  mv "$STATE/VERDICT.tmp" "$STATE/VERDICT"
+}
+
+cmd_wait() {
+  local state=${1:-} timeout=0
+  [ -d "$state" ] || { echo "live wait: no such state dir: $state" >&2; exit 2; }
+  [ "${2:-}" = --timeout ] && timeout=${3:-0}
+  local start=$SECONDS
+  while [ ! -s "$state/VERDICT" ]; do
+    local pid; pid=$(cat "$state/pid" 2>/dev/null)
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && [ ! -s "$state/VERDICT" ]; then
+      sleep 1  # the runner may have just written it
+      [ -s "$state/VERDICT" ] && break
+      STATE=$state LOGS=$state/logs CHECK=$(cat "$state/check" 2>/dev/null || echo "?") HOST=$(cat "$state/host" 2>/dev/null || echo "?")
+      write_verdict fail "$(cat "$state/current" 2>/dev/null || echo -)" "runner died without a verdict"
+      break
+    fi
+    [ "$timeout" -gt 0 ] && [ $((SECONDS-start)) -ge "$timeout" ] && { echo "live wait: timeout after ${timeout}s" >&2; exit 4; }
+    sleep 1
+  done
+  cat "$state/VERDICT"; code_of "$state/VERDICT"; exit $?
+}
+
+cmd_list() {
+  local f
+  for f in "$LIVE_D"/*.sh; do [ -e "$f" ] || continue
+    echo "$(basename "$f" .sh)  $(sed -n 's/^CHECK_DESC="\(.*\)"$/\1/p' "$f" | head -1)"
+  done
+}
+
+case "${1:-}" in -h|--help|"") usage; exit 0;; wait) shift; cmd_wait "$@";; list) cmd_list; exit 0;; esac
+
+CHECK=$1; shift; FROM=""; HOST=mac; STATE=""
+while [ $# -gt 0 ]; do case "$1" in
+  --from) FROM=${2:-}; shift 2;; --host) HOST=${2:-}; shift 2;; --state) STATE=${2:-}; shift 2;;
+  -h|--help) usage; exit 0;; *) echo "live: unknown argument: $1" >&2; usage >&2; exit 2;;
+esac; done
+case "$HOST" in mac|linux) ;; *) echo "live: --host must be mac or linux" >&2; exit 2;; esac
+CHECK_FILE=$LIVE_D/$CHECK.sh
+[ -f "$CHECK_FILE" ] || { echo "live: no check '$CHECK' in $LIVE_D (try: live list)" >&2; exit 2; }
+STATE=${STATE:-${TMPDIR:-/tmp}/silo-agent/live/$CHECK}; STATE=${STATE%/}
+case "$STATE" in /*) ;; *) STATE=$PWD/$STATE;; esac
+LOGS=$STATE/logs
+mkdir -p "$STATE/steps" "$LOGS" || exit 2
+
+if [ -f "$STATE/pid" ] && kill -0 "$(cat "$STATE/pid")" 2>/dev/null && [ ! -s "$STATE/VERDICT" ]; then
+  echo "live: a run is already active in $STATE (pid $(cat "$STATE/pid"))" >&2; exit 2
+fi
+
+# shellcheck source=live-lib.sh
+. "$HERE/live-lib.sh"
+STEPS=()
+# shellcheck disable=SC1090
+. "$CHECK_FILE"
+[ ${#STEPS[@]} -gt 0 ] || { echo "live: $CHECK_FILE defines no STEPS" >&2; exit 2; }
+for s in "${STEPS[@]}"; do declare -F "step_$s" >/dev/null || { echo "live: step_$s is not defined in $CHECK_FILE" >&2; exit 2; }; done
+
+if [ -n "$FROM" ]; then
+  found=""; for s in "${STEPS[@]}"; do [ "$s" = "$FROM" ] && found=1; [ -n "$found" ] && rm -f "$STATE/steps/$s.ok"; done
+  [ -n "$found" ] || { echo "live: --from $FROM is not a step of $CHECK (steps: ${STEPS[*]})" >&2; exit 2; }
+fi
+# Stamps from another host do not count.
+if [ "$(cat "$STATE/host" 2>/dev/null || echo "$HOST")" != "$HOST" ]; then rm -f "$STATE"/steps/*.ok; fi
+
+rm -f "$STATE/VERDICT" "$STATE/skip-reason" "$STATE"/steps/*.failed
+echo $$ >"$STATE/pid"; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; : >"$STATE/current"
+export STATE LOGS CHECK HOST REPO
+
+RESULT=fail; FAIL_STEP=-; REASON="exited unexpectedly"; STEP_PID=""; FINISHED=""; CLEANING=""
+
+finish() { # runs once, from the EXIT trap
+  [ -n "$FINISHED" ] && return; FINISHED=1
+  if declare -F cleanup >/dev/null; then
+    CLEANING=1; live_say "cleanup" >>"$LOGS/cleanup.log"
+    ( cleanup ) >>"$LOGS/cleanup.log" 2>&1
+  fi
+  write_verdict "$RESULT" "$FAIL_STEP" "$REASON"
+  echo "== VERDICT ($STATE/VERDICT)"; cat "$STATE/VERDICT"
+}
+on_signal() { # $1 = signal name
+  REASON="interrupted by $1"; RESULT=fail; FAIL_STEP=$(cat "$STATE/current")
+  [ -n "$STEP_PID" ] && kill "$STEP_PID" 2>/dev/null
+  if [ -n "$CLEANING" ]; then FINISHED=1; write_verdict fail "$FAIL_STEP" "$REASON (cleanup cut short)"; fi
+  exit 130
+}
+trap finish EXIT
+trap 'on_signal INT' INT; trap 'on_signal TERM' TERM; trap 'on_signal HUP' HUP
+
+echo "== live $CHECK host=$HOST state=$STATE"
+if [ "$HOST" = linux ] && ! live_linux_up; then
+  RESULT=skipped; REASON="skipped: offline ($LIVE_LINUX_HOST did not answer ssh in 3 s)"; echo "$REASON"; exit 3
+fi
+
+for s in "${STEPS[@]}"; do
+  if [ -e "$STATE/steps/$s.ok" ]; then echo "-- skip $s (done)"; continue; fi
+  echo "$s" >"$STATE/current"; echo "-- step $s ($LOGS/$s.log)"
+  rm -f "$STATE/steps/$s.failed"
+  ( export LIVE_STEP=$s; set -euo pipefail; "step_$s" ) >"$LOGS/$s.log" 2>&1 &
+  STEP_PID=$!; wait "$STEP_PID"; rc=$?; STEP_PID=""
+  [ $rc = 0 ] && [ -e "$STATE/steps/$s.failed" ] && rc=1
+  if [ $rc = 77 ]; then
+    RESULT=skipped; FAIL_STEP=$s; REASON="skipped: $(cat "$STATE/skip-reason" 2>/dev/null)"; echo "$REASON"; exit 3
+  elif [ $rc != 0 ]; then
+    RESULT=fail; FAIL_STEP=$s; REASON="step $s failed (exit $rc)"
+    [ -e "$STATE/steps/$s.failed" ] && REASON="step $s had failing checks"
+    echo "-- FAILED $s; last lines of its log:"; tail -n 15 "$LOGS/$s.log"; exit 1
+  fi
+  touch "$STATE/steps/$s.ok"
+done
+RESULT=pass; FAIL_STEP=-; REASON="all steps done"; exit 0
