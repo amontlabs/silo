@@ -58,11 +58,7 @@ impl Document {
             .cloned()
             .collect();
         Handoff {
-            fork: self
-                .created
-                .iter()
-                .find(|record| record.id == fork)
-                .cloned(),
+            fork: self.created.iter().find(|record| record.id == fork).cloned(),
             target: self
                 .created
                 .iter()

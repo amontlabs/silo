@@ -9,12 +9,12 @@
 
 pub mod access;
 pub mod handoff;
-#[cfg(test)]
-mod network_tests;
 pub mod resources;
 mod rules;
 pub mod store;
 mod summary;
+#[cfg(test)]
+mod network_tests;
 #[cfg(test)]
 mod tests;
 
@@ -27,8 +27,8 @@ use silo_api::{
     transport::ApprovalKind,
 };
 
-use crate::network_policy::{Grants, Held, NetworkPolicy, NetworkPolicyMode, GITHUB_GRANT_PIN};
 pub use access::{Access, GitHubAccess};
+use crate::network_policy::{Grants, Held, NetworkPolicy, NetworkPolicyMode, GITHUB_GRANT_PIN};
 pub use resources::Resources;
 pub use rules::{rule, Rule};
 use summary::{github_access, github_identity, github_writes, listed, quoted};
@@ -103,7 +103,8 @@ pub trait World {
     }
     /// A fresh computer id.
     fn new_id(&self) -> String;
-    /// The sizes of a computer; `None` when they cannot be read.
+    /// The sizes of a computer; `None` when they cannot be read. No rule reads them since size
+    /// stopped asking; kept for a later size policy.
     fn resources(&self, computer: &str) -> Option<Resources>;
     /// The port and bind address saved for a computer's SSH access, when it has any.
     fn ssh_settings(&self, computer: &str) -> Option<(u16, String)>;
@@ -404,9 +405,8 @@ impl<'a> Judge<'a> {
                     "{} is for the person who runs Silo; a computer's agent cannot do it.",
                     sentence_start(command)
                 ),
-                None => {
-                    "This is for the person who runs Silo; a computer's agent cannot do it.".into()
-                }
+                None => "This is for the person who runs Silo; a computer's agent cannot do it."
+                    .into(),
             }),
         };
         decided.unwrap_or_else(refuse)
@@ -474,10 +474,9 @@ impl<'a> Judge<'a> {
             MethodName::GuestClientStatus => {
                 match text(&params, "computerId") {
                     Some(id) if id == self.caller => {}
-                    Some(_) => return Err(
-                        "A computer's agent can read the tools status of its own computer only."
-                            .into(),
-                    ),
+                    Some(_) => {
+                        return Err("A computer's agent can read the tools status of its own computer only.".into())
+                    }
                     None => return Err("The call must name a computer (computerId).".into()),
                 }
                 Ok(allow_with(json!({ "computerId": self.caller })))
@@ -723,7 +722,8 @@ impl<'a> Judge<'a> {
                 };
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
                 let network = self.new_computer_network(asked_network.clone(), None, false, name);
-                rewritten["networkPolicy"] = json!(Self::chosen_network(&network, asked_network));
+                rewritten["networkPolicy"] =
+                    json!(Self::chosen_network(&network, asked_network));
                 let asked = Resources::of_linux(configuration)
                     .ok_or("A Linux computer's CPUs, memory and storage are numbers.")?;
                 let container =
@@ -738,20 +738,10 @@ impl<'a> Judge<'a> {
                         summary.push(' ');
                         summary.push_str(network);
                     }
-                    return Ok(ask_to_create(
-                        ApprovalKind::Container,
-                        summary,
-                        rewritten,
-                        creates,
-                    ));
+                    return Ok(ask_to_create(ApprovalKind::Container, summary, rewritten, creates));
                 }
                 if let Err(summary) = network {
-                    return Ok(ask_to_create(
-                        ApprovalKind::Network,
-                        summary,
-                        rewritten,
-                        creates,
-                    ));
+                    return Ok(ask_to_create(ApprovalKind::Network, summary, rewritten, creates));
                 }
                 Ok(Decision::Allow(Allowed {
                     params: Some(rewritten),
@@ -766,7 +756,8 @@ impl<'a> Judge<'a> {
                     .ok_or("A macOS computer's CPUs, memory and disk are numbers.")?;
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
                 let network = self.new_computer_network(asked_network.clone(), None, false, name);
-                rewritten["networkPolicy"] = json!(Self::chosen_network(&network, asked_network));
+                rewritten["networkPolicy"] =
+                    json!(Self::chosen_network(&network, asked_network));
                 let creates = Creation {
                     name: name.to_owned(),
                     id: None,

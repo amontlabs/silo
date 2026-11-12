@@ -119,43 +119,26 @@ fn reading_is_for_its_tree_only() {
     let world = World::with(NetworkPolicy::default(), NetworkPolicy::default());
     for computer in ["main", "fork-1"] {
         assert!(matches!(
-            decide(
-                &main(),
-                MethodName::NetworkPolicyGet,
-                &json!({"computerId": computer}),
-                &world
-            ),
+            decide(&main(), MethodName::NetworkPolicyGet, &json!({"computerId": computer}), &world),
             Decision::Allow(_)
         ));
     }
     assert!(matches!(
-        decide(
-            &main(),
-            MethodName::NetworkPolicyGet,
-            &json!({"computerId": "stranger"}),
-            &world
-        ),
+        decide(&main(), MethodName::NetworkPolicyGet, &json!({"computerId": "stranger"}), &world),
         Decision::Refuse { .. }
     ));
 }
 
 #[test]
 fn narrowing_its_own_policy_is_free_and_widening_asks() {
-    let world = World::with(
-        allowlist(&["a.example.com", "b.example.com"]),
-        allowlist(&[]),
-    );
+    let world = World::with(allowlist(&["a.example.com", "b.example.com"]), allowlist(&[]));
     let params = allowed_params(set(&world, "main", &allowlist(&["a.example.com"])));
     assert_eq!(params["policy"]["hosts"], json!(["a.example.com"]));
     assert!(matches!(
         set(&world, "main", &mode(NetworkPolicyMode::Closed)),
         Decision::Allow(_)
     ));
-    let summary = asked(set(
-        &world,
-        "main",
-        &allowlist(&["a.example.com", "evil.example.org"]),
-    ));
+    let summary = asked(set(&world, "main", &allowlist(&["a.example.com", "evil.example.org"])));
     assert!(summary.contains("evil.example.org"), "{summary}");
     assert!(!summary.contains("a.example.com"), "{summary}");
     let summary = asked(set(&world, "main", &mode(NetworkPolicyMode::Open)));
@@ -165,10 +148,7 @@ fn narrowing_its_own_policy_is_free_and_widening_asks() {
 #[test]
 fn a_computer_it_made_gets_no_more_than_its_current_policy_or_the_callers() {
     // fork-1 is closed and main has an allowlist.
-    let world = World::with(
-        allowlist(&["a.example.com"]),
-        mode(NetworkPolicyMode::Closed),
-    );
+    let world = World::with(allowlist(&["a.example.com"]), mode(NetworkPolicyMode::Closed));
     // Wider than fork-1's current policy, even if within main's own, asks.
     asked(set(&world, "fork-1", &allowlist(&["a.example.com"])));
     // The owner widened fork-1 beyond main; narrowing it within main's own is free...
@@ -252,10 +232,7 @@ fn a_new_computer_gets_the_callers_policy_or_narrower() {
     assert_eq!(allowed_params(create(None))["networkPolicy"], json!(own));
     let params = allowed_params(create(Some(mode(NetworkPolicyMode::Closed))));
     assert_eq!(params["networkPolicy"]["mode"], "closed");
-    let summary = asked(create(Some(allowlist(&[
-        "a.example.com",
-        "other.example.net",
-    ]))));
+    let summary = asked(create(Some(allowlist(&["a.example.com", "other.example.net"]))));
     assert!(summary.contains("other.example.net"), "{summary}");
 }
 
@@ -435,10 +412,7 @@ fn a_network_request_runs_the_checked_policy_and_names_the_computer_plainly() {
     };
     assert!(summary.contains("“evil"), "{summary}");
     assert!(!summary.contains('\u{202e}'), "{summary}");
-    assert_eq!(
-        params["policy"]["hosts"],
-        json!(["a.example.com", "b.example.com"])
-    );
+    assert_eq!(params["policy"]["hosts"], json!(["a.example.com", "b.example.com"]));
 }
 
 thread_local! {
@@ -475,14 +449,13 @@ impl super::World for Served {
         None
     }
     fn access(&self, _: &str) -> Access {
-        let github =
-            GITHUB_ACCESS
-                .with(std::cell::Cell::get)
-                .then(|| crate::policy::access::GitHubAccess {
-                    method: "oauth".into(),
-                    all: true,
-                    repositories: Default::default(),
-                });
+        let github = GITHUB_ACCESS.with(std::cell::Cell::get).then(|| {
+            crate::policy::access::GitHubAccess {
+                method: "oauth".into(),
+                all: true,
+                repositories: Default::default(),
+            }
+        });
         Access {
             github,
             ..Access::default()
@@ -554,9 +527,7 @@ fn an_imported_computer_cannot_open_itself_or_hand_an_open_policy_to_a_fork() {
         Decision::Allow(_)
     ));
     // A computer whose policy cannot be read asks.
-    let world = Served {
-        held: HashMap::new(),
-    };
+    let world = Served { held: HashMap::new() };
     assert!(matches!(
         set(&world, "main", &mode(NetworkPolicyMode::Closed)),
         Decision::Ask { .. }
@@ -574,10 +545,7 @@ fn a_free_narrowing_carries_the_policy_it_was_judged_against() {
     let Decision::Ask { params, .. } = set(&world, "main", &mode(NetworkPolicyMode::Open)) else {
         panic!("widening asks");
     };
-    assert!(params
-        .as_ref()
-        .and_then(|params| params.get("expected"))
-        .is_none());
+    assert!(params.as_ref().and_then(|params| params.get("expected")).is_none());
 }
 
 #[test]
@@ -604,17 +572,11 @@ fn a_preset_update_is_wider_for_a_computer_that_has_not_accepted_it() {
         pins: Pins::new(),
     };
     let world = Served {
-        held: HashMap::from([
-            ("main", approved_at_one.clone()),
-            ("fork-1", approved_at_one),
-        ]),
+        held: HashMap::from([("main", approved_at_one.clone()), ("fork-1", approved_at_one)]),
     };
     // Setting the same presets would take the update, so it asks and names the new host.
     let summary = asked(set(&world, "main", &policy));
-    assert!(
-        summary.contains("b.example.com") && !summary.contains("a.example.com"),
-        "{summary}"
-    );
+    assert!(summary.contains("b.example.com") && !summary.contains("a.example.com"), "{summary}");
     use_test_presets(None);
 }
 

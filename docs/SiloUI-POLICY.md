@@ -28,7 +28,7 @@ compile until it is classified there.
 | Its own jobs | allowed for a job the computer started |
 | Its tree | the target is the computer itself or one it made; lists show only those |
 | What it made | the target is a computer it made, never itself |
-| Makes a computer | forks itself or one it made, or makes a new one; asks if what the new computer gets (access, CPUs, memory, storage) is more than the caller has |
+| Makes a computer | forks itself or one it made, or makes a new one; asks if what the new computer gets (access, network) is more than the caller has; its size never asks (the device's free memory still limits it) |
 | Asks you | becomes a request you allow or deny; the call answers `approval_required` with what is asked |
 | Never | refused with `permission_denied` |
 
@@ -63,7 +63,7 @@ to answer in one piece cannot be cut, so it is withheld.
 | `desktop.action`, `computerUse.setup`, `clipboard.write` | What it made | |
 | `changes.request`, `changes.requests.throwAway` | What it made | A review request can target only its tree. |
 | `checkpoints.fork` | Makes a computer | Source: itself or one it made. The fork may have any secret the caller has (see [Secrets in a fork](#secrets-in-a-fork)), and a read-only copy of GitHub access the caller's own access covers; anything more asks you. Forking an earlier checkpoint of itself asks you, since it can hold what you have since taken away. The fork keeps the network policy of the computer it comes from when that is no wider than the caller's own, else it gets the caller's; a wider one the caller asks for asks you. The token file of the in-guest client is always scrubbed; a recipe hash is never passed on (it names a baseline other forks share). The one source outside its tree that is allowed is the hidden computer a recipe was built in (its name starts with `silo-build-`, a name no agent can give a computer): any computer may fork it to make a computer from that recipe, and the rule for secrets, GitHub access and network above applies as for any fork, so the new computer gets nothing beyond what the caller has. |
-| `computers.create` | Makes a computer | The engine chooses a Linux computer's id, and a macOS computer is recorded as the caller's by the id the create returned, never by its name. A Linux name must satisfy the runtime's rule (lowercase letters, digits and hyphens, at most 32), any other name is plain text of at most 64 characters. A container computer asks you: it shares the device's kernel. A computer with more CPUs, maximum CPUs, memory, maximum memory or storage than the caller has (a macOS one: CPUs, memory or disk) asks you, with the sizes in the request. Of a Linux computer's `desktop` settings only whether the desktop starts with the computer is passed on (Silo decides the rest). Names Silo reserves (`silo-build-`, `silo-baseline-`) are refused. A new computer gets the caller's network policy, or a narrower one the caller asks for; a wider one asks you. |
+| `computers.create` | Makes a computer | The engine chooses a Linux computer's id, and a macOS computer is recorded as the caller's by the id the create returned, never by its name. A Linux name must satisfy the runtime's rule (lowercase letters, digits and hyphens, at most 32), any other name is plain text of at most 64 characters. A container computer asks you: it shares the device's kernel. Its size never asks you, even when larger than the caller: the agent picks it from what `resources` shows, and a computer that does not fit the device's free memory is refused or waits. Of a Linux computer's `desktop` settings only whether the desktop starts with the computer is passed on (Silo decides the rest). Names Silo reserves (`silo-build-`, `silo-baseline-`) are refused. A new computer gets the caller's network policy, or a narrower one the caller asks for; a wider one asks you. |
 | `changes.keep` | Asks you | Free when both the fork and the computer it merges into are ones it made; asks when it merges into itself; refused anywhere else. The request lists the commands the merge's `keep` hooks run in the target, says when database changes are accepted without a migration (`dataOk`), and lists the choices and skipped items. |
 | `changes.requests.keep` | Asks you | Only for a request about a computer it made; free when the request merges into a computer it made too, asks when it merges into itself. |
 | `changes.undo` | Asks you | Free on a computer it made; asks on itself. It undoes the merge or replacement that was last when it asked: if another one happened since, nothing is undone and the computer asks again. |
@@ -93,7 +93,7 @@ to answer in one piece cannot be cut, so it is withheld.
 
 A call that needs your approval answers at once with the error `approval_required`. Its details
 carry the kind (`merge`, `replace_main`, `github`, `secret`, `network`, `port`, `ssh`, `access`,
-`container`, `resources`), a summary the engine wrote from the call's parameters, never from the agent's
+`container`; `resources` only on approvals saved before size stopped asking), a summary the engine wrote from the call's parameters, never from the agent's
 words, and the id of the approval that now waits for you. The call itself has not happened.
 
 ### The approval

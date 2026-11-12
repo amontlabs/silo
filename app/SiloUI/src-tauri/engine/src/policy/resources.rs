@@ -48,40 +48,6 @@ impl Resources {
         })
     }
 
-    fn storage_gib(&self) -> u64 {
-        self.workspace_gib + self.runtime_gib
-    }
-
-    /// What `self`, asked for a new computer, has more of than `own`. Two Linux computers are
-    /// compared size by size; otherwise CPUs, memory and the storage in all.
-    pub fn exceeding(&self, own: &Resources) -> Vec<String> {
-        let mut more = Vec::new();
-        let mut check = |what: &str, asked: u64, has: u64| {
-            if asked > has {
-                more.push(format!("{what} {asked} (it has {has})"));
-            }
-        };
-        check("CPUs", self.cpus, own.cpus);
-        check("memory in GiB", self.memory_gib, own.memory_gib);
-        if self.linux && own.linux {
-            check("maximum CPUs", self.max_cpus, own.max_cpus);
-            check(
-                "maximum memory in GiB",
-                self.max_memory_gib,
-                own.max_memory_gib,
-            );
-            check(
-                "workspace storage in GiB",
-                self.workspace_gib,
-                own.workspace_gib,
-            );
-            check("runtime storage in GiB", self.runtime_gib, own.runtime_gib);
-        } else {
-            check("storage in GiB", self.storage_gib(), own.storage_gib());
-        }
-        more
-    }
-
     /// The sizes in a sentence.
     pub fn describe(&self) -> String {
         if self.linux {

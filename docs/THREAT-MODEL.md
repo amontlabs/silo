@@ -750,10 +750,10 @@ A new method does not compile until the policy classifies it.
 
 | A computer may, alone | A computer must ask | A computer never |
 | --- | --- | --- |
-| Fork itself or a computer it made, make a new computer, with no more access, CPUs, memory or storage than it has | Merge into a computer it did not make, or replace main | Read a secret's value |
+| Fork itself or a computer it made, make a new computer of any size (free memory permitting), with no more access than it has | Merge into a computer it did not make, or replace main | Read a secret's value |
 | Hand a fork access it has itself | A new repository, write access, a new secret or an assignment | Touch a computer outside its tree |
 | Run commands in, read, checkpoint, restore, stop and delete computers it made; read its own files, logs and diff | A wider network policy, a published port, SSH access from outside | Change settings or Connections, export or import, answer an approval, read the event stream |
-| Narrow its network policy, unpublish a port | A container computer; a new computer larger than itself | Name another device |
+| Narrow its network policy, unpublish a port | A container computer | Name another device |
 | Read what it holds (`computers.access`, names and hosts only), the device's resources, and the audit rows of its tree | | |
 
 A call that must ask returns at once, the engine writes what is asked from the call's own
