@@ -1,22 +1,35 @@
 #!/usr/bin/env python3
 """Merge a batch of branches into the integration branch and start the full suite.
 
-  merge-batch [--into BRANCH] [--no-check] [--no-suite] <branch>...
+  merge-batch [--into BRANCH] [--force] [--no-check] [--no-suite] <branch>...
   merge-batch --suite [--into BRANCH]
   merge-batch --last
 
 Run it in the integration checkout (clean tree, a branch checked out). It refuses unless the
-current branch is the integration branch: --into, else $BOARD_INTEGRATION, else main.
+current branch is the integration branch: --into, else $BOARD_INTEGRATION, else the branch
+checked out here.
+0. Refuses (exit 4, nothing merged) a branch that `check` has not recorded as GREEN (full mode)
+   for its exact tree, against a base that covers the branch's whole diff (check writes
+   app/SiloUI/target/agent-check/green/tree-<tree> in the worktree it ran in; every worktree of
+   the repository is searched). A branch already contained here is skipped. --force merges anyway,
+   with a note.
 1. Merges each branch with --no-ff, in order. On a conflict it prints the conflicting files,
-   aborts that merge (earlier merges stay) and exits 2.
+   aborts that merge (earlier merges stay) and exits 2. Each branch actually merged gets
+   state=merged on the board ($BOARD, else $SILO_BUILD_STATE/board.tsv, default
+   <this checkout>.state/board.tsv; skipped quietly when there is no file or row).
 2. If the merged changes touched app/SiloUI/api/, regenerates the API files once
    (generate_requests and generate_schema, from app/SiloUI) and commits them if they changed.
 3. Runs `tools/agent/check --base <sha before the batch>` in the foreground (skipped, with a
-   note, if that script does not exist yet).
-4. Starts the full suite in the background on the resulting commit:
-   in a detached throwaway worktree at exactly that commit (node_modules, the native runtime and,
-   where APFS allows, the target folder are cloned from this checkout; the worktree is removed
-   when done, so edits or merges here cannot change what is tested): cargo nextest run
+   note, if that script does not exist yet) - unless the merged tree is exactly a tree that check
+   already recorded as green (a single branch merged on top of its own base).
+4. Starts the full suite in the background on the resulting commit, cancelling first a suite still
+   running for an older commit of this branch (TERM to its process group; its verdict becomes
+   SUPERSEDED, "superseded by <sha>"; a suite for a commit that is not older is never touched, the
+   new start is refused). It runs in one fixed worktree, <this checkout>.suite, reset to exactly
+   that commit (detached, tracked changes and untracked files removed; ignored build output stays,
+   so Cargo stays warm; node_modules, the native runtime and, on the first run, the target folder
+   are cloned from this checkout, and refreshed when package-lock.json, package.json or
+   runtime-inputs.json change), so edits or merges here cannot change what is tested: cargo nextest run
    --workspace --no-fail-fast (else cargo test --workspace --locked --no-fail-fast), vitest (a
    missing node_modules is a failure), the Python and script suites and the patched updater
    tests that .github/workflows/ci.yml runs. The prepared native runtime comes from
@@ -25,17 +38,18 @@ current branch is the integration branch: --into, else $BOARD_INTEGRATION, else 
    when present (never printed), else the synthetic SILO_GITHUB_* test values are used. Steps CI
    runs only on Linux (the isolation evals) or with packages this machine lacks (reviewer-service
    needs pytest: a cached venv from reviewer-service/requirements-dev.txt, else skipped) are
-   skipped with a note in the log and a "skipped:" line in the verdict, not failed. A second suite
+   skipped with a note in the log and a "skipped:" line in the verdict, not failed. A runtime-cache
+   hit is topped up with any runtime resource it lacks, cloned from this checkout. A second suite
    for a SHA is refused while one runs. It writes
    app/SiloUI/target/agent/full-suite.<sha>.log, .merged (branch<TAB>file lines) and, when it
    ends, .done (first line PASS or FAIL). Do not change the checkout's files while it runs.
 --suite takes no branches: after a merge done by hand, it makes the same branch and clean-tree checks,
 merges nothing, skips the foreground check and starts step 4 on the current HEAD.
---last prints the newest full-suite verdict; on failure also the failing tests (nextest, cargo test,
+--last prints the newest full-suite verdict (superseded ones only when there is no other); on failure also the failing tests (nextest, cargo test,
 Python unittest and pytest, vitest, node --test, and cargo build errors) with their step and, for each,
 the merged branches that touched that crate or file.
 """
-import argparse, glob, json, os, re, subprocess, sys, tempfile
+import argparse, glob, json, os, re, signal, subprocess, sys, time
 
 ROOT = None
 WS = "app/SiloUI"
@@ -69,13 +83,16 @@ def last(args):
     if not done:
         running = glob.glob(os.path.join(out_dir(), "full-suite.*.log"))
         die("no finished full suite" + (" (one is still running: %s)" % max(running, key=os.path.getmtime) if running else ""))
-    d = done[-1]
+    real = [x for x in done if not open(x).readline().startswith("SUPERSEDED")]
+    d = (real or done)[-1]
     base = d[:-5]
     lines = open(d).read().splitlines()
     print("%s  %s" % (lines[0], os.path.basename(base)))
     print("\n".join(lines[1:]))
     if lines[0] == "PASS":
         return
+    if lines[0] == "SUPERSEDED":
+        sys.exit(1)
     tests = parse_failures(open(base + ".log", errors="replace").read())
     merged = {}
     try:
@@ -201,6 +218,55 @@ def crate_dirs():
             for x in json.loads(p.stdout)["packages"]}
 
 
+def ancestor(a, b):
+    return git("merge-base", "--is-ancestor", a, b).returncode == 0
+
+
+def worktree_paths():
+    out = git("worktree", "list", "--porcelain", "-z").stdout
+    return [f[9:] for f in out.replace("\0\0", "\0").split("\0") if f.startswith("worktree ")]
+
+
+def green_bases(tree):
+    """Bases of the full checks that passed on exactly this tree, in any worktree of the repository."""
+    found = []
+    for wt in worktree_paths():
+        try:
+            found.append(open(os.path.join(wt, WS, "target", "agent-check", "green", "tree-" + tree)).read().strip())
+        except OSError:
+            pass
+    return found
+
+
+def unchecked(branch, head, batch):
+    """Why `check` has not vouched for this branch's tree, or "" when it has. The check's base must
+    be in the history the branch is merged onto, or in an earlier branch of the batch (stacked)."""
+    tree = git("rev-parse", branch + "^{tree}").stdout.strip()
+    bases = green_bases(tree)
+    if not bases:
+        return "no green check recorded for its tree: run tools/agent/check in its worktree"
+    mb = git("merge-base", head, branch).stdout.strip()
+    earlier = batch[:batch.index(branch)]
+    if any(ancestor(b, mb) or any(ancestor(b, e) for e in earlier) for b in bases):
+        return ""
+    return "its green check used a base (%s) that does not cover the whole branch: rerun tools/agent/check" % bases[0][:9]
+
+
+def mark_merged(branch):
+    """state=merged on the board for the item that owns this branch; quiet when there is none."""
+    board = os.environ.get("BOARD") or os.path.join(os.environ.get("SILO_BUILD_STATE") or ROOT + ".state", "board.tsv")
+    tool = os.path.join(os.path.dirname(os.path.realpath(__file__)), "board")
+    try:
+        rows = [l.split("\t") for l in open(board).read().splitlines()[1:]]
+    except OSError:
+        return
+    for r in rows:
+        if len(r) > 1 and r[1] == branch:
+            q = subprocess.run([tool, "--file", board, "set", r[0], "state=merged"], capture_output=True, text=True)
+            print("board: %s state=merged" % r[0] if q.returncode == 0 else "note: board not updated for %s: %s" % (r[0], q.stderr.strip()))
+            return
+
+
 def main():
     global ROOT
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -208,6 +274,7 @@ def main():
     ap.add_argument("--last", action="store_true")
     ap.add_argument("--suite", action="store_true",
                     help="merge nothing: start the background suite on the current commit")
+    ap.add_argument("--force", action="store_true", help="merge branches without a recorded green check")
     ap.add_argument("--no-check", action="store_true", help="skip the foreground check")
     ap.add_argument("--no-suite", action="store_true", help="do not start the background suite")
     ap.add_argument("branches", nargs="*")
@@ -226,7 +293,7 @@ def main():
     cur = git("symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
     if not cur:
         die("HEAD is detached: run it in the integration checkout, on its branch")
-    into = args.into or os.environ.get("BOARD_INTEGRATION") or "main"
+    into = args.into or os.environ.get("BOARD_INTEGRATION") or cur
     if cur != into:
         die("this checkout is on %s, not %s: run it in the integration checkout" % (cur, into))
     if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
@@ -238,6 +305,18 @@ def main():
         start_suite(git("rev-parse", "HEAD").stdout.strip(), [])
         return
     start = git("rev-parse", "HEAD").stdout.strip()
+
+    bad = {}
+    for b in args.branches:
+        if not ancestor(b, start):
+            why = unchecked(b, start, args.branches)
+            if why:
+                bad[b] = why
+    for b, why in bad.items():
+        print("%s %s: %s" % ("note: merging anyway (--force)" if args.force else "REFUSED", b, why))
+    if bad and not args.force:
+        print("nothing was merged. Check the branches (or --force).")
+        sys.exit(4)
 
     merged = []  # (branch, [files])
     for b in args.branches:
@@ -254,6 +333,8 @@ def main():
         files = names("diff", "--name-only", before, after) if after != before else []
         print("merged %s (%d files)%s" % (b, len(files), "" if after != before else " - already contained"))
         merged.append((b, files))
+        if after != before:
+            mark_merged(b)
 
     touched = {f for _, fs in merged for f in fs}
     if any(f.startswith(WS + "/api/") for f in touched):
@@ -276,6 +357,9 @@ def main():
     check = os.path.join(ROOT, "tools", "agent", "check")
     if args.no_check:
         pass
+    elif not bad and head != start and git("rev-parse", "HEAD^{tree}").stdout.strip() in [
+            git("rev-parse", b + "^{tree}").stdout.strip() for b, _ in merged if b in args.branches]:
+        print("check skipped: the merged tree is exactly the tree of a branch that check recorded as green")
     elif os.path.exists(check):
         print("== check --base %s" % start[:9])
         rc = subprocess.run([check, "--base", start], cwd=ROOT).returncode
@@ -290,34 +374,52 @@ def main():
 
 SUITE = r'''
 root="$1"; base="$2"; sha="$3"; wt="$4"; log="$base.log"; fail=""
-made=""
-cleanup() {
-  [ "$(cat "$base.running" 2>/dev/null)" = "$$" ] && rm -f "$base.running"
-  [ -n "$made" ] && { git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1; git -C "$root" worktree prune; }
-  rmdir "$wt" 2>/dev/null
-}
+cleanup() { [ "$(cat "$base.running" 2>/dev/null)" = "$$" ] && rm -f "$base.running"; }
 trap cleanup EXIT
 echo "== full suite on $sha started $(date)" > "$log"
-git -C "$root" worktree add -q --detach "$wt" "$sha" >> "$log" 2>&1 || { printf 'FAIL\nfailed: worktree\n' > "$base.done"; exit 1; }
-made=1
+die() { printf 'FAIL\nfailed: %s\n' "$1" > "$base.done"; echo "suite: $1" >> "$log"; exit 1; }
+# One fixed worktree per integration checkout, reset to exactly $sha. Only a worktree registered for this repository
+# (or an empty folder) is ever touched; ignored build output (target, node_modules, runtime) stays, so Cargo stays warm.
+if git -C "$root" worktree list --porcelain | grep -qx "worktree $wt"; then
+  [ -e "$wt/.git" ] || { git -C "$root" worktree prune; }
+fi
+if git -C "$root" worktree list --porcelain | grep -qx "worktree $wt"; then
+  [ "$(git -C "$wt" symbolic-ref -q HEAD)" ] && die "worktree: $wt has a branch checked out; it is not a suite worktree"
+  git -C "$wt" checkout -q -f --detach "$sha" >> "$log" 2>&1 && git -C "$wt" reset -q --hard "$sha" >> "$log" 2>&1 \
+    && git -C "$wt" clean -fdq >> "$log" 2>&1 || die "worktree: cannot reset $wt to $sha"
+else
+  { [ ! -e "$wt" ] || [ -z "$(ls -A "$wt" 2>/dev/null)" ]; } || die "worktree: $wt exists and is not a worktree of this repository"
+  git -C "$root" worktree add -q --detach "$wt" "$sha" >> "$log" 2>&1 || die "worktree"
+fi
+[ "$(git -C "$wt" rev-parse HEAD)" = "$sha" ] && [ -z "$(git -C "$wt" status --porcelain)" ] || die "worktree: $wt is not clean at $sha"
 src="$root/app/SiloUI"; dst="$wt/app/SiloUI"
-cp -cR "$src/target" "$dst/target" 2>/dev/null && rm -rf "$dst/target/agent"
-[ -d "$src/node_modules" ] && { cp -cR "$src/node_modules" "$dst/node_modules" 2>/dev/null || ln -s "$src/node_modules" "$dst/node_modules"; }
+cl() { cp -cR "$1" "$2" 2>/dev/null || cp -R "$1" "$2"; }
+# Ignored inputs cloned from the integration checkout: the target folder on the first run; node_modules and the
+# native runtime on the first run and again whenever the files that decide them change.
+stamp=$(cat "$dst/package-lock.json" "$dst/package.json" "$dst/runtime-inputs.json" 2>/dev/null | shasum | cut -c1-40)
+if [ "$(cat "$dst/target/.suite-stamp" 2>/dev/null)" != "$stamp" ]; then
+  rm -rf "$dst/node_modules" "$dst/src-tauri/runtime" "$dst/src-tauri/binaries"
+fi
+[ -d "$dst/target" ] || { cl "$src/target" "$dst/target" 2>/dev/null; rm -rf "$dst/target/agent"; }
+mkdir -p "$dst/target"; echo "$stamp" > "$dst/target/.suite-stamp"
+[ -e "$dst/node_modules" ] || [ ! -d "$src/node_modules" ] || { cp -cR "$src/node_modules" "$dst/node_modules" 2>/dev/null || ln -s "$src/node_modules" "$dst/node_modules"; }
 export SILO_AGENT_CACHE="${SILO_AGENT_CACHE:-$([ "$(uname -s)" = Darwin ] && echo "$HOME/Library/Caches/silo-agent" || echo "$HOME/.cache/silo-agent")}"
 skipped=""
 skip() { echo "== $1: skipped ($2)" >> "$log"; skipped="$skipped""skipped: $1 ($2)"$'\n'; }
 # The native runtime (bundled msb and the other tools) is ignored build output that silo-ui's build script needs.
-# A runtime-cache hit restores it; otherwise it is cloned from the integration checkout.
-rt=""
+# A runtime-cache hit restores what it stores; the rest is cloned from the integration checkout.
 if [ -x "$wt/tools/agent/runtime-cache" ] && (cd "$wt" && ./tools/agent/runtime-cache --status 2>/dev/null) | grep -qx hit; then
-  (cd "$wt" && ./tools/agent/runtime-cache) >> "$log" 2>&1 && rt=1
+  (cd "$wt" && ./tools/agent/runtime-cache) >> "$log" 2>&1
 fi
-if [ -z "$rt" ]; then
-  for d in binaries runtime; do
-    [ -d "$src/src-tauri/$d" ] && { cp -cR "$src/src-tauri/$d" "$dst/src-tauri/$d" 2>/dev/null || cp -R "$src/src-tauri/$d" "$dst/src-tauri/$d"; }
+# Whatever a cache hit does not restore (and everything on a miss) is cloned from the integration checkout, entry by entry.
+for d in binaries runtime; do
+  [ -d "$src/src-tauri/$d" ] || continue
+  mkdir -p "$dst/src-tauri/$d"
+  for e in "$src/src-tauri/$d"/*; do
+    [ -e "$e" ] && [ ! -e "$dst/src-tauri/$d/$(basename "$e")" ] && cl "$e" "$dst/src-tauri/$d/"
   done
-  [ -d "$dst/src-tauri/binaries" ] || echo "note: no prepared native runtime (runtime-cache miss and none in $src/src-tauri); the silo-ui build will fail" >> "$log"
-fi
+done
+[ -d "$dst/src-tauri/binaries" ] || echo "note: no prepared native runtime (runtime-cache miss and none in $src/src-tauri); the silo-ui build will fail" >> "$log"
 # The private GitHub build file is copied, never printed; without it the synthetic test values apply.
 if [ -f "$src/github-build.local.json" ]; then
   cp "$src/github-build.local.json" "$dst/github-build.local.json"
@@ -370,6 +472,37 @@ def running(path):
         return False
 
 
+def supersede(sha):
+    """Stop every suite still running for another commit, which must be older than `sha` (TERM to its
+    process group, then wait); its verdict becomes SUPERSEDED. Refuses, touching nothing it cannot
+    identify as a suite of this checkout, when one is not older or does not stop."""
+    for g in sorted(glob.glob(os.path.join(out_dir(), "full-suite.*.running"))):
+        old = os.path.basename(g)[len("full-suite."):-len(".running")]
+        if old == sha or not running(g):
+            continue
+        if not ancestor(old, sha):
+            die("a full suite for %s is running and %s is not newer than it; wait for it or stop it" % (old[:9], sha[:9]), 3)
+        pid = int(open(g).read().strip())
+        cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout
+        if pid == os.getpid() or os.getpgid(pid) != pid or "full-suite." + old not in cmd:
+            die("the guard %s names pid %d, which is not that suite's process group; not touching it" % (g, pid), 3)
+        os.killpg(pid, signal.SIGTERM)
+        for _ in range(240):
+            if not running(g) or not os.path.exists(g):
+                break
+            time.sleep(0.5)
+        else:
+            die("the suite for %s did not stop within 2 minutes after TERM; start again when it has" % old[:9], 3)
+        base = g[:-len(".running")]
+        with open(base + ".done", "w") as f:
+            f.write("SUPERSEDED\nsuperseded by %s\nsha %s\nfinished %s\n" % (sha, old, time.ctime()))
+        try:
+            os.remove(g)
+        except OSError:
+            pass
+        print("cancelled the running suite for %s (superseded by %s)" % (old[:9], sha[:9]))
+
+
 def start_suite(sha, merged):
     d = out_dir()
     os.makedirs(d, exist_ok=True)
@@ -401,6 +534,11 @@ def start_suite(sha, merged):
         die("cannot take the start guard for %s (%s)" % (sha[:9], guard), 3)
     os.write(fd, str(os.getpid()).encode())
     os.close(fd)
+    try:
+        supersede(sha)
+    except SystemExit:
+        os.remove(guard)
+        raise
     for ext in (".done", ".log", ".merged"):
         if os.path.exists(base + ext):
             os.remove(base + ext)
@@ -408,9 +546,7 @@ def start_suite(sha, merged):
         for b, fs in merged:
             for x in fs:
                 f.write("%s\t%s\n" % (b, x))
-    parent = os.path.join(os.path.realpath(os.environ.get("TMPDIR") or "/tmp"), "silo-agent")
-    os.makedirs(parent, exist_ok=True)
-    wt = tempfile.mkdtemp(prefix="suite-%s-" % sha[:12], dir=parent)  # unique per launch
+    wt = ROOT + ".suite"
     p = subprocess.Popen(["bash", "-c", SUITE, "x", ROOT, base, sha, wt], stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     try:
@@ -418,7 +554,7 @@ def start_suite(sha, merged):
             f.write(str(p.pid))
     except OSError:
         pass
-    print("full suite started in the background on %s (detached worktree %s)" % (sha[:9], wt))
+    print("full suite started in the background on %s (fixed worktree %s)" % (sha[:9], wt))
     print("  log:     %s.log" % base)
     print("  verdict: %s.done (appears when it ends; first line PASS or FAIL)" % base)
     print("  later:   tools/agent/merge-batch --last")
