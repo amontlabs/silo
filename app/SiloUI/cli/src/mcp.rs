@@ -706,7 +706,7 @@ impl SiloMcp {
     }
 
     #[tool(
-        description = "Show what the device has left (memory, disk, running computers) and whether it is running short. Check it before you make several computers."
+        description = "Show what the device has left (memory, disk, running computers) and whether it is running short, and the CPUs, memory and disk size of each computer you can see. Check it before you make several computers."
     )]
     async fn resources(&self) -> Result<String, String> {
         show(async { ops::device_resources(&self.engine().await?).await }.await)

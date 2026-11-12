@@ -3508,6 +3508,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "diskGib": {
+          "description": "The disk the computer is configured with, in GiB: workspace plus runtime storage for a Linux computer, the disk for a macOS computer.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "id": {
           "type": "string"
         },
@@ -3523,6 +3529,24 @@
         "running": {
           "description": "Whether the computer is running or starting.",
           "type": "boolean"
+        },
+        "runtimeStorageGib": {
+          "description": "A Linux computer's runtime storage, in GiB; absent for a macOS computer.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "workspaceStorageGib": {
+          "description": "A Linux computer's workspace storage, in GiB; absent for a macOS computer.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -3530,7 +3554,8 @@
         "name",
         "running",
         "cpus",
-        "memoryGib"
+        "memoryGib",
+        "diskGib"
       ],
       "type": "object"
     },

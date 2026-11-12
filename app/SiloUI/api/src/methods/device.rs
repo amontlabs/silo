@@ -124,5 +124,11 @@ wire_struct! {
         cpus: u64,
         #[doc = "The memory the computer is configured with, in GiB."]
         memory_gib: u64,
+        #[doc = "The disk the computer is configured with, in GiB: workspace plus runtime storage for a Linux computer, the disk for a macOS computer."]
+        disk_gib: u64,
+        #[doc = "A Linux computer's workspace storage, in GiB; absent for a macOS computer."]
+        workspace_storage_gib: Option<u64>,
+        #[doc = "A Linux computer's runtime storage, in GiB; absent for a macOS computer."]
+        runtime_storage_gib: Option<u64>,
     }
 }
