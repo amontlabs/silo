@@ -151,6 +151,10 @@
     {
       "path": "patches/microsandbox-fork-layer-names-0.7.14.patch",
       "sha256": "ea43f5a6084e66be16b93683f773804e7208822c854086853167d9e2e9fae1e8"
+    },
+    {
+      "path": "patches/microsandbox-refuse-unlisted-0.7.14.patch",
+      "sha256": "fa3bc49fb6a2ff537c3c037b2bca7a050905614af7d69e903bdb07d3487a1e82"
     }
   ]
 }

@@ -3977,11 +3977,13 @@ fn with_profile_defaults(network: &Value) -> Value {
 }
 
 /// The `http` section a runtime saves for a computer Silo created, restored or
-/// forked: 0.7.5 and 0.7.6 save readable denial responses off, 0.7.14 saves them
-/// on with a JSON body. Silo sets neither, so both count as the runtime default;
-/// any other value is a custom setting.
+/// forked: 0.7.5 and 0.7.6 save readable denial responses off, stock 0.7.14 saves
+/// them on with a JSON body, and Silo's 0.7.14 build saves them off with a JSON
+/// format. Silo sets none of these, so all count as the runtime default; any other
+/// value is a custom setting.
 fn runtime_default_http(http: &Value) -> bool {
     http == &serde_json::json!({"deny_response": false})
+        || http == &serde_json::json!({"deny_response": false, "deny_response_format": "json"})
         || http == &serde_json::json!({"deny_response": true, "deny_response_format": "json"})
 }
 
@@ -6953,10 +6955,21 @@ mod tests {
     }
 
     #[test]
+    fn export_accepts_the_http_settings_each_runtime_saves() {
+        for http in [
+            serde_json::json!({"deny_response": false}),
+            serde_json::json!({"deny_response": false, "deny_response_format": "json"}),
+            serde_json::json!({"deny_response": true, "deny_response_format": "json"}),
+        ] {
+            assert!(runtime_default_http(&http), "{http}");
+        }
+    }
+
+    #[test]
     fn export_refuses_custom_http_settings_of_either_runtime() {
         for http in [
             serde_json::json!({"deny_response": true, "deny_response_format": "text"}),
-            serde_json::json!({"deny_response": false, "deny_response_format": "json"}),
+            serde_json::json!({"deny_response": false, "deny_response_format": "text"}),
             serde_json::json!({"deny_response": true, "network_deny_message": "no"}),
         ] {
             let mut config = managed_config("dev");

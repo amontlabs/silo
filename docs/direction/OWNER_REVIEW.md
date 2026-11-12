@@ -113,15 +113,18 @@ was chosen and why; any can be changed. Older items are also in the build log un
     never part of a merge**, so a fork's merge no longer conflicts on them (R8).
 29. **One merge ask is one row on Pending**; its review opens from that row (R8).
 
-30. **Blocked web requests from a computer get Silo's JSON "blocked by policy" answer instead of
-    a refused connection** (MicroSandbox 0.7.14, upstream #1825). In allowlist mode a direct
-    connection to an unlisted address on port 80 or 443 now completes, and the gateway answers
-    it with a 403 itself; nothing is sent to that address. Silo keeps upstream's behaviour rather
-    than carrying a patch to turn it off (branch `silo/0714-fix-net` has that patch if wanted).
-    The live check found other ports behave the same way: a connection to an unlisted address
-    completes but gets nothing back (DNS over TCP gets the gateway's own "no such name"), so a
-    program sees a silent connection or a timeout rather than an immediate refusal. The live
-    network test checks that no data comes back from the unlisted address.
+30. **A computer in allowlist mode gets an immediate refusal for any address it may not reach,
+    on every port** (owner decision, R20). MicroSandbox 0.7.14 (upstream #1825) had made a
+    connection to an unlisted address on port 80 or 443 complete so the gateway could answer
+    with a 403, and the DNS ports (53, 853) completed too; a program saw a blocked-request page
+    or a silent connection. Silo's build now refuses all of them (connection refused) and
+    nothing is ever sent to the unlisted address. Two patch changes: the readable-denial default
+    goes back to off (`http.deny_response`), and a connection to port 53 or 853 of any address
+    other than the computer's own gateway is checked against the policy like every other port
+    (the gateway's own resolver keeps working). Patch `refuse-unlisted`; the live network test
+    now expects "connection refused" on 80, 443, 853 and 53. Upstream's behaviour stays
+    available by setting `deny_response` explicitly. UDP DNS to another resolver is unchanged
+    (it gets the gateway's "no such name").
 
 ## App timings (R13)
 
