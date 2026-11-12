@@ -93,10 +93,16 @@ def git(*a, cwd=None, check=False):
 
 
 def integration(args):
-    """Integration branch: --into, else $BOARD_INTEGRATION, else the branch checked out in the main worktree."""
+    """Integration branch: --into, else $BOARD_INTEGRATION, else the branch of the checkout you run in when it
+    has a build state directory next to it (<checkout>.state), else the branch checked out in the main worktree."""
     b = args.into or os.environ.get("BOARD_INTEGRATION")
     if b:
         return b
+    here = git("rev-parse", "--show-toplevel").stdout.strip()
+    if here and os.path.isdir(here + ".state"):
+        for p, br in worktree_list():
+            if os.path.realpath(p) == os.path.realpath(here) and br:
+                return br
     main = worktree_list()[0]
     if not main[1]:
         die("the main worktree %s has no branch checked out: pass --into or set BOARD_INTEGRATION" % main[0])
