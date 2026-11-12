@@ -310,7 +310,7 @@ fn a_creation_by_a_caller_with_an_unreadable_policy_never_runs_without_one() {
 }
 
 #[test]
-fn a_fork_larger_than_the_caller_asks_and_carries_the_policy() {
+fn a_fork_larger_than_the_caller_needs_no_approval_and_carries_the_policy() {
     let own = allowlist(&["a.example.com"]);
     let mut world = World::with(own.clone(), NetworkPolicy::default());
     let fork = |world: &World, source: &str| {
@@ -328,21 +328,8 @@ fn a_fork_larger_than_the_caller_asks_and_carries_the_policy() {
         Resources::of_linux(&json!({"cpus": 8, "maxCPUs": 8, "memoryGiB": 16,
             "maxMemoryGiB": 16, "workspaceStorageGiB": 20, "runtimeStorageGiB": 10})),
     );
-    match fork(&world, "fork-1") {
-        Decision::Ask {
-            kind,
-            summary,
-            params: Some(params),
-            creates: Some(creates),
-            ..
-        } => {
-            assert_eq!(kind, ApprovalKind::Resources);
-            assert!(summary.contains("child") && summary.contains("CPUs 8"), "{summary}");
-            assert_eq!(params["networkPolicy"], json!(own));
-            assert_eq!(creates.source.as_deref(), Some("fork-1"));
-        }
-        other => panic!("expected a request about the sizes, got {other:?}"),
-    }
+    let params = allowed_params(fork(&world, "fork-1"));
+    assert_eq!(params["networkPolicy"], json!(own));
     // Forking itself copies its own sizes.
     allowed_params(fork(&world, "main"));
 }
@@ -609,7 +596,7 @@ fn access_summary(decision: Decision) -> String {
 }
 
 #[test]
-fn a_fork_wider_in_access_and_larger_shows_both_in_one_summary() {
+fn a_fork_wider_in_access_asks_for_access_not_for_its_larger_size() {
     let mut world = World::with(allowlist(&["a.example.com"]), NetworkPolicy::default());
     world.sizes.insert(
         "fork-1",
@@ -622,27 +609,7 @@ fn a_fork_wider_in_access_and_larger_shows_both_in_one_summary() {
         json!({"secrets": ["API_KEY"]}),
     ));
     assert!(summary.contains("API_KEY"), "{summary}");
-    assert!(
-        summary.contains("8 CPUs") && summary.contains("16 GiB"),
-        "{summary}"
-    );
-    assert!(summary.contains("which is more than “main” has"), "{summary}");
-}
-
-#[test]
-fn a_fork_wider_in_access_says_when_the_sizes_could_not_be_read() {
-    let mut world = World::with(allowlist(&["a.example.com"]), NetworkPolicy::default());
-    world.sizes.insert("fork-1", None);
-    let summary = access_summary(fork_with_secret(
-        &world,
-        "fork-1",
-        json!({"secrets": ["API_KEY"]}),
-    ));
-    assert!(summary.contains("API_KEY"), "{summary}");
-    assert!(
-        summary.contains("could not be read to compare them"),
-        "{summary}"
-    );
+    assert!(!summary.contains("16 GiB"), "{summary}");
 }
 
 #[test]

@@ -642,19 +642,7 @@ impl<'a> Judge<'a> {
             new_name,
         );
         rewritten["networkPolicy"] = json!(Self::chosen_network(&network, asked_network));
-        let more = if source == self.caller {
-            None
-        } else {
-            self.fork_exceeds(source)
-        };
         if !wider.is_empty() {
-            match &more {
-                Some(more) if more.is_empty() => {
-                    wider.push("sizes that could not be compared with its own".into())
-                }
-                Some(_) => wider.push("more resources than its own".into()),
-                None => {}
-            }
             if network.is_err() {
                 wider.push("a network policy wider than its own".into());
             }
@@ -665,40 +653,12 @@ impl<'a> Judge<'a> {
                 quoted(new_name),
                 wider.join(" and "),
             );
-            if let Some(more) = &more {
-                summary.push_str(&self.copied_sizes_sentence(source, more));
-            }
             if let Err(network) = &network {
                 summary.push(' ');
                 summary.push_str(network);
             }
             return Ok(ask_to_create(
                 ApprovalKind::Access,
-                summary,
-                rewritten,
-                creates,
-            ));
-        }
-        if let Some(more) = more {
-            let mut summary = format!(
-                "More resources: fork {} as {}",
-                self.shown(source),
-                quoted(new_name)
-            );
-            match self.world.resources(source) {
-                Some(copied) => summary.push_str(&self.sizes_sentence(&copied, Some(&more))),
-                None => summary.push_str(&format!(
-                    "; the sizes of {} or {} could not be read to compare them.",
-                    self.shown(source),
-                    self.shown(self.caller)
-                )),
-            }
-            if let Err(network) = &network {
-                summary.push(' ');
-                summary.push_str(network);
-            }
-            return Ok(ask_to_create(
-                ApprovalKind::Resources,
                 summary,
                 rewritten,
                 creates,
@@ -869,18 +829,6 @@ impl<'a> Judge<'a> {
         }
     }
 
-    /// What a fork of `source` has more of than the caller, since a fork copies the sizes of its
-    /// source: `Some` (and empty) when either side's sizes cannot be read, so it asks.
-    fn fork_exceeds(&self, source: &str) -> Option<Vec<String>> {
-        match (self.world.resources(source), self.world.resources(self.caller)) {
-            (Some(copied), Some(own)) => {
-                let more = copied.exceeding(&own);
-                (!more.is_empty()).then_some(more)
-            }
-            _ => Some(Vec::new()),
-        }
-    }
-
     /// What a new computer of these sizes has more of than the caller: `Some` (and empty) when
     /// the caller's own sizes cannot be read, so it asks.
     fn more_than_it_has(&self, asked: &Resources) -> Option<Vec<String>> {
@@ -890,31 +838,6 @@ impl<'a> Judge<'a> {
                 (!more.is_empty()).then_some(more)
             }
             None => Some(Vec::new()),
-        }
-    }
-
-    /// The sentence that tells what a fork copies from `source` and how it compares with the
-    /// caller, for a request that is mainly about something else.
-    fn copied_sizes_sentence(&self, source: &str, more: &[String]) -> String {
-        match self.world.resources(source) {
-            Some(copied) if more.is_empty() => format!(
-                " It copies {} from {}; the sizes of {} could not be read to compare them.",
-                copied.describe(),
-                self.shown(source),
-                self.shown(self.caller)
-            ),
-            Some(copied) => format!(
-                " It copies {} from {}, which is more than {} has: {}.",
-                copied.describe(),
-                self.shown(source),
-                self.shown(self.caller),
-                more.join(", ")
-            ),
-            None => format!(
-                " The sizes of {} or {} could not be read to compare them.",
-                self.shown(source),
-                self.shown(self.caller)
-            ),
         }
     }
 
