@@ -263,20 +263,25 @@ fn github_line(github: &Value) -> String {
 
 pub fn secrets(value: &Value) -> String {
     let items = value["secrets"].as_array().cloned().unwrap_or_default();
-    if items.is_empty() {
-        return "No secrets yet.".to_owned();
+    let mut out = if items.is_empty() {
+        "No secrets yet.".to_owned()
+    } else {
+        items
+            .iter()
+            .map(|item| {
+                format!(
+                    "{}  {}",
+                    text(item, "name"),
+                    names_or_none(&list_of(item, "computers"))
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    for warning in list_of(value, "warnings").iter().filter_map(Value::as_str) {
+        out.push_str(&format!("\nwarning: {warning}"));
     }
-    items
-        .iter()
-        .map(|item| {
-            format!(
-                "{}  {}",
-                text(item, "name"),
-                names_or_none(&list_of(item, "computers"))
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    out
 }
 
 pub fn computer_line(verb: &str, value: &Value) -> String {

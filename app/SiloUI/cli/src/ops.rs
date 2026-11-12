@@ -316,6 +316,7 @@ pub async fn secret_set(
     value: String,
     computers: &[String],
     domains: &[String],
+    allow_shared_hosting: bool,
 ) -> Result<Value, CliError> {
     if value.is_empty() {
         return Err(CliError::new("The secret value is empty."));
@@ -357,8 +358,54 @@ pub async fn secret_set(
             "A new secret needs at least one --computer and one --domain.",
         ));
     }
-    save_secret(engine, name, existing.as_ref(), Some(value), ids, allowed).await?;
-    secrets_list(engine).await
+    if allow_shared_hosting && !allowed.iter().any(|domain| domain.starts_with("*.")) {
+        return Err(CliError::new(
+            "--allow-shared-hosting needs a destination such as *.example.com.",
+        ));
+    }
+    save_secret(
+        engine,
+        name,
+        existing.as_ref(),
+        Some(value),
+        ids.clone(),
+        allowed,
+        allow_shared_hosting,
+    )
+    .await?;
+    let mut listed = secrets_list(engine).await?;
+    if allow_shared_hosting {
+        listed["warnings"] = json!(shared_hosting_warnings(engine, &ids).await);
+    }
+    Ok(listed)
+}
+
+/// What the engine says about the shared-hosting wildcards the computers now reach through
+/// their secrets, each once. Empty when none is open or the engine cannot say.
+async fn shared_hosting_warnings(engine: &Engine, computer_ids: &[String]) -> Vec<String> {
+    let mut warnings: Vec<String> = Vec::new();
+    for computer_id in computer_ids {
+        let Ok(state) = engine
+            .call(requests::network_policy_get(ComputerTargetParams {
+                computer_id: computer_id.clone(),
+                device_id: None,
+            }))
+            .await
+        else {
+            continue;
+        };
+        for notice in state["notices"].as_array().into_iter().flatten() {
+            if let Some(notice) = notice
+                .as_str()
+                .filter(|notice| notice.contains("lets this computer reach any site hosted under"))
+            {
+                if !warnings.iter().any(|seen| seen == notice) {
+                    warnings.push(notice.to_owned());
+                }
+            }
+        }
+    }
+    warnings
 }
 
 /// Assigns the secret to a computer, or takes it away.
@@ -394,7 +441,7 @@ pub async fn secret_assign(
         }
     }
     let allowed = serde_json::from_value(existing["allowedDomains"].clone()).unwrap_or_default();
-    save_secret(engine, name, Some(&existing), None, ids, allowed).await?;
+    save_secret(engine, name, Some(&existing), None, ids, allowed, false).await?;
     secrets_list(engine).await
 }
 
@@ -405,6 +452,7 @@ async fn save_secret(
     value: Option<String>,
     computer_ids: Vec<String>,
     allowed_domains: Vec<String>,
+    allow_shared_hosting: bool,
 ) -> Result<(), CliError> {
     // A wildcard is kept as it was; this command never widens one.
     let wildcard = allowed_domains.iter().any(|domain| domain.trim() == "*");
@@ -428,7 +476,7 @@ async fn save_secret(
                 computer_ids,
                 allowed_domains,
                 allow_any_destination: wildcard.then_some(true),
-                allow_shared_hosting: None,
+                allow_shared_hosting: allow_shared_hosting.then_some(true),
             },
             device_id: None,
         }))

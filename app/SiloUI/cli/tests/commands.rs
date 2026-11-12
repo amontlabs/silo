@@ -457,6 +457,10 @@ fn engine_with_secrets() -> FakeEngine {
             stored["allowedDomains"] = request["allowedDomains"].clone();
             Ok(json!([stored.clone()]))
         }
+        "network.policy.get" => Ok(json!({"notices": [
+            "`*.surge.sh` lets this computer reach any site hosted under surge.sh, since anyone can publish there.",
+            "The secret OTHER may be sent to *.com, which covers too many hosts."
+        ]})),
         "github.state" => Ok(json!({"computers": [{
             "computerId": "id-fork", "repositoryMode": "selected",
             "repositories": [{"repository": "o/r", "allowPushes": false}],
@@ -530,7 +534,7 @@ async fn secrets_assign_and_unassign_edit_the_computer_list() {
 async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
     let engine = engine_with_secrets();
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    ops::secret_set(&connected, "API_KEY", "v2".into(), &[], &[])
+    ops::secret_set(&connected, "API_KEY", "v2".into(), &[], &[], false)
         .await
         .unwrap();
     let saved = &engine.calls("secrets.save")[0]["request"];
@@ -538,7 +542,7 @@ async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
     assert_eq!(saved["value"], "v2");
     assert_eq!(saved["computerIds"], json!(["id-main"]));
     assert_eq!(saved["allowedDomains"], json!(["api.example.com"]));
-    let error = ops::secret_set(&connected, "NEW_KEY", "v".into(), &[], &[])
+    let error = ops::secret_set(&connected, "NEW_KEY", "v".into(), &[], &[], false)
         .await
         .unwrap_err();
     assert!(error.message.contains("--computer"));
@@ -548,6 +552,7 @@ async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
         "v".into(),
         &["fork".into()],
         &["x.example.com".into()],
+        false,
     )
     .await
     .unwrap();
@@ -555,9 +560,48 @@ async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
     assert_eq!(added["operation"], "add");
     assert!(added.get("id").is_none());
     assert_eq!(added["computerIds"], json!(["id-fork"]));
-    assert!(ops::secret_set(&connected, "K", String::new(), &[], &[])
+    assert!(
+        ops::secret_set(&connected, "K", String::new(), &[], &[], false)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn secrets_set_sends_shared_hosting_approval_only_when_asked() {
+    let engine = engine_with_secrets();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let wildcard = ["*.surge.sh".to_owned()];
+    let plain = ops::secret_set(&connected, "API_KEY", "v".into(), &[], &wildcard, false)
         .await
-        .is_err());
+        .unwrap();
+    let saved = &engine.calls("secrets.save")[0]["request"];
+    assert!(saved.get("allowSharedHosting").is_none());
+    assert!(plain.get("warnings").is_none());
+    assert!(engine.calls("network.policy.get").is_empty());
+
+    let allowed = ops::secret_set(&connected, "API_KEY", "v".into(), &[], &wildcard, true)
+        .await
+        .unwrap();
+    let saved = &engine.calls("secrets.save")[1]["request"];
+    assert_eq!(saved["allowSharedHosting"], true);
+    assert_eq!(
+        allowed["warnings"],
+        json!(["`*.surge.sh` lets this computer reach any site hosted under surge.sh, since anyone can publish there."])
+    );
+    assert!(
+        silo_cli::render::secrets(&allowed).contains("warning: `*.surge.sh` lets this computer")
+    );
+
+    assert_eq!(engine.calls("secrets.save").len(), 2);
+
+    let engine = engine_with_secrets();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let error = ops::secret_set(&connected, "API_KEY", "v".into(), &[], &[], true)
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("--allow-shared-hosting"));
+    assert!(engine.calls("secrets.save").is_empty());
 }
 
 #[tokio::test]
@@ -760,7 +804,9 @@ fn status_leaves_out_computer_use_for_a_computer_with_no_desktop() {
 fn keep_engine(result: Value) -> FakeEngine {
     FakeEngine::start(move |method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
-        "changes.keep" | "changes.undo" | "changes.promote" | "computers.rebuild" => Ok(json!({"jobId": "job:1"})),
+        "changes.keep" | "changes.undo" | "changes.promote" | "computers.rebuild" => {
+            Ok(json!({"jobId": "job:1"}))
+        }
         "operations.job.get" => Ok(finished(result.clone())),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
