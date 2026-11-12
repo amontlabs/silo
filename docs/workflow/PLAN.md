@@ -50,7 +50,7 @@ current setup and its advice is folded in.
    handover. Children block on long commands and report once; they never end a turn to wait.
 9. **Clean up as soon as nothing depends on it.** When an item is merged and no stacked item
    builds on it, its worktree, branch, build folder and temporary data (logs, temp homes, live
-   test leftovers) are removed at once. `stack clean` does this and refuses while a dependent
+   test leftovers) are removed at once. `clean` does this and refuses while a dependent
    branch exists.
 
 ## Agents (set in lastdrop)
@@ -97,49 +97,73 @@ models handle long Rust tasks as well as Claude's own (try on the dry run).
   Other accounts (`~/.claude-accounts/*`) have no memories of their own, so children running
   on them never saw these memories anyway; rules in the repo reach every account.
 
-## Scripts (`tools/agent/`)
+## Tools and scripts
 
 Scripts only take over what is repetitive, intricate and deterministic (choosing test commands
 from a diff, merge mechanics, setup of live tests, cleanup). Judgement stays with the agents:
-which tests prove a change, whether a failure matters, what to review. Before writing any of
-them, existing tools are researched and preferred (research in progress: test selection and
-caching; worktrees, stacking, harnesses and boards).
+which tests prove a change, whether a failure matters, what to review. Research of existing tools
+(reports in `~/code/projects/research/silo-timing-2026-11/research-*.md`) decided what is adopted
+and what is left to small scripts.
 
+**Adopted, no new install:**
+- `rust-toolchain.toml` pinning one Rust version. Mixed `+1.94.0`/`+1.95.0`/`+stable` runs
+  invalidate both the build folder and sccache; this is the largest single rebuild saving.
+- cargo-nextest filtersets (`rdeps()`, `package()`, `test()`) to run only affected crates/tests.
+- Vitest's own `--changed <base>` and `vitest related <files>`; oxlint and `tsc -b` as the
+  frontend's fast first gate.
+- Plain git for stacking (`git rebase --onto`), driven by the board; git-spice only if agents keep
+  getting restacks wrong.
 
-1. **`select-tests [base]`** — maps changed paths to the smallest useful commands and prints
-   them: crate → `cargo nextest run -p <crate> <module filter>`; `api/` → both generators;
-   `.ts/.tsx` → `vitest related <files>`; scripts → their own tests; docs only → nothing.
-   Builds on `app/SiloUI/scripts/ci-native-changes.py`. `--why` explains each line.
-2. **`check [--quick|--run]`** — the only check a child runs: fmt on touched files →
-   `cargo check --tests -p <touched>` → selected tests → typecheck/lint only if frontend changed.
-   Log to a file, print failures and a one-line verdict, `--no-fail-fast` always, and "already
-   green" on an unchanged tree. Uses the toolchain from a new `rust-toolchain.toml`.
-3. **`merge-batch <branch>...`** — for the orchestrator: merge in order, regenerate API files
-   once, run `select-tests` on the union in the foreground (1–2 min), then start the full suite
-   in the background writing `full-suite.<sha>.{log,done}`. On failure: failing tests and the
-   branch that touched those paths. Replaces `docs/direction/tools/integrate.sh`.
-4. **`live <check> [--from step] [--host mac|linux]`** — one harness for all live checks: shared
-   setup (temp home, guest-image links, short socket path, Dev engine identity), named steps with
-   `.ok` markers so a rerun resumes at the failed step, a `done` file with the verdict, Linux
-   probed with a 3-second ssh timeout ("skipped: offline"). Existing checks in
+**Skipped, with the reason:** Bazel/Buck2/Pants (would need a build rewrite; Tauri and the patched
+MicroSandbox build do not map onto them), Nx/Turborepo (too heavy for one npm package and one
+Cargo workspace), cargo-difftests (nightly and instrumented builds), mold/lld on macOS (little
+gain), go-task (its cache lives per worktree, so a shared runtime cache needs a script anyway),
+git-branchless and jj (unfinished or a different model from T3's git worktrees), Graphite (tied to
+its service), Conductor/Crystal/Vibe Kanban (built around pull requests and CI), Earthly/Dagger
+(cannot run macOS VMs), beads/taskwarrior (too heavy for ~30 items).
+
+**Small scripts in `tools/agent/`:**
+1. **`affected`** — maps a diff (against the integration branch) to affected crates with
+   `cargo metadata`, reusing `app/SiloUI/scripts/ci-native-changes.py` for non-Rust files Rust
+   tests read; prints the nextest filterset and the frontend files. `Cargo.lock`, the root
+   `Cargo.toml` and the toolchain file mean "everything". `--why` explains each line.
+2. **`check`** — the fast path a child uses when it wants proof: fmt on touched files →
+   `cargo check --tests -p <affected>` → `cargo nextest run -E <affected>` (no fail-fast) →
+   typecheck/oxlint/`vitest related` only if the frontend changed. Logs to a file, prints failures
+   and a one-line verdict, and skips a run already green for the same tree hash, toolchain and
+   command. Children may run narrower commands themselves when that proves the point faster.
+3. **`board`** — one TSV per build (item, branch, base, depends on, state) with `ready` (its base
+   is committed, so it can start stacked), `status`, and `cleanable` (merged, nothing unmerged
+   depends on it) queries; `restack` moves dependents bottom-up after a lower branch changes
+   (`git rebase --update-refs` skips branches checked out in other worktrees, so one at a time).
+4. **`clean <item>`** — refuses while a dependent exists; otherwise removes the worktree, branch,
+   build folder and temp data (logs, temp homes, live-test leftovers, stopping only the throwaway
+   `e2e-*` computers that test started).
+5. **`merge-batch <branch>...`** — merge in order, regenerate API files once, run `affected` tests
+   on the union in the foreground, start the full suite in the background writing
+   `full-suite.<sha>.{log,done}`; on failure, name the failing tests and the branch that touched
+   those paths. Replaces `docs/direction/tools/integrate.sh`.
+6. **`live <check> [--from step] [--host mac|linux]`** — a small bash step-runner: a fast preflight
+   (paths, guest-image links, socket path length, Linux reachable in 3 s or "skipped: offline"),
+   named steps with a stamp each so a rerun resumes at the failed one, and a verdict file written
+   on every exit. A child waits with one blocking command on the verdict file. The checks in
    `docs/direction/checks/` become steps.
-5. **`stack new|add|status|clean`** — worktrees and the board: create, stack an item on an
-   existing branch, show what is running or ready, remove worktrees and targets after merge.
-6. **`runtime-cache`** — wraps `runtime:prepare`, keyed on MicroSandbox revision, patch hashes,
-   toolchain and target, stored outside worktrees, restored by copy-on-write. First find out why
-   the build uses one core.
-7. **`linux-warm`** — keeps a checkout, toolchain and build on the Linux machine, so a Linux run
-   does not start cold (a cold build there cost 21 minutes).
+7. **`runtime-cache`** — wraps `runtime:prepare`, keyed on `runtime-inputs.json`, the patch
+   hashes, toolchain and target, stored outside worktrees and restored by copy-on-write. First find
+   out why the build runs on one core.
+8. **`linux-warm`** — keeps a checkout, toolchain and build on the Linux machine.
+9. **Flaky log** — `docs/workflow/FLAKY.md`, fed from nextest's JUnit output when a test fails and
+   then passes.
 
 ## How it gets built
 
 | Step | What | Who | Parallel with |
 |---|---|---|---|
-| 0 | Research existing tools; adopt them in place of scripts where they fit | 2 research agents | — |
+| 0 | Research existing tools (done) | 2 research agents | — |
 | 1 | lastdrop agents changed; memories purged; fallback checked | orchestrator | 2–5 |
 | 2 | `CLAUDE.md`, `AGENTS.md` trim, `docs/workflow/` documents and briefs | `build` child | 3–5 |
-| 3 | `select-tests`, `check`, `rust-toolchain.toml` | `build` child | 2, 4, 5 |
-| 4 | `merge-batch`, `stack`, board | `build` child | 2, 3, 5 |
+| 3 | `rust-toolchain.toml`, `affected`, `check`, flaky log | `build` child | 2, 4, 5 |
+| 4 | `board`, `clean`, `merge-batch` | `build` child | 2, 3, 5 |
 | 5 | `live` harness (porting the Direction checks as steps) | `build` child | 2–4 |
 | 6 | `runtime-cache` (after a one-core investigation), `linux-warm` | `build` child | after 3 |
 | 7 | One `review` (Fable) of the documents and scripts together; one fix round | orchestrator | — |
