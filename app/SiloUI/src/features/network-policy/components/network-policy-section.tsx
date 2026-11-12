@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import type { NetworkMode, NetworkPolicy, NetworkPolicyState } from "@/desktop/production-schemas"
 import type { ApplicationActions } from "@/features/application/model/application-source"
 
-import { addedByReason, hostCount, modeChoices, timingText, useNetworkPolicy, validateHost } from "../model/network-policy"
+import { addedByReason, hostCount, modeChoices, hostWarning, timingText, useNetworkPolicy, validateHost } from "../model/network-policy"
 
 const rowClassName = "flex min-w-0 items-start gap-2 px-3 py-2 text-xs"
 const detailsClassName = "grid gap-3 border-t border-border px-3 py-3 text-xs"
@@ -47,9 +47,12 @@ function HostList({ hosts, disabled, onChange }: { hosts: readonly string[]; dis
   return <section className="grid gap-1.5" aria-label="Allowed hosts">
     <label htmlFor={field} className="font-medium">Hosts you allow</label>
     {hosts.length > 0
-      ? <ul className="grid gap-1">{hosts.map(host => <li key={host} className="flex items-center justify-between gap-2 rounded-md bg-muted/40 py-0.5 pr-0.5 pl-2">
-        <span className="min-w-0 truncate font-mono" title={host}>{host}</span>
-        <Button type="button" variant="ghost" size="icon-xs" aria-label={`Remove ${host}`} disabled={disabled} onClick={() => onChange(hosts.filter(item => item !== host))}><X aria-hidden="true" /></Button>
+      ? <ul className="grid gap-1">{hosts.map(host => <li key={host} className="grid gap-0.5 rounded-md bg-muted/40 py-0.5 pr-0.5 pl-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate font-mono" title={host}>{host}</span>
+          <Button type="button" variant="ghost" size="icon-xs" aria-label={`Remove ${host}`} disabled={disabled} onClick={() => onChange(hosts.filter(item => item !== host))}><X aria-hidden="true" /></Button>
+        </div>
+        {hostWarning(host) && <p role="status" className="text-caption text-muted-foreground">{hostWarning(host)}</p>}
       </li>)}</ul>
       : <p className="text-caption text-muted-foreground">No hosts yet.</p>}
     <form className="flex items-center gap-2" onSubmit={event => { event.preventDefault(); add() }}>

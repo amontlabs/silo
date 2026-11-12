@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import { secretConfiguration, type SecretDraft } from "./secret-configuration"
 
-const draft: SecretDraft = { kind: "generic", name: "SERVICE_TOKEN", value: "fixture-token", computers: ["dev"], domains: "api.example.test", allowAnyDomain: false }
+const draft: SecretDraft = { kind: "generic", name: "SERVICE_TOKEN", value: "fixture-token", computers: ["dev"], domains: "api.example.test", allowAnyDomain: false, allowSharedHosting: false }
 
 describe("secret configuration", () => {
   it.each([
@@ -79,7 +79,7 @@ describe("secret configuration", () => {
   })
 
   describe("GitHub tokens", () => {
-    const tokenDraft: SecretDraft = { kind: "github-token", name: "work", value: "ghp_synthetic", computers: [], domains: "", allowAnyDomain: false }
+    const tokenDraft: SecretDraft = { kind: "github-token", name: "work", value: "ghp_synthetic", computers: [], domains: "", allowAnyDomain: false, allowSharedHosting: false }
     const existing = { id: "token-1", name: "work", kind: "github-token" as const, computers: ["dev"], allowedDomains: [], state: "active" as const }
 
     it("asks for a label and a token only, with no computers or hosts", () => {
@@ -108,5 +108,12 @@ describe("secret configuration", () => {
       expect(replace.request).toEqual({ kind: "github-token", name: "work", computers: [], allowedDomains: [], operation: "edit", id: "token-1", value: "ghp_new" })
       expect(secretConfiguration({ ...tokenDraft, value: "" }, [existing], [], existing).request).not.toHaveProperty("value")
     })
+  })
+
+  it("sends the any-destination confirmation only for a wildcard secret that was confirmed", () => {
+    const wildcard = secretConfiguration({ ...draft, domains: "*", allowAnyDomain: true }, [], ["dev"])
+    expect(wildcard.request).toMatchObject({ allowedDomains: ["*"], allowAnyDestination: true })
+    expect(secretConfiguration({ ...draft, domains: "*", allowAnyDomain: false }, [], ["dev"]).errors?.allowAnyDomain).toBeDefined()
+    expect(secretConfiguration({ ...draft, allowAnyDomain: true }, [], ["dev"]).request).not.toHaveProperty("allowAnyDestination")
   })
 })

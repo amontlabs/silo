@@ -1249,7 +1249,8 @@ fn a_computer_list_loaded_before_a_reservation_cannot_end_it() {
 }
 
 #[tokio::test]
-async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_restart_does_not() {
+async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_restart_holds_nothing(
+) {
     let _device = device(32 * GIB, 400 * GIB);
     let (id, fork) = computer();
     sized(&fork, 3);
@@ -1272,8 +1273,8 @@ async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_
         assert_eq!(super::reserved_memory_of(&fork), 0);
     }
     drop(start);
-    // A restart of a computer that is resident now stops it and boots it again, so the memory
-    // stays set aside until the job ends.
+    // A restart of a computer that is resident now holds the memory it boots with already, so it
+    // sets aside nothing, or only what a larger saved state takes beyond that.
     let restart = {
         let _resident = Resident::new(&fork);
         reserve(MethodName::ComputersRestart).await
@@ -1281,7 +1282,7 @@ async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_
     {
         let _resident = Resident::new(&fork);
         super::current_reserved_memory(engine(), &residency(super::test_resident::all()));
-        assert_eq!(super::reserved_memory_of(&fork), 3 * GIB);
+        assert_eq!(super::reserved_memory_of(&fork), 0);
     }
     drop(restart);
     super::clear_reservations();
@@ -1300,6 +1301,72 @@ async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_
     assert_eq!(super::reserved_memory(), GIB);
     super::current_reserved_memory(engine(), &resident_set(&[&created]));
     assert_eq!(super::reserved_memory(), 0);
+}
+
+#[tokio::test]
+async fn a_restart_keeps_its_computers_memory_reserved_while_it_is_stopped() {
+    // 10 GiB above the 4 GiB floor.
+    let _device = device(14 * GIB, 400 * GIB);
+    let (id, big) = computer();
+    let other = format!("{id}-other");
+    sized(&big, 8);
+    sized(&other, 8);
+    let context = context(Caller::owner("app"));
+    let restart = {
+        let _resident = Resident::new(&big);
+        let held = super::reserve_now(
+            &context,
+            MethodName::ComputersRestart,
+            &json!({"computerId": big}),
+        )
+        .await
+        .unwrap();
+        held.settle(Some(&running_job()), None);
+        held
+    };
+    let start_other = || async {
+        super::reserve_now(
+            &context,
+            MethodName::ComputersStart,
+            &json!({"computerId": other}),
+        )
+        .await
+    };
+    // The list the restart was admitted on shows the computer running: nothing is counted twice.
+    assert_eq!(super::reserved_memory_of(&big), 0);
+    {
+        let _resident = Resident::new(&big);
+        let held = start_other().await.unwrap();
+        held.settle(Some(&running_job()), None);
+    }
+    super::clear_reservations();
+    let restart_again = {
+        let _resident = Resident::new(&big);
+        let held = super::reserve_now(
+            &context,
+            MethodName::ComputersRestart,
+            &json!({"computerId": big}),
+        )
+        .await
+        .unwrap();
+        held.settle(Some(&running_job()), None);
+        held
+    };
+    // Between the stop and the boot a list read afterwards no longer shows it: its memory is
+    // taken from the headroom, so another start of that size is refused.
+    let error = start_other()
+        .await
+        .err()
+        .expect("refused while the computer is stopped");
+    assert!(error.contains("memory"), "{error}");
+    // Resident again: its memory is in the device's measurement and counts once.
+    {
+        let _resident = Resident::new(&big);
+        let held = start_other().await.unwrap();
+        held.settle(Some(&running_job()), None);
+    }
+    drop((restart, restart_again));
+    super::clear_reservations();
 }
 
 #[tokio::test]
@@ -1516,6 +1583,94 @@ async fn an_undo_is_sized_by_the_memory_its_checkpoint_resumes_at_and_not_the_sa
     );
 }
 
+#[tokio::test]
+async fn a_running_computer_restarted_or_undone_needs_none_of_the_memory_it_already_holds() {
+    // 6 GiB above the 4 GiB floor.
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, big) = computer();
+    sized(&big, 7);
+    let caller = Caller::Computer { id: id.clone() };
+    let calls = [
+        (MethodName::ComputersRestart, json!({"computerId": big})),
+        (MethodName::ChangesUndo, json!({"computerId": big})),
+    ];
+    // Stopped, the computer is sized in full.
+    for (method, params) in calls.clone() {
+        let error = call(&caller, method, params).await.unwrap_err();
+        assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", method.name());
+    }
+    // Running, it already holds that memory.
+    let _resident = Resident::new(&big);
+    for (method, params) in calls {
+        let Err(error) = call(&caller, method, params).await else {
+            continue;
+        };
+        assert_ne!(
+            error.code,
+            ErrorCode::ResourcesLow,
+            "{}: {}",
+            method.name(),
+            error.message
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_running_computer_resuming_a_larger_saved_state_needs_only_the_difference() {
+    // 6 GiB above the 4 GiB floor.
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, running) = computer();
+    sized(&running, 4);
+    let _resident = Resident::new(&running);
+    let caller = Caller::Computer { id };
+    // 4 GiB held, 9 GiB resumed: 5 GiB more fits.
+    super::test_resumes::add(&running, Ok(9 * 1024));
+    let error = call(
+        &caller,
+        MethodName::ComputersRestart,
+        json!({"computerId": running}),
+    )
+    .await
+    .unwrap_err();
+    assert_ne!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    // 4 GiB held, 11 GiB resumed: 7 GiB more does not.
+    super::test_resumes::add(&running, Ok(11 * 1024));
+    let error = call(
+        &caller,
+        MethodName::ComputersRestart,
+        json!({"computerId": running}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    // A resume that cannot be read is still refused.
+    super::test_resumes::add(&running, Err("The checkpoint could not be read.".into()));
+    let error = call(
+        &caller,
+        MethodName::ComputersRestart,
+        json!({"computerId": running}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+}
+
+#[tokio::test]
+async fn a_running_computer_with_no_readable_size_is_still_refused() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, running) = computer();
+    let _resident = Resident::new(&running);
+    let error = call(
+        &Caller::Computer { id },
+        MethodName::ComputersRestart,
+        json!({"computerId": running}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow);
+    assert!(error.message.contains("can't read"), "{}", error.message);
+}
+
 #[test]
 fn a_kept_result_from_before_a_restart_gets_a_deadline_again_and_its_charge_clears_with_it() {
     let (_directory, store) = own_store();
@@ -1712,4 +1867,31 @@ async fn a_job_call_holds_its_place_until_the_record_has_its_job_and_gives_it_ba
         assert_eq!(super::job_slots_of("gate-settled"), kept);
         super::release_job_slot(slot);
     }
+}
+
+#[test]
+fn a_held_computer_counts_until_a_list_loaded_after_the_reservation_shows_it_resident() {
+    let before = std::time::Instant::now();
+    let listed_before = residency(HashSet::new());
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let reservation = super::Reservation {
+        id: 1,
+        computer_id: None,
+        boots: None,
+        job_id: None,
+        memory_bytes: GIB,
+        held: vec![("held".to_owned(), 2 * GIB)],
+        created_at: std::time::Instant::now(),
+        running_since: None,
+    };
+    assert!(before < reservation.created_at);
+    // A list read before the reservation says nothing: the host measured after may show the
+    // computer's memory free already.
+    assert_eq!(reservation.counted(&listed_before), 3 * GIB);
+    let mut with_it = resident_set(&["held"]);
+    with_it.loaded_at = before;
+    assert_eq!(reservation.counted(&with_it), 3 * GIB);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert_eq!(reservation.counted(&resident_set(&[])), 3 * GIB);
+    assert_eq!(reservation.counted(&resident_set(&["held"])), GIB);
 }

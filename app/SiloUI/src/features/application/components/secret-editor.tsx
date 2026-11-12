@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import type { ApplicationSecret, ApplicationSource, SecretConfigurationRequest, SecretKind } from "../model/application-source"
-import { secretConfiguration, type SecretDraft, type SecretValidationErrors } from "../model/secret-configuration"
+import { secretConfiguration, sharedHostingWarnings, type SecretDraft, type SecretValidationErrors } from "../model/secret-configuration"
 
 export function SecretEditor({ secret, source, onSave, onCancel, saving = false, saveError, initialComputers, kind: initialKind }: {
   secret?: ApplicationSecret
@@ -27,6 +27,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
   const [draft, setDraft] = useState<SecretDraft>(() => ({
     kind, name: secret?.name ?? "", value: "", computers: secret?.computers ?? initialComputers ?? [],
     domains: secret?.allowedDomains.join(", ") ?? "", allowAnyDomain: secret?.allowedDomains.includes("*") ?? false,
+    allowSharedHosting: false,
   }))
   const [errors, setErrors] = useState<SecretValidationErrors>({})
   // A GitHub token leaves the form once it is submitted; after a failed save it is asked for again.
@@ -39,7 +40,9 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     secret.computers.length !== baseline.computers.length || !secret.computers.every(name => baseline.computers.includes(name))
     || secret.allowedDomains.length !== baseline.allowedDomains.length || !secret.allowedDomains.every(domain => baseline.allowedDomains.includes(domain))
   ))
-  const anyDomain = draft.domains.split(/[\s,]+/).includes("*")
+  const domainList = draft.domains.split(/[\s,]+/).filter(Boolean).map((domain) => domain.toLowerCase())
+  const anyDomain = domainList.includes("*")
+  const sharedHosting = sharedHostingWarnings([...new Set(domainList)])
 
   useEffect(() => {
     formRef.current?.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus()
@@ -71,7 +74,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
       return
     }
     const request = result.request
-    const unchanged = secret && request.value === undefined
+    const unchanged = secret && request.value === undefined && !request.allowSharedHosting
       && (token || (request.computers.length === secret.computers.length && request.computers.every((name) => secret.computers.includes(name))
       && request.allowedDomains.length === secret.allowedDomains.length && request.allowedDomains.every((domain) => secret.allowedDomains.includes(domain))))
     if (unchanged) {
@@ -143,6 +146,10 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
       <p>Any HTTPS server could receive this secret.</p>
       <label className="flex items-center gap-2"><Checkbox checked={draft.allowAnyDomain} aria-invalid={Boolean(errors.allowAnyDomain)} aria-describedby={errors.allowAnyDomain ? `${id}-allowAnyDomain-error` : undefined} onCheckedChange={(checked) => update({ allowAnyDomain: checked === true })} />Allow any HTTPS destination</label>
       {fieldError("allowAnyDomain")}
+    </div>}
+    {sharedHosting.length > 0 && <div className="grid gap-2 rounded-md bg-warning/10 p-2.5 text-caption text-warning">
+      {sharedHosting.map((warning) => <p key={warning}>{warning}</p>)}
+      <label className="flex items-center gap-2"><Checkbox checked={draft.allowSharedHosting} onCheckedChange={(checked) => update({ allowSharedHosting: checked === true })} />Let computers reach every site under these</label>
     </div>}
     </>}
     </fieldset>

@@ -36,8 +36,6 @@ fn hosts_are_validated_strictly() {
     for bad in [
         "",
         "*.co.uk",
-        "*.github.io",
-        "*.s3.amazonaws.com",
         "Example.com",
         "example.com.",
         ".example.com",
@@ -310,6 +308,7 @@ fn grants_add_github_and_secret_hosts_only_in_allowlist_mode() {
                 vec!["*.example.net".into(), "10.0.0.1".into()],
             ),
         ],
+        ..Grants::default()
     };
     let list = plan(&allowlist(&["example.com"], &[]), &grants, &[]);
     let tokens: Vec<String> = list.rules.iter().map(Rule::token).collect();
@@ -922,6 +921,7 @@ fn a_secret_wildcard_over_a_public_suffix_is_not_a_network_rule() {
             "WIDE".into(),
             vec!["*.co.uk".into(), "*.com".into(), "api.example.com".into()],
         )],
+        ..Grants::default()
     };
     let list = plan(&allowlist(&[], &[]), &grants, &[]);
     let tokens: Vec<String> = list.rules.iter().map(Rule::token).collect();
@@ -954,7 +954,7 @@ fn github_version_two() -> Vec<Preset> {
 fn github_grant() -> Grants {
     Grants {
         github: true,
-        secrets: Vec::new(),
+        ..Grants::default()
     }
 }
 
@@ -1164,24 +1164,12 @@ fn the_checked_in_github_list_is_what_an_unpinned_grant_has_always_added() {
 }
 
 #[test]
-fn a_wildcard_over_any_public_suffix_is_refused_and_ordinary_domains_are_not() {
-    for shared in [
-        "*.duckdns.org",
-        "*.blogspot.com",
-        "*.github.io",
-        "*.s3.amazonaws.com",
-        "*.herokuapp.com",
-        "*.co.uk",
-        "*.pages.dev",
-        "*.githubusercontent.com",
-        "*.ck",
-        "*.compute.amazonaws.com",
-        "*.sch.uk",
-        "*.kobe.jp",
-    ] {
-        assert!(validate_host(shared).is_err(), "{shared}");
-        assert!(is_too_wide_wildcard(shared), "{shared}");
-        assert!(validate(&allowlist(&[shared], &[])).is_err(), "{shared}");
+fn a_wildcard_over_a_registry_suffix_is_refused_and_ordinary_domains_are_not() {
+    for refused in ["*.co.uk", "*.ck", "*.sch.uk", "*.kobe.jp", "*.com", "*.org"] {
+        assert!(validate_host(refused).is_err(), "{refused}");
+        assert!(is_too_wide_wildcard(refused), "{refused}");
+        assert!(shared_hosting_warning(refused).is_none(), "{refused}");
+        assert!(validate(&allowlist(&[refused], &[])).is_err(), "{refused}");
     }
     // The same names as exact hosts, and names under them, are fine.
     for fine in [
@@ -1197,11 +1185,102 @@ fn a_wildcard_over_any_public_suffix_is_refused_and_ordinary_domains_are_not() {
     ] {
         assert!(validate_host(fine).is_ok(), "{fine}");
         assert!(!is_too_wide_wildcard(fine), "{fine}");
+        assert!(shared_hosting_warning(fine).is_none(), "{fine}");
     }
 }
 
 #[test]
-fn cloud_bases_that_host_tenant_subdomains_are_refused_for_a_wildcard() {
+fn a_wildcard_over_shared_hosting_is_saved_with_a_warning() {
+    for shared in [
+        "*.duckdns.org",
+        "*.blogspot.com",
+        "*.github.io",
+        "*.s3.amazonaws.com",
+        "*.herokuapp.com",
+        "*.pages.dev",
+        "*.netlify.app",
+        "*.cloudfront.net",
+        "*.githubusercontent.com",
+        "*.compute.amazonaws.com",
+    ] {
+        assert!(validate_host(shared).is_ok(), "{shared}");
+        assert!(!is_too_wide_wildcard(shared), "{shared}");
+        assert!(validate(&allowlist(&[shared], &[])).is_ok(), "{shared}");
+        let warning = shared_hosting_warning(shared).unwrap_or_default();
+        assert!(
+            warning.contains(shared) && warning.contains("anyone can publish"),
+            "{shared}: {warning}"
+        );
+    }
+    let hosts = [
+        "*.netlify.app".to_owned(),
+        "*.netlify.app".to_owned(),
+        "example.com".to_owned(),
+    ];
+    assert_eq!(shared_hosting_warnings(&hosts).len(), 1);
+}
+
+#[test]
+fn approving_a_widening_to_shared_hosting_carries_the_warning() {
+    let summary = widening_summary(
+        "main",
+        &allowlist(&["example.com"], &[]),
+        &allowlist(&["example.com", "*.netlify.app"], &[]),
+    );
+    assert!(summary.contains("adding *.netlify.app"), "{summary}");
+    assert!(summary.contains("anyone can publish"), "{summary}");
+    let plain = widening_summary(
+        "main",
+        &allowlist(&["example.com"], &[]),
+        &allowlist(&["example.com", "api.example.org"], &[]),
+    );
+    assert!(!plain.contains("anyone can publish"), "{plain}");
+}
+
+fn netlify_grants(approved: bool) -> Grants {
+    Grants {
+        secrets: vec![("SITE".into(), vec!["*.netlify.app".into()])],
+        shared_hosting: approved.then(|| "SITE".to_owned()).into_iter().collect(),
+        ..Grants::default()
+    }
+}
+
+#[test]
+fn a_secret_saved_before_shared_hosting_was_allowed_does_not_widen_the_list() {
+    let grants = netlify_grants(false);
+    let tokens: Vec<String> = plan(&allowlist(&["example.com"], &[]), &grants, &[])
+        .rules
+        .iter()
+        .map(Rule::token)
+        .collect();
+    assert!(!tokens.iter().any(|token| token.contains("netlify")), "{tokens:?}");
+    assert_eq!(
+        grants.too_wide(),
+        [("SITE".to_owned(), "*.netlify.app".to_owned())]
+    );
+    assert!(grants.shared_hosting_warnings().is_empty());
+}
+
+#[test]
+fn an_approved_secret_over_shared_hosting_widens_the_list_with_a_notice() {
+    let grants = netlify_grants(true);
+    let tokens: Vec<String> = plan(&allowlist(&["example.com"], &[]), &grants, &[])
+        .rules
+        .iter()
+        .map(Rule::token)
+        .collect();
+    assert!(
+        tokens.contains(&"allow@*.netlify.app:tcp:443".to_owned()),
+        "{tokens:?}"
+    );
+    assert!(grants.too_wide().is_empty());
+    let warnings = grants.shared_hosting_warnings();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("*.netlify.app"), "{warnings:?}");
+}
+
+#[test]
+fn cloud_bases_that_host_tenant_subdomains_are_warned_about_for_a_wildcard() {
     for base in [
         "azure.com",
         "azure.net",
@@ -1238,8 +1317,8 @@ fn cloud_bases_that_host_tenant_subdomains_are_refused_for_a_wildcard() {
         "force.com",
     ] {
         let pattern = format!("*.{base}");
-        assert!(validate_host(&pattern).is_err(), "{pattern}");
-        assert!(is_too_wide_wildcard(&pattern), "{pattern}");
+        assert!(validate_host(&pattern).is_ok(), "{pattern}");
+        assert!(shared_hosting_warning(&pattern).is_some(), "{pattern}");
         // A tenant's own name below it stays allowed, and so does the base as an exact host.
         assert!(validate_host(&format!("*.tenant.{base}")).is_ok(), "{base}");
         assert!(validate_host(base).is_ok(), "{base}");
@@ -1247,14 +1326,28 @@ fn cloud_bases_that_host_tenant_subdomains_are_refused_for_a_wildcard() {
 }
 
 #[test]
-fn the_names_silo_always_refused_stay_refused_whether_or_not_the_list_carries_them() {
+fn the_listed_names_are_refused_or_warned_whether_or_not_the_list_carries_them() {
     let file: Value = serde_json::from_str(include_str!("public_suffixes.json")).unwrap();
+    let not_refused: Vec<&str> = file["registry"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|suffix| suffix.as_str().unwrap())
+        .filter(|suffix| {
+            let pattern = format!("*.{suffix}");
+            validate_host(&pattern).is_ok() || !is_too_wide_wildcard(&pattern)
+        })
+        .collect();
+    assert!(not_refused.is_empty(), "{not_refused:?}");
     for suffix in file["suffixes"].as_array().unwrap() {
         let suffix = suffix.as_str().unwrap();
-        assert!(validate_host(&format!("*.{suffix}")).is_err(), "{suffix}");
-        assert!(is_too_wide_wildcard(&format!("*.{suffix}")), "{suffix}");
+        assert!(validate_host(&format!("*.{suffix}")).is_ok(), "{suffix}");
+        assert!(
+            shared_hosting_warning(&format!("*.{suffix}")).is_some(),
+            "{suffix}"
+        );
     }
-    assert!(validate_host("*.amazonaws.com").is_err());
+    assert!(shared_hosting_warning("*.amazonaws.com").is_some());
 }
 
 #[test]

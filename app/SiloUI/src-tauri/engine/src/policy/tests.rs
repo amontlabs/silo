@@ -1203,9 +1203,56 @@ fn what_the_agent_chose_is_quoted_cut_and_never_the_start_of_the_sentence() {
     );
     let summary = ask_summary("secrets.save", secret("API_KEY", json!(["*.co.uk", "api.example.com"])));
     assert!(summary.contains("not added to a list of allowed hosts"), "{summary}");
+    let summary = ask_summary("secrets.save", secret("API_KEY", json!(["*.netlify.app", "api.example.com"])));
+    assert!(summary.contains("anyone can publish"), "{summary}");
+    assert!(!summary.contains("not added to a list of allowed hosts"), "{summary}");
+    // Allowing an ask that showed the warning confirms the shared-hosting host; one that showed
+    // none carries no confirmation.
+    let shared = secret("API_KEY", json!(["*.netlify.app"]));
+    match check("secrets.save", shared) {
+        Decision::Ask { params, .. } => {
+            assert_eq!(params.unwrap()["request"]["allowSharedHosting"], true)
+        }
+        other => panic!("{other:?}"),
+    }
+    match check("secrets.save", secret("API_KEY", json!(["api.example.com"]))) {
+        Decision::Ask { params, .. } => assert!(params.is_none()),
+        other => panic!("{other:?}"),
+    }
     let any = json!({"request": {"operation": "add", "name": "API_KEY", "value": "v",
         "computerIds": ["fork-1"], "allowedDomains": ["*"], "allowAnyDestination": true}});
     assert!(ask_summary("secrets.save", any).starts_with("Sent to any destination: add the secret “API_KEY”"));
+    // A computer cannot confirm shared-hosting hosts itself: the field is dropped, and set only
+    // when the summary shows the warning, whether or not a wildcard is listed.
+    let sent = |domains: Value, any: bool| {
+        json!({"request": {"operation": "add", "name": "API_KEY", "value": "v",
+            "computerIds": ["fork-1"], "allowedDomains": domains,
+            "allowAnyDestination": any, "allowSharedHosting": true}})
+    };
+    match check("secrets.save", sent(json!(["*", "*.netlify.app"]), true)) {
+        Decision::Ask { summary, params, .. } => {
+            assert!(summary.starts_with("Sent to any destination"), "{summary}");
+            assert!(summary.contains("anyone can publish"), "{summary}");
+            assert_eq!(params.unwrap()["request"]["allowSharedHosting"], true);
+        }
+        other => panic!("{other:?}"),
+    }
+    match check("secrets.save", sent(json!(["*.netlify.app"]), true)) {
+        Decision::Ask { summary, .. } => {
+            assert!(summary.starts_with("Sent only to “*.netlify.app”"), "{summary}");
+            assert!(summary.contains("anyone can publish"), "{summary}");
+        }
+        other => panic!("{other:?}"),
+    }
+    for domains in [json!(["api.example.com"]), json!(["*"])] {
+        match check("secrets.save", sent(domains, true)) {
+            Decision::Ask { params, .. } => {
+                let params = params.expect("the field is stripped");
+                assert!(params["request"].get("allowSharedHosting").is_none(), "{params}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
     // A value that cannot be saved is refused now.
     let no_value = json!({"request": {"operation": "add", "name": "API_KEY",
         "computerIds": ["fork-1"], "allowedDomains": ["a.example.com"]}});

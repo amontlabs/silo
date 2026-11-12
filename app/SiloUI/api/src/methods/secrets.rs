@@ -89,6 +89,10 @@ pub struct SecretSaveRequest {
     pub allowed_domains: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_any_destination: Option<bool>,
+    /// Confirms that the computers using the secret may reach every site under each wildcard
+    /// host over shared hosting among `allowed_domains`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_shared_hosting: Option<bool>,
 }
 
 #[derive(

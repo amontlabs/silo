@@ -347,6 +347,11 @@ struct Reservation {
     boots: Option<String>,
     job_id: Option<String>,
     memory_bytes: u64,
+    /// Computers that held their memory when the call was admitted, each with the memory it
+    /// boots with. That memory is in the device's measurement while the computer is resident,
+    /// so it counts only while a list loaded after the reservation shows the computer gone
+    /// (stopped between a restart's stop and boot).
+    held: Vec<(String, u64)>,
     created_at: std::time::Instant,
     /// When the registry was first seen to have the reservation's job running, which is when
     /// the work behind it starts: a job waits in the registry for its turn before that.
@@ -388,6 +393,22 @@ const RESERVATION_LIFE: std::time::Duration = std::time::Duration::from_secs(300
 /// finishing it would otherwise hold its memory until the engine restarts. It outlasts a
 /// download of a macOS restore image on a slow connection.
 const JOB_RESERVATION_CEILING: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
+
+impl Reservation {
+    /// The memory this reservation sets aside given `resident`: its own, and that of each held
+    /// computer except one a list loaded after the reservation shows resident. A list older
+    /// than the reservation says nothing about whether the computer came back, and a host
+    /// measured after the reservation may already show its memory free, so it stays counted.
+    fn counted(&self, resident: &Residency) -> u64 {
+        let back = |computer: &str| {
+            resident.loaded_at > self.created_at && resident.contains(computer)
+        };
+        self.held
+            .iter()
+            .filter(|(computer, _)| !back(computer))
+            .fold(self.memory_bytes, |sum, (_, bytes)| sum.saturating_add(*bytes))
+    }
+}
 
 /// Whether a reservation is still wanted. One tied to a job lasts until the job ends, the
 /// computer it is for is resident in a list loaded after the reservation was made, or
@@ -475,7 +496,7 @@ fn current_reserved_memory(engine: &dyn EngineContext, resident: &Residency) -> 
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
-        .map(|r| r.memory_bytes)
+        .map(|r| r.counted(resident))
         .sum()
 }
 
@@ -492,16 +513,41 @@ fn reserve_if_fits(
     boots: Option<String>,
     memory_bytes: u64,
 ) -> Result<Option<u64>, String> {
+    reserve_if_fits_holding(
+        engine,
+        resident,
+        host,
+        floors,
+        computer_id,
+        boots,
+        memory_bytes,
+        Vec::new(),
+    )
+}
+
+/// [`reserve_if_fits`] for a call that also stops and boots computers resident now: `held` is
+/// each with the memory it boots with, which the reservation counts while one is not resident.
+#[allow(clippy::too_many_arguments)]
+fn reserve_if_fits_holding(
+    engine: &dyn EngineContext,
+    resident: &Residency,
+    host: &resources::Host,
+    floors: &resources::Floors,
+    computer_id: Option<String>,
+    boots: Option<String>,
+    memory_bytes: u64,
+    held: Vec<(String, u64)>,
+) -> Result<Option<u64>, String> {
     prune_reservations(engine, resident);
     let mut reservations = RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     reservations.retain(|r| reservation_alive(r, &[], resident));
-    let reserved: u64 = reservations.iter().map(|r| r.memory_bytes).sum();
+    let reserved: u64 = reservations.iter().map(|r| r.counted(resident)).sum();
     if let Some(refusal) = resources::refusal_for(host, floors, reserved, memory_bytes) {
         return Err(refusal);
     }
-    if memory_bytes == 0 {
+    if memory_bytes == 0 && held.is_empty() {
         return Ok(None);
     }
     let id = NEXT_RESERVATION_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -511,6 +557,7 @@ fn reserve_if_fits(
         boots,
         job_id: None,
         memory_bytes,
+        held,
         created_at: std::time::Instant::now(),
         running_since: None,
     });
@@ -697,7 +744,7 @@ fn requested_memory_bytes(
     params: &Value,
     sizes: &Sizes,
     swapped: &[String],
-) -> Result<u64, String> {
+) -> Result<Requested, String> {
     use silo_api::methods::{
         checkpoints::{CheckpointCreateParams, CheckpointForkParams, CheckpointTargetParams},
         common::ComputerTargetParams,
@@ -721,12 +768,23 @@ fn requested_memory_bytes(
             .ok_or_else(unreadable)
     };
     let sized = |id: Option<String>| id.map_or(Ok(0), |id| stored(&id));
-    // A computer with a full checkpoint restore pending boots at the memory the capture holds.
+    // A computer with a full checkpoint restore pending boots at the memory the capture holds. One
+    // that holds its memory now needs only what the boot takes beyond that, normally nothing.
+    let held = std::cell::RefCell::new(Vec::new());
     let started = |id: Option<String>| match id {
-        Some(id) => match sizes.resumes.get(&id) {
-            Some(resume) => resume.clone().map(|mib| mib.saturating_mul(MIB)),
-            None => stored(&id),
-        },
+        Some(id) => {
+            let boots = match sizes.resumes.get(&id) {
+                Some(resume) => resume.clone().map(|mib| mib.saturating_mul(MIB))?,
+                None => stored(&id)?,
+            };
+            if sizes.resident.contains(&id) {
+                let extra = boots.saturating_sub(stored(&id)?);
+                held.borrow_mut().push((id, boots));
+                Ok(extra)
+            } else {
+                Ok(boots)
+            }
+        }
         None => Ok(0),
     };
     let all = |ids: Vec<String>| {
@@ -734,7 +792,7 @@ fn requested_memory_bytes(
             Ok::<u64, String>(sum.saturating_add(stored(id)?))
         })
     };
-    match method {
+    let extra = match method {
         MethodName::ComputersCreate => Ok(match decode::<ComputerCreateParams>(params) {
             Some(ComputerCreateParams::Linux { configuration, .. }) => {
                 u64::from(configuration.memory_gib).saturating_mul(resources::GIB)
@@ -758,7 +816,7 @@ fn requested_memory_bytes(
             }
         }
         MethodName::CheckpointsRestore => {
-            sized(decode::<CheckpointTargetParams>(params).map(|target| target.computer_id))
+            started(decode::<CheckpointTargetParams>(params).map(|target| target.computer_id))
         }
         // A fork boots at the size its source has now; a checkpoint records none.
         MethodName::CheckpointsFork => {
@@ -782,7 +840,18 @@ fn requested_memory_bytes(
             _ => 0,
         }),
         _ => Ok(0),
-    }
+    };
+    extra.map(|extra| Requested {
+        extra,
+        held: held.into_inner(),
+    })
+}
+
+/// What a call needs of the device's memory: `extra` above what is held now, and the computers
+/// resident now that it stops and boots, each with the memory it boots with.
+struct Requested {
+    extra: u64,
+    held: Vec<(String, u64)>,
 }
 
 /// The computer a call boots whose memory the device's measurement does not hold yet, when the
@@ -831,7 +900,11 @@ fn assess_headroom(
         }
         _ => Vec::new(),
     };
-    let requested = match requested_memory_bytes(method, params, sizes, &swapped) {
+    let Requested {
+        extra: requested,
+        held,
+    } = match requested_memory_bytes(method, params, sizes, &swapped)
+    {
         Ok(requested) => requested,
         Err(unreadable) => {
             // A device short of its floors is told so before anything else.
@@ -840,7 +913,7 @@ fn assess_headroom(
         }
     };
     match reserve_for {
-        Some(computer) => reserve_if_fits(
+        Some(computer) => reserve_if_fits_holding(
             context.engine_context(),
             &sizes.resident,
             &host,
@@ -848,6 +921,7 @@ fn assess_headroom(
             computer,
             booted_computer(method, params, sizes),
             requested,
+            held,
         )
         .map(Held::of),
         None => {
