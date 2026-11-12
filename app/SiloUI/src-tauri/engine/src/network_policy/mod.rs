@@ -93,7 +93,18 @@ const FIRST_PRESET_VERSION: u32 = 1;
 
 /// The version of each preset a policy was approved at, by preset name. A preset without an
 /// entry was approved at the first version.
+///
+/// The hosts a GitHub grant adds are pinned under [`GITHUB_GRANT_PIN`], whether or not the
+/// policy lists the `github` preset, so that a later GitHub list reaches a computer only when
+/// the owner accepts it. A policy saved before grants were pinned has no such entry and holds
+/// the first version, which is the list GitHub access has always added.
 pub type Pins = BTreeMap<String, u32>;
+
+/// The [`Pins`] key of the hosts a computer's GitHub access adds.
+pub const GITHUB_GRANT_PIN: &str = "grant:github";
+
+/// What an update to the hosts a GitHub grant adds is called when it is offered for approval.
+const GITHUB_GRANT_TITLE: &str = "GitHub access";
 
 /// A named host list from `presets.json`.
 #[derive(Clone, Debug)]
@@ -274,6 +285,9 @@ impl Held {
             .presets
             .iter()
             .filter_map(|name| preset(name).map(|preset| (name.clone(), preset.version)))
+            .chain(
+                preset("github").map(|preset| (GITHUB_GRANT_PIN.to_owned(), preset.version)),
+            )
             .collect();
         Self { policy, pins }
     }
@@ -300,17 +314,41 @@ impl Held {
         self.preset_hosts()
             .1
             .into_iter()
-            .map(|(name, title, added)| NetworkPresetUpdate {
-                name,
-                title,
-                added_hosts: added
-                    .iter()
-                    .map(|allowed| allowed.host.clone())
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect(),
-            })
+            .map(|(name, title, added)| update_of(name, title, &added))
             .collect()
+    }
+
+    /// The hosts a GitHub grant would add that this policy was not approved with: one update
+    /// when `grants` hold GitHub access and the running GitHub list has grown past the pin.
+    pub fn grant_updates(&self, grants: &Grants) -> Vec<NetworkPresetUpdate> {
+        if !grants.github {
+            return Vec::new();
+        }
+        let Some(github) = preset("github") else {
+            return Vec::new();
+        };
+        let (_, added) = github.hosts_at(self.pins.get(GITHUB_GRANT_PIN).copied());
+        if added.is_empty() {
+            return Vec::new();
+        }
+        vec![update_of(
+            GITHUB_GRANT_PIN.to_owned(),
+            GITHUB_GRANT_TITLE.to_owned(),
+            &added,
+        )]
+    }
+}
+
+fn update_of(name: String, title: String, added: &[Allowed]) -> NetworkPresetUpdate {
+    NetworkPresetUpdate {
+        name,
+        title,
+        added_hosts: added
+            .iter()
+            .map(|allowed| allowed.host.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
     }
 }
 
@@ -642,19 +680,16 @@ impl Grants {
             .collect()
     }
 
-    /// The hosts these grants add, with where each comes from. A secret allowed to any host
-    /// adds nothing: an allowlist computer can send it only to hosts on its list. A wildcard
-    /// over a public suffix adds nothing either ([`Self::too_wide`]).
-    fn hosts(&self) -> Vec<(Allowed, String)> {
+    /// The hosts these grants add, with where each comes from. GitHub access adds the GitHub
+    /// list at the version `pins` holds. A secret allowed to any host adds nothing: an
+    /// allowlist computer can send it only to hosts on its list. A wildcard over a public
+    /// suffix adds nothing either ([`Self::too_wide`]).
+    fn hosts(&self, pins: &Pins) -> Vec<(Allowed, String)> {
         let mut hosts = Vec::new();
         if self.github {
             if let Some(preset) = preset("github") {
-                hosts.extend(
-                    preset
-                        .hosts
-                        .iter()
-                        .map(|allowed| (allowed.clone(), "github".to_owned())),
-                );
+                let (approved, _) = preset.hosts_at(pins.get(GITHUB_GRANT_PIN).copied());
+                hosts.extend(approved.into_iter().map(|allowed| (allowed, "github".to_owned())));
             }
         }
         for (name, domains) in &self.secrets {
@@ -817,7 +852,7 @@ pub fn plan_held(held: &Held, grants: &Grants, extras: &[ExtraRule]) -> Plan {
                         .map(|allowed| (allowed, format!("preset:{name}"))),
                 );
             }
-            sources.extend(grants.hosts());
+            sources.extend(grants.hosts(&held.pins));
             let mut seen = BTreeSet::new();
             let mut rules = vec![Rule::Dns];
             let mut hosts: Vec<NetworkPolicyHost> = Vec::new();

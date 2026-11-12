@@ -7,7 +7,7 @@ use super::{
     exec::{perl_argv, FILES},
     process::{self, Stopped},
     target::Target,
-    GuestError, MAX_RESPONSE_RAW_BYTES,
+    GuestError, HELPER_STDERR_BYTES, MAX_RESPONSE_RAW_BYTES,
 };
 use silo_api::jobs::ErrorCode;
 use std::{
@@ -320,7 +320,7 @@ pub(crate) fn run_argv(
         stdin,
         FILE_TIMEOUT,
         max_stdout,
-        16 * 1024,
+        HELPER_STDERR_BYTES,
         None,
         &|| {},
     )?;
@@ -335,6 +335,11 @@ pub(crate) fn run_argv(
         Err(Stopped::Overflow) => {
             return Err(GuestError::internal(
                 "The result is larger than one response can carry.",
+            ))
+        }
+        Err(Stopped::StderrOverflow) => {
+            return Err(GuestError::internal(
+                "The computer's file helper printed too much error output.",
             ))
         }
         Err(Stopped::Cancelled) => return Err(GuestError::new(ErrorCode::Cancelled, "Cancelled.")),

@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Held, NetworkPolicy, NetworkPolicyMode, Pins};
+use super::{Held, NetworkPolicy, NetworkPolicyMode, Pins, GITHUB_GRANT_PIN};
 
 const FILE: &str = "network-policy.json";
 const VERSION: u8 = 1;
@@ -53,6 +53,7 @@ impl Stored {
 
     /// `policy` saved over `before`: a preset already there keeps the version it was approved
     /// at (none means the first), and a preset added now is pinned to the version this Silo has.
+    /// The GitHub grant's hosts keep the version they were approved at the same way.
     pub fn preserving_pins(
         policy: &NetworkPolicy,
         before: Option<&Stored>,
@@ -66,6 +67,10 @@ impl Stored {
                     None => pins.remove(preset),
                 };
             }
+            match before.preset_versions.get(GITHUB_GRANT_PIN) {
+                Some(version) => pins.insert(GITHUB_GRANT_PIN.to_owned(), *version),
+                None => pins.remove(GITHUB_GRANT_PIN),
+            };
         }
         Self {
             mode: policy.mode,

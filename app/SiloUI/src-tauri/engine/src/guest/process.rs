@@ -3,8 +3,7 @@
 use super::GuestError;
 use std::{
     ffi::OsString,
-    fs::File,
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Read, Write},
     path::PathBuf,
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
     sync::{
@@ -44,17 +43,17 @@ impl Plan {
 pub(crate) struct Collected {
     pub status: ExitStatus,
     pub stdout: Vec<u8>,
-    /// At most `stderr_keep` bytes of the spooled standard error.
     pub stderr: Vec<u8>,
-    /// The full length of standard error, kept in a private temporary file while running.
-    pub stderr_len: u64,
 }
 
 /// Why a bounded run was stopped before the process ended on its own.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Stopped {
     Timeout,
+    /// Standard output went past its allowance.
     Overflow,
+    /// Standard error went past its allowance.
+    StderrOverflow,
     Cancelled,
 }
 
@@ -92,8 +91,9 @@ fn wait_all(flags: &[Arc<AtomicBool>], grace: Duration) -> bool {
 /// Runs `plan` to completion.
 ///
 /// Standard output is read only up to `max_stdout` bytes: one byte more stops the run
-/// (`Stopped::Overflow`), so the host never buffers more. Standard error is drained without
-/// a limit into a private temporary file and read back up to `stderr_keep` bytes.
+/// (`Stopped::Overflow`), so the host never buffers more. Standard error is held the same
+/// way up to `max_stderr` bytes (`Stopped::StderrOverflow`); nothing is written to the host's
+/// disk, so a command that prints forever costs neither disk nor unbounded memory.
 /// `before_stop` runs once, before the host process is killed, so the caller can end the
 /// guest process tree first.
 ///
@@ -105,7 +105,7 @@ pub(crate) fn run_collect(
     stdin: Option<&[u8]>,
     timeout: Duration,
     max_stdout: usize,
-    stderr_keep: usize,
+    max_stderr: usize,
     cancel: Option<&AtomicBool>,
     before_stop: &dyn Fn(),
 ) -> Result<Result<Collected, Stopped>, GuestError> {
@@ -136,37 +136,41 @@ pub(crate) fn run_collect(
             }
         })
     });
-    let exceeded = Arc::new(AtomicBool::new(false));
-    let stdout = {
-        let (mut stream, exceeded, done) = (child.stdout.take(), exceeded.clone(), flag());
-        thread::spawn(move || {
-            let _done = Done(done);
-            let mut bytes = Vec::new();
-            if let Some(stream) = stream.as_mut() {
-                let _ = stream.take(max_stdout as u64 + 1).read_to_end(&mut bytes);
-            }
-            if bytes.len() > max_stdout {
-                exceeded.store(true, Ordering::SeqCst);
-            }
-            bytes
-        })
-    };
-    let stderr = {
-        let (mut stream, done) = (child.stderr.take(), flag());
-        thread::spawn(move || -> std::io::Result<File> {
-            let _done = Done(done);
-            let mut spool = tempfile::tempfile()?;
-            if let Some(stream) = stream.as_mut() {
-                std::io::copy(stream, &mut spool)?;
-            }
-            Ok(spool)
-        })
-    };
+    let stdout_exceeded = Arc::new(AtomicBool::new(false));
+    let stderr_exceeded = Arc::new(AtomicBool::new(false));
+    let mut capped =
+        |stream: Option<Box<dyn Read + Send>>, limit: usize, exceeded: &Arc<AtomicBool>| {
+            let (exceeded, done) = (exceeded.clone(), flag());
+            thread::spawn(move || {
+                let _done = Done(done);
+                let mut bytes = Vec::new();
+                if let Some(mut stream) = stream {
+                    let _ = (&mut stream).take(limit as u64 + 1).read_to_end(&mut bytes);
+                }
+                if bytes.len() > limit {
+                    exceeded.store(true, Ordering::SeqCst);
+                }
+                bytes
+            })
+        };
+    let stdout = capped(
+        child.stdout.take().map(|stream| Box::new(stream) as _),
+        max_stdout,
+        &stdout_exceeded,
+    );
+    let stderr = capped(
+        child.stderr.take().map(|stream| Box::new(stream) as _),
+        max_stderr,
+        &stderr_exceeded,
+    );
     let deadline = Instant::now() + timeout;
     let mut status = None;
     let stopped = loop {
-        if exceeded.load(Ordering::SeqCst) {
+        if stdout_exceeded.load(Ordering::SeqCst) {
             break Some(Stopped::Overflow);
+        }
+        if stderr_exceeded.load(Ordering::SeqCst) {
+            break Some(Stopped::StderrOverflow);
         }
         if cancel.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
             break Some(Stopped::Cancelled);
@@ -209,32 +213,18 @@ pub(crate) fn run_collect(
         let _ = writer.join();
     }
     let stdout = stdout.join().unwrap_or_default();
-    // Output past the allowance may have been the last thing read before the process ended.
+    let stderr = stderr.join().unwrap_or_default();
+    // Output past an allowance may have been the last thing read before the process ended.
     if stdout.len() > max_stdout {
         return Ok(Err(Stopped::Overflow));
     }
-    let mut spool = stderr
-        .join()
-        .map_err(|_| GuestError::internal("Silo lost the guest command's error output."))?
-        .map_err(|error| {
-            GuestError::internal(format!("Silo could not keep the command's errors: {error}"))
-        })?;
-    let stderr_len = spool
-        .metadata()
-        .map_err(|error| GuestError::internal(error.to_string()))?
-        .len();
-    let mut kept = Vec::new();
-    spool
-        .seek(SeekFrom::Start(0))
-        .and_then(|_| spool.take(stderr_keep as u64).read_to_end(&mut kept))
-        .map_err(|error| {
-            GuestError::internal(format!("Silo could not read the errors: {error}"))
-        })?;
+    if stderr.len() > max_stderr {
+        return Ok(Err(Stopped::StderrOverflow));
+    }
     Ok(Ok(Collected {
         status,
         stdout,
-        stderr: kept,
-        stderr_len,
+        stderr,
     }))
 }
 
@@ -419,5 +409,50 @@ mod tests {
         assert_eq!(outcome.status.code(), Some(3));
         assert_eq!(outcome.stdout, b"out");
         assert_eq!(outcome.stderr, b"err");
+    }
+
+    #[test]
+    fn standard_error_past_its_allowance_stops_the_run_without_spooling() {
+        let started = Instant::now();
+        let outcome = run_collect(
+            &shell("while :; do printf xxxxxxxx >&2; done"),
+            None,
+            Duration::from_secs(60),
+            1024,
+            1024,
+            None,
+            &|| {},
+        )
+        .unwrap();
+        assert!(matches!(outcome, Err(Stopped::StderrOverflow)));
+        assert!(started.elapsed() < Duration::from_secs(30));
+    }
+
+    #[test]
+    fn standard_error_that_ends_exactly_at_its_allowance_completes() {
+        let outcome = run_collect(
+            &shell("printf 12345 >&2"),
+            None,
+            Duration::from_secs(60),
+            1024,
+            5,
+            None,
+            &|| {},
+        )
+        .unwrap()
+        .ok()
+        .unwrap();
+        assert_eq!(outcome.stderr, b"12345");
+        let outcome = run_collect(
+            &shell("printf 123456 >&2"),
+            None,
+            Duration::from_secs(60),
+            1024,
+            5,
+            None,
+            &|| {},
+        )
+        .unwrap();
+        assert!(matches!(outcome, Err(Stopped::StderrOverflow)));
     }
 }

@@ -765,3 +765,118 @@ fn a_secret_wildcard_over_a_public_suffix_is_not_a_network_rule() {
     assert!(validate_host("*.example.co.uk").is_ok());
     assert!(validate(&allowlist(&["*.co.uk"], &[])).is_err());
 }
+
+fn github_version_two() -> Vec<Preset> {
+    let at = |host: &str| Allowed::new(host, HTTPS_PORT);
+    vec![Preset {
+        name: "github".into(),
+        title: "GitHub".into(),
+        version: 2,
+        hosts: vec![at("github.com"), at("new.github.example")],
+        history: vec![(1, vec![at("github.com")])],
+    }]
+}
+
+fn github_grant() -> Grants {
+    Grants {
+        github: true,
+        secrets: Vec::new(),
+    }
+}
+
+fn rule_tokens(held: &Held, grants: &Grants) -> Vec<String> {
+    plan_held(held, grants, &[]).rules.iter().map(Rule::token).collect()
+}
+
+#[test]
+fn a_github_grant_holds_the_list_it_was_approved_with_until_the_owner_accepts_the_update() {
+    use_test_presets(Some(github_version_two()));
+    let policy = allowlist(&["example.com"], &[]);
+    // A policy saved before grants were pinned has no pin: it holds the first list.
+    let old = Held {
+        policy: policy.clone(),
+        pins: Pins::new(),
+    };
+    let tokens = rule_tokens(&old, &github_grant());
+    assert!(tokens.contains(&"allow@github.com:tcp:443".to_owned()), "{tokens:?}");
+    assert!(!tokens.iter().any(|token| token.contains("new.github.example")), "{tokens:?}");
+    let updates = old.grant_updates(&github_grant());
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0].name, GITHUB_GRANT_PIN);
+    assert_eq!(updates[0].added_hosts, ["new.github.example"]);
+    // Without a GitHub grant there is nothing to approve, and nothing is added.
+    assert!(old.grant_updates(&Grants::default()).is_empty());
+    assert!(!rule_tokens(&old, &Grants::default()).iter().any(|token| token.contains("github")));
+    // Approved now, the grant gets the running list.
+    let latest = Held::latest(policy.clone());
+    assert_eq!(latest.pins.get(GITHUB_GRANT_PIN), Some(&2));
+    assert!(latest.grant_updates(&github_grant()).is_empty());
+    assert!(rule_tokens(&latest, &github_grant())
+        .contains(&"allow@new.github.example:tcp:443".to_owned()));
+    // A pin this Silo does not know allows no GitHub hosts.
+    let unknown = Held {
+        policy,
+        pins: Pins::from([(GITHUB_GRANT_PIN.to_owned(), 7)]),
+    };
+    assert!(!rule_tokens(&unknown, &github_grant()).iter().any(|token| token.contains("github")));
+    use_test_presets(None);
+}
+
+#[test]
+fn saving_a_policy_keeps_the_github_grant_pin_and_only_an_accept_moves_it() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    use_test_presets(Some(github_version_two()));
+    use_test_grants(Some(github_grant()));
+    let target = || service::Target::Macos {
+        name: "dev".into(),
+        running: false,
+    };
+    let policy = allowlist(&["example.com"], &[]);
+    // An entry saved before grants were pinned.
+    std::fs::write(
+        directory.path().join("network-policy.json"),
+        r#"{"version": 1, "computers": {"c": {"mode": "allowlist", "hosts": ["example.com"]}}}"#,
+    )
+    .unwrap();
+    let state = service::get("c", target()).unwrap();
+    assert_eq!(state.preset_updates.len(), 1);
+    assert_eq!(state.preset_updates[0].added_hosts, ["new.github.example"]);
+    assert!(!state.allowed_hosts.iter().any(|host| host.host == "new.github.example"));
+    assert!(state.allowed_hosts.iter().any(|host| host.host == "github.com" && host.from == "github"));
+    // An ordinary save keeps waiting for the owner.
+    let saved = service::set("c", &policy, None, None, target()).unwrap();
+    assert_eq!(saved.preset_updates.len(), 1);
+    assert!(store::get_stored("c").unwrap().unwrap().preset_versions.is_empty());
+    // A new entry is approved at the running list.
+    let fresh = service::set("d", &policy, None, None, target()).unwrap();
+    assert!(fresh.preset_updates.is_empty());
+    assert_eq!(
+        store::get_stored("d").unwrap().unwrap().preset_versions.get(GITHUB_GRANT_PIN),
+        Some(&2)
+    );
+    assert!(fresh.allowed_hosts.iter().any(|host| host.host == "new.github.example"));
+    // Accepting moves the pin.
+    let accepted = service::set("c", &policy, None, Some(true), target()).unwrap();
+    assert!(accepted.preset_updates.is_empty());
+    assert!(accepted.allowed_hosts.iter().any(|host| host.host == "new.github.example"));
+    assert_eq!(
+        store::get_stored("c").unwrap().unwrap().preset_versions.get(GITHUB_GRANT_PIN),
+        Some(&2)
+    );
+    use_test_grants(None);
+    use_test_presets(None);
+    store::use_test_path(None);
+}
+
+#[test]
+fn the_checked_in_github_list_is_what_an_unpinned_grant_has_always_added() {
+    let github = preset("github").unwrap();
+    let held = Held {
+        policy: allowlist(&[], &[]),
+        pins: Pins::new(),
+    };
+    let unpinned: BTreeSet<Allowed> = github.hosts_at(held.pins.get(GITHUB_GRANT_PIN).copied()).0.into_iter().collect();
+    let current: BTreeSet<Allowed> = github.hosts.iter().cloned().collect();
+    assert_eq!(unpinned, current, "an unpinned grant would widen or narrow on load");
+}

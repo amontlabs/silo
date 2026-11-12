@@ -179,7 +179,12 @@ fn state(computer_id: &str, resolved: Resolved) -> NetworkPolicyState {
         .collect();
     NetworkPolicyState {
         computer_id: computer_id.to_owned(),
-        preset_updates: resolved.held.preset_updates(),
+        preset_updates: resolved
+            .held
+            .preset_updates()
+            .into_iter()
+            .chain(resolved.held.grant_updates(&resolved.grants))
+            .collect(),
         policy: resolved.held.policy,
         allowed_hosts: resolved.plan.hosts,
         timing: resolved.timing,
