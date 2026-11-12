@@ -376,3 +376,12 @@ These were not asked of the owner. Each is open to change.
   findings), R16 (`721e6c425`), R17 (`49a70349e`) and R18 (`b0cf56695`) after Sonnet reviews.
   R18 found two review points not real (running Linux computers never grow past `memoryGiB`;
   checkpoints record no size). All wait for the 07:55 Codex reviews; nothing merged.
+- **Codex reviews of R15-R18, 2026-11-12 morning (all on Codex gpt-6.1-sol):** none LGTM yet.
+  R15 round 2: export cleanup still checks the archive after publication (replacement race);
+  older-journal undo recovery doesn't fail closed and publishes undo before its policy. R16: the
+  cross-device watch queue is unbounded, a self-fork advances the GitHub grant pin without
+  approval, exactly limit+1 bytes with an open pipe ends in a timeout. R17: legacy resource
+  approvals drop the rechecked params (open computer); every approved promote fails because the
+  dispatcher bumps the generation first. R18: full-checkpoint restores sized from current memory,
+  undo/promote skip admission, kept charges never clear after restart, released jobs and deleted
+  callers miscounted, job-slot check not atomic. Third Sonnet rounds running on all four.
