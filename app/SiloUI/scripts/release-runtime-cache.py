@@ -17,10 +17,9 @@ FILES = (
     'app/SiloUI/src-tauri/target/runtime-cache/v*/microsandbox-*.tar.gz',
     'app/SiloUI/src-tauri/target/runtime-cache/v*/agentd-*',
     'app/SiloUI/src-tauri/target/runtime-cache/v*/libkrunfw-*',
-    'app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/msb',
-    'app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/msb.sha256',
-    'app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/silo-macos-gateway',
-    'app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/silo-macos-gateway.sha256',
+    'app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/published/manifest.json',
+    'app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/published/msb',
+    'app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/published/silo-macos-gateway',
     'app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/*/source.tar.gz',
 )
 DIRECTORIES = (

@@ -18,7 +18,7 @@ SPEC.loader.exec_module(CACHE)
 ACTION = (ROOT / '.github/actions/prepare-release-runtime/action.yml').read_text()
 PLATFORM = (ROOT / '.github/workflows/release-platform.yml').read_text()
 WORKFLOW = (ROOT / '.github/workflows/release.yml').read_text()
-MSB = 'app/SiloUI/src-tauri/target/runtime-cache/v0.7.6/patched-builds/key/msb'
+MSB = 'app/SiloUI/src-tauri/target/runtime-cache/v0.7.6/patched-builds/key/published/msb'
 
 
 class RuntimeTransferTests(unittest.TestCase):
@@ -48,8 +48,8 @@ class RuntimeTransferTests(unittest.TestCase):
             'app/SiloUI/github-build.local.json',
             'app/SiloUI/src-tauri/target/release/silo-ui',
             'app/SiloUI/src-tauri/runtime/release-info.json',
-            'app/SiloUI/src-tauri/target/runtime-cache/v0.7.6/patched-builds/key/cargo-target/private',
-            'app/SiloUI/src-tauri/target/runtime-cache/v0.7.6/patched-builds/key/work/private',
+            'app/SiloUI/src-tauri/target/runtime-cache/v0.7.6/patched-builds/work-123-target/private',
+            'app/SiloUI/src-tauri/target/runtime-cache/v0.7.6/patched-builds/work-123/private',
             'app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/source-123/main.go',
         ]
         for name in forbidden:

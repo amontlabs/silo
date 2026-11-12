@@ -84,11 +84,10 @@ class ReleaseCacheTests(unittest.TestCase):
         self.assertEqual(paths[0], paths[2], 'Runtime restore/save paths must match')
         self.assertEqual(paths[1], paths[3], 'Cargo restore/save paths must match')
         runtime = 'app/SiloUI/src-tauri/target/runtime-cache/'
-        allowed = [runtime + 'v0.7.6/patched-builds/key/msb',
-                   runtime + 'v0.7.6/patched-builds/key/msb.sha256',
-                   # microsandbox-runtime.mjs reuses msb only with a verified gateway beside it.
-                   runtime + 'v0.7.6/patched-builds/key/silo-macos-gateway',
-                   runtime + 'v0.7.6/patched-builds/key/silo-macos-gateway.sha256',
+        # microsandbox-runtime.mjs reuses msb and the gateway only as the pair its manifest names.
+        allowed = [runtime + 'v0.7.6/patched-builds/key/published/manifest.json',
+                   runtime + 'v0.7.6/patched-builds/key/published/msb',
+                   runtime + 'v0.7.6/patched-builds/key/published/silo-macos-gateway',
                    runtime + 'v0.7.6/microsandbox-09df3d4b9d832adaede1fb9a198cfc660bfab8cd.tar.gz',
                    runtime + 'v0.7.6/agentd-aarch64',
                    runtime + 'v0.7.6/libkrunfw-darwin-aarch64.dylib',
@@ -97,8 +96,9 @@ class ReleaseCacheTests(unittest.TestCase):
                    runtime + 'git-lfs-transfer/pin/source.tar.gz',
                    runtime + 'git-lfs-transfer/pin/builds/linux-arm64/git-lfs-transfer',
                    '.cargo/registry/cache/index/crate.tar.gz']
-        forbidden = [runtime + 'v0.7.6/patched-builds/key/cargo-target/release/msb',
-                     runtime + 'v0.7.6/patched-builds/key/work/source.rs',
+        forbidden = [runtime + 'v0.7.6/patched-builds/work-123-target/release/msb',
+                     runtime + 'v0.7.6/patched-builds/work-123/source.rs',
+                     runtime + 'v0.7.6/patched-builds/key/published.publish-123/msb',
                      runtime + 'git-lfs-transfer/pin/source-123/main.go',
                      'app/SiloUI/src-tauri/target/release/silo-ui',
                      'app/SiloUI/src-tauri/target/debug/build/silo/output',
