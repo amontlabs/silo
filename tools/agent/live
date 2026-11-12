@@ -27,8 +27,8 @@ write_verdict() { # verdict step reason
   local v=$1 step=${2:--} reason=${3:--} log=-
   [ "$step" != - ] && log="$LOGS/$step.log"
   [ "$step" = - ] && [ -f "$LOGS/cleanup.log" ] && [ "$v" = fail ] && log="$LOGS/cleanup.log"
-  printf 'verdict: %s\ncheck: %s\nhost: %s\nstep: %s\nreason: %s\nlog: %s\nat: %s\n' \
-    "$v" "$CHECK" "$HOST" "$step" "$reason" "$log" "$(date -u +%FT%TZ)" >"$STATE/VERDICT.tmp"
+  printf 'verdict: %s\ncheck: %s\nhost: %s\nstep: %s\nreason: %s\nlog: %s\nat: %s\nrun: %s\n' \
+    "$v" "$CHECK" "$HOST" "$step" "$reason" "$log" "$(date -u +%FT%TZ)" "$(cat "$STATE/run" 2>/dev/null)" >"$STATE/VERDICT.tmp"
   mv "$STATE/VERDICT.tmp" "$STATE/VERDICT"
 }
 
@@ -36,12 +36,14 @@ cmd_wait() {
   local state=${1:-} timeout=0
   [ -d "$state" ] || { echo "live wait: no such state dir: $state" >&2; exit 2; }
   [ "${2:-}" = --timeout ] && timeout=${3:-0}
-  local start=$SECONDS
-  while [ ! -s "$state/VERDICT" ]; do
-    local pid; pid=$(cat "$state/pid" 2>/dev/null)
-    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && [ ! -s "$state/VERDICT" ]; then
+  local start=$SECONDS cr vr lp
+  while :; do  # a verdict of an earlier run (its run id differs from the current one) is not an answer
+    cr=$(cat "$state/run" 2>/dev/null); vr=$(sed -n 's/^run: //p' "$state/VERDICT" 2>/dev/null)
+    if [ -s "$state/VERDICT" ] && { [ -z "$cr" ] || [ "$vr" = "$cr" ]; }; then break; fi
+    lp=$(cat "$state/lock/pid" 2>/dev/null)
+    if [ -d "$state/lock" ] && [ -n "$lp" ] && ! kill -0 "$lp" 2>/dev/null; then
       sleep 1  # the runner may have just written it
-      [ -s "$state/VERDICT" ] && break
+      vr=$(sed -n 's/^run: //p' "$state/VERDICT" 2>/dev/null); [ -s "$state/VERDICT" ] && [ "$vr" = "$(cat "$state/run" 2>/dev/null)" ] && break
       STATE=$state LOGS=$state/logs CHECK=$(cat "$state/check" 2>/dev/null || echo "?") HOST=$(cat "$state/host" 2>/dev/null || echo "?")
       write_verdict fail "$(cat "$state/current" 2>/dev/null || echo -)" "runner died without a verdict"
       break
@@ -74,9 +76,22 @@ case "$STATE" in /*) ;; *) STATE=$PWD/$STATE;; esac
 LOGS=$STATE/logs
 mkdir -p "$STATE/steps" "$LOGS" || exit 2
 
-if [ -f "$STATE/pid" ] && kill -0 "$(cat "$STATE/pid")" 2>/dev/null && [ ! -s "$STATE/VERDICT" ]; then
-  echo "live: a run is already active in $STATE (pid $(cat "$STATE/pid"))" >&2; exit 2
-fi
+# One runner per state dir: mkdir is the atomic test-and-set; a lock whose pid is dead is taken over.
+acquire_lock() {
+  local i p
+  for i in 1 2 3; do
+    if mkdir "$STATE/lock" 2>/dev/null; then echo $$ >"$STATE/lock/pid"; return 0; fi
+    p=$(cat "$STATE/lock/pid" 2>/dev/null)
+    if [ -z "$p" ] || kill -0 "$p" 2>/dev/null; then echo "live: a run is already active in $STATE (pid ${p:-?})" >&2; exit 2; fi
+    if mv "$STATE/lock" "$STATE/lock.stale.$$" 2>/dev/null; then
+      if [ "$(cat "$STATE/lock.stale.$$/pid" 2>/dev/null)" = "$p" ]; then rm -rf "$STATE/lock.stale.$$"
+      else mv "$STATE/lock.stale.$$" "$STATE/lock" 2>/dev/null; echo "live: lock changed hands in $STATE" >&2; exit 2; fi
+    fi
+  done
+  echo "live: cannot take the lock in $STATE" >&2; exit 2
+}
+acquire_lock
+trap 'rm -rf "$STATE/lock"' EXIT
 
 # shellcheck source=live-lib.sh
 . "$HERE/live-lib.sh"
@@ -86,32 +101,55 @@ STEPS=()
 [ ${#STEPS[@]} -gt 0 ] || { echo "live: $CHECK_FILE defines no STEPS" >&2; exit 2; }
 for s in "${STEPS[@]}"; do declare -F "step_$s" >/dev/null || { echo "live: step_$s is not defined in $CHECK_FILE" >&2; exit 2; }; done
 
+# Stamps count only for the same inputs: check file, runner, HEAD and tracked changes, host, engine identity.
+FP=$( { cat "$CHECK_FILE" "$HERE/live" "$HERE/live-lib.sh" | shasum; git -C "$REPO" rev-parse HEAD 2>/dev/null
+        git -C "$REPO" diff HEAD 2>/dev/null | shasum; echo "$HOST"; [ "$HOST" = linux ] && echo "$LIVE_LINUX_HOST"
+        declare -F fingerprint_extra >/dev/null && fingerprint_extra; } | shasum | cut -c1-40 )
+if [ "$(cat "$STATE/fingerprint" 2>/dev/null)" != "$FP" ]; then rm -f "$STATE"/steps/*.ok "$STATE/runid"; fi
+echo "$FP" >"$STATE/fingerprint"
+
 if [ -n "$FROM" ]; then
   found=""; for s in "${STEPS[@]}"; do [ "$s" = "$FROM" ] && found=1; [ -n "$found" ] && rm -f "$STATE/steps/$s.ok"; done
   [ -n "$found" ] || { echo "live: --from $FROM is not a step of $CHECK (steps: ${STEPS[*]})" >&2; exit 2; }
 fi
-# Stamps from another host do not count.
-if [ "$(cat "$STATE/host" 2>/dev/null || echo "$HOST")" != "$HOST" ]; then rm -f "$STATE"/steps/*.ok; fi
 
-rm -f "$STATE/VERDICT" "$STATE/skip-reason" "$STATE"/steps/*.failed
-echo $$ >"$STATE/pid"; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; : >"$STATE/current"
+rm -f "$STATE/skip-reason" "$STATE"/steps/*.failed
+RUN=$$-$(date +%s); echo "$RUN" >"$STATE/run"; echo $$ >"$STATE/pid"; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; : >"$STATE/current"; rm -f "$STATE/VERDICT"
 export STATE LOGS CHECK HOST REPO
 
-RESULT=fail; FAIL_STEP=-; REASON="exited unexpectedly"; STEP_PID=""; FINISHED=""; CLEANING=""
+RESULT=fail; FAIL_STEP=-; REASON="exited unexpectedly"; STEP_PID=""; FINISHED=""; CLEANING=""; CLEAN_FAIL=""
 
 finish() { # runs once, from the EXIT trap
   [ -n "$FINISHED" ] && return; FINISHED=1
+  stop_step
   if declare -F cleanup >/dev/null; then
+    local had; had=$(cat "$STATE/computers" 2>/dev/null)
     CLEANING=1; live_say "cleanup" >>"$LOGS/cleanup.log"
-    ( cleanup ) >>"$LOGS/cleanup.log" 2>&1
+    ( cleanup ) >>"$LOGS/cleanup.log" 2>&1; local crc=$?
+    # What the step stamps stand for is gone once cleanup destroyed the computers: do not resume over it.
+    if [ -n "$had" ] && [ -z "$(cat "$STATE/computers" 2>/dev/null)" ]; then rm -f "$STATE"/steps/*.ok "$STATE/runid"; fi
+    if [ $crc != 0 ]; then
+      if [ "$RESULT" = fail ]; then REASON="$REASON; cleanup failed (exit $crc)"
+      else RESULT=fail; FAIL_STEP=-; REASON="cleanup failed (exit $crc)"; CLEAN_FAIL=1; fi
+    fi
   fi
   write_verdict "$RESULT" "$FAIL_STEP" "$REASON"
   echo "== VERDICT ($STATE/VERDICT)"; cat "$STATE/VERDICT"
+  rm -rf "$STATE/lock"
+  [ -n "$CLEAN_FAIL" ] && exit 1
+}
+# Ends the running step and everything it started (its process group) and waits for them to be gone.
+stop_step() {
+  [ -n "$STEP_PID" ] || return 0
+  kill -TERM -- "-$STEP_PID" 2>/dev/null
+  local i; for i in $(seq 1 100); do kill -0 -- "-$STEP_PID" 2>/dev/null || break; sleep 0.1; done
+  kill -0 -- "-$STEP_PID" 2>/dev/null && { kill -KILL -- "-$STEP_PID" 2>/dev/null; sleep 0.5; }
+  wait "$STEP_PID" 2>/dev/null; STEP_PID=""
 }
 on_signal() { # $1 = signal name
   REASON="interrupted by $1"; RESULT=fail; FAIL_STEP=$(cat "$STATE/current")
-  [ -n "$STEP_PID" ] && kill "$STEP_PID" 2>/dev/null
-  if [ -n "$CLEANING" ]; then FINISHED=1; write_verdict fail "$FAIL_STEP" "$REASON (cleanup cut short)"; fi
+  if [ -n "$CLEANING" ]; then FINISHED=1; write_verdict fail "$FAIL_STEP" "$REASON (cleanup cut short)"; rm -rf "$STATE/lock"; exit 130; fi
+  stop_step
   exit 130
 }
 trap finish EXIT
@@ -126,8 +164,9 @@ for s in "${STEPS[@]}"; do
   if [ -e "$STATE/steps/$s.ok" ]; then echo "-- skip $s (done)"; continue; fi
   echo "$s" >"$STATE/current"; echo "-- step $s ($LOGS/$s.log)"
   rm -f "$STATE/steps/$s.failed"
-  ( export LIVE_STEP=$s; set -euo pipefail; "step_$s" ) >"$LOGS/$s.log" 2>&1 &
-  STEP_PID=$!; wait "$STEP_PID"; rc=$?; STEP_PID=""
+  set -m  # the step gets its own process group, so an interrupt can stop everything it started
+  ( set +m; export LIVE_STEP=$s; set -euo pipefail; "step_$s" ) >"$LOGS/$s.log" 2>&1 &
+  STEP_PID=$!; set +m; wait "$STEP_PID"; rc=$?; STEP_PID=""
   [ $rc = 0 ] && [ -e "$STATE/steps/$s.failed" ] && rc=1
   if [ $rc = 77 ]; then
     RESULT=skipped; FAIL_STEP=$s; REASON="skipped: $(cat "$STATE/skip-reason" 2>/dev/null)"; echo "$REASON"; exit 3
