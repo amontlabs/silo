@@ -354,7 +354,9 @@ impl PolicyStore {
 
     /// Forgets computers that no longer exist. A computer made by a removed one becomes its
     /// maker's, so the agent that could reach it before still can; one whose maker was not
-    /// made by a computer is forgotten with it.
+    /// made by a computer is forgotten with it. The jobs a removed computer had open stay
+    /// recorded, since the job registry still holds them and they count toward what computers
+    /// together may hold, until `release_jobs` forgets them.
     pub fn remove_computers(&self, ids: &[&str]) -> Result<(), String> {
         if ids.is_empty() {
             return Ok(());
@@ -383,7 +385,6 @@ impl PolicyStore {
                 document.pending.retain(|pending| {
                     pending.created_by != *id && pending.id.as_deref() != Some(id)
                 });
-                document.jobs.retain(|job| job.caller != *id);
             }
             Ok(())
         })
@@ -436,12 +437,13 @@ impl PolicyStore {
         })
     }
 
-    /// Forgets kept results the job registry has released.
-    pub fn release_kept(&self, job_ids: &[String]) -> Result<(), String> {
+    /// Forgets the jobs the job registry has released, open or kept.
+    pub fn release_jobs(&self, job_ids: &[String]) -> Result<(), String> {
         if job_ids.is_empty() {
             return Ok(());
         }
         self.update(|document| {
+            document.jobs.retain(|job| !job_ids.contains(&job.id));
             document.kept.retain(|job| !job_ids.contains(&job.id));
             Ok(())
         })

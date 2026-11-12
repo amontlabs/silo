@@ -980,8 +980,12 @@ mod store {
         store.remove_computers(&["a"]).unwrap();
         let document = store.snapshot().unwrap();
         assert_eq!(document.made_by("main"), ["b".to_owned()].into());
-        assert!(document.jobs_of("a").is_empty());
+        // The registry still holds the removed computer's job, so it stays counted until the
+        // registry releases it.
+        assert!(document.owns_job("a", "job:2"));
         store.drop_job("main", "job:1").unwrap();
+        assert_eq!(store.snapshot().unwrap().jobs.len(), 1);
+        store.release_jobs(&["job:2".to_owned()]).unwrap();
         assert!(store.snapshot().unwrap().jobs.is_empty());
         store.remove_computers(&["main"]).unwrap();
     }

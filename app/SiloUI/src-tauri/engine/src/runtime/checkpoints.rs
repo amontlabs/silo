@@ -10,6 +10,9 @@ mod native;
 #[path = "checkpoints/reclaim.rs"]
 mod reclaim;
 #[cfg(test)]
+#[path = "checkpoints/resume_memory_tests.rs"]
+mod resume_memory_tests;
+#[cfg(test)]
 #[path = "checkpoints/running_retry_tests.rs"]
 mod running_retry_tests;
 pub use native::{plan as native_removal_plan, Member as NativeMember};
@@ -1443,6 +1446,58 @@ pub(super) fn view_pending(record: &Record, name: &str) -> Option<PendingRestore
             state: target.scope.clone(),
         })
     })
+}
+
+/// The memory, in MiB, a pending restore of a full checkpoint resumes `id` at. It is the memory
+/// the capture recorded, which is not the size the computer is saved with now. `None` when no
+/// full restore is pending.
+pub(super) fn pending_resume_memory_mib(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    id: &str,
+    name: &str,
+) -> Result<Option<u64>, RuntimeError> {
+    let record = load(paths, id)?;
+    let Some(pending) = view_pending(&record, name).filter(|pending| pending.state == "full")
+    else {
+        return Ok(None);
+    };
+    let unreadable = || error("The memory the saved checkpoint resumes with could not be read.");
+    if !valid_snapshot_group(&pending.source_computer) || !valid_native_id(&pending.checkpoint_id) {
+        return Err(unreadable());
+    }
+    let member = native::inventory_in_group(runner, paths, &pending.source_computer)?
+        .into_iter()
+        .find(|member| member.name.as_deref() == Some(pending.checkpoint_id.as_str()))
+        .ok_or_else(unreadable)?;
+    let store = paths
+        .storage_home
+        .as_deref()
+        .unwrap_or(&paths.home)
+        .join("snapshots");
+    let artifact = member
+        .artifact_path
+        .as_deref()
+        .and_then(|artifact| fs::canonicalize(artifact).ok())
+        .filter(|artifact| fs::canonicalize(&store).is_ok_and(|store| artifact.starts_with(store)))
+        .ok_or_else(unreadable)?;
+    let descriptor = fs::File::open(artifact.join("snapshot.json"))
+        .and_then(|file| {
+            let mut bytes = Vec::new();
+            file.take(1024 * 1024).read_to_end(&mut bytes)?;
+            Ok(bytes)
+        })
+        .map_err(|_| unreadable())?;
+    serde_json::from_slice::<Value>(&descriptor)
+        .ok()
+        .and_then(|descriptor| {
+            descriptor
+                .pointer("/state/requirements_summary/memory_mib")
+                .and_then(Value::as_u64)
+        })
+        .filter(|memory| *memory > 0)
+        .map(Some)
+        .ok_or_else(unreadable)
 }
 
 pub fn forget_removed(paths: &RuntimePaths, id: &str) -> Result<(), RuntimeError> {

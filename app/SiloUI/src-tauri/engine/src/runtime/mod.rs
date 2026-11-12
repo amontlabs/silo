@@ -5907,6 +5907,18 @@ pub fn is_pending_restore(paths: &RuntimePaths, name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The memory, in MiB, that starting the computer `name` (`id`) resumes at when a full
+/// checkpoint restore is pending: what the capture recorded, not the computer's saved size.
+/// `None` when no full restore is pending.
+pub fn pending_resume_memory_mib(
+    paths: &RuntimePaths,
+    id: &str,
+    name: &str,
+) -> Result<Option<u64>, String> {
+    checkpoints::pending_resume_memory_mib(&ProcessRunner, paths, id, name)
+        .map_err(|error| error.to_string())
+}
+
 /// Inspect a Silo computer without treating "not created yet" as a failure. An unattempted
 /// restore is absent; after an attempt, inspect the computer it may have created. A runtime
 /// that reports the computer as missing is likewise `Absent`.

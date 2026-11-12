@@ -631,8 +631,8 @@ async fn a_refused_call_gives_back_the_memory_it_was_going_to_reserve() {
     }
 }
 
-/// A finished job of the computer `id`, which the computer has not acknowledged.
-fn finished_job_of(id: &str) -> String {
+/// A job the registry holds as finished, which nobody has acknowledged.
+fn finished_job() -> String {
     let engine = fixture().context.as_ref();
     let job = silo_engine::jobs::allocate(engine, "changes.merge")
         .unwrap()
@@ -650,10 +650,16 @@ fn finished_job_of(id: &str) -> String {
             },
         )
         .unwrap();
-    PolicyStore::new(&engine.paths().app_data)
-        .note_job(id, job.as_str())
-        .unwrap();
     job.as_str().to_owned()
+}
+
+/// A finished job of the computer `id`, which the computer has not acknowledged.
+fn finished_job_of(id: &str) -> String {
+    let job = finished_job();
+    PolicyStore::new(&fixture().context.paths().app_data)
+        .note_job(id, &job)
+        .unwrap();
+    job
 }
 
 #[tokio::test]
@@ -791,4 +797,268 @@ async fn a_call_dropped_before_it_finishes_gives_back_its_memory() {
     assert_eq!(super::reserved_memory_of(&fork), 3 * GIB);
     drop(admitted);
     assert_eq!(super::reserved_memory_of(&fork), 0);
+}
+
+/// A record of its own, so a test that fills it up leaves the other tests alone.
+fn own_store() -> (tempfile::TempDir, PolicyStore) {
+    let directory = tempfile::tempdir().unwrap();
+    let store = PolicyStore::new(directory.path());
+    (directory, store)
+}
+
+fn engine() -> &'static dyn EngineContext {
+    fixture().context.as_ref()
+}
+
+#[tokio::test]
+async fn a_start_that_resumes_a_full_checkpoint_reserves_the_memory_the_capture_recorded() {
+    // 6 GiB above the 4 GiB floor.
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    // Saved at 2 GiB now, but the checkpoint was captured at 16 GiB.
+    sized(&fork, 2);
+    super::test_resumes::add(&fork, Ok(16 * 1024));
+    let caller = Caller::Computer { id: id.clone() };
+    for method in [MethodName::ComputersStart, MethodName::ComputersRestart] {
+        let error = call(&caller, method, json!({"computerId": fork}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", method.name());
+    }
+    // One that was captured small enough fits.
+    let (_id, small) = computer();
+    sized(&small, 16);
+    super::test_resumes::add(&small, Ok(2 * 1024));
+    let error = call(
+        &caller,
+        MethodName::ComputersStart,
+        json!({"computerId": small}),
+    )
+    .await
+    .unwrap_err();
+    assert_ne!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+}
+
+#[tokio::test]
+async fn a_start_whose_checkpoint_memory_cannot_be_read_is_refused() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    sized(&fork, 1);
+    super::test_resumes::add(&fork, Err("The checkpoint could not be read.".into()));
+    let error = call(
+        &Caller::Computer { id },
+        MethodName::ComputersStart,
+        json!({"computerId": fork}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow);
+    assert!(
+        error.message.contains("could not be read"),
+        "{}",
+        error.message
+    );
+}
+
+#[tokio::test]
+async fn an_undo_or_a_promote_reserves_for_every_computer_it_can_start() {
+    // 6 GiB above the floor: 4 GiB for either computer, 8 GiB for both.
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    sized(&id, 4);
+    sized(&fork, 4);
+    let caller = Caller::Computer { id: id.clone() };
+    let promote = json!({"forkId": fork, "targetId": id});
+    let error = call(&caller, MethodName::ChangesPromote, promote.clone())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    // Asked for without a target, the computer it was forked from is the one replaced.
+    super::test_nodes::add(&fork, "gate-fork-name", Some(&id));
+    let error = call(&caller, MethodName::ChangesPromote, json!({"forkId": fork}))
+        .await
+        .unwrap_err();
+    super::test_nodes::remove(&fork);
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    // A check that only reports starts nothing.
+    let error = call(
+        &caller,
+        MethodName::ChangesPromote,
+        json!({"forkId": fork, "targetId": id, "dryRun": true}),
+    )
+    .await
+    .unwrap_err();
+    assert_ne!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    // An undo of a computer that is too big for the device.
+    sized(&fork, 7);
+    let error = call(
+        &caller,
+        MethodName::ChangesUndo,
+        json!({"computerId": fork}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+}
+
+#[tokio::test]
+async fn an_undo_or_a_promote_of_a_computer_with_no_readable_size_is_refused() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    let caller = Caller::Computer { id: id.clone() };
+    for (method, params) in [
+        (MethodName::ChangesUndo, json!({"computerId": fork})),
+        (
+            MethodName::ChangesPromote,
+            json!({"forkId": fork, "targetId": id}),
+        ),
+    ] {
+        let error = call(&caller, method, params).await.unwrap_err();
+        assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", method.name());
+        assert!(error.message.contains("can't read"), "{}", error.message);
+    }
+}
+
+#[tokio::test]
+async fn an_approved_undo_or_promote_reserves_memory_for_both_computers() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    sized(&id, 2);
+    sized(&fork, 3);
+    let context = context(Caller::owner("app"));
+    let held = super::reserve_now(
+        &context,
+        MethodName::ChangesPromote,
+        &json!({"forkId": fork, "targetId": id}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(super::reserved_memory(), 5 * GIB);
+    drop(held);
+    assert_eq!(super::reserved_memory(), 0);
+}
+
+#[test]
+fn a_kept_result_from_before_a_restart_gets_a_deadline_again_and_its_charge_clears_with_it() {
+    let (_directory, store) = own_store();
+    let job = finished_job();
+    store.import_legacy("gate-kept", &[], &[]).unwrap();
+    store.keep_job("gate-kept", &job).unwrap();
+    let registry = engine().job_registry().unwrap();
+    let id = silo_api::jobs::JobId::new(&job).unwrap();
+    // The engine that kept the result is gone, and with it the registry's deadline.
+    assert_eq!(registry.retention_deadline_ms(&id), None);
+    let document = super::current_charges(engine(), &store, store.snapshot().unwrap());
+    assert_eq!(document.kept.len(), 1);
+    assert!(registry.retention_deadline_ms(&id).is_some());
+    // The owner acknowledging it releases the result and the charge together.
+    registry.acknowledge(&id).unwrap();
+    let document = super::current_charges(engine(), &store, store.snapshot().unwrap());
+    assert!(document.kept.is_empty());
+    assert!(store.snapshot().unwrap().kept.is_empty());
+}
+
+#[test]
+fn open_jobs_the_registry_has_released_stop_counting_toward_any_limit() {
+    let (_directory, store) = own_store();
+    // More than all computers together may hold, none of them in the registry any more.
+    let stale: Vec<(String, u64)> = (0..super::MAX_COMPUTER_JOBS + 5)
+        .map(|n| (format!("job:{}", 800_000_000 + n), 1))
+        .collect();
+    store.import_legacy("gate-stale", &[], &stale).unwrap();
+    let slot = super::reserve_job_slot(engine(), &store, "gate-fresh").unwrap();
+    super::release_job_slot(slot);
+    // The computer that held them is not held back by them either.
+    let slot = super::reserve_job_slot(engine(), &store, "gate-stale").unwrap();
+    super::release_job_slot(slot);
+    assert!(store.snapshot().unwrap().jobs.is_empty());
+}
+
+#[test]
+fn the_jobs_of_a_deleted_computer_count_until_the_registry_releases_them() {
+    let (_directory, store) = own_store();
+    let jobs: Vec<String> = (0..super::MAX_COMPUTER_JOBS)
+        .map(|_| finished_job())
+        .collect();
+    let owned: Vec<(String, u64)> = jobs.iter().map(|job| (job.clone(), 1)).collect();
+    store.import_legacy("gate-gone", &[], &owned).unwrap();
+    store.remove_computers(&["gate-gone"]).unwrap();
+    let error = super::reserve_job_slot(engine(), &store, "gate-other").unwrap_err();
+    assert!(error.contains("together"), "{error}");
+    // The registry letting one go makes room for one more.
+    let registry = engine().job_registry().unwrap();
+    registry
+        .acknowledge(&silo_api::jobs::JobId::new(&jobs[0]).unwrap())
+        .unwrap();
+    let slot = super::reserve_job_slot(engine(), &store, "gate-other").unwrap();
+    super::release_job_slot(slot);
+    for job in &jobs {
+        registry
+            .acknowledge(&silo_api::jobs::JobId::new(job).unwrap())
+            .unwrap();
+    }
+}
+
+#[test]
+fn computers_starting_jobs_at_the_same_moment_cannot_all_take_the_last_places() {
+    use silo_engine::guest_client::MAX_JOBS;
+    let (_directory, store) = own_store();
+    let store = std::sync::Arc::new(store);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3 * MAX_JOBS));
+    let threads: Vec<_> = (0..3 * MAX_JOBS)
+        .map(|_| {
+            let (store, barrier) = (store.clone(), barrier.clone());
+            std::thread::spawn(move || {
+                barrier.wait();
+                super::reserve_job_slot(engine(), &store, "gate-racer")
+            })
+        })
+        .collect();
+    let results: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    let places: Vec<u64> = results.iter().filter_map(|r| r.clone().ok()).collect();
+    assert_eq!(places.len(), MAX_JOBS, "{results:?}");
+    for place in places {
+        super::release_job_slot(place);
+    }
+    assert_eq!(super::job_slots_of("gate-racer"), 0);
+}
+
+#[tokio::test]
+async fn a_job_call_holds_its_place_until_the_record_has_its_job_and_gives_it_back_otherwise() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    sized(&fork, 1);
+    let caller = Caller::Computer { id: id.clone() };
+    let admitted = super::admit(
+        &context(caller.clone()),
+        MethodName::ComputersStart,
+        &json!({"computerId": fork}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(super::job_slots_of(&id), 1);
+    // The call is dropped before it finishes, as when its caller goes away.
+    drop(admitted);
+    assert_eq!(super::job_slots_of(&id), 0);
+    // A call that fails starts no job and takes no place.
+    let error = call(
+        &caller,
+        MethodName::ComputersStart,
+        json!({"computerId": fork}),
+    )
+    .await
+    .unwrap_err();
+    assert_ne!(error.code, ErrorCode::ResourcesLow);
+    assert_eq!(super::job_slots_of(&id), 0);
+    // A job the record could not take keeps its place; one it holds gives the place back.
+    let (_directory, store) = own_store();
+    for (recorded, kept) in [(true, 0), (false, 1)] {
+        let slot = super::reserve_job_slot(engine(), &store, "gate-settled").unwrap();
+        let mut held = super::Held::of(None);
+        held.slot = Some(slot);
+        held.settle_slot(Some("job:700000001"), recorded);
+        drop(held);
+        assert_eq!(super::job_slots_of("gate-settled"), kept);
+        super::release_job_slot(slot);
+    }
 }
