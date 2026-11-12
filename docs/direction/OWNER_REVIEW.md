@@ -143,3 +143,13 @@ was chosen and why; any can be changed. Older items are also in the build log un
 33. **Guest output limits:** a command the engine runs in a computer is stopped when it prints
     more than 64 KiB of errors (helper runs) or 960 KiB (other runs); nothing it prints is
     written to the device's disk.
+
+## Approvals seen by a computer (R17)
+
+34. **Forks of bigger computers ask first:** a computer forking another computer that is larger
+    than itself (or whose size can't be read) now needs your approval, including a recipe's
+    hidden build. Recipe-heavy flows may prompt more often.
+35. **What a computer sees of an approval:** a merge approval shown to the computer counts the
+    recipe's setup steps ("runs 1 step last") instead of quoting them; you still see the full
+    commands. A merge waiting for you shows the computer "A merge waiting for the approval of
+    the person who runs Silo."
