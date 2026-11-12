@@ -62,8 +62,9 @@ exec "${zig}" ar "$@"
 // Cargo keys every compilation on the linker path, so the wrappers live at a path that depends only
 // on their content (never a fresh temporary directory): an unchanged guest silo is not rebuilt, and
 // checkouts sharing a cache root reuse each other's compiled dependencies.
-async function wrapperDirectory(appRoot, files) {
-  const digest = sha256(Buffer.from(JSON.stringify(files))).slice(0, 16)
+async function wrapperDirectory(appRoot, files, zigVersion) {
+  // The Zig release is part of the path too: cc-rs does not notice a new compiler behind the same wrapper.
+  const digest = sha256(Buffer.from(JSON.stringify([files, zigVersion]))).slice(0, 16)
   const tools = join(runtimeCacheRoot(resolve(appRoot, 'src-tauri'), process.env), 'guest-cc', digest)
   await mkdir(tools, { recursive: true })
   for (const [name, content] of Object.entries(files)) {
@@ -74,8 +75,8 @@ async function wrapperDirectory(appRoot, files) {
   return tools
 }
 
-async function build({ appRoot, selected, zig, toolchain, run, environment }) {
-  const tools = await wrapperDirectory(appRoot, { cc: compilerWrapper(zig, selected.zigTarget), ar: archiverWrapper(zig) })
+async function build({ appRoot, selected, zig, zigVersion, toolchain, run, environment }) {
+  const tools = await wrapperDirectory(appRoot, { cc: compilerWrapper(zig, selected.zigTarget), ar: archiverWrapper(zig) }, zigVersion)
   const triple = selected.rustTarget.toUpperCase().replaceAll('-', '_')
   const targetDirectory = environment.CARGO_TARGET_DIR?.trim() || resolve(appRoot, 'src-tauri/target/guest-silo')
   await run('cargo', [...(toolchain ? [`+${toolchain}`] : []), 'build', '--release', '-p', 'silo-cli', '--target', selected.rustTarget, '--locked'], {
@@ -157,7 +158,7 @@ export async function stageGuestSilo({
       throw new Error(`Zig ${ZIG_VERSION} is required to build the Linux program of Silo's tools; found ${version}`)
     }
     const toolchain = await selectToolchain(run, selected, required)
-    built = { path: await build({ appRoot, selected, zig, toolchain, run, environment }), zigVersion: version, toolchain }
+    built = { path: await build({ appRoot, selected, zig, zigVersion: version, toolchain, run, environment }), zigVersion: version, toolchain }
   } catch (error) {
     if (required || !(error instanceof Unavailable)) {
       throw new Error(`The Linux program of Silo's tools could not be built: ${error.message}. A build that ships needs it (Zig ${ZIG_VERSION}).`, { cause: error })
