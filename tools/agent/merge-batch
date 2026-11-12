@@ -394,13 +394,13 @@ fi
 [ "$(git -C "$wt" rev-parse HEAD)" = "$sha" ] && [ -z "$(git -C "$wt" status --porcelain)" ] || die "worktree: $wt is not clean at $sha"
 src="$root/app/SiloUI"; dst="$wt/app/SiloUI"
 cl() { cp -cR "$1" "$2" 2>/dev/null || cp -R "$1" "$2"; }
-# Ignored inputs cloned from the integration checkout: the target folder on the first run; node_modules and the
-# native runtime on the first run and again whenever the files that decide them change.
+# Ignored inputs cloned from the integration checkout: node_modules and the native runtime, on the first run and
+# again whenever the files that decide them change. The target folder is never copied: mbx manages it per checkout
+# (a copy of the integration checkout's target link would make both share one build folder).
 stamp=$(cat "$dst/package-lock.json" "$dst/package.json" "$dst/runtime-inputs.json" 2>/dev/null | shasum | cut -c1-40)
 if [ "$(cat "$dst/target/.suite-stamp" 2>/dev/null)" != "$stamp" ]; then
   rm -rf "$dst/node_modules" "$dst/src-tauri/runtime" "$dst/src-tauri/binaries"
 fi
-[ -d "$dst/target" ] || { cl "$src/target" "$dst/target" 2>/dev/null; rm -rf "$dst/target/agent"; }
 mkdir -p "$dst/target"; echo "$stamp" > "$dst/target/.suite-stamp"
 [ -e "$dst/node_modules" ] || [ ! -d "$src/node_modules" ] || { cp -cR "$src/node_modules" "$dst/node_modules" 2>/dev/null || ln -s "$src/node_modules" "$dst/node_modules"; }
 export SILO_AGENT_CACHE="${SILO_AGENT_CACHE:-$([ "$(uname -s)" = Darwin ] && echo "$HOME/Library/Caches/silo-agent" || echo "$HOME/.cache/silo-agent")}"
