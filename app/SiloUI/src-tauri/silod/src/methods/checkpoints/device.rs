@@ -46,8 +46,10 @@ fn resources_of(listed: &ComputersListResult) -> Vec<ComputerResources> {
             ),
             cpus: u64::from(computer.configuration.cpus),
             memory_gib: u64::from(computer.configuration.memory_gib),
-            disk_gib: u64::from(computer.configuration.workspace_storage_gib)
-                .saturating_add(u64::from(computer.configuration.runtime_storage_gib)),
+            disk_gib: Some(
+                u64::from(computer.configuration.workspace_storage_gib)
+                    .saturating_add(u64::from(computer.configuration.runtime_storage_gib)),
+            ),
             workspace_storage_gib: Some(u64::from(computer.configuration.workspace_storage_gib)),
             runtime_storage_gib: Some(u64::from(computer.configuration.runtime_storage_gib)),
         })
@@ -65,7 +67,7 @@ fn resources_of(listed: &ComputersListResult) -> Vec<ComputerResources> {
                     ),
                     cpus: computer.cpus,
                     memory_gib: computer.memory_gib,
-                    disk_gib: computer.disk_gib,
+                    disk_gib: Some(computer.disk_gib),
                     workspace_storage_gib: None,
                     runtime_storage_gib: None,
                 }),
@@ -179,7 +181,7 @@ mod tests {
             running,
             cpus: 2,
             memory_gib,
-            disk_gib: 20,
+            disk_gib: Some(20),
             workspace_storage_gib: Some(10),
             runtime_storage_gib: Some(10),
         }
@@ -215,11 +217,11 @@ mod tests {
     fn a_linux_computer_shows_its_workspace_and_runtime_storage_and_a_macos_computer_its_disk() {
         let rows = resources_of(&listed());
         let linux = rows.iter().find(|row| row.id == "lin").unwrap();
-        assert_eq!(linux.disk_gib, 42);
+        assert_eq!(linux.disk_gib, Some(42));
         assert_eq!(linux.workspace_storage_gib, Some(30));
         assert_eq!(linux.runtime_storage_gib, Some(12));
         let mac = rows.iter().find(|row| row.id == "mac").unwrap();
-        assert_eq!(mac.disk_gib, 64);
+        assert_eq!(mac.disk_gib, Some(64));
         assert_eq!(mac.workspace_storage_gib, None);
         assert_eq!(mac.runtime_storage_gib, None);
     }
@@ -230,7 +232,7 @@ mod tests {
         let visible: BTreeSet<String> = ["mac"].map(String::from).into();
         let shown = shown_to(&all, Some(&visible));
         assert_eq!(shown.len(), 1);
-        assert_eq!((shown[0].id.as_str(), shown[0].disk_gib), ("mac", 64));
+        assert_eq!((shown[0].id.as_str(), shown[0].disk_gib), ("mac", Some(64)));
     }
 
     #[test]

@@ -760,7 +760,9 @@ fn status_leaves_out_computer_use_for_a_computer_with_no_desktop() {
 fn keep_engine(result: Value) -> FakeEngine {
     FakeEngine::start(move |method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
-        "changes.keep" | "changes.undo" | "changes.promote" | "computers.rebuild" => Ok(json!({"jobId": "job:1"})),
+        "changes.keep" | "changes.undo" | "changes.promote" | "computers.rebuild" => {
+            Ok(json!({"jobId": "job:1"}))
+        }
         "operations.job.get" => Ok(finished(result.clone())),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
