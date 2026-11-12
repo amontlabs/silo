@@ -1788,65 +1788,95 @@ fn end_tokens_of(
     }
 }
 
-/// Which file a path named when the export was published.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct FileIdentity {
-    device: u64,
-    inode: u64,
-}
-
-fn file_identity(path: &Path) -> Option<FileIdentity> {
-    use std::os::unix::fs::MetadataExt;
-    let metadata = fs::symlink_metadata(path).ok()?;
-    Some(FileIdentity {
-        device: metadata.dev(),
-        inode: metadata.ino(),
-    })
-}
-
-/// An export whose computers' tokens could not all be ended is not handed over. A file this
-/// export published (`published` is its identity, taken when the export returned) is removed,
-/// because it may hold a token that still works; when it cannot be removed, or is no longer the
-/// file that was published, the error says it was left. A failed export published nothing, so
-/// whatever sits at `archive_path` is not touched.
-fn refuse_unrevoked(
+/// Settles an export the writers put at the private path `staged`. The export reaches
+/// `archive_path` only when every token ended, and then by a rename that never replaces a file;
+/// otherwise the staged file, which only this export knows, is removed. A failed export
+/// published nothing at `archive_path`, and whatever sits there is not touched.
+fn publish_staged_export(
     result: Result<Archive, TransferError>,
     revoked: Result<(), String>,
+    staged: &Path,
     archive_path: &Path,
-    published: Option<FileIdentity>,
 ) -> Result<Archive, TransferError> {
-    let Err(problem) = revoked else {
-        return result;
+    let discard = || match fs::remove_file(staged) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
+        _ => Ok(()),
     };
-    Err(match result {
-        Ok(_) => {
-            let outcome = match published {
-                Some(identity) if file_identity(archive_path) == Some(identity) => {
-                    fs::remove_file(archive_path).map_err(|error| error.to_string())
-                }
-                Some(_) => Err("The file at that place is no longer the one exported.".into()),
-                None => Err("The exported file could not be found to remove.".into()),
-            };
-            TransferError::from(match outcome {
+    let archive = match (result, revoked) {
+        (Ok(archive), Ok(())) => archive,
+        (Ok(_), Err(problem)) => {
+            return Err(TransferError::from(match discard() {
                 Ok(()) => format!(
                     "The export was removed because it may hold a login that still works. {problem}"
                 ),
                 Err(removal) => format!(
                     "The export at {} may hold a login that still works, and it was not removed: {removal} {problem}",
-                    archive_path.display()
+                    staged.display()
                 ),
-            })
+            }));
         }
-        Err(mut error) if error.cancelled => {
-            error.cancelled = false;
-            error.message = problem;
-            error
+        (Err(mut error), revoked) => {
+            let _ = discard();
+            return Err(match revoked {
+                Ok(()) => error,
+                Err(problem) if error.cancelled => {
+                    error.cancelled = false;
+                    error.message = problem;
+                    error
+                }
+                Err(problem) => {
+                    error.message = format!("{} {problem}", error.message);
+                    error
+                }
+            });
         }
-        Err(mut error) => {
-            error.message = format!("{} {problem}", error.message);
-            error
-        }
-    })
+    };
+    let parent = archive_path.parent().ok_or_else(|| {
+        TransferError::from("The export destination has no parent directory.".to_string())
+    })?;
+    if let Err(error) = backup::publish_package(staged, archive_path, parent, |parent| {
+        fs::File::open(parent).and_then(|directory| directory.sync_all())
+    }) {
+        // A file already at the chosen name stays; only the staged one goes.
+        let _ = discard();
+        return Err(error.into());
+    }
+    Ok(archive_at(archive, archive_path))
+}
+
+/// `archive` as it sits at `path`, where the writers reported the private path it was staged at.
+fn archive_at(archive: Archive, path: &Path) -> Archive {
+    Archive {
+        name: path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Silo export")
+            .to_string(),
+        archive_path: path.to_string_lossy().into_owned(),
+        destination: path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .to_string_lossy()
+            .into_owned(),
+        ..archive
+    }
+}
+
+/// A new hidden name beside `archive_path`, which the writers publish the export under before
+/// it is handed over. It carries the saved operation's id, so a relaunch removes what an
+/// interruption leaves.
+fn staged_export_path(controller: &Controller, archive_path: &Path) -> Result<PathBuf, String> {
+    let parent = archive_path
+        .parent()
+        .ok_or_else(|| "The export destination has no parent directory.".to_string())?;
+    let name = match recovery::token(controller)? {
+        Some(token) => format!(
+            ".silo-backup-{token}-staged-{}.silo-backup",
+            uuid::Uuid::new_v4()
+        ),
+        None => format!(".silo-backup-staged-{}.silo-backup", uuid::Uuid::new_v4()),
+    };
+    Ok(parent.join(name))
 }
 
 /// The name, size and sha256 of a finished export that sits in the transfer area, so the other
@@ -2265,25 +2295,25 @@ fn backup_work(
     // The computers exported are known by their ids before the gate is released, and their
     // tokens end under it, so no computer that takes a name in between loses its own.
     let targets = token_targets(controller, original_names)?;
+    // The writers publish under a name only this export knows. The file reaches the chosen
+    // name once the tokens in it have ended, so no one else's file there is ever replaced or
+    // removed.
+    let staged = staged_export_path(controller, archive_path)?;
     let result = backup_at_paths_presenting(
         &paths,
         controller,
-        archive_path,
+        &staged,
         names,
         original_names,
         presented,
         checkpoint_id,
         cancellation,
     );
-    let published = result
-        .as_ref()
-        .ok()
-        .and_then(|_| file_identity(archive_path));
-    refuse_unrevoked(
+    publish_staged_export(
         result,
         end_tokens_of(&targets, &crate::guest_client::end_token),
+        &staged,
         archive_path,
-        published,
     )
 }
 
@@ -6104,22 +6134,24 @@ mod tests {
         );
     }
 
-    fn written_archive() -> (tempfile::TempDir, PathBuf, Archive) {
+    /// An export staged beside the chosen name, which nothing is at yet.
+    fn staged_archive() -> (tempfile::TempDir, PathBuf, PathBuf, Archive) {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("export.silo");
-        fs::write(&path, b"archive").unwrap();
+        let staged = directory.path().join(".silo-backup-staged-1.silo-backup");
+        let chosen = directory.path().join("export.silo-backup");
+        fs::write(&staged, b"archive").unwrap();
         let archive = Archive {
-            name: "export".into(),
-            archive_path: path.to_string_lossy().into_owned(),
+            name: staged.file_name().unwrap().to_string_lossy().into_owned(),
+            archive_path: staged.to_string_lossy().into_owned(),
             completed_label: String::new(),
             size: String::new(),
-            destination: String::new(),
+            destination: directory.path().to_string_lossy().into_owned(),
             computers: vec!["dev".into()],
             checkpoint_name: None,
             transfer: None,
             left_out: Vec::new(),
         };
-        (directory, path, archive)
+        (directory, staged, chosen, archive)
     }
 
     #[test]
@@ -6154,71 +6186,105 @@ mod tests {
 
     #[test]
     fn an_export_whose_token_could_not_be_ended_is_removed_and_fails() {
-        let (_directory, path, archive) = written_archive();
-        let identity = file_identity(&path);
-        assert!(identity.is_some());
-        let error = refuse_unrevoked(Ok(archive.clone()), Err("locked".into()), &path, identity)
-            .unwrap_err();
+        let (_directory, staged, chosen, archive) = staged_archive();
+        let error =
+            publish_staged_export(Ok(archive), Err("locked".into()), &staged, &chosen).unwrap_err();
         assert!(error.message.contains("was removed") && error.message.contains("locked"));
         assert!(!error.cancelled);
-        assert!(!path.exists());
+        assert!(!staged.exists());
+        assert!(!chosen.exists());
+    }
 
-        let (_directory, path, archive) = written_archive();
-        let identity = file_identity(&path);
-        assert_eq!(
-            refuse_unrevoked(Ok(archive.clone()), Ok(()), &path, identity).unwrap(),
-            archive
+    #[test]
+    fn an_export_with_every_token_ended_reaches_its_chosen_name() {
+        let (_directory, staged, chosen, archive) = staged_archive();
+        let published = publish_staged_export(Ok(archive), Ok(()), &staged, &chosen).unwrap();
+        assert_eq!(fs::read(&chosen).unwrap(), b"archive");
+        assert!(!staged.exists());
+        assert_eq!(published.name, "export.silo-backup");
+        assert_eq!(published.archive_path, chosen.to_string_lossy());
+        assert_eq!(published.computers, ["dev"]);
+    }
+
+    #[test]
+    fn another_writers_file_at_the_chosen_name_is_never_replaced_or_removed() {
+        // The name was taken after the export began.
+        let (_directory, staged, chosen, archive) = staged_archive();
+        fs::write(&chosen, b"someone else's").unwrap();
+        let error = publish_staged_export(Ok(archive), Ok(()), &staged, &chosen).unwrap_err();
+        assert!(
+            error.message.contains("already exists"),
+            "{}",
+            error.message
         );
-        assert!(path.exists());
+        assert_eq!(fs::read(&chosen).unwrap(), b"someone else's");
+        assert!(!staged.exists());
+
+        // Nor when the tokens could not be ended.
+        let (_directory, staged, chosen, archive) = staged_archive();
+        fs::write(&chosen, b"someone else's").unwrap();
+        let error =
+            publish_staged_export(Ok(archive), Err("locked".into()), &staged, &chosen).unwrap_err();
+        assert!(error.message.contains("locked"));
+        assert_eq!(fs::read(&chosen).unwrap(), b"someone else's");
+        assert!(!staged.exists());
     }
 
     #[test]
     fn a_failed_export_leaves_the_file_at_its_destination_alone() {
-        let (_directory, path, _) = written_archive();
-        let failed = TransferError::from("A file already exists there.".to_string());
-        let error = refuse_unrevoked(Err(failed), Err("locked".into()), &path, None).unwrap_err();
-        assert!(error.message.starts_with("A file already exists there."));
+        let (_directory, staged, chosen, _) = staged_archive();
+        fs::write(&chosen, b"someone else's").unwrap();
+        let failed = TransferError::from("The disk is full.".to_string());
+        let error =
+            publish_staged_export(Err(failed), Err("locked".into()), &staged, &chosen).unwrap_err();
+        assert!(error.message.starts_with("The disk is full."));
         assert!(error.message.contains("locked"));
-        assert_eq!(fs::read(&path).unwrap(), b"archive");
+        assert_eq!(fs::read(&chosen).unwrap(), b"someone else's");
+        assert!(!staged.exists());
 
-        let error = refuse_unrevoked(
+        let (_directory, staged, chosen, _) = staged_archive();
+        let error = publish_staged_export(
             Err(TransferError::cancelled()),
             Err("locked".into()),
-            &path,
-            None,
+            &staged,
+            &chosen,
         )
         .unwrap_err();
         assert!(!error.cancelled && error.message.contains("locked"));
-        assert!(path.exists());
+        assert!(!staged.exists() && !chosen.exists());
     }
 
     #[test]
-    fn an_export_that_cannot_be_removed_or_is_no_longer_the_one_published_says_so() {
-        let (_directory, path, archive) = written_archive();
-        let published = file_identity(&path);
-        // Another writer's file took the place of the one published.
-        let other = path.with_file_name("other.silo");
-        fs::write(&other, b"someone else's").unwrap();
-        fs::rename(&other, &path).unwrap();
-        let error = refuse_unrevoked(Ok(archive.clone()), Err("locked".into()), &path, published)
-            .unwrap_err();
-        assert!(error.message.contains("not removed") && error.message.contains("locked"));
-        assert_eq!(fs::read(&path).unwrap(), b"someone else's");
-
-        // The file cannot be deleted.
-        let (_directory, path, archive) = written_archive();
-        fs::remove_file(&path).unwrap();
-        fs::create_dir(&path).unwrap();
-        let error = refuse_unrevoked(
-            Ok(archive),
-            Err("locked".into()),
-            &path,
-            file_identity(&path),
-        )
-        .unwrap_err();
+    fn an_export_that_cannot_be_removed_says_so() {
+        let (_directory, staged, chosen, archive) = staged_archive();
+        fs::remove_file(&staged).unwrap();
+        fs::create_dir(&staged).unwrap();
+        let error =
+            publish_staged_export(Ok(archive), Err("locked".into()), &staged, &chosen).unwrap_err();
         assert!(error.message.contains("not removed") && error.message.contains("locked"));
         assert!(!error.message.contains("was removed"));
-        assert!(path.exists());
+        assert!(staged.exists() && !chosen.exists());
+    }
+
+    #[test]
+    fn the_staged_name_is_new_beside_the_chosen_one_and_carries_the_operation() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let controller = history_controller(directory.path().join("backup-history.json"));
+        let journal = recovery::Journal::backup(completed_archive(), vec!["dev".into()], None);
+        let operation = journal.identity().to_owned();
+        recovery::begin(&controller, journal).unwrap();
+        let chosen = directory.path().join("export.silo-backup");
+        let first = staged_export_path(&controller, &chosen).unwrap();
+        let second = staged_export_path(&controller, &chosen).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(first.parent(), chosen.parent());
+        let name = first.file_name().unwrap().to_string_lossy();
+        assert!(
+            name.starts_with(&format!(".silo-backup-{operation}-")),
+            "{name}"
+        );
+        assert!(name.ends_with(".silo-backup"));
     }
 
     #[test]

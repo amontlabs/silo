@@ -16,7 +16,7 @@ use super::{
     engine_env::{
         bind_undo_policy, can_clone, clone_workspace, copy_folder, ensure_undo_policy,
         forget_build_policies, parse_du, parse_pack_report, replay_steps, save_build_policies,
-        PACK_HOME, UNPACK_HOME,
+        swap_with_policy, PACK_HOME, UNPACK_HOME,
     },
     journal::{Journal, Plan, Record, Step},
     rebuild, recover_one, swap, undo_name, Info, RebuildEnv,
@@ -1851,8 +1851,8 @@ fn the_undo_computer_keeps_an_explicit_policy_when_the_original_had_none() {
     let saved = store::get_stored(&plan.undo_id).unwrap();
     assert!(saved.is_some());
     // The swap binds it again on every retry, and the original still has no saved policy.
-    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
-    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    bind_undo_policy(&plan, &|| Ok(Some(closed_runtime_policy()))).unwrap();
+    bind_undo_policy(&plan, &|| Ok(Some(closed_runtime_policy()))).unwrap();
     assert_eq!(store::get_stored(&plan.undo_id).unwrap(), saved);
     assert_eq!(store::get_stored(&plan.old_id).unwrap(), None);
     // An original with a saved policy gives it, with its approvals.
@@ -1870,7 +1870,7 @@ fn the_undo_computer_does_not_keep_the_channel_rule_of_the_original() {
     let _dir = policy_store();
     let plan = plan();
     save_build_policies(&plan, Some(&closed_runtime_policy())).unwrap();
-    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    bind_undo_policy(&plan, &|| Ok(Some(closed_runtime_policy()))).unwrap();
     // The original's sandbox holds the rule for its channel port.
     let held = store::get_stored(&plan.old_id).unwrap().unwrap_or_else(|| {
         Stored::of(
@@ -2314,15 +2314,143 @@ fn an_older_swap_gives_the_undo_computer_the_rules_its_sandbox_held() {
 }
 
 #[test]
-fn an_undo_computer_is_left_without_a_policy_when_the_rules_cannot_be_read() {
+fn an_undo_computer_is_closed_to_the_network_when_the_rules_cannot_be_read() {
     let _dir = policy_store();
     let plan = plan();
     let error = bind_undo_policy(&plan, &|| Err("no such sandbox".into())).unwrap_err();
     assert!(error.contains("no such sandbox"));
-    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), None);
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(Stored::closed_without_incoming())
+    );
     assert!(ensure_undo_policy(&plan, &|| Err("no such sandbox".into())).is_err());
-    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), None);
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(Stored::closed_without_incoming())
+    );
+    // The rules replace the closed policy once they can be read.
+    let open = serde_json::json!({"default_egress": "allow"});
+    ensure_undo_policy(&plan, &|| Ok(Some(open.clone()))).unwrap();
+    let bound = store::get_stored(&plan.undo_id).unwrap().unwrap();
+    assert_eq!(bound.mode, NetworkPolicyMode::Open);
     store::use_test_path(None);
+}
+
+/// The undo computer's saved policy at each rename or relabel of the swap.
+struct Watched<'a> {
+    table: &'a Table,
+    undo_id: String,
+    seen: Mutex<Vec<Option<Stored>>>,
+}
+
+impl Watched<'_> {
+    fn note(&self) {
+        self.seen
+            .lock()
+            .unwrap()
+            .push(store::get_stored(&self.undo_id).unwrap());
+    }
+}
+
+impl swap::Sandboxes for Watched<'_> {
+    fn owner(&self, name: &str) -> Result<Option<String>, String> {
+        self.table.owner(name)
+    }
+
+    fn rename(&self, from: &str, to: &str) -> Result<(), String> {
+        self.note();
+        self.table.rename(from, to)
+    }
+
+    fn relabel(&self, name: &str, id: &str) -> Result<(), String> {
+        self.note();
+        self.table.relabel(name, id)
+    }
+}
+
+#[test]
+fn the_undo_policy_is_saved_before_its_sandbox_is_published() {
+    let _dir = policy_store();
+    let plan = plan();
+    let table = before();
+    let watched = Watched {
+        table: &table,
+        undo_id: plan.undo_id.clone(),
+        seen: Mutex::new(Vec::new()),
+    };
+    let closed = closed_runtime_policy();
+    swap_with_policy(&plan, &watched, &|| Ok(Some(closed.clone())), &|| Ok(())).unwrap();
+    let seen = watched.seen.lock().unwrap();
+    assert!(!seen.is_empty());
+    assert!(
+        seen.iter().all(Option::is_some),
+        "a sandbox moved before the undo computer had a policy: {seen:?}"
+    );
+    store::use_test_path(None);
+}
+
+#[test]
+fn an_older_swap_that_cannot_read_the_rules_publishes_a_closed_undo_computer() {
+    let _dir = policy_store();
+    let plan = plan();
+    let table = before();
+    let watched = Watched {
+        table: &table,
+        undo_id: plan.undo_id.clone(),
+        seen: Mutex::new(Vec::new()),
+    };
+    // The first attempt publishes the undo computer, then stops on the unread rules.
+    let error =
+        swap_with_policy(&plan, &watched, &|| Err("unreadable".into()), &|| Ok(())).unwrap_err();
+    assert!(error.contains("unreadable"));
+    assert!(watched
+        .seen
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|seen| *seen == Some(Stored::closed_without_incoming())));
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(Stored::closed_without_incoming())
+    );
+    // The retry reads them and the closed policy gives way.
+    let open = serde_json::json!({"default_egress": "allow"});
+    swap_with_policy(&plan, &watched, &|| Ok(Some(open.clone())), &|| Ok(())).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap().unwrap().mode,
+        NetworkPolicyMode::Open
+    );
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_swap_stopped_halfway_is_closed_before_it_goes_on() {
+    let _dir = policy_store();
+    let plan = plan();
+    // Stopped after the old sandbox took the undo name, with no policy saved for it.
+    let table = before();
+    swap::Sandboxes::rename(&table, &plan.old_name, &plan.undo_name).unwrap();
+    let watched = Watched {
+        table: &table,
+        undo_id: plan.undo_id.clone(),
+        seen: Mutex::new(Vec::new()),
+    };
+    let error =
+        swap_with_policy(&plan, &watched, &|| Err("unreadable".into()), &|| Ok(())).unwrap_err();
+    assert!(error.contains("unreadable"));
+    assert!(watched.seen.lock().unwrap().iter().all(Option::is_some));
+    store::use_test_path(None);
+}
+
+#[test]
+fn the_original_is_found_under_whichever_name_the_swap_left_it() {
+    let plan = plan();
+    let table = before();
+    assert_eq!(swap::original_name(&table, &plan).unwrap(), "dev");
+    swap::apply(&table, &plan).unwrap();
+    assert_eq!(swap::original_name(&table, &plan).unwrap(), "dev-undo");
+    let strangers = Table::with(&[("dev", "someone-else", "old")]);
+    assert!(swap::original_name(&strangers, &plan).is_err());
 }
 
 #[test]
@@ -2336,14 +2464,17 @@ fn settling_a_swap_binds_the_undo_policy_and_keeps_one_it_has() {
         Some(allowlist_stored())
     );
     // A policy the undo computer already holds is not replaced by a later change to the computer.
-    let closed = Stored::of(
-        network_policy::held_for("other", Some(&closed_runtime_policy()))
-            .unwrap()
-            .0,
-        true,
+    let held = Stored::preserving_pins(
+        &NetworkPolicy {
+            mode: NetworkPolicyMode::Allowlist,
+            hosts: vec!["other.example".into()],
+            presets: Vec::new(),
+        },
+        None,
+        false,
     );
-    store::set_stored(&plan.undo_id, closed.clone()).unwrap();
+    store::set_stored(&plan.undo_id, held.clone()).unwrap();
     ensure_undo_policy(&plan, &|| Ok(None)).unwrap();
-    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(closed));
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(held));
     store::use_test_path(None);
 }
