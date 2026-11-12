@@ -147,9 +147,16 @@ was chosen and why; any can be changed. Older items are also in the build log un
 
 ## Approvals seen by a computer (R17)
 
-34. **Forks of bigger computers ask first:** a computer forking another computer that is larger
-    than itself (or whose size can't be read) now needs your approval, including a recipe's
-    hidden build. Recipe-heavy flows may prompt more often.
+34. **Size never asks (owner decision, reverses R17 and the earlier create rule):** a computer
+    forking, or creating, a computer larger than itself no longer needs your approval for its
+    size, including a recipe's hidden build. The agent chooses from what its tools show (the
+    `resources` tool lists the device's free memory, disk and CPUs, plus the sizes of the
+    computers it can see). A computer that doesn't fit in free memory is still refused or
+    queued. Container computers still ask (less isolated). Any policy on size, and a
+    resource-usage pane, come later. I extended your fork decision to creation myself, since the
+    same reasoning applies; say if creation should keep asking. Gap: the `resources` tool shows
+    a computer only the computers it can see, so it cannot read the size of a recipe's hidden
+    build before forking it, and it shows no per-computer disk size.
 35. **What a computer sees of an approval:** a merge approval shown to the computer counts the
     recipe's setup steps ("runs 1 step last") instead of quoting them; you still see the full
     commands. A merge waiting for you shows the computer "A merge waiting for the approval of

@@ -1062,9 +1062,8 @@ fn linux_create(sizes: Value) -> Value {
 }
 
 #[test]
-fn a_new_computer_larger_than_its_maker_asks_with_the_sizes() {
+fn a_new_computer_of_any_size_needs_no_approval() {
     assert!(allowed(&check("computers.create", linux_create(json!({})))));
-    assert!(allowed(&check("computers.create", linux_create(json!({"cpus": 1, "memoryGiB": 1})))));
     for (field, value) in [
         ("cpus", 3),
         ("maxCPUs", 5),
@@ -1073,37 +1072,27 @@ fn a_new_computer_larger_than_its_maker_asks_with_the_sizes() {
         ("workspaceStorageGiB", 21),
         ("runtimeStorageGiB", 11),
     ] {
-        match check("computers.create", linux_create(json!({ field: value }))) {
-            Decision::Ask { kind, summary, .. } => {
-                assert_eq!(kind, ApprovalKind::Resources, "{field}");
-                assert!(summary.contains(&value.to_string()), "{field}: {summary}");
-                assert!(summary.contains("box"), "{summary}");
-            }
-            other => panic!("{field}: {other:?}"),
-        }
+        assert!(allowed(&check("computers.create", linux_create(json!({ field: value })))), "{field}");
     }
-    // A container that is also larger says so, and is asked as a container.
+    // A caller whose own sizes are unknown is not asked about size either.
+    assert!(allowed(&as_computer("stranger", "computers.create", linux_create(json!({})))));
+    // A container is asked as a container, with its sizes.
     let mut container = linux_create(json!({"cpus": 8}));
     container["configuration"]["runtime"] = json!("container");
     match check("computers.create", container) {
         Decision::Ask { kind, summary, .. } => {
             assert_eq!(kind, ApprovalKind::Container);
-            assert!(summary.contains("8 CPUs") && summary.contains("more than"), "{summary}");
+            assert!(summary.contains("8 CPUs") && !summary.contains("more than"), "{summary}");
         }
         other => panic!("{other:?}"),
     }
-    // A computer whose own sizes are unknown asks for anything.
-    assert_eq!(
-        asked(&as_computer("stranger", "computers.create", linux_create(json!({})))),
-        Some(ApprovalKind::Resources)
-    );
     let macos = |cpus: u64, disk: u64| {
         json!({"kind": "macos", "request": {"name": "mac", "cpus": cpus,
             "memoryGiB": 4, "diskGiB": disk}})
     };
     assert!(allowed(&check("computers.create", macos(2, 30))));
-    assert_eq!(asked(&check("computers.create", macos(3, 30))), Some(ApprovalKind::Resources));
-    assert_eq!(asked(&check("computers.create", macos(2, 31))), Some(ApprovalKind::Resources));
+    assert!(allowed(&check("computers.create", macos(3, 30))));
+    assert!(allowed(&check("computers.create", macos(2, 31))));
 }
 
 #[test]

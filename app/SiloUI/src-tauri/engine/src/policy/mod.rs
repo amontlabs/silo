@@ -103,7 +103,8 @@ pub trait World {
     }
     /// A fresh computer id.
     fn new_id(&self) -> String;
-    /// The sizes of a computer; `None` when they cannot be read.
+    /// The sizes of a computer; `None` when they cannot be read. No rule reads them since size
+    /// stopped asking; kept for a later size policy.
     fn resources(&self, computer: &str) -> Option<Resources>;
     /// The port and bind address saved for a computer's SSH access, when it has any.
     fn ssh_settings(&self, computer: &str) -> Option<(u16, String)>;
@@ -642,19 +643,7 @@ impl<'a> Judge<'a> {
             new_name,
         );
         rewritten["networkPolicy"] = json!(Self::chosen_network(&network, asked_network));
-        let more = if source == self.caller {
-            None
-        } else {
-            self.fork_exceeds(source)
-        };
         if !wider.is_empty() {
-            match &more {
-                Some(more) if more.is_empty() => {
-                    wider.push("sizes that could not be compared with its own".into())
-                }
-                Some(_) => wider.push("more resources than its own".into()),
-                None => {}
-            }
             if network.is_err() {
                 wider.push("a network policy wider than its own".into());
             }
@@ -665,40 +654,12 @@ impl<'a> Judge<'a> {
                 quoted(new_name),
                 wider.join(" and "),
             );
-            if let Some(more) = &more {
-                summary.push_str(&self.copied_sizes_sentence(source, more));
-            }
             if let Err(network) = &network {
                 summary.push(' ');
                 summary.push_str(network);
             }
             return Ok(ask_to_create(
                 ApprovalKind::Access,
-                summary,
-                rewritten,
-                creates,
-            ));
-        }
-        if let Some(more) = more {
-            let mut summary = format!(
-                "More resources: fork {} as {}",
-                self.shown(source),
-                quoted(new_name)
-            );
-            match self.world.resources(source) {
-                Some(copied) => summary.push_str(&self.sizes_sentence(&copied, Some(&more))),
-                None => summary.push_str(&format!(
-                    "; the sizes of {} or {} could not be read to compare them.",
-                    self.shown(source),
-                    self.shown(self.caller)
-                )),
-            }
-            if let Err(network) = &network {
-                summary.push(' ');
-                summary.push_str(network);
-            }
-            return Ok(ask_to_create(
-                ApprovalKind::Resources,
                 summary,
                 rewritten,
                 creates,
@@ -765,37 +726,22 @@ impl<'a> Judge<'a> {
                     json!(Self::chosen_network(&network, asked_network));
                 let asked = Resources::of_linux(configuration)
                     .ok_or("A Linux computer's CPUs, memory and storage are numbers.")?;
-                let more = self.more_than_it_has(&asked);
                 let container =
                     configuration.get("runtime").and_then(Value::as_str) == Some("container");
-                if let (false, None, Err(summary)) = (container, &more, &network) {
-                    return Ok(ask_to_create(
-                        ApprovalKind::Network,
-                        summary.clone(),
-                        rewritten,
-                        creates,
-                    ));
-                }
-                if container || more.is_some() {
-                    let mut summary = if container {
-                        format!(
-                            "Less isolated: make {}, a container computer that shares this device's kernel",
-                            quoted(name)
-                        )
-                    } else {
-                        format!("More resources: make {}", quoted(name))
-                    };
-                    summary.push_str(&self.sizes_sentence(&asked, more.as_deref()));
+                if container {
+                    let mut summary = format!(
+                        "Less isolated: make {}, a container computer that shares this device's kernel with {}.",
+                        quoted(name),
+                        asked.describe()
+                    );
                     if let Err(network) = &network {
                         summary.push(' ');
                         summary.push_str(network);
                     }
-                    let kind = if container {
-                        ApprovalKind::Container
-                    } else {
-                        ApprovalKind::Resources
-                    };
-                    return Ok(ask_to_create(kind, summary, rewritten, creates));
+                    return Ok(ask_to_create(ApprovalKind::Container, summary, rewritten, creates));
+                }
+                if let Err(summary) = network {
+                    return Ok(ask_to_create(ApprovalKind::Network, summary, rewritten, creates));
                 }
                 Ok(Decision::Allow(Allowed {
                     params: Some(rewritten),
@@ -806,7 +752,7 @@ impl<'a> Judge<'a> {
             Some("macos") => {
                 let request = params.get("request").ok_or("The request is missing.")?;
                 let name = self.checked_name(text(request, "name"), false)?;
-                let asked = Resources::of_macos(request)
+                Resources::of_macos(request)
                     .ok_or("A macOS computer's CPUs, memory and disk are numbers.")?;
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
                 let network = self.new_computer_network(asked_network.clone(), None, false, name);
@@ -817,23 +763,6 @@ impl<'a> Judge<'a> {
                     id: None,
                     source: None,
                 };
-                if let Some(more) = self.more_than_it_has(&asked) {
-                    let mut summary = format!(
-                        "More resources: make {}{}",
-                        quoted(name),
-                        self.sizes_sentence(&asked, Some(&more))
-                    );
-                    if let Err(network) = &network {
-                        summary.push(' ');
-                        summary.push_str(network);
-                    }
-                    return Ok(ask_to_create(
-                        ApprovalKind::Resources,
-                        summary,
-                        rewritten,
-                        creates,
-                    ));
-                }
                 if let Err(summary) = network {
                     return Ok(ask_to_create(
                         ApprovalKind::Network,
@@ -866,72 +795,6 @@ impl<'a> Judge<'a> {
                 mode: NetworkPolicyMode::Closed,
                 ..NetworkPolicy::default()
             }),
-        }
-    }
-
-    /// What a fork of `source` has more of than the caller, since a fork copies the sizes of its
-    /// source: `Some` (and empty) when either side's sizes cannot be read, so it asks.
-    fn fork_exceeds(&self, source: &str) -> Option<Vec<String>> {
-        match (self.world.resources(source), self.world.resources(self.caller)) {
-            (Some(copied), Some(own)) => {
-                let more = copied.exceeding(&own);
-                (!more.is_empty()).then_some(more)
-            }
-            _ => Some(Vec::new()),
-        }
-    }
-
-    /// What a new computer of these sizes has more of than the caller: `Some` (and empty) when
-    /// the caller's own sizes cannot be read, so it asks.
-    fn more_than_it_has(&self, asked: &Resources) -> Option<Vec<String>> {
-        match self.world.resources(self.caller) {
-            Some(own) => {
-                let more = asked.exceeding(&own);
-                (!more.is_empty()).then_some(more)
-            }
-            None => Some(Vec::new()),
-        }
-    }
-
-    /// The sentence that tells what a fork copies from `source` and how it compares with the
-    /// caller, for a request that is mainly about something else.
-    fn copied_sizes_sentence(&self, source: &str, more: &[String]) -> String {
-        match self.world.resources(source) {
-            Some(copied) if more.is_empty() => format!(
-                " It copies {} from {}; the sizes of {} could not be read to compare them.",
-                copied.describe(),
-                self.shown(source),
-                self.shown(self.caller)
-            ),
-            Some(copied) => format!(
-                " It copies {} from {}, which is more than {} has: {}.",
-                copied.describe(),
-                self.shown(source),
-                self.shown(self.caller),
-                more.join(", ")
-            ),
-            None => format!(
-                " The sizes of {} or {} could not be read to compare them.",
-                self.shown(source),
-                self.shown(self.caller)
-            ),
-        }
-    }
-
-    /// ", with <sizes>, which is more than <caller> has: <what>." for the summary of a request.
-    fn sizes_sentence(&self, asked: &Resources, more: Option<&[String]>) -> String {
-        let sizes = asked.describe();
-        match more {
-            None => format!(" with {sizes}."),
-            Some([]) => format!(
-                " with {sizes}; the sizes of {} could not be read to compare them.",
-                self.shown(self.caller)
-            ),
-            Some(more) => format!(
-                " with {sizes}, which is more than {} has: {}.",
-                self.shown(self.caller),
-                more.join(", ")
-            ),
         }
     }
 
