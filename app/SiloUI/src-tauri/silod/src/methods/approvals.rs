@@ -685,10 +685,20 @@ fn execute<'a>(
                     "Nothing was run: the call would now ask for something other than what you allowed. The computer can ask again.",
                 );
             }
-            Some((Decision::Ask { .. }, tree)) => (tree, None),
+            // Asked again for the same thing, it runs as the policy now rewrites it too.
+            Some((Decision::Ask { params, .. }, tree)) => (tree, params),
             // The computer may do it now without asking; it runs as the policy now rewrites it.
             Some((Decision::Allow(allowed), tree)) => (tree, allowed.params),
         };
+        // The computer it makes keeps the id the approval recorded for it.
+        let rewritten = rewritten.map(|mut rewritten| {
+            if let Some(id) = record.creates.as_ref().and_then(|c| c.id.as_deref()) {
+                if rewritten.pointer("/configuration/id").is_some() {
+                    rewritten["configuration"]["id"] = Value::from(id);
+                }
+            }
+            rewritten
+        });
         if gate::takes_headroom(method) {
             if let Some(message) =
                 gate::short_of_resources(context, method, &approval.params, &std::collections::HashMap::new())

@@ -40,6 +40,18 @@ fn pinned(expected: Option<&str>, current: impl FnOnce() -> String, refusal: &st
     }
 }
 
+/// The check a promote of `fork` makes once it holds its lanes: the fork is still as
+/// [`promote_pin`] saw it when `expected_pin` is given.
+pub fn promote_guard(expected_pin: Option<String>, fork: String) -> impl Fn() -> Result<(), String> {
+    move || {
+        pinned(
+            expected_pin.as_deref(),
+            || promote_pin(&fork),
+            "Nothing was replaced: the fork changed after you were asked. The computer can ask again.",
+        )
+    }
+}
+
 /// `changes.promote`. `expected_pin` is the [`promote_pin`] an approval was given for; the job
 /// refuses to change anything when the fork has moved since, which it checks holding the lanes.
 pub fn start_promote(
@@ -57,12 +69,13 @@ pub fn start_promote(
             service,
             keep_service::journal_for(context.as_ref()),
         );
+        let guard = promote_guard(expected_pin, request.fork.clone());
+        // Once the lanes are held and the fork is as approved, the promote is a change to
+        // every computer: it moves their generation.
         let under_lane = || {
-            pinned(
-                expected_pin.as_deref(),
-                || promote_pin(&request.fork),
-                "Nothing was replaced: the fork changed after you were asked. The computer can ask again.",
-            )
+            guard()?;
+            crate::generation::bump_all();
+            Ok(())
         };
         super::promote_checked(&env, store.as_ref(), &journal, &request, LANE_WAIT, &under_lane)
             .map(|outcome| outcome.to_json())
