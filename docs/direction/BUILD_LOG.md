@@ -359,3 +359,8 @@ These were not asked of the owner. Each is open to change.
 - **Codex boundary pass (T1/T2, T5/T8), 2026-11-11 ~23:00:** started through lastdrop's
   `reviewer`; the T5/T8 run hit Codex's usage limit ("try again at Nov 12th, 2026 2:30 AM").
   A scheduled task reruns the owed reviews at 02:45 on 2026-11-12 in this thread.
+- **Codex boundary pass rerun, 2026-11-12:** both reviews restarted at `672b40b31`. T5/T8 ran
+  on Codex gpt-6.1-sol: seven findings ([review](reviews/T5-T8-codex.md)). Findings 2-5 (rebuild
+  staging and `-undo` policy, macOS import policy, export token) go to R15
+  (`fix/r15-policy-carryover`); 1, 6, 7 (guest stderr cap, GitHub grant pins, public-suffix list)
+  to R16 (`fix/r16-guest-output-and-allowlist`). T1/T2 review running.
