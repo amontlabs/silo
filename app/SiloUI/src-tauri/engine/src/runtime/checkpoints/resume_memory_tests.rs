@@ -126,3 +126,63 @@ fn a_capture_whose_memory_cannot_be_read_is_an_error() {
     let runner = listing(&outside);
     assert!(pending_resume_memory_mib(&runner, &paths, ID, "dev").is_err());
 }
+
+fn saved(paths: &RuntimePaths, scope: &str) {
+    let record = Record {
+        version: RECORD_VERSION,
+        snapshot_group: Some(GROUP.into()),
+        checkpoints: vec![Checkpoint {
+            id: "chk-1".into(),
+            native_id: Some(MEMBER.into()),
+            name: "before".into(),
+            created_at: 1,
+            scope: scope.into(),
+            reason: "manual".into(),
+            kind: "manual".into(),
+        }],
+        ..Record::default()
+    };
+    save(paths, ID, &record).unwrap();
+}
+
+#[test]
+fn a_saved_full_checkpoint_resumes_at_the_memory_the_capture_recorded() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = crate::test_support::paths(directory.path());
+    saved(&paths, "full");
+    let runner = capture(&paths, full_capture(8 * 1024));
+    assert_eq!(
+        checkpoint_resume_memory_mib(&runner, &paths, ID, "chk-1").unwrap(),
+        Some(8 * 1024)
+    );
+}
+
+#[test]
+fn a_saved_disk_checkpoint_or_an_unknown_one_resumes_nothing_and_asks_the_runtime_nothing() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = crate::test_support::paths(directory.path());
+    let runner = capture(&paths, full_capture(8 * 1024));
+    saved(&paths, "disk");
+    assert_eq!(
+        checkpoint_resume_memory_mib(&runner, &paths, ID, "chk-1").unwrap(),
+        None
+    );
+    saved(&paths, "full");
+    assert_eq!(
+        checkpoint_resume_memory_mib(&runner, &paths, ID, "other").unwrap(),
+        None
+    );
+    assert_eq!(*runner.calls.lock().unwrap(), 0);
+}
+
+#[test]
+fn a_saved_full_checkpoint_whose_memory_cannot_be_read_is_an_error() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = crate::test_support::paths(directory.path());
+    saved(&paths, "full");
+    let runner = capture(&paths, full_capture(0));
+    assert!(checkpoint_resume_memory_mib(&runner, &paths, ID, "chk-1").is_err());
+}

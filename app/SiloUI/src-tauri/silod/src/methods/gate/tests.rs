@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use serde_json::{json, Value};
 use silo_api::{
@@ -595,7 +595,15 @@ fn memory_set_aside_for_calls_made_at_the_same_moment_cannot_all_fit_the_same_he
                 (engine.clone(), barrier.clone(), host.clone(), id.clone());
             std::thread::spawn(move || {
                 barrier.wait();
-                super::reserve_if_fits(engine.as_ref(), &host, &floors, Some(id), 2 * GIB)
+                super::reserve_if_fits(
+                    engine.as_ref(),
+                    &HashSet::new(),
+                    &host,
+                    &floors,
+                    Some(id),
+                    None,
+                    2 * GIB,
+                )
             })
         })
         .collect();
@@ -953,22 +961,30 @@ fn a_reservation_tied_to_a_running_job_outlasts_the_longest_a_start_takes_and_en
     let _exclusive = super::test_exclusive();
     let (id, _fork) = computer();
     let reserve = |bytes: u64| {
-        super::reserve_if_fits(engine(), &host, &floors, Some(id.clone()), bytes)
-            .unwrap()
-            .unwrap()
+        super::reserve_if_fits(
+            engine(),
+            &HashSet::new(),
+            &host,
+            &floors,
+            Some(id.clone()),
+            None,
+            bytes,
+        )
+        .unwrap()
+        .unwrap()
     };
     let registry = engine().job_registry().unwrap();
     let job = silo_engine::jobs::allocate(engine(), "computers.start")
         .unwrap()
         .job_id;
     let tied = reserve(2 * GIB);
-    super::attach_reservation_job(tied, job.as_str());
+    super::attach_reservation_job(tied, job.as_str(), None);
     let untied = reserve(GIB);
     super::backdate_reservation(tied, 2 * super::RESERVATION_LIFE);
     super::backdate_reservation(untied, 2 * super::RESERVATION_LIFE);
 
     // The job is still running: its reservation stays, and the one nothing settled is dropped.
-    super::current_reserved_memory(engine());
+    super::current_reserved_memory(engine(), &HashSet::new());
     assert_eq!(super::reserved_memory_of(&id), 2 * GIB);
     let next = reserve(GIB);
     assert_eq!(super::reserved_memory_of(&id), 3 * GIB);
@@ -986,17 +1002,397 @@ fn a_reservation_tied_to_a_running_job_outlasts_the_longest_a_start_takes_and_en
             },
         )
         .unwrap();
-    super::current_reserved_memory(engine());
+    super::current_reserved_memory(engine(), &HashSet::new());
     assert_eq!(super::reserved_memory_of(&id), 0);
     let released = reserve(GIB);
-    super::attach_reservation_job(released, job.as_str());
+    super::attach_reservation_job(released, job.as_str(), None);
     registry.acknowledge(&job).unwrap();
-    super::current_reserved_memory(engine());
+    super::current_reserved_memory(engine(), &HashSet::new());
     assert_eq!(super::reserved_memory_of(&id), 0);
     let unknown = reserve(GIB);
-    super::attach_reservation_job(unknown, "job:700000099");
-    super::current_reserved_memory(engine());
+    super::attach_reservation_job(unknown, "job:700000099", None);
+    super::current_reserved_memory(engine(), &HashSet::new());
     assert_eq!(super::reserved_memory_of(&id), 0);
+}
+
+/// A computer a test says holds its memory on the device, until the guard is dropped.
+struct Resident(String);
+
+impl Resident {
+    fn new(id: &str) -> Self {
+        super::test_resident::add(id);
+        Self(id.to_owned())
+    }
+}
+
+impl Drop for Resident {
+    fn drop(&mut self) {
+        super::test_resident::remove(&self.0);
+    }
+}
+
+fn running_job() -> String {
+    silo_engine::jobs::allocate(engine(), "computers.start")
+        .unwrap()
+        .job_id
+        .as_str()
+        .to_owned()
+}
+
+fn resident_set(ids: &[&str]) -> HashSet<String> {
+    ids.iter().map(|id| (*id).to_owned()).collect()
+}
+
+#[test]
+fn a_reservation_for_a_job_ends_once_the_computer_it_boots_is_resident() {
+    use silo_engine::resources::{Floors, Host};
+    let host = Host {
+        logical_cpus: 8,
+        memory_total: 32 * GIB,
+        memory_available: Some(20 * GIB),
+        pressure: None,
+        disk_free: 400 * GIB,
+        disk_total: 500 * GIB,
+    };
+    let floors = Floors::resolve(&host, None, None);
+    let _exclusive = super::test_exclusive();
+    let (id, _fork) = computer();
+    let booting = format!("{id}-booting");
+    let reserve = |boots: Option<&str>| {
+        super::reserve_if_fits(
+            engine(),
+            &HashSet::new(),
+            &host,
+            &floors,
+            Some(id.clone()),
+            boots.map(str::to_owned),
+            GIB,
+        )
+        .unwrap()
+        .unwrap()
+    };
+    let job = running_job();
+    let for_booting = reserve(Some(&booting));
+    super::attach_reservation_job(for_booting, &job, None);
+    let for_other = reserve(None);
+    super::attach_reservation_job(for_other, &job, None);
+    // Neither computer is resident yet: both reservations hold their memory.
+    super::current_reserved_memory(engine(), &resident_set(&["someone-else"]));
+    assert_eq!(super::reserved_memory_of(&id), 2 * GIB);
+    // The booting computer is resident: its memory is in the device's measurement now, so only
+    // the reservation that is not for it stays, even though the job still runs.
+    super::current_reserved_memory(engine(), &resident_set(&[&booting]));
+    assert_eq!(super::reserved_memory_of(&id), GIB);
+    super::release_reservation(for_other);
+}
+
+#[test]
+fn a_reservation_for_a_computer_a_call_created_is_released_when_that_computer_is_resident() {
+    use silo_engine::resources::{Floors, Host};
+    let host = Host {
+        logical_cpus: 8,
+        memory_total: 32 * GIB,
+        memory_available: Some(20 * GIB),
+        pressure: None,
+        disk_free: 400 * GIB,
+        disk_total: 500 * GIB,
+    };
+    let floors = Floors::resolve(&host, None, None);
+    let _exclusive = super::test_exclusive();
+    let (id, _fork) = computer();
+    let made = format!("{id}-mac");
+    // A macOS creation names no computer until its answer does.
+    let reservation = super::reserve_if_fits(
+        engine(),
+        &HashSet::new(),
+        &host,
+        &floors,
+        None,
+        None,
+        4 * GIB,
+    )
+    .unwrap()
+    .unwrap();
+    super::attach_reservation_job(reservation, &running_job(), Some(&made));
+    super::current_reserved_memory(engine(), &HashSet::new());
+    assert_eq!(super::reserved_memory(), 4 * GIB);
+    super::current_reserved_memory(engine(), &resident_set(&[&made]));
+    assert_eq!(super::reserved_memory(), 0);
+}
+
+#[test]
+fn a_reservation_for_a_job_that_never_finished_is_dropped_at_the_ceiling() {
+    use silo_engine::resources::{Floors, Host};
+    let host = Host {
+        logical_cpus: 8,
+        memory_total: 32 * GIB,
+        memory_available: Some(20 * GIB),
+        pressure: None,
+        disk_free: 400 * GIB,
+        disk_total: 500 * GIB,
+    };
+    let floors = Floors::resolve(&host, None, None);
+    let _exclusive = super::test_exclusive();
+    let (id, _fork) = computer();
+    let reservation = super::reserve_if_fits(
+        engine(),
+        &HashSet::new(),
+        &host,
+        &floors,
+        Some(id.clone()),
+        None,
+        GIB,
+    )
+    .unwrap()
+    .unwrap();
+    // The job's worker died: its record still says it runs.
+    super::attach_reservation_job(reservation, &running_job(), None);
+    let ceiling = super::JOB_RESERVATION_CEILING;
+    super::backdate_reservation(reservation, ceiling - std::time::Duration::from_secs(60));
+    super::current_reserved_memory(engine(), &HashSet::new());
+    assert_eq!(super::reserved_memory_of(&id), GIB);
+    super::backdate_reservation(reservation, ceiling + std::time::Duration::from_secs(60));
+    super::current_reserved_memory(engine(), &HashSet::new());
+    assert_eq!(super::reserved_memory_of(&id), 0);
+}
+
+#[tokio::test]
+async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_restart_does_not() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    sized(&fork, 3);
+    let context = context(Caller::owner("app"));
+    let reserve = |method| {
+        let (context, params) = (&context, json!({"computerId": fork}));
+        async move {
+            let held = super::reserve_now(context, method, &params).await.unwrap();
+            held.settle(Some(&running_job()), None);
+            held
+        }
+    };
+    // A start of a computer that is not resident boots it: the reservation ends with it.
+    let start = reserve(MethodName::ComputersStart).await;
+    assert_eq!(super::reserved_memory_of(&fork), 3 * GIB);
+    {
+        let _resident = Resident::new(&fork);
+        // Any later call prunes against what is resident then.
+        super::current_reserved_memory(engine(), &super::test_resident::all());
+        assert_eq!(super::reserved_memory_of(&fork), 0);
+    }
+    drop(start);
+    // A restart of a computer that is resident now stops it and boots it again, so the memory
+    // stays set aside until the job ends.
+    let restart = {
+        let _resident = Resident::new(&fork);
+        reserve(MethodName::ComputersRestart).await
+    };
+    {
+        let _resident = Resident::new(&fork);
+        super::current_reserved_memory(engine(), &super::test_resident::all());
+        assert_eq!(super::reserved_memory_of(&fork), 3 * GIB);
+    }
+    drop(restart);
+    super::clear_reservations();
+    // A creation names its computer, which is not resident before it exists.
+    let created = format!("{id}-created");
+    let held = super::reserve_now(
+        &context,
+        MethodName::ComputersCreate,
+        &json!({"kind": "linux", "configuration": {"id": created, "name": "gate-created",
+            "cpus": 2, "maxCPUs": 2, "memoryGiB": 1, "maxMemoryGiB": 1,
+            "workspaceStorageGiB": 10, "runtimeStorageGiB": 10}}),
+    )
+    .await
+    .unwrap();
+    held.settle(Some(&running_job()), None);
+    assert_eq!(super::reserved_memory(), GIB);
+    super::current_reserved_memory(engine(), &resident_set(&[&created]));
+    assert_eq!(super::reserved_memory(), 0);
+}
+
+#[tokio::test]
+async fn a_macos_creation_reservation_follows_the_computer_its_answer_names() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, _fork) = computer();
+    let made = format!("{id}-mac");
+    let context = context(Caller::owner("app"));
+    let held = super::reserve_now(
+        &context,
+        MethodName::ComputersCreate,
+        &json!({"kind": "macos", "request": {"name": "gate-mac", "cpus": 2,
+            "memoryGiB": 8, "diskGiB": 60}}),
+    )
+    .await
+    .unwrap();
+    let answer = Ok(crate::dispatcher::HandlerOutput {
+        value: json!({"jobId": "job:1", "computer": {"id": made}}),
+        event_barrier: None,
+    });
+    assert_eq!(
+        super::computer_made(&answer).as_deref(),
+        Some(made.as_str())
+    );
+    held.settle(
+        Some(&running_job()),
+        super::computer_made(&answer).as_deref(),
+    );
+    assert_eq!(super::reserved_memory(), 8 * GIB);
+    // The installer is running: the computer holds its memory.
+    super::current_reserved_memory(engine(), &resident_set(&[&made]));
+    assert_eq!(super::reserved_memory(), 0);
+}
+
+#[tokio::test]
+async fn a_checkpoint_of_a_computer_that_is_resident_reserves_no_more_memory() {
+    // 6 GiB above the 4 GiB floor, and a computer of 16 GiB.
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    sized(&fork, 16);
+    let caller = Caller::Computer { id: id.clone() };
+    let params = json!({"computerId": fork, "name": "c"});
+    let error = call(&caller, MethodName::CheckpointsCreate, params.clone())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    let _resident = Resident::new(&fork);
+    let error = call(&caller, MethodName::CheckpointsCreate, params)
+        .await
+        .unwrap_err();
+    assert_ne!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    assert_eq!(super::reserved_memory_of(&fork), 0);
+}
+
+fn full_checkpoint(id: &str, scope: &str) -> silo_engine::changes::keep::CheckpointRef {
+    silo_engine::changes::keep::CheckpointRef {
+        id: id.into(),
+        name: format!("before-keep-{id}"),
+        created_at: String::new(),
+        scope: scope.into(),
+    }
+}
+
+/// A keep journal in which the checkpoint `id` of `scope` is the one an undo of "main" restores.
+fn journal_with(
+    directory: &tempfile::TempDir,
+    id: &str,
+    scope: &str,
+) -> silo_engine::changes::keep::Journal {
+    let journal = silo_engine::changes::keep::Journal::new(directory.path());
+    journal
+        .record_pending("main", &full_checkpoint(id, scope))
+        .unwrap();
+    journal
+        .set_state(
+            "main",
+            id,
+            silo_engine::changes::keep::journal::State::Undoable,
+        )
+        .unwrap();
+    journal
+}
+
+#[test]
+fn an_undo_of_a_full_checkpoint_resumes_at_the_memory_the_capture_recorded() {
+    let directory = tempfile::tempdir().unwrap();
+    let journal = journal_with(&directory, "chk-full", "full");
+    let read = |id: &str| {
+        assert_eq!(id, "chk-full");
+        Ok(Some(8 * 1024))
+    };
+    assert_eq!(
+        super::keep_undo_resume(&journal, "main", None, &read),
+        Some(Ok(8 * 1024))
+    );
+    // A promote made after the keep is what the undo takes back, which resumes no checkpoint.
+    let promoted_later = Some(silo_engine::changes::promote::journal::now_millis() + 60_000);
+    assert_eq!(
+        super::keep_undo_resume(&journal, "main", promoted_later, &read),
+        None
+    );
+}
+
+#[test]
+fn an_undo_of_a_disk_checkpoint_or_of_nothing_resumes_nothing() {
+    let directory = tempfile::tempdir().unwrap();
+    let journal = journal_with(&directory, "chk-disk", "disk");
+    let never = |_: &str| -> Result<Option<u64>, String> { panic!("no capture is read") };
+    assert_eq!(
+        super::keep_undo_resume(&journal, "main", None, &never),
+        None
+    );
+    assert_eq!(
+        super::keep_undo_resume(&journal, "other", None, &never),
+        None
+    );
+}
+
+#[test]
+fn an_undo_whose_checkpoint_memory_cannot_be_read_cannot_be_sized() {
+    let directory = tempfile::tempdir().unwrap();
+    let journal = journal_with(&directory, "chk-full", "full");
+    for read in [
+        Err("The runtime did not answer.".to_owned()),
+        // A full checkpoint the computer's record does not list.
+        Ok(None),
+    ] {
+        let resume = super::keep_undo_resume(&journal, "main", None, &|_| read.clone());
+        let Some(Err(message)) = resume else {
+            panic!("{resume:?}");
+        };
+        assert!(message.contains("can't read"), "{message}");
+    }
+    // An interrupted keep that is waiting to be put back is the checkpoint the undo restores.
+    let pending = silo_engine::changes::keep::journal::Entry {
+        fork: "fork".into(),
+        target: "main".into(),
+        checkpoint_id: "chk-pending".into(),
+        checkpoint_name: "before-keep".into(),
+        checkpoint_scope: "full".into(),
+    };
+    journal.begin(&pending).unwrap();
+    let asked = std::cell::RefCell::new(String::new());
+    let resume = super::keep_undo_resume(&journal, "main", None, &|id| {
+        *asked.borrow_mut() = id.to_owned();
+        Ok(Some(2 * 1024))
+    });
+    assert_eq!(resume, Some(Ok(2 * 1024)));
+    assert_eq!(*asked.borrow(), "chk-pending");
+}
+
+#[tokio::test]
+async fn an_undo_is_sized_by_the_memory_its_checkpoint_resumes_at_and_not_the_saved_size() {
+    // 6 GiB above the 4 GiB floor.
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    // Kept at 8 GiB, lowered to 2 GiB since.
+    sized(&fork, 2);
+    super::test_resumes::add(&fork, Ok(8 * 1024));
+    let caller = Caller::Computer { id: id.clone() };
+    let error = call(
+        &caller,
+        MethodName::ChangesUndo,
+        json!({"computerId": fork}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    // One whose checkpoint cannot be read is refused rather than sized by the saved size.
+    let (other, unread) = computer();
+    sized(&unread, 1);
+    super::test_resumes::add(&unread, Err("The checkpoint could not be read.".into()));
+    let error = call(
+        &Caller::Computer { id: other },
+        MethodName::ChangesUndo,
+        json!({"computerId": unread}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    assert!(
+        error.message.contains("could not be read"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]

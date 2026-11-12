@@ -1462,13 +1462,53 @@ pub(super) fn pending_resume_memory_mib(
     else {
         return Ok(None);
     };
+    captured_memory_mib(
+        runner,
+        paths,
+        &pending.source_computer,
+        &pending.checkpoint_id,
+    )
+    .map(Some)
+}
+
+/// The memory, in MiB, that restoring the checkpoint `checkpoint_id` of `id` and starting the
+/// computer resumes at. `None` when the checkpoint is not a full one or the computer has no
+/// such checkpoint.
+pub(super) fn checkpoint_resume_memory_mib(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    id: &str,
+    checkpoint_id: &str,
+) -> Result<Option<u64>, RuntimeError> {
+    let record = load(paths, id)?;
+    let Some(checkpoint) = record
+        .checkpoints
+        .iter()
+        .find(|checkpoint| checkpoint.id == checkpoint_id && checkpoint.scope == "full")
+    else {
+        return Ok(None);
+    };
+    let group = record
+        .snapshot_group
+        .as_deref()
+        .ok_or_else(|| error("The memory the saved checkpoint resumes with could not be read."))?;
+    captured_memory_mib(runner, paths, group, checkpoint.native_id()).map(Some)
+}
+
+/// The memory, in MiB, the capture `native_id` of the snapshot group `group` recorded.
+fn captured_memory_mib(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    group: &str,
+    native_id: &str,
+) -> Result<u64, RuntimeError> {
     let unreadable = || error("The memory the saved checkpoint resumes with could not be read.");
-    if !valid_snapshot_group(&pending.source_computer) || !valid_native_id(&pending.checkpoint_id) {
+    if !valid_snapshot_group(group) || !valid_native_id(native_id) {
         return Err(unreadable());
     }
-    let member = native::inventory_in_group(runner, paths, &pending.source_computer)?
+    let member = native::inventory_in_group(runner, paths, group)?
         .into_iter()
-        .find(|member| member.name.as_deref() == Some(pending.checkpoint_id.as_str()))
+        .find(|member| member.name.as_deref() == Some(native_id))
         .ok_or_else(unreadable)?;
     let store = paths
         .storage_home
@@ -1496,7 +1536,6 @@ pub(super) fn pending_resume_memory_mib(
                 .and_then(Value::as_u64)
         })
         .filter(|memory| *memory > 0)
-        .map(Some)
         .ok_or_else(unreadable)
 }
 

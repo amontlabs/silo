@@ -5919,6 +5919,18 @@ pub fn pending_resume_memory_mib(
         .map_err(|error| error.to_string())
 }
 
+/// The memory, in MiB, that restoring the checkpoint `checkpoint_id` of the computer `id` and
+/// starting it resumes at: what the capture recorded. `None` when the checkpoint is not a full
+/// one.
+pub fn checkpoint_resume_memory_mib(
+    paths: &RuntimePaths,
+    id: &str,
+    checkpoint_id: &str,
+) -> Result<Option<u64>, String> {
+    checkpoints::checkpoint_resume_memory_mib(&ProcessRunner, paths, id, checkpoint_id)
+        .map_err(|error| error.to_string())
+}
+
 /// Inspect a Silo computer without treating "not created yet" as a failure. An unattempted
 /// restore is absent; after an attempt, inspect the computer it may have created. A runtime
 /// that reports the computer as missing is likewise `Absent`.

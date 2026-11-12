@@ -712,7 +712,7 @@ fn execute<'a>(
             .and_then(Value::as_str)
             .map(str::to_owned);
         if let Some(held) = &held {
-            held.settle(job.as_deref());
+            held.settle(job.as_deref(), gate::computer_made(&result).as_deref());
         }
         let policy_store = PolicyStore::new(&app_data);
         let mut noted = Vec::new();

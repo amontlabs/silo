@@ -5,7 +5,7 @@
 //! writes the audit log. No handler is reached any other way, so none can forget either.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, LazyLock},
 };
@@ -281,6 +281,32 @@ pub(crate) mod test_resumes {
     }
 }
 
+/// The computers a test says hold their memory on the device now.
+#[cfg(test)]
+pub(crate) mod test_resident {
+    use std::{collections::HashSet, sync::Mutex};
+
+    static RESIDENT: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    fn resident() -> std::sync::MutexGuard<'static, Vec<String>> {
+        RESIDENT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn add(id: &str) {
+        resident().push(id.into());
+    }
+
+    pub(crate) fn remove(id: &str) {
+        resident().retain(|resident| resident != id);
+    }
+
+    pub(crate) fn all() -> HashSet<String> {
+        resident().iter().cloned().collect()
+    }
+}
+
 /// The device now and the floors that apply to an agent inside a computer.
 pub(crate) fn host_and_floors(
     context: &HandlerContext,
@@ -316,6 +342,9 @@ pub(crate) fn takes_headroom(method: MethodName) -> bool {
 struct Reservation {
     id: u64,
     computer_id: Option<String>,
+    /// The computer the memory is for, when it is not resident yet: once it is, the device's
+    /// own measurement holds its memory and the reservation would count it twice.
+    boots: Option<String>,
     job_id: Option<String>,
     memory_bytes: u64,
     created_at: std::time::Instant,
@@ -324,17 +353,31 @@ struct Reservation {
 static RESERVATIONS: std::sync::Mutex<Vec<Reservation>> = std::sync::Mutex::new(Vec::new());
 static NEXT_RESERVATION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// Longest a start takes, after which a reservation that nothing settled is dropped. One tied
-/// to a job is kept for as long as the job runs.
+/// Longest a start takes, after which a reservation that nothing settled is dropped.
 const RESERVATION_LIFE: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Whether a reservation is still wanted: it is tied to a job that has not ended, or nothing
-/// has settled it for less than [`RESERVATION_LIFE`].
-fn reservation_alive(reservation: &Reservation, over: &[u64]) -> bool {
-    if over.contains(&reservation.id) {
+/// Longest a reservation tied to a job is kept, whatever the job's record says: a job whose
+/// worker died without finishing it would otherwise hold its memory until the engine restarts.
+const JOB_RESERVATION_CEILING: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Whether a reservation is still wanted. One tied to a job lasts until the job ends, the
+/// computer it is for is resident, or [`JOB_RESERVATION_CEILING`]; one nothing settled lasts
+/// [`RESERVATION_LIFE`].
+fn reservation_alive(reservation: &Reservation, over: &[u64], resident: &HashSet<String>) -> bool {
+    if over.contains(&reservation.id)
+        || reservation
+            .boots
+            .as_ref()
+            .is_some_and(|computer| resident.contains(computer))
+    {
         return false;
     }
-    reservation.job_id.is_some() || reservation.created_at.elapsed() <= RESERVATION_LIFE
+    let life = if reservation.job_id.is_some() {
+        JOB_RESERVATION_CEILING
+    } else {
+        RESERVATION_LIFE
+    };
+    reservation.created_at.elapsed() <= life
 }
 
 /// Whether the job registry still has `job` waiting or running. A registry that cannot be read
@@ -352,10 +395,10 @@ fn job_runs(engine: &dyn EngineContext, job: &str) -> bool {
     )
 }
 
-/// Drops the reservations whose job is over or that no job holds and that outlived the longest
-/// a start takes. The job registry is read with no lock held; a reservation whose job ends
-/// meanwhile is dropped by the next call.
-fn prune_reservations(engine: &dyn EngineContext) {
+/// Drops the reservations whose job is over, whose computer is resident, or that outlived their
+/// life. The job registry is read with no lock held; a reservation whose job ends meanwhile is
+/// dropped by the next call.
+fn prune_reservations(engine: &dyn EngineContext, resident: &HashSet<String>) {
     let jobs: Vec<(u64, String)> = RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -370,11 +413,11 @@ fn prune_reservations(engine: &dyn EngineContext) {
     RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .retain(|r| reservation_alive(r, &over));
+        .retain(|r| reservation_alive(r, &over, resident));
 }
 
-fn current_reserved_memory(engine: &dyn EngineContext) -> u64 {
-    prune_reservations(engine);
+fn current_reserved_memory(engine: &dyn EngineContext, resident: &HashSet<String>) -> u64 {
+    prune_reservations(engine, resident);
     RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -385,20 +428,22 @@ fn current_reserved_memory(engine: &dyn EngineContext) -> u64 {
 
 /// Reserves `memory_bytes` when the device has that much above its floor after the memory
 /// already reserved. The check and the reservation are one step under one lock, so calls made
-/// at the same moment cannot all pass on the same headroom. `Ok(None)` when nothing is to be
-/// reserved.
+/// at the same moment cannot all pass on the same headroom. `boots` is the computer the memory
+/// is for when it is not resident yet. `Ok(None)` when nothing is to be reserved.
 fn reserve_if_fits(
     engine: &dyn EngineContext,
+    resident: &HashSet<String>,
     host: &resources::Host,
     floors: &resources::Floors,
     computer_id: Option<String>,
+    boots: Option<String>,
     memory_bytes: u64,
 ) -> Result<Option<u64>, String> {
-    prune_reservations(engine);
+    prune_reservations(engine, resident);
     let mut reservations = RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    reservations.retain(|r| reservation_alive(r, &[]));
+    reservations.retain(|r| reservation_alive(r, &[], resident));
     let reserved: u64 = reservations.iter().map(|r| r.memory_bytes).sum();
     if let Some(refusal) = resources::refusal_for(host, floors, reserved, memory_bytes) {
         return Err(refusal);
@@ -410,6 +455,7 @@ fn reserve_if_fits(
     reservations.push(Reservation {
         id,
         computer_id,
+        boots,
         job_id: None,
         memory_bytes,
         created_at: std::time::Instant::now(),
@@ -417,13 +463,29 @@ fn reserve_if_fits(
     Ok(Some(id))
 }
 
-fn attach_reservation_job(id: u64, job_id: &str) {
+/// Ties the reservation `id` to the job it started. `made` is the computer the call created,
+/// which a call that names no computer beforehand learns only from its answer.
+fn attach_reservation_job(id: u64, job_id: &str, made: Option<&str>) {
     let mut reservations = RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(r) = reservations.iter_mut().find(|r| r.id == id) {
         r.job_id = Some(job_id.to_owned());
+        if r.boots.is_none() {
+            r.boots = made.map(str::to_owned);
+        }
     }
+}
+
+/// The id of the computer a call's answer says it created.
+pub(crate) fn computer_made(result: &Result<HandlerOutput, DispatchError>) -> Option<String> {
+    result
+        .as_ref()
+        .ok()?
+        .value
+        .pointer("/computer/id")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
 fn release_reservation(id: u64) {
@@ -455,12 +517,13 @@ impl Held {
     }
 
     /// Ties the reservation to the job the call started, or gives it back when it started none.
-    pub(crate) fn settle(&self, job: Option<&str>) {
+    /// `made` is the computer the call created, if its answer names one.
+    pub(crate) fn settle(&self, job: Option<&str>, made: Option<&str>) {
         if self.settled.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return;
         }
         match (self.id, job) {
-            (Some(id), Some(job)) => attach_reservation_job(id, job),
+            (Some(id), Some(job)) => attach_reservation_job(id, job, made),
             (Some(id), None) => release_reservation(id),
             (None, _) => {}
         }
@@ -547,6 +610,9 @@ struct Sizes {
     resumes: HashMap<String, Result<u64, String>>,
     /// The computer each computer was forked from.
     parents: HashMap<String, Option<String>>,
+    /// The computers that hold their memory on the device now, so the device's own measurement
+    /// of free memory already counts it.
+    resident: HashSet<String>,
 }
 
 const MIB: u64 = 1024 * 1024;
@@ -595,8 +661,9 @@ fn requested_memory_bytes(
         None => Ok(0),
     };
     let all = |ids: Vec<String>| {
-        ids.iter()
-            .try_fold(0_u64, |sum, id| Ok(sum.saturating_add(stored(id)?)))
+        ids.iter().try_fold(0_u64, |sum, id| {
+            Ok::<u64, String>(sum.saturating_add(stored(id)?))
+        })
     };
     match method {
         MethodName::ComputersCreate => Ok(match decode::<ComputerCreateParams>(params) {
@@ -614,8 +681,12 @@ fn requested_memory_bytes(
         MethodName::MacosSetupRetry => {
             sized(decode::<ComputerTargetParams>(params).map(|target| target.computer_id))
         }
+        // A capture of a computer that already holds its memory takes no more.
         MethodName::CheckpointsCreate => {
-            sized(decode::<CheckpointCreateParams>(params).map(|target| target.computer_id))
+            match decode::<CheckpointCreateParams>(params).map(|target| target.computer_id) {
+                Some(id) if sizes.resident.contains(&id) => Ok(0),
+                id => sized(id),
+            }
         }
         MethodName::CheckpointsRestore => {
             sized(decode::<CheckpointTargetParams>(params).map(|target| target.computer_id))
@@ -625,7 +696,9 @@ fn requested_memory_bytes(
             sized(decode::<CheckpointForkParams>(params).map(|source| source.computer_id))
         }
         // An undo resumes full checkpoints and may restart the other computer of a promote.
-        MethodName::ChangesUndo => all(swapped.to_vec()),
+        MethodName::ChangesUndo => swapped.iter().try_fold(0_u64, |sum, id| {
+            Ok(sum.saturating_add(started(Some(id.clone()))?))
+        }),
         // A promote restarts the fork and the computer it replaces; a dry run starts nothing.
         MethodName::ChangesPromote => Ok(match decode::<ChangesPromoteParams>(params) {
             Some(promote) if promote.dry_run != Some(true) => {
@@ -641,6 +714,27 @@ fn requested_memory_bytes(
         }),
         _ => Ok(0),
     }
+}
+
+/// The computer a call boots whose memory the device's measurement does not hold yet, when the
+/// call names it beforehand. A macOS computer a call creates is named by its answer.
+fn booted_computer(method: MethodName, params: &Value, sizes: &Sizes) -> Option<String> {
+    use silo_api::methods::{common::ComputerTargetParams, computers::ComputerCreateParams};
+    let id = match method {
+        MethodName::ComputersStart | MethodName::ComputersRestart | MethodName::MacosSetupRetry => {
+            serde_json::from_value::<ComputerTargetParams>(params.clone())
+                .ok()?
+                .computer_id
+        }
+        MethodName::ComputersCreate => {
+            match serde_json::from_value::<ComputerCreateParams>(params.clone()).ok()? {
+                ComputerCreateParams::Linux { configuration, .. } => configuration.id,
+                ComputerCreateParams::Macos { .. } => return None,
+            }
+        }
+        _ => return None,
+    };
+    (!sizes.resident.contains(&id)).then_some(id)
 }
 
 /// Checks a call that takes memory or disk against the device and, when `reserve_for` names
@@ -672,21 +766,23 @@ fn assess_headroom(
         Ok(requested) => requested,
         Err(unreadable) => {
             // A device short of its floors is told so before anything else.
-            let reserved = current_reserved_memory(context.engine_context());
+            let reserved = current_reserved_memory(context.engine_context(), &sizes.resident);
             return Err(resources::refusal_for(&host, &floors, reserved, 0).unwrap_or(unreadable));
         }
     };
     match reserve_for {
         Some(computer) => reserve_if_fits(
             context.engine_context(),
+            &sizes.resident,
             &host,
             &floors,
             computer,
+            booted_computer(method, params, sizes),
             requested,
         )
         .map(Held::of),
         None => {
-            let reserved = current_reserved_memory(context.engine_context());
+            let reserved = current_reserved_memory(context.engine_context(), &sizes.resident);
             match resources::refusal_for(&host, &floors, reserved, requested) {
                 Some(refusal) => Err(refusal),
                 None => Ok(Held::of(None)),
@@ -708,7 +804,7 @@ pub(crate) async fn reserve_now(
         context,
         method,
         params,
-        &world.sizes(),
+        &sizes_of(context, method, params, &world).await,
         Some(policy::target_computer(params)),
     )
 }
@@ -940,7 +1036,7 @@ pub(crate) async fn admit(
                 policy::decide(&caller, method, params, &world),
                 Some(Arc::new(visible)),
                 policy::World::name(&world, id),
-                world.sizes(),
+                sizes_of(context, method, params, &world).await,
             )
         }
         _ => (
@@ -1091,7 +1187,9 @@ pub(crate) fn finish(
         .and_then(|output| output.value.get("jobId"))
         .and_then(Value::as_str)
         .map(str::to_owned);
-    admitted.held.settle(job.as_deref());
+    admitted
+        .held
+        .settle(job.as_deref(), computer_made(&result).as_deref());
     if let Caller::Computer { id } = &context.client_identity().caller {
         let store = PolicyStore::new(&app_data(context));
         let mut noted = Vec::new();
@@ -1196,8 +1294,11 @@ struct EngineWorld {
     /// Every computer's sizes, read only for a call that makes a computer.
     resources: HashMap<String, Resources>,
     /// The memory a pending full checkpoint restore resumes each computer at, read only for a
-    /// call that starts a computer.
+    /// call that starts a computer or undoes a change.
     resumes: HashMap<String, Result<u64, String>>,
+    /// The computers that hold their memory on the device now, read only for a call that
+    /// makes a computer.
+    resident: HashSet<String>,
     /// The saved SSH port and bind address of each computer, read only for `sshAccess.save`.
     ssh: HashMap<String, (u16, String)>,
     /// The saved SSH public keys of each computer, read with the above.
@@ -1258,6 +1359,7 @@ impl EngineWorld {
         };
         let mut resources = HashMap::new();
         let mut resumes = HashMap::new();
+        let mut resident = HashSet::new();
         if method == MethodName::ComputersCreate || takes_headroom(method) {
             let list = super::route(&internal, MethodName::ComputersList, &json!({}))
                 .await
@@ -1275,16 +1377,25 @@ impl EngineWorld {
                 if let (Some(id), Some(sizes)) = (id, Resources::of_linux(configuration)) {
                     resources.insert(id.to_owned(), sizes);
                 }
+                if let (Some(id), Some("running")) = (id, computer["state"].as_str()) {
+                    resident.insert(id.to_owned());
+                }
             }
             for computer in computers("macos") {
                 let id = computer.get("id").and_then(Value::as_str);
                 if let (Some(id), Some(sizes)) = (id, Resources::of_macos(&computer)) {
                     resources.insert(id.to_owned(), sizes);
                 }
+                // The installer and the setup run the computer, so they hold its memory too.
+                if let (Some(id), Some("installing" | "setting-up" | "running")) =
+                    (id, computer["state"].as_str())
+                {
+                    resident.insert(id.to_owned());
+                }
             }
             if matches!(
                 method,
-                MethodName::ComputersStart | MethodName::ComputersRestart
+                MethodName::ComputersStart | MethodName::ComputersRestart | MethodName::ChangesUndo
             ) {
                 let waiting: Vec<(String, String)> = list
                     .pointer("/linux/computers")
@@ -1331,6 +1442,8 @@ impl EngineWorld {
         for (id, resume) in test_resumes::all() {
             resumes.insert(id, resume);
         }
+        #[cfg(test)]
+        resident.extend(test_resident::all());
         let mut ssh = HashMap::new();
         let mut ssh_keys = HashMap::new();
         if method == MethodName::SshAccessSave {
@@ -1417,6 +1530,7 @@ impl EngineWorld {
             github,
             resources,
             resumes,
+            resident,
             ssh,
             ssh_keys,
             network,
@@ -1474,9 +1588,97 @@ fn resolve(
         .cloned()
 }
 
+/// Why the memory an undo resumes a computer with is unknown.
+const UNDO_UNREADABLE: &str = "Silo can't read the memory this undo would resume the computer with, so it cannot tell whether it fits. Try again, or ask the person who runs Silo.";
+
+/// The memory, in MiB, that undoing the last keep of `computer` resumes it at, when that undo
+/// restores a full checkpoint. `None` when the undo takes back a promote (`promoted` is when
+/// the latest one finished), restores a disk checkpoint, or has nothing to restore. A journal
+/// or a capture that cannot be read is an error, so the undo is not admitted on a guess.
+/// `memory` reads what a checkpoint of the computer resumes at.
+fn keep_undo_resume(
+    journal: &silo_engine::changes::keep::Journal,
+    computer: &str,
+    promoted: Option<u128>,
+    memory: &dyn Fn(&str) -> Result<Option<u64>, String>,
+) -> Option<Result<u64, String>> {
+    let unreadable = || UNDO_UNREADABLE.to_owned();
+    let pending = match journal.pending(computer) {
+        Ok(pending) => pending,
+        Err(_) => return Some(Err(unreadable())),
+    };
+    if silo_engine::changes::promote::promote_is_newest(
+        promoted,
+        journal.latest_undoable_at(computer),
+        pending.is_some(),
+    ) {
+        return None;
+    }
+    let (scope, id) = match pending {
+        Some(entry) => (entry.checkpoint_scope, entry.checkpoint_id),
+        None => {
+            let checkpoint = journal.latest_undoable(computer)?;
+            (checkpoint.scope, checkpoint.id)
+        }
+    };
+    (scope == "full").then(|| {
+        memory(&id)
+            .and_then(|mib| mib.ok_or_else(unreadable))
+            .map_err(|_| unreadable())
+    })
+}
+
+/// What an undo of the computer `params` names resumes it at, when it restores a full
+/// checkpoint, by computer. Added to what a pending restore resumes the computers at.
+async fn undo_resumes(
+    context: &HandlerContext,
+    params: &Value,
+) -> HashMap<String, Result<u64, String>> {
+    let Ok(undo) =
+        serde_json::from_value::<silo_api::methods::keep::ChangesUndoParams>(params.clone())
+    else {
+        return HashMap::new();
+    };
+    let engine = context.engine.clone();
+    let host = context.silod_context().runtime_host();
+    tokio::task::spawn_blocking(move || {
+        let promoted = silo_engine::changes::promote::latest_at(
+            &silo_engine::changes::promote::service::journal_for(engine.as_ref()),
+            &undo.computer_id,
+        );
+        let journal = silo_engine::changes::keep::service::journal_for(engine.as_ref());
+        let paths = silo_engine::runtime::runtime_paths(host.as_ref());
+        let memory = |checkpoint: &str| {
+            let paths = paths.as_ref().map_err(|_| UNDO_UNREADABLE.to_owned())?;
+            silo_engine::runtime::checkpoint_resume_memory_mib(paths, &undo.computer_id, checkpoint)
+        };
+        keep_undo_resume(&journal, &undo.computer_id, promoted, &memory)
+            .map(|resume| (undo.computer_id.clone(), resume))
+            .into_iter()
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// What the gate reads about the computers before it sizes a call made by `world`'s load.
+async fn sizes_of(
+    context: &HandlerContext,
+    method: MethodName,
+    params: &Value,
+    world: &EngineWorld,
+) -> Sizes {
+    let mut sizes = world.sizes();
+    if method == MethodName::ChangesUndo {
+        sizes.resumes.extend(undo_resumes(context, params).await);
+    }
+    sizes
+}
+
 impl EngineWorld {
     fn sizes(&self) -> Sizes {
         Sizes {
+            resident: self.resident.clone(),
             resources: self.resources.clone(),
             resumes: self.resumes.clone(),
             parents: self.parents.clone(),
