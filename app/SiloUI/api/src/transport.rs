@@ -190,7 +190,7 @@ pub fn from_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
     }
     let digit = |byte: u8| char::from(byte).to_digit(16).map(|value| value as u8);
     let mut bytes = [0_u8; N];
-    for (index, pair) in text.chunks_exact(2).enumerate() {
+    for (index, pair) in text.as_chunks::<2>().0.iter().enumerate() {
         bytes[index] = digit(pair[0])? << 4 | digit(pair[1])?;
     }
     Some(bytes)
