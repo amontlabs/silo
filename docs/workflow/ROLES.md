@@ -17,7 +17,9 @@ Pick by name. Models, fallbacks and limits belong to lastdrop and the owner; do 
 
 - The brief filled in completely; no placeholder left.
 - The absolute worktree path and the base branch.
+- The build state directory (`$SILO_BUILD_STATE`, absolute) for `build`, `build-hard` and `live`: `check` writes `flaky.log` there. A task without it uses the default next to the integration checkout.
 - Where to write the report if it is long (a file in the worktree, outside Git).
+- The sentence: "Your final message is the whole report; stop every background wait first and never end a turn to wait." (every brief already has it).
 - Nothing about models, retries or CI.
 
 ## Notes
@@ -25,4 +27,5 @@ Pick by name. Models, fallbacks and limits belong to lastdrop and the owner; do 
 - Only the orchestrator starts `review`, `judge` and `scout`. Children never start reviewers.
 - `review` and `scout` are read-only: they change no files.
 - `live` and `computer-use` may use only the Dev build and throwaway `e2e-*` computers ([AGENTS.md](../../AGENTS.md#running-and-debugging)).
+- A report that is only a pointer ("the report above stands") is lost: ask the child to resend it in full (SendMessage) before judging the item.
 - Fixes go to the child that wrote the code, not to a new agent, while its session is small.
