@@ -96,6 +96,11 @@ def compute_key(triple):
     return h.hexdigest()[:32]
 
 
+def guest_staged():
+    """This checkout stages a guest silo (newer runtimes do; older ones have no such step)."""
+    return (APP / "scripts/stage-guest-silo.mjs").is_file()
+
+
 def guest_key(triple):
     """Key of runtime/guest-silo, or None when the silo-cli closure cannot be read."""
     inputs = json.loads((APP / "runtime-inputs.json").read_text())
@@ -345,8 +350,9 @@ def main():
     key = compute_key(triple)
     entry = cache_root() / key
     if args.status:
-        gkey, gentry = guest_entry(triple)
-        runtime_hit, guest_hit = bool(entry_paths(entry)), guest_cached(gentry)
+        gkey, gentry = guest_entry(triple) if guest_staged() else ("not staged here", None)
+        runtime_hit = bool(entry_paths(entry))
+        guest_hit = guest_cached(gentry) if guest_staged() else True
         print(f"key {key}\ntarget {triple}\nstore {entry}\nruntime {'hit' if runtime_hit else 'miss'}\n"
               f"guest-silo key {gkey or 'unavailable'}\nguest-silo {'hit' if guest_hit else 'miss'}\n{'hit' if runtime_hit and guest_hit else 'miss'}")
         return
@@ -357,7 +363,8 @@ def main():
                 restore(entry, paths)
                 print(f"runtime-cache: hit {key}, restored {len(paths)} paths")
         if paths:
-            guest_ensure(triple)
+            if guest_staged():
+                guest_ensure(triple)
             return
     print(f"runtime-cache: miss {key}, running runtime:prepare", flush=True)
     cmd = shlex.split(os.environ["RUNTIME_PREPARE_CMD"]) if os.environ.get("RUNTIME_PREPARE_CMD") else ["npm", "--prefix", str(APP), "run", "runtime:prepare"]
@@ -365,7 +372,8 @@ def main():
         sys.exit("runtime-cache: runtime:prepare failed; nothing saved")
     save(entry, triple, replace=args.force)
     print(f"runtime-cache: saved {entry}")
-    guest_save(triple, replace=args.force)
+    if guest_staged():
+        guest_save(triple, replace=args.force)
 
 
 main()

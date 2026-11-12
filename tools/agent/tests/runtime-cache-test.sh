@@ -15,7 +15,7 @@ R=$W/repo; S=$R/app/SiloUI; T=$S/src-tauri; mkdir -p $R/tools/agent $S/scripts $
 cp $A/runtime-cache $R/tools/agent/
 echo '{"toolchain":"1.95.0","patches":[]}' >$S/runtime-inputs.json
 for f in package.json scripts/prepare-microsandbox-runtime.mjs scripts/microsandbox-runtime.mjs scripts/git-runtime.mjs scripts/linux-package-tools.mjs \
-  scripts/build-input.mjs scripts/preflight.mjs scripts/guest-silo-runtime.mjs src-tauri/guest/macos/build-network-bootstrap.sh \
+  scripts/build-input.mjs scripts/preflight.mjs scripts/guest-silo-runtime.mjs scripts/stage-guest-silo.mjs src-tauri/guest/macos/build-network-bootstrap.sh \
   src-tauri/guest/macos/silo-network-bootstrap.swift src-tauri/macos-gateway/a Cargo.toml Cargo.lock; do echo "$f" >$S/$f; done
 echo "const goSelection = 'go 1.25'" >$S/scripts/lfs-transfer-runtime.mjs
 echo lib1 >$S/cli/src/lib.rs; echo unrelated1 >$S/other/lib.rs
