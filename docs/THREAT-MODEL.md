@@ -121,9 +121,9 @@ the computer ([`network_policy/`](../app/SiloUI/src-tauri/engine/src/network_pol
 
 Host patterns are lowercase DNS names of at least two labels, or `*.` and such a name (which also
 covers the name itself); addresses, ports, bare top-level names, names that stay on the device and
-a `*.` pattern over a public suffix (`*.co.uk`, `*.github.io`, `*.duckdns.org`) are refused. The
+a `*.` pattern over a registry suffix (`*.co.uk`, `*.com`) are refused. A `*.` pattern over a name where anyone can publish a site (`*.github.io`, `*.duckdns.org`, `*.netlify.app`) is accepted with a warning shown wherever the list is set and in the approval that adds it. The
 suffixes are those of the Public Suffix List, ICANN and private, compiled into the engine from the
-`psl` crate, plus a few shared-hosting names Silo has always refused that the list does not carry
+`psl` crate, plus a few shared-hosting names that the list does not carry
 ([`public_suffixes.json`](../app/SiloUI/src-tauri/engine/src/network_policy/public_suffixes.json));
 see [the choice](SiloUI-NETWORK-PLAN.md#public-suffix-list-for-allowlist-wildcards). A policy saved
 before a name was refused keeps working until it is saved again. Presets (npm, PyPI, crates.io,

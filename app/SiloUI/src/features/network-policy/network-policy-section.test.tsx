@@ -153,6 +153,17 @@ it("lowercases added hosts and rejects invalid hosts at add time", async () => {
   expect(within(hosts).getByText("new-host.example.com")).toBeVisible()
 })
 
+it("accepts a wildcard over shared hosting and warns that anyone can publish there", async () => {
+  const { user } = await openDetail("allowlist")
+  const section = await network()
+  const hosts = await within(section).findByRole("region", { name: "Allowed hosts" })
+  await user.type(within(hosts).getByLabelText("Hosts you allow"), "*.netlify.app")
+  await user.click(within(hosts).getByRole("button", { name: "Add" }))
+  expect(within(hosts).queryByRole("alert")).not.toBeInTheDocument()
+  expect(within(hosts).getByText("*.netlify.app")).toBeVisible()
+  expect(within(hosts).getByRole("status")).toHaveTextContent("lets this computer reach any site hosted under netlify.app, since anyone can publish there")
+})
+
 it("shows a preset update with its hosts and accepts it by saving the policy again", async () => {
   const { user, target, fixture } = await openDetail("update")
   const save = fixture.saveNetworkPolicy

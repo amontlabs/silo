@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "note": "Names under which unrelated people get their own hosts, refused for a `*.` pattern in addition to the Public Suffix List the engine compiles in (the `psl` crate). The user interface uses this list for an early answer; the engine decides.",
-  "suffixes": [
+  "note": "Names a `*.` pattern covers separately owned hosts under. `registry` names are refused (the engine also knows them from the Public Suffix List it compiles in, the `psl` crate); `suffixes` are shared hosting, allowed with a warning, listed here for those the Public Suffix List does not carry. The user interface uses both for an early answer; the engine decides.",
+  "registry": [
     "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk", "net.uk", "sch.uk",
     "com.au", "net.au", "org.au", "edu.au", "gov.au", "id.au",
     "co.nz", "org.nz", "net.nz", "govt.nz",
@@ -16,8 +16,10 @@
     "com.ar", "com.mx", "com.co", "com.pe", "com.ve", "com.uy",
     "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn",
     "com.hk", "com.tw", "com.sg", "com.my", "com.ph", "com.vn", "com.pk", "com.bd",
-    "com.tr", "com.ua", "com.pl", "com.es", "com.pt", "com.ru", "com.eg", "com.ng", "com.sa",
-    "github.io", "gitlab.io", "bitbucket.io", "readthedocs.io",
+    "com.tr", "com.ua", "com.pl", "com.es", "com.pt", "com.eg", "com.ng", "com.sa"
+  ],
+  "suffixes": [
+    "com.ru", "github.io", "gitlab.io", "bitbucket.io", "readthedocs.io",
     "herokuapp.com", "vercel.app", "netlify.app", "pages.dev", "workers.dev",
     "appspot.com", "web.app", "firebaseapp.com", "onrender.com", "fly.dev", "glitch.me",
     "repl.co", "replit.app", "ngrok.io", "ngrok-free.app", "trycloudflare.com",

@@ -1534,6 +1534,10 @@ impl<'a> Judge<'a> {
                     listed(&reachable)
                 ));
             }
+            for warning in crate::network_policy::shared_hosting_warnings(&domains) {
+                summary.push(' ');
+                summary.push_str(&warning);
+            }
             if domains
                 .iter()
                 .any(|domain| crate::network_policy::is_too_wide_wildcard(domain))

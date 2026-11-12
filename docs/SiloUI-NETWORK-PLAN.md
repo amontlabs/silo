@@ -31,21 +31,22 @@ of three. No extra Silo proxy or database is introduced.
 
 ## Public suffix list for allowlist wildcards
 
-A `*.` host in a network policy is refused when its base is a public suffix, because the
-rule would allow every host anyone registers under it (`*.duckdns.org`, `*.github.io`). The
-engine decides this with the Public Suffix List (ICANN and private sections) from the `psl`
-crate, which compiles Mozilla's list into the build. The bundled `public_suffixes.json` stays
-as an addition for shared-hosting names the list does not carry (`amazonaws.com`,
-`wordpress.com` and others Silo already refused) and as the early answer in the settings view.
-The list holds registrable domains only when they have no tenant sub-suffix of their own, so a
-cloud provider's base such as `azure.com`, `windows.net` or `oraclecloud.com`, under which
-customers get their own names, is not on it. The hand list covers those names, one entry per
-base that hosts tenant subdomains and per service name under it (`core.windows.net`,
-`openai.azure.com`). When a provider adds such a base, add it to `public_suffixes.json`; the
-test `cloud_bases_that_host_tenant_subdomains_are_refused_for_a_wildcard` lists the ones
-checked.
-A base is also refused when every name directly under it is a suffix (`*.sch.uk`, which the
-list covers with a `*.` rule).
+A `*.` host in a network policy over a name under which anyone can get a host (`*.duckdns.org`,
+`*.github.io`, `*.netlify.app`, `*.cloudfront.net`) is accepted and saved with a warning, since
+it is the owner's call whether to allow every site published there. The engine finds such names
+with the Public Suffix List (ICANN and private sections) from the `psl` crate, which compiles
+Mozilla's list into the build, plus the shared-hosting names in `public_suffixes.json` that the
+list does not carry (`amazonaws.com`, `wordpress.com`, cloud bases such as `azure.com` or
+`windows.net`, one entry per base that hosts tenant subdomains and per service name under it).
+The warning is in `network.policy.get` and `network.policy.set` as a notice, in the settings view
+next to the host, and in the summary of an approval that adds such a host.
+
+Still refused: a `*.` pattern over a bare top-level name (`*.com`) and over a registry suffix,
+which is a suffix in the ICANN section of the list (`*.co.uk`), or one whose every direct
+child is (`*.sch.uk`, which the list covers with a `*.` rule). `public_suffixes.json` keeps
+those as `registry`, for the settings view's early answer, and the shared names as `suffixes`.
+The test `cloud_bases_that_host_tenant_subdomains_are_warned_about_for_a_wildcard` lists the
+cloud bases checked.
 
 Compared on 2026-11-12:
 

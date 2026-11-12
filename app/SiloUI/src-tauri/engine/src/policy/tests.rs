@@ -1203,6 +1203,9 @@ fn what_the_agent_chose_is_quoted_cut_and_never_the_start_of_the_sentence() {
     );
     let summary = ask_summary("secrets.save", secret("API_KEY", json!(["*.co.uk", "api.example.com"])));
     assert!(summary.contains("not added to a list of allowed hosts"), "{summary}");
+    let summary = ask_summary("secrets.save", secret("API_KEY", json!(["*.netlify.app", "api.example.com"])));
+    assert!(summary.contains("anyone can publish"), "{summary}");
+    assert!(!summary.contains("not added to a list of allowed hosts"), "{summary}");
     let any = json!({"request": {"operation": "add", "name": "API_KEY", "value": "v",
         "computerIds": ["fork-1"], "allowedDomains": ["*"], "allowAnyDestination": true}});
     assert!(ask_summary("secrets.save", any).starts_with("Sent to any destination: add the secret “API_KEY”"));

@@ -721,12 +721,20 @@ fn requested_memory_bytes(
             .ok_or_else(unreadable)
     };
     let sized = |id: Option<String>| id.map_or(Ok(0), |id| stored(&id));
-    // A computer with a full checkpoint restore pending boots at the memory the capture holds.
+    // A computer with a full checkpoint restore pending boots at the memory the capture holds. One
+    // that holds its memory now needs only what the boot takes beyond that, normally nothing.
     let started = |id: Option<String>| match id {
-        Some(id) => match sizes.resumes.get(&id) {
-            Some(resume) => resume.clone().map(|mib| mib.saturating_mul(MIB)),
-            None => stored(&id),
-        },
+        Some(id) => {
+            let boots = match sizes.resumes.get(&id) {
+                Some(resume) => resume.clone().map(|mib| mib.saturating_mul(MIB))?,
+                None => stored(&id)?,
+            };
+            if sizes.resident.contains(&id) {
+                Ok(boots.saturating_sub(stored(&id)?))
+            } else {
+                Ok(boots)
+            }
+        }
         None => Ok(0),
     };
     let all = |ids: Vec<String>| {
@@ -758,7 +766,7 @@ fn requested_memory_bytes(
             }
         }
         MethodName::CheckpointsRestore => {
-            sized(decode::<CheckpointTargetParams>(params).map(|target| target.computer_id))
+            started(decode::<CheckpointTargetParams>(params).map(|target| target.computer_id))
         }
         // A fork boots at the size its source has now; a checkpoint records none.
         MethodName::CheckpointsFork => {

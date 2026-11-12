@@ -1249,7 +1249,8 @@ fn a_computer_list_loaded_before_a_reservation_cannot_end_it() {
 }
 
 #[tokio::test]
-async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_restart_does_not() {
+async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_restart_holds_nothing(
+) {
     let _device = device(32 * GIB, 400 * GIB);
     let (id, fork) = computer();
     sized(&fork, 3);
@@ -1272,8 +1273,8 @@ async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_
         assert_eq!(super::reserved_memory_of(&fork), 0);
     }
     drop(start);
-    // A restart of a computer that is resident now stops it and boots it again, so the memory
-    // stays set aside until the job ends.
+    // A restart of a computer that is resident now holds the memory it boots with already, so it
+    // sets aside nothing, or only what a larger saved state takes beyond that.
     let restart = {
         let _resident = Resident::new(&fork);
         reserve(MethodName::ComputersRestart).await
@@ -1281,7 +1282,7 @@ async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_
     {
         let _resident = Resident::new(&fork);
         super::current_reserved_memory(engine(), &residency(super::test_resident::all()));
-        assert_eq!(super::reserved_memory_of(&fork), 3 * GIB);
+        assert_eq!(super::reserved_memory_of(&fork), 0);
     }
     drop(restart);
     super::clear_reservations();
@@ -1514,6 +1515,94 @@ async fn an_undo_is_sized_by_the_memory_its_checkpoint_resumes_at_and_not_the_sa
         "{}",
         error.message
     );
+}
+
+#[tokio::test]
+async fn a_running_computer_restarted_or_undone_needs_none_of_the_memory_it_already_holds() {
+    // 6 GiB above the 4 GiB floor.
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, big) = computer();
+    sized(&big, 7);
+    let caller = Caller::Computer { id: id.clone() };
+    let calls = [
+        (MethodName::ComputersRestart, json!({"computerId": big})),
+        (MethodName::ChangesUndo, json!({"computerId": big})),
+    ];
+    // Stopped, the computer is sized in full.
+    for (method, params) in calls.clone() {
+        let error = call(&caller, method, params).await.unwrap_err();
+        assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", method.name());
+    }
+    // Running, it already holds that memory.
+    let _resident = Resident::new(&big);
+    for (method, params) in calls {
+        let Err(error) = call(&caller, method, params).await else {
+            continue;
+        };
+        assert_ne!(
+            error.code,
+            ErrorCode::ResourcesLow,
+            "{}: {}",
+            method.name(),
+            error.message
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_running_computer_resuming_a_larger_saved_state_needs_only_the_difference() {
+    // 6 GiB above the 4 GiB floor.
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, running) = computer();
+    sized(&running, 4);
+    let _resident = Resident::new(&running);
+    let caller = Caller::Computer { id };
+    // 4 GiB held, 9 GiB resumed: 5 GiB more fits.
+    super::test_resumes::add(&running, Ok(9 * 1024));
+    let error = call(
+        &caller,
+        MethodName::ComputersRestart,
+        json!({"computerId": running}),
+    )
+    .await
+    .unwrap_err();
+    assert_ne!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    // 4 GiB held, 11 GiB resumed: 7 GiB more does not.
+    super::test_resumes::add(&running, Ok(11 * 1024));
+    let error = call(
+        &caller,
+        MethodName::ComputersRestart,
+        json!({"computerId": running}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+    // A resume that cannot be read is still refused.
+    super::test_resumes::add(&running, Err("The checkpoint could not be read.".into()));
+    let error = call(
+        &caller,
+        MethodName::ComputersRestart,
+        json!({"computerId": running}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", error.message);
+}
+
+#[tokio::test]
+async fn a_running_computer_with_no_readable_size_is_still_refused() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, running) = computer();
+    let _resident = Resident::new(&running);
+    let error = call(
+        &Caller::Computer { id },
+        MethodName::ComputersRestart,
+        json!({"computerId": running}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow);
+    assert!(error.message.contains("can't read"), "{}", error.message);
 }
 
 #[test]

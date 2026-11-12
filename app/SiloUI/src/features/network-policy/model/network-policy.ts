@@ -45,7 +45,8 @@ export function hostCount(count: number): string {
 
 /** The engine's own lists, so a host is refused here for the same reasons as when it is saved. */
 const RESERVED_TOP_LEVEL = new Set(["internal", "local", "localhost", "arpa", "invalid", "test", "onion", "lan", "home", "localdomain"])
-const PUBLIC_SUFFIXES = new Set(publicSuffixes.suffixes)
+const REGISTRY_SUFFIXES = new Set(publicSuffixes.registry)
+const SHARED_HOSTING_SUFFIXES = new Set(publicSuffixes.suffixes)
 
 /** Why the engine would refuse a host pattern, or nothing when it would take it. Mirrors `validate_host`. */
 export function validateHost(host: string): string | undefined {
@@ -63,8 +64,14 @@ export function validateHost(host: string): string | undefined {
   const top = labels[labels.length - 1]!
   if (/^\d+$/.test(top)) return refuse("addresses are not allowed, only names")
   if (RESERVED_TOP_LEVEL.has(top)) return refuse("that name stays on this device or its network")
-  if (host.startsWith("*.") && PUBLIC_SUFFIXES.has(name)) return refuse("a name under which anyone can get a host would allow all of them")
+  if (host.startsWith("*.") && REGISTRY_SUFFIXES.has(name)) return refuse("a name under which anyone can get a host would allow all of them")
   return undefined
+}
+
+/** A warning for a `*.` host over a name where anyone can publish a site, which a list accepts; nothing for any other host. The engine knows more such names and warns about them when the policy is saved. */
+export function hostWarning(host: string): string | undefined {
+  if (!host.startsWith("*.") || !SHARED_HOSTING_SUFFIXES.has(host.slice(2))) return undefined
+  return `\`${host}\` lets this computer reach any site hosted under ${host.slice(2)}, since anyone can publish there.`
 }
 
 /** The code the engine gives a save refused because the policy changed since the person read it. */

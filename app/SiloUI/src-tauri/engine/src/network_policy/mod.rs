@@ -464,11 +464,14 @@ struct SuffixFile {
     version: u8,
     #[allow(dead_code)]
     note: String,
+    /// Registry suffixes the user interface mirrors; the engine takes these from the list.
+    #[allow(dead_code)]
+    registry: Vec<String>,
     suffixes: Vec<String>,
 }
 
-/// The names `public_suffixes.json` adds to the Public Suffix List: shared hosting Silo has
-/// always refused a `*.` pattern over, which the list does not carry as suffixes.
+/// The shared-hosting names `public_suffixes.json` adds to the Public Suffix List, which does not
+/// carry them as suffixes.
 fn extra_suffixes() -> &'static BTreeSet<String> {
     static SUFFIXES: OnceLock<BTreeSet<String>> = OnceLock::new();
     SUFFIXES.get_or_init(|| {
@@ -479,19 +482,72 @@ fn extra_suffixes() -> &'static BTreeSet<String> {
     })
 }
 
-/// Whether a `*.` pattern over `name` would cover separately owned hosts: `name` is a public
-/// suffix on the Public Suffix List, ICANN or private (`co.uk`, `github.io`, `duckdns.org`), or
-/// every name directly under it is one (`sch.uk`, `compute.amazonaws.com`, which the list covers
-/// with a `*.` rule), or it is one of the [`extra_suffixes`]. The list is compiled into the
-/// build (`psl`). A name below a suffix, even one under a top-level name the list does not
-/// know, is not one.
-fn is_public_suffix(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    let on_the_list = |name: &str| psl::domain(name.as_bytes()).is_none();
-    on_the_list(&name) || on_the_list(&format!("x.{name}")) || extra_suffixes().contains(&name)
+/// How a `*.` pattern over a name that is a public suffix is treated.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SuffixKind {
+    /// A registry's own suffix (`co.uk`, `sch.uk`): refused.
+    Registry,
+    /// A name where anyone can publish a site (`github.io`, `duckdns.org`, `netlify.app`): allowed
+    /// with a warning.
+    SharedHosting,
 }
 
-/// Whether `host` is a `*.` pattern a network rule refuses for being too wide, whatever else is
+/// What `name` is as a suffix, if a `*.` pattern over it would cover separately owned hosts: it
+/// is a public suffix on the Public Suffix List, ICANN or private, or every name directly under
+/// it is one (`sch.uk`, `compute.amazonaws.com`, which the list covers with a `*.` rule), or it
+/// is one of the [`extra_suffixes`]. The list is compiled into the build (`psl`). A name below a
+/// suffix, even one under a top-level name the list does not know, is not one.
+fn suffix_kind(name: &str) -> Option<SuffixKind> {
+    let name = name.to_ascii_lowercase();
+    let kind_of = |name: &str| {
+        if psl::domain(name.as_bytes()).is_some() {
+            return None;
+        }
+        let icann = psl::suffix(name.as_bytes())
+            .and_then(|suffix| suffix.typ())
+            .is_some_and(|typ| typ == psl::Type::Icann);
+        Some(if icann {
+            SuffixKind::Registry
+        } else {
+            SuffixKind::SharedHosting
+        })
+    };
+    kind_of(&name)
+        .or_else(|| kind_of(&format!("x.{name}")))
+        .or_else(|| {
+            extra_suffixes()
+                .contains(&name)
+                .then_some(SuffixKind::SharedHosting)
+        })
+}
+
+fn is_public_suffix(name: &str) -> bool {
+    suffix_kind(name) == Some(SuffixKind::Registry)
+}
+
+/// A plain warning for a `*.` host over a name where anyone can publish a site, which a list
+/// accepts. `None` for any other host.
+pub fn shared_hosting_warning(host: &str) -> Option<String> {
+    let name = host.strip_prefix("*.")?;
+    (name.contains('.') && suffix_kind(name) == Some(SuffixKind::SharedHosting)).then(|| {
+        format!(
+            "`{host}` lets this computer reach any site hosted under {name}, since anyone can publish there."
+        )
+    })
+}
+
+/// The warnings for every shared-hosting wildcard in `hosts`, each host once, in order.
+pub fn shared_hosting_warnings<'a>(hosts: impl IntoIterator<Item = &'a String>) -> Vec<String> {
+    let mut warnings: Vec<String> = hosts
+        .into_iter()
+        .filter_map(|host| shared_hosting_warning(host))
+        .collect();
+    warnings.dedup();
+    warnings
+}
+
+/// Whether `host` is a `*.` pattern a network rule refuses for being too wide (a bare
+/// top-level name or a registry suffix; shared hosting is allowed with a warning), whatever else is
 /// wrong with it.
 pub fn is_too_wide_wildcard(host: &str) -> bool {
     host.strip_prefix("*.")
@@ -710,6 +766,7 @@ pub fn widening_summary_held(
             mode_words(new.policy.mode)
         )
     };
+    let mut warnings = Vec::new();
     if new.policy.mode == NetworkPolicyMode::Allowlist {
         let added = uncovered(
             &expand_with_grants(new, new_grants),
@@ -717,11 +774,16 @@ pub fn widening_summary_held(
         );
         if !added.is_empty() {
             summary.push_str(&format!(", adding {}", host_words(&added)));
+            warnings = shared_hosting_warnings(added.iter().map(|entry| &entry.host));
         } else if current.policy.mode == NetworkPolicyMode::Closed {
             summary.push_str(", which lets it look up names");
         }
     }
     summary.push('.');
+    for warning in warnings {
+        summary.push(' ');
+        summary.push_str(&warning);
+    }
     summary
 }
 

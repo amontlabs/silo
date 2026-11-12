@@ -172,7 +172,9 @@ pub fn judged(computer_id: &str, target: Target<'_>) -> Option<Held> {
 }
 
 fn state(computer_id: &str, resolved: Resolved) -> NetworkPolicyState {
-    let notices = resolved
+    let notices = super::shared_hosting_warnings(&resolved.held.policy.hosts)
+        .into_iter()
+        .chain(resolved
         .grants
         .too_wide()
         .into_iter()
@@ -180,7 +182,7 @@ fn state(computer_id: &str, resolved: Resolved) -> NetworkPolicyState {
             format!(
                 "The secret {secret} may be sent to {host}, which covers too many hosts to allow here, so a list does not let this computer reach them."
             )
-        })
+        }))
         .collect();
     NetworkPolicyState {
         computer_id: computer_id.to_owned(),
