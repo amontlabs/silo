@@ -1,11 +1,12 @@
-import { Activity, Bell, Boxes, CircleAlert, Code, Download, File, GitFork, GitPullRequestArrow, History, KeyRound, Monitor, Network, Play, Plus, RotateCw, Settings2, Square, Terminal, Trash2, Upload, type LucideIcon } from "lucide-react"
+import { Activity, Bell, Bot, Boxes, CircleAlert, Code, Download, File, GitFork, GitPullRequestArrow, History, KeyRound, Monitor, Network, Play, Plus, RotateCw, Settings2, Square, Terminal, Trash2, Upload, type LucideIcon } from "lucide-react"
 
 import type { ApplicationActions, ApplicationSource } from "@/features/application/model/application-source"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
 import { computerTarget } from "@/features/application/model/connections"
 import { computerAvailability } from "@/features/application/model/computer-availability"
-import { computerCan } from "@/features/computers/model/computer-capabilities"
+import { computerCan, kindOf, type ComputerCapability } from "@/features/computers/model/computer-capabilities"
 import { lifecycleGuard, type LifecycleAction } from "@/features/application/model/lifecycle-guard"
+import { openableAgents, type AgentInfo } from "@/features/agents/model/agents"
 
 /** A question the palette asks, in place, before running a command. */
 export interface CommandConfirmation {
@@ -37,23 +38,25 @@ export interface ApplicationCommandOptions {
   onExportComputer?: (computerName: string) => void
   /** Opens the computer's page and there its editor folder picker, Fork or Delete popover. */
   onComputerRequest?: (computerId: string, request: ComputerCommandRequest) => void
+  /** The agents a computer is known to have, by its target; each installed one gets an "Open" command. */
+  agentsOf?: (target: string) => readonly AgentInfo[] | undefined
 }
 
 const computerSections = [
-  { section: "files", label: "Files", icon: File, keywords: ["folders", "repositories"] },
+  { section: "files", label: "Files", icon: File, keywords: ["folders", "repositories"], needs: "files" },
   { section: "logs", label: "Logs", icon: Terminal, keywords: ["diagnostics", "output"] },
-  { section: "network", label: "Network", icon: Network, keywords: ["ports", "connections"] },
+  { section: "network", label: "Network", icon: Network, keywords: ["ports", "connections"], needs: "ports" },
   { section: "activity", label: "Activity", icon: Activity, keywords: ["history", "events"] },
-] as const
+] as readonly { section: "files" | "logs" | "network" | "activity"; label: string; icon: LucideIcon; keywords: string[]; needs?: ComputerCapability }[]
 
-export function applicationCommands(source: ApplicationSource, actions: ApplicationActions, navigate: (route: ApplicationInitialRoute) => void, { onImportComputer, onNewComputer, onExportComputer, onComputerRequest }: ApplicationCommandOptions = {}): ApplicationCommand[] {
+export function applicationCommands(source: ApplicationSource, actions: ApplicationActions, navigate: (route: ApplicationInitialRoute) => void, { onImportComputer, onNewComputer, onExportComputer, onComputerRequest, agentsOf }: ApplicationCommandOptions = {}): ApplicationCommand[] {
   // Lifecycle commands use the same guard as the pages: unavailable operations are reported,
   // and a request that needs a prompt asks it inside the palette.
   const guard = lifecycleGuard(source, actions)
   const destinations: { label: string; icon: LucideIcon; route: ApplicationInitialRoute; keywords?: string[] }[] = [
     { label: "All computers", icon: Boxes, route: { computerSection: "overview" }, keywords: ["overview", "computers", "configurations"] },
     ...computerSections.map(({ section, label, icon, keywords }) => ({ label, icon, route: { computerSection: section }, keywords: [...keywords] })),
-    { label: "Pending changes", icon: GitPullRequestArrow, route: { tab: "changes" }, keywords: ["review", "requests", "forks", "keep"] },
+    { label: "Pending", icon: GitPullRequestArrow, route: { tab: "changes" }, keywords: ["approvals", "requests", "review", "forks", "merge"] },
     { label: "GitHub", icon: GitFork, route: { tab: "github" }, keywords: ["git", "account", "access"] },
     { label: "Secrets", icon: KeyRound, route: { tab: "secrets" }, keywords: ["tokens", "credentials"] },
     { label: "Settings", icon: Settings2, route: { settingsSection: "general" }, keywords: ["general", "preferences", "applications", "computer use", "agents", "approval"] },
@@ -82,20 +85,28 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
     const name = computer.device ? `${computer.configuration.name} on ${computer.device.name}` : computer.configuration.name
     const computerKeywords = computer.device ? [computer.configuration.name, computer.device.name] : [name]
     const availability = computerAvailability(computer, source)
-    commands.push({ id: `${id}:page`, label: `Open ${name}`, icon: Boxes, group: "Computers", keywords: [...computerKeywords, "computer", "details"], run: () => navigate({ computer: id }) })
-    commands.push({ id: `${id}:checkpoints`, label: `Open ${name} checkpoints`, icon: History, group: "Computers", keywords: [...computerKeywords, "checkpoints", "restore", "snapshot"], run: () => navigate({ computer: id, computerTab: "checkpoints" }) })
-    for (const { section, label, icon, keywords } of computerSections) {
+    // A macOS computer of another device has its row and no page of its own.
+    const hasPage = !(computer.macos && computer.device)
+    if (hasPage) commands.push({ id: `${id}:page`, label: `Open ${name}`, icon: Boxes, group: "Computers", keywords: [...computerKeywords, "computer", "details"], run: () => navigate({ computer: id }) })
+    if (hasPage) commands.push({ id: `${id}:checkpoints`, label: `Open ${name} checkpoints`, icon: History, group: "Computers", keywords: [...computerKeywords, "checkpoints", "restore", "snapshot"], run: () => navigate({ computer: id, computerTab: "checkpoints" }) })
+    for (const { section, label, icon, keywords, needs } of computerSections) {
+      if (needs && !computerCan(kindOf(computer), needs)) continue
       commands.push({
         id: `${id}:${section}`, label: `Open ${name} ${label.toLowerCase()}`, icon, group: "Computers",
         keywords: [...computerKeywords, ...keywords], run: () => navigate({ computer: id, computerSection: section }),
       })
     }
-    if (availability.canOpen && computerCan(computer.configuration, "terminal")) {
+    if (availability.canOpen && computerCan(kindOf(computer), "terminal")) {
       commands.push(
         { id: `${id}:terminal`, label: `Open ${name} in ${source.preferences.terminal}`, icon: Terminal, group: "Actions", keywords: [...computerKeywords, "terminal", "shell"], run: () => actions.openTerminal(target) },
       )
     }
-    if (availability.canOpen && computerCan(computer.configuration, "editor")) {
+    if (availability.canOpen && computerCan(kindOf(computer), "terminal") && actions.openAgent) {
+      for (const agent of openableAgents(agentsOf?.(target))) {
+        commands.push({ id: `${id}:agent:${agent.id}`, label: `Open ${agent.name} in ${name}`, icon: Bot, group: "Actions", keywords: [...computerKeywords, "agent", "terminal", agent.name], run: () => actions.openAgent?.(target, agent.id) })
+      }
+    }
+    if (availability.canOpen && computerCan(kindOf(computer), "editor")) {
       commands.push(
         // Like the editor buttons, the command asks which folder to open first.
         onComputerRequest
@@ -105,14 +116,14 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
     }
     // Fork and Delete open the computer page's own popovers; they follow the page's ⋯ menu rules.
     const changing = source.computerConfigurationOperation !== null || availability.busy || computer.freshness === "stale"
-    if (actions.forkCheckpoint && onComputerRequest && !changing) {
+    if (actions.forkCheckpoint && onComputerRequest && !changing && computerCan(kindOf(computer), "fork")) {
       commands.push({ id: `${id}:fork`, label: `Fork ${name}…`, icon: GitFork, group: "Actions", keywords: [...computerKeywords, "fork", "copy", "clone"], opensPanel: true, run: () => onComputerRequest(id, "fork") })
     }
     if (!computer.device && onExportComputer && !changing) {
       commands.push({ id: `${id}:export`, label: `Export ${name}…`, icon: Download, group: "Actions", keywords: [...computerKeywords, "export", "backup", "archive"], run: () => onExportComputer(computer.configuration.name) })
     }
     const offline = Boolean(computer.device && !computer.device.connected)
-    if (onComputerRequest && source.computerConfigurationOperation === null && !availability.busy && !offline && computer.state !== "running") {
+    if (hasPage && onComputerRequest && source.computerConfigurationOperation === null && !availability.busy && !offline && computer.state !== "running") {
       commands.push({ id: `${id}:delete`, label: `Delete ${name}…`, icon: Trash2, group: "Actions", keywords: [...computerKeywords, "delete", "remove"], opensPanel: true, run: () => onComputerRequest(id, "delete") })
     }
     const lifecycle: { action: LifecycleAction; label: string; icon: LucideIcon; available: boolean }[] = [

@@ -189,7 +189,7 @@ async fn the_guest_domain_works_end_to_end_over_the_engine_socket() {
     let handshake = session
         .request(
             "engine.handshake",
-            json!({"protocol": {"min": 7, "max": 7},
+            json!({"protocol": {"min": 8, "max": 8},
                    "client": {"name": "guest-integration-test", "version": "1.0"}}),
         )
         .await;

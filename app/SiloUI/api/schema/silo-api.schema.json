@@ -17,6 +17,130 @@
       ],
       "type": "object"
     },
+    "AgentId": {
+      "description": "An agent Silo can install in a computer.",
+      "enum": [
+        "claude-code",
+        "codex"
+      ],
+      "type": "string"
+    },
+    "AgentInfo": {
+      "properties": {
+        "expectedVersion": {
+          "description": "The version an install puts in the computer.",
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/AgentId"
+        },
+        "name": {
+          "description": "The name to show, for example `Claude Code`.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/AgentState"
+        },
+        "version": {
+          "description": "The installed version; null when not installed or not known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state",
+        "expectedVersion"
+      ],
+      "type": "object"
+    },
+    "AgentInstallProgress": {
+      "description": "The `data` of an `agent` job progress event.",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentId"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "detail": {
+          "description": "A short sentence for the step, such as `Downloading Codex (42%)`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "step": {
+          "$ref": "#/$defs/AgentInstallStep"
+        }
+      },
+      "required": [
+        "computerId",
+        "agent",
+        "step"
+      ],
+      "type": "object"
+    },
+    "AgentInstallStep": {
+      "description": "Where an agent install is. The first step of a macOS install downloads the pinned files on\nthis device; the last registers computer use with the agent.",
+      "enum": [
+        "waiting",
+        "downloading",
+        "installing",
+        "registering",
+        "done"
+      ],
+      "type": "string"
+    },
+    "AgentPreference": {
+      "description": "Which agent the person uses, or that they set one up themselves.",
+      "oneOf": [
+        {
+          "enum": [
+            "claude-code",
+            "codex"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Silo installs no agent; the person sets it up themselves.",
+          "type": "string"
+        }
+      ]
+    },
+    "AgentState": {
+      "oneOf": [
+        {
+          "const": "ready",
+          "description": "Installed at the version this Silo ships.",
+          "type": "string"
+        },
+        {
+          "const": "missing",
+          "description": "Not installed.",
+          "type": "string"
+        },
+        {
+          "const": "outdated",
+          "description": "Installed, but not at the version this Silo ships.",
+          "type": "string"
+        },
+        {
+          "const": "installing",
+          "description": "An install is running in the computer.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Not known: the computer is stopped or cannot be reached.",
+          "type": "string"
+        }
+      ]
+    },
     "AgentToolsState": {
       "oneOf": [
         {
@@ -91,6 +215,41 @@
       ],
       "type": "object"
     },
+    "AgentsInstallParams": {
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentId"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId",
+        "agent"
+      ],
+      "type": "object"
+    },
+    "AgentsListResult": {
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agents"
+      ],
+      "type": "object"
+    },
     "ApplicationComputer": {
       "description": "Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ApplicationComputer` (lines\n591-628). `kind` is the discriminator required by 10 §1.3 and is added by\nthe canonical API; source fields retain their names and omission behavior.",
       "properties": {
@@ -157,6 +316,10 @@
         "logs": {
           "items": true,
           "type": "array"
+        },
+        "needsStorageUpgrade": {
+          "description": "The computer's storage could not be moved to the protected layout of the new runtime. It\ncannot start until a later launch finishes the move; `attention` says why.",
+          "type": "boolean"
         },
         "pendingCheckpointRestore": {
           "anyOf": [
@@ -283,12 +446,366 @@
       ],
       "type": "object"
     },
+    "Approval": {
+      "description": "A call held for the owner's answer. Its method, parameters and summary never change\nafter it is made.",
+      "properties": {
+        "computerId": {
+          "description": "The computer whose agent asked.",
+          "type": "string"
+        },
+        "computerName": {
+          "description": "That computer's name when it asked.",
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decidedBy": {
+          "description": "The program the owner answered with (diagnostic only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decisionNote": {
+          "description": "The owner's note with the answer; the agent reads it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expiresAt": {
+          "description": "When a pending approval expires (RFC 3339).",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ApprovalKind"
+        },
+        "method": {
+          "description": "The method that runs on allow.",
+          "type": "string"
+        },
+        "note": {
+          "description": "The agent's own words on why it asks. Never part of the summary.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "params": {
+          "description": "The parameters that run on allow, as the engine checked them. A secret's value is\nnever shown."
+        },
+        "reason": {
+          "description": "Why an approval was cancelled or expired, in plain words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewDigest": {
+          "description": "The digest of the changes the merge is pinned to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewRequestId": {
+          "description": "The review request a merge shows its diff with (`changes.requests.show`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ApprovalState"
+        },
+        "summary": {
+          "description": "What is asked, written by the engine from the parameters.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "computerId",
+        "computerName",
+        "method",
+        "params",
+        "summary",
+        "state",
+        "createdAt",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "ApprovalDecision": {
+      "description": "The answer to an approval.",
+      "enum": [
+        "allow",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "ApprovalIdParams": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ApprovalKind": {
+      "description": "What a call that widens a computer's access asks the owner for.",
+      "oneOf": [
+        {
+          "const": "merge",
+          "description": "Bring a computer's changes into one the caller did not make.",
+          "type": "string"
+        },
+        {
+          "const": "replace_main",
+          "description": "Replace main with a fork.",
+          "type": "string"
+        },
+        {
+          "const": "github",
+          "description": "GitHub access: a repository, or write access.",
+          "type": "string"
+        },
+        {
+          "const": "secret",
+          "description": "A secret, or a secret's assignment to a computer.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "A wider network policy.",
+          "type": "string"
+        },
+        {
+          "const": "port",
+          "description": "A port published on the device.",
+          "type": "string"
+        },
+        {
+          "const": "ssh",
+          "description": "SSH access to a computer from outside.",
+          "type": "string"
+        },
+        {
+          "const": "access",
+          "description": "Access the caller does not have itself, handed to a computer it makes or forks.",
+          "type": "string"
+        },
+        {
+          "const": "container",
+          "description": "A container computer, which shares the device's kernel.",
+          "type": "string"
+        },
+        {
+          "const": "resources",
+          "description": "A new computer with more CPUs, memory or storage than the computer making it has.",
+          "type": "string"
+        }
+      ]
+    },
     "ApprovalMode": {
       "enum": [
         "ask",
         "auto"
       ],
       "type": "string"
+    },
+    "ApprovalOutcome": {
+      "description": "What the allowed call returned: its result, the job it started, or the error it ended\nwith.",
+      "properties": {
+        "error": {
+          "description": "Why the call did not run, or how it failed, in plain words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "jobId": {
+          "description": "The job the call started; the computer that asked may read it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": true
+      },
+      "type": "object"
+    },
+    "ApprovalRequiredDetails": {
+      "description": "The details of an `approval_required` error.",
+      "properties": {
+        "approvalId": {
+          "description": "The request the owner answers, once approvals are recorded.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/ApprovalKind"
+        },
+        "summary": {
+          "description": "What is asked, written by the engine from the call's parameters.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "ApprovalState": {
+      "description": "Where an approval stands.",
+      "oneOf": [
+        {
+          "enum": [
+            "denied"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "pending",
+          "description": "Waiting for an answer.",
+          "type": "string"
+        },
+        {
+          "const": "allowed",
+          "description": "Allowed; the engine ran the call, or is running it while `outcome` is absent.",
+          "type": "string"
+        },
+        {
+          "const": "cancelled",
+          "description": "Withdrawn by the computer that asked, or ended because that computer was deleted or\nthe review request it wraps was closed.",
+          "type": "string"
+        },
+        {
+          "const": "expired",
+          "description": "Nobody answered within seven days.",
+          "type": "string"
+        }
+      ]
+    },
+    "ApprovalsChangedPayload": {
+      "description": "The payload of `approvals.changed`.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ApprovalState"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ApprovalsDecideParams": {
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecision"
+        },
+        "id": {
+          "type": "string"
+        },
+        "note": {
+          "description": "Shown to the agent with the answer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "ApprovalsListParams": {
+      "properties": {
+        "computerId": {
+          "description": "Only approvals this computer asked for.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only approvals in this state."
+        }
+      },
+      "type": "object"
+    },
+    "ApprovalsListResult": {
+      "properties": {
+        "approvals": {
+          "description": "Newest first.",
+          "items": {
+            "$ref": "#/$defs/Approval"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "approvals"
+      ],
+      "type": "object"
+    },
+    "ApprovalsNoteParams": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "note": {
+          "description": "At most 500 characters; an empty note removes it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "note"
+      ],
+      "type": "object"
     },
     "Archive": {
       "properties": {
@@ -312,6 +829,13 @@
         },
         "destination": {
           "type": "string"
+        },
+        "leftOut": {
+          "description": "The login files the export removed from the computer it wrote, by the name the scan\ngives them. Traces of them may remain in the file's disk layers.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "name": {
           "type": "string"
@@ -366,6 +890,183 @@
       "enum": [
         "warning",
         "error"
+      ],
+      "type": "string"
+    },
+    "AuditCallerKind": {
+      "description": "Who made a recorded call.",
+      "oneOf": [
+        {
+          "const": "owner",
+          "description": "A program on this device, through the engine's own socket (the app, the command line).",
+          "type": "string"
+        },
+        {
+          "const": "device",
+          "description": "Another device, through Connections.",
+          "type": "string"
+        },
+        {
+          "const": "computer",
+          "description": "The agent inside a computer.",
+          "type": "string"
+        }
+      ]
+    },
+    "AuditEntry": {
+      "properties": {
+        "approvalId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "at": {
+          "description": "RFC 3339 time the call was answered.",
+          "type": "string"
+        },
+        "callerId": {
+          "description": "The computer's id for a computer, the key fingerprint for a device when it is known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "callerKind": {
+          "$ref": "#/$defs/AuditCallerKind"
+        },
+        "client": {
+          "description": "The name the calling program gave; diagnostic only, never an identity.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "computerId": {
+          "description": "The computer the call named, when it named one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "count": {
+          "default": 1,
+          "description": "How many times the same call was made in a row by the same caller. `at` is the\nfirst, `lastAt` the latest.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "jobId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastAt": {
+          "description": "RFC 3339 time of the latest of the `count` calls.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/AuditOutcome"
+        }
+      },
+      "required": [
+        "id",
+        "at",
+        "callerKind",
+        "method",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "AuditListParams": {
+      "properties": {
+        "beforeId": {
+          "description": "Only rows older than this row id (the `nextBeforeId` of the previous page).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "callerKind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuditCallerKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only rows of calls this kind of caller made."
+        },
+        "computerId": {
+          "description": "Only rows about this computer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "At most this many rows, newest first; 100 when left out, never more than 500.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AuditListResult": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/AuditEntry"
+          },
+          "type": "array"
+        },
+        "nextBeforeId": {
+          "description": "Pass as `beforeId` to read the next, older page; absent on the last page.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "AuditOutcome": {
+      "description": "How a recorded call ended.",
+      "enum": [
+        "ok",
+        "error",
+        "refused",
+        "asked"
       ],
       "type": "string"
     },
@@ -783,6 +1484,16 @@
     },
     "ChangesKeepParams": {
       "properties": {
+        "choices": {
+          "additionalProperties": {
+            "$ref": "#/$defs/KeepAnswer"
+          },
+          "description": "The answer for each item both sides changed, by item id (the `id` of a conflict, or\nof an entry in `changes.diff`). A repository takes `branch` or `main`; every other\nitem takes `fork` or `main`. An id that is not in the reviewed diff, or an answer the\nitem does not allow, fails the keep and names the item. Databases take no answer.\nChoices are checked against the reviewed diff and are not part of the review digest.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "dataOk": {
           "description": "Carry database changes even though no migration step covers them.",
           "type": [
@@ -825,6 +1536,16 @@
             "null"
           ]
         },
+        "skip": {
+          "description": "Item ids not to bring over even though they do not conflict. The same as answering\n`main`; the report calls them `skipped`.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "targetId": {
           "description": "The computer to keep into; defaults to the one the fork was made from.",
           "type": [
@@ -839,7 +1560,7 @@
       "type": "object"
     },
     "ChangesKeepResult": {
-      "description": "The final result of `changes.keep`. `status` is `kept`, `dry-run` or `refused`; a\nrefused keep did not change the target.",
+      "description": "The final result of `changes.keep`. `status` is `kept`, `dry-run` or `refused`; a\nrefused keep did not change the target. A keep that needs answers is `refused` with the\nreason `choices-needed`.",
       "properties": {
         "refusal": {
           "anyOf": [
@@ -989,6 +1710,16 @@
     },
     "ChangesRequestsKeepParams": {
       "properties": {
+        "choices": {
+          "additionalProperties": {
+            "$ref": "#/$defs/KeepAnswer"
+          },
+          "description": "The answer for each item both sides changed, by item id; see `changes.keep`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "dataOk": {
           "description": "Carry database changes even though no migration step covers them.",
           "type": [
@@ -1016,6 +1747,16 @@
         },
         "requestId": {
           "type": "string"
+        },
+        "skip": {
+          "description": "Item ids not to bring over even though they do not conflict; see `changes.keep`.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1234,6 +1975,13 @@
           "description": "`true` when the fork's changes differ from the ones the request was made from; a\nkeep of the request refuses. `None` when this cannot be told (a folder fork).",
           "type": [
             "boolean",
+            "null"
+          ]
+        },
+        "targetName": {
+          "description": "The name of the computer the request would be merged into, when it still exists.",
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -1474,6 +2222,17 @@
             "string",
             "null"
           ]
+        },
+        "networkPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The fork's network policy. Absent, the fork keeps its source's."
         },
         "newName": {
           "type": "string"
@@ -1877,6 +2636,156 @@
       },
       "required": [
         "argv"
+      ],
+      "type": "object"
+    },
+    "ComputerAccess": {
+      "description": "What one computer holds.",
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "github": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComputerAccessGitHub"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "networkPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which hosts it may reach."
+        },
+        "ports": {
+          "description": "Its ports published on this device.",
+          "items": {
+            "$ref": "#/$defs/PublishedPort"
+          },
+          "type": "array"
+        },
+        "secrets": {
+          "items": {
+            "$ref": "#/$defs/ComputerAccessSecret"
+          },
+          "type": "array"
+        },
+        "ssh": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComputerAccessSsh"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "computerId",
+        "name",
+        "secrets",
+        "ports"
+      ],
+      "type": "object"
+    },
+    "ComputerAccessGitHub": {
+      "properties": {
+        "allRepositories": {
+          "description": "Every repository the account reaches.",
+          "type": "boolean"
+        },
+        "allRepositoriesWrite": {
+          "description": "With `allRepositories`: whether it may push to them.",
+          "type": "boolean"
+        },
+        "method": {
+          "description": "`oauth` (the signed-in account) or `token` (a personal token).",
+          "type": "string"
+        },
+        "repositories": {
+          "items": {
+            "$ref": "#/$defs/ComputerAccessRepository"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "method",
+        "allRepositories",
+        "allRepositoriesWrite",
+        "repositories"
+      ],
+      "type": "object"
+    },
+    "ComputerAccessRepository": {
+      "properties": {
+        "repository": {
+          "description": "`owner/name`.",
+          "type": "string"
+        },
+        "write": {
+          "description": "Whether the computer may push to it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "repository",
+        "write"
+      ],
+      "type": "object"
+    },
+    "ComputerAccessSecret": {
+      "description": "A secret a computer holds: its name and where it may be sent. Never its value.",
+      "properties": {
+        "hosts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "hosts"
+      ],
+      "type": "object"
+    },
+    "ComputerAccessSsh": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "description": "`disabled`, `waiting`, `listening` or `error`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "port",
+        "state"
       ],
       "type": "object"
     },
@@ -2288,6 +3197,13 @@
       "oneOf": [
         {
           "properties": {
+            "agents": {
+              "description": "Agents to install during the new computer's first boot, after its setup. A failed\ninstall does not fail the creation: the creation job reports it and the agent\nlists as `missing`. Empty installs none. A macOS computer does not accept agents\nat creation yet (see the `macos` kind); `agents.install` installs one in a running\ncomputer of either kind. An agent that lists as `ready` is the computer's own\nreport, and a computer can claim it.",
+              "items": {
+                "$ref": "#/$defs/AgentId"
+              },
+              "type": "array"
+            },
             "configuration": {
               "$ref": "#/$defs/ComputerConfiguration"
             },
@@ -2300,6 +3216,17 @@
             "kind": {
               "const": "linux",
               "type": "string"
+            },
+            "networkPolicy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The new computer's network policy. Absent, it is open."
             },
             "requestId": {
               "type": [
@@ -2316,6 +3243,13 @@
         },
         {
           "properties": {
+            "agents": {
+              "description": "Not accepted yet: a macOS computer refuses a non-empty list, because its setup ends\nwith the computer stopped. Create the computer, start it, then install an agent\nwith `agents.install`. An agent that lists as `ready` is the computer's own report,\nand a computer can claim it.",
+              "items": {
+                "$ref": "#/$defs/AgentId"
+              },
+              "type": "array"
+            },
             "deviceId": {
               "type": [
                 "string",
@@ -2325,6 +3259,17 @@
             "kind": {
               "const": "macos",
               "type": "string"
+            },
+            "networkPolicy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The new computer's network policy. Absent, it is open."
             },
             "request": {
               "$ref": "#/$defs/MacosComputerCreateRequest"
@@ -2484,6 +3429,139 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "ComputerRebuildParams": {
+      "description": "`computers.rebuild`: the computer to rebuild, and whether to rebuild it although it is\nalready on the newest image. With `abandon`, nothing is rebuilt: an interrupted rebuild\nthat Silo could not settle is thrown away and the old computer is put back.",
+      "properties": {
+        "abandon": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "force": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "ComputerRebuildResult": {
+      "description": "The final result of `computers.rebuild`.",
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "undoName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId",
+        "name",
+        "undoName",
+        "image"
+      ],
+      "type": "object"
+    },
+    "ComputerRecipeResult": {
+      "properties": {
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent for a computer that was not built from a recipe."
+        }
+      },
+      "type": "object"
+    },
+    "ComputerResources": {
+      "properties": {
+        "cpus": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "diskGib": {
+          "default": null,
+          "description": "The disk the computer is configured with, in GiB: workspace plus runtime storage for a Linux computer, the disk for a macOS computer; absent from an engine that does not report it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "memoryGib": {
+          "description": "The memory the computer is configured with, in GiB.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "running": {
+          "description": "Whether the computer is running or starting.",
+          "type": "boolean"
+        },
+        "runtimeStorageGib": {
+          "default": null,
+          "description": "A Linux computer's runtime storage, in GiB; absent for a macOS computer.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "workspaceStorageGib": {
+          "default": null,
+          "description": "A Linux computer's workspace storage, in GiB; absent for a macOS computer.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "running",
+        "cpus",
+        "memoryGib"
+      ],
       "type": "object"
     },
     "ComputerRuntimeKind": {
@@ -2671,6 +3749,17 @@
             "string",
             "null"
           ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "ComputersAccessParams": {
+      "properties": {
+        "computerId": {
+          "type": "string"
         }
       },
       "required": [
@@ -3589,6 +4678,109 @@
       },
       "type": "object"
     },
+    "DeviceResources": {
+      "description": "`device.resources`: what this device has left, so an agent can judge whether another computer fits.",
+      "properties": {
+        "computers": {
+          "description": "The computers the caller may see: all of them for the owner, the caller and the computers it made otherwise.",
+          "items": {
+            "$ref": "#/$defs/ComputerResources"
+          },
+          "type": "array"
+        },
+        "diskFloorBytes": {
+          "description": "An agent inside a computer cannot start or create a computer below this much free disk.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "diskFreeBytes": {
+          "description": "Free space on the disk that holds computers.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "diskTotalBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "logicalCpus": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memoryAvailableBytes": {
+          "description": "Memory that can be given to a computer now; absent when the system cannot tell.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "memoryFloorBytes": {
+          "description": "An agent inside a computer cannot start or create a computer below this much free memory.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memoryPressure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryPressure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent where the system gives no level."
+        },
+        "memoryTotalBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message": {
+          "description": "One plain sentence about the state.",
+          "type": "string"
+        },
+        "runningComputers": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runningCpus": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runningMemoryGib": {
+          "description": "The memory the running computers were configured with, in GiB.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/ResourceState"
+        }
+      },
+      "required": [
+        "logicalCpus",
+        "memoryTotalBytes",
+        "diskFreeBytes",
+        "diskTotalBytes",
+        "runningComputers",
+        "runningMemoryGib",
+        "runningCpus",
+        "memoryFloorBytes",
+        "diskFloorBytes",
+        "state",
+        "message",
+        "computers"
+      ],
+      "type": "object"
+    },
     "DisplayAxis": {
       "maximum": 32767,
       "minimum": 0,
@@ -3745,7 +4937,9 @@
         "setup_incomplete",
         "screen_sharing_unavailable",
         "desktop_update_required",
-        "credential_access_denied"
+        "credential_access_denied",
+        "approval_required",
+        "resources_low"
       ],
       "type": "string"
     },
@@ -3769,6 +4963,17 @@
       "properties": {
         "code": {
           "$ref": "#/$defs/ErrorCode"
+        },
+        "details": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequiredDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For `approval_required`: what the call asks the owner for."
         },
         "diagnostics": {
           "anyOf": [
@@ -4554,6 +5759,36 @@
             "payload"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "event": {
+              "const": "approvals.changed",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/ApprovalsChangedPayload"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "subscription": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "subscription",
+            "deviceId",
+            "seq",
+            "payload"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -4636,6 +5871,13 @@
             "string",
             "null"
           ]
+        },
+        "includeLogins": {
+          "description": "The export keeps the logins in the file, so none will be left out.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
@@ -4651,6 +5893,10 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "leavesOut": {
+          "description": "The export removes these logins from the computer it writes: it is made from a copy\nthey are removed from. Traces of them may remain in the file's disk layers.",
+          "type": "boolean"
         },
         "logins": {
           "description": "Logins found, by tool name and path.",
@@ -4699,6 +5945,13 @@
         "deviceId": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "includeLogins": {
+          "description": "Keep the logins found on the computer in the file. By default an export of a Linux\ncomputer is made from a copy with the known login files removed; `archive.leftOut`\nof the result names them. Traces of them may remain in the file's disk layers.",
+          "type": [
+            "boolean",
             "null"
           ]
         },
@@ -5097,6 +6350,13 @@
     "FoldRequest": {
       "description": "A recorded request to review a fork. The engine keeps it until it is answered.",
       "properties": {
+        "approvalId": {
+          "description": "The approval that asks the owner to merge this request, when a computer's agent\nasked for the merge.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "closedReason": {
           "anyOf": [
             {
@@ -5450,6 +6710,7 @@
       "type": "object"
     },
     "GitHubPersonalTokenSaveParams": {
+      "description": "Superseded: a personal token is a secret of kind `github-token`. This still saves\nthe secret named `github-token`.",
       "properties": {
         "deviceId": {
           "type": [
@@ -5496,6 +6757,17 @@
         },
         "repositoryMode": {
           "$ref": "#/$defs/GitHubRepositoryMode"
+        },
+        "tokenMissing": {
+          "description": "Set by the engine when the token secret this computer chose no longer exists. The\ncomputer has no GitHub access until another token is chosen.",
+          "type": "boolean"
+        },
+        "tokenSecretId": {
+          "description": "With token access, the `github-token` secret the computer uses.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5618,7 +6890,8 @@
           ]
         },
         "personalToken": {
-          "$ref": "#/$defs/GitHubPersonalToken"
+          "$ref": "#/$defs/GitHubPersonalToken",
+          "description": "Superseded by `github-token` secrets; the state of the one named `github-token`."
         },
         "policyRevision": {
           "format": "uint64",
@@ -5701,96 +6974,161 @@
     },
     "GuestClientEnableParams": {
       "properties": {
-        "computerId": {
-          "type": "string"
-        },
-        "policy": {
-          "$ref": "#/$defs/GuestClientPolicy"
-        }
-      },
-      "required": [
-        "computerId",
-        "policy"
-      ],
-      "type": "object"
-    },
-    "GuestClientEnableResult": {
-      "description": "The token is shown here once; the engine keeps only its hash.",
-      "properties": {
-        "computerId": {
-          "type": "string"
-        },
-        "mintedAt": {
-          "type": "string"
-        },
-        "spoolDir": {
-          "type": "string"
-        },
-        "token": {
-          "type": "string"
-        },
-        "tokenPath": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "computerId",
-        "token",
-        "tokenPath",
-        "spoolDir",
-        "mintedAt"
-      ],
-      "type": "object"
-    },
-    "GuestClientPolicy": {
-      "description": "What the project settings allow the agent, resolved on the host when the token is\nminted (the engine has no project folder of its own). The in-guest client never keeps,\nso `fold` and `auto_keep` are not part of it.",
-      "properties": {
-        "agent": {
-          "description": "The agent name the settings were resolved for.",
+        "binaryPath": {
+          "description": "A `silo` program for Linux on this device to send into the computer instead of the one\nthis build ships (for development). It is checked inside the computer by its SHA-256\nlike the shipped one, and replaced by the shipped one at the computer's next start.",
           "type": [
             "string",
             "null"
           ]
         },
-        "forkSecrets": {
-          "default": [],
-          "description": "Secret names (`github` included) a fork made from inside may name. Empty by default.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "computerId": {
+          "type": "string"
         }
       },
+      "required": [
+        "computerId"
+      ],
       "type": "object"
     },
     "GuestClientStatus": {
+      "description": "Whether a computer has Silo's tools, and where they answer.",
       "properties": {
+        "components": {
+          "description": "What Silo keeps in the computer and how each piece fared at its last reconcile.",
+          "items": {
+            "$ref": "#/$defs/GuestComponentStatus"
+          },
+          "type": "array"
+        },
         "computerId": {
           "type": "string"
         },
         "enabled": {
           "type": "boolean"
         },
-        "mintedAt": {
+        "enabledAt": {
+          "description": "When the tools were turned on.",
           "type": [
             "string",
             "null"
           ]
         },
-        "policy": {
+        "endpointPath": {
+          "description": "Where the computer finds the address and its token.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "description": "The host name the computer reaches the channel by.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
           "anyOf": [
             {
-              "$ref": "#/$defs/GuestClientPolicy"
+              "$ref": "#/$defs/NetworkPolicyTiming"
             },
             {
               "type": "null"
             }
+          ],
+          "description": "When the computer's network lets it reach the channel: now, at its next start, or\nafter a restart."
+        },
+        "port": {
+          "description": "The channel's port on the device's loopback.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
           ]
+        },
+        "restartNeeded": {
+          "default": false,
+          "description": "The channel had to move to a new port while the computer's network still names the\nold one, which another program holds. The tools are not served, and no token is\nwritten, until the computer restarts.",
+          "type": "boolean"
+        },
+        "written": {
+          "default": false,
+          "description": "Whether the endpoint file was written into the computer by this call. A computer\nthat is not running gets it when it next starts.",
+          "type": "boolean"
         }
       },
       "required": [
         "computerId",
         "enabled"
+      ],
+      "type": "object"
+    },
+    "GuestComponentState": {
+      "description": "How one piece Silo keeps in a computer ended its last reconcile.",
+      "oneOf": [
+        {
+          "const": "ok",
+          "description": "In place and current.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "The step failed; the detail says why.",
+          "type": "string"
+        },
+        {
+          "const": "unavailable",
+          "description": "This build of Silo cannot provide the piece.",
+          "type": "string"
+        },
+        {
+          "const": "waiting",
+          "description": "Waiting for something else, such as an agent that is not installed yet.",
+          "type": "string"
+        },
+        {
+          "const": "removed",
+          "description": "Taken out on purpose because the tools were turned off.",
+          "type": "string"
+        }
+      ]
+    },
+    "GuestComponentStatus": {
+      "description": "A piece Silo puts into a computer and keeps current, with the result of its last reconcile\n(at every start of the computer, and when the tools are turned on or off).",
+      "properties": {
+        "at": {
+          "description": "Seconds since the epoch of that reconcile.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "detail": {
+          "description": "Why it failed or is waiting, in words for a person.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "`silo` (the program at `/usr/local/bin/silo`) or `silo-mcp` (its registration as an\nMCP server in Claude Code and Codex).",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/GuestComponentState"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "state",
+        "at"
       ],
       "type": "object"
     },
@@ -6688,7 +8026,7 @@
       "type": "string"
     },
     "HandshakeParams": {
-      "description": "`engine.handshake` parameters. `sshKey` is used by the Connections bridge\nto install the restricted key; local engine clients omit it.",
+      "description": "`engine.handshake` parameters. `sshKey` is used by the Connections bridge\nto install the restricted key; local engine clients omit it. `proof` answers the channel's\n[`ChannelChallenge`] on the channel inside a computer, and is required there (lowercase hex of\n[`channel_proof`]); `engine.sock` ignores it.",
       "properties": {
         "client": {
           "anyOf": [
@@ -6698,6 +8036,12 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "proof": {
+          "type": [
+            "string",
+            "null"
           ]
         },
         "protocol": {
@@ -7172,6 +8516,42 @@
             "data"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "computerId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "data": {
+              "$ref": "#/$defs/AgentInstallProgress"
+            },
+            "jobId": {
+              "$ref": "#/$defs/JobId"
+            },
+            "kind": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OperationKind2"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "source": {
+              "const": "agent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "jobId",
+            "data"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7197,6 +8577,9 @@
     "JobTerminalResultsSchema": {
       "description": "Terminal job values remain untagged on the wire. This catalogue roots every\nmethod-specific result schema and maps the defined job completion shapes.",
       "properties": {
+        "agents": {
+          "$ref": "#/$defs/AgentsListResult"
+        },
         "application_source": {
           "$ref": "#/$defs/ApplicationSource"
         },
@@ -7242,6 +8625,9 @@
         "push": {
           "$ref": "#/$defs/PushOperation"
         },
+        "rebuild": {
+          "$ref": "#/$defs/ComputerRebuildResult"
+        },
         "recipe_build": {
           "$ref": "#/$defs/RecipeBuildResult"
         },
@@ -7283,6 +8669,7 @@
         "requests_show",
         "requests_throw_away",
         "desktop",
+        "agents",
         "backup",
         "archive_inspection",
         "export_check",
@@ -7294,20 +8681,64 @@
         "engine_update_prepare",
         "push",
         "storage",
-        "update"
+        "update",
+        "rebuild"
       ],
       "type": "object"
     },
+    "KeepAnswer": {
+      "description": "How an item both sides changed is settled.",
+      "oneOf": [
+        {
+          "const": "fork",
+          "description": "The fork's version is written over main's.",
+          "type": "string"
+        },
+        {
+          "const": "main",
+          "description": "The item stays as main has it.",
+          "type": "string"
+        },
+        {
+          "const": "branch",
+          "description": "A repository only: the fork's commits arrive as a branch named `silo/<fork name>` and\nnothing is merged or checked out.",
+          "type": "string"
+        }
+      ]
+    },
     "KeepConflict": {
       "properties": {
+        "allowed": {
+          "default": [],
+          "description": "The answers that settle it; empty when none does.",
+          "items": {
+            "$ref": "#/$defs/KeepAnswer"
+          },
+          "type": "array"
+        },
         "detail": {
+          "type": "string"
+        },
+        "forkChange": {
+          "default": "",
+          "description": "What changed in the fork, in a few words.",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "description": "The id of the item, the key of its answer in `choices`; empty when no answer\nsettles the conflict (credentials).",
           "type": "string"
         },
         "item": {
           "type": "string"
         },
         "kind": {
-          "description": "`file`, `package`, `crontab`, `launch agent` or `git`.",
+          "description": "`file`, `package`, `crontab`, `git`, `credentials` or `destination`.",
+          "type": "string"
+        },
+        "mainChange": {
+          "default": "",
+          "description": "What changed on main, in a few words.",
           "type": "string"
         }
       },
@@ -7348,6 +8779,38 @@
       },
       "type": "object"
     },
+    "KeepItem": {
+      "description": "What happened to one item.",
+      "properties": {
+        "detail": {
+          "description": "The same in words.",
+          "type": "string"
+        },
+        "id": {
+          "description": "The item id.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`file`, `package`, `repository`, `crontab`, `launch agent` or `database`.",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "outcome": {
+          "description": "`brought-over`, `left-as-main` (answered `main`), `branch` (a repository's commits\nleft as a branch), `skipped` (listed in `skip`), `already-there` (main already holds\nit) or `not-combined` (a database).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "outcome",
+        "detail"
+      ],
+      "type": "object"
+    },
     "KeepRefusal": {
       "properties": {
         "conflicts": {
@@ -7363,7 +8826,7 @@
           "type": "string"
         },
         "reason": {
-          "description": "`divergent`, `database` or `git`.",
+          "description": "`choices-needed` (both sides changed items that have no answer yet: `conflicts` lists\nthem with the answers each allows), `database`, `credentials`, `changed` or\n`main-changed`. Older engines also said `divergent` and `git`.",
           "type": "string"
         }
       },
@@ -7384,8 +8847,24 @@
             "null"
           ]
         },
+        "fastForward": {
+          "default": null,
+          "description": "Whether main was unchanged since the fork was made, so nothing could conflict.\nAbsent when the keep stopped before main was looked at.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "fork": {
           "type": "string"
+        },
+        "items": {
+          "default": [],
+          "description": "What was done with each item, by id. Empty when the keep was refused.",
+          "items": {
+            "$ref": "#/$defs/KeepItem"
+          },
+          "type": "array"
         },
         "notes": {
           "items": {
@@ -8156,6 +9635,15 @@
       ],
       "type": "object"
     },
+    "MemoryPressure": {
+      "description": "The system's own reading of memory pressure.",
+      "enum": [
+        "normal",
+        "warning",
+        "critical"
+      ],
+      "type": "string"
+    },
     "MethodContractSchema": {
       "properties": {
         "params": {
@@ -8174,6 +9662,14 @@
     "MethodName": {
       "enum": [
         "activity.setup.read",
+        "approvals.cancel",
+        "approvals.decide",
+        "approvals.get",
+        "approvals.list",
+        "approvals.note",
+        "audit.list",
+        "agents.install",
+        "agents.list",
         "changes.keep",
         "changes.promote",
         "changes.request",
@@ -8202,6 +9698,7 @@
         "computers.configuration.change",
         "computers.configuration.read",
         "computers.configuration.retry",
+        "computers.access",
         "computers.create",
         "computers.credentials",
         "computers.delete",
@@ -8212,9 +9709,11 @@
         "computers.launch",
         "computers.list",
         "computers.restart",
+        "computers.rebuild",
         "computers.shell",
         "computers.start",
         "computers.stop",
+        "computers.recipe",
         "computers.tree",
         "connections.devices.connect",
         "connections.devices.health",
@@ -8233,6 +9732,7 @@
         "desktop.status",
         "device.dependencies",
         "device.facts",
+        "device.resources",
         "display.close",
         "display.native.attach",
         "display.show",
@@ -8314,6 +9814,8 @@
         "network.state",
         "network.unpublish",
         "network.urls",
+        "network.policy.get",
+        "network.policy.set",
         "notifications.list",
         "operations.cancel",
         "operations.job.acknowledge",
@@ -8326,8 +9828,10 @@
         "push.start",
         "push.status",
         "recipes.build",
+        "recipes.get",
         "recipes.list",
         "recipes.remove",
+        "recipes.save",
         "secrets.list",
         "secrets.remove",
         "secrets.retry",
@@ -8361,6 +9865,134 @@
             },
             "params": {
               "$ref": "#/$defs/DeviceParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.cancel",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalIdParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.decide",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalsDecideParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalIdParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalsListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.note",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalsNoteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "audit.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/AuditListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agents.install",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/AgentsInstallParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agents.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
             }
           },
           "required": [
@@ -8820,6 +10452,22 @@
         {
           "properties": {
             "method": {
+              "const": "computers.access",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputersAccessParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "computers.create",
               "type": "string"
             },
@@ -8980,6 +10628,22 @@
         {
           "properties": {
             "method": {
+              "const": "computers.rebuild",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerRebuildParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "computers.shell",
               "type": "string"
             },
@@ -9013,6 +10677,22 @@
           "properties": {
             "method": {
               "const": "computers.stop",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.recipe",
               "type": "string"
             },
             "params": {
@@ -9301,6 +10981,22 @@
           "properties": {
             "method": {
               "const": "device.facts",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/DeviceParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "device.resources",
               "type": "string"
             },
             "params": {
@@ -10612,6 +12308,38 @@
         {
           "properties": {
             "method": {
+              "const": "network.policy.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "network.policy.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/NetworkPolicySetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "notifications.list",
               "type": "string"
             },
@@ -10804,6 +12532,22 @@
         {
           "properties": {
             "method": {
+              "const": "recipes.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RecipeGetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "recipes.list",
               "type": "string"
             },
@@ -10825,6 +12569,22 @@
             },
             "params": {
               "$ref": "#/$defs/RecipeRemoveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.save",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RecipeSaveParams"
             }
           },
           "required": [
@@ -11168,6 +12928,134 @@
                 "$ref": "#/$defs/ComputerConfigurationProgress"
               },
               "type": "array"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.cancel",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.decide",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.get",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ApprovalsListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.note",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "audit.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/AuditListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agents.install",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agents.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/AgentsListResult"
             }
           },
           "required": [
@@ -11627,6 +13515,22 @@
         {
           "properties": {
             "method": {
+              "const": "computers.access",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ComputerAccess"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "computers.create",
               "type": "string"
             },
@@ -11787,6 +13691,22 @@
         {
           "properties": {
             "method": {
+              "const": "computers.rebuild",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "computers.shell",
               "type": "string"
             },
@@ -11824,6 +13744,22 @@
             },
             "result": {
               "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.recipe",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ComputerRecipeResult"
             }
           },
           "required": [
@@ -12115,6 +14051,22 @@
             },
             "result": {
               "$ref": "#/$defs/DeviceFacts"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "device.resources",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/DeviceResources"
             }
           },
           "required": [
@@ -13045,7 +14997,7 @@
               "type": "string"
             },
             "result": {
-              "$ref": "#/$defs/GuestClientEnableResult"
+              "$ref": "#/$defs/GuestClientStatus"
             }
           },
           "required": [
@@ -13437,6 +15389,38 @@
         {
           "properties": {
             "method": {
+              "const": "network.policy.get",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/NetworkPolicyState"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "network.policy.set",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/NetworkPolicyState"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "notifications.list",
               "type": "string"
             },
@@ -13642,6 +15626,22 @@
         {
           "properties": {
             "method": {
+              "const": "recipes.get",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/RecipeDocument"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "recipes.list",
               "type": "string"
             },
@@ -13663,6 +15663,22 @@
             },
             "result": {
               "type": "null"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.save",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/RecipeDocument"
             }
           },
           "required": [
@@ -14365,6 +16381,239 @@
       ],
       "type": "object"
     },
+    "NetworkPolicy": {
+      "description": "A computer's network policy, as the owner sets it.",
+      "properties": {
+        "hosts": {
+          "default": [],
+          "description": "Host patterns: `example.com` or `*.example.com` (which also covers\n`example.com`). Lowercase names only; no ports, no addresses. Used in allowlist mode.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "$ref": "#/$defs/NetworkPolicyMode"
+        },
+        "presets": {
+          "default": [],
+          "description": "Named host lists kept by the engine (`network.policy.get` lists them). Used in\nallowlist mode.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "NetworkPolicyHost": {
+      "description": "One host a computer in allowlist mode may reach, and why.",
+      "properties": {
+        "from": {
+          "description": "`list`, `preset:<name>`, `github` or `secret:<name>`.",
+          "type": "string"
+        },
+        "host": {
+          "description": "A host pattern, as in `NetworkPolicy::hosts`.",
+          "type": "string"
+        },
+        "ports": {
+          "description": "The TCP ports allowed to it.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "host",
+        "ports",
+        "from"
+      ],
+      "type": "object"
+    },
+    "NetworkPolicyMode": {
+      "description": "How much of the network a computer may reach.",
+      "oneOf": [
+        {
+          "const": "open",
+          "description": "Any public address, as every computer had before policies existed.",
+          "type": "string"
+        },
+        {
+          "const": "allowlist",
+          "description": "Only the hosts on its list, the hosts of its presets and the hosts its grants need.",
+          "type": "string"
+        },
+        {
+          "const": "closed",
+          "description": "No outbound traffic, not even name lookups.",
+          "type": "string"
+        }
+      ]
+    },
+    "NetworkPolicySetParams": {
+      "properties": {
+        "acceptPresets": {
+          "description": "When true, re-pins presets to their latest versions, accepting pending updates.\nA normal save preserves existing pins.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The policy the caller judged the change against. When it is given and the computer's\npolicy is now another, nothing is saved. The engine fills it in for a computer's\nagent narrowing its own network, so a narrowing cannot undo a change the owner made\nmeanwhile."
+        },
+        "policy": {
+          "$ref": "#/$defs/NetworkPolicy"
+        }
+      },
+      "required": [
+        "computerId",
+        "policy"
+      ],
+      "type": "object"
+    },
+    "NetworkPolicyState": {
+      "properties": {
+        "allowedHosts": {
+          "description": "Every host the computer may reach in allowlist mode, including those added for its\nGitHub access and its secrets. Empty in the other modes.",
+          "items": {
+            "$ref": "#/$defs/NetworkPolicyHost"
+          },
+          "type": "array"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "notices": {
+          "default": [],
+          "description": "Things to tell the owner about this policy, in plain words: a secret wildcard that is\nnot added to the list, or a policy that could not be read.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "policy": {
+          "$ref": "#/$defs/NetworkPolicy"
+        },
+        "presetUpdates": {
+          "default": [],
+          "description": "Presets of the policy that have an update to accept.",
+          "items": {
+            "$ref": "#/$defs/NetworkPresetUpdate"
+          },
+          "type": "array"
+        },
+        "presets": {
+          "items": {
+            "$ref": "#/$defs/NetworkPreset"
+          },
+          "type": "array"
+        },
+        "timing": {
+          "$ref": "#/$defs/NetworkPolicyTiming"
+        }
+      },
+      "required": [
+        "computerId",
+        "policy",
+        "allowedHosts",
+        "timing",
+        "presets"
+      ],
+      "type": "object"
+    },
+    "NetworkPolicyTiming": {
+      "description": "When a saved policy is in force.",
+      "oneOf": [
+        {
+          "const": "applied",
+          "description": "The computer runs with it now.",
+          "type": "string"
+        },
+        {
+          "const": "nextStart",
+          "description": "The computer is stopped; it starts with this policy.",
+          "type": "string"
+        },
+        {
+          "const": "nextRestart",
+          "description": "The computer is running with its previous rules and keeps them until it restarts.",
+          "type": "string"
+        }
+      ]
+    },
+    "NetworkPreset": {
+      "description": "A named host list the engine keeps.",
+      "properties": {
+        "hosts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "hosts"
+      ],
+      "type": "object"
+    },
+    "NetworkPresetUpdate": {
+      "description": "A preset whose list in this Silo has hosts the computer's policy was not approved with.\nThe computer keeps its approved list until the owner sets the policy again with the\nsame presets.",
+      "properties": {
+        "addedHosts": {
+          "description": "The hosts the update would add.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "addedHosts"
+      ],
+      "type": "object"
+    },
     "NetworkPublishParams": {
       "properties": {
         "computerId": {
@@ -14527,12 +16776,21 @@
       "type": "object"
     },
     "NoticeCategory": {
-      "enum": [
-        "failures",
-        "changes",
-        "completions"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "failures",
+            "changes",
+            "completions"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "approvals",
+          "description": "A computer's agent asks for something only the owner can allow.",
+          "type": "string"
+        }
+      ]
     },
     "NoticeComputer": {
       "properties": {
@@ -14553,6 +16811,13 @@
       "properties": {
         "computerId": {
           "type": "string"
+        },
+        "key": {
+          "description": "Only the notice with this key is gone; without it, every notice of the computer.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -15323,16 +17588,23 @@
           ]
         },
         "name": {
-          "description": "The recipe's name (`linux-dev`, or a file under `.silo/recipes/`).",
+          "description": "The recipe's name: a stored recipe (`linux-dev` is always there).",
           "type": "string"
         },
         "spec": {
-          "$ref": "#/$defs/RecipeSpec"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Build this spec instead of the stored recipe's."
         }
       },
       "required": [
-        "name",
-        "spec"
+        "name"
       ],
       "type": "object"
     },
@@ -15350,6 +17622,108 @@
       "required": [
         "recipe",
         "built"
+      ],
+      "type": "object"
+    },
+    "RecipeDefinition": {
+      "description": "A stored recipe: what builds the computer, and the rules that go with it.",
+      "properties": {
+        "commandsHidden": {
+          "description": "Set on an answer to a computer's agent: the command lines (`setup`, each service's\n`run`, the `migrate` and `after` hooks) were left out because they may hold secrets.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "files": {
+          "description": "Settings files merged into the computer from forks. Merging appends to it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "keep": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeepHooks"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Run when changes are merged into a computer built from this recipe."
+        },
+        "quiet": {
+          "description": "Process names and units stopped in a fork of a computer built from this recipe.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scrub": {
+          "description": "Absolute paths removed from such a fork.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "spec": {
+          "$ref": "#/$defs/RecipeSpec"
+        },
+        "test": {
+          "description": "The command that tests the project; a note for people and agents, never run by Silo.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "spec"
+      ],
+      "type": "object"
+    },
+    "RecipeDocument": {
+      "description": "A stored recipe with what the engine knows about it.",
+      "properties": {
+        "built": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeEntry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The build forks start from, when one exists for this exact spec."
+        },
+        "builtIn": {
+          "description": "Shipped with Silo (`linux-dev`) and not saved by anyone. Saving a recipe with this\nname replaces it until that recipe is removed.",
+          "type": "boolean"
+        },
+        "hash": {
+          "description": "Content hash of the normalized spec on the current image.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeDefinition"
+        },
+        "warnings": {
+          "description": "Things worth knowing about the recipe, such as a quiet service whose process name\ncannot be derived.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "builtIn",
+        "hash",
+        "recipe"
       ],
       "type": "object"
     },
@@ -15404,6 +17778,24 @@
       ],
       "type": "object"
     },
+    "RecipeGetParams": {
+      "properties": {
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "RecipeOs": {
       "enum": [
         "linux",
@@ -15453,6 +17845,31 @@
       },
       "type": "object"
     },
+    "RecipeRecord": {
+      "description": "The recipe a computer was built from, as it was when it was built. Forks have their\nsource's record.",
+      "properties": {
+        "builtAt": {
+          "type": "string"
+        },
+        "hash": {
+          "description": "Content hash of the normalized spec the computer was built from.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeDefinition"
+        }
+      },
+      "required": [
+        "name",
+        "hash",
+        "builtAt",
+        "recipe"
+      ],
+      "type": "object"
+    },
     "RecipeRemoveParams": {
       "properties": {
         "deviceId": {
@@ -15468,6 +17885,29 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "RecipeSaveParams": {
+      "properties": {
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Lowercase letters, digits, `-` and `_`. Saving over a name replaces that recipe;\ncomputers already built from it keep the text they were built from.",
+          "type": "string"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeDefinition"
+        }
+      },
+      "required": [
+        "name",
+        "recipe"
       ],
       "type": "object"
     },
@@ -15557,11 +17997,49 @@
       ],
       "type": "object"
     },
+    "RecipeSummary": {
+      "description": "One line of the recipe list.",
+      "properties": {
+        "built": {
+          "description": "A build of this exact spec exists.",
+          "type": "boolean"
+        },
+        "builtIn": {
+          "type": "boolean"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "os": {
+          "$ref": "#/$defs/RecipeOs"
+        }
+      },
+      "required": [
+        "name",
+        "builtIn",
+        "os",
+        "hash",
+        "built"
+      ],
+      "type": "object"
+    },
     "RecipesListResult": {
       "properties": {
         "recipes": {
+          "description": "The builds forks start from.",
           "items": {
             "$ref": "#/$defs/RecipeEntry"
+          },
+          "type": "array"
+        },
+        "saved": {
+          "default": [],
+          "description": "Every stored recipe, built or not.",
+          "items": {
+            "$ref": "#/$defs/RecipeSummary"
           },
           "type": "array"
         }
@@ -15729,6 +18207,26 @@
       ],
       "type": "object"
     },
+    "ResourceState": {
+      "description": "How short of memory or disk the device is, judged against the floors Silo keeps free.",
+      "oneOf": [
+        {
+          "const": "ok",
+          "description": "Enough is free.",
+          "type": "string"
+        },
+        {
+          "const": "low",
+          "description": "Less than twice the floor is free: starting another computer works but may slow the device.",
+          "type": "string"
+        },
+        {
+          "const": "critical",
+          "description": "Less than the floor is free: an agent inside a computer cannot start or create another.",
+          "type": "string"
+        }
+      ]
+    },
     "ResponseEnvelope": {
       "anyOf": [
         {
@@ -15805,6 +18303,13 @@
     },
     "Secret": {
       "properties": {
+        "account": {
+          "description": "The GitHub account a `github-token` secret belongs to, once GitHub confirmed it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "allowedDomains": {
           "items": {
             "type": "string"
@@ -15812,10 +18317,22 @@
           "type": "array"
         },
         "computerIds": {
+          "description": "For a `github-token` secret, the computers whose GitHub access uses it.",
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "connection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SecretConnection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether GitHub accepts a `github-token` secret."
         },
         "error": {
           "type": [
@@ -15825,6 +18342,11 @@
         },
         "id": {
           "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SecretKind",
+          "default": "generic",
+          "description": "`generic` secrets reach a computer as a placeholder for the hosts they allow;\n`github-token` secrets reach it only as its GitHub access. Absent on older engines."
         },
         "name": {
           "type": "string"
@@ -15853,6 +18375,30 @@
       ],
       "type": "object"
     },
+    "SecretConnection": {
+      "properties": {
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/SecretConnectionState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "SecretConnectionState": {
+      "enum": [
+        "connected",
+        "disconnected"
+      ],
+      "type": "string"
+    },
     "SecretIdParams": {
       "properties": {
         "deviceId": {
@@ -15870,6 +18416,13 @@
       ],
       "type": "object"
     },
+    "SecretKind": {
+      "enum": [
+        "generic",
+        "github-token"
+      ],
+      "type": "string"
+    },
     "SecretSaveAction": {
       "enum": [
         "add",
@@ -15880,6 +18433,13 @@
     "SecretSaveRequest": {
       "properties": {
         "allowAnyDestination": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "allowSharedHosting": {
+          "description": "Confirms that the computers using the secret may reach every site under each wildcard\nhost over shared hosting among `allowed_domains`.",
           "type": [
             "boolean",
             "null"
@@ -15902,6 +18462,11 @@
             "string",
             "null"
           ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SecretKind",
+          "default": "generic",
+          "description": "A `github-token` secret takes no computers and no hosts here."
         },
         "name": {
           "type": "string"
@@ -15996,6 +18561,17 @@
       "additionalProperties": false,
       "description": "Known settings exposed by 60 §2.3. Unknown keys are rejected by the API;\ndisk migration and legacy preservation remain engine concerns.",
       "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentPreference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The agent the person uses; computers made later suggest it. `null` until chosen."
+        },
         "alphaNoticeDismissed": {
           "type": "boolean"
         },
@@ -16030,6 +18606,15 @@
         "computerUseAutoApproval": {
           "type": "boolean"
         },
+        "diskFloorGib": {
+          "description": "Free disk, in GiB, an agent inside a computer cannot start or create a computer below;\n`null` returns to the default (the larger of 10 GiB and 5 % of the disk).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "editor": {
           "type": "string"
         },
@@ -16051,7 +18636,19 @@
         "launchAtLogin": {
           "type": "boolean"
         },
+        "memoryFloorGib": {
+          "description": "Memory, in GiB, an agent inside a computer cannot start or create a computer below;\n`null` returns to the default (the larger of 4 GiB and 10 % of the device's memory).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "notificationsEnabled": {
+          "type": "boolean"
+        },
+        "notifyApprovals": {
           "type": "boolean"
         },
         "notifyChanges": {
@@ -16597,6 +19194,17 @@
     },
     "TerminalCommandParams": {
       "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Start this agent in the computer's workspace folder instead of a plain shell. The\nengine runs the agent's fixed command; nothing else can be named."
+        },
         "computerId": {
           "type": "string"
         },
@@ -17357,6 +19965,10 @@
   "type": "object",
   "x-silo-job-results": [
     {
+      "method": "agents.install",
+      "resultType": "AgentsListResult"
+    },
+    {
       "method": "changes.keep",
       "resultType": "ChangesKeepResult"
     },
@@ -17423,6 +20035,10 @@
     {
       "method": "computers.create",
       "resultType": "ApplicationSource | null"
+    },
+    {
+      "method": "computers.rebuild",
+      "resultType": "ComputerRebuildResult"
     },
     {
       "method": "computers.delete",
@@ -17519,6 +20135,54 @@
       "name": "activity.setup.read",
       "paramsType": "common::DeviceParams",
       "resultType": "Vec<computers::ComputerConfigurationProgress>"
+    },
+    {
+      "kind": "command",
+      "name": "approvals.cancel",
+      "paramsType": "approvals::ApprovalsCancelParams",
+      "resultType": "approvals::Approval"
+    },
+    {
+      "kind": "command",
+      "name": "approvals.decide",
+      "paramsType": "approvals::ApprovalsDecideParams",
+      "resultType": "approvals::Approval"
+    },
+    {
+      "kind": "query",
+      "name": "approvals.get",
+      "paramsType": "approvals::ApprovalsGetParams",
+      "resultType": "approvals::Approval"
+    },
+    {
+      "kind": "query",
+      "name": "approvals.list",
+      "paramsType": "approvals::ApprovalsListParams",
+      "resultType": "approvals::ApprovalsListResult"
+    },
+    {
+      "kind": "command",
+      "name": "approvals.note",
+      "paramsType": "approvals::ApprovalsNoteParams",
+      "resultType": "approvals::Approval"
+    },
+    {
+      "kind": "query",
+      "name": "audit.list",
+      "paramsType": "audit::AuditListParams",
+      "resultType": "audit::AuditListResult"
+    },
+    {
+      "kind": "job",
+      "name": "agents.install",
+      "paramsType": "agents::AgentsInstallParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "query",
+      "name": "agents.list",
+      "paramsType": "agents::AgentsListParams",
+      "resultType": "agents::AgentsListResult"
     },
     {
       "kind": "job",
@@ -17689,6 +20353,12 @@
       "resultType": "common::JobStartResult"
     },
     {
+      "kind": "query",
+      "name": "computers.access",
+      "paramsType": "approvals::ComputersAccessParams",
+      "resultType": "approvals::ComputerAccess"
+    },
+    {
       "kind": "job",
       "name": "computers.create",
       "paramsType": "computers::ComputerCreateParams",
@@ -17749,6 +20419,12 @@
       "resultType": "common::JobStartResult"
     },
     {
+      "kind": "job",
+      "name": "computers.rebuild",
+      "paramsType": "computers::ComputerRebuildParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
       "kind": "query",
       "name": "computers.shell",
       "paramsType": "computers::ComputerShellParams",
@@ -17765,6 +20441,12 @@
       "name": "computers.stop",
       "paramsType": "common::ComputerTargetParams",
       "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "query",
+      "name": "computers.recipe",
+      "paramsType": "common::ComputerTargetParams",
+      "resultType": "recipes::ComputerRecipeResult"
     },
     {
       "kind": "query",
@@ -17873,6 +20555,12 @@
       "name": "device.facts",
       "paramsType": "device::DeviceFactsParams",
       "resultType": "device::DeviceFacts"
+    },
+    {
+      "kind": "query",
+      "name": "device.resources",
+      "paramsType": "device::DeviceResourcesParams",
+      "resultType": "device::DeviceResources"
     },
     {
       "kind": "command",
@@ -18220,7 +20908,7 @@
       "kind": "command",
       "name": "guestClient.enable",
       "paramsType": "guest_client::GuestClientEnableParams",
-      "resultType": "guest_client::GuestClientEnableResult"
+      "resultType": "guest_client::GuestClientStatus"
     },
     {
       "kind": "command",
@@ -18362,6 +21050,18 @@
     },
     {
       "kind": "query",
+      "name": "network.policy.get",
+      "paramsType": "network::NetworkTargetParams",
+      "resultType": "network::NetworkPolicyState"
+    },
+    {
+      "kind": "command",
+      "name": "network.policy.set",
+      "paramsType": "network::NetworkPolicySetParams",
+      "resultType": "network::NetworkPolicyState"
+    },
+    {
+      "kind": "query",
       "name": "notifications.list",
       "paramsType": "notifications::NotificationsListParams",
       "resultType": "notifications::NotificationsListResult"
@@ -18434,6 +21134,12 @@
     },
     {
       "kind": "query",
+      "name": "recipes.get",
+      "paramsType": "recipes::RecipeGetParams",
+      "resultType": "recipes::RecipeDocument"
+    },
+    {
+      "kind": "query",
       "name": "recipes.list",
       "paramsType": "common::DeviceParams",
       "resultType": "recipes::RecipesListResult"
@@ -18443,6 +21149,12 @@
       "name": "recipes.remove",
       "paramsType": "recipes::RecipeRemoveParams",
       "resultType": "()"
+    },
+    {
+      "kind": "command",
+      "name": "recipes.save",
+      "paramsType": "recipes::RecipeSaveParams",
+      "resultType": "recipes::RecipeDocument"
     },
     {
       "kind": "query",

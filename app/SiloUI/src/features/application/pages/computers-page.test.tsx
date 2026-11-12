@@ -8,6 +8,7 @@ import { computerTarget } from "../model/connections"
 import { ComputersPage } from "./computers-page"
 import { createFixtureMacosComputersStore } from "@/fixtures/macos-computers"
 import { MacosComputersContext } from "@/features/macos-computers/model/macos-computers"
+import { withMacosComputers } from "../model/macos-application-computers"
 
 function activity(id: string, computer: string): ApplicationActivity {
   return { id, category: "computer", title: `Event ${id}`, detail: "", occurredAt: "2026-09-29T10:00:00.000Z", time: "10:00", tone: "danger", status: "completed", computer }
@@ -145,10 +146,13 @@ it("names a remote computer's Push button by its device", () => {
 it("lists a macOS computer on the Logs page and reads its logs by id", async () => {
   const source = structuredClone(applicationSourceForScenario("complete"))
   const queryLogs = vi.fn(async () => ({ entries: [], nextCursor: null, oldestAvailableTimestamp: null, newestAvailableTimestamp: null, totalMatches: 0, timestampEstimated: false }))
+  const store = createFixtureMacosComputersStore()
+  await store.refresh()
+  const listed = withMacosComputers(source, store.getSnapshot()).computers
   render(
-    <MacosComputersContext.Provider value={createFixtureMacosComputersStore()}>
+    <MacosComputersContext.Provider value={store}>
       <ComputersPage
-        source={source} section="logs" computers={source.computers} activities={[]} selectedComputerIds={new Set(["mac-running"])}
+        source={source} section="logs" computers={listed} activities={[]} selectedComputerIds={new Set(["mac-running"])}
         networkActions={{ queryLogs } as unknown as ApplicationActions} onSectionChange={vi.fn()} editor="Editor" onOpenEditor={vi.fn()}
         directoryStore={createDirectoryStore()} active logQuery="" repositoryPushOperations={[]} browser="Browser"
         onComputerFilterChange={vi.fn()} onLogQueryChange={vi.fn()} onPushRepository={vi.fn()} onDismissRepositoryPush={vi.fn()}

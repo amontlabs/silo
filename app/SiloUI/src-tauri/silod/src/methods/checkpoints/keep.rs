@@ -6,12 +6,12 @@ use silo_api::methods::{
     common::JobStartResult,
     keep::{
         ChangesKeepParams, ChangesPromoteParams, ChangesRequestParams, ChangesRequestResult,
-        ChangesUndoParams,
+        ChangesUndoParams, KeepAnswer,
     },
 };
 use silo_engine::{
     changes::{
-        keep::{service, store, Hooks, Request},
+        keep::{service, store, Answer, Choices, Hooks, Request},
         promote,
     },
     context::EngineContext,
@@ -25,6 +25,28 @@ use super::{
     HandlerContext,
 };
 
+/// The caller's answers and skips, as the engine reads them.
+pub(super) fn choices_of(
+    answers: Option<std::collections::BTreeMap<String, KeepAnswer>>,
+    skip: Option<Vec<String>>,
+) -> Choices {
+    Choices {
+        answers: answers
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, answer)| {
+                let answer = match answer {
+                    KeepAnswer::Fork => Answer::Fork,
+                    KeepAnswer::Main => Answer::Main,
+                    KeepAnswer::Branch => Answer::Branch,
+                };
+                (id, answer)
+            })
+            .collect(),
+        skip: skip.unwrap_or_default().into_iter().collect(),
+    }
+}
+
 pub(super) async fn keep(
     context: &HandlerContext,
     params: &Value,
@@ -37,6 +59,10 @@ pub(super) async fn keep(
         migrate: h.migrate,
         after: h.after,
     });
+    let save_recipe = matches!(
+        context.caller(),
+        silo_engine::policy::Caller::Owner { .. } | silo_engine::policy::Caller::Device { .. }
+    );
     let request = Request {
         fork: params.fork_id,
         target: params.target_id,
@@ -44,6 +70,10 @@ pub(super) async fn keep(
         dry_run: params.dry_run.unwrap_or(false),
         data_ok: params.data_ok.unwrap_or(false),
         reviewed: params.review_digest,
+        choices: choices_of(params.choices, params.skip),
+        save_recipe,
+        hide_recipe_commands: crate::methods::approvals::result_goes_to_computer(context),
+        ..Request::default()
     };
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
@@ -71,8 +101,9 @@ pub(super) async fn undo(
     let host = context.silod_context().runtime_host();
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
+    let pin = crate::methods::approvals::expected_pin();
     let started = tokio::task::spawn_blocking(move || {
-        promote::service::start_undo(host, checkpoints, manifests, params.computer_id)
+        promote::service::start_undo(host, checkpoints, manifests, params.computer_id, pin)
     })
     .await
     .map_err(|_| DispatchError::internal("The undo could not start."))?;
@@ -102,8 +133,9 @@ pub(super) async fn promote(
     };
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
+    let pin = crate::methods::approvals::expected_pin();
     let started = tokio::task::spawn_blocking(move || {
-        promote::service::start_promote(host, checkpoints, manifests, request)
+        promote::service::start_promote(host, checkpoints, manifests, request, pin)
     })
     .await
     .map_err(|_| DispatchError::internal("The promote could not start."))?;
@@ -147,4 +179,29 @@ pub(super) async fn request(
     .map_err(|_| DispatchError::internal("The request could not be recorded."))?
     .map_err(DispatchError::internal)?;
     output(ChangesRequestResult { request })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn answers_and_skips_reach_the_engine_as_the_caller_wrote_them() {
+        let choices = choices_of(
+            Some(
+                [
+                    ("repo:/root/app".to_owned(), KeepAnswer::Branch),
+                    ("file:/etc/x".to_owned(), KeepAnswer::Fork),
+                    ("package:dpkg:jq".to_owned(), KeepAnswer::Main),
+                ]
+                .into(),
+            ),
+            Some(vec!["cron:root".to_owned()]),
+        );
+        assert_eq!(choices.answers["repo:/root/app"], Answer::Branch);
+        assert_eq!(choices.answers["file:/etc/x"], Answer::Fork);
+        assert_eq!(choices.answers["package:dpkg:jq"], Answer::Main);
+        assert!(choices.skip.contains("cron:root"));
+        assert!(choices_of(None, None).is_empty());
+    }
 }

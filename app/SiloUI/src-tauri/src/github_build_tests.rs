@@ -48,6 +48,39 @@ fn missing_and_malformed_files_fail_without_echoing_values() {
 }
 
 #[test]
+fn malformed_value_fails_with_key_name_only_and_does_not_echo_value() {
+    let file = fixture();
+    // Non-string JSON value in local file
+    std::fs::write(
+        file.path(),
+        r#"{"SILO_GITHUB_APP_SLUG":"test-app","SILO_GITHUB_CLIENT_ID":"test-client","SILO_GITHUB_CLIENT_SECRET":123456789}"#,
+    )
+    .unwrap();
+    let error = github_build::configuration(file.path(), |_| None).unwrap_err();
+    assert!(error.contains("SILO_GITHUB_CLIENT_SECRET"));
+    assert!(!error.contains("123456789"));
+
+    // String with newline / carriage return / null
+    std::fs::write(
+        file.path(),
+        r#"{"SILO_GITHUB_APP_SLUG":"test-app","SILO_GITHUB_CLIENT_ID":"test-client","SILO_GITHUB_CLIENT_SECRET":"secret\nvalue"}"#,
+    )
+    .unwrap();
+    let error = github_build::configuration(file.path(), |_| None).unwrap_err();
+    assert!(error.contains("SILO_GITHUB_CLIENT_SECRET"));
+    assert!(!error.contains("secret"));
+
+    // Malformed environment value
+    let file = fixture();
+    let error = github_build::configuration(file.path(), |key| {
+        (key == "SILO_GITHUB_CLIENT_SECRET").then(|| "malformed-secret\n".to_string())
+    })
+    .unwrap_err();
+    assert!(error.contains("SILO_GITHUB_CLIENT_SECRET"));
+    assert!(!error.contains("malformed-secret"));
+}
+
+#[test]
 fn cargo_directive_injection_is_rejected() {
     let file = fixture();
     assert!(

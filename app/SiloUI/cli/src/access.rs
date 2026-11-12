@@ -11,9 +11,13 @@ use std::{
 
 use serde_json::{json, Value};
 use silo_api::methods::{
+    approvals::ComputersAccessParams,
     common::{ComputerTargetParams, DeviceParams},
     guest::GuestSshAliasEnsureParams,
-    network::{NetworkPublishParams, NetworkScheme, NetworkUnpublishParams},
+    network::{
+        NetworkPolicy, NetworkPolicyMode, NetworkPolicySetParams, NetworkPublishParams,
+        NetworkScheme, NetworkUnpublishParams,
+    },
     requests,
     ssh_access::{SshAccessConnectionParams, SshAccessSaveParams},
 };
@@ -23,6 +27,109 @@ use crate::{
     engine::{Computer, Engine},
     error::CliError,
 };
+
+// MARK: Network policy
+
+/// What `silo network policy` changes; empty shows the policy.
+#[derive(Debug, Default)]
+pub struct PolicyChange {
+    pub mode: Option<NetworkPolicyMode>,
+    pub allow: Vec<String>,
+    pub remove: Vec<String>,
+    pub presets: Vec<String>,
+}
+
+impl PolicyChange {
+    fn is_empty(&self) -> bool {
+        self.mode.is_none()
+            && self.allow.is_empty()
+            && self.remove.is_empty()
+            && self.presets.is_empty()
+    }
+
+    /// `policy` with this change: hosts and presets added, then removed (a name with no dot is
+    /// a preset), then the mode.
+    fn apply(&self, mut policy: NetworkPolicy) -> NetworkPolicy {
+        for host in &self.allow {
+            let host = host.trim().to_ascii_lowercase();
+            if !policy.hosts.contains(&host) {
+                policy.hosts.push(host);
+            }
+        }
+        for preset in &self.presets {
+            if !policy.presets.contains(preset) {
+                policy.presets.push(preset.clone());
+            }
+        }
+        for removed in &self.remove {
+            let removed = removed.trim().to_ascii_lowercase();
+            policy.hosts.retain(|host| *host != removed);
+            policy.presets.retain(|preset| *preset != removed);
+        }
+        if let Some(mode) = self.mode {
+            policy.mode = mode;
+        }
+        policy
+    }
+}
+
+/// The policy the engine reported, as the engine will compare it on save.
+fn read_policy(state: &Value) -> Result<NetworkPolicy, CliError> {
+    serde_json::from_value(state["policy"].clone())
+        .map_err(|_| CliError::new("The engine returned an unreadable network policy."))
+}
+
+/// `silo network policy <computer>`: shows a computer's network policy, or changes it.
+pub async fn network_policy(
+    engine: &Engine,
+    name: &str,
+    change: &PolicyChange,
+) -> Result<Value, CliError> {
+    let computer = engine.computer(name).await?;
+    let current = engine
+        .call(requests::network_policy_get(ComputerTargetParams {
+            computer_id: computer.id.clone(),
+            device_id: None,
+        }))
+        .await?;
+    let state = if change.is_empty() {
+        current
+    } else {
+        engine
+            .call(requests::network_policy_set(NetworkPolicySetParams {
+                computer_id: computer.id.clone(),
+                device_id: None,
+                policy: change.apply(read_policy(&current)?),
+                expected: Some(read_policy(&current)?),
+                accept_presets: None,
+            }))
+            .await?
+    };
+    let mut value = state;
+    value["computer"] = json!(computer.name);
+    Ok(value)
+}
+
+// MARK: What a computer holds
+
+/// `computers.access` for one computer, or for every computer the caller can see.
+pub async fn held(engine: &Engine, name: Option<&str>) -> Result<Value, CliError> {
+    let computers = match name {
+        Some(name) => vec![engine.computer(name).await?],
+        None => engine.computers().await?,
+    };
+    let mut rows = Vec::new();
+    for computer in &computers {
+        rows.push(
+            engine
+                .call(requests::computers_access(ComputersAccessParams {
+                    computer_id: computer.id.clone(),
+                }))
+                .await?,
+        );
+    }
+    Ok(json!({ "computers": rows }))
+}
 
 // MARK: Ports
 
@@ -34,18 +141,16 @@ fn scheme_of(name: &str) -> Option<NetworkScheme> {
     }
 }
 
-/// The saved published ports of a computer, as the engine lists them.
+/// The saved published ports of a computer, as `computers.access` lists them: the read a
+/// computer may make of itself and of the computers it made, unlike `network.state`.
 async fn saved_ports(engine: &Engine, computer: &Computer) -> Result<Vec<Value>, CliError> {
-    let state = engine
-        .call(requests::network_state(DeviceParams { device_id: None }))
+    let held = engine
+        .call(requests::computers_access(ComputersAccessParams {
+            computer_id: computer.id.clone(),
+        }))
         .await?;
-    let row = state["computers"].as_array().and_then(|rows| {
-        rows.iter().find(|row| {
-            row["computerId"] == computer.id.as_str() || row["computer"] == computer.name.as_str()
-        })
-    });
-    Ok(row
-        .and_then(|row| row["ports"].as_array())
+    Ok(held["ports"]
+        .as_array()
         .map(|ports| {
             ports
                 .iter()
@@ -679,5 +784,30 @@ mod tests {
             fs::read_to_string(&b).unwrap(),
             "Host silo-b main.silo\n  User silo\n"
         );
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn a_change_adds_removes_and_sets_the_mode() {
+        let current = NetworkPolicy {
+            mode: NetworkPolicyMode::Open,
+            hosts: vec!["a.example.com".into()],
+            presets: vec!["npm".into()],
+        };
+        let change = PolicyChange {
+            mode: Some(NetworkPolicyMode::Allowlist),
+            allow: vec!["B.Example.com".into(), "a.example.com".into()],
+            remove: vec!["a.example.com".into(), "npm".into()],
+            presets: vec!["pypi".into()],
+        };
+        let changed = change.apply(current);
+        assert_eq!(changed.mode, NetworkPolicyMode::Allowlist);
+        assert_eq!(changed.hosts, ["b.example.com"]);
+        assert_eq!(changed.presets, ["pypi"]);
+        assert!(PolicyChange::default().is_empty());
     }
 }

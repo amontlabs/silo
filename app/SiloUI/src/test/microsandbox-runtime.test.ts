@@ -11,6 +11,7 @@ import {
   runtimeTargets,
   MICROSANDBOX_PATCHES,
   MICRO_SANDBOX_VERSION,
+  MICROSANDBOX_BUILD_TOOLCHAIN,
   resolveRuntimeTarget,
   selectRuntime,
   sha256,
@@ -154,12 +155,12 @@ describe("bundled MicroSandbox release staging", () => {
     expect((await stat(staged.executablePath)).mode & 0o777).toBe(0o755)
     const manifest = JSON.parse(await readFile(staged.manifestPath, "utf8"))
     expect(manifest).toMatchObject({
-      microsandboxVersion: "0.7.6",
+      microsandboxVersion: MICRO_SANDBOX_VERSION,
       targetTriple,
       executable: {
         bundledName: "msb",
         sha256: sha256(executable),
-        sourceCommit: "09df3d4b9d832adaede1fb9a198cfc660bfab8cd",
+        sourceCommit: JSON.parse(readFileSync("runtime-inputs.json", "utf8")).sourceCommit,
         patchSha256s: MICROSANDBOX_PATCHES.map((_, index) => sha256(patches[index])),
         officialReleaseAsset: "msb-darwin-aarch64",
       },
@@ -194,6 +195,8 @@ describe("bundled MicroSandbox release staging", () => {
     let outdatedCachedInstance = false
     let outdatedCachedStaging = false
     let outdatedCachedNoStdin = false
+    let outdatedCachedRestoreStrict = false
+    let outdatedCachedRestoreHelp = false
     const sourceArtifact = { url: "https://example.test/source.tar.gz", sha256: sha256(source) }
     const selected = {
       ...runtimeTargets[targetTriple],
@@ -217,7 +220,7 @@ describe("bundled MicroSandbox release staging", () => {
     // Exercise the real download verifier, build-cache lookup, compiler orchestration,
     // and staged bytes. Only external tools are replaced with deterministic fixtures.
     const compiler = ((command: string, args: string[], options: ExecFileSyncOptions) => {
-      if (command === "rustc") return "rustc 1.94.0 (fixture)"
+      if (command === "rustc") return `rustc ${MICROSANDBOX_BUILD_TOOLCHAIN} (fixture)`
       if (command === "/usr/bin/tar") {
         mkdirSync(join(args[args.indexOf("-C") + 1], "source"), { recursive: true })
         return ""
@@ -241,14 +244,17 @@ describe("bundled MicroSandbox release staging", () => {
         if (outdatedCachedAccount && !command.includes("cargo-target") && args[0] === "--silo-working-account-protocol") return "0"
         if (outdatedCachedStdin && !command.includes("cargo-target") && args[0] === "--silo-secret-values-protocol") return "0"
         if (outdatedCachedInstance && !command.includes("cargo-target") && args[0] === "--silo-runtime-instance-protocol") return "0"
-        if (["--silo-storage-protocol", "--silo-desktop-protocol", "--silo-github-token-protocol", "--silo-github-protocol", "--silo-working-account-protocol", "--silo-secret-values-protocol", "--silo-runtime-instance-protocol"].includes(args[0])) return "1"
+        if (outdatedCachedRestoreStrict && !command.includes("cargo-target") && args[0] === "--silo-restore-strict-protocol") return "0"
+        if (["--silo-storage-protocol", "--silo-desktop-protocol", "--silo-github-token-protocol", "--silo-github-protocol", "--silo-working-account-protocol", "--silo-secret-values-protocol", "--silo-runtime-instance-protocol", "--silo-restore-strict-protocol"].includes(args[0])) return "1"
         if (args[0] === "--version") return `msb ${MICRO_SANDBOX_VERSION}`
         if (outdatedCachedStaging && !command.includes("cargo-target") && args[0] === "snapshot" && args[1] === "load") return "--group"
         if (args.includes("--help")) {
           const oldFlags = "--mount-owned --no-start --progress-json"
           const currentFlags = `${oldFlags} --no-stdin`
           if (args[0] === "snapshot") return "--from-sandbox --group --dest-dir --full --guest-flush --integrity --stage-id"
-          if (args[0] === "restore") return "--cow-mem --name"
+          if (args[0] === "restore") {
+            return outdatedCachedRestoreHelp && !command.includes("cargo-target") ? "--cow-mem --name" : "--cow-mem --name --net-strict"
+          }
           if (outdatedCachedNoStdin && !command.includes("cargo-target") && args[0] === "exec") return oldFlags
           return outdatedCachedSsh && !command.includes("cargo-target") && args[0] === "ssh"
             ? oldFlags
@@ -344,6 +350,25 @@ describe("bundled MicroSandbox release staging", () => {
         vi.stubEnv("CARGO_PROFILE_RELEASE_DEBUG", "2")
         await stage()
         expect(compilations).toBe(15)
+
+        // A cached runtime whose restore cannot take --net-strict is rebuilt, by its probe or
+        // by its help.
+        outdatedCachedRestoreStrict = true
+        await stage()
+        expect(compilations).toBe(16)
+        outdatedCachedRestoreStrict = false
+        outdatedCachedRestoreHelp = true
+        await stage()
+        expect(compilations).toBe(17)
+        outdatedCachedRestoreHelp = false
+        await stage()
+        expect(compilations).toBe(17)
+
+        // A change to the gateway's published-port code rebuilds it.
+        const ports = join(appRoot, "src-tauri/macos-gateway/src/ports.rs")
+        await writeFile(ports, `${await readFile(ports, "utf8")}\n// changed\n`)
+        await stage()
+        expect(compilations).toBe(18)
       })
     } finally {
       vi.unstubAllEnvs()

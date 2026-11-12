@@ -1466,13 +1466,13 @@ mod tests {
     #[test]
     fn failed_version_probe_reports_stderr_or_exit_status_instead_of_successful_stdout() {
         match version_probe(
-            "printf 'msb 0.7.6'; printf ' specific failure \\n' >&2; exit 23",
+            "printf 'msb 0.7.14'; printf ' specific failure \\n' >&2; exit 23",
             &[],
         ) {
             Err(ProbeError::Unsupported(detail)) => assert_eq!(detail, "specific failure"),
             result => panic!("failed probe was not rejected: {result:?}"),
         }
-        match version_probe("printf 'msb 0.7.6'; exit 7", &[]) {
+        match version_probe("printf 'msb 0.7.14'; exit 7", &[]) {
             Err(ProbeError::Unsupported(detail)) => {
                 assert_eq!(detail, "version check exited with exit status: 7")
             }
@@ -1923,11 +1923,11 @@ mod tests {
     #[test]
     fn maps_actual_version_results_to_specific_states_and_captions() {
         assert_eq!(
-            microsandbox_version_result(Ok("msb 0.7.6".into())),
+            microsandbox_version_result(Ok("msb 0.7.14".into())),
             DependencyCheck::pass(
                 "runtime-microsandbox",
                 "MicroSandbox runtime",
-                "Bundled msb 0.7.6 · libkrunfw 5.6.1"
+                "Bundled msb 0.7.14 · libkrunfw 5.6.1"
             )
         );
         assert_eq!(

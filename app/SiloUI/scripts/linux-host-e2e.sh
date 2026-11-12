@@ -1244,7 +1244,7 @@ time.sleep(60)' "$address" "$port" "$scratch/idle-held" &
   wait "$idle" 2>/dev/null || true
 }
 
-# SSH, SFTP, a terminal, the editor's proxy and the in-guest client, which a container computer has
+# SSH, SFTP, a terminal, the editor's proxy and Silo's tools, which a container computer has
 # through the same commands as a virtual machine.
 container_access_features() {
   local scratch host
@@ -1340,26 +1340,25 @@ container_access_features() {
   remove_editor_key
   expect "authorized key removed" "$(grep -c silo-e2e-editor "$home/ssh/authorized_keys" || true)" 0
 
-  step "Installing the in-guest client in $ctr"
+  step "Silo's tools in $ctr"
   mkdir -p "$scratch/project"
-  (cd "$scratch/project" && "$silo" guest-client install "$ctr" --binary "$silo")
+  (cd "$scratch/project" && "$silo" tools enable "$ctr" --binary "$silo")
   expect "client binary" "$(in_container sh -c 'test -x /usr/local/bin/silo && echo installed')" installed
   expect "client account" "$(in_container id -u)" 1001
-  expect "bridge folder owner" "$(in_container stat -c %U /.msb/silo-bridge)" silo
+  expect "endpoint file" "$(in_container sh -c 'test -r /etc/silo/endpoint.json && echo readable')" readable
   local listed_inside
-  listed_inside=$(in_container silo --in-guest --json list)
+  listed_inside=$(in_container silo --json list)
   if ! grep -q "\"$ctr\"" <<<"$listed_inside"; then
-    echo "the in-guest client did not list $ctr: $listed_inside" >&2
-    engine_find -path "*sandboxes/$ctr/runtime" -exec ls -lan {} \; >&2 || true
+    echo "silo inside $ctr did not list it: $listed_inside" >&2
     exit 1
   fi
-  echo "in-guest list: ok"
-  # The client reaches only its own computer and forks; a keep is not offered at all.
-  if in_container silo --in-guest keep "$ctr" >/dev/null 2>&1; then
-    echo "the in-guest client ran a keep" >&2
+  echo "list inside the computer: ok"
+  # The engine answers a computer's calls as that computer: an owner-only call is refused.
+  if in_container silo secrets list >/dev/null 2>&1; then
+    echo "silo inside $ctr read the device's secrets" >&2
     exit 1
   fi
-  (cd "$scratch/project" && "$silo" guest-client revoke "$ctr") >/dev/null
+  (cd "$scratch/project" && "$silo" tools disable "$ctr") >/dev/null
   rm -rf "$scratch"
 }
 

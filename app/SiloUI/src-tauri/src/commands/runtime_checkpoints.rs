@@ -53,6 +53,7 @@ pub(crate) async fn fork(
             secrets: Vec::new(),
             quiet: None,
             recipe_hash: None,
+            network_policy: None,
         }),
     )
     .await

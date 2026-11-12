@@ -22,6 +22,24 @@ const AUTHORIZATION_REJECTED: &str = "GitHub rejected the authorization.";
 pub(crate) fn authorization_rejected(error: &str) -> bool {
     error.starts_with(AUTHORIZATION_REJECTED)
 }
+/// GitHub answered that the credential itself is not valid.
+pub(crate) const CREDENTIALS_REJECTED: &str = "GitHub rejected the credentials.";
+/// Whether a failed request ended because GitHub said the credential is not valid, as opposed
+/// to a network failure, a server error or a rate limit, which say nothing about it.
+pub(crate) fn credentials_rejected(error: &str) -> bool {
+    error.starts_with(CREDENTIALS_REJECTED)
+}
+/// A 401, or a 403 whose body says the credentials are bad. A rate limit never counts.
+fn rejects_credentials(status: u16, rate_limited: bool, body: &Value) -> bool {
+    if rate_limited {
+        return false;
+    }
+    status == 401
+        || (status == 403
+            && body["message"]
+                .as_str()
+                .is_some_and(|message| message.to_ascii_lowercase().contains("bad credentials")))
+}
 static CLIENT: OnceLock<Client> = OnceLock::new();
 static GATES: OnceLock<Mutex<Gates>> = OnceLock::new();
 /// GitHub limits each credential separately, so a limit reached with one credential
@@ -386,15 +404,15 @@ fn response(
     let rate = is_rate_limit(status, &headers, &body);
     let retryable = retryable_response(status, &headers, &body, safe);
     let message = if rate {
-        "GitHub is limiting requests."
-    } else if status == 401 {
-        "GitHub authorization expired or was revoked. Reconnect GitHub."
+        "GitHub is limiting requests.".to_owned()
+    } else if rejects_credentials(status, rate, &body) {
+        format!("{CREDENTIALS_REJECTED} Reconnect GitHub.")
     } else if status == 403 {
-        "GitHub refused this request. Check the App's repository permissions."
+        "GitHub refused this request. Check the App's repository permissions.".to_owned()
     } else {
-        "GitHub access could not be updated."
+        "GitHub access could not be updated.".to_owned()
     };
-    Err(failure(request, retryable, floor, rate, message, safe))
+    Err(failure(request, retryable, floor, rate, &message, safe))
 }
 /// Only fixed GitHub destinations are accepted. Tokens never follow redirects.
 pub(crate) enum Authentication {
@@ -578,6 +596,23 @@ pub(crate) fn assert_bearer_retry_isolated(retry: impl FnOnce(&str)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_an_answer_about_the_credentials_rejects_them() {
+        let bad = serde_json::json!({"message":"Bad credentials"});
+        let limit = serde_json::json!({"message":"API rate limit exceeded"});
+        assert!(rejects_credentials(401, false, &Value::Null));
+        assert!(rejects_credentials(403, false, &bad));
+        assert!(!rejects_credentials(403, true, &bad));
+        assert!(!rejects_credentials(403, false, &limit));
+        for status in [404, 408, 429, 500, 502, 503] {
+            assert!(!rejects_credentials(status, false, &bad), "{status}");
+        }
+        assert!(credentials_rejected(&format!(
+            "{CREDENTIALS_REJECTED} Reconnect GitHub. Automatic retries stopped."
+        )));
+        assert!(!credentials_rejected("Cannot reach GitHub."));
+        assert!(!credentials_rejected("GitHub access update is waiting. Retrying in 2 seconds."));
+    }
     #[test]
     fn catalog_retry_preserves_ambiguous_writes_and_unrelated_reads() {
         let _test_state = crate::test_support::global_state();

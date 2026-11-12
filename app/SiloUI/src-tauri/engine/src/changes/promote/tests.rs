@@ -18,6 +18,10 @@ use super::{
     promote, promote_is_newest, recover_all, recover_one, undo, Info, Outcome, PromoteEnv, Request,
 };
 use crate::changes::keep::{lane, CheckpointRef, ManifestStore, Os};
+use crate::policy::{
+    handoff::Handoff,
+    store::{Created, Document, OwnedJob, Pending},
+};
 
 const MAIN: &str = "id-main";
 const FORK: &str = "id-fork";
@@ -53,6 +57,8 @@ struct Device {
     /// computer name -> cached proxy policy
     proxy_policy: BTreeSet<String>,
     checkpoints: Vec<(String, String)>,
+    /// Which computer's agent made which, with the pending computers and jobs it started.
+    makers: Document,
 }
 
 /// One promote test at a time (a test may hold several fakes): the lanes they take are keyed
@@ -120,6 +126,42 @@ impl Fake {
         device
             .proxy_policy
             .extend(["main".to_owned(), "try-it".to_owned()]);
+        let made = |id: &str, by: &str| Created {
+            id: id.into(),
+            created_by: by.into(),
+            at: 7,
+        };
+        let job = |id: &str, computer: Option<&str>| OwnedJob {
+            caller: MAIN.into(),
+            id: id.into(),
+            at: 9,
+            computer: computer.map(str::to_owned),
+        };
+        device.makers = Document {
+            version: 1,
+            created: vec![
+                made(FORK, MAIN),
+                made("kid", MAIN),
+                made("grandkid", "kid"),
+                made("fork-kid", FORK),
+            ],
+            pending: vec![Pending {
+                created_by: MAIN.into(),
+                name: "coming".into(),
+                id: None,
+                source: None,
+                job_id: Some("job:coming".into()),
+                at: 8,
+            }],
+            jobs: vec![
+                job("job:kid", Some("kid")),
+                job("job:coming", None),
+                job("job:fork", Some(FORK)),
+                job("job:self", Some(MAIN)),
+                job("job:unknown", None),
+            ],
+            kept: Vec::new(),
+        };
         Arc::new(Self {
             _serial: Serial::take(),
             os,
@@ -130,7 +172,11 @@ impl Fake {
     }
 
     fn snapshot(&self) -> Device {
-        self.device.lock().unwrap().clone()
+        let mut device = self.device.lock().unwrap().clone();
+        device.makers.created.sort_by(|a, b| a.id.cmp(&b.id));
+        device.makers.pending.sort_by(|a, b| a.name.cmp(&b.name));
+        device.makers.jobs.sort_by(|a, b| a.id.cmp(&b.id));
+        device
     }
 
     fn name_of(&self, id: &str) -> String {
@@ -239,6 +285,15 @@ impl PromoteEnv for Fake {
         Ok(Value::Object(out))
     }
 
+    fn export_makers(&self, fork_id: &str, target_id: &str) -> Result<Handoff, String> {
+        Ok(self
+            .device
+            .lock()
+            .unwrap()
+            .makers
+            .handoff(fork_id, target_id))
+    }
+
     fn apply(&self, step: Step, swap: &Swap) -> Result<(), String> {
         if *self.fail_apply.lock().unwrap() == Some(step) {
             // The failure happens after part of the work, as a real one would.
@@ -274,7 +329,10 @@ impl PromoteEnv for Fake {
                     d.alias.insert(swap.target_id.clone(), swap.fork_id.clone());
                     d.alias.insert(swap.fork_id.clone(), swap.target_id.clone());
                 }
-                Step::Lineage => {}
+                Step::Lineage => {
+                    d.makers
+                        .hand_over(&swap.fork_id, &swap.target_id, &swap.makers);
+                }
                 Step::MacosIdentity => {
                     d.proxy_policy.clear();
                     let main_ca = d.ca[&swap.target_id].clone();
@@ -336,7 +394,10 @@ impl PromoteEnv for Fake {
                         .insert(swap.target_id.clone(), swap.target_id.clone());
                     d.alias.insert(swap.fork_id.clone(), swap.fork_id.clone());
                 }
-                Step::Lineage => {}
+                Step::Lineage => {
+                    d.makers
+                        .hand_back(&swap.fork_id, &swap.target_id, &swap.makers);
+                }
                 Step::MacosIdentity => {
                     d.proxy_policy.insert(swap.target_name.clone());
                     d.proxy_policy.insert(swap.fork_name.clone());
@@ -556,6 +617,37 @@ fn undo_swaps_everything_back_exactly() {
             .unwrap()
             .is_none());
     }
+}
+
+#[test]
+fn an_undo_or_promote_whose_pin_moved_under_the_lanes_changes_nothing() {
+    let fake = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    promoted(&fake, &journal);
+    let before = fake.snapshot();
+    let moved = || Err("the pin moved".to_owned());
+    assert_eq!(
+        super::undo_checked(fake.as_ref(), &journal, FORK, Duration::from_secs(1), &moved).unwrap_err(),
+        "the pin moved"
+    );
+    assert_eq!(fake.snapshot(), before);
+    assert_eq!(journal.all()[0].state, State::Promoted);
+    let fresh = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    let before = fresh.snapshot();
+    assert_eq!(
+        super::promote_checked(
+            fresh.as_ref(),
+            &Lineage::new(Arc::new(Source::standard()), journal.clone()),
+            &journal,
+            &request(),
+            Duration::from_secs(1),
+            &moved
+        )
+        .unwrap_err(),
+        "the pin moved"
+    );
+    assert_eq!(fresh.snapshot(), before);
 }
 
 #[test]
@@ -816,6 +908,7 @@ fn a_crash_before_any_step_leaves_the_device_as_it_was() {
             },
             fork_was_running: false,
             target_was_running: false,
+            makers: Default::default(),
         },
         state: State::Promoting,
         at: 1,
@@ -1343,6 +1436,9 @@ impl PromoteEnv for Gated {
     fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String> {
         self.fake.export_bindings(id, name)
     }
+    fn export_makers(&self, fork_id: &str, target_id: &str) -> Result<Handoff, String> {
+        self.fake.export_makers(fork_id, target_id)
+    }
     fn apply(&self, step: Step, swap: &Swap) -> Result<(), String> {
         assert!(
             crate::runtime::operation_gate::held(),
@@ -1393,4 +1489,190 @@ fn a_promote_and_its_undo_run_through_the_real_gate() {
         .expect("the promote is undone");
     assert_eq!(stopped(env.fake.snapshot()), stopped(before));
     assert!(env.gate.is_idle());
+}
+
+fn made_by(device: &Device, creator: &str) -> BTreeSet<String> {
+    device.makers.made_by(creator).into_iter().collect()
+}
+
+fn ids(names: &[&str]) -> BTreeSet<String> {
+    names.iter().map(|name| (*name).to_owned()).collect()
+}
+
+fn job_callers(device: &Device) -> BTreeMap<String, String> {
+    device
+        .makers
+        .jobs
+        .iter()
+        .map(|job| (job.id.clone(), job.caller.clone()))
+        .collect()
+}
+
+fn assert_moved_to_the_fork(after: &Device) {
+    assert!(
+        made_by(after, MAIN).is_empty(),
+        "the old main makes nothing"
+    );
+    assert_eq!(
+        made_by(after, FORK),
+        ids(&["kid", "grandkid", "fork-kid"]),
+        "the new main makes what the old main made, and what it made itself"
+    );
+    assert!(
+        !after.makers.created.iter().any(|record| record.id == FORK),
+        "the new main is made by no one"
+    );
+    assert!(
+        !after.makers.created.iter().any(|record| record.id == MAIN),
+        "the old main is made by no one"
+    );
+    assert_eq!(after.makers.pending[0].created_by, FORK);
+    assert_eq!(
+        job_callers(after),
+        [
+            ("job:kid", FORK),
+            ("job:coming", FORK),
+            ("job:fork", FORK),
+            ("job:self", MAIN),
+            ("job:unknown", MAIN),
+        ]
+        .map(|(job, caller)| (job.to_owned(), caller.to_owned()))
+        .into(),
+        "jobs about the moved computers move with them"
+    );
+}
+
+#[test]
+fn a_promote_gives_what_the_old_main_made_to_the_new_main() {
+    let fake = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    assert_eq!(made_by(&fake.snapshot(), MAIN).len(), 4);
+    let after = promoted(&fake, &journal);
+    assert_moved_to_the_fork(&after);
+}
+
+#[test]
+fn an_undo_puts_back_who_made_which_exactly() {
+    let fake = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    let before = fake.snapshot().makers;
+    promoted(&fake, &journal);
+    undo(fake.as_ref(), &journal, FORK, Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    assert_eq!(fake.snapshot().makers, {
+        let mut want = before;
+        want.created.sort_by(|a, b| a.id.cmp(&b.id));
+        want.pending.sort_by(|a, b| a.name.cmp(&b.name));
+        want.jobs.sort_by(|a, b| a.id.cmp(&b.id));
+        want
+    });
+}
+
+#[test]
+fn a_computer_deleted_while_promoted_stays_deleted_after_an_undo() {
+    let fake = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    promoted(&fake, &journal);
+    fake.device
+        .lock()
+        .unwrap()
+        .makers
+        .created
+        .retain(|r| r.id != "kid");
+    undo(fake.as_ref(), &journal, FORK, Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    assert!(!fake
+        .snapshot()
+        .makers
+        .created
+        .iter()
+        .any(|record| record.id == "kid"));
+}
+
+#[test]
+fn the_new_main_takes_the_old_mains_place_under_the_computer_that_made_it() {
+    let fake = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    fake.device.lock().unwrap().makers.created.push(Created {
+        id: MAIN.into(),
+        created_by: "outer".into(),
+        at: 3,
+    });
+    let before = fake.snapshot().makers;
+    let after = promoted(&fake, &journal);
+    let record = |id: &str| after.makers.created.iter().find(|r| r.id == id);
+    assert_eq!(record(FORK).map(|r| r.created_by.as_str()), Some("outer"));
+    assert!(record(MAIN).is_none(), "the old main is made by no one");
+    assert_eq!(
+        made_by(&after, "outer"),
+        ids(&[FORK, "kid", "grandkid", "fork-kid"])
+    );
+    assert!(made_by(&after, MAIN).is_empty());
+
+    undo(fake.as_ref(), &journal, MAIN, Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    let mut want = before;
+    want.created.sort_by(|a, b| a.id.cmp(&b.id));
+    want.pending.sort_by(|a, b| a.name.cmp(&b.name));
+    want.jobs.sort_by(|a, b| a.id.cmp(&b.id));
+    assert_eq!(fake.snapshot().makers, want);
+}
+
+#[test]
+fn a_promote_finished_by_recovery_has_moved_who_made_which() {
+    let fake = Fake::new(Os::Linux);
+    fake.crash_after(Step::Quiet, false);
+    let (_dir, journal) = scratch_journal();
+    assert!(catch_unwind(AssertUnwindSafe(|| run(&fake, &journal, &request()))).is_err());
+    assert!(recover_all(fake.as_ref(), &journal).is_empty());
+    assert_eq!(journal.all()[0].state, State::Promoted);
+    assert_moved_to_the_fork(&fake.snapshot());
+
+    // The engine stopped after the step ran but before the journal marked it: the repeat
+    // changes nothing more.
+    let again = fake.snapshot();
+    let record = journal.all().remove(0);
+    fake.device
+        .lock()
+        .unwrap()
+        .makers
+        .hand_over(FORK, MAIN, &record.swap.makers);
+    assert_eq!(fake.snapshot().makers, again.makers);
+}
+
+#[test]
+fn a_promote_rolled_back_by_recovery_leaves_who_made_which_as_it_was() {
+    let fake = Fake::new(Os::Linux);
+    let before = fake.snapshot().makers;
+    fake.crash_after(Step::Lineage, false);
+    let (_dir, journal) = scratch_journal();
+    assert!(catch_unwind(AssertUnwindSafe(|| run(&fake, &journal, &request()))).is_err());
+    assert!(recover_all(fake.as_ref(), &journal).is_empty());
+    assert_eq!(journal.all()[0].state, State::Over);
+    let mut want = before;
+    want.created.sort_by(|a, b| a.id.cmp(&b.id));
+    want.pending.sort_by(|a, b| a.name.cmp(&b.name));
+    want.jobs.sort_by(|a, b| a.id.cmp(&b.id));
+    assert_eq!(fake.snapshot().makers, want);
+}
+
+#[test]
+fn an_undo_finished_by_recovery_puts_back_who_made_which() {
+    let fake = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    let mut want = fake.snapshot().makers;
+    promoted(&fake, &journal);
+    fake.crash_after(Step::Lineage, true);
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        undo(fake.as_ref(), &journal, FORK, Duration::from_secs(1))
+    }))
+    .is_err());
+    assert!(recover_all(fake.as_ref(), &journal).is_empty());
+    want.created.sort_by(|a, b| a.id.cmp(&b.id));
+    want.pending.sort_by(|a, b| a.name.cmp(&b.name));
+    want.jobs.sort_by(|a, b| a.id.cmp(&b.id));
+    assert_eq!(fake.snapshot().makers, want);
 }

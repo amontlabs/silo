@@ -1,5 +1,5 @@
-import { ChevronRight, Code, Cpu, GitBranch, Globe, Monitor, Play, Plus, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
-import { useId, type MouseEvent, type ReactNode } from "react"
+import { Bot, ChevronRight, Code, Cpu, GitBranch, Globe, Monitor, Play, Plus, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
+import { useId, useState, type MouseEvent, type ReactNode } from "react"
 
 import { ActionsMenu, type MenuAction, type MenuPopovers } from "@/components/actions-menu"
 import { SectionHeading } from "@/components/page"
@@ -16,7 +16,7 @@ import { ContainerBrowserNotice, OsBadge } from "@/features/computers/components
 import { ComputerEditor } from "@/features/computers/components/computer-editor"
 import { useComputerEditing } from "@/features/computers/model/use-computer-editing"
 import { computerBusyReason } from "@/features/computers/model/computer-presentation"
-import { computerCan } from "@/features/computers/model/computer-capabilities"
+import { computerCan, kindOf } from "@/features/computers/model/computer-capabilities"
 import { deviceCapacityFrom } from "@/features/computers/model/computer-limits"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
 import { DeleteComputerBody, type DeleteComputerDetails } from "@/features/computers/components/delete-computer-confirmation"
@@ -28,7 +28,10 @@ import { DisabledReason } from "@/features/application/components/disabled-reaso
 import { LifecycleControl } from "@/features/application/components/lifecycle-control"
 import type { LifecycleGuard } from "@/features/application/model/lifecycle-guard"
 import type { NetworkPort, ApplicationActions, ApplicationSource, ApplicationComputer, ComputerDetailTab, SshAccessComputer } from "@/features/application/model/application-source"
-import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
+import { macosNeedsSetup, useMacosComputers } from "@/features/macos-computers/model/macos-computers"
+import { MacosCheckpointPanel } from "@/features/macos-computers/components/macos-checkpoint-panel"
+import { MacosSetupPanel } from "@/features/macos-computers/components/macos-detail"
+import { macosDetailMenu } from "@/features/macos-computers/components/macos-detail-menu"
 import { computerNamesOnDevice, type ComputerCheckpoint } from "@/features/application/model/checkpoint-source"
 import { computerTarget } from "@/features/application/model/connections"
 import { computerAvailability } from "@/features/application/model/computer-availability"
@@ -41,6 +44,11 @@ import { NetworkPortForm, NetworkPortRowActions } from "@/features/application/c
 import { networkAddress, networkPortState, useNetworkPorts } from "@/features/application/components/network-ports-state"
 import { ComputerUseSection } from "@/desktop/computer-use-panel"
 import { PortStateLabel } from "@/features/application/components/application-ui"
+import { AgentsSection } from "@/features/agents/components/agents-section"
+import { openableAgents, openAgentLabel } from "@/features/agents/model/agents"
+import { useComputerAgents } from "@/features/agents/model/use-computer-agents"
+import { NetworkPolicySection } from "@/features/network-policy/components/network-policy-section"
+import { SilosToolsSection } from "@/features/network-policy/components/silos-tools-section"
 import { cn } from "@/lib/utils"
 
 /** Everything the detail page needs to edit or delete this computer in place, sharing the
@@ -78,8 +86,8 @@ export interface ComputerDetailControls {
   popovers?: MenuPopovers
   onTerminal: () => void
   onEditor: () => void
-  /** Opens the Linux desktop; absent when the computer has none. */
-  desktop?: { disabled: boolean; onClick: () => void }
+  /** Opens the desktop (a macOS computer's screen); absent when the computer has none. */
+  desktop?: { label?: string; disabled: boolean; onClick: () => void }
   /** Start and Stop go through the shared lifecycle guard; its prompts open next to the button. */
   lifecycleGuard: LifecycleGuard
   /** In-place Edit/Delete of this computer. Absent in read-only or standalone renders. */
@@ -93,7 +101,7 @@ export interface ComputerDetailControls {
   /** Jump to another section (Files/Network filtered to this computer, or the Secrets tab). */
   onNavigate?: (route: ApplicationInitialRoute) => void
   // Export a checkpoint's disks; progress is shown as a background toast.
-  onCheckpointExport?: (checkpoint: ComputerCheckpoint) => void
+  onCheckpointExport?: (checkpoint: Pick<ComputerCheckpoint, "id" | "name">) => void
   checkpointExportDisabled: boolean
   // Toast a created fork (with Open) and a restored checkpoint (with Start).
   onCheckpointForkedAction?: (name: string) => { label: string; onClick: () => void }
@@ -266,14 +274,14 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
   </Section>
 }
 
-function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, computerUse }: { computerUse?: ReactNode; computer: ApplicationComputer; source: ApplicationSource; actions: ApplicationActions; active: boolean; onEdit?: () => void; onNavigate?: (route: ApplicationInitialRoute) => void }) {
+function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, computerUse, agentsSection, toolsSection, networkSection }: { computerUse?: ReactNode; agentsSection?: ReactNode; toolsSection?: ReactNode; networkSection?: ReactNode; computer: ApplicationComputer; source: ApplicationSource; actions: ApplicationActions; active: boolean; onEdit?: () => void; onNavigate?: (route: ApplicationInitialRoute) => void }) {
   const { configuration } = computer
   const repositories = computer.repositories ?? []
   const extraGithub = (computer.githubRepositories ?? []).filter(name => !repositories.some(repo => repo.path.endsWith(name)))
   const hasRepositories = repositories.length > 0 || extraGithub.length > 0
 
   const resourceTitle = `CPUs at start: ${configuration.cpus} (maximum ${configuration.maxCPUs}) · Memory at start: ${configuration.memoryGiB} GiB (maximum ${configuration.maxMemoryGiB} GiB)`
-  const diskDetail = `Workspace disk: ${configuration.workspaceStorageGiB} GiB · Runtime disk: ${configuration.runtimeStorageGiB} GiB`
+  const diskDetail = computer.macos ? `Disk: ${configuration.workspaceStorageGiB} GiB` : `Workspace disk: ${configuration.workspaceStorageGiB} GiB · Runtime disk: ${configuration.runtimeStorageGiB} GiB`
 
   return <div className="grid gap-5">
     <Section label="Resources">
@@ -289,6 +297,10 @@ function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, co
 
     {computerUse}
 
+    {agentsSection}
+
+    {toolsSection}
+
     <Section label="Repositories" action={onNavigate ? <ViewAllAction label="View all files for this computer" onClick={() => onNavigate({ computerSection: "files", computer: configuration.id })} /> : undefined}>
       <ListCard divided={repositories.length + extraGithub.length > 1}>
         {hasRepositories ? <>
@@ -302,13 +314,15 @@ function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, co
             key={name}
             icon={<ListRowIcon aria-hidden="true"><GitBranch className="size-3.5" /></ListRowIcon>}
             title={<span className="truncate" title={name}>{name}</span>}
-            detail="Clones on next start"
+            detail={computer.macos ? "Access granted" : "Clones on next start"}
           />)}
-        </> : <EmptyState variant="inline" title="No repositories cloned yet" />}
+        </> : <EmptyState variant="inline" title={computer.macos ? "No repositories allowed" : "No repositories cloned yet"} />}
       </ListCard>
     </Section>
 
     <SecretsSection computer={computer} source={source} actions={actions} onNavigate={onNavigate} />
+
+    {networkSection}
 
     <PortsSection computer={computer} source={source} actions={actions} browser={source.preferences.browser} active={active} onNavigate={onNavigate} />
   </div>
@@ -320,10 +334,18 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
   actions: ApplicationActions
   controls: ComputerDetailControls
 }) {
-  const macosNames = useMacosComputers()?.snapshot.state?.computers.map(({ name }) => name) ?? []
+  const macos = useMacosComputers()
+  const macosNames = macos?.snapshot.state?.computers.map(({ name }) => name) ?? []
+  const macosStore = macos?.store
+  // A palette request or the Resources button opens a ⋯ popover without the menu.
+  const [panelRequest, setPanelRequest] = useState<{ token: number; panel: string }>()
   const { configuration } = computer
+  const kind = kindOf(computer)
   const target = computerTarget(computer)
   const state = computer.state
+  const agentsAvailable = Boolean(actions.listAgents) && computerCan(kind, "terminal") && !(computer.macos && macosNeedsSetup(computer.macos)) && !(computer.device && computer.device.connected === false)
+  const agents = useComputerAgents(actions.listAgents, target, agentsAvailable && controls.pageActive !== false, state)
+  const openAgents = actions.openAgent ? openableAgents(agents.agents) : []
   const canStop = state === "running" || state === "starting"
   // A starting or stopping computer can be neither edited nor deleted until it settles.
   const busyReason = computerBusyReason(computer)
@@ -344,6 +366,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
     draftKey: `computer-detail:${configuration.id}`,
   })
   const canEdit = Boolean(editingContext) && !controls.configurationLocked && !busyReason
+  const canEditMacos = Boolean(macosStore && computer.macos?.state === "stopped") && !controls.readOnly && !busyReason && !computer.macos?.pendingRestore?.memory
   const isEditing = Boolean(editing.editor)
   const editDeviceConfigurations = editingContext?.getDeviceId
     ? (editingContext.configurations).filter(item => (editingContext.getDeviceId!(item) ?? "") === editing.deviceId)
@@ -366,20 +389,21 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
       void editing.save({ ...vm, desktop: { startWithComputer: true } }, configuration.id, editingContext.getDeviceId?.(configuration) ?? "")
     },
   }) : []
-  const menuActions = [...controls.menuActions, ...editMenuActions]
+  const macosMenu = computer.macos && macosStore ? macosDetailMenu({ computer: computer.macos, store: macosStore, unavailable: controls.readOnly ? "Silo is read-only." : busyReason, onDeleted: controls.onBack }) : undefined
+  const menuActions = [...controls.menuActions, ...editMenuActions, ...(macosMenu?.items ?? [])]
 
   const access = source.sshAccess?.computers.find(row => row.computer === target)
-  const sshAvailable = Boolean(source.sshAccess || actions.refreshSshAccess) && computerCan(configuration, "sshAccess")
+  const sshAvailable = Boolean(source.sshAccess || actions.refreshSshAccess) && computerCan(kind, "sshAccess")
   const sshStale = Boolean((source.sshAccessError && !computer.device) || computer.device?.connected === false || computer.freshness === "stale")
   const pendingSecrets = !computer.device
     ? source.secrets.filter(secret => secret.state === "restart-required" && secret.computers.includes(configuration.name)).map(secret => secret.name)
     : []
 
-  const showStorage = !computer.device && Boolean(actions.readWorkspaceStorage)
+  const showStorage = !computer.device && computerCan(kind, "storage") && Boolean(actions.readWorkspaceStorage)
   const showAccess = sshAvailable
   const tabs: { value: ComputerDetailTab; label: string; visible: boolean }[] = [
     { value: "overview", label: "Overview", visible: true },
-    { value: "checkpoints", label: "Checkpoints", visible: true },
+    { value: "checkpoints", label: "Checkpoints", visible: computerCan(kind, "checkpoints") },
     { value: "storage", label: "Storage", visible: showStorage },
     { value: "access", label: "SSH", visible: showAccess },
   ]
@@ -394,12 +418,27 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
         if (await editing.deleteWithNotice(configuration)) controls.onBack()
       }}
     />,
+    ...macosMenu?.popovers,
   }
-  const menu = <ActionsMenu label={`More actions for ${configuration.name}`} items={menuActions} popovers={menuPopovers} openPanel={controls.menuRequest} />
+  const menu = <ActionsMenu label={`More actions for ${configuration.name}`} items={menuActions} popovers={menuPopovers} openPanel={panelRequest ?? controls.menuRequest} />
   const activeTab = visibleTabs.some(tab => tab.value === controls.activeTab) ? controls.activeTab : "overview"
 
   const reasons = controls.disabledReasons ?? {}
   const restartAvailability = computerAvailability(computer, source)
+  const overviewActive = activeTab === "overview" && controls.pageActive !== false
+  const restartFor = (reason: string) => <LifecycleControl guard={controls.lifecycleGuard} computer={computer} action="restart" disabled={controls.readOnly || !restartAvailability.canRestart} reason={controls.readOnly ? undefined : restartAvailability.reasons.restart}>
+    {({ onClick, disabled }) => <Button type="button" variant="outline" size="xs" aria-label={`Restart ${configuration.name} ${reason}`} disabled={disabled} onClick={onClick}><RotateCw aria-hidden="true" data-icon="inline-start" />Restart</Button>}
+  </LifecycleControl>
+  // The policy and the tools belong to the device that runs the computer, so a computer of another device has neither here.
+  const local = !computer.device && !(computer.macos && macosNeedsSetup(computer.macos))
+  const networkSection = local && actions.readNetworkPolicy
+    ? <NetworkPolicySection key={`network:${target}`} target={target} computerName={configuration.name} running={state === "running"} readOnly={controls.readOnly} enabled={overviewActive} refreshKey={state} actions={actions} restart={restartFor("to apply the network change")} />
+    : undefined
+  // The tools' status names the agents it found, so it is read again when an agent's state changes.
+  const toolsRefreshKey = `${state}:${agents.agents?.map(({ id, state: agentState }) => `${id}=${agentState}`).join(",") ?? ""}`
+  const toolsSection = local && actions.readComputerTools
+    ? <SilosToolsSection key={`tools:${target}`} target={target} computerName={configuration.name} running={state === "running"} readOnly={controls.readOnly} enabled={overviewActive} refreshKey={toolsRefreshKey} actions={actions} restart={restartFor("for Silo's tools")} />
+    : undefined
 
   return <TooltipProvider delayDuration={150}>
     <div className="flex h-full min-h-0 flex-col">
@@ -408,13 +447,14 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
           <button type="button" className={cn(listHeadingClassName, "shrink-0 rounded-sm hover:underline focus-ring")} onClick={controls.onBack}>Computers</button>
           <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className={cn(listHeadingClassName, "truncate")} title={configuration.name}>{configuration.name}</span>
-          {configuration.runtime === "container" && <OsBadge os="container" />}
+          {configuration.runtime === "container" && <OsBadge os="container" />}{computer.macos && <OsBadge os="macos" />}
         </nav>}
         subtitle={<span data-slot="computer-detail-status"><DetailSubtitle computer={computer} source={source} readOnly={controls.readOnly} pendingSecrets={pendingSecrets} sshAccess={access} sshStale={sshStale} onCancel={actions.cancelOperation} onOpenSsh={showAccess ? () => controls.onSelectTab("access") : undefined} /></span>}
         actions={<div className="flex shrink-0 items-center gap-1">
-          {computerCan(configuration, "terminal") && <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.terminal}`} disabled={!controls.canOpen} onClick={controls.onTerminal}><Terminal aria-hidden="true" data-icon="inline-start" />Terminal</Button></DisabledReason>}
-          {computerCan(configuration, "editor") && <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.editor}`} disabled={!controls.canOpen} onClick={controls.onEditor}><Code aria-hidden="true" data-icon="inline-start" />Editor</Button></DisabledReason>}
-          {controls.desktop && <Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} desktop`} disabled={controls.desktop.disabled} onClick={controls.desktop.onClick}><Monitor aria-hidden="true" data-icon="inline-start" />Desktop</Button>}
+          {computerCan(kind, "terminal") && <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.terminal}`} disabled={!controls.canOpen} onClick={controls.onTerminal}><Terminal aria-hidden="true" data-icon="inline-start" />Terminal</Button></DisabledReason>}
+          {openAgents.map(agent => <DisabledReason key={agent.id} reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={openAgentLabel(agent.id, configuration.name)} disabled={!controls.canOpen} onClick={() => actions.openAgent?.(target, agent.id)}><Bot aria-hidden="true" data-icon="inline-start" />{agent.name}</Button></DisabledReason>)}
+          {computerCan(kind, "editor") && <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.editor}`} disabled={!controls.canOpen} onClick={controls.onEditor}><Code aria-hidden="true" data-icon="inline-start" />Editor</Button></DisabledReason>}
+          {controls.desktop && <Button type="button" variant="outline" size="xs" aria-label={controls.desktop.label ? `${controls.desktop.label} of ${configuration.name}` : `Open ${configuration.name} desktop`} disabled={controls.desktop.disabled} onClick={controls.desktop.onClick}><Monitor aria-hidden="true" data-icon="inline-start" />{controls.desktop.label ?? "Desktop"}</Button>}
           {canStop
             ? <LifecycleControl guard={controls.lifecycleGuard} computer={computer} action="stop" disabled={!controls.canStop} reason={reasons.stop}>
               {({ onClick, disabled }) => <Button type="button" variant="outline" size="xs" aria-label={`Stop ${configuration.name}`} disabled={disabled} onClick={onClick}><Square aria-hidden="true" data-icon="inline-start" />{!disabled && controls.lifecycleGuard.check(computer, "stop").kind === "confirm" ? "Stop…" : "Stop"}</Button>}
@@ -433,6 +473,8 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
           {({ onClick, disabled }) => <Button variant="outline" size="xs" aria-label={`Restart ${configuration.name}`} disabled={disabled} onClick={onClick}><RotateCw aria-hidden="true" />Restart</Button>}
         </LifecycleControl>
       </div>}
+
+      {computer.macos && computer.state === "failed" && computer.macos.detail && !macosNeedsSetup(computer.macos) && <InlineAlert className="m-3 mb-0">{computer.macos.detail}</InlineAlert>}
 
       {isEditing && editing.editor ? (
         <ScrollArea className="min-h-0 flex-1">
@@ -464,6 +506,10 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
             </div>
           </Section>
         </ScrollArea>
+      ) : computer.macos && macosStore && macosNeedsSetup(computer.macos) ? (
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="pt-4"><MacosSetupPanel computer={computer.macos} store={macosStore} unavailable={controls.readOnly ? "Silo is read-only." : undefined} onDeleted={controls.onBack} /></div>
+        </ScrollArea>
       ) : (
       <Tabs value={activeTab} onValueChange={value => controls.onSelectTab(value as ComputerDetailTab)} className="flex min-h-0 flex-1 flex-col gap-0">
         <div className="relative z-10 border-b border-border">
@@ -473,10 +519,12 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
         </div>
         <ScrollArea className="min-h-0 flex-1">
           <div className="pt-4">
-            <TabsContent value="overview"><OverviewTab computer={computer} source={source} actions={actions} active={activeTab === "overview" && controls.pageActive !== false} onEdit={canEdit ? () => editing.startEdit(configuration) : undefined} onNavigate={controls.onNavigate} computerUse={configuration.desktop ? <>{configuration.runtime === "container" && <ContainerBrowserNotice className="mb-3" />}<ComputerUseSection key={target} computer={target} active={activeTab === "overview" && controls.pageActive !== false} /></> : undefined} /></TabsContent>
+            <TabsContent value="overview"><OverviewTab computer={computer} source={source} actions={actions} active={activeTab === "overview" && controls.pageActive !== false} onEdit={canEdit ? () => editing.startEdit(configuration) : canEditMacos ? () => setPanelRequest({ token: Date.now(), panel: "resources" }) : undefined} onNavigate={controls.onNavigate} networkSection={networkSection} toolsSection={toolsSection} agentsSection={agentsAvailable ? <AgentsSection target={target} computerName={configuration.name} running={state === "running"} offline={computer.freshness === "stale" && Boolean(computer.device)} agents={agents.agents} error={agents.error} loading={agents.loading} onReload={() => void agents.reload()} actions={actions} /> : undefined} computerUse={configuration.desktop || computer.macos?.setupComplete ? <>{configuration.runtime === "container" && <ContainerBrowserNotice className="mb-3" />}<ComputerUseSection key={target} computer={target} active={activeTab === "overview" && controls.pageActive !== false} /></> : undefined} /></TabsContent>
             <TabsContent value="checkpoints">
+              {computer.macos && macosStore ? <MacosCheckpointPanel computer={computer.macos} store={macosStore} takenNames={computerNamesOnDevice(source.computers, undefined, macosNames)} onStart={() => controls.lifecycleGuard.request(computer, "start")} onExport={controls.onCheckpointExport && ((_name, checkpoint) => { if (checkpoint) controls.onCheckpointExport!(checkpoint) })} /> : <>
               <CheckpointPanel computer={computer} target={target} actions={actions} takenNames={computerNamesOnDevice(source.computers, computer.device?.id, macosNames)} disabled={controls.configurationLocked || Boolean(computer.lifecycleAction) || Boolean(computer.device?.busy) || computer.freshness === "stale"} onExport={controls.onCheckpointExport} exportDisabled={controls.checkpointExportDisabled} forkedAction={controls.onCheckpointForkedAction} restoredAction={controls.onCheckpointRestoredAction} />
               <div className="pt-5"><StepsPanel computer={computer} target={target} actions={actions} takenNames={computerNamesOnDevice(source.computers, computer.device?.id, macosNames)} disabled={controls.configurationLocked || Boolean(computer.lifecycleAction) || Boolean(computer.device?.busy) || computer.freshness === "stale"} forkedAction={controls.onCheckpointForkedAction} /></div>
+              </>}
             </TabsContent>
             {showStorage && actions.readWorkspaceStorage && <TabsContent value="storage">
               <WorkspaceStoragePanel key={configuration.id} computerId={configuration.id} computerName={configuration.name} deviceName={computer.device?.name} running={state === "running"} disabled={controls.configurationLocked || controls.computerOperationBusy} read={actions.readWorkspaceStorage} reclaim={actions.reclaimWorkspaceStorage} />

@@ -6,6 +6,8 @@ import { afterEach, expect, it, vi } from "vitest"
 import { ApplicationPreview } from "@/fixtures/application-preview"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import type { ApplicationSource } from "@/features/application/model/application-source"
+import { computerTarget } from "@/features/application/model/connections"
+import { clearComputerAgents } from "@/features/agents/model/use-computer-agents"
 
 afterEach(() => { toast.dismiss() })
 
@@ -101,4 +103,33 @@ it("keeps same-named computers on different devices apart", async () => {
   expect(options.filter(option => option.getAttribute("aria-selected") === "true")).toHaveLength(1)
   await user.keyboard("{ArrowDown}{Enter}")
   expect(openTerminal).toHaveBeenCalledExactlyOnceWith("silo-remote:second:vm-second")
+})
+
+it("opens each installed agent of a running computer from the palette", async () => {
+  const user = userEvent.setup()
+  const openAgent = vi.fn()
+  const listAgents = vi.fn(async () => [
+    { id: "claude-code" as const, name: "Claude Code", state: "ready" as const, version: "2.1.287", expectedVersion: "2.1.287" },
+    { id: "codex" as const, name: "Codex", state: "missing" as const, version: undefined, expectedVersion: "0.167.0" },
+  ])
+  clearComputerAgents()
+  const source = applicationSourceForScenario("running")
+  const dev = source.computers.find(({ configuration }) => configuration.name === "dev")!
+  render(<ApplicationPreview source={source} actions={{ openAgent, listAgents, installAgent: vi.fn() }} />)
+  await waitFor(() => expect(listAgents).toHaveBeenCalledWith(computerTarget(dev)))
+  await run(user, "claude code dev", "Open Claude Code in dev")
+  expect(openAgent).toHaveBeenCalledExactlyOnceWith(computerTarget(dev), "claude-code")
+  await user.click(screen.getByRole("button", { name: "Search or jump to" }))
+  await user.type(screen.getByRole("combobox", { name: "Search commands" }), "codex dev")
+  expect(screen.queryByRole("option", { name: "Open Codex in dev" })).not.toBeInTheDocument()
+})
+
+it("offers no agent command for a computer that is not running", async () => {
+  const user = userEvent.setup()
+  clearComputerAgents()
+  const listAgents = vi.fn(async () => [{ id: "claude-code" as const, name: "Claude Code", state: "unknown" as const, version: undefined, expectedVersion: "2.1.287" }])
+  render(<ApplicationPreview source={withStoppedDev()} actions={{ openAgent: vi.fn(), listAgents, installAgent: vi.fn() }} />)
+  await user.click(screen.getByRole("button", { name: "Search or jump to" }))
+  await user.type(screen.getByRole("combobox", { name: "Search commands" }), "claude code dev")
+  expect(screen.queryByRole("option", { name: "Open Claude Code in dev" })).not.toBeInTheDocument()
 })

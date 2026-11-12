@@ -1,0 +1,36 @@
+diff --git a/sdk/rust/lib/sandbox/ssh.rs b/sdk/rust/lib/sandbox/ssh.rs
+index 383ae95e926eb1568494ab58ea2cabca8a347e42..96a8ebbb7fe66e072c045c177b9fb94f2c7f0856 100644
+--- a/sdk/rust/lib/sandbox/ssh.rs
++++ b/sdk/rust/lib/sandbox/ssh.rs
+@@ -1286,6 +1286,10 @@ impl SshSession {
+             .guest_user
+             .clone()
+             .or_else(|| self.user.clone());
++        if let Some(user) = &user {
++            env.push(EnvVar::new("USER", user.clone()));
++            env.push(EnvVar::new("LOGNAME", user.clone()));
++        }
+         let cwd = self.session_home().await?;
+         let opts = ExecOptions {
+             args,
+@@ -1682,6 +1686,20 @@ impl russh::server::Handler for SshSession {
+             return Ok(());
+         }
+ 
++        // Agent filesystem RPCs run as root. Nonroot SSH sessions must use
++        // the guest's OpenSSH subsystem through the same identity-aware exec
++        // stream as shell commands. A missing helper fails without root fallback.
++        let user = self.settings.guest_user.as_deref().or(self.user.as_deref());
++        if user.is_some_and(|user| user != "root") {
++            return self
++                .start_exec(
++                    channel,
++                    ExecCommand::Command("exec /usr/lib/openssh/sftp-server".to_string()),
++                    session,
++                )
++                .await;
++        }
++
+         let Some(ChannelState::Pending {
+             channel: Some(channel_stream),
+             ..

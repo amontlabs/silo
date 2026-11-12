@@ -309,31 +309,19 @@ async fn it_is_off_until_configured_and_errors_are_clear() {
 }
 
 #[tokio::test]
-async fn a_project_file_cannot_choose_where_the_token_goes() {
+async fn the_reviewer_address_comes_from_the_environment_or_the_user_file_only() {
     let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
     let service = mock(200, json!({"lenses": {}}));
     let _home = home_with(None);
     configure(None);
-    let settings =
-        silo_cli::config::parse_settings("reviewer:\n  url: https://evil.example\n").unwrap();
-    let error = hosted::Reviewer::resolve(Some(&settings)).unwrap_err();
-    assert!(error.message.contains("reviewer is off") && error.message.contains("ignored"));
-    // The same address as the trusted one is accepted without a note.
+    let error = hosted::Reviewer::resolve().unwrap_err();
+    assert!(error.message.contains("reviewer is off"));
     configure(Some(&service.url));
-    let same =
-        silo_cli::config::parse_settings(&format!("reviewer:\n  url: {}\n", service.url)).unwrap();
-    let reviewer = hosted::Reviewer::resolve(Some(&same)).unwrap();
-    assert!(reviewer.notes.is_empty());
-    // A different project URL is ignored with a note, and the trusted one is used.
-    let other =
-        silo_cli::config::parse_settings("reviewer:\n  url: https://evil.example\n").unwrap();
-    let reviewer = hosted::Reviewer::resolve(Some(&other)).unwrap();
-    assert_eq!(reviewer.url, service.url);
-    assert_eq!(reviewer.notes.len(), 1);
+    assert_eq!(hosted::Reviewer::resolve().unwrap().url, service.url);
     // The user-level file works without the variable.
     let _home = home_with(Some(&format!("url: {}\n", service.url)));
     std::env::remove_var("SILO_REVIEWER_URL");
-    assert_eq!(hosted::Reviewer::resolve(None).unwrap().url, service.url);
+    assert_eq!(hosted::Reviewer::resolve().unwrap().url, service.url);
 }
 
 #[tokio::test]
@@ -427,7 +415,7 @@ async fn the_cli_reviews_through_the_real_service_with_a_fake_llm() {
         .await
         .unwrap();
     let lenses = hosted::parse_lenses(Some("all")).unwrap();
-    let value = hosted::review_target(&connected, None, "try", &lenses, &|_| {})
+    let value = hosted::review_target(&connected, "try", &lenses, &|_| {})
         .await
         .unwrap();
     assert_eq!(
@@ -469,104 +457,11 @@ async fn requests_show_review_json_sends_the_chosen_lens() {
     assert!(seen[0].1["diff"].get("code_diff").is_none());
 }
 
-#[tokio::test]
-async fn the_mcp_review_tool_returns_the_shaped_review() {
-    use rmcp::ServiceExt;
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
-    let word = forbidden(0);
-    let service = mock(
-        200,
-        json!({"lenses": {"packages": {"summary": format!("It is {word}."), "findings": []}}}),
-    );
-    let _home = home_with(None);
-    configure(Some(&service.url));
-    let engine = engine();
-    let (server_side, client_side) = tokio::io::duplex(64 * 1024);
-    let (server_read, server_write) = tokio::io::split(server_side);
-    let server = silo_cli::mcp::SiloMcp::new(engine.socket.clone(), std::env::temp_dir());
-    tokio::spawn(async move {
-        let running = server.serve((server_read, server_write)).await.unwrap();
-        let _ = running.waiting().await;
-    });
-    let (read, mut write) = tokio::io::split(client_side);
-    let mut read = tokio::io::BufReader::new(read);
-    let ask = |id: u64, method: &str, params: Value| {
-        format!(
-            "{}\n",
-            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
-        )
-    };
-    let init = json!({"protocolVersion": "2025-06-18", "capabilities": {},
-                      "clientInfo": {"name": "test", "version": "0"}});
-    write
-        .write_all(ask(1, "initialize", init).as_bytes())
-        .await
-        .unwrap();
-    let mut line = String::new();
-    read.read_line(&mut line).await.unwrap();
-    write
-        .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
-        .await
-        .unwrap();
-    let call = json!({"name": "review", "arguments": {"target": "try", "lens": "packages"}});
-    write
-        .write_all(ask(2, "tools/call", call).as_bytes())
-        .await
-        .unwrap();
-    line.clear();
-    read.read_line(&mut line).await.unwrap();
-    let reply: Value = serde_json::from_str(&line).unwrap();
-    assert_ne!(reply["result"]["isError"], true, "{reply}");
-    let text = reply["result"]["content"][0]["text"].as_str().unwrap();
-    let value: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(value["advisory"], hosted::BANNER);
-    assert_eq!(value["filtered"], 1);
-    assert_eq!(
-        value["lenses"]["packages"]["summary"],
-        "It is [wording removed]."
-    );
-    assert_eq!(
-        service.seen.lock().unwrap()[0].1["lenses"],
-        json!(["packages"])
-    );
-}
-
 #[test]
-fn a_failed_lens_is_shown_as_one_and_file_names_are_not_filtered() {
-    let word = forbidden(0);
-    let answer = json!({"lenses": {
-        "code": {"summary": "", "findings": [], "error": "this lens could not be produced"},
-        "general": {"summary": "ok", "findings": [
-            {"severity": "low", "file": format!("src/{word}.rs"), "message": "m"}]}
-    }});
-    let shaped = hosted::shape(&answer, &["general".to_owned(), "code".to_owned()]);
-    assert_eq!(
-        shaped["lenses"]["code"]["summary"],
-        "this lens could not be produced"
-    );
-    assert_eq!(
-        shaped["lenses"]["general"]["findings"][0]["file"],
-        format!("src/{word}.rs")
-    );
-    assert_eq!(shaped["filtered"], 0);
-    assert!(hosted::render(&shaped).contains("code: this lens could not be produced"));
-}
-
-#[test]
-fn the_review_address_keeps_the_query_and_the_user_file_is_read_only_without_the_variable() {
-    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
-    let _home = home_with(Some("url: [not yaml\n"));
-    std::env::set_var(
-        "SILO_REVIEWER_URL",
-        "https://reviewer.example.com/base/?team=1",
-    );
-    std::env::set_var("SILO_REVIEWER_TOKEN", "t");
-    let reviewer = hosted::Reviewer::resolve(None).unwrap();
-    assert_eq!(
-        reviewer.endpoint().unwrap().as_str(),
-        "https://reviewer.example.com/base/v1/review?team=1"
-    );
-    std::env::remove_var("SILO_REVIEWER_URL");
-    assert!(hosted::Reviewer::resolve(None).is_err());
+fn the_hosted_reviewer_is_not_an_mcp_tool_and_its_commands_are_hidden_from_help() {
+    use clap::CommandFactory;
+    let command = silo_cli::cli::Cli::command();
+    assert!(command.find_subcommand("review").unwrap().is_hide_set());
+    let help = command.clone().render_long_help().to_string();
+    assert!(!help.contains("hosted reviewer"), "{help}");
 }

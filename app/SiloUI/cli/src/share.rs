@@ -60,6 +60,8 @@ pub struct ExportArgs {
     pub checkpoint: Option<String>,
     /// Share without asking when logins are found or the check could not run.
     pub yes: bool,
+    /// Keep the logins in the file instead of leaving them out.
+    pub include_logins: bool,
 }
 
 /// `<computer>-<YYYY-MM-DD>.silo-backup`, with the first free `-2`, `-3`, ... in `folder`.
@@ -107,8 +109,10 @@ fn names(logins: &[String]) -> String {
     logins.join(", ")
 }
 
-/// Exports `args.computer` to a file. Logins on the computer, or that Silo could not check for
-/// them, are named first; the files stay in the export either way.
+/// Exports `args.computer` to a file. An export of a Linux computer leaves its known login
+/// files out unless `include_logins` is set. Where the logins stay in the file (the logins were
+/// asked to be included, a checkpoint, a computer Silo cannot strip), the logins found on the
+/// computer, or that Silo could not check for them, are named first.
 pub async fn export(
     engine: &Engine,
     args: &ExportArgs,
@@ -128,14 +132,20 @@ pub async fn export(
             requests::exports_check(ExportCheckParams {
                 computer_id: target.id.clone(),
                 checkpoint_id: checkpoint.clone(),
+                include_logins: args.include_logins.then_some(true),
                 device_id: None,
             }),
             progress,
         )
         .await;
+    // The export is made from a copy without the logins: nothing is asked.
+    let leaves_out = found
+        .as_ref()
+        .is_ok_and(|found| found["leavesOut"].as_bool() == Some(true));
     // A check that did not run, could only look at part of the computer, or failed is one case:
     // Silo could not check, and `unchecked` says why.
     let (logins, unchecked): (Vec<String>, Option<String>) = match &found {
+        Ok(_) if leaves_out => (Vec::new(), None),
         Ok(found) => (
             found["logins"]
                 .as_array()
@@ -189,6 +199,7 @@ pub async fn export(
             checkpoint,
             &archive,
             (logins, unchecked),
+            args.include_logins,
             progress,
         )
         .await;
@@ -207,6 +218,7 @@ pub async fn export(
                 checkpoint_id: checkpoint.clone(),
                 archive_path: Some(archive.to_string_lossy().into_owned()),
                 transfer_area: None,
+                include_logins: args.include_logins.then_some(true),
                 device_id: None,
             }),
             progress,
@@ -220,6 +232,7 @@ pub async fn export(
         "checkpoint": result["archive"]["checkpointName"],
         "logins": logins,
         "unchecked": unchecked,
+        "leftOut": result["archive"]["leftOut"].as_array().cloned().unwrap_or_default(),
     }))
 }
 
@@ -300,6 +313,7 @@ async fn export_from_device(
     checkpoint: Option<String>,
     archive: &Path,
     (logins, unchecked): (Vec<String>, Option<String>),
+    include_logins: bool,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     check_new_archive(archive)?;
@@ -312,6 +326,7 @@ async fn export_from_device(
                 checkpoint_id: checkpoint,
                 archive_path: None,
                 transfer_area: Some(true),
+                include_logins: include_logins.then_some(true),
                 device_id: None,
             }),
             progress,
@@ -344,6 +359,7 @@ async fn export_from_device(
         "checkpoint": result["archive"]["checkpointName"],
         "logins": logins,
         "unchecked": unchecked,
+        "leftOut": result["archive"]["leftOut"].as_array().cloned().unwrap_or_default(),
     }))
 }
 

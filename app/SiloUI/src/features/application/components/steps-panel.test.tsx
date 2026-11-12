@@ -30,7 +30,7 @@ it("lists steps newest first with command, exit code and checkpoint", async () =
 it("explains that step checkpoints are off when there are no steps", async () => {
   renderPanel({ listComputerSteps: vi.fn().mockResolvedValue([]) })
   expect(await screen.findByText("No steps yet")).toBeTruthy()
-  expect(screen.getByText(/step_checkpoints: true/)).toBeTruthy()
+  expect(screen.getByText(/--step-checkpoints/)).toBeTruthy()
 })
 
 it("forks from the step's checkpoint with the trimmed name", async () => {

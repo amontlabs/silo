@@ -11,8 +11,6 @@ fn main_window_can_manage_github_authorization() {
         "manage_github_repositories",
         "cancel_github_connection",
         "reopen_github_authorization",
-        "save_github_personal_token",
-        "remove_github_personal_token",
     ] {
         let permission = format!("allow-{}", command.replace('_', "-"));
         assert_eq!(

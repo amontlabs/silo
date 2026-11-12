@@ -83,6 +83,7 @@ fn main() -> Result<(), String> {
             github_profile_json: None,
             github_hosts: None,
             policy: None,
+            strict: None,
             usage_log: settings.usage_log,
             log: None,
         },

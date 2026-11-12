@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::OnceLock;
 
+use microsandbox_network::config::builder::HttpBuilder;
 use microsandbox_network::config::{
     EnvNetworkSecretResolver, InterfaceOverrides, NetworkBuilder,
     PortProtocol as NetworkPortProtocol,
@@ -16,7 +17,7 @@ pub use microsandbox_network::network::{
     PublishedPortBinding, SmoltcpNetwork, generate_intercept_ca_pair,
 };
 use microsandbox_network::policy::{NetworkPolicy, NetworkProfile};
-use microsandbox_types::DeploymentProfile;
+use microsandbox_types::{DeploymentProfile, HttpDenyResponseFormat};
 use tempfile::TempDir;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -188,6 +189,14 @@ pub fn validate_init(init: &InitRequest) -> Result<(), NetworkSetupError> {
     Ok(())
 }
 
+/// A connection to an address policy denies is refused (reset), not accepted and answered
+/// with an HTTP 403, the same as the runtime's own sandboxes. Stated here so a change of the
+/// upstream default cannot change what a guest sees.
+fn refuse_denied_connections(http: HttpBuilder) -> HttpBuilder {
+    http.deny_response(false)
+        .deny_response_format(HttpDenyResponseFormat::Json)
+}
+
 pub fn build_network(mut init: InitRequest) -> Result<NetworkResources, NetworkSetupError> {
     install_crypto_provider();
     let github_hosts = GithubHosts::from_init(&init)?;
@@ -221,6 +230,8 @@ pub fn build_network(mut init: InitRequest) -> Result<NetworkResources, NetworkS
             ..Default::default()
         })
         .policy(policy)
+        .strict(init.strict.unwrap_or(true))
+        .http(refuse_denied_connections)
         .tls(|tls| {
             tls.enabled(true)
                 .intercepted_ports(init.intercepted_ports.clone())
@@ -577,6 +588,19 @@ mod tests {
     }
 
     #[test]
+    fn denied_connections_are_refused_not_answered_with_a_403() {
+        let config = NetworkBuilder::new()
+            .http(refuse_denied_connections)
+            .build()
+            .unwrap();
+        assert!(!config.http.deny_response);
+        assert_eq!(
+            config.http.deny_response_format,
+            HttpDenyResponseFormat::Json
+        );
+    }
+
+    #[test]
     fn missing_policy_uses_public_egress_with_deny_defaults() {
         let policy = NetworkPolicy::from_profiles([NetworkProfile::Public]);
         assert_eq!(policy.default_egress, Action::Deny);
@@ -629,6 +653,7 @@ mod tests {
             guest_mac: [2, 0, 0, 0, 0, 4],
             mtu: 1500,
             policy: None,
+            strict: None,
             dns_nameservers: Vec::new(),
             intercepted_ports: vec![443],
             loopback_ports: [22, 5900]

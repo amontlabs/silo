@@ -14,6 +14,8 @@ import {
   setupQueueItemIdSchema,
 } from "@/contracts/silo"
 import type { SetupComputerConfigurationRequest } from "@/contracts/silo"
+import { agentIds, type AgentId } from "@/desktop/production-schemas"
+import type { AgentChoice } from "@/features/agents/model/agents"
 import { applicationPreferenceSelectionSchema, type ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 
 // This is the frontend's narrow input seam, not a Silo wire object. Each field
@@ -40,6 +42,15 @@ export const onboardingSourceSchema = z.object({
   /** Every computer id on this device, including any whose saved configuration could not be read. Absent while the list is not known. */
   existingConfigurationIds: z.array(z.string()).optional(),
   setupQueue: z.array(z.object({ id: setupQueueItemIdSchema, status: z.enum(["idle", "queued", "running", "succeeded", "failed"]), failure: z.string().optional() }).strict()).optional(),
+  /** Installing the chosen agent in the first computer; absent when none was chosen. A failure does not fail setup. */
+  agentSetup: z.object({
+    computer: z.string().min(1),
+    agent: z.enum(agentIds),
+    status: z.enum(["queued", "running", "succeeded", "failed"]),
+    step: z.enum(["waiting", "downloading", "installing", "registering", "done"]).optional(),
+    detail: z.string().optional(),
+    failure: z.string().optional(),
+  }).strict().nullable().optional(),
   computerConfigurations: setupComputerConfigurationRequestSchema.shape.computers,
   bootstrapConfiguration: siloBootstrapConfigurationSchema,
   bootstrapState: siloBootstrapStateSchema,
@@ -76,6 +87,8 @@ export type ComputerRepositorySelection = ApplicationGitHubRepositoryPolicy
 export type ComputerGitIdentity = ApplicationComputerGitIdentity
 
 export interface OnboardingCompletionRequest {
+  /** The agent to install in the first computer: the one chosen, or "none" for one the person sets up. */
+  agent?: AgentChoice
   computerConfiguration: SetupComputerConfigurationRequest
   applications: ApplicationPreferenceSelection
   github: {
@@ -93,7 +106,7 @@ export interface OnboardingSubmissionOptions {
 }
 
 export interface OnboardingActions {
-  submitStep?: (step: "computers" | "github", request: OnboardingCompletionRequest, options?: OnboardingSubmissionOptions) => void
+  submitStep?: (step: "computers" | "agent" | "github", request: OnboardingCompletionRequest, options?: OnboardingSubmissionOptions) => void
   cancelGitHubConnection?: () => void
   reopenGitHubAuthorization?: () => void
   connectGitHub: () => void
@@ -101,6 +114,12 @@ export interface OnboardingActions {
   /** Retry the last submission, rebuilt from `request` (the current draft) when given. */
   retryComputerSetup: (request?: OnboardingCompletionRequest, options?: OnboardingSubmissionOptions) => void
   finishSetup: (request: OnboardingCompletionRequest, options?: OnboardingSubmissionOptions) => void
+  /** Installs the chosen agent again after it failed. */
+  retryAgentInstall?: () => void
+  /** Opens the person's terminal on the computer with the agent started. */
+  openAgent?: (computer: string, agent: AgentId) => void
+  /** The SSH host name this device's desktop apps use for the computer. */
+  ensureSshName?: NonNullable<import("@/features/application/model/application-source").ApplicationActions["ensureSshName"]>
   /** Resolves a `finishBlocker` whose action is "start". */
   startComputer?: (computer: string) => void
   /** Resolves a `finishBlocker` whose action is "refresh". */

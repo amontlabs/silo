@@ -1,0 +1,103 @@
+[18:40:45] == header: commit 86bfa04b9 direction; silo 0.1.0; 2026-11-11T17:40:45Z
+[18:40:46] engine start: [18:40:45]   list says: silo: Cannot reach the Silo engine at /Users/polarzero/.silo-dev/engine.sock: The engine connection failed: No such file or directory (os error 2). Open Silo and try again.
+answered=1s list_ok=1s
+[18:40:46] lock file: /Users/polarzero/Library/Application Support/org.silo.dev/runtime/microsandbox/.silo-configuration-worker.lock
+[18:40:46] == create two Linux computers, run both
+[18:40:55] PASS  create e2e-r7-a  -- 9s
+[18:41:04] PASS  create e2e-r7-b  -- 9s
+[18:41:08] PASS  start e2e-r7-a  -- 4s
+[18:41:13] PASS  start e2e-r7-b  -- 5s
+NAME                            IMAGE                                                   STATUS     CREATED
+e2e-r7-b                        ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      running    2026-11-11 18:40:55
+e2e-r7-a                        ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      running    2026-11-11 18:40:47
+[18:41:13] lock holders at rest: none
+[18:41:13] == crash scenario: kill during silo stop e2e-r7-b
+[18:41:16] lock holders mid-command: 
+[18:41:16] SIGKILL sent to engine 54750
+NAME                            IMAGE                                                   STATUS     CREATED
+e2e-r7-b                        ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      stopped    2026-11-11 18:40:55
+e2e-r7-a                        ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      running    2026-11-11 18:40:47
+[18:41:17] lock holders after the kill: none
+[18:41:17] PASS  kill during silo stop e2e-r7-b: no process holds the lock file after the kill  -- none
+[18:41:18] PASS  kill during silo stop e2e-r7-b: engine settles at once  -- [18:41:17]   list says: silo: Cannot reach the Silo engine at /Users/polarzero/.silo-dev/engine.sock: The engine connection failed: Connection refused (os error 61). Open Silo and try again.
+answered=1s list_ok=1s
+NAME         STATE      KIND       SIZE
+workspace-1  stopped    linux      8 cpu, 32 GiB
+e2e-relay    stopped    linux      8 cpu, 32 GiB
+silo-eval-a  stopped    linux      2 cpu, 2 GiB
+silo-eval-b  stopped    linux      2 cpu, 2 GiB
+e2e-r7-a     running    linux      2 cpu, 4 GiB
+e2e-r7-b     stopped    linux      2 cpu, 4 GiB
+e2e-r7-b (linux): stopped
+2 cpu, 4 GiB memory, 10 GiB disk
+0 checkpoints
+[18:41:28] PASS  create after the crash  -- 9s
+[18:41:29] PASS  stop after the crash  -- 1s
+[18:41:34] PASS  start after the crash  -- 5s
+[18:41:34] == crash scenario: kill during silo create e2e-r7-c
+[18:41:38] lock holders mid-command: 
+[18:41:38] SIGKILL sent to engine 55843
+NAME                            IMAGE                                                   STATUS     CREATED
+e2e-r7-c                        ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      stopped    2026-11-11 18:41:34
+e2e-r7-d                        ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      stopped    2026-11-11 18:41:19
+e2e-r7-b                        ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      running    2026-11-11 18:40:55
+e2e-r7-a                        ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      running    2026-11-11 18:40:47
+[18:41:39] lock holders after the kill: none
+[18:41:39] PASS  kill during silo create e2e-r7-c: no process holds the lock file after the kill  -- none
+[18:41:45] PASS  kill during silo create e2e-r7-c: engine settles at once  -- [18:41:39]   list says: silo: Cannot reach the Silo engine at /Users/polarzero/.silo-dev/engine.sock: The engine connection failed: Connection refused (os error 61). Open Silo and try again.
+[18:41:41]   list says: silo: Computer configuration is being updated.
+answered=2s list_ok=6s
+NAME         STATE      KIND       SIZE
+workspace-1  stopped    linux      8 cpu, 32 GiB
+e2e-relay    stopped    linux      8 cpu, 32 GiB
+silo-eval-a  stopped    linux      2 cpu, 2 GiB
+silo-eval-b  stopped    linux      2 cpu, 2 GiB
+e2e-r7-a     running    linux      2 cpu, 4 GiB
+e2e-r7-b     running    linux      2 cpu, 4 GiB
+e2e-r7-d     stopped    linux      2 cpu, 4 GiB
+e2e-r7-c     stopped    linux      2 cpu, 4 GiB
+[18:41:55] PASS  create after the second crash  -- 9s
+[18:41:57] PASS  stop the computer that ran through both crashes  -- 2s
+[18:41:57] == Quit (TERM to the engine)
+[18:41:59] PASS  Quit finishes  -- 2s
+[18:42:00] restart for cleanup: [18:41:59]   list says: silo: Cannot reach the Silo engine at /Users/polarzero/.silo-dev/engine.sock: The engine connection failed: No such file or directory (os error 2). Open Silo and try again.
+answered=1s list_ok=1s
+[18:42:00] PASS: 14 FAIL: 0
+[18:42:00] cleanup
+[18:42:27] silo list after cleanup:
+NAME         STATE      KIND       SIZE
+workspace-1  stopped    linux      8 cpu, 32 GiB
+e2e-relay    stopped    linux      8 cpu, 32 GiB
+silo-eval-a  stopped    linux      2 cpu, 2 GiB
+silo-eval-b  stopped    linux      2 cpu, 2 GiB
+[18:42:28] Dev engine still running after cleanup: checked 
+
+======================================================================
+ADDITIONAL RUNS (same script, kill point of the create moved; output of the create scenario only)
+======================================================================
+First run (KILL_AFTER 4 s on create; poll was "silo list ok", limit ~100 s): the computer e2e-r7-c was
+already "running" in the runtime when the engine was killed. After SIGKILL no process held the lock
+file (lsof empty), but the restarted engine never reached a working `silo list` within ~100 s:
+  silo: Silo's saved computer configuration does not match its managed runtime state. No computer operation was performed.
+  silod log: "The computer tools were prepared, but the runtime did not restore its stopped state.
+              Saved setup progress was preserved. Relaunch Silo to retry."
+  silod log: "initial computer read skipped: Computer configuration is being updated."
+Stopping that engine (TERM) and starting it again settled in 8 s and the computer was gone.
+
+KILL_AFTER 5 s (c was "starting" in the runtime at kill time):
+  [18:43:37] SIGKILL sent to engine 63385      lock holders after the kill: none  (PASS)
+  restarted engine: socket answered after 1 s, `silo list` still "configuration does not match its
+  managed runtime state" after 240 s (limit of the script): FAIL; create after that also refused.
+KILL_AFTER 6 s (c was "running"): same, 240 s, FAIL.
+(KILL_AFTER 4 s in the second run left c "stopped" in the runtime: engine settled in 6 s, PASS.)
+
+Reading: R7 itself holds (no VM process keeps the lock file; with a stop in flight or a create killed
+early the engine settles in 1-6 s and create/stop/start/Quit work). A different problem remains: a
+kill in the window where a new computer's runtime sandbox is already starting/running but the
+engine has not saved it as a computer leaves the next engine reporting "configuration does not
+match its managed runtime state" and refusing every computer command, with nothing holding the
+lock file. This is not the 3-minute lock wait (lsof empty, error returned at once, still there after
+240 s). The sandbox e2e-r7-c is the orphan; the next engine start (after a clean TERM Quit and
+restart) cleared it in 8 s in the first run.
+Reproduction: bash docs/direction/checks/r7_lock_check.sh with `KILL_AFTER=5 crash ...` for the create
+scenario (edit the number in the script line "KILL_AFTER=4 crash"), Dev engine only.

@@ -1,5 +1,8 @@
 #[path = "backup_controller/recovery.rs"]
 mod recovery;
+mod scrub;
+
+pub use scrub::leaves_logins_out;
 
 use crate::runtime::RuntimeHost;
 use crate::{backup, runtime};
@@ -50,6 +53,9 @@ struct Archive {
     /// the other machine fetches it by.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     transfer: Option<crate::transfer_area::FileInfo>,
+    /// The login files an export without logins left out of the file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    left_out: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -576,6 +582,7 @@ pub fn begin_export_for_ids(
     computer_ids: Vec<String>,
     checkpoint_id: Option<String>,
     archive_path: Option<String>,
+    include_logins: bool,
 ) -> Result<String, String> {
     let macos = controller.runtime_host()?.macos_context();
     // macOS computers are not in the Linux inventory; the Apple Virtualization registry
@@ -611,7 +618,14 @@ pub fn begin_export_for_ids(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    begin_export(controller, destination, names, checkpoint_id, archive_path)
+    begin_export_with(
+        controller,
+        destination,
+        names,
+        checkpoint_id,
+        archive_path,
+        include_logins,
+    )
 }
 
 /// Publishes the current backup operation through the durable job contract.
@@ -838,6 +852,7 @@ fn archive_from(path: &Path, inspected: &backup::ArchiveInspection) -> Archive {
         computers: inspected.computers.clone(),
         checkpoint_name: None,
         transfer: None,
+        left_out: Vec::new(),
     }
 }
 
@@ -993,6 +1008,7 @@ pub fn inspection_worker(
                     computers: Vec::new(),
                     checkpoint_name: None,
                     transfer: None,
+                    left_out: Vec::new(),
                 },
                 valid: false,
                 reason: Some(error.to_string()),
@@ -1291,12 +1307,33 @@ fn explicit_archive(archive_path: &str) -> Result<(PathBuf, PathBuf), String> {
     Ok((folder, file))
 }
 
+/// An export that keeps every login in the file.
 pub fn begin_export(
     controller: Arc<Controller>,
     destination: String,
     computers: Vec<String>,
     checkpoint_id: Option<String>,
     archive_path: Option<String>,
+) -> Result<String, String> {
+    begin_export_with(
+        controller,
+        destination,
+        computers,
+        checkpoint_id,
+        archive_path,
+        true,
+    )
+}
+
+/// Starts an export. Unless `include_logins` is set, a Linux computer's current state is
+/// exported from a hidden copy with its known login files removed ([`crate::export_scrub`]).
+pub fn begin_export_with(
+    controller: Arc<Controller>,
+    destination: String,
+    computers: Vec<String>,
+    checkpoint_id: Option<String>,
+    archive_path: Option<String>,
+    include_logins: bool,
 ) -> Result<String, String> {
     let (canonical, explicit) = match archive_path.as_deref() {
         Some(path) => {
@@ -1407,6 +1444,7 @@ pub fn begin_export(
             archive_path,
             computers,
             checkpoint_id,
+            include_logins,
             cancellation,
             pending_archive,
         )
@@ -1480,6 +1518,7 @@ fn claim_export_at(
         computers: computers.to_vec(),
         checkpoint_name: checkpoint_name.map(Into::into),
         transfer: None,
+        left_out: Vec::new(),
     };
     let journal = recovery::Journal::backup(archive.clone(), computers.to_vec(), checkpoint_id);
     let operation_id = journal.identity().to_string();
@@ -1575,17 +1614,23 @@ fn run_backup(
     archive_path: PathBuf,
     computers: Vec<String>,
     checkpoint_id: Option<String>,
+    include_logins: bool,
     cancellation: backup::Cancellation,
     pending_archive: Archive,
 ) {
     let started = std::time::Instant::now();
-    let result = backup_work(
+    let result = export_and_drop_copies(
         &controller,
         &archive_path,
         &computers,
         checkpoint_id.as_deref(),
+        include_logins,
         &cancellation,
     );
+    let (result, cleanup_note) = match result {
+        Ok((archive, note)) => (Ok(archive), note),
+        Err(error) => (Err(error), None),
+    };
     let result = result.and_then(|archive| {
         let transfer = transfer_file(&controller, &archive_path, &cancellation)?;
         Ok(Archive {
@@ -1605,7 +1650,7 @@ fn run_backup(
             outcome: "success",
             title: "Export complete".into(),
             message: "Computer exported.".into(),
-            detail: None,
+            detail: cleanup_note,
         },
         Err(error) => failed_transfer("backup", pending_archive, None, error),
     };
@@ -1613,6 +1658,269 @@ fn run_backup(
     notify_transfer(&controller, &operation, started.elapsed());
     let _ = set_operation(&controller, operation);
     publish_and_finish(&controller, || publish(&controller));
+}
+
+/// Exports the computers, from hidden copies without their logins when that applies, and drops
+/// the copies whether or not the export worked. A copy that could not be dropped comes back as
+/// a note beside a successful export, and is added to the message of a failed one.
+fn export_and_drop_copies(
+    controller: &Controller,
+    archive_path: &Path,
+    names: &[String],
+    checkpoint_id: Option<&str>,
+    include_logins: bool,
+    cancellation: &backup::Cancellation,
+) -> Result<(Archive, Option<String>), TransferError> {
+    let host = controller.runtime_host()?;
+    // A checkpoint is another disk than the computer's, and the person may ask to keep the logins.
+    let env = host
+        .export_scrub()
+        .filter(|_| !include_logins && checkpoint_id.is_none());
+    let targets = if env.is_some() {
+        scrub::targets(host, names)
+    } else {
+        Vec::new()
+    };
+    let Some(env) = env.filter(|_| !targets.is_empty()) else {
+        let result = backup_work(
+            controller,
+            archive_path,
+            names,
+            names,
+            &[],
+            checkpoint_id,
+            cancellation,
+        );
+        return result.map(|archive| (archive, None));
+    };
+    let copies = scrub::make_copies(controller, env, &targets, cancellation)?;
+    let result = backup_work(
+        controller,
+        archive_path,
+        &copies.export_names(names),
+        names,
+        &copies.presented(),
+        checkpoint_id,
+        cancellation,
+    );
+    let dropped = copies.drop_all();
+    match (result, dropped) {
+        (Ok(archive), dropped) => Ok((
+            Archive {
+                left_out: copies.left_out(),
+                ..archive
+            },
+            dropped.err(),
+        )),
+        (Err(mut error), Err(note)) => {
+            // A cancel that left a copy behind is reported as the failure it became.
+            error.message = if error.cancelled {
+                format!("The export was cancelled. {note}")
+            } else {
+                format!("{} {note}", error.message)
+            };
+            error.cancelled = false;
+            Err(error)
+        }
+        (Err(error), Ok(())) => Err(error),
+    }
+}
+
+/// A computer whose token ends after its export: its name and the id it had when the export
+/// began.
+type TokenTarget = (String, Option<String>);
+
+/// The ids of the computers in `names`. A computer exported from a hidden copy has the id it
+/// had when the copy was made (`presented`), whatever has taken its name since; the others are
+/// read by name under the export gate, so a computer that takes a name afterwards is not
+/// mistaken for the one that was exported.
+fn token_targets(
+    controller: &Controller,
+    names: &[String],
+    presented: &[backup::Presented],
+) -> Result<Vec<TokenTarget>, String> {
+    let host = controller.runtime_host()?;
+    let macos = host.macos_context();
+    let metadata = runtime::runtime_paths(host)
+        .ok()
+        .and_then(|paths| runtime::read_metadata(&paths.metadata).ok());
+    Ok(token_target_ids(names, presented, &|name| {
+        macos
+            .as_ref()
+            .and_then(|context| crate::macos_computers::id_for_name(context, name))
+            .or_else(|| {
+                metadata.as_ref().and_then(|metadata| {
+                    metadata
+                        .computers
+                        .iter()
+                        .find(|configuration| configuration.name() == name)
+                        .map(|configuration| configuration.id().to_owned())
+                })
+            })
+    }))
+}
+
+/// [`token_targets`] with `by_name` finding the computer that holds a name now.
+fn token_target_ids(
+    names: &[String],
+    presented: &[backup::Presented],
+    by_name: &dyn Fn(&str) -> Option<String>,
+) -> Vec<TokenTarget> {
+    names
+        .iter()
+        .map(|name| {
+            let id = presented
+                .iter()
+                .find(|entry| entry.name == *name)
+                .map(|entry| entry.id.clone())
+                .or_else(|| by_name(name));
+            (name.clone(), id)
+        })
+        .collect()
+}
+
+/// Ends the token of Silo's tools of each of `targets` once the export is written, whether the
+/// computer was exported from its own disk, from a checkpoint or from a hidden copy: the
+/// archive holds the computer's endpoint file or, for a copy, the bytes of it that remain in the
+/// layers beneath, and the token in them must prove nothing. A computer whose tools are on gets
+/// a new token the next time it runs: the engine checks the endpoint file of each running
+/// computer every few seconds and of each computer when it starts, and writes a new token
+/// where the file does not match. Every computer is tried; the ones that failed are named
+/// together.
+fn end_tokens_of(
+    targets: &[TokenTarget],
+    end: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let problems: Vec<String> = targets
+        .iter()
+        .filter_map(|(name, id)| match id {
+            Some(id) => end(id).err().map(|error| {
+                format!("The access of {name} to Silo's tools was not ended: {error}")
+            }),
+            None => Some(format!(
+                "Silo could not find {name} to end its access to Silo's tools."
+            )),
+        })
+        .collect();
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join(" "))
+    }
+}
+
+/// Settles an export the writers put at the private path `staged`. The export reaches
+/// `archive_path` only when every token ended, and then by a rename that never replaces a file;
+/// otherwise the staged file, which only this export knows, is removed. A staged file that
+/// cannot be removed is recorded with `keep`, so the saved operation stays open and removes it
+/// when it can, and the failure says so. A failed export published nothing at `archive_path`,
+/// and whatever sits there is not touched.
+fn publish_staged_export(
+    result: Result<Archive, TransferError>,
+    revoked: Result<(), String>,
+    staged: &Path,
+    archive_path: &Path,
+    keep: &dyn Fn() -> Result<(), String>,
+) -> Result<Archive, TransferError> {
+    // `None` once the staged file is gone; otherwise the sentence that says it is not.
+    let discard = || match fs::remove_file(staged) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            let kept = match keep() {
+                Ok(()) => "Silo will try to remove it again.".to_owned(),
+                Err(problem) => {
+                    format!("Silo could not keep a record to remove it later: {problem}")
+                }
+            };
+            Some((error.to_string(), kept))
+        }
+        _ => None,
+    };
+    let archive = match (result, revoked) {
+        (Ok(archive), Ok(())) => archive,
+        (Ok(_), Err(problem)) => {
+            return Err(TransferError::from(match discard() {
+                None => format!(
+                    "The export was removed because it may hold a login that still works. {problem}"
+                ),
+                Some((removal, kept)) => format!(
+                    "The export at {} may hold a login that still works, and it was not removed: {removal} {problem} {kept}",
+                    staged.display()
+                ),
+            }));
+        }
+        (Err(mut error), revoked) => {
+            let left = discard();
+            if let Err(problem) = revoked {
+                if error.cancelled {
+                    error.cancelled = false;
+                    error.message = problem;
+                } else {
+                    error.message = format!("{} {problem}", error.message);
+                }
+            }
+            if let Some((removal, kept)) = left {
+                error.message = format!(
+                    "{} The unfinished export at {} could not be removed: {removal} {kept}",
+                    error.message,
+                    staged.display()
+                );
+            }
+            return Err(error);
+        }
+    };
+    let parent = archive_path.parent().ok_or_else(|| {
+        TransferError::from("The export destination has no parent directory.".to_string())
+    })?;
+    if let Err(error) = backup::publish_package(staged, archive_path, parent, |parent| {
+        fs::File::open(parent).and_then(|directory| directory.sync_all())
+    }) {
+        // A file already at the chosen name stays; only the staged one goes.
+        let mut error = TransferError::from(error);
+        if let Some((removal, kept)) = discard() {
+            error.message = format!(
+                "{} The export at {} may hold a login that still works, and it could not be removed: {removal} {kept}",
+                error.message,
+                staged.display()
+            );
+        }
+        return Err(error);
+    }
+    Ok(archive_at(archive, archive_path))
+}
+
+/// `archive` as it sits at `path`, where the writers reported the private path it was staged at.
+fn archive_at(archive: Archive, path: &Path) -> Archive {
+    Archive {
+        name: path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Silo export")
+            .to_string(),
+        archive_path: path.to_string_lossy().into_owned(),
+        destination: path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .to_string_lossy()
+            .into_owned(),
+        ..archive
+    }
+}
+
+/// A new hidden name beside `archive_path`, which the writers publish the export under before
+/// it is handed over. It carries the saved operation's id, so a relaunch removes what an
+/// interruption leaves.
+fn staged_export_path(controller: &Controller, archive_path: &Path) -> Result<PathBuf, String> {
+    let parent = archive_path
+        .parent()
+        .ok_or_else(|| "The export destination has no parent directory.".to_string())?;
+    let name = match recovery::token(controller)? {
+        Some(token) => format!(
+            ".silo-backup-{token}-staged-{}.silo-backup",
+            uuid::Uuid::new_v4()
+        ),
+        None => format!(".silo-backup-staged-{}.silo-backup", uuid::Uuid::new_v4()),
+    };
+    Ok(parent.join(name))
 }
 
 /// The name, size and sha256 of a finished export that sits in the transfer area, so the other
@@ -2002,10 +2310,15 @@ fn prepare_archive_image(
     Ok(())
 }
 
+/// `names` are what is captured; `original_names` are the computers the export is of, which
+/// differ where a hidden copy stands in (`presented`). The tokens of the computers exported end
+/// before the export gate is released.
 fn backup_work(
     controller: &Controller,
     archive_path: &Path,
     names: &[String],
+    original_names: &[String],
+    presented: &[backup::Presented],
     checkpoint_id: Option<&str>,
     cancellation: &backup::Cancellation,
 ) -> Result<Archive, TransferError> {
@@ -2023,13 +2336,29 @@ fn backup_work(
         publish(controller);
     }
     let paths = runtime::runtime_paths(controller.runtime_host()?)?;
-    backup_at_paths(
+    // The computers exported are known by their ids before the gate is released, and their
+    // tokens end under it, so no computer that takes a name in between loses its own.
+    let targets = token_targets(controller, original_names, presented)?;
+    // The writers publish under a name only this export knows. The file reaches the chosen
+    // name once the tokens in it have ended, so no one else's file there is ever replaced or
+    // removed.
+    let staged = staged_export_path(controller, archive_path)?;
+    let result = backup_at_paths_presenting(
         &paths,
         controller,
-        archive_path,
+        &staged,
         names,
+        original_names,
+        presented,
         checkpoint_id,
         cancellation,
+    );
+    publish_staged_export(
+        result,
+        end_tokens_of(&targets, &crate::guest_client::end_token),
+        &staged,
+        archive_path,
+        &|| recovery::keep_staged_cleanup(controller),
     )
 }
 
@@ -2042,7 +2371,32 @@ fn backup_at_paths(
     checkpoint_id: Option<&str>,
     cancellation: &backup::Cancellation,
 ) -> Result<Archive, TransferError> {
-    let fork_records = stored_fork_records(controller, names)?;
+    backup_at_paths_presenting(
+        paths,
+        controller,
+        archive_path,
+        names,
+        names,
+        &[],
+        checkpoint_id,
+        cancellation,
+    )
+}
+
+/// [`backup_at_paths`] where the computers in `names` may be hidden copies standing in for
+/// the ones in `original_names`: the fork-time records are the originals', and the rows of the
+/// file carry the originals' names.
+fn backup_at_paths_presenting(
+    paths: &runtime::RuntimePaths,
+    controller: &Controller,
+    archive_path: &Path,
+    names: &[String],
+    original_names: &[String],
+    presented: &[backup::Presented],
+    checkpoint_id: Option<&str>,
+    cancellation: &backup::Cancellation,
+) -> Result<Archive, TransferError> {
+    let fork_records = stored_fork_records(controller, original_names)?;
     if let Some(context) = controller.runtime_host()?.macos_context() {
         let macos_count = names
             .iter()
@@ -2081,11 +2435,22 @@ fn backup_at_paths(
                     .filter(|name| !crate::macos_computers::owns_name(&context, name))
                     .cloned()
                     .collect::<Vec<_>>();
-                backup_at_paths(
+                let linux_originals = linux_names
+                    .iter()
+                    .map(|name| {
+                        presented
+                            .iter()
+                            .find(|entry| entry.copy == *name)
+                            .map_or_else(|| name.clone(), |entry| entry.name.clone())
+                    })
+                    .collect::<Vec<_>>();
+                backup_at_paths_presenting(
                     paths,
                     controller,
                     &linux_archive,
                     &linux_names,
+                    &linux_originals,
+                    presented,
                     None,
                     cancellation,
                 )?;
@@ -2102,7 +2467,7 @@ fn backup_at_paths(
                 let result = controller.service.create_mixed_archive_from_archives(
                     archive_path,
                     &[linux_archive, macos_archive],
-                    names,
+                    original_names,
                     &fork_records,
                     cancellation,
                     recovery::token(controller)?.as_deref(),
@@ -2198,6 +2563,7 @@ fn backup_at_paths(
         destination: archive_path.to_path_buf(),
         sources,
         fork_records,
+        presented: presented.to_vec(),
         pinned_image: pinned_image(paths),
         // A file for another machine stops as soon as the computers written exceed what the
         // transfer area carries; `describe_transfer` checks the finished file's size.
@@ -2470,6 +2836,7 @@ pub fn begin_import(
         computers: source_name.iter().cloned().collect(),
         checkpoint_name: None,
         transfer: None,
+        left_out: Vec::new(),
     };
     let journal =
         recovery::Journal::restore(archive.clone(), new_name.clone(), source_name.clone());
@@ -2943,6 +3310,7 @@ fn commit_import(
     if let Err(error) = store_fork_record(controller, id, record) {
         return discard(error);
     }
+    let name = configuration.name().to_owned();
     save_import_metadata(
         original,
         configuration,
@@ -2957,7 +3325,14 @@ fn commit_import(
             let _ = recovery::discard_uncommitted_import(paths, controller, id, Some(group));
         }
         error
-    })
+    })?;
+    // An export from an older Silo can bring a computer in the layout the move exists for.
+    crate::runtime_migration::check_protected_storage_of_arrival(
+        &runtime::ProcessRunner,
+        paths,
+        &name,
+    );
+    Ok(())
 }
 
 /// Stores the fork-time record an archive carried as the record of the imported computer `id`.
@@ -3478,6 +3853,7 @@ mod tests {
                 first_archive_path,
                 vec!["first".into()],
                 None,
+                true,
                 first.cancellation,
                 first_archive,
             );
@@ -3532,6 +3908,7 @@ mod tests {
             computers: vec!["source".into()],
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         };
         let journal =
             recovery::Journal::restore(archive.clone(), "copy".into(), Some("source".into()));
@@ -3632,6 +4009,7 @@ mod tests {
             computers: vec!["source".into()],
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         };
         let journal =
             recovery::Journal::restore(archive.clone(), "copy".into(), Some("source".into()));
@@ -4048,6 +4426,7 @@ mod tests {
             computers: vec!["dev".into()],
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         }
     }
 
@@ -4072,6 +4451,7 @@ mod tests {
             computers: vec!["copy".into()],
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         };
         recovery::begin(
             &seed,
@@ -5701,6 +6081,42 @@ mod tests {
     }
 
     #[test]
+    fn an_import_waiting_for_its_first_start_is_not_flagged_as_needing_attention() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = import_paths(directory.path());
+        fs::create_dir_all(paths.metadata.parent().unwrap()).unwrap();
+        let controller = history_controller(directory.path().join("backup-history.json"));
+        recovery::begin(
+            &controller,
+            recovery::Journal::restore(completed_archive(), "copy".into(), Some("dev".into())),
+        )
+        .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let original = runtime::read_metadata(&paths.metadata).unwrap();
+        commit_import(
+            &paths,
+            &controller,
+            original,
+            imported_computer(&id),
+            &id,
+            GROUP,
+            MEMBER,
+            &serde_json::json!({}),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::runtime_migration::protected_storage_attention(&paths.metadata, "copy"),
+            None
+        );
+        assert!(!paths
+            .metadata
+            .with_file_name("protected-storage.json")
+            .exists());
+    }
+
+    #[test]
     fn a_failed_readback_keeps_a_possibly_committed_import() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
@@ -5761,6 +6177,240 @@ mod tests {
             !error.preserve_import,
             "verified absence must still clean up failed imports"
         );
+    }
+
+    /// An export staged beside the chosen name, which nothing is at yet.
+    fn staged_archive() -> (tempfile::TempDir, PathBuf, PathBuf, Archive) {
+        let directory = tempfile::tempdir().unwrap();
+        let staged = directory.path().join(".silo-backup-staged-1.silo-backup");
+        let chosen = directory.path().join("export.silo-backup");
+        fs::write(&staged, b"archive").unwrap();
+        let archive = Archive {
+            name: staged.file_name().unwrap().to_string_lossy().into_owned(),
+            archive_path: staged.to_string_lossy().into_owned(),
+            completed_label: String::new(),
+            size: String::new(),
+            destination: directory.path().to_string_lossy().into_owned(),
+            computers: vec!["dev".into()],
+            checkpoint_name: None,
+            transfer: None,
+            left_out: Vec::new(),
+        };
+        (directory, staged, chosen, archive)
+    }
+
+    #[test]
+    fn the_token_of_every_exported_computer_ends_and_a_failure_is_reported() {
+        let ended = std::cell::RefCell::new(Vec::new());
+        let targets: Vec<TokenTarget> = vec![
+            ("dev".into(), Some("id-dev".into())),
+            ("scrubbed".into(), Some("id-scrubbed".into())),
+        ];
+        end_tokens_of(&targets, &|id| {
+            ended.borrow_mut().push(id.to_owned());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(*ended.borrow(), ["id-dev", "id-scrubbed"]);
+
+        let error = end_tokens_of(&targets, &|id| {
+            if id == "id-dev" {
+                Err("the store is locked".into())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert!(error.contains("dev") && error.contains("the store is locked"));
+        assert!(!error.contains("scrubbed"));
+
+        let unknown: Vec<TokenTarget> = vec![("dev".into(), None), ("scrubbed".into(), None)];
+        let error = end_tokens_of(&unknown, &|_| Ok(())).unwrap_err();
+        assert!(error.contains("dev") && error.contains("scrubbed"));
+    }
+
+    #[test]
+    fn a_copied_computer_is_ended_by_the_id_it_was_copied_from() {
+        // `main` was renamed after its copy was made, and another computer took the name.
+        let presented = vec![backup::Presented {
+            copy: "silo-export-1".into(),
+            name: "main".into(),
+            id: "id-original".into(),
+        }];
+        let names = vec!["main".to_owned(), "other".to_owned()];
+        let targets = token_target_ids(&names, &presented, &|name| Some(format!("id-now-{name}")));
+        assert_eq!(
+            targets,
+            [
+                ("main".to_owned(), Some("id-original".to_owned())),
+                ("other".to_owned(), Some("id-now-other".to_owned())),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_staged_export_that_cannot_be_removed_is_recorded_for_a_retry() {
+        for (result, revoked) in [
+            (Ok(()), Err("locked".to_string())),
+            (Err(()), Ok(())),
+            (Err(()), Err("locked".to_string())),
+        ] {
+            let (_directory, staged, chosen, archive) = staged_archive();
+            fs::remove_file(&staged).unwrap();
+            fs::create_dir(&staged).unwrap();
+            let kept = std::cell::Cell::new(0);
+            let result = match result {
+                Ok(()) => Ok(archive),
+                Err(()) => Err(TransferError::from("The disk is full.".to_string())),
+            };
+            let error = publish_staged_export(result, revoked, &staged, &chosen, &|| {
+                kept.set(kept.get() + 1);
+                Ok(())
+            })
+            .unwrap_err();
+            assert_eq!(kept.get(), 1, "{}", error.message);
+            assert!(
+                error.message.contains("could not be removed")
+                    || error.message.contains("was not removed"),
+                "{}",
+                error.message
+            );
+            assert!(error.message.contains("try to remove it again"));
+        }
+
+        // A publish that fails after the tokens ended records the leftover too.
+        let (_directory, staged, chosen, archive) = staged_archive();
+        fs::remove_file(&staged).unwrap();
+        let kept = std::cell::Cell::new(0);
+        let error = publish_staged_export(Ok(archive), Ok(()), &staged, &chosen, &|| {
+            kept.set(kept.get() + 1);
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(
+            kept.get(),
+            0,
+            "a file that is gone needs no retry: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn an_export_whose_token_could_not_be_ended_is_removed_and_fails() {
+        let (_directory, staged, chosen, archive) = staged_archive();
+        let error =
+            publish_staged_export(Ok(archive), Err("locked".into()), &staged, &chosen, &|| {
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(error.message.contains("was removed") && error.message.contains("locked"));
+        assert!(!error.cancelled);
+        assert!(!staged.exists());
+        assert!(!chosen.exists());
+    }
+
+    #[test]
+    fn an_export_with_every_token_ended_reaches_its_chosen_name() {
+        let (_directory, staged, chosen, archive) = staged_archive();
+        let published =
+            publish_staged_export(Ok(archive), Ok(()), &staged, &chosen, &|| Ok(())).unwrap();
+        assert_eq!(fs::read(&chosen).unwrap(), b"archive");
+        assert!(!staged.exists());
+        assert_eq!(published.name, "export.silo-backup");
+        assert_eq!(published.archive_path, chosen.to_string_lossy());
+        assert_eq!(published.computers, ["dev"]);
+    }
+
+    #[test]
+    fn another_writers_file_at_the_chosen_name_is_never_replaced_or_removed() {
+        // The name was taken after the export began.
+        let (_directory, staged, chosen, archive) = staged_archive();
+        fs::write(&chosen, b"someone else's").unwrap();
+        let error =
+            publish_staged_export(Ok(archive), Ok(()), &staged, &chosen, &|| Ok(())).unwrap_err();
+        assert!(
+            error.message.contains("already exists"),
+            "{}",
+            error.message
+        );
+        assert_eq!(fs::read(&chosen).unwrap(), b"someone else's");
+        assert!(!staged.exists());
+
+        // Nor when the tokens could not be ended.
+        let (_directory, staged, chosen, archive) = staged_archive();
+        fs::write(&chosen, b"someone else's").unwrap();
+        let error =
+            publish_staged_export(Ok(archive), Err("locked".into()), &staged, &chosen, &|| {
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(error.message.contains("locked"));
+        assert_eq!(fs::read(&chosen).unwrap(), b"someone else's");
+        assert!(!staged.exists());
+    }
+
+    #[test]
+    fn a_failed_export_leaves_the_file_at_its_destination_alone() {
+        let (_directory, staged, chosen, _) = staged_archive();
+        fs::write(&chosen, b"someone else's").unwrap();
+        let failed = TransferError::from("The disk is full.".to_string());
+        let error =
+            publish_staged_export(Err(failed), Err("locked".into()), &staged, &chosen, &|| {
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(error.message.starts_with("The disk is full."));
+        assert!(error.message.contains("locked"));
+        assert_eq!(fs::read(&chosen).unwrap(), b"someone else's");
+        assert!(!staged.exists());
+
+        let (_directory, staged, chosen, _) = staged_archive();
+        let error = publish_staged_export(
+            Err(TransferError::cancelled()),
+            Err("locked".into()),
+            &staged,
+            &chosen,
+            &|| Ok(()),
+        )
+        .unwrap_err();
+        assert!(!error.cancelled && error.message.contains("locked"));
+        assert!(!staged.exists() && !chosen.exists());
+    }
+
+    #[test]
+    fn an_export_that_cannot_be_removed_says_so() {
+        let (_directory, staged, chosen, archive) = staged_archive();
+        fs::remove_file(&staged).unwrap();
+        fs::create_dir(&staged).unwrap();
+        let error =
+            publish_staged_export(Ok(archive), Err("locked".into()), &staged, &chosen, &|| {
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(error.message.contains("not removed") && error.message.contains("locked"));
+        assert!(!error.message.contains("was removed"));
+        assert!(staged.exists() && !chosen.exists());
+    }
+
+    #[test]
+    fn the_staged_name_is_new_beside_the_chosen_one_and_carries_the_operation() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let controller = history_controller(directory.path().join("backup-history.json"));
+        let journal = recovery::Journal::backup(completed_archive(), vec!["dev".into()], None);
+        let operation = journal.identity().to_owned();
+        recovery::begin(&controller, journal).unwrap();
+        let chosen = directory.path().join("export.silo-backup");
+        let first = staged_export_path(&controller, &chosen).unwrap();
+        let second = staged_export_path(&controller, &chosen).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(first.parent(), chosen.parent());
+        let name = first.file_name().unwrap().to_string_lossy();
+        assert!(
+            name.starts_with(&format!(".silo-backup-{operation}-")),
+            "{name}"
+        );
+        assert!(name.ends_with(".silo-backup"));
     }
 
     #[test]
@@ -6723,10 +7373,21 @@ mod tests {
         runtime::create_disposable_test_computer(&paths, existing_name).unwrap();
         let cache_hashes = || {
             use sha2::{Digest, Sha256};
-            fs::read_dir(paths.home.join("cache/vmdk"))
-                .unwrap()
-                .map(|entry| {
+            fn files(directory: &Path, found: &mut Vec<PathBuf>) {
+                for entry in fs::read_dir(directory).unwrap() {
                     let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        files(&path, found);
+                    } else {
+                        found.push(path);
+                    }
+                }
+            }
+            let mut found = Vec::new();
+            files(&paths.home.join("cache/vmdk"), &mut found);
+            found
+                .into_iter()
+                .map(|path| {
                     let mut file = fs::File::open(&path).unwrap();
                     let mut hash = Sha256::new();
                     std::io::copy(&mut file, &mut hash).unwrap();
@@ -6949,7 +7610,10 @@ mod tests {
             .unwrap_err();
         // The checkpoint was saved while the computer ran, so it holds memory, and an export
         // never carries memory: nothing is written.
-        assert!(matches!(error, backup::BackupError::InvalidRequest(_)), "{error}");
+        assert!(
+            matches!(error, backup::BackupError::InvalidRequest(_)),
+            "{error}"
+        );
         assert!(!archive.exists());
         let _ = (&cold, restored_name, captured_pid, source_boot_id);
         eprintln!("Verified a checkpoint that holds memory is refused for export.");

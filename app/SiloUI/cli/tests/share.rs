@@ -82,7 +82,85 @@ fn args(yes: bool) -> ExportArgs {
         output: Some("/out/main.silo-backup".into()),
         checkpoint: None,
         yes,
+        include_logins: false,
     }
+}
+
+/// An engine whose export leaves the logins out: the check says so, and the finished export
+/// names the files it left out.
+fn leaving_engine() -> FakeEngine {
+    FakeEngine::start(move |method, params| match method {
+        "computers.list" => Ok(listing(&[("main", "running")])),
+        "exports.check" => Ok(json!({"jobId": "exports:check"})),
+        "exports.create" => Ok(json!({"jobId": "exports:op"})),
+        "operations.job.get" if params["jobId"] == "exports:check" => Ok(finished(
+            json!({"logins": [CLAUDE], "checked": ["disk"], "leavesOut": true}),
+        )),
+        "operations.job.get" => Ok(finished(json!({
+            "kind": "result", "operation": "backup", "outcome": "success",
+            "message": "Computer exported.",
+            "archive": {"archivePath": "/out/main.silo-backup", "size": "1.2 GiB",
+                        "leftOut": [CLAUDE]}
+        }))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        _ => Ok(Value::Null),
+    })
+}
+
+#[tokio::test]
+async fn an_export_that_leaves_the_logins_out_asks_nothing_and_reports_what_it_left_out() {
+    let fake = leaving_engine();
+    let asker = Answers::new(false, false);
+    let value = export(
+        &connect(&fake).await,
+        &args(false),
+        Path::new("/"),
+        &asker,
+        &ignore,
+    )
+    .await
+    .unwrap();
+    assert!(asker.asked.borrow().is_empty());
+    assert_eq!(value["logins"], json!([]));
+    assert_eq!(value["unchecked"], Value::Null);
+    assert_eq!(value["leftOut"], json!([CLAUDE]));
+    assert!(fake.calls("exports.check")[0]
+        .get("includeLogins")
+        .is_none());
+    assert!(fake.calls("exports.create")[0]
+        .get("includeLogins")
+        .is_none());
+    let line = silo_cli::render::exported(&value);
+    assert!(
+        line.contains(&format!("Removed from the exported computer: {CLAUDE}")),
+        "{line}"
+    );
+    assert!(line.contains("Traces of them may remain"), "{line}");
+}
+
+#[tokio::test]
+async fn including_logins_is_asked_for_to_the_engine_and_the_old_question_applies() {
+    let fake = engine(json!([CLAUDE]), "success");
+    let asker = Answers::new(true, true);
+    let mut with = args(false);
+    with.include_logins = true;
+    let value = export(
+        &connect(&fake).await,
+        &with,
+        Path::new("/"),
+        &asker,
+        &ignore,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fake.calls("exports.check")[0]["includeLogins"], json!(true));
+    assert_eq!(
+        fake.calls("exports.create")[0]["includeLogins"],
+        json!(true)
+    );
+    assert_eq!(asker.asked.borrow().len(), 1);
+    assert_eq!(value["logins"], json!([CLAUDE]));
+    assert_eq!(value["leftOut"], json!([]));
 }
 
 #[tokio::test]

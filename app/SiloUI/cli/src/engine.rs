@@ -107,6 +107,25 @@ pub fn default_socket(flag: Option<PathBuf>, allow_other: bool) -> Result<PathBu
     Ok(socket)
 }
 
+/// Where the CLI keeps what it remembers between commands inside a computer, which has no
+/// engine socket beside it: `$XDG_STATE_HOME/silo`, else `~/.local/state/silo`.
+fn channel_memory() -> PathBuf {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
+        .unwrap_or_else(std::env::temp_dir);
+    let memory = base.join("silo");
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let _ = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&memory);
+    }
+    memory
+}
+
 /// A connection to the engine. Clones share it; it closes when the last clone is dropped.
 #[derive(Clone)]
 pub struct Engine {
@@ -118,6 +137,8 @@ pub struct Engine {
     device: Option<String>,
     /// Whether the engine serves requests for another device (older engines ignore `deviceId`).
     routes_devices: bool,
+    /// What a call does when the engine answers that it needs the owner's approval.
+    approvals: crate::approvals::WaitOptions,
     _closer: Arc<Closer>,
 }
 
@@ -270,18 +291,113 @@ pub fn find<'a>(computers: &'a [Computer], name: &str) -> Result<&'a Computer, C
         .ok_or_else(|| CliError::new(format!("No computer is called {name}.")))
 }
 
+/// How long a client waits before each new try when the engine refuses its handshake without
+/// a new endpoint file: the engine writes one soon after it starts or ends a token.
+const CHANNEL_WAITS: &[Duration] = &[
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+];
+
+/// The endpoint this process last reached the engine with, newer than the one it started with.
+static LATEST_ENDPOINT: Mutex<Option<crate::endpoint::Endpoint>> = Mutex::new(None);
+
+/// The endpoint file as it is now, from where this process found it.
+fn reread_endpoint() -> Option<crate::endpoint::Endpoint> {
+    let path = std::env::var_os(crate::endpoint::ENV)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(silo_api::methods::guest_client::GUEST_ENDPOINT_PATH));
+    crate::endpoint::Endpoint::load(&path).ok()
+}
+
+/// Connects over a computer's channel. A handshake the engine refuses (it closes without an
+/// answer) usually means the token changed: the engine started again, or ended the token. The
+/// endpoint file is read again and the connection tried again, waiting `waits` in turn while
+/// the file has not changed.
+async fn connect_channel(
+    given: &crate::endpoint::Endpoint,
+    mut options: ConnectOptions,
+    reread: &(dyn Fn() -> Option<crate::endpoint::Endpoint> + Sync),
+    waits: &[Duration],
+) -> Result<(Client, silo_client::EventFeed), (crate::endpoint::Endpoint, silo_client::ClientError)>
+{
+    let latest = LATEST_ENDPOINT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+        .filter(|latest| latest.computer_id == given.computer_id);
+    let mut endpoint = latest.unwrap_or_else(|| given.clone());
+    let mut waits = waits.iter();
+    loop {
+        options.token = Some(endpoint.token.clone());
+        match Client::connect_channel(&endpoint.host, endpoint.port, options.clone()).await {
+            Err(silo_client::ClientError::Disconnected) => {
+                let fresh = reread().filter(|fresh| fresh != &endpoint);
+                if let Some(fresh) = fresh {
+                    endpoint = fresh;
+                    continue;
+                }
+                let Some(wait) = waits.next() else {
+                    return Err((endpoint, silo_client::ClientError::Disconnected));
+                };
+                tokio::time::sleep(*wait).await;
+                if let Some(fresh) = reread() {
+                    endpoint = fresh;
+                }
+            }
+            Err(error) => return Err((endpoint, error)),
+            Ok(connected) => {
+                if &endpoint != given {
+                    *LATEST_ENDPOINT
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(endpoint);
+                }
+                return Ok(connected);
+            }
+        }
+    }
+}
+
 impl Engine {
     pub async fn connect(socket: &Path) -> Result<Self, CliError> {
-        let options = ConnectOptions::new(ClientMetadata {
+        Self::connect_to(&crate::endpoint::Transport::Socket(socket.to_owned())).await
+    }
+
+    /// Connects to the engine over the socket, or over a computer's channel with its token.
+    pub async fn connect_to(transport: &crate::endpoint::Transport) -> Result<Self, CliError> {
+        use crate::endpoint::Transport;
+        let mut options = ConnectOptions::new(ClientMetadata {
             name: "silo-cli".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
         });
-        let (client, events) = Client::connect(socket, options).await.map_err(|error| {
-            CliError::new(format!(
-                "Cannot reach the Silo engine at {}: {error}. Open Silo and try again.",
-                socket.display()
-            ))
-        })?;
+        let (connected, memory) = match transport {
+            Transport::Socket(socket) => (
+                Client::connect(socket, options).await.map_err(|error| {
+                    CliError::new(format!(
+                        "Cannot reach the Silo engine at {}: {error}. Open Silo and try again.",
+                        socket.display()
+                    ))
+                }),
+                socket.parent().map(Path::to_path_buf).unwrap_or_default(),
+            ),
+            Transport::Channel(endpoint) => {
+                options.token = Some(endpoint.token.clone());
+                (
+                    connect_channel(endpoint, options, &reread_endpoint, CHANNEL_WAITS)
+                        .await
+                        .map_err(|(endpoint, error)| {
+                            CliError::new(format!(
+                                "Cannot reach Silo at {}:{}: {error}. Silo may be closed, or this computer's tools were turned off or need a restart of the computer.",
+                                endpoint.host, endpoint.port
+                            ))
+                        }),
+                    channel_memory(),
+                )
+            }
+        };
+        let (client, events) = connected?;
         // The commands read replies only; the event feed is dropped.
         drop(events);
         let routes_devices = client.supports("device.routing.v1");
@@ -289,9 +405,10 @@ impl Engine {
             _closer: Arc::new(Closer(client.clone())),
             client,
             last_job: Arc::new(Mutex::new(None)),
-            memory: socket.parent().map(Path::to_path_buf).unwrap_or_default(),
+            memory,
             device: None,
             routes_devices,
+            approvals: crate::approvals::WaitOptions::default(),
         })
     }
 
@@ -497,7 +614,34 @@ impl Engine {
         format!("The job {job_id} keeps running in the engine. Re-attach with `silo job {job_id}`.")
     }
 
+    /// The same connection with this behaviour for calls that need the owner's approval.
+    pub fn with_approvals(&self, approvals: crate::approvals::WaitOptions) -> Engine {
+        Engine {
+            approvals,
+            ..self.clone()
+        }
+    }
+
+    /// A call. When the engine answers that the owner must approve it (a call from inside a
+    /// computer that widens what the computer has), this says what was asked, waits for the
+    /// answer, and returns what the call would have returned: a job's start, or its result.
+    /// A deny, a request that ended and a wait that ran out are errors with their own exit
+    /// codes.
     pub async fn call<K: Kind>(&self, request: Request<K>) -> Result<Value, CliError> {
+        match self.call_unattended(request).await {
+            Err(error) => match error.approval_request {
+                Some((id, summary)) => {
+                    crate::approvals::follow(self, &id, &summary, &self.approvals).await
+                }
+                None => Err(error),
+            },
+            ok => ok,
+        }
+    }
+
+    /// A call that returns the engine's `approval_required` as an error carrying the request,
+    /// without waiting for it.
+    pub async fn call_unattended<K: Kind>(&self, request: Request<K>) -> Result<Value, CliError> {
         if self.device.is_some()
             && !is_routed(request.name())
             && !request.name().starts_with("connections.")
@@ -508,16 +652,21 @@ impl Engine {
             )));
         }
         let params = routed_params(request.name(), request.params_value(), self.device());
-        Ok(self.client.request(request.name(), params).await?)
+        self.client
+            .request(request.name(), params)
+            .await
+            .map_err(CliError::from)
     }
 
-    /// The computers a person works with: the throwaway computers that measure baselines are
-    /// left out.
+    /// The computers a person works with: the throwaway computers that measure baselines, build
+    /// recipes, carry exports and take part in a rebuild are left out.
     pub async fn computers(&self) -> Result<Vec<Computer>, CliError> {
         let mut computers = self.all_computers().await?;
         computers.retain(|computer| {
             !computer.name.starts_with(crate::ops::BASELINE_PREFIX)
                 && !computer.name.starts_with(crate::ops::BUILDER_PREFIX)
+                && !computer.name.starts_with(crate::ops::EXPORT_COPY_PREFIX)
+                && !computer.name.starts_with(crate::ops::REBUILD_BUILD_PREFIX)
         });
         Ok(computers)
     }
@@ -543,6 +692,18 @@ impl Engine {
             }))
             .await?;
         Ok(macos_supported(&listed))
+    }
+
+    /// Puts computer names in place of the ids in a merge result. Ids stay where the engine
+    /// cannot list the computers.
+    pub async fn name_merge_computers(&self, value: &mut Value) {
+        if let Ok(computers) = self.all_computers().await {
+            let names: Vec<(String, String)> = computers
+                .into_iter()
+                .map(|computer| (computer.id, computer.name))
+                .collect();
+            crate::render::name_merge_computers(value, &names);
+        }
     }
 
     pub async fn computer(&self, name: &str) -> Result<Computer, CliError> {
@@ -759,6 +920,79 @@ fn outcome_result(outcome: &Value) -> Result<Value, CliError> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A channel on `port` that serves only `token`, answering like the engine: a challenge,
+    /// then a reply to a valid proof or a close without one.
+    async fn channel_serving(
+        listener: tokio::net::TcpListener,
+        token: &'static str,
+    ) -> tokio::task::JoinHandle<usize> {
+        use silo_api::transport::{channel_key, channel_proof_matches, from_hex, to_hex};
+        use silo_client::{read_frame, write_frame};
+        tokio::spawn(async move {
+            let port = listener.local_addr().unwrap().port();
+            let mut refused = 0;
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let nonce = [refused as u8; 32];
+                write_frame(&mut stream, &json!({ "nonce": to_hex(&nonce) }))
+                    .await
+                    .unwrap();
+                let request: Value = read_frame(&mut stream).await.unwrap().unwrap();
+                let proof = request["params"]["proof"]
+                    .as_str()
+                    .and_then(from_hex::<32>)
+                    .unwrap_or_default();
+                if !channel_proof_matches(&channel_key(token), &nonce, port, &proof) {
+                    refused += 1;
+                    continue;
+                }
+                let reply = json!({"id": "handshake", "result": {
+                    "deviceId": "dev", "name": "Mac", "protocol": 8,
+                    "capabilities": [], "clientId": "c1"
+                }});
+                write_frame(&mut stream, &reply).await.unwrap();
+                return refused;
+            }
+        })
+    }
+
+    fn endpoint(port: u16, token: &str, computer: &str) -> crate::endpoint::Endpoint {
+        serde_json::from_value(json!({
+            "host": "127.0.0.1", "port": port, "token": token, "computerId": computer
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_refused_handshake_reads_the_endpoint_file_again_and_recovers() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = channel_serving(listener, "silo_gc_new").await;
+        let options = ConnectOptions::new(ClientMetadata {
+            name: "test".into(),
+            version: "0".into(),
+        });
+        let old = endpoint(port, "silo_gc_old", "c-recover");
+        let fresh = endpoint(port, "silo_gc_new", "c-recover");
+        let reread = || Some(fresh.clone());
+        let (client, _) = connect_channel(&old, options.clone(), &reread, &[])
+            .await
+            .map_err(|(_, error)| error)
+            .unwrap();
+        assert_eq!(client.handshake().client_id.as_deref(), Some("c1"));
+        assert_eq!(server.await.unwrap(), 1, "one refusal, then the new token");
+        // Without a new file and with no waits left, the refusal is the answer.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _server = channel_serving(listener, "silo_gc_other").await;
+        let stale = endpoint(port, "silo_gc_stale", "c-stale");
+        let same = || Some(stale.clone());
+        assert!(matches!(
+            connect_channel(&stale, options, &same, &[]).await,
+            Err((_, silo_client::ClientError::Disconnected))
+        ));
+    }
 
     #[test]
     fn the_channel_is_development_unless_built_with_the_production_identifier() {

@@ -23,8 +23,18 @@ export interface GitHubRepositorySelection {
 
 const emptySelections: readonly GitHubRepositorySelection[] = []
 
+/** A personal token held as a secret, which a computer's GitHub access can use. */
+export interface GitHubTokenOption {
+  id: string
+  name: string
+  account?: string
+  connected: boolean
+}
+
 export interface GitHubRepositoryAccess {
   authenticationMethod?: "oauth" | "token"
+  /** With token access, the token secret the computer uses. */
+  tokenSecretId?: string
   repositoryMode: "selected" | "all"
   allRepositoriesAllowChanges: boolean
 }
@@ -37,6 +47,8 @@ export interface GitHubIdentity {
 
 export interface GitHubComputer {
   name: string
+  /** The token this computer chose no longer exists, so it has no GitHub access. */
+  tokenMissing?: boolean
 }
 
 interface RepositoryComboboxProps {
@@ -213,8 +225,7 @@ function RepositoryCombobox({ computer, repositoryOptions, selectedRepositories,
 export interface GitHubAccessEditorProps {
   computers: readonly GitHubComputer[]
   connectionState: GitHubConnectionState
-  tokenConnected?: boolean
-  tokenConnection?: ReactNode
+  tokenSecrets?: readonly GitHubTokenOption[]
   repositoryOptions: readonly string[]
   computerSelections: Readonly<Record<string, readonly GitHubRepositorySelection[]>>
   computerRepositoryAccess?: Readonly<Record<string, GitHubRepositoryAccess>>
@@ -247,8 +258,7 @@ export interface GitHubAccessEditorProps {
 export function GitHubAccessEditor({
   computers,
   connectionState,
-  tokenConnected = false,
-  tokenConnection,
+  tokenSecrets = [],
   repositoryOptions,
   computerSelections,
   computerIdentities,
@@ -277,6 +287,7 @@ export function GitHubAccessEditor({
   confirmRepositoryClear = false,
   busy = false,
 }: GitHubAccessEditorProps) {
+  const connectedTokens = tokenSecrets.filter((token) => token.connected)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -312,7 +323,6 @@ export function GitHubAccessEditor({
         {connectionProgress}
       </ListCard>
 
-      {tokenConnection}
       {notice && <div className="shrink-0">{notice}</div>}
 
       <ScrollArea className="min-h-0 flex-initial rounded-md border border-border" role="region" aria-label="Computer Git identity and repository access" aria-busy={busy || undefined}>
@@ -417,18 +427,39 @@ export function GitHubAccessEditor({
                             <input type="radio" name={`github-method-${name}`} aria-label={`Use GitHub OAuth for ${name}`}
                               checked={(access.authenticationMethod ?? "oauth") === "oauth"}
                               disabled={computerDisabled || connectionState !== "connected"}
-                              onChange={() => onComputerRepositoryAccessChange(name, { ...access, authenticationMethod: "oauth" })} />
+                              onChange={() => onComputerRepositoryAccessChange(name, { ...access, authenticationMethod: "oauth", tokenSecretId: undefined })} />
                             Use GitHub OAuth
                           </label>
                           <TooltipProvider><Tooltip><TooltipTrigger asChild>
                             <label className="flex items-center gap-2">
                               <input type="radio" name={`github-method-${name}`} aria-label={`Use token for ${name}`}
                                 checked={access.authenticationMethod === "token"}
-                                disabled={computerDisabled || !tokenConnected}
-                                onChange={() => onComputerRepositoryAccessChange(name, { ...access, authenticationMethod: "token" })} />
+                                disabled={computerDisabled || connectedTokens.length === 0}
+                                onChange={() => onComputerRepositoryAccessChange(name, { ...access, authenticationMethod: "token", tokenSecretId: access.tokenSecretId ?? connectedTokens[0]?.id })} />
                               Use token
                             </label>
                           </TooltipTrigger><TooltipContent>Full token access. This computer can perform every action permitted by the token, with no additional Silo repository restrictions. Credentials remain outside the computer.</TooltipContent></Tooltip></TooltipProvider>
+                          {access.authenticationMethod === "token" && (
+                            <label className="flex items-center gap-2">
+                              <span className="text-muted-foreground">Token</span>
+                              <select aria-label={`GitHub token for ${name}`} className="h-7 max-w-56 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                                value={access.tokenSecretId ?? ""} disabled={computerDisabled}
+                                onChange={(event) => onComputerRepositoryAccessChange(name, { ...access, tokenSecretId: event.target.value })}>
+                                {access.tokenSecretId === undefined && <option value="" disabled>Choose a token…</option>}
+                                {tokenSecrets.map((token) => (
+                                  <option key={token.id} value={token.id} disabled={!token.connected && token.id !== access.tokenSecretId}>
+                                    {token.name}{token.account ? ` · @${token.account}` : ""}{token.connected ? "" : " (disconnected)"}
+                                  </option>
+                                ))}
+                                {access.tokenSecretId !== undefined && !tokenSecrets.some((token) => token.id === access.tokenSecretId) && (
+                                  <option value={access.tokenSecretId} disabled>Removed token</option>
+                                )}
+                              </select>
+                            </label>
+                          )}
+                          {access.authenticationMethod === "token" && computer.tokenMissing && (
+                            <p role="alert" className="text-destructive">The token this computer used was removed, so it has no GitHub access. Choose another token.</p>
+                          )}
                         </div>
                         {connectionState === "connected" && access.authenticationMethod !== "token" && (
                           <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-xs">
@@ -445,6 +476,9 @@ export function GitHubAccessEditor({
                           </div>
                         )}
                       </div>
+                    )}
+                    {access.authenticationMethod === "token" && (
+                      <p className="text-xs text-muted-foreground">Full token permissions: this computer can do everything the token allows, with no repository limits from Silo.</p>
                     )}
                     {connectionState === "connected" && access.authenticationMethod !== "token" && (
                       <>

@@ -252,11 +252,13 @@ mod tests {
             .borrow_mut()
             .push(published(40002, 4000, Ipv4Addr::UNSPECIFIED.into()));
         assert!(answer(&control, &add_request(3000)).is_none());
-        assert!(control
-            .ports
-            .borrow()
-            .iter()
-            .any(|port| port.guest_port == 3000));
+        assert!(
+            control
+                .ports
+                .borrow()
+                .iter()
+                .any(|port| port.guest_port == 3000)
+        );
     }
 
     #[test]

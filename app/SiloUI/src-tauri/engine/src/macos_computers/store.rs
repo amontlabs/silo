@@ -185,6 +185,11 @@ pub(super) struct Record {
     /// this computer exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forked_from: Option<ForkOrigin>,
+    /// An agent may have written this computer's disk: set the first time its setup completes,
+    /// and at birth for a fork or an import, and never cleared. Such a disk never boots on
+    /// Apple's own network (see `engine::network_plan`).
+    #[serde(default)]
+    pub agent_may_have_used: bool,
 }
 
 /// A checkpoint of a source computer that a fork depends on.
@@ -218,6 +223,19 @@ impl Record {
     /// Readiness shown to the user and used by operations that require a current setup.
     pub(super) fn setup_complete(&self) -> bool {
         self.setup.complete() && !self.developer_tools_stale() && !self.imported
+    }
+
+    /// Whether an agent may have written this computer's disk. A record saved before the
+    /// field existed has it from its completed setup.
+    pub(super) fn may_hold_agent_work(&self) -> bool {
+        self.agent_may_have_used || self.setup.complete()
+    }
+
+    /// Sets `agent_may_have_used` once the setup is complete. It is never cleared.
+    pub(super) fn note_agent_use(&mut self) {
+        if self.setup.complete() {
+            self.agent_may_have_used = true;
+        }
     }
 
     pub(super) fn os_version(&self) -> Option<String> {
@@ -367,6 +385,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         boots: 0,
         quiet: None,
         forked_from: None,
+        agent_may_have_used: false,
     }
 }
 
@@ -377,6 +396,36 @@ pub(super) fn initial_state(record: &Record) -> (State, Option<String>) {
     } else {
         (State::Failed, Some(INTERRUPTED_INSTALL.into()))
     }
+}
+
+/// Why a computer an agent may have written is refused a start on the Mac's own network.
+pub(super) const NETWORK_NOT_PREPARED: &str = "This computer may have been used, and its network setup from Silo is not in place, so Silo will not start it on the Mac's own network. Delete it and make it again from a computer or checkpoint that Silo has set up, or import an export of one.";
+
+/// How a boot of the computer reaches the network.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NetworkPlan {
+    /// Behind the computer's own gateway, which applies Silo's network rules.
+    Gateway,
+    /// On Apple's own network, with no rules: only for a disk no agent can have written, which
+    /// is a first install or the setup of a copy of a template.
+    AppleNat,
+}
+
+/// The network a boot of this computer gets. A computer an agent may have written never gets
+/// Apple's network: its boot goes behind the gateway once the network bootstrap is on its
+/// disk, and is refused until then.
+pub(super) fn network_plan(record: &Record) -> Result<NetworkPlan, String> {
+    if record.setup.complete() {
+        return Ok(NetworkPlan::Gateway);
+    }
+    if record.may_hold_agent_work() {
+        return if record.setup.proxy_bootstrap {
+            Ok(NetworkPlan::Gateway)
+        } else {
+            Err(NETWORK_NOT_PREPARED.into())
+        };
+    }
+    Ok(NetworkPlan::AppleNat)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -579,7 +628,32 @@ pub(super) fn save(layout: &Layout, record: &Record) -> Result<(), String> {
 
 pub(super) fn read_record(layout: &Layout) -> Result<Record, String> {
     let bytes = fs::read(layout.record()).map_err(|error| io_error("read the computer", &error))?;
-    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+    let mut record: Record = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    record.note_agent_use();
+    record.disk_gib = disk_file_gib(&layout.disk(), record.disk_gib);
+    Ok(record)
+}
+
+/// The size of a backing disk file in whole gibibytes, or `recorded` when the file is missing,
+/// is not a whole number of gibibytes, or is not larger than `recorded`. A file is only ever
+/// larger than its record when an earlier version recorded the guest's usable size after a
+/// failed expansion; the file is what the virtual machine and an export really have.
+pub(super) fn disk_file_gib(disk: &Path, recorded: u64) -> u64 {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    match fs::metadata(disk).map(|meta| meta.len()) {
+        Ok(len) if len % GIB == 0 && len / GIB > recorded => len / GIB,
+        _ => recorded,
+    }
+}
+
+/// Whether a saved record says an agent may have used the disk, by its flag or by a completed
+/// setup in a version that predates the flag.
+fn saved_agent_use(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<Record>(bytes).is_ok_and(|saved| saved.may_hold_agent_work())
+        || serde_json::from_slice::<serde_json::Value>(bytes)
+            .ok()
+            .and_then(|value| value.get("agentMayHaveUsed")?.as_bool())
+            .unwrap_or(false)
 }
 
 pub(super) fn save_with_sync(
@@ -588,12 +662,25 @@ pub(super) fn save_with_sync(
     mut sync: impl FnMut(&Path) -> std::io::Result<()>,
 ) -> Result<(), String> {
     fs::create_dir_all(&layout.dir).map_err(|error| io_error("create the computer", &error))?;
-    let json = serde_json::to_vec_pretty(record).map_err(|error| error.to_string())?;
     let previous = match fs::read(layout.record()) {
         Ok(bytes) => Some(bytes),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(io_error("read the computer before saving", &error)),
     };
+    // The flag only ever turns on: a record that lacks it but whose setup is complete, or
+    // whose saved version has it, is written with it.
+    let flagged;
+    let record = if !record.agent_may_have_used
+        && (record.setup.complete() || previous.as_deref().is_some_and(saved_agent_use))
+    {
+        let mut copy = record.clone();
+        copy.agent_may_have_used = true;
+        flagged = copy;
+        &flagged
+    } else {
+        record
+    };
+    let json = serde_json::to_vec_pretty(record).map_err(|error| error.to_string())?;
     match write_record(layout, &json, &mut sync) {
         Ok(()) => Ok(()),
         Err(error) => {
@@ -650,7 +737,9 @@ pub(super) fn load_all(app_data: &Path) -> Vec<Record> {
         .flatten()
         .filter_map(|entry| {
             let bytes = fs::read(entry.path().join("computer.json")).ok()?;
-            let record: Record = serde_json::from_slice(&bytes).ok()?;
+            let mut record: Record = serde_json::from_slice(&bytes).ok()?;
+            record.note_agent_use();
+            record.disk_gib = disk_file_gib(&entry.path().join("disk.img"), record.disk_gib);
             let directory = entry.file_name();
             (record.schema_version == SCHEMA_VERSION && directory.to_str() == Some(&record.id))
                 .then_some(record)
@@ -1008,6 +1097,8 @@ mod tests {
         let layout = Layout::new(data.path(), "one");
         let mut record = finished();
         record.id = "one".into();
+        // A complete setup is saved and loaded with the flag.
+        record.agent_may_have_used = true;
         record.pending_restore = Some(super::super::checkpoints::PendingRestore {
             checkpoint_id: "c".into(),
             memory: true,
@@ -1238,6 +1329,49 @@ mod tests {
         assert_eq!(load_all(app_data.path()), vec![good]);
     }
 
+    fn write_disk(layout: &Layout, gib: u64) {
+        fs::create_dir_all(&layout.dir).unwrap();
+        let file = fs::File::create(layout.disk()).unwrap();
+        file.set_len(gib * 1024 * 1024 * 1024).unwrap();
+    }
+
+    #[test]
+    fn a_disk_file_larger_than_its_record_is_what_the_computer_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path(), "one");
+        // No file, a file of the recorded size and a smaller one change nothing.
+        assert_eq!(disk_file_gib(&layout.disk(), 40), 40);
+        write_disk(&layout, 40);
+        assert_eq!(disk_file_gib(&layout.disk(), 40), 40);
+        assert_eq!(disk_file_gib(&layout.disk(), 64), 64);
+        write_disk(&layout, 64);
+        assert_eq!(disk_file_gib(&layout.disk(), 40), 64);
+        // A file that is not a whole number of gibibytes is not trusted.
+        let file = fs::OpenOptions::new().write(true).open(layout.disk()).unwrap();
+        file.set_len(64 * 1024 * 1024 * 1024 + 4096).unwrap();
+        assert_eq!(disk_file_gib(&layout.disk(), 40), 40);
+    }
+
+    #[test]
+    fn a_record_that_says_less_than_its_disk_file_loads_with_the_files_size() {
+        let app_data = tempfile::tempdir().unwrap();
+        let mut stale = record(&request());
+        stale.disk_gib = 40;
+        stale.disk_note = Some("kept".into());
+        let layout = Layout::new(app_data.path(), &stale.id);
+        write_disk(&layout, 64);
+        save(&layout, &stale).unwrap();
+        let loaded = load_all(app_data.path());
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].disk_gib, 64);
+        assert_eq!(loaded[0].disk_note.as_deref(), Some("kept"));
+        assert_eq!(read_record(&layout).unwrap().disk_gib, 64);
+        // The file on disk is only rewritten by the engine's own saves.
+        assert!(fs::read_to_string(layout.record())
+            .unwrap()
+            .contains("\"diskGiB\": 40"));
+    }
+
     #[test]
     fn an_interrupted_install_loads_as_failed() {
         let mut interrupted = record(&request());
@@ -1360,6 +1494,169 @@ mod tests {
         let loaded = load_all(app_data.path());
         assert_eq!(loaded[0].setup, SetupProgress::default());
         assert!(!loaded[0].setup.complete());
+    }
+
+    /// A record saved before the field existed has it from its completed setup; one whose
+    /// setup is not complete does not.
+    #[test]
+    fn an_old_record_gets_the_use_flag_from_its_completed_setup() {
+        let app_data = tempfile::tempdir().unwrap();
+        for complete in [true, false] {
+            let mut original = finished();
+            original.id = uuid::Uuid::new_v4().to_string();
+            original.setup.proxy_bootstrap = complete;
+            let layout = Layout::new(app_data.path(), &original.id);
+            save(&layout, &original).unwrap();
+            let mut json: serde_json::Value =
+                serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
+            json.as_object_mut().unwrap().remove("agentMayHaveUsed");
+            fs::write(layout.record(), serde_json::to_vec(&json).unwrap()).unwrap();
+            assert_eq!(read_record(&layout).unwrap().agent_may_have_used, complete);
+            let loaded = load_all(app_data.path());
+            let loaded = loaded.iter().find(|r| r.id == original.id).unwrap();
+            assert_eq!(loaded.agent_may_have_used, complete);
+        }
+    }
+
+    #[test]
+    fn a_new_computer_is_unused_and_the_flag_is_set_when_its_setup_completes_and_kept() {
+        let mut computer = finished();
+        computer.setup.proxy_bootstrap = false;
+        computer.agent_may_have_used = false;
+        computer.note_agent_use();
+        assert!(!computer.agent_may_have_used);
+        assert!(!computer.may_hold_agent_work());
+        computer.setup.proxy_bootstrap = true;
+        assert!(computer.may_hold_agent_work(), "complete setup counts at once");
+        computer.note_agent_use();
+        assert!(computer.agent_may_have_used);
+        // Nothing clears it, even a setup that is no longer complete.
+        computer.setup.proxy_bootstrap = false;
+        computer.note_agent_use();
+        assert!(computer.agent_may_have_used && computer.may_hold_agent_work());
+    }
+
+    #[test]
+    fn saving_writes_the_flag_once_setup_is_complete_and_never_removes_it() {
+        let app_data = tempfile::tempdir().unwrap();
+        let mut computer = finished();
+        let layout = Layout::new(app_data.path(), &computer.id);
+        // A complete record whose in-memory copy lacks the flag is saved with it.
+        assert!(!computer.agent_may_have_used);
+        save(&layout, &computer).unwrap();
+        assert!(read_record(&layout).unwrap().agent_may_have_used);
+        let json: serde_json::Value =
+            serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
+        assert_eq!(json["agentMayHaveUsed"], serde_json::json!(true));
+        // A stale copy that no longer says so cannot clear what is saved.
+        computer.setup.proxy_bootstrap = false;
+        computer.agent_may_have_used = false;
+        save(&layout, &computer).unwrap();
+        let saved = read_record(&layout).unwrap();
+        assert!(saved.agent_may_have_used && saved.may_hold_agent_work());
+    }
+
+    /// Every case that boots a macOS computer: a computer an agent may have written is on its
+    /// gateway or refused, and only a clean disk can be on Apple's network.
+    #[test]
+    fn a_boot_chooses_the_network_for_every_kind_of_computer() {
+        use NetworkPlan::{AppleNat, Gateway};
+        let setup_done = || {
+            let mut computer = finished();
+            computer.agent_may_have_used = false;
+            computer
+        };
+
+        // First install and the setup of a copy of a template: nothing has written the disk.
+        let mut first_install = record(&request());
+        first_install.installed = true;
+        assert_eq!(network_plan(&first_install), Ok(AppleNat));
+        let mut half_set_up = setup_done();
+        half_set_up.setup.proxy_bootstrap = false;
+        assert_eq!(network_plan(&half_set_up), Ok(AppleNat), "retry of a first install");
+        let mut template_copy = setup_done();
+        template_copy.template = Some("25G83-abcd".into());
+        template_copy.setup.needs_personalizing = true;
+        template_copy.setup.proxy_bootstrap = false;
+        template_copy.setup.roots = false;
+        assert_eq!(network_plan(&template_copy), Ok(AppleNat));
+
+        // A computer whose setup is complete.
+        assert_eq!(network_plan(&setup_done()), Ok(Gateway));
+
+        // A fork is born flagged: it is refused until its bootstrap is on the disk and is on
+        // its gateway afterwards, whatever its guest steps have left.
+        let mut fork = setup_done();
+        fork.agent_may_have_used = true;
+        fork.inherited_access = true;
+        fork.setup.needs_personalizing = true;
+        fork.setup.proxy_bootstrap = false;
+        assert_eq!(network_plan(&fork), Err(NETWORK_NOT_PREPARED.to_string()));
+        fork.setup.needs_personalizing = false;
+        fork.setup.proxy_bootstrap = true;
+        fork.first_boot = true;
+        fork.setup.developer_tools = false;
+        assert_eq!(network_plan(&fork), Ok(Gateway), "a fork with guest work left");
+        fork.setup.proxy_bootstrap = false;
+        assert_eq!(network_plan(&fork), Err(NETWORK_NOT_PREPARED.to_string()));
+
+        // An import is born flagged and has every guest step left.
+        let mut import = record(&request());
+        import.installed = true;
+        import.imported = true;
+        import.agent_may_have_used = true;
+        import.setup = SetupProgress {
+            account: true,
+            sip: true,
+            needs_personalizing: true,
+            ..SetupProgress::default()
+        };
+        assert_eq!(network_plan(&import), Err(NETWORK_NOT_PREPARED.to_string()));
+        import.setup.needs_personalizing = false;
+        import.setup.proxy_bootstrap = true;
+        assert_eq!(network_plan(&import), Ok(Gateway));
+
+        // A retry, or a start after a failure, of a computer that was complete once.
+        let mut failed_later = setup_done();
+        failed_later.agent_may_have_used = true;
+        failed_later.setup.clipboard = false;
+        assert_eq!(network_plan(&failed_later), Ok(Gateway));
+        failed_later.setup.proxy_bootstrap = false;
+        assert_eq!(
+            network_plan(&failed_later),
+            Err(NETWORK_NOT_PREPARED.to_string())
+        );
+    }
+
+    /// No record with the flag, or with a complete setup, can select Apple's network, in any
+    /// combination of the fields that setup and the boot paths read.
+    #[test]
+    fn no_flagged_state_selects_apple_network() {
+        for bits in 0_u32..1 << 10 {
+            let bit = |n: u32| bits & (1 << n) != 0;
+            let mut computer = record(&request());
+            computer.installed = true;
+            computer.agent_may_have_used = bit(0);
+            computer.imported = bit(1);
+            computer.first_boot = bit(2);
+            computer.setup = SetupProgress {
+                account: bit(3),
+                sip: true,
+                developer_tools: bit(4),
+                computer_use: bit(5),
+                clipboard: bit(6),
+                roots: bit(7),
+                needs_personalizing: bit(8),
+                proxy_bootstrap: bit(9),
+            };
+            if computer.may_hold_agent_work() {
+                assert_ne!(
+                    network_plan(&computer),
+                    Ok(NetworkPlan::AppleNat),
+                    "{computer:?}"
+                );
+            }
+        }
     }
 
     #[test]

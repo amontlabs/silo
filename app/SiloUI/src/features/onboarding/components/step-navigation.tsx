@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react"
-import { Boxes, Check, CircleAlert, ClipboardCheck, GitFork, PackageCheck } from "lucide-react"
+import { Bot, Boxes, Check, CircleAlert, ClipboardCheck, GitFork, PackageCheck } from "lucide-react"
 
 import { SiloMark } from "@/components/silo-mark"
 import { TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -13,6 +13,7 @@ import type { OnboardingStep, PresentationStatus } from "@/features/onboarding/m
 const steps = [
   { id: "dependencies", label: "Dependencies", icon: PackageCheck },
   { id: "computers", label: "Computers", icon: Boxes },
+  { id: "agent", label: "Your agent", icon: Bot },
   { id: "github", label: "GitHub", icon: GitFork },
   { id: "review", label: "Review", icon: ClipboardCheck },
 ] as const

@@ -6,8 +6,9 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
 use crate::methods::{
-    computers::ComputerConfigurationProgress, exports::BackupOperation, files::TransferProgress,
-    operations::OperationKind, push::PushOperation, updates::UpdateProgressData,
+    agents::AgentInstallProgress, computers::ComputerConfigurationProgress,
+    exports::BackupOperation, files::TransferProgress, operations::OperationKind,
+    push::PushOperation, updates::UpdateProgressData,
 };
 
 /// Stable snake_case wire error code. Existing values are sourced from
@@ -41,6 +42,10 @@ pub enum ErrorCode {
     DesktopUpdateRequired,
     // The system credential store refused the engine without asking (Keychain access list).
     CredentialAccessDenied,
+    // The call needs the owner's approval; the error's details say what it asks for.
+    ApprovalRequired,
+    // The device is too short of memory or disk for an agent to start or create another computer.
+    ResourcesLow,
 }
 
 /// A string JobId with one of the six canonical id-space prefixes.
@@ -216,6 +221,14 @@ pub enum JobProgress {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         computer_id: Option<String>,
         data: UpdateProgressData,
+    },
+    Agent {
+        job_id: JobId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<OperationKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer_id: Option<String>,
+        data: AgentInstallProgress,
     },
 }
 

@@ -1,0 +1,363 @@
+diff --git a/crates/network/lib/engine/netstack/poll.rs b/crates/network/lib/engine/netstack/poll.rs
+index f9971f16..0c5b4980 100644
+--- a/crates/network/lib/engine/netstack/poll.rs
++++ b/crates/network/lib/engine/netstack/poll.rs
+@@ -140,6 +140,47 @@ pub struct GatewayIps {
+ // Functions
+ //--------------------------------------------------------------------------------------------------
+ 
++/// Accept mode for a TCP SYN to the DNS-over-TLS port.
++///
++/// The DoT interceptor can only complete TLS as the gateway. A connection to
++/// any other address is a regular outbound flow: if policy denies it the guest
++/// gets a reset instead of a handshake that would hang.
++fn dns_accept_mode(
++    dst: SocketAddr,
++    gateway: GatewayIps,
++    network_policy: &NetworkPolicy,
++    platform_policy: Option<&NetworkPolicy>,
++    shared: &SharedState,
++    intercepted: TcpAcceptMode,
++) -> TcpAcceptMode {
++    let to_gateway = match dst.ip() {
++        IpAddr::V4(ip) => gateway.ipv4 == Some(ip),
++        IpAddr::V6(ip) => gateway.ipv6 == Some(ip),
++    };
++    if to_gateway {
++        return intercepted;
++    }
++    let platform_allows = platform_policy.is_none_or(|policy| {
++        policy
++            .evaluate_egress(dst, Protocol::Tcp, shared)
++            .is_allow()
++    });
++    let denied = matches!(
++        network_policy.evaluate_egress_with_source(
++            dst,
++            Protocol::Tcp,
++            shared,
++            HostnameSource::Deferred,
++        ),
++        EgressEvaluation::Deny
++    );
++    if platform_allows && !denied {
++        intercepted
++    } else {
++        TcpAcceptMode::Reject
++    }
++}
++
+ /// Classify a raw ethernet frame for pre-inspection.
+ ///
+ /// Uses smoltcp's wire module for zero-copy parsing. Returns
+@@ -438,7 +479,14 @@ pub(crate) fn smoltcp_poll_loop_with_options(
+                         // per query by the forwarder.
+                         DnsPortType::EncryptedDns => {
+                             if tls_state.is_some() {
+-                                TcpAcceptMode::AcceptImmediately
++                                dns_accept_mode(
++                                    dst,
++                                    config.gateway,
++                                    &network_policy,
++                                    platform_policy.as_deref(),
++                                    &shared,
++                                    TcpAcceptMode::AcceptImmediately,
++                                )
+                             } else {
+                                 tracing::debug!(%dst, "DoT port refused (TLS interception not configured); stub should fall back to TCP/53");
+                                 TcpAcceptMode::Reject
+@@ -2040,9 +2088,21 @@ mod tests {
+         seq: i32,
+         ack: Option<i32>,
+         payload: &[u8],
++    ) -> Vec<u8> {
++        build_tcp_frame_to(SERVER_IP, src_port, dst_port, control, seq, ack, payload)
++    }
++
++    fn build_tcp_frame_to(
++        dst: [u8; 4],
++        src_port: u16,
++        dst_port: u16,
++        control: TcpControl,
++        seq: i32,
++        ack: Option<i32>,
++        payload: &[u8],
+     ) -> Vec<u8> {
+         let src_ip = Ipv4Addr::from(GUEST_IP);
+-        let dst_ip = Ipv4Addr::from(SERVER_IP);
++        let dst_ip = Ipv4Addr::from(dst);
+ 
+         let tcp_repr = TcpRepr {
+             src_port,
+@@ -2229,6 +2289,182 @@ mod tests {
+         );
+     }
+ 
++    fn assert_unlisted_syn_reset(port: u16) {
++        let (syn, rst) = syn_reply_flags(SERVER_IP, port);
++        assert!(
++            rst && !syn,
++            "SYN to port {port} of an unlisted address was answered with a handshake (syn={syn}, rst={rst})"
++        );
++    }
++
++    /// Re-run the named test in a subprocess: the poll loop has no shutdown API
++    /// and the TLS provider is installed process-wide.
++    fn run_in_child(test_path: &str, check: impl FnOnce()) {
++        const CHILD_ENV: &str = "MSB_TEST_UNLISTED_SYN_CHILD";
++        if std::env::var_os(CHILD_ENV).is_some() {
++            check();
++            return;
++        }
++        let output = std::process::Command::new(std::env::current_exe().unwrap())
++            .args(["--exact", test_path, "--nocapture"])
++            .env(CHILD_ENV, "1")
++            .output()
++            .unwrap();
++        assert!(
++            output.status.success(),
++            "{}\n{}",
++            String::from_utf8_lossy(&output.stdout),
++            String::from_utf8_lossy(&output.stderr)
++        );
++    }
++
++    /// Send a SYN to `dst:port` under an allowlist (default HTTP settings,
++    /// intercepted port 443, DNS interception on) and return the reply's
++    /// (syn, rst) flags.
++    fn syn_reply_flags(dst: [u8; 4], port: u16) -> (bool, bool) {
++        use crate::policy::{Action, Destination, PortRange, Protocol, Rule};
++
++        let _ = rustls::crypto::ring::default_provider().install_default();
++        let mut allow_host =
++            Rule::allow_egress(Destination::Domain("example.com".parse().unwrap()));
++        allow_host.protocols = vec![Protocol::Tcp];
++        allow_host.ports = vec![PortRange::single(443)];
++        let policy = NetworkPolicy {
++            default_egress: Action::Deny,
++            default_ingress: Action::Allow,
++            rules: vec![Rule::allow_dns(), allow_host],
++        };
++        let shared = Arc::new(SharedState::new(256));
++        shared.set_http_config(crate::config::NetworkConfig::default().http);
++        let secrets = SecretsHandle::new(Default::default());
++        let tls_state = Arc::new(
++            TlsState::new(microsandbox_types::TlsConfig::default(), secrets.clone()).unwrap(),
++        );
++        assert!(tls_state.config.intercepted_ports.contains(&443));
++
++        let loop_shared = shared.clone();
++        std::thread::spawn(move || {
++            let runtime = tokio::runtime::Builder::new_current_thread()
++                .enable_all()
++                .build()
++                .unwrap();
++            smoltcp_poll_loop(
++                loop_shared,
++                leak_poll_config(),
++                policy,
++                None,
++                DnsConfig::default(),
++                Some(tls_state),
++                BoundPublishedPorts::default(),
++                mpsc::channel().1,
++                false,
++                None,
++                None,
++                None,
++                runtime.handle().clone(),
++                secrets,
++                None,
++            );
++        });
++        shared
++            .tx_ring
++            .push(build_arp_request_frame(GUEST_MAC, GUEST_IP, GATEWAY_IP))
++            .unwrap();
++        shared
++            .tx_ring
++            .push(build_tcp_frame_to(
++                dst,
++                40000,
++                port,
++                TcpControl::Syn,
++                1000,
++                None,
++                &[],
++            ))
++            .unwrap();
++        shared.tx_wake.wake();
++
++        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
++        let reply = loop {
++            if let Some(reply) = last_tcp_reply(&shared) {
++                break reply;
++            }
++            assert!(std::time::Instant::now() < deadline, "no reply to the SYN");
++            std::thread::sleep(std::time::Duration::from_millis(1));
++        };
++        let (_, _, syn, _, rst) = reply;
++        (syn, rst)
++    }
++
++    /// A SYN to an address that is not on an allowlist must be reset under the
++    /// default HTTP settings, even on a TLS-intercepted port: completing the
++    /// handshake shows the guest a reachable host that policy denies.
++    #[test]
++    fn default_deny_resets_syn_to_unlisted_address() {
++        run_in_child(
++            "engine::netstack::poll::tests::default_deny_resets_syn_to_unlisted_address",
++            || {
++                assert_unlisted_syn_reset(443);
++            },
++        );
++    }
++
++    /// Plain DNS over TCP to another resolver is still intercepted, exactly
++    /// like UDP 53: the handshake completes and the gateway's resolver answers.
++    #[test]
++    fn unlisted_dns_port_is_still_intercepted() {
++        run_in_child(
++            "engine::netstack::poll::tests::unlisted_dns_port_is_still_intercepted",
++            || {
++                let (syn, rst) = syn_reply_flags(SERVER_IP, 53);
++                assert!(
++                    syn && !rst,
++                    "SYN to port 53 of an unlisted address was not intercepted (syn={syn}, rst={rst})"
++                );
++            },
++        );
++    }
++
++    /// DNS-over-TLS (853) to an address other than the gateway is reset as well,
++    /// even though TLS interception is configured.
++    #[test]
++    fn default_deny_resets_syn_to_unlisted_dot_port() {
++        run_in_child(
++            "engine::netstack::poll::tests::default_deny_resets_syn_to_unlisted_dot_port",
++            || {
++                assert_unlisted_syn_reset(853);
++            },
++        );
++    }
++
++    /// The gateway's own resolver keeps answering on plain DNS and DoT.
++    #[test]
++    fn gateway_dns_ports_still_complete_the_handshake() {
++        run_in_child(
++            "engine::netstack::poll::tests::gateway_dns_ports_still_complete_the_handshake",
++            || {
++                for port in [53, 853] {
++                    let (syn, rst) = syn_reply_flags(GATEWAY_IP, port);
++                    assert!(
++                        syn && !rst,
++                        "SYN to the gateway on port {port} was not accepted (syn={syn}, rst={rst})"
++                    );
++                }
++            },
++        );
++    }
++
++    /// Any other port of an unlisted address is reset, not left to hang.
++    #[test]
++    fn default_deny_resets_syn_to_unlisted_plain_port() {
++        run_in_child(
++            "engine::netstack::poll::tests::default_deny_resets_syn_to_unlisted_plain_port",
++            || {
++                assert_unlisted_syn_reset(8080);
++            },
++        );
++    }
++
+     /// Run the real OS-thread loop in a subprocess because it has no shutdown API.
+     #[test]
+     fn stalled_drain_wakes_poll_loop_without_network_events() {
+diff --git a/crates/network/lib/engine/netstack/shared.rs b/crates/network/lib/engine/netstack/shared.rs
+index bca030d5..2a570cc0 100644
+--- a/crates/network/lib/engine/netstack/shared.rs
++++ b/crates/network/lib/engine/netstack/shared.rs
+@@ -459,7 +459,7 @@ mod tests {
+                 "",
+             ),
+             (
+-                r#"{"deny_response_format":"text","deny_message":"blocked {host}"}"#,
++                r#"{"deny_response":true,"deny_response_format":"text","deny_message":"blocked {host}"}"#,
+                 "  ",
+                 "blocked this host",
+             ),
+diff --git a/crates/network/lib/model/config/types.rs b/crates/network/lib/model/config/types.rs
+index ee29a89e..1f18fd69 100644
+--- a/crates/network/lib/model/config/types.rs
++++ b/crates/network/lib/model/config/types.rs
+@@ -524,14 +524,14 @@ mod tests {
+     #[test]
+     fn http_config_uses_nested_wire_contract() {
+         let defaults = NetworkConfig::default();
+-        assert!(defaults.http.deny_response);
++        assert!(!defaults.http.deny_response);
+         assert_eq!(
+             defaults.http.deny_response_format,
+             microsandbox_types::HttpDenyResponseFormat::Json
+         );
+         let wire = serde_json::to_value(&defaults).unwrap();
+         let restored: NetworkConfig = serde_json::from_value(wire).unwrap();
+-        assert!(restored.http.deny_response);
++        assert!(!restored.http.deny_response);
+         assert_eq!(
+             restored.http.deny_response_format,
+             microsandbox_types::HttpDenyResponseFormat::Json
+@@ -539,12 +539,12 @@ mod tests {
+         for (raw, enabled, format) in [
+             (
+                 r#"{}"#,
+-                true,
++                false,
+                 microsandbox_types::HttpDenyResponseFormat::Json,
+             ),
+             (
+                 r#"{"http":{}}"#,
+-                true,
++                false,
+                 microsandbox_types::HttpDenyResponseFormat::Json,
+             ),
+             (
+@@ -554,7 +554,7 @@ mod tests {
+             ),
+             (
+                 r#"{"http":{"deny_response_format":"text"}}"#,
+-                true,
++                false,
+                 microsandbox_types::HttpDenyResponseFormat::Text,
+             ),
+         ] {
+@@ -583,7 +583,7 @@ mod tests {
+                 config.http.secret_deny_message.as_deref(),
+                 Some("Check secret access.")
+             );
+-            assert!(config.http.deny_response);
++            assert!(!config.http.deny_response);
+             let wire = serde_json::to_value(&config).unwrap();
+             assert!(wire.get("http_deny_message").is_none());
+             assert_eq!(
+diff --git a/packages/microsandbox-types/rust/lib/domain.rs b/packages/microsandbox-types/rust/lib/domain.rs
+index 04cdbf2a..6aab46cb 100644
+--- a/packages/microsandbox-types/rust/lib/domain.rs
++++ b/packages/microsandbox-types/rust/lib/domain.rs
+@@ -597,7 +597,7 @@ pub enum HttpDenyResponseFormat {
+ #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+ #[serde(default)]
+ pub struct HttpConfig {
+-    /// Return readable HTTP 403 responses for supported denied requests. Default: true.
++    /// Return readable HTTP 403 responses for supported denied requests. Default: false.
+     pub deny_response: bool,
+ 
+     /// Omission uses the runtime default: JSON.
+@@ -1971,7 +1971,7 @@ impl Default for SandboxRuntimeOptions {
+ impl Default for HttpConfig {
+     fn default() -> Self {
+         Self {
+-            deny_response: true,
++            deny_response: false,
+             deny_response_format: HttpDenyResponseFormat::Json,
+             deny_message: None,
+             network_deny_message: None,

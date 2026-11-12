@@ -136,10 +136,13 @@ fn method_by_name(name: &str) -> Option<MethodName> {
 }
 
 /// Owner side: runs a controller's request as one of this engine's own.
+/// `key` is the fingerprint of the SSH key the other device connected with, when the bridge
+/// could tell; the request runs as that device (`Caller::Device`).
 pub fn serve_owner(
     engine: &Arc<SilodContext>,
     name: &str,
     params: &Value,
+    key: Option<&str>,
 ) -> Result<Value, BridgeError> {
     let method = method_by_name(name)
         .filter(|method| is_passthrough(*method))
@@ -170,6 +173,9 @@ pub fn serve_owner(
             client_id: OWNER_CLIENT.to_owned(),
             protocol: PROTOCOL_VERSION,
             client: None,
+            caller: silo_engine::policy::Caller::Device {
+                key: key.map(str::to_owned),
+            },
         },
     );
     let mut params = params.clone();
@@ -235,7 +241,7 @@ mod tests {
     /// so both ends of a request run their real code and only the SSH hop is missing.
     fn engine_as_owner(owner: &str) -> (Seen, StubOwner) {
         canned_owner(owner, |method, params| {
-            serve_owner(&fixture().context, method, params)
+            serve_owner(&fixture().context, method, params, None)
         })
     }
 
@@ -525,6 +531,7 @@ mod tests {
                 &engine,
                 "computers.start",
                 &json!({ "computerId": COMPUTER, "deviceId": THIRD }),
+                None,
             )
         })
         .await
@@ -544,7 +551,7 @@ mod tests {
         ] {
             let engine = engine.clone();
             let error =
-                tokio::task::spawn_blocking(move || serve_owner(&engine, method, &json!({})))
+                tokio::task::spawn_blocking(move || serve_owner(&engine, method, &json!({}), None))
                     .await
                     .unwrap()
                     .unwrap_err();
@@ -560,7 +567,7 @@ mod tests {
     async fn the_owner_checks_a_request_before_running_it() {
         let engine = fixture().context.clone();
         let error = tokio::task::spawn_blocking(move || {
-            serve_owner(&engine, "computers.start", &json!({ "name": "dev" }))
+            serve_owner(&engine, "computers.start", &json!({ "name": "dev" }), None)
         })
         .await
         .unwrap()
@@ -607,6 +614,11 @@ mod tests {
                     "changes.requests.list" => json!({ "requests": [] }),
                     "changes.requests.markKept" => json!({ "requests": [request] }),
                     "computers.tree" => json!({ "nodes": [] }),
+                    "computers.recipe" => json!({}),
+                    "recipes.get" | "recipes.save" => json!({
+                        "name": "r", "builtIn": false, "hash": "h",
+                        "recipe": { "spec": { "os": "linux", "packages": {} } }
+                    }),
                     "recipes.list" => json!({ "recipes": [] }),
                     "recipes.remove" => Value::Null,
                     "steps.list" => json!({ "steps": [] }),
@@ -667,6 +679,21 @@ mod tests {
             (MethodName::StepsList, "steps.list", by_computer),
             (MethodName::StepsRecord, "steps.record", record),
             (MethodName::ComputersTree, "computers.tree", json!({})),
+            (
+                MethodName::ComputersRecipe,
+                "computers.recipe",
+                json!({ "computerId": COMPUTER }),
+            ),
+            (
+                MethodName::RecipesGet,
+                "recipes.get",
+                json!({ "name": "r" }),
+            ),
+            (
+                MethodName::RecipesSave,
+                "recipes.save",
+                json!({ "name": "r", "recipe": { "spec": { "os": "linux" } } }),
+            ),
             (MethodName::CheckpointsFork, "checkpoints.fork", fork),
             (MethodName::RecipesBuild, "recipes.build", build),
             (MethodName::RecipesList, "recipes.list", json!({})),
@@ -817,6 +844,7 @@ mod tests {
                 client_id: OWNER_CLIENT.to_owned(),
                 protocol: PROTOCOL_VERSION,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         );
         let merged = crate::methods::checkpoints::all_devices::merge(
@@ -833,6 +861,7 @@ mod tests {
                 &engine,
                 "changes.requests.list",
                 &json!({ "allDevices": true }),
+                None,
             )
         })
         .await
@@ -1025,6 +1054,9 @@ mod tests {
         "display.show",
         "display.close",
         "clipboard.transfer",
+        // A computer's network policy is set on the device that runs it.
+        "network.policy.get",
+        "network.policy.set",
     ];
 
     #[test]

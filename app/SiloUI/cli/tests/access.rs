@@ -47,7 +47,14 @@ fn engine_with(names: &[&str], published: Published) -> FakeEngine {
                 .collect();
             Ok(listing(&pairs))
         }
-        "network.state" => Ok(state_of(&published)),
+        "computers.access" => {
+            let id = params["computerId"].as_str().unwrap_or_default();
+            let ports = state_of(&published)["computers"]
+                .as_array()
+                .and_then(|rows| rows.iter().find(|row| row["computerId"] == id).cloned())
+                .map_or(json!([]), |row| row["ports"].clone());
+            Ok(json!({"computerId": id, "name": id, "secrets": [], "ports": ports}))
+        }
         "network.urls" => Ok(json!({
             "computerId": params["computerId"],
             "urls": [{"port": 3000, "host": "h", "url": "http://main.test:43000"}]
@@ -127,10 +134,10 @@ async fn a_fork_publishes_the_ports_of_its_source() {
         name: Some("try".into()),
         checkpoint: Some("cp1".into()),
         secrets: Vec::new(),
-        recipe: None,
         recipe_name: None,
+        no_start: false,
     };
-    let value = ops::fork(&connected, &args, None, &ignore).await.unwrap();
+    let value = ops::fork(&connected, &args, &ignore).await.unwrap();
     assert_eq!(value["ports"], json!([3000, 5432]));
     let calls = engine.calls("network.publish");
     assert_eq!(calls.len(), 2);
@@ -222,4 +229,106 @@ async fn the_name_follows_a_promote_and_an_undo() {
     let mut kept = json!({"status": "undone", "kind": "keep", "computer": "main"});
     access::ssh_after_change(&connected, &mut kept, home.path(), Channel::Production).await;
     assert!(kept.get("ssh").is_none());
+}
+
+#[tokio::test]
+async fn ports_and_the_display_after_unpublish_read_what_a_computer_may_read() {
+    let published = published_with(&[("id-main", 3000, Some("http"))]);
+    let engine = engine_with(&["main"], published);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    access::ports(&connected, "main").await.unwrap();
+    access::unpublish(&connected, "main", 3000).await.unwrap();
+    // `network.state` is the owner's; a computer's agent reads `computers.access` instead.
+    assert!(engine.calls("network.state").is_empty());
+    assert!(!engine.calls("computers.access").is_empty());
+}
+
+#[tokio::test]
+async fn access_lists_what_each_computer_holds() {
+    let engine = FakeEngine::start(|method, params| match method {
+        "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
+        "computers.access" => Ok(json!({
+            "computerId": params["computerId"], "name": params["computerId"],
+            "secrets": [{"name": "npm", "hosts": ["registry.npmjs.org"]}],
+            "github": null, "ports": [], "ssh": {"enabled": false, "port": 0, "state": "disabled"},
+            "networkPolicy": {"mode": "allowlist", "hosts": ["example.com"], "presets": ["npm"]}
+        })),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let one = access::held(&connected, Some("try")).await.unwrap();
+    assert_eq!(one["computers"].as_array().unwrap().len(), 1);
+    assert_eq!(engine.calls("computers.access")[0]["computerId"], "id-try");
+    let all = access::held(&connected, None).await.unwrap();
+    assert_eq!(all["computers"].as_array().unwrap().len(), 2);
+    let text = silo_cli::render::held(&all);
+    assert!(text.contains("npm (to registry.npmjs.org)"), "{text}");
+    assert!(
+        text.contains("network: allowlist: example.com, npm"),
+        "{text}"
+    );
+    assert!(text.contains("SSH: off"), "{text}");
+}
+
+fn policy_engine(saved: Arc<Mutex<Vec<Value>>>) -> FakeEngine {
+    FakeEngine::start(move |method, params| match method {
+        "computers.list" => Ok(listing(&[("main", "running")])),
+        "network.policy.get" => Ok(json!({
+            "computerId": params["computerId"],
+            "policy": {"mode": "allowlist", "hosts": ["a.example.com"], "presets": ["npm"]},
+            "allowedHosts": [],
+            "timing": "applied",
+            "presets": [{"name": "npm", "title": "npm", "hosts": []}],
+            "presetUpdates": [],
+            "notices": []
+        })),
+        "network.policy.set" => {
+            saved.lock().unwrap().push(params.clone());
+            Ok(json!({
+                "computerId": params["computerId"],
+                "policy": params["policy"],
+                "allowedHosts": [],
+                "timing": "applied",
+                "presets": [],
+                "presetUpdates": [],
+                "notices": []
+            }))
+        }
+        other => panic!("unexpected {other}"),
+    })
+}
+
+#[tokio::test]
+async fn a_policy_change_is_judged_against_the_policy_that_was_read() {
+    let saved = Arc::new(Mutex::new(Vec::new()));
+    let engine = policy_engine(saved.clone());
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let change = access::PolicyChange {
+        allow: vec!["b.example.com".into()],
+        ..access::PolicyChange::default()
+    };
+    access::network_policy(&connected, "main", &change)
+        .await
+        .unwrap();
+    let sent = saved.lock().unwrap()[0].clone();
+    assert_eq!(
+        sent["expected"],
+        json!({"mode": "allowlist", "hosts": ["a.example.com"], "presets": ["npm"]})
+    );
+    assert_eq!(
+        sent["policy"]["hosts"],
+        json!(["a.example.com", "b.example.com"])
+    );
+}
+
+#[tokio::test]
+async fn reading_a_policy_saves_nothing() {
+    let saved = Arc::new(Mutex::new(Vec::new()));
+    let engine = policy_engine(saved.clone());
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = access::network_policy(&connected, "main", &access::PolicyChange::default())
+        .await
+        .unwrap();
+    assert_eq!(value["computer"], "main");
+    assert!(saved.lock().unwrap().is_empty());
 }

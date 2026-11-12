@@ -16,6 +16,9 @@ mod migration;
 pub(crate) mod preparation;
 mod recipes;
 mod requests;
+pub(crate) mod scrub_env;
+#[cfg(test)]
+pub(crate) use requests::tests_rows;
 mod steps;
 
 use std::sync::Arc;
@@ -56,7 +59,7 @@ pub(super) fn owns(method: MethodName) -> bool {
             "steps.",
             "device.",
         ],
-    )
+    ) || method == MethodName::ComputersRecipe
 }
 
 pub async fn handle(
@@ -82,6 +85,9 @@ async fn dispatch(
         MethodName::StepsList => steps::list(context, params).await,
         MethodName::StepsRecord => steps::record(context, params).await,
         MethodName::RecipesRemove => recipes::remove(context, params).await,
+        MethodName::RecipesSave => recipes::save(context, params).await,
+        MethodName::RecipesGet => recipes::get(context, params).await,
+        MethodName::ComputersRecipe => recipes::of_computer(context, params).await,
         MethodName::ChangesCapture => changes::capture(context, params).await,
         MethodName::ChangesDiff => changes::diff(context, params).await,
         MethodName::ChangesBaseline => changes::baseline(context, params).await,
@@ -126,6 +132,7 @@ async fn dispatch(
         MethodName::PreparationRetry => preparation::retry(context, params).await,
         MethodName::DeviceDependencies => device::dependencies(context, params).await,
         MethodName::DeviceFacts => device::facts(context, params).await,
+        MethodName::DeviceResources => device::resources(context, params).await,
         _ => Err(DispatchError::unsupported(method_name(method))),
     }
 }
@@ -145,6 +152,7 @@ pub(super) fn failure(failure: Failure) -> DispatchError {
     DispatchError {
         code: failure.code,
         message: failure.message,
+        details: None,
     }
 }
 
@@ -163,6 +171,7 @@ pub(super) fn require_local_device(
         return Err(DispatchError {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: "This engine does not route requests to remote devices.".to_owned(),
+            details: None,
         });
     }
     Ok(())
@@ -250,6 +259,12 @@ async fn restore(context: &HandlerContext, params: &Value) -> Result<HandlerOutp
 async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
     let params: CheckpointForkParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
+    let network_policy = params
+        .network_policy
+        .as_ref()
+        .map(silo_engine::network_policy::validate)
+        .transpose()
+        .map_err(DispatchError::internal)?;
     let service = service(context);
     job_started(
         blocking_failure(move || {
@@ -265,6 +280,8 @@ async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
                         .map(|q| q.stop.clone())
                         .unwrap_or_default(),
                     scrub: params.quiet.map(|q| q.scrub).unwrap_or_default(),
+                    closed_network: false,
+                    network_policy,
                 },
                 params.recipe_hash.as_deref(),
             )
@@ -277,9 +294,12 @@ async fn delete(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
     let params: CheckpointTargetParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let service = service(context);
+    let visible = visible_to_computer(context);
     job_started(
-        blocking_failure(move || service.start_delete(&params.computer_id, &params.checkpoint_id))
-            .await,
+        blocking_failure(move || {
+            service.start_delete_visible(&params.computer_id, &params.checkpoint_id, visible)
+        })
+        .await,
     )
 }
 
@@ -293,11 +313,19 @@ async fn abandon_restore(
     job_started(blocking_failure(move || service.start_abandon_restore(&params.computer_id)).await)
 }
 
+/// The computers a computer's agent may be told of, when the caller is one; a refusal or a
+/// list of dependants names no other.
+fn visible_to_computer(context: &HandlerContext) -> Option<std::collections::BTreeSet<String>> {
+    matches!(context.caller(), silo_engine::policy::Caller::Computer { .. })
+        .then(|| context.visible().map(|seen| (*seen).clone()).unwrap_or_default())
+}
+
 async fn usage(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
     let params: CheckpointUsageParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let service = service(context);
-    blocking_failure(move || service.usage(&params.computer_id))
+    let visible = visible_to_computer(context);
+    blocking_failure(move || service.usage_visible(&params.computer_id, visible.as_ref()))
         .await
         .map_err(failure)
         .and_then(output)

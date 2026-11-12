@@ -48,6 +48,17 @@ it("offers Start for a crashed computer on the page as in the list", async () =>
   expect(screen.getByRole("button", { name: "Start dev" })).toBeEnabled()
 })
 
+it("shows why a computer with unmoved storage cannot start, in the list and on the page", async () => {
+  const user = userEvent.setup()
+  const message = "Needs attention: Its files were kept untouched. Report this problem before using the computer."
+  render(<OverviewPage source={sourceWith(computer => { computer.state = "stopped"; computer.needsStorageUpgrade = true; computer.attention = { level: "error", message } })} actions={{} as ApplicationActions} onConfigurationsChange={vi.fn()} />)
+  const row = within(screen.getByText("dev").closest("li")!)
+  expect(row.getByText(new RegExp(message))).toBeInTheDocument()
+  expect(await reasonFor(user, row.getByRole("button", { name: "Start dev" }))).toContain(message)
+  await user.click(row.getByRole("button", { name: "Open dev" }))
+  expect(screen.getByRole("button", { name: "Start dev" })).toBeDisabled()
+})
+
 it("disables Stop while the computer is still starting, in the list and on the page, with the reason", async () => {
   const user = userEvent.setup()
   render(<OverviewPage source={sourceWith(computer => { computer.state = "starting"; computer.stateDetail = "Starting" })} actions={{} as ApplicationActions} onConfigurationsChange={vi.fn()} />)

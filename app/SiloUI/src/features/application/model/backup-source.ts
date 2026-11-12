@@ -7,6 +7,8 @@ export interface BackupArchive {
   computers: string[]
   /** The checkpoint an export packages; absent for an export of the current state. */
   checkpointName?: string
+  /** The login files an export removed from the exported computer, each by tool name and path. Traces may remain in the file. */
+  leftOut?: string[]
 }
 
 export type BackupOperationKind = "backup" | "restore"
@@ -78,17 +80,19 @@ export class ExportIncompleteError extends Error {
   }
 }
 
-/** The logins Silo found on a computer before it is shared. Nothing is removed from the export. */
+/** The logins Silo found on a computer before it is shared. */
 export interface ExportLogins {
   /** Each login by tool name and path, for example "a Claude Code login (/root/.claude/.credentials.json)". */
   logins: string[]
   /** Why Silo could not check the whole computer, when it could not (it is stopped, or the export is of a checkpoint). */
   unchecked?: string
+  /** The export removes these logins from the exported computer, unless the person asks to include them. False when it cannot (a checkpoint, a macOS or container computer). */
+  leavesOut?: boolean
 }
 
 export interface BackupActions {
-  /** Lists the logins on a computer, or on the disk of one of its checkpoints, before an export. */
-  checkLogins: (computerName: string, checkpointId?: string) => Promise<ExportLogins>
+  /** Lists the logins on a computer, or on the disk of one of its checkpoints, before an export. `includeLogins` says the export will keep them. */
+  checkLogins: (computerName: string, checkpointId?: string, includeLogins?: boolean) => Promise<ExportLogins>
   chooseDestination: () => Promise<string | null>
   /**
    * Picks an export file and checks it. Aborting `signal` stops the check (a large file
@@ -97,7 +101,7 @@ export interface BackupActions {
   chooseArchive: (onSelected?: (archivePath: string) => void, signal?: AbortSignal) => Promise<{ archive: BackupArchive; valid: boolean; reason?: string; warnings?: string[] } | null>
   inspectArchive: (selection: BackupArchive, signal?: AbortSignal) => Promise<{ archive: BackupArchive; valid: boolean; reason?: string; warnings?: string[] }>
   /** Starts an export and returns immediately; the result appears in `BackupState.operation`. */
-  startBackup: (destination: string, computers: string[], checkpointId?: string) => void
+  startBackup: (destination: string, computers: string[], checkpointId?: string, includeLogins?: boolean) => void
   /**
    * Starts an export to a folder from `chooseDestination` and settles only with
    * that export's own result: resolves once it completed and its file was
@@ -105,7 +109,7 @@ export interface BackupActions {
    * the result are also shown through `BackupState.operation`, like `startBackup`.
    * "Export, then delete" deletes only after this resolves.
    */
-  exportAndVerify: (destination: string, computers: string[], checkpointId?: string) => Promise<VerifiedExport>
+  exportAndVerify: (destination: string, computers: string[], checkpointId?: string, includeLogins?: boolean) => Promise<VerifiedExport>
   startRestore: (archive: BackupArchive, newName: string, sourceName?: string) => void
   cancelOperation: () => void
   dismissOperation: () => void

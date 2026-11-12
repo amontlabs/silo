@@ -544,6 +544,51 @@ pub(crate) struct BackupRequest {
     /// written exceed it, before the archive is assembled, so nothing is left at the
     /// destination.
     pub(crate) size_cap: Option<u64>,
+    /// Computers written under the name and id of another one: the hidden copy an export
+    /// without logins is captured from stands in for the computer it was made from.
+    pub(crate) presented: Vec<Presented>,
+}
+
+/// A computer exported as another: `copy` is captured, and its row says it is `name` with `id`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Presented {
+    pub(crate) copy: String,
+    pub(crate) name: String,
+    pub(crate) id: String,
+}
+
+/// The name a computer's row carries.
+fn presented_name(presented: &[Presented], copy: &str) -> String {
+    presented
+        .iter()
+        .find(|entry| entry.copy == copy)
+        .map_or(copy, |entry| entry.name.as_str())
+        .to_owned()
+}
+
+/// `runtime_config` and `computer_configuration` of `copy` as the computer it stands in for
+/// would have written them; unchanged for a computer that stands in for none.
+fn present(
+    presented: &[Presented],
+    copy: &str,
+    mut runtime_config: Value,
+    mut computer_configuration: Value,
+) -> (Value, Value) {
+    let Some(entry) = presented.iter().find(|entry| entry.copy == copy) else {
+        return (runtime_config, computer_configuration);
+    };
+    runtime_config["name"] = entry.name.clone().into();
+    if let Some(labels) = runtime_config
+        .get_mut("labels")
+        .and_then(Value::as_object_mut)
+    {
+        if labels.contains_key("silo.machine-id") {
+            labels.insert("silo.machine-id".into(), entry.id.clone().into());
+        }
+    }
+    computer_configuration["name"] = entry.name.clone().into();
+    computer_configuration["id"] = entry.id.clone().into();
+    (runtime_config, computer_configuration)
 }
 
 /// The pinned guest image as the runtime cache holds it.
@@ -1109,6 +1154,12 @@ impl<R: MsbRunner> BackupService<R> {
                     format_bytes(cap),
                 )));
             }
+            let (runtime_config, computer_configuration) = present(
+                &request.presented,
+                &source.name,
+                runtime_config,
+                computer_configuration,
+            );
             payloads.push((
                 source,
                 runtime_config,
@@ -1133,7 +1184,7 @@ impl<R: MsbRunner> BackupService<R> {
                 .map(
                     |(source, runtime_config, computer_configuration, _, payload_size, digest)| {
                         PackageComputer {
-                            name: source.name.clone(),
+                            name: presented_name(&request.presented, &source.name),
                             runtime_config: runtime_config.clone(),
                             computer_configuration: computer_configuration.clone(),
                             payload_size: *payload_size,
@@ -1169,8 +1220,8 @@ impl<R: MsbRunner> BackupService<R> {
             size_bytes,
             computers: request
                 .sources
-                .into_iter()
-                .map(|source| source.name)
+                .iter()
+                .map(|source| presented_name(&request.presented, &source.name))
                 .collect(),
         })
     }
@@ -3901,11 +3952,12 @@ fn with_profile_defaults(network: &Value) -> Value {
     let mut network = network.clone();
     // MicroSandbox 0.7.5 and later save two more fields, both at their runtime
     // defaults for a computer Silo created or restored: readable denial responses
-    // (opt-in, off) and the NAT64 prefix. Earlier runtimes save neither, so the
-    // profile omits them and a default value counts as absent. A changed value
-    // stays and fails the comparison as a custom network setting.
+    // (off in 0.7.5 to 0.7.6, on with a JSON body from 0.7.14) and the NAT64
+    // prefix. Earlier runtimes save neither, so the profile omits them and a
+    // default value counts as absent. A changed value stays and fails the
+    // comparison as a custom network setting.
     if let Some(object) = network.as_object_mut() {
-        if object.get("http") == Some(&serde_json::json!({"deny_response": false})) {
+        if object.get("http").is_some_and(runtime_default_http) {
             object.remove("http");
         }
         if object.get("nat64_prefixes") == Some(&serde_json::json!(["64:ff9b::/96"])) {
@@ -3922,6 +3974,17 @@ fn with_profile_defaults(network: &Value) -> Value {
         }
     }
     network
+}
+
+/// The `http` section a runtime saves for a computer Silo created, restored or
+/// forked: 0.7.5 and 0.7.6 save readable denial responses off, stock 0.7.14 saves
+/// them on with a JSON body, and Silo's 0.7.14 build saves them off with a JSON
+/// format. Silo sets none of these, so all count as the runtime default; any other
+/// value is a custom setting.
+fn runtime_default_http(http: &Value) -> bool {
+    http == &serde_json::json!({"deny_response": false})
+        || http == &serde_json::json!({"deny_response": false, "deny_response_format": "json"})
+        || http == &serde_json::json!({"deny_response": true, "deny_response_format": "json"})
 }
 
 /// The network an import starts from: Silo's profile with a deny-all policy.
@@ -3962,6 +4025,11 @@ fn portable_export_network(name: &str, runtime_config: &mut Value) -> Result<(),
     let mut candidate = network.clone();
     for field in ["policy", "secrets", "ports"] {
         candidate[field] = expected[field].clone();
+    }
+    // A boolean `strict` goes with the policy: an allowlist computer runs with it off, and the
+    // import starts closed with the profile's value.
+    if candidate.get("strict").is_some_and(Value::is_boolean) {
+        candidate["strict"] = expected["strict"].clone();
     }
     if let (Some(candidate), Some(expected)) = (candidate.as_object(), expected.as_object()) {
         let differing = expected
@@ -4418,6 +4486,12 @@ fn same_volume(left: &Path, right: &Path) -> bool {
 /// `statvfs` of the nearest existing ancestor: space available to this
 /// account (f_bavail), so a path that is not created yet still resolves.
 pub(crate) fn available_bytes(path: &Path) -> io::Result<u64> {
+    volume_bytes(path).map(|(available, _)| available)
+}
+
+/// Space available to this account and the volume's total size, for the nearest existing
+/// ancestor of `path`.
+pub(crate) fn volume_bytes(path: &Path) -> io::Result<(u64, u64)> {
     use std::os::unix::ffi::OsStrExt;
     let existing = path
         .ancestors()
@@ -4432,8 +4506,19 @@ pub(crate) fn available_bytes(path: &Path) -> io::Result<u64> {
         return Err(io::Error::last_os_error());
     }
     #[allow(clippy::unnecessary_cast)] // The field widths differ between platforms.
-    (statistics.f_bavail as u64)
-        .checked_mul(statistics.f_frsize as u64)
+    let (available, total, unit) = (
+        statistics.f_bavail as u64,
+        statistics.f_blocks as u64,
+        // Some filesystems report no fragment size; POSIX then means the block size.
+        if statistics.f_frsize == 0 {
+            statistics.f_bsize as u64
+        } else {
+            statistics.f_frsize as u64
+        },
+    );
+    available
+        .checked_mul(unit)
+        .zip(total.checked_mul(unit))
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid volume capacity"))
 }
 
@@ -4855,7 +4940,7 @@ fn write_immutable_package_from_readers(
     Ok(size_bytes)
 }
 
-fn publish_package(
+pub(crate) fn publish_package(
     source: &Path,
     destination: &Path,
     parent: &Path,
@@ -5639,6 +5724,71 @@ mod tests {
         assert!(!row.image_embedded);
         assert_eq!(row.image_digest.as_deref(), Some(container_header().template.image_digest.as_str()));
         assert!(is_container_row(&row.runtime_config));
+    }
+
+    #[test]
+    fn a_hidden_copy_is_captured_and_written_as_the_computer_it_stands_in_for() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let destination = temp.path().join("main.silo-backup");
+        let mut runtime_config = managed_config("silo-export-0123abcd");
+        runtime_config["labels"]["silo.machine-id"] = "copy-id".into();
+        let mut configuration = computer_configuration("silo-export-0123abcd");
+        configuration["id"] = "9c8f6d1e-0000-4000-8000-000000000001".into();
+        let result = service
+            .create_backup(
+                BackupRequest {
+                    destination: destination.clone(),
+                    sources: vec![BackupSource {
+                        name: "silo-export-0123abcd".into(),
+                        snapshot_group: "dev".into(),
+                        was_running: false,
+                        runtime_config,
+                        computer_configuration: configuration,
+                        existing_member: None,
+                    }],
+                    presented: vec![Presented {
+                        copy: "silo-export-0123abcd".into(),
+                        name: "main".into(),
+                        id: "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8".into(),
+                    }],
+                    ..Default::default()
+                },
+                &Cancellation::default(),
+            )
+            .unwrap();
+        assert_eq!(result.computers, ["main"]);
+        // The runtime captured the copy, by its own name.
+        let calls = service.runner.calls.lock().unwrap().clone();
+        let capture = calls.iter().find(|call| call[1] == "create").unwrap();
+        assert!(capture.contains(&"silo-export-0123abcd".to_owned()), "{capture:?}");
+        let manifest = manifest_of(&destination);
+        let row = &manifest.computers[0];
+        assert_eq!(row.name, "main");
+        assert_eq!(row.runtime_config["name"], "main");
+        assert_eq!(row.runtime_config["labels"]["silo.machine-id"], "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8");
+        assert_eq!(row.computer_configuration["name"], "main");
+        assert_eq!(row.computer_configuration["id"], "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8");
+        validate_manifest(&manifest).unwrap();
+    }
+
+    #[test]
+    fn only_the_copy_a_row_names_is_presented_as_another_computer() {
+        let presented = vec![Presented {
+            copy: "silo-export-0123abcd".into(),
+            name: "main".into(),
+            id: "id-main".into(),
+        }];
+        assert_eq!(presented_name(&presented, "silo-export-0123abcd"), "main");
+        assert_eq!(presented_name(&presented, "other"), "other");
+        let (runtime, configuration) = present(
+            &presented,
+            "other",
+            managed_config("other"),
+            computer_configuration("other"),
+        );
+        assert_eq!(runtime["name"], "other");
+        assert_eq!(configuration["name"], "other");
     }
 
     #[test]
@@ -6727,6 +6877,7 @@ mod tests {
     /// that migration runs.
     fn captured_network(origin: &str) -> Value {
         let text = match origin {
+            "created-0.7.14" => include_str!("test_support/msb-inspect/created-0.7.14.json"),
             "created-0.7.6" => include_str!("test_support/msb-inspect/created-0.7.6.json"),
             "restored-0.7.6" => include_str!("test_support/msb-inspect/restored-0.7.6.json"),
             "forked-0.7.6" => include_str!("test_support/msb-inspect/forked-0.7.6.json"),
@@ -6750,8 +6901,9 @@ mod tests {
         serde_json::from_str(text).unwrap()
     }
 
-    const CAPTURED_NETWORKS: [(&str, Option<bool>); 12] = [
+    const CAPTURED_NETWORKS: [(&str, Option<bool>); 13] = [
         // Created by Silo's own `msb create`: the runtime's current default.
+        ("created-0.7.14", Some(true)),
         ("created-0.7.6", Some(true)),
         ("restored-0.7.6", Some(true)),
         ("forked-0.7.6", Some(true)),
@@ -6799,6 +6951,32 @@ mod tests {
             );
             // Whatever the source carried, the archive carries the profile's value.
             assert_eq!(network["strict"], profile_strict, "{origin}");
+        }
+    }
+
+    #[test]
+    fn export_accepts_the_http_settings_each_runtime_saves() {
+        for http in [
+            serde_json::json!({"deny_response": false}),
+            serde_json::json!({"deny_response": false, "deny_response_format": "json"}),
+            serde_json::json!({"deny_response": true, "deny_response_format": "json"}),
+        ] {
+            assert!(runtime_default_http(&http), "{http}");
+        }
+    }
+
+    #[test]
+    fn export_refuses_custom_http_settings_of_either_runtime() {
+        for http in [
+            serde_json::json!({"deny_response": true, "deny_response_format": "text"}),
+            serde_json::json!({"deny_response": false, "deny_response_format": "text"}),
+            serde_json::json!({"deny_response": true, "network_deny_message": "no"}),
+        ] {
+            let mut config = managed_config("dev");
+            config["network"] = captured_network("created-0.7.14");
+            config["network"]["http"] = http.clone();
+            let error = export_with_runtime(config).err().unwrap().to_string();
+            assert!(error.contains("custom network http settings"), "{http}: {error}");
         }
     }
 
@@ -6863,19 +7041,15 @@ mod tests {
                 serde_json::json!({"domain": "example.com"}),
                 serde_json::json!({"domain_suffix": "example.com"}),
             ] {
-                // With `strict` off the runtime treats a hostname allow rule differently,
-                // so that combination is a real setting, and the export names it.
-                let error = export_with_rule(origin, false.into(), hostname.clone())
-                    .err()
-                    .unwrap()
-                    .to_string();
-                assert!(error.contains("custom network strict settings"), "{error}");
-                // With it on (the profile's value) the rule is only a custom policy,
-                // which an export resets like any other.
-                let manifest = export_with_rule(origin, true.into(), hostname).unwrap();
-                assert!(imported_deny_network(
-                    &manifest.computers[0].runtime_config["network"]
-                ));
+                // An allowlist computer runs with `strict` off; the export resets it with the
+                // policy, and with it on (the profile's value) only the policy is reset.
+                for strict in [false, true] {
+                    let manifest = export_with_rule(origin, strict.into(), hostname.clone())
+                        .unwrap_or_else(|error| panic!("{origin} {strict}: {error}"));
+                    let network = &manifest.computers[0].runtime_config["network"];
+                    assert!(imported_deny_network(network));
+                    assert_eq!(network["strict"], true);
+                }
             }
             // Without a hostname rule the value changes nothing.
             let manifest = export_with_rule(
@@ -7235,6 +7409,7 @@ mod tests {
                         manifest_digest: format!("sha256:{}", "c".repeat(64)),
                     }),
                     size_cap: None,
+                    presented: Vec::new(),
                 },
                 &Cancellation::default(),
             )
@@ -9031,6 +9206,7 @@ mod tests {
                 manifest_digest: format!("sha256:{}", "a".repeat(64)),
             }),
             size_cap: None,
+            presented: Vec::new(),
         };
         let cancellation = Cancellation::default();
         let destination = temp.path().join("dev.silo-backup");
@@ -9175,5 +9351,57 @@ mod tests {
         assert!(validate_computer_name("../victim").is_err());
         assert!(validate_computer_name("/absolute").is_err());
         assert!(validate_computer_name("valid-name").is_ok());
+    }
+
+    /// The export code paths on the runtime's own configuration of computers on each network
+    /// policy, written by the live check in `runtime::checkpoints::tests::network_live`
+    /// (`SILO_T8_CONFIGS` names their folder).
+    #[test]
+    #[ignore = "reads the configurations a live network policy check wrote"]
+    fn live_export_accepts_each_network_policy() {
+        let folder = std::env::var("SILO_T8_CONFIGS").expect("SILO_T8_CONFIGS");
+        let mut names: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+            .collect();
+        names.sort();
+        assert!(!names.is_empty());
+        for path in names {
+            let label = path.file_stem().unwrap().to_string_lossy().into_owned();
+            let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            // Fields the runtime reports for a live computer that a snapshot's configuration lacks.
+            for key in ["external_mount_policy", "snapshot_parent"] {
+                config.as_object_mut().unwrap().remove(key);
+            }
+            let strict = config["network"]["strict"].clone();
+            let rules = config["network"]["policy"]["rules"].as_array().map_or(0, Vec::len);
+            let name = config["name"].as_str().unwrap().to_owned();
+            let before = validate_snapshottable_config(&name, &config);
+            let exported = portable_export_network(&name, &mut config);
+            let after = validate_snapshottable_config(&name, &config);
+            let show = |result: &Result<(), BackupError>| match result {
+                Ok(()) => "accepted".to_owned(),
+                Err(error) => format!("refused: {error}"),
+            };
+            eprintln!(
+                "\nEXPORT {label}: runtime strict={strict}, {rules} rules; as it runs: {}; export reset: {}; after the reset: {}; strict now {}",
+                show(&before),
+                show(&exported),
+                show(&after),
+                config["network"]["strict"],
+            );
+            if label.contains("restored") || label.contains("fork") {
+                // A computer restored from a memory checkpoint reports a pinned network interface,
+                // which the export check refuses whatever its rules are.
+                if let Err(error) = &exported {
+                    assert!(error.to_string().contains("interface"), "{label}: {error}");
+                }
+                continue;
+            }
+            exported.unwrap_or_else(|error| panic!("{label}: {error}"));
+            after.unwrap_or_else(|error| panic!("{label}: {error}"));
+            assert_eq!(config["network"]["strict"], true, "{label}");
+        }
     }
 }

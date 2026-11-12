@@ -18,6 +18,7 @@ use crate::{
     checkpoints::Service,
     guest::{self, ExecRequest, GuestUser},
     macos_computers,
+    policy::{handoff::Handoff, store::PolicyStore},
     runtime::{self, RuntimeHost, RuntimePaths},
 };
 
@@ -99,7 +100,7 @@ fn with_linux<T>(
 /// Runs `work` while holding the computer's operation lane, as a `computers.start` job does:
 /// the runtime's start reconciles published ports, which requires the lane to be held.
 /// Callers must not hold the lane themselves (the gate does not nest).
-fn under_gate<T>(
+pub(crate) fn under_gate<T>(
     id: &str,
     name: &str,
     label: &str,
@@ -113,7 +114,7 @@ fn under_gate<T>(
 }
 
 /// The computer ids that hold disks under a name of their own (see `refusal`).
-fn stored_under_its_name(paths: &RuntimePaths, name: &str) -> bool {
+pub(crate) fn stored_under_its_name(paths: &RuntimePaths, name: &str) -> bool {
     let folder = paths.volumes.join(name).to_string_lossy().into_owned();
     runtime::inspect_computer(&runtime::ProcessRunner, paths, name)
         .map(|inspected| inspected.config.to_string().contains(&folder))
@@ -161,7 +162,8 @@ impl EngineEnv {
                 linux.ports_apply(swap)
             }
             // The saved SSH entries connect by name, so they follow the names step.
-            Step::Alias | Step::Lineage | Step::MacosIdentity => Ok(()),
+            Step::Alias | Step::MacosIdentity => Ok(()),
+            Step::Lineage => hand_over_makers(swap),
             Step::Quiet => linux
                 .quiet_apply(swap)
                 .map_err(|error| format!("Parked scheduled jobs were not restored: {error}")),
@@ -185,13 +187,37 @@ impl EngineEnv {
                     swap.fork_bindings.get("github").unwrap_or(&Value::Null),
                 )
             }
-            Step::Alias | Step::Lineage | Step::MacosIdentity => Ok(()),
+            Step::Alias | Step::MacosIdentity => Ok(()),
+            Step::Lineage => hand_back_makers(swap),
             Step::Quiet => linux.quiet_revert(swap),
         })
     }
 }
 
+/// The fork takes main's place in the record of which computer's agent made which, so the old
+/// main's agent keeps nothing it could reach in the new main.
+fn hand_over_makers(swap: &Swap) -> Result<(), String> {
+    match PolicyStore::running() {
+        Some(store) => store.hand_over(&swap.fork_id, &swap.target_id, &swap.makers),
+        None => Ok(()),
+    }
+}
+
+fn hand_back_makers(swap: &Swap) -> Result<(), String> {
+    match PolicyStore::running() {
+        Some(store) => store.hand_back(&swap.fork_id, &swap.target_id, &swap.makers),
+        None => Ok(()),
+    }
+}
+
 impl PromoteEnv for EngineEnv {
+    fn export_makers(&self, fork_id: &str, target_id: &str) -> Result<Handoff, String> {
+        match PolicyStore::running() {
+            Some(store) => store.handoff(fork_id, target_id),
+            None => Ok(Handoff::default()),
+        }
+    }
+
     fn info(&self, id: &str) -> Result<Info, String> {
         let os = self.guest.os(id)?;
         if os == Os::Linux {
@@ -374,7 +400,7 @@ impl PromoteEnv for EngineEnv {
                 true,
             ),
             // The lineage is read from the journal (see `lineage`).
-            Step::Lineage => Ok(()),
+            Step::Lineage => hand_over_makers(swap),
             Step::MacosIdentity => {
                 macos_computers::promote_check_identity(&swap.fork_id)?;
                 macos_computers::promote_check_identity(&swap.target_id)?;
@@ -460,7 +486,7 @@ impl PromoteEnv for EngineEnv {
                 &swap.fork_id,
                 field(&swap.fork_bindings, "quiet"),
             ),
-            Step::Lineage => Ok(()),
+            Step::Lineage => hand_back_makers(swap),
         }
     }
 }

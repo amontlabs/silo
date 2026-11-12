@@ -55,6 +55,10 @@ it("forwards valid backend notices, ignores malformed ones, and stops listening 
   log.mockRestore()
 })
 
+it("accepts the approvals category", () => {
+  expect(noticeSchema.safeParse({ ...notice, category: "approvals", key: "approval:ap-1" }).success).toBe(true)
+})
+
 it("accepts a notice without a computer and rejects an unknown category", () => {
   expect(noticeSchema.safeParse({ ...notice, computer: null }).success).toBe(true)
   expect(noticeSchema.safeParse({ ...notice, category: "health" }).success).toBe(false)

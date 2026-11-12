@@ -58,13 +58,24 @@ pub(crate) fn engine_notice(app: &AppHandle, payload: &serde_json::Value) {
     }
 }
 
-/// `notifications.cleared`: the computer's notices are gone.
+/// `notifications.cleared`: the computer's notices are gone, or only the one with `key`.
 pub(crate) fn engine_cleared(app: &AppHandle, payload: &serde_json::Value) {
-    if let Some(computer_id) = payload
+    let Some(computer_id) = payload
         .get("computerId")
         .and_then(serde_json::Value::as_str)
-    {
-        clear_computer(app, computer_id);
+    else {
+        return;
+    };
+    match payload.get("key").and_then(serde_json::Value::as_str) {
+        Some(key) => {
+            let pending = notifications::withdraw_notice(computer_id, key);
+            tauri::async_runtime::handle()
+                .inner()
+                .spawn_blocking(move || {
+                    pending.clear(crate::system_integrations::clear_notifications)
+                });
+        }
+        None => clear_computer(app, computer_id),
     }
 }
 

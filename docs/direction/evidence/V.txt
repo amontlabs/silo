@@ -1,0 +1,85 @@
+V: end-to-end run with the app on screen (Dev build "Silo Dev" from `direction`, Dev engine, live data)
+Run 2026-11-11 by the test sub-agent. App: app/SiloUI/target/debug/bundle/macos/Silo Dev.app (opened by exact path).
+Engine: the bundle's silod started by hand (the app alone showed "Silo could not load: engine is not reachable"
+until it ran; see FINDINGS). Computers: e2e-v-main (Linux, 2 cpu 4 GiB), forks e2e-v-g1/g2 made from inside main.
+GUI: LCU (mcp__lcu__js) with the accessibility tree; a few scaled screenshots.
+
+== Setup notes
+- LCU's getApp("Silo Dev") (by name or bundle id) launched ANOTHER copy of org.silo.dev (the one in
+  ~/code/projects/microsandbox-workspaces/.../release/bundle) each call; the running copy answered each with the
+  "Silo Dev is already running. Quit it first" alert, endlessly. Fix used: `lsregister -f` on the direction bundle
+  so LaunchServices resolves org.silo.dev to it, then dismissed the alert once. (Environment, not product.)
+
+== Approvals (T10, R4)
+(Live data: the Dev engine, throwaway e2e-v-* computers; requests made from inside e2e-v-main/e2e-v-linux with the guest `silo`.)
+
+[PASS] A1 Sidebar shows Pending with a count when an agent asks -- badge "1" (later 2, 4) and "1 waiting for you" beside Pending.
+[PASS] A2a Publish port 8080 from inside e2e-v-main -- in-app toast "1 waiting for you" with a Review button; Review opened the request.
+[SKIPPED] A2b System notification with Silo in the background -- Settings > Notifications > "Enable notifications" is off by default; turning it on made macOS show its permission banner ("Notifications « Silo Dev »", Autoriser / Ne pas autoriser). That is a system dialog: not answered, and NotificationCenter's accessibility tree through LCU only exposes the calendar widget, never the banner. The switch stayed disabled and off.
+[SKIPPED] A2c Menu bar row "waiting for you" -- the Silo tray icon is in the menu bar (seen on a screenshot) but its panel belongs to SystemUIServer, which LCU has no approval for (not worked around).
+[SKIPPED] A2d Clicking the notification opens the request -- no notification could be produced (A2b).
+[PASS] A3a Allow in the app -- "You allowed this"; `silo ports e2e-v-main` showed 8080 reachable on 127.0.0.1:51453 and `curl` returned the page ("hello-from-v").
+[PASS] A3b Deny another (port 8081) with a note -- the in-guest command exited 4: "The owner denied this ... Their note: Use 8080 instead, ...". (The note field held the setValue text plus the typed text, my input, not a bug.)
+[PASS] A4a Merge of fork e2e-v-g1 into main opened while other approvals were open -- diff, changes buckets (Settings & files 2) and credentials show (R4 fix).
+[PASS] A4b Deny it with a note -- agent got "owner denied ... Their note: Not now"; `silo requests` lists no fr-* for g1 afterwards and Pending shows no second row, only "Answered lately: You said no" (R4 fix).
+[PASS] A5 Merge with conflicts -- via `silo merge e2e-v-g1 --request`, Merge in the app listed the conflict (/etc/silo/endpoint.json) with radios; choosing "Use the fork's version" and "Merge with these choices" merged it (/etc/v-g1.conf appeared in main; request "Merged").
+[PASS] A6 Approval detail shows the computer id beside its name -- screenshot: "e2e-v-linux asks 3f942e80-e10c-49f4-a57b-bf9b13df332b" (monospace id after the name).
+[SKIPPED] A7 Settings > Notifications > "Requests from agents" toggle -- the category switches are disabled while "Enable notifications" is off (see A2b).
+[PASS] A8a Activity > Who did what: the Who filter (Anyone / You / Other devices / Computers) -- "Computers" narrowed the rows to what computers did.
+[PASS] A8b Load more -- the button loaded the rest and disappeared.
+[FAIL] A8c Open request -- clicking the "Open request" cell of a row whose computer was removed (e2e-t5-a, an old approval) did nothing. Not tried on a row of a live computer (the table's accessibility tree is virtualised and the live rows were out of view). See FINDINGS 8.
+
+[SKIPPED] G1 Onboarding with `main` -- not shown: the Dev data already has computers and `main` was not made with `silo up` (it needs a recipe build).
+[PASS] G1b A failing install shows how to try again -- with e2e-v-linux on an allowlist (example.com only) Install Codex ended with "Could not install Codex: ... The runtime did not complete the operation. Check the computer state and retry." and the Install button stays. The button is labelled "Install Codex", not "Retry" (FINDINGS 6).
+[PASS] G1c Install from the app works -- Claude Code (2.1.287) and Codex (0.167.0) went to "Ready" on e2e-v-main.
+[PASS] G2a Open Claude Code from the header -- a Terminal window ran `msb exec e2e-v-main --user silo --workdir /workspace --tty -- bash -lc 'cd /workspace ...; exec /usr/local/bin/claude'`; the claude process in the guest has cwd /workspace.
+[PASS] G2b Open Codex from the computer's More actions menu -- codex process in the guest, cwd /workspace.
+[PASS] G2c Open Claude Code from the palette ("Open Claude") -- second claude process, cwd /workspace.
+[SKIPPED] G2d Open from the menu bar -- tray panel not reachable (A2c). Agents were not logged in (no login needed to check the launch).
+[PASS] G3a Agents section Install -- as G1c.
+[SKIPPED] G3b Agents section Update -- both agents were just installed; no Update control or newer version exists.
+[PASS] G3c Show and copy the SSH name -- "silo-dev-358726eb-e1a8-49d7-9a05-dca36c35060a", button "SSH name copied". Side effect: ~/.ssh/config grew by one Include line for the Dev engine's ssh folder (sha256 d2b36ad5... -> 6e65c5e1...); Open Claude Code/Codex on Linux left it at 6e65c5e1... .
+[PASS] G4 Create a computer with an agent selected -- New computer form (name e2e-v-linux, 2 CPUs, 4 GiB, 10/20 GiB disks, Agent Claude Code, Network Open): created stopped; after it started Claude Code showed "Ready · 2.1.287".
+[SKIPPED] G5 Opening an agent on a macOS computer leaves ~/.ssh/config unchanged -- no macOS computer: disk was at 92% (73 GiB free) after the Linux work, a macOS copy was not tried.
+
+[PASS] N1 Change the network mode, Save, Restart, the mode applies -- Allowlist + example.com saved ("Restart e2e-v-linux to apply the network change"), Restart dialog, afterwards https://example.com answered 200 and https://github.com 000 from inside.
+[PASS] N2 Invalid hosts refused as you add them -- `Example.com:80`: ""example.com:80" is not a host Silo can allow: give a name without a port"; `*.com`: "a top-level name alone would allow a whole domain".
+[SKIPPED] N3 Preset update (Save does not accept it; Accept shows the hosts) -- needs a Silo preset that changed after a computer pinned it; none could be produced without editing the engine's presets.
+[PASS] N4 Two edits at once -- unsaved edit in the app, `silo network policy --allow cli-edit.example.com` in a shell, then Save: "The network policy of this computer changed while this was being decided. Read it again and retry." with "Read again"; it loaded cli-edit.example.com.
+[PASS] N5 Toggle Silo's tools -- turned on e2e-v-linux; the page says On / "Restart needed"; `silo tools status e2e-v-linux` (host) says "on (port ...); restart it so it can reach them", and `silo` inside refused with "Cannot reach Silo at host...:56904 ... need a restart" until it restarted.
+[PASS] N6a Network page link -- "Open the network of e2e-v-linux" opens the computer's page with its Network section (no scroll, known).
+[PASS] N6b Create a computer with a mode -- G4 (mode Open, shown selected on its page).
+[PASS] N7 Settings > Keep free -- typed 8 in Memory, Enter, clicked away: "Now 8 GiB"; Who did what shows exactly one "Changed a setting" row. Reset to the default afterwards with "Use the default memory to keep free".
+[PASS] N8 A network request from an agent appears on Pending -- `silo network policy e2e-v-linux --allow example.org` from inside showed "e2e-v-linux asks: Widen the network of ..., adding example.org" as a toast and a Pending row; Allow in the app applied it (list shows example.org, "applies when it restarts").
+
+[PASS] I1 `silo list` inside -- shows only e2e-v-main and the forks it made.
+[FAIL] I1b `silo tools status e2e-v-main` inside -- "silo: guestClient.status is for the person who runs Silo; a computer's agent cannot call it." Fine if intended (R1), but the message names an internal method and the checklist expects it to work. See FINDINGS 9.
+[PASS] I1c MCP in Claude Code inside -- `claude mcp list` inside e2e-v-main: "silo: /usr/local/bin/silo mcp - Connected" next to cua-driver. (The tool names were not listed: Claude Code is not logged in.)
+[PASS] I2a `silo recipe show <own recipe>` -- in e2e-v-fromrecipe (made with `silo fork --recipe e2e-v-recipe`): setup and the service command are hidden ("web: ''"), plus the line "The setup commands, service commands and keep commands are hidden from a computer; the engine runs them."
+[PASS] I2b Another recipe refused -- `silo recipe show linux-dev`: "A computer can read only the recipe it was built from ... linux-dev is not this computer's recipe." (exit 1).
+[PASS] I3a `silo fork` and `silo merge` back with an approval -- forks made from inside main (publish approvals appeared for each fork's inherited port 8080), merge asked and was merged through the app (A4, A5).
+[PASS] I3b Undo -- `silo undo e2e-v-main` removed /etc/v-g1.conf; a second undo: "Nothing to undo". It also put back the whole pre-merge state: the agents installed after the merge were gone (expected from "back to before its latest merge", worth a line in the undo wording).
+
+[PASS] R1 `silo rebuild e2e-v-linux --force` -- "Rebuilt e2e-v-linux on ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64. The previous computer is e2e-v-linux-undo (stopped)." (about 40 s)
+[PASS] R2 The app shows the step label -- "Rebuilding e2e-v-linux: building the new computer" with a progress bar.
+[PASS] R3 Workspace and home kept -- /workspace/v-marker.txt and ~/v-home.txt intact after the rebuild.
+[PASS] R4 `-undo` appears stopped -- yes (silo list).
+
+== Totals: PASS 36, FAIL 2, SKIPPED 9 (47 lines).
+
+== FINDINGS (bugs and oddities; no product code changed in this task)
+1. Environment, not product: LCU `getApp("Silo Dev")` / bundle id resolved to another copy (microsandbox-workspaces/.../release/bundle) and launched it on every call; the running copy answered each launch with "Silo Dev is already running. Quit it first" (src-tauri/src/single_instance.rs). `lsregister -f` on the direction bundle fixed the resolution. Several copies of org.silo.dev exist (main checkout release build, two t3 worktrees).
+2. The Dev app does not start the Dev engine in this setup: "Silo could not load: Silo's engine is not reachable yet" until the bundle's silod was started by hand (as t5b_tools_check.sh does). After it ran, Retry loaded the app, but a red "System issue: Silo runtime is unavailable ... desktop bridge did not respond" kept every Open Terminal / Claude Code / Codex / Zed / Stop button disabled ("Resolve the system issue first.") until "Retry checks" was clicked. Worth checking whether the app should retry its own checks when the engine appears (src/features/application/model/computer-availability.ts).
+3. Every fork reports a conflict on /etc/silo/endpoint.json ("changed on main since the fork was made, and differently in the fork; fork: added; main: added"), so each merge of a fork needs --choose file:/etc/silo/endpoint.json=fork (or the app's radio). The file is per-computer; it should be left out of the diff/merge (engine changes ignore list; guest_client / changes code).
+4. A merge approval shows as two Pending rows and the badge counts both: "e2e-v-main asks: Merge ..." and "e2e-v-g2 into e2e-v-main -- No changes -- Open" ("2 waiting for you" for one ask). The request row says "No changes" (`silo requests`: "no changes counted") although the diff has 2 settings changes; a request made with `--request` counts them ("settings 2").
+5. The review page opened from a merge approval shows the target as an id ("e2e-v-g1 -> 358726eb-e1a8-...", "Merge into 358726eb-...?") where the same page from a `--request` shows names; the conflict text uses ids and CLI words ("Merge again with `choices`: ... Add an id to `skip` ...", "Keeping ab4fafba-..."). The approval carried "Choices: endpoint.json = fork", yet merging from that page asked for the choice again (the approval itself had expired by then; not separated).
+6. Failed install: the button after the error is still "Install Codex" (checklist says Retry) and the error is generic ("The runtime did not complete the operation"); a blocked network is the likely cause and could be named.
+7. Clicking "Pending" in the sidebar while a request's page is open leaves that page; Back is needed to reach the list. A toast "Couldn't delete e2e-v-f2" (from my CLI drop of a running computer) stayed on screen for the whole session.
+8. Activity > Who did what > "Open request" did nothing on a row of a removed computer (src/features/application/components/audit-log.tsx:42, onOpenApproval). Either it should be hidden/disabled there or the request page should open.
+9. Inside a computer `silo tools status <computer>` is refused with an internal name in the message (guestClient.status); `silo tools --help`/docs should say agents cannot ask, or allow a read-only status.
+10. On e2e-v-main right after the installs the "Silo's tools" row read "Claude Code and Codex not installed yet" while Agents said Ready (seen once, may be stale until refresh).
+11. Disk: the run took about 41 GB at its peak (113 GB free at the start, 73 GB with all computers running); 96 GB free after cleanup (the rebuilt/installed images and caches stay). The create form's defaults are 8 CPUs / 32 GiB / 120 GiB + 100 GiB disks.
+12. Notifications: the "Enable notifications" switch becomes disabled and stays off while the macOS permission banner is up and unanswered.
+
+== Cleanup
+All e2e-v-* computers and the e2e-v-recipe recipe removed; Settings floor back to default; Silo Dev quit through its menu; the hand-started Dev silod (pid 95111) stopped with SIGTERM; production silod (pid 1238) untouched. Two Terminal windows from G2 (msb exec sessions of dropped computers) are left open. ~/.ssh/config keeps the Dev Include line added by "Show SSH name" (G3c).

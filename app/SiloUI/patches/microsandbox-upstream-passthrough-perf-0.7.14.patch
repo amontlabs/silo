@@ -1,0 +1,1189 @@
+diff --git a/.github/workflows/test-platform.yml b/.github/workflows/test-platform.yml
+index 80ab307a9105fd86eb4e9a06123f0d1a3943023b..b6b3925e3b497b92f4e5915e10109de35e399dfe 100644
+--- a/.github/workflows/test-platform.yml
++++ b/.github/workflows/test-platform.yml
+@@ -62,7 +62,7 @@ jobs:
+ 
+       - name: Install build deps (Linux)
+         if: inputs.os == 'linux'
+-        run: sudo apt-get update && sudo apt-get install -y musl-tools libcap-ng-dev
++        run: sudo apt-get update && sudo apt-get install -y musl-tools libcap-ng-dev strace
+ 
+       # Reuse the runtime already built by Check Platform. The SDK build script
+       # discovers build/ in CI, so unit tests no longer repeat the release/LTO
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/builder.rs b/crates/filesystem/lib/backends/passthroughfs/unix/builder.rs
+index fb0c4bc1be10eba404f5f270b7496eda452bc13b..5799483886758c24b36db17d405d367af843d720 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/builder.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/builder.rs
+@@ -237,7 +237,7 @@ impl PassthroughFsBuilder {
+             root_fd,
+             inodes: RwLock::new(MultikeyBTreeMap::new()),
+             next_inode: AtomicU64::new(3), // 1=root, 2=init
+-            handles: RwLock::new(BTreeMap::new()),
++            handles: RwLock::new(Default::default()),
+             dir_handles: RwLock::new(BTreeMap::new()),
+             next_handle: AtomicU64::new(1), // 0=init handle
+             writeback: AtomicBool::new(false),
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/create_ops.rs b/crates/filesystem/lib/backends/passthroughfs/unix/create_ops.rs
+index d4bd63d8cbc1c64feb6d6af1010f4b804c3efc63..c15b7fa76ab400052502275c3a5e5e3136d408e8 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/create_ops.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/create_ops.rs
+@@ -21,7 +21,7 @@
+ use std::{
+     ffi::CStr,
+     io,
+-    os::fd::FromRawFd,
++    os::fd::{AsRawFd, FromRawFd},
+     sync::{Arc, RwLock, atomic::Ordering},
+ };
+ 
+@@ -76,6 +76,14 @@ pub(crate) fn do_create(
+     let mut open_flags = inode::translate_open_flags(flags as i32);
+     open_flags |= libc::O_CREAT | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+ 
++    // Match OPEN's writeback descriptor policy before the first open.
++    if fs.writeback.load(Ordering::Relaxed) {
++        if open_flags & libc::O_ACCMODE == libc::O_WRONLY {
++            open_flags = (open_flags & !libc::O_ACCMODE) | libc::O_RDWR;
++        }
++        open_flags &= !libc::O_APPEND;
++    }
++
+     // With overlay, default to conservative 0o600 and let `Mirror` widen via
+     // `fchmod` after creation. Without overlay (`Off`), use the guest's request
+     // OR'd with the owner-access floor so the host process can keep accessing
+@@ -117,14 +125,9 @@ pub(crate) fn do_create(
+         }
+     }
+ 
+-    // Close the fd we used for xattr, then do a proper lookup.
+-    unsafe { libc::close(fd) };
+-
+-    let entry = inode::do_lookup(fs, parent, name)?;
+-
+-    // Reopen for the handle — strip O_CREAT since the file already exists.
+-    // open_inode_fd adds O_CLOEXEC itself and rejects real host symlinks.
+-    let open_fd = inode::open_inode_fd(fs, entry.inode, open_flags & !libc::O_CREAT)?;
++    // Retain the original descriptor through registration and handle publication.
++    let file = unsafe { std::fs::File::from_raw_fd(fd) };
++    let open_fd = file.as_raw_fd();
+ 
+     // Clear SUID/SGID on create+truncate of existing file (HANDLE_KILLPRIV_V2).
+     if kill_priv && (open_flags & libc::O_TRUNC != 0) {
+@@ -143,7 +146,14 @@ pub(crate) fn do_create(
+         }
+     }
+ 
+-    let file = unsafe { std::fs::File::from_raw_fd(open_fd) };
++    #[cfg(test)]
++    super::tests::BEFORE_CREATE_REGISTRATION.with(|hook| {
++        let callback = hook.borrow_mut().take();
++        if let Some(callback) = callback {
++            callback();
++        }
++    });
++    let entry = inode::register_created_fd(fs, parent, name, open_fd)?;
+ 
+     let handle = fs.next_handle.fetch_add(1, Ordering::Relaxed);
+     let data = Arc::new(HandleData {
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/handle_table.rs b/crates/filesystem/lib/backends/passthroughfs/unix/handle_table.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7b7f0a5fe74c0d6e7b9b5c2382fdec604119a16f
+--- /dev/null
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/handle_table.rs
+@@ -0,0 +1,71 @@
++//! Open handles indexed by handle ID and inode, under the same table lock.
++
++use std::{collections::BTreeMap, ops::Deref, sync::Arc};
++
++use crate::backends::shared::handle_table::HandleData;
++
++//--------------------------------------------------------------------------------------------------
++// Types
++//--------------------------------------------------------------------------------------------------
++
++#[derive(Default)]
++pub(crate) struct FileHandles {
++    by_handle: BTreeMap<u64, Arc<HandleData>>,
++    by_inode: BTreeMap<(u64, u64), Arc<HandleData>>,
++}
++
++//--------------------------------------------------------------------------------------------------
++// Methods
++//--------------------------------------------------------------------------------------------------
++
++impl FileHandles {
++    pub(super) fn for_inode(&self, inode: u64) -> Option<&Arc<HandleData>> {
++        self.by_inode
++            .range((inode, 0)..=(inode, u64::MAX))
++            .next()
++            .map(|(_, data)| data)
++    }
++
++    pub(super) fn insert(&mut self, handle: u64, data: Arc<HandleData>) {
++        if let Some(previous) = self.by_handle.insert(handle, data.clone()) {
++            self.by_inode.remove(&(previous.inode, handle));
++        }
++        self.by_inode.insert((data.inode, handle), data);
++    }
++
++    pub(super) fn remove(&mut self, handle: &u64) {
++        if let Some(data) = self.by_handle.remove(handle) {
++            self.by_inode.remove(&(data.inode, *handle));
++        }
++    }
++
++    pub(super) fn clear(&mut self) {
++        self.by_inode.clear();
++        self.by_handle.clear();
++    }
++}
++
++//--------------------------------------------------------------------------------------------------
++// Trait Implementations
++//--------------------------------------------------------------------------------------------------
++
++impl Deref for FileHandles {
++    type Target = BTreeMap<u64, Arc<HandleData>>;
++
++    fn deref(&self) -> &Self::Target {
++        &self.by_handle
++    }
++}
++
++impl From<BTreeMap<u64, Arc<HandleData>>> for FileHandles {
++    fn from(by_handle: BTreeMap<u64, Arc<HandleData>>) -> Self {
++        let by_inode = by_handle
++            .iter()
++            .map(|(handle, data)| ((data.inode, *handle), data.clone()))
++            .collect();
++        Self {
++            by_handle,
++            by_inode,
++        }
++    }
++}
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/inode.rs b/crates/filesystem/lib/backends/passthroughfs/unix/inode.rs
+index 1af2c0693d515934995e0ff3c39d8228b58587ee..e2788b5bbfcc5a0ba0cacd3bc9f587d587177c2b 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/inode.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/inode.rs
+@@ -328,6 +328,83 @@ fn do_lookup_linux(
+     })
+ }
+ 
++/// Register CREATE from the descriptor returned by openat, never resolving
++/// the child name again to select the guest handle's identity.
++pub(crate) fn register_created_fd(
++    fs: &PassthroughFs,
++    parent: u64,
++    name: &CStr,
++    fd: i32,
++) -> io::Result<Entry> {
++    #[cfg(target_os = "macos")]
++    let st = platform::fstat(fd)?;
++    #[cfg(target_os = "linux")]
++    let (st, alt_key) = linux_stat_from_fd(fd)?;
++    let patched = crate::backends::shared::stat_override::patched_stat(
++        fd,
++        st,
++        fs.cfg.xattr_enabled(),
++        fs.cfg.strict_enabled(),
++        fs.cfg.bind_identity_map.as_ref(),
++    )?;
++    #[cfg(target_os = "linux")]
++    let mnt_id = alt_key.mnt_id;
++    #[cfg(target_os = "linux")]
++    let alias = NamespaceAlias::new(parent, name.to_bytes());
++    #[cfg(target_os = "macos")]
++    let alt_key = InodeAltKey::new(platform::stat_ino(&st), platform::stat_dev(&st));
++    #[cfg(target_os = "macos")]
++    let _ = (parent, name);
++    let mut inodes = fs.inodes.write().unwrap();
++    if let Some(data) = inodes.get_alt(&alt_key).cloned() {
++        data.refcount.fetch_add(1, Ordering::Acquire);
++        #[cfg(target_os = "linux")]
++        register_alias_locked(&mut inodes, &data, alias);
++        return Ok(Entry {
++            inode: data.inode,
++            generation: 0,
++            attr: patched,
++            attr_flags: 0,
++            attr_timeout: fs.cfg.attr_timeout,
++            entry_timeout: fs.cfg.entry_timeout,
++        });
++    }
++
++    let inode_num = fs.next_inode.fetch_add(1, Ordering::Relaxed);
++    let data = Arc::new(InodeData {
++        inode: inode_num,
++        ino: platform::stat_ino(&st),
++        dev: platform::stat_dev(&st),
++        refcount: std::sync::atomic::AtomicU64::new(1),
++        #[cfg(target_os = "linux")]
++        mnt_id,
++        #[cfg(target_os = "linux")]
++        anchor_parent: std::sync::atomic::AtomicU64::new(0),
++        #[cfg(target_os = "linux")]
++        anchor_name: std::sync::RwLock::new(Vec::new()),
++        #[cfg(target_os = "linux")]
++        aliases: std::sync::RwLock::new(std::collections::BTreeSet::new()),
++        #[cfg(target_os = "linux")]
++        anchor_children: std::sync::atomic::AtomicU64::new(0),
++        #[cfg(target_os = "linux")]
++        retained_fd: std::sync::Mutex::new(None),
++        #[cfg(target_os = "macos")]
++        unlinked_fd: std::sync::atomic::AtomicI64::new(-1),
++    });
++    inodes.insert(inode_num, alt_key, data.clone());
++    #[cfg(target_os = "linux")]
++    register_alias_locked(&mut inodes, &data, alias);
++
++    Ok(Entry {
++        inode: inode_num,
++        generation: 0,
++        attr: patched,
++        attr_flags: 0,
++        attr_timeout: fs.cfg.attr_timeout,
++        entry_timeout: fs.cfg.entry_timeout,
++    })
++}
++
+ /// macOS lookup: fstatat → check table → register.
+ ///
+ /// Opens a real fd via `/.vol/dev/ino` for xattr access since macOS
+@@ -745,6 +822,11 @@ fn validate_identity_linux(fd: RawFd, expected: InodeAltKey) -> io::Result<()> {
+ 
+ #[cfg(target_os = "linux")]
+ pub(crate) fn linux_alt_key_from_fd(fd: RawFd) -> io::Result<InodeAltKey> {
++    linux_stat_from_fd(fd).map(|(_, key)| key)
++}
++
++#[cfg(target_os = "linux")]
++fn linux_stat_from_fd(fd: RawFd) -> io::Result<(stat64, InodeAltKey)> {
+     let mut stx: libc::statx = unsafe { std::mem::zeroed() };
+     let ret = unsafe {
+         libc::statx(
+@@ -759,11 +841,8 @@ pub(crate) fn linux_alt_key_from_fd(fd: RawFd) -> io::Result<InodeAltKey> {
+         return Err(platform::linux_error(io::Error::last_os_error()));
+     }
+ 
+-    Ok(InodeAltKey::new(
+-        stx.stx_ino,
+-        platform::statx_to_stat64(&stx).st_dev,
+-        stx.stx_mnt_id,
+-    ))
++    let st = platform::statx_to_stat64(&stx);
++    Ok((st, InodeAltKey::new(st.st_ino, st.st_dev, stx.stx_mnt_id)))
+ }
+ 
+ #[cfg(target_os = "linux")]
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/metadata.rs b/crates/filesystem/lib/backends/passthroughfs/unix/metadata.rs
+index 0bcce6b584cdd545cb0be121456669910947f8ae..0407c71a86e46d4f6022b19059c420344fe74d20 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/metadata.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/metadata.rs
+@@ -93,11 +93,24 @@ pub(crate) fn do_setattr(
+         libc::O_RDONLY
+     };
+ 
++    let handle_data = handle
++        .map(|handle| {
++            let handles = fs.handles.read().unwrap();
++            let data = handles.get(&handle).cloned().ok_or_else(platform::ebadf)?;
++            if valid.contains(SetattrValid::SIZE)
++                && data.flags as i32 & libc::O_ACCMODE == libc::O_RDONLY
++            {
++                return Err(platform::einval());
++            }
++            Ok(data)
++        })
++        .transpose()?;
++    let borrowed_file = handle_data.as_ref().map(|data| data.file.read().unwrap());
+     let file = match handle {
+         // A supplied FUSE handle is the authoritative object. In particular,
+         // it remains valid after an atomic host replacement detaches the inode
+         // from the namespace, when reopening by inode can no longer succeed.
+-        Some(handle) => clone_handle_file(fs, handle, valid.contains(SetattrValid::SIZE))?,
++        Some(_) => None,
+         None => {
+             #[cfg(target_os = "linux")]
+             let fd = inode::open_inode_fd(fs, ino, open_flags)?;
+@@ -110,10 +123,14 @@ pub(crate) fn do_setattr(
+             };
+ 
+             // SAFETY: each open helper returns a newly owned descriptor.
+-            unsafe { File::from_raw_fd(fd) }
++            Some(unsafe { File::from_raw_fd(fd) })
+         }
+     };
+-    let fd = file.as_raw_fd();
++    let fd = borrowed_file
++        .as_deref()
++        .or(file.as_ref())
++        .unwrap()
++        .as_raw_fd();
+ 
+     // FUSE expects setattr-triggered truncate/chown to clear suid/sgid when
+     // requested. UID/GID changes always clear them; SIZE changes only do so
+@@ -240,6 +257,7 @@ pub(crate) fn do_setattr(
+         }
+     }
+ 
++    drop(borrowed_file);
+     drop(file);
+ 
+     // Return updated attributes.
+@@ -329,16 +347,6 @@ fn stat_handle(fs: &PassthroughFs, handle: u64) -> io::Result<stat64> {
+     )
+ }
+ 
+-fn clone_handle_file(fs: &PassthroughFs, handle: u64, writable: bool) -> io::Result<File> {
+-    let handles = fs.handles.read().unwrap();
+-    let data = handles.get(&handle).ok_or_else(platform::ebadf)?;
+-    if writable && data.flags as i32 & libc::O_ACCMODE == libc::O_RDONLY {
+-        return Err(platform::einval());
+-    }
+-    let file = data.file.read().unwrap();
+-    file.try_clone().map_err(platform::linux_error)
+-}
+-
+ #[cfg(target_os = "macos")]
+ pub(crate) fn open_symlink_inode_fd_macos(fs: &PassthroughFs, ino: u64) -> io::Result<i32> {
+     let inodes = fs.inodes.read().unwrap();
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/mobility.rs b/crates/filesystem/lib/backends/passthroughfs/unix/mobility.rs
+index ecbdce62efa3a12fd0efaa65fb5f2f1bd4757341..90ea81f62c587cb004d2c4490c0207fe36b3f991 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/mobility.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/mobility.rs
+@@ -316,7 +316,7 @@ pub(super) fn restore(fs: &PassthroughFs, bytes: &[u8]) -> io::Result<()> {
+     }
+ 
+     *fs.inodes.write().unwrap() = prepared.inodes;
+-    *fs.handles.write().unwrap() = prepared.files;
++    *fs.handles.write().unwrap() = prepared.files.into();
+     *fs.dir_handles.write().unwrap() = prepared.dirs;
+     fs.next_inode.store(prepared.next_inode, Ordering::Release);
+     fs.next_handle
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/mod.rs b/crates/filesystem/lib/backends/passthroughfs/unix/mod.rs
+index fe60197fab92b7522772c6421328d02ccdf61aa0..e690769ea913c667f2437de53cdfdca660dc04a6 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/mod.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/mod.rs
+@@ -10,6 +10,7 @@ mod create_ops;
+ mod dax;
+ mod dir_ops;
+ mod file_ops;
++mod handle_table;
+ mod host_mode;
+ pub(crate) mod inode;
+ mod metadata;
+@@ -37,7 +38,6 @@ use crate::{
+     AddDirEntry, AddDirEntryPlus, Context, DirEntry, DynFileSystem, Entry, Extensions, FsOptions,
+     GetxattrReply, ListxattrReply, OpenOptions, SetattrValid, ZeroCopyReader, ZeroCopyWriter,
+     backends::shared::{
+-        handle_table::HandleData,
+         init_binary,
+         inode_table::{InodeAltKey, InodeData, MultikeyBTreeMap},
+         platform, stat_override,
+@@ -209,7 +209,7 @@ pub struct PassthroughFs {
+     pub(crate) next_inode: AtomicU64,
+ 
+     /// Open file handle table.
+-    pub(crate) handles: RwLock<BTreeMap<u64, Arc<HandleData>>>,
++    pub(crate) handles: RwLock<handle_table::FileHandles>,
+ 
+     /// Open directory handle table.
+     pub(crate) dir_handles: RwLock<BTreeMap<u64, Arc<PassthroughDirHandle>>>,
+@@ -400,7 +400,7 @@ impl PassthroughFs {
+             root_fd,
+             inodes: RwLock::new(MultikeyBTreeMap::new()),
+             next_inode: AtomicU64::new(3), // 1=root, 2=init
+-            handles: RwLock::new(BTreeMap::new()),
++            handles: RwLock::new(Default::default()),
+             dir_handles: RwLock::new(BTreeMap::new()),
+             next_handle: AtomicU64::new(1), // 0=init handle
+             writeback: AtomicBool::new(false),
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/tests/mod.rs b/crates/filesystem/lib/backends/passthroughfs/unix/tests/mod.rs
+index 41cee4f6e61d162002fc59bce97bfee68d2756d7..30aa10ffdf393ec2d7d80238f0b3db58a549882f 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/tests/mod.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/tests/mod.rs
+@@ -46,6 +46,11 @@ use crate::{
+ // Constants
+ //--------------------------------------------------------------------------------------------------
+ 
++// Replace a host name after CREATE opens it but before inode registration.
++thread_local! {
++    pub(super) static BEFORE_CREATE_REGISTRATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = Default::default();
++}
++
+ /// Linux errno constants for assertion matching.
+ ///
+ /// The PassthroughFs always returns Linux errno values regardless of host OS
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_create_ops.rs b/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_create_ops.rs
+index 37c63d793cd4f229fc95c66cadba65240e8dbceb..4a776e20f09fb796690fe44de4c3b43b46a2fdea 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_create_ops.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_create_ops.rs
+@@ -347,3 +347,82 @@ fn test_link_init_name_rejected() {
+     );
+     TestSandbox::assert_errno(result, LINUX_EACCES);
+ }
++
++#[test]
++fn test_create_exclusive_truncate_and_handle_identity() {
++    let sb = TestSandbox::new();
++    let create = |flags| {
++        sb.fs.create(
++            sb.ctx(),
++            ROOT_INODE,
++            &TestSandbox::cstr("existing"),
++            0o644,
++            false,
++            flags,
++            0,
++            Extensions::default(),
++        )
++    };
++    // Linux O_EXCL is 0x80 even on macOS. A second CREATE must fail without
++    // changing the original contents; the initial successful handle stays usable.
++    let (entry, handle, _) = create(LINUX_O_RDWR | 0x80).unwrap();
++    let handle = handle.unwrap();
++    sb.fuse_write(entry.inode, handle, b"original", 0).unwrap();
++    assert_eq!(
++        create(LINUX_O_RDWR | 0x80).err().unwrap().raw_os_error(),
++        Some(LINUX_EEXIST)
++    );
++    assert_eq!(
++        std::fs::read(sb.root.join("existing")).unwrap(),
++        b"original"
++    );
++
++    // Replace the name after openat, before CREATE registers or returns. A
++    // path-based registration/reopen would now select the replacement inode.
++    let root = sb.root.clone();
++    BEFORE_CREATE_REGISTRATION.with(|hook| {
++        *hook.borrow_mut() = Some(Box::new(move || {
++            std::fs::rename(root.join("existing"), root.join("detached")).unwrap();
++            std::fs::write(root.join("existing"), b"replacement").unwrap();
++        }))
++    });
++    let (truncated, handle, _) = create(LINUX_O_RDWR | LINUX_O_TRUNC).unwrap();
++    let handle = handle.unwrap();
++    assert_eq!(truncated.inode, entry.inode);
++    assert_eq!(truncated.attr.st_size, 0);
++    // The returned stat and retained handle must both belong to the old inode.
++    sb.fuse_write(entry.inode, handle, b"retained", 0).unwrap();
++    assert_eq!(
++        std::fs::read(sb.root.join("detached")).unwrap(),
++        b"retained"
++    );
++    assert_eq!(
++        std::fs::read(sb.root.join("existing")).unwrap(),
++        b"replacement"
++    );
++}
++
++#[test]
++fn test_create_writeback_allows_reads_and_uses_supplied_write_offset() {
++    let sb = TestSandbox::new();
++    sb.fs.writeback.store(true, Ordering::Relaxed);
++    // Linux O_WRONLY | O_APPEND. Writeback must widen the fd and clear APPEND,
++    // just as OPEN does: the kernel owns the cached write position.
++    let (entry, handle, _) = sb
++        .fs
++        .create(
++            sb.ctx(),
++            ROOT_INODE,
++            &TestSandbox::cstr("writeback"),
++            0o644,
++            false,
++            1 | 0x400,
++            0,
++            Extensions::default(),
++        )
++        .unwrap();
++    let handle = handle.unwrap();
++    sb.fuse_write(entry.inode, handle, b"abcd", 0).unwrap();
++    sb.fuse_write(entry.inode, handle, b"XY", 0).unwrap();
++    assert_eq!(sb.fuse_read(entry.inode, handle, 4, 0).unwrap(), b"XYcd");
++}
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_file_ops.rs b/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_file_ops.rs
+index 6a6ebd23945b0cfcc73f9f9c82eaf99ef5d46160..9bc94ec42a190d84e36a35085e209d841ac6b790 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_file_ops.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_file_ops.rs
+@@ -183,3 +183,142 @@ fn test_getattr_via_handle_after_forget() {
+     let (st, _) = sb.fs.getattr(sb.ctx(), entry.inode, Some(handle)).unwrap();
+     assert_eq!(st.st_size, 6);
+ }
++
++/// Trace the real handler sequence, including repeated guest closes on one
++/// handle. Run on Linux with strace installed; no mock descriptor layer needed.
++#[test]
++#[cfg(target_os = "linux")]
++fn test_create_write_close_budget() {
++    const CHILD: &str = "MSB_TEST_CLOSE_BUDGET_CHILD";
++    const TEST_NAME: &str =
++        "backends::passthroughfs::unix::tests::test_file_ops::test_create_write_close_budget";
++
++    if std::env::var_os(CHILD).is_some() {
++        let sb = TestSandbox::new();
++        let (entry, handle) = sb.fuse_create_root("close-budget.txt").unwrap();
++        sb.fuse_write(entry.inode, handle, b"data", 0).unwrap();
++        let mut attr: crate::stat64 = unsafe { std::mem::zeroed() };
++        attr.st_size = 3;
++        sb.fs
++            .setattr(
++                sb.ctx(),
++                entry.inode,
++                attr,
++                Some(handle),
++                SetattrValid::SIZE,
++            )
++            .unwrap();
++        sb.fs
++            .setxattr(sb.ctx(), entry.inode, c"user.budget", b"value", 0)
++            .unwrap();
++        assert!(matches!(
++            sb.fs.getxattr(sb.ctx(), entry.inode, c"user.budget", 10).unwrap(),
++            GetxattrReply::Value(value) if value == b"value"
++        ));
++        sb.fs.listxattr(sb.ctx(), entry.inode, 0).unwrap();
++        sb.fs
++            .removexattr(sb.ctx(), entry.inode, c"user.budget")
++            .unwrap();
++        for _ in 0..4 {
++            sb.fs.flush(sb.ctx(), entry.inode, handle, 0).unwrap();
++        }
++        assert_eq!(sb.fuse_read(entry.inode, handle, 10, 0).unwrap(), b"dat");
++        sb.fs.fsync(sb.ctx(), entry.inode, false, handle).unwrap();
++        sb.fs.fsync(sb.ctx(), entry.inode, true, handle).unwrap();
++        sb.fs
++            .release(sb.ctx(), entry.inode, 0, handle, false, false, None)
++            .unwrap();
++        return;
++    }
++
++    assert!(
++        std::process::Command::new("strace")
++            .arg("--version")
++            .status()
++            .expect("Linux close-budget tests require strace (apt-get install strace)")
++            .success()
++    );
++    let trace = tempfile::NamedTempFile::new().unwrap();
++    let output = std::process::Command::new("strace")
++        .args(["-f", "-yy", "-e", "trace=close,dup,fsync,fdatasync", "-o"])
++        .arg(trace.path())
++        .arg(std::env::current_exe().unwrap())
++        .args(["--exact", TEST_NAME, "--nocapture"])
++        .env(CHILD, "1")
++        .output()
++        .unwrap();
++    assert!(
++        output.status.success(),
++        "{}",
++        String::from_utf8_lossy(&output.stderr)
++    );
++    let calls = std::fs::read_to_string(trace.path()).unwrap();
++    let file_calls: Vec<_> = calls
++        .lines()
++        .filter(|line| line.contains("/close-budget.txt>"))
++        .collect();
++    let closes = file_calls
++        .iter()
++        .filter(|line| line.contains("close("))
++        .count();
++    assert_eq!(closes, 5, "{calls}");
++    assert!(
++        file_calls.iter().any(|line| line.contains("fsync(")),
++        "{calls}"
++    );
++    assert!(
++        file_calls.iter().any(|line| line.contains("fdatasync(")),
++        "{calls}"
++    );
++}
++
++/// Inject a backing close error at the syscall boundary, without mocking the
++/// filesystem handler. strace path filtering leaves unrelated closes alone.
++#[test]
++#[cfg(target_os = "linux")]
++fn test_flush_reports_backing_close_errors_by_default() {
++    const CHILD_ROOT: &str = "MSB_TEST_FLUSH_ERROR_ROOT";
++    const CHILD_ERRNO: &str = "MSB_TEST_FLUSH_ERROR_ERRNO";
++    const TEST_NAME: &str = "backends::passthroughfs::unix::tests::test_file_ops::test_flush_reports_backing_close_errors_by_default";
++
++    if let Some(root) = std::env::var_os(CHILD_ROOT) {
++        let errno = std::env::var(CHILD_ERRNO).unwrap();
++        let sb = TestSandbox::with_config(|mut cfg| {
++            cfg.root_dir = root.into();
++            cfg
++        });
++        let (entry, handle) = sb.fuse_create_root("flush-error.txt").unwrap();
++        sb.fuse_write(entry.inode, handle, b"pending write", 0)
++            .unwrap();
++        let result = sb.fs.flush(sb.ctx(), entry.inode, handle, 0);
++        TestSandbox::assert_errno(result, errno.parse().unwrap());
++        return;
++    }
++
++    for (code, errno) in [("28", "ENOSPC"), ("5", "EIO")] {
++        let root = tempfile::tempdir().unwrap();
++        let path = root.path().join("flush-error.txt");
++        std::fs::write(&path, b"").unwrap();
++        let output = std::process::Command::new("strace")
++            .args(["-f", "-yy", "-P"])
++            .arg(&path)
++            .args(["-e", "trace=close", "-e"])
++            .arg(format!("inject=close:error={errno}:when=1"))
++            .arg(std::env::current_exe().unwrap())
++            .args(["--exact", TEST_NAME, "--nocapture"])
++            .env(CHILD_ROOT, root.path())
++            .env(CHILD_ERRNO, code)
++            .output()
++            .expect("Linux flush error tests require strace (apt-get install strace)");
++        let trace = String::from_utf8_lossy(&output.stderr);
++        assert!(
++            output.status.success(),
++            "{code}: {trace}\n{}",
++            String::from_utf8_lossy(&output.stdout)
++        );
++        assert!(
++            trace.contains("INJECTED"),
++            "fault did not reach the backing close: {trace}"
++        );
++    }
++}
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_xattr_ops.rs b/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_xattr_ops.rs
+index 58430408462398de6cf98bffca468539fd4e530d..5deec4fb3e164002f285f391fd669ec703c29789 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_xattr_ops.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/tests/test_xattr_ops.rs
+@@ -30,6 +30,37 @@ fn test_setxattr_getxattr_roundtrip() {
+     }
+ }
+ 
++#[test]
++fn test_xattr_after_releasing_one_of_multiple_handles() {
++    let sb = TestSandbox::new();
++    let (entry, first) = sb.fuse_create_root("xattr.txt").unwrap();
++    let second = sb.fuse_open(entry.inode, libc::O_RDWR as u32).unwrap();
++
++    sb.fs
++        .release(sb.ctx(), entry.inode, 0, first, false, false, None)
++        .unwrap();
++    sb.fs
++        .setxattr(sb.ctx(), entry.inode, c"user.test", b"remaining", 0)
++        .unwrap();
++    let reply = sb
++        .fs
++        .getxattr(sb.ctx(), entry.inode, c"user.test", 64)
++        .unwrap();
++    assert!(matches!(reply, GetxattrReply::Value(value) if value == b"remaining"));
++
++    sb.fs
++        .release(sb.ctx(), entry.inode, 0, second, false, false, None)
++        .unwrap();
++    sb.fs
++        .setxattr(sb.ctx(), entry.inode, c"user.test", b"reopened", 0)
++        .unwrap();
++    let reply = sb
++        .fs
++        .getxattr(sb.ctx(), entry.inode, c"user.test", 64)
++        .unwrap();
++    assert!(matches!(reply, GetxattrReply::Value(value) if value == b"reopened"));
++}
++
+ #[test]
+ fn test_getxattr_size_query() {
+     let sb = TestSandbox::new();
+diff --git a/crates/filesystem/lib/backends/passthroughfs/unix/xattr_ops.rs b/crates/filesystem/lib/backends/passthroughfs/unix/xattr_ops.rs
+index e2aa4ca8a2bb592f0fe0cf18c1a20e911b310d2c..80c0845402f6cdd902c03d924f6df7d40a68d73b 100644
+--- a/crates/filesystem/lib/backends/passthroughfs/unix/xattr_ops.rs
++++ b/crates/filesystem/lib/backends/passthroughfs/unix/xattr_ops.rs
+@@ -5,11 +5,6 @@
+ //! FUSE protocol guarantees ALL guest xattr operations go through these handlers — there is
+ //! no direct path from the guest to the host filesystem.
+ //!
+-//! ## Errno Safety
+-//!
+-//! All error paths capture `io::Error::last_os_error()` *before* calling `libc::close(fd)`,
+-//! since `close()` may clobber errno on some systems. The captured error is then returned.
+-//!
+ //! ## listxattr size=0
+ //!
+ //! When `size=0` (query byte count), the response is computed by doing a full listxattr,
+@@ -17,7 +12,12 @@
+ //! kernel count would leak the hidden xattr's existence (the guest could compare the
+ //! unfiltered count with the filtered list to infer the xattr exists).
+ 
+-use std::{ffi::CStr, io};
++use std::{
++    ffi::CStr,
++    fs::File,
++    io,
++    os::fd::{AsRawFd, FromRawFd},
++};
+ 
+ #[cfg(target_os = "macos")]
+ use super::metadata;
+@@ -52,49 +52,45 @@ pub(crate) fn do_setxattr(
+         return Err(platform::eacces());
+     }
+ 
+-    let fd = open_xattr_fd(fs, ino)?;
+-
+-    #[cfg(target_os = "linux")]
+-    {
+-        let path = format!("/proc/self/fd/{fd}\0");
+-        let ret = unsafe {
+-            libc::setxattr(
+-                path.as_ptr() as *const libc::c_char,
+-                name.as_ptr(),
+-                value.as_ptr() as *const libc::c_void,
+-                value.len(),
+-                flags as i32,
+-            )
+-        };
+-        if ret < 0 {
+-            let err = io::Error::last_os_error();
+-            unsafe { libc::close(fd) };
+-            return Err(platform::linux_error(err));
++    with_xattr_fd(fs, ino, |fd| {
++        #[cfg(target_os = "linux")]
++        {
++            let path = format!("/proc/self/fd/{fd}\0");
++            let ret = unsafe {
++                libc::setxattr(
++                    path.as_ptr() as *const libc::c_char,
++                    name.as_ptr(),
++                    value.as_ptr() as *const libc::c_void,
++                    value.len(),
++                    flags as i32,
++                )
++            };
++            if ret < 0 {
++                let err = io::Error::last_os_error();
++                return Err(platform::linux_error(err));
++            }
+         }
+-        unsafe { libc::close(fd) };
+-    }
+ 
+-    #[cfg(target_os = "macos")]
+-    {
+-        let ret = unsafe {
+-            libc::fsetxattr(
+-                fd,
+-                name.as_ptr(),
+-                value.as_ptr() as *const libc::c_void,
+-                value.len(),
+-                0,
+-                flags as i32,
+-            )
+-        };
+-        if ret < 0 {
+-            let err = io::Error::last_os_error();
+-            unsafe { libc::close(fd) };
+-            return Err(platform::linux_error(err));
++        #[cfg(target_os = "macos")]
++        {
++            let ret = unsafe {
++                libc::fsetxattr(
++                    fd,
++                    name.as_ptr(),
++                    value.as_ptr() as *const libc::c_void,
++                    value.len(),
++                    0,
++                    flags as i32,
++                )
++            };
++            if ret < 0 {
++                let err = io::Error::last_os_error();
++                return Err(platform::linux_error(err));
++            }
+         }
+-        unsafe { libc::close(fd) };
+-    }
+ 
+-    Ok(())
++        Ok(())
++    })
+ }
+ 
+ /// Get an extended attribute.
+@@ -114,70 +110,66 @@ pub(crate) fn do_getxattr(
+         return Err(platform::eacces());
+     }
+ 
+-    let fd = open_xattr_fd(fs, ino)?;
+-
+-    if size == 0 {
+-        // Query size.
+-        #[cfg(target_os = "linux")]
+-        let ret = {
+-            let path = format!("/proc/self/fd/{fd}\0");
+-            unsafe {
+-                libc::getxattr(
+-                    path.as_ptr() as *const libc::c_char,
+-                    name.as_ptr(),
+-                    std::ptr::null_mut(),
+-                    0,
+-                )
++    with_xattr_fd(fs, ino, |fd| {
++        if size == 0 {
++            // Query size.
++            #[cfg(target_os = "linux")]
++            let ret = {
++                let path = format!("/proc/self/fd/{fd}\0");
++                unsafe {
++                    libc::getxattr(
++                        path.as_ptr() as *const libc::c_char,
++                        name.as_ptr(),
++                        std::ptr::null_mut(),
++                        0,
++                    )
++                }
++            };
++
++            #[cfg(target_os = "macos")]
++            let ret = unsafe { libc::fgetxattr(fd, name.as_ptr(), std::ptr::null_mut(), 0, 0, 0) };
++
++            if ret < 0 {
++                let err = io::Error::last_os_error();
++                return Err(platform::linux_error(err));
+             }
+-        };
+-
+-        #[cfg(target_os = "macos")]
+-        let ret = unsafe { libc::fgetxattr(fd, name.as_ptr(), std::ptr::null_mut(), 0, 0, 0) };
+-
+-        if ret < 0 {
+-            let err = io::Error::last_os_error();
+-            unsafe { libc::close(fd) };
+-            return Err(platform::linux_error(err));
+-        }
+-        unsafe { libc::close(fd) };
+-        Ok(GetxattrReply::Count(ret as u32))
+-    } else {
+-        let mut buf = vec![0u8; size as usize];
+-
+-        #[cfg(target_os = "linux")]
+-        let ret = {
+-            let path = format!("/proc/self/fd/{fd}\0");
+-            unsafe {
+-                libc::getxattr(
+-                    path.as_ptr() as *const libc::c_char,
++            Ok(GetxattrReply::Count(ret as u32))
++        } else {
++            let mut buf = vec![0u8; size as usize];
++
++            #[cfg(target_os = "linux")]
++            let ret = {
++                let path = format!("/proc/self/fd/{fd}\0");
++                unsafe {
++                    libc::getxattr(
++                        path.as_ptr() as *const libc::c_char,
++                        name.as_ptr(),
++                        buf.as_mut_ptr() as *mut libc::c_void,
++                        buf.len(),
++                    )
++                }
++            };
++
++            #[cfg(target_os = "macos")]
++            let ret = unsafe {
++                libc::fgetxattr(
++                    fd,
+                     name.as_ptr(),
+                     buf.as_mut_ptr() as *mut libc::c_void,
+                     buf.len(),
++                    0,
++                    0,
+                 )
+-            }
+-        };
++            };
+ 
+-        #[cfg(target_os = "macos")]
+-        let ret = unsafe {
+-            libc::fgetxattr(
+-                fd,
+-                name.as_ptr(),
+-                buf.as_mut_ptr() as *mut libc::c_void,
+-                buf.len(),
+-                0,
+-                0,
+-            )
+-        };
+-
+-        if ret < 0 {
+-            let err = io::Error::last_os_error();
+-            unsafe { libc::close(fd) };
+-            return Err(platform::linux_error(err));
++            if ret < 0 {
++                let err = io::Error::last_os_error();
++                return Err(platform::linux_error(err));
++            }
++            buf.truncate(ret as usize);
++            Ok(GetxattrReply::Value(buf))
+         }
+-        unsafe { libc::close(fd) };
+-        buf.truncate(ret as usize);
+-        Ok(GetxattrReply::Value(buf))
+-    }
++    })
+ }
+ 
+ /// List extended attribute names.
+@@ -196,100 +188,96 @@ pub(crate) fn do_listxattr(
+         return Ok(ListxattrReply::Names(Vec::new()));
+     }
+ 
+-    let fd = open_xattr_fd(fs, ino)?;
+-
+-    if size == 0 {
+-        // Do a full listxattr, filter, and return the filtered byte count.
+-        // Returning the raw kernel count would leak the hidden xattr's existence.
+-        #[cfg(target_os = "linux")]
+-        let raw_size = {
+-            let path = format!("/proc/self/fd/{fd}\0");
+-            unsafe {
+-                libc::listxattr(
+-                    path.as_ptr() as *const libc::c_char,
+-                    std::ptr::null_mut(),
+-                    0,
+-                )
++    with_xattr_fd(fs, ino, |fd| {
++        if size == 0 {
++            // Do a full listxattr, filter, and return the filtered byte count.
++            // Returning the raw kernel count would leak the hidden xattr's existence.
++            #[cfg(target_os = "linux")]
++            let raw_size = {
++                let path = format!("/proc/self/fd/{fd}\0");
++                unsafe {
++                    libc::listxattr(
++                        path.as_ptr() as *const libc::c_char,
++                        std::ptr::null_mut(),
++                        0,
++                    )
++                }
++            };
++
++            #[cfg(target_os = "macos")]
++            let raw_size = unsafe { libc::flistxattr(fd, std::ptr::null_mut(), 0, 0) };
++
++            if raw_size < 0 {
++                let err = io::Error::last_os_error();
++                return Err(platform::linux_error(err));
+             }
+-        };
+-
+-        #[cfg(target_os = "macos")]
+-        let raw_size = unsafe { libc::flistxattr(fd, std::ptr::null_mut(), 0, 0) };
+-
+-        if raw_size < 0 {
+-            let err = io::Error::last_os_error();
+-            unsafe { libc::close(fd) };
+-            return Err(platform::linux_error(err));
+-        }
+ 
+-        if raw_size == 0 {
+-            unsafe { libc::close(fd) };
+-            return Ok(ListxattrReply::Count(0));
+-        }
+-
+-        // Read the full list to compute filtered size.
+-        let mut buf = vec![0u8; raw_size as usize];
+-
+-        #[cfg(target_os = "linux")]
+-        let ret = {
+-            let path = format!("/proc/self/fd/{fd}\0");
+-            unsafe {
+-                libc::listxattr(
+-                    path.as_ptr() as *const libc::c_char,
+-                    buf.as_mut_ptr() as *mut libc::c_char,
+-                    buf.len(),
+-                )
++            if raw_size == 0 {
++                return Ok(ListxattrReply::Count(0));
+             }
+-        };
+-
+-        #[cfg(target_os = "macos")]
+-        let ret =
+-            unsafe { libc::flistxattr(fd, buf.as_mut_ptr() as *mut libc::c_char, buf.len(), 0) };
+-
+-        if ret < 0 {
+-            let err = io::Error::last_os_error();
+-            unsafe { libc::close(fd) };
+-            return Err(platform::linux_error(err));
+-        }
+-        unsafe { libc::close(fd) };
+-        buf.truncate(ret as usize);
+-
+-        let hidden_key = stat_override::OVERRIDE_XATTR_KEY.to_bytes_with_nul();
+-        let filtered = filter_xattr_names(&buf, hidden_key);
+-        Ok(ListxattrReply::Count(filtered.len() as u32))
+-    } else {
+-        let mut buf = vec![0u8; size as usize];
+ 
+-        #[cfg(target_os = "linux")]
+-        let ret = {
+-            let path = format!("/proc/self/fd/{fd}\0");
+-            unsafe {
+-                libc::listxattr(
+-                    path.as_ptr() as *const libc::c_char,
+-                    buf.as_mut_ptr() as *mut libc::c_char,
+-                    buf.len(),
+-                )
++            // Read the full list to compute filtered size.
++            let mut buf = vec![0u8; raw_size as usize];
++
++            #[cfg(target_os = "linux")]
++            let ret = {
++                let path = format!("/proc/self/fd/{fd}\0");
++                unsafe {
++                    libc::listxattr(
++                        path.as_ptr() as *const libc::c_char,
++                        buf.as_mut_ptr() as *mut libc::c_char,
++                        buf.len(),
++                    )
++                }
++            };
++
++            #[cfg(target_os = "macos")]
++            let ret = unsafe {
++                libc::flistxattr(fd, buf.as_mut_ptr() as *mut libc::c_char, buf.len(), 0)
++            };
++
++            if ret < 0 {
++                let err = io::Error::last_os_error();
++                return Err(platform::linux_error(err));
++            }
++            buf.truncate(ret as usize);
++
++            let hidden_key = stat_override::OVERRIDE_XATTR_KEY.to_bytes_with_nul();
++            let filtered = filter_xattr_names(&buf, hidden_key);
++            Ok(ListxattrReply::Count(filtered.len() as u32))
++        } else {
++            let mut buf = vec![0u8; size as usize];
++
++            #[cfg(target_os = "linux")]
++            let ret = {
++                let path = format!("/proc/self/fd/{fd}\0");
++                unsafe {
++                    libc::listxattr(
++                        path.as_ptr() as *const libc::c_char,
++                        buf.as_mut_ptr() as *mut libc::c_char,
++                        buf.len(),
++                    )
++                }
++            };
++
++            #[cfg(target_os = "macos")]
++            let ret = unsafe {
++                libc::flistxattr(fd, buf.as_mut_ptr() as *mut libc::c_char, buf.len(), 0)
++            };
++
++            if ret < 0 {
++                let err = io::Error::last_os_error();
++                return Err(platform::linux_error(err));
+             }
+-        };
++            buf.truncate(ret as usize);
+ 
+-        #[cfg(target_os = "macos")]
+-        let ret =
+-            unsafe { libc::flistxattr(fd, buf.as_mut_ptr() as *mut libc::c_char, buf.len(), 0) };
++            // Filter out the override xattr key from the list.
++            let hidden_key = stat_override::OVERRIDE_XATTR_KEY.to_bytes_with_nul();
++            let filtered = filter_xattr_names(&buf, hidden_key);
+ 
+-        if ret < 0 {
+-            let err = io::Error::last_os_error();
+-            unsafe { libc::close(fd) };
+-            return Err(platform::linux_error(err));
++            Ok(ListxattrReply::Names(filtered))
+         }
+-        unsafe { libc::close(fd) };
+-        buf.truncate(ret as usize);
+-
+-        // Filter out the override xattr key from the list.
+-        let hidden_key = stat_override::OVERRIDE_XATTR_KEY.to_bytes_with_nul();
+-        let filtered = filter_xattr_names(&buf, hidden_key);
+-
+-        Ok(ListxattrReply::Names(filtered))
+-    }
++    })
+ }
+ 
+ /// Remove an extended attribute.
+@@ -311,32 +299,29 @@ pub(crate) fn do_removexattr(
+         return Err(platform::eacces());
+     }
+ 
+-    let fd = open_xattr_fd(fs, ino)?;
+-
+-    #[cfg(target_os = "linux")]
+-    {
+-        let path = format!("/proc/self/fd/{fd}\0");
+-        let ret = unsafe { libc::removexattr(path.as_ptr() as *const libc::c_char, name.as_ptr()) };
+-        if ret < 0 {
+-            let err = io::Error::last_os_error();
+-            unsafe { libc::close(fd) };
+-            return Err(platform::linux_error(err));
++    with_xattr_fd(fs, ino, |fd| {
++        #[cfg(target_os = "linux")]
++        {
++            let path = format!("/proc/self/fd/{fd}\0");
++            let ret =
++                unsafe { libc::removexattr(path.as_ptr() as *const libc::c_char, name.as_ptr()) };
++            if ret < 0 {
++                let err = io::Error::last_os_error();
++                return Err(platform::linux_error(err));
++            }
+         }
+-        unsafe { libc::close(fd) };
+-    }
+ 
+-    #[cfg(target_os = "macos")]
+-    {
+-        let ret = unsafe { libc::fremovexattr(fd, name.as_ptr(), 0) };
+-        if ret < 0 {
+-            let err = io::Error::last_os_error();
+-            unsafe { libc::close(fd) };
+-            return Err(platform::linux_error(err));
++        #[cfg(target_os = "macos")]
++        {
++            let ret = unsafe { libc::fremovexattr(fd, name.as_ptr(), 0) };
++            if ret < 0 {
++                let err = io::Error::last_os_error();
++                return Err(platform::linux_error(err));
++            }
+         }
+-        unsafe { libc::close(fd) };
+-    }
+ 
+-    Ok(())
++        Ok(())
++    })
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+@@ -373,3 +358,20 @@ fn open_xattr_fd(fs: &PassthroughFs, ino: u64) -> io::Result<i32> {
+ 
+     inode::open_inode_fd(fs, ino, libc::O_RDONLY)
+ }
++
++/// Borrow a pinned guest handle when available; otherwise open read-only.
++/// Holding the file lock keeps checkpoint handle replacement from closing it.
++fn with_xattr_fd<T>(
++    fs: &PassthroughFs,
++    ino: u64,
++    operation: impl FnOnce(i32) -> io::Result<T>,
++) -> io::Result<T> {
++    let data = fs.handles.read().unwrap().for_inode(ino).cloned();
++    if let Some(data) = data {
++        let file = data.file.read().unwrap();
++        return operation(file.as_raw_fd());
++    }
++
++    let file = unsafe { File::from_raw_fd(open_xattr_fd(fs, ino)?) };
++    operation(file.as_raw_fd())
++}

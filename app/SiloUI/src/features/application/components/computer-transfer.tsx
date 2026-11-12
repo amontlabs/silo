@@ -6,13 +6,16 @@ import { type OperationStep, dismissOperationToast, showActionFailure, showOpera
 import type { ApplicationSource } from "@/features/application/model/application-source"
 import type { BackupController, BackupPhase, VerifiedExport } from "@/features/application/model/backup-source"
 import { ImportPopover, type ImportReview } from "@/features/application/components/import-popover"
-import { ShareLoginsConfirmation, type ShareLoginsRequest } from "@/features/application/components/share-logins-confirmation"
+import { ShareLoginsConfirmation, type ShareLoginsChoice, type ShareLoginsRequest } from "@/features/application/components/share-logins-confirmation"
 
 /** One toast tracks the single in-flight export or import; updating it in place keeps the
  * notification tied to backend truth across navigation. */
 const TRANSFER_TOAST_ID = "backup-operation"
 
 const revealLabel = () => (isMac() ? "Show in Finder" : "Show in folder")
+
+/** What the success toast adds when the export removed login files. */
+const leftOutNote = (leftOut?: string[]) => leftOut?.length ? ` · ${leftOut.length} login ${leftOut.length === 1 ? "file" : "files"} removed` : ""
 
 const stepState: Record<BackupPhase["tone"], OperationStep["state"]> = { succeeded: "done", running: "current", waiting: "pending", failed: "failed" }
 
@@ -66,20 +69,25 @@ export function useComputerTransfer(backup: BackupController, options: { source:
       showOperationFailure(TRANSFER_TOAST_ID, "Export is unavailable", { description: controller.state.availabilityMessage ?? "Export is not available in this Silo build. No computer data was changed.", native: false })
       return null
     }
-    // Logins are named before anything is chosen or written. A check that could not run (a stopped computer, a
-    // checkpoint, a failure) is one case and asks the same question.
+    // Logins are named before anything is chosen or written. Where the export removes them, the person can choose to
+    // include them. Where it cannot, a check that found some, or could not run (a stopped computer, a checkpoint, a
+    // failure), asks whether to share anyway.
     let logins: string[] = []
     let unchecked: string | undefined
+    let leavesOut = false
     try {
       const found = await controller.actions.checkLogins(computerName, checkpoint?.id)
       logins = found.logins
       unchecked = found.unchecked
+      leavesOut = found.leavesOut === true
     } catch (error) { unchecked = errorMessage(error) }
-    if (logins.length > 0 || unchecked) {
-      const share = await new Promise<boolean>((resolve) => {
-        setLoginRequest({ computerName, logins, unchecked, answer: (value) => { setLoginRequest(null); resolve(value) } })
+    let includeLogins = false
+    if (leavesOut ? logins.length > 0 : (logins.length > 0 || unchecked)) {
+      const choice = await new Promise<ShareLoginsChoice>((resolve) => {
+        setLoginRequest({ computerName, logins, unchecked, leavesOut, answer: (value) => { setLoginRequest(null); resolve(value) } })
       })
-      if (!share) return null
+      if (choice === "cancel") return null
+      includeLogins = leavesOut && choice === "include"
     }
     let destination: string | null
     try { destination = await controller.actions.chooseDestination() }
@@ -89,7 +97,10 @@ export function useComputerTransfer(backup: BackupController, options: { source:
     if (backupRef.current.state.operation?.kind === "running") return null
     retryRef.current = () => { void exportComputer(computerName, checkpoint) }
     // The toast, driven by the export and import state, reports every outcome; only a verified export resolves.
-    return backupRef.current.actions.exportAndVerify(destination, [computerName], checkpoint?.id).catch(() => null)
+    const started = includeLogins
+      ? backupRef.current.actions.exportAndVerify(destination, [computerName], checkpoint?.id, true)
+      : backupRef.current.actions.exportAndVerify(destination, [computerName], checkpoint?.id)
+    return started.catch(() => null)
   }
 
   async function beginImport() {
@@ -175,7 +186,7 @@ export function useComputerTransfer(backup: BackupController, options: { source:
               else showActionFailure(`Could not open ${name}`, "Silo does not list this computer yet. Refresh, then open it from the computer list.", undefined, { native: false })
             } }
           })()
-      showOperationSuccess(TRANSFER_TOAST_ID, title, { description: isExport ? `${archive.name} · ${archive.size}` : "Stopped and verified.", action, persist: true, native: false, computer: isExport ? undefined : operation.targetName ?? archive.computers[0], onDismiss: dismiss })
+      showOperationSuccess(TRANSFER_TOAST_ID, title, { description: isExport ? `${archive.name} · ${archive.size}${leftOutNote(archive.leftOut)}` : "Stopped and verified.", action, persist: true, native: false, computer: isExport ? undefined : operation.targetName ?? archive.computers[0], onDismiss: dismiss })
       return
     }
 

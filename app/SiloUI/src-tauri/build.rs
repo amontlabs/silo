@@ -3,16 +3,10 @@ mod github_build;
 fn main() {
     let config =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../github-build.local.json");
-    println!("cargo:rerun-if-changed={}", config.display());
+    github_build::watch(&config);
     println!("cargo:rerun-if-changed=github_build.rs");
-    for key in github_build::KEYS {
-        println!("cargo:rerun-if-env-changed={key}");
-    }
-    let values = github_build::configuration(&config, |key| std::env::var(key).ok())
+    let _ = github_build::configuration(&config, |key| std::env::var(key).ok())
         .unwrap_or_else(|message| panic!("{message}"));
-    for (key, value) in values {
-        println!("cargo:rustc-env={key}={value}");
-    }
     // objc2-user-notifications declares a normal framework dependency. The
     // app still supports macOS 10.13, so override it at the final link step and
     // guard every framework call at runtime on macOS 10.14 or newer.
@@ -134,6 +128,20 @@ fn main() {
             "delete_checkpoint",
             "abandon_restore",
             "read_checkpoint_usage",
+            "list_agents",
+            "install_agent",
+            "ensure_ssh_name",
+            "list_approvals",
+            "get_approval",
+            "decide_approval",
+            "list_audit",
+            "read_approval_job",
+            "read_device_resources",
+            "read_network_policy",
+            "save_network_policy",
+            "read_computer_tools",
+            "enable_computer_tools",
+            "revoke_computer_tools",
             "list_review_requests",
             "show_review_request",
             "keep_review_request",
@@ -165,8 +173,6 @@ fn main() {
             "remove_secret",
             "retry_secret",
             "read_github_state",
-            "save_github_personal_token",
-            "remove_github_personal_token",
             "connect_github",
             "cancel_github_connection",
             "reopen_github_authorization",

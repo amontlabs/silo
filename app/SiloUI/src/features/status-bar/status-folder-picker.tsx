@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { FolderBreadcrumbs } from "@/components/folder-breadcrumbs"
 import { visibleText } from "@/lib/visible-text"
+import { workspaceRoot } from "@/features/computers/model/computer-capabilities"
 import type { ApplicationComputer } from "@/features/application/model/application-source"
 
 import { createDirectoryStore, directoryKey, type DirectoryLoader } from "@/features/application/model/directory-store"
@@ -27,7 +28,8 @@ export function StatusFolderPicker({ computer, editor, onBack, onOpen, listDirec
   useLayoutEffect(() => { store.setLoader(listDirectory) }, [store, listDirectory])
   const target = computerTarget(computer)
   useEffect(() => () => store.invalidateComputer(target), [store, target])
-  const path = ["/workspace", ...segments].join("/")
+  const root = workspaceRoot(computer)
+  const path = [root, ...segments].join("/")
   const key = directoryKey(target, path)
   const subscribe = useCallback((listener: () => void) => store.subscribe(key, listener), [store, key])
   const snapshot = useSyncExternalStore(subscribe, () => store.getSnapshot(key))
@@ -85,7 +87,7 @@ export function StatusFolderPicker({ computer, editor, onBack, onOpen, listDirec
         </div>
       </header>
       <div className="grid min-h-0 flex-auto content-start gap-2 overflow-y-auto p-3">
-        <FolderBreadcrumbs segments={segments} onNavigate={navigate} />
+        <FolderBreadcrumbs segments={segments} root={root} onNavigate={navigate} />
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <Input technical ref={search} aria-label="Filter folders" className="pl-8" placeholder="Filter folders…" value={query} onChange={(event) => setQuery(event.target.value)} />

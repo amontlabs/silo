@@ -59,6 +59,7 @@ pub(crate) fn legacy_events(frame: &Value) -> Vec<(&'static str, Value)> {
         "updates.changed" => vec![("silo://update-state", payload)],
         "preparation.changed" => vec![("silo://preparation-status", payload)],
         "notifications.notice" => vec![("silo://notice", payload)],
+        "approvals.changed" => vec![("silo://approvals-changed", payload)],
         "operations.job.progress" => progress_events(&payload),
         _ => Vec::new(),
     }
@@ -69,6 +70,7 @@ fn progress_events(payload: &Value) -> Vec<(&'static str, Value)> {
     match payload.get("source").and_then(Value::as_str) {
         Some("setup") => vec![("silo://computer-configuration-progress", data)],
         Some("lifecycle") => vec![("silo://lifecycle-progress", data)],
+        Some("agent") => vec![("silo://agent-install-progress", data)],
         Some("transfer") => vec![("silo://transfer-progress", data)],
         Some("macos" | "backup" | "push") => vec![(APPLICATION_STATE, Value::Null)],
         _ => Vec::new(),
@@ -137,6 +139,20 @@ mod tests {
     }
 
     #[test]
+    fn an_approval_change_reaches_the_window_with_its_id_and_state() {
+        assert_eq!(
+            legacy_events(&frame(
+                "approvals.changed",
+                json!({"id": "ap-1", "state": "allowed"})
+            )),
+            vec![(
+                "silo://approvals-changed",
+                json!({"id": "ap-1", "state": "allowed"})
+            )]
+        );
+    }
+
+    #[test]
     fn job_progress_goes_to_the_listener_for_its_source() {
         let progress = |source: &str| {
             legacy_events(&frame(
@@ -153,6 +169,8 @@ mod tests {
         );
         assert_eq!(progress("lifecycle")[0].0, "silo://lifecycle-progress");
         assert_eq!(progress("transfer")[0].0, "silo://transfer-progress");
+        assert_eq!(progress("agent")[0].0, "silo://agent-install-progress");
+        assert_eq!(progress("agent")[0].1, json!({"step": "x"}));
         assert_eq!(progress("backup")[0].0, "silo://application-state-changed");
         assert!(progress("update").is_empty());
     }

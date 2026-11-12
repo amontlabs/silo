@@ -21,8 +21,11 @@ inline by the editor and never notifies.
 - Focus: a system notification is never shown while the main window is visible and
   focused. The macOS delegate presents `List` only (no banner), so a notice that races a
   focus change lands quietly in Notification Center.
-- Categories: `failures`, `changes`, `completions`, gated by the master switch and
-  `notifyFailures` / `notifyChanges` / `notifyCompletions` (legacy keys are a fallback).
+- Categories: `failures`, `changes`, `completions`, `approvals`, gated by the master switch and
+  `notifyFailures` / `notifyChanges` / `notifyCompletions` / `notifyApprovals` (legacy keys are a fallback).
+- Approvals: a computer's agent asking for an answer. The engine publishes the notice with the key
+  `approval:<id>`; the window shows a toast with a Review button, and a click on the system
+  notification opens the Pending page at that request (route `{tab: "changes", approval: <id>}`).
 - Completions: successes notify only when the operation took at least 3 seconds
   (`LONG_OPERATION`), measured from the command start. Failures always notify.
 - Never notified: user cancellations, requests deduplicated into an already queued

@@ -10,21 +10,33 @@ use sha2::{Digest, Sha256};
 use super::{
     cron::{self, Merge},
     env::{KeepEnv, Live, ManifestStore, Os, RunAs},
-    plan::{self, Conflict, Decision, FileAction, FileOp, PkgOp, Plan},
+    plan::{self, outcome, Conflict, Decision, FileAction, FileOp, PkgOp, Plan, ReportItem},
     scripts, Refusal, Report, Request,
 };
 use crate::changes::{
     diff::{diff, Diff},
     ignore::{credential_group, IgnoreList},
+    items::{self, Answer, Said},
     manifest::Manifest,
 };
+
+/// The branch a repository's fork commits are left on.
+pub struct BranchPlan {
+    /// The name the branch gets: the wanted one, or the first free one after it.
+    pub name: String,
+    /// The branch already exists and points at the fork's commits.
+    pub exists: bool,
+}
 
 pub struct Bundle {
     pub repo: String,
     pub path: String,
     pub tmp_ref: String,
-    /// `uptodate`, `ff`, `merge` or `new`.
+    /// `uptodate`, `ff`, `merge`, `new`, or `conflict` / `unsupported` when the caller
+    /// answered `branch`.
     pub state: String,
+    /// Set when the commits are left on a branch instead of being merged.
+    pub branch: Option<BranchPlan>,
 }
 
 /// Temporary things a keep leaves on the computers until it ends.
@@ -57,6 +69,8 @@ pub struct ForkView {
     pub fork: Manifest,
     pub diff: Diff,
     pub digest: String,
+    /// What a computer left idle changes; taken out of the fork's diff and of main's.
+    pub noise: Option<Diff>,
 }
 
 pub struct Ready {
@@ -84,6 +98,7 @@ pub enum Prepared {
 
 /// The digest of what a reviewer saw: the buckets a keep acts on, without noise counts.
 pub fn review_digest(diff: &Diff) -> String {
+    let diff = diff.without_ids();
     let view = serde_json::json!({
         "code": diff.code, "packages": diff.packages, "settings": diff.settings,
         "database": diff.database, "other": diff.other,
@@ -101,7 +116,7 @@ fn compare(
     fork_name: &str,
     base: &Manifest,
     fork_text: &str,
-) -> Result<(Manifest, Diff), String> {
+) -> Result<(Manifest, Option<Diff>, Diff), String> {
     let fork = parse(fork_text)?;
     let noise = match store.baseline(fork_name) {
         Some((before, idle)) => Some(diff(
@@ -113,7 +128,7 @@ fn compare(
         None => None,
     };
     let changes = diff(base, &fork, noise.as_ref(), &IgnoreList::builtin());
-    Ok((fork, changes))
+    Ok((fork, noise, changes))
 }
 
 /// Captures the fork and compares it with its fork-time base.
@@ -124,13 +139,14 @@ pub fn look_at_fork(
 ) -> Result<ForkView, String> {
     env.note("Looking at the fork");
     let base = parse(&store.fork_time(fork_name)?)?;
-    let (fork, changes) = compare(store, fork_name, &base, &store.capture(fork_name)?)?;
+    let (fork, noise, changes) = compare(store, fork_name, &base, &store.capture(fork_name)?)?;
     let digest = review_digest(&changes);
     Ok(ForkView {
         base,
         fork,
         diff: changes,
         digest,
+        noise,
     })
 }
 
@@ -157,6 +173,13 @@ pub fn sensitive_path(path: &str) -> bool {
         || base == ".env"
         || (base.starts_with(".env.")
             && !matches!(base, ".env.example" | ".env.sample" | ".env.template"))
+}
+
+/// Whether a path inside a repository is a credential or an env file, judged by its path in
+/// the repository and by its full path (a repository can sit where the credentials are).
+fn sensitive_in(repo: &str, rel: &str) -> bool {
+    let full = format!("{}/{rel}", repo.trim_end_matches('/'));
+    sensitive_path(rel) || credential_group(&full).is_some()
 }
 
 fn refuse(
@@ -195,13 +218,14 @@ pub fn prepare(
     read_files: bool,
 ) -> Result<Prepared, String> {
     let fork_name = request.fork.as_str();
+    let (fork_label, target_label) = (env.name_of(fork_name), env.name_of(target));
     let os = env.os(target)?;
     if env.os(fork_name)? != os {
         return Err("The fork and the computer it is kept into run different systems.".into());
     }
     env.note("Looking at the target");
     let main = parse(&store.capture(target)?)?;
-    let mut plan = plan::build(&view.diff, &view.base, &view.fork, &main, os);
+    let mut plan = plan::build(&view.diff, &view.base, &view.fork, &main, os, request);
     let first_plan = plan.clone();
     let first_read = read_signature(&first_plan, &view.fork);
     let mut report = Report {
@@ -209,8 +233,11 @@ pub fn prepare(
         target: target.to_owned(),
         summary: view.diff.render_lines(15),
         review_digest: Some(view.digest.clone()),
+        fast_forward: Some(main_unchanged_since_fork(view, &main)),
         ..Report::default()
     };
+    let mut items = std::mem::take(&mut plan.items);
+    let forced = |id: &str| request.choices.said(id) == Said::Answered(Answer::Fork);
     let id = uuid::Uuid::new_v4().simple().to_string();
 
     // Files: the three-way rule against what both computers hold right now.
@@ -222,11 +249,35 @@ pub fn prepare(
     let mut fork_final: BTreeMap<String, Live> = BTreeMap::new();
     for cand in &plan.file_cands.clone() {
         let (f, m) = (&fork_live[&cand.path], &main_live[&cand.path]);
-        match plan::decide(&cand.base, f, m) {
-            Decision::Skip => {}
+        let unreadable = matches!(f, Live::Unreadable) || matches!(m, Live::Unreadable);
+        let mut decision = plan::decide(&cand.base, f, m);
+        if matches!(decision, Decision::Conflict(_)) && forced(&cand.id) && !unreadable {
+            decision = Decision::Write;
+        }
+        match decision {
+            Decision::Skip => {
+                if f == m {
+                    items.push(ReportItem::new(
+                        &cand.id,
+                        &cand.path,
+                        outcome::ALREADY_THERE,
+                        "main already holds what the fork holds",
+                    ));
+                }
+            }
             Decision::Conflict(why) => {
+                let allowed: &[Answer] = if unreadable {
+                    &[Answer::Main]
+                } else {
+                    &[Answer::Fork, Answer::Main]
+                };
                 plan.conflicts
-                    .push(Conflict::new("file", cand.path.clone(), why))
+                    .push(Conflict::new("file", cand.path.clone(), why).answerable(
+                        &cand.id,
+                        allowed,
+                        plan::file_change(&cand.base, f),
+                        plan::file_change(&cand.base, m),
+                    ));
             }
             Decision::Write => {
                 let action = match f {
@@ -250,11 +301,31 @@ pub fn prepare(
                     writes.push(cand.path.clone());
                 }
                 fork_final.insert(cand.path.clone(), f.clone());
+                items.push(ReportItem::new(
+                    &cand.id,
+                    &cand.path,
+                    outcome::BROUGHT_OVER,
+                    match &action {
+                        FileAction::Copy => "written from the fork",
+                        FileAction::Link(_) => "link recreated",
+                        FileAction::Delete => "deleted, as in the fork",
+                    },
+                ));
                 plan.files.push(FileOp {
+                    id: cand.id.clone(),
                     path: cand.path.clone(),
                     action,
                 });
             }
+        }
+    }
+
+    for op in &plan.packages {
+        report.additions.add_package(&op.manager, &op.name);
+    }
+    for op in &plan.files {
+        if op.action != FileAction::Delete && plan.settings_files.contains(&op.path) {
+            report.additions.add_file(&op.path);
         }
     }
 
@@ -284,16 +355,26 @@ pub fn prepare(
                 if is_migration(&name) {
                     migrations_changed = true;
                 }
-                if sensitive_path(&name) {
-                    plan.conflicts.push(Conflict::new(
-                        "credentials",
-                        format!("{}/{name}", repo.repo.trim_end_matches('/')),
-                        "a commit in the fork adds it; credentials and ignored paths are not kept into main",
-                    ));
+                if sensitive_in(&repo.repo, &name) {
+                    let path = format!("{}/{name}", repo.repo.trim_end_matches('/'));
+                    plan.conflicts.push(
+                        Conflict::new(
+                            "credentials",
+                            path.clone(),
+                            "a commit in the fork adds it; credentials and ignored paths are not kept into main",
+                        )
+                        .answerable(&format!("credentials:{path}"), &[], "added", ""),
+                    );
                 }
             }
         }
         if repo.commits.is_none() && !repo.new {
+            items.push(ReportItem::new(
+                &repo.id,
+                &repo.repo,
+                outcome::ALREADY_THERE,
+                "the fork has no new commits here; its uncommitted files are listed on their own",
+            ));
             continue;
         }
         if plan.conflicts.iter().any(|c| c.kind == "credentials") {
@@ -313,6 +394,7 @@ pub fn prepare(
         let data = env.read(fork_name, &path)?;
         env.write(target, &path, &data, "644")?;
         bundle_data.insert(path.clone(), data);
+        let mut branch = None;
         let state = if repo.new {
             "new".to_owned()
         } else {
@@ -325,32 +407,77 @@ pub fn prepare(
                 .success(&format!("Checking the merge in {}", repo.repo))?;
             let mut lines = out.lines();
             let state = lines.next().unwrap_or("unsupported").trim().to_owned();
-            match state.as_str() {
-                "conflict" => {
-                    for line in lines {
-                        plan.conflicts.push(Conflict::new("git", repo.repo.clone(), line.trim()));
-                    }
+            let stuck = matches!(state.as_str(), "conflict" | "unsupported");
+            if stuck && forced(&repo.id) {
+                return Err(format!(
+                    "{} cannot be forced over main's repository, because both sides changed it. Answer `branch` to keep the fork's commits as a branch, or `main` to leave it.",
+                    repo.id
+                ));
+            }
+            if let (Some(wanted), true) = (&repo.branch, state != "uptodate") {
+                let out = env
+                    .run(
+                        target,
+                        RunAs::Account,
+                        &scripts::git_branch_plan(&repo.repo, &tmp_ref, wanted),
+                    )?
+                    .success(&format!("Choosing a branch name in {}", repo.repo))?;
+                let mut lines = out.lines();
+                let name = lines.next().unwrap_or("").trim().to_owned();
+                if name.is_empty() {
+                    return Err(format!(
+                        "Silo could not choose a branch name in {}.",
+                        repo.repo
+                    ));
                 }
-                "unsupported" => plan.conflicts.push(Conflict::new(
-                    "git",
-                    repo.repo.clone(),
+                branch = Some(BranchPlan {
+                    name,
+                    exists: lines.next().is_some_and(|l| l.trim() == "same"),
+                });
+            } else if state == "conflict" {
+                let lines: Vec<&str> = lines.map(str::trim).collect();
+                plan.conflicts
+                    .push(git_conflict(&repo, &main, &lines.join(" | ")));
+            } else if state == "unsupported" {
+                plan.conflicts.push(git_conflict(
+                    &repo,
+                    &main,
                     "this git cannot test a merge before it happens (git merge-tree needs git 2.38)",
-                )),
-                _ => {}
+                ));
             }
             state
         };
+        items.push(repo_item(&repo, &state, branch.as_ref()));
         bundles.push(Bundle {
             repo: repo.repo.clone(),
             path,
             tmp_ref,
             state,
+            branch,
         });
     }
 
     // Uncommitted files and deletes: three-way against the blob at the fork point.
     for (index, repo) in plan.repos.clone().iter().enumerate() {
         let mut keep_ops = Vec::new();
+        if repo.branch.is_some() {
+            if !repo.dirty.is_empty() {
+                plan.notes.push(format!(
+                    "Uncommitted changes in {} are not carried while its commits are left on a branch",
+                    repo.repo
+                ));
+            }
+            for op in &repo.dirty {
+                items.push(ReportItem::new(
+                    &op.id,
+                    &op.path,
+                    outcome::LEFT_AS_MAIN,
+                    "not carried: the repository's commits are left on a branch",
+                ));
+            }
+            dirty_checked.push((index, keep_ops));
+            continue;
+        }
         let base_head = repo.base_head.clone().unwrap_or_default();
         let paths: Vec<String> = repo
             .dirty
@@ -360,8 +487,32 @@ pub fn prepare(
             .collect();
         let fork_paths = env.inspect(fork_name, &paths)?;
         for (n, op) in repo.dirty.iter().enumerate() {
-            if sensitive_path(&op.rel) {
-                plan.conflicts.push(Conflict::new("credentials", op.path.clone(), "it is uncommitted in the fork; credentials and ignored paths are not kept into main"));
+            match request.choices.said(&op.id) {
+                Said::Skipped => {
+                    items.push(ReportItem::new(
+                        &op.id,
+                        &op.path,
+                        outcome::SKIPPED,
+                        "skipped; it stays as main has it",
+                    ));
+                    continue;
+                }
+                Said::Answered(Answer::Main) => {
+                    items.push(ReportItem::new(
+                        &op.id,
+                        &op.path,
+                        outcome::LEFT_AS_MAIN,
+                        "left as main has it, as answered",
+                    ));
+                    continue;
+                }
+                _ => {}
+            }
+            if sensitive_in(&repo.repo, &op.rel) {
+                plan.conflicts.push(
+                    Conflict::new("credentials", op.path.clone(), "it is uncommitted in the fork; credentials and ignored paths are not kept into main")
+                        .answerable(&format!("credentials:{}", op.path), &[], "added", ""),
+                );
                 continue;
             }
             if is_migration(&op.rel) {
@@ -402,22 +553,49 @@ pub fn prepare(
                     }
                     Some(Live::Missing) | None => continue,
                     Some(Live::Unreadable) => {
-                        plan.conflicts.push(Conflict::new(
-                            "file",
-                            op.path.clone(),
-                            "it cannot be read",
-                        ));
+                        plan.conflicts.push(
+                            Conflict::new("file", op.path.clone(), "it cannot be read").answerable(
+                                &op.id,
+                                &[Answer::Main],
+                                "cannot be read",
+                                "",
+                            ),
+                        );
                         continue;
                     }
                 }
             }
-            match plan::decide_dirty(&blob, &fork_m, &main_m) {
-                Decision::Skip => {}
+            let mut decision = plan::decide_dirty(&blob, &fork_m, &main_m);
+            if matches!(decision, Decision::Conflict(_)) && forced(&op.id) {
+                decision = Decision::Write;
+            }
+            match decision {
+                Decision::Skip => items.push(ReportItem::new(
+                    &op.id,
+                    &op.path,
+                    outcome::ALREADY_THERE,
+                    "main already holds what the fork holds",
+                )),
                 Decision::Conflict(why) => {
                     plan.conflicts
-                        .push(Conflict::new("file", op.path.clone(), why))
+                        .push(Conflict::new("file", op.path.clone(), why).answerable(
+                            &op.id,
+                            &[Answer::Fork, Answer::Main],
+                            plan::dirty_change(&blob, &fork_m),
+                            plan::dirty_change(&blob, &main_m),
+                        ))
                 }
                 Decision::Write => {
+                    items.push(ReportItem::new(
+                        &op.id,
+                        &op.path,
+                        outcome::BROUGHT_OVER,
+                        if op.delete {
+                            "deleted, as in the fork"
+                        } else {
+                            "uncommitted change carried"
+                        },
+                    ));
                     if !op.delete {
                         writes.push(op.path.clone());
                         if let Some(live) = fork_paths.get(&op.path) {
@@ -453,15 +631,34 @@ pub fn prepare(
             .flat_map(|r| r.dirty.iter().filter(|d| !d.delete).map(|d| d.path.clone())),
     );
     if !dests.is_empty() {
+        let ids: BTreeMap<&str, &str> = plan
+            .files
+            .iter()
+            .map(|op| (op.path.as_str(), op.id.as_str()))
+            .chain(
+                plan.repos
+                    .iter()
+                    .flat_map(|r| r.dirty.iter().map(|d| (d.path.as_str(), d.id.as_str()))),
+            )
+            .collect();
         let out = env
             .run(target, RunAs::Root, &scripts::dest_check(&dests))?
             .code_ok("Checking destinations")?;
+        let mut blocked = Vec::new();
         for (path, verdict) in scripts::parse_pairs(&out) {
             if verdict != "ok" {
-                plan.conflicts
-                    .push(Conflict::new("destination", path, verdict));
+                let id = ids.get(path.as_str()).copied().unwrap_or_default();
+                blocked.push(
+                    Conflict::new("destination", path, verdict.clone()).answerable(
+                        id,
+                        &[Answer::Main],
+                        "to be written here",
+                        verdict,
+                    ),
+                );
             }
         }
+        plan.conflicts.extend(blocked);
     }
 
     // Read what the fork will give. A look ahead of the checkpoint only decides refusals, so
@@ -502,11 +699,19 @@ pub fn prepare(
             } else {
                 format!("brew now offers {shipped}; the fork has {}", pkg.version)
             };
-            plan.conflicts.push(Conflict::new(
-                "package",
-                format!("{} {}", pkg.manager, pkg.name),
-                detail,
-            ));
+            plan.conflicts.push(
+                Conflict::new("package", format!("{} {}", pkg.manager, pkg.name), detail)
+                    .answerable(
+                        &items::package(&pkg.manager, &pkg.name),
+                        &[Answer::Main],
+                        format!("version {}", pkg.version),
+                        if shipped.is_empty() {
+                            "no version offered".to_owned()
+                        } else {
+                            format!("brew offers {shipped}")
+                        },
+                    ),
+            );
         }
     }
 
@@ -525,7 +730,8 @@ pub fn prepare(
             None => (view.base.cron.get(user), view.base.cront.get(user)),
         };
         let untouched = base_digest == main.cron.get(user);
-        let merged = if untouched {
+        let id = items::cron(user);
+        let mut merged = if untouched {
             if theirs.lines().eq(ours.lines()) {
                 Merge::Unchanged
             } else {
@@ -534,14 +740,42 @@ pub fn prepare(
         } else {
             cron::merge(base_text.map_or("", String::as_str), &theirs, &ours)
         };
+        if matches!(merged, Merge::Conflict(_)) && forced(&id) {
+            merged = Merge::Merged(theirs.clone());
+        }
         match merged {
-            Merge::Unchanged => {}
-            Merge::Merged(text) => cron_texts.push((user.clone(), text)),
-            Merge::Conflict(lines) => plan.conflicts.push(Conflict::new(
-                "crontab",
-                user.clone(),
-                format!("main and the fork both changed: {}", lines.join(" | ")),
+            Merge::Unchanged => items.push(ReportItem::new(
+                &id,
+                user,
+                outcome::ALREADY_THERE,
+                "main's crontab already holds what the fork's does",
             )),
+            Merge::Merged(text) => {
+                items.push(ReportItem::new(
+                    &id,
+                    user,
+                    outcome::BROUGHT_OVER,
+                    if untouched || text == theirs {
+                        "the fork's crontab is written"
+                    } else {
+                        "the fork's lines are merged into main's crontab"
+                    },
+                ));
+                cron_texts.push((user.clone(), text));
+            }
+            Merge::Conflict(lines) => plan.conflicts.push(
+                Conflict::new(
+                    "crontab",
+                    user.clone(),
+                    format!("main and the fork both changed: {}", lines.join(" | ")),
+                )
+                .answerable(
+                    &id,
+                    &[Answer::Fork, Answer::Main],
+                    "changed lines",
+                    "changed lines",
+                ),
+            ),
         }
     }
     plan.cron
@@ -554,93 +788,181 @@ pub fn prepare(
         return Ok(refuse(
             report,
             "changed",
-            format!("{fork_name} changed while it was being read. {target} was not changed."),
+            format!(
+                "{fork_label} changed while it was being read. {target_label} was not changed."
+            ),
             vec![Conflict::new(
                 "fork",
-                fork_name,
+                fork_label.as_str(),
                 "its changes differ from the first look",
             )],
-            "Let the fork finish, review it again with `silo diff`, and keep again.",
+            "Let the fork finish, review it again with `silo diff`, and merge again.",
         ));
     }
-
-    let ready =
-        |plan: Plan, cron: Vec<(String, String)>, bundles: Vec<Bundle>, mut report: Report| {
-            report.summary.extend(
-                plan.summary()
-                    .into_iter()
-                    .map(|line| format!("will keep {line}")),
-            );
-            report.notes.extend(plan.notes.clone());
-            Ready {
-                plan,
-                main: main.clone(),
-                os,
-                report,
-                cron,
-                bundles,
-                migrations_changed,
-                fork_live: fork_final.clone(),
-                staged: staged.clone(),
-                bundle_data: bundle_data.clone(),
-            }
-        };
 
     if !plan.conflicts.is_empty() {
         let conflicts = plan.conflicts.clone();
-        let reason = if conflicts.iter().any(|c| c.kind == "credentials") {
-            "credentials"
-        } else if conflicts.iter().all(|c| c.kind == "git") {
-            "git"
-        } else {
-            "divergent"
-        };
-        let message = if conflicts.iter().all(|c| c.kind == "package") {
-            format!(
-                "Keep stopped: package version: {}. {target} was not changed.",
+        report.notes.extend(plan.notes.clone());
+        if conflicts.iter().any(|c| c.kind == "credentials") {
+            let message = format!(
+                "The merge stopped: {} would bring credentials or ignored files. {target_label} was not changed.",
                 conflicts
                     .iter()
-                    .map(|c| format!("{} ({})", c.item, c.detail))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )
-        } else {
-            format!(
-                "Keep stopped: {} {} on {target} and in {fork_name}. {target} was not changed.",
-                conflicts
-                    .iter()
+                    .filter(|c| c.kind == "credentials")
                     .map(|c| c.item.clone())
                     .collect::<Vec<_>>()
-                    .join(", "),
-                if reason == "credentials" {
-                    "would bring credentials or ignored files"
-                } else {
-                    "clash"
-                },
-            )
-        };
-        report.notes.extend(plan.notes.clone());
+                    .join(", ")
+            );
+            return Ok(refuse(
+                report,
+                "credentials",
+                message,
+                conflicts,
+                "Credentials are never merged into main. Remove them from the fork's commits and files and merge again.",
+            ));
+        }
+        let message = format!(
+            "{} changed on both sides and needs an answer before {fork_label} can be merged into {target_label}: {}. {target_label} was not changed.",
+            if conflicts.len() == 1 {
+                "One item".to_owned()
+            } else {
+                format!("{} items", conflicts.len())
+            },
+            conflicts
+                .iter()
+                .map(|c| c.item.clone())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
         return Ok(refuse(
             report,
-            reason,
+            "choices-needed",
             message,
             conflicts,
-            "Bring main's change into the fork (or remove the file from the fork's commits) and keep again.",
+            "Merge again with `choices`: an answer for each listed id, one of the answers it allows (`fork`, `main`, or `branch` for a repository). Add an id to `skip` to leave an item that does not conflict.",
         ));
     }
-    let covered = request.data_ok || (!request.hooks.migrate.is_empty() && migrations_changed);
+    let migrating = !request.hooks.migrate.is_empty() && migrations_changed;
+    let covered = request.data_ok || migrating;
     if !plan.databases.is_empty() && !covered {
         let message = format!(
-            "Database changed ({}) and no migration covers it. {target} was not changed.",
+            "Database changed ({}) and no migration covers it. {target_label} was not changed.",
             plan.databases.join(", ")
         );
         let hint = format!(
-            "A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise use \"Make this main\": run `silo fold {} --promote` and the fork becomes main with its database.",
+            "A merge carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise replace main with the fork: run `silo replace-main {}` and the fork becomes main with its database.",
             report.fork
         );
         return Ok(refuse(report, "database", message, Vec::new(), &hint));
     }
-    Ok(Prepared::Ready(ready(plan, cron_texts, bundles, report)))
+    for (id, label) in plan.database_ids.iter().zip(&plan.databases) {
+        items.push(ReportItem::new(
+            id,
+            label,
+            outcome::NOT_COMBINED,
+            if migrating {
+                "main's database is not combined with the fork's; the recipe's migrate step runs on main's own database"
+            } else {
+                "main's database is left as it is; the fork's database changes are not combined (kept without a migration step, as asked)"
+            },
+        ));
+    }
+    items.sort_by(|a, b| a.id.cmp(&b.id));
+    items.dedup_by(|later, first| later.id == first.id);
+    report.items = items;
+    report.summary.extend(
+        plan.summary()
+            .into_iter()
+            .map(|line| format!("will merge {line}")),
+    );
+    report.notes.extend(plan.notes.clone());
+    Ok(Prepared::Ready(Ready {
+        plan,
+        main,
+        os,
+        report,
+        cron: cron_texts,
+        bundles,
+        migrations_changed,
+        fork_live: fork_final,
+        staged,
+        bundle_data,
+    }))
+}
+
+/// Whether main still holds everything the fork started from: what main changed since the
+/// fork was made, compared with the fork-time record the same way the fork is. Databases do
+/// not count, since a keep never combines them. When this is true nothing can conflict.
+fn main_unchanged_since_fork(view: &ForkView, main: &Manifest) -> bool {
+    !diff(
+        &view.base,
+        main,
+        view.noise.as_ref(),
+        &IgnoreList::builtin(),
+    )
+    .has_reviewable_changes()
+}
+
+fn short(head: &str) -> &str {
+    &head[..head.len().min(7)]
+}
+
+/// A repository both sides changed, as a conflict only `branch` and `main` settle.
+fn git_conflict(repo: &plan::RepoOp, main: &Manifest, detail: &str) -> Conflict {
+    let fork_change = match &repo.commits {
+        Some((_, new)) => format!("new commits, now at {}", short(new)),
+        None => "changed".to_owned(),
+    };
+    let main_change = match (&repo.base_head, main.git.get(&repo.repo)) {
+        (Some(base), Some(now)) if *base != now.head => {
+            format!("moved from {} to {}", short(base), short(&now.head))
+        }
+        (_, Some(_)) => "its own changes".to_owned(),
+        _ => "changed".to_owned(),
+    };
+    Conflict::new("git", repo.repo.clone(), detail).answerable(
+        &repo.id,
+        &[Answer::Branch, Answer::Main],
+        fork_change,
+        main_change,
+    )
+}
+
+/// What happened to a repository's commits.
+fn repo_item(repo: &plan::RepoOp, state: &str, branch: Option<&BranchPlan>) -> ReportItem {
+    let (result, detail) = match (state, branch) {
+        ("uptodate", _) => (
+            outcome::ALREADY_THERE,
+            "main already has the fork's commits".to_owned(),
+        ),
+        (_, Some(branch)) if branch.exists => (
+            outcome::BRANCH,
+            format!(
+                "branch {} already holds the fork's commits; nothing was merged or checked out",
+                branch.name
+            ),
+        ),
+        (_, Some(branch)) => (
+            outcome::BRANCH,
+            format!(
+                "the fork's commits are left on branch {}; nothing was merged or checked out",
+                branch.name
+            ),
+        ),
+        ("new", _) => (
+            outcome::BROUGHT_OVER,
+            "the repository is cloned into main".to_owned(),
+        ),
+        ("ff", _) => (
+            outcome::BROUGHT_OVER,
+            "main moves forward to the fork's commits".to_owned(),
+        ),
+        _ => (
+            outcome::BROUGHT_OVER,
+            "the fork's commits are merged into main's".to_owned(),
+        ),
+    };
+    ReportItem::new(&repo.id, &repo.repo, result, detail)
 }
 
 /// The identity, in `fork`, of every item `plan` reads: file identities (kind, size, content

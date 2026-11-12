@@ -169,8 +169,9 @@ pub(super) fn list(app_data: &Path) -> Vec<Template> {
             if name.contains(PARTIAL) {
                 return None;
             }
-            let meta: Meta =
+            let mut meta: Meta =
                 serde_json::from_slice(&fs::read(entry.path().join(META)).ok()?).ok()?;
+            meta.disk_gib = store::disk_file_gib(&entry.path().join("disk.img"), meta.disk_gib);
             (meta.schema_version == SCHEMA_VERSION).then(|| Template {
                 name,
                 dir: entry.path(),
@@ -1156,6 +1157,23 @@ mod tests {
         make(data.path(), &computer, &layout, "abcd", "cu", false, &none).unwrap();
         assert!(!stale.exists());
         assert_eq!(list(data.path()).len(), 1);
+    }
+
+    #[test]
+    fn a_template_says_the_size_of_its_disk_file() {
+        let (computer, layout, data) = record(40);
+        make(data.path(), &computer, &layout, "abcd", "cu", false, &none).unwrap();
+        assert_eq!(list(data.path())[0].meta.disk_gib, 40);
+        // A template made from a computer whose record said less than its disk file.
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(list(data.path())[0].disk())
+            .unwrap();
+        file.set_len(64 * GIB).unwrap();
+        let template = &list(data.path())[0];
+        assert_eq!(template.meta.disk_gib, 64);
+        assert!(check_disk(40, template).is_err());
+        assert!(check_disk(64, template).is_ok());
     }
 
     #[test]

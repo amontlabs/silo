@@ -230,3 +230,29 @@ it("acknowledges a result exactly once when its action closes the notification",
   expect(onDismiss).toHaveBeenCalledOnce()
   expect(screen.queryByText("Imported computer")).not.toBeInTheDocument()
 })
+
+describe("approval notices", () => {
+  it("shows a request from an agent as a warning with a Review button, and never re-delivers it", async () => {
+    render(<Host />)
+    const review = vi.fn()
+    const notice = { category: "approvals" as const, key: "approval:ap-1", title: "main asks: Publish port 8080", body: "", computer }
+    act(() => showBackendNotice(notice, review))
+    await tick()
+    expect(screen.getByText("main asks: Publish port 8080")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Review" }))
+    expect(review).toHaveBeenCalledExactlyOnceWith(notice)
+    expect(delivered).not.toHaveBeenCalled()
+  })
+
+  it("replaces the toast of the same request in place and drops it when the request is answered", async () => {
+    render(<Host />)
+    act(() => showBackendNotice({ category: "approvals", key: "approval:ap-2", title: "main asks: Allow SSH", body: "", computer }))
+    act(() => showBackendNotice({ category: "approvals", key: "approval:ap-2", title: "main asks: Allow SSH", body: "", computer }))
+    await tick()
+    expect(screen.getAllByText("main asks: Allow SSH")).toHaveLength(1)
+    act(() => dismissOperationToast("approval:ap-2"))
+    await tick()
+    await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+    expect(screen.queryByText("main asks: Allow SSH")).not.toBeInTheDocument()
+  })
+})

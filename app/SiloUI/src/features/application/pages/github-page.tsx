@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { TriangleAlert } from "lucide-react"
 
-import { PersonalTokenConnection } from "@/features/github/components/personal-token-connection"
 import { CopyButton } from "@/components/copy-button"
 import { InlineAlert } from "@/components/inline-alert"
 import { githubFailure } from "./github-failure"
@@ -22,6 +21,7 @@ import {
   type GitHubIdentity,
   type GitHubRepositoryAccess,
   type GitHubRepositorySelection,
+  type GitHubTokenOption,
 } from "@/features/github/components/github-access-editor"
 
 type ComputerSelections = Record<string, GitHubRepositorySelection[]>
@@ -52,7 +52,7 @@ function draftFromSource(
   }))
 
   return {
-    access: Object.fromEntries(policies.map((policy) => [policy.computer, { repositoryMode: policy.repositoryMode ?? "selected", allRepositoriesAllowChanges: policy.allRepositoriesAllowChanges ?? false, ...(policy.authenticationMethod ? { authenticationMethod: policy.authenticationMethod } : {}) }])),
+    access: Object.fromEntries(policies.map((policy) => [policy.computer, { repositoryMode: policy.repositoryMode ?? "selected", allRepositoriesAllowChanges: policy.allRepositoriesAllowChanges ?? false, ...(policy.authenticationMethod ? { authenticationMethod: policy.authenticationMethod } : {}), ...(policy.tokenSecretId ? { tokenSecretId: policy.tokenSecretId } : {}) }])),
     selections: Object.fromEntries(policies.map((policy) => [
       policy.computer,
       policy.repositories.map((repository) => ({ ...repository })),
@@ -157,7 +157,10 @@ export function GitHubPage({
   const userInitiated = useRef(new Set<string>())
   const toastComputers = useRef(new Set<string>())
   const catalogAvailable = source.github.repositoryCatalogStatus?.status !== "unavailable"
-  const tokenConnected = source.github.personalToken?.state === "connected"
+  const tokenSecrets = useMemo<GitHubTokenOption[]>(() => source.secrets
+    .filter((secret) => secret.kind === "github-token" && !secret.removing)
+    .map((secret) => ({ id: secret.id, name: secret.name, account: secret.account, connected: secret.connection?.state === "connected" })), [source.secrets])
+  const tokenConnected = tokenSecrets.some((token) => token.connected)
   const applying = Object.values(computerOperations).some((operation) => operation.status === "applying")
   const busy = connectionState === "connecting" || applying
 
@@ -184,7 +187,7 @@ export function GitHubPage({
     const next = copyDraft(sourceDraft)
     for (const [computer, policy] of saveIntents.current) {
       if (!next.access[computer]) continue
-      next.access[computer] = { repositoryMode: policy.repositoryMode ?? "selected", allRepositoriesAllowChanges: policy.allRepositoriesAllowChanges ?? false, authenticationMethod: policy.authenticationMethod }
+      next.access[computer] = { repositoryMode: policy.repositoryMode ?? "selected", allRepositoriesAllowChanges: policy.allRepositoriesAllowChanges ?? false, authenticationMethod: policy.authenticationMethod, tokenSecretId: policy.tokenSecretId }
       next.selections[computer] = policy.repositories.map((repository) => ({ ...repository }))
       next.identities[computer] = { ...policy.identity }
     }
@@ -387,16 +390,14 @@ export function GitHubPage({
   return (
     <PageContainer className="flex h-full min-h-0 flex-col">
       <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
-        <p className="text-caption text-muted-foreground">GitHub access for computers on this device.</p>
+        <p className="text-caption text-muted-foreground">GitHub access for computers on this device. Personal tokens are added in Secrets.</p>
         {connectionState !== "connected" && tokenConnected && accessToggle}
       </div>
       <GitHubAccessEditor
         compactConnection
-        computers={source.computers.filter(w => !w.device).map(({ configuration }) => ({ name: configuration.name }))}
+        computers={source.computers.filter(w => !w.device).map(({ configuration }) => ({ name: configuration.name, tokenMissing: source.github.computers?.find(policy => policy.computer === configuration.name)?.tokenMissing }))}
         connectionState={connectionState}
-        tokenConnected={tokenConnected}
-        tokenConnection={<PersonalTokenConnection status={source.github.personalToken}
-          onSave={actions.saveGitHubPersonalToken} onRemove={actions.removeGitHubPersonalToken} />}
+        tokenSecrets={tokenSecrets}
         repositoryOptions={source.github.repositoryCatalog ?? []}
         computerSelections={draft.selections}
         computerRepositoryAccess={draft.access}

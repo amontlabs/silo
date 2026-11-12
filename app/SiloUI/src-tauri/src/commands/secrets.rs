@@ -80,7 +80,13 @@ fn request_for_engine(request: &Value, roster: &Roster) -> Result<Value, EngineE
         "computerIds": computer_ids,
         "allowedDomains": request.get("allowedDomains").cloned().unwrap_or_else(|| json!([])),
     });
-    for key in ["id", "value"] {
+    for key in [
+        "id",
+        "value",
+        "kind",
+        "allowAnyDestination",
+        "allowSharedHosting",
+    ] {
         if let Some(value) = text(key) {
             engine_request[key] = value;
         }
@@ -218,7 +224,7 @@ mod forwarding_tests {
         assert_eq!(
             fake.calls(MethodName::SecretsSave),
             vec![json!({"request": {
-                "operation": "add", "name": "TOKEN", "value": "v",
+                "operation": "add", "name": "TOKEN", "kind": "generic", "value": "v",
                 "computerIds": [DEV], "allowedDomains": ["example.com"]
             }})]
         );
@@ -230,6 +236,26 @@ mod forwarding_tests {
         .unwrap_err();
         assert_eq!(unknown.code, "not_found");
         assert_eq!(fake.calls(MethodName::SecretsSave).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn saving_a_github_token_forwards_its_kind() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        save(
+            &engine,
+            json!({"operation": "add", "name": "work", "kind": "github-token", "value": "v",
+                   "computers": [], "allowedDomains": []}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fake.calls(MethodName::SecretsSave),
+            vec![json!({"request": {
+                "operation": "add", "name": "work", "kind": "github-token", "value": "v",
+                "computerIds": [], "allowedDomains": []
+            }})]
+        );
     }
 
     #[tokio::test]

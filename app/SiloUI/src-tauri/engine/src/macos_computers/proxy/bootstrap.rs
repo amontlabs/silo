@@ -4,6 +4,7 @@
 
 use super::super::engine;
 use super::super::guest_access;
+use super::super::offline_setup::BootstrapFiles;
 use super::super::proxy_address::{self, ProxyAddress};
 use super::super::proxy_ca::{self, CaMaterial};
 use super::super::store::{Layout, Record};
@@ -136,14 +137,15 @@ pub(in crate::macos_computers_engine) fn stage_guest_bootstrap(
     write_identity(layout, &identity)
 }
 
-/// Allocates a fork's gateway address and proxy CA and saves its bootstrap identity, so the
-/// fork can boot behind its gateway at once. Returns the network configuration the guest
-/// reads at boot; its CA and trust files are installed over its first login.
-pub(in crate::macos_computers_engine) fn prepare_fork_bootstrap(
+/// Allocates a copied or imported computer's gateway address and proxy CA, saves its bootstrap
+/// identity, and returns the files its stopped disk gets so it can boot behind its gateway at
+/// once: the current program, its launch daemon and the configuration for its own address. The
+/// CA and the trust files are installed over its first login.
+pub(in crate::macos_computers_engine) fn prepare_offline_bootstrap(
     app: &MacosContext,
     record: &Record,
     layout: &Layout,
-) -> Result<Vec<u8>, String> {
+) -> Result<BootstrapFiles, String> {
     let routes = proxy_address::host_ipv4_routes()?;
     let address = proxy_address::load_or_allocate(layout, &routes)?;
     let ca = proxy_ca::get_or_create(&record.id, || super::generate_ca(app))?;
@@ -158,7 +160,13 @@ pub(in crate::macos_computers_engine) fn prepare_fork_bootstrap(
         }
         None => write_identity(layout, &identity)?,
     }
-    guest_config_json(record, &address, &identity)
+    let daemon = fs::read(bootstrap_binary(app)?)
+        .map_err(|_| "Cannot read the signed guest network bootstrap.".to_owned())?;
+    Ok(BootstrapFiles {
+        config: guest_config_json(record, &address, &identity)?,
+        daemon,
+        plist: include_bytes!("../../../../guest/macos/com.silo.network-bootstrap.plist").to_vec(),
+    })
 }
 
 /// Installs the network files and the proxy CA's trust in a running fork that already boots

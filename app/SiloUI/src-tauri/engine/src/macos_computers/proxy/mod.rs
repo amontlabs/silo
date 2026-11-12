@@ -16,7 +16,7 @@ mod bootstrap;
 // These narrow hooks are consumed by the parallel provisioning and launch-migration owners.
 #[allow(unused_imports)]
 pub(super) use bootstrap::{
-    install_on_running_guest, migrate_legacy_guest_bootstrap, prepare_fork_bootstrap,
+    install_on_running_guest, migrate_legacy_guest_bootstrap, prepare_offline_bootstrap,
     require_guest_bootstrap, stage_guest_bootstrap, sync_guest_placeholders, verify_guest_ready,
 };
 
@@ -32,11 +32,11 @@ pub(super) fn stage_guest_bootstrap(
 }
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-pub(super) fn prepare_fork_bootstrap(
+pub(super) fn prepare_offline_bootstrap(
     _app: &super::MacosContext,
     _record: &super::store::Record,
     _layout: &super::store::Layout,
-) -> Result<Vec<u8>, String> {
+) -> Result<super::offline_setup::BootstrapFiles, String> {
     Err(super::NOT_SUPPORTED.into())
 }
 

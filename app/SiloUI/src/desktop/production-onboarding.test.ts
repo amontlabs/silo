@@ -41,9 +41,9 @@ describe("production onboarding", () => {
     expect(mixed.computerConfigurations).toEqual(application.computers.map(({ configuration }) => configuration))
   })
 
-  it("offers only dev on a fresh install without claiming it has been created", () => {
+  it("offers only main on a fresh install without claiming it has been created", () => {
     const source = productionOnboardingSource({ ...application, computers: [] }, { checks: [], retry: vi.fn() }, application.preferences)
-    expect(source.computerConfigurations).toEqual([expect.objectContaining({ name: "dev", cpus: 8, memoryGiB: 32, workspaceStorageGiB: 120, runtimeStorageGiB: 100 })])
+    expect(source.computerConfigurations).toEqual([expect.objectContaining({ name: "main", cpus: 8, memoryGiB: 32, workspaceStorageGiB: 120, runtimeStorageGiB: 100 })])
     expect(source.readyToFinish).toBe(false)
     expect(source.bootstrapResult).toBeNull()
     expect(source.progressEvents).toEqual([])
@@ -66,7 +66,7 @@ describe("production onboarding", () => {
     const checks = [{ id: "runtime-microsandbox", title: "MicroSandbox", status: "failed" as const, detail: "Bundled runtime missing", remediation: null }]
     const source = productionOnboardingSource(null, { checks, retry: vi.fn() }, application.preferences)
     expect(source.preflightChecks).toBe(checks)
-    expect(source.computerConfigurations.map(({ name }) => name)).toEqual(["dev"])
+    expect(source.computerConfigurations.map(({ name }) => name)).toEqual(["main"])
     expect(source.bootstrapResult).toBeNull()
   })
 
@@ -108,7 +108,7 @@ describe("production onboarding", () => {
     expect(updatingWithDev.existingConfigurationIds).toBeUndefined()
     const unreadable = productionOnboardingSource(shell, dependencies, application.preferences, snapshot({ error: "Silo could not read application state" }))
     expect(unreadable.configurationsAuthoritative).toBe(false)
-    expect(unreadable.computerConfigurations.map(({ name }) => name)).toEqual(["dev"])
+    expect(unreadable.computerConfigurations.map(({ name }) => name)).toEqual(["main"])
 
     // A loaded device with no computers offers the default, as setup of this device.
     expect(productionOnboardingSource(shell, dependencies, application.preferences, snapshot({})).configurationsAuthoritative).toBe(true)

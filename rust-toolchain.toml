@@ -5,5 +5,5 @@
 # scripts/test_rust_toolchain.py). `runtime:prepare` builds MicroSandbox with an explicit
 # `cargo +<toolchain>`, which takes precedence over this file.
 [toolchain]
-channel = "1.94.0"
+channel = "1.95.0"
 components = ["rustfmt", "clippy"]

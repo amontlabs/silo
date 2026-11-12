@@ -784,6 +784,121 @@ class Registration(Guest):
         self.assertIn('settings.json', names)
         self.assertEqual((outside / 'config.toml').stat().st_uid, os.getuid())
 
+    def test_silos_own_server_is_registered_beside_the_driver_and_removed_alone(self):
+        cu.apply('auto')
+        self.claude_settings.write_text(json.dumps({'permissions': {'allow': ['mcp__cua-driver', 'Bash(ls)']}}))
+        registered, pending, failed, conflicts = cu.configure_server('silo', '/usr/local/bin/silo', ['mcp'])
+        self.assertEqual((registered, pending, failed, conflicts), (['claude-code', 'codex'], [], [], []))
+        servers = self.claude()['mcpServers']
+        self.assertEqual(servers['silo'], {'type': 'stdio', 'command': '/usr/local/bin/silo', 'args': ['mcp'],
+                                           'env': {'SILO_MANAGED': '1'}})
+        self.assertIn('cua-driver', servers)
+        section = self.codex_config()['mcp_servers']
+        self.assertEqual((section['silo']['command'], section['silo']['args']), ('/usr/local/bin/silo', ['mcp']))
+        self.assertEqual(section['silo']['env'], {'SILO_MANAGED': '1'})
+        self.assertEqual(section['cua-driver']['default_tools_approval_mode'], 'approve')
+        # Registering again changes nothing, and the driver's approval rule is untouched.
+        before = (self.claude_state.read_text(), self.codex.read_text())
+        cu.configure_server('silo', '/usr/local/bin/silo', ['mcp'])
+        self.assertEqual(before, (self.claude_state.read_text(), self.codex.read_text()))
+        self.assertEqual(json.loads(self.claude_settings.read_text())['permissions']['allow'], ['mcp__cua-driver', 'Bash(ls)'])
+        removed, failed, conflicts = cu.remove_server('silo')
+        self.assertEqual((removed, failed, conflicts), (['claude-code', 'codex'], [], []))
+        self.assertNotIn('silo', self.claude()['mcpServers'])
+        self.assertIn('cua-driver', self.claude()['mcpServers'])
+        self.assertNotIn('silo', self.codex_config()['mcp_servers'])
+        self.assertIn('cua-driver', self.codex_config()['mcp_servers'])
+
+    def test_a_server_of_another_name_is_kept_when_silos_is_removed_and_a_missing_file_is_not_created(self):
+        self.claude_state.parent.mkdir(parents=True, exist_ok=True)
+        self.claude_state.write_text(json.dumps({'mcpServers': {
+            'mine': {'command': 'x'}, 'silo': {'command': 'old', 'env': {'SILO_MANAGED': '1'}}}}))
+        cu.remove_server('silo')
+        self.assertEqual(self.claude()['mcpServers'], {'mine': {'command': 'x'}})
+        self.assertFalse(self.codex.exists())
+
+    def test_a_server_the_user_added_under_silos_name_is_left_alone_and_reported(self):
+        self.claude_state.parent.mkdir(parents=True, exist_ok=True)
+        self.claude_state.write_text(json.dumps({'mcpServers': {'silo': {'command': 'mine'}}}))
+        self.codex.parent.mkdir(parents=True, exist_ok=True)
+        self.codex.write_text('[mcp_servers.silo]\ncommand = "mine"\nargs = []\n')
+        before = (self.claude_state.read_text(), self.codex.read_text())
+        self.assertEqual(cu.configure_server('silo', '/usr/local/bin/silo', ['mcp']),
+                         ([], [], [], ['claude-code', 'codex']))
+        self.assertEqual(cu.remove_server('silo', '/usr/local/bin/silo', ['mcp']),
+                         ([], [], ['claude-code', 'codex']))
+        self.assertEqual(cu.remove_server('silo'), ([], [], ['claude-code', 'codex']))
+        self.assertEqual(before, (self.claude_state.read_text(), self.codex.read_text()))
+
+    def test_the_unmarked_entry_an_earlier_silo_wrote_is_marked_and_removable(self):
+        old = {'type': 'stdio', 'command': '/usr/local/bin/silo', 'args': ['mcp'], 'env': {}}
+        self.claude_state.parent.mkdir(parents=True, exist_ok=True)
+        self.claude_state.write_text(json.dumps({'mcpServers': {'silo': old, 'mine': {'command': 'x'}}}))
+        self.codex.parent.mkdir(parents=True, exist_ok=True)
+        old_toml = '[mcp_servers.silo]\ncommand = "/usr/local/bin/silo"\nargs = ["mcp"]\n'
+        self.codex.write_text('model = "x"\n\n' + old_toml)
+        self.assertEqual(cu.configure_server('silo', '/usr/local/bin/silo', ['mcp']),
+                         (['claude-code', 'codex'], [], [], []))
+        self.assertEqual(self.claude()['mcpServers']['silo']['env'], {'SILO_MANAGED': '1'})
+        self.assertEqual(self.claude()['mcpServers']['mine'], {'command': 'x'})
+        self.assertEqual(self.codex_config()['mcp_servers']['silo']['env'], {'SILO_MANAGED': '1'})
+        self.assertEqual(self.codex_config()['model'], 'x')
+        # An earlier entry is also taken out when the command is named.
+        self.claude_state.write_text(json.dumps({'mcpServers': {'silo': old}}))
+        self.codex.write_text(old_toml)
+        self.assertEqual(cu.remove_server('silo', '/usr/local/bin/silo', ['mcp']),
+                         (['claude-code', 'codex'], [], []))
+        self.assertEqual(self.claude()['mcpServers'], {})
+        self.assertNotIn('silo', self.codex_config().get('mcp_servers', {}))
+
+    def test_a_change_claude_code_made_while_silo_edited_is_kept(self):
+        self.claude_state.parent.mkdir(parents=True, exist_ok=True)
+        self.claude_state.write_text(json.dumps({'userID': '1'}))
+        read = cu.read_object
+        reads = []
+
+        def read_then_change(path):
+            found = read(path)
+            reads.append(path)
+            if path == cu.CLAUDE_STATE and len(reads) == 1:
+                path.write_text(json.dumps({'userID': '1', 'projects': {'a': 1}}))
+            return found
+
+        with mock.patch.object(cu, 'read_object', side_effect=read_then_change):
+            cu.configure_server('silo', '/usr/local/bin/silo', ['mcp'])
+        saved = self.claude()
+        self.assertEqual(saved['projects'], {'a': 1})
+        self.assertIn('silo', saved['mcpServers'])
+
+    def test_an_agent_that_is_not_installed_is_pending_for_silos_server(self):
+        self.installed_agents.discard('codex')
+        registered, pending, failed, conflicts = cu.configure_server('silo', '/usr/local/bin/silo', ['mcp'])
+        self.assertEqual((registered, pending, failed, conflicts), (['claude-code'], ['codex'], [], []))
+        self.assertFalse(self.codex.exists())
+
+    def test_only_a_plain_name_and_an_absolute_command_are_registered(self):
+        for name, command in (('cua-driver', '/x'), ('Silo', '/x'), ('a b', '/x'), ('', '/x'), ('silo', 'silo'), ('silo', '')):
+            with self.assertRaises(cu.Failure, msg=(name, command)):
+                cu.configure_server(name, command, ['mcp'])
+        with self.assertRaises(cu.Failure):
+            cu.remove_server('cua-driver')
+        self.assertFalse(self.claude_state.exists())
+
+    def test_the_command_line_registers_and_removes_and_reports_a_file_it_cannot_edit(self):
+        with mock.patch.object(cu.os, 'geteuid', return_value=0), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            code = cu.main(['server-add', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp'])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out.getvalue())['registered'], ['claude-code', 'codex'])
+        self.claude_state.write_text('[]')
+        with mock.patch.object(cu.os, 'geteuid', return_value=0), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            code = cu.main(['server-add', '--name', 'silo', '--command', '/usr/local/bin/silo', '--arg', 'mcp'])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out.getvalue())['failed'], ['claude-code'])
+        with mock.patch.object(cu.os, 'geteuid', return_value=0), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            code = cu.main(['server-remove', '--name', 'cua-driver'])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out.getvalue())['error'], 'invalid-server')
+
     def test_codex_gets_the_same_server_in_its_own_section(self):
         cu.apply('auto')
         server = self.codex_config()['mcp_servers']['cua-driver']

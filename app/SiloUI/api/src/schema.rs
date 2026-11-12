@@ -60,6 +60,7 @@ struct JobTerminalResultsSchema {
     requests_show: crate::methods::review_requests::ChangesRequestsShowResult,
     requests_throw_away: crate::methods::review_requests::ChangesRequestsThrowAwayResult,
     desktop: crate::methods::desktop::DesktopStatus,
+    agents: crate::methods::agents::AgentsListResult,
     backup: crate::methods::exports::BackupOperation,
     archive_inspection: crate::methods::exports::ArchiveInspectionResult,
     export_check: crate::methods::exports::ExportCheckResult,
@@ -72,11 +73,13 @@ struct JobTerminalResultsSchema {
     push: crate::methods::push::PushOperation,
     storage: crate::methods::storage::StorageState,
     update: crate::methods::updates::UpdateSnapshot,
+    rebuild: crate::methods::computers::ComputerRebuildResult,
 }
 
 /// Method-specific final job result schemas. Conditional rows describe the
 /// platform-specific terminal outcomes called out in the domain specifications.
 pub const JOB_FINISHED_RESULT_REGISTRY: &[(&str, &str)] = &[
+    ("agents.install", "AgentsListResult"),
     ("changes.keep", "ChangesKeepResult"),
     ("changes.promote", "ChangesPromoteResult"),
     ("changes.requests.keep", "ChangesRequestsKeepResult"),
@@ -97,6 +100,7 @@ pub const JOB_FINISHED_RESULT_REGISTRY: &[(&str, &str)] = &[
     ("computers.configuration.change", "ApplicationSource"),
     ("computers.configuration.retry", "ApplicationSource"),
     ("computers.create", "ApplicationSource | null"),
+    ("computers.rebuild", "ComputerRebuildResult"),
     (
         "computers.delete",
         "ApplicationSource | null | MacosComputersState",
@@ -197,8 +201,8 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 175);
-        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 39);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 191);
+        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 41);
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"
@@ -281,6 +285,7 @@ mod tests {
                 name: "Silo".into(),
                 version: "0.1".into(),
             }),
+            proof: None,
         };
         assert_eq!(
             serde_json::from_str::<HandshakeParams>(&serde_json::to_string(&handshake).unwrap())
@@ -311,16 +316,37 @@ mod tests {
     }
 
     #[test]
+    fn protocol_8_answers_the_channel_challenge_with_a_proof_never_the_token() {
+        assert_eq!(crate::transport::PROTOCOL_VERSION, 8);
+        let params: HandshakeParams = serde_json::from_value(serde_json::json!({
+            "protocol": { "min": 8, "max": 8 },
+            "proof": "ab",
+        }))
+        .unwrap();
+        assert_eq!(params.proof.as_deref(), Some("ab"));
+        let without = HandshakeParams {
+            proof: None,
+            ..params
+        };
+        let text = serde_json::to_string(&without).unwrap();
+        assert!(!text.contains("proof") && !text.contains("token"));
+        let challenge: crate::transport::ChannelChallenge =
+            serde_json::from_value(serde_json::json!({ "nonce": "00" })).unwrap();
+        assert_eq!(challenge.nonce, "00");
+    }
+
+    #[test]
     fn incompatible_version_diagnostics_have_canonical_field_names() {
         let error = ErrorObject {
             code: ErrorCode::IncompatibleVersion,
             message: "No common protocol version".to_owned(),
             diagnostics: Some(crate::transport::IncompatibleVersionDiagnostics {
-                engine_protocol_range: crate::transport::ProtocolRange { min: 7, max: 7 },
+                engine_protocol_range: crate::transport::ProtocolRange { min: 8, max: 8 },
                 client_protocol_range: crate::transport::ProtocolRange { min: 5, max: 5 },
                 engine_app_version: "0.1.0".to_owned(),
                 client_app_version: Some("9.8.7".to_owned()),
             }),
+            details: None,
         };
         let value = serde_json::to_value(&error).unwrap();
 
@@ -330,7 +356,7 @@ mod tests {
                 "code": "incompatible_version",
                 "message": "No common protocol version",
                 "diagnostics": {
-                    "engineProtocolRange": { "min": 7, "max": 7 },
+                    "engineProtocolRange": { "min": 8, "max": 8 },
                     "clientProtocolRange": { "min": 5, "max": 5 },
                     "engineAppVersion": "0.1.0",
                     "clientAppVersion": "9.8.7"
@@ -370,8 +396,10 @@ mod tests {
             (ScreenSharingUnavailable, "screen_sharing_unavailable"),
             (DesktopUpdateRequired, "desktop_update_required"),
             (CredentialAccessDenied, "credential_access_denied"),
+            (ApprovalRequired, "approval_required"),
+            (ResourcesLow, "resources_low"),
         ];
-        assert_eq!(codes.len(), 25);
+        assert_eq!(codes.len(), 27);
         for (code, expected) in codes {
             let json = serde_json::to_string(&code).unwrap();
             assert_eq!(json, format!("\"{expected}\""));
@@ -666,6 +694,65 @@ mod tests {
             AgentToolsState::Missing
         );
         assert_eq!(serde_json::to_value(status).unwrap(), payload);
+    }
+
+    #[test]
+    fn creating_a_computer_may_name_agents_and_old_requests_still_parse() {
+        use crate::methods::{agents::AgentId, computers::ComputerCreateParams};
+
+        let old = serde_json::json!({
+            "kind": "macos",
+            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64}
+        });
+        let parsed: ComputerCreateParams = serde_json::from_value(old.clone()).unwrap();
+        match &parsed {
+            ComputerCreateParams::Macos { agents, .. } => assert!(agents.is_empty()),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(serde_json::to_value(parsed).unwrap(), old);
+
+        let named = serde_json::json!({
+            "kind": "macos",
+            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64},
+            "agents": ["claude-code", "codex"]
+        });
+        match serde_json::from_value(named.clone()).unwrap() {
+            ComputerCreateParams::Macos { agents, .. } => {
+                assert_eq!(agents, [AgentId::ClaudeCode, AgentId::Codex])
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(serde_json::from_value::<ComputerCreateParams>(serde_json::json!({
+            "kind": "macos",
+            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64},
+            "agents": ["pi"]
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn agent_methods_are_a_query_and_a_job_and_progress_carries_the_step() {
+        use crate::{
+            jobs::JobProgress,
+            methods::{method_registry, MethodKind},
+        };
+
+        let kind = |name: &str| {
+            method_registry()
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap()
+                .kind
+        };
+        assert_eq!(kind("agents.list"), MethodKind::Query);
+        assert_eq!(kind("agents.install"), MethodKind::Job);
+        let progress = serde_json::json!({
+            "source": "agent", "jobId": "job:7", "computerId": "c",
+            "data": {"computerId": "c", "agent": "codex", "step": "downloading",
+                     "detail": "Downloading Codex (42%)"}
+        });
+        let parsed: JobProgress = serde_json::from_value(progress.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), progress);
     }
 
     #[test]

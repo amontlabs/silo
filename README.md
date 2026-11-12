@@ -2,7 +2,7 @@
 
 Isolated computers for AI agents. Run untrusted code with a desktop and computer use, branch checkpoints, and diff states.
 
-Silo gives each AI agent its own sandboxed Linux or macOS virtual machine—away from your host, with scoped repositories, credentials it can use but never read, and checkpoints you can branch, diff, and fold back like a Git repo.
+Silo gives each AI agent its own sandboxed Linux or macOS virtual machine—away from your host, with scoped repositories, credentials it can use but never read, and checkpoints you can branch, diff, and merge back like a Git repo.
 
 Apps embed Silo through `silod`, a daemon they talk to over a local socket with a versioned JSON protocol. [Fjord](https://github.com/amontlabs/fjord) is built on it.
 
@@ -37,7 +37,7 @@ Each mechanism, with the code that implements it, is in the [threat model](docs/
 - **Credentials can be used.** A scoped secret or GitHub token works for the agent within its scope: it can spend credits or write to a repository you granted for changes.
 - **Allowed hosts that echo headers reveal secrets.** If an allowed host reflects the request back, the guest reads the real value. The eval reproduces this.
 - **Write grants reach CI.** A repository granted for changes includes `workflows: write`, so the agent can edit its Actions workflows and use whatever they can reach.
-- **Personal access tokens are not scoped.** In personal-token mode the agent gets the token's full permissions.
+- **Personal access tokens are not scoped.** A computer that uses a personal token gets the token's full permissions.
 - **Other processes on your Mac are trusted.** Any process running as your user can drive the engine socket; there is no per-client authentication or audit log yet. Same-user malware, hypervisor escapes and hostile apps that embed the engine are out of scope.
 - **Also out of scope.** Outbound bandwidth and connection counts are not capped. Imported macOS computer archives are mounted on the Mac, so import only archives you trust. Published ports are reachable by any local process. A VM escape gives the attacker your user account, because the runtime runs as you without the App Sandbox.
 - **macOS computers during setup.** Until setup completes, and in Recovery, a macOS computer uses Apple's NAT and can reach the Mac and the LAN.

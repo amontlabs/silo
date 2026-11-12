@@ -1,15 +1,17 @@
 import type { ApplicationComputer } from "@/features/application/model/application-source"
 import type { DirectoryLoader } from "@/features/application/model/directory-store"
 import { computerTarget } from "@/features/application/model/connections"
+import { workspaceRoot } from "@/features/computers/model/computer-capabilities"
 
 /** Static directory data belongs only to previews and tests. */
 export function fixtureDirectoryLoader(computers: ApplicationComputer[]): DirectoryLoader {
   const snapshots = new Map<string, { computer: string; path: string; created: number; entries: { name: string; path: string; kind: "folder" | "file" }[] }>()
   let nextSnapshot = 0
   return async (computer, path, offset, snapshotId) => {
-    const parts = path.slice("/workspace/".length).split("/")
-    if (new TextEncoder().encode(path).length > 4096 || path.includes("\0") || (path !== "/workspace" && (!path.startsWith("/workspace/") || parts.some(part => !part || part === "." || part === ".."))) || !Number.isInteger(offset) || offset < 0 || offset > 20_000 || offset % 200 !== 0) throw "Invalid folder request."
     const owner = computers.find(item => computerTarget(item) === computer)
+    const root = workspaceRoot(owner ?? {})
+    const parts = path.slice(`${root}/`.length).split("/")
+    if (new TextEncoder().encode(path).length > 4096 || path.includes("\0") || (path !== root && (!path.startsWith(`${root}/`) || parts.some(part => !part || part === "." || part === ".."))) || !Number.isInteger(offset) || offset < 0 || offset > 20_000 || offset % 200 !== 0) throw "Invalid folder request."
     if (!owner) throw "Computer no longer exists."
     if (owner.state !== "running") throw "Start this computer to browse its files."
     let snapshot = snapshotId ? snapshots.get(snapshotId) : undefined
@@ -17,7 +19,7 @@ export function fixtureDirectoryLoader(computers: ApplicationComputer[]): Direct
       if (!snapshot || snapshot.computer !== computer || snapshot.path !== path || Date.now() - snapshot.created >= 120_000 || offset > snapshot.entries.length) throw "Folder listing expired. Refresh this folder."
     } else {
       let files = owner.files
-      for (const name of path === "/workspace" ? [] : parts) {
+      for (const name of path === root ? [] : parts) {
         const entry = files.find(entry => entry.name === name)
         if (!entry) throw "This folder no longer exists."
         if (entry.kind !== "folder") throw "This folder cannot be browsed."

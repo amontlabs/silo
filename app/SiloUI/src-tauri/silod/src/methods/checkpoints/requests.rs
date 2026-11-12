@@ -375,6 +375,7 @@ fn started(job_id: JobId) -> Result<HandlerOutput, DispatchError> {
 fn show_result(
     request: FoldRequest,
     fork: &Row,
+    target_name: Option<String>,
     diff: &Value,
     fresh: bool,
 ) -> Result<ChangesRequestsShowResult, String> {
@@ -390,6 +391,7 @@ fn show_result(
         credentials: fold_requests::credentials_for(&fork.id),
         fork_name: fork.name.clone(),
         fork_state: fork.state.clone(),
+        target_name,
         request,
     })
 }
@@ -418,6 +420,7 @@ pub(super) async fn show(
                 credentials: fold_requests::credentials_for(&request.fork_id),
                 fork_name: String::new(),
                 fork_state: "gone".to_owned(),
+                target_name: target_name(&computers, &request),
                 request,
             };
             let job_id = begin(context, "changes.requests.show")?;
@@ -438,6 +441,7 @@ pub(super) async fn show(
             credentials: fold_requests::credentials_for(&fork.id),
             fork_name: fork.name.clone(),
             fork_state: fork.state.clone(),
+            target_name: target_name(&computers, &request),
             request,
         };
         let job_id = begin(context, "changes.requests.show")?;
@@ -448,13 +452,14 @@ pub(super) async fn show(
     let engine = engine_context(context);
     let running = fork.state == "running";
     let finisher_fork = fork.clone();
+    let finisher_target = target_name(&computers, &request);
     let job_id = blocking(move || {
         let target = resolve_target(&silod, &finisher_fork.id).map_err(guest_error)?;
         if running {
             target.ensure_running().map_err(guest_error)?;
         }
         let finish: changes_service::Finish = Box::new(move |diff| {
-            show_result(request, &finisher_fork, &diff, running)
+            show_result(request, &finisher_fork, finisher_target, &diff, running)
                 .and_then(encode)
                 .map_err(silo_engine::guest::GuestError::invalid)
         });
@@ -486,6 +491,8 @@ pub(super) async fn keep(
     let hold = claim(&params.request_id)?;
     let request = open_request(context, params.request_id, Need::Keepable).await?;
     fold_requests::check_keepable(&request).map_err(message_error)?;
+    let approved = crate::methods::approvals::expected_review_digest();
+    check_approved_changes(&request.review_digest, approved.as_deref())?;
     let computers = all_rows(context).await?;
     if fork_row(&computers, &request).is_none() {
         return Err(message_error(
@@ -499,24 +506,49 @@ pub(super) async fn keep(
         migrate: h.migrate,
         after: h.after,
     });
+    let save_recipe = matches!(
+        context.caller(),
+        silo_engine::policy::Caller::Owner { .. } | silo_engine::policy::Caller::Device { .. }
+    );
+    // What the computer's ask recorded applies unless the caller answers the same item.
+    let (mut choices, mut skip) = crate::methods::approvals::recorded_answers(context, &request);
+    choices.extend(params.choices.unwrap_or_default());
+    skip.extend(params.skip.unwrap_or_default());
     let keep_request = Request {
         fork: request.fork_id.clone(),
         target: Some(request.target.clone()),
         hooks: hooks.unwrap_or_default(),
         dry_run: false,
         data_ok: params.data_ok.unwrap_or(false),
-        reviewed: Some(request.review_digest.clone()),
+        reviewed: Some(approved.unwrap_or_else(|| request.review_digest.clone())),
+        choices: super::keep::choices_of(Some(choices), Some(skip)),
+        save_recipe,
+        hide_recipe_commands: crate::methods::approvals::result_goes_to_computer(context),
+        ..Request::default()
     };
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
     let id = request.id;
+    let request_id = id.clone();
     let job_id = tokio::task::spawn_blocking(move || {
         keep_service::start_request_keep(host, checkpoints, manifests, keep_request, id, hold)
     })
     .await
     .map_err(|_| DispatchError::internal("The keep could not start."))?
     .map_err(failure)?;
+    crate::methods::approvals::request_answered(context, &request_id, Some(job_id.as_str()));
     started(job_id)
+}
+
+/// Refuses a keep whose request shows other changes than the ones the owner approved: the
+/// computer asked for the review again after it was approved.
+fn check_approved_changes(shown: &str, approved: Option<&str>) -> Result<(), DispatchError> {
+    match approved {
+        Some(approved) if approved != shown => Err(message_error(
+            "The review request was asked for again with other changes after you were asked, so nothing was merged. The computer can ask again.",
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// The same handler context, owned, for work that outlives the request.
@@ -642,6 +674,9 @@ pub(super) async fn throw_away(
         let outcome = blocking(move || store.mark_thrown_away(&request.id).map_err(message_error))
             .await
             .map_err(|error| error.message)
+            .inspect(|request| {
+                crate::methods::approvals::request_answered(context, &request.id, None)
+            })
             .and_then(|request| {
                 encode(ChangesRequestsThrowAwayResult {
                     request,
@@ -669,6 +704,9 @@ pub(super) async fn throw_away(
             Ok(()) => store_for(&owned)
                 .mark_thrown_away(&request.id)
                 .map_err(|error| format!("{} was dropped, but {error}", fork.name))
+                .inspect(|request| {
+                    crate::methods::approvals::request_answered(&owned, &request.id, None)
+                })
                 .and_then(|request| {
                     encode(ChangesRequestsThrowAwayResult {
                         request,
@@ -774,7 +812,7 @@ async fn reach(context: &HandlerContext, request: FoldRequest, fork: Row) -> Res
 
 /// The computers the handlers see in a test, where no Linux runtime can list them.
 #[cfg(test)]
-pub(super) mod tests_rows {
+pub(crate) mod tests_rows {
     use super::Row;
     use std::sync::Mutex;
 
@@ -795,11 +833,16 @@ pub(super) mod tests_rows {
     }
 
     /// The computers, a complete list, and no fork-time records.
-    pub fn set(rows: Vec<Row>) {
+    pub(in crate::methods::checkpoints) fn set(rows: Vec<Row>) {
         let mut state = state();
         state.rows = Some(rows);
         state.complete = true;
         state.sources.clear();
+    }
+
+    /// No computers, a complete list, and no fork-time records.
+    pub fn set_empty() {
+        set(Vec::new());
     }
 
     /// The fork-time source of each `(fork, target)` pair.
@@ -814,7 +857,7 @@ pub(super) mod tests_rows {
         state().complete = complete;
     }
 
-    pub fn get() -> Option<(Vec<Row>, bool)> {
+    pub(in crate::methods::checkpoints) fn get() -> Option<(Vec<Row>, bool)> {
         let state = state();
         state.rows.clone().map(|rows| (rows, state.complete))
     }
@@ -831,6 +874,18 @@ pub(super) mod tests_rows {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_keep_approved_for_other_changes_than_the_request_shows_is_refused() {
+        assert!(check_approved_changes("d1", None).is_ok());
+        assert!(check_approved_changes("d1", Some("d1")).is_ok());
+        let error = check_approved_changes("d2", Some("d1")).unwrap_err();
+        assert!(
+            error.message.contains("asked for again"),
+            "{}",
+            error.message
+        );
+    }
 
     #[test]
     fn computers_are_read_from_both_platforms() {

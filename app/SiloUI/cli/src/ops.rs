@@ -10,19 +10,20 @@ use silo_api::methods::{
     common::{ComputerTargetParams, DeviceParams},
     computers::{
         ComputerConfiguration, ComputerConfigurationChange, ComputerConfigurationChangeParams,
-        ComputerCreateParams, ComputerDeleteParams, ComputerRuntimeKind, DesktopConfiguration,
-        MacosComputerCreateRequest,
+        ComputerCreateParams, ComputerDeleteParams, ComputerRebuildParams, ComputerRuntimeKind,
+        DesktopConfiguration, MacosComputerCreateRequest,
     },
     desktop::{DesktopAction, DesktopActionParams},
     guest::GuestExecParams,
-    keep::{ChangesKeepParams, ChangesPromoteParams, ChangesUndoParams, KeepHooks},
-    recipes::{RecipeBuildParams, RecipeRemoveParams},
+    keep::{ChangesKeepParams, ChangesPromoteParams, ChangesUndoParams, KeepAnswer},
+    recipes::{
+        RecipeBuildParams, RecipeDefinition, RecipeGetParams, RecipeRemoveParams, RecipeSaveParams,
+    },
     requests,
-    secrets::{SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
+    secrets::{SecretKind, SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
 };
 
 use crate::{
-    config::{Recipe, Settings},
     engine::{find, Computer, Engine, Progress},
     error::CliError,
 };
@@ -225,6 +226,14 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
     };
     value["credentialsUsed"] = credentials_used(engine, &computer.id).await;
     value["computerUse"] = computer_use(engine, &computer.id).await;
+    value["recipe"] = match computer_recipe(engine, &computer).await {
+        Ok(record) if record.is_object() => json!({
+            "name": record["name"],
+            "hash": record["hash"],
+            "builtAt": record["builtAt"],
+        }),
+        _ => Value::Null,
+    };
     value["checkpointList"] = Value::Array(computer.checkpoints);
     Ok(value)
 }
@@ -307,6 +316,7 @@ pub async fn secret_set(
     value: String,
     computers: &[String],
     domains: &[String],
+    allow_shared_hosting: bool,
 ) -> Result<Value, CliError> {
     if value.is_empty() {
         return Err(CliError::new("The secret value is empty."));
@@ -348,8 +358,54 @@ pub async fn secret_set(
             "A new secret needs at least one --computer and one --domain.",
         ));
     }
-    save_secret(engine, name, existing.as_ref(), Some(value), ids, allowed).await?;
-    secrets_list(engine).await
+    if allow_shared_hosting && !allowed.iter().any(|domain| domain.starts_with("*.")) {
+        return Err(CliError::new(
+            "--allow-shared-hosting needs a destination such as *.example.com.",
+        ));
+    }
+    save_secret(
+        engine,
+        name,
+        existing.as_ref(),
+        Some(value),
+        ids.clone(),
+        allowed,
+        allow_shared_hosting,
+    )
+    .await?;
+    let mut listed = secrets_list(engine).await?;
+    if allow_shared_hosting {
+        listed["warnings"] = json!(shared_hosting_warnings(engine, &ids).await);
+    }
+    Ok(listed)
+}
+
+/// What the engine says about the shared-hosting wildcards the computers now reach through
+/// their secrets, each once. Empty when none is open or the engine cannot say.
+async fn shared_hosting_warnings(engine: &Engine, computer_ids: &[String]) -> Vec<String> {
+    let mut warnings: Vec<String> = Vec::new();
+    for computer_id in computer_ids {
+        let Ok(state) = engine
+            .call(requests::network_policy_get(ComputerTargetParams {
+                computer_id: computer_id.clone(),
+                device_id: None,
+            }))
+            .await
+        else {
+            continue;
+        };
+        for notice in state["notices"].as_array().into_iter().flatten() {
+            if let Some(notice) = notice
+                .as_str()
+                .filter(|notice| notice.contains("lets this computer reach any site hosted under"))
+            {
+                if !warnings.iter().any(|seen| seen == notice) {
+                    warnings.push(notice.to_owned());
+                }
+            }
+        }
+    }
+    warnings
 }
 
 /// Assigns the secret to a computer, or takes it away.
@@ -385,7 +441,7 @@ pub async fn secret_assign(
         }
     }
     let allowed = serde_json::from_value(existing["allowedDomains"].clone()).unwrap_or_default();
-    save_secret(engine, name, Some(&existing), None, ids, allowed).await?;
+    save_secret(engine, name, Some(&existing), None, ids, allowed, false).await?;
     secrets_list(engine).await
 }
 
@@ -396,6 +452,7 @@ async fn save_secret(
     value: Option<String>,
     computer_ids: Vec<String>,
     allowed_domains: Vec<String>,
+    allow_shared_hosting: bool,
 ) -> Result<(), CliError> {
     // A wildcard is kept as it was; this command never widens one.
     let wildcard = allowed_domains.iter().any(|domain| domain.trim() == "*");
@@ -414,10 +471,12 @@ async fn save_secret(
                 },
                 id: existing.and_then(|secret| secret["id"].as_str().map(str::to_owned)),
                 name: name.to_owned(),
+                kind: SecretKind::Generic,
                 value,
                 computer_ids,
                 allowed_domains,
                 allow_any_destination: wildcard.then_some(true),
+                allow_shared_hosting: allow_shared_hosting.then_some(true),
             },
             device_id: None,
         }))
@@ -487,6 +546,8 @@ pub async fn create(
                 },
                 request_id: None,
                 device_id: None,
+                agents: Vec::new(),
+                network_policy: None,
             }
         }
         Platform::Macos => ComputerCreateParams::Macos {
@@ -497,6 +558,8 @@ pub async fn create(
                 disk_gib: args.disk_gib.unwrap_or(64),
             },
             device_id: None,
+            agents: Vec::new(),
+            network_policy: None,
         },
     };
     engine
@@ -506,7 +569,15 @@ pub async fn create(
             progress,
         )
         .await?;
-    Ok(engine.computer(&args.name).await?.to_json())
+    with_warning(engine, engine.computer(&args.name).await?.to_json()).await
+}
+
+/// `value` with the device's `warning` sentence when it is running short of memory or disk.
+async fn with_warning(engine: &Engine, mut value: Value) -> Result<Value, CliError> {
+    if let Some(warning) = resource_warning(engine).await {
+        value["warning"] = json!(warning);
+    }
+    Ok(value)
 }
 
 pub async fn start(engine: &Engine, name: &str, progress: Progress<'_>) -> Result<Value, CliError> {
@@ -518,7 +589,7 @@ pub async fn start(engine: &Engine, name: &str, progress: Progress<'_>) -> Resul
             progress,
         )
         .await?;
-    Ok(engine.computer(name).await?.to_json())
+    with_warning(engine, engine.computer(name).await?.to_json()).await
 }
 
 pub async fn stop(engine: &Engine, name: &str, progress: Progress<'_>) -> Result<Value, CliError> {
@@ -645,154 +716,6 @@ fn target(computer: &Computer) -> ComputerTargetParams {
     }
 }
 
-/// What a fork carries beyond its source and name: the secrets it may use and what to quiet.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ForkExtras {
-    pub secrets: Vec<String>,
-    pub quiet: Option<QuietSpec>,
-}
-
-/// The recipe's `quiet:` processes to stop and `scrub:` paths to remove in the fork.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct QuietSpec {
-    pub stop: Vec<String>,
-    pub scrub: Vec<String>,
-}
-
-/// The one place the recipe and `--secret` become fork parameters. `quiet` is present only
-/// when the recipe names something to stop or scrub.
-pub fn fork_extras(recipe: Option<&Recipe>, secrets: &[String]) -> ForkExtras {
-    let quiet = recipe
-        .filter(|recipe| !recipe.quiet.is_empty() || !recipe.scrub.is_empty())
-        .map(|recipe| QuietSpec {
-            stop: quiet_names(recipe),
-            scrub: recipe.scrub.clone(),
-        });
-    ForkExtras {
-        secrets: secrets.to_vec(),
-        quiet,
-    }
-}
-
-/// The recipe's `quiet:` list as the guest matches it. The guest stops processes by program
-/// or script name, and a service's launcher `exec`s its command, so the running process of a
-/// service never carries the service's name: an entry naming one of the recipe's `services:`
-/// is kept (its launcher and autostart entry go by that name) and followed by the name its
-/// process runs under.
-fn quiet_names(recipe: &Recipe) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    for entry in &recipe.quiet {
-        let program = recipe
-            .services
-            .get(entry)
-            .and_then(|command| service_program(command));
-        for name in std::iter::once(entry.clone()).chain(program) {
-            if !names.contains(&name) {
-                names.push(name);
-            }
-        }
-    }
-    names
-}
-
-/// One line per quiet service whose running process name cannot be derived: only the service's
-/// own name is stopped for it, which its process does not carry.
-pub fn quiet_warnings(recipe: &Recipe) -> Vec<String> {
-    recipe
-        .quiet
-        .iter()
-        .filter_map(|entry| Some((entry, recipe.services.get(entry)?)))
-        .filter(|(_, command)| service_program(command).is_none())
-        .map(|(entry, _)| {
-            format!(
-                "quiet: cannot tell which process service {entry} runs; name its program or script in quiet: too."
-            )
-        })
-        .collect()
-}
-
-/// Programs that run some other program; their name says nothing about the service.
-const LAUNCHERS: [&str; 18] = [
-    "env", "sudo", "nohup", "nice", "exec", "timeout", "java", "npm", "npx", "yarn", "pnpm", "uv",
-    "docker", "make", "bun", "deno", "bash", "sh",
-];
-
-/// Interpreters whose process name is matched by the script they run.
-const INTERPRETERS: [&str; 6] = ["python", "node", "nodejs", "perl", "ruby", "php"];
-
-/// Interpreter options that run code or a module instead of a script file.
-const NO_SCRIPT: [&str; 8] = [
-    "-m",
-    "-c",
-    "-e",
-    "-p",
-    "-r",
-    "--eval",
-    "--print",
-    "--require",
-];
-
-/// The program or script name a service command runs under, as the guest's quiet step matches
-/// it: the script after an interpreter, by its full file name, when the script is a specific
-/// file (`python3 -u /opt/app/poller.py` is `poller.py`; `node server` says too little), else
-/// the program (`openclaw gateway` is `openclaw`). `None` for a launcher (`npm start`,
-/// `sudo x`, `bash run.sh`) and when the command is not a plain command line the launcher
-/// `exec`s.
-fn service_program(command: &str) -> Option<String> {
-    let plain = |c: char| c.is_ascii_alphanumeric() || "-_./:=@%+, ".contains(c);
-    if !command.chars().all(plain) {
-        return None;
-    }
-    let mut words = command.split_whitespace();
-    let first = words.next().filter(|word| !word.contains('='))?;
-    let base = |word: &str| word.rsplit('/').next().unwrap_or(word).to_owned();
-    let program = base(first);
-    let family = program.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
-    if LAUNCHERS.contains(&family) {
-        return None;
-    }
-    let name = if INTERPRETERS.contains(&family) {
-        let mut options = Vec::new();
-        let script = words.find(|word| {
-            options.push(*word);
-            !word.starts_with('-')
-        })?;
-        if options.iter().any(|option| NO_SCRIPT.contains(option)) {
-            return None;
-        }
-        let name = base(script);
-        let specific = name
-            .split_once('.')
-            .is_some_and(|(stem, extension)| !stem.is_empty() && !extension.is_empty());
-        if !specific {
-            return None;
-        }
-        name
-    } else {
-        program
-    };
-    let valid = |c: char| c.is_ascii_alphanumeric() || "._@:+-".contains(c);
-    let usable = !name.is_empty() && name != "." && name != ".." && !name.starts_with('-');
-    (usable && name.chars().all(valid)).then_some(name)
-}
-
-/// Puts the extras onto the engine's fork parameters. The parameters carry no secrets or
-/// quiet fields yet, so anything that would be dropped is refused instead.
-pub fn apply_fork_extras(
-    params: &mut CheckpointForkParams,
-    extras: &ForkExtras,
-) -> Result<(), CliError> {
-    params.secrets = extras.secrets.clone();
-    params.quiet = extras
-        .quiet
-        .as_ref()
-        .map(|quiet| silo_api::methods::checkpoints::QuietSpec {
-            stop: quiet.stop.clone(),
-            scrub: quiet.scrub.clone(),
-        });
-    Ok(())
-}
-
 /// `<source>-<short id>`, the name a fork gets when none is given.
 pub fn default_fork_name(source: &str, short_id: &str) -> String {
     format!("{source}-{short_id}")
@@ -808,69 +731,76 @@ pub struct ForkArgs {
     pub name: Option<String>,
     pub checkpoint: Option<String>,
     pub secrets: Vec<String>,
-    pub recipe: Option<Recipe>,
     /// Fork from this recipe's cached build instead of `source`.
     pub recipe_name: Option<String>,
+    /// Leave the new computer stopped.
+    pub no_start: bool,
 }
 
 pub async fn fork(
     engine: &Engine,
     args: &ForkArgs,
-    settings: Option<&Settings>,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
-    Settings::check_fork_secrets(settings, &args.secrets)?;
-    fork_then_sweep(engine, fork_now(engine, args, settings, progress)).await
+    fork_then_sweep(engine, fork_now(engine, args, progress)).await
 }
 
 async fn fork_now(
     engine: &Engine,
     args: &ForkArgs,
-    settings: Option<&Settings>,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let mut recipe_hash = None;
-    let mut checkpoint = args.checkpoint.clone();
+    let mut checkpoint = None;
+    let mut recipe_ports: Vec<u16> = Vec::new();
     let source = match &args.recipe_name {
         Some(recipe_name) => {
-            Settings::check_recipe(settings, recipe_name)?;
-            let recipe = args.recipe.as_ref().ok_or_else(|| {
-                CliError::new(format!("The recipe {recipe_name} was not loaded."))
-            })?;
-            let built = build_recipe(engine, recipe_name, recipe, false, progress).await?;
+            let built = build_recipe(engine, recipe_name, false, progress).await?;
             let entry = &built["recipe"];
             let text = |key: &str| entry[key].as_str().unwrap_or_default().to_owned();
             recipe_hash = Some(text("hash"));
             checkpoint = Some(text("checkpointId"));
+            recipe_ports = entry["ports"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|port| port.as_u64().and_then(|port| u16::try_from(port).ok()))
+                .collect();
             let all = engine.all_computers().await?;
             let mut builder = find(&all, &text("computerId"))?.clone();
             builder.name = recipe_name.clone();
             builder
         }
-        None => engine.computer(&args.source).await?,
+        None => {
+            let source = engine.computer(&args.source).await?;
+            if let Some(wanted) = &args.checkpoint {
+                checkpoint = Some(resolve_checkpoint(
+                    &source.name,
+                    &source.checkpoints,
+                    wanted,
+                )?);
+            }
+            source
+        }
     };
-    let name = match (&args.name, &args.recipe_name) {
-        (Some(name), _) => name.clone(),
-        (None, _) => default_fork_name(&source.name, &short_id()),
+    let name = match &args.name {
+        Some(name) => name.clone(),
+        None => default_fork_name(&source.name, &short_id()),
     };
     let started = crate::clock::now_unix();
     let known_before: Vec<Value> = source.checkpoints.clone();
-    let mut params = CheckpointForkParams {
+    // The recipe's quiet and scrub lists are applied by the engine, from the recipe the
+    // source was built from.
+    let params = CheckpointForkParams {
         computer_id: source.id.clone(),
         device_id: None,
         checkpoint_id: checkpoint.clone(),
         new_name: name.clone(),
-        secrets: Vec::new(),
+        secrets: args.secrets.clone(),
         quiet: None,
         recipe_hash,
+        network_policy: None,
     };
-    apply_fork_extras(
-        &mut params,
-        &fork_extras(args.recipe.as_ref(), &args.secrets),
-    )?;
-    for warning in args.recipe.iter().flat_map(quiet_warnings) {
-        progress(&warning);
-    }
     engine
         .run_job(
             &format!("Forking {} into {name}", source.name),
@@ -879,22 +809,15 @@ async fn fork_now(
         )
         .await?;
     let forked = engine.computer(&name).await?;
-    match &args.recipe_name {
-        Some(recipe_name) => crate::flows::remember_recipe(engine, &forked.id, recipe_name),
-        None => crate::flows::inherit_recipe(engine, &source.id, &forked.id),
-    }
     let mut fork = forked.to_json();
     fork["source"] = json!(source.name);
     // The fork reaches the same ports its source publishes (a recipe fork, those the recipe
     // names), each on a host port of its own.
-    let published = match (&args.recipe_name, &args.recipe) {
+    let published = match &args.recipe_name {
         // Ports are published by this device's engine (`network.*` is not routed).
         _ if engine.device().is_some() => Ok(Vec::new()),
-        (Some(_), Some(recipe)) => {
-            crate::access::publish_recipe_ports(engine, &forked, &recipe.ports).await
-        }
-        (Some(_), None) => Ok(Vec::new()),
-        (None, _) => crate::access::inherit_ports(engine, &source, &forked).await,
+        Some(_) => crate::access::publish_recipe_ports(engine, &forked, &recipe_ports).await,
+        None => crate::access::inherit_ports(engine, &source, &forked).await,
     };
     match published {
         Ok(ports) => fork["ports"] = json!(ports),
@@ -927,7 +850,33 @@ async fn fork_now(
         "reused": reused,
     });
     fork["forkedAsOf"] = json!(crate::clock::local_clock(at));
+    // A fork made to work in is running; the caller says if it should stay stopped.
+    if !args.no_start && forked.state != "running" {
+        start(engine, &name, progress).await?;
+        let running = engine.computer(&name).await?;
+        fork["state"] = json!(running.state);
+    }
+    if let Some(warning) = resource_warning(engine).await {
+        fork["warning"] = json!(warning);
+    }
     Ok(fork)
+}
+
+/// The sentence about the device's memory or disk when it is running short, so whoever makes
+/// another computer knows before the device slows down. `None` when there is enough, or when
+/// the engine cannot say.
+pub async fn resource_warning(engine: &Engine) -> Option<String> {
+    let resources = device_resources(engine).await.ok()?;
+    matches!(resources["state"].as_str(), Some("low" | "critical"))
+        .then(|| resources["message"].as_str().map(str::to_owned))
+        .flatten()
+}
+
+/// `device.resources`: what the device has left and the computers running on it.
+pub async fn device_resources(engine: &Engine) -> Result<Value, CliError> {
+    engine
+        .call(requests::device_resources(DeviceParams { device_id: None }))
+        .await
 }
 
 /// The newest checkpoint of `computer_id` that was not in `before`: the one a fork without a
@@ -962,6 +911,10 @@ pub const BASELINE_PREFIX: &str = "silo-baseline-";
 const RECIPE_KEY_PREFIX: &str = "recipe:";
 /// Name prefix of the hidden computers that recipes are built in.
 pub const BUILDER_PREFIX: &str = "silo-build-";
+/// Name prefix of the hidden copies an export without logins is made from.
+pub const EXPORT_COPY_PREFIX: &str = "silo-export-";
+/// Name prefix of the hidden computer a rebuild builds beside the one it rebuilds.
+pub const REBUILD_BUILD_PREFIX: &str = "silo-rebuild-";
 /// The longest a throwaway fork is left idle, however long the real fork has run.
 pub const BASELINE_CAP_SECONDS: u64 = 600;
 
@@ -1177,20 +1130,17 @@ async fn measure_on_throwaway(
             .collect()
     };
     let (stop, scrub) = (list("stop"), list("scrub"));
-    let extras = ForkExtras {
-        secrets: Vec::new(),
-        quiet: (!stop.is_empty() || !scrub.is_empty()).then_some(QuietSpec { stop, scrub }),
-    };
-    let mut params = CheckpointForkParams {
+    let params = CheckpointForkParams {
         computer_id: copy.owner.id.clone(),
         device_id: None,
         checkpoint_id: Some(copy.checkpoint.to_owned()),
         new_name: name.to_owned(),
         secrets: Vec::new(),
-        quiet: None,
+        quiet: (!stop.is_empty() || !scrub.is_empty())
+            .then_some(silo_api::methods::checkpoints::QuietSpec { stop, scrub }),
         recipe_hash: copy.recipe_hash.map(str::to_owned),
+        network_policy: None,
     };
-    apply_fork_extras(&mut params, &extras)?;
     engine
         .run_job(
             "Forking the idle copy that measures the baseline",
@@ -1484,17 +1434,6 @@ pub async fn job(engine: &Engine, id: &str, progress: Progress<'_>) -> Result<Va
         .await
 }
 
-/// The recipe a fork uses: the explicit file, else the project's `.silo/recipe.yaml`.
-pub fn resolve_recipe(
-    explicit: Option<&std::path::Path>,
-    project: &crate::config::Project,
-) -> Result<Option<Recipe>, CliError> {
-    match explicit {
-        Some(path) => crate::config::load_recipe(path).map(Some),
-        None => project.load_recipe(),
-    }
-}
-
 pub fn parse_checkpoint_kind(text: &str) -> Result<CheckpointKind, CliError> {
     match text {
         "manual" => Ok(CheckpointKind::Manual),
@@ -1534,42 +1473,62 @@ pub async fn checkpoint(
     Ok(result.get("checkpoint").cloned().unwrap_or(result))
 }
 
-/// The recipe's `keep:` section as the engine takes it.
-pub fn keep_hooks(recipe: Option<&Recipe>) -> Option<KeepHooks> {
-    recipe.map(|recipe| KeepHooks {
-        restart: recipe.keep.restart.clone(),
-        migrate: recipe.keep.migrate.clone(),
-        after: recipe.keep.after.clone(),
-    })
-}
-
-/// What a keep is asked beyond the fork and target.
+/// What a merge is asked beyond the fork and target.
 #[derive(Clone, Debug, Default)]
-pub struct FoldOptions {
+pub struct MergeOptions {
     pub dry_run: bool,
     /// Carry database changes even though no migrate step covers them.
     pub data_ok: bool,
     /// The review digest from `silo diff --json`.
     pub reviewed: Option<String>,
+    /// The answer for each item both sides changed, by item id.
+    pub choices: std::collections::BTreeMap<String, KeepAnswer>,
+    /// Items not to bring over even though they do not conflict.
+    pub skip: Vec<String>,
 }
 
-/// Keeps a fork's changes into `into` (default: the computer the fork was made from). A
-/// refused keep is a result (`status: "refused"`), not an error: nothing was changed.
-pub async fn fold(
+/// Parses `item=fork`, `item=main` or `item=branch`. The item is an id as the merge lists it
+/// (`file:/etc/app.conf`, `package:dpkg:jq`, `repo:/work/app`), so the answer follows the last
+/// `=`.
+pub fn parse_choice(text: &str) -> Result<(String, KeepAnswer), CliError> {
+    let wrong = || {
+        CliError::new(format!(
+            "`{text}` is not an answer. Write <item>=<fork|main|branch>, with the item as the merge lists it."
+        ))
+    };
+    let (item, answer) = text.rsplit_once('=').ok_or_else(wrong)?;
+    if item.trim().is_empty() {
+        return Err(wrong());
+    }
+    let answer = match answer.trim() {
+        "fork" => KeepAnswer::Fork,
+        "main" => KeepAnswer::Main,
+        "branch" => KeepAnswer::Branch,
+        _ => return Err(wrong()),
+    };
+    Ok((item.trim().to_owned(), answer))
+}
+
+/// Merges a fork's changes into `into` (default: the computer the fork was made from). A
+/// refused merge is a result (`status: "refused"`), not an error: nothing was changed. A
+/// refusal with `reason: "choices-needed"` lists the conflicts and the answers that settle
+/// each.
+pub async fn merge(
     engine: &Engine,
     fork: &str,
     into: Option<&str>,
-    keep: Option<KeepHooks>,
-    options: FoldOptions,
+    options: MergeOptions,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
-    let FoldOptions {
+    let MergeOptions {
         dry_run,
         data_ok,
         reviewed,
+        choices,
+        skip,
     } = options;
     let fork = engine.computer(fork).await?;
-    // Without a digest, the one the last `silo diff` of this fork showed pins the keep.
+    // Without a digest, the one the last `silo diff` of this fork showed pins the merge.
     // A dry run reports and never pins: it ignores the digest a review left behind.
     let reviewed = if dry_run {
         None
@@ -1580,7 +1539,7 @@ pub async fn fold(
         Some(name) => Some(engine.computer(name).await?.id),
         None => None,
     };
-    let label = if dry_run { "Checking" } else { "Keeping" };
+    let label = if dry_run { "Checking" } else { "Merging" };
     engine
         .run_job(
             &format!("{label} {}", fork.name),
@@ -1588,19 +1547,21 @@ pub async fn fold(
                 device_id: None,
                 fork_id: fork.id,
                 target_id,
-                keep,
+                keep: None,
                 dry_run: dry_run.then_some(true),
                 data_ok: data_ok.then_some(true),
                 review_digest: reviewed,
+                choices: (!choices.is_empty()).then_some(choices),
+                skip: (!skip.is_empty()).then_some(skip),
             }),
             progress,
         )
         .await
 }
 
-/// Makes a fork main: it replaces `into` (default: the computer it was made from). A refused
-/// promote is a result (`status: "refused"`); nothing was changed.
-pub async fn promote(
+/// Replaces main with a fork: it takes `into`'s place (default: the computer it was made
+/// from). A refused replace is a result (`status: "refused"`); nothing was changed.
+pub async fn replace_main(
     engine: &Engine,
     fork: &str,
     into: Option<&str>,
@@ -1610,7 +1571,7 @@ pub async fn promote(
     let fork = engine.computer(fork).await?;
     if let Some(record) = crate::folder::record_for(engine, &fork.id) {
         return Err(CliError::new(format!(
-            "{} was made from {}; it cannot become main. Fold it into that folder instead.",
+            "{} was made from {}; it cannot replace main. Merge it into that folder instead.",
             fork.name, record.path
         )));
     }
@@ -1618,7 +1579,11 @@ pub async fn promote(
         Some(name) => Some(engine.computer(name).await?.id),
         None => None,
     };
-    let label = if dry_run { "Checking" } else { "Promoting" };
+    let label = if dry_run {
+        "Checking"
+    } else {
+        "Replacing main with"
+    };
     engine
         .run_job(
             &format!("{label} {}", fork.name),
@@ -1633,7 +1598,40 @@ pub async fn promote(
         .await
 }
 
-/// Puts a computer back to before its latest keep.
+/// Rebuilds a Linux computer on the newest guest image, keeping its workspace and home. A
+/// computer already on the newest image is refused unless `force` is set. With `abandon`, an
+/// interrupted rebuild that Silo could not settle is thrown away and the old computer put back.
+pub async fn rebuild(
+    engine: &Engine,
+    computer: &str,
+    force: bool,
+    abandon: bool,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let computer = engine.computer(computer).await?;
+    engine
+        .run_job(
+            &format!(
+                "{} {}",
+                if abandon {
+                    "Abandoning the rebuild of"
+                } else {
+                    "Rebuilding"
+                },
+                computer.name
+            ),
+            requests::computers_rebuild(ComputerRebuildParams {
+                device_id: None,
+                computer_id: computer.id,
+                force: force.then_some(true),
+                abandon: abandon.then_some(true),
+            }),
+            progress,
+        )
+        .await
+}
+
+/// Puts a computer back to before its latest merge.
 pub async fn undo(
     engine: &Engine,
     computer: &str,
@@ -1642,7 +1640,7 @@ pub async fn undo(
     let target = engine.computer(computer).await?;
     engine
         .run_job(
-            &format!("Undoing the latest keep or promote of {}", target.name),
+            &format!("Undoing the latest merge or replace of {}", target.name),
             requests::changes_undo(ChangesUndoParams {
                 device_id: None,
                 computer_id: target.id,
@@ -1650,6 +1648,107 @@ pub async fn undo(
             progress,
         )
         .await
+}
+
+/// The names of the secrets each computer holds and the hosts each may be sent to, from
+/// `computers.access`: the read a computer may make, which never returns a value.
+pub async fn secrets_from_access(engine: &Engine) -> Result<Value, CliError> {
+    let held = crate::access::held(engine, None).await?;
+    let computers: Vec<Value> = held["computers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|computer| json!({ "computer": computer["name"], "secrets": computer["secrets"] }))
+        .collect();
+    Ok(json!({ "computers": computers }))
+}
+
+/// The coding agents a computer has and whether each is installed.
+pub async fn agents_list(engine: &Engine, computer: &str) -> Result<Value, CliError> {
+    let target = engine.computer(computer).await?;
+    let mut value = engine
+        .call(requests::agents_list(target_of(&target)))
+        .await?;
+    value["computer"] = json!(target.name);
+    Ok(value)
+}
+
+/// Installs a coding agent in a computer and returns the agents it now has.
+pub async fn agent_install(
+    engine: &Engine,
+    computer: &str,
+    agent: silo_api::methods::agents::AgentId,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let target = engine.computer(computer).await?;
+    let mut value = engine
+        .run_job(
+            &format!("Installing {} in {}", agent.display_name(), target.name),
+            requests::agents_install(silo_api::methods::agents::AgentsInstallParams {
+                computer_id: target.id.clone(),
+                device_id: None,
+                agent,
+            }),
+            progress,
+        )
+        .await?;
+    value["computer"] = json!(target.name);
+    Ok(value)
+}
+
+/// The id of the checkpoint `wanted` names, by id or by name. A name that several checkpoints
+/// share is refused with their ids listed.
+pub fn resolve_checkpoint(
+    computer: &str,
+    checkpoints: &[Value],
+    wanted: &str,
+) -> Result<String, CliError> {
+    if let Some(id) = checkpoints
+        .iter()
+        .find(|cp| cp["id"] == wanted)
+        .and_then(|cp| cp["id"].as_str())
+    {
+        return Ok(id.to_owned());
+    }
+    let ids: Vec<&str> = checkpoints
+        .iter()
+        .filter(|cp| cp["name"] == wanted)
+        .filter_map(|cp| cp["id"].as_str())
+        .collect();
+    match ids.as_slice() {
+        [id] => Ok((*id).to_owned()),
+        [] => Err(CliError::new(format!(
+            "{computer} has no checkpoint {wanted}. `silo checkpoints {computer}` lists them."
+        ))),
+        many => Err(CliError::new(format!(
+            "{computer} has {} checkpoints named {wanted}: {}. Use one of these ids.",
+            many.len(),
+            many.join(", ")
+        ))),
+    }
+}
+
+/// Puts a computer back to one of its checkpoints, named by id or by name.
+pub async fn restore(
+    engine: &Engine,
+    computer: &str,
+    checkpoint: &str,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let target = engine.computer(computer).await?;
+    let wanted = resolve_checkpoint(&target.name, &target.checkpoints, checkpoint)?;
+    engine
+        .run_job(
+            &format!("Restoring {}", target.name),
+            requests::checkpoints_restore(silo_api::methods::checkpoints::CheckpointTargetParams {
+                computer_id: target.id.clone(),
+                device_id: None,
+                checkpoint_id: wanted,
+            }),
+            progress,
+        )
+        .await?;
+    Ok(engine.computer(computer).await?.to_json())
 }
 
 pub async fn checkpoints(engine: &Engine, computer: &str) -> Result<Value, CliError> {
@@ -1660,7 +1759,34 @@ pub async fn checkpoints(engine: &Engine, computer: &str) -> Result<Value, CliEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::parse_recipe;
+
+    #[test]
+    fn a_checkpoint_is_found_by_id_or_by_a_unique_name() {
+        let checkpoints = vec![
+            json!({"id": "cp-1", "name": "before"}),
+            json!({"id": "cp-2", "name": "twin"}),
+            json!({"id": "cp-3", "name": "twin"}),
+        ];
+        assert_eq!(
+            resolve_checkpoint("a", &checkpoints, "cp-2").unwrap(),
+            "cp-2"
+        );
+        assert_eq!(
+            resolve_checkpoint("a", &checkpoints, "before").unwrap(),
+            "cp-1"
+        );
+        let ambiguous = resolve_checkpoint("a", &checkpoints, "twin")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            ambiguous.contains("cp-2") && ambiguous.contains("cp-3"),
+            "{ambiguous}"
+        );
+        let missing = resolve_checkpoint("a", &checkpoints, "nope")
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("no checkpoint nope"), "{missing}");
+    }
 
     #[test]
     fn no_desktop_sends_the_setting_the_apps_form_sends() {
@@ -1684,110 +1810,6 @@ mod tests {
     }
 
     #[test]
-    fn fork_extras_map_the_recipe_and_secrets() {
-        let recipe = parse_recipe("quiet: [poller]\nscrub: [/root/.env]\n").unwrap();
-        let extras = fork_extras(Some(&recipe), &["github".to_owned()]);
-        assert_eq!(extras.secrets, ["github"]);
-        assert_eq!(
-            extras.quiet,
-            Some(QuietSpec {
-                stop: vec!["poller".into()],
-                scrub: vec!["/root/.env".into()]
-            })
-        );
-        assert_eq!(fork_extras(None, &[]), ForkExtras::default());
-        let empty = parse_recipe("keep: { restart: [web] }\n").unwrap();
-        assert_eq!(fork_extras(Some(&empty), &[]).quiet, None);
-    }
-
-    #[test]
-    fn a_quiet_service_also_stops_the_program_it_runs() {
-        let recipe = parse_recipe(concat!(
-            "services:\n",
-            "  final-poller: python3 -u /opt/final/poller.py\n",
-            "  gateway: openclaw gateway\n",
-            "  shell: cd /srv && ./run\n",
-            "quiet: [final-poller, gateway, openclaw, shell, cron]\n",
-        ))
-        .unwrap();
-        let stop = fork_extras(Some(&recipe), &[]).quiet.unwrap().stop;
-        assert_eq!(
-            stop,
-            [
-                "final-poller",
-                "poller.py",
-                "gateway",
-                "openclaw",
-                "shell",
-                "cron"
-            ]
-        );
-        assert_eq!(
-            service_program("node server.js").as_deref(),
-            Some("server.js")
-        );
-        assert_eq!(
-            service_program("/usr/bin/redis-server --port 6380").as_deref(),
-            Some("redis-server")
-        );
-        assert_eq!(service_program("PORT=1 node app.js"), None);
-        assert_eq!(service_program("python3"), None);
-    }
-
-    #[test]
-    fn launchers_and_unspecific_scripts_name_no_process_and_warn() {
-        for command in [
-            "env FOO=1 poller",
-            "sudo -u bot poller",
-            "nohup poller",
-            "nice -n 5 poller",
-            "exec poller",
-            "timeout 60 poller",
-            "java -jar /opt/app.jar",
-            "npm start",
-            "npx serve",
-            "yarn dev",
-            "pnpm run bot",
-            "uv run bot.py",
-            "docker run app",
-            "make serve",
-            "bun run index.ts",
-            "deno run main.ts",
-            "bash run.sh",
-            "/bin/sh -c poller",
-            "node server",
-            "python3 -m http.server",
-            "python3 -c pass",
-            "node -e 1",
-            "python3 -u /opt/app/.env",
-        ] {
-            assert_eq!(service_program(command), None, "{command}");
-        }
-        assert_eq!(
-            service_program("python3.12 -u /opt/app/poller.py").as_deref(),
-            Some("poller.py")
-        );
-        assert_eq!(
-            service_program("node /srv/bot/index.mjs").as_deref(),
-            Some("index.mjs")
-        );
-        let recipe = parse_recipe(concat!(
-            "services:\n",
-            "  web: npm start\n",
-            "  poller: python3 /opt/poller.py\n",
-            "quiet: [web, poller, cron]\n",
-        ))
-        .unwrap();
-        assert_eq!(
-            fork_extras(Some(&recipe), &[]).quiet.unwrap().stop,
-            ["web", "poller", "poller.py", "cron"]
-        );
-        let warnings = quiet_warnings(&recipe);
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("service web"), "{}", warnings[0]);
-    }
-
-    #[test]
     fn signals_map_to_shell_exit_codes() {
         assert_eq!(exit_code_for(Some(3), Some("KILL")), 3);
         assert_eq!(exit_code_for(None, Some("KILL")), 137);
@@ -1800,47 +1822,23 @@ mod tests {
     }
 
     #[test]
-    fn fork_extras_reach_the_fork_parameters() {
-        let mut params = CheckpointForkParams {
-            computer_id: "c".into(),
-            device_id: None,
-            checkpoint_id: None,
-            new_name: "n".into(),
-            secrets: Vec::new(),
-            quiet: None,
-            recipe_hash: None,
-        };
-        apply_fork_extras(&mut params, &ForkExtras::default()).unwrap();
-        assert!(params.secrets.is_empty());
-        assert!(params.quiet.is_none());
-        let recipe =
-            crate::config::parse_recipe("quiet: [poller]\nscrub: [/root/.bot.env]\n").unwrap();
-        apply_fork_extras(
-            &mut params,
-            &fork_extras(Some(&recipe), &["github".to_owned()]),
-        )
-        .unwrap();
-        assert_eq!(params.secrets, ["github"]);
-        let quiet = params.quiet.unwrap();
-        assert_eq!(quiet.stop, ["poller"]);
-        assert_eq!(quiet.scrub, ["/root/.bot.env"]);
-    }
-
-    #[test]
-    fn the_recipe_comes_from_the_file_or_the_project() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join(".silo")).unwrap();
-        std::fs::write(root.path().join(".silo/recipe.yaml"), "quiet: [p]\n").unwrap();
-        let project = crate::config::Project::discover(root.path());
+    fn merge_answers_parse_with_the_item_ids_the_merge_lists() {
         assert_eq!(
-            resolve_recipe(None, &project).unwrap().unwrap().quiet,
-            ["p"]
+            parse_choice("file:/etc/app.conf=fork").unwrap(),
+            ("file:/etc/app.conf".to_owned(), KeepAnswer::Fork)
         );
-        let none = crate::config::Project::default();
-        assert_eq!(resolve_recipe(None, &none).unwrap(), None);
-        std::fs::write(root.path().join(".silo/recipe.yaml"), "bogus: 1\n").unwrap();
-        let project = crate::config::Project::discover(root.path());
-        assert!(resolve_recipe(None, &project).is_err());
+        assert_eq!(
+            parse_choice("repo:/work/app=branch").unwrap().1,
+            KeepAnswer::Branch
+        );
+        // The answer follows the last `=`: a path may hold one.
+        assert_eq!(
+            parse_choice("file:/a=b.txt=main").unwrap(),
+            ("file:/a=b.txt".to_owned(), KeepAnswer::Main)
+        );
+        for bad in ["file:/x", "=fork", "file:/x=theirs", ""] {
+            assert!(parse_choice(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
@@ -1865,12 +1863,11 @@ mod tests {
 
 // MARK: Recipes
 
-/// Builds a recipe, or returns its cached build. The result carries `recipe` (the cache entry)
-/// and `built` (false for a cache hit).
+/// Builds a stored recipe, or returns its cached build. The result carries `recipe` (the
+/// cache entry) and `built` (false for a cache hit).
 pub async fn build_recipe(
     engine: &Engine,
     name: &str,
-    recipe: &Recipe,
     force: bool,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
@@ -1880,7 +1877,7 @@ pub async fn build_recipe(
             requests::recipes_build(RecipeBuildParams {
                 device_id: None,
                 name: name.to_owned(),
-                spec: recipe.spec(),
+                spec: None,
                 force: force.then_some(true),
             }),
             progress,
@@ -1888,26 +1885,48 @@ pub async fn build_recipe(
         .await
 }
 
-/// Every recipe the project and the CLI offer, with whether the engine holds a build of it.
-pub async fn recipe_list(
+/// Stores a recipe under `name`, replacing the one of that name.
+pub async fn recipe_add(
     engine: &Engine,
-    project: &crate::config::Project,
+    name: &str,
+    recipe: RecipeDefinition,
 ) -> Result<Value, CliError> {
-    let built = engine
-        .call(requests::recipes_list(
-            silo_api::methods::common::DeviceParams { device_id: None },
-        ))
+    engine
+        .call(requests::recipes_save(RecipeSaveParams {
+            device_id: None,
+            name: name.to_owned(),
+            recipe,
+        }))
+        .await
+}
+
+/// One stored recipe with its hash, whether a build of it exists and any warnings.
+pub async fn recipe_show(engine: &Engine, name: &str) -> Result<Value, CliError> {
+    engine
+        .call(requests::recipes_get(RecipeGetParams {
+            device_id: None,
+            name: name.to_owned(),
+        }))
+        .await
+}
+
+/// Every stored recipe, with whether the engine holds a build of it.
+pub async fn recipe_list(engine: &Engine) -> Result<Value, CliError> {
+    let listed = engine
+        .call(requests::recipes_list(DeviceParams { device_id: None }))
         .await?;
-    let built = built["recipes"].as_array().cloned().unwrap_or_default();
-    let recipes: Vec<Value> = project
-        .recipe_names()
+    let built = listed["recipes"].as_array().cloned().unwrap_or_default();
+    let recipes: Vec<Value> = listed["saved"]
+        .as_array()
         .into_iter()
-        .map(|(name, origin)| {
-            let entry = built.iter().find(|entry| entry["name"] == name.as_str());
+        .flatten()
+        .map(|saved| {
+            let entry = built.iter().find(|entry| entry["name"] == saved["name"]);
             json!({
-                "name": name,
-                "origin": origin,
-                "built": entry.is_some(),
+                "name": saved["name"],
+                "origin": if saved["builtIn"] == true { "built-in" } else { "saved" },
+                "os": saved["os"],
+                "built": saved["built"],
                 "builtAt": entry.map(|entry| entry["builtAt"].clone()),
                 "imageVersion": entry.map(|entry| entry["imageVersion"].clone()),
             })
@@ -1916,6 +1935,7 @@ pub async fn recipe_list(
     Ok(json!({ "recipes": recipes }))
 }
 
+/// Forgets a stored recipe and drops its build.
 pub async fn recipe_remove(engine: &Engine, name: &str) -> Result<Value, CliError> {
     engine
         .call(requests::recipes_remove(RecipeRemoveParams {
@@ -1924,6 +1944,14 @@ pub async fn recipe_remove(engine: &Engine, name: &str) -> Result<Value, CliErro
         }))
         .await?;
     Ok(json!({ "removed": name }))
+}
+
+/// The recipe a computer was built from, as it was when it was built.
+pub async fn computer_recipe(engine: &Engine, computer: &Computer) -> Result<Value, CliError> {
+    let reply = engine
+        .call(requests::computers_recipe(target(computer)))
+        .await?;
+    Ok(reply.get("recipe").cloned().unwrap_or(Value::Null))
 }
 
 // MARK: Up
@@ -1935,17 +1963,23 @@ pub async fn recipe_remove(engine: &Engine, name: &str) -> Result<Value, CliErro
 pub async fn up(
     engine: &Engine,
     recipe_name: &str,
-    recipe: &Recipe,
     ssh: Option<(&std::path::Path, silo_client::channel::Channel)>,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let mut created = false;
+    let mut recipe_ports: Vec<u16> = Vec::new();
     let mut main = match engine.computer(MAIN).await {
         Ok(main) => main,
         Err(_) => {
-            let built = build_recipe(engine, recipe_name, recipe, false, progress).await?;
+            let built = build_recipe(engine, recipe_name, false, progress).await?;
             let entry = &built["recipe"];
             let text = |key: &str| entry[key].as_str().unwrap_or_default().to_owned();
+            recipe_ports = entry["ports"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|port| port.as_u64().and_then(|port| u16::try_from(port).ok()))
+                .collect();
             let all = engine.all_computers().await?;
             let builder = find(&all, &text("computerId"))?.clone();
             let params = CheckpointForkParams {
@@ -1956,6 +1990,7 @@ pub async fn up(
                 secrets: Vec::new(),
                 quiet: None,
                 recipe_hash: None,
+                network_policy: None,
             };
             engine
                 .run_job(
@@ -1965,7 +2000,6 @@ pub async fn up(
                 )
                 .await?;
             created = true;
-            crate::flows::remember_recipe(engine, &engine.computer(MAIN).await?.id, recipe_name);
             engine.computer(MAIN).await?
         }
     };
@@ -1975,7 +2009,7 @@ pub async fn up(
     }
     // The recipe's ports are published from main itself, so its forks inherit them.
     let (ports, ports_error) =
-        match crate::access::publish_recipe_ports(engine, &main, &recipe.ports).await {
+        match crate::access::publish_recipe_ports(engine, &main, &recipe_ports).await {
             Ok(ports) => (json!(ports), Value::Null),
             Err(error) => (Value::Null, json!(error.message)),
         };
@@ -2012,5 +2046,6 @@ pub async fn up(
         "publishedPorts": ports,
         "portsError": ports_error,
         "ssh": ssh,
+        "warning": resource_warning(engine).await,
     }))
 }

@@ -37,6 +37,9 @@ import { createFixturePreparationBackend, preparationFixtureFromSearch } from ".
 import { createPreparationStore, PreparationProvider } from "@/desktop/preparation"
 import { computerUseFixtureFromSearch, createFixtureComputerUseBackend, withComputerUseFixture } from "./computer-use"
 import { createFixtureUnseenResult, unseenResultFixtureModeFromSearch } from "./transfer-result-notice"
+import { approvalFixtureModeFromSearch } from "./approvals"
+import { agentFixtureModeFromSearch } from "./agents"
+import { networkFixtureModeFromSearch } from "./network-policy"
 
 export function FixtureApp({ nativeOnboardingComplete = false, nativeDependencies = null, nativeOperations = false, settingsStore }: { nativeOnboardingComplete?: boolean; nativeDependencies?: DependencyRuntime | null; nativeOperations?: boolean; settingsStore?: SettingsStore }) {
   const source = applicationSourceForScenario(scenarioFromSearch(window.location.search))
@@ -61,6 +64,9 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
   const [activityStep, setActivityStep] = useState(0)
   const [dependencyFixtureRecovered, setDependencyFixtureRecovered] = useState(false)
   const operationQueue = operationQueueFromSearch(window.location.search)
+  const approvalMode = approvalFixtureModeFromSearch(window.location.search) ?? "waiting"
+  const agentMode = agentFixtureModeFromSearch(window.location.search) ?? "mixed"
+  const networkMode = networkFixtureModeFromSearch(window.location.search) ?? "mixed"
   // One backup per preview, so the migration screen and Settings, General agree about it.
   // The migration view always has one; elsewhere it appears only when asked for.
   const backupFixtureMode = preUpgradeBackupFixtureModeFromSearch(window.location.search) ?? (surface === "migration" ? "present" : undefined)
@@ -108,6 +114,9 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
             preUpgradeBackup={preUpgradeBackup}
             editorInclude={editorInclude}
             unseenResult={unseenResult}
+          approvals={approvalMode}
+          agents={agentMode}
+          network={networkMode}
           />
         </RuntimeMigrationBoundary>
       ) : surface === "app" ? (
@@ -120,6 +129,9 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
           preUpgradeBackup={preUpgradeBackup}
           editorInclude={editorInclude}
           unseenResult={unseenResult}
+          approvals={approvalMode}
+          agents={agentMode}
+          network={networkMode}
         />
       ) : surface === "status-bar" ? (
         <StatusBarPreview
@@ -147,6 +159,7 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
           onRetryDependencies={nativeDependencies?.retry ?? (scenario === "dependency-failure" ? () => setDependencyFixtureRecovered(true) : undefined)}
           initialGitHubConnectionState={githubState}
           repositoryOptions={repositoryFixtures}
+          agents={agentMode}
           initialCompleted={nativeOnboardingComplete}
           onOpenApp={() => {
             const url = new URL(window.location.href)

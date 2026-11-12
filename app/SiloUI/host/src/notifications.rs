@@ -39,6 +39,8 @@ pub enum Category {
     Changes,
     /// Work that ran for at least `LONG_OPERATION` finished successfully.
     Completions,
+    /// A computer's agent asks for something only the person who runs Silo can allow.
+    Approvals,
 }
 
 /// A successful operation this long or longer is worth a completion notice. Matches the
@@ -73,6 +75,7 @@ impl Category {
             Self::Failures => "failures",
             Self::Changes => "changes",
             Self::Completions => "completions",
+            Self::Approvals => "approvals",
         }
     }
 }
@@ -81,6 +84,12 @@ impl Notice {
     /// Where a click on the system notification opens the app. Same shape as
     /// `desktop/use-main-route.ts`.
     pub fn route(&self) -> Value {
+        if self.category == Category::Approvals {
+            return match self.key.strip_prefix("approval:").filter(|id| !id.is_empty()) {
+                Some(id) => serde_json::json!({"tab": "changes", "approval": id}),
+                None => serde_json::json!({"tab": "changes"}),
+            };
+        }
         match &self.computer {
             Some(computer) => serde_json::json!({"tab": "computers", "computer": computer.id}),
             None => serde_json::json!({"tab": "computers"}),
@@ -116,6 +125,7 @@ pub fn enabled(settings: &Map<String, Value>, category: Category) -> bool {
             ),
             Category::Changes => flag(settings, "notifyChanges", &["notifyHealth"]),
             Category::Completions => flag(settings, "notifyCompletions", &[]),
+            Category::Approvals => flag(settings, "notifyApprovals", &[]),
         }
 }
 
@@ -182,8 +192,28 @@ impl DeliveredIndex {
     }
 
     fn withdraw(&mut self, computer_id: &str) -> PendingWithdrawal {
-        let notices = self
-            .take(computer_id)
+        let keys = self.take(computer_id);
+        self.withdraw_keys(keys)
+    }
+
+    /// Withdraws one notice; the computer's other notices stay.
+    fn withdraw_key(&mut self, computer_id: &str, key: &str) -> PendingWithdrawal {
+        let found = self
+            .keys
+            .get_mut(computer_id)
+            .is_some_and(|keys| keys.remove(key));
+        if self.keys.get(computer_id).is_some_and(BTreeSet::is_empty) {
+            self.keys.remove(computer_id);
+        }
+        self.withdraw_keys(if found {
+            vec![key.to_owned()]
+        } else {
+            Vec::new()
+        })
+    }
+
+    fn withdraw_keys(&mut self, keys: Vec<String>) -> PendingWithdrawal {
+        let notices = keys
             .into_iter()
             .map(|key| {
                 let gate = self.gate(&key);
@@ -250,6 +280,14 @@ pub fn withdraw_computer(computer_id: &str) -> PendingWithdrawal {
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .withdraw(computer_id)
+}
+
+/// Withdraws the notice `key` of the computer, leaving its other notices.
+pub fn withdraw_notice(computer_id: &str, key: &str) -> PendingWithdrawal {
+    DELIVERED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .withdraw_key(computer_id, key)
 }
 
 pub struct PendingWithdrawal {
@@ -398,7 +436,12 @@ mod tests {
     fn settings(value: Value) -> Map<String, Value> {
         value.as_object().unwrap().clone()
     }
-    const ALL: [Category; 3] = [Category::Failures, Category::Changes, Category::Completions];
+    const ALL: [Category; 4] = [
+        Category::Failures,
+        Category::Changes,
+        Category::Completions,
+        Category::Approvals,
+    ];
     #[test]
     fn master_and_each_category_preference_gate_delivery() {
         for category in ALL {
@@ -409,7 +452,8 @@ mod tests {
             ));
         }
         let preferences = settings(
-            json!({"notifyFailures": false, "notifyChanges": false, "notifyCompletions": false}),
+            json!({"notifyFailures": false, "notifyChanges": false, "notifyCompletions": false,
+                "notifyApprovals": false}),
         );
         for category in ALL {
             assert!(!enabled(&preferences, category));
@@ -595,6 +639,24 @@ mod tests {
         notice.computer = None;
         assert_eq!(notice.route(), json!({"tab": "computers"}));
         assert_eq!(notice.thread(), "failures");
+    }
+    #[test]
+    fn an_approval_notice_opens_its_request_on_the_pending_page() {
+        let mut notice = failure(
+            "approval:ap-1",
+            "main asks: Publish port 8080",
+            "",
+            computer(),
+        );
+        notice.category = Category::Approvals;
+        assert_eq!(
+            notice.route(),
+            json!({"tab": "changes", "approval": "ap-1"})
+        );
+        notice.key = "other".into();
+        assert_eq!(notice.route(), json!({"tab": "changes"}));
+        notice.key = "approval:".into();
+        assert_eq!(notice.route(), json!({"tab": "changes"}));
     }
     #[test]
     fn clearing_remote_notices_preserves_other_devices_with_the_same_computer_id() {
@@ -937,5 +999,42 @@ mod tests {
         );
         assert!(index.take("1").is_empty());
         assert_eq!(index.take("2"), vec!["computer:2:lifecycle"]);
+    }
+
+    #[test]
+    fn an_engine_approval_notice_parses_and_has_its_own_switch() {
+        let notice: Notice = serde_json::from_value(json!({"category": "approvals",
+            "key": "approval:ap-0123456789abcdef", "title": "main asks: Publish port 8080",
+            "body": "Allow or deny it in Silo.", "computer": {"id": "1", "name": "main"}}))
+        .unwrap();
+        assert_eq!(notice.category, Category::Approvals);
+        assert!(enabled(&settings(json!({})), Category::Approvals));
+        assert!(!enabled(
+            &settings(json!({"notifyApprovals": false})),
+            Category::Approvals
+        ));
+        assert!(enabled(
+            &settings(json!({"notifyApprovals": false})),
+            Category::Failures
+        ));
+    }
+
+    #[test]
+    fn withdrawing_one_notice_keeps_the_computers_others() {
+        let mut index = DeliveredIndex::default();
+        let notice = |key: &str, category: Category| Notice {
+            category,
+            computer: computer(),
+            ..failure(key, "t", "b", None)
+        };
+        index.record(&notice("computer:1:lifecycle", Category::Failures));
+        index.record(&notice("approval:ap-1", Category::Approvals));
+        let mut cleared = Vec::new();
+        index
+            .withdraw_key("1", "approval:ap-1")
+            .clear(|keys| cleared.extend(keys.iter().cloned()));
+        assert_eq!(cleared, ["approval:ap-1"]);
+        assert!(index.withdraw_key("1", "approval:ap-1").notices.is_empty());
+        assert_eq!(index.take("1"), ["computer:1:lifecycle"]);
     }
 }

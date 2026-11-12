@@ -1,6 +1,7 @@
 import type { ApplicationSource, ApplicationComputer } from "@/features/application/model/application-source"
 import { computerAvailability } from "@/features/application/model/computer-availability"
 import { computerCan } from "@/features/computers/model/computer-capabilities"
+import type { AgentId } from "@/features/agents/model/agents"
 
 /**
  * One computer's "…" menu in the status panel, as data. The desktop app renders it as a
@@ -19,6 +20,9 @@ export interface ComputerMenuHandlers {
   /** Stop and Restart always ask first (decision 8), so they only request a confirmation. */
   confirm: (action: "stop" | "restart") => void
   openTerminal: () => void
+  /** The agents that can be opened in this computer, and how to open one. Absent when none can. */
+  agents?: { id: AgentId; name: string }[]
+  openAgent?: (agent: AgentId) => void
   /** Opens the folder picker for the configured editor. */
   chooseFolder: () => void
   openSite: (port: number) => void
@@ -43,6 +47,7 @@ export function computerMenuItems(computer: ApplicationComputer, source: Applica
       ]),
     { kind: "separator" },
     ...(computerCan(computer.configuration, "terminal") ? [{ kind: "action", id: "terminal", label: `Open in ${source.preferences.terminal}`, enabled: canOpen, run: handlers.openTerminal } as const] : []),
+    ...(handlers.openAgent ? (handlers.agents ?? []).map(({ id, name }) => ({ kind: "action", id: `agent:${id}`, label: `Open ${name}`, enabled: canOpen, run: () => handlers.openAgent!(id) } as const)) : []),
     ...(computerCan(computer.configuration, "editor") ? [{ kind: "action", id: "editor", label: `Open in ${source.preferences.editor}…`, enabled: canOpen, run: handlers.chooseFolder } as const] : []),
     {
       kind: "submenu",

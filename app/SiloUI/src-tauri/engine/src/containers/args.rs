@@ -505,7 +505,8 @@ fn parse_restore(args: &[String]) -> Result<Restore, String> {
             "--net-default-ingress" => {
                 value(index + 1)?;
             }
-            "--disk-only" => {
+            // A container has no host mounts a snapshot could record.
+            "--disk-only" | "--allow-missing-resources" => {
                 index += 1;
                 continue;
             }

@@ -1,0 +1,818 @@
+diff --git a/crates/cli/lib/commands/create.rs b/crates/cli/lib/commands/create.rs
+index e2f70d2e9fc8663811847a66c85d108aabb44db8..890adba52ed6507980db8c86a9c9976bd4071b02 100644
+--- a/crates/cli/lib/commands/create.rs
++++ b/crates/cli/lib/commands/create.rs
+@@ -18,6 +18,14 @@ pub struct CreateArgs {
+     /// May be omitted when a config file supplies `image`.
+     pub image: Option<String>,
+ 
++    /// Prepare persistent storage without executing guest code.
++    #[arg(long)]
++    pub no_start: bool,
++
++    /// Emit credential-free structured progress on stderr.
++    #[arg(long)]
++    pub progress_json: bool,
++
+     /// Sandbox configuration options.
+     #[command(flatten)]
+     pub sandbox: SandboxOpts,
+@@ -54,14 +62,22 @@ pub async fn run(
+         apply_sandbox_opts(builder, &args.sandbox)?
+     };
+ 
+-    let (mut progress, task) = builder.detached(true).create_detached_with_progress()?;
++    let (mut progress, task) = if args.no_start {
++        builder.create_stopped_with_progress()?
++    } else {
++        builder.detached(true).create_detached_with_progress()?
++    };
+     let mut display = if args.sandbox.quiet {
+         ui::PullProgressDisplay::quiet(&image.display())
+     } else {
+         ui::PullProgressDisplay::new(&image.display())
+     };
+ 
++    let mut last_bytes = None;
+     while let Some(event) = progress.recv().await {
++        if args.progress_json && should_emit_progress(&event, &mut last_bytes) {
++            eprintln!("{}", safe_progress(&event));
++        }
+         display.handle_creation_event(event);
+     }
+ 
+@@ -69,7 +85,9 @@ pub async fn run(
+         Ok(Ok(sandbox)) => {
+             display.finish();
+             super::common::display_restore_warnings(&sandbox).await;
+-            sandbox.detach().await;
++            if !args.no_start {
++                sandbox.detach().await;
++            }
+             // Print auto-generated name to stdout so it's scriptable.
+             if !is_named {
+                 println!("{name}");
+@@ -87,3 +105,81 @@ pub async fn run(
+ 
+     Ok(())
+ }
++
++// Never serialize the source event: image references and digests can contain private data.
++fn safe_progress(event: &microsandbox::CreationProgress) -> serde_json::Value {
++    use microsandbox::CreationProgress;
++    use microsandbox_image::PullProgress;
++    use serde_json::json;
++    match event {
++        CreationProgress::Startup(value) => {
++            json!({"type":"silo-progress","phase":format!("runtime-{:?}", value.phase).to_lowercase(),"completedBytes":value.completed_bytes,"totalBytes":value.total_bytes})
++        }
++        CreationProgress::Pull(value) => match value {
++            PullProgress::Resolving { .. } => {
++                json!({"type":"silo-progress","phase":"image-resolving"})
++            }
++            PullProgress::Resolved {
++                layer_count,
++                total_download_bytes,
++                ..
++            } => {
++                json!({"type":"silo-progress","phase":"image-resolved","layerCount":layer_count,"totalBytes":total_download_bytes})
++            }
++            PullProgress::LayerDownloadProgress {
++                layer_index,
++                downloaded_bytes,
++                total_bytes,
++                ..
++            } => {
++                json!({"type":"silo-progress","phase":"image-download","layerIndex":layer_index,"downloadedBytes":downloaded_bytes,"totalBytes":total_bytes})
++            }
++            PullProgress::LayerDownloadComplete {
++                layer_index,
++                downloaded_bytes,
++                ..
++            } => {
++                json!({"type":"silo-progress","phase":"image-downloaded","layerIndex":layer_index,"downloadedBytes":downloaded_bytes})
++            }
++            PullProgress::LayerDownloadVerifying { layer_index, .. } => {
++                json!({"type":"silo-progress","phase":"image-verifying","layerIndex":layer_index})
++            }
++            PullProgress::LayerMaterializeProgress {
++                layer_index,
++                bytes_read,
++                total_bytes,
++            } => {
++                json!({"type":"silo-progress","phase":"image-preparing","layerIndex":layer_index,"preparedBytes":bytes_read,"totalBytes":total_bytes})
++            }
++            PullProgress::LayerMaterializeStarted { layer_index, .. }
++            | PullProgress::LayerMaterializeWriting { layer_index }
++            | PullProgress::LayerMaterializeComplete { layer_index, .. } => {
++                json!({"type":"silo-progress","phase":"image-preparing","layerIndex":layer_index})
++            }
++            PullProgress::Complete { .. } => json!({"type":"silo-progress","phase":"image-ready"}),
++            _ => json!({"type":"silo-progress","phase":"image-preparing"}),
++        },
++    }
++}
++
++fn should_emit_progress(
++    event: &microsandbox::CreationProgress,
++    last: &mut Option<std::time::Instant>,
++) -> bool {
++    let byte_event = matches!(
++        event,
++        microsandbox::CreationProgress::Pull(
++            microsandbox_image::PullProgress::LayerDownloadProgress { .. }
++                | microsandbox_image::PullProgress::LayerMaterializeProgress { .. }
++        )
++    );
++    if !byte_event {
++        return true;
++    }
++    let now = std::time::Instant::now();
++    if last.is_some_and(|before| now.duration_since(before) < std::time::Duration::from_secs(1)) {
++        return false;
++    }
++    *last = Some(now);
++    true
++}
+diff --git a/sdk/rust/lib/backend/local/sandbox/create.rs b/sdk/rust/lib/backend/local/sandbox/create.rs
+index 34e20562d0ee8b01c3d3cfa285c9877c1ea58135..495605a874c74af6425db7a5efd57cbd835b7f40 100644
+--- a/sdk/rust/lib/backend/local/sandbox/create.rs
++++ b/sdk/rust/lib/backend/local/sandbox/create.rs
+@@ -123,6 +123,7 @@ impl LocalBackend {
+         &self,
+         backend: Arc<dyn Backend>,
+         input: impl Into<SandboxBuilder>,
++        start: bool,
+         mode: SpawnMode,
+         progress: Option<PullProgressSender>,
+     ) -> MicrosandboxResult<Sandbox> {
+@@ -931,6 +932,23 @@ impl LocalBackend {
+         };
+         tracing::debug!(sandbox_id, sandbox = %config.spec.name, "create_local: db record inserted");
+ 
++        if !start {
++            // No guest owns this storage; publishing `Created` retires the recovery ownership.
++            drop(lifecycle_guard);
++            creation_cleanup.begin_publication();
++            if let Err(error) =
++                creation::complete(write_db, sandbox_id, SandboxStatus::Created).await
++            {
++                return Err(creation_cleanup.finish_failure(error).await);
++            }
++            creation_cleanup.disarm();
++            return Ok(Sandbox::from_local_created(
++                backend,
++                sandbox_id,
++                persisted_config,
++            ));
++        }
++
+         // Spawn the sandbox process and create the bridge. On failure, mark the sandbox
+         // from Starting to Stopped so it cannot remain as a phantom boot.
+         let restore_closure = config
+@@ -1275,6 +1293,252 @@ impl LocalBackend {
+             }
+         };
+ 
++        // Silo's optional guest service starts on every actual boot, including
++        // boots initiated through the CLI or SSH. A fork carries `silo.quiet-*` labels:
++        // its quiet step runs first, as root, and nothing else is started until it has
++        // succeeded. A missing service must not prevent the VM from becoming usable.
++        if config.spec.labels.get("silo.managed").map(String::as_str) == Some("true") {
++            const SILO_QUIET: &str = r####"set -u
++token=$1; host=$2; shift 2
++case $token in ''|*[!0-9a-f-]*) exit 1;; esac
++quiet=/var/lib/silo-quiet
++mkdir -p "$quiet/disabled" || exit 1
++
++if [ -s "$quiet/$token.machine-id" ]; then
++  new=$(cat "$quiet/$token.machine-id") || exit 1
++else
++  new=$(tr -d - < /proc/sys/kernel/random/uuid) || exit 1
++  printf '%s\n' "$new" > "$quiet/$token.machine-id" || exit 1
++fi
++printf '%s\n' "$new" > /etc/machine-id || exit 1
++if [ -e /var/lib/dbus/machine-id ] || [ -L /var/lib/dbus/machine-id ]; then
++  rm -f /var/lib/dbus/machine-id
++  printf '%s\n' "$new" > /var/lib/dbus/machine-id || exit 1
++fi
++
++if [ ! -e "$quiet/$token.old-hostname" ]; then
++  { cat /etc/hostname 2>/dev/null || hostname; } > "$quiet/$token.old-hostname" || exit 1
++fi
++old=$(head -n 1 "$quiet/$token.old-hostname")
++hostname "$host" || exit 1
++printf '%s\n' "$host" > /etc/hostname || exit 1
++if [ -f /etc/hosts ]; then
++  grep -v '^127\.0\.1\.1[[:space:]]' /etc/hosts > "$quiet/hosts.new" || true
++  case $old in
++    ''|"$host"|*[!A-Za-z0-9.-]*) ;;
++    *)
++      esc=$(printf '%s' "$old" | sed 's/\./\\./g')
++      for _ in 1 2; do
++        sed -E "/^[[:space:]]*#/!s/(^|[[:space:]])$esc([[:space:]]|\$)/\1$host\2/g" "$quiet/hosts.new" > "$quiet/hosts.sed" || exit 1
++        cat "$quiet/hosts.sed" > "$quiet/hosts.new"
++      done
++      rm -f "$quiet/hosts.sed"
++      ;;
++  esac
++  printf '127.0.1.1\t%s\n' "$host" >> "$quiet/hosts.new"
++  cat "$quiet/hosts.new" > /etc/hosts || exit 1
++  rm -f "$quiet/hosts.new"
++fi
++
++# Moves a file or link under the saved originals. An earlier copy is never replaced.
++park() {
++  [ -e "$1" ] || [ -L "$1" ] || return 0
++  d="$quiet/disabled$(dirname "$1")"
++  mkdir -p "$d" || return 1
++  dest="$d/$(basename "$1")"
++  n=0
++  while [ -e "$dest" ] || [ -L "$dest" ]; do n=$((n + 1)); dest="$d/$(basename "$1").$n"; done
++  mv -f "$1" "$dest"
++}
++
++# Succeeds when the argv on stdin, one entry per line, belongs to the program or script $1: the
++# first entry, or the first one that is not an option, has that base name.
++argv_matches() {
++  count=0
++  while IFS= read -r arg; do
++    count=$((count + 1))
++    if [ "$count" -gt 1 ]; then
++      case $arg in -*) continue;; esac
++    fi
++    [ "${arg##*/}" = "$1" ] && return 0
++    [ "$count" -gt 1 ] && return 1
++  done
++  return 1
++}
++
++# Masks a unit by name, keeping a real file of that name under the saved originals.
++mask() {
++  if [ -L "$1" ] && [ "$(readlink "$1")" = /dev/null ]; then return 0; fi
++  park "$1" && ln -sf /dev/null "$1"
++}
++
++# Succeeds when the Exec line of the autostart entry $1 has a word whose base name is $2, so an
++# entry still matches when it starts the program through a wrapper.
++desktop_runs() {
++  line=$(grep -m 1 '^Exec=' "$1" 2>/dev/null) || return 1
++  printf '%s\n' "${line#Exec=}" | tr -s ' \t' '\n\n' | (
++    while IFS= read -r w; do
++      w=${w#\"}; w=${w%\"}; w=${w#\'}; w=${w%\'}
++      [ "${w##*/}" = "$2" ] && exit 0
++    done
++    exit 1
++  )
++}
++
++pids_of() {
++  for d in /proc/[0-9]*; do
++    p=${d#/proc/}
++    [ "$p" = 1 ] && continue
++    [ "$p" = "$$" ] && continue
++    [ "$p" = "$PPID" ] && continue
++    [ -r "$d/cmdline" ] || continue
++    if tr '\0' '\n' < "$d/cmdline" 2>/dev/null | argv_matches "$1"; then printf '%s\n' "$p"; fi
++  done
++}
++
++stop_processes() {
++  pids=$(pids_of "$1")
++  [ -z "$pids" ] && return 0
++  for p in $pids; do kill -TERM "$p" 2>/dev/null; done
++  i=0
++  while [ "$i" -lt 25 ]; do
++    [ -z "$(pids_of "$1")" ] && return 0
++    sleep 0.2
++    i=$((i + 1))
++  done
++  for p in $(pids_of "$1"); do kill -KILL "$p" 2>/dev/null; done
++  sleep 0.5
++  [ -z "$(pids_of "$1")" ]
++}
++
++for daemon in cron crond anacron atd; do
++  stop_processes "$daemon" || exit 1
++done
++for f in /var/spool/cron/crontabs/* /var/spool/cron/* /var/spool/cron/atjobs/* /var/spool/cron/atspool/* /etc/cron.d/* /etc/cron.hourly/* /etc/cron.daily/* /etc/cron.weekly/* /etc/cron.monthly/* /etc/anacrontab; do
++  case "$f" in */crontabs|*/atjobs|*/atspool|*.placeholder) continue;; esac
++  park "$f" || exit 1
++done
++if [ -f /etc/crontab ]; then
++  mkdir -p "$quiet/disabled/etc" || exit 1
++  [ -e "$quiet/disabled/etc/crontab" ] || cp /etc/crontab "$quiet/disabled/etc/crontab" || exit 1
++  grep '^[[:space:]]*#' /etc/crontab > "$quiet/crontab.new"
++  cat "$quiet/crontab.new" > /etc/crontab; rm -f "$quiet/crontab.new"
++fi
++
++mkdir -p /etc/systemd/system || exit 1
++# A timer the computer defined itself is saved before a mask takes its name. Each mask made here
++# is listed first, so a promote removes those and no mask that was there before or came later.
++masked_list=$quiet/$token.masked-timers.list
++for dir in /etc/systemd/system /usr/lib/systemd/system /lib/systemd/system; do
++  for f in "$dir"/*.timer; do
++    [ -e "$f" ] || [ -L "$f" ] || continue
++    unit=/etc/systemd/system/$(basename "$f")
++    if ! { [ -L "$unit" ] && [ "$(readlink "$unit")" = /dev/null ]; }; then
++      grep -qxF "$unit" "$masked_list" 2>/dev/null || printf '%s\n' "$unit" >> "$masked_list" || exit 1
++    fi
++    mask "$unit" || exit 1
++  done
++done
++for f in /root/.config/systemd/user/*.timer /home/*/.config/systemd/user/*.timer; do park "$f" || exit 1; done
++
++IFS='
++'
++for a; do
++  case "$a" in
++    stop=*)
++      n=${a#stop=}
++      case $n in ''|.|..|-*|*[!A-Za-z0-9._@:+-]*) exit 1;; esac
++      unit=${n%.service}
++      stop_processes "$n" || exit 1
++      [ "$unit" != "$n" ] && { stop_processes "$unit" || exit 1; }
++      mask "/etc/systemd/system/$unit.service" || exit 1
++      case "$n" in *.*) [ "$unit" = "$n" ] && { mask "/etc/systemd/system/$n" || exit 1; };; esac
++      if [ -f "/etc/init.d/$n" ]; then chmod a-x "/etc/init.d/$n" || exit 1; fi
++      for f in /etc/rc[0-9S].d/[SK][0-9][0-9]"$n"; do
++        [ -e "$f" ] || [ -L "$f" ] || continue
++        park "$f" || exit 1
++      done
++      for f in "/etc/xdg/autostart/$n.desktop" "/root/.config/autostart/$n.desktop" /home/*/.config/autostart/"$n".desktop "/etc/supervisor/conf.d/$n.conf"; do park "$f" || exit 1; done
++      for f in /etc/xdg/autostart/*.desktop /root/.config/autostart/*.desktop /home/*/.config/autostart/*.desktop; do
++        [ -f "$f" ] || continue
++        if desktop_runs "$f" "$n"; then park "$f" || exit 1; fi
++      done
++      for f in "/root/.config/systemd/user/$unit.service" /home/*/.config/systemd/user/"$unit".service; do park "$f" || exit 1; done
++      mkdir -p /etc/systemd/user || exit 1
++      mask "/etc/systemd/user/$unit.service" || exit 1
++      ;;
++  esac
++done
++
++# Removes what a scrub pattern matches. Each match is resolved through its parent directory
++# first; one whose real parent is not inside the pattern's literal directory, or that lands
++# at the top of the file system, stops the script. Links are removed, never followed.
++scrub_one() {
++  pattern=$1
++  prefix=${pattern%%[*?[]*}
++  prefix=${prefix%/*}
++  [ -n "$prefix" ] || return 1
++  [ -d "$prefix" ] || return 0
++  for f in $pattern; do
++    [ -e "$f" ] || [ -L "$f" ] || continue
++    name=${f##*/}
++    case $name in .|..) continue;; esac
++    parent=$(cd -P -- "${f%/*}" 2>/dev/null && pwd -P) || continue
++    case "$parent/" in "$prefix"/*) ;; *) return 1;; esac
++    target=$parent/$name
++    case ${target#/} in */*) ;; *) return 1;; esac
++    rm -rf -- "$target" || return 1
++  done
++  return 0
++}
++for a; do
++  case "$a" in
++    scrub=*) scrub_one "${a#scrub=}" || exit 1;;
++  esac
++done
++
++: > "$quiet/applied-$token" || exit 1
++sync
++exit 0
++"####;
++            const SILO_BOOT: &str = r####"quiet=$1; token=$2; host=$3; list=$4
++if [ -n "$token" ] && [ ! -e "/var/lib/silo-quiet/applied-$token" ]; then
++  set -f
++  sh -c "$quiet" silo-quiet "$token" "$host" $list || exit 1
++fi
++if [ -x /usr/local/bin/silo-desktop ]; then /usr/local/bin/silo-desktop boot >/dev/null 2>&1; fi"####;
++            let label = |key: &str| config.spec.labels.get(key).cloned().unwrap_or_default();
++            let token = label("silo.quiet-token");
++            let quiet = !token.is_empty();
++            let boot = crate::sandbox::exec::agent::exec(
++                self,
++                &config.spec.name,
++                &config,
++                "/bin/sh".into(),
++                crate::sandbox::exec::ExecOptions {
++                    args: vec![
++                        "-c".into(),
++                        SILO_BOOT.into(),
++                        "silo-boot".into(),
++                        if quiet {
++                            SILO_QUIET.into()
++                        } else {
++                            String::new()
++                        },
++                        token,
++                        label("silo.quiet-host"),
++                        label("silo.quiet-args"),
++                    ],
++                    cwd: Some("/".into()),
++                    user: Some("root".into()),
++                    timeout: Some(std::time::Duration::from_secs(if quiet { 120 } else { 15 })),
++                    ..Default::default()
++                },
++            );
++            if let Err(error) = boot.await {
++                tracing::warn!(%error, "optional guest startup failed; sandbox remains available");
++            }
++        }
+         if let Ok(ready) = client.ready() {
+             tracing::info!(
+                 sandbox_name = %config.spec.name,
+@@ -2621,7 +2885,7 @@ mod tests {
+                 .image("registry.invalid/review-never-pulled:missing")
+                 .pull_policy(crate::sandbox::PullPolicy::Never);
+             let error = backend
+-                .create_sandbox(backend.clone(), input, SpawnMode::Attached, None)
++                .create_sandbox(backend.clone(), input, true, SpawnMode::Attached, None)
+                 .await
+                 .err()
+                 .unwrap();
+@@ -2680,7 +2944,7 @@ mod tests {
+             .cpus(8)
+             .max_cpus(3);
+         let error = backend
+-            .create_sandbox(backend.clone(), builder, SpawnMode::Attached, None)
++            .create_sandbox(backend.clone(), builder, true, SpawnMode::Attached, None)
+             .await
+             .err()
+             .expect("missing rootfs must fail without starting a VM");
+@@ -2723,7 +2987,7 @@ mod tests {
+             .cpus(2)
+             .replace();
+         let error = backend
+-            .create_sandbox(backend.clone(), builder, SpawnMode::Attached, None)
++            .create_sandbox(backend.clone(), builder, true, SpawnMode::Attached, None)
+             .await
+             .err()
+             .expect("invalid managed CPU count must fail");
+@@ -2796,7 +3060,7 @@ esac
+             .replace();
+ 
+         let error = backend
+-            .create_sandbox(backend.clone(), builder, SpawnMode::Attached, None)
++            .create_sandbox(backend.clone(), builder, true, SpawnMode::Attached, None)
+             .await
+             .err()
+             .expect("unsupported nesting must reject before replacement");
+@@ -2817,6 +3081,33 @@ esac
+         );
+     }
+ 
++    #[tokio::test]
++    async fn created_publication_retires_recovery_ownership_without_a_run() {
++        let fixture = RecoveryFixture::new().await;
++        let pools = fixture.local.db().await.unwrap();
++        assert!(creation::pending(pools.read(), fixture.id).await.unwrap());
++
++        creation::complete(pools.write(), fixture.id, SandboxStatus::Created)
++            .await
++            .unwrap();
++
++        let row = sandbox_entity::Entity::find_by_id(fixture.id)
++            .one(pools.read())
++            .await
++            .unwrap()
++            .unwrap();
++        assert_eq!(row.status, SandboxStatus::Created);
++        assert!(!creation::pending(pools.read(), fixture.id).await.unwrap());
++        assert!(
++            run_entity::Entity::find()
++                .filter(run_entity::Column::SandboxId.eq(fixture.id))
++                .one(pools.read())
++                .await
++                .unwrap()
++                .is_none()
++        );
++    }
++
+     #[test]
+     fn readiness_deadline_reports_timeout_not_only_missing_socket() {
+         let error = super::relay_readiness_timeout(
+@@ -3237,7 +3528,7 @@ esac
+         config.replace_existing = true;
+ 
+         let error = match backend
+-            .create_sandbox(backend.clone(), config, SpawnMode::Attached, None)
++            .create_sandbox(backend.clone(), config, true, SpawnMode::Attached, None)
+             .await
+         {
+             Ok(_) => panic!("snapshot descriptor must be validated before replacement"),
+@@ -3275,7 +3566,7 @@ esac
+         ));
+ 
+         let error = match backend
+-            .create_sandbox(backend.clone(), config, SpawnMode::Attached, None)
++            .create_sandbox(backend.clone(), config, true, SpawnMode::Attached, None)
+             .await
+         {
+             Ok(_) => panic!("stored snapshot references must be resolved before ordinary creation"),
+@@ -3323,7 +3614,7 @@ esac
+         config.snapshot_upper_source = Some(temp.path().join("upper.ext4"));
+ 
+         let error = match backend
+-            .create_sandbox(backend.clone(), config, SpawnMode::Attached, None)
++            .create_sandbox(backend.clone(), config, true, SpawnMode::Attached, None)
+             .await
+         {
+             Ok(_) => panic!("patches must be rejected when combined with from_snapshot"),
+@@ -3372,7 +3663,7 @@ esac
+         ];
+ 
+         let err = match backend
+-            .create_sandbox(backend_trait, config, SpawnMode::Attached, None)
++            .create_sandbox(backend_trait, config, true, SpawnMode::Attached, None)
+             .await
+         {
+             Ok(_) => panic!("expected invalid direct-config mounts to be rejected"),
+@@ -3401,7 +3692,7 @@ esac
+         config.spec.runtime.hostname = Some("y".repeat(MAX_HOSTNAME_BYTES + 1));
+ 
+         let err = match backend
+-            .create_sandbox(backend.clone(), config, SpawnMode::Attached, None)
++            .create_sandbox(backend.clone(), config, true, SpawnMode::Attached, None)
+             .await
+         {
+             Ok(_) => panic!("invalid hostname should fail before sandbox creation"),
+diff --git a/sdk/rust/lib/backend/local/sandbox/create/cleanup.rs b/sdk/rust/lib/backend/local/sandbox/create/cleanup.rs
+index 99da4a2e0680260e60fc9482672b6f814bc7187f..cb1f86c71e94aa016d9fa03177b2980b0447cc80 100644
+--- a/sdk/rust/lib/backend/local/sandbox/create/cleanup.rs
++++ b/sdk/rust/lib/backend/local/sandbox/create/cleanup.rs
+@@ -354,6 +354,7 @@ mod tests {
+             .create_sandbox(
+                 fixture.backend.clone(),
+                 fixture.config.clone(),
++                true,
+                 crate::runtime::SpawnMode::Detached,
+                 None,
+             )
+diff --git a/sdk/rust/lib/backend/local/sandbox/create/restore.rs b/sdk/rust/lib/backend/local/sandbox/create/restore.rs
+index d8741c5f9b450bd3c1173db7043b57f004cd6d22..df6bbaa6eb062e1cdbc10af2200ad0da8e91a566 100644
+--- a/sdk/rust/lib/backend/local/sandbox/create/restore.rs
++++ b/sdk/rust/lib/backend/local/sandbox/create/restore.rs
+@@ -439,7 +439,7 @@ mod tests {
+         std::fs::write(child.join("sentinel"), b"keep my disk").unwrap();
+ 
+         let error = match backend
+-            .create_sandbox(backend.clone(), request, SpawnMode::Attached, None)
++            .create_sandbox(backend.clone(), request, true, SpawnMode::Attached, None)
+             .await
+         {
+             Ok(_) => panic!("unsupported archive must not launch"),
+@@ -615,7 +615,7 @@ mod tests {
+             .with_snapshot_reference(SnapshotReference::path(archive.to_string_lossy()))
+             .disk_only();
+         let error = match backend
+-            .create_sandbox(backend.clone(), builder, SpawnMode::Attached, None)
++            .create_sandbox(backend.clone(), builder, true, SpawnMode::Attached, None)
+             .await
+         {
+             Ok(_) => panic!("the stub runtime must not launch"),
+diff --git a/sdk/rust/lib/backend/local/sandbox/mod.rs b/sdk/rust/lib/backend/local/sandbox/mod.rs
+index 833116d642541c7b011d4894723ae8a31f7abea8..fac71d4ee11b3a42dccc5fff8854e1098f42bdf4 100644
+--- a/sdk/rust/lib/backend/local/sandbox/mod.rs
++++ b/sdk/rust/lib/backend/local/sandbox/mod.rs
+@@ -1235,12 +1235,10 @@ impl SandboxBackend for LocalBackend {
+         &'a self,
+         backend: Arc<dyn Backend>,
+         config: SandboxConfig,
+-        _start: bool,
++        start: bool,
+     ) -> BoxFuture<'a, MicrosandboxResult<Sandbox>> {
+         Box::pin(async move {
+-            // Local backend always boots immediately — `start` only differs
+-            // for cloud where create-without-start is a distinct state.
+-            self.create_sandbox(backend, config, SpawnMode::Attached, None)
++            self.create_sandbox(backend, config, start, SpawnMode::Attached, None)
+                 .await
+         })
+     }
+@@ -1251,7 +1249,7 @@ impl SandboxBackend for LocalBackend {
+         config: SandboxConfig,
+     ) -> BoxFuture<'a, MicrosandboxResult<Sandbox>> {
+         Box::pin(async move {
+-            self.create_sandbox(backend, config, SpawnMode::Detached, None)
++            self.create_sandbox(backend, config, true, SpawnMode::Detached, None)
+                 .await
+         })
+     }
+diff --git a/sdk/rust/lib/backend/sandbox.rs b/sdk/rust/lib/backend/sandbox.rs
+index d728df0f8c646fec53d6f4322dfbcfe94899ea0b..48c033ab9fd26d7035c2469fcb81fa316861ec58 100644
+--- a/sdk/rust/lib/backend/sandbox.rs
++++ b/sdk/rust/lib/backend/sandbox.rs
+@@ -61,6 +61,11 @@ pub type LogStream = Pin<Box<dyn Stream<Item = MicrosandboxResult<LogEntry>> + S
+ pub enum SandboxInner {
+     /// Local libkrun-backed sandbox state.
+     Local(SandboxLocalState),
++    /// Persisted local sandbox whose guest has never run.
++    LocalCreated {
++        /// Persisted database identity.
++        db_id: i32,
++    },
+     /// Cloud msb-cloud-backed sandbox state.
+     Cloud(SandboxCloudState),
+ }
+@@ -178,12 +183,7 @@ pub trait SandboxBackend: Send + Sync {
+     /// `backend` Arc and the variant-specific state inside `SandboxInner`.
+     ///
+     /// `start` controls whether the sandbox is booted as part of create.
+-    /// **Cloud honours `start`** (forwards it as `?start=true|false` on the
+-    /// create request). **Local always boots immediately** — the local impl
+-    /// ignores the flag, because libkrun has no equivalent "create-without-
+-    /// start" state. This asymmetry is intentional per the SDK parity plan
+-    /// (D6.4); callers that need a stopped local sandbox should create then
+-    /// `stop()` it explicitly.
++    /// Both backends honor `start`; local `false` persists prepared storage without guest execution.
+     fn create<'a>(
+         &'a self,
+         backend: Arc<dyn Backend>,
+diff --git a/sdk/rust/lib/sandbox/builder.rs b/sdk/rust/lib/sandbox/builder.rs
+index d494ec4e65c42041d6439fdf81fb42fab6256ca8..9498f44c91d657da1788726cb18b8d95b96a8920 100644
+--- a/sdk/rust/lib/sandbox/builder.rs
++++ b/sdk/rust/lib/sandbox/builder.rs
+@@ -1671,6 +1671,7 @@ impl SandboxBuilder {
+         // compose multiple creates in a single async task.
+         Box::pin(self.create_with_mode(
+             detached,
++            true,
+             #[cfg(feature = "local")]
+             None,
+         ))
+@@ -1713,6 +1714,7 @@ impl SandboxBuilder {
+     /// Create the sandbox for detached/background use.
+     pub async fn create_detached(self) -> MicrosandboxResult<Sandbox> {
+         Box::pin(self.create_with_mode(
++            true,
+             true,
+             #[cfg(feature = "local")]
+             None,
+@@ -1726,7 +1728,29 @@ impl SandboxBuilder {
+     /// result; dropping the progress receiver does not cancel it. Abort the task to cancel.
+     #[cfg(feature = "local")]
+     pub fn create_with_progress(
++        self,
++    ) -> crate::MicrosandboxResult<(
++        crate::CreationProgressHandle,
++        tokio::task::JoinHandle<crate::MicrosandboxResult<super::Sandbox>>,
++    )> {
++        self.create_with_progress_mode(true)
++    }
++
++    /// Prepare the local sandbox and persist it without executing guest code.
++    #[cfg(feature = "local")]
++    pub fn create_stopped_with_progress(
++        self,
++    ) -> crate::MicrosandboxResult<(
++        crate::CreationProgressHandle,
++        tokio::task::JoinHandle<crate::MicrosandboxResult<super::Sandbox>>,
++    )> {
++        self.create_with_progress_mode(false)
++    }
++
++    #[cfg(feature = "local")]
++    fn create_with_progress_mode(
+         mut self,
++        start: bool,
+     ) -> crate::MicrosandboxResult<(
+         crate::CreationProgressHandle,
+         tokio::task::JoinHandle<crate::MicrosandboxResult<super::Sandbox>>,
+@@ -1743,7 +1767,7 @@ impl SandboxBuilder {
+             }
+             let (mut pull, pull_sender) = microsandbox_image::progress_channel();
+             let detached = self.detached;
+-            let create = self.create_with_mode(detached, Some(pull_sender));
++            let create = self.create_with_mode(detached, start, Some(pull_sender));
+             let forward = async {
+                 while let Some(event) = pull.recv().await {
+                     let _ = sender.try_send(crate::CreationProgress::Pull(event));
+@@ -1787,7 +1811,7 @@ impl SandboxBuilder {
+         let (handle, sender) = microsandbox_image::progress_channel();
+         let task = tokio::spawn(crate::backend::with_backend(backend, async move {
+             let detached = self.detached;
+-            self.create_with_mode(detached, Some(sender)).await
++            self.create_with_mode(detached, true, Some(sender)).await
+         }));
+         Ok((handle, task))
+     }
+@@ -1805,7 +1829,7 @@ impl SandboxBuilder {
+         self.capture_host_paths(backend.as_ref())?;
+         let (handle, sender) = microsandbox_image::progress_channel();
+         let task = tokio::spawn(crate::backend::with_backend(backend, async move {
+-            self.create_with_mode(true, Some(sender)).await
++            self.create_with_mode(true, true, Some(sender)).await
+         }));
+         Ok((handle, task))
+     }
+@@ -1813,6 +1837,7 @@ impl SandboxBuilder {
+     async fn create_with_mode(
+         mut self,
+         detached: bool,
++        start: bool,
+         #[cfg(feature = "local")] progress: Option<PullProgressSender>,
+     ) -> MicrosandboxResult<Sandbox> {
+         let backend = default_backend();
+@@ -1824,7 +1849,8 @@ impl SandboxBuilder {
+                 SpawnMode::Attached
+             };
+             // Keep the local restore future off callers' stacks, including cloud callers.
+-            return Box::pin(local.create_sandbox(backend.clone(), self, mode, progress)).await;
++            return Box::pin(local.create_sandbox(backend.clone(), self, start, mode, progress))
++                .await;
+         }
+ 
+         // Cloud doesn't transmit progress information yet.
+@@ -1832,7 +1858,9 @@ impl SandboxBuilder {
+         drop(progress);
+         #[cfg(feature = "cloud")]
+         if let Some(cloud) = backend.as_cloud() {
+-            return cloud.create_from_builder(backend.clone(), self, true).await;
++            return cloud
++                .create_from_builder(backend.clone(), self, start)
++                .await;
+         }
+         self.prepare(backend.clone()).await?;
+ 
+@@ -1842,7 +1870,7 @@ impl SandboxBuilder {
+         if detached || config.resumed_from_full_snapshot() {
+             sandboxes.create_detached(backend.clone(), config).await
+         } else {
+-            sandboxes.create(backend.clone(), config, true).await
++            sandboxes.create(backend.clone(), config, start).await
+         }
+     }
+ }
+diff --git a/sdk/rust/lib/sandbox/mod.rs b/sdk/rust/lib/sandbox/mod.rs
+index d60a0b3659decef71d0f52bb0111867cdc0060ff..65112ab91189895a9ad09d5783dd912f21271d81 100644
+--- a/sdk/rust/lib/sandbox/mod.rs
++++ b/sdk/rust/lib/sandbox/mod.rs
+@@ -431,7 +431,7 @@ impl Sandbox {
+                         crate::MicrosandboxError::local_only(Operation::SandboxCreate)
+                     })?;
+                     local
+-                        .create_sandbox(backend.clone(), config, mode, Some(sender))
++                        .create_sandbox(backend.clone(), config, true, mode, Some(sender))
+                         .await
+                 }
+                 crate::backend::BackendKind::Cloud => {
+@@ -570,6 +570,21 @@ impl Default for SandboxListBuilder {
+ //--------------------------------------------------------------------------------------------------
+ 
+ impl Sandbox {
++    /// Build an outer `Sandbox` for a persisted local sandbox without a guest process.
++    #[cfg(feature = "local")]
++    pub(crate) fn from_local_created(
++        backend: Arc<dyn crate::backend::Backend>,
++        db_id: i32,
++        config: SandboxConfig,
++    ) -> Self {
++        Self {
++            backend,
++            inner: Arc::new(crate::backend::SandboxInner::LocalCreated { db_id }),
++            name: config.spec.name.clone(),
++            config,
++        }
++    }
++
+     /// Build an outer `Sandbox` from local-variant inner state.
+     #[cfg(feature = "local")]
+     pub(crate) fn from_local(
+@@ -670,6 +685,7 @@ impl Sandbox {
+     pub fn id(&self) -> SandboxId {
+         match self.inner.as_ref() {
+             crate::backend::SandboxInner::Local(state) => SandboxId::local(state.db_id),
++            crate::backend::SandboxInner::LocalCreated { db_id } => SandboxId::local(*db_id),
+             crate::backend::SandboxInner::Cloud(state) => SandboxId::cloud(&state.id),
+         }
+     }
+@@ -677,6 +693,7 @@ impl Sandbox {
+     fn identity(&self) -> SandboxIdentity {
+         match self.inner.as_ref() {
+             crate::backend::SandboxInner::Local(state) => SandboxIdentity::Local(state.db_id),
++            crate::backend::SandboxInner::LocalCreated { db_id } => SandboxIdentity::Local(*db_id),
+             crate::backend::SandboxInner::Cloud(state) => SandboxIdentity::Cloud(state.id.clone()),
+         }
+     }
+@@ -736,7 +753,8 @@ impl Sandbox {
+     pub fn local(&self) -> Option<&crate::backend::SandboxLocalState> {
+         match self.inner.as_ref() {
+             crate::backend::SandboxInner::Local(s) => Some(s),
+-            crate::backend::SandboxInner::Cloud(_) => None,
++            crate::backend::SandboxInner::Cloud(_)
++            | crate::backend::SandboxInner::LocalCreated { .. } => None,
+         }
+     }
+ 
+@@ -745,7 +763,8 @@ impl Sandbox {
+     pub fn cloud(&self) -> Option<&crate::backend::SandboxCloudState> {
+         match self.inner.as_ref() {
+             crate::backend::SandboxInner::Cloud(s) => Some(s),
+-            crate::backend::SandboxInner::Local(_) => None,
++            crate::backend::SandboxInner::Local(_)
++            | crate::backend::SandboxInner::LocalCreated { .. } => None,
+         }
+     }
+ 

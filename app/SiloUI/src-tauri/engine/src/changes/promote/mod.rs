@@ -23,7 +23,8 @@ use std::{any::Any, time::Duration};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::keep::{lane, CheckpointRef, ManifestStore, Os};
+use super::keep::{lane, CheckpointRef, ManifestStore, Os, UnderLane};
+use crate::policy::handoff::Handoff;
 use journal::now_millis;
 pub use journal::{Journal, Record, State, Step, Swap};
 
@@ -116,6 +117,11 @@ pub trait PromoteEnv: Send + Sync {
     }
     /// Everything the stores keep under the computer's name, as one document.
     fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String>;
+    /// Who made which of the two computers, read before the swap and given back to `apply` and
+    /// `revert` in the swap.
+    fn export_makers(&self, _fork_id: &str, _target_id: &str) -> Result<Handoff, String> {
+        Ok(Handoff::default())
+    }
     /// Does one step. Repeating it changes nothing.
     fn apply(&self, step: Step, swap: &Swap) -> Result<(), String>;
     /// Undoes one step, whether or not it was applied. Repeating it changes nothing.
@@ -262,6 +268,18 @@ pub fn promote(
     request: &Request,
     wait: Duration,
 ) -> Result<Outcome, String> {
+    promote_checked(env, store, journal, request, wait, &|| Ok(()))
+}
+
+/// [`promote`], after `under_lane` accepts the state of the fork once both lanes are held.
+pub fn promote_checked(
+    env: &dyn PromoteEnv,
+    store: &dyn ManifestStore,
+    journal: &Journal,
+    request: &Request,
+    wait: Duration,
+    under_lane: UnderLane<'_>,
+) -> Result<Outcome, String> {
     let target = match &request.target {
         Some(target) => target.clone(),
         None => store.source(&request.fork)?.ok_or_else(|| {
@@ -275,6 +293,7 @@ pub fn promote(
         return Err("A computer cannot replace itself.".into());
     }
     let _lanes = lanes(&target, &request.fork, wait)?;
+    under_lane()?;
     recover_ids(env, journal, &[&target, &request.fork])?;
 
     let main = env.info(&target).map_err(|_| {
@@ -374,6 +393,7 @@ pub fn promote(
         checkpoint,
         fork_was_running: fork.running,
         target_was_running: main.running,
+        makers: env.export_makers(&fork.id, &main.id)?,
     };
     let mut record = Record {
         swap,
@@ -477,11 +497,23 @@ pub fn undo(
     computer: &str,
     wait: Duration,
 ) -> Result<Option<Undone>, String> {
+    undo_checked(env, journal, computer, wait, &|| Ok(()))
+}
+
+/// [`undo`], after `under_lane` accepts what the undo would take back once the lanes are held.
+pub fn undo_checked(
+    env: &dyn PromoteEnv,
+    journal: &Journal,
+    computer: &str,
+    wait: Duration,
+    under_lane: UnderLane<'_>,
+) -> Result<Option<Undone>, String> {
     let Some(record) = latest_for(journal, computer) else {
         return Ok(None);
     };
     let key = (record.swap.fork_id.clone(), record.swap.target_id.clone());
     let _lanes = lanes(&key.0, &key.1, wait)?;
+    under_lane()?;
     // Look again with the lanes held: a recovery or another undo may have finished it.
     let Some(mut record) = journal
         .get(&key.0, &key.1)

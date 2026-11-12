@@ -15,7 +15,7 @@ import type { ComputerStep } from "@/desktop/production-schemas"
 export type StepsSubject = Pick<ApplicationComputer, "device"> & { configuration: Pick<ApplicationComputer["configuration"], "id" | "name"> }
 export type StepsActions = Pick<ApplicationActions, "listComputerSteps" | "readComputerTree" | "forkCheckpoint">
 
-export const noCheckpointReason = "No checkpoint was saved after this step. Turn on step_checkpoints in .silo/silo.yaml to save one after each step."
+export const noCheckpointReason = "No checkpoint was saved after this step. Run commands with silo exec --step-checkpoints to save one after each step."
 
 export function StepsPanel({ computer, target, actions, disabled, takenNames, forkedAction }: {
   computer: StepsSubject
@@ -65,7 +65,7 @@ export function StepsPanel({ computer, target, actions, disabled, takenNames, fo
       <ListCard><ListRow
         icon={<ListRowIcon aria-hidden="true"><Terminal className="size-3.5" /></ListRowIcon>}
         title="No steps yet"
-        detail="Step checkpoints are off unless step_checkpoints: true is set in .silo/silo.yaml. Steps are still recorded for commands run with silo exec, but only a step with a checkpoint can be forked."
+        detail="Step checkpoints are off unless a command runs with silo exec --step-checkpoints. Steps are still recorded for commands run with silo exec, but only a step with a checkpoint can be forked."
         detailClassName="whitespace-normal"
       /></ListCard>
     ) : steps !== null && (

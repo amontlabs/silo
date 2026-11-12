@@ -24,8 +24,8 @@ tokio = { version = "1", features = ["full"] }
 base64 = "0.23"
 libc = "0.2"
 rustix = { version = "1.1.4", default-features = false, features = ["fs", "std"] }
-microsandbox-image = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-image" }
-microsandbox-utils = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-utils" }
+microsandbox-image = { git = "https://github.com/superradcompany/microsandbox", rev = "60fc5071b34e6cc2671c84c8dc07709795d45d27", package = "microsandbox-image" }
+microsandbox-utils = { git = "https://github.com/superradcompany/microsandbox", rev = "60fc5071b34e6cc2671c84c8dc07709795d45d27", package = "microsandbox-utils" }
 oci-spec = { version = "0.10", default-features = false, features = ["runtime"] }
 sha2 = "0.10"
 zeroize = "1"
@@ -48,6 +48,7 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 # The SSH server of container computers (`containers/ssh.rs`). Apache-2.0. ed25519 and ECDSA keys only: the
 # `rsa` feature would bring the `rsa` crate, which has an unfixed timing side channel (RUSTSEC-2023-0071).
 russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
+psl = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

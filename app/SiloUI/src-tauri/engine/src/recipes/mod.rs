@@ -5,17 +5,27 @@
 //! (one JSON file per built recipe), [`BuildEnv`] (what a build needs from the world; the
 //! engine supplies the real one, tests supply a fake) and [`build`] (the flow itself).
 
+mod additions;
 mod build;
 mod cache;
+mod library;
+mod quiet;
+pub mod records;
 mod scripts;
 
 use sha2::{Digest, Sha256};
 use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, RecipeSpec};
 
 pub use build::{build, remove, BuildEnv, BuildOutcome, Created, ExecOut, RunAs, BUILDER_PREFIX};
+pub(crate) use scripts::Step as BuildStep;
 #[cfg(test)]
 use build::{builder_name, is_builder_of};
+pub use additions::{append, manager_key, record_merge, unrecord_merge, Additions, Recorded};
 pub use cache::Cache;
+pub use quiet::{quiet_names, quiet_warnings};
+pub use library::{
+    built_in, built_in_names, hide_commands, hooks_of, validate_definition, Library, DEFAULT_RECIPE,
+};
 
 /// Folded into every hash, so a change to how a build runs retires every cached build.
 const BUILD_VERSION: &str = "silo-recipe-build-3";
@@ -101,7 +111,12 @@ pub fn hash(spec: &RecipeSpec, image: &str) -> String {
         .collect()
 }
 
-/// A recipe name: lowercase letters, digits, `-` and `_`, as a file name under `.silo/recipes`.
+/// The guest steps that put `spec` on a computer: the ones a build runs, in the same order.
+pub(crate) fn steps_for(spec: &RecipeSpec) -> Vec<BuildStep> {
+    scripts::all_steps(&normalize(spec))
+}
+
+/// A recipe name: lowercase letters, digits, `-` and `_`, as a file name.
 pub fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 40
@@ -111,7 +126,7 @@ pub fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-fn plain_word(word: &str) -> bool {
+pub(crate) fn plain_word(word: &str) -> bool {
     !word.is_empty()
         && word.len() <= 200
         && !word.starts_with('-')

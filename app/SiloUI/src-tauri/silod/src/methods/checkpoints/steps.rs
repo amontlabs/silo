@@ -42,6 +42,7 @@ pub(super) async fn record(
         return Err(DispatchError {
             code: ErrorCode::Internal,
             message: "A step needs the command that ran.".into(),
+            details: None,
         });
     }
     // The first step of a fork starts from the checkpoint the fork was made from.

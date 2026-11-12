@@ -2,6 +2,7 @@ import { AlertCircle, Check, Clock3 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { agentName, type AgentChoice } from "@/features/agents/model/agents"
 import type { OnboardingStep, OnboardingViewModel } from "@/features/onboarding/model/onboarding-state"
 
 interface OnboardingFooterProps {
@@ -11,11 +12,17 @@ interface OnboardingFooterProps {
   onContinue: () => void
   completed?: boolean
   onOpenApp?: () => void
+  /** The agent chosen on the agent step; Continue waits for one. */
+  agentChoice?: AgentChoice | null
+  /** The main action of the finished screen, ahead of Open Silo: opening the installed agent. */
+  completedAction?: { label: string; onClick: () => void }
 }
 
-export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, completed = false, onOpenApp }: OnboardingFooterProps) {
+export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, completed = false, onOpenApp, agentChoice, completedAction }: OnboardingFooterProps) {
   const isReview = activeStep === "review"
   const dependenciesBlocked = activeStep === "dependencies" && viewModel.dependencyStatus !== "succeeded"
+  const agentBlocked = activeStep === "agent" && !agentChoice
+  const agentLabel = viewModel.agent ? agentName[viewModel.agent.agent] : undefined
   const failedItem = viewModel.queueItems.find(({ status }) => status === "failed")
   const runningItem = viewModel.queueItems.find(({ status }) => status === "running")
   const queued = viewModel.queueItems.some(({ status }) => status === "queued")
@@ -29,8 +36,19 @@ export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, co
   const stepComplete = !!completedStepMessage && !checkingDependencies && !failed && !runningItem && !queued
   // A computer that failed, is starting, or is unconfirmed keeps Finish unavailable.
   const blocker = isReview && !viewModel.finishEnabled && !failed && !runningItem && !queued ? viewModel.finishBlocker : null
+  // The agent step speaks for itself: what is chosen, and how its install is going.
+  const agentStepText = activeStep === "agent" && !completed && !failed && !blocker
+    ? viewModel.agent?.status === "running" ? `In progress · Installing ${agentLabel} in ${viewModel.agent.computer}`
+      : viewModel.agent?.status === "queued" ? `Waiting · ${agentLabel} installs after the earlier setup tasks`
+      : viewModel.agent?.status === "succeeded" ? `Complete · ${agentLabel} is ready in ${viewModel.agent.computer}`
+      : viewModel.agent?.status === "failed" ? `${agentLabel} could not be installed · Retry, or continue and install it later`
+      : agentChoice ? (agentChoice === "none" ? "Ready · Continue without installing an agent" : `Ready · Continue to install ${agentName[agentChoice]}`)
+      : "Choose your agent, or set it up yourself, to continue"
+    : null
   const statusText = completed
     ? "Complete · Silo is ready"
+    : agentStepText
+      ? agentStepText
     : checkingDependencies
       ? "Checking · Making sure this device can run computers"
     : viewModel.dependencyStatus === "failed"
@@ -43,6 +61,7 @@ export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, co
           ? "Complete · Ready to finish setup"
           : runningItem
             ? `In progress · ${runningItem.label}`
+
             : queued ? "Waiting · Setup tasks are queued"
               : completedStepMessage ? completedStepMessage
               : isReview && viewModel.finishEnabled ? "Ready · Finish setup"
@@ -55,15 +74,22 @@ export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, co
     <footer className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-border bg-muted/20 px-4 py-3 sm:px-6" aria-label="Onboarding actions">
       <div className="flex min-w-0 flex-[1_1_12rem] items-start gap-2 text-xs leading-5 text-muted-foreground" aria-live="polite">
         {(failed || blocker?.action === "start") && !completed ? <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+          : agentStepText ? (viewModel.agent?.status === "running" ? <Spinner className="mt-0.5 shrink-0" />
+            : viewModel.agent?.status === "succeeded" ? <Check className="mt-0.5 size-3.5 shrink-0 text-success" />
+              : viewModel.agent?.status === "failed" ? <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+                : <Clock3 className="mt-0.5 size-3.5 shrink-0" />)
           : complete || stepComplete ? <Check className="mt-0.5 size-3.5 shrink-0 text-success" />
             : checkingDependencies || runningItem ? <Spinner className="mt-0.5 shrink-0" />
               : <Clock3 className="mt-0.5 size-3.5 shrink-0" />}
         <span className="break-words">{statusText}</span>
       </div>
       <div className="ml-auto flex shrink-0 gap-2">
-        {completed ? <Button onClick={onOpenApp} disabled={!onOpenApp}>Open Silo</Button> : <>
+        {completed ? <>
+          {completedAction && <Button onClick={completedAction.onClick}>{completedAction.label}</Button>}
+          <Button variant={completedAction ? "outline" : "default"} onClick={onOpenApp} disabled={!onOpenApp}>Open Silo</Button>
+        </> : <>
           <Button variant="outline" onClick={onBack} disabled={activeStep === "dependencies"}>Back</Button>
-          <Button onClick={onContinue} disabled={isReview ? !viewModel.finishEnabled : dependenciesBlocked}>
+          <Button onClick={onContinue} disabled={isReview ? !viewModel.finishEnabled : dependenciesBlocked || agentBlocked}>
             {isReview ? "Finish" : "Continue"}
           </Button>
         </>}

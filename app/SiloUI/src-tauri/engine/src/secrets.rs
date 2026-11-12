@@ -37,7 +37,7 @@ fn runtime() -> Result<&'static Arc<dyn RuntimeAccess>, String> {
         .ok_or_else(|| "Computer secret access is unavailable.".to_owned())
 }
 
-fn publish_changed() {
+pub(crate) fn publish_changed() {
     if let Some(context) = context::current() {
         context.publish(
             Event::new("silo://application-state-changed", Value::Null),
@@ -88,14 +88,43 @@ fn lock_vault() -> MutexGuard<'static, Cached> {
 }
 const STORE_ERROR: &str =
     "Cannot access secrets in the system credential store. Unlock it and retry.";
+/// What a secret is for. A `github-token` secret reaches a computer only as its GitHub
+/// access (see `github::personal_token`), never as an environment placeholder.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SecretKind {
+    #[default]
+    Generic,
+    GithubToken,
+}
+impl SecretKind {
+    fn is_generic(&self) -> bool {
+        *self == SecretKind::Generic
+    }
+    fn as_str(self) -> &'static str {
+        match self {
+            SecretKind::Generic => "generic",
+            SecretKind::GithubToken => "github-token",
+        }
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Secret {
     id: String,
     name: String,
     value_id: String,
+    #[serde(default, skip_serializing_if = "SecretKind::is_generic")]
+    kind: SecretKind,
+    /// The GitHub account a `github-token` secret was last validated for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account: Option<String>,
     computers: Vec<String>,
     allowed_domains: Vec<String>,
+    /// Set when the owner saved the secret knowing a wildcard over shared hosting among its
+    /// domains also becomes an allowed host; secrets saved before that never have it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    shared_hosting_approved: bool,
     #[serde(default)]
     affected: Vec<String>,
     #[serde(default)]
@@ -145,6 +174,12 @@ pub struct Request {
     value: Option<String>,
     computers: Vec<String>,
     allowed_domains: Vec<String>,
+    #[serde(default)]
+    kind: SecretKind,
+    /// The owner confirmed that the wildcard hosts over shared hosting among `allowed_domains`
+    /// may be reached by the computers using the secret.
+    #[serde(default)]
+    allow_shared_hosting: bool,
 }
 fn entry() -> Result<keyring::Entry, String> {
     keyring::Entry::new(
@@ -283,27 +318,291 @@ fn prune_values() -> Result<(), String> {
     values.retain(|id, _| referenced.contains(id));
     write_vault(values)
 }
-fn public(secret: &Secret) -> Value {
+fn public(secret: &Secret, token_users: &BTreeMap<String, Vec<String>>) -> Value {
     let errors = secret
         .errors
         .iter()
         .map(|(name, error)| format!("{name}: {error}"))
         .collect::<Vec<_>>();
-    json!({"id":secret.id,"name":secret.name,"computers":secret.computers,"allowedDomains":secret.allowed_domains,
+    let mut row = json!({"id":secret.id,"name":secret.name,"kind":secret.kind.as_str(),"computers":secret.computers,"allowedDomains":secret.allowed_domains,
         "state": if secret.errors.is_empty() && secret.affected.iter().any(|computer| !secret.pending_computers.contains(computer)) {
             "applying"
         } else if secret.pending_computers.is_empty() {"active"} else {"restart-required"},
         "pendingComputers":secret.pending_computers,"removing":secret.removing,
-        "error": if errors.is_empty() {Value::Null} else {json!(errors.join(" "))}})
+        "error": if errors.is_empty() {Value::Null} else {json!(errors.join(" "))}});
+    if secret.kind == SecretKind::GithubToken {
+        row["computers"] = json!(token_users.get(&secret.id).cloned().unwrap_or_default());
+        row["account"] = json!(secret.account);
+        row["connection"] = crate::github::personal_token::connection(&secret.id, secret.removing);
+    }
+    row
 }
 pub(crate) fn snapshot() -> Result<Vec<Value>, String> {
     snapshot_from(store_path())
 }
 fn snapshot_from(path: Option<PathBuf>) -> Result<Vec<Value>, String> {
-    Ok(load_from(path)?.secrets.iter().map(public).collect())
+    let document = load_from(path)?;
+    let users = if document
+        .secrets
+        .iter()
+        .any(|secret| secret.kind == SecretKind::GithubToken)
+    {
+        crate::github::personal_token::users()
+    } else {
+        BTreeMap::new()
+    };
+    Ok(document
+        .secrets
+        .iter()
+        .map(|secret| public(secret, &users))
+        .collect())
 }
 pub(crate) fn activities() -> Result<Vec<Value>, String> {
     Ok(load()?.activities)
+}
+
+/// A `github-token` secret as the GitHub module sees it: never its value.
+pub(crate) struct TokenEntry {
+    pub id: String,
+    pub name: String,
+    pub account: Option<String>,
+    pub removing: bool,
+    /// Names the stored value; a replaced token gets a new one.
+    pub value_id: String,
+}
+
+pub(crate) fn github_token_entries() -> Result<Vec<TokenEntry>, String> {
+    Ok(load()?
+        .secrets
+        .into_iter()
+        .filter(|s| s.kind == SecretKind::GithubToken)
+        .map(|s| TokenEntry {
+            id: s.id,
+            name: s.name,
+            account: s.account,
+            removing: s.removing,
+            value_id: s.value_id,
+        })
+        .collect())
+}
+
+/// The name of the live `github-token` secret `id`.
+pub fn github_token_name(id: &str) -> Option<String> {
+    github_token_entries()
+        .ok()?
+        .into_iter()
+        .find(|entry| entry.id == id && !entry.removing)
+        .map(|entry| entry.name)
+}
+
+/// The id of the live `github-token` secret called `name`.
+pub(crate) fn github_token_named(name: &str) -> Result<Option<String>, String> {
+    Ok(github_token_entries()?
+        .into_iter()
+        .find(|entry| entry.name == name && !entry.removing)
+        .map(|entry| entry.id))
+}
+
+/// The value of one live `github-token` secret, read from the credential store.
+pub(crate) fn github_token_value(id: &str) -> Result<String, String> {
+    let secret = load()?
+        .secrets
+        .into_iter()
+        .find(|s| s.id == id && s.kind == SecretKind::GithubToken && !s.removing)
+        .ok_or("The chosen GitHub token no longer exists.")?;
+    read_vault()?
+        .get(&secret.value_id)
+        .cloned()
+        .ok_or_else(|| STORE_ERROR.to_owned())
+}
+
+/// A token's stored value and the `value_id` that names it.
+pub(crate) struct TokenValue {
+    pub value_id: String,
+    pub value: String,
+}
+
+/// The values of every live `github-token` secret, by id, from one credential-store read.
+pub(crate) fn github_token_values() -> Result<BTreeMap<String, TokenValue>, String> {
+    let secrets: Vec<_> = load()?
+        .secrets
+        .into_iter()
+        .filter(|s| s.kind == SecretKind::GithubToken && !s.removing)
+        .collect();
+    if secrets.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let values = read_vault()?;
+    Ok(secrets
+        .into_iter()
+        .filter_map(|s| {
+            values.get(&s.value_id).map(|value| {
+                (
+                    s.id,
+                    TokenValue {
+                        value_id: s.value_id,
+                        value: value.clone(),
+                    },
+                )
+            })
+        })
+        .collect())
+}
+
+/// Like `github_token_values` but only from what this session already holds in memory,
+/// so callers that must not wait on the credential store can use it.
+pub(crate) fn peek_github_token_values() -> BTreeMap<String, String> {
+    let Ok(document) = load() else {
+        return BTreeMap::new();
+    };
+    #[cfg(test)]
+    let test_vault = TEST_VAULT.with(|vault| vault.borrow().clone());
+    #[cfg(not(test))]
+    let test_vault: Option<Vault> = None;
+    let vault = match test_vault {
+        Some(vault) => vault,
+        None => match lock_vault().as_ref() {
+            Some((Ok(vault), _)) => vault.clone(),
+            _ => return BTreeMap::new(),
+        },
+    };
+    document
+        .secrets
+        .into_iter()
+        .filter(|s| s.kind == SecretKind::GithubToken && !s.removing)
+        .filter_map(|s| vault.get(&s.value_id).map(|v| (s.id, v.clone())))
+        .collect()
+}
+
+/// Whether `secret` is the live token secret holding the value named `value_id`.
+fn holds_value(secret: &Secret, id: &str, value_id: &str) -> bool {
+    secret.id == id
+        && secret.kind == SecretKind::GithubToken
+        && !secret.removing
+        && secret.value_id == value_id
+}
+
+/// Records the account GitHub reported for the value named `value_id` of a token. A secret
+/// whose value was replaced, or that is gone or being removed, keeps what it has.
+pub(crate) fn set_github_token_account(
+    id: &str,
+    value_id: &str,
+    account: &str,
+) -> Result<bool, String> {
+    let _guard = lock_unit(&DOCUMENT);
+    let mut document = load()?;
+    let Some(secret) = document
+        .secrets
+        .iter_mut()
+        .find(|s| holds_value(s, id, value_id))
+    else {
+        return Ok(false);
+    };
+    if secret.account.as_deref() == Some(account) {
+        return Ok(false);
+    }
+    secret.account = Some(account.to_owned());
+    save(&document)?;
+    Ok(true)
+}
+
+/// Whether the saved secret has its wildcard hosts over shared hosting approved: when the
+/// request confirms them, or when the stored secret had them approved and the request adds no
+/// such host to the ones it had.
+fn shared_hosting_approval(request: &Request, stored: Option<&Secret>) -> bool {
+    request.allow_shared_hosting
+        || stored.is_some_and(|stored| {
+            stored.shared_hosting_approved
+                && request
+                    .allowed_domains
+                    .iter()
+                    .filter(|domain| {
+                        crate::network_policy::shared_hosting_warning(domain).is_some()
+                    })
+                    .all(|domain| stored.allowed_domains.contains(domain))
+        })
+}
+
+/// The request that saves the secret named `name` as a GitHub token.
+pub(crate) fn github_token_request(
+    id: Option<String>,
+    name: &str,
+    value: Option<String>,
+) -> Request {
+    Request {
+        operation: if id.is_some() { "edit" } else { "add" }.into(),
+        id,
+        name: name.into(),
+        value,
+        computers: Vec::new(),
+        allowed_domains: Vec::new(),
+        kind: SecretKind::GithubToken,
+        allow_shared_hosting: false,
+    }
+}
+
+/// Stores a token that was saved before token secrets existed. A token already held by
+/// a live token secret is reused, so a repeated or interrupted import adds nothing.
+pub(crate) fn import_github_token(
+    token: &str,
+    account: &str,
+    preferred_name: &str,
+) -> Result<String, String> {
+    let _operation = lock_unit(&OPERATION);
+    retry_store();
+    let document = load()?;
+    let mut values = read_vault()?;
+    if let Some(existing) = document.secrets.iter().find(|s| {
+        s.kind == SecretKind::GithubToken
+            && !s.removing
+            && values.get(&s.value_id).is_some_and(|value| value == token)
+    }) {
+        return Ok(existing.id.clone());
+    }
+    let name = (1..)
+        .map(|n| match n {
+            1 => preferred_name.to_owned(),
+            n => format!("{preferred_name}-{n}"),
+        })
+        .find(|candidate| !document.secrets.iter().any(|s| &s.name == candidate))
+        .ok_or("No free name for the GitHub token.")?;
+    let value_id = uuid::Uuid::new_v4().to_string();
+    values.insert(value_id.clone(), token.to_owned());
+    write_vault(values)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    update(|d| {
+        d.secrets.push(Secret {
+            id: id.clone(),
+            name,
+            value_id,
+            kind: SecretKind::GithubToken,
+            account: Some(account.to_owned()),
+            computers: Vec::new(),
+            allowed_domains: Vec::new(),
+            shared_hosting_approved: false,
+            affected: Vec::new(),
+            pending_computers: Vec::new(),
+            errors: BTreeMap::new(),
+            removing: false,
+        });
+        event(d, "GitHub token moved to Secrets", false);
+        Ok(())
+    })?;
+    publish_changed();
+    Ok(id)
+}
+
+/// Gives the module its document path without starting the secrets worker.
+pub(crate) fn init_path() {
+    if let Some(context) = context::current() {
+        let _ = PATH.set(context.paths().app_data.join("secrets.json"));
+    }
+}
+/// A generic secret assigned to `computer`. Token secrets are never delivered this way.
+fn generic_on(secret: &Secret, computer: &str) -> bool {
+    !secret.removing
+        && secret.kind == SecretKind::Generic
+        && secret.computers.iter().any(|w| w == computer)
 }
 pub(crate) fn runtime_material(
     computer: &str,
@@ -312,7 +611,7 @@ pub(crate) fn runtime_material(
     let selected: Vec<_> = document
         .secrets
         .iter()
-        .filter(|s| !s.removing && s.computers.iter().any(|w| w == computer))
+        .filter(|s| generic_on(s, computer))
         .collect();
     if selected.is_empty() {
         return Ok(Vec::new());
@@ -356,7 +655,38 @@ pub(crate) fn assigned_names(computer: &str) -> Result<Vec<String>, String> {
     Ok(load()?
         .secrets
         .iter()
+        .filter(|s| generic_on(s, computer))
+        .map(|s| s.name.clone())
+        .collect())
+}
+
+/// The secrets assigned to `computer`, each with the hosts it may be sent to. Never a value.
+pub(crate) fn assigned_with_hosts(computer: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+    Ok(load()?
+        .secrets
+        .iter()
         .filter(|s| !s.removing && s.computers.iter().any(|w| w == computer))
+        .map(|s| (s.name.clone(), s.allowed_domains.clone()))
+        .collect())
+}
+
+/// Each generic secret assigned to `computer`, with the hosts it may be sent to. Values are not read.
+pub(crate) fn assigned_hosts(computer: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+    Ok(load()?
+        .secrets
+        .iter()
+        .filter(|s| generic_on(s, computer))
+        .map(|s| (s.name.clone(), s.allowed_domains.clone()))
+        .collect())
+}
+
+/// The names of the generic secrets assigned to `computer` that were saved with their shared-hosting
+/// wildcards approved as allowed hosts.
+pub(crate) fn shared_hosting_approved(computer: &str) -> Result<BTreeSet<String>, String> {
+    Ok(load()?
+        .secrets
+        .iter()
+        .filter(|s| generic_on(s, computer) && s.shared_hosting_approved)
         .map(|s| s.name.clone())
         .collect())
 }
@@ -371,6 +701,7 @@ pub(crate) fn reassign(computer: &str, names: &[String]) -> Result<(), String> {
     update(|document| {
         for secret in &mut document.secrets {
             if !secret.removing
+                && secret.kind == SecretKind::Generic
                 && names.contains(&secret.name)
                 && !secret.computers.iter().any(|w| w == computer)
             {
@@ -385,11 +716,10 @@ fn unassigned_names(document: &Document, source: &str, names: &[String]) -> Vec<
     names
         .iter()
         .filter(|name| {
-            !document.secrets.iter().any(|secret| {
-                !secret.removing
-                    && &secret.name == *name
-                    && secret.computers.iter().any(|w| w == source)
-            })
+            !document
+                .secrets
+                .iter()
+                .any(|secret| generic_on(secret, source) && &secret.name == *name)
         })
         .cloned()
         .collect()
@@ -397,7 +727,7 @@ fn unassigned_names(document: &Document, source: &str, names: &[String]) -> Vec<
 
 fn copy_assignment_refs(document: &mut Document, source: &str, target: &str, names: &[String]) {
     for secret in &mut document.secrets {
-        if !secret.removing
+        if generic_on(secret, source)
             && names.contains(&secret.name)
             && secret.computers.iter().any(|name| name == source)
             && !secret.computers.iter().any(|name| name == target)
@@ -415,11 +745,18 @@ fn event(document: &mut Document, title: &str, failed: bool) {
         document.activities.remove(0);
     }
 }
+/// Puts a failure in the activity list on the Secrets page.
+pub(crate) fn record_failure(title: &str) {
+    let _ = update(|document| {
+        event(document, title, true);
+        Ok(())
+    });
+}
 fn revision(document: &Document, computer: &str) -> String {
     let desired: Vec<_> = document
         .secrets
         .iter()
-        .filter(|s| !s.removing && s.computers.iter().any(|w| w == computer))
+        .filter(|s| generic_on(s, computer))
         .map(|s| (&s.name, &s.value_id, &s.allowed_domains))
         .collect();
     format!(
@@ -543,7 +880,7 @@ pub(crate) fn reserved_secret_name(name: &str) -> bool {
             .any(|prefix| upper.starts_with(prefix.as_str()))
 }
 
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
         && name
@@ -552,7 +889,7 @@ fn valid_name(name: &str) -> bool {
             .all(|(i, c)| c == b'_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit()))
         && !reserved_secret_name(name)
 }
-fn valid_domain(domain: &str) -> bool {
+pub(crate) fn valid_domain(domain: &str) -> bool {
     if domain == "*" {
         return true;
     }
@@ -569,8 +906,23 @@ fn valid_domain(domain: &str) -> bool {
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
         })
 }
+/// A token secret's name is a label, not an environment variable, so hyphens are allowed.
+pub(crate) fn valid_token_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.bytes().enumerate().all(|(i, c)| {
+            c.is_ascii_alphanumeric() || (i > 0 && (c == b'_' || c == b'-'))
+        })
+}
 fn validate(request: &Request, document: &Document) -> Result<(), String> {
-    if !valid_name(&request.name) {
+    let token = request.kind == SecretKind::GithubToken;
+    if token {
+        if !valid_token_name(&request.name) {
+            return Err(
+                "Choose a name of letters, digits, hyphens and underscores for this token.".into(),
+            );
+        }
+    } else if !valid_name(&request.name) {
         return Err("Choose a valid, unreserved secret name.".into());
     }
     if !matches!(request.operation.as_str(), "add" | "edit") {
@@ -586,6 +938,9 @@ fn validate(request: &Request, document: &Document) -> Result<(), String> {
     if original.is_some_and(|s| s.name != request.name || s.removing) {
         return Err("Secret names cannot change. Finish removal before adding it again.".into());
     }
+    if original.is_some_and(|s| s.kind != request.kind) {
+        return Err("A secret cannot change from one kind to another.".into());
+    }
     if document
         .secrets
         .iter()
@@ -596,7 +951,12 @@ fn validate(request: &Request, document: &Document) -> Result<(), String> {
     if request.operation == "add"
         && (request.id.is_some() || request.value.as_deref().is_none_or(str::is_empty))
     {
-        return Err("Enter a secret value.".into());
+        return Err(if token {
+            "Enter a GitHub token."
+        } else {
+            "Enter a secret value."
+        }
+        .into());
     }
     if request
         .value
@@ -606,6 +966,13 @@ fn validate(request: &Request, document: &Document) -> Result<(), String> {
         return Err(
             "Secret values must contain between 1 and 65536 bytes without null characters.".into(),
         );
+    }
+    if token {
+        // A token's computers are chosen in GitHub access and its hosts are GitHub's.
+        if !request.computers.is_empty() || !request.allowed_domains.is_empty() {
+            return Err("A GitHub token is given to computers in GitHub access, with no hosts of its own.".into());
+        }
+        return Ok(());
     }
     if request.computers.is_empty()
         || request.computers.len() > 100
@@ -743,7 +1110,7 @@ fn reconcile_with(
 }
 /// Commit the name-only retry journal before deleting the credential. A credential
 /// failure leaves a retryable tombstone excluded from all future boot material.
-fn remove_from_store(id: &str) -> Result<(), String> {
+fn remove_from_store(id: &str, operation: &mut OperationGuard) -> Result<(), String> {
     let secret = load()?
         .secrets
         .into_iter()
@@ -774,6 +1141,15 @@ fn remove_from_store(id: &str) -> Result<(), String> {
         }
         Ok(())
     })?;
+    if secret.kind == SecretKind::GithubToken {
+        // Computers using the token lose it before its value is deleted, so a failed
+        // deletion cannot leave their GitHub access silently in place. A computer may
+        // take minutes to detach, so the secrets lock is not held meanwhile.
+        *operation = None;
+        let detached = crate::github::personal_token::secret_removing(id);
+        *operation = Some(lock_unit(&OPERATION));
+        detached?;
+    }
     let mut values = read_vault()?;
     values.remove(&secret.value_id);
     write_vault(values)?;
@@ -781,7 +1157,14 @@ fn remove_from_store(id: &str) -> Result<(), String> {
         document.secrets.retain(|secret| secret.id != id);
         event(document, "Secret removed", false);
         Ok(())
-    })
+    })?;
+    if secret.kind == SecretKind::GithubToken {
+        // Computers already lost the token; this only clears what remains of it.
+        *operation = None;
+        crate::github::personal_token::secret_removed(id);
+        *operation = Some(lock_unit(&OPERATION));
+    }
+    Ok(())
 }
 
 pub(crate) fn pending_names(computer: &str) -> Result<Vec<String>, String> {
@@ -887,21 +1270,37 @@ pub fn read_secrets_state_sync() -> Result<Vec<Value>, String> {
 }
 
 pub fn save_secret<G>(
-    request: Request,
+    mut request: Request,
     update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Vec<Value>, String> {
+    let token = request.kind == SecretKind::GithubToken;
+    // GitHub is asked about a new token before any lock is taken: the answer can take
+    // seconds and nothing else should wait for it.
+    let account = if token {
+        request.value = request.value.map(|value| value.trim().to_owned());
+        validate(&request, &load()?)?;
+        match request.value.as_deref() {
+            Some(value) => Some(crate::github::personal_token::validate_token(value)?),
+            None => None,
+        }
+    } else {
+        None
+    };
     let _update = update_guard()?;
     let mut operation = Some(lock_unit(&OPERATION));
     retry_store();
     let validated_assignments = assignment_revision(&request.computers);
     let document = load()?;
     validate(&request, &document)?;
-    runtime()?.validate_computers(&request.computers)?;
+    if !token {
+        runtime()?.validate_computers(&request.computers)?;
+    }
     let id = request
         .id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let original = document.secrets.iter().find(|s| s.id == id);
+    let shared_hosting_approved = shared_hosting_approval(&request, original);
     let value_id = if let Some(value) = &request.value {
         let value_id = uuid::Uuid::new_v4().to_string();
         let mut values = read_vault()?;
@@ -911,6 +1310,8 @@ pub fn save_secret<G>(
     } else {
         original.ok_or("Enter a secret value.")?.value_id.clone()
     };
+    let replaced = token && request.value.is_some();
+    let account = account.or_else(|| original.and_then(|s| s.account.clone()));
     update(|d| {
         ensure_assignment_revision(&request.computers, &validated_assignments)?;
         let affected = original
@@ -926,8 +1327,11 @@ pub fn save_secret<G>(
             id: id.clone(),
             name: request.name,
             value_id,
+            kind: request.kind,
+            account,
             computers: request.computers,
             allowed_domains: request.allowed_domains,
+            shared_hosting_approved,
             affected,
             pending_computers: Vec::new(),
             errors: BTreeMap::new(),
@@ -936,7 +1340,26 @@ pub fn save_secret<G>(
         Ok(())
     })?;
     publish_changed();
-    reconcile(&id, &mut operation)?;
+    if token {
+        // Computers using the token pick up a replaced value; a computer can take
+        // minutes to apply it, so the secrets lock is not held meanwhile.
+        drop(operation.take());
+        // The new value is already stored; a computer that could not switch to it is
+        // reported after the rest of the save is recorded.
+        let applied = if replaced {
+            crate::github::personal_token::secret_saved(&id)
+        } else {
+            Ok(())
+        };
+        update(|d| {
+            event(d, "Secret settings saved", applied.is_err());
+            Ok(())
+        })?;
+        let _ = prune_values();
+        applied?;
+    } else {
+        reconcile(&id, &mut operation)?;
+    }
     let _ = prune_values();
     snapshot()
 }
@@ -946,9 +1369,9 @@ pub fn remove_secret<G>(
     update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Vec<Value>, String> {
     let _update = update_guard()?;
-    let _operation = lock_unit(&OPERATION);
+    let mut operation = Some(lock_unit(&OPERATION));
     retry_store();
-    remove_from_store(&id)?;
+    remove_from_store(&id, &mut operation)?;
     publish_changed();
     schedule_revocations();
     snapshot()
@@ -966,8 +1389,15 @@ pub fn retry_secret<G>(
         .iter()
         .any(|secret| secret.id == id && secret.removing)
     {
-        remove_from_store(&id)?;
+        remove_from_store(&id, &mut operation)?;
         schedule_revocations();
+    } else if load()?
+        .secrets
+        .iter()
+        .any(|secret| secret.id == id && secret.kind == SecretKind::GithubToken)
+    {
+        drop(operation.take());
+        crate::github::personal_token::secret_retry(&id)?;
     } else {
         reconcile(&id, &mut operation)?;
     }
@@ -983,12 +1413,16 @@ pub fn install() -> Result<(), String> {
         if let Ok(document) = load() {
             // Migrate legacy removals before any slow live update can wait on a computer.
             for secret in document.secrets.iter().filter(|secret| secret.removing) {
-                let _ = remove_from_store(&secret.id);
+                let _ = remove_from_store(&secret.id, &mut operation);
             }
             for secret in document
                 .secrets
                 .iter()
-                .filter(|secret| !secret.removing && !secret.affected.is_empty())
+                .filter(|secret| {
+                    !secret.removing
+                        && secret.kind == SecretKind::Generic
+                        && !secret.affected.is_empty()
+                })
             {
                 let _ = reconcile(&secret.id, &mut operation);
             }
@@ -1045,6 +1479,9 @@ mod tests {
         use_test_store(None);
         assert!(retry.is_ok());
     }
+    fn public_row(secret: &Secret) -> Value {
+        public(secret, &BTreeMap::new())
+    }
     fn request() -> Request {
         Request {
             operation: "add".into(),
@@ -1053,15 +1490,185 @@ mod tests {
             value: Some("private-value".into()),
             computers: vec!["dev".into()],
             allowed_domains: vec!["api.example.com".into()],
+            kind: SecretKind::Generic,
+            allow_shared_hosting: false,
         }
+    }
+    fn token_secret() -> Secret {
+        Secret {
+            kind: SecretKind::GithubToken,
+            account: Some("alice".into()),
+            name: "work".into(),
+            computers: Vec::new(),
+            allowed_domains: Vec::new(),
+            shared_hosting_approved: false,
+            affected: Vec::new(),
+            ..secret()
+        }
+    }
+    fn token_request(name: &str) -> Request {
+        Request {
+            computers: Vec::new(),
+            allowed_domains: Vec::new(),
+            kind: SecretKind::GithubToken,
+            name: name.into(),
+            ..request()
+        }
+    }
+    #[test]
+    fn documents_saved_before_token_secrets_load_as_generic_secrets() {
+        let saved = r#"{"secrets":[{"id":"id","name":"API_KEY","valueId":"v","computers":["dev"],"allowedDomains":["api.example.com"]}]}"#;
+        let document: Document = serde_json::from_str(saved).unwrap();
+        assert_eq!(document.secrets[0].kind, SecretKind::Generic);
+        assert_eq!(public_row(&document.secrets[0])["kind"], "generic");
+        let written = serde_json::to_string(&document).unwrap();
+        assert!(!written.contains("kind") && !written.contains("account"));
+    }
+    #[test]
+    fn a_token_secret_row_carries_its_account_and_connection() {
+        let _test_state = crate::test_support::global_state();
+        let users = BTreeMap::from([("id".to_string(), vec!["dev".to_string()])]);
+        let row = public(&token_secret(), &users);
+        assert_eq!(row["kind"], "github-token");
+        assert_eq!(row["account"], "alice");
+        assert_eq!(row["computers"], json!(["dev"]));
+        assert_eq!(row["allowedDomains"], json!([]));
+        assert_eq!(row["connection"]["state"], "disconnected");
+        assert!(!row.to_string().contains("private-reference"));
+    }
+    #[test]
+    fn a_token_secret_has_no_computers_or_hosts_of_its_own() {
+        let document = Document::default();
+        assert!(validate(&token_request("github-token"), &document).is_ok());
+        let mut with_computer = token_request("work");
+        with_computer.computers = vec!["dev".into()];
+        assert!(validate(&with_computer, &document).is_err());
+        let mut with_host = token_request("work");
+        with_host.allowed_domains = vec!["*".into()];
+        assert!(validate(&with_host, &document).is_err());
+        // A label with a hyphen is not an environment variable name.
+        let generic = Request {
+            name: "github-token".into(),
+            ..request()
+        };
+        assert!(validate(&generic, &document).is_err());
+    }
+    #[test]
+    fn a_secret_keeps_its_kind_and_its_name_is_unique_across_kinds() {
+        let mut document = Document::default();
+        document.secrets.push(token_secret());
+        let mut edit = token_request("work");
+        edit.operation = "edit".into();
+        edit.id = Some("id".into());
+        assert!(validate(&edit, &document).is_ok());
+        let mut as_generic = request();
+        as_generic.operation = "edit".into();
+        as_generic.id = Some("id".into());
+        as_generic.name = "work".into();
+        assert!(validate(&as_generic, &document).is_err());
+        assert!(validate(&token_request("work"), &document).is_err());
+    }
+    #[test]
+    fn token_secrets_are_not_delivered_as_environment_variables() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        use_test_store(Some(directory.path().join("secrets.json")));
+        use_test_vault(Some(BTreeMap::from([
+            ("private-reference".to_string(), "synthetic_token".to_string()),
+        ])));
+        let mut assigned = token_secret();
+        assigned.computers = vec!["dev".into()];
+        let document = Document {
+            secrets: vec![assigned, secret()],
+            ..Default::default()
+        };
+        save(&document).unwrap();
+        // The generic secret shares the value reference but only it is delivered.
+        let material = runtime_material("dev").unwrap();
+        assert_eq!(material.len(), 1);
+        assert_eq!(material[0].0, "API_KEY");
+        assert_eq!(assigned_names("dev").unwrap(), ["API_KEY"]);
+        assert_eq!(
+            revision(&document, "dev"),
+            revision(
+                &Document {
+                    secrets: vec![secret()],
+                    ..Default::default()
+                },
+                "dev"
+            )
+        );
+        assert!(unassigned_names(&document, "dev", &["work".to_string()]).contains(&"work".to_string()));
+        use_test_store(None);
+        use_test_vault(None);
+    }
+    #[test]
+    fn an_account_is_recorded_only_for_the_value_that_was_checked() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        use_test_store(Some(directory.path().join("secrets.json")));
+        use_test_vault(Some(BTreeMap::new()));
+        let id = import_github_token("synthetic_token", "alice", "work").unwrap();
+        let value_id = github_token_entries().unwrap()[0].value_id.clone();
+        let account = || github_token_entries().unwrap()[0].account.clone();
+        // A verdict about an older value, or another secret, changes nothing.
+        assert!(!set_github_token_account(&id, "older-value", "mallory").unwrap());
+        assert!(!set_github_token_account("other", &value_id, "mallory").unwrap());
+        assert_eq!(account().as_deref(), Some("alice"));
+        // The checked value's account is recorded once.
+        assert!(set_github_token_account(&id, &value_id, "bob").unwrap());
+        assert!(!set_github_token_account(&id, &value_id, "bob").unwrap());
+        assert_eq!(account().as_deref(), Some("bob"));
+        // A token being removed keeps its account too.
+        update(|d| {
+            d.secrets[0].removing = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(!set_github_token_account(&id, &value_id, "carol").unwrap());
+        use_test_store(None);
+        use_test_vault(None);
+    }
+    #[test]
+    fn shared_hosting_approval_is_absent_on_secrets_saved_before_it_existed() {
+        let mut stored = serde_json::to_value(secret()).unwrap();
+        assert!(stored.get("sharedHostingApproved").is_none());
+        let old: Secret = serde_json::from_value(stored.clone()).unwrap();
+        assert!(!old.shared_hosting_approved);
+        stored["sharedHostingApproved"] = true.into();
+        let approved: Secret = serde_json::from_value(stored).unwrap();
+        assert!(approved.shared_hosting_approved);
+    }
+    #[test]
+    fn shared_hosting_hosts_are_approved_only_by_a_confirmation_or_a_prior_approval() {
+        let shared = "*.netlify.app".to_owned();
+        let mut stored = secret();
+        stored.allowed_domains = vec![shared.clone()];
+        let mut request = request();
+        request.allowed_domains = vec![shared.clone()];
+        // A new secret, or a stored one never approved, stays unapproved until confirmed.
+        assert!(!shared_hosting_approval(&request, None));
+        assert!(!shared_hosting_approval(&request, Some(&stored)));
+        request.allow_shared_hosting = true;
+        assert!(shared_hosting_approval(&request, None));
+        assert!(shared_hosting_approval(&request, Some(&stored)));
+        // An approval stands while the hosts over shared hosting are the ones it covered.
+        request.allow_shared_hosting = false;
+        stored.shared_hosting_approved = true;
+        assert!(shared_hosting_approval(&request, Some(&stored)));
+        request.allowed_domains.push("*.vercel.app".into());
+        assert!(!shared_hosting_approval(&request, Some(&stored)));
     }
     fn secret() -> Secret {
         Secret {
             id: "id".into(),
             name: "API_KEY".into(),
             value_id: "private-reference".into(),
+            kind: SecretKind::Generic,
+            account: None,
             computers: vec!["dev".into()],
             allowed_domains: vec!["api.example.com".into()],
+            shared_hosting_approved: false,
             affected: vec!["dev".into()],
             pending_computers: Vec::new(),
             errors: BTreeMap::new(),
@@ -1307,7 +1914,7 @@ mod tests {
         let _test_state = crate::test_support::global_state();
         let mut s = secret();
         s.pending_computers = vec!["dev".into()];
-        let value = public(&s);
+        let value = public_row(&s);
         let text = value.to_string();
         assert!(!text.contains("private-reference"));
         assert!(value.get("value").is_none());
@@ -1316,28 +1923,28 @@ mod tests {
         s.pending_computers.clear();
         s.errors
             .insert("dev".into(), "Could not apply secret changes.".into());
-        assert!(public(&s)["error"].as_str().unwrap().contains("dev:"));
+        assert!(public_row(&s)["error"].as_str().unwrap().contains("dev:"));
         s.removing = true;
-        assert_eq!(public(&s)["removing"], true);
+        assert_eq!(public_row(&s)["removing"], true);
     }
     #[test]
     fn persisted_unfinished_secret_targets_are_not_reported_active_after_relaunch() {
         let _test_state = crate::test_support::global_state();
         let mut secret = secret();
-        assert_eq!(public(&secret)["state"], "applying");
+        assert_eq!(public_row(&secret)["state"], "applying");
         secret.pending_computers.push("dev".into());
-        assert_eq!(public(&secret)["state"], "restart-required");
+        assert_eq!(public_row(&secret)["state"], "restart-required");
         secret.affected.push("other".into());
-        assert_eq!(public(&secret)["state"], "applying");
+        assert_eq!(public_row(&secret)["state"], "applying");
         secret
             .errors
             .insert("other".into(), "Could not apply changes.".into());
-        assert_eq!(public(&secret)["state"], "restart-required");
-        assert!(public(&secret)["error"].is_string());
+        assert_eq!(public_row(&secret)["state"], "restart-required");
+        assert!(public_row(&secret)["error"].is_string());
         secret.affected.clear();
         secret.pending_computers.clear();
         secret.errors.clear();
-        assert_eq!(public(&secret)["state"], "active");
+        assert_eq!(public_row(&secret)["state"], "active");
     }
     #[test]
     fn poisoned_locks_recover_instead_of_blocking_secrets_and_updates() {
@@ -1501,7 +2108,7 @@ mod tests {
         let document = load().unwrap();
         assert_eq!(attempts, 3);
         assert_eq!(document.secrets[0].affected, ["dev"]);
-        assert!(public(&document.secrets[0])["error"]
+        assert!(public_row(&document.secrets[0])["error"]
             .as_str()
             .unwrap()
             .contains("Retry"));
@@ -1607,7 +2214,7 @@ mod tests {
             "the newer desired state is applied again"
         );
         let document = load().unwrap();
-        assert_eq!(public(&document.secrets[0])["state"], "active");
+        assert_eq!(public_row(&document.secrets[0])["state"], "active");
         use_test_store(None);
     }
     #[test]
@@ -1641,7 +2248,7 @@ mod tests {
         drop(operation);
         let document = load().unwrap();
         assert!(document.secrets[0].pending_computers.is_empty());
-        assert_eq!(public(&document.secrets[0])["state"], "active");
+        assert_eq!(public_row(&document.secrets[0])["state"], "active");
         use_test_store(None);
     }
     #[test]
@@ -1657,7 +2264,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        remove_from_store("id").unwrap();
+        remove_from_store("id", &mut None).unwrap();
         assert!(snapshot().unwrap().is_empty());
         assert!(read_vault().unwrap().is_empty());
         assert!(runtime_material("dev").unwrap().is_empty());
@@ -1691,7 +2298,7 @@ mod tests {
             &mut |_, material| {
                 assert_eq!(material[0].1, "private-value");
                 let _remove = lock_unit(&OPERATION);
-                remove_from_store("id")?;
+                remove_from_store("id", &mut None)?;
                 assert!(snapshot()?.is_empty());
                 assert!(read_vault()?.is_empty());
                 assert_eq!(pending_names("dev")?, ["API_KEY"]);
@@ -1722,7 +2329,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        remove_from_store("id").unwrap();
+        remove_from_store("id", &mut None).unwrap();
         let before_apply = pending_revocations().unwrap();
         revocations_replaced(&before_apply, "dev", &["API_KEY".into()]).unwrap();
         assert_eq!(
@@ -1738,7 +2345,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        remove_from_store("replacement").unwrap();
+        remove_from_store("replacement", &mut None).unwrap();
         revocations_replaced(&before_apply, "dev", &[]).unwrap();
         let remaining = pending_revocations().unwrap();
         assert_eq!(remaining.len(), 1);
@@ -1763,7 +2370,7 @@ mod tests {
         })
         .unwrap();
         let before = computer_revision("dev").unwrap();
-        remove_from_store("id").unwrap();
+        remove_from_store("id", &mut None).unwrap();
         computer_started("dev", &before).unwrap();
         assert_eq!(
             pending_names("dev").unwrap(),
@@ -1792,7 +2399,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        remove_from_store("id").unwrap();
+        remove_from_store("id", &mut None).unwrap();
         let old = load().unwrap().pending_revocations[0].clone();
         assert!(revocation_needed(&old).unwrap());
         assert!(validate(&request(), &load().unwrap()).is_ok());
@@ -1810,7 +2417,7 @@ mod tests {
         );
         // A delayed success for the old generation cannot clear a later removal.
         write_vault([("new-generation".into(), "new-value".into())].into()).unwrap();
-        remove_from_store("replacement").unwrap();
+        remove_from_store("replacement", &mut None).unwrap();
         retry_revocations_with(&mut |record| Ok(record.generation == old.generation)).unwrap();
         let pending = load().unwrap().pending_revocations;
         assert_eq!(pending.len(), 1);

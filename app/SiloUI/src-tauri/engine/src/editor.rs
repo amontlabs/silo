@@ -4,6 +4,7 @@ use crate::{
     applications,
     runtime::{self, RuntimePaths},
 };
+use silo_api::methods::agents::AgentId;
 use std::{
     fs,
     io::{Read, Seek, SeekFrom, Write},
@@ -1060,15 +1061,25 @@ pub fn validate_remote_path(path: &str, macos: bool) -> Result<(), String> {
 /// The home folder of a macOS computer's working account.
 pub const MACOS_HOME: &str = "/Users/silo";
 
-/// The argv a terminal runs to open a shell in a computer on another device.
-pub fn remote_terminal_argv(config: &Path, alias: &str) -> Result<Vec<String>, String> {
-    Ok(vec![
+/// The argv a terminal runs to open a shell in a computer on another device, or, with an
+/// `agent`, to start that agent in the workspace of a Linux (`macos` false) or macOS computer.
+pub fn remote_terminal_argv(
+    config: &Path,
+    alias: &str,
+    agent: Option<AgentId>,
+    macos: bool,
+) -> Result<Vec<String>, String> {
+    let mut argv = vec![
         "/usr/bin/ssh".to_owned(),
         "-F".to_owned(),
         config.to_str().ok_or(FAILED)?.to_owned(),
         "-t".to_owned(),
         alias.to_owned(),
-    ])
+    ];
+    if let Some(agent) = agent {
+        argv.push(crate::agents::launch_script(agent, macos));
+    }
+    Ok(argv)
 }
 
 /// The argv that opens `path` of a computer on another device in the chosen editor. `macos`
@@ -3303,8 +3314,30 @@ mod tests {
     }
 
     #[test]
+    fn a_remote_terminal_with_an_agent_adds_the_fixed_command_of_its_system() {
+        for (macos, workspace) in [(false, "/workspace"), (true, "/Users/silo/workspace")] {
+            let argv = remote_terminal_argv(
+                Path::new("/tmp/x.conf"),
+                "silo-remote-d-c",
+                Some(AgentId::Codex),
+                macos,
+            )
+            .unwrap();
+            assert_eq!(argv.len(), 6);
+            assert_eq!(argv[5], crate::agents::launch_script(AgentId::Codex, macos));
+            assert!(argv[5].starts_with(&format!("cd {workspace} ")));
+        }
+    }
+
+    #[test]
     fn remote_terminal_and_editor_argvs_name_the_alias() {
-        let argv = remote_terminal_argv(Path::new("/tmp/a b/x.conf"), "silo-remote-d-c").unwrap();
+        let argv = remote_terminal_argv(
+            Path::new("/tmp/a b/x.conf"),
+            "silo-remote-d-c",
+            None,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             argv,
             [

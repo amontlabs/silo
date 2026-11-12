@@ -46,6 +46,9 @@ wire_struct! {
         /// is cached under it, so every fork of one recipe shares a baseline.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         recipe_hash: Option<String>,
+        /// The fork's network policy. Absent, the fork keeps its source's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network_policy: Option<super::network::NetworkPolicy>,
     }
 }
 

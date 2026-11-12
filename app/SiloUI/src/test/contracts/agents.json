@@ -1,0 +1,20 @@
+{
+  "list": {
+    "agents": [
+      { "id": "claude-code", "name": "Claude Code", "state": "ready", "version": "2.1.287", "expectedVersion": "2.1.287" },
+      { "id": "codex", "name": "Codex", "state": "missing", "version": null, "expectedVersion": "0.167.0" }
+    ]
+  },
+  "installed": {
+    "agents": [
+      { "id": "claude-code", "name": "Claude Code", "state": "ready", "version": "2.1.287", "expectedVersion": "2.1.287" },
+      { "id": "codex", "name": "Codex", "state": "ready", "version": "0.167.0", "expectedVersion": "0.167.0" }
+    ]
+  },
+  "progress": { "computerId": "main-1", "agent": "codex", "step": "downloading", "detail": "Downloading Codex (42%)" },
+  "sshName": {
+    "alias": "silo-6f0c1a52-6a47-4a43-9d26-7a1f0b6f8f10", "user": "silo", "home": "/home/silo",
+    "configPath": "/Users/me/Library/Application Support/Silo/ssh/silo-6f0c1a52.conf",
+    "includeLine": "Include \"/Users/me/Library/Application Support/Silo/ssh/*.conf\"", "includeInstalled": true
+  }
+}

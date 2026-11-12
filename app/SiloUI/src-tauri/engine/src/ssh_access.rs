@@ -197,7 +197,7 @@ fn validate(config: &Configuration) -> Result<(), String> {
     }
     Ok(())
 }
-fn normalize_key(key: &str) -> Result<String, String> {
+pub(crate) fn normalize_key(key: &str) -> Result<String, String> {
     if key.len() > 4096 || key.contains(['\n', '\r', '\0']) {
         return Err("Paste one Ed25519 public key per entry.".into());
     }
@@ -209,6 +209,18 @@ fn normalize_key(key: &str) -> Result<String, String> {
     );
     editor::validate_public_key(&normalized)?;
     Ok(normalized)
+}
+/// The SHA-256 fingerprint of a public key, as `ssh-keygen -l` shows it.
+pub(crate) fn key_fingerprint(key: &str) -> Option<String> {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(key.split_whitespace().nth(1)?)
+        .ok()?;
+    Some(format!(
+        "SHA256:{}",
+        base64::engine::general_purpose::STANDARD_NO_PAD.encode(Sha256::digest(bytes))
+    ))
 }
 fn device_name() -> String {
     let mut bytes = [0u8; 256];

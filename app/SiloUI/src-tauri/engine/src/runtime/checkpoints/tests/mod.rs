@@ -13,6 +13,7 @@ fn a_migrated_checkpoint_record_loads() {
 }
 
 mod failed_capture_tests;
+mod network_live;
 
 const ID: &str = "00000000-0000-4000-8000-000000000001";
 
@@ -346,6 +347,11 @@ fn checkpoint_start_selects_native_scope_and_desired_restore_mode_separately() {
         assert_eq!(
             restore.iter().any(|arg| arg == "--cpus"),
             desired_mode == "disk"
+        );
+        assert_eq!(
+            restore.iter().any(|arg| arg == "--allow-missing-resources"),
+            desired_mode == "disk",
+            "native={native_scope}, desired={desired_mode}: {restore:?}"
         );
     }
 }
@@ -954,8 +960,6 @@ fn a_fork_point_of_a_running_computer_saves_disks_only_after_a_guest_flush() {
         },
     )
     .unwrap();
-    // A bridge folder makes a capture with memory drop the guest's cached entries first.
-    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
     let runner = Runner {
         mount_type: "Owned",
         calls: Mutex::new(Vec::new()),
@@ -1041,83 +1045,45 @@ fn a_fork_point_of_a_stopped_computer_asks_for_no_guest_flush() {
 }
 
 #[test]
-fn a_full_capture_drops_the_guests_cached_entries_first_only_when_a_bridge_folder_exists() {
-    let _test_state = crate::test_support::global_state();
-    for bridge in [false, true] {
-        let directory = tempfile::tempdir().unwrap();
-        let paths = paths(&directory);
-        write_metadata(
-            &paths.metadata,
-            &ComputerConfigurationRequest {
-                schema_version: 1,
-                computers: vec![computer_configuration()],
-            },
-        )
-        .unwrap();
-        if bridge {
-            std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
-        }
-        let runner = Runner {
-            mount_type: "Owned",
-            calls: Mutex::new(Vec::new()),
-        };
-        capture_with(&runner, &paths, ID, "Before work", "manual").unwrap();
-        let calls = runner.calls.lock().unwrap();
-        let release = calls.iter().position(|call| {
-            call[0] == "exec" && call.iter().any(|arg| arg.contains("drop_caches"))
-        });
-        let create = calls
-            .iter()
-            .position(|call| call[..2] == ["snapshot", "create"])
-            .unwrap();
-        if bridge {
-            assert!(release.unwrap() < create);
-            assert!(calls[release.unwrap()]
-                .windows(2)
-                .any(|pair| pair == ["--user", "root"]));
-        } else {
-            assert!(release.is_none());
-        }
-    }
-}
-
-#[test]
-fn a_capture_the_share_rejects_says_to_restart_and_releases_the_bridge_hold() {
+fn a_full_capture_runs_nothing_in_the_guest_before_the_snapshot() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
-    let rejected = || RuntimeError::Failed {
-        operation: "snapshot".into(),
-        exit_code: Some(1),
-        detail: "control operation rejected by peer".into(),
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![computer_configuration()],
+        },
+    )
+    .unwrap();
+    // A folder an earlier engine left in the runtime share changes nothing.
+    std::fs::create_dir_all(paths.home.join("sandboxes/dev/runtime/silo-bridge/req")).unwrap();
+    let runner = Runner {
+        mount_type: "Owned",
+        calls: Mutex::new(Vec::new()),
     };
-    // Without a bridge folder the failure is reported as it is.
-    assert!(matches!(
-        explain_rejected_capture(&paths, "dev", rejected()),
-        RuntimeError::Failed { .. }
-    ));
-    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
-    let explained = explain_rejected_capture(&paths, "dev", rejected()).to_string();
-    assert!(explained.contains("Restart the computer"), "{explained}");
-    let hold = crate::guest_client::hold_bridge("dev");
-    assert!(crate::guest_client::bridge_held("dev"));
-    drop(hold);
-    assert!(!crate::guest_client::bridge_held("dev"));
+    capture_with(&runner, &paths, ID, "Before work", "manual").unwrap();
+    let calls = runner.calls.lock().unwrap();
+    assert!(!calls.iter().any(|call| call[0] == "exec"), "{calls:?}");
+    assert!(calls.iter().any(|call| call[..2] == ["snapshot", "create"]));
 }
 
 #[test]
 fn every_fork_scrubs_the_guest_client_token_once() {
-    let token = silo_api::methods::guest_client::GUEST_TOKEN_PATH;
+    use silo_api::methods::guest_client::{
+        GUEST_ENDPOINT_PATH as token, LEGACY_GUEST_TOKEN_PATH as legacy,
+    };
     let mut options = ForkOptions::default();
     options.scrub_guest_client_token();
     options.scrub_guest_client_token();
-    assert_eq!(options.scrub, [token]);
+    assert_eq!(options.scrub, [token, legacy]);
     let mut named = ForkOptions {
         scrub: vec!["/root/.bot.env".into(), token.into()],
         ..ForkOptions::default()
     };
     named.scrub_guest_client_token();
-    assert_eq!(named.scrub, ["/root/.bot.env", token]);
+    assert_eq!(named.scrub, ["/root/.bot.env", token, legacy]);
     assert!(named.validate().is_ok());
 }
 
@@ -2802,6 +2768,8 @@ struct Store {
     computers: Vec<(&'static str, Option<&'static str>)>,
     fail_create_after_publish: bool,
     fail_remove: bool,
+    /// The runtime's `snapshot verify` rejects every member.
+    fail_verify: bool,
     /// Layers (head included) the fake runtime reports per disk for `modify --compact`.
     layers: usize,
     /// Layers of the `/workspace` disk when its chain differs from the root's.
@@ -2834,6 +2802,7 @@ impl Store {
             computers,
             fail_create_after_publish: false,
             fail_remove: false,
+            fail_verify: false,
             layers: 0,
             workspace_layers: None,
             fail_compact: false,
@@ -2851,6 +2820,10 @@ impl Store {
     }
     fn with_layers(mut self, layers: usize) -> Self {
         self.layers = layers;
+        self
+    }
+    fn failing_verification(mut self) -> Self {
+        self.fail_verify = true;
         self
     }
     fn failing_compaction(mut self) -> Self {
@@ -3049,6 +3022,9 @@ impl RuntimeRunner for Store {
                     }
                     members.remove(index);
                     ok(String::new())
+                }
+                ("snapshot", Some("verify")) if self.fail_verify => {
+                    Err(RuntimeError::Unavailable("snapshot verification failed".into()))
                 }
                 ("snapshot", Some("create")) => {
                     let group = args[args.iter().position(|arg| arg == "--group").unwrap() + 1].clone();
@@ -3498,6 +3474,77 @@ fn checkpoint_usage_keeps_saved_dependencies_when_native_member_is_missing() {
 }
 
 #[test]
+fn checkpoint_usage_for_a_computer_names_only_the_dependants_it_can_see() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut started = Record::default();
+    started.snapshot_group = Some("dev".into());
+    let paths = delete_fixture(
+        &directory,
+        vec![entry(A, "Selected", "manual")],
+        Some(started),
+    );
+    let store = Store::new(vec![("dev", Some("snap_a")), ("branch", Some("snap_a"))])
+        .with("dev", A, "snap_a", None);
+    let only_itself = BTreeSet::from([ID.to_owned()]);
+    let usage = usage_as(&store, &paths, ID, Some(&only_itself)).unwrap();
+    let json = serde_json::to_string(&usage).unwrap();
+    assert!(!json.contains("branch"), "{json}");
+    assert_eq!(usage.checkpoints[0].used_by, ["a computer you can’t see"]);
+    assert_eq!(
+        usage.checkpoints[0].delete_blocker.as_deref(),
+        Some("Used by a computer you can’t see.")
+    );
+    // A delete that is refused says the same.
+    let refusal = delete_checkpoint_as(&store, &paths, ID, A, Some(&only_itself))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        refusal.contains("a computer you can’t see") && !refusal.contains("branch"),
+        "{refusal}"
+    );
+    let with_branch = BTreeSet::from([ID.to_owned(), FORK_ID.to_owned()]);
+    let usage = usage_as(&store, &paths, ID, Some(&with_branch)).unwrap();
+    assert_eq!(usage.checkpoints[0].used_by, ["branch"]);
+    assert!(usage.checkpoints[0]
+        .delete_blocker
+        .as_ref()
+        .unwrap()
+        .starts_with("Used by branch."));
+    // A dependant that is not one of Silo's computers is never one a computer can name.
+    let outside = Store::new(vec![("outside-silo", Some("snap_a"))]).with("dev", A, "snap_a", None);
+    let usage = usage_as(&outside, &paths, ID, Some(&with_branch)).unwrap();
+    assert_eq!(usage.checkpoints[0].used_by, ["a computer you can’t see"]);
+}
+
+#[test]
+fn checkpoint_usage_names_a_computer_it_cannot_see_once_however_many_depend_on_the_checkpoint() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut started = Record::default();
+    started.snapshot_group = Some("dev".into());
+    let paths = delete_fixture(
+        &directory,
+        vec![entry(A, "Selected", "manual")],
+        Some(started),
+    );
+    let store = Store::new(vec![
+        ("dev", Some("snap_a")),
+        ("branch", Some("snap_a")),
+        ("second", Some("snap_a")),
+    ])
+    .with("dev", A, "snap_a", None);
+    let only_itself = BTreeSet::from([ID.to_owned()]);
+    let usage = usage_as(&store, &paths, ID, Some(&only_itself)).unwrap();
+    let json = serde_json::to_string(&usage).unwrap();
+    assert!(
+        !json.contains("branch") && !json.contains("second"),
+        "{json}"
+    );
+    assert_eq!(usage.checkpoints[0].used_by, ["a computer you can’t see"]);
+}
+
+#[test]
 fn checkpoint_storage_totals_lists_only_the_selected_lineage_group() {
     let _test_state = crate::test_support::global_state();
     for group in [Some("source"), None] {
@@ -3755,6 +3802,89 @@ fn a_failed_capture_removes_its_published_member_unless_the_computer_builds_on_i
         }
         assert_eq!(record.checkpoint_operation.unwrap().status, "failed");
     }
+}
+
+#[test]
+fn a_capture_the_runtime_finished_and_the_computer_builds_on_is_kept_at_launch() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, vec![entry(A, "Kept", "manual")], None);
+    let mut record = load(&paths, ID).unwrap();
+    record.inflight_checkpoint = Some(entry(B, "Interrupted", "manual"));
+    record.checkpoint_operation = Some(Operation {
+        kind: "capture".into(),
+        status: "running".into(),
+        stage: "Capturing computer state".into(),
+        error: None,
+    });
+    save(&paths, ID, &record).unwrap();
+    let store = Store::new(vec![("dev", None)])
+        .with("dev", A, "snap_a", None)
+        .with("dev", B, "snap_b", Some("snap_a"));
+    cursor(&paths, "dev", "snap_b");
+    let recovery = recover_interrupted(&store, &paths).unwrap();
+    assert!(recovery.unresolved.is_empty());
+    assert_eq!(store.names(), [A, B]);
+    let recovered = load(&paths, ID).unwrap();
+    assert!(recovered.inflight_checkpoint.is_none());
+    assert!(recovered.checkpoint_operation.is_none());
+    let ids: Vec<_> = recovered.checkpoints.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, [B, A]);
+}
+
+#[test]
+fn only_a_ready_capture_the_computer_builds_on_is_adopted() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = restore_fixture(&directory, None);
+    let mut record = load(&paths, ID).unwrap();
+    record.snapshot_group = Some("dev".into());
+    record.inflight_checkpoint = Some(Checkpoint {
+        scope: "disk".into(),
+        ..entry(B, "Interrupted", "manual")
+    });
+    save(&paths, ID, &record).unwrap();
+    let store = Store::new(vec![("dev", None)]).with("dev", B, "snap_b", None);
+    cursor(&paths, "dev", "snap_b");
+    let mut adopted = load(&paths, ID).unwrap();
+    assert!(adopt_finished_capture(&store, &paths, &mut adopted, "dev", "dev").unwrap());
+    assert!(store.calls.lock().unwrap().iter().any(|call| call[..2] == ["snapshot", "verify"]));
+    assert!(adopted.inflight_checkpoint.is_none());
+    assert_eq!(adopted.checkpoints[0].id, B);
+    // A capture nothing builds on is not adopted (it is discarded instead).
+    let other = tempfile::tempdir().unwrap();
+    let paths = restore_fixture(&other, None);
+    let mut record = load(&paths, ID).unwrap();
+    record.inflight_checkpoint = Some(Checkpoint {
+        scope: "disk".into(),
+        ..entry(B, "Interrupted", "manual")
+    });
+    let store = Store::new(vec![("dev", None)]).with("dev", B, "snap_b", None);
+    assert!(!adopt_finished_capture(&store, &paths, &mut record, "dev", "dev").unwrap());
+    assert!(record.inflight_checkpoint.is_some());
+}
+
+#[test]
+fn a_finished_capture_that_fails_the_runtimes_check_is_not_adopted() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, vec![entry(A, "Kept", "manual")], None);
+    let mut record = load(&paths, ID).unwrap();
+    record.inflight_checkpoint = Some(entry(B, "Interrupted", "manual"));
+    save(&paths, ID, &record).unwrap();
+    let store = Store::new(vec![("dev", None)])
+        .with("dev", A, "snap_a", None)
+        .with("dev", B, "snap_b", Some("snap_a"))
+        .failing_verification();
+    cursor(&paths, "dev", "snap_b");
+    let error = recover_interrupted(&store, &paths).unwrap().unresolved;
+    assert_eq!(error.len(), 1, "{error:?}");
+    assert!(error.values().next().unwrap().to_string().contains("did not pass"));
+    assert_eq!(store.names(), [A, B]);
+    let preserved = load(&paths, ID).unwrap();
+    assert!(preserved.inflight_checkpoint.is_some());
+    let ids: Vec<_> = preserved.checkpoints.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, [A]);
 }
 
 #[test]
@@ -5883,6 +6013,202 @@ fn a_fork_copies_only_the_named_secrets_and_github_on_request() {
 }
 
 #[test]
+fn a_fork_starts_on_a_closed_network_only_when_asked_to() {
+    let _test_state = crate::test_support::global_state();
+    let deny_all = serde_json::json!({
+        "default_egress": "deny",
+        "default_ingress": "deny",
+        "rules": []
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut fork) = fork_fixture(&directory);
+    let parent_policy = fork.desired_policy.clone();
+    assert_ne!(parent_policy, deny_all);
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    let (_, record) = fork_child(&paths);
+    assert_eq!(record.desired_network_policy, Some(parent_policy));
+
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, closed) = fork_fixture(&directory);
+    fork = closed;
+    fork.options = ForkOptions {
+        closed_network: true,
+        ..ForkOptions::default()
+    };
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    let (_, record) = fork_child(&paths);
+    assert_eq!(record.desired_network_policy, Some(deny_all));
+}
+
+#[test]
+fn a_fork_has_its_own_channel_port_and_the_closed_copy_of_an_export_has_none() {
+    use crate::network_policy::{extra_rules, plan_for, ExtraRule, Rule};
+    let _test_state = crate::test_support::global_state();
+    let store_directory = tempfile::tempdir().unwrap();
+    crate::network_policy::store::use_test_path(Some(
+        store_directory.path().join("network-policy.json"),
+    ));
+    crate::guest_client::tokens::use_test_directory(Some(
+        store_directory.path().join("guest-client"),
+    ));
+    let tokens = crate::guest_client::TokenStore::current().unwrap();
+    crate::guest_client::turn_on(ID).unwrap();
+    let source_port = tokens.port_of(ID).unwrap();
+
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, fork) = fork_fixture(&directory);
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    let (child, _) = fork_child(&paths);
+    let child_port = tokens.port_of(&child).unwrap();
+    assert_ne!(child_port, source_port);
+    assert_eq!(extra_rules(&child), vec![ExtraRule::GatewayPort(child_port)]);
+    let plan = plan_for(&child, "branch", None).unwrap();
+    assert!(plan.rules.contains(&Rule::GatewayPort(child_port)));
+    assert!(!plan.rules.contains(&Rule::GatewayPort(source_port)));
+
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut closed) = fork_fixture(&directory);
+    closed.options = ForkOptions {
+        closed_network: true,
+        ..ForkOptions::default()
+    };
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &closed,
+        "branch",
+    )
+    .unwrap();
+    let (copy, _) = fork_child(&paths);
+    assert!(tokens.port_of(&copy).is_none(), "the closed copy has no channel");
+    assert!(extra_rules(&copy).is_empty());
+    let plan = plan_for(&copy, "branch", None).unwrap();
+    assert!(plan.rules.is_empty());
+    assert!(!plan.ingress_allowed);
+    crate::guest_client::tokens::use_test_directory(None);
+    crate::network_policy::store::use_test_path(None);
+}
+
+struct InspectRunner(Value);
+impl RuntimeRunner for InspectRunner {
+    fn run(
+        &self,
+        _paths: &RuntimePaths,
+        args: &[String],
+        _timeout: Duration,
+    ) -> Result<CommandOutput, RuntimeError> {
+        assert_eq!(args[0], "inspect", "{args:?}");
+        Ok(CommandOutput {
+            stdout: serde_json::json!({
+                "name": "dev",
+                "status": "Stopped",
+                "config": self.0,
+            })
+            .to_string(),
+            stderr: String::new(),
+        })
+    }
+}
+
+fn inspected_with_policy(policy: Option<Value>) -> InspectRunner {
+    let mut config = serde_json::json!({
+        "labels": {"silo.managed": "true", "silo.machine-id": ID},
+        "network": {"strict": true},
+    });
+    if let Some(policy) = policy {
+        config["network"]["policy"] = policy;
+    }
+    InspectRunner(config)
+}
+
+#[test]
+fn a_computer_with_no_saved_policy_gets_its_channel_rule_added_to_the_rules_it_was_made_with() {
+    use crate::network_policy::{plan, Grants, NetworkPolicy, Rule};
+    let _test_state = crate::test_support::global_state();
+    let store_directory = tempfile::tempdir().unwrap();
+    let file = store_directory.path().join("network-policy.json");
+    crate::network_policy::store::use_test_path(Some(file.clone()));
+    crate::guest_client::tokens::use_test_directory(Some(
+        store_directory.path().join("guest-client"),
+    ));
+    let directory = tempfile::tempdir().unwrap();
+    let paths = restore_fixture(&directory, None);
+    let configuration = computer_configuration();
+    let open = plan(&NetworkPolicy::default(), &Grants::default(), &[]);
+    let runner = inspected_with_policy(Some(open.policy_value()));
+
+    // No saved policy and no channel: the rules it was made with stay.
+    assert!(!network_policy_changed(&runner, &paths, &configuration).unwrap());
+    ensure_network_rules_current(&runner, &paths, &configuration).unwrap();
+
+    // With a channel the rule is added to the recorded rules, not to an assumed open policy.
+    crate::guest_client::turn_on(ID).unwrap();
+    let port = crate::guest_client::TokenStore::current().unwrap().port_of(ID).unwrap();
+    let (planned, _) = changed_network_plan(&runner, &paths, &configuration)
+        .unwrap()
+        .unwrap();
+    assert_eq!(planned.rules, vec![Rule::Dns, Rule::GatewayPort(port), Rule::Public]);
+    let refused = ensure_network_rules_current(&runner, &paths, &configuration).unwrap_err();
+    assert!(refused.to_string().contains("was not started"), "{refused}");
+    let closed = inspected_with_policy(Some(serde_json::json!({
+        "default_egress": "deny",
+        "default_ingress": "deny",
+        "rules": []
+    })));
+    let (planned, _) = changed_network_plan(&closed, &paths, &configuration)
+        .unwrap()
+        .unwrap();
+    assert_eq!(planned.rules, vec![Rule::GatewayPort(port)]);
+    assert!(!planned.ingress_allowed);
+
+    // Once the runtime holds the channel rule there is nothing to change.
+    let current = inspected_with_policy(Some(planned_value(&open, port)));
+    ensure_network_rules_current(&current, &paths, &configuration).unwrap();
+
+    // When the recorded rules cannot be read, nothing is guessed.
+    let mut record = load(&paths, ID).unwrap();
+    record.desired_network_policy = None;
+    save(&paths, ID, &record).unwrap();
+    let unknown = inspected_with_policy(None);
+    let refused = changed_network_plan(&unknown, &paths, &configuration).unwrap_err();
+    assert!(refused.to_string().contains("cannot read"), "{refused}");
+
+    // A saved policy that cannot be read is an error whatever else is known.
+    std::fs::write(&file, "{ not json").unwrap();
+    assert!(ensure_network_rules_current(&current, &paths, &configuration).is_err());
+    crate::guest_client::tokens::use_test_directory(None);
+    crate::network_policy::store::use_test_path(None);
+}
+
+fn planned_value(open: &crate::network_policy::Plan, port: u16) -> Value {
+    let mut plan = open.clone();
+    plan.rules.insert(1, crate::network_policy::Rule::GatewayPort(port));
+    plan.policy_value()
+}
+
+#[test]
 fn a_fork_records_what_it_was_quieted_with() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
@@ -5891,6 +6217,8 @@ fn a_fork_records_what_it_was_quieted_with() {
         secrets: vec!["github".into(), "TOKEN".into()],
         stop: vec!["poller".into()],
         scrub: vec!["/root/.bot.env".into()],
+        closed_network: false,
+        network_policy: None,
     };
     fork_commit(
         &journal_runner("Running", ""),
@@ -5913,6 +6241,8 @@ fn fork_options_refuse_odd_names_and_paths() {
         secrets: Vec::new(),
         stop: stop.iter().map(|s| s.to_string()).collect(),
         scrub: scrub.iter().map(|s| s.to_string()).collect(),
+        closed_network: false,
+        network_policy: None,
     };
     assert!(options(
         &["poller", "my-app.service", "a@b"],
@@ -6444,7 +6774,7 @@ fn run_sh(program: &str) -> std::process::Output {
 fn the_boot_patch_carries_the_script_the_engine_runs() {
     let patch = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../patches/microsandbox-create-stopped-0.7.6.patch"),
+            .join("../../patches/microsandbox-create-stopped-0.7.14.patch"),
     )
     .unwrap();
     let lines: Vec<&str> = patch.lines().collect();
@@ -6605,8 +6935,6 @@ fn a_running_container_is_captured_with_disks_only() {
         },
     )
     .unwrap();
-    // A bridge folder makes a capture with memory drop the guest's cached entries first.
-    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
     crate::containers::capability::make_container(&paths.home, "dev");
     let runner = Runner {
         mount_type: "Owned",
@@ -6801,4 +7129,77 @@ fn an_imported_container_starts_from_the_deny_all_policy_like_a_virtual_machine(
         }
         assert!(!restore.iter().any(|arg| arg == "--net-rule"), "{restore:?}");
     }
+}
+
+#[test]
+fn an_import_saves_a_closed_policy_and_a_start_does_not_run_on_an_unreadable_one() {
+    let _test_state = crate::test_support::global_state();
+    struct Probe(Mutex<Vec<Vec<String>>>);
+    impl RuntimeRunner for Probe {
+        fn run(
+            &self,
+            _paths: &RuntimePaths,
+            args: &[String],
+            _timeout: Duration,
+        ) -> Result<CommandOutput, RuntimeError> {
+            self.0.lock().unwrap().push(args.to_vec());
+            let stdout = match args.first().map(String::as_str) {
+                Some("snapshot") => serde_json::json!([{
+                    "group":"silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9",
+                    "name":"silo-backup-0-330418-1790360984903",
+                    "scope":"disk", "availability":"ready"
+                }])
+                .to_string(),
+                Some("list") => "[]".into(),
+                _ => panic!("unexpected command: {args:?}"),
+            };
+            Ok(CommandOutput {
+                stdout,
+                stderr: String::new(),
+            })
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let file = directory.path().join("network-policy.json");
+    crate::network_policy::store::use_test_path(Some(file.clone()));
+    // A policy left over from a computer of this id is replaced by an explicit closed one.
+    crate::network_policy::store::set(
+        ID,
+        &crate::network_policy::NetworkPolicy::default(),
+    )
+    .unwrap();
+    crate::guest_client::tokens::use_test_directory(Some(directory.path().join("guest-client")));
+    // Silo's tools left over from a computer of this id are turned off by the import.
+    crate::guest_client::turn_on(ID).unwrap();
+    import_pending_restore(
+        &paths,
+        ID,
+        "silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9",
+        "silo-backup-0-330418-1790360984903",
+    )
+    .unwrap();
+    let stored = crate::network_policy::store::get_stored(ID).unwrap().unwrap();
+    assert_eq!(stored.mode, crate::network_policy::NetworkPolicyMode::Closed);
+    assert!(stored.incoming_denied);
+    assert!(crate::network_policy::extra_rules(ID).is_empty());
+    assert!(crate::guest_client::TokenStore::current()
+        .unwrap()
+        .port_of(ID)
+        .is_none());
+    // With the saved policies unreadable the start refuses before it asks the runtime for
+    // anything that changes it.
+    std::fs::write(&file, "{ not json").unwrap();
+    let runner = Probe(Mutex::new(Vec::new()));
+    let refused = start_pending(&runner, &paths, &computer_configuration()).unwrap_err();
+    assert!(refused.to_string().contains("unreadable"), "{refused}");
+    assert!(runner
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|args| args[0] != "restore" && args[0] != "remove"));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
+    crate::guest_client::tokens::use_test_directory(None);
+    crate::network_policy::store::use_test_path(None);
 }

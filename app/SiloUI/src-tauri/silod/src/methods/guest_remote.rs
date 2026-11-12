@@ -228,7 +228,8 @@ pub(super) async fn terminal_command(
             true,
             false,
         )?;
-        editor::remote_terminal_argv(&alias.config, &alias.alias).map_err(plain)
+        editor::remote_terminal_argv(&alias.config, &alias.alias, params.agent, owner.macos)
+            .map_err(plain)
     })
     .await?;
     output(CommandResult { argv })
@@ -1028,8 +1029,9 @@ pub(crate) mod tests {
             fixture().context.clone(),
             crate::dispatcher::RequestContext {
                 client_id: "remote-watch-client".to_owned(),
-                protocol: 7,
+                protocol: 8,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         );
         let watch = crate::methods::dispatch(
@@ -1088,8 +1090,9 @@ pub(crate) mod tests {
             fixture().context.clone(),
             crate::dispatcher::RequestContext {
                 client_id: "remote-watch-refused".to_owned(),
-                protocol: 7,
+                protocol: 8,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         );
         let error = crate::methods::dispatch(

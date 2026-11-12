@@ -200,6 +200,10 @@ pub trait KeepEnv: Send + Sync {
     fn start(&self, _computer: &str) -> Result<(), String> {
         Ok(())
     }
+    /// The name a person knows `computer` by, for the words of a message; the id when none is known.
+    fn name_of(&self, computer: &str) -> String {
+        computer.to_owned()
+    }
     /// Called after a keep into `computer` succeeded, with its lane released.
     fn after_kept(&self, _computer: &str) {}
     /// Holds the engine's operation lane for `computer` until the returned value is dropped,

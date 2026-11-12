@@ -22,7 +22,7 @@ export const VOCABULARY_RECORD = "vocabulary-migration.json"
 export const COPIED_SETTINGS = Object.freeze([
   "theme", "onboardingComplete", "reduceMotion",
   "notificationsEnabled", "notifyHealth", "notifyActions", "notifyBackup",
-  "notifyFailures", "notifyChanges", "notifyCompletions",
+  "notifyFailures", "notifyChanges", "notifyCompletions", "notifyApprovals",
   "terminal", "terminalUseSystemDefault", "terminalPath",
   "editor", "editorUseSystemDefault", "editorPath",
   "browser", "browserUseSystemDefault", "browserPath",

@@ -6,13 +6,27 @@ pub const KEYS: [&str; 3] = [
     "SILO_GITHUB_CLIENT_SECRET",
 ];
 
+// Cargo treats a missing `rerun-if-changed` path as always stale, and a
+// directory is scanned recursively (the parent holds `target/` and
+// `node_modules/`). So the local file is watched only while it exists; without
+// it the build depends on the environment keys alone, and creating the file
+// takes effect with the next change to a build script or a key.
+pub fn watch(path: &Path) {
+    if path.exists() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+    for key in KEYS {
+        println!("cargo:rerun-if-env-changed={key}");
+    }
+}
+
 // Environment values override the ignored local file, including empty values:
 // an empty CI secret must fail rather than silently use another configuration.
 pub fn configuration(
     path: &Path,
     environment: impl Fn(&str) -> Option<String>,
 ) -> Result<BTreeMap<String, String>, String> {
-    let local: BTreeMap<String, String> = match std::fs::read(path) {
+    let local: BTreeMap<String, serde_json::Value> = match std::fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| {
             "github-build.local.json must be a JSON object with string values.".to_owned()
         })?,
@@ -21,12 +35,23 @@ pub fn configuration(
     };
     let mut values = BTreeMap::new();
     for key in KEYS {
-        let value = environment(key)
-            .or_else(|| local.get(key).cloned())
-            .unwrap_or_default();
+        let value = match environment(key) {
+            Some(env_val) => env_val,
+            None => match local.get(key) {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(_) => {
+                    return Err(format!(
+                        "Missing or invalid {key}. Configure app/SiloUI/github-build.local.json or set the build environment. See docs/SiloUI-RELEASES.md."
+                    ));
+                }
+                None => String::new(),
+            },
+        };
         // Never include values in diagnostics. Newlines would also inject Cargo directives.
         if value.trim().is_empty() || value.contains(['\r', '\n', '\0']) || value.trim() != value {
-            return Err(format!("Missing or invalid {key}. Configure app/SiloUI/github-build.local.json or set the build environment. See docs/SiloUI-RELEASES.md."));
+            return Err(format!(
+                "Missing or invalid {key}. Configure app/SiloUI/github-build.local.json or set the build environment. See docs/SiloUI-RELEASES.md."
+            ));
         }
         values.insert(key.to_owned(), value);
     }

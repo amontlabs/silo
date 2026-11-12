@@ -109,6 +109,9 @@ impl Identity {
 /// exist).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PathChange {
+    /// The item id of a file a keep can bring over; empty on entries that are not items.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub path: String,
     pub change: Change,
     #[serde(default)]
@@ -120,6 +123,9 @@ pub struct PathChange {
 /// Code (git) changes for one repo.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoChange {
+    /// The item id of the repository.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub repo: String,
     /// Set when the repo did not exist in the base: (head, branch).
     pub new: Option<(String, String)>,
@@ -140,6 +146,10 @@ pub struct RepoChange {
     /// Renamed files in `dirty_new`: new path -> old path.
     #[serde(default)]
     pub renamed_from: BTreeMap<String, String>,
+    /// The item id of each uncommitted file (and of each renamed file's old path), by
+    /// repo-relative path.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dirty_ids: BTreeMap<String, String>,
     /// Growth of the dirty+untracked count when the file lists do not explain it.
     pub dirty_delta: i64,
     /// Changed gitignored files (`.env`).
@@ -164,6 +174,10 @@ impl RepoChange {
 pub struct PackageChange {
     /// Manager name as in the manifest (`dpkg`, `brew`, `pip`, ...).
     pub manager: String,
+    /// The item id of each package a keep acts on: the top-level added packages, and the
+    /// upgraded and removed ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ids: Vec<String>,
     pub added: BTreeMap<String, String>,
     pub removed: BTreeMap<String, String>,
     pub upgraded: BTreeMap<String, (String, String)>,
@@ -193,6 +207,9 @@ impl PackageChange {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CronChange {
+    /// The item id of the crontab.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub user: String,
     pub change: Change,
     /// The crontab file, when the manifest names it.
@@ -219,6 +236,9 @@ pub struct ServiceChange {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchAgentChange {
+    /// The item id of the launch agent or daemon.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub scope: String,
     pub label: String,
     pub change: Change,
@@ -255,6 +275,9 @@ pub struct TableChange {
 /// One changed database: a Postgres database or a SQLite file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DbChange {
+    /// The item id of the database.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     /// `postgres` or `sqlite`.
     pub engine: String,
     /// Database name (Postgres) or file path (SQLite).
@@ -408,6 +431,7 @@ fn file_changes(
             _ => continue,
         };
         out.push(PathChange {
+            id: String::new(),
             path: p.clone(),
             change,
             before: x.map(Identity::of),
@@ -440,6 +464,7 @@ fn gig_changes(
             _ => continue,
         };
         let pc = PathChange {
+            id: String::new(),
             path: p.clone(),
             change,
             before: x.map(|g| Identity::of(&as_entry(g))),
@@ -971,6 +996,7 @@ impl<'a> Builder<'a> {
                         creds.push((
                             g,
                             PathChange {
+                                id: String::new(),
                                 path,
                                 change,
                                 before: None,
@@ -1067,6 +1093,7 @@ impl<'a> Builder<'a> {
                 _ => (None, None),
             };
             self.d.settings.cron.push(CronChange {
+                id: String::new(),
                 user: u.clone(),
                 change,
                 path,
@@ -1097,6 +1124,7 @@ impl<'a> Builder<'a> {
                 _ => continue,
             };
             self.d.settings.launch_agents.push(LaunchAgentChange {
+                id: String::new(),
                 scope: k.0.clone(),
                 label: k.1.clone(),
                 change,
@@ -1165,6 +1193,7 @@ impl<'a> Builder<'a> {
                 _ => None,
             };
             self.d.database.push(DbChange {
+                id: String::new(),
                 engine: "postgres".into(),
                 name: db.clone(),
                 change,
@@ -1190,6 +1219,7 @@ impl<'a> Builder<'a> {
             let owned = self.cur.own.contains_key(f) || self.base.own.contains_key(f);
             if let Some(g) = credential_group_owned(f, owned) {
                 let pc = PathChange {
+                    id: String::new(),
                     path: f.clone(),
                     change,
                     before: x.map(|d| db_identity(d)),
@@ -1199,6 +1229,7 @@ impl<'a> Builder<'a> {
                 continue;
             }
             self.d.database.push(DbChange {
+                id: String::new(),
                 engine: "sqlite".into(),
                 name: f.clone(),
                 change,
@@ -1399,7 +1430,13 @@ impl Diff {
                 continue;
             };
             match db.change {
-                Change::Added | Change::Deleted => drop[i] = db.change == b.change && *db == **b,
+                Change::Added | Change::Deleted => {
+                    let same = DbChange {
+                        id: db.id.clone(),
+                        ..(**b).clone()
+                    };
+                    drop[i] = db.change == b.change && *db == same;
+                }
                 Change::Modified if b.change == Change::Modified => {
                     if db.schema.as_ref().map(|s| &s.1) == b.schema.as_ref().map(|s| &s.1) {
                         db.schema = None;
@@ -1469,6 +1506,7 @@ impl Diff {
             .iter()
             .map(|(g, v)| (g.clone(), v.iter().map(|c| c.path.clone()).collect()))
             .collect();
+        self.assign_ids();
         self.summary = self.sections();
     }
 

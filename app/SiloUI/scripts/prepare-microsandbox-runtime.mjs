@@ -9,6 +9,7 @@ import { stageGitRuntime } from "./git-runtime.mjs"
 import { preflight } from "./preflight.mjs"
 import { fetchStream } from "./build-input.mjs"
 import { stageLinuxPackageTools } from "./linux-package-tools.mjs"
+import { stageGuestSilo } from "./guest-silo-runtime.mjs"
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 preflight(appRoot)
@@ -37,6 +38,10 @@ const git = await stageGitRuntime({
 })
 
 await stageLfsTransferRuntime({ appRoot, targetTriple, fetchStream })
+
+// The Linux `silo` that Silo installs in its Linux computers. A development build without Zig
+// goes on and says so; a build that ships fails here.
+await stageGuestSilo({ appRoot, targetTriple })
 
 console.log(`Prepared bundled MicroSandbox ${prepared.targetTriple}`)
 console.log(`Prepared bundled Git ${git.targetTriple}`)

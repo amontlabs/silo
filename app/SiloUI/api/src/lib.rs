@@ -6,9 +6,11 @@
 pub mod events;
 pub mod jobs;
 pub mod methods;
+pub mod plain_text;
 pub mod schema;
 pub mod transport;
 
 pub use jobs::{ErrorCode, JobId};
+pub use plain_text::{plain_text, plain_text_within};
 pub use schema::{schema_json, write_schema, SiloApiSchema};
 pub use transport::{ErrorObject, RequestEnvelope, ResponseEnvelope};

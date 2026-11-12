@@ -81,6 +81,11 @@ pub trait RuntimeHost: Send + Sync {
     fn macos_computer_names(&self) -> Vec<String> {
         Vec::new()
     }
+    /// What an export needs to make the hidden copy it leaves logins out of; a host that
+    /// cannot make one leaves the logins in the file.
+    fn export_scrub(&self) -> Option<Arc<dyn crate::export_scrub::ScrubEnv>> {
+        None
+    }
     fn macos_log_target(&self, _computer_id: &str) -> Option<(String, PathBuf)> {
         None
     }
@@ -802,6 +807,9 @@ struct ApplicationComputer {
     /// Silo's own records (checkpoints, failures, secrets) stay current. Omitted when false.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     settling: bool,
+    /// Its storage could not be moved to the protected layout; it cannot start. Omitted when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    needs_storage_upgrade: bool,
     repositories: Vec<Value>,
     files: Vec<Value>,
     ports: Vec<Value>,
@@ -1523,7 +1531,7 @@ thread_local! {
 }
 
 /// Run `work` with this thread's operation cancellation ignored by runtime commands.
-fn without_cancellation<T>(work: impl FnOnce() -> T) -> T {
+pub(crate) fn without_cancellation<T>(work: impl FnOnce() -> T) -> T {
     let previous = CANCELLATION_MASKED.with(|masked| masked.replace(true));
     let result = work();
     CANCELLATION_MASKED.with(|masked| masked.set(previous));
@@ -1848,6 +1856,48 @@ pub(crate) fn command_for(paths: &RuntimePaths, name: &str) -> Command {
     command
 }
 
+/// Stops a runtime command that has no record, so no later engine could wait for it. When
+/// the command cannot be reaped, the lock stays held until it exits.
+fn stop_unrecorded_command(
+    mut child: std::process::Child,
+    lock: Option<configuration_recovery::CommandLock>,
+) {
+    if crate::child_process::terminate_child(&mut child, RUNTIME_TERMINATE_GRACE).is_ok() {
+        if let Some(mut lock) = lock {
+            lock.mark_child_exited();
+        }
+        return;
+    }
+    hold_lock_until_exit(child, lock);
+}
+
+/// Keeps `lock` until `child` has exited, on a thread of its own, signalling the child again
+/// while it runs.
+fn hold_lock_until_exit(
+    mut child: std::process::Child,
+    lock: Option<configuration_recovery::CommandLock>,
+) {
+    thread::spawn(move || {
+        let mut lock = lock;
+        let mut last_signal = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(None) => {
+                    if last_signal.elapsed() >= Duration::from_secs(1) {
+                        let _ = child.kill();
+                        last_signal = Instant::now();
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Ok(Some(_)) | Err(_) => break,
+            }
+        }
+        if let Some(lock) = lock.as_mut() {
+            lock.mark_child_exited();
+        }
+    });
+}
+
 fn spawn_runtime(
     paths: &RuntimePaths,
     launch: RuntimeLaunch<'_>,
@@ -1889,19 +1939,6 @@ fn spawn_runtime(
         None
     };
     let mut command = runtime_command(&paths.executable);
-    if let Some(lock) = &worker_lock {
-        use std::os::{fd::AsRawFd, unix::process::CommandExt};
-        let fd = lock.as_raw_fd();
-        // SAFETY: only async-signal-safe fcntl runs between fork and exec.
-        unsafe {
-            command.pre_exec(move || {
-                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
     // Secret values never enter the runtime's environment (readable by other processes
     // of this user, and where a secret named like a host variable could change the
     // runtime's behaviour). The runtime reads them from standard input instead, and
@@ -1933,9 +1970,27 @@ fn spawn_runtime(
     } else {
         command.stdout(Stdio::null()).stderr(Stdio::null());
     }
-    let mut child = command.spawn().map_err(|error| {
-        RuntimeError::Launch(format!("Silo could not start its bundled runtime: {error}"))
-    })?;
+    // The command does not inherit the lock. A record of it lets the next engine wait for
+    // it if this one dies first, so one is written before the command starts and replaced
+    // by the command's own once its pid is known.
+    if let Some(lock) = worker_lock.as_mut() {
+        lock.begin_command(timeout).map_err(|_| {
+            RuntimeError::Unavailable(
+                "Silo could not record the computer command, so it did not start it.".into(),
+            )
+        })?;
+    }
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            if let Some(lock) = worker_lock.as_mut() {
+                lock.mark_child_exited();
+            }
+            return Err(RuntimeError::Launch(format!(
+                "Silo could not start its bundled runtime: {error}"
+            )));
+        }
+    };
     // The runtime reads the whole document before anything else; a separate writer
     // never blocks this thread, even if the child exits without reading it.
     if let Some(mut stdin) = child.stdin.take() {
@@ -1943,10 +1998,13 @@ fn spawn_runtime(
             let _ = stdin.write_all(&secret_values);
         });
     }
-    // Spawn succeeded with pre_exec clearing close-on-exec for this lock only.
-    // A surviving child must keep the flock if Silo exits before it does.
     if let Some(lock) = worker_lock.as_mut() {
-        lock.mark_inherited_by_child();
+        if lock.record_child(child.id(), timeout).is_err() {
+            stop_unrecorded_command(child, worker_lock.take());
+            return Err(RuntimeError::Unavailable(
+                "Silo could not record the computer command, so it stopped it.".into(),
+            ));
+        }
     }
     let mut stop_child = |child: &mut std::process::Child| {
         // Quit and session end keep their own deadlines, so they kill without a grace.
@@ -3224,6 +3282,23 @@ enum Repositories {
 /// Add what the runtime read does not carry: push operations, each fresh running computer's
 /// repositories, and GitHub state. A settling or stale row keeps the repositories of its
 /// last known reading instead of scanning a guest that is changing or unreadable.
+/// A computer whose storage could not be moved to the protected layout cannot start; its row
+/// says so, replacing any lesser notice.
+fn flag_unmoved_storage(paths: &RuntimePaths, computers: &mut [ApplicationComputer]) {
+    for computer in computers {
+        if let Some(message) = crate::runtime_migration::protected_storage_attention(
+            &paths.metadata,
+            computer.configuration.name(),
+        ) {
+            computer.needs_storage_upgrade = true;
+            computer.attention = Some(ComputerAttention {
+                level: AttentionLevel::Error,
+                message: format!("Needs attention: {message}"),
+            });
+        }
+    }
+}
+
 fn enrich_application_state(
     host: &dyn RuntimeHost,
     paths: &RuntimePaths,
@@ -3232,6 +3307,7 @@ fn enrich_application_state(
 ) {
     source.repository_push_operations =
         host.repository_push_operations(crate::host_push::operations());
+    flag_unmoved_storage(paths, &mut source.computers);
     match repositories {
         Repositories::LastKnown => keep_last_known_repositories(paths, &mut source.computers),
         Repositories::Discover { refresh } => {
@@ -4151,6 +4227,10 @@ fn computer_progress(
         ("desktop-installation", _) => "Installing the Linux desktop.".into(),
         ("computer-use-setup", _) => "Setting up the desktop and computer use.".into(),
         ("computer-use-pending", _) => "Computer use will finish setting up at first start.".into(),
+        ("agent-installation", _) => format!("Installing agents in {computer}…"),
+        ("agent-installation-failed", _) => format!(
+            "Some agents could not be installed in {computer}. Install them from the computer's page."
+        ),
         ("computer-image-wait", _) => "Waiting for the VM image…".into(),
         ("computer-configuration", _) => format!("{computer} configured."),
         ("computer-verification", 0) => format!("Verifying {computer}…"),
@@ -4193,7 +4273,7 @@ fn computer_progress(
         message,
         safe_for_display: true,
         timestamp: activity_timestamp(),
-        level: "info".into(),
+        level: if step == "agent-installation-failed" { "warning" } else { "info" }.into(),
         elapsed_seconds: 0,
         downloaded_bytes: None,
         total_bytes: None,
@@ -4660,7 +4740,7 @@ fn read_activity(
     }
     for event in &mut events {
         event.message = match event.step.as_str() {
-            "desktop-installation" | "computer-use-setup" | "computer-use-pending" | "computer-configuration" | "computer-verification" | "computer-removal" | "computer-disk-preparation" | "computer-image-preparation" | "computer-image-import" | "computer-runtime-preparation" | "computer-settings" | "setup-started" | "setup-completed" | "setup-interrupted" => computer_progress(&event.request_id, &event.step, &event.computer, event.fraction.unwrap_or(0)).message,
+            "desktop-installation" | "computer-use-setup" | "computer-use-pending" | "agent-installation" | "agent-installation-failed" | "computer-configuration" | "computer-verification" | "computer-removal" | "computer-disk-preparation" | "computer-image-preparation" | "computer-image-import" | "computer-runtime-preparation" | "computer-settings" | "setup-started" | "setup-completed" | "setup-interrupted" => computer_progress(&event.request_id, &event.step, &event.computer, event.fraction.unwrap_or(0)).message,
             "image-resolving" => format!("{}: Resolving the VM image…", event.computer),
             "image-resolved" => format!("{}: VM image resolved; preparing the download…", event.computer),
             "image-download" => format!("{}: Downloading the VM image…", event.computer),
@@ -4936,6 +5016,7 @@ fn apply_configuration_with_progress(
         operation_gate::held(),
         "configuration changes require the operation gate"
     );
+    let _locked = lock_metadata();
     let resources = device_resources().map_err(|e| e.to_string())?;
     let mut request = request;
     validate_request(&request).map_err(|e| e.to_string())?;
@@ -5224,6 +5305,39 @@ pub fn change_computer_configuration_with_host_and_job(
     result
 }
 
+/// [`change_computer_configuration_with_host`] for a caller that holds a computer's operation
+/// gate for its whole job (no device-wide operation runs meanwhile, so the saved computers
+/// are the caller's to change). The gate does not nest, so the change does not take it again.
+pub fn change_computer_configuration_while_held(
+    host: &dyn RuntimeHost,
+    change: ComputerConfigurationChange,
+) -> Result<ApplicationSource, String> {
+    debug_assert!(
+        operation_gate::held(),
+        "this change relies on the caller's operation gate"
+    );
+    host.ensure_runtime_ready()?;
+    let request_id = normalize_request_id(None)?;
+    let paths = runtime_paths(host)?;
+    shutdown::ensure_accepting_operations()?;
+    let _locked = lock_metadata();
+    let mut request = read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
+    let before = request.computers.clone();
+    change.apply(&mut request.computers)?;
+    let _reservation =
+        crate::computer_names::reserve(&new_names(&before, &request.computers), &|| {
+            host.macos_computer_names()
+        })?;
+    let deleted = change.deleted_ids();
+    let result =
+        apply_configuration_with_progress(host, &paths, request, &request_id, None);
+    if result.is_ok() {
+        host.clear_computer_notices(&deleted);
+        crate::changes::store::forget(host.engine_context().as_ref(), &deleted);
+    }
+    result
+}
+
 /// Read every computer with no operation-overlap policy: each computer's reading is taken as
 /// settled. A computer whose own inspection fails is returned stale (its last known state with
 /// the reason) instead of failing every computer. Health checks and tests use this.
@@ -5269,8 +5383,28 @@ fn read_rows(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<Vec<Row
         .iter()
         .map(ComputerConfiguration::name)
         .collect();
-    if listed_names.iter().any(|name| !configured.contains(name)) {
-        return Err(RuntimeError::Malformed(INVENTORY_MISMATCH.into()));
+    // A computer an interrupted configuration was still creating is Silo's own: recovery
+    // finishes or removes it, and meanwhile it does not fail the reading of every other
+    // computer. The pending record is only read when the runtime lists a computer Silo does not
+    // have.
+    let unknown: Vec<&str> = listed_names
+        .iter()
+        .copied()
+        .filter(|name| !configured.contains(name))
+        .collect();
+    if !unknown.is_empty() {
+        let pending = configuration_recovery::load(paths)?;
+        for name in unknown {
+            let creating = match &pending {
+                Some(journal) => {
+                    configuration_recovery::is_being_created(runner, paths, journal, name)?
+                }
+                None => false,
+            };
+            if !creating {
+                return Err(RuntimeError::Malformed(INVENTORY_MISMATCH.into()));
+            }
+        }
     }
     // Whether each computer is read from Silo's pending-restore record rather than the runtime.
     // An unreadable record (damaged, or written by a newer Silo) degrades only its own
@@ -5548,6 +5682,7 @@ fn unread_computer(configuration: ComputerConfiguration) -> ApplicationComputer 
         attention: None,
         freshness: Freshness::Fresh,
         settling: false,
+        needs_storage_upgrade: false,
         repositories: Vec::new(),
         files: Vec::new(),
         ports: Vec::new(),
@@ -5772,6 +5907,30 @@ pub fn is_pending_restore(paths: &RuntimePaths, name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The memory, in MiB, that starting the computer `name` (`id`) resumes at when a full
+/// checkpoint restore is pending: what the capture recorded, not the computer's saved size.
+/// `None` when no full restore is pending.
+pub fn pending_resume_memory_mib(
+    paths: &RuntimePaths,
+    id: &str,
+    name: &str,
+) -> Result<Option<u64>, String> {
+    checkpoints::pending_resume_memory_mib(&ProcessRunner, paths, id, name)
+        .map_err(|error| error.to_string())
+}
+
+/// The memory, in MiB, that restoring the checkpoint `checkpoint_id` of the computer `id` and
+/// starting it resumes at: what the capture recorded. `None` when the checkpoint is not a full
+/// one.
+pub fn checkpoint_resume_memory_mib(
+    paths: &RuntimePaths,
+    id: &str,
+    checkpoint_id: &str,
+) -> Result<Option<u64>, String> {
+    checkpoints::checkpoint_resume_memory_mib(&ProcessRunner, paths, id, checkpoint_id)
+        .map_err(|error| error.to_string())
+}
+
 /// Inspect a Silo computer without treating "not created yet" as a failure. An unattempted
 /// restore is absent; after an attempt, inspect the computer it may have created. A runtime
 /// that reports the computer as missing is likewise `Absent`.
@@ -5834,6 +5993,26 @@ pub(crate) fn rename_sandbox(
         .map(|_| ())
 }
 
+/// Forgets what the stores keep for a computer whose entry was dropped from the saved
+/// configuration while its sandbox lives on under another identity (the build of a rebuild,
+/// after its swap).
+pub(crate) fn forget_replaced_identity(
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<(), RuntimeError> {
+    let (id, name) = (configuration.id(), configuration.name());
+    crate::network::computer_removed(paths, name).map_err(RuntimeError::Unavailable)?;
+    lifecycle_recovery::forget_removed(paths, configuration)?;
+    crate::secrets::computer_removed(name).map_err(RuntimeError::Unavailable)?;
+    forget_github_state(&paths.home, name);
+    crate::github::computer_removed(name).map_err(RuntimeError::Unavailable)?;
+    checkpoints::forget_removed(paths, id)?;
+    crate::policy::store::computer_removed(id);
+    crate::network_policy::computer_removed(id);
+    crate::guest_client::computer_removed(id);
+    Ok(())
+}
+
 /// Forgets what this process remembers under a computer name (GitHub identity and access state),
 /// after a promote moved the name to another computer.
 pub(crate) fn forget_name_state(paths: &RuntimePaths, name: &str) {
@@ -5856,6 +6035,7 @@ pub(crate) fn set_computer_names(
     paths: &RuntimePaths,
     renames: &[(&str, &str)],
 ) -> Result<(), RuntimeError> {
+    let _locked = lock_metadata();
     let mut inventory = read_metadata(&paths.metadata)?;
     let mut changed = false;
     for (id, name) in renames {
@@ -5995,6 +6175,7 @@ fn application_computer(
         attention,
         freshness: Freshness::Fresh,
         settling: false,
+        needs_storage_upgrade: false,
         repositories: Vec::new(),
         files: Vec::new(),
         ports: Vec::new(),
@@ -6254,11 +6435,40 @@ fn computer_action_with(
             }
         }
     }
+    if matches!(action, "start" | "restart") {
+        if let Some(message) =
+            crate::runtime_migration::protected_storage_attention(&paths.metadata, name)
+        {
+            return Err(RuntimeError::Invalid(message));
+        }
+    }
     if action == "dismiss-error" {
         return crash_acknowledgement::dismiss(runner, paths, name);
     }
     if matches!(action, "start" | "stop" | "restart") {
         crash_acknowledgement::clear(paths, name)?;
+    }
+    if matches!(action, "start" | "restart") {
+        if let Some(configuration) = read_metadata(&paths.metadata)?
+            .computers
+            .into_iter()
+            .find(|configuration| configuration.name() == name)
+        {
+            // A changed network policy takes effect when the computer next starts; a running
+            // computer keeps its rules until then.
+            let restarting = action == "restart"
+                && checkpoints::network_policy_changed(runner, paths, &configuration)?;
+            if restarting {
+                lifecycle_recovery::perform(runner, paths, device, "stop", name)?;
+            }
+            if checkpoints::apply_network_policy_change(runner, paths, &configuration)? {
+                crate::github::computer_restored(name);
+                return Ok(());
+            }
+            if restarting {
+                return lifecycle_recovery::perform(runner, paths, device, "start", name);
+            }
+        }
     }
     lifecycle_recovery::perform(runner, paths, device, action, name)
 }
@@ -6390,6 +6600,9 @@ fn apply_whole_configuration_with_progress(
                 configuration.name(),
             )?;
             checkpoints::forget_removed(paths, configuration.id())?;
+            crate::policy::store::computer_removed(configuration.id());
+            crate::network_policy::computer_removed(configuration.id());
+            crate::guest_client::computer_removed(configuration.id());
             progress("computer-removal", configuration.name(), 1);
         }
         for configuration in &request.computers {
@@ -6486,6 +6699,35 @@ fn validate_computer_update(
         Ok(())
     } else {
         Err(RuntimeError::Invalid("Storage disks cannot be resized in place. Keep both saved sizes or create a new computer.".into()))
+    }
+}
+
+/// Brings a computer the runtime made but Silo never saved to rest. An interrupted creation
+/// can leave it starting or running, and the runtime does not stop it when the engine dies.
+/// `inspected` is the computer as just read.
+fn settle_unsaved_computer(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    inspected: &InspectedSandbox,
+    name: &str,
+) -> Result<(), RuntimeError> {
+    let at_rest = |status: &str| matches!(status, "Created" | "Stopped" | "Crashed");
+    if at_rest(&inspected.status) {
+        return Ok(());
+    }
+    runner.run(
+        paths,
+        &["stop".into(), name.into(), "--quiet".into()],
+        STOP_TIMEOUT,
+    )?;
+    let stopped = inspect_computer(runner, paths, name)?;
+    ensure_managed(&stopped)?;
+    if at_rest(&stopped.status) {
+        Ok(())
+    } else {
+        Err(RuntimeError::Malformed(format!(
+            "Computer '{name}' did not stop after its creation was interrupted."
+        )))
     }
 }
 
@@ -6626,12 +6868,19 @@ fn create_computer_with_progress(
         "--secret".into(),
         secrets_runtime::SILO_GITHUB_SECRET_SPEC.into(),
     ]);
-    args.extend([
-        // Explicit, so a computer does not depend on the runtime's default (off in
-        // 0.7.2, on since 0.7.4). It matches `guest/github-network-default.json`,
-        // which exports compare against; no hostname rule makes it observable.
-        "--net-strict=true".into(),
-    ]);
+    // The computer's stored network policy (open unless one was saved for it), with strict
+    // given explicitly so a computer does not depend on the runtime's default (off in 0.7.2, on
+    // since 0.7.4). An open computer gets exactly `guest/github-network-default.json`, which
+    // exports compare against. A container's gateway takes its policy when it starts.
+    if runtime.is_some() {
+        args.push("--net-strict=true".into());
+    } else {
+        args.extend(
+            crate::network_policy::plan_for(id, name, None)
+                .map_err(RuntimeError::Unavailable)?
+                .create_args(),
+        );
+    }
     args.extend(["--env".into(), "GH_TOKEN=$MSB_SILO_GITHUB".into()]);
     args.extend([
         "--label".into(),
@@ -6695,6 +6944,7 @@ fn create_computer_with_progress(
             progress("computer-use-pending", name, 0);
         }
     }
+    crate::desktop::install_requested_after_create(runner, paths, id, name, progress);
     Ok(())
 }
 
@@ -7281,6 +7531,59 @@ pub fn resolve_computer_id(paths: &RuntimePaths, name: &str) -> Result<String, R
         .find(|configuration| configuration.name() == name)
         .map(|configuration| configuration.id().to_owned())
         .ok_or_else(|| RuntimeError::Invalid("This computer no longer exists.".into()))
+}
+
+/// Serialises every read-modify-write of the saved computers in this process: a rename, a
+/// rebuild's swap and a configuration apply each read the file, change it and write it back, so
+/// without one lock the later write would drop the other's change.
+static METADATA_WRITERS: Mutex<()> = Mutex::new(());
+
+thread_local! {
+    static METADATA_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Held while the saved computers are read, changed and written. A thread that holds it may
+/// take it again (a configuration apply calls helpers that lock too).
+#[must_use = "the saved computers stay locked until the guard is dropped"]
+pub struct MetadataGuard {
+    _lock: Option<std::sync::MutexGuard<'static, ()>>,
+}
+
+impl Drop for MetadataGuard {
+    fn drop(&mut self) {
+        METADATA_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
+pub fn lock_metadata() -> MetadataGuard {
+    let nested = METADATA_DEPTH.with(|depth| {
+        let nested = depth.get() > 0;
+        depth.set(depth.get() + 1);
+        nested
+    });
+    let lock = (!nested).then(|| {
+        METADATA_WRITERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    });
+    MetadataGuard { _lock: lock }
+}
+
+/// Reads the saved computers, lets `change` edit them, and writes them back when they differ.
+/// Returns whether anything was written. Other writers wait for the whole read-change-write.
+pub fn edit_metadata(
+    path: &Path,
+    change: impl FnOnce(&mut Vec<ComputerConfiguration>) -> Result<(), RuntimeError>,
+) -> Result<bool, RuntimeError> {
+    let _locked = lock_metadata();
+    let mut request = read_metadata(path)?;
+    let before = request.computers.clone();
+    change(&mut request.computers)?;
+    if request.computers == before {
+        return Ok(false);
+    }
+    write_metadata(path, &request)?;
+    Ok(true)
 }
 
 pub fn write_metadata(
@@ -8599,6 +8902,19 @@ esac
     }
 
     #[test]
+    fn agent_installation_during_creation_is_reported_and_its_failure_is_a_warning() {
+        let _test_state = crate::test_support::global_state();
+        let event = computer_progress("attempt", "agent-installation", "dev", 0);
+        assert_eq!(event.message, "Installing agents in dev…");
+        assert_eq!(event.level, "info");
+        let event = computer_progress("attempt", "agent-installation-failed", "dev", 0);
+        assert_eq!(event.level, "warning");
+        assert!(event
+            .message
+            .contains("Install them from the computer's page."));
+    }
+
+    #[test]
     fn first_time_image_import_is_reported_without_a_fraction() {
         let _test_state = crate::test_support::global_state();
         let event = computer_progress("attempt", "computer-image-import", "", 0);
@@ -9753,6 +10069,68 @@ esac
         }
     }
 
+    #[test]
+    fn writers_of_the_saved_computers_do_not_lose_each_others_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths(&dir);
+        let numbered = |n: usize| {
+            let mut one = computer();
+            one.id = format!("00000000-0000-4000-8000-0000000001{n:02}");
+            one.name = format!("c{n}");
+            one
+        };
+        let writers = 6;
+        write_metadata(&paths.metadata, &request((0..writers).map(numbered).collect())).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(writers));
+        let threads: Vec<_> = (0..writers)
+            .map(|n| {
+                let (paths, barrier) = (paths.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let id = format!("00000000-0000-4000-8000-0000000001{n:02}");
+                    for round in 0..40 {
+                        if n % 2 == 0 {
+                            set_computer_names(&paths, &[(&id, &format!("w{n}-r{round}"))])
+                                .unwrap();
+                        } else {
+                            // A writer that edits through the shared helper, like a rebuild's swap.
+                            edit_metadata(&paths.metadata, |computers| {
+                                computers.iter_mut().find(|c| c.id() == id).unwrap().name =
+                                    format!("w{n}-r{round}");
+                                Ok(())
+                            })
+                            .unwrap();
+                        }
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let names: Vec<String> = read_metadata(&paths.metadata)
+            .unwrap()
+            .computers
+            .iter()
+            .map(|c| c.name().to_owned())
+            .collect();
+        let expected: Vec<String> = (0..writers).map(|n| format!("w{n}-r39")).collect();
+        assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn the_metadata_lock_can_be_taken_again_by_the_thread_that_holds_it() {
+        let outer = lock_metadata();
+        let inner = lock_metadata();
+        drop(inner);
+        drop(outer);
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths(&dir);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let _held = lock_metadata();
+        assert!(!edit_metadata(&paths.metadata, |_| Ok(())).unwrap());
+    }
+
     fn generous_device() -> DeviceResources {
         DeviceResources {
             logical_cpus: 64,
@@ -10468,6 +10846,157 @@ exit 9
         fs::write(paths.home.join("release"), b"done\n").unwrap();
         worker.join().unwrap().unwrap();
         drop(configuration_recovery::command_lock(&paths, Duration::ZERO).unwrap());
+    }
+
+    #[cfg(unix)]
+    const LOCK_SURVIVAL_HELPER: &str = "SILO_TEST_LOCK_SURVIVAL_HOME";
+
+    /// Runs only inside the process `killed_engine_does_not_leave_its_lock_with_a_surviving_vm`
+    /// starts and kills. It is the "engine": it runs a locked runtime command whose program starts
+    /// a long-lived process, as `msb` starts a computer's VM.
+    #[cfg(unix)]
+    #[test]
+    fn lock_survival_helper_engine() {
+        let Some(home) = std::env::var_os(LOCK_SURVIVAL_HELPER) else {
+            return;
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let mut paths = paths(&directory);
+        paths.home = home.clone().into();
+        paths.executable = paths.home.join("fake-msb");
+        paths.library = paths.home.join("fake-lib");
+        let _ = run_msb_process(
+            &paths,
+            &["create".into()],
+            Duration::from_secs(60),
+            &|_| {},
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn killed_engine_does_not_leave_its_lock_with_a_surviving_vm() {
+        let _test_state = crate::test_support::global_state();
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let mut paths = paths(&directory);
+        let home = directory.path().join("lock-survival");
+        fs::create_dir_all(&home).unwrap();
+        paths.home = home.clone();
+        paths.executable = home.join("fake-msb");
+        paths.library = home.join("fake-lib");
+        fs::write(&paths.library, b"test library").unwrap();
+        for name in ["ready", "release"] {
+            let fifo = std::ffi::CString::new(home.join(name).to_str().unwrap()).unwrap();
+            // SAFETY: fifo is a valid NUL-terminated path in this test directory.
+            assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        }
+        fs::write(
+            &paths.executable,
+            b"#!/bin/sh\ncat >/dev/null\nwhile [ ! -f \"$MSB_HOME/.silo-configuration-worker.child-$$\" ]; do sleep 0.05; done\nsleep 60 &\necho $! > \"$MSB_HOME/vm.pid\"\nprintf x > \"$MSB_HOME/ready\"\nread line < \"$MSB_HOME/release\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut engine = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "runtime::tests::lock_survival_helper_engine", "--nocapture"])
+            .env(LOCK_SURVIVAL_HELPER, &home)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let _ready = File::open(home.join("ready")).unwrap();
+        assert!(configuration_recovery::command_lock(&paths, Duration::ZERO).is_err());
+        engine.kill().unwrap();
+        engine.wait().unwrap();
+        let vm: libc::pid_t = fs::read_to_string(home.join("vm.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        // The command the dead engine started is still running, so a new holder waits for it.
+        assert!(configuration_recovery::command_lock(&paths, Duration::ZERO).is_err());
+        fs::write(home.join("release"), b"done\n").unwrap();
+        let started = Instant::now();
+        let reacquired = loop {
+            if let Ok(lock) = configuration_recovery::command_lock(&paths, Duration::ZERO) {
+                break Some(lock);
+            }
+            if started.elapsed() > Duration::from_secs(10) {
+                break None;
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        // SAFETY: signal 0 only checks that the process exists.
+        let vm_alive = unsafe { libc::kill(vm, 0) } == 0;
+        // SAFETY: the pid is the test's own `sleep`.
+        unsafe { libc::kill(vm, libc::SIGKILL) };
+        assert!(vm_alive, "the stand-in for the VM should still be running");
+        assert!(
+            reacquired.is_some(),
+            "a process the dead engine's command started kept the command lock"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_whose_record_cannot_be_written_is_stopped_and_releases_the_lock() {
+        let _test_state = crate::test_support::global_state();
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        fs::write(&paths.library, b"test library").unwrap();
+        fs::create_dir_all(&paths.home).unwrap();
+        fs::write(
+            &paths.executable,
+            b"#!/bin/sh\necho $$ > \"$MSB_HOME/command.pid\"\nexec sleep 60\n",
+        )
+        .unwrap();
+        fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        configuration_recovery::FAIL_CHILD_RECORD.store(true, Ordering::SeqCst);
+        let error = run_msb_process(
+            &paths,
+            &["create".into()],
+            Duration::from_secs(30),
+            &|_| {},
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Silo could not record the computer command, so it stopped it."),
+            "{error}"
+        );
+        // The command is gone and neither it nor its record holds the lock.
+        if let Ok(pid) = fs::read_to_string(paths.home.join("command.pid")) {
+            let pid: libc::pid_t = pid.trim().parse().unwrap();
+            // SAFETY: signal 0 only checks that the process exists.
+            assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "the command is still running");
+        }
+        drop(configuration_recovery::command_lock(&paths, Duration::ZERO).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_lock_stays_held_until_a_command_that_could_not_be_reaped_exits() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let mut lock = configuration_recovery::command_lock(&paths, Duration::ZERO).unwrap();
+        lock.begin_command(Duration::from_secs(60)).unwrap();
+        let child = Command::new("sleep").arg("1").spawn().unwrap();
+        hold_lock_until_exit(child, Some(lock));
+        assert!(configuration_recovery::command_lock(&paths, Duration::ZERO).is_err());
+        let started = Instant::now();
+        let reacquired = loop {
+            if let Ok(lock) = configuration_recovery::command_lock(&paths, Duration::ZERO) {
+                break Some(lock);
+            }
+            if started.elapsed() > Duration::from_secs(10) {
+                break None;
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        assert!(reacquired.is_some());
     }
 
     #[test]
@@ -12178,6 +12707,95 @@ exit 9
         assert!(encoded.get("backup").is_none());
     }
 
+    /// `dev` is saved and `made` is the computer an interrupted configuration was creating.
+    fn being_created_fixture(
+        directory: &tempfile::TempDir,
+    ) -> (RuntimePaths, ComputerConfiguration) {
+        let paths = paths(directory);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let mut created = second_computer();
+        created.name = "made".into();
+        configuration_recovery::begin(&paths, &request(vec![computer(), created.clone()]))
+            .unwrap();
+        (paths, created)
+    }
+
+    fn listed_with_made(paths: &RuntimePaths, made_owner: &str) -> StubRunner {
+        let mut made = inspect(paths, "Running");
+        made["name"] = json!("made");
+        made["config"]["labels"]["silo.machine-id"] = json!(made_owner);
+        StubRunner::successful_json(vec![
+            json!([
+                {"name":"dev","status":"Running","image":"ubuntu"},
+                {"name":"made","status":"Running","image":"ubuntu"}
+            ]),
+            made,
+            inspect(paths, "Running"),
+        ])
+    }
+
+    #[test]
+    fn a_computer_still_being_created_does_not_fail_the_reading_of_the_others() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, created) = being_created_fixture(&directory);
+        let state = read_application_state_with(&listed_with_made(&paths, created.id()), &paths)
+            .unwrap();
+        assert_eq!(state.computers.len(), 1);
+        // A managed computer no journal names is still refused.
+        configuration_recovery::finish(&paths).unwrap();
+        let error = read_application_state_with(&listed_with_made(&paths, created.id()), &paths)
+            .unwrap_err();
+        assert!(error.to_string().contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn a_runtime_computer_of_the_pending_name_owned_by_another_is_refused() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, _) = being_created_fixture(&directory);
+        let error = read_application_state_with(
+            &listed_with_made(&paths, "00000000-0000-4000-8000-0000000000aa"),
+            &paths,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn a_computer_the_pending_configuration_removes_is_not_one_being_created() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let mut stale = second_computer();
+        stale.name = "made".into();
+        write_metadata(&paths.metadata, &request(vec![computer(), stale.clone()])).unwrap();
+        configuration_recovery::begin(&paths, &request(vec![computer(), stale.clone()])).unwrap();
+        // The journal's previous list names `made`, which the metadata no longer has.
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let error = read_application_state_with(&listed_with_made(&paths, stale.id()), &paths)
+            .unwrap_err();
+        assert!(error.to_string().contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn a_damaged_pending_configuration_is_reported_instead_of_hidden() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, created) = being_created_fixture(&directory);
+        std::fs::write(
+            paths.metadata.with_file_name("configuration-operation.json"),
+            b"{ not json",
+        )
+        .unwrap();
+        let error = read_application_state_with(&listed_with_made(&paths, created.id()), &paths)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("Could not recover computer configuration"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn read_refuses_missing_runtime_rows_instead_of_publishing_false_success() {
         let _test_state = crate::test_support::global_state();
@@ -12450,6 +13068,34 @@ exit 9
         assert!(crate::computer_use::settings(&paths, configuration.id())
             .last
             .is_none());
+    }
+
+    #[test]
+    fn a_computer_is_not_created_while_the_saved_network_policies_cannot_be_read() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let file = directory.path().join("network-policy.json");
+        std::fs::write(&file, "{ not json").unwrap();
+        crate::network_policy::store::use_test_path(Some(file.clone()));
+        let runner = StubRunner::successful_json(vec![
+            json!([]),
+            json!(1),
+            json!(1),
+            json!(1),
+            json!(1),
+            json!(1),
+        ]);
+        let refused = create_computer(&runner, &paths, &built_in_computer()).unwrap_err();
+        assert!(refused.to_string().contains("unreadable"), "{refused}");
+        assert!(!runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call.iter().any(|argument| argument == "create")));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
+        crate::network_policy::store::use_test_path(None);
     }
 
     #[test]
@@ -13045,6 +13691,60 @@ exit 9
         assert!(error
             .to_string()
             .contains("did not reach the Running state"));
+    }
+
+    #[test]
+    fn a_computer_whose_storage_was_not_moved_cannot_start_and_says_why() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let reason = "Its files were kept untouched. Report this problem before using the computer.";
+        crate::runtime_migration::set_protected_storage_attention_for_test(&paths.metadata, "dev", Some(reason));
+        let runner = StubRunner::successful_json(vec![]);
+
+        for action in ["start", "restart"] {
+            let error = computer_action_with(&runner, &paths, &generous_device(), action, "dev")
+                .unwrap_err();
+            assert_eq!(error.to_string(), reason);
+        }
+        assert!(runner.calls.lock().unwrap().is_empty(), "msb is never asked");
+
+        let mut computers = vec![unread_computer(computer())];
+        flag_unmoved_storage(&paths, &mut computers);
+        assert!(computers[0].needs_storage_upgrade);
+        let attention = computers[0].attention.as_ref().unwrap();
+        assert!(matches!(attention.level, AttentionLevel::Error));
+        assert_eq!(attention.message, format!("Needs attention: {reason}"));
+
+        crate::runtime_migration::set_protected_storage_attention_for_test(&paths.metadata, "dev", None);
+        let mut computers = vec![unread_computer(computer())];
+        flag_unmoved_storage(&paths, &mut computers);
+        assert!(!computers[0].needs_storage_upgrade && computers[0].attention.is_none());
+    }
+
+    #[test]
+    fn a_computer_waiting_for_its_first_start_is_not_checked_flagged_or_kept_from_starting() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+
+        let checker = StubRunner::successful_json(vec![]);
+        crate::runtime_migration::check_protected_storage_of_arrival(&checker, &paths, "dev");
+        assert!(checker.calls.lock().unwrap().is_empty(), "no runtime folder, nothing to check");
+        assert!(!directory.path().join("computers.json").with_file_name("protected-storage.json").exists());
+
+        let mut computers = vec![unread_computer(computer())];
+        flag_unmoved_storage(&paths, &mut computers);
+        assert!(!computers[0].needs_storage_upgrade && computers[0].attention.is_none());
+
+        let runner = StubRunner::successful_json(vec![
+            inspect(&paths, "Stopped"),
+            json!(null),
+            inspect(&paths, "Running"),
+        ]);
+        computer_action_with(&runner, &paths, &generous_device(), "start", "dev").unwrap();
     }
 
     #[test]

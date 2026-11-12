@@ -6,8 +6,8 @@ import { FolderActions } from "@/features/application/components/folder-actions"
 import { ComputerFileTree } from "@/features/application/components/computer-file-tree"
 import { useFileTransferControls } from "@/features/application/components/use-file-transfers"
 import type { createDirectoryStore } from "@/features/application/model/directory-store"
-import { memo, useEffect, useId, useMemo, useState } from "react"
-import { macosLogComputer } from "@/features/application/model/macos-log-computers"
+import { memo, useEffect, useId, useMemo, useState, type ReactNode } from "react"
+import { computerCan, kindOf } from "@/features/computers/model/computer-capabilities"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { Activity, Archive, Box, Boxes, Check, CircleAlert, Cloud, File, GitBranch, KeyRound, Plus, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
 
@@ -35,6 +35,8 @@ import { showActionFailure } from "@/lib/operation-toast"
 import { cn } from "@/lib/utils"
 import { useStableCallback } from "@/lib/use-stable-callback"
 import { lazyPage } from "@/features/application/components/lazy-page"
+import { AuditLog } from "@/features/application/components/audit-log"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LazyBoundary } from "@/features/application/components/panel-content"
 
 const logsPage = lazyPage(() => import("./logs-page"), "Logs")
@@ -326,6 +328,32 @@ function ActivityLog({ computers, sourceActivities, filtered, onShowLogs }: { co
   )
 }
 
+/** The Activity section: what happened to the computers, and, where the engine keeps it, who did what. */
+function ActivityView({ events, auditRead, computers, active, onOpenApproval, openableApprovals }: {
+  events: ReactNode
+  auditRead: ApplicationActions["listAudit"]
+  computers: readonly ApplicationComputer[]
+  active: boolean
+  onOpenApproval?: (approvalId: string) => void
+  openableApprovals?: ReadonlySet<string>
+}) {
+  const [view, setView] = useState<"events" | "audit">("events")
+  if (!auditRead) return events
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <Tabs value={view} onValueChange={value => setView(value as "events" | "audit")} className="shrink-0">
+        <TabsList variant="line" className="-ml-1.5 w-fit">
+          <TabsTrigger value="events" className="text-xs">Events</TabsTrigger>
+          <TabsTrigger value="audit" className="text-xs">Who did what</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      <div className="min-h-0 flex-1">
+        {view === "events" ? events : <AuditLog read={auditRead} computers={computers} active={active} onOpenApproval={onOpenApproval} openableApprovals={openableApprovals} />}
+      </div>
+    </div>
+  )
+}
+
 export function ComputersPage({
   source,
   network, networkError, networkActions, onSectionChange,
@@ -346,6 +374,9 @@ export function ComputersPage({
   onDismissRepositoryPush,
   onCreateComputer,
   operationQueue,
+  onOpenApproval,
+  openableApprovals,
+  onOpenComputer,
   notifyOperations = true,
 }: {
   /** The application source, for the same availability rules as the other surfaces. */
@@ -371,6 +402,11 @@ export function ComputersPage({
   onDismissRepositoryPush: (computer: string, repositoryPath: string) => void
   /** Opens the new-computer editor; omitted while a computer cannot be created. */
   onCreateComputer?: () => void
+  /** Opens an approval on the Pending page, from a row of Who did what. */
+  onOpenApproval?: (approvalId: string) => void
+  openableApprovals?: ReadonlySet<string>
+  /** Opens a computer's page, from its network mode on the Network page. */
+  onOpenComputer?: (computerId: string) => void
   /** Standalone pages own notifications; ApplicationApp owns them across navigation. */
   notifyOperations?: boolean
   /** Lets a running push be cancelled from its notification. */
@@ -388,35 +424,26 @@ export function ComputersPage({
       return configuration ? { id: configuration.id, name: configuration.name } : undefined
     },
   })
-  // The Logs section also lists this device's macOS computers: their setup logs are retained
-  // under their ids. Every other section works with the computers of the application source.
-  const macos = useMacosComputers()
-  const macosComputers = macos?.snapshot.state?.supported ? macos.snapshot.state.computers : undefined
-  const remoteMacos = macos?.snapshot.remote
-  const macosStore = macos?.store
+  // The devices whose macOS computers the Logs page lists are read while it is shown.
+  const macosStore = useMacosComputers()?.store
   const logsOwner = useId()
   const logDevices = JSON.stringify(section === "logs" ? (source.devices ?? []).map(device => [device.id, device.connected]) : [])
   useEffect(() => {
     macosStore?.setRemoteDevices(logsOwner, (JSON.parse(logDevices) as [string, boolean][]).map(([id, connected]) => ({ id, connected })))
   }, [macosStore, logsOwner, logDevices])
   useEffect(() => () => macosStore?.setRemoteDevices(logsOwner, []), [macosStore, logsOwner])
+  // Every computer has logs; Files and Network list the ones whose system serves them.
   const listed = useMemo(() => {
-    if (section !== "logs") return computers
-    // Other devices' macOS computers follow the local ones, for the devices of the source that host them.
-    const remote = (source.devices ?? []).flatMap(device => {
-      const hosted = remoteMacos?.[device.id]?.state
-      return hosted?.supported ? hosted.computers.map(computer => macosLogComputer(computer, device)) : []
-    })
-    const extra = [...(macosComputers ?? []).map(computer => macosLogComputer(computer)), ...remote]
-    return extra.length ? [...computers, ...extra] : computers
-  }, [section, computers, macosComputers, remoteMacos, source.devices])
-  // A macOS computer selected on the Logs page is not one of the computers of the other
-  // sections: it stays selected for the way back but filters nothing there.
+    const needs = section === "files" ? "files" : section === "network" ? "ports" : undefined
+    return needs ? computers.filter(computer => computerCan(kindOf(computer), needs)) : computers
+  }, [section, computers])
+  // A computer selected on the Logs page that another section does not list stays selected for
+  // the way back but filters nothing there.
   const selection = useMemo(() => {
     if (section === "logs") return selectedComputerIds
-    const known = new Set(computers.map(({ configuration }) => configuration.id))
+    const known = new Set(listed.map(({ configuration }) => configuration.id))
     return new Set([...selectedComputerIds].filter((id) => known.has(id)))
-  }, [section, computers, selectedComputerIds])
+  }, [section, listed, selectedComputerIds])
   const changeFilter = (next: Set<string>) => {
     if (section === "logs") return onComputerFilterChange(next)
     const hidden = [...selectedComputerIds].filter((id) => !selection.has(id))
@@ -457,8 +484,11 @@ export function ComputersPage({
       {hasComputers && <ComputerFilterBar computers={listed} selectedComputerIds={selection} onChange={changeFilter} />}
       {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
       {section === "logs" && <LazyBoundary><Logs key={logTargetsKey} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} /></LazyBoundary>}
-      {section === "network" && <LazyBoundary><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} /></LazyBoundary>}
-      {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selection.size > 0} onShowLogs={showActivityLogs} />}
+      {section === "network" && <LazyBoundary><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} onOpenComputer={onOpenComputer} /></LazyBoundary>}
+      {section === "activity" && <ActivityView
+        events={<ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selection.size > 0} onShowLogs={showActivityLogs} />}
+        auditRead={networkActions.listAudit} computers={listed} active={active} onOpenApproval={onOpenApproval} openableApprovals={openableApprovals}
+      />}
     </PageContainer>
   )
 }

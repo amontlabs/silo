@@ -1,13 +1,16 @@
 import { errorMessage } from "@/lib/error-message"
 import { useEffect, useRef, useState } from "react"
 
-import type { ApplicationSecret, ApplicationSource, SecretConfigurationRequest } from "@/features/application/model/application-source"
+import type { ApplicationSecret, ApplicationSource, SecretConfigurationRequest, SecretKind } from "@/features/application/model/application-source"
 import { restoreFocus } from "@/lib/focus"
 
 const actionableFailures = new Set([
   "Cannot access secrets in the system credential store. Unlock it and retry.",
   "Secret settings are too large. Reduce assignments or allowed domains and retry. No settings were overwritten.",
   "A selected computer was removed while saving this secret. Select computers again and retry.",
+  "Enter a valid GitHub personal access token.",
+  "Could not validate the GitHub token. Check its validity and your connection.",
+  "GitHub did not identify this token's account.",
 ])
 
 function operationFailure(error: unknown, fallback: string) {
@@ -19,6 +22,8 @@ interface EditorState {
   secret?: ApplicationSecret
   /** Preselected computers when adding a new secret scoped to one computer. */
   initialComputers?: string[]
+  /** What kind of secret to add; absent means a generic one. */
+  kind?: SecretKind
 }
 
 /** Shared state and operations for viewing, adding, editing, removing, and retrying secrets.

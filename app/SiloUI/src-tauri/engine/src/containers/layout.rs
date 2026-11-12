@@ -1,15 +1,17 @@
 //! Where a container computer's files live, and the record that describes it.
 //!
-//!     <runtime home>/containers/
-//!       images/<config digest>/rootfs        the pinned guest image, unpacked once per digest
-//!       boot/<hash>/                         the shim layer: silo/init and an empty workspace
-//!       computers/<name>/
-//!         computer.json                      the record (ComputerRecord)
-//!         work/                              the overlay work directory
-//!       layers/<id>/                         the shared layer store: sealed layers and writable uppers
-//!       snapshots/<group>/<name>.json        checkpoints (a chain of layer ids and a record template)
-//!         bundle/config.json                 the OCI configuration crun runs
-//!         state/                             crun's state, the holder's pid files, logs, sockets
+//! <pre>
+//! &lt;runtime home&gt;/containers/
+//!   images/&lt;config digest&gt;/rootfs        the pinned guest image, unpacked once per digest
+//!   boot/&lt;hash&gt;/                         the shim layer: silo/init and an empty workspace
+//!   computers/&lt;name&gt;/
+//!     computer.json                      the record (ComputerRecord)
+//!     work/                              the overlay work directory
+//!   layers/&lt;id&gt;/                         the shared layer store: sealed layers and writable uppers
+//!   snapshots/&lt;group&gt;/&lt;name&gt;.json        checkpoints (a chain of layer ids and a record template)
+//!     bundle/config.json                 the OCI configuration crun runs
+//!     state/                             crun's state, the holder's pid files, logs, sockets
+//! </pre>
 //!
 //! The overlay's lower directories, top first, are the sealed layers newest to oldest, the shim
 //! layer and the image: [`ComputerDir::lower_dirs`]. The writable layer is one of the store's

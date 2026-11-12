@@ -21,5 +21,29 @@
       "url": "https://downloads.claude.ai/claude-code-releases/bootstrap.sh",
       "sha256": "3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944"
     }
+  },
+  "codex": {
+    "version": "0.167.0",
+    "source": "https://github.com/openai/codex/releases/tag/rust-v0.167.0",
+    "assets": {
+      "linux-arm64": {
+        "url": "https://github.com/openai/codex/releases/download/rust-v0.167.0/codex-aarch64-unknown-linux-musl.tar.gz",
+        "bytes": 114300898,
+        "sha256": "843489acb4d4b1079745c36b03c5963b887b83155af208fd53584e33ee8eb281",
+        "member": "codex-aarch64-unknown-linux-musl"
+      },
+      "linux-amd64": {
+        "url": "https://github.com/openai/codex/releases/download/rust-v0.167.0/codex-x86_64-unknown-linux-musl.tar.gz",
+        "bytes": 122587028,
+        "sha256": "9d64836106d5b374e90ee4454c7ebcde7ca7106558bd7e41a34b9f26ebda251a",
+        "member": "codex-x86_64-unknown-linux-musl"
+      },
+      "macos-arm64": {
+        "url": "https://github.com/openai/codex/releases/download/rust-v0.167.0/codex-aarch64-apple-darwin.tar.gz",
+        "bytes": 108379331,
+        "sha256": "4b22a2a971be2791c3e31f912f3e77a88ebd64a65812a7289ccba65dd6425fe9",
+        "member": "codex-aarch64-apple-darwin"
+      }
+    }
   }
 }

@@ -74,9 +74,6 @@ pub(super) fn run_import_rekey(disk: &Path, account: &GuestAccount) -> Result<()
 /// What the offline setup of a fork did beyond its credentials.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct ForkRekey {
-    /// The network configuration was written. False when the source disk has no bootstrap
-    /// configuration to replace, so the fork needs a boot of its own to stage it.
-    pub bootstrap_staged: bool,
     /// Guest paths of the scheduled work that was moved aside (see `quiet`).
     pub parked: Vec<String>,
     /// Scheduled jobs inside app bundles, which are left as they are.
@@ -88,34 +85,52 @@ pub(super) struct ForkRekey {
 /// source's password), and none of the source's SSH keys. The key, names and host keys are
 /// set by `fork_finalization_script` in the same boot that checks the result. With `scrub` and
 /// `stop`, the source's scheduled work and the jobs named in `stop` are moved aside and the
-/// paths are deleted in the same mount.
+/// paths are deleted in the same mount. With `bootstrap`, the guest's network bootstrap is
+/// brought up to date in the same mount, and a disk that lacks it is refused before anything
+/// is changed.
 pub(super) fn run_fork_rekey(
     disk: &Path,
     account: &GuestAccount,
-    bootstrap_config: Option<&[u8]>,
+    bootstrap: Option<&BootstrapFiles>,
     scrub: Option<(&[String], &[String])>,
 ) -> Result<ForkRekey, String> {
     let mut attached = Attached::attach(disk)?;
-    let patched = attached.mount_data_volume().and_then(|mount| {
-        rekey_fork_data_volume(&mount, account)?;
-        let bootstrap_staged = match bootstrap_config {
-            Some(config) => write_bootstrap_config(&mount, config)?,
-            None => true,
-        };
-        let quieted = match scrub {
-            Some((scrub, stop)) => super::quiet::apply_offline(&mount, scrub, stop)?,
-            None => Default::default(),
-        };
-        Ok(ForkRekey {
-            bootstrap_staged,
-            parked: quieted.parked,
-            still_scheduled: quieted.still_scheduled,
-        })
-    });
+    let patched = attached
+        .mount_data_volume()
+        .and_then(|mount| rekey_fork_volume(&mount, account, bootstrap, scrub));
     let closed = attached.close();
     let rekeyed = patched?;
     closed?;
     Ok(rekeyed)
+}
+
+fn rekey_fork_volume(
+    mount: &Path,
+    account: &GuestAccount,
+    bootstrap: Option<&BootstrapFiles>,
+    scrub: Option<(&[String], &[String])>,
+) -> Result<ForkRekey, String> {
+    if bootstrap.is_some() {
+        bootstrap_targets(mount)?;
+    }
+    rekey_fork_data_volume(mount, account)?;
+    if let Some(files) = bootstrap {
+        stage_bootstrap(mount, files)?;
+    }
+    let quieted = match scrub {
+        Some((scrub, stop)) => super::quiet::apply_offline(mount, scrub, stop)?,
+        None => Default::default(),
+    };
+    Ok(ForkRekey {
+        parked: quieted.parked,
+        still_scheduled: quieted.still_scheduled,
+    })
+}
+
+/// Brings the network bootstrap on a stopped disk up to date, so the guest's first boot comes
+/// up behind its gateway. A disk without the bootstrap is refused and left untouched.
+pub(super) fn stage_bootstrap_on_disk(disk: &Path, files: &BootstrapFiles) -> Result<(), String> {
+    with_data_volume(disk, |mount| stage_bootstrap(mount, files))
 }
 
 /// Runs `work` on the mounted Data volume of a stopped computer's disk, then unmounts and
@@ -494,19 +509,48 @@ fn rekey_fork_data_volume(root: &Path, account: &GuestAccount) -> Result<(), Str
 
 /// Where the guest's network bootstrap reads its configuration.
 const BOOTSTRAP_CONFIG: &str = "Library/Application Support/Silo/NetworkBootstrap/config.json";
+/// The guest's network bootstrap program and the launch daemon that runs it.
+const BOOTSTRAP_DAEMON: &str = "Library/PrivilegedHelperTools/silo-network-bootstrap";
+const BOOTSTRAP_PLIST: &str = "Library/LaunchDaemons/com.silo.network-bootstrap.plist";
 
-/// Replaces the source's network bootstrap configuration in place, so the file keeps the
-/// owner the guest requires of it and the fork's first boot already has its own address
-/// behind its gateway. Returns false, writing nothing, when the source has none.
-fn write_bootstrap_config(root: &Path, config: &[u8]) -> Result<bool, String> {
-    let relative = Path::new(BOOTSTRAP_CONFIG);
-    let path = validate_import_data_path(root, relative, true)?;
-    if fs::symlink_metadata(&path).is_err() {
-        return Ok(false);
+/// Why a disk without the network bootstrap is refused.
+pub(super) const BOOTSTRAP_MISSING: &str = "This computer's disk does not have the network setup Silo puts on every computer it sets up, so Silo will not start it on the Mac's own network. Delete it and make it again from a computer or checkpoint that this version of Silo has set up, or import an export of one.";
+
+/// The files of the network bootstrap that a disk gets before the guest first boots behind its
+/// gateway: the program, the launch daemon and its configuration. The proxy CA's trust is
+/// installed in the first boot, over the login that boot allows.
+pub(super) struct BootstrapFiles {
+    pub config: Vec<u8>,
+    pub daemon: Vec<u8>,
+    pub plist: Vec<u8>,
+}
+
+/// The three files' paths on the volume, checked for links. A volume that lacks one is
+/// refused: the host cannot create a file the guest sees as owned by root, and the guest
+/// cannot reach the network without the program, its launch daemon and its configuration.
+fn bootstrap_targets(root: &Path) -> Result<[PathBuf; 3], String> {
+    let mut paths = Vec::new();
+    for relative in [BOOTSTRAP_CONFIG, BOOTSTRAP_DAEMON, BOOTSTRAP_PLIST] {
+        let relative = Path::new(relative);
+        let path = validate_import_data_path(root, relative, true)?;
+        if fs::symlink_metadata(&path).is_err() {
+            return Err(BOOTSTRAP_MISSING.into());
+        }
+        paths.push(validate_import_data_path(root, relative, false)?);
     }
-    let path = validate_import_data_path(root, relative, false)?;
-    write_file(&path, config, 0o644, true)?;
-    Ok(true)
+    let [config, daemon, plist]: [PathBuf; 3] = paths
+        .try_into()
+        .map_err(|_| "Silo could not find the computer's network setup.".to_string())?;
+    Ok([config, daemon, plist])
+}
+
+/// Replaces the bootstrap files the disk already has, in place, so each keeps the owner the
+/// guest requires of it. Nothing is written unless all three exist.
+fn stage_bootstrap(root: &Path, files: &BootstrapFiles) -> Result<(), String> {
+    let [config, daemon, plist] = bootstrap_targets(root)?;
+    write_file(&config, &files.config, 0o644, true)?;
+    write_file(&daemon, &files.daemon, 0o755, true)?;
+    write_file(&plist, &files.plist, 0o644, true)
 }
 
 /// Removes what is in the account's `Library/Keychains`. macOS makes a new login keychain
@@ -1988,21 +2032,135 @@ mod tests {
         assert!(disabled.get("com.apple.screensharing").is_none());
     }
 
-    #[test]
-    fn the_fork_network_configuration_replaces_the_sources_in_place() {
-        use std::os::unix::fs::MetadataExt;
+    fn bootstrap_volume() -> tempfile::TempDir {
         let root = volume();
-        let path = root.path().join(BOOTSTRAP_CONFIG);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, b"source config").unwrap();
-        let inode = fs::metadata(&path).unwrap().ino();
-        assert!(write_bootstrap_config(root.path(), b"fork config").unwrap());
-        assert_eq!(fs::read(&path).unwrap(), b"fork config");
-        assert_eq!(fs::metadata(&path).unwrap().ino(), inode);
-        // A source without a bootstrap has nothing to take over, and nothing is created.
+        for (relative, bytes) in [
+            (BOOTSTRAP_CONFIG, "source config"),
+            (BOOTSTRAP_DAEMON, "source daemon"),
+            (BOOTSTRAP_PLIST, "source plist"),
+        ] {
+            let path = root.path().join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, bytes).unwrap();
+        }
+        root
+    }
+
+    fn bootstrap_files() -> BootstrapFiles {
+        BootstrapFiles {
+            config: b"fork config".to_vec(),
+            daemon: b"current daemon".to_vec(),
+            plist: b"current plist".to_vec(),
+        }
+    }
+
+    #[test]
+    fn the_network_bootstrap_replaces_the_sources_files_in_place() {
+        use std::os::unix::fs::MetadataExt;
+        let root = bootstrap_volume();
+        let inodes: Vec<u64> = [BOOTSTRAP_CONFIG, BOOTSTRAP_DAEMON, BOOTSTRAP_PLIST]
+            .iter()
+            .map(|relative| fs::metadata(root.path().join(relative)).unwrap().ino())
+            .collect();
+        stage_bootstrap(root.path(), &bootstrap_files()).unwrap();
+        for ((relative, expected), (inode, mode)) in [
+            (BOOTSTRAP_CONFIG, "fork config"),
+            (BOOTSTRAP_DAEMON, "current daemon"),
+            (BOOTSTRAP_PLIST, "current plist"),
+        ]
+        .into_iter()
+        .zip(inodes.into_iter().zip([0o644, 0o755, 0o644]))
+        {
+            let path = root.path().join(relative);
+            assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+            assert_eq!(fs::metadata(&path).unwrap().ino(), inode, "{relative}");
+            assert_eq!(mode_of(&path), Some(mode), "{relative}");
+        }
+    }
+
+    #[test]
+    fn a_disk_missing_any_bootstrap_file_is_refused_and_nothing_is_written() {
+        for missing in [BOOTSTRAP_CONFIG, BOOTSTRAP_DAEMON, BOOTSTRAP_PLIST] {
+            let root = bootstrap_volume();
+            fs::remove_file(root.path().join(missing)).unwrap();
+            assert_eq!(
+                stage_bootstrap(root.path(), &bootstrap_files()),
+                Err(BOOTSTRAP_MISSING.to_string()),
+                "{missing}"
+            );
+            for kept in [BOOTSTRAP_CONFIG, BOOTSTRAP_DAEMON, BOOTSTRAP_PLIST] {
+                let path = root.path().join(kept);
+                if kept == missing {
+                    assert!(!path.exists(), "nothing is created at {kept}");
+                } else {
+                    assert!(fs::read_to_string(path).unwrap().starts_with("source"));
+                }
+            }
+        }
+        // A source without any bootstrap has nothing to take over, and nothing is created.
         let bare = volume();
-        assert!(!write_bootstrap_config(bare.path(), b"x").unwrap());
+        assert_eq!(
+            stage_bootstrap(bare.path(), &bootstrap_files()),
+            Err(BOOTSTRAP_MISSING.to_string())
+        );
         assert!(!bare.path().join(BOOTSTRAP_CONFIG).exists());
+    }
+
+    #[test]
+    fn a_linked_bootstrap_file_is_refused_before_anything_is_written() {
+        let root = bootstrap_volume();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("elsewhere");
+        fs::write(&target, "outside").unwrap();
+        let daemon = root.path().join(BOOTSTRAP_DAEMON);
+        fs::remove_file(&daemon).unwrap();
+        std::os::unix::fs::symlink(&target, &daemon).unwrap();
+        assert!(stage_bootstrap(root.path(), &bootstrap_files()).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "outside");
+        assert_eq!(
+            fs::read_to_string(root.path().join(BOOTSTRAP_CONFIG)).unwrap(),
+            "source config"
+        );
+    }
+
+    #[test]
+    fn a_fork_whose_disk_lacks_the_bootstrap_is_refused_before_its_account_changes() {
+        let (root, _, _) = imported_volume();
+        let users = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+        let before = fs::read(&users).unwrap();
+        let mut new_account = account();
+        new_account.password = "fork-password".into();
+        assert_eq!(
+            rekey_fork_volume(root.path(), &new_account, Some(&bootstrap_files()), None),
+            Err(BOOTSTRAP_MISSING.to_string())
+        );
+        assert_eq!(fs::read(&users).unwrap(), before);
+    }
+
+    #[test]
+    fn a_fork_with_the_bootstrap_gets_its_credentials_and_the_files_together() {
+        let (root, _, old_hash) = imported_volume();
+        for relative in [BOOTSTRAP_CONFIG, BOOTSTRAP_DAEMON, BOOTSTRAP_PLIST] {
+            let path = root.path().join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "source").unwrap();
+        }
+        let mut new_account = account();
+        new_account.password = "fork-password".into();
+        rekey_fork_volume(root.path(), &new_account, Some(&bootstrap_files()), None).unwrap();
+        let user = read_plist(
+            &root
+                .path()
+                .join("private/var/db/dslocal/nodes/Default/users/silo.plist"),
+        )
+        .unwrap();
+        assert_ne!(user["ShadowHashData"], old_hash);
+        assert_eq!(
+            fs::read_to_string(root.path().join(BOOTSTRAP_CONFIG)).unwrap(),
+            "fork config"
+        );
     }
 
     #[test]

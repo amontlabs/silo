@@ -14,7 +14,7 @@ async fn main() {
         Ok(code) => std::process::exit(code),
         Err(error) => {
             eprintln!("silo: {error}");
-            std::process::exit(1);
+            std::process::exit(error.exit);
         }
     }
 }

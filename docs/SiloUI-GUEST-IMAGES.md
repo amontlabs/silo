@@ -313,6 +313,124 @@ v5 changes the v4 recipe in these ways:
    `npm --prefix app/SiloUI run test:release`.
 5. Run the live tests in [Rust test support](SiloUI-RUST-TEST-SUPPORT.md) against the new image.
 
+## Agents in a computer
+
+A computer can have two agents: Claude Code and Codex. Both systems answer the same two
+methods, and Silo installs an agent but never signs in to it.
+
+- `agents.list { computerId }` returns each agent with its `state` (`ready`, `missing`,
+  `outdated`, `installing`, or `unknown`), its installed `version` and the version an install
+  gives. `unknown` means Silo could not learn the state: the computer is stopped, cannot be
+  reached, or gave an answer Silo could not read. `missing` is only for a computer that
+  answered and has no such agent. Silo never reports `missing` for a computer it could not ask.
+- `agents.install { computerId, agent }` is a job that installs one agent in a running computer,
+  reports its step (`downloading`, `installing`, `registering`) as `agent` progress, and finishes
+  with the same list. It then runs the computer-use registration step, so the agent has the
+  computer-use server at once and not only after the next boot. The old `setup-agent-tools`
+  desktop action is the same install for Claude Code. Cancelling the job stops the installer in
+  the computer: on Linux the job ends, and the agent can be installed again, only after the
+  installer's process has exited.
+- `computers.create` accepts `agents` for a Linux computer. It installs them during its first
+  boot after setup, taking the same per-agent install guard as `agents.install`, and shows an
+  installing step on the creation. If one fails the computer is still created, the creation
+  shows a warning, and the agent lists as `missing` so that `agents.install` can retry it. The
+  request is remembered only after the creation job is accepted. A macOS computer does not
+  accept agents at creation yet: it refuses a non-empty list, because its setup ends with the
+  computer stopped and its template must stay as it is. Create the computer, start it, then use
+  `agents.install`.
+- `ready` is the computer's own report: it comes from the agent's version or receipt inside the
+  computer, which software in the computer can write. Treat it as what the computer says, not as
+  proof of what is installed.
+
+Both agents are pinned in `app/SiloUI/src-tauri/guest/agent-tools-lock.json`: Claude Code
+by the version and SHA-256 of Anthropic's installer, Codex by the version of OpenAI's release
+and the size and SHA-256 of its archive for Linux arm64 and x64 (musl) and macOS arm64, with
+the release address. Checking the pin means downloading the archive and comparing the SHA-256
+with the one GitHub shows for the release asset.
+
+Versions follow one rule. A version is read as the first whole word of the program's output that
+is dotted numbers (`codex-cli 0.167.0` is `0.167.0`; `0.167.0-beta` is not a version), and it
+matches the pin only when it is equal. An installed version equal to or newer than the pinned one
+is `ready`, and an install never downgrades it: it keeps the newer version and records that one.
+Versions compare as dotted numbers (`0.10.0` is newer than `0.9.0`; a missing part is zero).
+Anything that is not dotted numbers counts only when it is equal to the pin.
+
+What a computer prints is untrusted. The host keeps only the last 64 KB of an install's standard
+error on macOS, stops an install that prints more than 64 KB, and shows at most about 200
+characters of a failure reason with control characters removed.
+
+- **Linux** (`guest/agent-tools.py`, run as root through `agents.install`): the guest downloads
+  over HTTPS only, redirects included, with a maximum file size. It refuses a file that does not
+  match the lock's size (Codex) and SHA-256, unpacks the one expected file of the
+  Codex archive into `/opt/silo/codex/<version>/`, links it at `/usr/local/bin/codex`, and runs
+  `codex --version` as the `silo` account. Claude Code is installed with its documented
+  installer as that account, with its updater off. The receipt is `/var/lib/silo/agent-tools.json`
+  (`codexVersion` joins the existing fields). The install runs in a process group of its own,
+  recorded in `/run/silo-agent-install-<agent>.pid`, so the host can stop it.
+- **macOS** (`guest/macos/silo-agent-tools.zsh`): this device downloads and checks the file
+  and copies it over SSH; the computer downloads nothing for Codex. The script first copies the
+  staged file into a folder only root can change, checks the size and SHA-256 of that copy, and
+  installs from it, so the account cannot swap the file between the check and its use. It installs
+  under `/usr/local/libexec/silo-tools/codex/<version>/`, links `/usr/local/bin/codex`, runs
+  `codex --version`, and writes a receipt for the agent at
+  `/Library/Application Support/Silo/agents/<agent>.json`. It removes its staging folders on every
+  exit. Claude Code is part of the template, so `agents.list` reports it ready there; installing it
+  again repairs or updates it. The template's developer tools script and lock are not changed by
+  any of this.
+
+## Guest components
+
+Silo puts a few things of its own into a computer and keeps them current. The mechanism is small
+on purpose (`app/SiloUI/src-tauri/engine/src/guest_components/`):
+
+- **A list of components with versions** in the engine (`COMPONENTS`). The version is raised when
+  what a component is changes, so that a computer that recorded an earlier one is reconciled again.
+- **A receipt in the computer**: `/var/lib/silo/components.json` on Linux (root-owned, `0644`), and
+  `~/Library/Application Support/Silo/components.json` of the working account on macOS. It holds
+  the computer's id and, for each component, the version, a state (`ok`, `failed`, `unavailable`,
+  `waiting`, `removed`), the SHA-256 of an installed file, a sentence for a person and the time. A
+  copy is kept on the device (`<app data>/guest-client/components/<computer id>.json`), so a
+  computer's status shows it even while the computer is stopped.
+- **A reconcile** whenever the engine sees the computer running after it was not (every start,
+  including the engine's own start and a fork's first start), when the tools are turned on, and when
+  they are turned off. It reads what the computer has in one command as the working account, decides
+  (`plan.rs`, pure), runs the steps that are needed and records each result. A step that fails is
+  recorded and the next still runs; a computer that cannot be asked at all is tried again within
+  seconds. Nothing in a reconcile stops a computer from starting.
+- **The receipt is not believed.** An agent with root can write it. It is read bounded to 64 KiB,
+  field by field (an entry that is malformed or names no component of this build is dropped, a
+  receipt of another computer's id or another schema is empty), and only decides what to do: the
+  program is checked by hashing the file itself, and the registration is applied again at every
+  reconcile.
+
+The members today:
+
+| Component | What it is | Linux | macOS |
+| --- | --- | --- | --- |
+| `silo` | The `silo` program at `/usr/local/bin/silo` | The build the engine ships, sent as root through the guest agent | The device's own `silo`, sent over SSH |
+| `silo-mcp` | `silo mcp` as an MCP server named `silo` in Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`) | `silo-computer-use.py server-add` as root, writing as the working account | `silo-cua-register.py server-add` as the working account |
+
+The program is sent through the shell's standard input into a folder only root can enter, hashed
+there against the checksum the engine verified, and moved over the old file in the destination's
+folder (a rename, so a program is never half written; a link planted at the destination is replaced,
+a folder refused). A mismatch replaces nothing. Without the tools on, the program is left where it is
+(it refuses to work without the endpoint file's token) and the registration is taken out: at once
+when the computer runs, otherwise the removal is owed and done at its next start.
+
+The registration reuses the way computer use registers Cua Driver: the same helpers, the same
+editors of the two agents' configuration (now taking the server's name), the same pending rule for an
+agent that is not installed yet (it is registered by the reconcile at the next start, and by
+`agents.install` right after the install, beside computer use's own registration). The helper is
+pushed with the registration when the computer's copy differs. A shared lock keeps the two kinds of
+registration from overwriting each other's change in an agent's file.
+
+**Computer use and the desktop streamer keep their own paths for now** (`computer_use.rs` and the
+guest image); they are not members of the list. The GitHub credential helper and the accessibility
+helper are the next candidates.
+
+A computer's status (`guestClient.status`, `silo tools status`) lists the components with their last
+result. A build that cannot provide the Linux program shows it as `unavailable` with the reason.
+
 ## Runtime behavior
 
 The app downloads and verifies the pinned archive (below), then imports it into its private

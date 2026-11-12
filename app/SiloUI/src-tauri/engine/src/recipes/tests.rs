@@ -616,3 +616,381 @@ fn macos_recipes_install_homebrew_before_they_need_it() {
     });
     assert!(!linux[0].script.contains("brew"));
 }
+
+mod stored {
+    use silo_api::methods::{
+        keep::KeepHooks,
+        recipes::{RecipeDefinition, RecipeRecord},
+    };
+
+    use super::*;
+    use crate::recipes::{
+        additions::manager_key, append, built_in, hide_commands, hooks_of, record_merge, records, unrecord_merge,
+        Additions, Library,
+    };
+
+    fn definition() -> RecipeDefinition {
+        RecipeDefinition {
+            spec: spec(),
+            quiet: vec!["poller".into()],
+            scrub: vec!["/home/silo/.env".into()],
+            keep: Some(KeepHooks {
+                restart: vec!["web".into()],
+                migrate: vec!["npm run migrate".into()],
+                after: vec!["npm test".into()],
+            }),
+            test: Some("npm test".into()),
+            files: vec!["/home/silo/.bashrc".into()],
+            commands_hidden: None,
+        }
+    }
+
+    fn folder() -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("silo-recipes-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn record(name: &str) -> RecipeRecord {
+        RecipeRecord {
+            name: name.into(),
+            hash: "h".into(),
+            built_at: "2026-11-11T00:00:00Z".into(),
+            recipe: definition(),
+        }
+    }
+
+    #[test]
+    fn hiding_commands_keeps_names_packages_and_files() {
+        let mut recipe = definition();
+        recipe.spec.setup = vec!["export TOKEN=hunter2".into()];
+        recipe.spec.services = vec![RecipeService {
+            name: "web".into(),
+            run: "web --token hunter2".into(),
+        }];
+        let shown = hide_commands(recipe.clone());
+        assert_eq!(shown.commands_hidden, Some(true));
+        assert!(shown.spec.setup.is_empty());
+        assert_eq!(shown.spec.services[0].name, "web");
+        assert!(shown.spec.services[0].run.is_empty());
+        let keep = shown.keep.unwrap();
+        assert_eq!(keep.restart, ["web"]);
+        assert!(keep.migrate.is_empty() && keep.after.is_empty());
+        assert_eq!(shown.test, recipe.test);
+        assert_eq!(shown.files, recipe.files);
+        assert_eq!(shown.spec.packages, recipe.spec.packages);
+        assert_eq!(shown.quiet, recipe.quiet);
+        assert_eq!(recipe.commands_hidden, None);
+    }
+
+    #[test]
+    fn a_saved_recipe_keeps_every_key_and_replaces_the_shipped_one() {
+        let app = folder();
+        let library = Library::new(&app);
+        assert!(library.get("web").unwrap().is_none());
+        library.save("web", &definition()).unwrap();
+        let (got, built_in_flag) = library.get("web").unwrap().unwrap();
+        assert_eq!(got, definition());
+        assert!(!built_in_flag);
+
+        assert!(library.get("linux-dev").unwrap().unwrap().1);
+        let mut mine = definition();
+        mine.spec.packages.apt = vec!["vim".into()];
+        library.save("linux-dev", &mine).unwrap();
+        assert!(!library.get("linux-dev").unwrap().unwrap().1);
+        assert!(library.remove("linux-dev").unwrap());
+        assert_eq!(
+            library.get("linux-dev").unwrap().unwrap().0,
+            built_in("linux-dev").unwrap()
+        );
+        assert!(!library.remove("linux-dev").unwrap());
+
+        let names: Vec<String> = library.list().into_iter().map(|(name, _, _)| name).collect();
+        assert_eq!(names, ["linux-dev", "macos-xcode", "web"]);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn a_recipe_with_a_bad_name_or_entry_is_not_stored() {
+        let library = Library::new(&folder());
+        assert!(library.save("Bad Name", &definition()).is_err());
+        let mut bad = definition();
+        bad.scrub = vec!["relative/path".into()];
+        assert!(library.save("web", &bad).unwrap_err().contains("absolute"));
+        let mut bad = definition();
+        bad.keep.as_mut().unwrap().after = vec!["one\ntwo".into()];
+        assert!(library.save("web", &bad).is_err());
+        let mut bad = definition();
+        bad.spec.packages.apt = vec!["--evil".into()];
+        assert!(library.save("web", &bad).is_err());
+        assert_eq!(built_in_names(), ["linux-dev", "macos-xcode"]);
+    }
+
+    #[test]
+    fn a_record_is_inherited_by_forks_and_forgotten_with_the_computer() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        records::set("builder", &record("web")).unwrap();
+        records::inherit("builder", "fork").unwrap();
+        assert_eq!(records::get("fork").unwrap().unwrap().name, "web");
+        // A fork of a computer with no record has none, even if its id had one before.
+        records::inherit("nothing", "fork").unwrap();
+        assert!(records::get("fork").unwrap().is_none());
+        records::computer_removed("builder");
+        assert!(records::get("builder").unwrap().is_none());
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn the_hooks_of_a_recipe_are_its_keep_section() {
+        let hooks = hooks_of(&definition());
+        assert_eq!(hooks.restart, ["web"]);
+        assert_eq!(hooks.migrate, ["npm run migrate"]);
+        let mut none = definition();
+        none.keep = None;
+        assert!(hooks_of(&none).after.is_empty());
+    }
+
+    #[test]
+    fn a_fork_gets_the_quiet_and_scrub_lists_of_its_sources_recipe_once() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        records::set("builder", &record("web")).unwrap();
+        let asked = crate::runtime::checkpoints::ForkOptions {
+            stop: vec!["poller".into(), "extra".into()],
+            scrub: vec!["/tmp/mine".into()],
+            ..Default::default()
+        };
+        let options = crate::checkpoints::options_with_recipe_rules("builder", asked.clone()).unwrap();
+        assert_eq!(options.stop, ["poller", "extra"]);
+        assert_eq!(options.scrub, ["/tmp/mine", "/home/silo/.env"]);
+        let plain = crate::checkpoints::options_with_recipe_rules("someone-else", asked.clone()).unwrap();
+        assert_eq!(plain, asked);
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn a_corrupt_records_file_refuses_options_with_recipe_rules() {
+        let app = folder();
+        let path = app.join("recipe-records.json");
+        std::fs::write(&path, "corrupt-json").unwrap();
+        records::use_test_path(Some(path));
+        let asked = crate::runtime::checkpoints::ForkOptions::default();
+        let result = crate::checkpoints::options_with_recipe_rules("builder", asked);
+        assert!(result.is_err());
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn a_merge_appends_new_packages_and_files_to_the_recipe_and_the_record() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        library.save("web", &definition()).unwrap();
+        records::set("main", &record("web")).unwrap();
+
+        let mut adds = Additions::default();
+        adds.add_package("dpkg", "jq");
+        adds.add_package("apt", "git");
+        adds.add_package("pip3", "requests");
+        adds.add_package("snap", "lxd");
+        adds.add_file("/home/silo/.bashrc");
+        adds.add_file("/home/silo/.gitconfig");
+        let recorded = record_merge(&library, "main", &adds, true)
+            .unwrap()
+            .unwrap();
+        let fresh = recorded.record;
+        assert_eq!(recorded.name, "web");
+        assert_eq!(fresh.packages["apt"], ["jq"]);
+        assert_eq!(fresh.packages["pip"], ["requests"]);
+        assert!(!fresh.packages.contains_key("snap"));
+        assert_eq!(fresh.files, ["/home/silo/.gitconfig"]);
+
+        let stored = library.saved("web").unwrap().unwrap();
+        assert!(stored.spec.packages.apt.contains(&"jq".to_owned()));
+        assert!(stored.files.contains(&"/home/silo/.gitconfig".to_owned()));
+        let on_main = records::get("main").unwrap().unwrap();
+        assert_eq!(on_main.recipe, stored);
+        // The same again adds nothing.
+        assert!(record_merge(&library, "main", &adds, true).unwrap().is_none());
+        // A computer with no recipe has nothing to append to.
+        assert!(record_merge(&library, "nobody", &adds, true).unwrap().is_none());
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn record_merge_skips_saving_recipe_when_save_recipe_is_false() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        library.save("web", &definition()).unwrap();
+        records::set("main", &record("web")).unwrap();
+
+        let mut adds = Additions::default();
+        adds.add_package("apt", "jq");
+        let recorded = record_merge(&library, "main", &adds, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recorded.name, "web");
+        assert_eq!(recorded.record.packages["apt"], ["jq"]);
+
+        let stored = library.saved("web").unwrap().unwrap();
+        assert!(!stored.spec.packages.apt.contains(&"jq".to_owned()));
+        let on_main = records::get("main").unwrap().unwrap();
+        assert!(on_main.recipe.spec.packages.apt.contains(&"jq".to_owned()));
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn a_recipe_that_ships_with_silo_is_never_edited_by_a_merge() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        let mut main = record("linux-dev");
+        main.recipe = built_in("linux-dev").unwrap();
+        records::set("main", &main).unwrap();
+        let mut adds = Additions::default();
+        adds.add_package("npm", "typescript");
+        let recorded = record_merge(&library, "main", &adds, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recorded.record.packages["npm"], ["typescript"]);
+        assert!(library.saved("linux-dev").unwrap().is_none());
+        assert_eq!(
+            built_in("linux-dev").unwrap().spec.packages.npm,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            records::get("main").unwrap().unwrap().recipe.spec.packages.npm,
+            ["typescript"]
+        );
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn undoing_a_merge_removes_exactly_what_it_appended() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        library.save("web", &definition()).unwrap();
+        records::set("main", &record("web")).unwrap();
+
+        let mut adds = Additions::default();
+        adds.add_package("apt", "git");
+        adds.add_package("apt", "jq");
+        adds.add_package("pip", "requests");
+        adds.add_file("/home/silo/.bashrc");
+        adds.add_file("/home/silo/.gitconfig");
+        let recorded = record_merge(&library, "main", &adds, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recorded.record.packages["apt"], ["jq"]);
+        assert_eq!(recorded.saved, recorded.record);
+
+        // Something the owner added to the saved recipe after the merge stays.
+        let mut saved = library.saved("web").unwrap().unwrap();
+        saved.spec.packages.apt.push("tmux".into());
+        library.save("web", &saved).unwrap();
+
+        unrecord_merge(&library, "main", &recorded).unwrap();
+        let after = library.saved("web").unwrap().unwrap();
+        assert_eq!(after.spec.packages.apt, ["git", "curl", "tmux"]);
+        assert!(after.spec.packages.pip.is_empty());
+        assert_eq!(after.files, ["/home/silo/.bashrc"]);
+        let on_main = records::get("main").unwrap().unwrap();
+        assert_eq!(on_main.recipe.spec.packages.apt, ["git", "curl"]);
+        assert!(on_main.recipe.spec.packages.pip.is_empty());
+        assert_eq!(on_main.recipe.files, ["/home/silo/.bashrc"]);
+        // Undoing again, or after the entries are gone, changes nothing.
+        unrecord_merge(&library, "main", &recorded).unwrap();
+        assert_eq!(library.saved("web").unwrap().unwrap(), after);
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn undoing_a_merge_leaves_the_saved_recipe_alone_when_the_merge_did_not_save() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        let mut saved = definition();
+        saved.spec.packages.apt.push("jq".into());
+        library.save("web", &saved).unwrap();
+        records::set("main", &record("web")).unwrap();
+
+        let mut adds = Additions::default();
+        adds.add_package("apt", "jq");
+        let recorded = record_merge(&library, "main", &adds, false)
+            .unwrap()
+            .unwrap();
+        assert!(recorded.saved.is_empty());
+        unrecord_merge(&library, "main", &recorded).unwrap();
+        assert_eq!(library.saved("web").unwrap().unwrap(), saved);
+        let on_main = records::get("main").unwrap().unwrap();
+        assert!(!on_main.recipe.spec.packages.apt.contains(&"jq".to_owned()));
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn undoing_a_merge_does_not_touch_a_record_of_another_recipe() {
+        let app = folder();
+        records::use_test_path(Some(app.join("recipe-records.json")));
+        let library = Library::new(&app);
+        records::set("main", &record("web")).unwrap();
+        let mut adds = Additions::default();
+        adds.add_package("npm", "eslint");
+        let recorded = record_merge(&library, "main", &adds, true)
+            .unwrap()
+            .unwrap();
+        // The computer was rebuilt from another recipe that happens to list the same package.
+        let mut other = record("other");
+        other.recipe.spec.packages.npm.push("eslint".into());
+        records::set("main", &other).unwrap();
+        unrecord_merge(&library, "main", &recorded).unwrap();
+        assert_eq!(records::get("main").unwrap().unwrap(), other);
+        records::use_test_path(None);
+        std::fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn append_skips_additions_that_would_exceed_limits() {
+        let mut recipe = definition();
+        recipe.spec.packages.apt = (0..250).map(|i| format!("pkg{i}")).collect();
+        let mut adds = Additions::default();
+        for i in 250..270 {
+            adds.add_package("apt", &format!("pkg{i}"));
+        }
+        let (updated, fresh) = append(&recipe, &adds);
+        assert_eq!(updated.spec.packages.apt.len(), super::library::MAX_LIST);
+        assert_eq!(fresh.packages["apt"].len(), 6);
+
+        let recipe = definition();
+        let big_str = "a".repeat(100);
+        let mut adds = Additions::default();
+        for i in 0..3000 {
+            adds.add_package("apt", &format!("pkg{i}_{big_str}"));
+        }
+        let (updated, _) = append(&recipe, &adds);
+        let size = serde_json::to_vec(&updated).unwrap().len();
+        assert!(size <= super::library::MAX_BYTES);
+    }
+
+    #[test]
+    fn packages_a_system_cannot_install_are_not_appended() {
+        let mut adds = Additions::default();
+        adds.add_package("brew", "wget");
+        adds.add_package("cargo", "ripgrep");
+        let (linux, fresh) = append(&definition(), &adds);
+        assert!(linux.spec.packages.brew.is_empty());
+        assert_eq!(fresh.packages.keys().collect::<Vec<_>>(), ["cargo"]);
+        assert_eq!(manager_key("dpkg"), Some("apt"));
+        assert_eq!(manager_key("snap"), None);
+    }
+}

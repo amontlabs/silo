@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { ConfirmPopover } from "@/components/confirm-popover"
 import { PageContainer, PageHeader, SectionHeading } from "@/components/page"
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,9 @@ import { CopyButton } from "@/components/copy-button"
 import { statusLabels } from "@/features/application/model/use-pending-changes"
 import { errorMessage } from "@/lib/error-message"
 import { BucketCounts, CredentialsUsed } from "./review-request-parts"
+import { MergeConflicts } from "./merge-conflicts"
+import { refusalHint } from "@/features/application/model/merge-copy"
+import type { MergeChoice } from "@/desktop/production-source"
 
 export type ReviewRequestActions = {
   show: typeof showReviewRequest
@@ -18,10 +21,11 @@ export type ReviewRequestActions = {
 }
 const productionActions: ReviewRequestActions = { show: showReviewRequest, keep: keepReviewRequest, throwAway: throwAwayReviewRequest, open: openReviewRequest }
 
-export const staleReason = "This request no longer matches the fork's current changes. Throw it away; the agent can request again."
+export const staleReason = "The fork has changed since this was requested. Delete the fork; the agent can ask again."
+export const fastForwardNote = "Main had not changed since the fork was made, so nothing could conflict. Everything was applied."
 
-/** One review request: what the fork changed, the credentials it used, and Keep, Throw away and Open fork. */
-export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onBack, onClose, actions = productionActions }: {
+/** One review request: what the fork changed, the credentials it used, and Merge, Delete fork and Open fork. */
+export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onBack, onClose, onChanged, extraActions, intro, actions = productionActions }: {
   requestId: string
   deviceId?: string
   /** Shown in the header instead of the device id. */
@@ -30,8 +34,14 @@ export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onB
   targetName?: string
   /** Called from the Back button. */
   onClose?: () => void
-  /** Called after the fork is thrown away. */
+  /** Called after the fork is deleted. */
   onBack?: () => void
+  /** Called after a merge or a deletion, so a list showing the request can read again. */
+  onChanged?: () => void
+  /** Further header buttons; the Pending page adds Deny for a merge a computer asked for. */
+  extraActions?: ReactNode
+  /** Shown under the header: what a computer's agent asked, for a merge it asked for. */
+  intro?: ReactNode
   actions?: ReviewRequestActions
 }) {
   const [detail, setDetail] = useState<RequestDetail | null>(null)
@@ -57,13 +67,14 @@ export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onB
     setBusy(true); setActionError(null)
     try { await work() } catch (error) { setActionError(errorMessage(error)) } finally { setBusy(false) }
   }
-  const keep = (dataOk?: boolean) => run(async () => {
+  const keep = (options: { dataOk?: boolean; choices?: Record<string, MergeChoice> } = {}) => run(async () => {
     setDataConfirm(false)
-    const result = await actions.keep(dataOk ? { ...target, dataOk } : target)
+    const result = await actions.keep({ ...target, ...(options.dataOk ? { dataOk: true } : {}), ...(options.choices ? { choices: options.choices } : {}) })
     setKept(result)
     if (!result.refusal) setReload(value => value + 1)
+    onChanged?.()
   })
-  const throwAway = () => run(async () => { await actions.throwAway(target); onBack?.() })
+  const throwAway = () => run(async () => { await actions.throwAway(target); onChanged?.(); onBack?.() })
   const open = () => run(async () => { setOpened(await actions.open(target)) })
 
   if (loadError) {
@@ -79,10 +90,10 @@ export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onB
   const refusal = kept?.refusal
   const keptNow = kept && !refusal ? kept : null
   const request = keptNow?.request ?? detail.request
-  const targetLabel = targetName ?? request.target
+  const targetLabel = targetName ?? detail.targetName ?? request.target
   const resolved = request.status !== "open"
   const stale = detail.stale === true
-  const keepDisabledReason = stale ? staleReason : resolved ? `This request is ${statusLabels[request.status].toLowerCase()}.` : keptNow ? "Already kept." : undefined
+  const keepDisabledReason = stale ? staleReason : resolved ? `This request is ${statusLabels[request.status].toLowerCase()}.` : keptNow ? "Already merged." : undefined
   const subtitle = [deviceId ? `on ${deviceName ?? deviceId}` : "this device", `created ${formatAbsoluteTime(request.createdAt)}`, statusLabels[request.status]].join(" · ")
 
   return (
@@ -91,31 +102,37 @@ export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onB
         <div className="flex flex-wrap gap-2">
           {onClose && <Button variant="ghost" size="sm" onClick={onClose}>Back</Button>}
           <Button variant="outline" size="sm" disabled={busy || request.status === "thrown-away"} onClick={open}>Open fork</Button>
-          <ConfirmPopover title={`Throw away ${detail.forkName}?`} description="The fork and its changes are removed. Nothing is kept into the target." confirmLabel="Throw away" tone="destructive" onConfirm={throwAway}>
-            <Button variant="outline" size="sm" disabled={busy || resolved}>Throw away</Button>
+          <ConfirmPopover title={`Delete the fork ${detail.forkName}?`} description={`This deletes the fork and everything in it. Nothing is merged into ${targetLabel}.`} confirmLabel="Delete fork" tone="destructive" onConfirm={throwAway}>
+            <Button variant="outline" size="sm" disabled={busy || resolved}>Delete fork</Button>
           </ConfirmPopover>
-          <ConfirmPopover title={`Keep into ${targetLabel}?`} description={`The changes in ${detail.forkName} are carried into ${targetLabel}.`} confirmLabel="Keep" onConfirm={() => keep()}>
-            <Button size="sm" disabled={busy || keepDisabledReason !== undefined}>Keep</Button>
+          {extraActions}
+          <ConfirmPopover title={`Merge into ${targetLabel}?`} description={`The changes in ${detail.forkName} are brought into ${targetLabel}.`} confirmLabel="Merge" onConfirm={() => keep()}>
+            <Button size="sm" disabled={busy || keepDisabledReason !== undefined}>Merge</Button>
           </ConfirmPopover>
         </div>
       } />
+      {intro}
       {keepDisabledReason && <p role={stale ? "alert" : undefined} className="text-caption text-muted-foreground">{stale ? `Stale: ${keepDisabledReason}` : keepDisabledReason}</p>}
       {stale && <Button variant="outline" size="sm" className="w-fit" onClick={() => { setDetail(null); setReload(value => value + 1) }}>Reload</Button>}
       {keptNow && (
         <p role="status" className="text-sm">
-          Kept into {targetLabel}. Undo with <code>silo undo {targetLabel}</code>.
+          Merged into {targetLabel}. Undo with <code>silo undo {targetLabel}</code>.
+          {keptNow.report.fastForward && <> {fastForwardNote}</>}
         </p>
       )}
       {refusal && (
         <div role="alert" className="grid gap-2 text-sm">
           <p className="whitespace-pre-wrap">{refusal.message}</p>
-          {refusal.hint && <p className="whitespace-pre-wrap text-muted-foreground">{refusal.hint}</p>}
+          {refusalHint(refusal) && <p className="whitespace-pre-wrap text-muted-foreground">{refusalHint(refusal)}</p>}
           {refusal.reason === "database" && (
-            <ConfirmPopover title="Keep with the database change?" description="Database changes are carried into the target without a migration covering them." confirmLabel="Keep anyway" open={dataConfirm} onOpenChange={setDataConfirm} onConfirm={() => keep(true)}>
-              <Button variant="outline" size="sm" className="w-fit" disabled={busy}>Keep with data changes</Button>
+            <ConfirmPopover title="Merge with the database change?" description="Database changes are carried into the target without a migration covering them." confirmLabel="Merge anyway" open={dataConfirm} onOpenChange={setDataConfirm} onConfirm={() => keep({ dataOk: true })}>
+              <Button variant="outline" size="sm" className="w-fit" disabled={busy}>Merge with data changes</Button>
             </ConfirmPopover>
           )}
         </div>
+      )}
+      {refusal && refusal.conflicts.length > 0 && (
+        <MergeConflicts key={refusal.conflicts.map(({ id, item }) => id || item).join("\n")} conflicts={refusal.conflicts} forkName={detail.forkName} busy={busy} onMerge={choices => void keep({ choices })} />
       )}
       {actionError && <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">{actionError}</p>}
       {opened && (
@@ -141,14 +158,17 @@ export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onB
 }
 
 /** The page slice B renders for `onOpenRequest(requestId, deviceId?)`. */
-export function ReviewRequestPage({ requestId, deviceId, deviceName, targetName, onBack, actions }: {
+export function ReviewRequestPage({ requestId, deviceId, deviceName, targetName, onBack, onChanged, extraActions, intro, actions }: {
   requestId: string
   deviceId?: string
   deviceName?: string
   targetName?: string
-  /** Returns to the list; also called after the fork is thrown away. */
+  /** Returns to the list; also called after the fork is deleted. */
   onBack?: () => void
+  onChanged?: () => void
+  extraActions?: ReactNode
+  intro?: ReactNode
   actions?: ReviewRequestActions
 }) {
-  return <ReviewRequest key={`${deviceId ?? ""}:${requestId}`} requestId={requestId} deviceId={deviceId} deviceName={deviceName} targetName={targetName} onBack={onBack} onClose={onBack} actions={actions} />
+  return <ReviewRequest key={`${deviceId ?? ""}:${requestId}`} requestId={requestId} deviceId={deviceId} deviceName={deviceName} targetName={targetName} onBack={onBack} onClose={onBack} onChanged={onChanged} extraActions={extraActions} intro={intro} actions={actions} />
 }

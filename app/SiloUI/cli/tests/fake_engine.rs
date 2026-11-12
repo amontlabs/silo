@@ -117,7 +117,13 @@ async fn serve(
         let reply = match result {
             Ok(result) => json!({"id": request["id"], "result": result}),
             Err((code, message)) => {
-                json!({"id": request["id"], "error": {"code": code, "message": message}})
+                // A message that is a JSON object may carry `details`, as an
+                // `approval_required` error does.
+                match serde_json::from_str::<Value>(&message) {
+                    Ok(body) if body.is_object() => json!({"id": request["id"], "error": {
+                        "code": code, "message": body["message"], "details": body["details"]}}),
+                    _ => json!({"id": request["id"], "error": {"code": code, "message": message}}),
+                }
             }
         };
         if write_frame(&mut writer, &reply).await.is_err() {

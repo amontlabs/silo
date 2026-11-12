@@ -110,6 +110,16 @@ pub const BUILTIN_IGNORE: &str = "\
 /Users/*/Library/Application Support/Silo/computer-use-receipt.json
 /Users/*/Library/Application Support/Silo/Recordings
 
+# Silo's own per-computer files: the channel endpoint and token, the tools receipt, the
+# working account record, the package update marker, the quiet-restore state and the machine id.
+# Each computer has its own; they are never part of a review or merge.
+/etc/silo
+/var/lib/silo
+/var/lib/silo-quiet
+/etc/machine-id
+/var/lib/dbus/machine-id
+/Users/*/Library/Application Support/Silo/components.json
+
 # agent session data
 */.claude/projects
 .claude.json.backup*
@@ -314,6 +324,9 @@ const CREDENTIAL_NAMES: &[&str] = &[
 const CREDENTIAL_SUFFIXES: &[&str] = &[
     "/gh/hosts.yml",
     "/.claude/.credentials.json",
+    // Claude Code's user file: the account it is signed in as, sign-in state, and the
+    // headers and variables of the MCP servers added for the user.
+    "/.claude.json",
     "/.codex/auth.json",
     "/.gemini/oauth_creds.json",
     "/.gemini/gemini-credentials.json",
@@ -386,6 +399,7 @@ pub fn credential_group_owned(path: &str, owned: bool) -> Option<String> {
 /// export warning shows.
 const LOGIN_LABELS: &[(&str, &str)] = &[
     ("/.claude/.credentials.json", "a Claude Code login"),
+    ("/.claude.json", "Claude Code sign-in data"),
     ("/.codex/auth.json", "a Codex login"),
     ("/.gemini/oauth_creds.json", "a Gemini CLI login"),
     ("/.gemini/gemini-credentials.json", "a Gemini CLI login"),
@@ -453,6 +467,23 @@ mod tests {
         let list = IgnoreList::builtin();
         assert!(list.matches("/Users/a/Movies/TV/TV Library.tvlibrary/library.tvdb"));
         assert!(!list.matches("/Users/a/Movies/film.mov"));
+    }
+
+    #[test]
+    fn silos_per_computer_files_are_not_a_change() {
+        let list = IgnoreList::builtin();
+        for path in [
+            "/etc/silo/endpoint.json",
+            "/etc/silo/guest-client.json",
+            "/var/lib/silo/components.json",
+            "/var/lib/silo/working-account.json",
+            "/etc/machine-id",
+            "/Users/silo/Library/Application Support/Silo/components.json",
+        ] {
+            assert!(list.matches(path), "{path} should be ignored");
+        }
+        assert!(!list.matches("/etc/silo-notes.conf"));
+        assert!(!list.matches("/Users/silo/Library/Application Support/Silo/notes.txt"));
     }
 
     #[test]
@@ -617,6 +648,21 @@ mod tests {
             login_label("/home/dev/.gemini/gemini-credentials.json").as_deref(),
             Some("a Gemini CLI login (/home/dev/.gemini/gemini-credentials.json)")
         );
+    }
+
+    #[test]
+    fn claude_codes_user_file_is_a_login_but_its_backups_are_not() {
+        for path in ["/root/.claude.json", "/home/dev/.claude.json"] {
+            assert_eq!(credential_group(path).as_deref(), Some(path), "{path}");
+            assert_eq!(
+                login_label(path),
+                Some(format!("Claude Code sign-in data ({path})")),
+                "{path}"
+            );
+        }
+        for path in ["/root/.claude/settings.json", "/home/dev/.claude.json.backup"] {
+            assert_eq!(login_label(path), None, "{path}");
+        }
     }
 
     #[test]

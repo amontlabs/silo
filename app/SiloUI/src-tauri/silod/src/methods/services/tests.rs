@@ -91,8 +91,9 @@ fn fixture_at(home: &std::path::Path) -> Fixture {
         silod.clone(),
         RequestContext {
             client_id: "services-client".to_owned(),
-            protocol: 7,
+            protocol: 8,
             client: None,
+            caller: silo_engine::policy::Caller::owner("test"),
         },
     );
     Fixture {
@@ -928,6 +929,54 @@ async fn startup_recovery_resumes_the_saved_set_and_reports_what_could_not_resum
         .is_null());
     assert!(!second.silod.engine_state().update_pending);
     assert!(!engine_update::store(second.silod.as_ref()).exists());
+}
+
+#[tokio::test]
+async fn update_recovery_waits_for_the_storage_move_and_then_resumes_in_the_same_launch() {
+    let first = fixture();
+    let world = World::with_running(&["dev", "linux-1"]);
+    install_fake(&first, &world, None);
+    outcome(
+        &first,
+        &job_id(&ok(&first, MethodName::EngineUpdatePrepare, json!({})).await),
+    )
+    .await;
+    let shutdown = job_id(
+        &ok(
+            &first,
+            MethodName::EngineShutdown,
+            json!({"stopComputers": false, "reason": "update"}),
+        )
+        .await,
+    );
+    outcome(&first, &shutdown).await;
+    assert_eq!(world.calls("restore:"), 0);
+
+    // The next engine finds the computers' storage still to be moved.
+    let second = fixture_at(&first.home);
+    install_fake(&second, &world, None);
+    let migration = second.silod.migration_controller();
+    migration.hold_protected_storage_for_test();
+    let state = second.silod.runtime_state().update().clone();
+    let recovery = spawn_recovery(&second.silod, &state);
+    let (settled, settled_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || settled.send(recovery.wait()).unwrap());
+
+    assert!(
+        settled_rx.recv_timeout(Duration::from_millis(500)).is_err(),
+        "recovery must not start while the storage move holds the computers"
+    );
+    assert_eq!(world.calls("restore:"), 0);
+
+    migration.release_protected_storage();
+    let resumed = tokio::task::spawn_blocking(move || {
+        settled_rx.recv_timeout(Duration::from_secs(10)).unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(resumed, "the saved set existed");
+    assert_eq!(world.calls("restore:"), 2, "both computers resume in this launch");
+    assert!(!second.silod.engine_state().update_pending);
 }
 
 #[tokio::test]

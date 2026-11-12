@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "note": "Names a `*.` pattern covers separately owned hosts under. `registry` names are refused (the engine also knows them from the Public Suffix List it compiles in, the `psl` crate); `suffixes` are shared hosting, allowed with a warning, listed here for those the Public Suffix List does not carry. The user interface uses both for an early answer; the engine decides.",
+  "registry": [
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk", "net.uk", "sch.uk",
+    "com.au", "net.au", "org.au", "edu.au", "gov.au", "id.au",
+    "co.nz", "org.nz", "net.nz", "govt.nz",
+    "co.jp", "ne.jp", "or.jp", "ac.jp", "go.jp",
+    "co.kr", "or.kr", "ne.kr", "go.kr",
+    "co.in", "net.in", "org.in", "gov.in", "ac.in",
+    "co.za", "org.za", "net.za", "gov.za",
+    "co.il", "org.il", "net.il", "ac.il",
+    "co.id", "or.id", "web.id", "go.id",
+    "co.th", "or.th", "ac.th", "go.th",
+    "com.br", "net.br", "org.br", "gov.br",
+    "com.ar", "com.mx", "com.co", "com.pe", "com.ve", "com.uy",
+    "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn",
+    "com.hk", "com.tw", "com.sg", "com.my", "com.ph", "com.vn", "com.pk", "com.bd",
+    "com.tr", "com.ua", "com.pl", "com.es", "com.pt", "com.eg", "com.ng", "com.sa"
+  ],
+  "suffixes": [
+    "com.ru", "github.io", "gitlab.io", "bitbucket.io", "readthedocs.io",
+    "herokuapp.com", "vercel.app", "netlify.app", "pages.dev", "workers.dev",
+    "appspot.com", "web.app", "firebaseapp.com", "onrender.com", "fly.dev", "glitch.me",
+    "repl.co", "replit.app", "ngrok.io", "ngrok-free.app", "trycloudflare.com",
+    "azurewebsites.net", "cloudapp.azure.com", "blob.core.windows.net",
+    "cloudfront.net", "amazonaws.com", "s3.amazonaws.com", "elasticbeanstalk.com",
+    "blogspot.com", "wordpress.com", "myshopify.com", "weebly.com", "wixsite.com",
+    "github.dev", "githubusercontent.com", "gist.github.com", "supabase.co", "railway.app",
+    "azure.com", "azure.net", "windows.net", "core.windows.net", "database.windows.net",
+    "search.windows.net", "scm.azurewebsites.net", "vault.azure.net", "openai.azure.com",
+    "cognitiveservices.azure.com", "googleusercontent.com", "firebaseio.com",
+    "firebasestorage.app", "oraclecloud.com", "aliyuncs.com", "myqcloud.com",
+    "myhuaweicloud.com", "herokudns.com", "scw.cloud", "backblazeb2.com",
+    "r2.cloudflarestorage.com", "netlify.com", "glitch.com", "webcontainer.io",
+    "codesandbox.io", "gitpod.io", "fastly.net", "b-cdn.net", "visualstudio.com",
+    "appdomain.cloud", "mybluemix.net", "salesforce.com", "force.com"
+  ]
+}

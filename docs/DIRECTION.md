@@ -1,9 +1,36 @@
 # Silo: product direction
 
 Agreed with the owner on 2026-11-10, after a review of everything built so far. This page says
-what Silo is meant to be. It is a direction, not a description of the code: most of it is not
-built yet, and several existing features disagree with it. Where another document disagrees, this
-page decides what gets planned; the other document still describes what the code does today.
+what Silo is meant to be. It is a direction, not a description of the code. Most of it is now
+built (see [What is built](#what-is-built)); what is not is listed there and under
+[Still open](#still-open). Where another document disagrees, this page decides what gets planned;
+the other document describes what the code does.
+
+## What is built
+
+- **Who is calling, and the one rule.** Every call carries who made it: the owner, another device
+  or a computer. A computer does what gives it no more than it has and asks for the rest
+  ([what an agent may do](SiloUI-POLICY.md)).
+- **Approvals** in the Silo app: the Pending page, the menu bar, notifications, allow or deny with
+  a note. The audit log shows who did what (Activity).
+- **The address inside every computer**: a loopback port per computer with a challenge-and-response
+  handshake, and the `silo` program and its MCP server inside the computer
+  ([Silo's tools in a computer](SiloUI-IN-GUEST-CLIENT.md)). The `/.msb` folder carries no requests.
+- **Merge** with choices for conflicts, fast-forward meaning "nothing can conflict", and replace
+  main as a separate action. `silo merge`, `silo replace-main`, `silo undo`, `silo drop`.
+- **Recipes** stored by the engine and remembered by each computer; the `.silo` folder is gone
+  ([recipes](SiloUI-RECIPES.md)).
+- **Network policy** per computer: open, an allowlist with presets, or closed, with a control in the
+  app ([threat model](THREAT-MODEL.md#network-policy-per-computer)).
+- **macOS computers** have the same page as Linux ones, and a macOS computer an agent may have
+  used never boots on Apple's network.
+- **Limits** as a safety floor on memory and disk, with `device.resources`.
+- **Tokens as secrets**: several personal GitHub tokens, each assigned to chosen computers.
+- **Agents**: Claude Code and Codex can be installed in a Linux computer, and onboarding makes
+  `main`, installs the agent you pick and opens it. Installing an agent while creating a macOS
+  computer is not offered yet.
+- **Export without logins**, as best effort: known login files are removed from a Linux computer's
+  export, and traces may remain in the file.
 
 ## The product
 
@@ -60,8 +87,13 @@ There is no broker agent: policy is engine code plus your answer, never a model'
 Every computer has Silo's tools at a fixed address inside it, served by the host-side network
 stack that all its traffic already passes through. It is the same for Linux, macOS and container
 computers, with nothing to install in the computer and no token file. The computer's identity is the
-channel the call arrives on. This replaces the file polling in the `/.msb` folder. It needs a
-spike first: an earlier design note rejected it to avoid a runtime patch.
+channel the call arrives on. This replaces the file polling in the `/.msb` folder.
+
+As built, it is a loopback port on the device for each computer, which the computer's network rules
+allow on the gateway address, and a token proved by a challenge and response that never crosses the
+connection. The `silo` program is pushed into the computer; it is not preinstalled in the image.
+macOS and container computers use the same port through their gateway. No runtime patch was needed.
+A patch that maps the gateway port to a Unix socket would remove the open loopback port later.
 
 ## Git for computers
 
@@ -90,9 +122,8 @@ The framing stays: a computer has history, branches and a diff that covers more 
 **Replace main** is the separate, explicit action for taking a fork wholesale and discarding what
 main did since. It restarts main, so it ends whatever runs there.
 
-What goes: the words fold, keep and promote, and keeping without asking when tests pass (the
-tests run inside the fork, so the fork can fake them). This section is a framing; the current
-fold code has not been audited against it.
+What went: the words fold, keep and promote, and keeping without asking when tests pass (the
+tests run inside the fork, so the fork can fake them).
 
 ## One kind of thing: a computer
 
@@ -143,7 +174,11 @@ forced through it, so the host itself holds nothing worth taking.
 - **Agent logins** (a Claude or Codex sign-in) are files inside the computer today and are copied
   into forks and exports. The aim is that a login does not travel by accident; the design is
   not decided yet. Until then: a fork keeps its parent's login, because the same agent already
-  controls both, and an export leaves known login files out unless you ask for them.
+  controls both, and an export of a Linux computer removes known login files from the exported
+  computer unless you ask for them. Traces may remain in the file: a copy is a fork, and the disk
+  layers it shares with the computer are written into the file whole (checked on 2026-11-10, see
+  [the evidence](direction/evidence/T14.txt)). Exports of a checkpoint, of a macOS computer and of a
+  container computer keep the logins in the file and warn first.
 
 ## Trust on your own device
 
@@ -173,12 +208,13 @@ governance, and anything tied to funding.
 
 ## Order of work
 
-1. Scopes, approvals and the audit log: one feature, since each needs the others.
-2. The address inside every computer, then onboarding that installs and opens your agent.
-3. macOS and Linux made consistent: the app page, the contents, the upgrade path, the network
-   window.
-4. Merge as described above, and recipes as a property of a computer.
-5. The network policy, reflected-secret redaction and the `/.msb` review.
+1. Scopes, approvals and the audit log: done.
+2. The address inside every computer, then onboarding that installs and opens your agent: done.
+3. macOS and Linux made consistent: the app page, the contents and the network window are done;
+   the upgrade path (rebuild on the newest image) is not.
+4. Merge as described above, and recipes as a property of a computer: done.
+5. The network policy: done. Reflected-secret redaction and the `/.msb` review: next, with the
+   other open items in the [roadmap](ROADMAP.md#13-after-the-direction-build).
 
 ## Still open
 
@@ -186,6 +222,10 @@ governance, and anything tied to funding.
 - Limits. Decided: no fixed cap on how many computers an agent makes. The agent can read the
   device's memory, disk and running computers and judge for itself; a call gets a warning when
   the device is getting short, and fails when going on would freeze the device or fill the
-  disk. Open: whether the app should also show and enforce this, and the default thresholds.
-- Whether the address inside a computer can be served without a new runtime patch.
-- What the first-run flow looks like for each agent program, and which ones are supported first.
+  disk. The default thresholds are in [the policy](SiloUI-POLICY.md#limits). Open: whether the app
+  should also show this.
+- The first-run flow for agent programs other than Claude Code and Codex (T3 Code, a plain
+  terminal).
+- Whether to keep removing logins from exports by default, given that traces may remain, until the
+  runtime can flatten a fork's disk layers.
+- Whether a computer should be able to read every saved recipe's name, or only its own recipe.
