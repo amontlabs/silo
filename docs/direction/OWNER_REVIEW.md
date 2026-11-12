@@ -163,3 +163,18 @@ was chosen and why; any can be changed. Older items are also in the build log un
     rebuild after publishing it but before saving the undo policy, this Silo closes the `-undo`
     computer instead of guessing its allowlist from the disk's recorded rules; you reopen it by
     hand. Rules read from a disk with no saved policy also hold every list at its first version.
+
+## Memory and job limits for computers (R18)
+
+38. **How long memory stays set aside for a job:** a job's memory reservation ends when the job
+    ends, when the computer it boots is seen running, or 2 hours after the job starts its work
+    (a backstop for a job whose worker died). A creation still queued more than 2 hours behind
+    others loses its reservation; a restore-image download over 2 hours too. Is 2 hours right?
+39. **Undo and restart of a running computer reserve its full memory again:** an undo or restart
+    is refused when free memory is below that computer's size, even though it already holds it.
+    Same rule restart and restore used before.
+40. **Deleted computers' jobs:** finished jobs of a computer that is gone for two housekeeping
+    passes (1-2 minutes) are acknowledged for you at once, so they stop counting against the
+    512-job limit; you can't read their results afterwards.
+41. **Device audit rows** have their own share (256 waiting rows), so busy computers can't push
+    them out of the audit log.
