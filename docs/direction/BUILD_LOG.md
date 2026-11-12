@@ -372,3 +372,7 @@ These were not asked of the owner. Each is open to change.
   limit again (until 07:45); a Sonnet review runs meanwhile, and a scheduled task at 07:55 runs
   the owed Codex reviews of R15-R18. Sonnet children cannot start `reviewer` ("lastdrop found
   nowhere to run reviewer"), so reviews run from the orchestrator.
+  By 03:30 all four had a second round on their branch: R15 (`8ac64d6da`, Codex's five
+  findings), R16 (`721e6c425`), R17 (`49a70349e`) and R18 (`b0cf56695`) after Sonnet reviews.
+  R18 found two review points not real (running Linux computers never grow past `memoryGiB`;
+  checkpoints record no size). All wait for the 07:55 Codex reviews; nothing merged.
