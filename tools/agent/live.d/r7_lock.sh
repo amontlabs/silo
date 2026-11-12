@@ -15,7 +15,7 @@ silo() { "$SILO_BIN" --socket "$SOCK" "$@"; }
 
 our_engine() { live_our_engine "$SILOD"; }
 # Inputs that must invalidate the step stamps (read by `live`): the engine binaries and socket.
-fingerprint_extra() { echo "$(live_canon "$SILOD") $(live_fileid "$SILOD") $(live_fileid "$SILO_BIN") $(live_canon "$SOCK")"; }
+fingerprint_extra() { echo "$(live_canon "$SILOD") $(live_fileid "$SILOD") $(live_fileid "$SILO_BIN") $(live_fileid "$MSB") $(live_canon "$SOCK")"; }
 # Starts the engine and records its pid (the only engine this check ever stops); refuses when one
 # it did not start already answers. Prints seconds until the socket answers and until `silo list` succeeds.
 start_engine() {

@@ -150,8 +150,36 @@ S=$W/s13; mkdir -p $S/lock; sleep 30 & SP=$!
 printf 'verdict: pass\nrun: old\n' >$S/VERDICT; echo new >$S/run; echo $SP >$S/lock/pid
 $LIVE wait $S --timeout 2 >$W/wout 2>&1; rc=$?
 ok "wait does not return a verdict of an earlier run" $([ $rc = 4 ] && echo 0 || echo 1)
-printf 'verdict: pass\nrun: new\n' >$S/VERDICT; $LIVE wait $S --timeout 5 >/dev/null 2>&1
-ok "wait returns the verdict of the current run" $([ $? = 0 ] && echo 0 || echo 1); kill $SP
+( sleep 1; printf 'verdict: pass\nrun: new\n' >$S/VERDICT ) & $LIVE wait $S --timeout 8 >/dev/null 2>&1
+ok "wait returns the verdict of the current run" $([ $? = 0 ] && echo 0 || echo 1)
+$LIVE wait $S --timeout 2 >/dev/null 2>&1; ok "wait ignores a verdict that was already there when it began, even with the current run id" $([ $? = 4 ] && echo 0 || echo 1); kill $SP
+# a started runner drops the old verdict before anything else
+S=$W/s15; mkdir -p $S; touch $S/hang-two; printf 'verdict: pass\nrun: old\n' >$S/VERDICT
+$LIVE fake --state $S >/dev/null 2>&1 & P=$!
+for _ in $(seq 1 50); do [ "$(cat $S/current 2>/dev/null)" = two ] && break; sleep 0.1; done
+ok "a running runner has a new run id and no old verdict" $([ ! -e $S/VERDICT ] && [ "$(cat $S/run)" != old ] && echo 0 || echo 1)
+kill -TERM $P; wait $P 2>/dev/null
+# a configuration error still ends in a verdict
+echo 'STEPS=(nostep)' >"$LIVE_D/broken.sh"; S=$W/s16; mkdir -p $S; printf 'verdict: pass\nrun: old\n' >$S/VERDICT
+$LIVE broken --state $S >/dev/null 2>&1; rc=$?
+ok "an undefined step gives exit 2 and a fail verdict" $([ $rc = 2 ] && [ "$(verdict $S verdict)" = fail ] && echo 0 || echo 1)
+# stale lock: concurrent takers never both run; a live takeover lock refuses
+S=$W/s17; mkdir -p $S/lock; echo 999999 >$S/lock/pid; touch $S/hang-two; rm -f $W/r.*
+for i in 1 2 3 4 5 6; do ( $LIVE fake --state $S >/dev/null 2>&1; echo $? >$W/r.$i ) & done
+sleep 3; kill -TERM "$(cat $S/lock/pid)"; wait
+ok "six runners on a stale lock: one runs, five are refused" $([ "$(cat $W/r.* | grep -c '^2$')" = 5 ] && [ "$(cnt $S/count-two)" = 1 ] && echo 0 || echo 1)
+S=$W/s18; mkdir -p $S/lock $S/lock.takeover; echo 999999 >$S/lock/pid
+$LIVE fake --state $S >$W/out 2>&1; rc=$?
+ok "a stale lock with a takeover in progress is refused" $([ $rc = 2 ] && grep -q 'lock.takeover' $W/out && echo 0 || echo 1)
+# deleting one of two computers drops the stamps
+cat >"$LIVE_D/half.sh" <<'C'
+STEPS=(make)
+step_make() { echo ran >>"$STATE/count-make"; live_computer >/dev/null; live_computer >/dev/null; }
+cleanup() { live_forget_computer "$(live_computers | head -1)"; }
+C
+S=$W/s19; mkdir -p $S
+$LIVE half --state $S >/dev/null 2>&1; $LIVE half --state $S >/dev/null 2>&1
+ok "forgetting one of two computers drops the step stamps" $([ "$(cnt $S/count-make)" = 2 ] && echo 0 || echo 1)
 
 # interrupt stops what the step started before cleanup
 cat >"$LIVE_D/kids.sh" <<'C'

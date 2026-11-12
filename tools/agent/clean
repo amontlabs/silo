@@ -156,6 +156,7 @@ def run(args, path):
         if not os.path.isabs(t):
             say("skip temp path %s (not absolute)" % t)
             continue
+        t = t.rstrip("/") or "/"  # a symlink named with a trailing "/" is not a symlink to islink
         link = os.path.islink(t)
         # a symlink is removed itself; its target is never touched
         real = os.path.join(os.path.realpath(os.path.dirname(t)), os.path.basename(t)) if link else os.path.realpath(t)
