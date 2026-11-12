@@ -348,6 +348,33 @@ struct Reservation {
     job_id: Option<String>,
     memory_bytes: u64,
     created_at: std::time::Instant,
+    /// When the registry was first seen to have the reservation's job running, which is when
+    /// the work behind it starts: a job waits in the registry for its turn before that.
+    running_since: Option<std::time::Instant>,
+}
+
+/// The computers that hold their memory on the device, as of when the list they come from was
+/// loaded. A list older than a reservation says nothing about the computer the reservation
+/// is for, since the computer may have stopped after the list was read.
+#[derive(Clone, Debug)]
+struct Residency {
+    ids: HashSet<String>,
+    loaded_at: std::time::Instant,
+}
+
+impl Residency {
+    fn contains(&self, computer: &str) -> bool {
+        self.ids.contains(computer)
+    }
+}
+
+impl Default for Residency {
+    fn default() -> Self {
+        Self {
+            ids: HashSet::new(),
+            loaded_at: std::time::Instant::now(),
+        }
+    }
 }
 
 static RESERVATIONS: std::sync::Mutex<Vec<Reservation>> = std::sync::Mutex::new(Vec::new());
@@ -356,67 +383,93 @@ static NEXT_RESERVATION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::At
 /// Longest a start takes, after which a reservation that nothing settled is dropped.
 const RESERVATION_LIFE: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Longest a reservation tied to a job is kept, whatever the job's record says: a job whose
-/// worker died without finishing it would otherwise hold its memory until the engine restarts.
-const JOB_RESERVATION_CEILING: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+/// Longest a reservation tied to a job is kept, counted from when the job starts running, or
+/// from the reservation while it still waits for its turn: a job whose worker died without
+/// finishing it would otherwise hold its memory until the engine restarts. It outlasts a
+/// download of a macOS restore image on a slow connection.
+const JOB_RESERVATION_CEILING: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
 
 /// Whether a reservation is still wanted. One tied to a job lasts until the job ends, the
-/// computer it is for is resident, or [`JOB_RESERVATION_CEILING`]; one nothing settled lasts
-/// [`RESERVATION_LIFE`].
-fn reservation_alive(reservation: &Reservation, over: &[u64], resident: &HashSet<String>) -> bool {
+/// computer it is for is resident in a list loaded after the reservation was made, or
+/// [`JOB_RESERVATION_CEILING`]; one nothing settled lasts [`RESERVATION_LIFE`].
+fn reservation_alive(reservation: &Reservation, over: &[u64], resident: &Residency) -> bool {
     if over.contains(&reservation.id)
-        || reservation
-            .boots
-            .as_ref()
-            .is_some_and(|computer| resident.contains(computer))
+        || reservation.boots.as_ref().is_some_and(|computer| {
+            resident.loaded_at >= reservation.created_at && resident.contains(computer)
+        })
     {
         return false;
     }
-    let life = if reservation.job_id.is_some() {
-        JOB_RESERVATION_CEILING
-    } else {
-        RESERVATION_LIFE
-    };
-    reservation.created_at.elapsed() <= life
+    if reservation.job_id.is_none() {
+        return reservation.created_at.elapsed() <= RESERVATION_LIFE;
+    }
+    reservation
+        .running_since
+        .unwrap_or(reservation.created_at)
+        .elapsed()
+        <= JOB_RESERVATION_CEILING
 }
 
-/// Whether the job registry still has `job` waiting or running. A registry that cannot be read
-/// says nothing about the job, so the job is taken to run.
-fn job_runs(engine: &dyn EngineContext, job: &str) -> bool {
+/// Where the job registry has a job.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JobPhase {
+    Over,
+    Waiting,
+    Running,
+}
+
+/// Where the job registry has `job`. A registry that cannot be read says nothing about the
+/// job, so the job is taken to run.
+fn job_phase(engine: &dyn EngineContext, job: &str) -> JobPhase {
     let Ok(job) = JobId::new(job) else {
-        return false;
+        return JobPhase::Over;
     };
     let Ok(registry) = engine.job_registry() else {
-        return true;
+        return JobPhase::Running;
     };
-    !matches!(
-        registry.state_of(&job),
-        Ok(None | Some(ApiJobState::Finished))
-    )
+    match registry.state_of(&job) {
+        Ok(None | Some(ApiJobState::Finished)) => JobPhase::Over,
+        Ok(Some(ApiJobState::Waiting)) => JobPhase::Waiting,
+        _ => JobPhase::Running,
+    }
 }
 
 /// Drops the reservations whose job is over, whose computer is resident, or that outlived their
-/// life. The job registry is read with no lock held; a reservation whose job ends meanwhile is
-/// dropped by the next call.
-fn prune_reservations(engine: &dyn EngineContext, resident: &HashSet<String>) {
+/// life, and starts the ceiling of those whose job has begun to run. The job registry is read
+/// with no lock held; a reservation whose job ends meanwhile is dropped by the next call.
+fn prune_reservations(engine: &dyn EngineContext, resident: &Residency) {
     let jobs: Vec<(u64, String)> = RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
         .filter_map(|r| r.job_id.clone().map(|job| (r.id, job)))
         .collect();
-    let over: Vec<u64> = jobs
+    let phases: Vec<(u64, JobPhase)> = jobs
         .into_iter()
-        .filter(|(_, job)| !job_runs(engine, job))
-        .map(|(id, _)| id)
+        .map(|(id, job)| (id, job_phase(engine, &job)))
         .collect();
-    RESERVATIONS
+    let over: Vec<u64> = phases
+        .iter()
+        .filter(|(_, phase)| *phase == JobPhase::Over)
+        .map(|(id, _)| *id)
+        .collect();
+    let now = std::time::Instant::now();
+    let mut reservations = RESERVATIONS
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .retain(|r| reservation_alive(r, &over, resident));
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for r in reservations.iter_mut() {
+        if r.running_since.is_none()
+            && phases
+                .iter()
+                .any(|(id, phase)| *id == r.id && *phase == JobPhase::Running)
+        {
+            r.running_since = Some(now);
+        }
+    }
+    reservations.retain(|r| reservation_alive(r, &over, resident));
 }
 
-fn current_reserved_memory(engine: &dyn EngineContext, resident: &HashSet<String>) -> u64 {
+fn current_reserved_memory(engine: &dyn EngineContext, resident: &Residency) -> u64 {
     prune_reservations(engine, resident);
     RESERVATIONS
         .lock()
@@ -432,7 +485,7 @@ fn current_reserved_memory(engine: &dyn EngineContext, resident: &HashSet<String
 /// is for when it is not resident yet. `Ok(None)` when nothing is to be reserved.
 fn reserve_if_fits(
     engine: &dyn EngineContext,
-    resident: &HashSet<String>,
+    resident: &Residency,
     host: &resources::Host,
     floors: &resources::Floors,
     computer_id: Option<String>,
@@ -459,6 +512,7 @@ fn reserve_if_fits(
         job_id: None,
         memory_bytes,
         created_at: std::time::Instant::now(),
+        running_since: None,
     });
     Ok(Some(id))
 }
@@ -592,6 +646,21 @@ pub(crate) fn backdate_reservation(id: u64, age: std::time::Duration) {
     }
 }
 
+/// Makes the job of the reservation `id` look to have been running for `age`.
+#[cfg(test)]
+pub(crate) fn backdate_running(id: u64, age: std::time::Duration) {
+    let mut reservations = RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(r) = reservations.iter_mut().find(|r| r.id == id) {
+        r.running_since = Some(
+            std::time::Instant::now()
+                .checked_sub(age)
+                .expect("the machine has been up for longer than the age"),
+        );
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn clear_reservations() {
     let mut reservations = RESERVATIONS
@@ -612,7 +681,7 @@ struct Sizes {
     parents: HashMap<String, Option<String>>,
     /// The computers that hold their memory on the device now, so the device's own measurement
     /// of free memory already counts it.
-    resident: HashSet<String>,
+    resident: Residency,
 }
 
 const MIB: u64 = 1024 * 1024;
@@ -1298,7 +1367,7 @@ struct EngineWorld {
     resumes: HashMap<String, Result<u64, String>>,
     /// The computers that hold their memory on the device now, read only for a call that
     /// makes a computer.
-    resident: HashSet<String>,
+    resident: Residency,
     /// The saved SSH port and bind address of each computer, read only for `sshAccess.save`.
     ssh: HashMap<String, (u16, String)>,
     /// The saved SSH public keys of each computer, read with the above.
@@ -1360,6 +1429,7 @@ impl EngineWorld {
         let mut resources = HashMap::new();
         let mut resumes = HashMap::new();
         let mut resident = HashSet::new();
+        let resident_loaded_at = std::time::Instant::now();
         if method == MethodName::ComputersCreate || takes_headroom(method) {
             let list = super::route(&internal, MethodName::ComputersList, &json!({}))
                 .await
@@ -1530,7 +1600,10 @@ impl EngineWorld {
             github,
             resources,
             resumes,
-            resident,
+            resident: Residency {
+                ids: resident,
+                loaded_at: resident_loaded_at,
+            },
             ssh,
             ssh_keys,
             network,
@@ -1628,11 +1701,26 @@ fn keep_undo_resume(
     })
 }
 
+/// The memory, in MiB, a full checkpoint of a computer resumes it at. A macOS computer resumes
+/// saved memory only in the configuration it was saved in, so it boots at its configured
+/// memory; `read` is asked for any other computer.
+fn undo_checkpoint_memory(
+    saved: Option<&Resources>,
+    read: impl FnOnce() -> Result<Option<u64>, String>,
+) -> Result<Option<u64>, String> {
+    match saved {
+        Some(saved) if !saved.linux => Ok(Some(saved.memory_gib.saturating_mul(1024))),
+        _ => read(),
+    }
+}
+
 /// What an undo of the computer `params` names resumes it at, when it restores a full
 /// checkpoint, by computer. Added to what a pending restore resumes the computers at.
+/// `saved` is each computer's saved sizes.
 async fn undo_resumes(
     context: &HandlerContext,
     params: &Value,
+    saved: &HashMap<String, Resources>,
 ) -> HashMap<String, Result<u64, String>> {
     let Ok(undo) =
         serde_json::from_value::<silo_api::methods::keep::ChangesUndoParams>(params.clone())
@@ -1641,6 +1729,7 @@ async fn undo_resumes(
     };
     let engine = context.engine.clone();
     let host = context.silod_context().runtime_host();
+    let own = saved.get(&undo.computer_id).copied();
     tokio::task::spawn_blocking(move || {
         let promoted = silo_engine::changes::promote::latest_at(
             &silo_engine::changes::promote::service::journal_for(engine.as_ref()),
@@ -1649,8 +1738,14 @@ async fn undo_resumes(
         let journal = silo_engine::changes::keep::service::journal_for(engine.as_ref());
         let paths = silo_engine::runtime::runtime_paths(host.as_ref());
         let memory = |checkpoint: &str| {
-            let paths = paths.as_ref().map_err(|_| UNDO_UNREADABLE.to_owned())?;
-            silo_engine::runtime::checkpoint_resume_memory_mib(paths, &undo.computer_id, checkpoint)
+            undo_checkpoint_memory(own.as_ref(), || {
+                let paths = paths.as_ref().map_err(|_| UNDO_UNREADABLE.to_owned())?;
+                silo_engine::runtime::checkpoint_resume_memory_mib(
+                    paths,
+                    &undo.computer_id,
+                    checkpoint,
+                )
+            })
         };
         keep_undo_resume(&journal, &undo.computer_id, promoted, &memory)
             .map(|resume| (undo.computer_id.clone(), resume))
@@ -1670,7 +1765,9 @@ async fn sizes_of(
 ) -> Sizes {
     let mut sizes = world.sizes();
     if method == MethodName::ChangesUndo {
-        sizes.resumes.extend(undo_resumes(context, params).await);
+        sizes
+            .resumes
+            .extend(undo_resumes(context, params, &world.resources).await);
     }
     sizes
 }

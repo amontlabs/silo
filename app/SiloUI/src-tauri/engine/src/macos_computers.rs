@@ -8901,7 +8901,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn a_creation_whose_work_panics_ends_its_job_and_keeps_the_computer_failed() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -8930,6 +8929,7 @@ mod tests {
         reset_macos_registry();
     }
 
+    #[test]
     fn a_new_computers_network_policy_is_saved_before_its_creation_can_start() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();

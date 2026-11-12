@@ -597,7 +597,7 @@ fn memory_set_aside_for_calls_made_at_the_same_moment_cannot_all_fit_the_same_he
                 barrier.wait();
                 super::reserve_if_fits(
                     engine.as_ref(),
-                    &HashSet::new(),
+                    &super::Residency::default(),
                     &host,
                     &floors,
                     Some(id),
@@ -963,7 +963,7 @@ fn a_reservation_tied_to_a_running_job_outlasts_the_longest_a_start_takes_and_en
     let reserve = |bytes: u64| {
         super::reserve_if_fits(
             engine(),
-            &HashSet::new(),
+            &super::Residency::default(),
             &host,
             &floors,
             Some(id.clone()),
@@ -984,7 +984,7 @@ fn a_reservation_tied_to_a_running_job_outlasts_the_longest_a_start_takes_and_en
     super::backdate_reservation(untied, 2 * super::RESERVATION_LIFE);
 
     // The job is still running: its reservation stays, and the one nothing settled is dropped.
-    super::current_reserved_memory(engine(), &HashSet::new());
+    super::current_reserved_memory(engine(), &super::Residency::default());
     assert_eq!(super::reserved_memory_of(&id), 2 * GIB);
     let next = reserve(GIB);
     assert_eq!(super::reserved_memory_of(&id), 3 * GIB);
@@ -1002,16 +1002,16 @@ fn a_reservation_tied_to_a_running_job_outlasts_the_longest_a_start_takes_and_en
             },
         )
         .unwrap();
-    super::current_reserved_memory(engine(), &HashSet::new());
+    super::current_reserved_memory(engine(), &super::Residency::default());
     assert_eq!(super::reserved_memory_of(&id), 0);
     let released = reserve(GIB);
     super::attach_reservation_job(released, job.as_str(), None);
     registry.acknowledge(&job).unwrap();
-    super::current_reserved_memory(engine(), &HashSet::new());
+    super::current_reserved_memory(engine(), &super::Residency::default());
     assert_eq!(super::reserved_memory_of(&id), 0);
     let unknown = reserve(GIB);
     super::attach_reservation_job(unknown, "job:700000099", None);
-    super::current_reserved_memory(engine(), &HashSet::new());
+    super::current_reserved_memory(engine(), &super::Residency::default());
     assert_eq!(super::reserved_memory_of(&id), 0);
 }
 
@@ -1039,8 +1039,15 @@ fn running_job() -> String {
         .to_owned()
 }
 
-fn resident_set(ids: &[&str]) -> HashSet<String> {
-    ids.iter().map(|id| (*id).to_owned()).collect()
+fn residency(ids: HashSet<String>) -> super::Residency {
+    super::Residency {
+        ids,
+        loaded_at: std::time::Instant::now(),
+    }
+}
+
+fn resident_set(ids: &[&str]) -> super::Residency {
+    residency(ids.iter().map(|id| (*id).to_owned()).collect())
 }
 
 #[test]
@@ -1061,7 +1068,7 @@ fn a_reservation_for_a_job_ends_once_the_computer_it_boots_is_resident() {
     let reserve = |boots: Option<&str>| {
         super::reserve_if_fits(
             engine(),
-            &HashSet::new(),
+            &super::Residency::default(),
             &host,
             &floors,
             Some(id.clone()),
@@ -1104,7 +1111,7 @@ fn a_reservation_for_a_computer_a_call_created_is_released_when_that_computer_is
     // A macOS creation names no computer until its answer does.
     let reservation = super::reserve_if_fits(
         engine(),
-        &HashSet::new(),
+        &super::Residency::default(),
         &host,
         &floors,
         None,
@@ -1114,7 +1121,7 @@ fn a_reservation_for_a_computer_a_call_created_is_released_when_that_computer_is
     .unwrap()
     .unwrap();
     super::attach_reservation_job(reservation, &running_job(), Some(&made));
-    super::current_reserved_memory(engine(), &HashSet::new());
+    super::current_reserved_memory(engine(), &super::Residency::default());
     assert_eq!(super::reserved_memory(), 4 * GIB);
     super::current_reserved_memory(engine(), &resident_set(&[&made]));
     assert_eq!(super::reserved_memory(), 0);
@@ -1136,7 +1143,7 @@ fn a_reservation_for_a_job_that_never_finished_is_dropped_at_the_ceiling() {
     let (id, _fork) = computer();
     let reservation = super::reserve_if_fits(
         engine(),
-        &HashSet::new(),
+        &super::Residency::default(),
         &host,
         &floors,
         Some(id.clone()),
@@ -1149,10 +1156,95 @@ fn a_reservation_for_a_job_that_never_finished_is_dropped_at_the_ceiling() {
     super::attach_reservation_job(reservation, &running_job(), None);
     let ceiling = super::JOB_RESERVATION_CEILING;
     super::backdate_reservation(reservation, ceiling - std::time::Duration::from_secs(60));
-    super::current_reserved_memory(engine(), &HashSet::new());
+    super::current_reserved_memory(engine(), &super::Residency::default());
     assert_eq!(super::reserved_memory_of(&id), GIB);
     super::backdate_reservation(reservation, ceiling + std::time::Duration::from_secs(60));
-    super::current_reserved_memory(engine(), &HashSet::new());
+    super::current_reserved_memory(engine(), &super::Residency::default());
+    assert_eq!(super::reserved_memory_of(&id), 0);
+}
+
+fn big_host() -> (silo_engine::resources::Host, silo_engine::resources::Floors) {
+    use silo_engine::resources::{Floors, Host};
+    let host = Host {
+        logical_cpus: 8,
+        memory_total: 32 * GIB,
+        memory_available: Some(20 * GIB),
+        pressure: None,
+        disk_free: 400 * GIB,
+        disk_total: 500 * GIB,
+    };
+    let floors = Floors::resolve(&host, None, None);
+    (host, floors)
+}
+
+#[test]
+fn the_ceiling_of_a_job_reservation_counts_from_when_the_job_runs_and_not_from_admission() {
+    let (host, floors) = big_host();
+    let _exclusive = super::test_exclusive();
+    let (id, _fork) = computer();
+    let reservation = super::reserve_if_fits(
+        engine(),
+        &super::Residency::default(),
+        &host,
+        &floors,
+        Some(id.clone()),
+        None,
+        GIB,
+    )
+    .unwrap()
+    .unwrap();
+    let job = running_job();
+    super::attach_reservation_job(reservation, &job, None);
+    let ceiling = super::JOB_RESERVATION_CEILING;
+    let minute = std::time::Duration::from_secs(60);
+    // A job queued for a long time behind another still holds its memory, and the clock
+    // has not started while the registry has it waiting.
+    super::backdate_reservation(reservation, ceiling - minute);
+    super::current_reserved_memory(engine(), &super::Residency::default());
+    assert_eq!(super::reserved_memory_of(&id), GIB);
+    // Its turn comes: the ceiling counts from when the registry shows it running, however long
+    // ago the reservation was made.
+    let registry = engine().job_registry().unwrap();
+    registry
+        .mark_running(&silo_api::jobs::JobId::new(job.clone()).unwrap())
+        .unwrap();
+    super::current_reserved_memory(engine(), &super::Residency::default());
+    super::backdate_reservation(reservation, 2 * ceiling);
+    super::current_reserved_memory(engine(), &super::Residency::default());
+    assert_eq!(super::reserved_memory_of(&id), GIB);
+    super::backdate_running(reservation, ceiling - minute);
+    super::current_reserved_memory(engine(), &super::Residency::default());
+    assert_eq!(super::reserved_memory_of(&id), GIB);
+    // A job that runs past the ceiling had its worker die.
+    super::backdate_running(reservation, ceiling + minute);
+    super::current_reserved_memory(engine(), &super::Residency::default());
+    assert_eq!(super::reserved_memory_of(&id), 0);
+}
+
+#[test]
+fn a_computer_list_loaded_before_a_reservation_cannot_end_it() {
+    let (host, floors) = big_host();
+    let _exclusive = super::test_exclusive();
+    let (id, _fork) = computer();
+    let booting = format!("{id}-restarted");
+    // The list was read while the computer ran; the owner stopped it, and a call started it.
+    let stale = resident_set(&[&booting]);
+    let reservation = super::reserve_if_fits(
+        engine(),
+        &super::Residency::default(),
+        &host,
+        &floors,
+        Some(id.clone()),
+        Some(booting.clone()),
+        GIB,
+    )
+    .unwrap()
+    .unwrap();
+    super::attach_reservation_job(reservation, &running_job(), None);
+    super::current_reserved_memory(engine(), &stale);
+    assert_eq!(super::reserved_memory_of(&id), GIB);
+    // A list read after the reservation was made is evidence.
+    super::current_reserved_memory(engine(), &resident_set(&[&booting]));
     assert_eq!(super::reserved_memory_of(&id), 0);
 }
 
@@ -1176,7 +1268,7 @@ async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_
     {
         let _resident = Resident::new(&fork);
         // Any later call prunes against what is resident then.
-        super::current_reserved_memory(engine(), &super::test_resident::all());
+        super::current_reserved_memory(engine(), &residency(super::test_resident::all()));
         assert_eq!(super::reserved_memory_of(&fork), 0);
     }
     drop(start);
@@ -1188,7 +1280,7 @@ async fn a_started_job_stops_holding_memory_once_its_computer_is_resident_and_a_
     };
     {
         let _resident = Resident::new(&fork);
-        super::current_reserved_memory(engine(), &super::test_resident::all());
+        super::current_reserved_memory(engine(), &residency(super::test_resident::all()));
         assert_eq!(super::reserved_memory_of(&fork), 3 * GIB);
     }
     drop(restart);
@@ -1308,6 +1400,35 @@ fn an_undo_of_a_full_checkpoint_resumes_at_the_memory_the_capture_recorded() {
     assert_eq!(
         super::keep_undo_resume(&journal, "main", promoted_later, &read),
         None
+    );
+}
+
+#[test]
+fn an_undo_of_a_macos_computer_resumes_at_its_configured_memory_without_reading_a_linux_record() {
+    let directory = tempfile::tempdir().unwrap();
+    let journal = journal_with(&directory, "chk-mac", "full");
+    let mac = silo_engine::policy::Resources::of_macos(
+        &json!({"cpus": 4, "memoryGiB": 12, "diskGiB": 100}),
+    )
+    .unwrap();
+    let linux_record = || -> Result<Option<u64>, String> { Ok(None) };
+    let resume = super::keep_undo_resume(&journal, "main", None, &|_| {
+        super::undo_checkpoint_memory(Some(&mac), linux_record)
+    });
+    assert_eq!(resume, Some(Ok(12 * 1024)));
+    // A Linux computer is read from the checkpoint it resumes.
+    let linux = silo_engine::policy::Resources::of_linux(&json!({
+        "cpus": 2, "maxCPUs": 2, "memoryGiB": 2, "maxMemoryGiB": 2,
+        "workspaceStorageGiB": 10, "runtimeStorageGiB": 10
+    }))
+    .unwrap();
+    assert_eq!(
+        super::undo_checkpoint_memory(Some(&linux), || Ok(Some(8 * 1024))),
+        Ok(Some(8 * 1024))
+    );
+    assert_eq!(
+        super::undo_checkpoint_memory(None, || Ok(Some(6 * 1024))),
+        Ok(Some(6 * 1024))
     );
 }
 
