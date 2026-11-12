@@ -367,3 +367,8 @@ These were not asked of the owner. Each is open to change.
   ([review](reviews/T1-T2-codex.md)). Findings 1, 2, 4, 6, 9 (policy and approvals) go to R17
   (`fix/r17-policy-approvals`); 3, 5, 7, 8 (gate admission, job quota, audit queue) to R18
   (`fix/r18-gate-quotas`).
+  R15's Codex review found five problems (older-journal recovery, revocation after the export
+  gate is released, failed-export cleanup); round 2 running. R16's Codex review hit the usage
+  limit again (until 07:45); a Sonnet review runs meanwhile, and a scheduled task at 07:55 runs
+  the owed Codex reviews of R15-R18. Sonnet children cannot start `reviewer` ("lastdrop found
+  nowhere to run reviewer"), so reviews run from the orchestrator.
