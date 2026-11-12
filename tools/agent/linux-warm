@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# linux-warm: keep a warm Silo checkout and build on the Linux test machine.
+usage() { cat <<'USAGE'
+usage: linux-warm [--ref REF] [--host HOST] [--dir DIR] [--no-build] [--dry-run] [-- NEXTEST_ARGS...]
+
+Syncs REF (default HEAD) to a persistent checkout on the Linux machine (default
+ssh 10.77.77.2, ~/silo-warm), builds `silod` and `silo-engine` there with the pinned toolchain
+(src-tauri/rust-toolchain.toml) into the checkout's persistent target/, and, if NEXTEST_ARGS
+are given, runs `cargo nextest run -p silod -p silo-engine NEXTEST_ARGS` there.
+
+The sync is a git push over ssh to the checkout's own repository; nothing goes to GitHub.
+If the machine is offline it prints "skipped: offline" and exits 0.
+  --dry-run   print what would run, without touching the machine (offline probe still done)
+  --no-build  sync only (and run the tests, if asked)
+Environment: LINUX_WARM_HOST, LINUX_WARM_DIR.
+USAGE
+}
+set -euo pipefail
+host=${LINUX_WARM_HOST:-10.77.77.2} dir=${LINUX_WARM_DIR:-silo-warm} ref=HEAD build=1 dry=0 nextest=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    -h|--help) usage; exit 0 ;;
+    --ref) ref=$2; shift 2 ;;
+    --host) host=$2; shift 2 ;;
+    --dir) dir=$2; shift 2 ;;
+    --no-build) build=0; shift ;;
+    --dry-run) dry=1; shift ;;
+    --) shift; nextest=("$@"); break ;;
+    *) echo "linux-warm: unknown argument $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+sha=$(git -C "$root" rev-parse --verify "$ref^{commit}")
+toolchain=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$root/app/SiloUI/src-tauri/rust-toolchain.toml")
+ssh_opts=(-o BatchMode=yes -o ConnectTimeout=3)
+
+if ! ssh "${ssh_opts[@]}" "$host" true 2>/dev/null; then
+  echo "skipped: offline"; exit 0
+fi
+
+pkgs="-p silod -p silo-engine"
+remote="set -euo pipefail; export PATH=\$HOME/.cargo/bin:\$PATH
+mkdir -p $dir && cd $dir && { [ -d .git ] || git init -q; }
+git checkout -q -f --detach $sha
+rustup toolchain list | grep -q '^$toolchain' || rustup toolchain install $toolchain --profile minimal
+cd app/SiloUI"
+[ "$build" = 1 ] && remote+="
+cargo +$toolchain build $pkgs"
+if [ ${#nextest[@]} -gt 0 ]; then
+  remote+="
+command -v cargo-nextest >/dev/null || cargo +$toolchain install --locked cargo-nextest
+cargo +$toolchain nextest run $pkgs $(printf '%q ' "${nextest[@]}")"
+fi
+
+if [ "$dry" = 1 ]; then
+  echo "would push $sha to $host:$dir (refs/warm/head), then on $host:"; echo "$remote"; exit 0
+fi
+
+ssh "${ssh_opts[@]}" "$host" "mkdir -p $dir && cd $dir && { [ -d .git ] || git init -q; }"
+git -C "$root" push -q --force "ssh://$host/~/$dir" "$sha:refs/warm/head"
+echo "linux-warm: synced ${sha:0:12} to $host:$dir"
+exec ssh "${ssh_opts[@]}" "$host" "$remote"
