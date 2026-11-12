@@ -74,8 +74,16 @@ async fn a_computers_call_outside_its_rules_is_refused_before_any_handler_and_re
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::PermissionDenied);
-    assert!(error.message.contains("person who runs Silo"), "{}", error.message);
-    assert!(!error.message.contains("settings.read"), "{}", error.message);
+    assert!(
+        error.message.contains("person who runs Silo"),
+        "{}",
+        error.message
+    );
+    assert!(
+        !error.message.contains("settings.read"),
+        "{}",
+        error.message
+    );
     // A computer it did not make, such as one the owner forked by hand.
     let error = call(
         &caller,
@@ -85,9 +93,13 @@ async fn a_computers_call_outside_its_rules_is_refused_before_any_handler_and_re
     .await
     .unwrap_err();
     assert_eq!(error.code, ErrorCode::PermissionDenied);
-    let error = call(&caller, MethodName::OperationsJobGet, json!({"jobId": "job:424242"}))
-        .await
-        .unwrap_err();
+    let error = call(
+        &caller,
+        MethodName::OperationsJobGet,
+        json!({"jobId": "job:424242"}),
+    )
+    .await
+    .unwrap_err();
     assert_eq!(error.code, ErrorCode::PermissionDenied);
     let rows = rows_about(&[&id]);
     assert_eq!(rows.len(), 3, "{rows:?}");
@@ -137,7 +149,10 @@ async fn a_computers_row_names_only_computers_it_may_reach_and_repeats_are_count
         .collect();
     assert_eq!(mine.len(), 2, "{mine:?}");
     assert_eq!(mine[1].computer_id, None);
-    assert_eq!(mine[1].count, 3, "the same refused probe is one counted row");
+    assert_eq!(
+        mine[1].count, 3,
+        "the same refused probe is one counted row"
+    );
     assert_eq!(mine[0].computer_id.as_deref(), Some(fork.as_str()));
 }
 
@@ -193,7 +208,9 @@ async fn a_computer_reads_the_audit_rows_about_itself_and_what_it_made_only() {
     .unwrap();
     let entries: Vec<AuditEntry> = serde_json::from_value(page["entries"].clone()).unwrap();
     assert!(entries.iter().all(|row| row.client.is_none()));
-    assert!(entries.iter().any(|row| row.caller_id.as_deref() == Some(id.as_str())));
+    assert!(entries
+        .iter()
+        .any(|row| row.caller_id.as_deref() == Some(id.as_str())));
     assert!(entries
         .iter()
         .any(|row| row.computer_id.as_deref() == Some(fork.as_str())));
@@ -209,7 +226,10 @@ async fn a_computer_reads_the_audit_rows_about_itself_and_what_it_made_only() {
 
 #[tokio::test]
 async fn an_owners_command_is_recorded_and_a_query_is_not() {
-    let marker = format!("job:{}", 900_000 + (uuid::Uuid::new_v4().as_u128() % 99_999) as u64);
+    let marker = format!(
+        "job:{}",
+        900_000 + (uuid::Uuid::new_v4().as_u128() % 99_999) as u64
+    );
     let target = format!("owner-target-{}", uuid::Uuid::new_v4());
     let failed = call(
         &Caller::owner("app"),
@@ -443,14 +463,21 @@ fn a_pending_computer_with_neither_an_id_nor_a_source_is_never_matched_by_its_na
         super::resolve(&names, &parents, &pending(Some("existing"), None)),
         Some("existing".to_owned())
     );
-    assert_eq!(super::resolve(&names, &parents, &pending(Some("other"), None)), None);
+    assert_eq!(
+        super::resolve(&names, &parents, &pending(Some("other"), None)),
+        None
+    );
     // A fork still matches by name and parent.
-    let parents = std::collections::HashMap::from([("existing".to_owned(), Some("src".to_owned()))]);
+    let parents =
+        std::collections::HashMap::from([("existing".to_owned(), Some("src".to_owned()))]);
     assert_eq!(
         super::resolve(&names, &parents, &pending(None, Some("src"))),
         Some("existing".to_owned())
     );
-    assert_eq!(super::resolve(&names, &parents, &pending(None, Some("elsewhere"))), None);
+    assert_eq!(
+        super::resolve(&names, &parents, &pending(None, Some("elsewhere"))),
+        None
+    );
 }
 
 #[test]
@@ -459,7 +486,11 @@ fn a_macos_create_records_the_id_it_returned_and_a_same_named_computer_is_not_th
     use silo_engine::policy::Creation;
     let (id, _fork) = computer();
     let store = PolicyStore::new(&fixture().context.paths().app_data);
-    let creation = Creation { name: "same-name".into(), id: None, source: None };
+    let creation = Creation {
+        name: "same-name".into(),
+        id: None,
+        source: None,
+    };
     super::begin_creation(&fixture().context.paths().app_data, &id, &creation).unwrap();
     let returned = HandlerOutput {
         value: json!({"jobId": "job:5", "computer": {"id": "mac-new", "name": "same-name"}}),
@@ -468,6 +499,224 @@ fn a_macos_create_records_the_id_it_returned_and_a_same_named_computer_is_not_th
     super::settle_creation(&store, &id, &creation, &Ok(returned), Some("job:5")).unwrap();
     let document = store.snapshot().unwrap();
     assert!(document.made_by(&id).contains("mac-new"));
-    assert!(document.pending.iter().all(|pending| pending.created_by != id));
+    assert!(document
+        .pending
+        .iter()
+        .all(|pending| pending.created_by != id));
     assert!(!document.made_by(&id).contains("existing-same-name"));
+}
+
+fn sized(id: &str, memory_gib: u64) {
+    super::test_resources::add(
+        id,
+        silo_engine::policy::Resources {
+            linux: true,
+            cpus: 2,
+            max_cpus: 2,
+            memory_gib,
+            max_memory_gib: memory_gib,
+            workspace_gib: 10,
+            runtime_gib: 10,
+        },
+    );
+}
+
+#[tokio::test]
+async fn a_calls_memory_comes_from_the_computer_and_not_from_fields_the_call_adds() {
+    // 6 GiB above the 4 GiB floor, and a computer of 16 GiB.
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    sized(&fork, 16);
+    let caller = Caller::Computer { id };
+    for extra in [
+        json!({"computerId": fork, "memoryGiB": 0}),
+        json!({"computerId": fork, "id": "someone-else", "memoryGiB": 0}),
+        json!({"computerId": fork, "configuration": {"memoryGiB": 0}}),
+        json!({"computerId": fork, "request": {"memoryGiB": 0}}),
+    ] {
+        for method in [
+            MethodName::ComputersStart,
+            MethodName::ComputersRestart,
+            MethodName::MacosSetupRetry,
+            MethodName::CheckpointsCreate,
+            MethodName::CheckpointsRestore,
+        ] {
+            let mut params = extra.clone();
+            if method == MethodName::CheckpointsCreate {
+                params["name"] = json!("c");
+            }
+            if method == MethodName::CheckpointsRestore {
+                params["checkpointId"] = json!("none");
+            }
+            let error = call(&caller, method, params).await.unwrap_err();
+            assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", method.name());
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_new_computers_memory_is_the_size_it_is_made_with() {
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, _fork) = computer();
+    let caller = Caller::Computer { id };
+    // Asking is refused first when the computer would not fit, whatever else is in the call.
+    let error = call(
+        &caller,
+        MethodName::ComputersCreate,
+        json!({"kind": "macos", "memoryGiB": 0, "request": {"name": "gate-mac", "cpus": 2,
+            "memoryGiB": 16, "diskGiB": 60}}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow);
+}
+
+#[test]
+fn memory_set_aside_for_calls_made_at_the_same_moment_cannot_all_fit_the_same_headroom() {
+    use silo_engine::resources::{Floors, Host};
+    let host = Host {
+        logical_cpus: 8,
+        memory_total: 32 * GIB,
+        memory_available: Some(10 * GIB),
+        pressure: None,
+        disk_free: 400 * GIB,
+        disk_total: 500 * GIB,
+    };
+    let floors = Floors::resolve(&host, None, None);
+    let engine = fixture().context.clone();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(12));
+    let (id, _fork) = computer();
+    let threads: Vec<_> = (0..12)
+        .map(|_| {
+            let (engine, barrier, host, id) =
+                (engine.clone(), barrier.clone(), host.clone(), id.clone());
+            std::thread::spawn(move || {
+                barrier.wait();
+                super::reserve_if_fits(engine.as_ref(), &host, &floors, Some(id), 2 * GIB)
+            })
+        })
+        .collect();
+    let results: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    let fitted: Vec<u64> = results
+        .iter()
+        .filter_map(|r| r.clone().ok().flatten())
+        .collect();
+    // 10 GiB free less the 4 GiB floor leaves 6 GiB, which fits three of 2 GiB.
+    assert_eq!(fitted.len(), 3, "{results:?}");
+    assert_eq!(results.iter().filter(|r| r.is_err()).count(), 9);
+    for id in fitted {
+        super::release_reservation(id);
+    }
+}
+
+#[tokio::test]
+async fn a_refused_call_gives_back_the_memory_it_was_going_to_reserve() {
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    sized(&fork, 5);
+    let caller = Caller::Computer { id: id.clone() };
+    // Fits once; the call then fails in its handler (no such computer), which gives the memory back.
+    for _ in 0..4 {
+        let error = call(
+            &caller,
+            MethodName::ComputersStart,
+            json!({"computerId": fork}),
+        )
+        .await
+        .unwrap_err();
+        assert_ne!(error.code, ErrorCode::ResourcesLow);
+    }
+}
+
+/// A finished job of the computer `id`, which the computer has not acknowledged.
+fn finished_job_of(id: &str) -> String {
+    let engine = fixture().context.as_ref();
+    let job = silo_engine::jobs::allocate(engine, "changes.merge")
+        .unwrap()
+        .job_id;
+    engine
+        .job_registry()
+        .unwrap()
+        .finish(
+            &job,
+            &silo_api::jobs::JobFinished {
+                job_id: job.clone(),
+                result: Some(json!({"merged": true})),
+                error: None,
+                outcome_chunked: false,
+            },
+        )
+        .unwrap();
+    PolicyStore::new(&engine.paths().app_data)
+        .note_job(id, job.as_str())
+        .unwrap();
+    job.as_str().to_owned()
+}
+
+#[tokio::test]
+async fn acknowledging_a_job_does_not_free_its_place_while_the_owner_can_still_read_the_result() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    let caller = Caller::Computer { id: id.clone() };
+    let jobs: Vec<String> = (0..silo_engine::guest_client::MAX_JOBS)
+        .map(|_| finished_job_of(&id))
+        .collect();
+    for job in &jobs {
+        call(
+            &caller,
+            MethodName::OperationsJobAcknowledge,
+            json!({"jobId": job}),
+        )
+        .await
+        .unwrap();
+    }
+    // The computer has nothing open, but the owner has not read any of the results.
+    let error = call(
+        &caller,
+        MethodName::ComputersStart,
+        json!({"computerId": fork}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PermissionDenied);
+    assert!(error.message.contains("still kept"), "{}", error.message);
+    // The owner reads a result, then acknowledges them all, which releases them.
+    let owner = Caller::owner("app");
+    let read = call(
+        &owner,
+        MethodName::OperationsJobGet,
+        json!({"jobId": jobs[0]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(read["state"], "finished");
+    for job in &jobs {
+        call(
+            &owner,
+            MethodName::OperationsJobAcknowledge,
+            json!({"jobId": job}),
+        )
+        .await
+        .unwrap();
+    }
+    let error = call(
+        &caller,
+        MethodName::ComputersStart,
+        json!({"computerId": fork}),
+    )
+    .await
+    .unwrap_err();
+    assert_ne!(error.code, ErrorCode::PermissionDenied, "{}", error.message);
+}
+
+#[test]
+fn computers_together_leave_the_owner_room_in_the_job_registry() {
+    use silo_engine::guest_client::MAX_JOBS;
+    assert!(super::job_refusal(0, 0, 0).is_none());
+    assert!(super::job_refusal(MAX_JOBS - 1, 0, 0).is_none());
+    assert!(super::job_refusal(MAX_JOBS - 1, 1, 0).is_some());
+    assert!(super::job_refusal(0, MAX_JOBS, 0).is_some());
+    assert!(super::job_refusal(1, 1, super::MAX_COMPUTER_JOBS - 1).is_none());
+    let all = super::job_refusal(1, 1, super::MAX_COMPUTER_JOBS).unwrap();
+    assert!(all.contains("together"), "{all}");
 }

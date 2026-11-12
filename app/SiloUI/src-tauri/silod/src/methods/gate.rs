@@ -234,8 +234,8 @@ pub(crate) mod test_nodes {
 
 #[cfg(test)]
 pub(crate) mod test_resources {
-    use std::sync::Mutex;
     use super::Resources;
+    use std::sync::Mutex;
 
     static RESOURCES: Mutex<Vec<(String, Resources)>> = Mutex::new(Vec::new());
 
@@ -298,10 +298,8 @@ struct Reservation {
 static RESERVATIONS: std::sync::Mutex<Vec<Reservation>> = std::sync::Mutex::new(Vec::new());
 static NEXT_RESERVATION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-fn current_reserved_memory(engine: &dyn EngineContext) -> u64 {
-    let mut reservations = RESERVATIONS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+/// Drops the reservations whose job is over or that outlived the longest a start takes.
+fn prune_reservations(reservations: &mut Vec<Reservation>, engine: &dyn EngineContext) {
     reservations.retain(|r| {
         if r.created_at.elapsed() > std::time::Duration::from_secs(300) {
             return false;
@@ -315,14 +313,39 @@ fn current_reserved_memory(engine: &dyn EngineContext) -> u64 {
             true
         }
     });
-    reservations.iter().map(|r| r.memory_bytes).sum()
 }
 
-fn reserve_memory(memory_bytes: u64, computer_id: Option<String>) -> u64 {
-    let id = NEXT_RESERVATION_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+fn current_reserved_memory(engine: &dyn EngineContext) -> u64 {
     let mut reservations = RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    prune_reservations(&mut reservations, engine);
+    reservations.iter().map(|r| r.memory_bytes).sum()
+}
+
+/// Reserves `memory_bytes` when the device has that much above its floor after the memory
+/// already reserved. The check and the reservation are one step under one lock, so calls made
+/// at the same moment cannot all pass on the same headroom. `Ok(None)` when nothing is to be
+/// reserved.
+fn reserve_if_fits(
+    engine: &dyn EngineContext,
+    host: &resources::Host,
+    floors: &resources::Floors,
+    computer_id: Option<String>,
+    memory_bytes: u64,
+) -> Result<Option<u64>, String> {
+    let mut reservations = RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    prune_reservations(&mut reservations, engine);
+    let reserved: u64 = reservations.iter().map(|r| r.memory_bytes).sum();
+    if let Some(refusal) = resources::refusal_for(host, floors, reserved, memory_bytes) {
+        return Err(refusal);
+    }
+    if memory_bytes == 0 {
+        return Ok(None);
+    }
+    let id = NEXT_RESERVATION_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     reservations.push(Reservation {
         id,
         computer_id,
@@ -330,7 +353,7 @@ fn reserve_memory(memory_bytes: u64, computer_id: Option<String>) -> u64 {
         memory_bytes,
         created_at: std::time::Instant::now(),
     });
-    id
+    Ok(Some(id))
 }
 
 fn attach_reservation_job(id: u64, job_id: &str) {
@@ -349,6 +372,23 @@ fn release_reservation(id: u64) {
     reservations.retain(|r| r.id != id);
 }
 
+/// A reservation that is released when it goes out of scope unless it was kept.
+struct Held(Option<u64>);
+
+impl Held {
+    fn keep(mut self) -> Option<u64> {
+        self.0.take()
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        if let Some(id) = self.0 {
+            release_reservation(id);
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn clear_reservations() {
     let mut reservations = RESERVATIONS
@@ -357,53 +397,155 @@ pub(crate) fn clear_reservations() {
     reservations.clear();
 }
 
+/// The memory a call takes when it runs, from the parameters its handler will decode and, for
+/// a call on an existing computer, from that computer's stored size. A field the handler
+/// ignores never lowers it. A call that does not decode takes nothing, since its handler
+/// refuses it.
 fn requested_memory_bytes(
     method: MethodName,
     params: &Value,
     resources: &HashMap<String, Resources>,
 ) -> u64 {
-    if !takes_headroom(method) {
-        return 0;
+    use silo_api::methods::{
+        checkpoints::{CheckpointCreateParams, CheckpointForkParams, CheckpointTargetParams},
+        common::ComputerTargetParams,
+        computers::ComputerCreateParams,
+    };
+    fn decode<T: serde::de::DeserializeOwned>(params: &Value) -> Option<T> {
+        serde_json::from_value(params.clone()).ok()
     }
-    let explicit_gib = params
-        .pointer("/configuration/memoryGiB")
-        .or_else(|| params.pointer("/request/memoryGiB"))
-        .or_else(|| params.get("memoryGiB"))
-        .and_then(Value::as_u64);
-    if let Some(gib) = explicit_gib {
-        return gib.saturating_mul(silo_engine::resources::GIB);
-    }
-    let id = params
-        .get("computerId")
-        .or_else(|| params.get("id"))
-        .and_then(Value::as_str);
-    if let Some(id) = id {
-        if let Some(res) = resources.get(id) {
-            return res.memory_gib.saturating_mul(silo_engine::resources::GIB);
+    let stored = |id: &str| {
+        resources
+            .get(id)
+            .map_or(0, |sizes| sizes.memory_gib.saturating_mul(resources::GIB))
+    };
+    match method {
+        MethodName::ComputersCreate => match decode::<ComputerCreateParams>(params) {
+            Some(ComputerCreateParams::Linux { configuration, .. }) => {
+                u64::from(configuration.memory_gib).saturating_mul(resources::GIB)
+            }
+            Some(ComputerCreateParams::Macos { request, .. }) => {
+                request.memory_gib.saturating_mul(resources::GIB)
+            }
+            None => 0,
+        },
+        MethodName::ComputersStart | MethodName::ComputersRestart | MethodName::MacosSetupRetry => {
+            decode::<ComputerTargetParams>(params).map_or(0, |target| stored(&target.computer_id))
         }
+        MethodName::CheckpointsCreate => {
+            decode::<CheckpointCreateParams>(params).map_or(0, |target| stored(&target.computer_id))
+        }
+        MethodName::CheckpointsRestore => {
+            decode::<CheckpointTargetParams>(params).map_or(0, |target| stored(&target.computer_id))
+        }
+        MethodName::CheckpointsFork => {
+            decode::<CheckpointForkParams>(params).map_or(0, |source| stored(&source.computer_id))
+        }
+        _ => 0,
     }
-    0
 }
 
-/// Why an agent's call that takes memory or disk must fail now: the device has less free than
-/// the floor, the requested memory exceeds remaining headroom, or the device cannot be measured so nobody can tell.
+/// Checks a call that takes memory or disk against the device and, when `reserve_for` names
+/// who it is for, reserves the memory it needs in the same step. The error is the reason the
+/// call must fail now: the device has less free than a floor, the memory exceeds the headroom
+/// left, or the device cannot be measured so nobody can tell.
+fn assess_headroom(
+    context: &HandlerContext,
+    method: MethodName,
+    params: &Value,
+    resources: &HashMap<String, Resources>,
+    reserve_for: Option<Option<String>>,
+) -> Result<Held, String> {
+    let Ok((host, floors)) = host_and_floors(context) else {
+        return Err(
+            "Silo cannot measure this device's memory and disk, so it cannot tell whether another computer fits. Ask the person who runs Silo."
+                .to_owned(),
+        );
+    };
+    let requested = requested_memory_bytes(method, params, resources);
+    match reserve_for {
+        Some(computer) => reserve_if_fits(
+            context.engine_context(),
+            &host,
+            &floors,
+            computer,
+            requested,
+        )
+        .map(Held),
+        None => {
+            let reserved = current_reserved_memory(context.engine_context());
+            match resources::refusal_for(&host, &floors, reserved, requested) {
+                Some(refusal) => Err(refusal),
+                None => Ok(Held(None)),
+            }
+        }
+    }
+}
+
+/// Why an agent's call that takes memory or disk must fail now, without reserving anything.
 pub(crate) fn short_of_resources(
     context: &HandlerContext,
     method: MethodName,
     params: &Value,
     resources: &HashMap<String, Resources>,
 ) -> Option<String> {
-    match host_and_floors(context) {
-        Ok((host, floors)) => {
-            let reserved = current_reserved_memory(context.engine_context());
-            let requested = requested_memory_bytes(method, params, resources);
-            resources::refusal_for(&host, &floors, reserved, requested)
-        }
-        Err(_) => Some(
-            "Silo cannot measure this device's memory and disk, so it cannot tell whether another computer fits. Ask the person who runs Silo."
-                .to_owned(),
-        ),
+    assess_headroom(context, method, params, resources, None).err()
+}
+
+/// [`short_of_resources`] with the computers' stored sizes read now.
+pub(crate) async fn short_of_resources_now(
+    context: &HandlerContext,
+    method: MethodName,
+    params: &Value,
+) -> Option<String> {
+    let world = EngineWorld::load(context, method, None).await;
+    short_of_resources(context, method, params, &world.resources)
+}
+
+/// Results of jobs a computer's agent acknowledged that the job registry still keeps for the
+/// owner, with the computer each one was started by.
+static RETAINED: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// Every computer's retained results together, and the jobs not acknowledged together, that
+/// computers may hold in the job registry. The owner's jobs are never counted against it.
+const MAX_COMPUTER_JOBS: usize = 512;
+
+/// The results the registry still keeps for the owner that an agent acknowledged, as
+/// (computer, job) pairs. A result the registry has released is no longer one.
+fn retained_results(engine: &dyn EngineContext) -> Vec<(String, String)> {
+    let mut retained = RETAINED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    retained.retain(|(_, job)| job_state(engine, job) != JobState::Unknown);
+    retained.clone()
+}
+
+/// Charges the result of a job `computer` acknowledged to it for as long as the registry keeps it.
+fn keep_charging(engine: &dyn EngineContext, computer: &str, job: &str) {
+    if job_state(engine, job) == JobState::Unknown {
+        return;
     }
+    let mut retained = RETAINED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !retained.iter().any(|(_, kept)| kept == job) {
+        retained.push((computer.to_owned(), job.to_owned()));
+    }
+}
+
+/// Why a computer that has `open` unacknowledged jobs and `kept` acknowledged jobs whose
+/// results are still kept may not start another, when all computers together hold `all` jobs.
+fn job_refusal(open: usize, kept: usize, all: usize) -> Option<String> {
+    if open + kept >= silo_engine::guest_client::MAX_JOBS {
+        return Some(format!(
+            "{} jobs of this computer are not finished and acknowledged yet, or their results are still kept for the person who runs Silo.",
+            silo_engine::guest_client::MAX_JOBS
+        ));
+    }
+    (all >= MAX_COMPUTER_JOBS).then(|| {
+        "Computers together hold as many jobs as Silo allows them. Try again when some are over."
+            .to_owned()
+    })
 }
 
 /// Asks the policy again about a call `computer` made, as at the time it asked, and returns
@@ -470,34 +612,52 @@ pub(crate) async fn admit(
         Err(error)
     };
     // A call that would be held for approval is refused too: allowing it later would start a
-    // computer on a device that has nothing left for it.
+    // computer on a device that has nothing left for it. An allowed call reserves its memory in
+    // the same step as the check, and gives it back if it is refused further on.
+    let mut held = Held(None);
     if matches!(caller, Caller::Computer { .. })
         && takes_headroom(method)
         && matches!(decision, Decision::Allow(_) | Decision::Ask { .. })
     {
-        if let Some(message) = short_of_resources(context, method, params, &world_resources) {
-            return refuse(
-                DispatchError::new(ErrorCode::ResourcesLow, message),
-                AuditOutcome::Refused,
-            );
+        let sized = match &decision {
+            Decision::Allow(allowed) => allowed.params.as_ref().unwrap_or(params),
+            Decision::Ask {
+                params: Some(rewritten),
+                ..
+            } => rewritten,
+            _ => params,
+        };
+        let reserve_for = matches!(decision, Decision::Allow(_)).then(|| target.clone());
+        match assess_headroom(context, method, sized, &world_resources, reserve_for) {
+            Ok(reservation) => held = reservation,
+            Err(message) => {
+                return refuse(
+                    DispatchError::new(ErrorCode::ResourcesLow, message),
+                    AuditOutcome::Refused,
+                );
+            }
         }
     }
-    // A computer may have only so many jobs it has not acknowledged: a job nobody follows still
+    // A computer may have only so many jobs it has not acknowledged, counting the results of
+    // acknowledged ones that the engine still keeps for the owner: a job nobody follows still
     // takes a place in the engine's job admission.
     if let Caller::Computer { id } = &caller {
         if kind_of(method) == MethodKind::Job && matches!(decision, Decision::Allow(_)) {
-            let open = PolicyStore::new(&app_data(context))
-                .snapshot()
-                .map(|document| document.jobs_of(id).len());
-            if open.map_or(true, |open| open >= silo_engine::guest_client::MAX_JOBS) {
+            let refusal = match PolicyStore::new(&app_data(context)).snapshot() {
+                Ok(document) => {
+                    let kept = retained_results(context.engine_context());
+                    let of_this = kept.iter().filter(|(computer, _)| computer == id).count();
+                    job_refusal(
+                        document.jobs_of(id).len(),
+                        of_this,
+                        document.jobs.len() + kept.len(),
+                    )
+                }
+                Err(_) => Some("Silo cannot read this computer's jobs right now.".to_owned()),
+            };
+            if let Some(message) = refusal {
                 return refuse(
-                    DispatchError::new(
-                        ErrorCode::PermissionDenied,
-                        format!(
-                            "{} jobs of this computer are not finished and acknowledged yet.",
-                            silo_engine::guest_client::MAX_JOBS
-                        ),
-                    ),
+                    DispatchError::new(ErrorCode::PermissionDenied, message),
                     AuditOutcome::Refused,
                 );
             }
@@ -523,18 +683,6 @@ pub(crate) async fn admit(
                         .map(str::to_owned)
                 })
                 .flatten();
-            let reservation_id = if matches!(caller, Caller::Computer { .. })
-                && takes_headroom(method)
-            {
-                let requested = requested_memory_bytes(method, params, &world_resources);
-                if requested > 0 {
-                    Some(reserve_memory(requested, target.clone()))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
             Ok(Admitted {
                 params: allowed.params,
                 filter: allowed.filter,
@@ -543,7 +691,7 @@ pub(crate) async fn admit(
                 target,
                 kind: kind_of(method),
                 job,
-                reservation_id,
+                reservation_id: held.keep(),
             })
         }
         Decision::Refuse { reason } => refuse(
@@ -619,6 +767,7 @@ pub(crate) fn finish(
         }
         if let (Ok(_), Some(done)) = (&result, &admitted.job) {
             noted.push(store.drop_job(id, done));
+            keep_charging(context.engine_context(), id, done);
         }
         for error in noted.into_iter().filter_map(Result::err) {
             eprintln!("silod: computer {id}: {error}");

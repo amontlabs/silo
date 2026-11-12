@@ -10,9 +10,15 @@
 //! row's count instead of making a new one. Rows older than 90 days are trimmed; beyond that
 //! the owner's and devices' rows keep the newest 200,000, and each computer's own calls the
 //! newest 20,000, so a computer can never push out anyone else's rows.
+//!
+//! A computer's rows wait in a small buffer of their own, apart from the queue of the owner's
+//! and devices' rows. A repeat of the computer's newest waiting row is counted there before
+//! anything is queued, each computer may have only so many rows waiting, and the rows that
+//! find the buffer full are counted into one summary row per computer, so computer traffic
+//! cannot take a place in the owner's queue.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
@@ -32,6 +38,15 @@ use silo_api::methods::audit::{
 pub const FILE_NAME: &str = "audit.sqlite3";
 const SCHEMA_VERSION: i64 = 2;
 const QUEUE: usize = 4096;
+/// Rows of all computers together that may wait to be written.
+const COMPUTER_WAITING: usize = 1024;
+/// Rows of one computer that may wait to be written.
+const PER_COMPUTER_WAITING: usize = 64;
+/// How long the writer waits for a message before it looks at the computers' rows.
+const POLL: Duration = Duration::from_millis(250);
+/// The method of the row that counts the rows of a computer that were not recorded.
+pub const DROPPED_METHOD: &str = "audit.dropped";
+pub const DROPPED_ERROR: &str = "audit_rows_dropped";
 const DEFAULT_LIMIT: u32 = 100;
 const MAX_LIMIT: u32 = 500;
 /// Trims run after this many rows are written.
@@ -76,12 +91,123 @@ pub struct Row {
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
 }
 
 enum Message {
     Row(Box<Row>),
+    /// Computer rows are waiting in the buffer.
+    Wake,
     Flush(SyncSender<()>),
+}
+
+/// A computer's row waiting to be written, with the calls it stands for.
+struct Waiting {
+    row: Row,
+    count: u64,
+    last_at: i64,
+}
+
+/// What the rows of a computer's agent wait in: a bounded buffer in which a repeat of a
+/// computer's newest waiting row is counted instead of added.
+#[derive(Default)]
+struct ComputerRows {
+    next: u64,
+    waiting: BTreeMap<u64, Waiting>,
+    newest: HashMap<Option<String>, u64>,
+    per_computer: HashMap<Option<String>, usize>,
+    /// The rows each computer lost to a full buffer and the time of the latest.
+    dropped: HashMap<Option<String>, (u64, i64)>,
+}
+
+fn same_call(a: &Row, b: &Row) -> bool {
+    a.method == b.method
+        && a.outcome == b.outcome
+        && a.error_code == b.error_code
+        && a.computer_id == b.computer_id
+        && a.client == b.client
+        && a.approval_id == b.approval_id
+}
+
+impl ComputerRows {
+    fn add(&mut self, row: Row) {
+        let caller = row.caller_id.clone();
+        if let Some(waiting) = self
+            .newest
+            .get(&caller)
+            .and_then(|seq| self.waiting.get_mut(seq))
+        {
+            if same_call(&waiting.row, &row) {
+                waiting.count += 1;
+                waiting.last_at = row.at_ms;
+                return;
+            }
+        }
+        let held = self.per_computer.get(&caller).copied().unwrap_or(0);
+        if self.waiting.len() >= COMPUTER_WAITING || held >= PER_COMPUTER_WAITING {
+            // A flood of ids must not grow the summary either: past one entry per place in
+            // the buffer the rest are counted together.
+            let key = if self.dropped.contains_key(&caller) || self.dropped.len() < COMPUTER_WAITING
+            {
+                caller
+            } else {
+                None
+            };
+            let lost = self.dropped.entry(key).or_insert((0, row.at_ms));
+            lost.0 += 1;
+            lost.1 = row.at_ms;
+            return;
+        }
+        let seq = self.next;
+        self.next += 1;
+        *self.per_computer.entry(caller.clone()).or_default() += 1;
+        self.newest.insert(caller, seq);
+        let last_at = row.at_ms;
+        self.waiting.insert(
+            seq,
+            Waiting {
+                row,
+                count: 1,
+                last_at,
+            },
+        );
+    }
+
+    /// Everything waiting, oldest first, then a summary row for each computer that lost rows.
+    fn take(&mut self) -> Vec<Waiting> {
+        let mut rows: Vec<Waiting> = std::mem::take(&mut self.waiting).into_values().collect();
+        self.newest.clear();
+        self.per_computer.clear();
+        for (caller, (count, last_at)) in std::mem::take(&mut self.dropped) {
+            rows.push(Waiting {
+                row: Row {
+                    at_ms: last_at,
+                    caller_kind: AuditCallerKind::Computer,
+                    caller_id: caller,
+                    client: None,
+                    method: DROPPED_METHOD.to_owned(),
+                    computer_id: None,
+                    outcome: AuditOutcome::Error,
+                    error_code: Some(DROPPED_ERROR.to_owned()),
+                    job_id: None,
+                    approval_id: None,
+                },
+                count,
+                last_at,
+            });
+        }
+        rows
+    }
+}
+
+/// What the recording side and the writer thread share.
+#[derive(Default)]
+struct Shared {
+    computers: Mutex<ComputerRows>,
+    /// A wake message is queued and the writer has not looked at the buffer since.
+    woken: AtomicBool,
 }
 
 /// The calls a reader may see: every row, or only rows about these computers (rows whose
@@ -94,6 +220,7 @@ pub enum Scope<'a> {
 pub struct AuditLog {
     path: PathBuf,
     sender: SyncSender<Message>,
+    shared: Arc<Shared>,
     warned: Arc<AtomicBool>,
     reader: Mutex<Option<Connection>>,
 }
@@ -243,30 +370,39 @@ fn open_connection(path: &Path) -> Result<Connection, String> {
     Ok(connection)
 }
 
-/// Counts the call in the caller's newest row when it repeats it, else adds a row.
-fn insert(connection: &Connection, row: &Row) -> Result<(), String> {
+/// Counts `count` calls, the latest at `last_at`, in the caller's newest row when `row` repeats
+/// it, else adds a row.
+fn insert(connection: &Connection, row: &Row, count: u64, last_at: i64) -> Result<(), String> {
+    let count = i64::try_from(count).unwrap_or(i64::MAX);
     let caller = rusqlite::params![kind_text(row.caller_kind), row.caller_id];
-    let newest: Option<(i64, String, String, Option<String>, Option<String>, Option<String>, Option<String>)> =
-        connection
-            .query_row(
-                "SELECT id, method, outcome, error_code, computer_id, client, approval_id
+    let newest: Option<(
+        i64,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = connection
+        .query_row(
+            "SELECT id, method, outcome, error_code, computer_id, client, approval_id
                  FROM calls WHERE caller_kind = ?1 AND caller_id IS ?2
                  ORDER BY id DESC LIMIT 1",
-                caller,
-                |found| {
-                    Ok((
-                        found.get(0)?,
-                        found.get(1)?,
-                        found.get(2)?,
-                        found.get(3)?,
-                        found.get(4)?,
-                        found.get(5)?,
-                        found.get(6)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|error| error.to_string())?;
+            caller,
+            |found| {
+                Ok((
+                    found.get(0)?,
+                    found.get(1)?,
+                    found.get(2)?,
+                    found.get(3)?,
+                    found.get(4)?,
+                    found.get(5)?,
+                    found.get(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
     if let Some((id, method, outcome, error_code, computer_id, client, approval_id)) = newest {
         let repeats = method == row.method
             && outcome == outcome_text(row.outcome)
@@ -277,8 +413,8 @@ fn insert(connection: &Connection, row: &Row) -> Result<(), String> {
         if repeats {
             return connection
                 .execute(
-                    "UPDATE calls SET count = count + 1, last_at = ?2 WHERE id = ?1",
-                    rusqlite::params![id, row.at_ms],
+                    "UPDATE calls SET count = count + ?3, last_at = ?2 WHERE id = ?1",
+                    rusqlite::params![id, last_at, count],
                 )
                 .map(|_| ())
                 .map_err(|error| error.to_string());
@@ -288,7 +424,7 @@ fn insert(connection: &Connection, row: &Row) -> Result<(), String> {
         .execute(
             "INSERT INTO calls (at_ms, caller_kind, caller_id, client, method, computer_id,
                  outcome, error_code, job_id, approval_id, count, last_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?1)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
                 row.at_ms,
                 kind_text(row.caller_kind),
@@ -300,6 +436,8 @@ fn insert(connection: &Connection, row: &Row) -> Result<(), String> {
                 row.error_code,
                 row.job_id,
                 row.approval_id,
+                count,
+                last_at,
             ],
         )
         .map(|_| ())
@@ -348,40 +486,88 @@ fn trim(connection: &Connection, retention: Retention) -> Result<(), String> {
     Ok(())
 }
 
-fn write_loop(path: PathBuf, retention: Retention, warned: Arc<AtomicBool>, queue: Receiver<Message>) {
-    let mut connection: Option<Connection> = None;
-    let mut written: u64 = 0;
-    let mut trimmed = false;
-    for message in queue {
-        match message {
-            Message::Flush(done) => {
+/// The thread that writes the rows, owner and device rows from the queue and computer rows
+/// from the buffer.
+struct Writer {
+    path: PathBuf,
+    retention: Retention,
+    warned: Arc<AtomicBool>,
+    shared: Arc<Shared>,
+    connection: Option<Connection>,
+    written: u64,
+    trimmed: bool,
+}
+
+impl Writer {
+    fn write(&mut self, row: &Row, count: u64, last_at: i64) {
+        if self.connection.is_none() {
+            match open_connection(&self.path) {
+                Ok(opened) => self.connection = Some(opened),
+                Err(error) => {
+                    warn_once(&self.warned, &error);
+                    return;
+                }
+            }
+        }
+        let Some(open) = self.connection.as_ref() else {
+            return;
+        };
+        if let Err(error) = insert(open, row, count, last_at) {
+            warn_once(&self.warned, &error);
+            self.connection = None;
+            return;
+        }
+        self.written += 1;
+        if !self.trimmed || self.written % TRIM_EVERY == 0 {
+            self.trimmed = true;
+            if let Err(error) = trim(open, self.retention) {
+                warn_once(&self.warned, &error);
+            }
+        }
+    }
+
+    /// Writes the computers' waiting rows.
+    fn drain_computers(&mut self) {
+        self.shared.woken.store(false, Ordering::SeqCst);
+        let rows = self
+            .shared
+            .computers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        for waiting in rows {
+            self.write(&waiting.row, waiting.count, waiting.last_at);
+        }
+    }
+}
+
+fn write_loop(
+    path: PathBuf,
+    retention: Retention,
+    warned: Arc<AtomicBool>,
+    shared: Arc<Shared>,
+    queue: Receiver<Message>,
+) {
+    let mut writer = Writer {
+        path,
+        retention,
+        warned,
+        shared,
+        connection: None,
+        written: 0,
+        trimmed: false,
+    };
+    loop {
+        match queue.recv_timeout(POLL) {
+            Ok(Message::Row(row)) => writer.write(&row, 1, row.at_ms),
+            Ok(Message::Wake) | Err(mpsc::RecvTimeoutError::Timeout) => writer.drain_computers(),
+            Ok(Message::Flush(done)) => {
+                writer.drain_computers();
                 let _ = done.send(());
             }
-            Message::Row(row) => {
-                if connection.is_none() {
-                    match open_connection(&path) {
-                        Ok(opened) => connection = Some(opened),
-                        Err(error) => {
-                            warn_once(&warned, &error);
-                            continue;
-                        }
-                    }
-                }
-                let Some(open) = connection.as_ref() else {
-                    continue;
-                };
-                if let Err(error) = insert(open, &row) {
-                    warn_once(&warned, &error);
-                    connection = None;
-                    continue;
-                }
-                written += 1;
-                if !trimmed || written % TRIM_EVERY == 0 {
-                    trimmed = true;
-                    if let Err(error) = trim(open, retention) {
-                        warn_once(&warned, &error);
-                    }
-                }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                writer.drain_computers();
+                return;
             }
         }
     }
@@ -405,11 +591,12 @@ impl AuditLog {
     pub fn open(path: PathBuf, retention: Retention) -> Self {
         let (sender, queue) = mpsc::sync_channel(QUEUE);
         let warned = Arc::new(AtomicBool::new(false));
+        let shared = Arc::new(Shared::default());
         let writer = {
-            let (path, warned) = (path.clone(), warned.clone());
+            let (path, warned, shared) = (path.clone(), warned.clone(), shared.clone());
             std::thread::Builder::new()
                 .name("silo-audit".into())
-                .spawn(move || write_loop(path, retention, warned, queue))
+                .spawn(move || write_loop(path, retention, warned, shared, queue))
         };
         if let Err(error) = writer {
             warn_once(&warned, &error.to_string());
@@ -417,19 +604,35 @@ impl AuditLog {
         Self {
             path,
             sender,
+            shared,
             warned,
             reader: Mutex::new(None),
         }
     }
 
-    /// Queues a row. Never blocks; a full queue or a stopped writer drops the row.
+    /// Queues a row. Never blocks. A computer's row waits in the computers' buffer, where a
+    /// repeat is counted and a row that finds the buffer full is counted in the computer's
+    /// summary row; an owner's or device's row that finds the queue full, or a stopped
+    /// writer, is dropped.
     pub fn record(&self, row: Row) {
+        if row.caller_kind == AuditCallerKind::Computer {
+            self.shared
+                .computers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .add(row);
+            if !self.shared.woken.swap(true, Ordering::SeqCst)
+                && self.sender.try_send(Message::Wake).is_err()
+            {
+                // The writer looks at the buffer again within a moment of its own accord.
+                self.shared.woken.store(false, Ordering::SeqCst);
+            }
+            return;
+        }
         match self.sender.try_send(Message::Row(Box::new(row))) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => warn_once(&self.warned, "too many calls at once"),
-            Err(TrySendError::Disconnected(_)) => {
-                warn_once(&self.warned, "the writer stopped")
-            }
+            Err(TrySendError::Disconnected(_)) => warn_once(&self.warned, "the writer stopped"),
         }
     }
 
@@ -442,7 +645,11 @@ impl AuditLog {
     }
 
     /// One page of rows, newest first.
-    pub fn list(&self, params: &AuditListParams, scope: Scope<'_>) -> Result<AuditListResult, String> {
+    pub fn list(
+        &self,
+        params: &AuditListParams,
+        scope: Scope<'_>,
+    ) -> Result<AuditListResult, String> {
         self.flush(Duration::from_secs(2));
         let limit = params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
         let mut conditions: Vec<String> = Vec::new();
@@ -529,7 +736,10 @@ impl AuditLog {
         if let Some(visible) = visible_only {
             for entry in &mut entries {
                 entry.client = None;
-                let known = entry.caller_id.as_ref().is_some_and(|id| visible.contains(id));
+                let known = entry
+                    .caller_id
+                    .as_ref()
+                    .is_some_and(|id| visible.contains(id));
                 if entry.caller_kind != AuditCallerKind::Computer || !known {
                     entry.caller_id = None;
                 }
@@ -551,7 +761,12 @@ mod tests {
 
     use super::*;
 
-    fn row(method: &str, kind: AuditCallerKind, caller: Option<&str>, computer: Option<&str>) -> Row {
+    fn row(
+        method: &str,
+        kind: AuditCallerKind,
+        caller: Option<&str>,
+        computer: Option<&str>,
+    ) -> Row {
         Row {
             at_ms: now_ms(),
             caller_kind: kind,
@@ -588,10 +803,20 @@ mod tests {
             ));
         }
         let first = log
-            .list(&AuditListParams { limit: Some(2), ..all() }, Scope::All)
+            .list(
+                &AuditListParams {
+                    limit: Some(2),
+                    ..all()
+                },
+                Scope::All,
+            )
             .unwrap();
         assert_eq!(
-            first.entries.iter().map(|e| e.method.as_str()).collect::<Vec<_>>(),
+            first
+                .entries
+                .iter()
+                .map(|e| e.method.as_str())
+                .collect::<Vec<_>>(),
             ["m4", "m3"]
         );
         let next = log
@@ -606,7 +831,13 @@ mod tests {
             .unwrap();
         assert_eq!(next.entries[0].method, "m2");
         let last = log
-            .list(&AuditListParams { limit: Some(10), ..all() }, Scope::All)
+            .list(
+                &AuditListParams {
+                    limit: Some(10),
+                    ..all()
+                },
+                Scope::All,
+            )
             .unwrap();
         assert_eq!(last.entries.len(), 5);
         assert!(last.next_before_id.is_none());
@@ -623,13 +854,21 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let log = AuditLog::open(directory.path().join(FILE_NAME), Retention::default());
         log.record(row("a", AuditCallerKind::Owner, None, Some("main")));
-        log.record(row("b", AuditCallerKind::Computer, Some("main"), Some("fork")));
+        log.record(row(
+            "b",
+            AuditCallerKind::Computer,
+            Some("main"),
+            Some("fork"),
+        ));
         log.record(row("c", AuditCallerKind::Owner, None, Some("stranger")));
         log.record(row("d", AuditCallerKind::Computer, Some("stranger"), None));
         let visible: BTreeSet<String> = ["main".to_owned(), "fork".to_owned()].into();
         let seen = log.list(&all(), Scope::Computers(&visible)).unwrap();
         assert_eq!(
-            seen.entries.iter().map(|e| e.method.as_str()).collect::<Vec<_>>(),
+            seen.entries
+                .iter()
+                .map(|e| e.method.as_str())
+                .collect::<Vec<_>>(),
             ["b", "a"]
         );
         let computers = log
@@ -671,17 +910,31 @@ mod tests {
         log.record(old);
         // The trim runs when the row count reaches a multiple of TRIM_EVERY.
         for number in 0..(TRIM_EVERY as usize - 1) {
-            log.record(row(&format!("n{number}"), AuditCallerKind::Owner, None, None));
+            log.record(row(
+                &format!("n{number}"),
+                AuditCallerKind::Owner,
+                None,
+                None,
+            ));
         }
         let rows = log
-            .list(&AuditListParams { limit: Some(500), ..all() }, Scope::All)
+            .list(
+                &AuditListParams {
+                    limit: Some(500),
+                    ..all()
+                },
+                Scope::All,
+            )
             .unwrap();
         assert_eq!(rows.entries.len(), 3);
         assert!(rows.entries.iter().all(|entry| entry.method != "old"));
     }
 
     fn kinds() -> AuditListParams {
-        AuditListParams { limit: Some(500), ..all() }
+        AuditListParams {
+            limit: Some(500),
+            ..all()
+        }
     }
 
     fn trimmed_log(owner: u64, computer: u64) -> (tempfile::TempDir, AuditLog) {
@@ -701,15 +954,33 @@ mod tests {
     fn a_computer_can_never_push_out_the_owners_rows() {
         let (_directory, log) = trimmed_log(4, 4);
         for number in 0..3 {
-            log.record(row(&format!("owner{number}"), AuditCallerKind::Owner, None, None));
+            log.record(row(
+                &format!("owner{number}"),
+                AuditCallerKind::Owner,
+                None,
+                None,
+            ));
         }
         log.record(row("device", AuditCallerKind::Device, Some("key"), None));
         // The trim runs when the count of rows written reaches a multiple of TRIM_EVERY.
         for number in 0..TRIM_EVERY * 2 - 14 {
-            log.record(row(&format!("noise{number}"), AuditCallerKind::Computer, Some("a"), None));
+            log.record(row(
+                &format!("noise{number}"),
+                AuditCallerKind::Computer,
+                Some("a"),
+                None,
+            ));
+            if number % 16 == 15 {
+                log.flush(Duration::from_secs(5));
+            }
         }
         for number in 0..10 {
-            log.record(row(&format!("other{number}"), AuditCallerKind::Computer, Some("b"), None));
+            log.record(row(
+                &format!("other{number}"),
+                AuditCallerKind::Computer,
+                Some("b"),
+                None,
+            ));
         }
         let rows = log.list(&kinds(), Scope::All).unwrap();
         let methods = |kind: AuditCallerKind, caller: Option<&str>| {
@@ -734,7 +1005,12 @@ mod tests {
     fn owner_and_device_rows_are_trimmed_among_themselves() {
         let (_directory, log) = trimmed_log(3, 100);
         for number in 0..TRIM_EVERY {
-            log.record(row(&format!("m{number}"), AuditCallerKind::Owner, None, None));
+            log.record(row(
+                &format!("m{number}"),
+                AuditCallerKind::Owner,
+                None,
+                None,
+            ));
         }
         log.record(row("computer", AuditCallerKind::Computer, Some("a"), None));
         let rows = log.list(&kinds(), Scope::All).unwrap();
@@ -770,7 +1046,10 @@ mod tests {
             .iter()
             .map(|entry| {
                 (
-                    format!("{}:{:?}:{:?}", entry.method, entry.outcome, entry.computer_id),
+                    format!(
+                        "{}:{:?}:{:?}",
+                        entry.method, entry.outcome, entry.computer_id
+                    ),
                     entry.count,
                 )
             })
@@ -786,7 +1065,10 @@ mod tests {
         );
         let counted = rows.entries.last().unwrap();
         assert_eq!(counted.at, rfc3339(begun));
-        assert_eq!(counted.last_at.as_deref(), Some(rfc3339(begun + 4_000).as_str()));
+        assert_eq!(
+            counted.last_at.as_deref(),
+            Some(rfc3339(begun + 4_000).as_str())
+        );
     }
 
     #[test]
@@ -814,7 +1096,10 @@ mod tests {
         log.record(row("new", AuditCallerKind::Owner, None, None));
         let rows = log.list(&all(), Scope::All).unwrap();
         assert_eq!(
-            rows.entries.iter().map(|e| (e.method.as_str(), e.count)).collect::<Vec<_>>(),
+            rows.entries
+                .iter()
+                .map(|e| (e.method.as_str(), e.count))
+                .collect::<Vec<_>>(),
             [("new", 1), ("old", 1)]
         );
     }
@@ -822,9 +1107,19 @@ mod tests {
     #[test]
     fn what_a_computer_reads_names_no_program_and_no_device_key() {
         let (_directory, log) = trimmed_log(100, 100);
-        log.record(row("a", AuditCallerKind::Device, Some("SHA256:key"), Some("main")));
+        log.record(row(
+            "a",
+            AuditCallerKind::Device,
+            Some("SHA256:key"),
+            Some("main"),
+        ));
         log.record(row("b", AuditCallerKind::Owner, None, Some("main")));
-        log.record(row("c", AuditCallerKind::Computer, Some("main"), Some("main")));
+        log.record(row(
+            "c",
+            AuditCallerKind::Computer,
+            Some("main"),
+            Some("main"),
+        ));
         let visible: BTreeSet<String> = ["main".to_owned()].into();
         let seen = log.list(&all(), Scope::Computers(&visible)).unwrap();
         assert_eq!(seen.entries.len(), 3);
@@ -837,7 +1132,10 @@ mod tests {
         }
         let owner = log.list(&all(), Scope::All).unwrap();
         assert!(owner.entries.iter().all(|entry| entry.client.is_some()));
-        assert!(owner.entries.iter().any(|entry| entry.caller_id.as_deref() == Some("SHA256:key")));
+        assert!(owner
+            .entries
+            .iter()
+            .any(|entry| entry.caller_id.as_deref() == Some("SHA256:key")));
     }
 
     #[test]
@@ -847,12 +1145,102 @@ mod tests {
         {
             let connection = open_connection(&path).unwrap();
             connection
-                .execute("UPDATE meta SET value = 99 WHERE key = 'schema_version'", [])
+                .execute(
+                    "UPDATE meta SET value = 99 WHERE key = 'schema_version'",
+                    [],
+                )
                 .unwrap();
         }
         let log = AuditLog::open(path, Retention::default());
         log.record(row("x", AuditCallerKind::Owner, None, None));
         log.flush(Duration::from_secs(2));
         assert!(log.list(&all(), Scope::All).is_err());
+    }
+
+    #[test]
+    fn a_flood_of_computer_calls_cannot_push_out_the_owners_rows() {
+        let (_directory, log) = trimmed_log(10_000, 100_000);
+        let mut owner = 0;
+        let flood = 20_000;
+        for number in 0..flood {
+            log.record(row(
+                &format!("flood{number}"),
+                AuditCallerKind::Computer,
+                Some("a"),
+                None,
+            ));
+            if number % 100 == 0 {
+                log.record(row(
+                    &format!("owner{owner}"),
+                    AuditCallerKind::Owner,
+                    None,
+                    None,
+                ));
+                owner += 1;
+            }
+        }
+        log.flush(Duration::from_secs(30));
+        let mut kept_owner = 0;
+        let mut counted = 0;
+        let mut before = None;
+        loop {
+            let page = log
+                .list(
+                    &AuditListParams {
+                        limit: Some(500),
+                        before_id: before,
+                        ..all()
+                    },
+                    Scope::All,
+                )
+                .unwrap();
+            for entry in &page.entries {
+                match entry.caller_kind {
+                    AuditCallerKind::Owner => kept_owner += 1,
+                    _ if entry.method == DROPPED_METHOD => {
+                        counted += entry.count;
+                        assert_eq!(entry.error_code.as_deref(), Some(DROPPED_ERROR));
+                        assert_eq!(entry.caller_id.as_deref(), Some("a"));
+                    }
+                    _ => counted += entry.count,
+                }
+            }
+            before = page.next_before_id;
+            if before.is_none() {
+                break;
+            }
+        }
+        assert_eq!(kept_owner, owner, "every owner row is kept");
+        assert_eq!(
+            counted, flood,
+            "every computer call is a row, a count or in the summary"
+        );
+    }
+
+    #[test]
+    fn repeats_of_a_computers_call_are_counted_before_they_are_queued() {
+        let (_directory, log) = trimmed_log(100, 100);
+        let repeated = 30_000;
+        for _ in 0..repeated {
+            log.record(row(
+                "guest.exec",
+                AuditCallerKind::Computer,
+                Some("a"),
+                Some("a"),
+            ));
+        }
+        log.record(row("owner", AuditCallerKind::Owner, None, None));
+        let rows = log.list(&kinds(), Scope::All).unwrap();
+        let computer: Vec<&AuditEntry> = rows
+            .entries
+            .iter()
+            .filter(|entry| entry.caller_kind == AuditCallerKind::Computer)
+            .collect();
+        assert_eq!(
+            computer.iter().map(|entry| entry.count).sum::<u64>(),
+            repeated
+        );
+        assert!(computer.iter().all(|entry| entry.method == "guest.exec"));
+        assert!(rows.entries.iter().any(|entry| entry.method == "owner"));
     }
 }

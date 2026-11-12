@@ -670,7 +670,7 @@ fn execute<'a>(
         };
         if gate::takes_headroom(method) {
             if let Some(message) =
-                gate::short_of_resources(context, method, &approval.params, &std::collections::HashMap::new())
+                gate::short_of_resources_now(context, method, &approval.params).await
             {
                 return failed(format!("Nothing was run: {message}"));
             }
