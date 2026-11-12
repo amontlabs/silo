@@ -14,7 +14,8 @@ use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, Recipe
 
 use super::{
     engine_env::{
-        bind_undo_policy, can_clone, forget_build_policies, save_build_policies, clone_workspace, copy_folder, parse_du, parse_pack_report, replay_steps,
+        bind_undo_policy, can_clone, clone_workspace, copy_folder, ensure_undo_policy,
+        forget_build_policies, parse_du, parse_pack_report, replay_steps, save_build_policies,
         PACK_HOME, UNPACK_HOME,
     },
     journal::{Journal, Plan, Record, Step},
@@ -197,7 +198,10 @@ fn a_swap_stopped_after_any_change_is_finished_or_reverted() {
         swap::revert(&table, &plan()).unwrap();
         assert_eq!(after_tags(&table), [Some("old"), None, Some("new")]);
         assert_eq!(table.named("dev").unwrap().label, "id-old");
-        assert_eq!(table.named("silo-rebuild-aaaa1111").unwrap().label, "id-new");
+        assert_eq!(
+            table.named("silo-rebuild-aaaa1111").unwrap().label,
+            "id-new"
+        );
     }
 }
 
@@ -208,7 +212,10 @@ fn a_swap_reverted_from_the_end_returns_every_name_and_id() {
     swap::revert(&table, &plan()).unwrap();
     assert_eq!(after_tags(&table), [Some("old"), None, Some("new")]);
     assert_eq!(table.named("dev").unwrap().label, "id-old");
-    assert_eq!(table.named("silo-rebuild-aaaa1111").unwrap().label, "id-new");
+    assert_eq!(
+        table.named("silo-rebuild-aaaa1111").unwrap().label,
+        "id-new"
+    );
     // Reverting again changes nothing.
     let done = table.log.lock().unwrap().len();
     swap::revert(&table, &plan()).unwrap();
@@ -468,7 +475,10 @@ struct Gate {
 
 impl Drop for Gate {
     fn drop(&mut self) {
-        self.calls.lock().unwrap().push(format!("release {}", self.id));
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("release {}", self.id));
     }
 }
 
@@ -492,7 +502,13 @@ impl RebuildEnv for Fake {
 
     fn check_cancelled(&self) -> Result<(), String> {
         let wanted = self.cancel_on.lock().unwrap().clone();
-        let shown = self.labels.lock().unwrap().last().cloned().unwrap_or_default();
+        let shown = self
+            .labels
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap_or_default();
         if *self.cancelled.lock().unwrap() || wanted.is_some_and(|label| shown.contains(&label)) {
             return Err("The rebuild was cancelled.".into());
         }
@@ -518,7 +534,10 @@ impl RebuildEnv for Fake {
     }
 
     fn stuck_notice(&self, _plan: &Plan, problem: Option<&str>) {
-        self.notices.lock().unwrap().push(problem.map(str::to_owned));
+        self.notices
+            .lock()
+            .unwrap()
+            .push(problem.map(str::to_owned));
     }
 
     fn info(&self, id: &str) -> Result<Info, String> {
@@ -751,7 +770,11 @@ fn every_refusal_comes_before_any_change() {
             |f| f.refusal = Some("This device cannot clone.".into()),
             "cannot clone",
         ),
-        ("c-name", |f| f.taken = vec!["dev-undo".into()], "already exists"),
+        (
+            "c-name",
+            |f| f.taken = vec!["dev-undo".into()],
+            "already exists",
+        ),
         ("c-home", |f| f.home = 3 * 1024 * 1024 * 1024, "too large"),
     ];
     for (id, setup, expect) in cases {
@@ -765,7 +788,10 @@ fn every_refusal_comes_before_any_change() {
         assert!(journal.all().is_empty(), "{id}");
         assert!(fake.running(id), "{id} still runs");
         // The lane was let go: the same attempt reaches the same refusal, not a busy lane.
-        assert_eq!(rebuild(&fake, &journal, id, false, WAIT).unwrap_err(), error);
+        assert_eq!(
+            rebuild(&fake, &journal, id, false, WAIT).unwrap_err(),
+            error
+        );
     }
     let fake = Fake::new("c-gone", true);
     fake.machines.lock().unwrap().clear();
@@ -781,7 +807,10 @@ fn the_refusal_for_a_taken_undo_name_names_it() {
     fake.taken = vec!["dev-undo".into()];
     let (_dir, journal) = journal();
     let error = rebuild(&fake, &journal, "c-taken", false, WAIT).unwrap_err();
-    assert!(error.contains("Computer 'dev-undo' already exists"), "{error}");
+    assert!(
+        error.contains("Computer 'dev-undo' already exists"),
+        "{error}"
+    );
     assert!(error.contains("rebuilding 'dev'"), "{error}");
 }
 
@@ -872,7 +901,10 @@ fn a_rebuild_runs_the_steps_in_order_and_swaps_the_names() {
     assert_eq!(calls.iter().filter(|c| c.starts_with("hold")).count(), 1);
     // After the workspace disk is cloned, the old computer never runs until the rebuilt one
     // has taken its id.
-    let cloned = calls.iter().position(|c| c.starts_with("move_workspace")).unwrap();
+    let cloned = calls
+        .iter()
+        .position(|c| c.starts_with("move_workspace"))
+        .unwrap();
     let swapped = calls.iter().position(|c| c == "swap_apply").unwrap();
     assert!(
         !calls[cloned..swapped].iter().any(|c| c == "start c-ok"),
@@ -895,7 +927,10 @@ fn a_stopped_computer_stays_stopped_and_one_without_a_recipe_replays_nothing() {
     rebuild(&fake, &journal, "c-stopped", false, WAIT).unwrap();
     assert!(!fake.called("replay_recipe"));
     assert!(!fake.running("c-stopped"));
-    assert_eq!(fake.changes().last().map(String::as_str), Some("settle_swapped"));
+    assert_eq!(
+        fake.changes().last().map(String::as_str),
+        Some("settle_swapped")
+    );
 }
 
 #[test]
@@ -964,7 +999,10 @@ fn a_failure_at_any_step_rolls_back_to_the_computer_as_it_was() {
         assert!(fake.running(&id), "{method}");
         assert_eq!(fake.table.named("dev-undo"), None, "{method}");
         assert_eq!(fake.table.named("silo-rebuild-aaaa1111"), None, "{method}");
-        assert!(!fake.machines.lock().unwrap().contains_key("id-n1"), "{method}");
+        assert!(
+            !fake.machines.lock().unwrap().contains_key("id-n1"),
+            "{method}"
+        );
     }
 }
 
@@ -1067,7 +1105,10 @@ fn the_journal_follows_the_steps() {
         seen: Mutex::default(),
     };
     rebuild(&watching, &journal, "c-journal", false, WAIT).unwrap();
-    assert_eq!(*watching.seen.lock().unwrap(), [Step::Swapping, Step::Swapped]);
+    assert_eq!(
+        *watching.seen.lock().unwrap(),
+        [Step::Swapping, Step::Swapped]
+    );
 }
 
 #[test]
@@ -1087,8 +1128,15 @@ fn a_rollback_that_fails_keeps_the_journal_and_the_next_start_finishes_it() {
     // The next start: the removal works now.
     *fake.broken_remove.lock().unwrap() = false;
     let held = Mutex::new(0);
-    recover_one(&fake, &journal, "c-stuck", &|| *held.lock().unwrap() += 1, 1, Duration::ZERO)
-        .unwrap();
+    recover_one(
+        &fake,
+        &journal,
+        "c-stuck",
+        &|| *held.lock().unwrap() += 1,
+        1,
+        Duration::ZERO,
+    )
+    .unwrap();
     assert_eq!(*held.lock().unwrap(), 1);
     assert!(journal.all().is_empty());
     assert_eq!(fake.table.named("silo-rebuild-aaaa1111"), None);
@@ -1172,12 +1220,20 @@ fn an_interrupted_rebuild_is_rolled_back_or_finished_by_the_step_it_reached() {
                 assert!(fake.called("settle_swapped"), "{label}");
                 assert!(!fake.called("remove_build"), "{label}");
                 assert!(!fake.called("swap_revert"), "{label}");
-                assert_eq!(after_tags(&fake.table), [Some("new"), Some("old"), None], "{label}");
+                assert_eq!(
+                    after_tags(&fake.table),
+                    [Some("new"), Some("old"), None],
+                    "{label}"
+                );
             } else {
                 assert!(fake.called("remove_build"), "{label}");
                 assert!(!fake.called("settle_swapped"), "{label}");
                 assert!(!fake.called("swap_revert"), "{label}");
-                assert_eq!(after_tags(&fake.table), [Some("old"), None, None], "{label}");
+                assert_eq!(
+                    after_tags(&fake.table),
+                    [Some("old"), None, None],
+                    "{label}"
+                );
             }
         }
     }
@@ -1212,11 +1268,22 @@ fn a_swap_that_stopped_after_any_rename_is_finished_by_the_next_start() {
                 .unwrap();
             recover_one(&fake, &journal, &id, &|| {}, 1, Duration::ZERO).unwrap();
             let label = format!("{done} moves, running={was_running}");
-            assert_eq!(after_tags(&fake.table), [Some("new"), Some("old"), None], "{label}");
+            assert_eq!(
+                after_tags(&fake.table),
+                [Some("new"), Some("old"), None],
+                "{label}"
+            );
             assert_eq!(fake.table.named("dev").unwrap().label, id, "{label}");
-            assert_eq!(fake.table.named("dev-undo").unwrap().label, "id-undo", "{label}");
+            assert_eq!(
+                fake.table.named("dev-undo").unwrap().label,
+                "id-undo",
+                "{label}"
+            );
             assert!(fake.called("settle_swapped"), "{label}");
-            assert!(!fake.called("swap_revert") && !fake.called("remove_build"), "{label}");
+            assert!(
+                !fake.called("swap_revert") && !fake.called("remove_build"),
+                "{label}"
+            );
             assert_eq!(fake.running(&id), was_running, "{label}");
             assert!(journal.all().is_empty(), "{label}");
         }
@@ -1439,8 +1506,8 @@ fn the_recipe_replay_runs_the_steps_of_a_build_in_order_and_stops_at_the_first_f
         format!("{} failed (exit 3): no such package", steps[1].label)
     );
 
-    let error = replay_steps(&steps, &|_| {}, &mut |_| Err("the computer stopped".into()))
-        .unwrap_err();
+    let error =
+        replay_steps(&steps, &|_| {}, &mut |_| Err("the computer stopped".into())).unwrap_err();
     assert_eq!(
         error,
         format!("{} failed: the computer stopped", steps[0].label)
@@ -1453,7 +1520,13 @@ fn write(path: &std::path::Path, text: &str) {
 }
 
 /// A stopped sandbox folder: a workspace disk with `files`, and the runtime's journal of it.
-fn sandbox(root: &std::path::Path, name: &str, volume_id: &str, files: &[(&str, &str)], layers: &[&str]) {
+fn sandbox(
+    root: &std::path::Path,
+    name: &str,
+    volume_id: &str,
+    files: &[(&str, &str)],
+    layers: &[&str],
+) {
     let folder = root.join(name);
     for (file, text) in files {
         write(&folder.join("owned-volumes/workspace_abc").join(file), text);
@@ -1482,15 +1555,31 @@ fn the_workspace_disk_is_cloned_into_the_new_sandbox_with_its_own_volume_id() {
         &[("sealed-000.raw", "base"), ("writable.qcow2", "changes")],
         &["sealed-000.raw", "writable.qcow2"],
     );
-    sandbox(dir.path(), "new", "vol-new", &[("disk.raw", "empty")], &["disk.raw"]);
+    sandbox(
+        dir.path(),
+        "new",
+        "vol-new",
+        &[("disk.raw", "empty")],
+        &["disk.raw"],
+    );
     clone_workspace(&dir.path().join("old"), &dir.path().join("new")).unwrap();
 
     let disk = dir.path().join("new/owned-volumes/workspace_abc");
-    assert_eq!(fs::read_to_string(disk.join("sealed-000.raw")).unwrap(), "base");
-    assert_eq!(fs::read_to_string(disk.join("writable.qcow2")).unwrap(), "changes");
+    assert_eq!(
+        fs::read_to_string(disk.join("sealed-000.raw")).unwrap(),
+        "base"
+    );
+    assert_eq!(
+        fs::read_to_string(disk.join("writable.qcow2")).unwrap(),
+        "changes"
+    );
     assert!(!disk.join("disk.raw").exists());
     let journal: serde_json::Value = serde_json::from_slice(
-        &fs::read(dir.path().join("new/runtime/owned-disks/workspace_abc/disk.json")).unwrap(),
+        &fs::read(
+            dir.path()
+                .join("new/runtime/owned-disks/workspace_abc/disk.json"),
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(journal["volume_id"], "vol-new");
@@ -1519,9 +1608,16 @@ fn the_workspace_disk_is_cloned_into_the_new_sandbox_with_its_own_volume_id() {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(left, ["workspace_abc"]);
-    assert!(!dir.path().join("new/.workspace-swap-workspace_abc").exists());
+    assert!(!dir
+        .path()
+        .join("new/.workspace-swap-workspace_abc")
+        .exists());
     assert_eq!(
-        fs::read_to_string(dir.path().join("old/owned-volumes/workspace_abc/writable.qcow2")).unwrap(),
+        fs::read_to_string(
+            dir.path()
+                .join("old/owned-volumes/workspace_abc/writable.qcow2")
+        )
+        .unwrap(),
         "changes"
     );
 }
@@ -1533,9 +1629,20 @@ fn a_single_raw_workspace_disk_keeps_the_new_sandboxes_journal() {
         return;
     }
     // The old computer never started, so it has a disk and no journal.
-    write(&dir.path().join("old/owned-volumes/workspace_abc/disk.raw"), "data");
-    sandbox(dir.path(), "new", "vol-new", &[("disk.raw", "empty")], &["disk.raw"]);
-    let journal = dir.path().join("new/runtime/owned-disks/workspace_abc/disk.json");
+    write(
+        &dir.path().join("old/owned-volumes/workspace_abc/disk.raw"),
+        "data",
+    );
+    sandbox(
+        dir.path(),
+        "new",
+        "vol-new",
+        &[("disk.raw", "empty")],
+        &["disk.raw"],
+    );
+    let journal = dir
+        .path()
+        .join("new/runtime/owned-disks/workspace_abc/disk.json");
     let before = fs::read(&journal).unwrap();
     clone_workspace(&dir.path().join("old"), &dir.path().join("new")).unwrap();
     assert_eq!(
@@ -1551,15 +1658,33 @@ fn the_owner_marker_of_a_workspace_disk_stays_the_new_sandboxs_own() {
     if !can_clone(dir.path()) {
         return;
     }
-    sandbox(dir.path(), "old", "vol-old", &[("disk.raw", "data"), (".disk-owner", "old")], &["disk.raw"]);
-    sandbox(dir.path(), "new", "vol-new", &[("disk.raw", "empty"), (".disk-owner", "new")], &["disk.raw"]);
+    sandbox(
+        dir.path(),
+        "old",
+        "vol-old",
+        &[("disk.raw", "data"), (".disk-owner", "old")],
+        &["disk.raw"],
+    );
+    sandbox(
+        dir.path(),
+        "new",
+        "vol-new",
+        &[("disk.raw", "empty"), (".disk-owner", "new")],
+        &["disk.raw"],
+    );
     clone_workspace(&dir.path().join("old"), &dir.path().join("new")).unwrap();
     let disk = dir.path().join("new/owned-volumes/workspace_abc");
     assert_eq!(fs::read_to_string(disk.join("disk.raw")).unwrap(), "data");
     assert_eq!(fs::read_to_string(disk.join(".disk-owner")).unwrap(), "new");
 
     // A new sandbox whose disk has no marker does not get the old one's.
-    sandbox(dir.path(), "plain", "vol-plain", &[("disk.raw", "empty")], &["disk.raw"]);
+    sandbox(
+        dir.path(),
+        "plain",
+        "vol-plain",
+        &[("disk.raw", "empty")],
+        &["disk.raw"],
+    );
     clone_workspace(&dir.path().join("old"), &dir.path().join("plain")).unwrap();
     assert!(!dir
         .path()
@@ -1571,8 +1696,17 @@ fn the_owner_marker_of_a_workspace_disk_stays_the_new_sandboxs_own() {
 fn the_workspace_disk_is_not_touched_when_the_new_sandbox_cannot_take_it() {
     let dir = tempfile::tempdir().unwrap();
     // The new sandbox was never started: no journal of its own to take the volume id from.
-    sandbox(dir.path(), "old", "vol-old", &[("disk.raw", "data")], &["disk.raw"]);
-    write(&dir.path().join("new/owned-volumes/workspace_abc/disk.raw"), "empty");
+    sandbox(
+        dir.path(),
+        "old",
+        "vol-old",
+        &[("disk.raw", "data")],
+        &["disk.raw"],
+    );
+    write(
+        &dir.path().join("new/owned-volumes/workspace_abc/disk.raw"),
+        "empty",
+    );
     let error = clone_workspace(&dir.path().join("old"), &dir.path().join("new")).unwrap_err();
     assert!(error.contains("not been started once"), "{error}");
     assert_eq!(
@@ -1582,7 +1716,10 @@ fn the_workspace_disk_is_not_touched_when_the_new_sandbox_cannot_take_it() {
     assert!(!dir.path().join("new/.workspace-before-swap").exists());
 
     // Two workspace disks in one sandbox are not understood.
-    write(&dir.path().join("old/owned-volumes/workspace_def/disk.raw"), "more");
+    write(
+        &dir.path().join("old/owned-volumes/workspace_def/disk.raw"),
+        "more",
+    );
     let error = clone_workspace(&dir.path().join("old"), &dir.path().join("new")).unwrap_err();
     assert!(error.contains("exactly one workspace disk"), "{error}");
 }
@@ -1598,8 +1735,14 @@ fn the_ssh_folder_is_copied_with_its_modes_and_nothing_is_skipped() {
     let to = dir.path().join("new/ssh");
     write(&to.join("host_ed25519"), "generated by the first start");
     copy_folder(&from, &to).unwrap();
-    assert_eq!(fs::read_to_string(to.join("host_ed25519")).unwrap(), "private");
-    assert_eq!(fs::read_to_string(to.join("host_ed25519.pub")).unwrap(), "public");
+    assert_eq!(
+        fs::read_to_string(to.join("host_ed25519")).unwrap(),
+        "private"
+    );
+    assert_eq!(
+        fs::read_to_string(to.join("host_ed25519.pub")).unwrap(),
+        "public"
+    );
     let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&to.join("host_ed25519")), 0o600);
     assert_eq!(mode(&to), 0o700);
@@ -1649,8 +1792,14 @@ fn the_build_and_the_undo_computer_get_the_saved_policy_of_the_computer() {
     let plan = plan();
     store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
     save_build_policies(&plan, None).unwrap();
-    assert_eq!(store::get_stored(&plan.new_id).unwrap(), Some(allowlist_stored()));
-    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(allowlist_stored()));
+    assert_eq!(
+        store::get_stored(&plan.new_id).unwrap(),
+        Some(allowlist_stored())
+    );
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(allowlist_stored())
+    );
     store::use_test_path(None);
 }
 
@@ -1660,7 +1809,9 @@ fn a_computer_without_a_saved_policy_gives_its_effective_one_to_the_build() {
     let plan = plan();
     // An import that has not started yet carries its closed rules and no saved policy.
     save_build_policies(&plan, Some(&closed_runtime_policy())).unwrap();
-    let built = store::get_stored(&plan.new_id).unwrap().expect("the build has a policy");
+    let built = store::get_stored(&plan.new_id)
+        .unwrap()
+        .expect("the build has a policy");
     assert_eq!(built.mode, NetworkPolicyMode::Closed);
     assert!(built.incoming_denied);
     assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(built));
@@ -1670,8 +1821,14 @@ fn a_computer_without_a_saved_policy_gives_its_effective_one_to_the_build() {
         undo_id: "id-undo-2".into(),
         ..plan
     };
-    save_build_policies(&open_plan, Some(&serde_json::json!({"default_egress": "allow"}))).unwrap();
-    let built = store::get_stored(&open_plan.new_id).unwrap().expect("the build has a policy");
+    save_build_policies(
+        &open_plan,
+        Some(&serde_json::json!({"default_egress": "allow"})),
+    )
+    .unwrap();
+    let built = store::get_stored(&open_plan.new_id)
+        .unwrap()
+        .expect("the build has a policy");
     assert_eq!(built.mode, NetworkPolicyMode::Open);
     assert!(!built.incoming_denied);
     store::use_test_path(None);
@@ -1694,14 +1851,17 @@ fn the_undo_computer_keeps_an_explicit_policy_when_the_original_had_none() {
     let saved = store::get_stored(&plan.undo_id).unwrap();
     assert!(saved.is_some());
     // The swap binds it again on every retry, and the original still has no saved policy.
-    bind_undo_policy(&plan).unwrap();
-    bind_undo_policy(&plan).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
     assert_eq!(store::get_stored(&plan.undo_id).unwrap(), saved);
     assert_eq!(store::get_stored(&plan.old_id).unwrap(), None);
     // An original with a saved policy gives it, with its approvals.
     store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
-    bind_undo_policy(&plan).unwrap();
-    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(allowlist_stored()));
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(allowlist_stored())
+    );
     store::use_test_path(None);
 }
 
@@ -1710,17 +1870,28 @@ fn the_undo_computer_does_not_keep_the_channel_rule_of_the_original() {
     let _dir = policy_store();
     let plan = plan();
     save_build_policies(&plan, Some(&closed_runtime_policy())).unwrap();
-    bind_undo_policy(&plan).unwrap();
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
     // The original's sandbox holds the rule for its channel port.
     let held = store::get_stored(&plan.old_id).unwrap().unwrap_or_else(|| {
-        Stored::of(network_policy::held_for(&plan.old_id, Some(&closed_runtime_policy())).unwrap().0, true)
+        Stored::of(
+            network_policy::held_for(&plan.old_id, Some(&closed_runtime_policy()))
+                .unwrap()
+                .0,
+            true,
+        )
     });
-    let mut original = network_policy::plan_held(&held.held(), &Grants::of_computer("dev"), &[ExtraRule::GatewayPort(40001)]);
+    let mut original = network_policy::plan_held(
+        &held.held(),
+        &Grants::of_computer("dev"),
+        &[ExtraRule::GatewayPort(40001)],
+    );
     original.ingress_allowed = !held.incoming_denied;
     let runtime = serde_json::json!({"policy": original.policy_value(), "strict": original.strict});
     // The undo computer's saved policy plans no such rule, so its start finds the difference
     // and applies the plan.
-    let undo = store::get_stored(&plan.undo_id).unwrap().expect("the undo computer has a policy");
+    let undo = store::get_stored(&plan.undo_id)
+        .unwrap()
+        .expect("the undo computer has a policy");
     let mut wanted = network_policy::plan_held(&undo.held(), &Grants::of_computer("dev-undo"), &[]);
     wanted.ingress_allowed = !undo.incoming_denied;
     assert!(original.matches(&runtime));
@@ -1737,7 +1908,10 @@ fn the_policies_of_a_discarded_build_are_forgotten() {
     forget_build_policies(&plan).unwrap();
     assert_eq!(store::get_stored(&plan.new_id).unwrap(), None);
     assert_eq!(store::get_stored(&plan.undo_id).unwrap(), None);
-    assert_eq!(store::get_stored(&plan.old_id).unwrap(), Some(allowlist_stored()));
+    assert_eq!(
+        store::get_stored(&plan.old_id).unwrap(),
+        Some(allowlist_stored())
+    );
     store::use_test_path(None);
 }
 
@@ -1776,7 +1950,10 @@ fn a_person_can_cancel_between_the_steps_until_the_swap_begins() {
         let (_dir, journal) = journal();
         let error = rebuild(&fake, &journal, &id, false, WAIT).unwrap_err();
         assert!(error.contains("cancelled"), "{label}: {error}");
-        assert!(error.contains("rolled back; dev is as it was"), "{label}: {error}");
+        assert!(
+            error.contains("rolled back; dev is as it was"),
+            "{label}: {error}"
+        );
         assert!(!fake.called("swap_apply"), "{label}");
         assert!(journal.all().is_empty(), "{label}");
         assert_eq!(fake.table.named("dev").unwrap().label, id, "{label}");
@@ -1830,11 +2007,18 @@ fn the_rollback_the_swap_and_the_cleanup_run_protected_from_a_cancel() {
     assert!(fake.called("remove_build"));
     assert_eq!(*fake.unshielded.lock().unwrap(), Vec::<String>::new());
 
-    for (n, step) in [Step::Created, Step::Swapping, Step::Swapped].into_iter().enumerate() {
+    for (n, step) in [Step::Created, Step::Swapping, Step::Swapped]
+        .into_iter()
+        .enumerate()
+    {
         let id = format!("c-shield-rec-{n}");
         let (fake, _dir, journal) = interrupted(&id, step, true);
         recover_one(&fake, &journal, &id, &|| {}, 1, Duration::ZERO).unwrap();
-        assert_eq!(*fake.unshielded.lock().unwrap(), Vec::<String>::new(), "{step:?}");
+        assert_eq!(
+            *fake.unshielded.lock().unwrap(),
+            Vec::<String>::new(),
+            "{step:?}"
+        );
     }
 }
 
@@ -1857,7 +2041,10 @@ fn a_failed_cleanup_after_the_swap_keeps_the_journal_and_never_undoes_the_rebuil
     recover_one(&fake, &journal, "c-settle", &|| {}, 1, Duration::ZERO).unwrap();
     assert!(journal.all().is_empty());
     assert_eq!(
-        fake.calls().iter().filter(|c| *c == "settle_swapped").count(),
+        fake.calls()
+            .iter()
+            .filter(|c| *c == "settle_swapped")
+            .count(),
         2
     );
     assert_eq!(after_tags(&fake.table), [Some("new"), Some("old"), None]);
@@ -1871,7 +2058,10 @@ fn the_computer_is_started_again_even_when_the_cleanup_fails() {
     rebuild(&fake, &journal, "c-start-anyway", false, WAIT).unwrap_err();
     let calls = fake.calls();
     let settled = calls.iter().position(|c| c == "settle_swapped").unwrap();
-    assert!(calls[settled..].iter().any(|c| c == "start c-start-anyway"), "{calls:?}");
+    assert!(
+        calls[settled..].iter().any(|c| c == "start c-start-anyway"),
+        "{calls:?}"
+    );
 }
 
 #[test]
@@ -1884,7 +2074,9 @@ fn a_home_folder_that_cannot_be_measured_without_starting_is_left_to_the_packing
     let calls = fake.calls();
     let first_start = calls.iter().position(|c| c.starts_with("start")).unwrap();
     let measured = calls.iter().position(|c| c == "home_bytes").unwrap();
-    let stopped = calls.iter().position(|c| c.starts_with("stop") || c.starts_with("checkpoint"));
+    let stopped = calls
+        .iter()
+        .position(|c| c.starts_with("stop") || c.starts_with("checkpoint"));
     assert!(measured < first_start, "{calls:?}");
     assert!(stopped.is_some());
 }
@@ -1896,7 +2088,10 @@ fn a_rollback_from_the_home_folder_step_cleans_the_old_computer() {
     recover_one(&fake, &journal, "c-leftover", &|| {}, 1, Duration::ZERO).unwrap();
     assert!(fake.called("clean_old_computer"));
     let calls = fake.calls();
-    let cleaned = calls.iter().position(|c| c.starts_with("clean_old_computer")).unwrap();
+    let cleaned = calls
+        .iter()
+        .position(|c| c.starts_with("clean_old_computer"))
+        .unwrap();
     let removed = calls.iter().position(|c| c == "remove_build").unwrap();
     assert!(cleaned < removed);
     // Other steps never carried the home folder.
@@ -1921,7 +2116,10 @@ fn the_gate_is_taken_again_on_each_attempt_until_it_is_held() {
     .unwrap();
     assert_eq!(*held.lock().unwrap(), 1);
     assert_eq!(
-        fake.calls().iter().filter(|c| c.starts_with("hold")).count(),
+        fake.calls()
+            .iter()
+            .filter(|c| c.starts_with("hold"))
+            .count(),
         3
     );
     assert!(journal.all().is_empty());
@@ -1966,7 +2164,10 @@ fn lost_build(id: &str, was_running: bool) -> (Fake, tempfile::TempDir, Journal)
 fn a_swap_in_no_known_state_blocks_every_start_and_rebuild_until_it_is_abandoned() {
     let (fake, _dir, journal) = lost_build("c-lost", true);
     let error = recover_one(&fake, &journal, "c-lost", &|| {}, 2, Duration::ZERO).unwrap_err();
-    assert!(error.contains("not the computers the rebuild expected"), "{error}");
+    assert!(
+        error.contains("not the computers the rebuild expected"),
+        "{error}"
+    );
     assert_eq!(journal.all().len(), 1);
     let error = rebuild(&fake, &journal, "c-lost", false, WAIT).unwrap_err();
     assert!(error.contains("--abandon"), "{error}");
@@ -2015,24 +2216,52 @@ fn nothing_is_abandoned_when_no_rebuild_waits() {
     let fake = Fake::new("c-nothing", true);
     let (_dir, journal) = journal();
     let error = super::abandon(&fake, &journal, "c-nothing", WAIT).unwrap_err();
-    assert!(error.contains("No rebuild of this computer is waiting"), "{error}");
+    assert!(
+        error.contains("No rebuild of this computer is waiting"),
+        "{error}"
+    );
     assert_eq!(fake.changes(), Vec::<String>::new());
 }
 
 #[test]
 fn the_old_sandbox_is_found_by_its_identity_in_every_state_a_crash_can_leave() {
     let plan = plan();
-    let sandbox = |name: &str, label: &str, tag: &'static str| (name.to_owned(), label.to_owned(), tag);
+    let sandbox =
+        |name: &str, label: &str, tag: &'static str| (name.to_owned(), label.to_owned(), tag);
     // (the sandboxes, whether the swap had begun)
     let cases: Vec<(Vec<(String, String, &'static str)>, bool)> = vec![
         // The build was renamed away from its name.
-        (vec![sandbox("dev", "id-old", "old"), sandbox("other", "id-new", "new")], false),
+        (
+            vec![
+                sandbox("dev", "id-old", "old"),
+                sandbox("other", "id-new", "new"),
+            ],
+            false,
+        ),
         // The undo name was dropped after the swap.
-        (vec![sandbox("dev-undo", "id-undo", "old"), sandbox("dev", "id-new", "new")], true),
+        (
+            vec![
+                sandbox("dev-undo", "id-undo", "old"),
+                sandbox("dev", "id-new", "new"),
+            ],
+            true,
+        ),
         // The old sandbox is under its undo name, labelled with the computer's id.
-        (vec![sandbox("dev-undo", "id-old", "old"), sandbox("silo-rebuild-aaaa1111", "id-new", "new")], true),
+        (
+            vec![
+                sandbox("dev-undo", "id-old", "old"),
+                sandbox("silo-rebuild-aaaa1111", "id-new", "new"),
+            ],
+            true,
+        ),
         // Fully swapped.
-        (vec![sandbox("dev-undo", "id-undo", "old"), sandbox("dev", "id-old", "new")], true),
+        (
+            vec![
+                sandbox("dev-undo", "id-undo", "old"),
+                sandbox("dev", "id-old", "new"),
+            ],
+            true,
+        ),
     ];
     for (n, (sandboxes, swapping)) in cases.into_iter().enumerate() {
         let table = Table::default();
@@ -2055,7 +2284,10 @@ fn the_old_sandbox_is_found_by_its_identity_in_every_state_a_crash_can_leave() {
             .find(|s| s.tag == "new")
             .cloned();
         if let Some(build) = build {
-            assert!(build.label == "id-new" && build.name != "dev", "case {n}: {build:?}");
+            assert!(
+                build.label == "id-new" && build.name != "dev",
+                "case {n}: {build:?}"
+            );
         }
     }
     // With nothing to tell the old sandbox by, nothing is touched.
@@ -2063,4 +2295,55 @@ fn the_old_sandbox_is_found_by_its_identity_in_every_state_a_crash_can_leave() {
     let error = swap::restore_original(&table, &plan, true).unwrap_err();
     assert!(error.contains("cannot tell which"), "{error}");
     assert!(table.log.lock().unwrap().is_empty());
+}
+
+#[test]
+fn an_older_swap_gives_the_undo_computer_the_rules_its_sandbox_held() {
+    let _dir = policy_store();
+    let plan = plan();
+    // Neither the computer nor the undo computer has a saved policy, and the sandbox that is
+    // now the undo computer held closed rules.
+    bind_undo_policy(&plan, &|| Ok(Some(closed_runtime_policy()))).unwrap();
+    let undo = store::get_stored(&plan.undo_id)
+        .unwrap()
+        .expect("the undo computer has a policy");
+    assert_eq!(undo.mode, NetworkPolicyMode::Closed);
+    assert!(undo.incoming_denied);
+    assert_eq!(store::get_stored(&plan.old_id).unwrap(), None);
+    store::use_test_path(None);
+}
+
+#[test]
+fn an_undo_computer_is_left_without_a_policy_when_the_rules_cannot_be_read() {
+    let _dir = policy_store();
+    let plan = plan();
+    let error = bind_undo_policy(&plan, &|| Err("no such sandbox".into())).unwrap_err();
+    assert!(error.contains("no such sandbox"));
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), None);
+    assert!(ensure_undo_policy(&plan, &|| Err("no such sandbox".into())).is_err());
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), None);
+    store::use_test_path(None);
+}
+
+#[test]
+fn settling_a_swap_binds_the_undo_policy_and_keeps_one_it_has() {
+    let _dir = policy_store();
+    let plan = plan();
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    ensure_undo_policy(&plan, &|| Ok(None)).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(allowlist_stored())
+    );
+    // A policy the undo computer already holds is not replaced by a later change to the computer.
+    let closed = Stored::of(
+        network_policy::held_for("other", Some(&closed_runtime_policy()))
+            .unwrap()
+            .0,
+        true,
+    );
+    store::set_stored(&plan.undo_id, closed.clone()).unwrap();
+    ensure_undo_policy(&plan, &|| Ok(None)).unwrap();
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(closed));
+    store::use_test_path(None);
 }
