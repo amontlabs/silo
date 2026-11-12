@@ -12,7 +12,8 @@ Steps, using `affected` to choose them (base: see `affected --help`):
   5. frontend, only if frontend files changed: typecheck, oxlint on those files, vitest related
 --quick stops after cargo check and typecheck. The full log goes to
 app/SiloUI/target/agent-check/<time>.log. A run that already passed for the same tree, toolchain,
-affected set and mode is skipped ("already green"). Tests that fail and then pass on nextest's
+affected set and mode is skipped ("already green"). A full green (or nothing to check) also records
+app/SiloUI/target/agent-check/green/tree-<tree> holding the diff base, which merge-batch requires. Tests that fail and then pass on nextest's
 retry are recorded in docs/workflow/FLAKY.md. Exit code: 0 green, 1 a step failed, 2 PARTIAL (a
 crate could not be checked, or the tree changed during the run): never green, no marker written.
 The green key covers the tree hash, rustc, nextest or cargo test, RUSTFLAGS/CARGO_*/SILO_GITHUB_*
@@ -60,6 +61,14 @@ def tree_hash(root):
         subprocess.run(['git', 'add', '-A', '--', '.', ':!docs/workflow/FLAKY.md'], cwd=root, env=env, check=True, capture_output=True)
         return subprocess.run(['git', 'write-tree'], cwd=root, env=env, check=True, capture_output=True,
                               text=True).stdout.strip()
+
+
+def record_tree(app, tree, base):
+    """Remember that this exact tree passed a full check against `base`: merge-batch merges a branch
+    only when one of these exists for its tree (any worktree of the repository may hold it)."""
+    marker = app / 'target/agent-check/green' / f'tree-{tree}'
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(base + '\n')
 
 
 def excerpt(name, output, limit=60):
@@ -127,6 +136,7 @@ def main():
     run_frontend = bool(frontend) or plan['frontend_all']
     if not (plan['crates'] or plan['other_manifests'] or run_frontend or plan['script_tests']):
         print('check: nothing to check — the diff touches no Rust crate, frontend file or script test')
+        record_tree(app, tree_hash(root), plan['base'])
         return 0
 
     toolchain = run(['rustc', '-vV'], root)[1]
@@ -155,6 +165,8 @@ def main():
     marker = markers / f'{key}.{mode}'
     if not partial and (marker.exists() or (args.quick and (markers / f'{key}.full').exists())):
         print(f'check: already green — same tree {tree[:9]}, rustc {version}, {mode} — skipped')
+        if not args.quick:
+            record_tree(app, tree, plan['base'])
         return 0
 
     env = {**os.environ, 'CARGO_TERM_COLOR': 'never', 'NO_COLOR': '1'}
@@ -198,7 +210,7 @@ def main():
         else:
             step('typecheck', ['npm', '--prefix', str(app), 'run', '--silent', 'typecheck'])
     if args.quick:
-        return finish(failed, partial, steps, log, root, marker, tree, 'quick', crates, frontend, notes)
+        return finish(failed, partial, steps, log, root, marker, tree, 'quick', crates, frontend, notes, plan['base'])
     # 3. tests.
     if crates and 'cargo check' not in failed:
         junit = state / f'{run_id}.junit.xml'
@@ -246,10 +258,10 @@ def main():
             step('vitest', ['npm', '--prefix', str(app), 'test'])
         elif rel:
             step('vitest', ['npx', 'vitest', 'related', '--run'] + rel, cwd=app)
-    return finish(failed, partial, steps, log, root, marker, tree, mode, crates, frontend, notes)
+    return finish(failed, partial, steps, log, root, marker, tree, mode, crates, frontend, notes, plan['base'])
 
 
-def finish(failed, partial, steps, log, root, marker, tree, mode, crates, frontend, notes):
+def finish(failed, partial, steps, log, root, marker, tree, mode, crates, frontend, notes, base):
     for note in notes:
         print(f'note: {note}')
     rel_log = log.relative_to(root) if log.exists() else None
@@ -264,6 +276,8 @@ def finish(failed, partial, steps, log, root, marker, tree, mode, crates, fronte
         print(f'check: PARTIAL ({mode}) — NOT green: {"; ".join(partial)} · {scope} · {timing} · log {rel_log}')
         return 2
     marker.touch()
+    if mode == 'full':
+        record_tree(root / APP, tree, base)
     print(f'check: GREEN ({mode}) — {scope} · {timing} · log {rel_log}')
     return 0
 

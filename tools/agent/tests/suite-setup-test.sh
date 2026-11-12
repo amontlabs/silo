@@ -7,6 +7,7 @@ W=$(mktemp -d "${TMPDIR:-/tmp}/suite-setup-test.XXXXXX"); W=$(cd "$W" && pwd -P)
 export TMPDIR=$W/tmp; mkdir -p "$TMPDIR"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 export SILO_AGENT_CACHE=$W/cache
+unset SILO_GITHUB_APP_SLUG SILO_GITHUB_CLIENT_ID SILO_GITHUB_CLIENT_SECRET
 N=0; BAD=0
 ok() { N=$((N+1)); if [ "$2" = 0 ]; then echo "PASS $1"; else echo "FAIL $1 ${3:-}"; BAD=$((BAD+1)); fi; }
 t() { if eval "$2"; then ok "$1" 0; else ok "$1" 1 "${3:-}"; fi; }
@@ -66,7 +67,7 @@ run() {   # run ENV... : one suite launch; leaves its log in $B.log and verdict 
 }
 
 run RC_STATUS=hit
-t "a runtime-cache hit restores the runtime inside the suite worktree" 'grep -q "bin=from-cache," $W/cargo.out && ! grep -q "bin=msb" $W/cargo.out' "$(cat $W/cargo.out)"
+t "a runtime-cache hit restores the runtime inside the suite worktree and resources it lacks are cloned from the checkout" 'grep -q "bin=from-cache,msb, rt=r," $W/cargo.out' "$(cat $W/cargo.out)"
 run RC_STATUS=miss
 t "a runtime-cache miss never prepares: the runtime is cloned from the checkout" 'grep -q "bin=msb, rt=r," $W/cargo.out && ! grep -q from-cache $W/cargo.out' "$(cat $W/cargo.out) $(cat $B.log | tail -3)"
 t "the github-build.local.json of the checkout is copied and not printed" 'grep -q "file=yes slug=$" $W/cargo.out && ! grep -rq SECRETCONTENT $B.log $B.done' "$(cat $W/cargo.out)"
