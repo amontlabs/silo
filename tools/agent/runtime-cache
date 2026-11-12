@@ -12,7 +12,14 @@ identity and recipe environment (as upstream preparation keys on them), the Swif
 version and macOS SDK, the staging scripts, the macOS gateway and network-bootstrap sources, and package.json
 (the app version goes into release-info.json).
 
-Store: $SILO_AGENT_CACHE/runtime/<key>/ (default ~/Library/Caches/silo-agent on macOS,
+The Linux `silo` that `runtime:prepare` also stages (runtime/guest-silo, bundled as guest-support/silo) is built
+from the workspace's own sources, so it has a second entry with its own key: sha256 of the source of every
+local crate silo-cli depends on (from `cargo metadata`), Cargo.lock, the workspace manifest and toolchain
+pin, the staging script, the Rust flag environment, the pinned rustc and Zig versions and the guest target.
+Only a build that really produced the program is saved; a development build without Zig stages a manifest
+saying so (not saved, rebuilt each time).
+
+Store: $SILO_AGENT_CACHE/runtime/<key>/ and $SILO_AGENT_CACHE/runtime/guest-silo-<key>/ (default ~/Library/Caches/silo-agent on macOS,
 ~/.cache/silo-agent elsewhere). Nothing is ever committed. An entry is saved only right after a
 successful prepare in the same run, published atomically, and carries a checksum of every file;
 a hit verifies them first and restores through a temporary folder inside src-tauri.
@@ -87,6 +94,94 @@ def compute_key(triple):
     for name in files:
         h.update(name.encode() + b"\0" + hashlib.sha256((APP / name).read_bytes()).digest())
     return h.hexdigest()[:32]
+
+
+def guest_key(triple):
+    """Key of runtime/guest-silo, or None when the silo-cli closure cannot be read."""
+    inputs = json.loads((APP / "runtime-inputs.json").read_text())
+    arch = "x86_64" if triple.startswith("x86_64") else "aarch64"
+    musl = f"{arch}-unknown-linux-musl"
+    try:
+        meta = json.loads(out(["cargo", "metadata", "--format-version", "1", "--offline", "--locked", "--filter-platform", musl], cwd=APP))
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return None
+    packages = {p["id"]: p for p in meta["packages"]}
+    nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
+    todo, seen = [p["id"] for p in meta["packages"] if p["name"] == "silo-cli"], set()
+    while todo:
+        i = todo.pop()
+        if i not in seen:
+            seen.add(i)
+            todo += [d["pkg"] for d in nodes[i]["deps"] if any(k.get("kind") in (None, "build") for k in d["dep_kinds"])]
+    if not seen:
+        return None
+    root = Path(meta["workspace_root"])
+    files = [root / n for n in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/config.toml")]
+    files.append(APP / "scripts/guest-silo-runtime.mjs")
+    for i in sorted(seen):
+        if packages[i]["source"] is None:
+            for dirpath, dirs, names in os.walk(Path(packages[i]["manifest_path"]).parent):
+                dirs[:] = sorted(d for d in dirs if d not in ("target", "node_modules", ".git"))
+                files += [Path(dirpath) / n for n in sorted(names)]
+    h = hashlib.sha256()
+    names = ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_RUSTFLAGS", f"CARGO_TARGET_{musl.upper().replace('-', '_')}_RUSTFLAGS"]
+    names += sorted(n for n in os.environ if n.startswith("CARGO_PROFILE_"))
+    zig = os.environ.get("SILO_ZIG", "").strip() or "zig"
+    for line in [f"guest={musl}", f"rustc={try_out(['rustc', '+' + inputs['toolchain'], '--version'])}", f"zig={try_out([zig, 'version'])}",
+                 *(f"{n}={os.environ.get(n)!r}" for n in names)]:
+        h.update(line.encode() + b"\0")
+    for f in files:
+        if f.is_file():
+            h.update(str(f.relative_to(root) if f.is_relative_to(root) else f).encode() + b"\0" + hashlib.sha256(f.read_bytes()).digest())
+    return h.hexdigest()[:32]
+
+
+def guest_ready():
+    """runtime/guest-silo holds a built program (not the 'unavailable' manifest)."""
+    try:
+        manifest = json.loads((TAURI / "runtime/guest-silo/manifest.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return manifest.get("available") is True and (TAURI / "runtime/guest-silo/silo").is_file()
+
+
+def guest_entry(triple):
+    key = guest_key(triple)
+    return key, (cache_root() / f"guest-silo-{key}" if key else None)
+
+
+def guest_cached(entry):
+    return bool(entry) and bool(entry_paths(entry, required=lambda ps: "runtime/guest-silo" in ps))
+
+
+def guest_save(triple, replace):
+    key, entry = guest_entry(triple)
+    if entry is None or not guest_ready():
+        return
+    with locked(entry, exclusive=True):
+        save_locked(entry, triple, replace, paths=["runtime/guest-silo"], required=lambda ps: "runtime/guest-silo" in ps)
+    print(f"runtime-cache: saved guest-silo {key}")
+
+
+def guest_ensure(triple):
+    """Put runtime/guest-silo in place: from the cache, else built by stage-guest-silo.mjs (saved when real)."""
+    key, entry = guest_entry(triple)
+    if entry is not None:
+        with locked(entry, exclusive=False):
+            paths = entry_paths(entry, required=lambda ps: "runtime/guest-silo" in ps)
+            if paths:
+                restore(entry, paths)
+                print(f"runtime-cache: hit guest-silo {key}")
+                return
+    print(f"runtime-cache: miss guest-silo {key}, building it", flush=True)
+    remove(TAURI / "runtime/guest-silo")
+    code = subprocess.run(["node", "scripts/stage-guest-silo.mjs"], cwd=APP, stdout=subprocess.DEVNULL).returncode
+    if guest_ready():
+        guest_save(triple, replace=False)
+    elif (TAURI / "runtime/guest-silo/manifest.json").exists():
+        print("runtime-cache: guest-silo is not available in this build (see the message above); not saved")
+    else:
+        sys.exit(f"runtime-cache: the guest silo could not be built (exit {code})")
 
 
 def cache_root():
@@ -165,7 +260,11 @@ def checksums(base):
     return sums
 
 
-def entry_paths(entry):
+def runtime_complete(paths):
+    return any(p.startswith("binaries/msb-") for p in paths) and "runtime/microsandbox" in paths
+
+
+def entry_paths(entry, required=runtime_complete):
     """The manifest paths of a complete, intact entry, or None."""
     try:
         m = json.loads((entry / "manifest.json").read_text())
@@ -174,7 +273,7 @@ def entry_paths(entry):
         return None
     if not (isinstance(paths, list) and paths and isinstance(sums, dict) and all(safe_rel(p) for p in paths)):
         return None
-    if not (any(p.startswith("binaries/msb-") for p in paths) and "runtime/microsandbox" in paths):
+    if not required(paths):
         return None
     files = entry / "files"
     if not all((files / p).exists() or (files / p).is_symlink() for p in paths):
@@ -187,9 +286,9 @@ def save(entry, triple, replace):
         save_locked(entry, triple, replace)
 
 
-def save_locked(entry, triple, replace):
-    paths = [str(p) for p in outputs(triple)]
-    if not any(p.startswith("binaries/msb-") for p in paths) or "runtime/microsandbox" not in paths or not all(safe_rel(p) for p in paths):
+def save_locked(entry, triple, replace, paths=None, required=runtime_complete):
+    paths = paths or [str(p) for p in outputs(triple)]
+    if not required(paths) or not all(safe_rel(p) for p in paths):
         sys.exit("runtime-cache: runtime:prepare outputs are missing or unsafe; nothing saved")
     entry.parent.mkdir(parents=True, exist_ok=True)
     tmp = entry.with_name(f".tmp-{entry.name}-{os.getpid()}")
@@ -199,7 +298,7 @@ def save_locked(entry, triple, replace):
             clone(TAURI / p, tmp / "files" / p)
         manifest = {"target": triple, "paths": paths, "checksums": checksums(tmp / "files")}
         (tmp / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
-        if entry.exists() and not replace and entry_paths(entry):
+        if entry.exists() and not replace and entry_paths(entry, required):
             print(f"runtime-cache: {entry.name} already saved; keeping it")
             return
         old = None
@@ -246,7 +345,10 @@ def main():
     key = compute_key(triple)
     entry = cache_root() / key
     if args.status:
-        print(f"key {key}\ntarget {triple}\nstore {entry}\n{'hit' if entry_paths(entry) else 'miss'}")
+        gkey, gentry = guest_entry(triple)
+        runtime_hit, guest_hit = bool(entry_paths(entry)), guest_cached(gentry)
+        print(f"key {key}\ntarget {triple}\nstore {entry}\nruntime {'hit' if runtime_hit else 'miss'}\n"
+              f"guest-silo key {gkey or 'unavailable'}\nguest-silo {'hit' if guest_hit else 'miss'}\n{'hit' if runtime_hit and guest_hit else 'miss'}")
         return
     if not args.force:
         with locked(entry, exclusive=False):
@@ -254,13 +356,16 @@ def main():
             if paths:
                 restore(entry, paths)
                 print(f"runtime-cache: hit {key}, restored {len(paths)} paths")
-                return
+        if paths:
+            guest_ensure(triple)
+            return
     print(f"runtime-cache: miss {key}, running runtime:prepare", flush=True)
     cmd = shlex.split(os.environ["RUNTIME_PREPARE_CMD"]) if os.environ.get("RUNTIME_PREPARE_CMD") else ["npm", "--prefix", str(APP), "run", "runtime:prepare"]
     if subprocess.run(cmd, cwd=ROOT).returncode:
         sys.exit("runtime-cache: runtime:prepare failed; nothing saved")
     save(entry, triple, replace=args.force)
     print(f"runtime-cache: saved {entry}")
+    guest_save(triple, replace=args.force)
 
 
 main()
