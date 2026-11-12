@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Not the full public suffix list: the common names under which unrelated people get their own hosts. A `*.` pattern over one of these (or over a bare top-level name) is refused, because it would allow every host under it.",
+  "note": "Names under which unrelated people get their own hosts, refused for a `*.` pattern in addition to the Public Suffix List the engine compiles in (the `psl` crate). The user interface uses this list for an early answer; the engine decides.",
   "suffixes": [
     "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk", "net.uk", "sch.uk",
     "com.au", "net.au", "org.au", "edu.au", "gov.au", "id.au",
@@ -24,6 +24,14 @@
     "azurewebsites.net", "cloudapp.azure.com", "blob.core.windows.net",
     "cloudfront.net", "amazonaws.com", "s3.amazonaws.com", "elasticbeanstalk.com",
     "blogspot.com", "wordpress.com", "myshopify.com", "weebly.com", "wixsite.com",
-    "github.dev", "githubusercontent.com", "gist.github.com", "supabase.co", "railway.app"
+    "github.dev", "githubusercontent.com", "gist.github.com", "supabase.co", "railway.app",
+    "azure.com", "azure.net", "windows.net", "core.windows.net", "database.windows.net",
+    "search.windows.net", "scm.azurewebsites.net", "vault.azure.net", "openai.azure.com",
+    "cognitiveservices.azure.com", "googleusercontent.com", "firebaseio.com",
+    "firebasestorage.app", "oraclecloud.com", "aliyuncs.com", "myqcloud.com",
+    "myhuaweicloud.com", "herokudns.com", "scw.cloud", "backblazeb2.com",
+    "r2.cloudflarestorage.com", "netlify.com", "glitch.com", "webcontainer.io",
+    "codesandbox.io", "gitpod.io", "fastly.net", "b-cdn.net", "visualstudio.com",
+    "appdomain.cloud", "mybluemix.net", "salesforce.com", "force.com"
   ]
 }

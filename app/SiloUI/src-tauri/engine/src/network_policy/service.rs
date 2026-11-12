@@ -22,7 +22,10 @@ use crate::runtime::RuntimePaths;
 pub enum Target<'a> {
     Linux(&'a RuntimePaths),
     /// A macOS computer: its name and whether it is running.
-    Macos { name: String, running: bool },
+    Macos {
+        name: String,
+        running: bool,
+    },
 }
 
 static GATEWAYS: Mutex<Option<HashMap<String, (Value, bool)>>> = Mutex::new(None);
@@ -91,7 +94,7 @@ fn resolve(computer_id: &str, target: &Target<'_>) -> Result<Resolved, String> {
         Target::Macos { name, running } => {
             let held = match &stored {
                 Some(stored) => stored.held(),
-                None => Held::latest(effective(None, None)),
+                None => Held::unpinned(effective(None, None)),
             };
             let grants = Grants::of_computer(name);
             let plan = plan_held(&held, &grants, &extra_rules(computer_id));
@@ -127,7 +130,7 @@ fn resolve_linux(
     } else {
         match &stored {
             Some(stored) => stored.held(),
-            None => Held::latest(effective(None, recorded)),
+            None => Held::unpinned(effective(None, recorded)),
         }
     };
     let grants = Grants::of_computer(&view.name);
@@ -163,7 +166,9 @@ pub(crate) fn judged_from_view(
 /// The policy the engine judges a computer's calls against: exactly what `network.policy.get`
 /// reports. `None` when it cannot be read, so a check against it asks.
 pub fn judged(computer_id: &str, target: Target<'_>) -> Option<Held> {
-    resolve(computer_id, &target).ok().map(|resolved| resolved.held)
+    resolve(computer_id, &target)
+        .ok()
+        .map(|resolved| resolved.held)
 }
 
 fn state(computer_id: &str, resolved: Resolved) -> NetworkPolicyState {
@@ -179,7 +184,12 @@ fn state(computer_id: &str, resolved: Resolved) -> NetworkPolicyState {
         .collect();
     NetworkPolicyState {
         computer_id: computer_id.to_owned(),
-        preset_updates: resolved.held.preset_updates(),
+        preset_updates: resolved
+            .held
+            .preset_updates()
+            .into_iter()
+            .chain(resolved.held.grant_updates(&resolved.grants))
+            .collect(),
         policy: resolved.held.policy,
         allowed_hosts: resolved.plan.hosts,
         timing: resolved.timing,

@@ -16,11 +16,12 @@ use std::{
     io::{Read, Write},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        Arc,
     },
     time::{Duration, Instant},
 };
 
+use crate::guest::HintQueue;
 use serde_json::{json, Value};
 
 /// The stream method's name on the bridge.
@@ -57,15 +58,23 @@ pub fn read_watch_frame(reader: impl Read) -> Result<WatchFrame, String> {
     decode_frame(&crate::remote::read_stream_frame(reader)?)
 }
 
+struct EndOnDrop(Arc<HintQueue>);
+
+impl Drop for EndOnDrop {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
+
 /// A watch being served: the hints it produced and the flag that ends it.
 pub struct Watching {
-    pub hints: mpsc::Receiver<String>,
+    hints: Arc<HintQueue>,
     live: Arc<AtomicBool>,
 }
 
 impl Watching {
-    /// Starts the watch with `start`. Its hints queue without bound only as far as the
-    /// folder changes: the guest helper coalesces bursts into one hint per look.
+    /// Starts the watch with `start`. Hints wait in a small queue that holds each folder once,
+    /// so a slow connection never makes the owner hold more than a few folder names.
     pub fn start(
         params: &Value,
         start: impl FnOnce(
@@ -74,16 +83,12 @@ impl Watching {
             Arc<dyn Fn() -> bool + Send + Sync>,
         ) -> Result<(), String>,
     ) -> Result<Self, String> {
-        let (sender, hints) = mpsc::channel::<String>();
+        let hints = Arc::new(HintQueue::default());
         let live = Arc::new(AtomicBool::new(true));
         let emit: Arc<dyn Fn(String) + Send + Sync> = {
-            let sender = std::sync::Mutex::new(sender);
-            Arc::new(move |path| {
-                let _ = sender
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .send(path);
-            })
+            // The queue ends when the watch lets go of `emit`, which is when it ends.
+            let hints = EndOnDrop(hints.clone());
+            Arc::new(move |path| hints.0.push(&path))
         };
         let wanted: Arc<dyn Fn() -> bool + Send + Sync> = {
             let live = live.clone();
@@ -97,6 +102,7 @@ impl Watching {
 impl Drop for Watching {
     fn drop(&mut self) {
         self.live.store(false, Ordering::Release);
+        self.hints.close();
     }
 }
 
@@ -114,13 +120,13 @@ pub fn serve(
     while connected() && allowed() {
         let frame = match watching.hints.recv_timeout(LIVENESS.min(heartbeat)) {
             Ok(path) => json!({"type": "changed", "path": path}),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
+            Err(false) => {
                 if last_write.elapsed() < heartbeat {
                     continue;
                 }
                 json!({"type": "heartbeat"})
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            Err(true) => return,
         };
         if crate::remote::write_stream_frame(&mut writer, &frame).is_err() {
             return;
@@ -198,5 +204,24 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error, "No such computer.");
+    }
+
+    #[test]
+    fn hints_nobody_reads_yet_do_not_pile_up() {
+        let emitter = Arc::new(std::sync::Mutex::new(
+            None::<Arc<dyn Fn(String) + Send + Sync>>,
+        ));
+        let e = emitter.clone();
+        let watching = Watching::start(&json!({}), move |_, emit, _| {
+            *e.lock().unwrap() = Some(emit);
+            Ok(())
+        })
+        .unwrap();
+        let emit = emitter.lock().unwrap().clone().unwrap();
+        for index in 0..100_000 {
+            emit(format!("/folder-{}", index % 5000));
+            emit("/same".into());
+        }
+        assert!(watching.hints.drain().len() <= 64);
     }
 }

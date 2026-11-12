@@ -14,6 +14,7 @@
 mod commands;
 mod exec;
 mod files;
+mod hints;
 pub mod macos;
 mod process;
 mod session;
@@ -32,6 +33,7 @@ pub use session::{
 };
 pub use ssh_alias::{ensure_alias, remove_alias, AliasEnsure, AliasOutcome};
 pub use target::{resolve, Account, Target};
+pub(crate) use hints::HintQueue;
 pub use watch::{start_watch, WatchHandle};
 
 use silo_api::jobs::ErrorCode;
@@ -39,6 +41,9 @@ use silo_api::jobs::ErrorCode;
 /// Largest raw byte count a response may carry so that its JSON integer-array encoding
 /// (up to four characters per byte) and envelope stay inside one 4 MiB frame.
 pub const MAX_RESPONSE_RAW_BYTES: usize = 960 * 1024;
+/// The most standard error a guest helper run (control, files, endpoint checks) may print
+/// before it is stopped.
+pub(crate) const HELPER_STDERR_BYTES: usize = 64 * 1024;
 /// Encoded bytes a complete result may occupy; the frame limit minus envelope room.
 pub const MAX_RESULT_ENCODED_BYTES: usize = 4 * 1024 * 1024 - 64 * 1024;
 /// The default stdout allowance of a bounded run (95 A-37; B-32 candidate).

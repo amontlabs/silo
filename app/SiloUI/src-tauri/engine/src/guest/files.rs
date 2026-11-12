@@ -4,10 +4,10 @@
 //! guest (`helpers/files.pl`) opens, stages, commits and lists, so metadata always belongs to
 //! the bytes it describes and commits are atomic in the guest filesystem.
 use super::{
-    exec::{perl_argv, FILES},
-    process::{self, Stopped},
+    exec::{perl_argv, supervised, terminate, FILES},
+    process::{self, StderrLimit, Stopped},
     target::Target,
-    GuestError, MAX_RESPONSE_RAW_BYTES,
+    GuestError, HELPER_STDERR_BYTES, MAX_RESPONSE_RAW_BYTES,
 };
 use silo_api::jobs::ErrorCode;
 use std::{
@@ -16,7 +16,10 @@ use std::{
     time::Duration,
 };
 
+#[cfg(not(test))]
 const FILE_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const FILE_TIMEOUT: Duration = Duration::from_secs(3);
 const LIST_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 
 /// A file read: the requested bytes and the metadata of the file they came from.
@@ -314,15 +317,21 @@ pub(crate) fn run_argv(
     max_stdout: usize,
 ) -> Result<Vec<u8>, GuestError> {
     target.ensure_running()?;
-    let plan = target.plan(argv, &[], false, stdin.is_some())?;
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let argv = supervised(&token, None, argv);
+    let plan = target.plan(&argv, &[], false, stdin.is_some())?;
+    // Killing the host client alone would leave the helper running in the guest.
+    let end_guest = || {
+        let _ = terminate(target, false, &token);
+    };
     let outcome = process::run_collect(
         &plan,
         stdin,
         FILE_TIMEOUT,
         max_stdout,
-        16 * 1024,
+        StderrLimit::Keep(HELPER_STDERR_BYTES),
         None,
-        &|| {},
+        &end_guest,
     )?;
     let collected = match outcome {
         Ok(collected) => collected,
@@ -335,6 +344,11 @@ pub(crate) fn run_argv(
         Err(Stopped::Overflow) => {
             return Err(GuestError::internal(
                 "The result is larger than one response can carry.",
+            ))
+        }
+        Err(Stopped::StderrOverflow) => {
+            return Err(GuestError::internal(
+                "The computer's file helper printed too much error output.",
             ))
         }
         Err(Stopped::Cancelled) => return Err(GuestError::new(ErrorCode::Cancelled, "Cancelled.")),
@@ -759,5 +773,55 @@ mod tests {
             std::fs::read(folder.join("settings.json")).unwrap(),
             b"later"
         );
+    }
+
+    fn sh(script: &str) -> Vec<String> {
+        vec!["sh".into(), "-c".into(), script.into()]
+    }
+
+    #[test]
+    fn a_helper_that_prints_a_lot_of_error_output_still_reports_its_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let error = run_argv(
+            &target,
+            &sh("printf 'silo-files: nothing here\\n' >&2; head -c 300000 /dev/zero | tr '\\0' x >&2; exit 64"),
+            None,
+            1024,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert_eq!(error.message, "nothing here");
+    }
+
+    #[test]
+    fn a_helper_that_runs_past_its_deadline_is_ended_in_the_guest() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let pid_file = directory.path().join("helper.pid");
+        let error = run_argv(
+            &target,
+            &sh(&format!(
+                "echo $$ > '{}'; exec sleep 300",
+                pid_file.display()
+            )),
+            None,
+            1024,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::TimedOut);
+        let pid: i32 = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the helper kept running in the guest"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 }

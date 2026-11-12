@@ -93,7 +93,18 @@ const FIRST_PRESET_VERSION: u32 = 1;
 
 /// The version of each preset a policy was approved at, by preset name. A preset without an
 /// entry was approved at the first version.
+///
+/// The hosts a GitHub grant adds are pinned under [`GITHUB_GRANT_PIN`], whether or not the
+/// policy lists the `github` preset, so that a later GitHub list reaches a computer only when
+/// the owner accepts it. A policy saved before grants were pinned has no such entry and holds
+/// the first version, which is the list GitHub access has always added.
 pub type Pins = BTreeMap<String, u32>;
+
+/// The [`Pins`] key of the hosts a computer's GitHub access adds.
+pub const GITHUB_GRANT_PIN: &str = "grant:github";
+
+/// What an update to the hosts a GitHub grant adds is called when it is offered for approval.
+const GITHUB_GRANT_TITLE: &str = "GitHub access";
 
 /// A named host list from `presets.json`.
 #[derive(Clone, Debug)]
@@ -175,7 +186,10 @@ fn load_presets(text: &str) -> Result<Vec<Preset>, String> {
                     .bytes()
                     .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
             {
-                return Err(format!("preset name {:?} is invalid or repeated", entry.name));
+                return Err(format!(
+                    "preset name {:?} is invalid or repeated",
+                    entry.name
+                ));
             }
             if entry.version < FIRST_PRESET_VERSION {
                 return Err(format!("preset {} has no version", entry.name));
@@ -183,7 +197,9 @@ fn load_presets(text: &str) -> Result<Vec<Preset>, String> {
             let mut history = Vec::new();
             for earlier in entry.history {
                 if earlier.version >= entry.version
-                    || history.iter().any(|(version, _)| *version == earlier.version)
+                    || history
+                        .iter()
+                        .any(|(version, _)| *version == earlier.version)
                 {
                     return Err(format!(
                         "preset {} lists version {} twice or after its own",
@@ -274,13 +290,55 @@ impl Held {
             .presets
             .iter()
             .filter_map(|name| preset(name).map(|preset| (name.clone(), preset.version)))
+            .chain(preset("github").map(|preset| (GITHUB_GRANT_PIN.to_owned(), preset.version)))
             .collect();
         Self { policy, pins }
     }
 
+    /// `policy` handed on from a computer that holds `source`: a preset the source lists keeps
+    /// the version the source was approved at (none means the first), the GitHub grant keeps
+    /// the source's version, and a preset added now is pinned to the version this Silo has.
+    /// With no `source` nothing was approved yet: the grant holds the first version.
+    pub fn inheriting(policy: NetworkPolicy, source: Option<&Held>) -> Self {
+        let mut held = Self::latest(policy);
+        match source.and_then(|source| source.pins.get(GITHUB_GRANT_PIN)) {
+            Some(version) => held.pins.insert(GITHUB_GRANT_PIN.to_owned(), *version),
+            None => held.pins.remove(GITHUB_GRANT_PIN),
+        };
+        if let Some(source) = source {
+            for name in source
+                .policy
+                .presets
+                .iter()
+                .filter(|name| held.policy.presets.contains(name))
+            {
+                match source.pins.get(name) {
+                    Some(version) => held.pins.insert(name.clone(), *version),
+                    None => held.pins.remove(name),
+                };
+            }
+        }
+        held
+    }
+
+    /// `policy` for a computer with no saved entry: every preset and the GitHub grant hold the
+    /// first version, like an entry saved before versions existed, so a newer list reaches it
+    /// only when the owner accepts it.
+    pub fn unpinned(policy: NetworkPolicy) -> Self {
+        Self {
+            policy,
+            pins: Pins::new(),
+        }
+    }
+
     /// The hosts of every preset of the policy as approved, and per preset the hosts an update
     /// would add: `(name, title, added)`.
-    fn preset_hosts(&self) -> (Vec<(String, Vec<Allowed>)>, Vec<(String, String, Vec<Allowed>)>) {
+    fn preset_hosts(
+        &self,
+    ) -> (
+        Vec<(String, Vec<Allowed>)>,
+        Vec<(String, String, Vec<Allowed>)>,
+    ) {
         let mut hosts = Vec::new();
         let mut updates = Vec::new();
         for name in &self.policy.presets {
@@ -300,17 +358,41 @@ impl Held {
         self.preset_hosts()
             .1
             .into_iter()
-            .map(|(name, title, added)| NetworkPresetUpdate {
-                name,
-                title,
-                added_hosts: added
-                    .iter()
-                    .map(|allowed| allowed.host.clone())
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect(),
-            })
+            .map(|(name, title, added)| update_of(name, title, &added))
             .collect()
+    }
+
+    /// The hosts a GitHub grant would add that this policy was not approved with: one update
+    /// when `grants` hold GitHub access and the running GitHub list has grown past the pin.
+    pub fn grant_updates(&self, grants: &Grants) -> Vec<NetworkPresetUpdate> {
+        if !grants.github {
+            return Vec::new();
+        }
+        let Some(github) = preset("github") else {
+            return Vec::new();
+        };
+        let (_, added) = github.hosts_at(self.pins.get(GITHUB_GRANT_PIN).copied());
+        if added.is_empty() {
+            return Vec::new();
+        }
+        vec![update_of(
+            GITHUB_GRANT_PIN.to_owned(),
+            GITHUB_GRANT_TITLE.to_owned(),
+            &added,
+        )]
+    }
+}
+
+fn update_of(name: String, title: String, added: &[Allowed]) -> NetworkPresetUpdate {
+    NetworkPresetUpdate {
+        name,
+        title,
+        added_hosts: added
+            .iter()
+            .map(|allowed| allowed.host.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
     }
 }
 
@@ -347,17 +429,18 @@ pub fn validate_host(host: &str) -> Result<(), String> {
     if host.contains(':') {
         return refuse("give a name without a port; port 443 is allowed");
     }
-    if !name
-        .bytes()
-        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'.')
-    {
+    if !name.bytes().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'.'
+    }) {
         return refuse("use lowercase letters, digits, hyphens and dots only");
     }
     let labels: Vec<&str> = name.split('.').collect();
     if labels.iter().any(|label| {
         label.is_empty() || label.len() > 63 || label.starts_with('-') || label.ends_with('-')
     }) {
-        return refuse("each part between dots has 1 to 63 characters and does not start or end with a hyphen");
+        return refuse(
+            "each part between dots has 1 to 63 characters and does not start or end with a hyphen",
+        );
     }
     if labels.len() < 2 {
         return refuse("a top-level name alone would allow a whole domain");
@@ -384,9 +467,9 @@ struct SuffixFile {
     suffixes: Vec<String>,
 }
 
-/// The common multi-label public suffixes from `public_suffixes.json`: not the full public
-/// suffix list.
-fn public_suffixes() -> &'static BTreeSet<String> {
+/// The names `public_suffixes.json` adds to the Public Suffix List: shared hosting Silo has
+/// always refused a `*.` pattern over, which the list does not carry as suffixes.
+fn extra_suffixes() -> &'static BTreeSet<String> {
     static SUFFIXES: OnceLock<BTreeSet<String>> = OnceLock::new();
     SUFFIXES.get_or_init(|| {
         let file: SuffixFile = serde_json::from_str(include_str!("public_suffixes.json"))
@@ -396,9 +479,16 @@ fn public_suffixes() -> &'static BTreeSet<String> {
     })
 }
 
-/// Whether `name` is one of the listed public suffixes.
+/// Whether a `*.` pattern over `name` would cover separately owned hosts: `name` is a public
+/// suffix on the Public Suffix List, ICANN or private (`co.uk`, `github.io`, `duckdns.org`), or
+/// every name directly under it is one (`sch.uk`, `compute.amazonaws.com`, which the list covers
+/// with a `*.` rule), or it is one of the [`extra_suffixes`]. The list is compiled into the
+/// build (`psl`). A name below a suffix, even one under a top-level name the list does not
+/// know, is not one.
 fn is_public_suffix(name: &str) -> bool {
-    public_suffixes().contains(name)
+    let name = name.to_ascii_lowercase();
+    let on_the_list = |name: &str| psl::domain(name.as_bytes()).is_none();
+    on_the_list(&name) || on_the_list(&format!("x.{name}")) || extra_suffixes().contains(&name)
 }
 
 /// Whether `host` is a `*.` pattern a network rule refuses for being too wide, whatever else is
@@ -414,7 +504,9 @@ pub fn validate(policy: &NetworkPolicy) -> Result<NetworkPolicy, String> {
         return Err(format!("A network policy lists at most {MAX_HOSTS} hosts."));
     }
     if policy.presets.len() > MAX_PRESETS {
-        return Err(format!("A network policy uses at most {MAX_PRESETS} presets."));
+        return Err(format!(
+            "A network policy uses at most {MAX_PRESETS} presets."
+        ));
     }
     for host in &policy.hosts {
         validate_host(host)?;
@@ -513,18 +605,45 @@ fn uncovered(new: &BTreeSet<Allowed>, current: &BTreeSet<Allowed>) -> Vec<Allowe
 pub fn no_wider(new: &NetworkPolicy, current: &NetworkPolicy) -> bool {
     no_wider_held(
         &Held::latest(new.clone()),
+        &Grants::default(),
         &Held::latest(current.clone()),
+        &Grants::default(),
     )
 }
 
-/// [`no_wider`] with the preset versions each policy was approved at.
-pub fn no_wider_held(new: &Held, current: &Held) -> bool {
+/// [`no_wider`] with the preset versions each policy was approved at and the hosts each
+/// computer's grants add at the version it holds them.
+pub fn no_wider_held(
+    new: &Held,
+    new_grants: &Grants,
+    current: &Held,
+    current_grants: &Grants,
+) -> bool {
     use NetworkPolicyMode::*;
     match (new.policy.mode, current.policy.mode) {
         (Closed, _) | (_, Open) => true,
         (Open, _) | (Allowlist, Closed) => false,
-        (Allowlist, Allowlist) => uncovered(&expand_held(new), &expand_held(current)).is_empty(),
+        (Allowlist, Allowlist) => uncovered(
+            &expand_with_grants(new, new_grants),
+            &expand_with_grants(current, current_grants),
+        )
+        .is_empty(),
     }
+}
+
+/// What an allowlist lets through with its grants: [`expand_held`] and the hosts the grants add
+/// at the versions `held` pins.
+fn expand_with_grants(held: &Held, grants: &Grants) -> BTreeSet<Allowed> {
+    let mut allowed = expand_held(held);
+    if held.policy.mode == NetworkPolicyMode::Allowlist {
+        allowed.extend(
+            grants
+                .hosts(&held.pins)
+                .into_iter()
+                .map(|(allowed, _)| allowed),
+        );
+    }
+    allowed
 }
 
 fn mode_words(mode: NetworkPolicyMode) -> &'static str {
@@ -567,12 +686,21 @@ pub fn widening_summary(computer: &str, current: &NetworkPolicy, new: &NetworkPo
     widening_summary_held(
         computer,
         &Held::latest(current.clone()),
+        &Grants::default(),
         &Held::latest(new.clone()),
+        &Grants::default(),
     )
 }
 
-/// [`widening_summary`] with the preset versions each policy was approved at.
-pub fn widening_summary_held(computer: &str, current: &Held, new: &Held) -> String {
+/// [`widening_summary`] with the preset versions each policy was approved at and the grants
+/// each computer holds.
+pub fn widening_summary_held(
+    computer: &str,
+    current: &Held,
+    current_grants: &Grants,
+    new: &Held,
+    new_grants: &Grants,
+) -> String {
     let mut summary = if new.policy.mode == current.policy.mode {
         format!("Widen the network of {computer}")
     } else {
@@ -583,7 +711,10 @@ pub fn widening_summary_held(computer: &str, current: &Held, new: &Held) -> Stri
         )
     };
     if new.policy.mode == NetworkPolicyMode::Allowlist {
-        let added = uncovered(&expand_held(new), &expand_held(current));
+        let added = uncovered(
+            &expand_with_grants(new, new_grants),
+            &expand_with_grants(current, current_grants),
+        );
         if !added.is_empty() {
             summary.push_str(&format!(", adding {}", host_words(&added)));
         } else if current.policy.mode == NetworkPolicyMode::Closed {
@@ -614,6 +745,14 @@ pub(crate) fn use_test_grants(grants: Option<Grants>) {
 }
 
 impl Grants {
+    /// Only GitHub access, for comparing the hosts it adds.
+    pub fn github_only(github: bool) -> Self {
+        Self {
+            github,
+            secrets: Vec::new(),
+        }
+    }
+
     /// The grants of the computer named `name`, read from the GitHub and secret stores.
     pub fn of_computer(name: &str) -> Self {
         #[cfg(test)]
@@ -642,18 +781,19 @@ impl Grants {
             .collect()
     }
 
-    /// The hosts these grants add, with where each comes from. A secret allowed to any host
-    /// adds nothing: an allowlist computer can send it only to hosts on its list. A wildcard
-    /// over a public suffix adds nothing either ([`Self::too_wide`]).
-    fn hosts(&self) -> Vec<(Allowed, String)> {
+    /// The hosts these grants add, with where each comes from. GitHub access adds the GitHub
+    /// list at the version `pins` holds. A secret allowed to any host adds nothing: an
+    /// allowlist computer can send it only to hosts on its list. A wildcard over a public
+    /// suffix adds nothing either ([`Self::too_wide`]).
+    fn hosts(&self, pins: &Pins) -> Vec<(Allowed, String)> {
         let mut hosts = Vec::new();
         if self.github {
             if let Some(preset) = preset("github") {
+                let (approved, _) = preset.hosts_at(pins.get(GITHUB_GRANT_PIN).copied());
                 hosts.extend(
-                    preset
-                        .hosts
-                        .iter()
-                        .map(|allowed| (allowed.clone(), "github".to_owned())),
+                    approved
+                        .into_iter()
+                        .map(|allowed| (allowed, "github".to_owned())),
                 );
             }
         }
@@ -817,7 +957,7 @@ pub fn plan_held(held: &Held, grants: &Grants, extras: &[ExtraRule]) -> Plan {
                         .map(|allowed| (allowed, format!("preset:{name}"))),
                 );
             }
-            sources.extend(grants.hosts());
+            sources.extend(grants.hosts(&held.pins));
             let mut seen = BTreeSet::new();
             let mut rules = vec![Rule::Dns];
             let mut hosts: Vec<NetworkPolicyHost> = Vec::new();
@@ -1001,10 +1141,7 @@ pub fn effective(stored: Option<NetworkPolicy>, recorded: Option<&Value>) -> Net
 /// What a computer runs with and the preset versions it was approved at: the stored policy,
 /// else what the runtime's recorded rules mean (see [`effective`]). The error is a stored
 /// policy that cannot be read: the computer must not start on a guess.
-pub fn held_for(
-    computer_id: &str,
-    recorded: Option<&Value>,
-) -> Result<(Held, bool), String> {
+pub fn held_for(computer_id: &str, recorded: Option<&Value>) -> Result<(Held, bool), String> {
     match store::get_stored(computer_id)? {
         Some(stored) => Ok((stored.held(), stored.incoming_denied)),
         None => {
@@ -1016,7 +1153,7 @@ pub fn held_for(
                     .and_then(|recorded| recorded.get("default_ingress"))
                     .and_then(Value::as_str)
                     == Some("deny");
-            Ok((Held::latest(policy), denied))
+            Ok((Held::unpinned(policy), denied))
         }
     }
 }

@@ -76,13 +76,18 @@ fn hosts_are_validated_strictly() {
 
 #[test]
 fn a_policy_is_stored_sorted_and_once_and_capped() {
-    let policy = allowlist(&["b.example.com", "a.example.com", "b.example.com"], &["pypi", "npm", "npm"]);
+    let policy = allowlist(
+        &["b.example.com", "a.example.com", "b.example.com"],
+        &["pypi", "npm", "npm"],
+    );
     let stored = validate(&policy).unwrap();
     assert_eq!(stored.hosts, ["a.example.com", "b.example.com"]);
     assert_eq!(stored.presets, ["npm", "pypi"]);
     assert!(validate(&allowlist(&[], &["no-such-preset"])).is_err());
     assert!(validate(&allowlist(&["1.1.1.1"], &[])).is_err());
-    let many: Vec<String> = (0..=MAX_HOSTS).map(|n| format!("h{n}.example.com")).collect();
+    let many: Vec<String> = (0..=MAX_HOSTS)
+        .map(|n| format!("h{n}.example.com"))
+        .collect();
     let refs: Vec<&str> = many.iter().map(String::as_str).collect();
     assert!(validate(&allowlist(&refs, &[])).is_err());
     assert!(validate(&allowlist(&refs[..MAX_HOSTS], &[])).is_ok());
@@ -112,8 +117,20 @@ fn old_and_partial_records_load_as_open() {
 
 #[test]
 fn presets_load_and_expand_to_their_hosts() {
-    let names: Vec<&str> = presets().iter().map(|preset| preset.name.as_str()).collect();
-    for expected in ["npm", "pypi", "crates", "ubuntu", "homebrew", "github", "anthropic", "openai"] {
+    let names: Vec<&str> = presets()
+        .iter()
+        .map(|preset| preset.name.as_str())
+        .collect();
+    for expected in [
+        "npm",
+        "pypi",
+        "crates",
+        "ubuntu",
+        "homebrew",
+        "github",
+        "anthropic",
+        "openai",
+    ] {
         assert!(names.contains(&expected), "{expected}");
     }
     let expanded = expand(&allowlist(&["example.com"], &["pypi", "ubuntu"]));
@@ -126,16 +143,30 @@ fn presets_load_and_expand_to_their_hosts() {
         ("ports.ubuntu.com", 80),
         ("security.ubuntu.com", 80),
     ] {
-        assert!(expanded.contains(&Allowed::new(host, port)), "{host}:{port}");
+        assert!(
+            expanded.contains(&Allowed::new(host, port)),
+            "{host}:{port}"
+        );
     }
-    assert!(!expanded.iter().any(|allowed| allowed.host == "registry.npmjs.org"));
+    assert!(!expanded
+        .iter()
+        .any(|allowed| allowed.host == "registry.npmjs.org"));
     assert!(expand(&mode(NetworkPolicyMode::Open)).is_empty());
-    assert!(load_presets(r#"{"version":2,"presets":[{"name":"x","title":"X","version":1,"hosts":["1.2.3.4"]}]}"#).is_err());
-    assert!(load_presets(r#"{"version":2,"presets":[{"name":"x","title":"X","version":1,"hosts":[]}]}"#).is_err());
+    assert!(load_presets(
+        r#"{"version":2,"presets":[{"name":"x","title":"X","version":1,"hosts":["1.2.3.4"]}]}"#
+    )
+    .is_err());
+    assert!(load_presets(
+        r#"{"version":2,"presets":[{"name":"x","title":"X","version":1,"hosts":[]}]}"#
+    )
+    .is_err());
     assert!(load_presets(r#"{"version":2,"presets":[{"name":"x","title":"X","version":1,"hosts":["a.com"]},{"name":"x","title":"Y","version":1,"hosts":["b.com"]}]}"#).is_err());
     assert!(load_presets(r#"{"version":3,"presets":[]}"#).is_err());
     let listed = preset_list();
-    let ubuntu = listed.iter().find(|preset| preset.name == "ubuntu").unwrap();
+    let ubuntu = listed
+        .iter()
+        .find(|preset| preset.name == "ubuntu")
+        .unwrap();
     assert_eq!(ubuntu.hosts.len(), 3);
 }
 
@@ -147,8 +178,14 @@ fn rules_match_the_argument_lists_tried_in_s1() {
     assert_eq!(
         open.rule_args(),
         args(&[
-            "--net-default-egress", "deny", "--net-default-ingress", "allow",
-            "--net-rule", "allow@dns", "--net-rule", "allow@public",
+            "--net-default-egress",
+            "deny",
+            "--net-default-ingress",
+            "allow",
+            "--net-rule",
+            "allow@dns",
+            "--net-rule",
+            "allow@public",
         ])
     );
     assert!(open.strict);
@@ -163,19 +200,40 @@ fn rules_match_the_argument_lists_tried_in_s1() {
     assert_eq!(
         with_channel.create_args(),
         args(&[
-            "--net-default-egress", "deny", "--net-default-ingress", "allow",
-            "--net-rule", "allow@dns", "--net-rule", "allow@host:tcp:47311",
-            "--net-rule", "allow@public", "--net-strict=true",
+            "--net-default-egress",
+            "deny",
+            "--net-default-ingress",
+            "allow",
+            "--net-rule",
+            "allow@dns",
+            "--net-rule",
+            "allow@host:tcp:47311",
+            "--net-rule",
+            "allow@public",
+            "--net-strict=true",
         ])
     );
 
-    let list = plan(&allowlist(&["example.com", "*.python.org"], &[]), &none, &[ExtraRule::GatewayPort(47311)]);
+    let list = plan(
+        &allowlist(&["example.com", "*.python.org"], &[]),
+        &none,
+        &[ExtraRule::GatewayPort(47311)],
+    );
     assert_eq!(
         list.create_args(),
         args(&[
-            "--net-default-egress", "deny", "--net-default-ingress", "allow",
-            "--net-rule", "allow@dns", "--net-rule", "allow@example.com:tcp:443",
-            "--net-rule", "allow@*.python.org:tcp:443", "--net-rule", "allow@host:tcp:47311",
+            "--net-default-egress",
+            "deny",
+            "--net-default-ingress",
+            "allow",
+            "--net-rule",
+            "allow@dns",
+            "--net-rule",
+            "allow@example.com:tcp:443",
+            "--net-rule",
+            "allow@*.python.org:tcp:443",
+            "--net-rule",
+            "allow@host:tcp:47311",
             "--net-strict=false",
         ])
     );
@@ -185,11 +243,18 @@ fn rules_match_the_argument_lists_tried_in_s1() {
     assert_eq!(
         closed.create_args(),
         args(&[
-            "--net-default-egress", "deny", "--net-default-ingress", "allow",
+            "--net-default-egress",
+            "deny",
+            "--net-default-ingress",
+            "allow",
             "--net-strict=true",
         ])
     );
-    let closed_channel = plan(&mode(NetworkPolicyMode::Closed), &none, &[ExtraRule::GatewayPort(47311)]);
+    let closed_channel = plan(
+        &mode(NetworkPolicyMode::Closed),
+        &none,
+        &[ExtraRule::GatewayPort(47311)],
+    );
     assert_eq!(
         closed_channel.rules,
         vec![Rule::GatewayPort(47311)],
@@ -207,10 +272,17 @@ fn saved_shapes_match_the_runtime() {
     let mut relaxed = github_default.clone();
     relaxed["strict"] = json!(false);
     assert!(!open.matches(&relaxed));
-    let list = plan(&allowlist(&["example.com", "*.python.org"], &[]), &Grants::default(), &[]);
+    let list = plan(
+        &allowlist(&["example.com", "*.python.org"], &[]),
+        &Grants::default(),
+        &[],
+    );
     let rules = list.policy_value()["rules"].clone();
     assert_eq!(rules[1]["destination"], json!({"domain": "example.com"}));
-    assert_eq!(rules[2]["destination"], json!({"domain_suffix": "python.org"}));
+    assert_eq!(
+        rules[2]["destination"],
+        json!({"domain_suffix": "python.org"})
+    );
     assert_eq!(rules[1]["ports"], json!([{"start": 443, "end": 443}]));
     assert!(!list.matches(&github_default));
     let mut saved = github_default.clone();
@@ -233,7 +305,10 @@ fn grants_add_github_and_secret_hosts_only_in_allowlist_mode() {
         secrets: vec![
             ("OPENAI_KEY".into(), vec!["api.openai.com".into()]),
             ("ANY".into(), vec!["*".into()]),
-            ("WILD".into(), vec!["*.example.net".into(), "10.0.0.1".into()]),
+            (
+                "WILD".into(),
+                vec!["*.example.net".into(), "10.0.0.1".into()],
+            ),
         ],
     };
     let list = plan(&allowlist(&["example.com"], &[]), &grants, &[]);
@@ -246,21 +321,39 @@ fn grants_add_github_and_secret_hosts_only_in_allowlist_mode() {
         "allow@api.openai.com:tcp:443",
         "allow@*.example.net:tcp:443",
     ] {
-        assert!(tokens.contains(&token.to_owned()), "{token} missing from {tokens:?}");
+        assert!(
+            tokens.contains(&token.to_owned()),
+            "{token} missing from {tokens:?}"
+        );
     }
-    assert!(!tokens.iter().any(|token| token.contains("10.0.0.1") || token == "allow@*:tcp:443"));
-    assert!(list.hosts.iter().any(|host| host.host == "github.com" && host.from == "github"));
-    assert!(list.hosts.iter().any(|host| host.host == "api.openai.com" && host.from == "secret:OPENAI_KEY"));
+    assert!(!tokens
+        .iter()
+        .any(|token| token.contains("10.0.0.1") || token == "allow@*:tcp:443"));
+    assert!(list
+        .hosts
+        .iter()
+        .any(|host| host.host == "github.com" && host.from == "github"));
+    assert!(list
+        .hosts
+        .iter()
+        .any(|host| host.host == "api.openai.com" && host.from == "secret:OPENAI_KEY"));
     // A host the list and a grant both name is one rule.
     let twice = plan(&allowlist(&["api.openai.com"], &[]), &grants, &[]);
     assert_eq!(
-        twice.rules.iter().filter(|rule| rule.token() == "allow@api.openai.com:tcp:443").count(),
+        twice
+            .rules
+            .iter()
+            .filter(|rule| rule.token() == "allow@api.openai.com:tcp:443")
+            .count(),
         1
     );
     for other in [NetworkPolicyMode::Open, NetworkPolicyMode::Closed] {
         let plan = plan(&mode(other), &grants, &[]);
         assert!(plan.hosts.is_empty());
-        assert!(!plan.rules.iter().any(|rule| matches!(rule, Rule::Domain { .. })));
+        assert!(!plan
+            .rules
+            .iter()
+            .any(|rule| matches!(rule, Rule::Domain { .. })));
     }
 }
 
@@ -278,7 +371,14 @@ fn no_wider_orders_modes_and_compares_host_sets() {
     let pypi = allowlist(&[], &["pypi"]);
     let pypi_hosts = allowlist(&["pypi.org", "files.pythonhosted.org"], &[]);
     let ubuntu = allowlist(&[], &["ubuntu"]);
-    let ubuntu_https_only = allowlist(&["*.archive.ubuntu.com", "security.ubuntu.com", "ports.ubuntu.com"], &[]);
+    let ubuntu_https_only = allowlist(
+        &[
+            "*.archive.ubuntu.com",
+            "security.ubuntu.com",
+            "ports.ubuntu.com",
+        ],
+        &[],
+    );
     let cases: Vec<(&NetworkPolicy, &NetworkPolicy, bool)> = vec![
         (&closed, &closed, true),
         (&closed, &empty, true),
@@ -311,7 +411,10 @@ fn no_wider_orders_modes_and_compares_host_sets() {
     let unrelated = allowlist(&["example.org"], &[]);
     assert!(!no_wider(&unrelated, &wild));
     let sibling = allowlist(&["badexample.com"], &[]);
-    assert!(!no_wider(&sibling, &wild), "a suffix covers only names under it");
+    assert!(
+        !no_wider(&sibling, &wild),
+        "a suffix covers only names under it"
+    );
 }
 
 #[test]
@@ -319,18 +422,36 @@ fn a_widening_summary_names_the_hosts_added() {
     let current = allowlist(&["a.example.com"], &[]);
     let new = allowlist(&["a.example.com", "b.example.com"], &["pypi"]);
     let summary = widening_summary("main", &current, &new);
-    assert!(summary.starts_with("Widen the network of main"), "{summary}");
+    assert!(
+        summary.starts_with("Widen the network of main"),
+        "{summary}"
+    );
     for host in ["b.example.com", "pypi.org", "files.pythonhosted.org"] {
         assert!(summary.contains(host), "{summary}");
     }
     assert!(!summary.contains("a.example.com"), "{summary}");
-    let summary = widening_summary("main", &mode(NetworkPolicyMode::Closed), &mode(NetworkPolicyMode::Open));
-    assert_eq!(summary, "Change the network of main from closed to open (any public address).");
-    let summary = widening_summary("main", &mode(NetworkPolicyMode::Closed), &allowlist(&[], &["ubuntu"]));
+    let summary = widening_summary(
+        "main",
+        &mode(NetworkPolicyMode::Closed),
+        &mode(NetworkPolicyMode::Open),
+    );
+    assert_eq!(
+        summary,
+        "Change the network of main from closed to open (any public address)."
+    );
+    let summary = widening_summary(
+        "main",
+        &mode(NetworkPolicyMode::Closed),
+        &allowlist(&[], &["ubuntu"]),
+    );
     assert!(summary.contains("ports.ubuntu.com (port 80)"), "{summary}");
     let many: Vec<String> = (0..30).map(|n| format!("h{n}.example.com")).collect();
     let refs: Vec<&str> = many.iter().map(String::as_str).collect();
-    let summary = widening_summary("main", &mode(NetworkPolicyMode::Closed), &allowlist(&refs, &[]));
+    let summary = widening_summary(
+        "main",
+        &mode(NetworkPolicyMode::Closed),
+        &allowlist(&refs, &[]),
+    );
     assert!(summary.contains("and 10 more"), "{summary}");
 }
 
@@ -363,7 +484,10 @@ fn an_import_keeps_its_deny_all_policy_until_the_owner_sets_one() {
     let plan = plan_for("imported", "imported", Some(&imported)).unwrap();
     assert_eq!(plan.mode, NetworkPolicyMode::Closed);
     assert_eq!(plan.policy_value(), imported);
-    assert!(plan.rule_args().windows(2).any(|pair| pair == ["--net-default-ingress", "deny"]));
+    assert!(plan
+        .rule_args()
+        .windows(2)
+        .any(|pair| pair == ["--net-default-ingress", "deny"]));
     // Once the owner sets closed, published ports answer again.
     store::set("imported", &mode(NetworkPolicyMode::Closed)).unwrap();
     let plan = plan_for("imported", "imported", Some(&imported)).unwrap();
@@ -431,7 +555,10 @@ fn the_channel_rule_is_the_computers_own_port_in_every_mode_and_no_other_compute
     store::use_test_path(None);
 }
 
-fn view(network: Option<Value>, recorded: Option<Value>) -> crate::runtime::checkpoints::NetworkPolicyView {
+fn view(
+    network: Option<Value>,
+    recorded: Option<Value>,
+) -> crate::runtime::checkpoints::NetworkPolicyView {
     crate::runtime::checkpoints::NetworkPolicyView {
         name: "dev".into(),
         container: false,
@@ -456,7 +583,13 @@ fn the_judge_reads_a_computer_as_the_service_does() {
     let imported = view(Some(json!({"policy": deny_all()})), Some(deny_all()));
     let held = service::judged_from_view("imported", None, imported);
     assert_eq!(held.policy.mode, NetworkPolicyMode::Closed);
-    assert!(!no_wider_held(&Held::latest(mode(NetworkPolicyMode::Open)), &held));
+    let none = Grants::default();
+    assert!(!no_wider_held(
+        &Held::latest(mode(NetworkPolicyMode::Open)),
+        &none,
+        &held,
+        &none
+    ));
     // An older computer with the open rules and no entry is still open.
     let older = view(Some(github_default.clone()), None);
     assert_eq!(
@@ -488,7 +621,10 @@ fn an_import_saves_a_closed_entry_that_keeps_incoming_denied_until_the_owner_set
     let directory = tempfile::tempdir().unwrap();
     store::use_test_path(Some(directory.path().join("network-policy.json")));
     store::set_stored("imported", store::Stored::closed_without_incoming()).unwrap();
-    assert_eq!(store::get("imported").unwrap(), Some(mode(NetworkPolicyMode::Closed)));
+    assert_eq!(
+        store::get("imported").unwrap(),
+        Some(mode(NetworkPolicyMode::Closed))
+    );
     let plan = plan_for("imported", "imported", Some(&deny_all())).unwrap();
     assert_eq!(plan.mode, NetworkPolicyMode::Closed);
     assert_eq!(plan.policy_value(), deny_all());
@@ -496,9 +632,19 @@ fn an_import_saves_a_closed_entry_that_keeps_incoming_denied_until_the_owner_set
     let plan = plan_for("imported", "imported", None).unwrap();
     assert_eq!(plan.policy_value(), deny_all());
     // A gateway always lets its published ports in.
-    assert_eq!(plan_for_gateway("imported", "imported").unwrap().policy_value()["default_ingress"], "allow");
+    assert_eq!(
+        plan_for_gateway("imported", "imported")
+            .unwrap()
+            .policy_value()["default_ingress"],
+        "allow"
+    );
     store::set("imported", &mode(NetworkPolicyMode::Closed)).unwrap();
-    assert_eq!(plan_for("imported", "imported", None).unwrap().policy_value()["default_ingress"], "allow");
+    assert_eq!(
+        plan_for("imported", "imported", None)
+            .unwrap()
+            .policy_value()["default_ingress"],
+        "allow"
+    );
     store::use_test_path(None);
 }
 
@@ -508,7 +654,10 @@ fn a_fork_of_an_import_is_closed_and_a_closed_network_copy_denies_incoming() {
     store::use_test_path(Some(directory.path().join("network-policy.json")));
     store::set_stored("imported", store::Stored::closed_without_incoming()).unwrap();
     store::inherit("imported", "fork", None).unwrap();
-    assert_eq!(store::get("fork").unwrap(), Some(mode(NetworkPolicyMode::Closed)));
+    assert_eq!(
+        store::get("fork").unwrap(),
+        Some(mode(NetworkPolicyMode::Closed))
+    );
     assert!(store::get_stored("fork").unwrap().unwrap().incoming_denied);
     store::use_test_path(None);
 }
@@ -558,7 +707,10 @@ fn a_preset_update_waits_for_the_owner_to_accept_it() {
         policy: policy.clone(),
         pins: Pins::new(),
     };
-    let hosts: Vec<String> = expand_held(&held).into_iter().map(|allowed| allowed.host).collect();
+    let hosts: Vec<String> = expand_held(&held)
+        .into_iter()
+        .map(|allowed| allowed.host)
+        .collect();
     assert_eq!(hosts, ["a.example.com"]);
     let updates = held.preset_updates();
     assert_eq!(updates.len(), 1);
@@ -570,13 +722,17 @@ fn a_preset_update_waits_for_the_owner_to_accept_it() {
         .map(Rule::token)
         .collect();
     assert!(rules.contains(&"allow@a.example.com:tcp:443".to_owned()));
-    assert!(!rules.iter().any(|rule| rule.contains("b.example.com")), "{rules:?}");
+    assert!(
+        !rules.iter().any(|rule| rule.contains("b.example.com")),
+        "{rules:?}"
+    );
     // The same presets at the latest version are wider, so a computer's agent that sends them
     // asks, and the summary names the new host.
     let latest = Held::latest(policy.clone());
-    assert!(!no_wider_held(&latest, &held));
-    assert!(widening_summary_held("main", &held, &latest).contains("b.example.com"));
-    assert!(no_wider_held(&held, &latest));
+    let none = Grants::default();
+    assert!(!no_wider_held(&latest, &none, &held, &none));
+    assert!(widening_summary_held("main", &held, &none, &latest, &none).contains("b.example.com"));
+    assert!(no_wider_held(&held, &none, &latest, &none));
     // Setting the policy again approves the running version.
     store::set("c", &policy).unwrap();
     let stored = store::get_stored("c").unwrap().unwrap();
@@ -632,7 +788,11 @@ fn saving_policy_keeps_current_pins_and_only_explicit_accept_repins() {
     .unwrap();
     let saved = service::set("c", &policy, None, None, target()).unwrap();
     assert_eq!(saved.preset_updates.len(), 1);
-    assert!(store::get_stored("c").unwrap().unwrap().preset_versions.is_empty());
+    assert!(store::get_stored("c")
+        .unwrap()
+        .unwrap()
+        .preset_versions
+        .is_empty());
 
     // Explicit accept re-pins to version 2
     let accepted = service::set("c", &policy, Some(&policy), Some(true), target()).unwrap();
@@ -653,7 +813,10 @@ fn a_preset_version_this_silo_does_not_know_allows_nothing() {
             policy: policy.clone(),
             pins: Pins::from([("tools".to_owned(), pin)]),
         };
-        let hosts: Vec<String> = expand_held(&held).into_iter().map(|allowed| allowed.host).collect();
+        let hosts: Vec<String> = expand_held(&held)
+            .into_iter()
+            .map(|allowed| allowed.host)
+            .collect();
         assert_eq!(hosts, ["x.example.com"], "pin {pin}");
     }
     use_test_presets(None);
@@ -691,8 +854,14 @@ fn a_narrowing_is_saved_only_against_the_policy_it_was_judged_against() {
     // does not put a list back.
     store::set("c", &mode(NetworkPolicyMode::Closed)).unwrap();
     let refused = service::set("c", &narrow, Some(&wide), None, target()).unwrap_err();
-    assert!(refused.contains("try") || refused.contains("retry"), "{refused}");
-    assert_eq!(store::get("c").unwrap(), Some(mode(NetworkPolicyMode::Closed)));
+    assert!(
+        refused.contains("try") || refused.contains("retry"),
+        "{refused}"
+    );
+    assert_eq!(
+        store::get("c").unwrap(),
+        Some(mode(NetworkPolicyMode::Closed))
+    );
     // Against the policy it was judged against, it is saved.
     store::set("c", &wide).unwrap();
     let state = service::set("c", &narrow, Some(&wide), None, target()).unwrap();
@@ -757,11 +926,354 @@ fn a_secret_wildcard_over_a_public_suffix_is_not_a_network_rule() {
     let list = plan(&allowlist(&[], &[]), &grants, &[]);
     let tokens: Vec<String> = list.rules.iter().map(Rule::token).collect();
     assert!(tokens.contains(&"allow@api.example.com:tcp:443".to_owned()));
-    assert!(!tokens.iter().any(|token| token.contains("co.uk") || token.contains("*.com")));
+    assert!(!tokens
+        .iter()
+        .any(|token| token.contains("co.uk") || token.contains("*.com")));
     assert_eq!(
         grants.too_wide(),
-        [("WIDE".to_owned(), "*.co.uk".to_owned()), ("WIDE".to_owned(), "*.com".to_owned())]
+        [
+            ("WIDE".to_owned(), "*.co.uk".to_owned()),
+            ("WIDE".to_owned(), "*.com".to_owned())
+        ]
     );
     assert!(validate_host("*.example.co.uk").is_ok());
     assert!(validate(&allowlist(&["*.co.uk"], &[])).is_err());
+}
+
+fn github_version_two() -> Vec<Preset> {
+    let at = |host: &str| Allowed::new(host, HTTPS_PORT);
+    vec![Preset {
+        name: "github".into(),
+        title: "GitHub".into(),
+        version: 2,
+        hosts: vec![at("github.com"), at("new.github.example")],
+        history: vec![(1, vec![at("github.com")])],
+    }]
+}
+
+fn github_grant() -> Grants {
+    Grants {
+        github: true,
+        secrets: Vec::new(),
+    }
+}
+
+fn rule_tokens(held: &Held, grants: &Grants) -> Vec<String> {
+    plan_held(held, grants, &[])
+        .rules
+        .iter()
+        .map(Rule::token)
+        .collect()
+}
+
+#[test]
+fn a_github_grant_holds_the_list_it_was_approved_with_until_the_owner_accepts_the_update() {
+    use_test_presets(Some(github_version_two()));
+    let policy = allowlist(&["example.com"], &[]);
+    // A policy saved before grants were pinned has no pin: it holds the first list.
+    let old = Held {
+        policy: policy.clone(),
+        pins: Pins::new(),
+    };
+    let tokens = rule_tokens(&old, &github_grant());
+    assert!(
+        tokens.contains(&"allow@github.com:tcp:443".to_owned()),
+        "{tokens:?}"
+    );
+    assert!(
+        !tokens
+            .iter()
+            .any(|token| token.contains("new.github.example")),
+        "{tokens:?}"
+    );
+    let updates = old.grant_updates(&github_grant());
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0].name, GITHUB_GRANT_PIN);
+    assert_eq!(updates[0].added_hosts, ["new.github.example"]);
+    // Without a GitHub grant there is nothing to approve, and nothing is added.
+    assert!(old.grant_updates(&Grants::default()).is_empty());
+    assert!(!rule_tokens(&old, &Grants::default())
+        .iter()
+        .any(|token| token.contains("github")));
+    // Approved now, the grant gets the running list.
+    let latest = Held::latest(policy.clone());
+    assert_eq!(latest.pins.get(GITHUB_GRANT_PIN), Some(&2));
+    assert!(latest.grant_updates(&github_grant()).is_empty());
+    assert!(rule_tokens(&latest, &github_grant())
+        .contains(&"allow@new.github.example:tcp:443".to_owned()));
+    // A pin this Silo does not know allows no GitHub hosts.
+    let unknown = Held {
+        policy,
+        pins: Pins::from([(GITHUB_GRANT_PIN.to_owned(), 7)]),
+    };
+    assert!(!rule_tokens(&unknown, &github_grant())
+        .iter()
+        .any(|token| token.contains("github")));
+    use_test_presets(None);
+}
+
+#[test]
+fn saving_a_policy_keeps_the_github_grant_pin_and_only_an_accept_moves_it() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    use_test_presets(Some(github_version_two()));
+    use_test_grants(Some(github_grant()));
+    let target = || service::Target::Macos {
+        name: "dev".into(),
+        running: false,
+    };
+    let policy = allowlist(&["example.com"], &[]);
+    // An entry saved before grants were pinned.
+    std::fs::write(
+        directory.path().join("network-policy.json"),
+        r#"{"version": 1, "computers": {"c": {"mode": "allowlist", "hosts": ["example.com"]}}}"#,
+    )
+    .unwrap();
+    let state = service::get("c", target()).unwrap();
+    assert_eq!(state.preset_updates.len(), 1);
+    assert_eq!(state.preset_updates[0].added_hosts, ["new.github.example"]);
+    assert!(!state
+        .allowed_hosts
+        .iter()
+        .any(|host| host.host == "new.github.example"));
+    assert!(state
+        .allowed_hosts
+        .iter()
+        .any(|host| host.host == "github.com" && host.from == "github"));
+    // An ordinary save keeps waiting for the owner.
+    let saved = service::set("c", &policy, None, None, target()).unwrap();
+    assert_eq!(saved.preset_updates.len(), 1);
+    assert!(store::get_stored("c")
+        .unwrap()
+        .unwrap()
+        .preset_versions
+        .is_empty());
+    // A computer with no entry is unpinned like an old one: its first save keeps waiting too.
+    let first = service::set("d", &policy, None, None, target()).unwrap();
+    assert_eq!(first.preset_updates.len(), 1);
+    assert!(store::get_stored("d")
+        .unwrap()
+        .unwrap()
+        .preset_versions
+        .is_empty());
+    assert!(!first
+        .allowed_hosts
+        .iter()
+        .any(|host| host.host == "new.github.example"));
+    // A computer created now is approved at the running list.
+    store::set("e", &policy).unwrap();
+    let fresh = service::get("e", target()).unwrap();
+    assert!(fresh.preset_updates.is_empty());
+    assert_eq!(
+        store::get_stored("e")
+            .unwrap()
+            .unwrap()
+            .preset_versions
+            .get(GITHUB_GRANT_PIN),
+        Some(&2)
+    );
+    assert!(fresh
+        .allowed_hosts
+        .iter()
+        .any(|host| host.host == "new.github.example"));
+    // Accepting moves the pin.
+    let accepted = service::set("c", &policy, None, Some(true), target()).unwrap();
+    assert!(accepted.preset_updates.is_empty());
+    assert!(accepted
+        .allowed_hosts
+        .iter()
+        .any(|host| host.host == "new.github.example"));
+    assert_eq!(
+        store::get_stored("c")
+            .unwrap()
+            .unwrap()
+            .preset_versions
+            .get(GITHUB_GRANT_PIN),
+        Some(&2)
+    );
+    use_test_grants(None);
+    use_test_presets(None);
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_computer_with_no_policy_entry_holds_the_first_github_list_until_the_owner_accepts() {
+    let directory = tempfile::tempdir().unwrap();
+    store::use_test_path(Some(directory.path().join("network-policy.json")));
+    use_test_presets(Some(github_version_two()));
+    use_test_grants(Some(github_grant()));
+    let macos = || service::Target::Macos {
+        name: "dev".into(),
+        running: false,
+    };
+    // Shown and planned the same way: the newer list waits for the owner.
+    let state = service::get("legacy", macos()).unwrap();
+    assert_eq!(state.preset_updates.len(), 1);
+    assert_eq!(state.preset_updates[0].added_hosts, ["new.github.example"]);
+    assert!(!state
+        .allowed_hosts
+        .iter()
+        .any(|host| host.host == "new.github.example"));
+    let (held, _) = held_for("legacy", None).unwrap();
+    assert!(held.pins.is_empty());
+    assert!(!rule_tokens(&held, &github_grant())
+        .iter()
+        .any(|token| token.contains("new.github.example")));
+    // A Linux computer is resolved the same way, and the judge sees the same policy.
+    let resolved = service::judged_from_view("legacy", None, view(None, None));
+    assert!(resolved.pins.is_empty());
+    // A copy of a computer with no entry has none either.
+    store::inherit("legacy", "copy", None).unwrap();
+    assert!(store::get_stored("copy").unwrap().is_none());
+    assert_eq!(
+        service::get("copy", macos()).unwrap().preset_updates.len(),
+        1
+    );
+    // A copy given a policy holds its source's versions too: handing a policy on takes no
+    // update.
+    store::inherit("legacy", "chosen", Some(&allowlist(&["example.com"], &[]))).unwrap();
+    assert_eq!(
+        service::get("chosen", macos())
+            .unwrap()
+            .preset_updates
+            .len(),
+        1
+    );
+    use_test_grants(None);
+    use_test_presets(None);
+    store::use_test_path(None);
+}
+
+#[test]
+fn the_checked_in_github_list_is_what_an_unpinned_grant_has_always_added() {
+    let github = preset("github").unwrap();
+    let held = Held {
+        policy: allowlist(&[], &[]),
+        pins: Pins::new(),
+    };
+    let unpinned: BTreeSet<Allowed> = github
+        .hosts_at(held.pins.get(GITHUB_GRANT_PIN).copied())
+        .0
+        .into_iter()
+        .collect();
+    let current: BTreeSet<Allowed> = github.hosts.iter().cloned().collect();
+    assert_eq!(
+        unpinned, current,
+        "an unpinned grant would widen or narrow on load"
+    );
+}
+
+#[test]
+fn a_wildcard_over_any_public_suffix_is_refused_and_ordinary_domains_are_not() {
+    for shared in [
+        "*.duckdns.org",
+        "*.blogspot.com",
+        "*.github.io",
+        "*.s3.amazonaws.com",
+        "*.herokuapp.com",
+        "*.co.uk",
+        "*.pages.dev",
+        "*.githubusercontent.com",
+        "*.ck",
+        "*.compute.amazonaws.com",
+        "*.sch.uk",
+        "*.kobe.jp",
+    ] {
+        assert!(validate_host(shared).is_err(), "{shared}");
+        assert!(is_too_wide_wildcard(shared), "{shared}");
+        assert!(validate(&allowlist(&[shared], &[])).is_err(), "{shared}");
+    }
+    // The same names as exact hosts, and names under them, are fine.
+    for fine in [
+        "duckdns.org",
+        "example.duckdns.org",
+        "*.example.duckdns.org",
+        "*.example.co.uk",
+        "*.example.com",
+        "*.archive.ubuntu.com",
+        "*.www.ck",
+        "*.city.kobe.jp",
+        "*.example.unknowntld",
+    ] {
+        assert!(validate_host(fine).is_ok(), "{fine}");
+        assert!(!is_too_wide_wildcard(fine), "{fine}");
+    }
+}
+
+#[test]
+fn cloud_bases_that_host_tenant_subdomains_are_refused_for_a_wildcard() {
+    for base in [
+        "azure.com",
+        "azure.net",
+        "windows.net",
+        "core.windows.net",
+        "database.windows.net",
+        "search.windows.net",
+        "scm.azurewebsites.net",
+        "vault.azure.net",
+        "openai.azure.com",
+        "cognitiveservices.azure.com",
+        "googleusercontent.com",
+        "firebaseio.com",
+        "firebasestorage.app",
+        "oraclecloud.com",
+        "aliyuncs.com",
+        "myqcloud.com",
+        "myhuaweicloud.com",
+        "herokudns.com",
+        "scw.cloud",
+        "backblazeb2.com",
+        "r2.cloudflarestorage.com",
+        "netlify.com",
+        "glitch.com",
+        "webcontainer.io",
+        "codesandbox.io",
+        "gitpod.io",
+        "fastly.net",
+        "b-cdn.net",
+        "visualstudio.com",
+        "appdomain.cloud",
+        "mybluemix.net",
+        "salesforce.com",
+        "force.com",
+    ] {
+        let pattern = format!("*.{base}");
+        assert!(validate_host(&pattern).is_err(), "{pattern}");
+        assert!(is_too_wide_wildcard(&pattern), "{pattern}");
+        // A tenant's own name below it stays allowed, and so does the base as an exact host.
+        assert!(validate_host(&format!("*.tenant.{base}")).is_ok(), "{base}");
+        assert!(validate_host(base).is_ok(), "{base}");
+    }
+}
+
+#[test]
+fn the_names_silo_always_refused_stay_refused_whether_or_not_the_list_carries_them() {
+    let file: Value = serde_json::from_str(include_str!("public_suffixes.json")).unwrap();
+    for suffix in file["suffixes"].as_array().unwrap() {
+        let suffix = suffix.as_str().unwrap();
+        assert!(validate_host(&format!("*.{suffix}")).is_err(), "{suffix}");
+        assert!(is_too_wide_wildcard(&format!("*.{suffix}")), "{suffix}");
+    }
+    assert!(validate_host("*.amazonaws.com").is_err());
+}
+
+#[test]
+fn counting_what_a_policy_reaches_includes_the_hosts_its_github_grant_adds() {
+    use_test_presets(Some(github_version_two()));
+    let policy = allowlist(&["example.com"], &[]);
+    let at = |version: u32| Held {
+        policy: policy.clone(),
+        pins: Pins::from([(GITHUB_GRANT_PIN.to_owned(), version)]),
+    };
+    let github = github_grant();
+    let none = Grants::default();
+    // Holding the newer list reaches more than holding the first one, but only for a computer
+    // that has the grant.
+    assert!(!no_wider_held(&at(2), &github, &at(1), &github));
+    assert!(no_wider_held(&at(1), &github, &at(2), &github));
+    assert!(no_wider_held(&at(2), &none, &at(1), &github));
+    assert!(no_wider_held(&at(2), &none, &at(1), &none));
+    let summary = widening_summary_held("copy", &at(1), &github, &at(2), &github);
+    assert!(summary.contains("new.github.example"), "{summary}");
+    use_test_presets(None);
 }
