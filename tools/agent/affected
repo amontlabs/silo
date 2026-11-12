@@ -242,7 +242,7 @@ def analyse(root, base):
         readers = [crate for prefix, names in READ_BY_RUST + READ_ACROSS if path.startswith(prefix) for crate in names]
         if readers:
             seeded(path, readers, f'read by Rust code or tests of {", ".join(sorted(set(readers)))}')
-        crate = owning_crate(path, info)
+        crate = None if readers else owning_crate(path, info)  # the table names every crate that reads it
         nested = nested_manifest(root, path, info) if path.startswith(f'{APP}/') else None
         if '/vendor/' in path:
             result['everything'] = True
@@ -251,6 +251,8 @@ def analyse(root, base):
             if nested not in result['other_manifests']:
                 result['other_manifests'].append(nested)
             why.append((path, f'separate crate ({nested}): cargo check and test --manifest-path'))
+        elif readers or path.startswith(('.github/', 'tools/agent/')):
+            pass
         elif crate:
             seeded(path, [crate], f'file of crate {crate}')
         elif is_rust:
@@ -262,8 +264,6 @@ def analyse(root, base):
             else:
                 result['everything'] = True
                 why.append((path, 'Rust file outside any crate: all Rust checks and tests'))
-        elif readers or path.startswith(('.github/', 'tools/agent/')):
-            pass
         elif path.startswith(NO_RUST):
             ignored.append(path)
         elif classifier.skippable(path):
