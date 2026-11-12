@@ -433,7 +433,7 @@ export const deviceResourcesSchema = z.object({
   memoryFloorBytes: z.number().catch(0), diskFloorBytes: z.number().catch(0),
   runningComputers: z.number().catch(0), runningMemoryGib: z.number().catch(0),
   state: tolerantEnum(["ok", "low", "critical"], "ok"), message: z.string().catch(""),
-  computers: tolerantArray(z.object({ id: z.string(), name: z.string(), running: z.boolean(), cpus: z.number(), memoryGib: z.number() })).catch([]),
+  computers: tolerantArray(z.object({ id: z.string(), name: z.string(), running: z.boolean(), cpus: z.number(), memoryGib: z.number(), diskGib: z.number().optional(), workspaceStorageGib: z.number().optional(), runtimeStorageGib: z.number().optional() })).catch([]),
 })
 export type DeviceResources = z.infer<typeof deviceResourcesSchema>
 

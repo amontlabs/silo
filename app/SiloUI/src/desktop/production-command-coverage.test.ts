@@ -447,7 +447,7 @@ describe("approval commands", () => {
     expect(audit.nextBeforeId).toBe(40)
     expect(audit.entries[1]).toMatchObject({ count: 5, lastAt: "2026-11-11T08:10:00Z", outcome: "refused", errorCode: "permission_denied" })
     expect(audit.entries[0]).toMatchObject({ approvalId: "ap-merge", outcome: "asked" })
-    expect((await readDeviceResources("dev-2", native)).computers).toEqual([{ id: "main-1", name: "main", running: true, cpus: 4, memoryGib: 4 }])
+    expect((await readDeviceResources("dev-2", native)).computers).toEqual([{ id: "main-1", name: "main", running: true, cpus: 4, memoryGib: 4, diskGib: 42, workspaceStorageGib: 30, runtimeStorageGib: 12 }])
     expect(await readApprovalJob("job:7", native)).toMatchObject({ state: "finished", status: "refused" })
     expect(native.invoke.mock.calls).toEqual([
       ["list_approvals", { state: "pending" }],

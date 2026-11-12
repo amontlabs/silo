@@ -1776,7 +1776,11 @@ mod tool_tests {
         for name in SHARED.iter().chain(DEVICE_ONLY_TOOLS) {
             assert!(offered.iter().any(|offered| offered == name), "{name}");
         }
-        assert_eq!(offered.len(), SHARED.len() + DEVICE_ONLY_TOOLS.len(), "{offered:?}");
+        assert_eq!(
+            offered.len(),
+            SHARED.len() + DEVICE_ONLY_TOOLS.len(),
+            "{offered:?}"
+        );
     }
 
     #[test]
@@ -1810,7 +1814,11 @@ mod tool_tests {
             assert!(!text.is_empty(), "{}", tool.name);
             // A description says what the tool does and when to use it, in a few plain sentences.
             let sentences = text.matches(". ").count() + 1;
-            assert!(sentences <= 3, "{}: {sentences} sentences: {text}", tool.name);
+            assert!(
+                sentences <= 3,
+                "{}: {sentences} sentences: {text}",
+                tool.name
+            );
             let lower = text.to_lowercase();
             for old in ["fold", "promote", ".silo/", "auto_keep", "silo.yaml"] {
                 assert!(!lower.contains(old), "{}: {text}", tool.name);
