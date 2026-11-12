@@ -176,6 +176,10 @@ pub struct Request {
     allowed_domains: Vec<String>,
     #[serde(default)]
     kind: SecretKind,
+    /// The owner confirmed that the wildcard hosts over shared hosting among `allowed_domains`
+    /// may be reached by the computers using the secret.
+    #[serde(default)]
+    allow_shared_hosting: bool,
 }
 fn entry() -> Result<keyring::Entry, String> {
     keyring::Entry::new(
@@ -502,6 +506,23 @@ pub(crate) fn set_github_token_account(
     Ok(true)
 }
 
+/// Whether the saved secret has its wildcard hosts over shared hosting approved: when the
+/// request confirms them, or when the stored secret had them approved and the request adds no
+/// such host to the ones it had.
+fn shared_hosting_approval(request: &Request, stored: Option<&Secret>) -> bool {
+    request.allow_shared_hosting
+        || stored.is_some_and(|stored| {
+            stored.shared_hosting_approved
+                && request
+                    .allowed_domains
+                    .iter()
+                    .filter(|domain| {
+                        crate::network_policy::shared_hosting_warning(domain).is_some()
+                    })
+                    .all(|domain| stored.allowed_domains.contains(domain))
+        })
+}
+
 /// The request that saves the secret named `name` as a GitHub token.
 pub(crate) fn github_token_request(
     id: Option<String>,
@@ -516,6 +537,7 @@ pub(crate) fn github_token_request(
         computers: Vec::new(),
         allowed_domains: Vec::new(),
         kind: SecretKind::GithubToken,
+        allow_shared_hosting: false,
     }
 }
 
@@ -1278,6 +1300,7 @@ pub fn save_secret<G>(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let original = document.secrets.iter().find(|s| s.id == id);
+    let shared_hosting_approved = shared_hosting_approval(&request, original);
     let value_id = if let Some(value) = &request.value {
         let value_id = uuid::Uuid::new_v4().to_string();
         let mut values = read_vault()?;
@@ -1308,7 +1331,7 @@ pub fn save_secret<G>(
             account,
             computers: request.computers,
             allowed_domains: request.allowed_domains,
-            shared_hosting_approved: true,
+            shared_hosting_approved,
             affected,
             pending_computers: Vec::new(),
             errors: BTreeMap::new(),
@@ -1468,6 +1491,7 @@ mod tests {
             computers: vec!["dev".into()],
             allowed_domains: vec!["api.example.com".into()],
             kind: SecretKind::Generic,
+            allow_shared_hosting: false,
         }
     }
     fn token_secret() -> Secret {
@@ -1614,6 +1638,26 @@ mod tests {
         stored["sharedHostingApproved"] = true.into();
         let approved: Secret = serde_json::from_value(stored).unwrap();
         assert!(approved.shared_hosting_approved);
+    }
+    #[test]
+    fn shared_hosting_hosts_are_approved_only_by_a_confirmation_or_a_prior_approval() {
+        let shared = "*.netlify.app".to_owned();
+        let mut stored = secret();
+        stored.allowed_domains = vec![shared.clone()];
+        let mut request = request();
+        request.allowed_domains = vec![shared.clone()];
+        // A new secret, or a stored one never approved, stays unapproved until confirmed.
+        assert!(!shared_hosting_approval(&request, None));
+        assert!(!shared_hosting_approval(&request, Some(&stored)));
+        request.allow_shared_hosting = true;
+        assert!(shared_hosting_approval(&request, None));
+        assert!(shared_hosting_approval(&request, Some(&stored)));
+        // An approval stands while the hosts over shared hosting are the ones it covered.
+        request.allow_shared_hosting = false;
+        stored.shared_hosting_approved = true;
+        assert!(shared_hosting_approval(&request, Some(&stored)));
+        request.allowed_domains.push("*.vercel.app".into());
+        assert!(!shared_hosting_approval(&request, Some(&stored)));
     }
     fn secret() -> Secret {
         Secret {

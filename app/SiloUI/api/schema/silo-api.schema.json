@@ -18408,6 +18408,13 @@
             "null"
           ]
         },
+        "allowSharedHosting": {
+          "description": "Confirms that the computers using the secret may reach every site under each wildcard\nhost over shared hosting among `allowed_domains`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "allowedDomains": {
           "items": {
             "type": "string"

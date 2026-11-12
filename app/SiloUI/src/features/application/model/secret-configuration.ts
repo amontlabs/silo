@@ -1,4 +1,5 @@
 import type { ApplicationSecret, SecretConfigurationRequest, SecretKind } from "./application-source"
+import { hostWarning } from "@/features/network-policy/model/network-policy"
 import reservedSecretNames from "./reserved-secret-names.json"
 
 export interface SecretDraft {
@@ -8,6 +9,7 @@ export interface SecretDraft {
   computers: string[]
   domains: string
   allowAnyDomain: boolean
+  allowSharedHosting: boolean
 }
 
 export type SecretValidationErrors = Partial<Record<keyof SecretDraft, string>>
@@ -27,6 +29,11 @@ function validDomain(domain: string) {
   const labels = host.split(".")
   return host.length <= 253 && (!wildcard || labels.length >= 2) && labels.every((label) =>
     /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+}
+
+/** The hosts among `domains` that lead to sites anyone can publish, each with what that allows. */
+export function sharedHostingWarnings(domains: readonly string[]): string[] {
+  return domains.flatMap((domain) => hostWarning(domain) ?? [])
 }
 
 export function secretConfiguration(draft: SecretDraft, secrets: readonly ApplicationSecret[], availableComputers: readonly string[], original?: ApplicationSecret):
@@ -55,7 +62,8 @@ export function secretConfiguration(draft: SecretDraft, secrets: readonly Applic
   if (allowedDomains.includes("*") && !draft.allowAnyDomain) errors.allowAnyDomain = "Confirm access to any HTTPS destination."
   if (Object.keys(errors).length > 0) return { errors }
 
-  const metadata = { name, computers: [...draft.computers], allowedDomains }
+  const confirmed = draft.allowSharedHosting && sharedHostingWarnings(allowedDomains).length > 0
+  const metadata = { name, computers: [...draft.computers], allowedDomains, ...(confirmed ? { allowSharedHosting: true as const } : {}) }
   return { request: original
     ? { ...metadata, operation: "edit", id: original.id, ...(draft.value ? { value: draft.value } : {}) }
     : { ...metadata, operation: "add", value: draft.value } }

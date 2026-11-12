@@ -1517,6 +1517,7 @@ impl<'a> Judge<'a> {
         } else {
             format!("Sent only to {}", listed(&domains))
         };
+        let mut shows_shared_hosting = false;
         let mut summary = format!(
             "{sent}: add the secret {} for {}.",
             quoted(name),
@@ -1534,10 +1535,12 @@ impl<'a> Judge<'a> {
                     listed(&reachable)
                 ));
             }
-            for warning in crate::network_policy::shared_hosting_warnings(&domains) {
+            let warnings = crate::network_policy::shared_hosting_warnings(&domains);
+            for warning in &warnings {
                 summary.push(' ');
-                summary.push_str(&warning);
+                summary.push_str(warning);
             }
+            shows_shared_hosting = !warnings.is_empty();
             if domains
                 .iter()
                 .any(|domain| crate::network_policy::is_too_wide_wildcard(domain))
@@ -1546,6 +1549,13 @@ impl<'a> Judge<'a> {
                     " A pattern that covers a whole public domain is not added to a list of allowed hosts.",
                 );
             }
+        }
+        if shows_shared_hosting {
+            // The summary the owner approves names the wildcard hosts over shared hosting, so
+            // allowing it confirms them.
+            let mut confirmed = params.clone();
+            confirmed["request"]["allowSharedHosting"] = Value::Bool(true);
+            return Ok(ask_with(kind, summary, confirmed));
         }
         Ok(ask(kind, summary))
     }

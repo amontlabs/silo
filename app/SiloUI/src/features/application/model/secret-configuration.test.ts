@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import { secretConfiguration, type SecretDraft } from "./secret-configuration"
 
-const draft: SecretDraft = { kind: "generic", name: "SERVICE_TOKEN", value: "fixture-token", computers: ["dev"], domains: "api.example.test", allowAnyDomain: false }
+const draft: SecretDraft = { kind: "generic", name: "SERVICE_TOKEN", value: "fixture-token", computers: ["dev"], domains: "api.example.test", allowAnyDomain: false, allowSharedHosting: false }
 
 describe("secret configuration", () => {
   it.each([
@@ -79,7 +79,7 @@ describe("secret configuration", () => {
   })
 
   describe("GitHub tokens", () => {
-    const tokenDraft: SecretDraft = { kind: "github-token", name: "work", value: "ghp_synthetic", computers: [], domains: "", allowAnyDomain: false }
+    const tokenDraft: SecretDraft = { kind: "github-token", name: "work", value: "ghp_synthetic", computers: [], domains: "", allowAnyDomain: false, allowSharedHosting: false }
     const existing = { id: "token-1", name: "work", kind: "github-token" as const, computers: ["dev"], allowedDomains: [], state: "active" as const }
 
     it("asks for a label and a token only, with no computers or hosts", () => {

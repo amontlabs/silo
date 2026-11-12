@@ -80,7 +80,7 @@ fn request_for_engine(request: &Value, roster: &Roster) -> Result<Value, EngineE
         "computerIds": computer_ids,
         "allowedDomains": request.get("allowedDomains").cloned().unwrap_or_else(|| json!([])),
     });
-    for key in ["id", "value", "kind"] {
+    for key in ["id", "value", "kind", "allowSharedHosting"] {
         if let Some(value) = text(key) {
             engine_request[key] = value;
         }

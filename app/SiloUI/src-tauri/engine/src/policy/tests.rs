@@ -1206,6 +1206,19 @@ fn what_the_agent_chose_is_quoted_cut_and_never_the_start_of_the_sentence() {
     let summary = ask_summary("secrets.save", secret("API_KEY", json!(["*.netlify.app", "api.example.com"])));
     assert!(summary.contains("anyone can publish"), "{summary}");
     assert!(!summary.contains("not added to a list of allowed hosts"), "{summary}");
+    // Allowing an ask that showed the warning confirms the shared-hosting host; one that showed
+    // none carries no confirmation.
+    let shared = secret("API_KEY", json!(["*.netlify.app"]));
+    match check("secrets.save", shared) {
+        Decision::Ask { params, .. } => {
+            assert_eq!(params.unwrap()["request"]["allowSharedHosting"], true)
+        }
+        other => panic!("{other:?}"),
+    }
+    match check("secrets.save", secret("API_KEY", json!(["api.example.com"]))) {
+        Decision::Ask { params, .. } => assert!(params.is_none()),
+        other => panic!("{other:?}"),
+    }
     let any = json!({"request": {"operation": "add", "name": "API_KEY", "value": "v",
         "computerIds": ["fork-1"], "allowedDomains": ["*"], "allowAnyDestination": true}});
     assert!(ask_summary("secrets.save", any).starts_with("Sent to any destination: add the secret “API_KEY”"));

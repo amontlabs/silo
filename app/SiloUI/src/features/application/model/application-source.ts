@@ -240,6 +240,8 @@ export type SecretConfigurationRequest = {
   kind?: SecretKind
   computers: string[]
   allowedDomains: string[]
+  /** Set when the person confirmed the wildcard hosts over shared hosting among `allowedDomains`. */
+  allowSharedHosting?: true
 } & ({ operation: "add"; value: string } | { operation: "edit"; id: string; value?: string })
 
 export interface ApplicationGitIdentity {

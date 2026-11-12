@@ -396,15 +396,16 @@ const JOB_RESERVATION_CEILING: std::time::Duration = std::time::Duration::from_s
 
 impl Reservation {
     /// The memory this reservation sets aside given `resident`: its own, and that of each held
-    /// computer a list loaded after the reservation shows absent. A list older than the
-    /// reservation says nothing, so the computer is taken to be resident as at admission.
+    /// computer except one a list loaded after the reservation shows resident. A list older
+    /// than the reservation says nothing about whether the computer came back, and a host
+    /// measured after the reservation may already show its memory free, so it stays counted.
     fn counted(&self, resident: &Residency) -> u64 {
-        let absent = |computer: &str| {
-            resident.loaded_at > self.created_at && !resident.contains(computer)
+        let back = |computer: &str| {
+            resident.loaded_at > self.created_at && resident.contains(computer)
         };
         self.held
             .iter()
-            .filter(|(computer, _)| absent(computer))
+            .filter(|(computer, _)| !back(computer))
             .fold(self.memory_bytes, |sum, (_, bytes)| sum.saturating_add(*bytes))
     }
 }

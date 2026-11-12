@@ -428,6 +428,7 @@ async fn save_secret(
                 computer_ids,
                 allowed_domains,
                 allow_any_destination: wildcard.then_some(true),
+                allow_shared_hosting: None,
             },
             device_id: None,
         }))

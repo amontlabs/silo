@@ -1868,3 +1868,30 @@ async fn a_job_call_holds_its_place_until_the_record_has_its_job_and_gives_it_ba
         super::release_job_slot(slot);
     }
 }
+
+#[test]
+fn a_held_computer_counts_until_a_list_loaded_after_the_reservation_shows_it_resident() {
+    let before = std::time::Instant::now();
+    let listed_before = residency(HashSet::new());
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let reservation = super::Reservation {
+        id: 1,
+        computer_id: None,
+        boots: None,
+        job_id: None,
+        memory_bytes: GIB,
+        held: vec![("held".to_owned(), 2 * GIB)],
+        created_at: std::time::Instant::now(),
+        running_since: None,
+    };
+    assert!(before < reservation.created_at);
+    // A list read before the reservation says nothing: the host measured after may show the
+    // computer's memory free already.
+    assert_eq!(reservation.counted(&listed_before), 3 * GIB);
+    let mut with_it = resident_set(&["held"]);
+    with_it.loaded_at = before;
+    assert_eq!(reservation.counted(&with_it), 3 * GIB);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert_eq!(reservation.counted(&resident_set(&[])), 3 * GIB);
+    assert_eq!(reservation.counted(&resident_set(&["held"])), GIB);
+}
