@@ -63,7 +63,11 @@ export function secretConfiguration(draft: SecretDraft, secrets: readonly Applic
   if (Object.keys(errors).length > 0) return { errors }
 
   const confirmed = draft.allowSharedHosting && sharedHostingWarnings(allowedDomains).length > 0
-  const metadata = { name, computers: [...draft.computers], allowedDomains, ...(confirmed ? { allowSharedHosting: true as const } : {}) }
+  const metadata = {
+    name, computers: [...draft.computers], allowedDomains,
+    ...(allowedDomains.includes("*") ? { allowAnyDestination: true as const } : {}),
+    ...(confirmed ? { allowSharedHosting: true as const } : {}),
+  }
   return { request: original
     ? { ...metadata, operation: "edit", id: original.id, ...(draft.value ? { value: draft.value } : {}) }
     : { ...metadata, operation: "add", value: draft.value } }

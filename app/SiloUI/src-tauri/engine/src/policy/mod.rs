@@ -1512,49 +1512,51 @@ impl<'a> Judge<'a> {
             );
         }
         let names: Vec<String> = computers.iter().map(|id| self.name(id)).collect();
-        let sent = if any || wildcard {
+        let sent = if wildcard {
             "Sent to any destination".to_owned()
         } else {
             format!("Sent only to {}", listed(&domains))
         };
-        let mut shows_shared_hosting = false;
         let mut summary = format!(
             "{sent}: add the secret {} for {}.",
             quoted(name),
             listed(&names)
         );
-        if !any && !wildcard {
-            let reachable: Vec<String> = domains
-                .iter()
-                .filter(|domain| crate::network_policy::validate_host(domain).is_ok())
-                .cloned()
-                .collect();
-            if !reachable.is_empty() {
-                summary.push_str(&format!(
-                    " A computer whose network is a list of allowed hosts can also reach {} because of it.",
-                    listed(&reachable)
-                ));
-            }
-            let warnings = crate::network_policy::shared_hosting_warnings(&domains);
-            for warning in &warnings {
-                summary.push(' ');
-                summary.push_str(warning);
-            }
-            shows_shared_hosting = !warnings.is_empty();
-            if domains
-                .iter()
-                .any(|domain| crate::network_policy::is_too_wide_wildcard(domain))
-            {
-                summary.push_str(
-                    " A pattern that covers a whole public domain is not added to a list of allowed hosts.",
-                );
-            }
+        let reachable: Vec<String> = domains
+            .iter()
+            .filter(|domain| crate::network_policy::validate_host(domain).is_ok())
+            .cloned()
+            .collect();
+        if !reachable.is_empty() {
+            summary.push_str(&format!(
+                " A computer whose network is a list of allowed hosts can also reach {} because of it.",
+                listed(&reachable)
+            ));
         }
-        if shows_shared_hosting {
-            // The summary the owner approves names the wildcard hosts over shared hosting, so
-            // allowing it confirms them.
+        let warnings = crate::network_policy::shared_hosting_warnings(&domains);
+        for warning in &warnings {
+            summary.push(' ');
+            summary.push_str(warning);
+        }
+        if domains
+            .iter()
+            .any(|domain| crate::network_policy::is_too_wide_wildcard(domain))
+        {
+            summary.push_str(
+                " A pattern that covers a whole public domain is not added to a list of allowed hosts.",
+            );
+        }
+        // Only the owner confirms shared-hosting hosts, and only by approving a summary that
+        // names them; whatever a computer sends for it is dropped.
+        let sent_by_computer = request.get("allowSharedHosting").is_some();
+        if !warnings.is_empty() || sent_by_computer {
             let mut confirmed = params.clone();
-            confirmed["request"]["allowSharedHosting"] = Value::Bool(true);
+            if let Some(object) = confirmed["request"].as_object_mut() {
+                object.remove("allowSharedHosting");
+                if !warnings.is_empty() {
+                    object.insert("allowSharedHosting".to_owned(), Value::Bool(true));
+                }
+            }
             return Ok(ask_with(kind, summary, confirmed));
         }
         Ok(ask(kind, summary))

@@ -109,4 +109,11 @@ describe("secret configuration", () => {
       expect(secretConfiguration({ ...tokenDraft, value: "" }, [existing], [], existing).request).not.toHaveProperty("value")
     })
   })
+
+  it("sends the any-destination confirmation only for a wildcard secret that was confirmed", () => {
+    const wildcard = secretConfiguration({ ...draft, domains: "*", allowAnyDomain: true }, [], ["dev"])
+    expect(wildcard.request).toMatchObject({ allowedDomains: ["*"], allowAnyDestination: true })
+    expect(secretConfiguration({ ...draft, domains: "*", allowAnyDomain: false }, [], ["dev"]).errors?.allowAnyDomain).toBeDefined()
+    expect(secretConfiguration({ ...draft, allowAnyDomain: true }, [], ["dev"]).request).not.toHaveProperty("allowAnyDestination")
+  })
 })
