@@ -14,7 +14,7 @@ current setup and its advice is folded in.
 | ~12%: live tests, mostly polling, rerun from scratch, failing on setup | Ad-hoc scripts per item | One `live` harness with steps, resume and a done-file |
 | ~10%: Rust test loops, 1/3 failing (most on compile errors), full suites, cold or mixed-toolchain builds | Tests run as a reflex | `affected` + `check`, pinned toolchain |
 | 9-minute `runtime:prepare` run 4× in one effort | No cache | `runtime-cache` |
-| Review rounds up to 7, each re-running tests; children reviewing themselves | Loose review rules | One review per item, by the orchestrator, max 2 rounds |
+| Review rounds up to 7, each re-running tests; children reviewing themselves | Loose review rules | Only the orchestrator reviews; cheap rounds at its judgement (rule 5) |
 | Gemini/Flash implementers always redone by Sonnet; Gemini advisor 43 min vs Fable 2 min | Models picked ad hoc | Named lastdrop agents only |
 | Contradictory rules across 40 memory files and two accounts | Rules saved as memories | Rules live in the repo; memories hold facts only |
 
@@ -160,13 +160,13 @@ its service), Conductor/Crystal/Vibe Kanban (built around pull requests and CI),
 | Step | What | Who | Parallel with |
 |---|---|---|---|
 | 0 | Research existing tools (done) | 2 research agents | — |
-| 1 | lastdrop agents changed; memories purged; fallback checked | orchestrator | 2–5 |
+| 1 | lastdrop agents changed; memories purged | orchestrator | 2–5 |
 | 2 | `CLAUDE.md`, `AGENTS.md` trim, `docs/workflow/` documents and briefs | `build` child | 3–5 |
 | 3 | `rust-toolchain.toml`, `affected`, `check`, flaky log | `build` child | 2, 4, 5 |
 | 4 | `board`, `clean`, `merge-batch` | `build` child | 2, 3, 5 |
 | 5 | `live` harness (porting the Direction checks as steps) | `build` child | 2–4 |
 | 6 | `runtime-cache` (after a one-core investigation), `linux-warm` | `build` child | after 3 |
-| 7 | One `review` (Fable) of the documents and scripts together; one fix round | orchestrator | — |
+| 7 | `review` of the documents and scripts together, fixes as the orchestrator judges | orchestrator | — |
 | 8 | Dry run: the next real Direction item run end to end under the new rules, timed | orchestrator | — |
 
 Everything lands on `main` (it applies to every build) and is merged into `direction`.
