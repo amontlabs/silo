@@ -46,6 +46,10 @@ fn resources_of(listed: &ComputersListResult) -> Vec<ComputerResources> {
             ),
             cpus: u64::from(computer.configuration.cpus),
             memory_gib: u64::from(computer.configuration.memory_gib),
+            disk_gib: u64::from(computer.configuration.workspace_storage_gib)
+                .saturating_add(u64::from(computer.configuration.runtime_storage_gib)),
+            workspace_storage_gib: Some(u64::from(computer.configuration.workspace_storage_gib)),
+            runtime_storage_gib: Some(u64::from(computer.configuration.runtime_storage_gib)),
         })
         .chain(
             listed
@@ -61,6 +65,9 @@ fn resources_of(listed: &ComputersListResult) -> Vec<ComputerResources> {
                     ),
                     cpus: computer.cpus,
                     memory_gib: computer.memory_gib,
+                    disk_gib: computer.disk_gib,
+                    workspace_storage_gib: None,
+                    runtime_storage_gib: None,
                 }),
         )
         .collect()
@@ -172,7 +179,58 @@ mod tests {
             running,
             cpus: 2,
             memory_gib,
+            disk_gib: 20,
+            workspace_storage_gib: Some(10),
+            runtime_storage_gib: Some(10),
         }
+    }
+
+    fn listed() -> ComputersListResult {
+        let linux = json!({
+            "kind": "linux",
+            "configuration": {"id": "lin", "name": "box", "cpus": 2, "maxCPUs": 2, "memoryGiB": 4,
+                "maxMemoryGiB": 4, "workspaceStorageGiB": 30, "runtimeStorageGiB": 12},
+            "purpose": "", "state": "running", "stateDetail": "", "canDismissError": false,
+            "freshness": "fresh", "repositories": [], "files": [], "ports": [], "logs": [],
+            "githubRepositories": [], "secretNames": []
+        });
+        let macos = json!({
+            "kind": "macos", "id": "mac", "name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64,
+            "osVersion": null, "state": "stopped", "progress": null, "detail": null, "note": null,
+            "displayOpen": false, "installed": true, "setupComplete": true,
+            "needsPersonalizing": false, "checkpoints": [], "checkpointOperation": null,
+            "pendingRestore": null
+        });
+        serde_json::from_value(json!({
+            "linux": {"runtimeRepair": null, "computers": [linux], "activities": [],
+                "computerConfigurationOperation": null, "repositoryPushOperations": [],
+                "github": null, "secrets": []},
+            "macos": {"supported": true, "unsupportedReason": null, "computers": [macos],
+                "template": null, "minDiskGiB": 64}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_linux_computer_shows_its_workspace_and_runtime_storage_and_a_macos_computer_its_disk() {
+        let rows = resources_of(&listed());
+        let linux = rows.iter().find(|row| row.id == "lin").unwrap();
+        assert_eq!(linux.disk_gib, 42);
+        assert_eq!(linux.workspace_storage_gib, Some(30));
+        assert_eq!(linux.runtime_storage_gib, Some(12));
+        let mac = rows.iter().find(|row| row.id == "mac").unwrap();
+        assert_eq!(mac.disk_gib, 64);
+        assert_eq!(mac.workspace_storage_gib, None);
+        assert_eq!(mac.runtime_storage_gib, None);
+    }
+
+    #[test]
+    fn a_computer_sees_the_disk_size_of_only_the_computers_it_may_see() {
+        let all = resources_of(&listed());
+        let visible: BTreeSet<String> = ["mac"].map(String::from).into();
+        let shown = shown_to(&all, Some(&visible));
+        assert_eq!(shown.len(), 1);
+        assert_eq!((shown[0].id.as_str(), shown[0].disk_gib), ("mac", 64));
     }
 
     #[test]
