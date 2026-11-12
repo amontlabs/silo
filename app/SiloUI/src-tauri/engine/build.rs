@@ -8,11 +8,8 @@ mod github_build;
 fn main() {
     let config =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../github-build.local.json");
-    println!("cargo:rerun-if-changed={}", config.display());
+    github_build::watch(&config);
     println!("cargo:rerun-if-changed=../github_build.rs");
-    for key in github_build::KEYS {
-        println!("cargo:rerun-if-env-changed={key}");
-    }
     let configured = config.exists()
         || github_build::KEYS
             .iter()
