@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""runtime-cache: run `runtime:prepare` once per distinct set of runtime inputs.
+
+The prepared runtime (bundled msb, libkrunfw, Git, git-lfs-transfer, gateway, network
+bootstrap) is ignored build output. It depends only on the pinned inputs, so a worktree whose
+inputs match a saved copy restores it by copy-on-write instead of rebuilding (~9 minutes: the
+MicroSandbox release build is one LTO codegen unit).
+
+Cache key = sha256 of: runtime-inputs.json, the patch files, the toolchain (rustc +pinned
+--version), the target triple, the staging scripts, the macOS gateway and network-bootstrap
+sources, and package.json (the app version goes into release-info.json).
+
+Store: $SILO_AGENT_CACHE/runtime/<key>/ (default ~/Library/Caches/silo-agent on macOS,
+~/.cache/silo-agent elsewhere). Nothing is ever committed.
+"""
+import argparse, hashlib, json, os, platform, shutil, subprocess, sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+APP = ROOT / "app" / "SiloUI"
+TAURI = APP / "src-tauri"
+KEY_FILES = [
+    "runtime-inputs.json", "package.json", "scripts/prepare-microsandbox-runtime.mjs",
+    "scripts/microsandbox-runtime.mjs", "scripts/git-runtime.mjs", "scripts/lfs-transfer-runtime.mjs",
+    "scripts/linux-package-tools.mjs", "scripts/build-input.mjs", "scripts/preflight.mjs",
+    "src-tauri/guest/macos/build-network-bootstrap.sh", "src-tauri/guest/macos/silo-network-bootstrap.swift",
+]
+
+
+def out(cmd, **kw):
+    return subprocess.run(cmd, check=True, capture_output=True, text=True, **kw).stdout.strip()
+
+
+def target_triple():
+    return (os.environ.get("SILO_RUNTIME_TARGET") or os.environ.get("TAURI_ENV_TARGET_TRIPLE")
+            or out(["rustc", "--print", "host-tuple"])).strip()
+
+
+def compute_key(triple):
+    inputs = json.loads((APP / "runtime-inputs.json").read_text())
+    files = list(KEY_FILES) + [p["path"] for p in inputs["patches"]]
+    gateway = TAURI / "macos-gateway"
+    files += sorted(str(p.relative_to(APP)) for p in gateway.rglob("*") if p.is_file() and "target" not in p.parts)
+    toolchain = out(["rustc", f"+{inputs['toolchain']}", "--version"])
+    h = hashlib.sha256()
+    for line in (f"target={triple}", f"toolchain={toolchain}"):
+        h.update(line.encode() + b"\0")
+    for name in files:
+        h.update(name.encode() + b"\0" + hashlib.sha256((APP / name).read_bytes()).digest())
+    return h.hexdigest()[:32]
+
+
+def cache_root():
+    default = Path.home() / ("Library/Caches" if platform.system() == "Darwin" else ".cache") / "silo-agent"
+    return Path(os.environ.get("SILO_AGENT_CACHE", default)) / "runtime"
+
+
+def outputs(triple):
+    """Paths (relative to src-tauri) that runtime:prepare produces for this target."""
+    found = [p.relative_to(TAURI) for p in (TAURI / "binaries").glob(f"*-{triple}") if p.is_file()]
+    for name in ("microsandbox", "git", "lfs-transfer", "linux-package", "release-info.json"):
+        if (TAURI / "runtime" / name).exists():
+            found.append(Path("runtime") / name)
+    return sorted(found)
+
+
+def clone(src, dst):
+    """Copy a file or tree, copy-on-write where the filesystem supports it."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.is_dir() and not dst.is_symlink():
+        shutil.rmtree(dst)
+    elif dst.exists() or dst.is_symlink():
+        dst.unlink()
+    cmd = ["cp", "-cR", str(src), str(dst)] if platform.system() == "Darwin" else ["cp", "-a", "--reflink=auto", str(src), str(dst)]
+    if subprocess.run(cmd, capture_output=True).returncode:
+        shutil.copytree(src, dst, symlinks=True) if src.is_dir() else shutil.copy2(src, dst)
+
+
+def entry_paths(entry):
+    try:
+        paths = json.loads((entry / "manifest.json").read_text())["paths"]
+    except (OSError, ValueError, KeyError):
+        return None
+    ok = paths and all((entry / "files" / p).exists() for p in paths) \
+        and any(p.startswith("binaries/msb-") for p in paths) and "runtime/microsandbox" in paths
+    return paths if ok else None
+
+
+def save(entry, triple):
+    paths = [str(p) for p in outputs(triple)]
+    if not any(p.startswith("binaries/msb-") for p in paths) or "runtime/microsandbox" not in paths:
+        sys.exit("runtime-cache: runtime:prepare outputs are missing; nothing saved")
+    tmp = entry.with_name(entry.name + f".tmp-{os.getpid()}")
+    shutil.rmtree(tmp, ignore_errors=True)
+    for p in paths:
+        clone(TAURI / p, tmp / "files" / p)
+    (tmp / "manifest.json").write_text(json.dumps({"target": triple, "paths": paths}, indent=1) + "\n")
+    shutil.rmtree(entry, ignore_errors=True)
+    tmp.rename(entry)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], epilog="Environment: SILO_AGENT_CACHE (store), SILO_RUNTIME_TARGET (target triple), RUNTIME_PREPARE_CMD (replaces the prepare command, for tests).")
+    ap.add_argument("--status", action="store_true", help="print the key and hit/miss, change nothing")
+    ap.add_argument("--force", action="store_true", help="ignore a hit: rebuild and overwrite the saved copy")
+    ap.add_argument("--save", action="store_true", help="save the current outputs under the current key without preparing")
+    args = ap.parse_args()
+
+    triple = target_triple()
+    key = compute_key(triple)
+    entry = cache_root() / key
+    paths = entry_paths(entry)
+    if args.status:
+        print(f"key {key}\ntarget {triple}\nstore {entry}\n{'hit' if paths else 'miss'}")
+        return
+    if args.save:
+        save(entry, triple)
+        print(f"saved {entry}")
+        return
+    if paths and not args.force:
+        for p in paths:
+            clone(entry / "files" / p, TAURI / p)
+        print(f"runtime-cache: hit {key}, restored {len(paths)} paths")
+        return
+    print(f"runtime-cache: miss {key}, running runtime:prepare", flush=True)
+    cmd = os.environ.get("RUNTIME_PREPARE_CMD") or f"npm --prefix {APP} run runtime:prepare"
+    if subprocess.run(cmd, shell=True, cwd=ROOT).returncode:
+        sys.exit("runtime-cache: runtime:prepare failed; nothing saved")
+    save(entry, triple)
+    print(f"runtime-cache: saved {entry}")
+
+
+main()
