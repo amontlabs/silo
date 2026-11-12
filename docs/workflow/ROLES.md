@@ -13,6 +13,17 @@ Pick by name. Models, fallbacks and limits belong to lastdrop and the owner; do 
 | `cheap` | Cheap build or review; **only when the owner asks** | as the role it replaces | as the role it replaces |
 | `computer-use` | GUI steps in macOS apps through LCU | `Agent`, `model` = `computer-use`; called by `live` or the orchestrator | One bounded task: app, steps, what to report |
 
+## Reasoning effort
+
+The agents carry no fixed effort; choose it per task and pass it when you start the agent
+(`delegate_task`: `target.options.effort`; `Agent`: `effort`):
+
+- `low`: lookups, mechanical edits, one-line fixes, rerunning a known command, `scout` work.
+- `medium` (default when unsure): an ordinary item or fix with a clear design.
+- `high`: cross-crate or concurrency changes, migrations, security-relevant code, design calls for `judge`, reviews of risky diffs.
+
+Raise it for a retry that failed for lack of reasoning, not by default.
+
 ## What every task contains
 
 - The brief filled in completely; no placeholder left.
