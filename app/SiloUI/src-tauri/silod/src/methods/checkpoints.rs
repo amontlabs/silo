@@ -294,9 +294,12 @@ async fn delete(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
     let params: CheckpointTargetParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let service = service(context);
+    let visible = visible_to_computer(context);
     job_started(
-        blocking_failure(move || service.start_delete(&params.computer_id, &params.checkpoint_id))
-            .await,
+        blocking_failure(move || {
+            service.start_delete_visible(&params.computer_id, &params.checkpoint_id, visible)
+        })
+        .await,
     )
 }
 
@@ -310,11 +313,19 @@ async fn abandon_restore(
     job_started(blocking_failure(move || service.start_abandon_restore(&params.computer_id)).await)
 }
 
+/// The computers a computer's agent may be told of, when the caller is one; a refusal or a
+/// list of dependants names no other.
+fn visible_to_computer(context: &HandlerContext) -> Option<std::collections::BTreeSet<String>> {
+    matches!(context.caller(), silo_engine::policy::Caller::Computer { .. })
+        .then(|| context.visible().map(|seen| (*seen).clone()).unwrap_or_default())
+}
+
 async fn usage(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
     let params: CheckpointUsageParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let service = service(context);
-    blocking_failure(move || service.usage(&params.computer_id))
+    let visible = visible_to_computer(context);
+    blocking_failure(move || service.usage_visible(&params.computer_id, visible.as_ref()))
         .await
         .map_err(failure)
         .and_then(output)

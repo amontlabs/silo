@@ -1,7 +1,7 @@
 //! Silo's durable names and lifecycle intent for upstream MicroSandbox snapshots.
 //! Snapshot data and its reference graph remain owned by MicroSandbox.
 use super::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
 
@@ -3804,9 +3804,36 @@ struct Survey {
     uses: HashMap<native::Key, Vec<native::Use>>,
     inventory: Vec<native::Member>,
     positions: HashMap<String, String>,
+    /// The computers the reader may name, by id; `None` when it may name every one.
+    visible: Option<BTreeSet<String>>,
+    /// The id of each computer, by name.
+    ids: HashMap<String, String>,
+}
+
+/// What a reader who may not name a computer is told in its place.
+const HIDDEN_COMPUTER: &str = "a computer you can’t see";
+
+impl Survey {
+    fn sees_id(&self, id: &str) -> bool {
+        self.visible.as_ref().is_none_or(|visible| visible.contains(id))
+    }
+
+    fn sees_name(&self, name: &str) -> bool {
+        self.visible.is_none()
+            || self.ids.get(name).is_some_and(|id| self.sees_id(id))
+    }
 }
 
 fn survey(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<Survey, RuntimeError> {
+    survey_as(runner, paths, None)
+}
+
+/// A survey whose messages name only the computers in `visible`, when given.
+fn survey_as(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    visible: Option<&BTreeSet<String>>,
+) -> Result<Survey, RuntimeError> {
     let metadata = read_metadata(&paths.metadata)?;
     let uses = native::uses(paths, &metadata)?;
     let inventory = native::inventory(runner, paths)?;
@@ -3815,7 +3842,17 @@ fn survey(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<Survey, Ru
         uses,
         inventory,
         positions,
+        visible: visible.cloned(),
+        ids: computer_ids(&metadata),
     })
+}
+
+fn computer_ids(metadata: &ComputerConfigurationRequest) -> HashMap<String, String> {
+    metadata
+        .computers
+        .iter()
+        .map(|computer| (computer.name().to_owned(), computer.id().to_owned()))
+        .collect()
 }
 
 /// What deleting one checkpoint entry does to native data.
@@ -3858,6 +3895,9 @@ fn blocker_message(
     blocker: &native::Blocker,
 ) -> String {
     match blocker {
+        native::Blocker::Used(uses) if uses.iter().any(|used| !survey.sees_id(&used.computer_id)) => {
+            format!("Used by {HIDDEN_COMPUTER}.")
+        }
         native::Blocker::Used(uses) => {
             let mut names: Vec<String> = uses.iter().map(|used| used.computer.clone()).collect();
             names.sort();
@@ -3867,6 +3907,9 @@ fn blocker_message(
         native::Blocker::Lineage(owner) if owner == computer => format!(
             "{computer}’s next checkpoint and export build on this one, so it can’t be deleted while it is the latest state {computer} builds on."
         ),
+        native::Blocker::Lineage(owner) if !survey.sees_name(owner) => {
+            format!("Used by {HIDDEN_COMPUTER}.")
+        }
         native::Blocker::Lineage(owner) => format!(
             "Used by {owner}. {owner} was started from this checkpoint and still builds on it."
         ),
@@ -3879,8 +3922,10 @@ fn blocker_message(
                     if let native::Purpose::Checkpoint(_, label) = &used.purpose {
                         if used.computer_id == computer_id {
                             own.push(format!("“{label}”"));
-                        } else {
+                        } else if survey.sees_id(&used.computer_id) {
                             others.push(format!("{}’s checkpoint “{label}”", used.computer));
+                        } else {
+                            others.push(format!("a checkpoint of {HIDDEN_COMPUTER}"));
                         }
                     }
                 }
@@ -3982,6 +4027,17 @@ fn delete_checkpoint_with(
     computer_id: &str,
     checkpoint_id: &str,
 ) -> Result<(), RuntimeError> {
+    delete_checkpoint_as(runner, paths, computer_id, checkpoint_id, None)
+}
+
+/// [`delete_checkpoint_with`], whose refusals name only the computers in `visible`, when given.
+fn delete_checkpoint_as(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    checkpoint_id: &str,
+    visible: Option<&BTreeSet<String>>,
+) -> Result<(), RuntimeError> {
     let configuration = computer_configuration(paths, computer_id)?;
     let _ = ensure_snapshot_group(paths, computer_id, configuration.name())?;
     let mut record = load(paths, computer_id)?;
@@ -3991,7 +4047,7 @@ fn delete_checkpoint_with(
         .find(|checkpoint| checkpoint.id == checkpoint_id)
         .ok_or_else(|| RuntimeError::Invalid("The selected checkpoint no longer exists.".into()))?
         .clone();
-    let survey = survey(runner, paths)?;
+    let survey = survey_as(runner, paths, visible)?;
     match deletion(
         &survey,
         computer_id,
@@ -4051,6 +4107,7 @@ pub fn delete_for_job(
     checkpoint_id: &str,
     job_id: silo_api::jobs::JobId,
     cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    visible: Option<&BTreeSet<String>>,
 ) -> Result<(), String> {
     use super::operation_gate::{OperationKind, Scope};
 
@@ -4068,7 +4125,7 @@ pub fn delete_for_job(
     admitted()?;
     guard.expect_within(std::time::Duration::from_secs(5 * 60));
     shutdown::ensure_accepting_operations()?;
-    delete_checkpoint_with(&ProcessRunner, paths, computer_id, checkpoint_id)
+    delete_checkpoint_as(&ProcessRunner, paths, computer_id, checkpoint_id, visible)
         .map_err(|error| error.to_string())
 }
 
@@ -4100,6 +4157,17 @@ fn usage_with(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer_id: &str,
+) -> Result<CheckpointUsage, RuntimeError> {
+    usage_as(runner, paths, computer_id, None)
+}
+
+/// [`usage_with`] for a reader who may name only the computers in `visible`; a dependant it
+/// cannot name is reported as a computer it can’t see.
+fn usage_as(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    visible: Option<&BTreeSet<String>>,
 ) -> Result<CheckpointUsage, RuntimeError> {
     let configuration = computer_configuration(paths, computer_id)?;
     let record = load(paths, computer_id)?;
@@ -4136,6 +4204,8 @@ fn usage_with(
         uses,
         inventory,
         positions,
+        visible: visible.cloned(),
+        ids: computer_ids(&metadata),
     };
     let mut counted = HashSet::new();
     let mut total = Some(0u64);
@@ -4160,12 +4230,24 @@ fn usage_with(
             .into_iter()
             .flatten()
             .filter(|used| used.computer_id != computer_id)
-            .map(|used| used.computer.clone())
+            .map(|used| {
+                if survey.sees_id(&used.computer_id) {
+                    used.computer.clone()
+                } else {
+                    HIDDEN_COMPUTER.to_owned()
+                }
+            })
             .chain(
                 member
                     .and_then(|member| survey.positions.get(&member.snapshot_id))
                     .filter(|owner| owner.as_str() != configuration.name())
-                    .cloned(),
+                    .map(|owner| {
+                        if survey.sees_name(owner) {
+                            owner.clone()
+                        } else {
+                            HIDDEN_COMPUTER.to_owned()
+                        }
+                    }),
             )
             .collect();
         used_by.sort();
@@ -4190,8 +4272,13 @@ fn usage_with(
     })
 }
 
-pub fn read_usage(paths: &RuntimePaths, computer_id: &str) -> Result<CheckpointUsage, String> {
-    usage_with(&ProcessRunner, paths, computer_id).map_err(|error| safe_activity_error(&error))
+pub fn read_usage(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    visible: Option<&BTreeSet<String>>,
+) -> Result<CheckpointUsage, String> {
+    usage_as(&ProcessRunner, paths, computer_id, visible)
+        .map_err(|error| safe_activity_error(&error))
 }
 
 /// Host allocation of one computer's checkpoints and how many it has, for the Storage tab.
