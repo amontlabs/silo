@@ -1310,7 +1310,7 @@ fn a_merge_summary_lists_the_hooks_database_changes_and_choices() {
     assert_eq!(plain, "Merge the changes of “fork-1-name” into “main-name”.");
     assert!(matches!(
         check("changes.keep", json!({"forkId": "fork-1", "keep": {"after": ["make"]}})),
-        Decision::Ask { computer_summary: None, .. }
+        Decision::Ask { summary, computer_summary: Some(computer), .. } if computer == summary
     ));
     let with = ask_summary(
         "changes.keep",

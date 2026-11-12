@@ -108,11 +108,14 @@ impl Record {
             .is_some_and(|request| request.remove("value").is_some())
     }
 
-    /// The summary the computer that asked may read.
+    /// The summary the computer that asked may read. A merge saved without one may hold the
+    /// commands of a recipe's hooks, so the computer reads only that it waits.
     pub fn summary_for_computer(&self) -> &str {
-        self.computer_summary
-            .as_deref()
-            .unwrap_or(&self.approval.summary)
+        match (&self.computer_summary, self.approval.kind) {
+            (Some(summary), _) => summary,
+            (None, ApprovalKind::Merge) => crate::policy::WAITING_MERGE_SUMMARY,
+            (None, _) => &self.approval.summary,
+        }
     }
 
     /// The approval as a computer sees it: the view, with the summary cut for a computer.

@@ -676,7 +676,10 @@ fn execute<'a>(
                 _,
             )) if kind != approval.kind
                 || summary != approval.summary
-                || computer_summary != record.computer_summary =>
+                || record
+                    .computer_summary
+                    .as_ref()
+                    .is_some_and(|stored| computer_summary.as_ref() != Some(stored)) =>
             {
                 return failed(
                     "Nothing was run: the call would now ask for something other than what you allowed. The computer can ask again.",
@@ -719,7 +722,18 @@ fn execute<'a>(
                 return failed(format!("Nothing was run: {message}"));
             }
         }
-        let result = run_call(context, run_method, &run_params, record.pin.clone()).await;
+        let review_digest = approval
+            .review_digest
+            .clone()
+            .filter(|_| run_method == MethodName::ChangesRequestsKeep);
+        let result = run_call(
+            context,
+            run_method,
+            &run_params,
+            record.pin.clone(),
+            review_digest,
+        )
+        .await;
         let job = result
             .as_ref()
             .ok()
@@ -851,6 +865,14 @@ tokio::task_local! {
     /// The state an allowed undo or promote was approved for; the job compares it while it
     /// holds the lanes, since another approved call may run between this check and the job.
     static EXPECTED_PIN: Option<String>;
+    /// The review digest an allowed merge was approved for; the keep compares it while it
+    /// holds the request, since the computer may ask again between the check and the keep.
+    static EXPECTED_REVIEW: Option<String>;
+}
+
+/// The review digest the allowed merge that is running was approved for, when it is one.
+pub(crate) fn expected_review_digest() -> Option<String> {
+    EXPECTED_REVIEW.try_with(Clone::clone).ok().flatten()
 }
 
 /// The state the allowed call that is running was approved for, when it acts on pinned state.
@@ -871,19 +893,24 @@ async fn run_call(
     method: MethodName,
     params: &Value,
     pin: Option<String>,
+    review_digest: Option<String>,
 ) -> Result<HandlerOutput, DispatchError> {
-    EXPECTED_PIN
-        .scope(pin, async {
-            FOR_COMPUTER
-                .scope(true, async {
-                    #[cfg(test)]
-                    if let Ok(run) = TEST_RUN.try_with(Clone::clone) {
-                        return run(method, params).map(|value| HandlerOutput {
-                            value,
-                            event_barrier: None,
-                        });
-                    }
-                    super::run(context, method, params).await
+    EXPECTED_REVIEW
+        .scope(review_digest, async {
+            EXPECTED_PIN
+                .scope(pin, async {
+                    FOR_COMPUTER
+                        .scope(true, async {
+                            #[cfg(test)]
+                            if let Ok(run) = TEST_RUN.try_with(Clone::clone) {
+                                return run(method, params).map(|value| HandlerOutput {
+                                    value,
+                                    event_barrier: None,
+                                });
+                            }
+                            super::run(context, method, params).await
+                        })
+                        .await
                 })
                 .await
         })

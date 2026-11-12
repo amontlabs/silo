@@ -26,7 +26,7 @@ fn mode(mode: NetworkPolicyMode) -> NetworkPolicy {
 struct World {
     policies: HashMap<&'static str, NetworkPolicy>,
     /// Sizes that differ from the common ones.
-    sizes: HashMap<&'static str, Resources>,
+    sizes: HashMap<&'static str, Option<Resources>>,
 }
 
 impl World {
@@ -70,7 +70,7 @@ impl super::World for World {
         "fresh-id".into()
     }
     fn resources(&self, computer: &str) -> Option<Resources> {
-        self.sizes.get(computer).copied().or_else(|| {
+        self.sizes.get(computer).copied().unwrap_or_else(|| {
             Resources::of_linux(&json!({"cpus": 2, "maxCPUs": 4, "memoryGiB": 4,
                 "maxMemoryGiB": 8, "workspaceStorageGiB": 20, "runtimeStorageGiB": 10}))
         })
@@ -326,8 +326,7 @@ fn a_fork_larger_than_the_caller_asks_and_carries_the_policy() {
     world.sizes.insert(
         "fork-1",
         Resources::of_linux(&json!({"cpus": 8, "maxCPUs": 8, "memoryGiB": 16,
-            "maxMemoryGiB": 16, "workspaceStorageGiB": 20, "runtimeStorageGiB": 10}))
-        .unwrap(),
+            "maxMemoryGiB": 16, "workspaceStorageGiB": 20, "runtimeStorageGiB": 10})),
     );
     match fork(&world, "fork-1") {
         Decision::Ask {
@@ -574,4 +573,87 @@ fn a_preset_update_is_wider_for_a_computer_that_has_not_accepted_it() {
     let summary = asked(set(&world, "main", &policy));
     assert!(summary.contains("b.example.com") && !summary.contains("a.example.com"), "{summary}");
     use_test_presets(None);
+}
+
+fn fork_with_secret(world: &World, source: &str, params: Value) -> Decision {
+    let mut params = params;
+    params["computerId"] = json!(source);
+    params["newName"] = json!("child");
+    decide(&main(), MethodName::CheckpointsFork, &params, world)
+}
+
+fn access_summary(decision: Decision) -> String {
+    match decision {
+        Decision::Ask {
+            kind: ApprovalKind::Access,
+            summary,
+            ..
+        } => summary,
+        other => panic!("expected a request for more access, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_fork_wider_in_access_and_larger_shows_both_in_one_summary() {
+    let mut world = World::with(allowlist(&["a.example.com"]), NetworkPolicy::default());
+    world.sizes.insert(
+        "fork-1",
+        Resources::of_linux(&json!({"cpus": 8, "maxCPUs": 8, "memoryGiB": 16,
+            "maxMemoryGiB": 16, "workspaceStorageGiB": 20, "runtimeStorageGiB": 10})),
+    );
+    let summary = access_summary(fork_with_secret(
+        &world,
+        "fork-1",
+        json!({"secrets": ["API_KEY"]}),
+    ));
+    assert!(summary.contains("API_KEY"), "{summary}");
+    assert!(
+        summary.contains("8 CPUs") && summary.contains("16 GiB"),
+        "{summary}"
+    );
+    assert!(summary.contains("which is more than “main” has"), "{summary}");
+}
+
+#[test]
+fn a_fork_wider_in_access_says_when_the_sizes_could_not_be_read() {
+    let mut world = World::with(allowlist(&["a.example.com"]), NetworkPolicy::default());
+    world.sizes.insert("fork-1", None);
+    let summary = access_summary(fork_with_secret(
+        &world,
+        "fork-1",
+        json!({"secrets": ["API_KEY"]}),
+    ));
+    assert!(summary.contains("API_KEY"), "{summary}");
+    assert!(
+        summary.contains("could not be read to compare them"),
+        "{summary}"
+    );
+}
+
+#[test]
+fn a_creation_by_a_caller_with_an_unreadable_policy_names_the_policy_it_asked_for() {
+    let world = World {
+        policies: HashMap::new(),
+        sizes: HashMap::new(),
+    };
+    let open = mode(NetworkPolicyMode::Open);
+    let mut request = linux_request(json!({}));
+    request["networkPolicy"] = json!(open);
+    match decide(&main(), MethodName::ComputersCreate, &request, &world) {
+        Decision::Ask {
+            summary,
+            params: Some(params),
+            ..
+        } => {
+            assert_eq!(params["networkPolicy"], json!(open));
+            assert!(summary.contains("open (any public address)"), "{summary}");
+        }
+        other => panic!("expected a request, got {other:?}"),
+    }
+    let fork = json!({"computerId": "main", "newName": "child", "secrets": ["API_KEY"]});
+    let summary = access_summary(decide(&main(), MethodName::CheckpointsFork, &fork, &world));
+    assert!(
+        summary.contains("could not be read to compare"),
+        "{summary}"
+    );
 }

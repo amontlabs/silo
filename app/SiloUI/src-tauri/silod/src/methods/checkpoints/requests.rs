@@ -491,6 +491,8 @@ pub(super) async fn keep(
     let hold = claim(&params.request_id)?;
     let request = open_request(context, params.request_id, Need::Keepable).await?;
     fold_requests::check_keepable(&request).map_err(message_error)?;
+    let approved = crate::methods::approvals::expected_review_digest();
+    check_approved_changes(&request.review_digest, approved.as_deref())?;
     let computers = all_rows(context).await?;
     if fork_row(&computers, &request).is_none() {
         return Err(message_error(
@@ -518,7 +520,7 @@ pub(super) async fn keep(
         hooks: hooks.unwrap_or_default(),
         dry_run: false,
         data_ok: params.data_ok.unwrap_or(false),
-        reviewed: Some(request.review_digest.clone()),
+        reviewed: Some(approved.unwrap_or_else(|| request.review_digest.clone())),
         choices: super::keep::choices_of(Some(choices), Some(skip)),
         save_recipe,
         hide_recipe_commands: crate::methods::approvals::result_goes_to_computer(context),
@@ -536,6 +538,17 @@ pub(super) async fn keep(
     .map_err(failure)?;
     crate::methods::approvals::request_answered(context, &request_id, Some(job_id.as_str()));
     started(job_id)
+}
+
+/// Refuses a keep whose request shows other changes than the ones the owner approved: the
+/// computer asked for the review again after it was approved.
+fn check_approved_changes(shown: &str, approved: Option<&str>) -> Result<(), DispatchError> {
+    match approved {
+        Some(approved) if approved != shown => Err(message_error(
+            "The review request was asked for again with other changes after you were asked, so nothing was merged. The computer can ask again.",
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// The same handler context, owned, for work that outlives the request.
@@ -861,6 +874,18 @@ pub(crate) mod tests_rows {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_keep_approved_for_other_changes_than_the_request_shows_is_refused() {
+        assert!(check_approved_changes("d1", None).is_ok());
+        assert!(check_approved_changes("d1", Some("d1")).is_ok());
+        let error = check_approved_changes("d2", Some("d1")).unwrap_err();
+        assert!(
+            error.message.contains("asked for again"),
+            "{}",
+            error.message
+        );
+    }
 
     #[test]
     fn computers_are_read_from_both_platforms() {

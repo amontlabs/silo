@@ -222,11 +222,12 @@ fn ask(kind: ApprovalKind, summary: impl Into<String>) -> Decision {
 }
 
 /// An ask for a merge, whose owner-facing text holds the commands of a recipe's hooks and the
-/// computer's holds only their number.
+/// computer's holds only their number. The computer's text is always stored, so an approval
+/// saved without one is known to predate it.
 fn ask_merge(kind: ApprovalKind, summary: String, computer_summary: String) -> Decision {
     Decision::Ask {
         kind,
-        computer_summary: (computer_summary != summary).then_some(computer_summary),
+        computer_summary: Some(computer_summary),
         summary,
         params: None,
         creates: None,
@@ -646,21 +647,33 @@ impl<'a> Judge<'a> {
             self.fork_exceeds(source)
         };
         if !wider.is_empty() {
-            if more.is_some() {
-                wider.push("more resources than its own".into());
+            match &more {
+                Some(more) if more.is_empty() => {
+                    wider.push("sizes that could not be compared with its own".into())
+                }
+                Some(_) => wider.push("more resources than its own".into()),
+                None => {}
             }
             if network.is_err() {
                 wider.push("a network policy wider than its own".into());
             }
+            let mut summary = format!(
+                "More access than {} has: fork {} as {} with {}.",
+                self.shown(self.caller),
+                self.shown(source),
+                quoted(new_name),
+                wider.join(" and "),
+            );
+            if let Some(more) = &more {
+                summary.push_str(&self.copied_sizes_sentence(source, more));
+            }
+            if let Err(network) = &network {
+                summary.push(' ');
+                summary.push_str(network);
+            }
             return Ok(ask_to_create(
                 ApprovalKind::Access,
-                format!(
-                    "More access than {} has: fork {} as {} with {}.",
-                    self.shown(self.caller),
-                    self.shown(source),
-                    quoted(new_name),
-                    wider.join(" and "),
-                ),
+                summary,
                 rewritten,
                 creates,
             ));
@@ -879,6 +892,31 @@ impl<'a> Judge<'a> {
         }
     }
 
+    /// The sentence that tells what a fork copies from `source` and how it compares with the
+    /// caller, for a request that is mainly about something else.
+    fn copied_sizes_sentence(&self, source: &str, more: &[String]) -> String {
+        match self.world.resources(source) {
+            Some(copied) if more.is_empty() => format!(
+                " It copies {} from {}; the sizes of {} could not be read to compare them.",
+                copied.describe(),
+                self.shown(source),
+                self.shown(self.caller)
+            ),
+            Some(copied) => format!(
+                " It copies {} from {}, which is more than {} has: {}.",
+                copied.describe(),
+                self.shown(source),
+                self.shown(self.caller),
+                more.join(", ")
+            ),
+            None => format!(
+                " The sizes of {} or {} could not be read to compare them.",
+                self.shown(source),
+                self.shown(self.caller)
+            ),
+        }
+    }
+
     /// ", with <sizes>, which is more than <caller> has: <what>." for the summary of a request.
     fn sizes_sentence(&self, asked: &Resources, more: Option<&[String]>) -> String {
         let sizes = asked.describe();
@@ -1040,11 +1078,24 @@ impl<'a> Judge<'a> {
         new_name: &str,
     ) -> Result<NetworkPolicy, String> {
         let Some(own) = self.world.network_held(self.caller) else {
-            return Err(format!(
+            let mut summary = format!(
                 "Give {} a network policy; the network policy of {} could not be read to compare.",
                 quoted(new_name),
                 self.shown(self.caller)
-            ));
+            );
+            if let Some(asked) = asked.filter(|asked| asked.mode != NetworkPolicyMode::Closed) {
+                let closed = Held::latest(NetworkPolicy {
+                    mode: NetworkPolicyMode::Closed,
+                    ..NetworkPolicy::default()
+                });
+                summary.push(' ');
+                summary.push_str(&crate::network_policy::widening_summary_held(
+                    &quoted(new_name),
+                    &closed,
+                    &Held::latest(asked),
+                ));
+            }
+            return Err(summary);
         };
         // The new computer is approved at the preset versions of this Silo, so it is compared
         // that way against the caller's own policy.
@@ -1742,20 +1793,25 @@ pub fn filter_result(filter: Filter, result: &mut Value, visible: &BTreeSet<Stri
 
 /// What a computer reads in place of the engine's summary of a review request that waits for
 /// an approval, which can name commands the computer may not read.
-const WAITING_MERGE_SUMMARY: &str =
+pub const WAITING_MERGE_SUMMARY: &str =
     "A merge waiting for the approval of the person who runs Silo.";
 
 /// Replaces the engine's text on a review request an approval wraps, and on the answer that
 /// shows it.
 fn cut_request_summary(object: &mut serde_json::Map<String, Value>) {
-    let wrapped = |request: &Value| {
+    let wrapped = |request: &serde_json::Map<String, Value>| {
         request.get("approvalId").is_some_and(|id| !id.is_null())
-            && request.get("reviewDigest").is_some()
+            && request.contains_key("reviewDigest")
     };
-    if wrapped(&Value::Object(object.clone())) {
+    if wrapped(object) {
         object.insert("summary".into(), json!(WAITING_MERGE_SUMMARY));
     }
-    if object.get("request").is_some_and(wrapped) && object.contains_key("text") {
+    if object
+        .get("request")
+        .and_then(Value::as_object)
+        .is_some_and(wrapped)
+        && object.contains_key("text")
+    {
         object.insert("text".into(), json!(WAITING_MERGE_SUMMARY));
     }
 }
