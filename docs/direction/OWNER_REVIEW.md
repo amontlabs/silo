@@ -150,7 +150,7 @@ was chosen and why; any can be changed. Older items are also in the build log un
     `*.co.uk`) stay refused. A secret only opens such a wildcard once you tick "Let computers reach
     every site under these" in its editor, or approve a computer's ask that showed the warning;
     secrets saved before R19 stay as they were until then. Gap: hosts that only the full Public
-    Suffix List knows (e.g. `*.surge.sh`) get no checkbox in the editor and the CLI has no flag,
+    Suffix List knows (e.g. `*.surge.sh`) get no checkbox in the editor (the CLI flag below covers them),
     so for those you add the wildcard to the computer's network list directly. Since the 2026-11-12 trial the CLI has `silo secrets set NAME --domain '*.host' --allow-shared-hosting`, which prints the engine's warning; the app editor still has no checkbox for such hosts.
 33. **Guest output limits:** a command the engine runs in a computer is stopped when it prints
     more than 64 KiB of errors (helper runs) or 960 KiB (other runs); nothing it prints is
