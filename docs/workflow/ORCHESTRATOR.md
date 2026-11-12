@@ -80,7 +80,7 @@ cd <INT> && tools/agent/merge-batch --into $BOARD_INTEGRATION <branch> [<branch>
 tools/agent/board set <item> state=merged     # for each merged item
 ```
 
-It merges with `--no-ff`, regenerates the API files once, runs `check` on the union in the foreground, and starts the full suite in the background (`app/SiloUI/target/agent/full-suite.<sha>.{log,merged,done}` in `INT`). A conflict exits 2 and names the files. **Do not edit files in `INT` while the suite runs** (the board and owner log are elsewhere). Keep launching and reviewing. At the **next merge**, run `tools/agent/merge-batch --last` first: it prints the verdict, and on FAIL the failing tests and the merged branches that touched them. Send that to the child that wrote it; fix before merging more.
+It merges with `--no-ff`, regenerates the API files once, runs `check` on the union in the foreground, and starts the full suite in the background (`app/SiloUI/target/agent/full-suite.<sha>.{log,merged,done}` in `INT`). A conflict exits 2 and names the files; after resolving it by hand (merge in `INT`, commit), `tools/agent/merge-batch --suite` starts the same background suite on the current `HEAD` without merging or running `check`. **Do not edit files in `INT` while the suite runs** (the board and owner log are elsewhere). Keep launching and reviewing. At the **next merge**, run `tools/agent/merge-batch --last` first: it prints the verdict, and on FAIL the failing tests and the merged branches that touched them. Send that to the child that wrote it; fix before merging more.
 
 ## 6. Clean
 

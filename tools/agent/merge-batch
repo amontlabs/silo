@@ -2,6 +2,7 @@
 """Merge a batch of branches into the integration branch and start the full suite.
 
   merge-batch [--into BRANCH] [--no-check] [--no-suite] <branch>...
+  merge-batch --suite [--into BRANCH]
   merge-batch --last
 
 Run it in the integration checkout (clean tree, a branch checked out). It refuses unless the
@@ -22,6 +23,8 @@ current branch is the integration branch: --into, else $BOARD_INTEGRATION, else 
    runs. It writes
    app/SiloUI/target/agent/full-suite.<sha>.log, .merged (branch<TAB>file lines) and, when it
    ends, .done (first line PASS or FAIL). Do not change the checkout's files while it runs.
+--suite takes no branches: after a merge done by hand, it makes the same branch and clean-tree checks,
+merges nothing, skips the foreground check and starts step 4 on the current HEAD.
 --last prints the newest full-suite verdict; on failure also the failing tests and, for each,
 the merged branches that touched that crate or file.
 """
@@ -110,6 +113,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--into")
     ap.add_argument("--last", action="store_true")
+    ap.add_argument("--suite", action="store_true",
+                    help="merge nothing: start the background suite on the current commit")
     ap.add_argument("--no-check", action="store_true", help="skip the foreground check")
     ap.add_argument("--no-suite", action="store_true", help="do not start the background suite")
     ap.add_argument("branches", nargs="*")
@@ -120,8 +125,10 @@ def main():
     ROOT = p.stdout.strip()
     if args.last:
         return last(args)
-    if not args.branches:
-        ap.error("give at least one branch (or --last)")
+    if args.suite and (args.branches or args.last):
+        ap.error("--suite takes no branches")
+    if not args.branches and not args.suite:
+        ap.error("give at least one branch (or --suite, or --last)")
 
     cur = git("symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
     if not cur:
@@ -134,6 +141,9 @@ def main():
     for b in args.branches:
         if git("rev-parse", "--verify", "-q", "refs/heads/" + b).returncode:
             die("no such branch: " + b)
+    if args.suite:
+        start_suite(git("rev-parse", "HEAD").stdout.strip(), [])
+        return
     start = git("rev-parse", "HEAD").stdout.strip()
 
     merged = []  # (branch, [files])
