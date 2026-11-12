@@ -57,6 +57,10 @@ def exchange(address, port, payload):
 query = b'\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03org\x00\x00\x01\x00\x01'
 print("unlisted IP, TCP connect (1.1.1.1:853):", exchange("1.1.1.1", 853, b'\x16\x03\x01\x00\x01\x00'))
 print("unlisted IP, TCP connect (8.8.8.8:53):", exchange("8.8.8.8", 53, struct.pack('>H', len(query)) + query))
+import time
+started = time.time()
+refusal = connect("1.1.1.1", 80)
+print("unlisted IP, TCP connect (1.1.1.1:80):", "%s after %.1fs" % (refusal, time.time() - started))
 PY
 echo "unlisted IP, HTTP status (1.1.1.1): $(curl -s -o /dev/null -m 12 -w '%{http_code}' http://1.1.1.1/ 2>/dev/null || true)"
 echo "unlisted IP, HTTP body (1.1.1.1): $(curl -s -m 12 http://1.1.1.1/ 2>/dev/null | head -c 300 | tr '\n' ' ' || true)"
@@ -74,6 +78,7 @@ struct Reach {
     http_body: String,
     port_853: String,
     port_53: String,
+    port_80: String,
 }
 
 fn field(report: &str, label: &str) -> String {
@@ -101,6 +106,7 @@ fn probe(fixture: &Fixture, name: &str, label: &str) -> Reach {
         http_body: field(&report, "unlisted IP, HTTP body (1.1.1.1)"),
         port_853: field(&report, "unlisted IP, TCP connect (1.1.1.1:853)"),
         port_53: field(&report, "unlisted IP, TCP connect (8.8.8.8:53)"),
+        port_80: field(&report, "unlisted IP, TCP connect (1.1.1.1:80)"),
     }
 }
 
@@ -108,18 +114,30 @@ fn reached(result: &str) -> bool {
     result != "000" && !result.is_empty() && !result.starts_with("failed")
 }
 
-/// A connection to an unlisted public IP is refused at once on every port (HTTP, HTTPS, DNS,
-/// DNS-over-TLS): the program gets a reset, never a handshake, a gateway answer or a hang, and
-/// nothing is sent to the address.
+/// A connection to an unlisted public IP is refused at once on HTTP, HTTPS and DNS-over-TLS: the
+/// program gets a reset, never a handshake, a gateway answer or a hang, and nothing is sent to the
+/// address. Plain DNS on TCP 53 is answered by the gateway's own resolver (like UDP 53), so the
+/// unlisted address never sees it and no name outside the policy resolves.
 fn unlisted_ip_is_refused(reach: &Reach, label: &str) {
     const REFUSED: &str = "failed (ConnectionRefusedError)";
     assert!(
         reach.public_ip == REFUSED
             && reach.port_853 == REFUSED
-            && reach.port_53 == REFUSED
             && reach.http_status == "000"
             && reach.http_body.trim().is_empty(),
-        "{label}: a connection to an unlisted IP must be refused on every port: {reach:?}"
+        "{label}: a connection to an unlisted IP must be refused on 80, 443 and 853: {reach:?}"
+    );
+    let waited = reach
+        .port_80
+        .strip_prefix(&format!("{REFUSED} after "))
+        .and_then(|seconds| seconds.trim_end_matches('s').parse::<f64>().ok());
+    assert!(
+        waited.is_some_and(|seconds| seconds < 2.0),
+        "{label}: port 80 of an unlisted IP must be refused at once, not time out: {reach:?}"
+    );
+    assert!(
+        reach.port_53.starts_with("connected") && !answered(&reach.port_53.replace("DNS reply ", "")),
+        "{label}: TCP 53 to another resolver must reach the gateway's resolver and get no answer for an unlisted name: {reach:?}"
     );
 }
 

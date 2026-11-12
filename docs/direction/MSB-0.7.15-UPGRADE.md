@@ -126,6 +126,8 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   (from `silo/0714-fix-net`), and TCP SYNs to ports 53 and 853 are no longer accepted for every
   address: the netstack accepted DNS ports without an egress check, so an unlisted address
   completed the handshake there; only the computer's own gateway is accepted unchecked now, other
-  addresses follow the policy (Reject = RST). Failing-first tests in `netstack/poll.rs` for ports
-  443, 53, 853, 8080 and the gateway still accepted. The macOS gateway sets `deny_response(false)`
+  addresses follow the policy (Reject = RST). Plain TCP 53 stays intercepted for every address
+  (the gateway's resolver answers, like UDP 53); only 853 to a non-gateway address is refused.
+  Failing-first tests in `netstack/poll.rs` for ports 443 and 853; the 8080 test and the
+  gateway-still-accepted test guard regressions only; a test pins TCP 53 as still intercepted. The macOS gateway sets `deny_response(false)`
   and export accepts the `deny_response:false` + `json` http section the patched runtime saves.
