@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Merge a batch of branches into the integration branch and start the full suite.
+
+  merge-batch [--into BRANCH] [--no-check] [--no-suite] <branch>...
+  merge-batch --last
+
+Run it in the integration checkout (clean tree). --into only asserts which branch that is.
+1. Merges each branch with --no-ff, in order. On a conflict it prints the conflicting files,
+   aborts that merge (earlier merges stay) and exits 2.
+2. If the merged changes touched app/SiloUI/api/, regenerates the API files once
+   (generate_requests and generate_schema, from app/SiloUI) and commits them if they changed.
+3. Runs `tools/agent/check --base <sha before the batch>` in the foreground (skipped, with a
+   note, if that script does not exist yet).
+4. Starts the full suite in the background on the resulting commit:
+   cargo nextest run --workspace --no-fail-fast (else cargo test --workspace --locked
+   --no-fail-fast), then vitest if node_modules exists. It writes
+   app/SiloUI/target/agent/full-suite.<sha>.log, .merged (branch<TAB>file lines) and, when it
+   ends, .done (first line PASS or FAIL). Do not change the checkout's files while it runs.
+--last prints the newest full-suite verdict; on failure also the failing tests and, for each,
+the merged branches that touched that crate or file.
+"""
+import argparse, glob, json, os, re, subprocess, sys
+
+ROOT = None
+WS = "app/SiloUI"
+
+
+def sh(*a, cwd=None):
+    return subprocess.run(a, cwd=cwd or ROOT, capture_output=True, text=True)
+
+
+def git(*a):
+    return sh("git", *a)
+
+
+def die(msg, code=1):
+    print("merge-batch: " + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def out_dir():
+    return os.path.join(ROOT, WS, "target", "agent")
+
+
+def last(args):
+    done = sorted(glob.glob(os.path.join(out_dir(), "full-suite.*.done")), key=os.path.getmtime)
+    if not done:
+        running = glob.glob(os.path.join(out_dir(), "full-suite.*.log"))
+        die("no finished full suite" + (" (one is still running: %s)" % max(running, key=os.path.getmtime) if running else ""))
+    d = done[-1]
+    base = d[:-5]
+    lines = open(d).read().splitlines()
+    print("%s  %s" % (lines[0], os.path.basename(base)))
+    print("\n".join(lines[1:]))
+    if lines[0] == "PASS":
+        return
+    log = open(base + ".log", errors="replace").read()
+    tests = set()
+    for m in re.finditer(r"^\s*FAIL\s+\[[^\]]*\]\s+(\S+)\s+(\S+)", log, re.M):  # nextest
+        tests.add(("crate", m.group(1).split("::")[0], m.group(2)))
+    for m in re.finditer(r"^test (\S+) \.\.\. FAILED", log, re.M):  # cargo test
+        tests.add(("crate", "", m.group(1)))
+    for m in re.finditer(r"^\s*(?:FAIL|×)\s+(\S+\.(?:test|spec)\.\w+)", log, re.M):  # vitest
+        tests.add(("file", m.group(1), m.group(1)))
+    merged = {}
+    try:
+        for l in open(base + ".merged"):
+            b, _, f = l.rstrip("\n").partition("\t")
+            merged.setdefault(b, []).append(f)
+    except OSError:
+        pass
+    crates = crate_dirs()
+    print("\nFailing tests:")
+    if not tests:
+        print("  (none recognised; read %s.log)" % base)
+    for kind, key, name in sorted(tests):
+        if kind == "crate":
+            d_ = crates.get(key.replace("_", "-"))
+            hit = [b for b, fs in merged.items() if d_ and any(f.startswith(d_ + "/") for f in fs)]
+            where = "crate %s" % (d_ or key or "?")
+        else:
+            hit = [b for b, fs in merged.items() if any(key.endswith(f) or f.startswith(os.path.dirname(key) + "/") for f in fs)]
+            where = "file " + key
+        print("  %s  (%s) <- %s" % (name, where, ", ".join(hit) or "no merged branch touched it: pre-existing or flaky?"))
+    sys.exit(1)
+
+
+def crate_dirs():
+    p = sh("cargo", "metadata", "--no-deps", "--format-version", "1", "--locked", cwd=os.path.join(ROOT, WS))
+    if p.returncode:
+        return {}
+    return {x["name"]: os.path.relpath(os.path.dirname(x["manifest_path"]), ROOT)
+            for x in json.loads(p.stdout)["packages"]}
+
+
+def main():
+    global ROOT
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--into")
+    ap.add_argument("--last", action="store_true")
+    ap.add_argument("--no-check", action="store_true", help="skip the foreground check")
+    ap.add_argument("--no-suite", action="store_true", help="do not start the background suite")
+    ap.add_argument("branches", nargs="*")
+    args = ap.parse_args()
+    p = git("rev-parse", "--show-toplevel")
+    if p.returncode:
+        die("not in a git repository")
+    ROOT = p.stdout.strip()
+    if args.last:
+        return last(args)
+    if not args.branches:
+        ap.error("give at least one branch (or --last)")
+
+    cur = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if args.into and cur != args.into:
+        die("this checkout is on %s, not %s: run it in the integration checkout" % (cur, args.into))
+    if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+        die("the working tree has uncommitted changes")
+    for b in args.branches:
+        if git("rev-parse", "--verify", "-q", "refs/heads/" + b).returncode:
+            die("no such branch: " + b)
+    start = git("rev-parse", "HEAD").stdout.strip()
+
+    merged = []  # (branch, [files])
+    for b in args.branches:
+        before = git("rev-parse", "HEAD").stdout.strip()
+        r = git("merge", "--no-ff", "-m", "Merge %s" % b, b)
+        if r.returncode:
+            files = git("diff", "--name-only", "--diff-filter=U").stdout.split()
+            git("merge", "--abort")
+            print("CONFLICT merging %s into %s; merge aborted. Conflicting files:" % (b, cur))
+            print("\n".join("  " + f for f in files) or r.stdout + r.stderr)
+            print("Already merged: %s" % (", ".join(x for x, _ in merged) or "nothing"))
+            sys.exit(2)
+        after = git("rev-parse", "HEAD").stdout.strip()
+        files = git("diff", "--name-only", before, after).stdout.split() if after != before else []
+        print("merged %s (%d files)%s" % (b, len(files), "" if after != before else " - already contained"))
+        merged.append((b, files))
+
+    touched = {f for _, fs in merged for f in fs}
+    if any(f.startswith(WS + "/api/") for f in touched):
+        cwd = os.path.join(ROOT, WS)
+        for ex in ("generate_requests", "generate_schema"):
+            r = sh("cargo", "run", "-q", "-p", "silo-api", "--example", ex, cwd=cwd)
+            if r.returncode:
+                die("%s failed:\n%s" % (ex, r.stderr[-2000:]), 3)
+        if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+            git("add", "-u")
+            git("commit", "-q", "-m", "Regenerate API files after merging the batch")
+            print("regenerated API files and committed")
+        else:
+            print("API files already up to date")
+        merged_files = git("diff", "--name-only", start, "HEAD").stdout.split()
+        merged.append(("api-regeneration", [f for f in merged_files if f not in touched]))
+
+    head = git("rev-parse", "--short", "HEAD").stdout.strip()
+    rc = 0
+    check = os.path.join(ROOT, "tools", "agent", "check")
+    if args.no_check:
+        pass
+    elif os.path.exists(check):
+        print("== check --base %s" % start[:9])
+        rc = subprocess.run([check, "--base", start], cwd=ROOT).returncode
+        print("== check exit %d" % rc)
+    else:
+        print("note: tools/agent/check not found; skipped the foreground check")
+
+    if not args.no_suite:
+        start_suite(head, merged)
+    sys.exit(1 if rc else 0)
+
+
+def start_suite(sha, merged):
+    d = out_dir()
+    os.makedirs(d, exist_ok=True)
+    base = os.path.join(d, "full-suite." + sha)
+    for ext in (".done", ".log", ".merged"):
+        if os.path.exists(base + ext):
+            os.remove(base + ext)
+    with open(base + ".merged", "w") as f:
+        for b, fs in merged:
+            for x in fs:
+                f.write("%s\t%s\n" % (b, x))
+    script = r'''
+cd "$1/app/SiloUI" || exit 9
+log="$2.log"; fail=""
+echo "== full suite on $3 started $(date)" > "$log"
+if cargo nextest --version >/dev/null 2>&1; then
+  cargo nextest run --workspace --no-fail-fast --profile ci >> "$log" 2>&1 || fail="$fail rust"
+else
+  cargo test --workspace --locked --no-fail-fast >> "$log" 2>&1 || fail="$fail rust"
+fi
+if [ -d node_modules ]; then npx vitest run >> "$log" 2>&1 || fail="$fail vitest"; else echo "== vitest skipped: no node_modules" >> "$log"; fi
+if [ -z "$fail" ]; then echo PASS > "$2.done"; else echo FAIL > "$2.done"; echo "failed:$fail" >> "$2.done"; fi
+echo "finished $(date)" >> "$2.done"
+'''
+    subprocess.Popen(["bash", "-c", script, "x", ROOT, base, sha], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    print("full suite started in the background on %s" % sha)
+    print("  log:     %s.log" % base)
+    print("  verdict: %s.done (appears when it ends; first line PASS or FAIL)" % base)
+    print("  later:   tools/agent/merge-batch --last")
+
+
+if __name__ == "__main__":
+    main()
