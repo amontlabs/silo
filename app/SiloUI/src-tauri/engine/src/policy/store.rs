@@ -65,6 +65,10 @@ pub struct Document {
     pub pending: Vec<Pending>,
     #[serde(default)]
     pub jobs: Vec<OwnedJob>,
+    /// Jobs a computer's agent acknowledged whose results the job registry may still keep for
+    /// the owner.
+    #[serde(default)]
+    pub kept: Vec<OwnedJob>,
 }
 
 impl Document {
@@ -177,8 +181,9 @@ impl PolicyStore {
 
     fn read(&self) -> Result<Document, String> {
         match fs::read(self.file()) {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|error| format!("The record of who made which computer is unreadable: {error}")),
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
+                format!("The record of who made which computer is unreadable: {error}")
+            }),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Document {
                 version: VERSION,
                 ..Document::default()
@@ -251,7 +256,10 @@ impl PolicyStore {
                 .iter()
                 .any(|other| other.name.eq_ignore_ascii_case(&pending.name))
             {
-                return Err(format!("A computer named {} is already being made.", pending.name));
+                return Err(format!(
+                    "A computer named {} is already being made.",
+                    pending.name
+                ));
             }
             document.pending.push(Pending {
                 created_by: creator.to_owned(),
@@ -369,7 +377,9 @@ impl PolicyStore {
                     }
                     None => document.created.retain(|record| record.created_by != *id),
                 }
-                document.created.retain(|record| record.id != record.created_by);
+                document
+                    .created
+                    .retain(|record| record.id != record.created_by);
                 document.pending.retain(|pending| {
                     pending.created_by != *id && pending.id.as_deref() != Some(id)
                 });
@@ -399,6 +409,40 @@ impl PolicyStore {
                     computer: computer.map(str::to_owned),
                 });
             }
+            Ok(())
+        })
+    }
+
+    /// Moves a job `caller` acknowledged from the jobs it has open to the results still kept.
+    pub fn keep_job(&self, caller: &str, job_id: &str) -> Result<(), String> {
+        self.update(|document| {
+            let found = document
+                .jobs
+                .iter()
+                .position(|job| job.caller == caller && job.id == job_id);
+            let job = match found {
+                Some(at) => document.jobs.remove(at),
+                None => OwnedJob {
+                    caller: caller.to_owned(),
+                    id: job_id.to_owned(),
+                    at: now_secs(),
+                    computer: None,
+                },
+            };
+            if !document.kept.iter().any(|kept| kept.id == job.id) {
+                document.kept.push(job);
+            }
+            Ok(())
+        })
+    }
+
+    /// Forgets kept results the job registry has released.
+    pub fn release_kept(&self, job_ids: &[String]) -> Result<(), String> {
+        if job_ids.is_empty() {
+            return Ok(());
+        }
+        self.update(|document| {
+            document.kept.retain(|job| !job_ids.contains(&job.id));
             Ok(())
         })
     }

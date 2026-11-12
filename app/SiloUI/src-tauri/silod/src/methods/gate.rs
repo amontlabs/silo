@@ -51,7 +51,7 @@ pub(crate) struct Admitted {
     kind: MethodKind,
     /// The job an acknowledgement names.
     job: Option<String>,
-    pub(crate) reservation_id: Option<u64>,
+    held: Held,
 }
 
 impl Admitted {
@@ -298,29 +298,38 @@ struct Reservation {
 static RESERVATIONS: std::sync::Mutex<Vec<Reservation>> = std::sync::Mutex::new(Vec::new());
 static NEXT_RESERVATION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// Drops the reservations whose job is over or that outlived the longest a start takes.
-fn prune_reservations(reservations: &mut Vec<Reservation>, engine: &dyn EngineContext) {
-    reservations.retain(|r| {
-        if r.created_at.elapsed() > std::time::Duration::from_secs(300) {
-            return false;
-        }
-        if let Some(job) = &r.job_id {
-            match job_state(engine, job) {
-                JobState::Succeeded | JobState::Failed | JobState::Unknown => false,
-                JobState::Running => true,
-            }
-        } else {
-            true
-        }
-    });
+/// Longest a start takes, after which a reservation that nothing settled is dropped.
+const RESERVATION_LIFE: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Drops the reservations whose job is over or that outlived the longest a start takes. The
+/// job registry is read with no lock held; a reservation whose job ends meanwhile is dropped by
+/// the next call.
+fn prune_reservations(engine: &dyn EngineContext) {
+    let jobs: Vec<(u64, String)> = RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .filter_map(|r| r.job_id.clone().map(|job| (r.id, job)))
+        .collect();
+    let over: Vec<u64> = jobs
+        .into_iter()
+        .filter(|(_, job)| job_state(engine, job) != JobState::Running)
+        .map(|(id, _)| id)
+        .collect();
+    RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .retain(|r| r.created_at.elapsed() <= RESERVATION_LIFE && !over.contains(&r.id));
 }
 
 fn current_reserved_memory(engine: &dyn EngineContext) -> u64 {
-    let mut reservations = RESERVATIONS
+    prune_reservations(engine);
+    RESERVATIONS
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    prune_reservations(&mut reservations, engine);
-    reservations.iter().map(|r| r.memory_bytes).sum()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(|r| r.memory_bytes)
+        .sum()
 }
 
 /// Reserves `memory_bytes` when the device has that much above its floor after the memory
@@ -334,10 +343,11 @@ fn reserve_if_fits(
     computer_id: Option<String>,
     memory_bytes: u64,
 ) -> Result<Option<u64>, String> {
+    prune_reservations(engine);
     let mut reservations = RESERVATIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    prune_reservations(&mut reservations, engine);
+    reservations.retain(|r| r.created_at.elapsed() <= RESERVATION_LIFE);
     let reserved: u64 = reservations.iter().map(|r| r.memory_bytes).sum();
     if let Some(refusal) = resources::refusal_for(host, floors, reserved, memory_bytes) {
         return Err(refusal);
@@ -372,21 +382,61 @@ fn release_reservation(id: u64) {
     reservations.retain(|r| r.id != id);
 }
 
-/// A reservation that is released when it goes out of scope unless it was kept.
-struct Held(Option<u64>);
+/// Memory reserved for a call. It is given back when this goes out of scope, as when the call
+/// is refused, fails, panics or its caller goes away, unless [`Held::settle`] tied it to the job
+/// the call started.
+pub(crate) struct Held {
+    id: Option<u64>,
+    settled: std::sync::atomic::AtomicBool,
+}
 
 impl Held {
-    fn keep(mut self) -> Option<u64> {
-        self.0.take()
+    fn of(id: Option<u64>) -> Self {
+        Self {
+            id,
+            settled: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Ties the reservation to the job the call started, or gives it back when it started none.
+    pub(crate) fn settle(&self, job: Option<&str>) {
+        if self.settled.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        match (self.id, job) {
+            (Some(id), Some(job)) => attach_reservation_job(id, job),
+            (Some(id), None) => release_reservation(id),
+            (None, _) => {}
+        }
     }
 }
 
 impl Drop for Held {
     fn drop(&mut self) {
-        if let Some(id) = self.0 {
-            release_reservation(id);
+        if !*self.settled.get_mut() {
+            if let Some(id) = self.id {
+                release_reservation(id);
+            }
         }
     }
+}
+
+/// A device a test fixes the numbers of, held by one test at a time because the reservations
+/// are shared by every test in the process.
+#[cfg(test)]
+pub(crate) struct FixedDevice(resources::FixedHost, std::sync::MutexGuard<'static, ()>);
+
+#[cfg(test)]
+pub(crate) fn fixed_device(host: resources::Host) -> FixedDevice {
+    FixedDevice(resources::FixedHost::new(host), test_exclusive())
+}
+
+#[cfg(test)]
+pub(crate) fn test_exclusive() -> std::sync::MutexGuard<'static, ()> {
+    static EXCLUSIVE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    EXCLUSIVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(test)]
@@ -400,12 +450,12 @@ pub(crate) fn clear_reservations() {
 /// The memory a call takes when it runs, from the parameters its handler will decode and, for
 /// a call on an existing computer, from that computer's stored size. A field the handler
 /// ignores never lowers it. A call that does not decode takes nothing, since its handler
-/// refuses it.
+/// refuses it. The error says why no size could be found for a computer the call names.
 fn requested_memory_bytes(
     method: MethodName,
     params: &Value,
     resources: &HashMap<String, Resources>,
-) -> u64 {
+) -> Result<u64, String> {
     use silo_api::methods::{
         checkpoints::{CheckpointCreateParams, CheckpointForkParams, CheckpointTargetParams},
         common::ComputerTargetParams,
@@ -414,13 +464,20 @@ fn requested_memory_bytes(
     fn decode<T: serde::de::DeserializeOwned>(params: &Value) -> Option<T> {
         serde_json::from_value(params.clone()).ok()
     }
+    // The memory a Linux computer takes is the size it boots with: nothing in Silo raises a
+    // running computer's memory toward its ceiling, and a change of ceiling needs it stopped.
     let stored = |id: &str| {
         resources
             .get(id)
-            .map_or(0, |sizes| sizes.memory_gib.saturating_mul(resources::GIB))
+            .map(|sizes| sizes.memory_gib.saturating_mul(resources::GIB))
+            .ok_or_else(|| {
+                "Silo can't read this computer's size, so it cannot tell whether it fits. Try again, or ask the person who runs Silo."
+                    .to_owned()
+            })
     };
+    let sized = |id: Option<String>| id.map_or(Ok(0), |id| stored(&id));
     match method {
-        MethodName::ComputersCreate => match decode::<ComputerCreateParams>(params) {
+        MethodName::ComputersCreate => Ok(match decode::<ComputerCreateParams>(params) {
             Some(ComputerCreateParams::Linux { configuration, .. }) => {
                 u64::from(configuration.memory_gib).saturating_mul(resources::GIB)
             }
@@ -428,20 +485,21 @@ fn requested_memory_bytes(
                 request.memory_gib.saturating_mul(resources::GIB)
             }
             None => 0,
-        },
+        }),
         MethodName::ComputersStart | MethodName::ComputersRestart | MethodName::MacosSetupRetry => {
-            decode::<ComputerTargetParams>(params).map_or(0, |target| stored(&target.computer_id))
+            sized(decode::<ComputerTargetParams>(params).map(|target| target.computer_id))
         }
         MethodName::CheckpointsCreate => {
-            decode::<CheckpointCreateParams>(params).map_or(0, |target| stored(&target.computer_id))
+            sized(decode::<CheckpointCreateParams>(params).map(|target| target.computer_id))
         }
         MethodName::CheckpointsRestore => {
-            decode::<CheckpointTargetParams>(params).map_or(0, |target| stored(&target.computer_id))
+            sized(decode::<CheckpointTargetParams>(params).map(|target| target.computer_id))
         }
+        // A fork boots at the size its source has now; a checkpoint records none.
         MethodName::CheckpointsFork => {
-            decode::<CheckpointForkParams>(params).map_or(0, |source| stored(&source.computer_id))
+            sized(decode::<CheckpointForkParams>(params).map(|source| source.computer_id))
         }
-        _ => 0,
+        _ => Ok(0),
     }
 }
 
@@ -462,7 +520,14 @@ fn assess_headroom(
                 .to_owned(),
         );
     };
-    let requested = requested_memory_bytes(method, params, resources);
+    let requested = match requested_memory_bytes(method, params, resources) {
+        Ok(requested) => requested,
+        Err(unreadable) => {
+            // A device short of its floors is told so before anything else.
+            let reserved = current_reserved_memory(context.engine_context());
+            return Err(resources::refusal_for(&host, &floors, reserved, 0).unwrap_or(unreadable));
+        }
+    };
     match reserve_for {
         Some(computer) => reserve_if_fits(
             context.engine_context(),
@@ -471,65 +536,97 @@ fn assess_headroom(
             computer,
             requested,
         )
-        .map(Held),
+        .map(Held::of),
         None => {
             let reserved = current_reserved_memory(context.engine_context());
             match resources::refusal_for(&host, &floors, reserved, requested) {
                 Some(refusal) => Err(refusal),
-                None => Ok(Held(None)),
+                None => Ok(Held::of(None)),
             }
         }
     }
 }
 
-/// Why an agent's call that takes memory or disk must fail now, without reserving anything.
-pub(crate) fn short_of_resources(
+/// Checks a call about to run, with the parameters it will run with, against the device and
+/// reserves its memory in the same step, reading the computers' stored sizes now. The error is
+/// why it must not run.
+pub(crate) async fn reserve_now(
     context: &HandlerContext,
     method: MethodName,
     params: &Value,
-    resources: &HashMap<String, Resources>,
-) -> Option<String> {
-    assess_headroom(context, method, params, resources, None).err()
-}
-
-/// [`short_of_resources`] with the computers' stored sizes read now.
-pub(crate) async fn short_of_resources_now(
-    context: &HandlerContext,
-    method: MethodName,
-    params: &Value,
-) -> Option<String> {
+) -> Result<Held, String> {
     let world = EngineWorld::load(context, method, None).await;
-    short_of_resources(context, method, params, &world.resources)
+    assess_headroom(
+        context,
+        method,
+        params,
+        &world.resources,
+        Some(policy::target_computer(params)),
+    )
 }
 
-/// Results of jobs a computer's agent acknowledged that the job registry still keeps for the
-/// owner, with the computer each one was started by.
-static RETAINED: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+/// The memory reserved for calls about `computer`.
+#[cfg(test)]
+pub(crate) fn reserved_memory_of(computer: &str) -> u64 {
+    RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .filter(|r| r.computer_id.as_deref() == Some(computer))
+        .map(|r| r.memory_bytes)
+        .sum()
+}
 
-/// Every computer's retained results together, and the jobs not acknowledged together, that
+/// The memory reserved for all calls now.
+#[cfg(test)]
+pub(crate) fn reserved_memory() -> u64 {
+    RESERVATIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(|r| r.memory_bytes)
+        .sum()
+}
+
+/// Every computer's kept results together, and the jobs not acknowledged together, that
 /// computers may hold in the job registry. The owner's jobs are never counted against it.
 const MAX_COMPUTER_JOBS: usize = 512;
 
 /// The results the registry still keeps for the owner that an agent acknowledged, as
-/// (computer, job) pairs. A result the registry has released is no longer one.
-fn retained_results(engine: &dyn EngineContext) -> Vec<(String, String)> {
-    let mut retained = RETAINED
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    retained.retain(|(_, job)| job_state(engine, job) != JobState::Unknown);
-    retained.clone()
+/// (computer, job) pairs, from the saved record. A result the registry has released is no
+/// longer one, and is forgotten.
+fn retained_results(
+    engine: &dyn EngineContext,
+    store: &PolicyStore,
+    document: &Document,
+) -> Vec<(String, String)> {
+    let mut kept = Vec::new();
+    let mut released = Vec::new();
+    for job in &document.kept {
+        if job_state(engine, &job.id) == JobState::Unknown {
+            released.push(job.id.clone());
+        } else {
+            kept.push((job.caller.clone(), job.id.clone()));
+        }
+    }
+    if let Err(error) = store.release_kept(&released) {
+        eprintln!("silod: {error}");
+    }
+    kept
 }
 
-/// Charges the result of a job `computer` acknowledged to it for as long as the registry keeps it.
-fn keep_charging(engine: &dyn EngineContext, computer: &str, job: &str) {
+/// Moves the job `computer` acknowledged from its open jobs to the results kept for the owner,
+/// or drops it when the registry keeps no result of it.
+fn keep_charging(
+    engine: &dyn EngineContext,
+    store: &PolicyStore,
+    computer: &str,
+    job: &str,
+) -> Result<(), String> {
     if job_state(engine, job) == JobState::Unknown {
-        return;
-    }
-    let mut retained = RETAINED
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if !retained.iter().any(|(_, kept)| kept == job) {
-        retained.push((computer.to_owned(), job.to_owned()));
+        store.drop_job(computer, job)
+    } else {
+        store.keep_job(computer, job)
     }
 }
 
@@ -614,7 +711,7 @@ pub(crate) async fn admit(
     // A call that would be held for approval is refused too: allowing it later would start a
     // computer on a device that has nothing left for it. An allowed call reserves its memory in
     // the same step as the check, and gives it back if it is refused further on.
-    let mut held = Held(None);
+    let mut held = Held::of(None);
     if matches!(caller, Caller::Computer { .. })
         && takes_headroom(method)
         && matches!(decision, Decision::Allow(_) | Decision::Ask { .. })
@@ -645,7 +742,8 @@ pub(crate) async fn admit(
         if kind_of(method) == MethodKind::Job && matches!(decision, Decision::Allow(_)) {
             let refusal = match PolicyStore::new(&app_data(context)).snapshot() {
                 Ok(document) => {
-                    let kept = retained_results(context.engine_context());
+                    let store = PolicyStore::new(&app_data(context));
+                    let kept = retained_results(context.engine_context(), &store, &document);
                     let of_this = kept.iter().filter(|(computer, _)| computer == id).count();
                     job_refusal(
                         document.jobs_of(id).len(),
@@ -691,7 +789,7 @@ pub(crate) async fn admit(
                 target,
                 kind: kind_of(method),
                 job,
-                reservation_id: held.keep(),
+                held,
             })
         }
         Decision::Refuse { reason } => refuse(
@@ -743,13 +841,7 @@ pub(crate) fn finish(
         .and_then(|output| output.value.get("jobId"))
         .and_then(Value::as_str)
         .map(str::to_owned);
-    if let Some(res_id) = admitted.reservation_id {
-        if let Some(job_id) = &job {
-            attach_reservation_job(res_id, job_id);
-        } else {
-            release_reservation(res_id);
-        }
-    }
+    admitted.held.settle(job.as_deref());
     if let Caller::Computer { id } = &context.client_identity().caller {
         let store = PolicyStore::new(&app_data(context));
         let mut noted = Vec::new();
@@ -766,8 +858,7 @@ pub(crate) fn finish(
             noted.push(store.note_job_about(id, job, admitted.target.as_deref()));
         }
         if let (Ok(_), Some(done)) = (&result, &admitted.job) {
-            noted.push(store.drop_job(id, done));
-            keep_charging(context.engine_context(), id, done);
+            noted.push(keep_charging(context.engine_context(), &store, id, done));
         }
         for error in noted.into_iter().filter_map(Result::err) {
             eprintln!("silod: computer {id}: {error}");

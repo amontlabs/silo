@@ -57,6 +57,20 @@ impl Tree {
             .unwrap();
         test_nodes::add(&me, &format!("{me}-name"), None);
         test_nodes::add(&fork, &format!("{fork}-name"), Some(&me));
+        for id in [&me, &fork] {
+            crate::methods::gate::test_resources::add(
+                id,
+                silo_engine::policy::Resources {
+                    linux: true,
+                    cpus: 2,
+                    max_cpus: 2,
+                    memory_gib: 1,
+                    max_memory_gib: 1,
+                    workspace_gib: 10,
+                    runtime_gib: 10,
+                },
+            );
+        }
         Self { me, fork }
     }
 
@@ -436,9 +450,9 @@ fn push_params(computer: &str) -> Value {
 
 /// A device with plenty of memory and disk, so the second check of an allowed call that takes
 /// memory or disk does not depend on the machine the test runs on.
-fn ample() -> silo_engine::resources::FixedHost {
-    use silo_engine::resources::{FixedHost, Host, GIB};
-    FixedHost::new(Host {
+fn ample() -> crate::methods::gate::FixedDevice {
+    use silo_engine::resources::{Host, GIB};
+    crate::methods::gate::fixed_device(Host {
         logical_cpus: 8,
         memory_total: 64 * GIB,
         memory_available: Some(48 * GIB),
@@ -640,9 +654,11 @@ async fn only_a_computer_caller_or_an_allowed_call_for_one_hides_recipe_commands
     let owner = context(owner());
     let computer = context(tree.me());
     assert!(!result_goes_to_computer(&owner));
-    assert!(FOR_COMPUTER
-        .scope(true, async { result_goes_to_computer(&owner) })
-        .await);
+    assert!(
+        FOR_COMPUTER
+            .scope(true, async { result_goes_to_computer(&owner) })
+            .await
+    );
     assert!(result_goes_to_computer(&computer));
 }
 
@@ -1005,7 +1021,10 @@ async fn a_merge_into_itself_needs_the_reviewed_digest_and_makes_the_review_requ
 #[tokio::test]
 async fn the_review_request_of_a_merge_approval_counts_the_changes_that_were_reviewed() {
     use silo_engine::changes::{
-        diff, keep::review_digest, store::{Slot, Store as Captures}, IgnoreList, Manifest,
+        diff,
+        keep::review_digest,
+        store::{Slot, Store as Captures},
+        IgnoreList, Manifest,
     };
     let _lock = crate::methods::MACOS_REGISTRY_TEST_LOCK
         .lock()
@@ -1095,7 +1114,10 @@ async fn denying_a_merge_approval_closes_its_review_request() {
         .get(&request_id)
         .unwrap()
         .unwrap();
-    assert_eq!(before.status, silo_api::methods::keep::FoldRequestStatus::Open);
+    assert_eq!(
+        before.status,
+        silo_api::methods::keep::FoldRequestStatus::Open
+    );
 
     decide(&ask_id, "deny").await.unwrap();
     assert_eq!(get(&owner(), &ask_id).await.unwrap()["state"], "denied");
@@ -1104,7 +1126,10 @@ async fn denying_a_merge_approval_closes_its_review_request() {
         .get(&request_id)
         .unwrap()
         .unwrap();
-    assert_eq!(after.status, silo_api::methods::keep::FoldRequestStatus::ThrownAway);
+    assert_eq!(
+        after.status,
+        silo_api::methods::keep::FoldRequestStatus::ThrownAway
+    );
     tests_rows::set_sources(&[]);
 }
 
@@ -1327,6 +1352,31 @@ async fn an_allowed_call_that_takes_memory_or_disk_is_refused_when_the_device_ha
         "{error}"
     );
     assert!(runs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_allowed_call_holds_its_memory_while_it_runs() {
+    use silo_engine::resources::GIB;
+    let _serial = serial();
+    let tree = Tree::new();
+    let container = json!({"kind": "linux", "configuration": {"name": format!("held-{}", &tree.me[4..12]),
+        "cpus": 2, "maxCPUs": 2, "memoryGiB": 4, "maxMemoryGiB": 4,
+        "workspaceStorageGiB": 10, "runtimeStorageGiB": 10, "runtime": "container"}});
+    let _host = ample();
+    let id = ask(&tree.me(), MethodName::ComputersCreate, container).await;
+    let seen: Arc<Mutex<Vec<u64>>> = Arc::default();
+    let (run, _runs) = {
+        let seen = seen.clone();
+        runner(move |_, _| {
+            seen.lock()
+                .unwrap()
+                .push(crate::methods::gate::reserved_memory());
+            Ok(json!({"computer": {"id": uuid::Uuid::new_v4().to_string()}}))
+        })
+    };
+    TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
+    let seen = seen.lock().unwrap().clone();
+    assert!(seen.iter().any(|reserved| *reserved >= 4 * GIB), "{seen:?}");
 }
 
 #[tokio::test]

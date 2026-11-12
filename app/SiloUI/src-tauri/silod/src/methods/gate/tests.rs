@@ -13,7 +13,7 @@ use silo_engine::{
     audit::{AuditLog, Scope},
     context::EngineContext,
     policy::{store::PolicyStore, Caller},
-    resources::{FixedHost, Host, GIB},
+    resources::{Host, GIB},
 };
 
 use crate::{
@@ -282,8 +282,8 @@ async fn another_device_reaches_only_the_connections_methods() {
 
 /// A device with `memory` bytes available and `disk` bytes free, whose default floors are
 /// 4 GiB of memory and 25 GiB of disk.
-fn device(memory: u64, disk: u64) -> FixedHost {
-    FixedHost::new(Host {
+fn device(memory: u64, disk: u64) -> super::FixedDevice {
+    super::fixed_device(Host {
         logical_cpus: 8,
         memory_total: 32 * GIB,
         memory_available: Some(memory),
@@ -385,6 +385,8 @@ async fn an_agent_may_go_on_while_the_device_is_low_and_can_still_read_its_resou
     // Between the floor and twice the floor.
     let _device = device(5 * GIB, 30 * GIB);
     let (id, fork) = computer();
+    sized(&id, 1);
+    sized(&fork, 1);
     let caller = Caller::Computer { id: id.clone() };
     for (method, params) in headroom_calls(&id, &fork) {
         if let Err(error) = call(&caller, method, params).await {
@@ -583,6 +585,7 @@ fn memory_set_aside_for_calls_made_at_the_same_moment_cannot_all_fit_the_same_he
         disk_total: 500 * GIB,
     };
     let floors = Floors::resolve(&host, None, None);
+    let _exclusive = super::test_exclusive();
     let engine = fixture().context.clone();
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(12));
     let (id, _fork) = computer();
@@ -657,6 +660,7 @@ fn finished_job_of(id: &str) -> String {
 async fn acknowledging_a_job_does_not_free_its_place_while_the_owner_can_still_read_the_result() {
     let _device = device(32 * GIB, 400 * GIB);
     let (id, fork) = computer();
+    sized(&fork, 1);
     let caller = Caller::Computer { id: id.clone() };
     let jobs: Vec<String> = (0..silo_engine::guest_client::MAX_JOBS)
         .map(|_| finished_job_of(&id))
@@ -670,6 +674,13 @@ async fn acknowledging_a_job_does_not_free_its_place_while_the_owner_can_still_r
         .await
         .unwrap();
     }
+    // The charge is read from what was saved, so an engine that restarted still holds it.
+    let saved = PolicyStore::new(&fixture().context.paths().app_data)
+        .snapshot()
+        .unwrap();
+    assert!(jobs
+        .iter()
+        .all(|job| saved.kept.iter().any(|kept| &kept.id == job)));
     // The computer has nothing open, but the owner has not read any of the results.
     let error = call(
         &caller,
@@ -719,4 +730,65 @@ fn computers_together_leave_the_owner_room_in_the_job_registry() {
     assert!(super::job_refusal(1, 1, super::MAX_COMPUTER_JOBS - 1).is_none());
     let all = super::job_refusal(1, 1, super::MAX_COMPUTER_JOBS).unwrap();
     assert!(all.contains("together"), "{all}");
+}
+
+#[tokio::test]
+async fn a_computer_whose_size_cannot_be_read_cannot_start_on_nothing() {
+    let _device = device(10 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    let caller = Caller::Computer { id };
+    for method in [
+        MethodName::ComputersStart,
+        MethodName::ComputersRestart,
+        MethodName::MacosSetupRetry,
+        MethodName::CheckpointsRestore,
+    ] {
+        let mut params = json!({"computerId": fork});
+        if method == MethodName::CheckpointsRestore {
+            params["checkpointId"] = json!("none");
+        }
+        let error = call(&caller, method, params).await.unwrap_err();
+        assert_eq!(error.code, ErrorCode::ResourcesLow, "{}", method.name());
+        assert!(
+            error.message.contains("can't read this computer's size"),
+            "{}",
+            error.message
+        );
+    }
+}
+
+#[tokio::test]
+async fn memory_reserved_for_a_call_is_held_until_its_guard_is_dropped() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (_id, fork) = computer();
+    sized(&fork, 3);
+    let context = context(Caller::owner("app"));
+    let held = super::reserve_now(
+        &context,
+        MethodName::ComputersStart,
+        &json!({"computerId": fork}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(super::reserved_memory_of(&fork), 3 * GIB);
+    drop(held);
+    assert_eq!(super::reserved_memory_of(&fork), 0);
+}
+
+#[tokio::test]
+async fn a_call_dropped_before_it_finishes_gives_back_its_memory() {
+    let _device = device(32 * GIB, 400 * GIB);
+    let (id, fork) = computer();
+    sized(&fork, 3);
+    let caller = Caller::Computer { id };
+    let admitted = super::admit(
+        &context(caller),
+        MethodName::ComputersStart,
+        &json!({"computerId": fork}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(super::reserved_memory_of(&fork), 3 * GIB);
+    drop(admitted);
+    assert_eq!(super::reserved_memory_of(&fork), 0);
 }

@@ -11,11 +11,11 @@
 //! the owner's and devices' rows keep the newest 200,000, and each computer's own calls the
 //! newest 20,000, so a computer can never push out anyone else's rows.
 //!
-//! A computer's rows wait in a small buffer of their own, apart from the queue of the owner's
-//! and devices' rows. A repeat of the computer's newest waiting row is counted there before
-//! anything is queued, each computer may have only so many rows waiting, and the rows that
-//! find the buffer full are counted into one summary row per computer, so computer traffic
-//! cannot take a place in the owner's queue.
+//! The rows of computers and devices wait in a small buffer of their own, apart from the queue
+//! of the owner's rows. A repeat of a caller's newest waiting row is counted there before
+//! anything is queued, each caller may have only so many rows waiting, and the rows that find
+//! the buffer full are counted into one summary row per caller, so computer or device traffic
+//! cannot take a place in the owner's queue. Waiting for the log to catch up queues nothing.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -23,9 +23,9 @@ use std::{
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
-        Arc, LazyLock, Mutex,
+        Arc, Condvar, LazyLock, Mutex,
     },
     time::Duration,
 };
@@ -38,11 +38,11 @@ use silo_api::methods::audit::{
 pub const FILE_NAME: &str = "audit.sqlite3";
 const SCHEMA_VERSION: i64 = 2;
 const QUEUE: usize = 4096;
-/// Rows of all computers together that may wait to be written.
+/// Rows of all computers and devices together that may wait to be written.
 const COMPUTER_WAITING: usize = 1024;
-/// Rows of one computer that may wait to be written.
+/// Rows of one computer or device that may wait to be written.
 const PER_COMPUTER_WAITING: usize = 64;
-/// How long the writer waits for a message before it looks at the computers' rows.
+/// How long the writer waits for a message before it looks at the buffered rows.
 const POLL: Duration = Duration::from_millis(250);
 /// The method of the row that counts the rows of a computer that were not recorded.
 pub const DROPPED_METHOD: &str = "audit.dropped";
@@ -98,28 +98,30 @@ pub fn now_ms() -> i64 {
 
 enum Message {
     Row(Box<Row>),
-    /// Computer rows are waiting in the buffer.
+    /// Rows are waiting in the buffer.
     Wake,
-    Flush(SyncSender<()>),
 }
 
-/// A computer's row waiting to be written, with the calls it stands for.
+/// A computer's or device's row waiting to be written, with the calls it stands for.
 struct Waiting {
     row: Row,
     count: u64,
     last_at: i64,
 }
 
-/// What the rows of a computer's agent wait in: a bounded buffer in which a repeat of a
-/// computer's newest waiting row is counted instead of added.
+/// A caller of one kind, as the buffer tells callers apart.
+type Caller = (AuditCallerKind, Option<String>);
+
+/// What the rows of computers and devices wait in: a bounded buffer in which a repeat of a
+/// caller's newest waiting row is counted instead of added.
 #[derive(Default)]
-struct ComputerRows {
+struct BufferedRows {
     next: u64,
     waiting: BTreeMap<u64, Waiting>,
-    newest: HashMap<Option<String>, u64>,
-    per_computer: HashMap<Option<String>, usize>,
-    /// The rows each computer lost to a full buffer and the time of the latest.
-    dropped: HashMap<Option<String>, (u64, i64)>,
+    newest: HashMap<Caller, u64>,
+    per_caller: HashMap<Caller, usize>,
+    /// The rows each caller lost to a full buffer and the time of the latest.
+    dropped: HashMap<Caller, (u64, i64)>,
 }
 
 fn same_call(a: &Row, b: &Row) -> bool {
@@ -131,9 +133,9 @@ fn same_call(a: &Row, b: &Row) -> bool {
         && a.approval_id == b.approval_id
 }
 
-impl ComputerRows {
+impl BufferedRows {
     fn add(&mut self, row: Row) {
-        let caller = row.caller_id.clone();
+        let caller = (row.caller_kind, row.caller_id.clone());
         if let Some(waiting) = self
             .newest
             .get(&caller)
@@ -145,7 +147,7 @@ impl ComputerRows {
                 return;
             }
         }
-        let held = self.per_computer.get(&caller).copied().unwrap_or(0);
+        let held = self.per_caller.get(&caller).copied().unwrap_or(0);
         if self.waiting.len() >= COMPUTER_WAITING || held >= PER_COMPUTER_WAITING {
             // A flood of ids must not grow the summary either: past one entry per place in
             // the buffer the rest are counted together.
@@ -153,7 +155,7 @@ impl ComputerRows {
             {
                 caller
             } else {
-                None
+                (caller.0, None)
             };
             let lost = self.dropped.entry(key).or_insert((0, row.at_ms));
             lost.0 += 1;
@@ -162,7 +164,7 @@ impl ComputerRows {
         }
         let seq = self.next;
         self.next += 1;
-        *self.per_computer.entry(caller.clone()).or_default() += 1;
+        *self.per_caller.entry(caller.clone()).or_default() += 1;
         self.newest.insert(caller, seq);
         let last_at = row.at_ms;
         self.waiting.insert(
@@ -175,16 +177,16 @@ impl ComputerRows {
         );
     }
 
-    /// Everything waiting, oldest first, then a summary row for each computer that lost rows.
+    /// Everything waiting, oldest first, then a summary row for each caller that lost rows.
     fn take(&mut self) -> Vec<Waiting> {
         let mut rows: Vec<Waiting> = std::mem::take(&mut self.waiting).into_values().collect();
         self.newest.clear();
-        self.per_computer.clear();
-        for (caller, (count, last_at)) in std::mem::take(&mut self.dropped) {
+        self.per_caller.clear();
+        for ((caller_kind, caller), (count, last_at)) in std::mem::take(&mut self.dropped) {
             rows.push(Waiting {
                 row: Row {
                     at_ms: last_at,
-                    caller_kind: AuditCallerKind::Computer,
+                    caller_kind,
                     caller_id: caller,
                     client: None,
                     method: DROPPED_METHOD.to_owned(),
@@ -202,12 +204,36 @@ impl ComputerRows {
     }
 }
 
+/// How far the writer has got, for a caller that waits for it.
+#[derive(Default)]
+struct Progress {
+    /// Queued rows the writer has handled.
+    handled: u64,
+    /// Passes over the buffer that began, and that ended.
+    passes_begun: u64,
+    passes_done: u64,
+    /// The writer thread has ended.
+    stopped: bool,
+}
+
 /// What the recording side and the writer thread share.
 #[derive(Default)]
 struct Shared {
-    computers: Mutex<ComputerRows>,
+    buffered: Mutex<BufferedRows>,
     /// A wake message is queued and the writer has not looked at the buffer since.
     woken: AtomicBool,
+    /// Owner rows that were accepted into the queue.
+    queued: AtomicU64,
+    progress: Mutex<Progress>,
+    advanced: Condvar,
+}
+
+impl Shared {
+    fn progress(&self) -> std::sync::MutexGuard<'_, Progress> {
+        self.progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 /// The calls a reader may see: every row, or only rows about these computers (rows whose
@@ -486,8 +512,8 @@ fn trim(connection: &Connection, retention: Retention) -> Result<(), String> {
     Ok(())
 }
 
-/// The thread that writes the rows, owner and device rows from the queue and computer rows
-/// from the buffer.
+/// The thread that writes the rows, the owner's from the queue and those of computers and
+/// devices from the buffer.
 struct Writer {
     path: PathBuf,
     retention: Retention,
@@ -526,18 +552,26 @@ impl Writer {
         }
     }
 
-    /// Writes the computers' waiting rows.
-    fn drain_computers(&mut self) {
+    /// Writes the rows waiting in the buffer.
+    fn drain_buffered(&mut self) {
         self.shared.woken.store(false, Ordering::SeqCst);
+        self.shared.progress().passes_begun += 1;
         let rows = self
             .shared
-            .computers
+            .buffered
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
         for waiting in rows {
             self.write(&waiting.row, waiting.count, waiting.last_at);
         }
+        self.shared.progress().passes_done += 1;
+        self.shared.advanced.notify_all();
+    }
+
+    fn handled_one(&self) {
+        self.shared.progress().handled += 1;
+        self.shared.advanced.notify_all();
     }
 }
 
@@ -559,14 +593,15 @@ fn write_loop(
     };
     loop {
         match queue.recv_timeout(POLL) {
-            Ok(Message::Row(row)) => writer.write(&row, 1, row.at_ms),
-            Ok(Message::Wake) | Err(mpsc::RecvTimeoutError::Timeout) => writer.drain_computers(),
-            Ok(Message::Flush(done)) => {
-                writer.drain_computers();
-                let _ = done.send(());
+            Ok(Message::Row(row)) => {
+                writer.write(&row, 1, row.at_ms);
+                writer.handled_one();
             }
+            Ok(Message::Wake) | Err(mpsc::RecvTimeoutError::Timeout) => writer.drain_buffered(),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                writer.drain_computers();
+                writer.drain_buffered();
+                writer.shared.progress().stopped = true;
+                writer.shared.advanced.notify_all();
                 return;
             }
         }
@@ -610,37 +645,60 @@ impl AuditLog {
         }
     }
 
-    /// Queues a row. Never blocks. A computer's row waits in the computers' buffer, where a
-    /// repeat is counted and a row that finds the buffer full is counted in the computer's
-    /// summary row; an owner's or device's row that finds the queue full, or a stopped
-    /// writer, is dropped.
+    /// Queues a row. Never blocks. A computer's or device's row waits in the buffer, where a
+    /// repeat is counted and a row that finds the buffer full is counted in the caller's
+    /// summary row; an owner's row that finds the queue full, or a stopped writer, is dropped.
     pub fn record(&self, row: Row) {
-        if row.caller_kind == AuditCallerKind::Computer {
+        if row.caller_kind != AuditCallerKind::Owner {
             self.shared
-                .computers
+                .buffered
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .add(row);
-            if !self.shared.woken.swap(true, Ordering::SeqCst)
-                && self.sender.try_send(Message::Wake).is_err()
-            {
-                // The writer looks at the buffer again within a moment of its own accord.
-                self.shared.woken.store(false, Ordering::SeqCst);
-            }
+            self.wake();
             return;
         }
         match self.sender.try_send(Message::Row(Box::new(row))) {
-            Ok(()) => {}
+            Ok(()) => {
+                self.shared.queued.fetch_add(1, Ordering::SeqCst);
+            }
             Err(TrySendError::Full(_)) => warn_once(&self.warned, "too many calls at once"),
             Err(TrySendError::Disconnected(_)) => warn_once(&self.warned, "the writer stopped"),
         }
     }
 
-    /// Waits, up to `timeout`, until every row queued so far is written.
+    /// Asks the writer to look at the buffer, with at most one such message queued at a time.
+    fn wake(&self) {
+        if !self.shared.woken.swap(true, Ordering::SeqCst)
+            && self.sender.try_send(Message::Wake).is_err()
+        {
+            // The writer looks at the buffer again within a moment of its own accord.
+            self.shared.woken.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// Waits, up to `timeout`, until every row recorded so far is written. Queues no message of
+    /// its own, so any number of callers waiting cannot take a place from a row.
     pub fn flush(&self, timeout: Duration) {
-        let (done, wait) = mpsc::sync_channel(1);
-        if self.sender.try_send(Message::Flush(done)).is_ok() {
-            let _ = wait.recv_timeout(timeout);
+        let queued = self.shared.queued.load(Ordering::SeqCst);
+        let deadline = std::time::Instant::now() + timeout;
+        // A pass that begins after this call has seen every row buffered before it.
+        let pass = {
+            let progress = self.shared.progress();
+            progress.passes_begun + 1
+        };
+        self.wake();
+        let mut progress = self.shared.progress();
+        while !progress.stopped && (progress.handled < queued || progress.passes_done < pass) {
+            let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) else {
+                return;
+            };
+            progress = self
+                .shared
+                .advanced
+                .wait_timeout(progress, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
         }
     }
 
@@ -1214,6 +1272,71 @@ mod tests {
         assert_eq!(
             counted, flood,
             "every computer call is a row, a count or in the summary"
+        );
+    }
+
+    /// Holds the log's file so the writer stays busy with the row it is writing.
+    fn stall(log: &AuditLog) -> Connection {
+        log.record(row("seed", AuditCallerKind::Owner, None, None));
+        log.flush(Duration::from_secs(5));
+        let held = Connection::open(&log.path).unwrap();
+        held.execute_batch("BEGIN IMMEDIATE").unwrap();
+        log.record(row("blocked", AuditCallerKind::Owner, None, None));
+        std::thread::sleep(Duration::from_millis(200));
+        held
+    }
+
+    fn methods_of(log: &AuditLog) -> Vec<String> {
+        log.flush(Duration::from_secs(10));
+        log.list(&all(), Scope::All)
+            .unwrap()
+            .entries
+            .into_iter()
+            .map(|entry| entry.method)
+            .collect()
+    }
+
+    #[test]
+    fn a_computer_that_keeps_listing_cannot_fill_the_owners_queue() {
+        let (_directory, log) = trimmed_log(100, 100);
+        let held = stall(&log);
+        for _ in 0..(QUEUE * 2) {
+            log.flush(Duration::ZERO);
+        }
+        log.record(row("after", AuditCallerKind::Owner, None, None));
+        held.execute_batch("ROLLBACK").unwrap();
+        let methods = methods_of(&log);
+        assert!(methods.iter().any(|method| method == "after"));
+        assert!(methods.iter().any(|method| method == "blocked"));
+    }
+
+    #[test]
+    fn a_flood_of_device_calls_cannot_push_out_the_owners_rows() {
+        let (_directory, log) = trimmed_log(100_000, 100);
+        let held = stall(&log);
+        let flood = (QUEUE * 2) as u64;
+        for number in 0..flood {
+            log.record(row(
+                &format!("device{number}"),
+                AuditCallerKind::Device,
+                Some("key"),
+                None,
+            ));
+        }
+        log.record(row("after", AuditCallerKind::Owner, None, None));
+        held.execute_batch("ROLLBACK").unwrap();
+        log.flush(Duration::from_secs(10));
+        let rows = log.list(&kinds(), Scope::All).unwrap();
+        assert!(rows.entries.iter().any(|entry| entry.method == "after"));
+        let devices: u64 = rows
+            .entries
+            .iter()
+            .filter(|entry| entry.caller_kind == AuditCallerKind::Device)
+            .map(|entry| entry.count)
+            .sum();
+        assert_eq!(
+            devices, flood,
+            "every device call is a row, a count or in the summary"
         );
     }
 
