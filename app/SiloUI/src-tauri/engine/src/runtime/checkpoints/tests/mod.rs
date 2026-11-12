@@ -3474,6 +3474,77 @@ fn checkpoint_usage_keeps_saved_dependencies_when_native_member_is_missing() {
 }
 
 #[test]
+fn checkpoint_usage_for_a_computer_names_only_the_dependants_it_can_see() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut started = Record::default();
+    started.snapshot_group = Some("dev".into());
+    let paths = delete_fixture(
+        &directory,
+        vec![entry(A, "Selected", "manual")],
+        Some(started),
+    );
+    let store = Store::new(vec![("dev", Some("snap_a")), ("branch", Some("snap_a"))])
+        .with("dev", A, "snap_a", None);
+    let only_itself = BTreeSet::from([ID.to_owned()]);
+    let usage = usage_as(&store, &paths, ID, Some(&only_itself)).unwrap();
+    let json = serde_json::to_string(&usage).unwrap();
+    assert!(!json.contains("branch"), "{json}");
+    assert_eq!(usage.checkpoints[0].used_by, ["a computer you can’t see"]);
+    assert_eq!(
+        usage.checkpoints[0].delete_blocker.as_deref(),
+        Some("Used by a computer you can’t see.")
+    );
+    // A delete that is refused says the same.
+    let refusal = delete_checkpoint_as(&store, &paths, ID, A, Some(&only_itself))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        refusal.contains("a computer you can’t see") && !refusal.contains("branch"),
+        "{refusal}"
+    );
+    let with_branch = BTreeSet::from([ID.to_owned(), FORK_ID.to_owned()]);
+    let usage = usage_as(&store, &paths, ID, Some(&with_branch)).unwrap();
+    assert_eq!(usage.checkpoints[0].used_by, ["branch"]);
+    assert!(usage.checkpoints[0]
+        .delete_blocker
+        .as_ref()
+        .unwrap()
+        .starts_with("Used by branch."));
+    // A dependant that is not one of Silo's computers is never one a computer can name.
+    let outside = Store::new(vec![("outside-silo", Some("snap_a"))]).with("dev", A, "snap_a", None);
+    let usage = usage_as(&outside, &paths, ID, Some(&with_branch)).unwrap();
+    assert_eq!(usage.checkpoints[0].used_by, ["a computer you can’t see"]);
+}
+
+#[test]
+fn checkpoint_usage_names_a_computer_it_cannot_see_once_however_many_depend_on_the_checkpoint() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut started = Record::default();
+    started.snapshot_group = Some("dev".into());
+    let paths = delete_fixture(
+        &directory,
+        vec![entry(A, "Selected", "manual")],
+        Some(started),
+    );
+    let store = Store::new(vec![
+        ("dev", Some("snap_a")),
+        ("branch", Some("snap_a")),
+        ("second", Some("snap_a")),
+    ])
+    .with("dev", A, "snap_a", None);
+    let only_itself = BTreeSet::from([ID.to_owned()]);
+    let usage = usage_as(&store, &paths, ID, Some(&only_itself)).unwrap();
+    let json = serde_json::to_string(&usage).unwrap();
+    assert!(
+        !json.contains("branch") && !json.contains("second"),
+        "{json}"
+    );
+    assert_eq!(usage.checkpoints[0].used_by, ["a computer you can’t see"]);
+}
+
+#[test]
 fn checkpoint_storage_totals_lists_only_the_selected_lineage_group() {
     let _test_state = crate::test_support::global_state();
     for group in [Some("source"), None] {

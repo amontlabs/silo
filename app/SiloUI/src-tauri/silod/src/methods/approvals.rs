@@ -101,6 +101,15 @@ fn announce(context: &HandlerContext, record: &Record) {
     approvals::announce(context.silod_context(), record);
 }
 
+/// The approval as the caller may read it: a computer's own summary leaves out what only the
+/// owner may see.
+fn view_for(context: &HandlerContext, record: &Record) -> Approval {
+    match context.caller() {
+        Caller::Computer { .. } => record.view_for_computer(),
+        _ => record.view(),
+    }
+}
+
 fn not_found(id: &str) -> DispatchError {
     DispatchError::new(ErrorCode::NotFound, format!("There is no approval {id}."))
 }
@@ -132,6 +141,8 @@ pub(crate) struct Asked<'a> {
     pub params: Value,
     pub kind: ApprovalKind,
     pub summary: String,
+    /// What the computer may read of `summary`, when it differs.
+    pub computer_summary: Option<String>,
     pub creates: Option<policy::Creation>,
 }
 
@@ -141,11 +152,11 @@ fn approval_required(record: &Record) -> DispatchError {
         code: ErrorCode::ApprovalRequired,
         message: format!(
             "This needs the approval of the person who runs Silo: {} The request is {}; read its answer with `silo approvals status {}`.",
-            approval.summary, approval.id, approval.id
+            record.summary_for_computer(), approval.id, approval.id
         ),
         details: Some(ApprovalRequiredDetails {
             kind: approval.kind,
-            summary: approval.summary.clone(),
+            summary: record.summary_for_computer().to_owned(),
             approval_id: Some(approval.id.clone()),
         }),
     }
@@ -170,10 +181,7 @@ fn pin_of(context: &HandlerContext, method: MethodName, params: &Value) -> Optio
         }
         MethodName::ChangesPromote => {
             let fork = params.get("forkId").and_then(Value::as_str)?;
-            Some(format!(
-                "generation:{}",
-                silo_engine::generation::generation(fork)
-            ))
+            Some(silo_engine::changes::promote::service::promote_pin(fork))
         }
         _ => None,
     }
@@ -240,7 +248,7 @@ async fn review_request(
             let mut request = json!({
                 "forkId": keep.fork_id,
                 "reviewDigest": digest,
-                "summary": asked.summary,
+                "summary": asked.computer_summary.as_ref().unwrap_or(&asked.summary),
             });
             if let Some(target) = keep.target_id.filter(|target| !target.is_empty()) {
                 request["targetId"] = json!(target);
@@ -344,6 +352,7 @@ pub(crate) async fn request(
         params: asked.params.clone(),
         asked: asked.asked.clone(),
         summary: asked.summary.clone(),
+        computer_summary: asked.computer_summary.clone(),
         creates: asked.creates.as_ref().map(|creation| approvals::Creation {
             name: creation.name.clone(),
             id: creation.id.clone(),
@@ -454,7 +463,7 @@ async fn list(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
                 .as_deref()
                 .is_none_or(|computer| record.computer() == computer)
         })
-        .map(Record::view)
+        .map(|record| view_for(context, record))
         .collect();
     output(ApprovalsListResult { approvals })
 }
@@ -467,7 +476,7 @@ async fn get(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, 
     let mut record = [visible_record(context, &params.id)?];
     settle_links(context, &mut record);
     let [record] = record;
-    output(record.view())
+    output(view_for(context, &record))
 }
 
 // MARK: Answering
@@ -657,17 +666,39 @@ fn execute<'a>(
                 return failed(format!("Nothing was run: {reason}"));
             }
             // Asked again now, the call must ask for exactly what you were shown.
-            Some((Decision::Ask { kind, summary, .. }, _))
-                if kind != approval.kind || summary != approval.summary =>
+            Some((
+                Decision::Ask {
+                    kind,
+                    summary,
+                    computer_summary,
+                    ..
+                },
+                _,
+            )) if kind != approval.kind
+                || summary != approval.summary
+                || record
+                    .computer_summary
+                    .as_ref()
+                    .is_some_and(|stored| computer_summary.as_ref() != Some(stored)) =>
             {
                 return failed(
                     "Nothing was run: the call would now ask for something other than what you allowed. The computer can ask again.",
                 );
             }
-            Some((Decision::Ask { .. }, tree)) => (tree, None),
+            // Asked again for the same thing, it runs as the policy now rewrites it too.
+            Some((Decision::Ask { params, .. }, tree)) => (tree, params),
             // The computer may do it now without asking; it runs as the policy now rewrites it.
             Some((Decision::Allow(allowed), tree)) => (tree, allowed.params),
         };
+        // The computer it makes keeps the id the approval recorded for it.
+        let rewritten = rewritten.map(|mut rewritten| {
+            if let Some(id) = record.creates.as_ref().and_then(|c| c.id.as_deref()) {
+                if rewritten.pointer("/configuration/id").is_some() {
+                    rewritten["configuration"]["id"] = Value::from(id);
+                }
+            }
+            rewritten
+        });
         if gate::takes_headroom(method) {
             if let Some(message) =
                 gate::short_of_resources(context, method, &approval.params, &std::collections::HashMap::new())
@@ -701,7 +732,18 @@ fn execute<'a>(
                 return failed(format!("Nothing was run: {message}"));
             }
         }
-        let result = run_call(context, run_method, &run_params).await;
+        let review_digest = approval
+            .review_digest
+            .clone()
+            .filter(|_| run_method == MethodName::ChangesRequestsKeep);
+        let result = run_call(
+            context,
+            run_method,
+            &run_params,
+            record.pin.clone(),
+            review_digest,
+        )
+        .await;
         let job = result
             .as_ref()
             .ok()
@@ -830,6 +872,22 @@ tokio::task_local! {
     /// Set while an allowed call runs for the computer that asked, so a merge hides the
     /// recipe's command lines from the job that computer reads.
     static FOR_COMPUTER: bool;
+    /// The state an allowed undo or promote was approved for; the job compares it while it
+    /// holds the lanes, since another approved call may run between this check and the job.
+    static EXPECTED_PIN: Option<String>;
+    /// The review digest an allowed merge was approved for; the keep compares it while it
+    /// holds the request, since the computer may ask again between the check and the keep.
+    static EXPECTED_REVIEW: Option<String>;
+}
+
+/// The review digest the allowed merge that is running was approved for, when it is one.
+pub(crate) fn expected_review_digest() -> Option<String> {
+    EXPECTED_REVIEW.try_with(Clone::clone).ok().flatten()
+}
+
+/// The state the allowed call that is running was approved for, when it acts on pinned state.
+pub(crate) fn expected_pin() -> Option<String> {
+    EXPECTED_PIN.try_with(Clone::clone).ok().flatten()
 }
 
 /// Whether a merge's result goes to a computer: it is the caller, or it asked for the call an
@@ -844,17 +902,27 @@ async fn run_call(
     context: &HandlerContext,
     method: MethodName,
     params: &Value,
+    pin: Option<String>,
+    review_digest: Option<String>,
 ) -> Result<HandlerOutput, DispatchError> {
-    FOR_COMPUTER
-        .scope(true, async {
-            #[cfg(test)]
-            if let Ok(run) = TEST_RUN.try_with(Clone::clone) {
-                return run(method, params).map(|value| HandlerOutput {
-                    value,
-                    event_barrier: None,
-                });
-            }
-            super::run(context, method, params).await
+    EXPECTED_REVIEW
+        .scope(review_digest, async {
+            EXPECTED_PIN
+                .scope(pin, async {
+                    FOR_COMPUTER
+                        .scope(true, async {
+                            #[cfg(test)]
+                            if let Ok(run) = TEST_RUN.try_with(Clone::clone) {
+                                return run(method, params).map(|value| HandlerOutput {
+                                    value,
+                                    event_barrier: None,
+                                });
+                            }
+                            super::run(context, method, params).await
+                        })
+                        .await
+                })
+                .await
         })
         .await
 }
@@ -871,7 +939,7 @@ async fn cancel(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
         .cancel(found.id(), by, reason)
         .map_err(unchangeable)?;
     announce(context, &cancelled);
-    output(cancelled.view())
+    output(view_for(context, &cancelled))
 }
 
 async fn note(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
@@ -886,7 +954,7 @@ async fn note(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
         .note(found.id(), caller, &params.note)
         .map_err(unchangeable)?;
     announce(context, &noted);
-    output(noted.view())
+    output(view_for(context, &noted))
 }
 
 // MARK: What a computer holds

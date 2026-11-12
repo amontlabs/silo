@@ -441,6 +441,16 @@ impl Service {
 
     /// `checkpoints.delete`.
     pub fn start_delete(&self, computer_id: &str, checkpoint_id: &str) -> Result<JobId, Failure> {
+        self.start_delete_visible(computer_id, checkpoint_id, None)
+    }
+
+    /// [`Self::start_delete`], whose refusals name only the computers in `visible`, when given.
+    pub fn start_delete_visible(
+        &self,
+        computer_id: &str,
+        checkpoint_id: &str,
+        visible: Option<std::collections::BTreeSet<String>>,
+    ) -> Result<JobId, Failure> {
         match self.platform(computer_id)? {
             Platform::Macos => macos_computers::start_macos_checkpoint_delete_job(
                 self.macos.clone(),
@@ -462,6 +472,7 @@ impl Service {
                             &checkpoint_id,
                             job_id,
                             cancellation,
+                            visible.as_ref(),
                         )
                         .map(|()| Value::Null)
                     },
@@ -501,12 +512,21 @@ impl Service {
     /// `checkpoints.usage`: a query. It can run `msb` listings, so callers run it off the
     /// async workers.
     pub fn usage(&self, computer_id: &str) -> Result<CheckpointUsage, Failure> {
+        self.usage_visible(computer_id, None)
+    }
+
+    /// [`Self::usage`] for a reader who may name only the computers in `visible`.
+    pub fn usage_visible(
+        &self,
+        computer_id: &str,
+        visible: Option<&std::collections::BTreeSet<String>>,
+    ) -> Result<CheckpointUsage, Failure> {
         match self.platform(computer_id)? {
             Platform::Macos => macos_computers::macos_checkpoint_usage(&self.macos, computer_id)
                 .map_err(Failure::from_message),
             Platform::Linux => {
                 let paths = self.linux_paths()?;
-                let usage = runtime::checkpoints::read_usage(&paths, computer_id)
+                let usage = runtime::checkpoints::read_usage(&paths, computer_id, visible)
                     .map_err(Failure::from_message)?;
                 serde_json::to_value(usage)
                     .and_then(serde_json::from_value)

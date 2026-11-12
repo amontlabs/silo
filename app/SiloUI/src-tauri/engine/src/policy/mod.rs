@@ -183,6 +183,9 @@ pub enum Decision {
     Ask {
         kind: ApprovalKind,
         summary: String,
+        /// What the computer that asked may read of `summary`, when `summary` holds what only
+        /// the owner may see.
+        computer_summary: Option<String>,
         params: Option<Value>,
         creates: Option<Creation>,
     },
@@ -212,6 +215,20 @@ fn ask(kind: ApprovalKind, summary: impl Into<String>) -> Decision {
     Decision::Ask {
         kind,
         summary: summary.into(),
+        computer_summary: None,
+        params: None,
+        creates: None,
+    }
+}
+
+/// An ask for a merge, whose owner-facing text holds the commands of a recipe's hooks and the
+/// computer's holds only their number. The computer's text is always stored, so an approval
+/// saved without one is known to predate it.
+fn ask_merge(kind: ApprovalKind, summary: String, computer_summary: String) -> Decision {
+    Decision::Ask {
+        kind,
+        computer_summary: Some(computer_summary),
+        summary,
         params: None,
         creates: None,
     }
@@ -222,6 +239,7 @@ fn ask_with(kind: ApprovalKind, summary: impl Into<String>, params: Value) -> De
     Decision::Ask {
         kind,
         summary: summary.into(),
+        computer_summary: None,
         params: Some(params),
         creates: None,
     }
@@ -237,6 +255,7 @@ fn ask_to_create(
     Decision::Ask {
         kind,
         summary: summary.into(),
+        computer_summary: None,
         params: Some(params),
         creates: Some(creates),
     }
@@ -616,35 +635,78 @@ impl<'a> Judge<'a> {
             many => wider.push(format!("the secrets {}", listed(many))),
         }
         let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
-        match self.new_computer_network(
+        let network = self.new_computer_network(
             asked_network.clone(),
             self.world.network_held(source),
             new_name,
-        ) {
-            Ok(policy) => rewritten["networkPolicy"] = json!(policy),
-            Err(summary) => {
-                rewritten["networkPolicy"] = json!(asked_network);
-                if wider.is_empty() {
-                    return Ok(ask_to_create(
-                        ApprovalKind::Network,
-                        summary,
-                        rewritten,
-                        creates,
-                    ));
+        );
+        rewritten["networkPolicy"] = json!(Self::chosen_network(&network, asked_network));
+        let more = if source == self.caller {
+            None
+        } else {
+            self.fork_exceeds(source)
+        };
+        if !wider.is_empty() {
+            match &more {
+                Some(more) if more.is_empty() => {
+                    wider.push("sizes that could not be compared with its own".into())
                 }
+                Some(_) => wider.push("more resources than its own".into()),
+                None => {}
+            }
+            if network.is_err() {
                 wider.push("a network policy wider than its own".into());
             }
-        }
-        if !wider.is_empty() {
+            let mut summary = format!(
+                "More access than {} has: fork {} as {} with {}.",
+                self.shown(self.caller),
+                self.shown(source),
+                quoted(new_name),
+                wider.join(" and "),
+            );
+            if let Some(more) = &more {
+                summary.push_str(&self.copied_sizes_sentence(source, more));
+            }
+            if let Err(network) = &network {
+                summary.push(' ');
+                summary.push_str(network);
+            }
             return Ok(ask_to_create(
                 ApprovalKind::Access,
-                format!(
-                    "More access than {} has: fork {} as {} with {}.",
-                    self.shown(self.caller),
+                summary,
+                rewritten,
+                creates,
+            ));
+        }
+        if let Some(more) = more {
+            let mut summary = format!(
+                "More resources: fork {} as {}",
+                self.shown(source),
+                quoted(new_name)
+            );
+            match self.world.resources(source) {
+                Some(copied) => summary.push_str(&self.sizes_sentence(&copied, Some(&more))),
+                None => summary.push_str(&format!(
+                    "; the sizes of {} or {} could not be read to compare them.",
                     self.shown(source),
-                    quoted(new_name),
-                    wider.join(" and "),
-                ),
+                    self.shown(self.caller)
+                )),
+            }
+            if let Err(network) = &network {
+                summary.push(' ');
+                summary.push_str(network);
+            }
+            return Ok(ask_to_create(
+                ApprovalKind::Resources,
+                summary,
+                rewritten,
+                creates,
+            ));
+        }
+        if let Err(summary) = network {
+            return Ok(ask_to_create(
+                ApprovalKind::Network,
+                summary,
                 rewritten,
                 creates,
             ));
@@ -697,10 +759,9 @@ impl<'a> Judge<'a> {
                     source: None,
                 };
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
-                let network = self.new_computer_network(asked_network, None, name);
-                if let Ok(policy) = &network {
-                    rewritten["networkPolicy"] = json!(policy);
-                }
+                let network = self.new_computer_network(asked_network.clone(), None, name);
+                rewritten["networkPolicy"] =
+                    json!(Self::chosen_network(&network, asked_network));
                 let asked = Resources::of_linux(configuration)
                     .ok_or("A Linux computer's CPUs, memory and storage are numbers.")?;
                 let more = self.more_than_it_has(&asked);
@@ -747,7 +808,14 @@ impl<'a> Judge<'a> {
                 let asked = Resources::of_macos(request)
                     .ok_or("A macOS computer's CPUs, memory and disk are numbers.")?;
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
-                let network = self.new_computer_network(asked_network, None, name);
+                let network = self.new_computer_network(asked_network.clone(), None, name);
+                rewritten["networkPolicy"] =
+                    json!(Self::chosen_network(&network, asked_network));
+                let creates = Creation {
+                    name: name.to_owned(),
+                    id: None,
+                    source: None,
+                };
                 if let Some(more) = self.more_than_it_has(&asked) {
                     let mut summary = format!(
                         "More resources: make {}{}",
@@ -762,39 +830,53 @@ impl<'a> Judge<'a> {
                         ApprovalKind::Resources,
                         summary,
                         rewritten,
-                        Creation {
-                            name: name.to_owned(),
-                            id: None,
-                            source: None,
-                        },
+                        creates,
                     ));
                 }
-                match network {
-                    Ok(policy) => rewritten["networkPolicy"] = json!(policy),
-                    Err(summary) => {
-                        return Ok(ask_to_create(
-                            ApprovalKind::Network,
-                            summary,
-                            rewritten,
-                            Creation {
-                                name: name.to_owned(),
-                                id: None,
-                                source: None,
-                            },
-                        ))
-                    }
+                if let Err(summary) = network {
+                    return Ok(ask_to_create(
+                        ApprovalKind::Network,
+                        summary,
+                        rewritten,
+                        creates,
+                    ));
                 }
                 Ok(Decision::Allow(Allowed {
                     params: Some(rewritten),
-                    creates: Some(Creation {
-                        name: name.to_owned(),
-                        id: None,
-                        source: None,
-                    }),
+                    creates: Some(creates),
                     ..Allowed::plain()
                 }))
             }
             _ => Err("A new computer is Linux or macOS (kind).".into()),
+        }
+    }
+
+    /// The network policy a new computer is saved with: the one it was judged against, or, when
+    /// that is wider than the caller's and so waits for the owner, the one that was asked for.
+    /// A caller whose own policy cannot be read gets a closed policy for the owner to widen, so
+    /// an approved creation is never saved without one.
+    fn chosen_network(
+        network: &Result<NetworkPolicy, String>,
+        asked: Option<NetworkPolicy>,
+    ) -> NetworkPolicy {
+        match network {
+            Ok(policy) => policy.clone(),
+            Err(_) => asked.unwrap_or_else(|| NetworkPolicy {
+                mode: NetworkPolicyMode::Closed,
+                ..NetworkPolicy::default()
+            }),
+        }
+    }
+
+    /// What a fork of `source` has more of than the caller, since a fork copies the sizes of its
+    /// source: `Some` (and empty) when either side's sizes cannot be read, so it asks.
+    fn fork_exceeds(&self, source: &str) -> Option<Vec<String>> {
+        match (self.world.resources(source), self.world.resources(self.caller)) {
+            (Some(copied), Some(own)) => {
+                let more = copied.exceeding(&own);
+                (!more.is_empty()).then_some(more)
+            }
+            _ => Some(Vec::new()),
         }
     }
 
@@ -807,6 +889,31 @@ impl<'a> Judge<'a> {
                 (!more.is_empty()).then_some(more)
             }
             None => Some(Vec::new()),
+        }
+    }
+
+    /// The sentence that tells what a fork copies from `source` and how it compares with the
+    /// caller, for a request that is mainly about something else.
+    fn copied_sizes_sentence(&self, source: &str, more: &[String]) -> String {
+        match self.world.resources(source) {
+            Some(copied) if more.is_empty() => format!(
+                " It copies {} from {}; the sizes of {} could not be read to compare them.",
+                copied.describe(),
+                self.shown(source),
+                self.shown(self.caller)
+            ),
+            Some(copied) => format!(
+                " It copies {} from {}, which is more than {} has: {}.",
+                copied.describe(),
+                self.shown(source),
+                self.shown(self.caller),
+                more.join(", ")
+            ),
+            None => format!(
+                " The sizes of {} or {} could not be read to compare them.",
+                self.shown(source),
+                self.shown(self.caller)
+            ),
         }
     }
 
@@ -857,17 +964,15 @@ impl<'a> Judge<'a> {
                     return Err("A merge can go only into this computer or one it made.".into());
                 }
                 let details = MergeDetails::of(params, record.as_ref(), &self.shown(&target))?;
-                Ok(ask(
+                let base = format!(
+                    "Merge the changes of {} into {}.",
+                    self.shown(&fork),
+                    self.shown(&target)
+                );
+                Ok(ask_merge(
                     kind,
-                    self.merge_summary(
-                        format!(
-                            "Merge the changes of {} into {}.",
-                            self.shown(&fork),
-                            self.shown(&target)
-                        ),
-                        &target,
-                        &details,
-                    ),
+                    self.merge_summary(base.clone(), &target, &details, false),
+                    self.merge_summary(base, &target, &details, true),
                 ))
             }
             MethodName::ChangesRequestsKeep => {
@@ -895,16 +1000,14 @@ impl<'a> Judge<'a> {
                 let target = target.unwrap_or_else(|| self.caller.to_owned());
                 let record = self.world.recipe_record(&target)?;
                 let details = MergeDetails::of(params, record.as_ref(), &self.shown(&target))?;
-                Ok(ask(
+                let base = format!(
+                    "Merge the changes of {} that its review request lists.",
+                    self.shown(&fork)
+                );
+                Ok(ask_merge(
                     kind,
-                    self.merge_summary(
-                        format!(
-                            "Merge the changes of {} that its review request lists.",
-                            self.shown(&fork)
-                        ),
-                        &target,
-                        &details,
-                    ),
+                    self.merge_summary(base.clone(), &target, &details, false),
+                    self.merge_summary(base, &target, &details, true),
                 ))
             }
             MethodName::ChangesUndo => {
@@ -975,11 +1078,24 @@ impl<'a> Judge<'a> {
         new_name: &str,
     ) -> Result<NetworkPolicy, String> {
         let Some(own) = self.world.network_held(self.caller) else {
-            return Err(format!(
+            let mut summary = format!(
                 "Give {} a network policy; the network policy of {} could not be read to compare.",
                 quoted(new_name),
                 self.shown(self.caller)
-            ));
+            );
+            if let Some(asked) = asked.filter(|asked| asked.mode != NetworkPolicyMode::Closed) {
+                let closed = Held::latest(NetworkPolicy {
+                    mode: NetworkPolicyMode::Closed,
+                    ..NetworkPolicy::default()
+                });
+                summary.push(' ');
+                summary.push_str(&crate::network_policy::widening_summary_held(
+                    &quoted(new_name),
+                    &closed,
+                    &Held::latest(asked),
+                ));
+            }
+            return Err(summary);
         };
         // The new computer is approved at the preset versions of this Silo, so it is compared
         // that way against the caller's own policy.
@@ -1042,9 +1158,22 @@ impl<'a> Judge<'a> {
         ))
     }
 
-    fn merge_summary(&self, base: String, target: &str, details: &MergeDetails) -> String {
+    /// The summary of a merge; `for_computer` leaves out the commands of a recipe's hooks,
+    /// which no computer may read.
+    fn merge_summary(
+        &self,
+        base: String,
+        target: &str,
+        details: &MergeDetails,
+        for_computer: bool,
+    ) -> String {
+        let commands = if for_computer {
+            &details.computer_commands
+        } else {
+            &details.commands
+        };
         let mut lead = Vec::new();
-        if !details.commands.is_empty() {
+        if !commands.is_empty() {
             lead.push(format!("Runs commands in {}", self.shown(target)));
         }
         if details.data_ok {
@@ -1058,11 +1187,11 @@ impl<'a> Judge<'a> {
             format!("{lead}. ")
         };
         summary.push_str(&base);
-        if !details.commands.is_empty() {
+        if !commands.is_empty() {
             summary.push_str(&format!(
                 " In {} it {}.",
                 self.shown(target),
-                details.commands.join("; ")
+                commands.join("; ")
             ));
         }
         if details.data_ok {
@@ -1469,10 +1598,20 @@ impl<'a> Judge<'a> {
     }
 }
 
+/// "1 step" or "3 steps".
+fn steps(count: usize) -> String {
+    match count {
+        1 => "1 step".to_owned(),
+        many => format!("{many} steps"),
+    }
+}
+
 /// What a merge asks to do besides bringing the changes over.
 struct MergeDetails {
     /// What the hooks do in the target.
     commands: Vec<String>,
+    /// The same, with the commands of a recipe's hooks counted instead of quoted.
+    computer_commands: Vec<String>,
     data_ok: bool,
     choices: Vec<String>,
     skipped: Vec<String>,
@@ -1521,6 +1660,7 @@ impl MergeDetails {
             }
         };
         let mut commands = Vec::new();
+        let mut computer_commands = Vec::new();
         let mut recipe_name = None;
         if let Some(record) = record {
             if has_keep_hooks(params)? {
@@ -1531,12 +1671,15 @@ impl MergeDetails {
             let keep = crate::recipes::hooks_of(&record.recipe);
             if !keep.restart.is_empty() {
                 commands.push(format!("restarts {}", listed(&keep.restart)));
+                computer_commands.push(format!("restarts {}", listed(&keep.restart)));
             }
             if !keep.migrate.is_empty() {
                 commands.push(format!("runs {} to migrate", listed(&keep.migrate)));
+                computer_commands.push(format!("runs {} to migrate", steps(keep.migrate.len())));
             }
             if !keep.after.is_empty() {
                 commands.push(format!("runs {} last", listed(&keep.after)));
+                computer_commands.push(format!("runs {} last", steps(keep.after.len())));
             }
             recipe_name = Some(record.name.clone());
         } else {
@@ -1558,6 +1701,7 @@ impl MergeDetails {
                 }
                 Some(_) => return Err("keep is an object of hooks.".into()),
             }
+            computer_commands.clone_from(&commands);
         }
         let data_ok = match params.get("dataOk") {
             None | Some(Value::Null) => false,
@@ -1579,6 +1723,7 @@ impl MergeDetails {
         };
         Ok(Self {
             commands,
+            computer_commands,
             data_ok,
             choices,
             skipped: strings(params.get("skip"), "skip")?,
@@ -1646,6 +1791,31 @@ pub fn filter_result(filter: Filter, result: &mut Value, visible: &BTreeSet<Stri
     }
 }
 
+/// What a computer reads in place of the engine's summary of a review request that waits for
+/// an approval, which can name commands the computer may not read.
+pub const WAITING_MERGE_SUMMARY: &str =
+    "A merge waiting for the approval of the person who runs Silo.";
+
+/// Replaces the engine's text on a review request an approval wraps, and on the answer that
+/// shows it.
+fn cut_request_summary(object: &mut serde_json::Map<String, Value>) {
+    let wrapped = |request: &serde_json::Map<String, Value>| {
+        request.get("approvalId").is_some_and(|id| !id.is_null())
+            && request.contains_key("reviewDigest")
+    };
+    if wrapped(object) {
+        object.insert("summary".into(), json!(WAITING_MERGE_SUMMARY));
+    }
+    if object
+        .get("request")
+        .and_then(Value::as_object)
+        .is_some_and(wrapped)
+        && object.contains_key("text")
+    {
+        object.insert("text".into(), json!(WAITING_MERGE_SUMMARY));
+    }
+}
+
 /// Cuts any answer to a computer down to what it may see, wherever it sits in the answer (a
 /// job's outcome holds the device's state after a fork, for one). A list of computers keeps only
 /// the visible ones; the device's own state loses its secrets, GitHub, activities and pushes; a
@@ -1661,6 +1831,7 @@ pub fn cut_for_computer(result: &mut Value, visible: &BTreeSet<String>) {
             if object.contains_key("outcomeChunk") {
                 object.insert("outcomeChunk".into(), Value::Null);
             }
+            cut_request_summary(object);
             if let Some(Value::Array(computers)) = object.get_mut("computers") {
                 computers.retain(|computer| {
                     ["/configuration/id", "/computerId", "/id"]

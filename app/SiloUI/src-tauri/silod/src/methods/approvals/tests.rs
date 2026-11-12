@@ -1364,6 +1364,146 @@ async fn a_promote_is_refused_when_the_fork_changed_after_it_was_asked_and_askin
 }
 
 #[tokio::test]
+async fn an_allowed_call_carries_the_state_it_was_approved_for_into_its_job() {
+    let _serial = serial();
+    let tree = Tree::new();
+    let id = ask(
+        &tree.me(),
+        MethodName::ChangesPromote,
+        json!({"forkId": tree.fork, "targetId": tree.me}),
+    )
+    .await;
+    let pinned = get(&owner(), &id).await.unwrap();
+    assert!(pinned["state"] == "pending");
+    let seen: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+    let record = seen.clone();
+    let (run, _runs) = runner(move |_, _| {
+        record.lock().unwrap().push(super::expected_pin());
+        Ok(json!({"jobId": "job:700001"}))
+    });
+    TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
+    let expected = silo_engine::changes::promote::service::promote_pin(&tree.fork);
+    assert_eq!(*seen.lock().unwrap(), vec![Some(expected)]);
+    assert_eq!(super::expected_pin(), None);
+}
+
+#[tokio::test]
+async fn an_allowed_merge_carries_the_changes_it_was_approved_for_into_its_job() {
+    let _serial = serial();
+    let tree = Tree::new();
+    let request = review_request(&tree, "d1");
+    let id = ask(
+        &tree.me(),
+        MethodName::ChangesRequestsKeep,
+        json!({"requestId": request}),
+    )
+    .await;
+    let seen: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+    let record = seen.clone();
+    let (run, _runs) = runner(move |_, _| {
+        record.lock().unwrap().push(super::expected_review_digest());
+        Ok(json!({"jobId": "job:700002"}))
+    });
+    TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
+    assert_eq!(*seen.lock().unwrap(), vec![Some("d1".to_owned())]);
+    assert_eq!(super::expected_review_digest(), None);
+}
+
+#[tokio::test]
+async fn a_merge_saved_before_computer_summaries_still_runs_and_is_worded_for_the_computer() {
+    let _serial = serial();
+    let tree = Tree::new();
+    let request = review_request(&tree, "d1");
+    let id = ask(
+        &tree.me(),
+        MethodName::ChangesRequestsKeep,
+        json!({"requestId": request}),
+    )
+    .await;
+    // The same ask as an earlier version of the engine saved it: no summary for the computer.
+    let modern = get(&owner(), &id).await.unwrap();
+    call(&tree.me(), MethodName::ApprovalsCancel, json!({"id": id}))
+        .await
+        .unwrap();
+    let params = json!({"requestId": request});
+    let (legacy, _) = approvals::Store::new(&app_data())
+        .ask(approvals::NewApproval {
+            kind: ApprovalKind::Merge,
+            computer_id: tree.me.clone(),
+            computer_name: format!("{}-name", tree.me),
+            method: "changes.requests.keep".into(),
+            params: params.clone(),
+            asked: params,
+            summary: modern["summary"].as_str().unwrap().to_owned(),
+            computer_summary: None,
+            creates: None,
+            pin: None,
+            review_request_id: Some(request),
+            review_digest: Some("d1".into()),
+        })
+        .unwrap();
+    let id = legacy.id().to_owned();
+    let seen = get(&tree.me(), &id).await.unwrap();
+    assert_eq!(seen["summary"], silo_engine::policy::WAITING_MERGE_SUMMARY);
+    let (run, runs) = job_runner();
+    let ended = TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
+    assert!(ended["outcome"]["error"].is_null(), "{ended}");
+    assert_eq!(runs.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn an_approval_saved_without_a_network_policy_runs_with_the_one_the_second_check_chooses() {
+    let _serial = serial();
+    let _host = ample();
+    let tree = Tree::new();
+    let (_, method, params) = every_kind(&tree)
+        .into_iter()
+        .find(|(kind, ..)| *kind == ApprovalKind::Container)
+        .unwrap();
+    let id = ask(&tree.me(), method, params.clone()).await;
+    let store = approvals::Store::new(&app_data());
+    let modern = store.get(&id).unwrap().unwrap();
+    let chosen = modern.approval.params["networkPolicy"].clone();
+    assert!(chosen.is_object(), "{chosen}");
+    call(&tree.me(), MethodName::ApprovalsCancel, json!({"id": id}))
+        .await
+        .unwrap();
+    // The same ask as an earlier version of the engine saved it: no network policy in the call.
+    let mut legacy_params = modern.approval.params.clone();
+    legacy_params.as_object_mut().unwrap().remove("networkPolicy");
+    let (legacy, _) = store
+        .ask(approvals::NewApproval {
+            kind: modern.approval.kind,
+            computer_id: tree.me.clone(),
+            computer_name: modern.approval.computer_name.clone(),
+            method: modern.approval.method.clone(),
+            params: legacy_params,
+            asked: params,
+            summary: modern.approval.summary.clone(),
+            computer_summary: modern.computer_summary.clone(),
+            creates: modern.creates.clone(),
+            pin: None,
+            review_request_id: None,
+            review_digest: None,
+        })
+        .unwrap();
+    let (run, runs) = job_runner();
+    let ended = TEST_RUN
+        .scope(run, decide(legacy.id(), "allow"))
+        .await
+        .unwrap();
+    assert!(ended["outcome"]["error"].is_null(), "{ended}");
+    let runs = runs.lock().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].1["networkPolicy"], chosen);
+    // The computer it makes keeps the id the approval recorded for it.
+    assert_eq!(
+        runs[0].1["configuration"]["id"],
+        modern.approval.params["configuration"]["id"]
+    );
+}
+
+#[tokio::test]
 async fn an_undo_is_refused_when_another_merge_happened_after_it_was_asked() {
     use silo_engine::changes::keep::{env::CheckpointRef, journal::State, service::journal_for};
     let _serial = serial();

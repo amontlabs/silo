@@ -101,8 +101,9 @@ pub(super) async fn undo(
     let host = context.silod_context().runtime_host();
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
+    let pin = crate::methods::approvals::expected_pin();
     let started = tokio::task::spawn_blocking(move || {
-        promote::service::start_undo(host, checkpoints, manifests, params.computer_id)
+        promote::service::start_undo(host, checkpoints, manifests, params.computer_id, pin)
     })
     .await
     .map_err(|_| DispatchError::internal("The undo could not start."))?;
@@ -132,8 +133,9 @@ pub(super) async fn promote(
     };
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
+    let pin = crate::methods::approvals::expected_pin();
     let started = tokio::task::spawn_blocking(move || {
-        promote::service::start_promote(host, checkpoints, manifests, request)
+        promote::service::start_promote(host, checkpoints, manifests, request, pin)
     })
     .await
     .map_err(|_| DispatchError::internal("The promote could not start."))?;

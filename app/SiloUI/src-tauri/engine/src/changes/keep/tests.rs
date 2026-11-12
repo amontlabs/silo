@@ -2402,6 +2402,29 @@ fn undo_restores_a_successful_keeps_checkpoint_once_and_says_what_it_discards() 
 }
 
 #[test]
+fn an_undo_whose_pin_moved_while_it_waited_for_the_lane_changes_nothing() {
+    let world = simple_world();
+    let env = Fake(world.clone());
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_FORK);
+    run(&world, &st, &journal, &request(Hooks::default())).unwrap();
+    let refused = super::undo_checked(&env, &st, &journal, "main", WAIT, &|| {
+        Err("Nothing was undone: another merge happened.".to_owned())
+    });
+    assert_eq!(
+        refused.unwrap_err(),
+        "Nothing was undone: another merge happened."
+    );
+    assert_eq!(world.logged("restore"), 0);
+    assert!(journal.latest_undoable("main").is_some());
+    // The same undo with a check that accepts runs.
+    assert!(matches!(
+        super::undo_checked(&env, &st, &journal, "main", WAIT, &|| Ok(())).unwrap(),
+        UndoOutcome::Undone { .. }
+    ));
+}
+
+#[test]
 fn undo_returns_a_running_main_running_from_the_checkpoints_memory() {
     let world = simple_world();
     let env = Fake(world.clone());

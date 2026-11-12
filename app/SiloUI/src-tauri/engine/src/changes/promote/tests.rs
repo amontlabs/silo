@@ -614,6 +614,37 @@ fn undo_swaps_everything_back_exactly() {
 }
 
 #[test]
+fn an_undo_or_promote_whose_pin_moved_under_the_lanes_changes_nothing() {
+    let fake = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    promoted(&fake, &journal);
+    let before = fake.snapshot();
+    let moved = || Err("the pin moved".to_owned());
+    assert_eq!(
+        super::undo_checked(fake.as_ref(), &journal, FORK, Duration::from_secs(1), &moved).unwrap_err(),
+        "the pin moved"
+    );
+    assert_eq!(fake.snapshot(), before);
+    assert_eq!(journal.all()[0].state, State::Promoted);
+    let fresh = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    let before = fresh.snapshot();
+    assert_eq!(
+        super::promote_checked(
+            fresh.as_ref(),
+            &Lineage::new(Arc::new(Source::standard()), journal.clone()),
+            &journal,
+            &request(),
+            Duration::from_secs(1),
+            &moved
+        )
+        .unwrap_err(),
+        "the pin moved"
+    );
+    assert_eq!(fresh.snapshot(), before);
+}
+
+#[test]
 fn a_promote_waits_for_both_computers_to_finish_stopping() {
     let fake = Fake::new(Os::Linux);
     fake.device.lock().unwrap().slow_stop = true;

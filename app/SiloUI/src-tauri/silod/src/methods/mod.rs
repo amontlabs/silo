@@ -319,6 +319,16 @@ fn changed_computer(method: MethodName, params: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Marks the work a request does on its computer while its handler runs. A promote is not
+/// marked: its job moves the generation itself once it holds its lanes, so the generation an
+/// approval pinned for the fork still matches when the job checks it.
+fn begin_work(
+    method: MethodName,
+    computer: Option<&str>,
+) -> Option<silo_engine::generation::Touch> {
+    (method != MethodName::ChangesPromote).then(|| silo_engine::generation::touch(computer))
+}
+
 /// Runs the request once the policy admits it (`gate`), moving the generation of the computer
 /// it can change.
 pub(crate) async fn dispatch(
@@ -341,7 +351,7 @@ async fn run(
         return route(context, method, params).await;
     }
     let computer = changed_computer(method, params);
-    let _touch = silo_engine::generation::touch(computer.as_deref());
+    let _touch = begin_work(method, computer.as_deref());
     let output = route(context, method, params).await?;
     if let Some(job) = output.value.get("jobId").and_then(Value::as_str) {
         silo_engine::generation::note_job(job, computer.as_deref());
@@ -399,6 +409,30 @@ mod tests {
         access, approvals, audit, changed_computer, changes_computer, checkpoints, computers,
         display, guest, guest_client, serves, services,
     };
+
+    #[test]
+    fn a_promote_approved_for_a_fork_passes_its_own_check_after_the_dispatcher_ran_it() {
+        use silo_engine::changes::promote::service::{promote_guard, promote_pin};
+        let fork = "dispatcher-pin-fork";
+        let params = serde_json::json!({"forkId": fork});
+        let guard = promote_guard(Some(promote_pin(fork)), fork.to_owned());
+        // The dispatcher wraps the handler that starts the job, then the job checks.
+        drop(super::begin_work(
+            MethodName::ChangesPromote,
+            changed_computer(MethodName::ChangesPromote, &params).as_deref(),
+        ));
+        assert_eq!(guard(), Ok(()));
+        // Anything else that happened to the fork in between is seen.
+        let guard = promote_guard(Some(promote_pin(fork)), fork.to_owned());
+        drop(super::begin_work(MethodName::GuestExec, Some(fork)));
+        assert!(guard().unwrap_err().contains("fork changed"));
+        // So is a change no computer is named for.
+        let guard = promote_guard(Some(promote_pin(fork)), fork.to_owned());
+        drop(super::begin_work(MethodName::ChangesKeep, None));
+        assert!(guard().is_err());
+        // A promote nobody pinned runs whatever happened.
+        assert_eq!(promote_guard(None, fork.to_owned())(), Ok(()));
+    }
 
     #[test]
     fn commands_and_file_writes_change_a_computer_but_ports_do_not() {

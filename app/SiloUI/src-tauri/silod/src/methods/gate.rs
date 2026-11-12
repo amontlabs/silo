@@ -553,6 +553,7 @@ pub(crate) async fn admit(
         Decision::Ask {
             kind,
             summary,
+            computer_summary,
             params: rewritten,
             creates,
         } => {
@@ -571,6 +572,7 @@ pub(crate) async fn admit(
                 params: rewritten.unwrap_or_else(|| params.clone()),
                 kind,
                 summary,
+                computer_summary,
                 creates,
             };
             match super::approvals::request(context, asked).await {
