@@ -1025,6 +1025,18 @@ pub fn held_from_recorded(recorded: Option<&Value>) -> (Held, bool) {
     (Held::latest(policy), denied)
 }
 
+/// [`held_from_recorded`] for rules that name their policy outright: closed (see
+/// [`is_closed_runtime_policy`]) or allowing everything by default. `None` for any other rules,
+/// which allow some destinations under a default deny (an allowlist, or a closed computer with
+/// grants): `effective` reads those as open, so they say nothing safe about the policy they
+/// came from.
+pub fn held_from_exact_recorded(recorded: Option<&Value>) -> Option<(Held, bool)> {
+    let recorded = recorded?;
+    let allows_by_default = recorded.get("default_egress").and_then(Value::as_str) == Some("allow");
+    (allows_by_default || is_closed_runtime_policy(recorded))
+        .then(|| held_from_recorded(Some(recorded)))
+}
+
 /// The plan for a computer: its stored policy (see [`held_for`]), its grants and Silo's own
 /// rules. Refused when the stored policies cannot be read.
 pub fn plan_for(

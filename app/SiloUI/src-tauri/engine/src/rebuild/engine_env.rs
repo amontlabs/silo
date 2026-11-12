@@ -531,13 +531,16 @@ impl Unbound {
 /// Gives the undo computer a policy of its own when it has none (or only a stand-in).
 /// `from_computer` is true while the computer's id still names the original: the undo computer
 /// then takes the policy the computer has saved, with its approvals, which may have changed
-/// since the build was made. When the computer has none saved, the undo computer takes the
-/// rules its own sandbox holds, which `recorded` reads: they are what the computer ran under.
-/// When they cannot be read the undo computer keeps the policy it was given when the build was
-/// made (which a computer with no saved policy cannot have outgrown), or else a closed policy
-/// (no network, no connections to its ports) marked as a stand-in, so that starting it is safe;
-/// the rules are bound when a later attempt can read them. A policy the undo computer has,
-/// other than a stand-in, is never replaced.
+/// since the build was made. When the computer has none saved, it takes what the rules its own
+/// sandbox holds mean (`recorded`), which are what the computer ran under.
+/// Once the computer's id names the rebuilt computer, only `recorded` is left, and only rules
+/// that name their policy outright are used (closed, or allowing everything by default): an
+/// allowlist and a closed computer with grants record rules that read as open, so they are not
+/// turned into a policy. Otherwise, and when the rules cannot be read, the undo computer keeps
+/// the policy it was given when the build was made, or else a closed policy (no network, no
+/// connections to its ports) marked as a stand-in, so that starting it is safe; the rules are
+/// bound when a later attempt can read them. A policy the undo computer has, other than a
+/// stand-in, is never replaced.
 fn bind(
     plan: &Plan,
     recorded: &dyn Fn() -> Result<Option<Value>, String>,
@@ -551,21 +554,36 @@ fn bind(
     if from_computer && store::resolve_from(&plan.old_id, &plan.undo_id).map_err(stored)? {
         return Ok(());
     }
+    let keep_closed = || -> Result<(), Unbound> {
+        if store::get_stored(&plan.undo_id)
+            .map_err(Unbound::Store)?
+            .is_none()
+        {
+            store::set_stand_in(&plan.undo_id).map_err(Unbound::Store)?;
+        }
+        Ok(())
+    };
     match recorded() {
         Ok(recorded) => {
-            let (held, incoming_denied) = if from_computer {
-                crate::network_policy::held_for(&plan.old_id, recorded.as_ref()).map_err(stored)?
+            let chosen = if from_computer {
+                Some(
+                    crate::network_policy::held_for(&plan.old_id, recorded.as_ref())
+                        .map_err(stored)?,
+                )
             } else {
-                crate::network_policy::held_from_recorded(recorded.as_ref())
+                crate::network_policy::held_from_exact_recorded(recorded.as_ref())
             };
-            store::resolve(&plan.undo_id, store::Stored::of(held, incoming_denied))
-                .map_err(stored)?;
-            Ok(())
+            match chosen {
+                Some((held, incoming_denied)) => {
+                    store::resolve(&plan.undo_id, store::Stored::of(held, incoming_denied))
+                        .map_err(stored)?;
+                    Ok(())
+                }
+                None => keep_closed(),
+            }
         }
         Err(error) => {
-            if store::get_stored(&plan.undo_id).map_err(stored)?.is_none() {
-                store::set_stand_in(&plan.undo_id).map_err(stored)?;
-            }
+            keep_closed()?;
             Err(Unbound::Rules(error))
         }
     }
@@ -608,17 +626,21 @@ fn secure_undo_policy(
 
 /// The swap: the undo computer's policy is saved first, then the sandboxes are renamed and the
 /// inventory published, then the rules the original ran under are bound if they could not be
-/// read before. Once the inventory is published the swap is done: rules that still cannot be
-/// read leave the undo computer with the policy it has, and settling the rebuild binds them
-/// later.
+/// read before. `published` is whether an earlier attempt already published the inventory: until
+/// then the computer's id names the original in whatever state the sandboxes were left, so the
+/// undo computer takes the policy the computer has saved; afterwards the computer's id names the
+/// rebuilt computer and is not used. Once the inventory is published the swap is done: rules
+/// that still cannot be read leave the undo computer with the policy it has, and settling the
+/// rebuild binds them later.
 pub(super) fn swap_with_policy(
     plan: &Plan,
     sandboxes: &dyn swap::Sandboxes,
     recorded: &dyn Fn() -> Result<Option<Value>, String>,
+    published: &dyn Fn() -> Result<bool, String>,
     publish_inventory: &dyn Fn() -> Result<(), String>,
 ) -> Result<(), String> {
-    let moved_aside = swap::state(sandboxes, plan)? != 0;
-    secure_undo_policy(plan, recorded, !moved_aside)?;
+    let from_computer = !published()?;
+    secure_undo_policy(plan, recorded, from_computer)?;
     swap::apply(sandboxes, plan)?;
     publish_inventory()?;
     if let Err(error) = settle_undo_policy(plan, recorded) {
@@ -721,6 +743,13 @@ impl EngineRebuildEnv {
         })
         .map(|_| ())
         .map_err(|error| error.to_string())
+    }
+
+    /// Whether the saved computers include the computer `id`.
+    fn inventory_has(&self, paths: &RuntimePaths, id: &str) -> Result<bool, String> {
+        runtime::read_metadata(&paths.metadata)
+            .map(|saved| saved.computers.iter().any(|c| c.id() == id))
+            .map_err(|error| error.to_string())
     }
 
     /// Stops the sandbox of computer `id` if it runs, waiting for it to be down.
@@ -1085,6 +1114,7 @@ impl RebuildEnv for EngineRebuildEnv {
             plan,
             &RuntimeSandboxes { paths: &paths },
             &|| self.original_recorded_policy(&paths, plan),
+            &|| self.inventory_has(&paths, &plan.undo_id),
             &|| self.write_inventory(&paths, |computers| swap::swap_inventory(computers, plan)),
         )?;
         crate::computer_use::inherit_settings(&paths, &plan.old_id, &plan.undo_id)
