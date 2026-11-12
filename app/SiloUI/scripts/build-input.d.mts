@@ -12,3 +12,13 @@ export function isVerifiedFile(path: string, expectedSha256: string, label: stri
 export function writeVerifiedFile(path: string, openSource: (signal: AbortSignal) => Promise<Readable>, expectedSha256: string, label: string, limits?: InputLimits): Promise<string>
 export function fetchVerifiedFile(fetchInput: FetchStream, url: string, expectedSha256: string, label: string, path: string, limits?: InputLimits): Promise<string>
 export function runtimeCacheRoot(tauriRoot: string, environment?: Record<string, string | undefined>): string
+export function takePublishedEntry(
+  directory: string,
+  names: readonly string[],
+  hooks?: { afterManifest?: () => Promise<void> | void; afterFile?: (name: string) => Promise<void> | void },
+): Promise<Record<string, Buffer> | null>
+export function publishEntry(
+  directory: string,
+  files: Record<string, Buffer>,
+  options?: { accept?: (taken: Record<string, Buffer>) => Promise<boolean> },
+): Promise<boolean>

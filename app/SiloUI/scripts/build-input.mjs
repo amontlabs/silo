@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { createReadStream, createWriteStream } from "node:fs"
-import { mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 import { Readable, Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
@@ -94,4 +94,77 @@ export function runtimeCacheRoot(tauriRoot, environment = process.env) {
   if (!shared) return join(tauriRoot, "target", "runtime-cache")
   if (!isAbsolute(shared)) throw new Error("SILO_RUNTIME_CACHE_DIR must be an absolute path")
   return resolve(shared)
+}
+
+const ENTRY_MANIFEST = "manifest.json"
+
+function digest(bytes) {
+  return createHash("sha256").update(bytes).digest("hex")
+}
+
+// Takes a published cache entry: reads its manifest once, then reads each named file once into
+// memory and checks what it read against that one manifest. Returns the bytes, or null (a miss)
+// when anything is missing or differs. A publisher replacing the entry meanwhile can only turn a
+// hit into a miss: the bytes returned are the bytes hashed, against one read of the manifest.
+export async function takePublishedEntry(directory, names, { afterManifest, afterFile } = {}) {
+  let manifest
+  try {
+    manifest = JSON.parse(await readFile(join(directory, ENTRY_MANIFEST), "utf8"))
+  } catch {
+    return null
+  }
+  const listed = manifest?.schemaVersion === 1 && manifest.files && typeof manifest.files === "object" ? Object.keys(manifest.files).sort() : null
+  if (!listed || JSON.stringify(listed) !== JSON.stringify([...names].sort())) return null
+  await afterManifest?.()
+  const taken = {}
+  for (const name of names) {
+    const expected = manifest.files[name]
+    if (typeof expected?.sha256 !== "string" || !Number.isSafeInteger(expected.size)) return null
+    let bytes
+    try {
+      bytes = await readFile(join(directory, name))
+    } catch {
+      return null
+    }
+    if (bytes.length !== expected.size || digest(bytes) !== expected.sha256) return null
+    taken[name] = bytes
+    await afterFile?.(name)
+  }
+  return taken
+}
+
+// Publishes `files` (name to bytes, executable) as one entry with its manifest: written in a private
+// folder beside the entry, then renamed into place. An entry that `takePublishedEntry` accepts is
+// kept and this build discarded when `accept` (the reader's own further checks) agrees; only an
+// entry that fails is replaced.
+export async function publishEntry(directory, files, { accept = async () => true } = {}) {
+  const names = Object.keys(files)
+  const usable = async () => {
+    const taken = await takePublishedEntry(directory, names)
+    return taken !== null && await accept(taken)
+  }
+  if (await usable()) return false
+  await mkdir(dirname(directory), { recursive: true })
+  const staged = await mkdtemp(`${directory}.publish-`)
+  const replaced = `${staged}.replaced`
+  try {
+    const manifest = { schemaVersion: 1, files: {} }
+    for (const name of names) {
+      await writeFile(join(staged, name), files[name], { mode: 0o755 })
+      manifest.files[name] = { sha256: digest(files[name]), size: files[name].length }
+    }
+    await writeFile(join(staged, ENTRY_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`)
+    await rename(directory, replaced).catch(error => { if (error.code !== "ENOENT") throw error })
+    try {
+      await rename(staged, directory)
+    } catch (error) {
+      // Another publisher put its entry in place between the two renames.
+      if ((error.code === "ENOTEMPTY" || error.code === "EEXIST") && await usable()) return false
+      throw error
+    }
+    return true
+  } finally {
+    await rm(staged, { recursive: true, force: true })
+    await rm(replaced, { recursive: true, force: true })
+  }
 }
