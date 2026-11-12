@@ -1,5 +1,6 @@
 import type { ApplicationComputer } from "@/features/application/model/application-source"
 import { computerTarget } from "@/features/application/model/connections"
+import { workspaceRoot } from "@/features/computers/model/computer-capabilities"
 import { baseName, type FileTransferActions, type TransferProgress } from "@/features/application/model/file-transfer"
 
 /** Names the fixture upload picker offers; previews and tests only. */
@@ -18,7 +19,7 @@ export function fixtureFileTransfers(computers: ApplicationComputer[]): FileTran
       const owner = computers.find(item => computerTarget(item) === computer)
       if (!owner || owner.state !== "running") throw "Start this computer to transfer files."
       const names = [...fixtureUploadNames]
-      const existing = directory === "/workspace" ? names.filter(name => owner.files.some(file => file.name === name)) : []
+      const existing = owner.files && directory === workspaceRoot(owner) ? names.filter(name => owner.files.some(file => file.name === name)) : []
       if (existing.length > 0 && conflict === "ask") return { status: "conflict", names: existing }
       const stored = names.map(name => existing.includes(name) && conflict === "keepBoth" ? name.replace(/(\.[^.]+)?$/, " (1)$1") : name)
       for (const done of [0, 500]) emit({ id, computer, direction: "upload", state: "transferring", name: stored[0] ?? "", fileIndex: 0, fileCount: stored.length, bytesDone: done, bytesTotal: 1000 })

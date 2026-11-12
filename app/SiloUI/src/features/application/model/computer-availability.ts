@@ -18,7 +18,8 @@ const lifecycleProgress = { start: "starting", stop: "stopping", restart: "resta
 function blockedReason(computer: ApplicationComputer, source: ApplicationSource): string | undefined {
   const { device, configuration } = computer
   if (!device && source.runtimeRepair) return "Resolve the system issue first."
-  if (!device && source.computerConfigurationOperation) {
+  // A macOS computer is not part of the Linux configuration being applied.
+  if (!device && !computer.macos && source.computerConfigurationOperation) {
     return source.computerConfigurationOperation.status === "failed" ? "Dismiss the computer changes error first." : "Wait for computer changes to finish."
   }
   if (computer.lifecycleAction) return `${configuration.name} is ${lifecycleProgress[computer.lifecycleAction]}.`
@@ -43,13 +44,17 @@ export function computerAvailability(computer: ApplicationComputer, source: Appl
   const blocked = blockedReason(computer, source)
   const error = computer.attention?.level === "error" ? computer.attention.message : undefined
   const canOpen = !blocked && !error && state === "running"
-  const canStart = !blocked && (state === "stopped" || state === "failed")
+  // A macOS computer starts once it is installed and personalised, and has no restart.
+  const macos = computer.macos
+  // A computer whose storage could not be moved is closed to Start and Restart; its notice says why.
+  const storageUpgrade = computer.needsStorageUpgrade ? computer.attention?.message ?? "This computer’s storage needs attention before it can start." : undefined
+  const canStart = !blocked && !storageUpgrade && (state === "stopped" || state === "failed") && (!macos || (macos.installed && !macos.needsPersonalizing))
   const canStop = !blocked && state === "running"
-  const canRestart = !blocked && (state === "running" || state === "failed")
+  const canRestart = !blocked && !storageUpgrade && !macos && (state === "running" || state === "failed")
   const reasons: ComputerAvailability["reasons"] = {}
   if (!canOpen) reasons.open = blocked ?? error ?? `Start ${configuration.name} to open it.`
-  if (!canStart) reasons.start = blocked ?? `${configuration.name} is already running.`
+  if (!canStart) reasons.start = blocked ?? storageUpgrade ?? `${configuration.name} is already running.`
   if (!canStop) reasons.stop = blocked ?? `${configuration.name} isn’t running.`
-  if (!canRestart) reasons.restart = blocked ?? `${configuration.name} isn’t running.`
+  if (!canRestart) reasons.restart = blocked ?? storageUpgrade ?? (computer.macos ? "A macOS computer can’t be restarted. Stop it, then start it." : `${configuration.name} isn’t running.`)
   return { busy, canOpen, canStart, canStop, canRestart, reasons }
 }

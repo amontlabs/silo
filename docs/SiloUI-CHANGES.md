@@ -15,7 +15,7 @@ manifest at both points ([format 2](v1/PHASE2_CONTRACT.md)); the engine compares
 | Database changed | Postgres: `schema changed` and `data changed in <table> (10→12 rows)`; SQLite: the file digest before and after. |
 | Database not compared | A Postgres database whose side of the comparison could not be read (the server did not answer when the fork-time base was captured): `postgres appdb: database not compared: base unreadable (...)`. It is not listed as new, dropped or changed. |
 | Other changed | Everything else, rolled up by directory. |
-| Not kept | What a keep never brings back: new listening ports, processes, services, and credential paths (`~/.ssh/`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `~/.openclaw/credentials/`, `*.pem`, keychains; the list is in `changes/ignore.rs`). |
+| Not kept | What a merge never brings over: new listening ports, processes, services, and credential paths (`~/.ssh/`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `~/.openclaw/credentials/`, `*.pem`, keychains; the list is in `changes/ignore.rs`). |
 | Ignored | A count of paths that are never reviewed (logs, caches, build output, boot-time rewrites; also in `ignore.rs`). |
 
 A no-op baseline (the diff of a fork of the same source left idle for the same time) can be
@@ -133,6 +133,12 @@ may be added.
   `database[].not_compared` is set (with the reason) when one side's server could not be read.
 - `settings.cron[]` may carry `lines_added` and `lines_removed` when both crontab texts are
   known. A crontab the quiet step parked is compared with its parked original.
+- Every entry a keep can bring over or conflict on carries an `id` (see
+  [Item ids](#item-ids)): `settings.files[]`, `other[]`, `code[].gitignored[]`, `code[]`
+  (the repository), `settings.cron[]`, `settings.launch_agents[]` and `database[]`. Each
+  package a keep acts on is listed in `packages[].ids`, and each uncommitted file of a
+  repository in `code[].dirty_ids` (repo-relative path to id). The ids are left out of the
+  review digest, so adding them did not change any digest.
 
 ## Manifest additions the diff reads
 
@@ -154,78 +160,164 @@ and `changes/tests.rs` asserts the exact text for each. Line counts against the 
 prototype: 3, 4, 7, 15, 9, 8 and 11 on Linux (the PDF skill moved from 10 to 11 because its
 credentials file now has its own Not kept line), 14, 12 and 12 on macOS, 3 for the live task.
 
-## Keeping a fork: `silo fold` and `silo undo`
+## Item ids
 
-`silo fold <fork> [--into main] [--dry-run] [--reviewed DIGEST] [--data-ok] [--json]` keeps a
-fork's changes into the computer it was made from (`changes.keep`,
+An item is one file, one package of a manager, one repository, one crontab, one launch agent or
+one database. Its id is built only from what names it, so it is the same in the diff, in a
+conflict and in a choice, and does not depend on the order of anything:
+
+| Item | Id |
+| --- | --- |
+| a file (also an uncommitted file in a repository) | `file:<absolute path>` |
+| a package | `package:<manager>:<name>` |
+| a repository | `repo:<absolute path>` |
+| a crontab | `cron:<user>` |
+| a launch agent or daemon | `launch-agent:<scope>:<label>` |
+| a database | `database:<engine>:<name>` |
+
+## Merging a fork: `silo merge` and `silo undo`
+
+`silo merge <fork> [--into C] [--choose ITEM=ANSWER]... [--skip ITEM]... [--dry-run] [--reviewed DIGEST] [--data-ok] [--json]` merges a
+fork's changes into the computer it was made from (the engine method is `changes.keep`, in
 `app/SiloUI/src-tauri/engine/src/changes/keep/`). `silo undo <computer>` puts the computer back
-to before its latest successful keep (`changes.undo`). Both are MCP tools (`fold`, `undo`).
+to before its latest successful merge (`changes.undo`). Both are MCP tools (`merge`, `undo`).
+`silo fold` is a hidden alias that prints one line saying it is now `silo merge`.
 
-A keep builds its plan from three manifests (the fork-time base, the fork, the target); the
+A merge builds its plan from three manifests (the fork-time base, the fork, the target); the
 diff supplies the item list (never Not kept or Ignored) and the database check. Files are
-compared live: both computers are hashed at keep time, so a file the collector could not hash,
+compared live: both computers are hashed at merge time, so a file the collector could not hash,
 an unreadable file or a changed mode is never taken as unchanged.
 
 1. **Pinned to what was reviewed.** `silo diff --json` returns a `reviewDigest`; `--reviewed`
-   passes it back, and the keep refuses (`changed`) if the fork's changes differ. The digest is a
+   passes it back, and the merge refuses (`changed`) if the fork's changes differ. The digest is a
    SHA-256 over the reviewed content only: the Code, Packages, Settings & files, Database and
    Other changed entries as shown after the ignore list and the baseline, with their identities
    (hash, size, link target). It leaves out the Ignored count, idle noise, Not kept, and every
-   timestamp (an entry carries no modification time). `silo fold --dry-run` does not send a digest, so
+   timestamp (an entry carries no modification time). `silo merge --dry-run` does not send a digest, so
    it never refuses on a stale one: a dry run reports and does not pin. Whatever the
-   keep writes is read from the fork once, before main is touched, and the fork is looked at
-   again afterwards: if it moved meanwhile, the keep stops.
-2. **Checkpoint, then lane.** A `before-keep` checkpoint named `Before keep of <fork>` of the
+   merge writes is read from the fork once, before main is touched, and the fork is looked at
+   again afterwards: if it moved meanwhile, the merge stops.
+2. **Checkpoint, then lane.** A `before-keep` checkpoint named `Before keep of <fork>` (saved names keep their spelling) of the
    target (on both platforms, with the same retention count; a running computer is captured
    with its memory, a Linux one with `--full --guest-flush required`), then the target's operation lane is held
    until the apply ends, so no restore, stop, fork or delete of it interleaves. The target is
    captured after the lane is taken. Every check below that does not change the target runs once
-   before the checkpoint too, so a refused keep is quick and creates nothing; the checks run
-   again once the lane is held. On Linux a keep reads and writes as root, and runs repository
+   before the checkpoint too, so a refused merge is quick and creates nothing; the checks run
+   again once the lane is held. On Linux a merge reads and writes as root, and runs repository
    commands and recipe steps as the owner of the folder they work in.
 3. **Checks, before anything is written.** Per file, package, crontab line and uncommitted file:
    if the target changed it since the fork point and the fork ended differently, it is a
    conflict (uncommitted files are compared with the blob at the fork point, so a commit on
    main counts). Git history is searched for credentials, `.env` files and ignored paths; any
-   found refuses the keep (`credentials`) with the list. The fork's commits are fetched into a
-   temporary ref and tested with `git merge-tree`; a conflict, or a git that cannot test,
-   refuses. Destinations are checked: a link or non-folder in the path, or a folder where a
-   file goes, refuses. Package names are validated; brew installs only when it would install
-   the fork's version. A database change is carried only with a `keep: migrate:` step and
-   changed migration files (folders named `migrations`, `migrate` or `alembic`), or `--data-ok`;
-   otherwise the refusal points to "Make this main". A refusal is a result
-   (`status: "refused"`, exit code 2) and the target is untouched.
+   found refuses the merge (`credentials`) with the list. The fork's commits are fetched into a
+   temporary ref and tested with `git merge-tree`; a conflict, or a git that cannot test, is a
+   conflict of that repository. Destinations are checked: a link or non-folder in the path, or
+   a folder where a file goes, is a conflict. Package names are validated; brew installs only
+   when it would install the fork's version. A database change is carried only with a
+   `keep: migrate:` step in the recipe of the computer being merged into and changed migration
+   files (folders named `migrations`, `migrate` or `alembic`), or `--data-ok`; otherwise the
+   refusal points to `silo replace-main`. A refusal is a
+   result (`status: "refused"`, exit code 2, or 3 when it only needs answers) and the target is untouched. A conflict is not a
+   dead end: see [Conflicts are questions](#conflicts-are-questions).
 4. **Apply, in order.** Package installs and removals (each manager as the user it belongs to),
    git merge, uncommitted files and deletes (renames delete the old path), files (written next
    to the target and renamed; links recreated, never read through), crontabs merged by line
    against the fork-time text (`CRONTXT` in the base manifest), launch agents (a plist that
-   will not load fails the keep), then the recipe's `migrate:`, `restart:` (the process id must
-   change and the new process must run) and `after:`.
+   will not load fails the merge), then the `migrate:`, `restart:` (the process id must
+   change and the new process must run) and `after:` hooks. They come from the recipe the
+   target computer was built from, which the engine reads itself: hooks a caller sends are
+   ignored for a computer built from a recipe, and used for one built from none
+   ([recipes](SiloUI-RECIPES.md#what-a-computer-records)).
 5. **Failure and crashes.** A failing step restores the checkpoint, which then can no longer be
-   undone. The journal (synced to disk) lets the next keep, `silo undo`, or the engine's start
-   restore the checkpoint of an interrupted keep.
-6. **One keep at a time per target.** A second waits up to two minutes, then fails with `busy`.
+   undone. The journal (synced to disk) lets the next merge, `silo undo`, or the engine's start
+   restore the checkpoint of an interrupted merge.
+6. **One merge at a time per target.** A second waits up to two minutes, then fails with `busy`.
 
-`silo undo` restores the latest checkpoint of a keep that succeeded, once, and lists what
-changed on the computer after the keep (that is discarded). A restore leaves the computer
-stopped, so the undo then starts it when it was running at the keep (the checkpoint has memory):
+`silo undo` restores the latest checkpoint of a merge that succeeded, once, and lists what
+changed on the computer after the merge (that is discarded). A restore leaves the computer
+stopped, so the undo then starts it when it was running at the merge (the checkpoint has memory):
 the start resumes the checkpoint's memory, processes and open databases as they were. A
 computer that was stopped stays stopped. The result says which (`main`, `resumedFrom`) and
 carries a note when main was put back but could not be started. A restore has no disk-only
 fallback for a checkpoint with memory. Temporary bundles and git refs are
 removed on every path.
 
-## Making a fork main: `silo fold <fork> --promote`
+### Conflicts are questions
 
-`silo fold <fork> --promote [--into main] [--dry-run] [--json]` (MCP `fold` with `promote`) makes
-the fork the computer a keep would have changed (`changes.promote`,
+An item both sides changed is a conflict. The merge does not stop on it for good: the caller
+answers each one and the merge goes on. The call takes `choices` (item id to answer) and `skip`
+(item ids). On the command line they are `--choose <id>=<answer>` and `--skip <id>`, repeated
+for each item; the MCP `merge` tool takes `choices` as an object and `skip` as a list:
+
+| Answer | Allowed for | What it does |
+| --- | --- | --- |
+| `fork` | files, packages, crontabs, launch agents | The fork's version is written over main's (a package is installed at the fork's version or removed; a crontab is replaced by the fork's whole crontab). |
+| `main` | everything that can conflict | The item stays as main has it. |
+| `branch` | repositories | The fork's commits are brought into main's repository as a branch named `silo/<fork name>`. Nothing is merged, checked out or reset, and the working tree is untouched, so Git can resolve it later. |
+
+- A repository both sides changed offers only `branch` and `main`: Silo does not force-reset
+  someone's repository. `fork` is accepted for a repository that merges cleanly (it is then the
+  ordinary merge) and is an error, naming the repository, for one that does not. An existing
+  branch is never moved: if `silo/<fork name>` exists at other commits, the next free name
+  (`silo/<fork name>-2`, ...) is used, and if it already holds the fork's commits nothing is
+  made. Uncommitted files of a repository whose commits go to a branch are not carried; the
+  report says so.
+- `skip` lists items not to bring over even though they do not conflict. It is the same as the
+  answer `main`; the only difference is the word in the report (`skipped` instead of
+  `left-as-main`). An id in both `skip` and `choices` must be answered `main`.
+- A choice for an id that is not in the reviewed diff, or an answer the item does not allow
+  (`branch` for anything but a repository with commits, any answer for a database), is an
+  error that names the item, before anything is fetched or changed.
+- **Without an answer** the merge is refused with `reason: "choices-needed"` (still
+  `status: "refused"`; the command exits with 3, where any other refusal exits with 2) and
+  `conflicts` lists every unanswered conflict: its `id`, the `item` and `detail`, `forkChange`
+  and `mainChange` (what changed on each side, in a few words) and `allowed`. The command prints
+  each one with its id and the answers it allows. Run the merge again with an answer for each
+  (`--choose <id>=<fork|main|branch>`), or leave an item as main has it with `--skip <id>`. A destination that cannot be written, an
+  unreadable file and a package version brew cannot install allow only `main`. The old reasons
+  `divergent` and `git` are gone.
+- **Credentials stay a wall.** They are never brought over and take no answer. A commit or an
+  uncommitted file with credentials, a `.env` or an ignored path refuses the merge
+  (`credentials`), whatever the answers, including `branch`. Their conflicts list no allowed
+  answers and cannot be named in `choices`.
+- **Databases are never combined.** A database takes no answer. As before, a database change
+  needs a `keep: migrate:` step in the target's recipe with changed migration files, or `data_ok`, and the report
+  says what happened to each one (`not-combined`): that main's database was left as it is, and
+  whether the recipe's migrate step runs on it.
+
+**Choices and the review digest.** The digest pins what the fork changed, and choices are
+checked against that same diff but are not part of the digest. They answer how those changes
+meet main, which moves on its own, and a digest that covered them would have to change every time
+the answers did. A merge reaches the check only after its digest matched (or none was sent), so
+the diff in hand is the reviewed one; a dry run checks the fork as it is now. Both then run the
+same planning with the same choices, so `--dry-run` with choices reports what the real run does:
+the same `items` and `summary`. A review request (`changes.requests.keep`, `silo requests merge <id>`) passes `choices` and
+`skip` through the same way.
+
+**The report** gains `items`, one per item, in id order, each with its `id`, `kind`, `label`,
+`outcome` and `detail`. The outcome is `brought-over`, `left-as-main` (answered `main`),
+`branch` (a repository's commits left as a branch), `skipped` (in `skip`), `already-there`
+(main already holds it) or `not-combined` (a database). It also gains `fastForward`: `true`
+when main was unchanged since the fork was made, from the fork-time record compared with
+main's capture the same way the fork is (databases do not count, since they are never
+combined). Then nothing could conflict, every change is applied, and main keeps running: the
+computers are not swapped, because the agent lives in main. The plan is the same either way.
+
+**Undo** is unchanged. It restores the before-keep checkpoint, which holds the whole disk, so
+a branch the merge made goes with everything else the merge wrote.
+
+## Replacing main with a fork: `silo replace-main <fork>`
+
+`silo replace-main <fork> [--into main] [--dry-run] [--json]` (MCP `replace_main`; `silo fold --promote` still works as a hidden alias) makes
+the fork the computer a merge would have changed (`changes.promote`,
 `app/SiloUI/src-tauri/engine/src/changes/promote/`). The fork takes main's name and settings;
 main is archived as `main-before-<yyyymmdd-hhmm>` (a number is added if taken), stopped, with
-its checkpoints. `silo undo main` (or `silo undo <fork>`) swaps everything back.
+its checkpoints. `silo undo main` (or `silo undo <fork>`) swaps everything back. Replacing main restarts main, so
+whatever runs there ends, and asked from inside a computer it always asks the owner first.
 
-A promote refuses, changing nothing, when either computer is busy, the two run different
+Replacing main refuses, changing nothing, when either computer is busy, the two run different
 systems, they carry the same name, or (Linux) one of them keeps a disk in a folder named after it. Otherwise it saves a
-`Before promote of <fork>` checkpoint of main, stops both, holds both operation lanes (in id
+`Before promote of <fork>` checkpoint of main (saved names keep their spelling), stops both, holds both operation lanes (in id
 order), writes the journal (`changes/promote/<fork id>.<main id>.promote.json`, synced) and
 applies these steps, recording each:
 
@@ -234,35 +326,35 @@ applies these steps, recording each:
 | names | the fork becomes `main`, old main becomes the archive name (computer record on macOS). A rename that would give two computers one name fails, so a duplicate `main` cannot exist even between the two renames. Linux: `msb rename` of the stopped main (to the archive name) and then of the stopped fork (to `main`), then both saved names in one write. Each sandbox is identified by the `silo.machine-id` label it carries, never by its name, so a repeat after a crash renames only what is not renamed yet; the SSH entries are rewritten here too (below) |
 | name-keyed settings | secret assignments (`secrets.rs`) and the GitHub assignment (`github.rs`) are keyed by name, so main's stay with the name `main`, now the fork's; the fork's own grants under its old name are dropped like a removed computer's (saved choices, cached attachments and issued tokens), never added to main's. Published ports move from main's id to the fork's on macOS (`macos-computers/ports`, keyed by id); on Linux they are saved under the computer name (`network.json`), so main's stay with the name `main`, now the fork's, and the fork's own are removed (an undo gives them back); URL routes (`url_proxy`, hosts derived from the name) are forgotten and rebuilt from the new name |
 | SSH access | the saved SSH entries are named after the computer id (`silo-<id>`), so main's entry is rewritten to connect to the new main (with its key and pinned host key) and the archive's to the archive; only entries that exist are touched. Linux entries connect by computer name and pin that sandbox's host key, so they are rewritten at the end of the names step, after both sandboxes carry their final names (an undo rewrites them back the same way) |
-| lineage | read from the journal, nothing is rewritten: while a promote is in force, forks made from the old main resolve to the new main (so `silo fold` and keep of those forks target it), and the new main's own source is the old main's. An undo ends the record and every answer returns |
+| lineage | read from the journal, nothing is rewritten: while a replace is in force, forks made from the old main resolve to the new main (so a merge of those forks targets it), and the new main's own source is the old main's. An undo ends the record and every answer returns |
 | macOS network identity | each computer keeps its own proxy CA (the guest trusts the CA it was set up with and the start verifies it against the saved network identity, so the CA stays with its disk) and the new main takes main's hostname, written to the stopped disk's system configuration; the archive takes the fork's hostname. The machine identifier stays with each disk: Apple ties a guest's hardware identity and what it activated to the identifier it first booted with, and the disks swap names, not hardware |
 | quiet parking | macOS: the scheduled work parked when the fork was made quiet is put back from `Library/Application Support/Silo/Quieted/` on the stopped disk, except at paths the fork has used since (those stay parked and listed). Linux: the new main is started, the cron, at, anacron and systemd timer items under `/var/lib/silo-quiet/disabled` are moved back through the guest (`quiet_restore.sh`, as root) except at paths the fork has used since, and it is stopped again; a timer the quiet step only masked is unmasked, and `/etc/crontab` gets its parked text back when it still holds nothing but comments. Items parked for the services the fork was asked to stop stay parked. Best effort; it never fails a promote |
 
 Keyed by id and therefore untouched: changes store manifests, checkpoint records and the
 proxy address slot.
 
-`silo undo` takes back the newest of a promote and a keep of that computer (an interrupted
-keep first). Undoing a promote:
+`silo undo` takes back the newest of a replace and a merge of that computer (an interrupted
+merge first). Undoing a replace:
 
-- reverts only the latest promote that involves either computer; an older one is refused with
-  "Undo that one first" while a later promote built on it;
-- refuses, changing nothing, when the two no longer carry the names the promote gave them, or
+- reverts only the latest replace that involves either computer; an older one is refused with
+  "Undo that one first" while a later replace built on it;
+- refuses, changing nothing, when the two no longer carry the names the replace gave them, or
   when another computer took the fork's old name, so two computers are never named `main`;
-- puts back what the promote moved and keeps what happened to the main role since: ports
+- puts back what the replace moved and keeps what happened to the main role since: ports
   changed on the new main while it was main go back to the old main with the name, and the
   fork gets the ports it had. Secrets and GitHub settings are keyed by name and follow the
   name. Not restored exactly: a secret value or GitHub token issued while promoted lives in the
   Keychain under the name and stays with it; the fork gets its recorded assignments back, and
   its GitHub runtime identity is created at its next start.
 
-A crash is repaired when the engine starts: a promote with every step but quiet parking
+A crash is repaired when the engine starts: a replace with every step but quiet parking
 recorded is rolled forward, any other is rolled back (steps are idempotent and reverted in
 reverse order); an interrupted undo is finished. Both computers are held (their operation
 lanes) from engine start until their recovery is done, and the recovery retries while the
-runtime is not ready, so a half-swapped computer cannot start. The next promote or undo of
+runtime is not ready, so a half-swapped computer cannot start. The next replace or undo of
 either computer settles it first.
 
-Linux computers are promoted with the same steps. The runtime names each sandbox after its
+Linux computers are replaced with the same steps. The runtime names each sandbox after its
 computer, so the names step uses the stopped-sandbox rename of the bundled `msb`
 (`microsandbox-rename-stopped`, see [runtime packaging](SiloUI-RUNTIME-PACKAGING.md#rename-a-stopped-sandbox-2026-11-05)).
 Checkpoint records, SSH aliases' file names and changes manifests are keyed by computer id and
@@ -278,10 +370,10 @@ Known gaps:
   mask from before the fork or added since stays, and a fork with no list unmasks nothing. Each
   change is recorded in `restored.list` before it is made, and the engine reads that record, not
   the script's output, to learn whether anything was restored.
-- The Linux restore starts the new main once (and stops it again), so a promote of a quiet fork
-  runs guest code that a macOS promote does not.
+- The Linux restore starts the new main once (and stops it again), so replacing main with a quiet fork
+  runs guest code that a macOS replace does not.
 - Not yet run end to end against a live Linux computer pair: the rename itself is covered by the
-  unit tests and the live run in the runtime packaging notes, and the promote and undo by the
+  unit tests and the live run in the runtime packaging notes, and the replace and undo by the
   engine tests with a fake runtime.
 
 ## Review requests: `changes.request`
@@ -291,7 +383,7 @@ Params: `forkId`, optional `targetId` (default: the computer the fork came from,
 fork-time record), `reviewDigest` (from `changes.diff`) and `summary`. The result is
 `{request: {id, forkId, target, createdAt, reviewDigest, summary, status}}` with `status: "open"`.
 The store is `fold_requests.rs` in the engine, one JSON file per request; a later request for
-the same fork and target updates the open one and keeps its id. The CLI and the MCP `fold` tool
+the same fork and target updates the open one and keeps its id. The CLI and the MCP `merge` tool
 (`request: true`) call it after a fresh diff, and pass `counts` (the number of changes in each
 bucket) so a list can show them without a diff.
 
@@ -308,10 +400,10 @@ the folder record the CLI keeps for that fork. A fork's source may be recorded a
 (no origin was stored); it counts as the computer that owns the checkpoint. The CLI writes the
 folder record into its channel's state directory (`~/.silo` or `~/.silo-dev`), where the engine
 reads it, even when it was given another socket. A keep made without the request
-(`changes.keep`) marks the open requests for that fork and target kept. A folder fold by the CLI
+(`changes.keep`) marks the open requests for that fork and target kept. A folder merge by the CLI
 does the same through `changes.requests.markKept` (`forkId`, `target: "folder:<path>"`, optional
 `keepId`, the folder's backup ref); the engine checks the fork is the folder's fork first, and a
-failure to close the request is a note in the fold's result, not a failed fold.
+failure to close the request is a note in the merge's result, not a failed merge.
 
 Five more methods work on one: `list` takes an optional `status` (`open` includes `keeping`);
 `show`, `keep`, `throwAway` and `open` take `requestId`. `keep` accepts an open or `keeping`
@@ -351,10 +443,27 @@ back, or never got going, with none pending for the target, makes the request `o
   `silo ssh-setup`) and `urls` from the URL proxy.
 
 Folder forks (`target: "folder:<path>"`): only the CLI reads the folder's git history, so the
-engine's `changes.requests.keep` refuses them with "Keep folder forks with `silo fold`", and
+engine's `changes.requests.keep` refuses them with "Merge folder forks with `silo merge`", and
 `changes.requests.show` returns `diff: null`, the request's own summary as `text` and
 `stale: null`; `silo requests show` reads the folder itself and fills the text, digest and `stale`.
 `throwAway` and `open` work for them like for any fork.
+
+Merges a computer's agent asks for. A `changes.keep` from a computer into itself, or its
+`changes.requests.keep`, is held for the owner as an approval of kind `merge`
+([SiloUI-POLICY.md](SiloUI-POLICY.md#asking-you)). A `changes.keep` must carry the `reviewDigest`
+of a `changes.diff` the agent ran (without it the call is refused and the agent is told to run
+the diff first; a dry run is refused too). Asking makes or reuses the open review request for that
+fork and target, with that digest and the engine's summary, and links the two: the request's
+`approvalId` and the approval's `reviewRequestId` and `reviewDigest`. Asking again with other
+changes updates the same request's digest and withdraws the earlier approval. Once a request is
+linked to an approval, only the engine writes its text: its summary is the approval's, its counts
+are empty, and a later `changes.request` for the same fork (by the agent, with the same digest or
+another) changes neither. Allowing the approval runs
+`changes.requests.keep` for the request with the stored `choices`, `skip`, `keep` and `dataOk`,
+only when the request is still open and still has the approval's digest. Keeping the request
+directly (`changes.requests.keep` from the app or the command line) allows the approval with the
+keep's job; throwing it away denies it; a request closed any other way (its fork or target was
+deleted, or the agent threw it away) withdraws it the next time approvals are read.
 
 ## Steps and the fork tree
 
@@ -380,10 +489,9 @@ not a checkpoint is taken; a failure to record never fails the command (the resu
   goes with the computer. Command lines are stored as typed, so keep secrets out of them.
 - `silo steps <computer>` prints a table (`--json` the same data); the MCP tool is `steps_list`.
 
-**Step checkpoints.** `.silo/silo.yaml` has `step_checkpoints: true|false` (default false) and
-`step_checkpoints_keep` (default 20; 0 keeps every one). Both resolve through
-`Settings::step_settings` in the CLI, the one place a per-agent override will take effect.
-When on, the CLI saves a checkpoint of the computer after each step with the existing
+**Step checkpoints.** `silo exec` and `silo fork ... -- <cmd>` take `--step-checkpoints`
+(default off) and `--keep-steps N` (default 20; 0 keeps every one); the MCP `exec` and `fork`
+tools take the same. When on, the CLI saves a checkpoint of the computer after each step with the existing
 `checkpoints.create` job, kind `step` and `keepNewest` set to the keep count. `step` is a
 checkpoint kind like `automatic` and `before-keep` (`silo checkpoint --kind step` makes one by
 hand): after each step capture the engine runs the same retention pass as its own job, keeping
@@ -404,7 +512,7 @@ fork-point or warm checkpoint), `checkpoint` (`checkpointId`), `step` (`number`,
 record, the engine does not know folders). Parent and origin come from the fork-time record
 the engine already keeps (the changes store: the checkpoint and computer noted when the fork
 was created and kept in the base record once it starts), read through the promote journal
-(`lineage.rs`): after `silo fold --promote` the promoted fork is a root, or has the old main's own
+(`lineage.rs`): after `silo replace-main` the promoted fork is a root, or has the old main's own
 parent, and the old main's forks hang under it; `silo undo main` ends the record and every
 answer goes back. `pendingChanges` is `{requestId, buckets}`: the open review request of the
 fork, and `buckets` is always null for now (counting needs a capture). The hidden throwaways
@@ -412,27 +520,18 @@ fork, and `buckets` is always null for now (counting needs a capture). The hidde
 pending review; `--json` is the same data; the MCP tool is `tree`. Computers on other devices
 are not included.
 
-## Agent settings, auto-keep, recipe write-back and pull requests
+## Recipe additions and pull requests
 
-`silo.yaml` takes `agents:` overrides, `auto_keep:` rules and `fold: auto-code`; `silo fold`
-appends kept packages and settings files to the recipe the computer came from, and
-`silo fold --pr` opens a pull request. The settings and rule semantics are in the
-[CLI reference](SiloUI-CLI.md#settings-file-reference); this is how a keep behaves with them.
-
-- **Keep.** Write-back happens only after `changes.keep` returned `kept` (never for a dry run,
-  a refusal or a folder fork). The packages and files come from a diff of the fork taken after
-  the keep (a keep does not change the fork); when the keep was pinned to a review digest and
-  the new digest differs, the recipe is left alone and the result says so.
-  Packages are the diff's top-level added packages per manager (`dpkg` is `apt`, `npm -g` is
-  `npm`); dependencies are not listed.
-- **Auto-keep.** The rules read the diff document: a bucket counts as non-empty when it has
-  entries (`code`, `packages` with added, removed or upgraded names, any `settings` list,
-  `database`, `other`). The keep passes the digest of the diff just taken as `reviewDigest`, so
-  a fork that moves after the decision is refused by the engine; that refusal becomes a review
-  request. A fork made from a folder has only code changes (commits or uncommitted work).
-- **Pull request.** Reads the fork; changes nothing in the fork except committing its
-  uncommitted work, which a folder fold does as well.
-
+- **Recipe additions.** After a merge brings packages or settings files, the engine appends them to
+  the recipe the target computer was built from (the computer's record, and the owner's stored
+  recipe of the same name; a recipe that ships with Silo is never edited). The merge result lists
+  what was added. Packages are the diff's top-level added packages per manager (`dpkg` is `apt`,
+  `npm -g` is `npm`); dependencies are not listed; a manager recipes have no list for (`brew
+  cask`) is left out. Nothing is appended for a dry run, a refusal or a folder fork. See
+  [Recipes](SiloUI-RECIPES.md#what-a-computer-remembers).
+- **Pull request.** `silo merge <fork> --pr` reads the fork and changes nothing in it except
+  committing its uncommitted work, which a folder merge does as well. It is a device-only command;
+  [the CLI reference](SiloUI-CLI.md#pull-requests) says how it works.
 
 ## Credentials used: `computers.credentials`
 

@@ -25,7 +25,7 @@ use silo_engine::{
 };
 use tokio::{
     io::AsyncWriteExt,
-    net::{UnixListener, UnixStream},
+    net::UnixListener,
     sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore},
     task::JoinSet,
     time,
@@ -210,6 +210,7 @@ impl EngineServer {
                         session_permit,
                         request_permits.clone(),
                         control_permits.clone(),
+                        None,
                     ));
                 }
                 Some(result) = sessions.join_next(), if !sessions.is_empty() => {
@@ -236,31 +237,69 @@ fn is_restart_scheduled(error: tokio::task::JoinError) -> bool {
     error.into_panic().downcast::<RestartScheduled>().is_ok()
 }
 
-async fn serve_connection(
-    mut stream: UnixStream,
+/// A session on a computer's channel: the computer the channel's port belongs to, whose token
+/// the handshake carried, and the signal that closes the session when the tools are turned off.
+pub(crate) struct ComputerSession {
+    pub computer_id: String,
+    pub first: Value,
+    pub closed: tokio::sync::watch::Receiver<bool>,
+}
+
+/// Resolves when a computer session's channel is closed; never for an owner session.
+async fn channel_closed(closed: &mut Option<tokio::sync::watch::Receiver<bool>>) {
+    let Some(closed) = closed else {
+        return std::future::pending::<()>().await;
+    };
+    loop {
+        if *closed.borrow_and_update() {
+            return;
+        }
+        if closed.changed().await.is_err() {
+            return std::future::pending::<()>().await;
+        }
+    }
+}
+
+pub(crate) async fn serve_connection<S>(
+    mut stream: S,
     dispatcher: Arc<Dispatcher>,
     _session_permit: OwnedSemaphorePermit,
     request_permits: Arc<Semaphore>,
     control_permits: Arc<Semaphore>,
-) {
-    let first = match time::timeout(
-        FIRST_HANDSHAKE_TIMEOUT,
-        read_json_frame::<_, Value>(&mut stream),
-    )
-    .await
-    {
-        Ok(Ok(Some(value))) => value,
-        Ok(Ok(None)) => return,
-        Ok(Err(error)) => {
-            eprintln!("silod: invalid first frame: {error}");
-            return;
-        }
-        Err(_) => {
-            eprintln!("silod: engine.sock handshake timed out");
-            return;
+    computer: Option<ComputerSession>,
+) where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    // A computer's channel has read and checked the handshake already; its caller is fixed to
+    // that computer for the whole session.
+    let (first, mut session, mut channel_close) = match computer {
+        Some(ComputerSession {
+            computer_id,
+            first,
+            closed,
+        }) => (first, SessionState::for_computer(computer_id), Some(closed)),
+        None => {
+            let first = match time::timeout(
+                FIRST_HANDSHAKE_TIMEOUT,
+                read_json_frame::<_, Value>(&mut stream),
+            )
+            .await
+            {
+                Ok(Ok(Some(value))) => value,
+                Ok(Ok(None)) => return,
+                Ok(Err(error)) => {
+                    eprintln!("silod: invalid first frame: {error}");
+                    return;
+                }
+                Err(_) => {
+                    eprintln!("silod: engine.sock handshake timed out");
+                    return;
+                }
+            };
+            (first, SessionState::default(), None)
         }
     };
-    let mut session = SessionState::default();
+    let on_channel = channel_close.is_some();
     let first_prepared = dispatcher.prepare(first, &mut session);
     let first_prepared = match first_prepared {
         PreparedRequest::Close(response, reason) => {
@@ -296,7 +335,11 @@ async fn serve_connection(
 
     // Inspect the first request after negotiation before starting the multiplexed session.
     // guest.ssh turns the connection into raw bytes, so it is accepted only here, once.
-    let initial_request = match read_json_frame::<_, Value>(&mut stream).await {
+    let initial_request = tokio::select! {
+        read = read_json_frame::<_, Value>(&mut stream) => read,
+        () = channel_closed(&mut channel_close) => return,
+    };
+    let initial_request = match initial_request {
         Ok(Some(value)) => value,
         Ok(None) => return,
         Err(error) => {
@@ -304,7 +347,7 @@ async fn serve_connection(
             return;
         }
     };
-    if initial_request.get("method").and_then(Value::as_str) == Some("guest.ssh") {
+    if !on_channel && initial_request.get("method").and_then(Value::as_str) == Some("guest.ssh") {
         let prepared = dispatcher.prepare(initial_request, &mut session);
         let (response, opened) = dispatcher.execute_stream(prepared).await;
         if let Some(response) = response {
@@ -319,7 +362,7 @@ async fn serve_connection(
         return;
     }
 
-    let (mut reader, mut writer) = stream.into_split();
+    let (mut reader, mut writer) = tokio::io::split(stream);
 
     let client_id = ClientId::new(
         session
@@ -509,6 +552,11 @@ async fn serve_connection(
                 continue;
             }
             frame = frame_rx.recv(), if !close_after_reply => frame,
+            () = channel_closed(&mut channel_close) => {
+                close_after_reply = true;
+                immediate_disconnect = true;
+                break;
+            }
             ack = async {
                 close_ack
                     .as_mut()
@@ -755,7 +803,10 @@ const GUEST_STREAM_CHECK_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Copies bytes both ways between the client and the guest until either side ends or the
 /// stream is no longer allowed (its forward was unpublished, or the computer stopped).
-async fn relay_guest_stream(mut client: UnixStream, opened: crate::dispatcher::OpenedStream) {
+async fn relay_guest_stream<S>(mut client: S, opened: crate::dispatcher::OpenedStream)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let crate::dispatcher::OpenedStream { stream, allowed } = opened;
     if let Err(error) = stream.set_nonblocking(true) {
         eprintln!("silod: guest stream setup failed: {error}");
@@ -1010,6 +1061,7 @@ fn encode_response(response: &ResponseEnvelope<Value>) -> Result<Vec<u8>, String
             code: ErrorCode::OutputTooLarge,
             message: "The response exceeds the 4 MiB engine frame limit.".to_owned(),
             diagnostics: None,
+            details: None,
         },
     };
     let bytes = serde_json::to_vec(&fallback).map_err(|error| {
@@ -1163,7 +1215,9 @@ fn remove_stale_socket(path: &Path, euid: u32) -> io::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use tokio::net::UnixStream;
+
     use super::*;
     use silo_engine::context::EngineContext;
     use std::os::unix::fs::PermissionsExt;
@@ -1799,7 +1853,7 @@ mod tests {
             &serde_json::json!({
                 "id": "handshake",
                 "method": "engine.handshake",
-                "params": { "protocol": { "min": 7, "max": 7 } }
+                "params": { "protocol": { "min": 8, "max": 8 } }
             }),
         )
         .await
@@ -1828,7 +1882,7 @@ mod tests {
             &serde_json::json!({
                 "id": "handshake",
                 "method": "engine.handshake",
-                "params": { "protocol": { "min": 7, "max": 7 } }
+                "params": { "protocol": { "min": 8, "max": 8 } }
             }),
         )
         .await
@@ -2073,7 +2127,7 @@ mod tests {
             .unwrap();
     }
 
-    fn test_context() -> Arc<crate::context::SilodContext> {
+    pub(crate) fn test_context() -> Arc<crate::context::SilodContext> {
         test_context_with_paths(silo_engine::context::EnginePaths::default())
     }
 

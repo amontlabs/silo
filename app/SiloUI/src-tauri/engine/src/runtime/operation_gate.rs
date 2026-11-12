@@ -1352,6 +1352,18 @@ impl OperationGate {
         result
     }
 
+    /// Changes the label of the operation this thread runs on this gate, for work that reports
+    /// the step it is on. Without one, does nothing.
+    pub fn relabel_own(&self, label: &str) {
+        let own = RUNNING
+            .get()
+            .filter(|(gate, _)| std::ptr::eq(*gate, self))
+            .map(|(_, id)| id);
+        if let Some(id) = own {
+            self.relabel(id, label);
+        }
+    }
+
     fn relabel(&self, id: u64, label: &str) {
         let mut state = self.lock();
         if let Some(entry) = state.running.iter_mut().find(|entry| entry.id == id) {

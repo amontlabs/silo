@@ -89,9 +89,7 @@ async fn fork_gui_sets_the_mode_starts_and_waits_for_the_driver() {
         approval: Some(ApprovalMode::Auto),
         timeout: Duration::from_secs(60),
     };
-    let fork = gui::fork_gui(&connected, &args, None, &ignore)
-        .await
-        .unwrap();
+    let fork = gui::fork_gui(&connected, &args, &ignore).await.unwrap();
     assert_eq!(fork["name"], "t1");
     assert_eq!(fork["computerUse"]["state"], "ready");
     assert_eq!(fork["computerUse"]["approval"], "auto");
@@ -278,22 +276,17 @@ type McpWrite = tokio::io::WriteHalf<tokio::io::DuplexStream>;
 type McpRead = tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>;
 
 async fn connect_mcp(engine: &FakeEngine) -> (McpWrite, McpRead) {
-    connect_mcp_in(engine, &std::env::temp_dir(), None).await
+    connect_mcp_in(engine, &std::env::temp_dir()).await
 }
 
-/// An MCP server working in `directory`, for the agent `agent`.
-async fn connect_mcp_in(
-    engine: &FakeEngine,
-    directory: &std::path::Path,
-    agent: Option<&str>,
-) -> (McpWrite, McpRead) {
+/// An MCP server working in `directory`.
+async fn connect_mcp_in(engine: &FakeEngine, directory: &std::path::Path) -> (McpWrite, McpRead) {
     use rmcp::ServiceExt;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     let (server_side, client_side) = tokio::io::duplex(8 * 1024 * 1024);
     let (server_read, server_write) = tokio::io::split(server_side);
-    let server = silo_cli::mcp::SiloMcp::new(engine.socket.clone(), directory.to_owned())
-        .with_agent(agent.map(str::to_owned));
+    let server = silo_cli::mcp::SiloMcp::new(engine.socket.clone(), directory.to_owned());
     tokio::spawn(async move {
         let running = server.serve((server_read, server_write)).await.unwrap();
         let _ = running.waiting().await;
@@ -410,11 +403,12 @@ async fn the_mcp_server_keeps_one_driver_session_per_fork_and_refuses_main() {
         json!({"computer_use": "auto"}),
     )
     .await;
-    assert_eq!(auto["result"]["isError"], true, "{auto}");
-    assert!(auto["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("computer_use_auto"));
+    // An agent cannot choose the mode: the tool has no such parameter.
+    assert!(
+        auto["error"].is_object() || auto["result"]["isError"] == true,
+        "{auto}"
+    );
+    assert!(engine.calls("computerUse.approval").is_empty());
     let folder = call(
         &mut write,
         &mut read,
@@ -562,13 +556,6 @@ async fn an_action_is_not_repeated_on_a_new_driver_after_the_driver_died_handlin
     assert_eq!(driver.lock().unwrap().started, 2);
 }
 
-fn project(settings: &str) -> tempfile::TempDir {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::create_dir(directory.path().join(".silo")).unwrap();
-    std::fs::write(directory.path().join(".silo/silo.yaml"), settings).unwrap();
-    directory
-}
-
 #[tokio::test]
 async fn fork_gui_on_another_device_forks_starts_and_waits_there() {
     let (engine, _) = fork_engine();
@@ -586,9 +573,7 @@ async fn fork_gui_on_another_device_forks_starts_and_waits_there() {
         approval: Some(ApprovalMode::Ask),
         timeout: Duration::from_secs(60),
     };
-    let fork = gui::fork_gui(&connected, &args, None, &ignore)
-        .await
-        .unwrap();
+    let fork = gui::fork_gui(&connected, &args, &ignore).await.unwrap();
     assert_eq!(fork["computerUse"]["state"], "ready");
     for method in [
         "checkpoints.fork",
@@ -608,91 +593,10 @@ async fn fork_gui_on_another_device_forks_starts_and_waits_there() {
 }
 
 #[tokio::test]
-async fn a_fork_on_another_device_is_driven_there_and_its_session_closed_there() {
+async fn the_computer_use_tools_drive_computers_of_this_device_only() {
     let driver = Arc::new(Mutex::new(Driver::default()));
     let engine = driver_engine(driver.clone(), screenshot_result());
-    let directory = project("agents:\n  bot:\n    devices: [Mac mini]\n");
-    let (mut write, mut read) = connect_mcp_in(&engine, directory.path(), Some("bot")).await;
-
-    let ready = call(
-        &mut write,
-        &mut read,
-        3,
-        "computer_use_ready",
-        json!({"computer": "t1", "device": "mac mini"}),
-    )
-    .await;
-    assert_ne!(ready["result"]["isError"], true, "{ready}");
-    assert_eq!(engine.calls("desktop.status")[0]["deviceId"], MINI);
-
-    let screenshot = call(
-        &mut write,
-        &mut read,
-        4,
-        "computer_use_screenshot",
-        json!({"computer": "t1", "device": "mac mini"}),
-    )
-    .await;
-    let content = screenshot["result"]["content"].as_array().unwrap();
-    assert!(
-        content.iter().any(|part| part["type"] == "image"),
-        "{screenshot}"
-    );
-    for method in [
-        "computers.list",
-        "computers.tree",
-        "guest.exec.start",
-        "guest.exec.input",
-        "guest.exec.get",
-        "guest.exec",
-    ] {
-        let calls = engine.calls(method);
-        assert!(!calls.is_empty(), "{method} was not sent");
-        assert!(
-            calls.iter().all(|params| params["deviceId"] == MINI),
-            "{method}: {calls:?}"
-        );
-    }
-    // The same computer id on this device is another computer, with a session of its own.
-    let here = call(
-        &mut write,
-        &mut read,
-        5,
-        "computer_use_type",
-        json!({"computer": "t1", "text": "a"}),
-    )
-    .await;
-    assert_ne!(here["result"]["isError"], true, "{here}");
-    assert_eq!(driver.lock().unwrap().started, 2);
-    let local_start = engine.calls("guest.exec.start").pop().unwrap();
-    assert!(local_start.get("deviceId").is_none(), "{local_start}");
-
-    // Dropping the fork there ends its driver on that device and leaves the local one.
-    let dropped = call(
-        &mut write,
-        &mut read,
-        6,
-        "drop",
-        json!({"computer": "t1", "device": "mac mini"}),
-    )
-    .await;
-    assert_ne!(dropped["result"]["isError"], true, "{dropped}");
-    assert_eq!(engine.calls("computers.delete")[0]["deviceId"], MINI);
-    let closes: Vec<Value> = engine
-        .calls("guest.exec.input")
-        .into_iter()
-        .filter(|params| params["close"] == true)
-        .collect();
-    assert_eq!(closes.len(), 1, "{closes:?}");
-    assert_eq!(closes[0]["deviceId"], MINI);
-}
-
-#[tokio::test]
-async fn an_agent_may_not_drive_a_fork_on_a_device_its_settings_do_not_list() {
-    let driver = Arc::new(Mutex::new(Driver::default()));
-    let engine = driver_engine(driver.clone(), screenshot_result());
-    let directory = project("agents:\n  bot:\n    recipes: [linux-dev]\n");
-    let (mut write, mut read) = connect_mcp_in(&engine, directory.path(), Some("bot")).await;
+    let (mut write, mut read) = connect_mcp(&engine).await;
     for (id, tool, arguments) in [
         (
             3,
@@ -704,17 +608,13 @@ async fn an_agent_may_not_drive_a_fork_on_a_device_its_settings_do_not_list() {
             "computer_use_click",
             json!({"computer": "t1", "x": 1, "y": 2, "device": "mac mini"}),
         ),
-        (
-            5,
-            "computer_use_tools",
-            json!({"computer": "t1", "device": "mac mini"}),
-        ),
         (6, "fork_gui", json!({"device": "mac mini"})),
     ] {
         let refused = call(&mut write, &mut read, id, tool, arguments).await;
-        assert_eq!(refused["result"]["isError"], true, "{tool}: {refused}");
-        let text = refused["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("devices:"), "{tool}: {text}");
+        assert!(
+            refused["error"].is_object() || refused["result"]["isError"] == true,
+            "{tool}: {refused}"
+        );
     }
     assert!(engine.calls("guest.exec.start").is_empty());
     assert!(engine.calls("checkpoints.fork").is_empty());
@@ -735,9 +635,7 @@ async fn fork_gui_refuses_a_source_without_a_desktop_before_forking() {
         approval: None,
         timeout: Duration::from_secs(60),
     };
-    let error = gui::fork_gui(&connected, &args, None, &ignore)
-        .await
-        .unwrap_err();
+    let error = gui::fork_gui(&connected, &args, &ignore).await.unwrap_err();
     assert_eq!(
         error.message,
         "main has no desktop; turn it on with `silo desktop on main`."
@@ -747,28 +645,31 @@ async fn fork_gui_refuses_a_source_without_a_desktop_before_forking() {
 
 #[tokio::test]
 async fn fork_gui_refuses_a_recipe_that_starts_no_desktop() {
-    let engine = FakeEngine::start(|method, _| Err(("internal", format!("unexpected {method}"))));
+    let engine = FakeEngine::start(|method, _| match method {
+        "recipes.get" => Ok(json!({
+            "name": "lean", "builtIn": false, "hash": "h",
+            "recipe": {"spec": {"os": "linux", "packages": {}, "desktop": false}}
+        })),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    let recipe = silo_cli::config::parse_recipe("desktop: false\n").unwrap();
     let args = GuiArgs {
         fork: ForkArgs {
             source: "main".into(),
-            recipe: Some(recipe),
             recipe_name: Some("lean".into()),
             ..ForkArgs::default()
         },
         approval: None,
         timeout: Duration::from_secs(60),
     };
-    let error = gui::fork_gui(&connected, &args, None, &ignore)
-        .await
-        .unwrap_err();
+    let error = gui::fork_gui(&connected, &args, &ignore).await.unwrap_err();
     assert!(
         error.message.contains("The recipe lean has desktop: false"),
         "{}",
         error.message
     );
     assert!(engine.calls("recipes.build").is_empty());
+    assert_eq!(engine.calls("recipes.get")[0]["name"], "lean");
 }
 
 #[tokio::test]

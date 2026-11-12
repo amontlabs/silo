@@ -54,6 +54,38 @@ pub fn blocked_gateway_policy() -> Value {
     json!({"default_egress": "deny", "default_ingress": "allow", "rules": []})
 }
 
+/// What a container's gateway is started with: the policy (`None` is the gateway's own, public
+/// addresses only) and the strict setting (`None` is on). A blocked computer is closed whatever
+/// policy is stored; otherwise the stored network policy applies, and open with nothing extra
+/// keeps the gateway's own.
+pub fn gateway_network(name: &str, record: &ComputerRecord) -> (Option<Value>, Option<bool>) {
+    if record.network_blocked {
+        if let Some(id) = record.label("silo.machine-id") {
+            crate::network_policy::service::gateway_started(id, &blocked_gateway_policy(), true);
+        }
+        return (Some(blocked_gateway_policy()), None);
+    }
+    // A record that cannot say which computer it is, or a policy that cannot be read, gets no
+    // way out rather than the gateway's own open policy.
+    let Some(plan) = record
+        .label("silo.machine-id")
+        .and_then(|id| crate::network_policy::plan_for_gateway(id, name).ok().map(|plan| (id, plan)))
+    else {
+        return (Some(blocked_gateway_policy()), None);
+    };
+    let (id, plan) = plan;
+    crate::network_policy::service::gateway_started(id, &plan.policy_value(), plan.strict);
+    gateway_network_for(&plan)
+}
+
+fn gateway_network_for(plan: &crate::network_policy::Plan) -> (Option<Value>, Option<bool>) {
+    use crate::network_policy::Rule;
+    if plan.rules == [Rule::Dns, Rule::Public] && plan.strict {
+        return (None, None);
+    }
+    (Some(plan.policy_value()), Some(plan.strict))
+}
+
 /// The network policy a container computer reports, which a fork or a restore is asked to keep.
 /// A container has one of two networks: its gateway's own policy (public addresses only,
 /// enforced there), reported as egress allowed, or none at all ([`blocked_policy`]).
@@ -228,6 +260,63 @@ mod tests {
         )
         .unwrap();
         assert!(record.github && record.secrets.is_empty());
+    }
+
+    #[test]
+    fn the_gateway_gets_the_stored_policy_and_a_blocked_computer_stays_closed() {
+        use crate::network_policy::{plan, Grants, NetworkPolicy, NetworkPolicyMode};
+        let open = plan(&NetworkPolicy::default(), &Grants::default(), &[]);
+        assert_eq!(gateway_network_for(&open), (None, None));
+        let list = plan(
+            &NetworkPolicy {
+                mode: NetworkPolicyMode::Allowlist,
+                hosts: vec!["example.com".into()],
+                presets: Vec::new(),
+            },
+            &Grants::default(),
+            &[],
+        );
+        let (policy, strict) = gateway_network_for(&list);
+        assert_eq!(strict, Some(false));
+        assert_eq!(policy.unwrap()["rules"][1]["destination"], json!({"domain": "example.com"}));
+        let closed = plan(
+            &NetworkPolicy {
+                mode: NetworkPolicyMode::Closed,
+                ..NetworkPolicy::default()
+            },
+            &Grants::default(),
+            &[],
+        );
+        assert_eq!(
+            gateway_network_for(&closed),
+            (Some(blocked_gateway_policy()), Some(true))
+        );
+        let mut blocked = record();
+        blocked.network_blocked = true;
+        blocked.labels.push(("silo.machine-id".into(), "c1".into()));
+        assert_eq!(
+            gateway_network("dev", &blocked),
+            (Some(blocked_gateway_policy()), None)
+        );
+    }
+
+    #[test]
+    fn a_container_that_cannot_say_which_computer_it_is_or_whose_policy_cannot_be_read_gets_no_way_out(
+    ) {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("network-policy.json");
+        crate::network_policy::store::use_test_path(Some(file.clone()));
+        let no_way_out = (Some(blocked_gateway_policy()), None);
+        let mut unlabelled = record();
+        unlabelled.labels.retain(|(key, _)| key != "silo.machine-id");
+        assert_eq!(gateway_network("dev", &unlabelled), no_way_out);
+        let mut labelled = record();
+        labelled.labels.push(("silo.machine-id".into(), "c1".into()));
+        assert_eq!(gateway_network("dev", &labelled), (None, None));
+        std::fs::write(&file, "{ not json").unwrap();
+        assert_eq!(gateway_network("dev", &labelled), no_way_out);
+        crate::network_policy::store::use_test_path(None);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { Box, Globe, KeyRound, Pencil, RotateCw, Trash2 } from "lucide-react"
+import { Box, Check, Globe, KeyRound, Pencil, RotateCw, Trash2 } from "lucide-react"
 
 import { ListRow, ListRowIcon } from "@/components/list-row"
 import { ConfirmPopover } from "@/components/confirm-popover"
@@ -18,6 +18,7 @@ export function AddSecretEditor({ manager }: { manager: SecretsManager }) {
     key="add"
     source={manager.source}
     initialComputers={manager.editor.initialComputers}
+    kind={manager.editor.kind}
     onSave={manager.saveSecret}
     onCancel={manager.closeEditor}
     saving={manager.saving}
@@ -32,6 +33,8 @@ export function SecretRow({ secret, manager }: { secret: ApplicationSecret; mana
   const working = manager.busy === secret.id
   const failure = manager.operationError?.id === secret.id ? manager.operationError.message : secret.error
   const disabled = manager.saving || manager.busy !== null
+  const token = secret.kind === "github-token"
+  const disconnected = token && !secret.removing && secret.connection?.state !== "connected"
 
   return (
     <li>
@@ -40,6 +43,13 @@ export function SecretRow({ secret, manager }: { secret: ApplicationSecret; mana
         icon={<ListRowIcon aria-hidden="true"><KeyRound className="size-3.5" /></ListRowIcon>}
         title={<div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <h3 className="break-all font-mono">{secret.name}</h3>
+          {token && <StatusBadge indicator={<KeyRound className="size-2" />}>GitHub token</StatusBadge>}
+          {token && secret.connection?.state === "connected" && <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
+            <Check className="size-3 text-success" aria-hidden="true" />{secret.account ? `@${secret.account}` : "Connected"}
+          </span>}
+          {disconnected && <span role="status" className="text-caption text-destructive">
+            Disconnected{secret.account ? ` (@${secret.account})` : ""}{secret.connection?.message ? `: ${secret.connection.message}` : ""}
+          </span>}
           {secret.state === "applying" && <span role="status" className="text-caption text-muted-foreground">{secret.removing ? "Removing…" : "Applying…"}</span>}
           {secret.state === "restart-required" && (
             <span className="inline-flex items-center gap-1 text-caption text-warning">
@@ -50,7 +60,7 @@ export function SecretRow({ secret, manager }: { secret: ApplicationSecret; mana
         </div>}
         detailClassName="whitespace-normal"
         detail={<div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-          <div className="flex min-w-0 flex-wrap gap-1" role="group" aria-label={`Computers for ${secret.name}`}>
+          <div className="flex min-w-0 flex-wrap gap-1" role="group" aria-label={token ? `Computers using ${secret.name}` : `Computers for ${secret.name}`}>
             {secret.computers.map((name) => {
               const computer = source.computers.find(({ configuration, device }) => !device && configuration.name === name)
               return computer
@@ -58,10 +68,15 @@ export function SecretRow({ secret, manager }: { secret: ApplicationSecret; mana
                 : <StatusBadge key={name} indicator={<Box className="size-2" />}>{name}</StatusBadge>
             })}
           </div>
-          <p className="flex min-w-0 items-start gap-1 text-caption text-muted-foreground" aria-label={`Allowed domains for ${secret.name}`}>
-            <Globe className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-            <span className="break-all">{secret.allowedDomains.join(", ") || "No allowed domains"}</span>
-          </p>
+          {token
+            ? <p className="flex min-w-0 items-start gap-1 text-caption text-muted-foreground">
+              <Globe className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+              <span>{secret.computers.length === 0 ? "No computer uses this token yet. Choose it on the GitHub page. " : ""}Sent only to GitHub.</span>
+            </p>
+            : <p className="flex min-w-0 items-start gap-1 text-caption text-muted-foreground" aria-label={`Allowed domains for ${secret.name}`}>
+              <Globe className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+              <span className="break-all">{secret.allowedDomains.join(", ") || "No allowed domains"}</span>
+            </p>}
         </div>}
         actions={<div className="flex shrink-0 items-center gap-0.5 text-muted-foreground" role="group" aria-label={`Manage ${secret.name}`}>
           <Tooltip>
@@ -72,7 +87,7 @@ export function SecretRow({ secret, manager }: { secret: ApplicationSecret; mana
             </TooltipTrigger>
             <TooltipContent>{`Edit ${secret.name}`}</TooltipContent>
           </Tooltip>
-          <ConfirmPopover align="end" tone="destructive" title={`Remove ${secret.name}?`} description="Silo deletes the stored value immediately. Computers that cannot revoke access may keep it until they restart." confirmLabel="Remove" tooltip={`Remove ${secret.name}`} onConfirm={() => manager.removeSecret(secret.id)}>
+          <ConfirmPopover align="end" tone="destructive" title={`Remove ${secret.name}?`} description={token ? "Silo deletes the stored token immediately. Computers using it lose GitHub access." : "Silo deletes the stored value immediately. Computers that cannot revoke access may keep it until they restart."} confirmLabel="Remove" tooltip={`Remove ${secret.name}`} onConfirm={() => manager.removeSecret(secret.id)}>
             <Button type="button" variant="ghost" size="icon-xs" aria-label={`Remove ${secret.name}`} disabled={disabled}>
               {working ? <Spinner /> : <Trash2 aria-hidden="true" />}
             </Button>

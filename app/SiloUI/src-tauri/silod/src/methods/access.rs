@@ -228,6 +228,11 @@ impl silo_engine::secrets::RuntimeAccess for SecretsRuntimeAccess {
     }
 }
 
+/// Whether `computer_id` is a macOS computer on this device.
+pub(crate) fn is_macos_computer(computer_id: &str) -> bool {
+    macos_proxy::owning_context(computer_id).is_some()
+}
+
 /// The macOS secrets and GitHub host proxy. Each function resolves the computer by name in
 /// the macOS store and calls the engine's `proxy_*` entry point. No computer is a macOS
 /// proxy computer until the access runtime is installed.
@@ -342,7 +347,12 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
         silo_engine::desktop::dispatch(&paths, method, params)
     }
 
-    fn access_dispatch(&self, method: &str, params: &Value) -> Result<Value, BridgeError> {
+    fn access_dispatch(
+        &self,
+        method: &str,
+        params: &Value,
+        key: Option<&str>,
+    ) -> Result<Value, BridgeError> {
         match method {
             "github.connect" => start_owner_connect(&self.0.context),
             "guest.exec.start" => {
@@ -378,7 +388,7 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
                 owner_job_operation(self.0.context.as_ref(), method, params)
             }
             name if silo_engine::remote::is_owner_method(name) => {
-                super::remote::serve_owner(&self.0.context, name, params)
+                super::remote::serve_owner(&self.0.context, name, params, key)
             }
             _ => run_local(self.0.context.as_ref(), method, params).map_err(BridgeError::from),
         }
@@ -490,6 +500,7 @@ pub async fn handle(
         MethodName::GitHubConnectCallback => Err(DispatchError {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: "github.connect.callback is served between engines over Connections, not on the local socket.".to_owned(),
+            details: None,
         }),
         MethodName::PushRepositories => push_repositories(params, context).await,
         MethodName::PushStart => push_start(params, context).await,
@@ -500,6 +511,8 @@ pub async fn handle(
         MethodName::NetworkUnpublish => network_change(params, context, false).await,
         MethodName::NetworkOpen => network_open(params, context).await,
         MethodName::NetworkUrls => network_urls(params, context).await,
+        MethodName::NetworkPolicyGet => network_policy(params, context, false).await,
+        MethodName::NetworkPolicySet => network_policy(params, context, true).await,
         MethodName::SshAccessState => ssh_access_state(params, context).await,
         MethodName::SshAccessSave => ssh_access_save(params, context).await,
         MethodName::SshAccessConnection => ssh_access_connection(params, context).await,
@@ -534,10 +547,12 @@ fn failure(message: impl Into<String>) -> DispatchError {
         ErrorCode::UpdateInProgress
     } else if message == silo_engine::github::CONNECTION_CANCELLED {
         ErrorCode::Cancelled
+    } else if message == silo_engine::network_policy::store::CHANGED {
+        ErrorCode::Changed
     } else {
         ErrorCode::Internal
     };
-    DispatchError { code, message }
+    DispatchError { code, message, details: None }
 }
 
 fn serialization(error: impl std::fmt::Display) -> DispatchError {
@@ -724,6 +739,7 @@ fn api_configuration_to_engine(
         row["computer"] = json!(computer_name(paths, id)?);
         if let Some(object) = row.as_object_mut() {
             object.remove("computerId");
+            object.remove("tokenMissing");
         }
     }
     Ok(value)
@@ -1097,6 +1113,7 @@ impl ConnectAdmission {
                 code: ErrorCode::Busy,
                 message: "A GitHub sign-in is already in progress. Finish or cancel it first."
                     .to_owned(),
+                details: None,
             });
         }
         *slot = ConnectSlot::Admitting;
@@ -1312,12 +1329,25 @@ fn owner_job_operation(
             Ok(Value::Null)
         }
         _ => {
-            ctx.job_registry()?
-                .acknowledge(&job_id)
-                .map_err(registry_error)?;
-            // The outcome is acknowledged: the replay of an exec job is no longer needed.
-            silo_engine::guest::forget_finished(&job_id);
-            ctx.job_queue_changed();
+            let released = super::operations::acknowledge_shared(
+                ctx.job_registry()?.as_ref(),
+                &ctx.paths().app_data,
+                &super::operations::reader_of(&silo_engine::policy::Caller::owner("device")),
+                &job_id,
+            )
+            .map_err(|error| match error {
+                super::operations::SharedAcknowledgeError::Registry(error) => {
+                    registry_error(error)
+                }
+                super::operations::SharedAcknowledgeError::Policy(message) => {
+                    BridgeError::from(message)
+                }
+            })?;
+            if released {
+                // The outcome is acknowledged: the replay of an exec job is no longer needed.
+                silo_engine::guest::forget_finished(&job_id);
+                ctx.job_queue_changed();
+            }
             Ok(Value::Null)
         }
     }
@@ -1957,6 +1987,84 @@ pub(crate) fn refresh_url_routes(has_websites: bool) {
     }
 }
 
+/// `network.policy.get` and `.set`, for a computer on this device.
+async fn network_policy(
+    params: &Value,
+    context: &HandlerContext,
+    setting: bool,
+) -> Result<HandlerOutput, DispatchError> {
+    let (computer_id, device_id, policy, expected, accept_presets) = if setting {
+        let typed = context.decode_params::<network::NetworkPolicySetParams>(params)?;
+        (
+            typed.computer_id,
+            typed.device_id,
+            Some(typed.policy),
+            typed.expected,
+            typed.accept_presets,
+        )
+    } else {
+        let typed = context.decode_params::<network::NetworkTargetParams>(params)?;
+        (typed.computer_id, typed.device_id, None, None, None)
+    };
+    if remote_target(context, device_id.as_deref()).is_some() {
+        return Err(DispatchError {
+            code: ErrorCode::UnsupportedRemoteOperation,
+            message: "The network policy of a computer on another device is set on that device."
+                .to_owned(),
+            details: None,
+        });
+    }
+    let state = blocking(move || {
+        use silo_engine::network_policy::service::{self, Target};
+        let paths = local_paths()?;
+        let target = network_target(&paths, &computer_id)?;
+        match &policy {
+            Some(policy) => service::set(
+                &computer_id,
+                policy,
+                expected.as_ref(),
+                accept_presets,
+                target,
+            ),
+            None => service::get(&computer_id, target),
+        }
+    })
+    .await?;
+    to_output(state)
+}
+
+/// Which kind of computer `computer_id` is, for the network policy service.
+fn network_target<'a>(
+    paths: &'a RuntimePaths,
+    computer_id: &str,
+) -> Result<silo_engine::network_policy::service::Target<'a>, String> {
+    use silo_engine::network_policy::service::Target;
+    match macos_proxy::owning_context(computer_id) {
+        Some(_) => {
+            let (name, stopped, _) = silo_engine::macos_computers::promote_view(computer_id)
+                .ok_or_else(|| "That computer was not found.".to_owned())?;
+            Ok(Target::Macos {
+                name,
+                running: !stopped,
+            })
+        }
+        None => {
+            computer_name(paths, computer_id)?;
+            Ok(Target::Linux(paths))
+        }
+    }
+}
+
+/// The policy the engine judges `computer_id`'s calls against (what `network.policy.get`
+/// reports); `None` when it cannot be read.
+pub(crate) fn judged_network_policy(
+    computer_id: &str,
+) -> Option<silo_engine::network_policy::Held> {
+    let paths = local_paths().ok()?;
+    let target = network_target(&paths, computer_id).ok()?;
+    silo_engine::network_policy::service::judged(computer_id, target)
+}
+
 async fn network_urls(
     params: &Value,
     context: &HandlerContext,
@@ -2591,8 +2699,9 @@ pub(crate) mod tests {
             fixture().context.clone(),
             RequestContext {
                 client_id: "access-test-client".to_owned(),
-                protocol: 7,
+                protocol: 8,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         )
     }
@@ -2722,6 +2831,20 @@ pub(crate) mod tests {
     /// Tests that create or remove this engine's Connections key must not overlap.
     static KEY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    /// Takes the Connections key for one test and starts it without the pending removals and
+    /// controller keys earlier tests left in the shared settings file.
+    async fn key_lock() -> tokio::sync::MutexGuard<'static, ()> {
+        let guard = KEY_LOCK.lock().await;
+        call(MethodName::ConnectionsStatus, json!({}))
+            .await
+            .unwrap();
+        edit_connections_config(|config| {
+            config["removals"] = json!([]);
+            config["controllerKeys"] = json!({});
+        });
+        guard
+    }
+
     fn connections_config_path() -> PathBuf {
         silo_engine::channel::current()
             .state_dir(&fixture().home)
@@ -2796,6 +2919,10 @@ pub(crate) mod tests {
         assert_eq!(
             failure("GitHub connection cancelled.").code,
             ErrorCode::Cancelled
+        );
+        assert_eq!(
+            failure(silo_engine::network_policy::store::CHANGED).code,
+            ErrorCode::Changed
         );
         assert_eq!(failure("Anything else").code, ErrorCode::Internal);
         assert_eq!(
@@ -3306,6 +3433,21 @@ pub(crate) mod tests {
         let engine = api_configuration_to_engine(typed, &local_paths().unwrap()).unwrap();
         assert_eq!(engine["computers"][0]["computer"], "dev");
         assert!(engine["computers"][0].get("computerId").is_none());
+
+        let chosen = json!({
+            "computerId": COMPUTER,
+            "identity": {"name": "", "email": "", "apply": false},
+            "repositoryMode": "selected",
+            "repositories": [],
+            "allRepositoriesAllowChanges": false,
+            "authenticationMethod": "token",
+            "tokenSecretId": "secret-1",
+        });
+        let typed: github::GitHubConfiguration =
+            serde_json::from_value(json!({"computers": [chosen], "baseRevision": null})).unwrap();
+        let engine = api_configuration_to_engine(typed, &local_paths().unwrap()).unwrap();
+        assert_eq!(engine["computers"][0]["tokenSecretId"], "secret-1");
+        assert_eq!(engine["computers"][0]["authenticationMethod"], "token");
     }
 
     #[tokio::test]
@@ -3360,6 +3502,34 @@ pub(crate) mod tests {
         let error = expect_error(MethodName::SecretsSave, specific).await;
         assert!(error.message.contains(NOT_CONNECTED), "{}", error.message);
         expect_invalid_params(MethodName::SecretsSave, json!({})).await;
+    }
+
+    #[tokio::test]
+    async fn a_github_token_secret_takes_no_computers_or_hosts() {
+        let request = |computers: Value, domains: Value| {
+            json!({"request": {
+                "operation": "add",
+                "name": "work",
+                "kind": "github-token",
+                "value": "synthetic_value",
+                "computerIds": computers,
+                "allowedDomains": domains,
+            }})
+        };
+        for params in [
+            request(json!([COMPUTER]), json!([])),
+            request(json!([]), json!(["api.example.com"])),
+        ] {
+            let error = expect_error(MethodName::SecretsSave, params).await;
+            assert!(
+                error.message.contains("GitHub access"),
+                "{}",
+                error.message
+            );
+        }
+        let mut unknown_kind = request(json!([]), json!([]));
+        unknown_kind["request"]["kind"] = json!("ssh-key");
+        expect_invalid_params(MethodName::SecretsSave, unknown_kind).await;
     }
 
     #[tokio::test]
@@ -3667,7 +3837,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn connections_status_list_and_enabled_state() {
         // Turning Connections off rewrites the settings file other tests edit.
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let status = call(MethodName::ConnectionsStatus, json!({}))
             .await
             .unwrap();
@@ -3689,7 +3859,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn connections_health_is_a_side_effect_free_projection() {
         // Removals rewrite the settings file; a save that overlaps one could be lost.
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "66666666-6666-4666-8666-666666666666";
         save_device(device, "ssh://user@127.0.0.1:9").await;
         let health = call(MethodName::ConnectionsDevicesHealth, json!({}))
@@ -3721,7 +3891,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn connections_ssh_commands_are_local_text() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let authorization = call(
             MethodName::ConnectionsSshAuthorizationCommand,
             json!({"address": "user@host.example"}),
@@ -3774,7 +3944,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn keys_revoke_leaves_unrelated_keys_alone_and_succeeds_when_absent() {
         // The authorize test writes the same authorized_keys.
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let path = fixture().home.join(".ssh/authorized_keys");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFakeFak";
@@ -3809,7 +3979,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn keys_authorize_and_list_are_this_devices_own() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let path = fixture().home.join(".ssh/authorized_keys");
         let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIAuthAuthAuthAuthAuthAuthAuthAuthAuthAuthAut";
         let offered = format!("ssh-ed25519 {blob} laptop");
@@ -3944,13 +4114,13 @@ pub(crate) mod tests {
         let adapter = SilodLocalAccess(runtime_host().unwrap().clone());
         let unknown = json!({"jobId": "job:424243"});
         let error = adapter
-            .access_dispatch("operations.cancel", &unknown)
+            .access_dispatch("operations.cancel", &unknown, None)
             .unwrap_err();
         assert_eq!(error.code, Code::NotFound);
         // A sign-in already running on the owner is refused as busy, not as `internal`.
         let admission = ConnectAdmission::admit().unwrap();
         let error = adapter
-            .access_dispatch("github.connect", &json!({}))
+            .access_dispatch("github.connect", &json!({}), None)
             .unwrap_err();
         assert_eq!(error.code, Code::Busy, "{}", error.message);
         drop(admission);
@@ -3987,7 +4157,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn events_subscribe_relays_saved_devices_only_and_ends_with_the_device() {
         use crate::dispatcher::{CoreMethodRegistry, MethodRegistry};
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "77777777-7777-4777-8777-777777777771";
         save_device(device, "owner.example").await;
         let link = Arc::new(UnreachableOwner(Default::default()));
@@ -4008,8 +4178,9 @@ pub(crate) mod tests {
         let subscribe = |params: Value| {
             let request = RequestContext {
                 client_id: "subscriber".to_owned(),
-                protocol: 7,
+                protocol: 8,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             };
             registry.dispatch(MethodName::EventsSubscribe, params, engine.clone(), request)
         };
@@ -4069,7 +4240,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn removing_a_device_revokes_its_key_first_and_keeps_it_when_that_fails() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "77777777-7777-4777-8777-777777777777";
         // The address cannot be used, so the owner can never confirm the revocation.
         save_device(device, "not an address").await;
@@ -4095,7 +4266,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn removing_a_device_after_its_private_key_was_deleted_still_needs_the_owner() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "99999999-9999-4999-8999-999999999999";
         // The owner holds the public key recorded for this device; the private key is gone.
         save_device(device, "not an address").await;
@@ -4127,6 +4298,57 @@ pub(crate) mod tests {
         config_without_device(device);
     }
 
+    #[tokio::test]
+    async fn a_removal_stuck_for_one_device_leaves_status_health_and_connect_for_another() {
+        let _key = key_lock().await;
+        let stuck = "77777777-7777-4777-8777-777777777778";
+        let other = "77777777-7777-4777-8777-777777777779";
+        save_device(stuck, "not an address").await;
+        save_device(other, "ssh://user@127.0.0.1:9").await;
+        edit_connections_config(|config| {
+            config["controllerKeys"] =
+                json!({stuck: ["ssh-ed25519 AAAAstuck Silo remote management"]});
+        });
+        // The owner cannot be reached, so this removal stays pending.
+        expect_error(
+            MethodName::ConnectionsDevicesRemove,
+            json!({"deviceId": stuck}),
+        )
+        .await;
+        let within = |future| async {
+            tokio::time::timeout(Duration::from_secs(60), future)
+                .await
+                .expect("the request stalled behind the stuck removal")
+        };
+        let status = within(call(MethodName::ConnectionsStatus, json!({})))
+            .await
+            .unwrap();
+        assert!(status["enabled"].is_boolean());
+        let health = within(call(MethodName::ConnectionsDevicesHealth, json!({})))
+            .await
+            .unwrap();
+        let health: connections::DeviceHealthResult = serde_json::from_value(health).unwrap();
+        assert!(health.devices.iter().any(|row| row.device_id == other));
+        // Connecting another device may fail for its own reasons, but not for this removal.
+        let connected = within(call(
+            MethodName::ConnectionsDevicesConnect,
+            json!({"address": "ssh://user@127.0.0.1:9"}),
+        ))
+        .await;
+        if let Err(error) = connected {
+            assert!(
+                !error.message.contains("being removed"),
+                "{}",
+                error.message
+            );
+        }
+        let config: Value =
+            serde_json::from_slice(&std::fs::read(connections_config_path()).unwrap()).unwrap();
+        assert_eq!(config["removals"][0]["deviceId"], stuck);
+        config_without_device(stuck);
+        config_without_device(other);
+    }
+
     fn config_without_device(device: &str) {
         edit_connections_config(|config| {
             config["devices"]
@@ -4139,8 +4361,33 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn a_test_holding_the_key_lock_starts_without_the_removals_and_keys_of_earlier_tests() {
+        let device = "55555555-5555-4555-8555-555555555555";
+        {
+            // A removal the owner cannot confirm stays pending, as another test may leave it.
+            let _key = KEY_LOCK.lock().await;
+            save_device(device, "not an address").await;
+            edit_connections_config(|config| {
+                config["controllerKeys"] =
+                    json!({device: ["ssh-ed25519 AAAAstale Silo remote management"]});
+            });
+            expect_error(
+                MethodName::ConnectionsDevicesRemove,
+                json!({"deviceId": device}),
+            )
+            .await;
+        }
+        let _key = key_lock().await;
+        let config: Value =
+            serde_json::from_slice(&std::fs::read(connections_config_path()).unwrap()).unwrap();
+        assert_eq!(config["removals"], json!([]));
+        assert_eq!(config["controllerKeys"], json!({}));
+        config_without_device(device);
+    }
+
+    #[tokio::test]
     async fn removing_a_device_without_a_connections_key_forgets_it() {
-        let _key = KEY_LOCK.lock().await;
+        let _key = key_lock().await;
         let device = "88888888-8888-4888-8888-888888888888";
         save_device(device, "ssh://user@127.0.0.1:9").await;
         let key = silo_engine::remote::connections_public_key().unwrap();

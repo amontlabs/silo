@@ -17,6 +17,7 @@ export function computerBusyReason(computer?: ApplicationComputer): string | und
   if (!computer) return undefined
   if (computer.checkpointOperation?.status === "running") return "Wait for the checkpoint to finish."
   const action = computer.lifecycleAction === "dismiss-error" ? undefined : computer.lifecycleAction
+  if (computer.state === "starting" && computer.stateDetail === "Stopping") return `Wait until ${computer.configuration.name} finishes stopping.`
   if (computer.state === "starting" || action === "start") return `Wait until ${computer.configuration.name} finishes starting.`
   if (action === "stop") return `Wait until ${computer.configuration.name} finishes stopping.`
   if (action === "restart") return `Wait until ${computer.configuration.name} finishes restarting.`

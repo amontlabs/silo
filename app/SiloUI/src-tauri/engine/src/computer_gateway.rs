@@ -88,6 +88,9 @@ pub struct Params {
     /// The network policy, in the shape MicroSandbox saves one; `None` is the gateway's own
     /// (public addresses only).
     pub policy: Option<Value>,
+    /// Strict hostname-policy enforcement; `None` is the gateway's own (on). A policy with a
+    /// list of allowed hosts needs it off.
+    pub strict: Option<bool>,
     /// Where the gateway appends credential-use events (names, hosts, methods; never values).
     pub usage_log: Option<PathBuf>,
     /// Where the gateway's own output goes; discarded when absent.
@@ -114,6 +117,8 @@ struct InitRequest<'a> {
     github_hosts: Option<&'a [String]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     policy: Option<&'a Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strict: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -435,6 +440,7 @@ fn handshake(
         github_profile_json,
         github_hosts,
         policy,
+        strict,
         ..
     } = params;
     let request = InitRequest {
@@ -471,6 +477,7 @@ fn handshake(
         github_profile_json: github_profile_json.as_deref().map(String::as_str),
         github_hosts: github_hosts.as_deref(),
         policy: policy.as_ref(),
+        strict,
     };
     let mut body = Zeroizing::new(
         serde_json::to_vec(&request)
@@ -594,6 +601,7 @@ mod tests {
             github_profile_json: None,
             github_hosts: None,
             policy: None,
+            strict: None,
             usage_log: None,
             log: None,
         }

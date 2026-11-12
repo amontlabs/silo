@@ -17,8 +17,8 @@ import { computerTarget } from "../model/connections"
 import { ConnectDeviceForm } from "../components/connections-settings"
 import { ComputerDetailPage, type ComputerDetailControls, type ComputerDetailEditing } from "./computer-detail-page"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
-import { Code, Download, GitFork, HardDrive, History, KeyRound, Monitor, RotateCw, Terminal } from "lucide-react"
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
+import { Bot, Code, Download, GitFork, HardDrive, History, KeyRound, Monitor, RotateCw, Terminal } from "lucide-react"
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
 import { dismissOperationToast, dismissComputerToasts, dismissComputerToastsById, showActionFailure } from "@/lib/operation-toast"
 
 import type { MenuAction, MenuPopovers } from "@/components/actions-menu"
@@ -27,7 +27,7 @@ import { PageContainer } from "@/components/page"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmBody } from "@/components/confirm-popover"
 import type { BackupController, VerifiedExport } from "../model/backup-source"
-import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
+import { canCheckpointMacos, useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { computerNamesOnDevice, type ComputerCheckpoint } from "../model/checkpoint-source"
 
 import { configurationFailureDiagnostic } from "../model/configuration-failure"
@@ -50,12 +50,14 @@ import { ComputerAction } from "@/features/computers/components/computer-list"
 import { SecretChangesLabel } from "@/features/computers/components/secret-changes-label"
 import { computerIconState, computerRowTone } from "@/features/computers/model/computer-presentation"
 import { computerCan } from "@/features/computers/model/computer-capabilities"
+import { openableAgents, openAgentLabel } from "@/features/agents/model/agents"
+import { useRunningComputerAgents } from "@/features/agents/model/use-computer-agents"
 import { deviceCapacityFrom } from "@/features/computers/model/computer-limits"
 
 export type { ComputerPageRequest }
 
 export function OverviewPage({ active = true, readOnly = false, notifyOperations = true,
-  source,
+  source: fullSource,
   actions,
   backup,
   onConfigurationsChange,
@@ -102,8 +104,11 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   /** Navigate to another section (Files/Network filtered to a computer, or the Secrets tab). */
   onNavigate?: (route: ApplicationInitialRoute) => void
 }) {
+  // The list and its editor work on Linux computers; macOS computers open on the same page.
+  const source = useMemo(() => fullSource.computers.some(({ os }) => os === "macos") ? { ...fullSource, computers: fullSource.computers.filter(({ os }) => os !== "macos") } : fullSource, [fullSource])
   useLifecycleToasts(source, actions, { enabled: notifyOperations, readOnly })
   useSshAccessRefresh(readOnly ? undefined : actions.refreshSshAccess, active)
+  const { agentsOf } = useRunningComputerAgents(fullSource, readOnly ? undefined : actions.listAgents)
   const [connecting, setConnecting] = useState(false)
   // Computer detail selection: controlled by the app's navigation when the callbacks are
   // supplied, otherwise kept locally so the page still opens details on its own.
@@ -153,22 +158,24 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   // Controlled navigation replaces its history entries in place (the app forgets missing
   // computers), so only the standalone page closes its own selection here: pushing a new
   // entry would leave Back pointing at the missing computer.
-  const detailComputer = selectedId ? computers.get(selectedId) : undefined
+  // A macOS computer of another device keeps its row and has no page.
+  const allComputers = new Map(fullSource.computers.filter((computer) => !(computer.macos && computer.device)).map((computer) => [computer.configuration.id, computer]))
+  const detailComputer = selectedId ? allComputers.get(selectedId) : undefined
   const detailMissing = Boolean(selectedId) && !detailComputer
   const returnToList = useEffectEvent(() => { if (!controlledNav) closeComputer() })
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { if (detailMissing) returnToList() }, [detailMissing])
 
-  const latestDeleteState = useRef({ source, readOnly })
-  useEffect(() => { latestDeleteState.current = { source, readOnly } }, [source, readOnly])
+  const latestDeleteState = useRef({ source: fullSource, readOnly })
+  useEffect(() => { latestDeleteState.current = { source: fullSource, readOnly } }, [fullSource, readOnly])
 
   // Every lifecycle request from this page (row, computer page, menus, toasts) goes through the
   // shared guard: unavailable Computer operations are reported and memory pressure asks first.
   const guard = lifecycleGuard(source, actions)
   // Notification actions run later: resolve the computer and its guard when clicked, so a toast
   // shown before the snapshot refreshed never acts on outdated state.
-  const latestLifecycle = useRef({ guard, computers })
-  useEffect(() => { latestLifecycle.current = { guard, computers } })
+  const latestLifecycle = useRef({ guard, computers: new Map<string, ApplicationComputer>() })
+  useEffect(() => { latestLifecycle.current = { guard, computers: allComputers } })
   function lifecycleLater(computer: ApplicationComputer, action: LifecycleAction, confirmed: boolean) {
     return () => {
       const { guard: current, computers: now } = latestLifecycle.current
@@ -188,8 +195,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
     const { configuration } = computer
     const readStorage = actions.readWorkspaceStorage
     return {
-      checkpoints: computer.checkpoints?.length,
-      readSize: !computer.device && readStorage
+      checkpoints: (computer.macos?.checkpoints ?? computer.checkpoints)?.length,
+      readSize: !computer.device && !computer.macos && readStorage
         ? async () => {
             const storage = await readStorage(configuration.id)
             return storage.workspaceHostBytes === null || storage.runtimeHostBytes === null
@@ -221,10 +228,12 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   /** The Open Linux desktop icon of a computer's list row and page, absent without a desktop. */
   function desktopAction(computer: ApplicationComputer): { disabled: boolean; onClick: () => void } | undefined {
     const { configuration } = computer
-    if (!configuration.desktop || !actions.openDesktop) return undefined
+    if (!(configuration.desktop || computer.macos) || !actions.openDesktop) return undefined
     const target = computerTarget(computer)
     const availability = computerAvailability(computer, source)
-    return { disabled: configurationLocked || availability.busy || Boolean(computer.device && computer.freshness === "stale"), onClick: () => { void actions.openDesktop!(target) } }
+    // A macOS computer's screen is shown while it runs and is not being changed.
+    const idle = computer.macos ? !availability.canOpen : false
+    return { ...(computer.macos && { label: "Show screen" }), disabled: (computer.macos ? readOnly : configurationLocked) || availability.busy || idle || Boolean(computer.device && computer.freshness === "stale"), onClick: () => { void actions.openDesktop!(target) } }
   }
 
   /** A computer's ⋯ menu actions and popovers, built once for its list row and its page. The
@@ -234,9 +243,26 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
     const availability = computerAvailability(computer, source)
     const stale = computer.freshness === "stale"
     const local = !computer.device
+    // One entry per installed agent: it opens the person's terminal with the agent started.
+    const agentItems: MenuAction[] = actions.openAgent && computerCan({ runtime: configuration.runtime, os: computer.os, remote: !local }, "terminal")
+      ? openableAgents(agentsOf(computerTarget(computer))).map(({ id, name }) => ({
+        label: `Open ${name}`, icon: Bot, accessibleLabel: openAgentLabel(id, configuration.name),
+        disabled: readOnly || !availability.canOpen, tooltip: readOnly || availability.canOpen ? undefined : availability.reasons.open,
+        onSelect: () => actions.openAgent?.(computerTarget(computer), id),
+      }))
+      : []
+    if (computer.macos) {
+      const items: MenuAction[] = [
+        ...agentItems,
+        { label: "Checkpoints", icon: History, accessibleLabel: `Checkpoints for ${configuration.name}`, onSelect: () => openComputer(configuration.id, "checkpoints") },
+        ...(local && exportComputer && canCheckpointMacos(computer.macos) ? [{ label: "Export…", icon: Download, accessibleLabel: `Export ${configuration.name}`, disabled: readOnly || availability.busy || transferBusy, onSelect: () => exportComputer(configuration.name) }] : []),
+      ]
+      return { items }
+    }
     const restartCheck = guard.check(computer, "restart")
     const restartPrompt = restartCheck.kind === "confirm" && availability.canRestart && !readOnly ? restartCheck.prompt : undefined
     const items: MenuAction[] = [
+      ...agentItems,
       restartPrompt
         ? { label: "Restart…", icon: RotateCw, accessibleLabel: `Restart ${configuration.name}`, popover: "restart" }
         : { label: "Restart", icon: RotateCw, accessibleLabel: `Restart ${configuration.name}`, disabled: readOnly || !availability.canRestart, tooltip: readOnly || availability.canRestart ? undefined : availability.reasons.restart, onSelect: () => guard.request(computer, "restart") },
@@ -266,7 +292,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   // otherwise point at something that no longer exists.
   const knownComputers = useRef(new Map<string, { id: string; name: string; deviceId: string; target: string }>())
   useEffect(() => {
-    const current = new Map(source.computers.map(computer => [`${computer.device?.id ?? ""}:${computer.configuration.id}`, { id: computer.configuration.id, name: computer.configuration.name, deviceId: computer.device?.id ?? "", target: computerTarget(computer) }]))
+    const current = new Map(fullSource.computers.map(computer => [`${computer.device?.id ?? ""}:${computer.configuration.id}`, { id: computer.configuration.id, name: computer.configuration.name, deviceId: computer.device?.id ?? "", target: computerTarget(computer) }]))
     for (const [key, known] of knownComputers.current) {
       if (current.has(key)) continue
       dismissComputerToastsById(known.id)
@@ -277,7 +303,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
       dismissComputerToasts(known.name)
     }
     knownComputers.current = current
-  }, [source.computers])
+  }, [fullSource.computers])
 
   /** Open the fork `name`, created on the same device as its source computer. */
   function forkOpenAction(name: string, deviceId = "") {
@@ -305,7 +331,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
     })
   }
 
-  const { folderComputer, showFolderPicker, openFolderPicker, closeFolderPicker, menuRequest } = useComputerPageRequest({ active, selectedId, activeComputerTab, computerRequest, onComputerRequestHandled, openComputer, computers, source })
+  const { folderComputer, showFolderPicker, openFolderPicker, closeFolderPicker, menuRequest } = useComputerPageRequest({ active, selectedId, activeComputerTab, computerRequest, onComputerRequestHandled, openComputer, computers: allComputers, source: fullSource })
   if (folderComputer && showFolderPicker) {
     return <PageContainer className="flex h-full min-h-0 flex-col">
       <StatusFolderPicker key={folderComputer.configuration.id} computer={folderComputer} editor={source.preferences.editor} listDirectory={actions.listComputerDirectory} onBack={closeFolderPicker} onOpen={(path) => actions.openEditor(computerTarget(folderComputer), path)} />
@@ -319,7 +345,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
     const menu = computerMenu(computer)
     // Edit and Delete are appended and handled in place by the detail page; Duplicate hands
     // off to the list editor for the new computer. Editing is offered only when not read-only.
-    const editing: ComputerDetailEditing | undefined = readOnly ? undefined : {
+    const editing: ComputerDetailEditing | undefined = readOnly || computer.macos ? undefined : {
       configurations,
       devices: source.devices,
       getDeviceId: getComputerDeviceId,
@@ -339,7 +365,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
       activeTab: activeComputerTab,
       onSelectTab: selectComputerTab,
       readOnly,
-      configurationLocked,
+      // Linux computer changes in flight do not lock a macOS computer.
+      configurationLocked: computer.macos ? readOnly : configurationLocked,
       computerOperationBusy: availability.busy,
       changesBlocked: changesBlocked(computer),
       menuRequest: menuRequest?.computerId === computer.configuration.id ? menuRequest : undefined,
@@ -354,7 +381,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
       onEditor: () => openFolderPicker(configuration.id),
       desktop: desktopAction(computer),
       lifecycleGuard: guard,
-      onCheckpointExport: exportComputer ? (checkpoint: ComputerCheckpoint) => exportComputer(configuration.name, { id: checkpoint.id, name: checkpoint.name }) : undefined,
+      onCheckpointExport: exportComputer ? (checkpoint: Pick<ComputerCheckpoint, "id" | "name">) => exportComputer(configuration.name, { id: checkpoint.id, name: checkpoint.name }) : undefined,
       checkpointExportDisabled: transferBusy || backup?.state.availability === "unavailable",
       onCheckpointForkedAction: (name: string) => forkOpenAction(name, computer.device?.id),
       onCheckpointRestoredAction: () => ({ label: "Start", onClick: lifecycleLater(computer, "start", false) }),
@@ -366,7 +393,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
       <div className="min-h-0 flex-1">
         {detailComputer ? (
           // Keyed per computer so edit drafts, delete confirmations and panel state never carry over.
-          <ComputerDetailPage key={computerTarget(detailComputer)} computer={detailComputer} source={source} actions={actions} controls={detailControls(detailComputer)} />
+          <ComputerDetailPage key={computerTarget(detailComputer)} computer={detailComputer} source={fullSource} actions={actions} controls={detailControls(detailComputer)} />
         ) : (
           <>
             {connecting && actions.connectDevice && <div className="mb-3"><ConnectDeviceForm connect={actions.connectDevice} authorize={actions.authorizeDevice} setupKey={actions.setupDeviceKey} onClose={() => setConnecting(false)} /></div>}
@@ -379,6 +406,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
               newComputerRequest={readOnly ? undefined : newComputerRequest}
               onNewComputerRequestHandled={onNewComputerRequestHandled}
               onOpenComputer={(configuration) => openComputer(configuration.id)}
+              onOpenMacosComputer={(id) => openComputer(id)}
               configurationActionRequest={configurationAction}
               onConfigurationActionHandled={(token) => setConfigurationAction((current) => current?.token === token ? undefined : current)}
               configurations={configurations}

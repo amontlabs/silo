@@ -68,7 +68,7 @@ pub fn start_background(
     crate::methods::computers::install_credential_source(context.clone());
     start_computer_use(context.clone());
     start_keep_recovery(context.clone());
-    crate::guest_bridge::start(context.clone());
+    crate::channel::start(context.clone());
     // The timers are the engine's own upkeep with no client connected (95 A-26).
     crate::timers::start(context.clone());
     let services = Arc::new(SilodStartupServices::new(
@@ -77,12 +77,42 @@ pub fn start_background(
         update_recovery,
     ));
     let state = context.runtime_state().startup().clone();
+    let migration_context = context.clone();
     let spawned = std::thread::Builder::new()
         .name("silod-launch-pass".into())
-        .spawn(move || silo_engine::startup::install(state, services));
+        .spawn(move || {
+            // Computers are not started or listed as healthy before their storage is moved.
+            move_to_protected_storage(&migration_context);
+            silo_engine::startup::install(state, services)
+        });
     if let Err(error) = spawned {
         eprintln!("silod: could not start the launch pass: {error}");
+        context.migration_controller().release_protected_storage();
     }
+}
+
+// MARK: Protected storage
+
+/// Moves computers created by MicroSandbox 0.7.6 to the protected storage of the bundled
+/// runtime, once per launch until none needs attention. Publishes `migration.changed` on every
+/// step; a computer that cannot be moved says why in the computers list.
+fn move_to_protected_storage(context: &Arc<SilodContext>) {
+    let migration = context.migration_controller();
+    let host = SilodRuntimeHost::for_engine(context.clone());
+    let result = (|| {
+        let storage = silo_engine::runtime_migration::selected_runtime_storage(
+            &context.paths().app_data,
+        )?;
+        let paths = runtime::migration_runtime_paths(&host, &storage)?;
+        migration.run_protected_storage(&runtime::ProcessRunner, &paths, &|| {
+            silo_engine::runtime_migration::publish_state(context.as_ref(), &migration)
+        })
+    })();
+    if let Err(error) = result {
+        eprintln!("silod: the computer storage upgrade did not finish: {error}");
+    }
+    // A failure before the step started would otherwise leave the computers closed.
+    migration.release_protected_storage();
 }
 
 // MARK: Launch migration
@@ -234,7 +264,8 @@ fn start_keep_recovery(context: Arc<SilodContext>) {
             Err(error) => eprintln!("silod: could not start the keep recovery: {error}"),
         }
     }
-    started += start_promote_recovery(context, host, &held_tx);
+    started += start_promote_recovery(context.clone(), host.clone(), &held_tx);
+    started += start_rebuild_recovery(context, host, &held_tx);
     drop(held_tx);
     // Startup goes on once every computer is held, or after a short wait when it cannot be.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -289,6 +320,51 @@ fn start_promote_recovery(
         match spawned {
             Ok(_) => started += 1,
             Err(error) => eprintln!("silod: could not start the promote recovery: {error}"),
+        }
+    }
+    started
+}
+
+/// Settles a rebuild the engine stopped in the middle of: finished when its swap was done,
+/// rolled back before that. The computer's lane and operation gate are held from engine start
+/// until it is settled, and the recovery is retried while the runtime is not ready.
+fn start_rebuild_recovery(
+    context: Arc<SilodContext>,
+    host: Arc<dyn RuntimeHost>,
+    held: &std::sync::mpsc::Sender<()>,
+) -> usize {
+    let journal = silo_engine::rebuild::service::journal_for(host.engine_context().as_ref());
+    // Home folders staged for a rebuild that no longer exists were left by a stop in the middle
+    // of carrying one.
+    silo_engine::rebuild::service::sweep_stage(host.engine_context().as_ref());
+    let mut started = 0;
+    for id in silo_engine::rebuild::interrupted_ids(&journal) {
+        let (context, host, journal, held) =
+            (context.clone(), host.clone(), journal.clone(), held.clone());
+        let spawned = std::thread::Builder::new()
+            .name("silod-rebuild-recovery".into())
+            .spawn(move || {
+                let env = silo_engine::rebuild::service::env_for(
+                    host,
+                    crate::methods::checkpoints::service_for(&context),
+                );
+                let result = silo_engine::rebuild::recover_one(
+                    &env,
+                    &journal,
+                    &id,
+                    &|| {
+                        let _ = held.send(());
+                    },
+                    30,
+                    std::time::Duration::from_secs(10),
+                );
+                if let Err(error) = result {
+                    eprintln!("silod: could not settle an interrupted rebuild: {error}");
+                }
+            });
+        match spawned {
+            Ok(_) => started += 1,
+            Err(error) => eprintln!("silod: could not start the rebuild recovery: {error}"),
         }
     }
     started

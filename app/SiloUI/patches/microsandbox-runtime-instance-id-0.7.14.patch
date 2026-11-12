@@ -1,0 +1,64 @@
+diff --git a/crates/cli/bin/main.rs b/crates/cli/bin/main.rs
+index a92bfa4d6f19cd8c1539aae194890647947cc392..dfc0bd786f983a44b3517f2ccf2aaa5eb85a9234 100644
+--- a/crates/cli/bin/main.rs
++++ b/crates/cli/bin/main.rs
+@@ -270,7 +270,8 @@ fn silo_protocol_probe(arguments: &[std::ffi::OsString]) -> Option<&'static str>
+                 || flag == "--silo-github-token-protocol"
+                 || flag == "--silo-github-protocol"
+                 || flag == "--silo-working-account-protocol"
+-                || flag == "--silo-secret-values-protocol" =>
++                || flag == "--silo-secret-values-protocol"
++                || flag == "--silo-runtime-instance-protocol" =>
+         {
+             Some("1")
+         }
+@@ -867,6 +868,7 @@ mod command_tests {
+             "--silo-github-protocol",
+             "--silo-working-account-protocol",
+             "--silo-secret-values-protocol",
++            "--silo-runtime-instance-protocol",
+         ] {
+             assert_eq!(silo_protocol_probe(&[flag.into()]), Some("1"));
+         }
+diff --git a/crates/cli/lib/commands/inspect.rs b/crates/cli/lib/commands/inspect.rs
+index 7c3211f520d6b394270448836585273d50326b43..8a0a1e9291c91e86e1813480618af5a77626852f 100644
+--- a/crates/cli/lib/commands/inspect.rs
++++ b/crates/cli/lib/commands/inspect.rs
+@@ -119,6 +119,7 @@ pub async fn run(args: InspectArgs) -> anyhow::Result<()> {
+             "name": handle.name(),
+             "status": format!("{:?}", handle.status_snapshot()),
+             "pause": pause_state,
++            "runtime_instance_id": handle.runtime_instance_id().await?,
+             "config": config,
+             "created_at": handle.created_at().map(|dt| ui::format_json_datetime(&dt)),
+             "updated_at": handle.updated_at().map(|dt| ui::format_json_datetime(&dt)),
+diff --git a/sdk/rust/lib/sandbox/handle.rs b/sdk/rust/lib/sandbox/handle.rs
+index bcda596a06b69a84e294e31798500bdae99d9a07..2f4e26cc7cb7ae9507279ce1d0bf2e9aa1591b89 100644
+--- a/sdk/rust/lib/sandbox/handle.rs
++++ b/sdk/rust/lib/sandbox/handle.rs
+@@ -255,6 +255,25 @@ impl SandboxHandle {
+         }
+     }
+ 
++    /// Identity of the active local runtime generation, if it still matches this handle.
++    pub async fn runtime_instance_id(&self) -> MicrosandboxResult<Option<String>> {
++        let Some(local) = self.local() else {
++            return Ok(None);
++        };
++        if local.status != SandboxStatus::Running || local.pid.is_none() {
++            return Ok(None);
++        }
++        let Some(backend) = self.backend.as_local() else {
++            return Ok(None);
++        };
++        let pools = backend.db().await?;
++        let run = crate::backend::LocalBackend::load_active_run(pools.read(), local.db_id).await?;
++        Ok(run.filter(|run| run.pid == local.pid).and_then(|run| {
++            run.started_at
++                .map(|started| format!("{}:{}", run.id, started))
++        }))
++    }
++
+     /// Snapshot of the cloud `last_failure_message`, if any. Returns `None`
+     /// for local handles (local errors flow through the typed error stack).
+     pub fn last_failure_message_snapshot(&self) -> Option<String> {

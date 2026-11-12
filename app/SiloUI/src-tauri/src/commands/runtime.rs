@@ -9,10 +9,11 @@
 
 use crate::engine_client::{
     params::{decode, device, job_id as parse_job_id, target},
-    Engine, EngineClient, EngineError,
+    targets, Engine, EngineClient, EngineError,
 };
 use serde_json::Value;
 use silo_api::methods::{
+    agents::AgentId,
     common::EmptyParams,
     computers::{
         ComputerConfigurationChangeParams, ComputerConfigurationRetryParams,
@@ -189,6 +190,7 @@ pub(crate) async fn lifecycle_action(
                 .call(requests::terminal_command(TerminalCommandParams {
                     computer_id,
                     device_id: None,
+                    agent: None,
                 }))
                 .await?;
             let settings = engine.call(requests::settings_read(EmptyParams {})).await?;
@@ -235,6 +237,33 @@ pub(crate) async fn lifecycle_action(
     engine.application_source(false).await
 }
 
+/// Opens the person's terminal on `computer` (a local name or a remote target) with `agent`
+/// started in the computer's workspace folder. The engine builds the command from the agent;
+/// this app only starts it. Nothing is started if the computer is stopped.
+pub(crate) async fn open_agent(
+    engine: &EngineClient,
+    computer: &str,
+    agent: AgentId,
+    open_terminal: impl FnOnce(&serde_json::Map<String, Value>, &[String]) -> Result<(), String>,
+) -> Result<Value, EngineError> {
+    let target = targets::resolve(engine, computer).await?;
+    let command = engine
+        .call(requests::terminal_command(TerminalCommandParams {
+            computer_id: target.computer_id,
+            device_id: target.device_id,
+            agent: Some(agent),
+        }))
+        .await?;
+    let settings = engine.call(requests::settings_read(EmptyParams {})).await?;
+    let settings = settings
+        .get("settings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    open_terminal(&settings, &argv(&command)?).map_err(EngineError::internal)?;
+    engine.application_source(false).await
+}
+
 fn argv(command: &Value) -> Result<Vec<String>, EngineError> {
     command
         .get("argv")
@@ -253,7 +282,12 @@ pub(crate) async fn computer_action(
     action: String,
     name: String,
     path: Option<String>,
+    agent: Option<AgentId>,
 ) -> Result<Value, EngineError> {
+    if action == "open-agent" {
+        let agent = agent.ok_or_else(|| EngineError::internal("Choose an agent to open."))?;
+        return open_agent(&engine, &name, agent, crate::host_launch::open_terminal).await;
+    }
     lifecycle_action(
         &engine,
         &action,
@@ -498,6 +532,50 @@ mod forwarding_tests {
         .await
         .unwrap_err();
         assert_eq!(failed.message, "The editor could not be opened.");
+    }
+
+    #[tokio::test]
+    async fn opening_an_agent_asks_the_engine_for_that_agents_terminal_and_runs_it() {
+        let fake = FakeEngine::start(|method, params| engine_replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        for (computer, agent, expected) in [
+            (
+                "dev",
+                AgentId::ClaudeCode,
+                json!({"computerId": DEV, "agent": "claude-code"}),
+            ),
+            (
+                "silo-remote:office:c9",
+                AgentId::Codex,
+                json!({"computerId": "c9", "deviceId": "office", "agent": "codex"}),
+            ),
+        ] {
+            let launched = Arc::new(Mutex::new(None));
+            let seen = launched.clone();
+            open_agent(&engine, computer, agent, move |settings, argv| {
+                *seen.lock().unwrap() = Some((settings.clone(), argv.to_vec()));
+                Ok(())
+            })
+            .await
+            .unwrap();
+            let (settings, argv) = launched.lock().unwrap().clone().unwrap();
+            assert_eq!(settings["terminalApplication"], "x");
+            assert_eq!(argv, vec!["/usr/bin/ssh", "-t", "alias"]);
+            assert_eq!(
+                fake.calls(MethodName::TerminalCommand).last(),
+                Some(&expected)
+            );
+        }
+        let failed = open_agent(&engine, "dev", AgentId::Codex, |_, _| {
+            Err("No terminal could be opened.".into())
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(failed.message, "No terminal could be opened.");
+        let missing = open_agent(&engine, "ghost", AgentId::Codex, |_, _| Ok(()))
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code, "not_found");
     }
 
     #[tokio::test]

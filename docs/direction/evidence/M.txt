@@ -1,0 +1,75 @@
+M: live check of the Direction build on MicroSandbox 0.7.14, with the app on screen
+Run 2026-11-11 by the test sub-agent. Branch direction at 5eb4e9c67 (includes 25276e2d7 MSB 0.7.14, R8, R9, R10).
+App: app/SiloUI/target/debug/bundle/macos/Silo Dev.app (built with `desktop:build:debug`, log app/SiloUI/target/verification/m-build.log;
+opened by exact path after `lsregister -f` on it). Dev engine, live data (the shared Dev home), throwaway e2e-m-* computers only.
+GUI through LCU (mcp__lcu__js, accessibility tree, a few scaled screenshots); in-guest commands through the bundle's `silo exec`.
+Production (~/.silo, silod pid 1238, app "Silo") not touched.
+
+== Migration of the shared Dev home (one way, intended)
+- Dev engine first started on 0.7.14: 2026-11-11 21:37:57 (silod pid 89235, started by launchd after the app's launcher registered the job; see A).
+- Protected storage report written 21:38:05 (about 8 s): runtime/protected-storage.json lists 6 computers, all "repaired", all in backed_up:
+  workspace-1, e2e-relay, silo-eval-a, silo-eval-b, silo-build-demo-7cb168dc, silo-build-openclaw-e58d4252.
+  No Needs attention. Backup clone runtime-backup-before-protected-storage (about 21 GB on disk, cloned) written 21:38:02.
+- Disk free: 104 GiB before the build, 102 GiB at launch, 101 GiB after the move (the backup is cloned); 103 GiB at the end of the run.
+
+== A. Engine start (R9)
+[FAIL] A1 The app starts its own Dev engine -- it did not. "Silo could not load: Silo's engine is not reachable yet" for 4 minutes. `launchctl print gui/501/org.silo.dev.engine`: state "spawn scheduled", last exit code 78 (EX_CONFIG), runs = 9+, "submitted by smd", BTM uuid 59759BD0-..., parent bundle org.silo.dev 0.13.0. launchd log: "Could not find and/or execute program specified by service: 3: No such process: Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silod" and "Service could not initialize: copy_bundle_path(59759BD0-..., 501, 0), error 0x6f". Cause: the job was registered earlier by another copy of org.silo.dev (three copies exist: this bundle, the main checkout's release bundle, a t3 worktree bundle) and launchd cannot resolve its relative program. The launcher saw a loaded job (job_loaded() == Some(true)) and only kickstarted it, forever. Saved: app/SiloUI/target/verification/m-A-first-launch.txt.
+[PASS] A2 After `launchctl bootout gui/501/org.silo.dev.engine` (the Dev job only) and Retry, the app's own launcher registered the agent from this bundle and the engine came up with no hand-started silod (21:37:57); `launchctl list` shows org.silo.dev.engine with a pid.
+[FAIL] A3 Stale error screens after the engine was up -- the "Silo could not load" screen stayed until Retry was clicked (the migration was already finished), and after Retry the app loaded but "System issue: Silo runtime is unavailable ... desktop bridge did not respond" stayed (10+ s, with every Open Terminal / Zed / Start disabled, "Resolve the system issue first") until "Retry checks" was clicked. R9's "health checks re-run when the engine connects" did not hold on this path.
+[PASS] A4 After a quit and relaunch of the app (engine already running): no System issue, list loaded at once, no Retry needed.
+
+== B. Existing Dev computers after the migration
+[PASS] B1 All 6 existing computers listed (6 computers, 0 on other devices), all Stopped, none Needs attention.
+[PASS] B2 Started workspace-1 from the app's play button (running in about 20 s, Open Terminal/Zed/desktop enabled; "workspace-1 is running"); started silo-eval-a and silo-eval-b with `silo start` and ran `hostname` in each (4-7 s each). e2e-relay, silo-build-demo-* and silo-build-openclaw-* were not started (only listed, no Needs attention). Stopped all again.
+
+== C. Create, fork from inside, merge back with an approval (R8)
+[PASS] C1 Created e2e-m-main (Linux, 2 cpu, 4 GiB, 20 GiB disk) and started it; `silo fork e2e-m-main --name e2e-m-g1` from inside main made and started e2e-m-g1.
+[PASS] C2 No conflict on /etc/silo/endpoint.json: `silo diff e2e-m-g1` lists it under "Ignored: 3 paths" (endpoint.json and two pulse files); the only change was the one I made (+ /etc/m-g1.conf); the merge asked for nothing to choose.
+[PASS] C3 One Pending row for the ask ("e2e-m-main asks polarzero-MBP: Merge the changes of "e2e-m-g1" into "e2e-m-main"."), sidebar "1 waiting for you", names and no ids anywhere.
+[PASS] C4 The review (page "e2e-m-g1 -> e2e-m-main") shows the agent's note, Changes buckets (Settings & files 1) and the diff "+ /etc/m-g1.conf"; credentials "none".
+[PASS] C5 Allow (the page's Merge button, then "Merge" in "Merge into e2e-m-main?"): "You allowed this", approval ap-68f3a28629944a37 allowed; /etc/m-g1.conf (content "cfg") present in e2e-m-main.
+[FAIL] C6 The agent's own `silo merge` did not get the result: after the owner allowed it the merge landed, but the in-guest command printed "Merging e2e-m-g1: 11s" then "silo: The job was not found." and exited 1 (log app/SiloUI/target/verification/m-C-merge.log). `silo approvals status ap-...` says "It started the job job:5247" but `silo job job:5247` (host and guest) also says "The job was not found." Activity shows "operations.job.acknowledge" by You at 21:51:46, i.e. the app acknowledged the job before the guest read its end. Likely: silod/src/methods/access.rs:1320 (owner_job_operation, "operations.job.get") and methods/operations.rs:106/311 with silo_engine::jobs::get_at; an acknowledged owner job is dropped while the approval's waiting agent still polls it.
+
+== D. Inside a computer, silo tools status (R8)
+[PASS] D1 `silo tools status e2e-m-main` inside e2e-m-main: exit 0 ("Silo's tools are on (port 54668); it can reach them now", silo: ok, silo-mcp: waiting). (Without a name it prints clap's "required arguments ... <COMPUTER>"; usage, not a bug.)
+[PASS] D2 `silo tools status e2e-m-g1` inside main: "A computer's agent can read the tools status of its own computer only." (exit 1); `silo tools status workspace-1`: "No computer is called workspace-1." The audit shows the refusal as Refused (permission_denied).
+
+== E. Activity and toasts (R9)
+[PASS] E1 Activity > Who did what > Open request on the row "Merged changes / e2e-m-g1 / Asked you" of the live computer e2e-m-main opened the request page. (It only worked after the toast stack was closed: four "is running" toasts covered the right-aligned button, and a click on the cell's centre does nothing, as in V.)
+[PASS] E2 With a request page open, clicking Pending in the sidebar showed the Pending list (heading "Pending", "Waiting for you").
+[PASS] E3 Failure toast: `silo drop e2e-m-g1` of a running fork -> toast "Couldn't delete e2e-m-g1 / Stop computer 'e2e-m-g1' before removing it from Silo..." at 21:54:08, gone by about 21:54:28 (about 20 s, unattended).
+
+== F. Failed agent install
+[PASS] F1 e2e-m-main on allowlist (example.com only), restarted; Install Codex: "Could not install Codex: Codex could not be installed: the network of e2e-m-main does not allow nodejs.org and github.com, which Codex is downloaded from. Allow them in its network settings, then try again." and the button is now "Retry installing Codex in e2e-m-main" (in 5 s). Not retried.
+
+== G. Network
+[PASS] G1 Allowlist mode (example.com), from inside: http://neverssl.com/, http://example.org/, http://1.1.1.1/, https://github.com/ and http://example.com/ (port 80 not allowed) each answered `HTTP/1.1 403 Forbidden`, `Content-Type: application/json`, body {"code":"network_policy_denied","domain":"<host>","message":"Request blocked by network policy."} (Silo's answer; no data from the host). A raw TCP connect to 1.1.1.1:80 (bash /dev/tcp) completes but the reply is the same JSON, "domain":"one.one.one.one" (the Host header I sent), no data from 1.1.1.1. https://example.com answered 200. OWNER_REVIEW 30 confirmed.
+
+== H. Desktop
+[PASS] H1 "Open e2e-m-main desktop" opened a window "e2e-m-main -- Silo Dev" (Selkies on 127.0.0.1:56488) and a screenshot showed the Linux desktop (panel, "File System", "Home", dock); closed it with the window's close button.
+
+== I. Storage reclaim
+[PASS] I1 Computer page > Storage tab > "Free up space": toast "Freed 0 B / Released on this device."; the row reads "Nothing to free - just now" (a prior automatic attempt "6 minutes ago" had also run when main stopped).
+
+== J. macOS computer from the existing template
+(Template 25G83 existed, 27 GB on disk; free disk stayed 95-103 GiB, always above 40.)
+[PASS] J1 New computer form, Operating system macOS, name e2e-m-mac, 4 CPUs 8 GiB 64 GiB, Create: the computer was made on disk in about a minute (computer.json installed:true, setup done); the template was refreshed once (an earlier `silo create --macos` made at 21:56 rebuilt it from a pristine copy: macos-templates/25G83-...-a11e... replaced by ...-b6c556f93266baf2, 82 s).
+[FAIL] J2 The app's list does not follow the engine for macOS computers: a computer made with `silo create --macos` never appeared in the app (9th computer missing; "8 computers" for 15+ s); the one made in the app stayed at "macOS Preparing ... 50%" with Open Terminal and Stop disabled for 12+ minutes after it was created and (via `silo start`) running. Only quitting and reopening the app (Quit > "Keep running") showed it "macOS Running - macOS 26.6.2 (25G83)". The macOS store refreshes only on its own operations: src/features/macos-computers/model/macos-computers.ts (refresh() around line 365; remote poll timer around 335).
+[PASS] J3 Started it (`silo start e2e-m-mac`, 15 s), `sw_vers` inside: 26.6.2, user silo.
+[PASS] J4 Computer page > "Open e2e-m-mac in Terminal": an `ssh -t` to silo-08b4483f-... started (pid alive 14 s later); inside the guest `who` shows a new ttys000 session from 172.30.155.5 running -zsh.
+[PASS] J5 Stopped and dropped e2e-m-mac right after (and the CLI-made one earlier); macos-computers/ is empty again, disk 102 GiB free.
+
+== Skipped
+[SKIPPED] S1 GitHub (needs the owner's account).
+[SKIPPED] S2 Keychain-approval secrets (need the owner).
+
+== Totals: PASS 22, FAIL 4 (A1, A3, C6, J2), SKIPPED 2 (28 lines)
+
+== Cleanup
+All e2e-m-* computers deleted (e2e-m-main, e2e-m-g1, e2e-m-mac; `silo list` shows only the 6 existing ones, all stopped). Silo Dev quit through its menu (final quit with nothing running). The Dev engine is still running: launchd keeps org.silo.dev.engine (silod pid 89235) after the app quits, as designed (KeepAlive after the app registered it); it was not stopped. Production silod pid 1238 untouched. `df -h ~`: 926 GiB, 733 GiB used, 103 GiB free (88%).
+
+== Other findings (not in the checklist; no product code changed)
+1. Success toasts never close on their own ("is running Took 4 seconds", "Freed 0 B") and pile up over the page's right edge, covering row buttons (they hid Open request in E1). R9 made only failure toasts expire.
+2. Activity > Who did what shows internal method names as the "What": guestClient.status, steps.record, changes.requests.show, changes.diff, operations.job.acknowledge (src/features/application/components/audit-log.tsx auditAction has no wording for them).
+3. A tool note: calling accessibility on a Silo Dev handle after quitting the app made LCU relaunch it (environment; check with `ps` instead after Quit).
+4. After the one-way move, the first launch's migration screen was never visible to the owner in this run: the app showed the error screen the whole time (see A1/A3), so "Upgrading computer storage" progress was not seen; the move itself took about 8 s.

@@ -30,6 +30,32 @@ pub type ComputerLaunchResult = LaunchStatus;
 pub type ComputerDismissErrorParams = ComputerTargetParams;
 pub type ComputerForceStopParams = ComputerTargetParams;
 pub type ComputerLifecycleParams = ComputerTargetParams;
+
+wire_struct! {
+    /// `computers.rebuild`: the computer to rebuild, and whether to rebuild it although it is
+    /// already on the newest image. With `abandon`, nothing is rebuilt: an interrupted rebuild
+    /// that Silo could not settle is thrown away and the old computer is put back.
+    ComputerRebuildParams {
+        computer_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        force: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        abandon: Option<bool>,
+    }
+}
+
+wire_struct! {
+    /// The final result of `computers.rebuild`.
+    ComputerRebuildResult {
+        computer_id: String,
+        name: String,
+        undo_name: String,
+        image: String,
+    }
+}
+
 pub type ComputerDeleteResult = ApplicationSource;
 wire_struct! { ComputerConfigurationRetryParams { #[serde(default, skip_serializing_if = "Option::is_none")] request_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] retry_computer_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] device_id: Option<String> } }
 wire_struct! { ComputerCreateResult { job_id: crate::jobs::JobId, #[serde(default, skip_serializing_if = "Option::is_none")] computer: Option<MacosComputer> } }
@@ -188,11 +214,31 @@ pub enum ComputerCreateParams {
         request_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
+        /// Agents to install during the new computer's first boot, after its setup. A failed
+        /// install does not fail the creation: the creation job reports it and the agent
+        /// lists as `missing`. Empty installs none. A macOS computer does not accept agents
+        /// at creation yet (see the `macos` kind); `agents.install` installs one in a running
+        /// computer of either kind. An agent that lists as `ready` is the computer's own
+        /// report, and a computer can claim it.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agents: Vec<super::agents::AgentId>,
+        /// The new computer's network policy. Absent, it is open.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network_policy: Option<super::network::NetworkPolicy>,
     },
     Macos {
         request: MacosComputerCreateRequest,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
+        /// Not accepted yet: a macOS computer refuses a non-empty list, because its setup ends
+        /// with the computer stopped. Create the computer, start it, then install an agent
+        /// with `agents.install`. An agent that lists as `ready` is the computer's own report,
+        /// and a computer can claim it.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agents: Vec<super::agents::AgentId>,
+        /// The new computer's network policy. Absent, it is open.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network_policy: Option<super::network::NetworkPolicy>,
     },
 }
 
@@ -292,6 +338,10 @@ pub struct ApplicationComputer {
     pub freshness: Freshness,
     #[serde(default, skip_serializing_if = "is_false")]
     pub settling: bool,
+    /// The computer's storage could not be moved to the protected layout of the new runtime. It
+    /// cannot start until a later launch finishes the move; `attention` says why.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub needs_storage_upgrade: bool,
     pub repositories: Vec<serde_json::Value>,
     pub files: Vec<serde_json::Value>,
     pub ports: Vec<serde_json::Value>,

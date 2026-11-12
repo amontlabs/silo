@@ -15,6 +15,21 @@ wire_struct! {
     }
 }
 
+/// How an item both sides changed is settled.
+#[derive(
+    Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, serde::Serialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum KeepAnswer {
+    /// The fork's version is written over main's.
+    Fork,
+    /// The item stays as main has it.
+    Main,
+    /// A repository only: the fork's commits arrive as a branch named `silo/<fork name>` and
+    /// nothing is merged or checked out.
+    Branch,
+}
+
 wire_struct! {
     ChangesKeepParams {
         /// The device that owns this; absent or `local` is this device.
@@ -37,6 +52,17 @@ wire_struct! {
         /// fork's changes no longer match it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         review_digest: Option<String>,
+        /// The answer for each item both sides changed, by item id (the `id` of a conflict, or
+        /// of an entry in `changes.diff`). A repository takes `branch` or `main`; every other
+        /// item takes `fork` or `main`. An id that is not in the reviewed diff, or an answer the
+        /// item does not allow, fails the keep and names the item. Databases take no answer.
+        /// Choices are checked against the reviewed diff and are not part of the review digest.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        choices: Option<std::collections::BTreeMap<String, KeepAnswer>>,
+        /// Item ids not to bring over even though they do not conflict. The same as answering
+        /// `main`; the report calls them `skipped`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skip: Option<Vec<String>>,
     }
 }
 
@@ -100,16 +126,31 @@ wire_struct! {
 
 wire_struct! {
     KeepConflict {
-        /// `file`, `package`, `crontab`, `launch agent` or `git`.
+        /// `file`, `package`, `crontab`, `git`, `credentials` or `destination`.
         kind: String,
         item: String,
         detail: String,
+        /// The id of the item, the key of its answer in `choices`; empty when no answer
+        /// settles the conflict (credentials).
+        #[serde(default)]
+        id: String,
+        /// The answers that settle it; empty when none does.
+        #[serde(default)]
+        allowed: Vec<KeepAnswer>,
+        /// What changed in the fork, in a few words.
+        #[serde(default)]
+        fork_change: String,
+        /// What changed on main, in a few words.
+        #[serde(default)]
+        main_change: String,
     }
 }
 
 wire_struct! {
     KeepRefusal {
-        /// `divergent`, `database` or `git`.
+        /// `choices-needed` (both sides changed items that have no answer yet: `conflicts` lists
+        /// them with the answers each allows), `database`, `credentials`, `changed` or
+        /// `main-changed`. Older engines also said `divergent` and `git`.
         reason: String,
         message: String,
         conflicts: Vec<KeepConflict>,
@@ -129,12 +170,37 @@ wire_struct! {
         /// The digest of the fork's changes the keep acted on.
         #[serde(default)]
         review_digest: Option<String>,
+        /// What was done with each item, by id. Empty when the keep was refused.
+        #[serde(default)]
+        items: Vec<KeepItem>,
+        /// Whether main was unchanged since the fork was made, so nothing could conflict.
+        /// Absent when the keep stopped before main was looked at.
+        #[serde(default)]
+        fast_forward: Option<bool>,
+    }
+}
+
+wire_struct! {
+    /// What happened to one item.
+    KeepItem {
+        /// The item id.
+        id: String,
+        /// `file`, `package`, `repository`, `crontab`, `launch agent` or `database`.
+        kind: String,
+        label: String,
+        /// `brought-over`, `left-as-main` (answered `main`), `branch` (a repository's commits
+        /// left as a branch), `skipped` (listed in `skip`), `already-there` (main already holds
+        /// it) or `not-combined` (a database).
+        outcome: String,
+        /// The same in words.
+        detail: String,
     }
 }
 
 wire_struct! {
     /// The final result of `changes.keep`. `status` is `kept`, `dry-run` or `refused`; a
-    /// refused keep did not change the target.
+    /// refused keep did not change the target. A keep that needs answers is `refused` with the
+    /// reason `choices-needed`.
     ChangesKeepResult {
         status: String,
         report: KeepReport,
@@ -257,6 +323,10 @@ wire_struct! {
         /// target computer was deleted.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         closed_reason: Option<FoldRequestClosedReason>,
+        /// The approval that asks the owner to merge this request, when a computer's agent
+        /// asked for the merge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        approval_id: Option<String>,
     }
 }
 
@@ -279,9 +349,11 @@ mod tests {
                 params.keep,
                 params.dry_run,
                 params.data_ok,
-                params.review_digest
+                params.review_digest,
+                params.choices,
+                params.skip
             ),
-            (None, None, None, None, None)
+            (None, None, None, None, None, None, None)
         );
         let hooks: KeepHooks = serde_json::from_str(r#"{"restart":["web"]}"#).unwrap();
         assert!(hooks.migrate.is_empty() && hooks.after.is_empty());
@@ -314,5 +386,34 @@ mod tests {
             serde_json::to_value(&result).unwrap()["refusal"]["reason"],
             "database"
         );
+    }
+
+    #[test]
+    fn choices_and_a_choices_needed_refusal_round_trip() {
+        let params: ChangesKeepParams = serde_json::from_str(
+            r#"{"forkId":"f","choices":{"repo:/root/app":"branch","file:/etc/x":"fork"},"skip":["package:dpkg:jq"]}"#,
+        )
+        .unwrap();
+        let choices = params.choices.unwrap();
+        assert_eq!(choices["repo:/root/app"], KeepAnswer::Branch);
+        assert_eq!(params.skip.unwrap(), ["package:dpkg:jq"]);
+        let value = serde_json::json!({
+            "status": "refused",
+            "report": {"fork": "f", "target": "m", "summary": [], "steps": [], "notes": [], "checkpoint": null, "fastForward": false},
+            "refusal": {"reason": "choices-needed", "message": "m", "hint": "h", "conflicts": [
+                {"kind": "git", "item": "/root/app", "detail": "d", "id": "repo:/root/app",
+                 "allowed": ["branch", "main"], "forkChange": "new commits", "mainChange": "its own changes"}
+            ]}
+        });
+        let result: ChangesKeepResult = serde_json::from_value(value).unwrap();
+        let refusal = result.refusal.unwrap();
+        assert_eq!(
+            refusal.conflicts[0].allowed,
+            [KeepAnswer::Branch, KeepAnswer::Main]
+        );
+        assert_eq!(result.report.fast_forward, Some(false));
+        let old: KeepConflict =
+            serde_json::from_str(r#"{"kind":"file","item":"/a","detail":"d"}"#).unwrap();
+        assert!(old.id.is_empty() && old.allowed.is_empty());
     }
 }

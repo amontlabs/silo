@@ -200,6 +200,34 @@ fn diff(
             .map_err(internal)?
             .ok_or_else(|| GuestError::not_found("This computer has not been captured yet."))?
     };
+    let (result, noise_applied, baseline_available) =
+        compare(store, &base_text, &base_meta, &current_text, use_baseline)?;
+    let elapsed_seconds = store::unix_seconds(&base_meta.captured_at)
+        .zip(store::unix_seconds(&current_meta.captured_at))
+        .map(|(base, now)| now.saturating_sub(base).max(0) as u64);
+    to_value(ChangesDiffResult {
+        base_source: base_meta.source.clone(),
+        elapsed_seconds,
+        diff: to_value(&result)?,
+        text: result.render(max_lines.map_or(DEFAULT_MAX_LINES, |lines| lines as usize)),
+        base_captured_at: base_meta.captured_at,
+        captured_at: current_meta.captured_at,
+        baseline_applied: noise_applied,
+        baseline_available,
+        review_digest: keep::review_digest(&result),
+    })
+}
+
+/// The fork's changes since its base, less the idle noise of its source when `use_baseline` is
+/// set and a baseline is stored. Also says whether noise was subtracted and whether a baseline
+/// exists.
+fn compare(
+    store: &Store,
+    base_text: &str,
+    base_meta: &store::Meta,
+    current_text: &str,
+    use_baseline: bool,
+) -> Result<(diff_module::Diff, bool, bool), GuestError> {
     let ignore = IgnoreList::builtin();
     let cached = match base_meta.source.as_deref() {
         Some(source) => store
@@ -217,24 +245,31 @@ fn diff(
         None => None,
     };
     let result = diff_module::diff(
-        &parse(&base_text)?,
-        &parse(&current_text)?,
+        &parse(base_text)?,
+        &parse(current_text)?,
         noise.as_ref(),
         &ignore,
     );
-    let elapsed_seconds = store::unix_seconds(&base_meta.captured_at)
-        .zip(store::unix_seconds(&current_meta.captured_at))
-        .map(|(base, now)| now.saturating_sub(base).max(0) as u64);
-    to_value(ChangesDiffResult {
-        base_source: base_meta.source.clone(),
-        elapsed_seconds,
-        diff: to_value(&result)?,
-        text: result.render(max_lines.map_or(DEFAULT_MAX_LINES, |lines| lines as usize)),
-        base_captured_at: base_meta.captured_at,
-        captured_at: current_meta.captured_at,
-        baseline_applied: noise.is_some(),
-        baseline_available: cached.is_some(),
-        review_digest: keep::review_digest(&result),
+    Ok((result, noise.is_some(), cached.is_some()))
+}
+
+/// The number of changes in each bucket of the diff the stored captures give, when its review
+/// digest is `digest`: the counts a review request shows for the diff that was reviewed.
+pub fn review_counts(
+    store: &Store,
+    computer: &str,
+    digest: &str,
+) -> Option<std::collections::BTreeMap<String, u64>> {
+    let (base_text, base_meta) = store.get(computer, Slot::Base).ok().flatten()?;
+    let (current_text, _) = store.get(computer, Slot::Latest).ok().flatten()?;
+    [true, false].into_iter().find_map(|use_baseline| {
+        let (result, _, _) =
+            compare(store, &base_text, &base_meta, &current_text, use_baseline).ok()?;
+        if keep::review_digest(&result) != digest {
+            return None;
+        }
+        let document = to_value(&result).ok()?;
+        Some(silo_api::methods::review_requests::bucket_counts(&document))
     })
 }
 

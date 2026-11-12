@@ -24,11 +24,11 @@ async fn exchange(
 async fn initialize_list_and_call_round_trip() {
     let engine = FakeEngine::start(|method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running")])),
-        "secrets.list" => Ok(json!([{
-            "id": "s1", "name": "API_KEY", "computerIds": ["id-main"],
-            "allowedDomains": ["api.example.com"], "state": "active",
-            "pendingComputerIds": [], "removing": false, "error": null
-        }])),
+        "computers.access" => Ok(json!({
+            "computerId": "id-main", "name": "main",
+            "secrets": [{"name": "API_KEY", "hosts": ["api.example.com"]}],
+            "ports": []
+        })),
         other => Err(("internal", format!("unexpected {other}"))),
     });
     let (server_side, client_side) = tokio::io::duplex(64 * 1024);
@@ -79,10 +79,15 @@ async fn initialize_list_and_call_round_trip() {
         "exec",
         "checkpoint",
         "retry_setup",
-        "fold",
+        "merge",
+        "replace_main",
         "undo",
         "steps_list",
         "tree",
+        "resources",
+        "access",
+        "create",
+        "restore",
     ] {
         assert!(
             names.contains(&expected),
@@ -125,8 +130,16 @@ async fn initialize_list_and_call_round_trip() {
     .await;
     let text = secrets["result"]["content"][0]["text"].as_str().unwrap();
     let listed: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(listed["secrets"][0]["name"], "API_KEY");
-    assert_eq!(listed["secrets"][0]["computers"][0], "main");
+    assert_eq!(listed["computers"][0]["computer"], "main");
+    assert_eq!(listed["computers"][0]["secrets"][0]["name"], "API_KEY");
+    assert_eq!(
+        listed["computers"][0]["secrets"][0]["hosts"][0],
+        "api.example.com"
+    );
+    assert!(
+        engine.calls("secrets.list").is_empty(),
+        "names come from what a computer may read"
+    );
 
     for id in 10..14 {
         exchange(
@@ -156,7 +169,7 @@ async fn initialize_list_and_call_round_trip() {
         &mut write,
         &mut read,
         json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call",
-               "params": {"name": "fold", "arguments": {"fork": "f", "pr": true}}}),
+               "params": {"name": "merge", "arguments": {"fork": "f", "pr": true}}}),
     )
     .await;
     assert_eq!(stale["result"]["isError"], true, "{stale}");
@@ -166,10 +179,51 @@ async fn initialize_list_and_call_round_trip() {
         .contains("pr"));
 }
 
-async fn agent_after_initialize(server: SiloMcp, client: &str) -> Option<String> {
+#[tokio::test]
+async fn the_server_explains_the_model_to_an_agent_that_has_never_seen_silo() {
+    let engine = FakeEngine::start(|_, _| Ok(Value::Null));
     let (server_side, client_side) = tokio::io::duplex(64 * 1024);
     let (server_read, server_write) = tokio::io::split(server_side);
-    let held = server.clone();
+    let server = SiloMcp::new(engine.socket.clone(), std::env::temp_dir());
+    tokio::spawn(async move {
+        let running = server.serve((server_read, server_write)).await.unwrap();
+        let _ = running.waiting().await;
+    });
+    let (read, mut write) = tokio::io::split(client_side);
+    let mut read = BufReader::new(read);
+    let initialized = exchange(
+        &mut write,
+        &mut read,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"}}}),
+    )
+    .await;
+    let instructions = initialized["result"]["instructions"].as_str().unwrap();
+    for word in ["fork", "merge", "person", "resources", "undo"] {
+        assert!(instructions.contains(word), "{word}: {instructions}");
+    }
+    assert!(!instructions.contains("fold") && !instructions.contains("promote"));
+}
+
+#[tokio::test]
+async fn a_tool_that_needs_the_owner_waits_then_reports_the_request_to_check_later() {
+    let engine = FakeEngine::start(|method, _| {
+        match method {
+        "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
+        "approvals.note" => Ok(Value::Null),
+        "approvals.get" => Ok(json!({"id": "ap-1", "state": "pending", "summary": "Merge",
+            "computerName": "main", "method": "changes.keep", "params": {}, "createdAt": "now"})),
+        "changes.keep" => Err((
+            "approval_required",
+            r#"{"message": "The owner has to answer.", "details": {"kind": "merge", "summary": "Merges try into main.", "approvalId": "ap-1"}}"#.to_owned(),
+        )),
+        other => Err(("internal", format!("unexpected {other}"))),
+    }
+    });
+    let (server_side, client_side) = tokio::io::duplex(64 * 1024);
+    let (server_read, server_write) = tokio::io::split(server_side);
+    let server = SiloMcp::new(engine.socket.clone(), std::env::temp_dir());
     tokio::spawn(async move {
         let running = server.serve((server_read, server_write)).await.unwrap();
         let _ = running.waiting().await;
@@ -181,31 +235,27 @@ async fn agent_after_initialize(server: SiloMcp, client: &str) -> Option<String>
         &mut read,
         json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2025-06-18", "capabilities": {},
-            "clientInfo": {"name": client, "version": "0"}}}),
+            "clientInfo": {"name": "test", "version": "0"}}}),
     )
     .await;
-    held.agent()
-}
-
-#[tokio::test]
-async fn the_client_name_is_the_agent_only_when_none_was_named() {
-    let engine = FakeEngine::start(|_, _| Ok(Value::Null));
-    // `new` reads SILO_AGENT, so the first case only holds when it is not set.
-    if std::env::var("SILO_AGENT").is_err() {
-        let unnamed = SiloMcp::new(engine.socket.clone(), std::env::temp_dir());
-        assert_eq!(
-            agent_after_initialize(unnamed, "Claude Code")
-                .await
-                .as_deref(),
-            Some("claude-code")
-        );
-    }
-    let named = SiloMcp::new(engine.socket.clone(), std::env::temp_dir())
-        .with_agent(Some("Careful".into()));
-    assert_eq!(
-        agent_after_initialize(named, "Claude Code")
-            .await
-            .as_deref(),
-        Some("careful")
-    );
+    write
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+        .await
+        .unwrap();
+    let waiting = exchange(
+        &mut write,
+        &mut read,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+               "params": {"name": "merge", "arguments": {
+                   "fork": "try", "wait_secs": 0, "reason": "the tests pass"}}}),
+    )
+    .await;
+    assert_ne!(waiting["result"]["isError"], true, "{waiting}");
+    let text = waiting["result"]["content"][0]["text"].as_str().unwrap();
+    let value: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(value["status"], "waiting-for-owner");
+    assert_eq!(value["approvalId"], "ap-1");
+    assert!(value["message"].as_str().unwrap().contains("ap-1"));
+    // The reason went to the request right after asking.
+    assert_eq!(engine.calls("approvals.note")[0]["note"], "the tests pass");
 }

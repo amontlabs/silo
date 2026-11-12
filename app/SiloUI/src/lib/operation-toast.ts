@@ -14,7 +14,7 @@ export type { OperationCancel, OperationProgressOptions, OperationStep } from "@
  * Dialogs are reserved for the ⌘K palette and the quit overlay.
  *
  *   showOperationProgress(id, { title, step, steps, progress, startedAt, cancel })
- *   showOperationSuccess(id, title, { action })   // stays until closed when it has an action or
+ *   showOperationSuccess(id, title, { action })   // stays 20 s when it has an action or
  *                                                 // followed a progress toast shown > 3 s; else 4 s
  *   showOperationFailure(id, title, { retry })    // stays, with Retry
  *   useOperationProgressToast(id, state)          // for backend-driven operation state
@@ -22,7 +22,7 @@ export type { OperationCancel, OperationProgressOptions, OperationStep } from "@
  */
 /**
  * One consistent notification lifecycle for background actions:
- * loading → success (stays until the user closes it) or failure (stays, with Retry).
+ * loading → success (closes by itself) or failure (stays, with Retry).
  * Use a stable `id` per operation so each phase replaces the previous toast in place.
  */
 interface OperationToastCopy {
@@ -103,6 +103,8 @@ export function dismissComputerToastsById(computerId: string) {
 
 /** Auto-dismiss delay of a quick confirmation (nothing to act on, finished fast). */
 const QUICK_TOAST_DURATION = 4000
+/** How long a success with an action, or after a long operation, stays: long enough to act on, never indefinitely. */
+export const LASTING_SUCCESS_TOAST_DURATION = 20_000
 /** A progress notification visible at least this long makes its success notification persistent. */
 export const LONG_OPERATION_MS = 3000
 
@@ -118,8 +120,8 @@ interface OperationResultOptions {
   /** Called when the user closes the notification or it closes by itself. */
   onDismiss?: () => void
   /**
-   * Success only. Stays until closed (true) or auto-dismisses after 4 s (false). Default:
-   * stays when it has an action or the operation showed progress for over 3 s.
+   * Success only. Stays for 20 s (true) or 4 s (false). Default: 20 s when it has an action
+   * or the operation showed progress for over 3 s.
    */
   persist?: boolean
   /**
@@ -145,11 +147,11 @@ export function showOperationSuccess(id: string, title: string, options: Operati
   progressStarts.delete(id)
   const long = started !== undefined && Date.now() - started > LONG_OPERATION_MS
   const persist = options.persist ?? (Boolean(options.action) || long)
-  toast.success(title, { id, description: options.description, duration: persist ? Infinity : QUICK_TOAST_DURATION, closeButton: true, ...callbacks })
+  toast.success(title, { id, description: options.description, duration: persist ? LASTING_SUCCESS_TOAST_DURATION : QUICK_TOAST_DURATION, closeButton: true, ...callbacks })
   if (long) mirror("completions", id, title, options)
 }
 
-export function showOperationFailure(id: string, title: string, options: OperationResultOptions & { retry?: () => void; tone?: "error" | "warning" } = {}) {
+export function showOperationFailure(id: string, title: string, options: OperationResultOptions & { retry?: () => void; tone?: "error" | "warning"; duration?: number } = {}) {
   const action = options.action ?? (options.retry ? {
     label: "Retry",
     onClick: (event: MouseEvent<HTMLButtonElement>) => { event.preventDefault(); options.retry?.() },
@@ -160,7 +162,7 @@ export function showOperationFailure(id: string, title: string, options: Operati
   notify(title, {
     id,
     description: options.description,
-    duration: Infinity,
+    duration: options.duration ?? Infinity,
     closeButton: true,
     ...callbacks,
   })

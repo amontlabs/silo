@@ -34,11 +34,26 @@ const QUERY_RETRY_DELAYS: &[Duration] = &[
 ];
 
 /// What this client announces and the protocol range it can speak.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ConnectOptions {
     pub client: ClientMetadata,
     pub protocol: ProtocolRange,
     pub handshake_timeout: Duration,
+    /// The computer's token on the channel inside a computer. It never leaves the client: the
+    /// handshake carries only a proof made with it for the engine's challenge and the port.
+    pub token: Option<String>,
+}
+
+impl fmt::Debug for ConnectOptions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConnectOptions")
+            .field("client", &self.client)
+            .field("protocol", &self.protocol)
+            .field("handshake_timeout", &self.handshake_timeout)
+            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 impl ConnectOptions {
@@ -51,6 +66,7 @@ impl ConnectOptions {
                 max: silo_api::transport::PROTOCOL_VERSION,
             },
             handshake_timeout: Duration::from_secs(10),
+            token: None,
         }
     }
 }
@@ -115,7 +131,7 @@ struct Inner<W> {
 }
 
 /// A connected, handshaken session. Cloning shares the connection.
-pub struct Client<W = WriteHalf<tokio::net::UnixStream>> {
+pub struct Client<W = WriteHalf<Stream>> {
     inner: Arc<Inner<W>>,
 }
 
@@ -138,6 +154,58 @@ impl EventFeed {
     }
 }
 
+/// The connection a [`Client`] runs on: `engine.sock`, or a computer's channel.
+pub enum Stream {
+    Unix(tokio::net::UnixStream),
+    Tcp(tokio::net::TcpStream),
+}
+
+impl AsyncRead for Stream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+        buffer: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Unix(stream) => std::pin::Pin::new(stream).poll_read(context, buffer),
+            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_read(context, buffer),
+        }
+    }
+}
+
+impl AsyncWrite for Stream {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+        buffer: &[u8],
+    ) -> std::task::Poll<io::Result<usize>> {
+        match self.get_mut() {
+            Self::Unix(stream) => std::pin::Pin::new(stream).poll_write(context, buffer),
+            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_write(context, buffer),
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Unix(stream) => std::pin::Pin::new(stream).poll_flush(context),
+            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_flush(context),
+        }
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Unix(stream) => std::pin::Pin::new(stream).poll_shutdown(context),
+            Self::Tcp(stream) => std::pin::Pin::new(stream).poll_shutdown(context),
+        }
+    }
+}
+
 impl Client {
     /// Connects to `engine.sock` and negotiates the protocol.
     pub async fn connect(
@@ -145,7 +213,51 @@ impl Client {
         options: ConnectOptions,
     ) -> Result<(Self, EventFeed), ClientError> {
         let stream = tokio::net::UnixStream::connect(socket).await?;
-        establish(stream, options).await
+        establish(Stream::Unix(stream), options).await
+    }
+
+    /// Connects to a computer's channel at `host:port` and negotiates the protocol, answering
+    /// the engine's challenge with a proof made from the token `options` carries and `port`.
+    pub async fn connect_channel(
+        host: &str,
+        port: u16,
+        options: ConnectOptions,
+    ) -> Result<(Self, EventFeed), ClientError> {
+        let Some(token) = options.token.as_deref() else {
+            return Err(ClientError::Protocol(
+                "a computer's channel needs its token".to_owned(),
+            ));
+        };
+        let key = silo_api::transport::channel_key(token);
+        let mut stream = time::timeout(
+            options.handshake_timeout,
+            tokio::net::TcpStream::connect((host, port)),
+        )
+        .await
+        .map_err(|_| ClientError::TimedOut)??;
+        let _ = stream.set_nodelay(true);
+        let challenge = time::timeout(
+            options.handshake_timeout,
+            read_frame::<_, Value>(&mut stream),
+        )
+        .await
+        .map_err(|_| ClientError::TimedOut)??
+        .ok_or(ClientError::Disconnected)?;
+        let challenge: silo_api::transport::ChannelChallenge = serde_json::from_value(challenge)
+            .map_err(|error| {
+                ClientError::Protocol(format!("malformed channel challenge: {error}"))
+            })?;
+        let nonce = silo_api::transport::from_hex::<{ silo_api::transport::CHANNEL_NONCE_BYTES }>(
+            &challenge.nonce,
+        )
+        .ok_or_else(|| ClientError::Protocol("malformed channel challenge".to_owned()))?;
+        let proof = silo_api::transport::channel_proof(&key, &nonce, port);
+        establish_with(
+            Stream::Tcp(stream),
+            options,
+            Some(silo_api::transport::to_hex(&proof)),
+        )
+        .await
     }
 }
 
@@ -267,6 +379,17 @@ pub async fn establish<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    establish_with(stream, options, None).await
+}
+
+async fn establish_with<S>(
+    stream: S,
+    options: ConnectOptions,
+    proof: Option<String>,
+) -> Result<(Client<WriteHalf<S>>, EventFeed), ClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let (mut reader, mut writer) = tokio::io::split(stream);
     let request = RequestEnvelope {
         id: HANDSHAKE_ID.to_owned(),
@@ -275,6 +398,7 @@ where
             ssh_key: None,
             protocol: options.protocol,
             client: Some(options.client.clone()),
+            proof,
         },
         operation_id: None,
         start_within_ms: None,
@@ -399,6 +523,8 @@ mod tests {
         tokio::spawn(async move {
             let request: Value = read_frame(&mut server).await.unwrap().unwrap();
             assert_eq!(request["method"], "engine.handshake");
+            assert!(request["params"].get("token").is_none());
+            assert!(request["params"].get("proof").is_none());
             assert_eq!(
                 request["params"]["protocol"]["min"],
                 silo_api::transport::PROTOCOL_VERSION
@@ -411,7 +537,7 @@ mod tests {
 
     #[tokio::test]
     async fn negotiates_and_exposes_capabilities_and_client_id() {
-        let stream = serve(handshake_reply(7), |_server| async {
+        let stream = serve(handshake_reply(8), |_server| async {
             tokio::time::sleep(Duration::from_millis(50)).await;
         })
         .await;
@@ -431,7 +557,7 @@ mod tests {
         let refusal = json!({"id": "handshake", "error": {
             "code": "incompatible_version", "message": "Update Silo.",
             "diagnostics": {"engineProtocolRange": {"min": 8, "max": 9},
-                "clientProtocolRange": {"min": 7, "max": 7}, "engineAppVersion": "9"}}});
+                "clientProtocolRange": {"min": 8, "max": 8}, "engineAppVersion": "9"}}});
         let stream = serve(refusal, |_s| async {}).await;
         match establish(stream, options()).await {
             Err(ClientError::Remote(error)) => {
@@ -453,7 +579,7 @@ mod tests {
 
     #[tokio::test]
     async fn correlates_replies_by_id_with_events_interleaved_and_out_of_order() {
-        let stream = serve(handshake_reply(7), |mut server| async move {
+        let stream = serve(handshake_reply(8), |mut server| async move {
             let first: Value = read_frame(&mut server).await.unwrap().unwrap();
             let second: Value = read_frame(&mut server).await.unwrap().unwrap();
             write_frame(
@@ -492,7 +618,7 @@ mod tests {
 
     #[tokio::test]
     async fn sends_operation_admission_fields() {
-        let stream = serve(handshake_reply(7), |mut server| async move {
+        let stream = serve(handshake_reply(8), |mut server| async move {
             let request: Value = read_frame(&mut server).await.unwrap().unwrap();
             assert_eq!(request["operationId"], "op-1");
             assert_eq!(request["startWithinMs"], 500);
@@ -522,7 +648,7 @@ mod tests {
     ) -> (Client<WriteHalf<tokio::io::DuplexStream>>, Arc<AtomicUsize>) {
         let seen = Arc::new(AtomicUsize::new(0));
         let counted = seen.clone();
-        let stream = serve(handshake_reply(7), move |mut server| async move {
+        let stream = serve(handshake_reply(8), move |mut server| async move {
             while let Ok(Some(request)) = read_frame::<_, Value>(&mut server).await {
                 assert_eq!(request["method"], method);
                 let attempt = counted.fetch_add(1, Ordering::SeqCst);
@@ -575,7 +701,7 @@ mod tests {
 
     #[tokio::test]
     async fn connection_loss_fails_pending_requests_and_ends_the_feed() {
-        let stream = serve(handshake_reply(7), |mut server| async move {
+        let stream = serve(handshake_reply(8), |mut server| async move {
             let _: Value = read_frame(&mut server).await.unwrap().unwrap();
             // Drop without replying.
         })
@@ -595,7 +721,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_frame_that_is_neither_event_nor_reply_ends_the_session() {
-        let stream = serve(handshake_reply(7), |mut server| async move {
+        let stream = serve(handshake_reply(8), |mut server| async move {
             let _: Value = read_frame(&mut server).await.unwrap().unwrap();
             write_frame(&mut server, &json!({"surprise": true}))
                 .await
@@ -618,7 +744,7 @@ mod tests {
         tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let _: Value = read_frame(&mut stream).await.unwrap().unwrap();
-            write_frame(&mut stream, &handshake_reply(7)).await.unwrap();
+            write_frame(&mut stream, &handshake_reply(8)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
         });
         let (client, _events) = Client::connect(&path, options()).await.unwrap();
@@ -628,5 +754,99 @@ mod tests {
             Client::connect(&missing, options()).await,
             Err(ClientError::Io(_))
         ));
+    }
+
+    /// A channel that challenges with `nonce` and returns every byte the client sent.
+    async fn challenging_channel(
+        nonce: [u8; 32],
+    ) -> (u16, tokio::task::JoinHandle<(Value, Vec<u8>)>) {
+        use tokio::io::AsyncReadExt as _;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            write_frame(
+                &mut stream,
+                &json!({ "nonce": silo_api::transport::to_hex(&nonce) }),
+            )
+            .await
+            .unwrap();
+            let request: Value = read_frame(&mut stream).await.unwrap().unwrap();
+            write_frame(&mut stream, &handshake_reply(8)).await.unwrap();
+            let mut rest = Vec::new();
+            let _ = tokio::time::timeout(Duration::from_millis(200), stream.read_to_end(&mut rest))
+                .await;
+            let mut sent = serde_json::to_vec(&request).unwrap();
+            sent.extend(rest);
+            (request, sent)
+        });
+        (port, seen)
+    }
+
+    #[tokio::test]
+    async fn a_channel_connection_answers_the_challenge_and_never_sends_the_token() {
+        const TOKEN: &str = "silo_gc_abc";
+        let nonce = [9_u8; 32];
+        let (port, seen) = challenging_channel(nonce).await;
+        let mut with_token = options();
+        with_token.token = Some(TOKEN.into());
+        assert!(!format!("{with_token:?}").contains(TOKEN));
+        let (client, _events) = Client::connect_channel("127.0.0.1", port, with_token)
+            .await
+            .unwrap();
+        assert_eq!(client.handshake().client_id.as_deref(), Some("c1"));
+        client.close().await;
+        let (request, sent) = seen.await.unwrap();
+        let key = silo_api::transport::channel_key(TOKEN);
+        let proof =
+            silo_api::transport::from_hex::<32>(request["params"]["proof"].as_str().unwrap())
+                .unwrap();
+        assert!(silo_api::transport::channel_proof_matches(
+            &key, &nonce, port, &proof
+        ));
+        assert!(!silo_api::transport::channel_proof_matches(
+            &key,
+            &nonce,
+            port ^ 1,
+            &proof
+        ));
+        let sent = String::from_utf8_lossy(&sent);
+        assert!(request["params"].get("token").is_none());
+        assert!(!sent.contains(TOKEN) && !sent.contains("abc"));
+        assert!(!sent.contains(&silo_api::transport::to_hex(&key)));
+        assert!(matches!(
+            Client::connect_channel("127.0.0.1", port, options()).await,
+            Err(ClientError::Protocol(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_channel_that_does_not_challenge_gets_nothing() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // Answers as an engine would, without a challenge first.
+            write_frame(&mut stream, &handshake_reply(8)).await.unwrap();
+            let mut rest = Vec::new();
+            use tokio::io::AsyncReadExt as _;
+            let _ = tokio::time::timeout(Duration::from_millis(300), stream.read_to_end(&mut rest))
+                .await;
+            rest
+        });
+        let mut with_token = options();
+        with_token.token = Some("silo_gc_abc".into());
+        assert!(matches!(
+            Client::connect_channel("127.0.0.1", port, with_token).await,
+            Err(ClientError::Protocol(_))
+        ));
+        assert!(server.await.unwrap().is_empty(), "nothing was sent");
+    }
+
+    #[tokio::test]
+    async fn engine_sock_handshakes_carry_no_token() {
+        let stream = serve(handshake_reply(8), |_server| async {}).await;
+        let (client, _events) = establish(stream, options()).await.unwrap();
+        assert_eq!(client.handshake().protocol, 8);
     }
 }

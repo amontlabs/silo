@@ -84,7 +84,7 @@ set -e
     .replace("GIB_BYTES", &GIB.to_string())
 }
 
-/// The disk size a computer really has once the guest has been measured.
+/// How much of its disk a computer's guest can use, once the guest has been measured.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Disk {
     pub gib: u64,

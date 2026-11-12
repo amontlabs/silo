@@ -12,6 +12,7 @@ const sshAccessShape = z.object({ computers: z.array(z.object({
 })) })
 
 export const githubStateShape = z.object({
+  // Superseded by token secrets; still sent for the secret named `github-token`.
   personalToken: z.object({ state: z.enum(["connected", "disconnected"]), saved: z.boolean(), account: z.string().optional(), message: z.string().optional() }).optional(),
   policyRevision: z.number().int().nonnegative().optional(),
   state: z.enum(["disconnected", "connecting", "connected"]),
@@ -26,6 +27,8 @@ export const githubStateShape = z.object({
   computers: z.array(z.object({
     computer: z.string(), identity: z.object({ name: z.string(), email: z.string(), apply: z.boolean() }),
     authenticationMethod: z.enum(["oauth", "token"]).nullish().transform(value => value ?? undefined),
+    tokenSecretId: z.string().nullish().transform(value => value ?? undefined),
+    tokenMissing: z.boolean().optional(),
     repositoryMode: z.enum(["selected", "all"]).default("selected"), allRepositoriesAllowChanges: z.boolean().default(false),
     repositories: z.array(z.object({ repository: z.string(), allowPushes: z.boolean() })),
   })).optional(),
@@ -38,12 +41,15 @@ export const githubStateShape = z.object({
 
 export const directoryPageShape = z.object({
   snapshotId: z.string().min(1),
-  entries: z.array(z.object({ name: z.string().min(1), path: z.string().startsWith("/workspace/"), kind: z.enum(["folder", "file", "symlink"]) }).strict()).max(200),
+  entries: z.array(z.object({ name: z.string().min(1), path: z.string().refine(path => path.startsWith("/workspace/") || path.startsWith("/Users/silo/workspace/")), kind: z.enum(["folder", "file", "symlink"]) }).strict()).max(200),
   nextOffset: z.number().int().nonnegative().nullable(),
 }).strict()
 
 export const secretShape = z.object({
-  id: z.string(), name: z.string(), computers: z.array(z.string()), allowedDomains: z.array(z.string()),
+  id: z.string(), name: z.string(), kind: z.enum(["generic", "github-token"]).optional(),
+  computers: z.array(z.string()), allowedDomains: z.array(z.string()),
+  account: z.string().nullish().transform((value) => value ?? undefined),
+  connection: z.object({ state: z.enum(["connected", "disconnected"]), message: z.string().nullish().transform((value) => value ?? undefined) }).nullish().transform((value) => value ?? undefined),
   state: z.enum(["active", "applying", "restart-required"]), pendingComputers: z.array(z.string()).optional(),
   error: z.string().nullish().transform((value) => value ?? undefined), removing: z.boolean().optional(),
 })
@@ -124,6 +130,7 @@ const computerShape = z.object({
   unfinishedRestore: unfinishedRestoreShape.nullable().optional().catch(null),
   quiet: quietStateSchema.nullable().optional().catch(null),
   settling: z.boolean().optional(),
+  needsStorageUpgrade: z.boolean().optional(),
 }).passthrough().transform(computer => (computerStates as readonly string[]).includes(computer.state)
   ? { ...computer, state: computer.state as (typeof computerStates)[number] }
   : { ...computer, state: "stopped" as const, freshness: "stale" as const, attention: computer.attention ?? { level: "warning" as const, message: "This version of Silo cannot show this computer's current state. Update Silo to see it." } })
@@ -210,7 +217,7 @@ const remoteApplicationSourceShape = applicationSourceShape.extend({
 
 const backupArchiveShape = z.object({
   name: z.string().min(1), archivePath: z.string().min(1), completedLabel: z.string(), size: z.string(), destination: z.string(), computers: z.array(z.string()),
-  checkpointName: z.string().optional(),
+  checkpointName: z.string().optional(), leftOut: z.array(z.string()).optional(),
 }).strict()
 const backupPhaseShape = z.object({ title: z.string(), detail: z.string(), tone: z.enum(["waiting", "running", "succeeded", "failed"]) }).strict()
 const backupOperationShape = z.discriminatedUnion("kind", [
@@ -227,7 +234,7 @@ const backupStateShape = z.object({
 }).strict()
 export const archiveInspectionShape = z.object({ archive: backupArchiveShape, valid: z.boolean(), reason: z.string().optional(), warnings: z.array(z.string()).optional() }).strict()
 
-export const exportLoginsShape = z.object({ logins: z.array(z.string()), checked: z.array(z.string()).optional(), unchecked: z.string().optional() }).strict()
+export const exportLoginsShape = z.object({ logins: z.array(z.string()), checked: z.array(z.string()).optional(), unchecked: z.string().optional(), leavesOut: z.boolean().optional() }).strict()
 
 const networkStateShape = z.object({ computers: z.array(z.object({
   computer: z.string(), error: z.string().nullable(), host: z.string().regex(/^[a-z0-9-]{1,63}\.localhost$/).nullable().optional(), ports: z.array(z.object({
@@ -273,6 +280,8 @@ export const foldRequestShape = z.object({
   resolvedAt: z.string().nullish().transform(value => value ?? undefined),
   keepingSinceMs: z.number().nonnegative().nullish().transform(value => value ?? undefined),
   closedReason: z.string().nullish().transform(value => (requestClosedReasons as readonly string[]).includes(value ?? "") ? (value as (typeof requestClosedReasons)[number]) : undefined),
+  /** The approval that asks the owner to merge this request, when a computer's agent asked. */
+  approvalId: z.string().nullish().transform(value => value ?? undefined),
 })
 export type FoldRequest = z.infer<typeof foldRequestShape>
 
@@ -297,7 +306,7 @@ export const credentialUsageSchema = z.object({
 export type CredentialUsage = z.infer<typeof credentialUsageSchema>
 
 export const requestDetailSchema = z.object({
-  request: foldRequestShape, forkName: z.string(), forkState: z.string(),
+  request: foldRequestShape, forkName: z.string(), forkState: z.string(), targetName: optionalText,
   stale: z.boolean().nullish().transform(value => value ?? undefined),
   reviewDigest: z.string(), fresh: z.boolean(),
   /** The `silo diff --json` document; null for a folder fork. */
@@ -306,14 +315,24 @@ export const requestDetailSchema = z.object({
 })
 export type RequestDetail = z.infer<typeof requestDetailSchema>
 
+/** One item both sides changed. `allowed` is empty when no answer settles it (credentials). */
+export const keepConflictShape = z.object({
+  kind: z.string().catch(""), item: z.string().catch(""), detail: z.string().catch(""),
+  id: z.string().catch(""), allowed: z.array(z.string()).catch([]),
+  forkChange: z.string().catch(""), mainChange: z.string().catch(""),
+})
+export type KeepConflict = z.infer<typeof keepConflictShape>
+
 export const keepRefusalShape = z.object({
-  reason: z.string(), message: z.string(), hint: z.string().catch(""), conflicts: z.array(z.unknown()).catch([]),
+  reason: z.string(), message: z.string(), hint: z.string().catch(""), conflicts: tolerantArray(keepConflictShape).catch([]),
 })
 export const keepRequestResultSchema = z.object({
   status: z.string(),
   report: z.object({
     fork: z.string(), target: z.string(), summary: z.array(z.string()).catch([]), steps: z.array(z.string()).catch([]),
     notes: z.array(z.string()).catch([]), checkpoint: optionalText, reviewDigest: optionalText,
+    /** True when main had not changed since the fork, so nothing could conflict. */
+    fastForward: z.boolean().nullish().transform(value => value ?? undefined),
   }),
   refusal: keepRefusalShape.nullish().transform(value => value ?? undefined),
   request: foldRequestShape,
@@ -361,3 +380,133 @@ export const treeNodeShape = z.object({
 })
 export type ComputerTreeNode = z.infer<typeof treeNodeShape>
 export const computerTreeSchema = z.object({ nodes: tolerantArray(treeNodeShape) })
+
+// Approvals (`approvals.*`), the audit log (`audit.list`) and `device.resources`.
+// Unknown kinds, states and callers from a newer engine read as the safest known value.
+const approvalStates = ["pending", "allowed", "denied", "cancelled", "expired"] as const
+
+export const approvalOutcomeShape = z.object({
+  result: z.unknown().optional(), jobId: optionalText, error: optionalText,
+})
+export type ApprovalOutcome = z.infer<typeof approvalOutcomeShape>
+
+export const approvalShape = z.object({
+  id: z.string().min(1), kind: z.string().catch("other"), computerId: z.string().catch(""), computerName: z.string().catch(""),
+  method: z.string().catch(""), params: z.unknown().optional(), summary: z.string().catch(""),
+  /** The agent's own words; never the engine's. */
+  note: optionalText,
+  state: tolerantEnum(approvalStates, "cancelled"),
+  createdAt: z.string(), expiresAt: optionalText, decidedAt: optionalText, decidedBy: optionalText,
+  decisionNote: optionalText, reason: optionalText,
+  outcome: approvalOutcomeShape.nullish().transform(value => value ?? undefined),
+  reviewRequestId: optionalText, reviewDigest: optionalText,
+})
+export type Approval = z.infer<typeof approvalShape>
+export type ApprovalState = Approval["state"]
+
+export const approvalListSchema = z.object({ approvals: tolerantArray(approvalShape) })
+export type ApprovalList = z.infer<typeof approvalListSchema>
+
+const callerKinds = ["owner", "device", "computer"] as const
+const auditOutcomes = ["ok", "error", "refused", "asked"] as const
+export type AuditCallerKind = (typeof callerKinds)[number]
+
+export const auditEntryShape = z.object({
+  id: z.number().int().nonnegative(), at: z.string(),
+  callerKind: tolerantEnum(callerKinds, "computer"), callerId: optionalText, client: optionalText,
+  method: z.string(), computerId: optionalText,
+  outcome: tolerantEnum(auditOutcomes, "error"), errorCode: optionalText, jobId: optionalText, approvalId: optionalText,
+  count: z.number().int().positive().catch(1), lastAt: optionalText,
+})
+export type AuditEntry = z.infer<typeof auditEntryShape>
+
+export const auditListSchema = z.object({
+  entries: tolerantArray(auditEntryShape),
+  nextBeforeId: z.number().int().nonnegative().nullish().transform(value => value ?? undefined),
+})
+export type AuditPage = z.infer<typeof auditListSchema>
+
+export const deviceResourcesSchema = z.object({
+  logicalCpus: z.number().catch(0), memoryTotalBytes: z.number().catch(0),
+  memoryAvailableBytes: z.number().nullish().transform(value => value ?? undefined),
+  diskFreeBytes: z.number().catch(0), diskTotalBytes: z.number().catch(0),
+  memoryFloorBytes: z.number().catch(0), diskFloorBytes: z.number().catch(0),
+  runningComputers: z.number().catch(0), runningMemoryGib: z.number().catch(0),
+  state: tolerantEnum(["ok", "low", "critical"], "ok"), message: z.string().catch(""),
+  computers: tolerantArray(z.object({ id: z.string(), name: z.string(), running: z.boolean(), cpus: z.number(), memoryGib: z.number(), diskGib: z.number().optional(), workspaceStorageGib: z.number().optional(), runtimeStorageGib: z.number().optional() })).catch([]),
+})
+export type DeviceResources = z.infer<typeof deviceResourcesSchema>
+
+/** How a job an allowed approval started is going; `gone` means the engine no longer holds it. */
+export const approvalJobSchema = z.object({
+  state: tolerantEnum(["waiting", "running", "finished", "gone"], "running"),
+  error: optionalText, status: optionalText, message: optionalText,
+})
+export type ApprovalJob = z.infer<typeof approvalJobSchema>
+
+// Agents (`agents.list`, `agents.install`) and the SSH name of a computer (`guest.sshAlias.ensure`).
+export const agentIds = ["claude-code", "codex"] as const
+export type AgentId = (typeof agentIds)[number]
+const agentStates = ["ready", "missing", "outdated", "installing", "unknown"] as const
+export type AgentState = (typeof agentStates)[number]
+
+/** An agent this Silo does not know is dropped, so a newer engine never shows a row nothing can act on. */
+const knownAgent = z.object({
+  id: z.enum(agentIds), name: z.string().catch(""),
+  state: tolerantEnum(agentStates, "unknown"), version: optionalText, expectedVersion: z.string().catch(""),
+})
+export type AgentInfo = z.infer<typeof knownAgent>
+
+export const agentsListSchema = z.object({ agents: tolerantArray(knownAgent) })
+
+export const agentInstallStepSchema = tolerantEnum(["waiting", "downloading", "installing", "registering", "done"], "installing")
+export type AgentInstallStep = z.infer<typeof agentInstallStepSchema>
+export const agentInstallProgressSchema = z.object({
+  computerId: z.string(), agent: z.enum(agentIds), step: agentInstallStepSchema, detail: optionalText,
+})
+export type AgentInstallProgress = z.infer<typeof agentInstallProgressSchema>
+
+export const sshNameSchema = z.object({
+  alias: z.string().min(1), includeInstalled: z.boolean().catch(true), includeLine: z.string().catch(""),
+})
+export type SshName = z.infer<typeof sshNameSchema>
+
+// A computer's network policy (`network.policy.get`, `network.policy.set`) and Silo's tools in it (`guestClient.*`).
+export const networkModes = ["open", "allowlist", "closed"] as const
+export type NetworkMode = (typeof networkModes)[number]
+export const networkPolicyShape = z.object({
+  mode: z.enum(networkModes), hosts: z.array(z.string()).catch([]), presets: z.array(z.string()).catch([]),
+})
+export type NetworkPolicy = z.infer<typeof networkPolicyShape>
+
+/** When a saved change is in force; a timing this Silo does not know reads as the cautious one. */
+export const networkTimings = ["applied", "nextStart", "nextRestart"] as const
+export type NetworkTiming = (typeof networkTimings)[number]
+const networkTimingShape = tolerantEnum(networkTimings, "nextRestart")
+
+export const networkPolicyStateSchema = z.object({
+  computerId: z.string(),
+  policy: networkPolicyShape,
+  allowedHosts: tolerantArray(z.object({ host: z.string(), ports: z.array(z.number()).catch([]), from: z.string().catch("") })).catch([]),
+  timing: networkTimingShape,
+  presets: tolerantArray(z.object({ name: z.string(), title: z.string().catch(""), hosts: z.array(z.string()).catch([]) })).catch([]),
+  presetUpdates: tolerantArray(z.object({ name: z.string(), title: z.string().catch(""), addedHosts: z.array(z.string()).catch([]) })).catch([]),
+  notices: tolerantArray(z.string()).catch([]),
+})
+export type NetworkPolicyState = z.infer<typeof networkPolicyStateSchema>
+
+/** How one piece Silo keeps in a computer fared at its last check. */
+export const guestComponentStates = ["ok", "failed", "unavailable", "waiting", "removed"] as const
+export type GuestComponentState = (typeof guestComponentStates)[number]
+export const guestComponentSchema = z.object({
+  id: z.string(), state: tolerantEnum(guestComponentStates, "failed"), detail: optionalText,
+})
+export type GuestComponent = z.infer<typeof guestComponentSchema>
+
+/** The port, address and token of the channel are not read: the page says only whether the tools are on. */
+export const computerToolsSchema = z.object({
+  computerId: z.string(), enabled: z.boolean(), network: networkTimingShape.optional(),
+  restartNeeded: z.boolean().catch(false),
+  components: tolerantArray(guestComponentSchema).catch([]),
+})
+export type ComputerTools = z.infer<typeof computerToolsSchema>

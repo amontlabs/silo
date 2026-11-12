@@ -11,7 +11,6 @@ use silo_api::methods::{
 };
 
 use crate::{
-    config::{Recipe, Settings},
     engine::{Computer, Engine, Progress},
     error::CliError,
     ops::{self, ForkArgs},
@@ -120,7 +119,7 @@ fn record_for_path(engine: &Engine, path: &Path) -> Option<Record> {
 /// Settings every host git command runs with. Git's own hooks, the file system monitor
 /// hook and external transports are programs the folder's configuration can name; a fork's
 /// commits are not trusted to cause any of them to run, so they are switched off for the
-/// commands `fold` and `undo` run. The folder's identity and other settings still apply, so
+/// commands `merge` and `undo` run. The folder's identity and other settings still apply, so
 /// the merge commit is made as its owner. A merge commit made here does not run the
 /// folder's own commit hooks either.
 const HARDENING: [&str; 6] = [
@@ -433,8 +432,6 @@ pub async fn fork_folder(
     engine: &Engine,
     dir: &Path,
     name: Option<&str>,
-    recipe: &Recipe,
-    settings: Option<&Settings>,
     secrets: &[String],
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
@@ -468,10 +465,7 @@ pub async fn fork_folder(
         clean_up(&bundle);
         return Err(error);
     }
-    let result = send(
-        engine, &bundle, &name, &label, recipe, settings, secrets, progress,
-    )
-    .await;
+    let result = send(engine, &bundle, &name, &label, secrets, progress).await;
     clean_up(&bundle);
     let (fork, guest_path) = result?;
     let record = Record {
@@ -497,8 +491,6 @@ async fn send(
     bundle: &Path,
     name: &str,
     label: &str,
-    recipe: &Recipe,
-    settings: Option<&Settings>,
     secrets: &[String],
     progress: Progress<'_>,
 ) -> Result<(Computer, String), CliError> {
@@ -509,14 +501,12 @@ async fn send(
             name: Some(name.to_owned()),
             checkpoint: None,
             secrets: secrets.to_vec(),
-            recipe: Some(recipe.clone()),
-            recipe_name: Some(crate::config::DEFAULT_RECIPE.to_owned()),
+            recipe_name: Some(crate::recipe_file::DEFAULT_RECIPE.to_owned()),
+            no_start: false,
         },
-        settings,
         progress,
     )
     .await?;
-    ops::start(engine, name, progress).await?;
     let fork = engine.computer(name).await?;
     let home = guest(
         engine,
@@ -635,7 +625,7 @@ pub async fn fold_folder(
     }
     if fork.state != "stopped" {
         return Err(CliError::new(format!(
-            "{} is {}; wait until it is running or stopped, then fold again.",
+            "{} is {}; wait until it is running or stopped, then merge again.",
             fork.name, fork.state
         )));
     }
@@ -748,7 +738,7 @@ async fn fold_running_folder(
             &target,
             "git",
             format!("{target} has no branch checked out (a detached HEAD)."),
-            "Check out a branch there, then fold again.",
+            "Check out a branch there, then merge again.",
         ));
     };
     if repo.dirty().await? {
@@ -757,7 +747,7 @@ async fn fold_running_folder(
             &target,
             "dirty",
             format!("{target} has uncommitted changes to tracked files."),
-            "Commit or stash them, then fold again.",
+            "Commit or stash them, then merge again.",
         ));
     }
     let gathered = gather_commits(engine, fork, &record, &repo, reviewed, progress).await;
@@ -767,7 +757,7 @@ async fn fold_running_folder(
             &target,
             "changed",
             CHANGED.into(),
-            "Run `silo diff` again, then keep.",
+            "Run `silo diff` again, then merge.",
         ));
     }
     let Some(reference) = gathered? else {
@@ -836,7 +826,7 @@ async fn fold_running_folder(
                 "{target} has files git does not track (untracked or ignored) where the fork's commits add files: {}. Keeping would overwrite them; nothing was changed.",
                 list(&coming.in_the_way)
             ),
-            "Move or remove those files, then fold again.",
+            "Move or remove those files, then merge again.",
         ));
     }
     let fast_forward = repo
@@ -886,7 +876,7 @@ async fn fold_running_folder(
                 "--quiet",
                 "--no-verify",
                 "-m",
-                &format!("Merge {} (silo fold)", fork.name),
+                &format!("Merge {} (silo merge)", fork.name),
                 &reference,
             ])
             .await?
@@ -1119,7 +1109,7 @@ pub async fn undo_folder(engine: &Engine, mut record: Record) -> Result<Value, C
     }
     if repo.head != backup.after {
         return Ok(refuse(format!(
-            "{} has new commits since the fold; undoing would drop them. To go back anyway: git -C {} reset --hard {}",
+            "{} has new commits since the merge; undoing would drop them. To go back anyway: git -C {} reset --hard {}",
             backup.branch, record.path, backup.reference
         )));
     }

@@ -12,12 +12,12 @@ use silo_api::{
         MethodDescriptor, MethodName,
     },
     transport::{
-        ClientMetadata, ErrorObject, HandshakeParams, HandshakeResult,
+        ApprovalRequiredDetails, ClientMetadata, ErrorObject, HandshakeParams, HandshakeResult,
         IncompatibleVersionDiagnostics, ProtocolRange, RequestEnvelope, ResponseEnvelope,
         PROTOCOL_VERSION,
     },
 };
-use silo_engine::context::EngineContext;
+use silo_engine::{context::EngineContext, policy::Caller};
 use uuid::Uuid;
 
 use crate::context::SilodContext;
@@ -49,12 +49,28 @@ pub struct RequestContext {
     pub client_id: String,
     pub protocol: u32,
     pub client: Option<ClientMetadata>,
+    /// Who is calling, set by the transport the request arrived on.
+    pub caller: Caller,
+}
+
+impl RequestContext {
+    /// A request made by the engine itself, or by a program on this device, as `client`.
+    pub(crate) fn owner(client: &str) -> Self {
+        Self {
+            client_id: client.to_owned(),
+            protocol: PROTOCOL_VERSION,
+            client: None,
+            caller: Caller::owner(client),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DispatchError {
     pub code: ErrorCode,
     pub message: String,
+    /// For `approval_required`: what the call asks the owner for.
+    pub details: Option<ApprovalRequiredDetails>,
 }
 
 impl DispatchError {
@@ -63,21 +79,27 @@ impl DispatchError {
         Self {
             code: refine_code(ErrorCode::Internal, &message),
             message,
+            details: None,
+        }
+    }
+
+    pub(crate) fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            details: None,
         }
     }
 
     pub(crate) fn unsupported_message(message: &str) -> Self {
-        Self {
-            code: ErrorCode::UnsupportedRemoteOperation,
-            message: message.to_owned(),
-        }
+        Self::new(ErrorCode::UnsupportedRemoteOperation, message)
     }
 
     pub(crate) fn unsupported(method: &str) -> Self {
-        Self {
-            code: ErrorCode::UnsupportedRemoteOperation,
-            message: format!("The engine does not support {method}."),
-        }
+        Self::new(
+            ErrorCode::UnsupportedRemoteOperation,
+            format!("The engine does not support {method}."),
+        )
     }
 }
 
@@ -87,9 +109,20 @@ pub struct SessionState {
     protocol: Option<u32>,
     client: Option<ClientMetadata>,
     seen_ids: HashSet<String>,
+    /// The computer whose channel this session arrived on; `None` on `engine.sock`.
+    computer: Option<String>,
 }
 
 impl SessionState {
+    /// A session on `computer_id`'s channel: every request it makes is that computer's. Only
+    /// the channel's listener makes one, after the handshake's token was checked.
+    pub(crate) fn for_computer(computer_id: String) -> Self {
+        Self {
+            computer: Some(computer_id),
+            ..Self::default()
+        }
+    }
+
     pub fn client_id(&self) -> Option<&str> {
         self.client_id.as_deref()
     }
@@ -161,6 +194,20 @@ impl MethodRegistry for CoreMethodRegistry {
         request: RequestContext,
     ) -> HandlerFuture<'a> {
         Box::pin(async move {
+            // The methods answered here, not by a domain handler, pass the same gate.
+            let answered_here = matches!(
+                method,
+                MethodName::EngineState
+                    | MethodName::EventsSubscribe
+                    | MethodName::EventsUnsubscribe
+                    | MethodName::NotificationsList
+            );
+            let gate_context = HandlerContext::new(context.clone(), request.clone());
+            let admitted = if answered_here {
+                Some(methods::gate::admit(&gate_context, method, &params).await?)
+            } else {
+                None
+            };
             let mut event_barrier = None;
             let result: Result<Value, DispatchError> = async {
                 match method {
@@ -204,6 +251,7 @@ impl MethodRegistry for CoreMethodRegistry {
                                     message: format!(
                                         "Device {unknown} is not connected to this engine."
                                     ),
+                                    details: None,
                                 });
                             }
                         }
@@ -259,10 +307,14 @@ impl MethodRegistry for CoreMethodRegistry {
                 }
             }
             .await;
-            result.map(|value| HandlerOutput {
+            let output = result.map(|value| HandlerOutput {
                 value,
                 event_barrier,
-            })
+            });
+            match admitted {
+                Some(admitted) => methods::gate::finish(&gate_context, method, &admitted, output),
+                None => output,
+            }
         })
     }
 
@@ -271,12 +323,36 @@ impl MethodRegistry for CoreMethodRegistry {
         method: MethodName,
         params: Value,
         context: Arc<SilodContext>,
-        _request: RequestContext,
+        request: RequestContext,
     ) -> StreamFuture<'a> {
         Box::pin(async move {
             if method != MethodName::GuestSsh {
                 return Err(DispatchError::unsupported(method_name(method)));
             }
+            let gate_context = HandlerContext::new(context.clone(), request);
+            let admitted = methods::gate::admit(&gate_context, method, &params).await?;
+            let opened = Self::open_guest_ssh(params, context).await;
+            let outcome = opened.as_ref().map(|_| HandlerOutput {
+                value: Value::Null,
+                event_barrier: None,
+            });
+            let recorded = methods::gate::finish(
+                &gate_context,
+                method,
+                &admitted,
+                outcome.map_err(Clone::clone),
+            );
+            recorded.and(opened)
+        })
+    }
+}
+
+impl CoreMethodRegistry {
+    async fn open_guest_ssh(
+        params: Value,
+        context: Arc<SilodContext>,
+    ) -> Result<OpenedStream, DispatchError> {
+        {
             let params: GuestSshParams = serde_json::from_value(params)
                 .map_err(|error| DispatchError::internal(format!("Invalid params: {error}")))?;
             // The stream is always SSH to the guest. A `port` purpose only labels the forward
@@ -311,7 +387,7 @@ impl MethodRegistry for CoreMethodRegistry {
                 }
             })
             .map_err(DispatchError::internal)
-        })
+        }
     }
 }
 
@@ -437,13 +513,26 @@ impl Dispatcher {
                 ));
             }
         };
+        let client_id = session
+            .client_id
+            .clone()
+            .expect("negotiated session has client id");
+        // The engine's own socket is the owner's; a computer's channel is that computer's. The
+        // client's name is diagnostic only.
+        let caller = match &session.computer {
+            Some(id) => Caller::Computer { id: id.clone() },
+            None => Caller::owner(
+                session
+                    .client
+                    .as_ref()
+                    .map_or(client_id.as_str(), |client| client.name.as_str()),
+            ),
+        };
         let request_context = RequestContext {
-            client_id: session
-                .client_id
-                .clone()
-                .expect("negotiated session has client id"),
+            client_id,
             protocol: session.protocol.expect("negotiated session has protocol"),
             client: session.client.clone(),
+            caller,
         };
         PreparedRequest::Invoke {
             id: request.id,
@@ -507,7 +596,7 @@ impl Dispatcher {
                             )
                         }
                         Err(error) => (
-                            error_response(id, error.code, error.message),
+                            error_response_with_details(id, error),
                             None,
                             None,
                             false,
@@ -545,7 +634,7 @@ impl Dispatcher {
                     Some(success_response(id, serde_json::json!({}))),
                     Some(opened),
                 ),
-                Err(error) => (Some(error_response(id, error.code, error.message)), None),
+                Err(error) => (Some(error_response_with_details(id, error)), None),
             },
             PreparedRequest::Reply(response) | PreparedRequest::Close(Some(response), _) => {
                 (Some(response), None)
@@ -698,6 +787,18 @@ fn error_response(id: String, code: ErrorCode, message: String) -> ResponseEnvel
     error_response_with_diagnostics(id, code, message, None)
 }
 
+fn error_response_with_details(id: String, error: DispatchError) -> ResponseEnvelope<Value> {
+    ResponseEnvelope::Error {
+        id,
+        error: ErrorObject {
+            code: refine_code(error.code, &error.message),
+            message: error.message,
+            diagnostics: None,
+            details: error.details,
+        },
+    }
+}
+
 fn error_response_with_diagnostics(
     id: String,
     code: ErrorCode,
@@ -710,6 +811,7 @@ fn error_response_with_diagnostics(
             code: refine_code(code, &message),
             message,
             diagnostics,
+            details: None,
         },
     }
 }
@@ -944,7 +1046,7 @@ mod tests {
         let dispatcher = dispatcher();
         let mut session = SessionState::default();
         let reply = dispatcher
-            .execute(dispatcher.prepare(handshake("one", 5, 7), &mut session))
+            .execute(dispatcher.prepare(handshake("one", 5, 8), &mut session))
             .await;
         assert!(matches!(
             reply.response,
@@ -999,7 +1101,7 @@ mod tests {
         let dispatcher = dispatcher();
         let mut session = SessionState::default();
         let _ = dispatcher
-            .execute(dispatcher.prepare(handshake("one", 7, 7), &mut session))
+            .execute(dispatcher.prepare(handshake("one", 8, 8), &mut session))
             .await;
         let request = serde_json::json!({ "id": "two", "method": "engine.state", "params": {} });
         let _ = dispatcher
@@ -1009,6 +1111,34 @@ mod tests {
             dispatcher.prepare(request, &mut session),
             PreparedRequest::Close(Some(ResponseEnvelope::Error { .. }), _)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_computer_session_calls_as_that_computer_whatever_the_client_says() {
+        let dispatcher = dispatcher();
+        for (mut session, expected) in [
+            (
+                SessionState::for_computer("c1".into()),
+                Caller::Computer { id: "c1".into() },
+            ),
+            (SessionState::default(), Caller::owner("c1")),
+        ] {
+            let mut first = handshake("one", 8, 8);
+            first["params"]["client"] = serde_json::json!({ "name": "c1", "version": "0" });
+            let _ = dispatcher
+                .execute(dispatcher.prepare(first, &mut session))
+                .await;
+            let request = serde_json::json!({
+                "id": "two", "method": "engine.state", "params": { "computerId": "c2" }
+            });
+            let PreparedRequest::Invoke {
+                request_context, ..
+            } = dispatcher.prepare(request, &mut session)
+            else {
+                panic!("a request after the handshake is invoked");
+            };
+            assert_eq!(request_context.caller, expected);
+        }
     }
 
     #[test]

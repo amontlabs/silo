@@ -7,8 +7,10 @@ import { visibleText } from "@/lib/visible-text"
 
 const crumbClass = "min-w-0 truncate rounded px-1 py-1 text-muted-foreground hover:bg-muted focus-ring-inset"
 
-export function FolderBreadcrumbs({ segments, onNavigate }: {
+export function FolderBreadcrumbs({ segments, root = "/workspace", onNavigate }: {
   segments: string[]
+  /** The folder the path starts at. */
+  root?: string
   onNavigate: (segments: string[]) => void
 }) {
   const container = useRef<HTMLElement>(null)
@@ -17,7 +19,7 @@ export function FolderBreadcrumbs({ segments, onNavigate }: {
   const reduceMotion = useReduceMotion()
   const [layout, setLayout] = useState({ collapsed: false, rootVisible: true })
   // Folder names come from the guest: reveal invisible and bidirectional characters.
-  const labels = ["/workspace", ...segments.map(visibleText)]
+  const labels = [root, ...segments.map(visibleText)]
   const path = labels.join("/")
 
   useLayoutEffect(() => {

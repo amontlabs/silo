@@ -68,6 +68,7 @@
       "runtime/microsandbox/manifest.json": "microsandbox/manifest.json",
       "runtime/microsandbox/licenses/": "microsandbox/licenses/",
       "runtime/lfs-transfer/": "git-support/lfs-transfer/",
+      "runtime/guest-silo/": "guest-support/silo/",
       "runtime/git/manifest.json": "git-support/manifest.json",
       "runtime/git/licenses/": "git-support/licenses/",
       "runtime/git/share/": "git-support/share/",

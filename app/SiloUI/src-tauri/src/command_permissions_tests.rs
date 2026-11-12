@@ -133,6 +133,20 @@ fn migration_and_checkpoint_commands_are_allowlisted_for_the_main_window() {
         "abandon_restore",
         "read_checkpoint_usage",
         "remote_checkpoint_action",
+        "list_agents",
+        "install_agent",
+        "ensure_ssh_name",
+        "list_approvals",
+        "get_approval",
+        "decide_approval",
+        "list_audit",
+        "read_approval_job",
+        "read_device_resources",
+        "read_network_policy",
+        "save_network_policy",
+        "read_computer_tools",
+        "enable_computer_tools",
+        "revoke_computer_tools",
         "list_review_requests",
         "show_review_request",
         "keep_review_request",
@@ -289,4 +303,71 @@ fn file_transfer_commands_are_limited_to_the_main_window_and_the_viewer_shell() 
     assert!(capabilities["desktop-transfer"]["windows"]
         .as_array()
         .is_none_or(Vec::is_empty));
+}
+
+#[test]
+fn agents_are_listed_by_the_status_panel_and_installed_from_the_main_window_only() {
+    let capabilities: Value =
+        serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();
+    let granted = |window: &str, permission: &str| {
+        capabilities[window]["permissions"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::String(permission.into()))
+    };
+    assert!(granted("preview", "allow-list-agents"));
+    assert!(granted("preview", "allow-install-agent"));
+    assert!(granted("status", "allow-list-agents"));
+    assert!(!granted("status", "allow-install-agent"));
+    assert!(granted("preview", "allow-ensure-ssh-name"));
+    assert!(!granted("status", "allow-ensure-ssh-name"));
+}
+
+#[test]
+fn approvals_are_listed_by_the_status_panel_and_decided_from_the_main_window_only() {
+    let capabilities: Value =
+        serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();
+    let granted = |window: &str, permission: &str| {
+        capabilities[window]["permissions"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::String(permission.into()))
+    };
+    assert!(granted("preview", "allow-list-approvals"));
+    assert!(granted("preview", "allow-list-review-requests"));
+    assert!(granted("preview", "allow-decide-approval"));
+    assert!(granted("status", "allow-list-approvals"));
+    assert!(granted("status", "allow-list-review-requests"));
+    assert!(!granted("status", "allow-decide-approval"));
+    let events = &capabilities["application-events"];
+    assert!(events["windows"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("status".into())));
+    assert!(events["permissions"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("core:event:allow-listen".into())));
+}
+
+#[test]
+fn network_policy_and_silos_tools_are_for_the_main_window_only() {
+    let capabilities: Value =
+        serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();
+    let granted = |window: &str, permission: &str| {
+        capabilities[window]["permissions"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::String(permission.into()))
+    };
+    for permission in [
+        "allow-read-network-policy",
+        "allow-save-network-policy",
+        "allow-read-computer-tools",
+        "allow-enable-computer-tools",
+        "allow-revoke-computer-tools",
+    ] {
+        assert!(granted("preview", permission), "{permission}");
+        assert!(!granted("status", permission), "{permission}");
+    }
 }

@@ -1,0 +1,1880 @@
+diff --git a/crates/network/lib/engine/netstack/poll.rs b/crates/network/lib/engine/netstack/poll.rs
+index 1ea4566de871887d7a3386a274f7c82a54e96533..e9606f06f0bc8dda896ea5bf06b2c28cba535a86 100644
+--- a/crates/network/lib/engine/netstack/poll.rs
++++ b/crates/network/lib/engine/netstack/poll.rs
+@@ -10,6 +10,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+ use std::num::NonZeroUsize;
+ use std::sync::Arc;
+ use std::sync::atomic::Ordering;
++use std::sync::mpsc;
+ 
+ #[cfg(windows)]
+ use msb_krun_utils::event::{EventSet, EventSource, WaitContext, WaitEvent};
+@@ -31,7 +32,7 @@ use crate::engine::dns::{
+ use crate::engine::tls::{proxy::TlsProxy, state::TlsState};
+ use crate::icmp::relay::IcmpRelay;
+ use crate::policy::{EgressEvaluation, HostnameSource, NetworkPolicy, Protocol};
+-use crate::ports::{BoundPublishedPorts, PortPublisher};
++use crate::ports::{BoundPublishedPorts, PortCommand, PortPublisher};
+ use crate::proxy::ResolvedOutboundProxy;
+ use crate::secrets::handle::SecretsHandle;
+ use crate::tcp::{
+@@ -242,6 +243,7 @@ pub fn smoltcp_poll_loop(
+     dns_config: DnsConfig,
+     tls_state: Option<Arc<TlsState>>,
+     published_ports: BoundPublishedPorts,
++    port_commands: mpsc::Receiver<PortCommand>,
+     strict: bool,
+     max_tcp_connections: Option<NonZeroUsize>,
+     max_udp_connections: Option<ConnectionLimit>,
+@@ -344,6 +346,16 @@ pub fn smoltcp_poll_loop(
+     };
+ 
+     loop {
++        while let Ok(command) = port_commands.try_recv() {
++            port_publisher.apply_command(
++                command,
++                &network_policy,
++                &shared,
++                &tokio_handle,
++                &mut iface,
++                &mut sockets,
++            );
++        }
+         let now = smoltcp_now();
+ 
+         // ── Phase 1: Drain all guest frames with pre-inspection ──────────
+@@ -2060,6 +2072,7 @@ mod tests {
+                 DnsConfig::default(),
+                 None,
+                 BoundPublishedPorts::default(),
++                mpsc::channel().1,
+                 false,
+                 None,
+                 None,
+@@ -2208,6 +2221,7 @@ mod tests {
+                 DnsConfig::default(),
+                 None,
+                 BoundPublishedPorts::default(),
++                mpsc::channel().1,
+                 false,
+                 None,
+                 None,
+diff --git a/crates/network/lib/engine/network.rs b/crates/network/lib/engine/network.rs
+index d01c15976ba787de93a32e1561ebf380276a8d7c..6eecde5fe23e95cba29856f159d3cc5d7e725f46 100644
+--- a/crates/network/lib/engine/network.rs
++++ b/crates/network/lib/engine/network.rs
+@@ -7,6 +7,7 @@
+ 
+ use std::net::{Ipv4Addr, Ipv6Addr, UdpSocket};
+ use std::num::NonZeroUsize;
++use std::sync::mpsc;
+ use std::sync::{Arc, Condvar, Mutex};
+ use std::thread::JoinHandle;
+ 
+@@ -28,7 +29,8 @@ use crate::netstack::{
+     shared::{DEFAULT_QUEUE_CAPACITY, SharedState},
+ };
+ use crate::policy::{NetworkPolicy, NetworkProfile};
+-use crate::ports::{BoundPublishedPorts, PublishedPortBindError};
++pub use crate::ports::PortControlHandle;
++use crate::ports::{BoundPublishedPorts, PortCommand, PublishedPortBindError};
+ use crate::secrets::handle::SecretsHandle;
+ 
+ //--------------------------------------------------------------------------------------------------
+@@ -77,6 +79,9 @@ pub struct SmoltcpNetwork {
+ 
+     // Live-swappable secrets view shared with the poll loop and TLS state.
+     secrets: SecretsHandle,
++    port_control: PortControlHandle,
++    port_commands: Option<mpsc::Receiver<PortCommand>>,
++    allow_live_ports: bool,
+ }
+ 
+ #[derive(Clone, Copy)]
+@@ -289,6 +294,7 @@ impl SmoltcpNetwork {
+             });
+         }
+         shared.set_nat64_prefixes(config.nat64_prefixes.clone());
++        let (port_control, port_commands) = PortControlHandle::channel(shared.clone());
+         // Every write path validates rate limiters (`NetworkBuilder::build`),
+         // but a stored config bypasses the builder: fail startup cleanly
+         // instead of panicking on a corrupted spec.
+@@ -345,6 +351,9 @@ impl SmoltcpNetwork {
+             gateway_ipv6,
+             tls_state,
+             secrets,
++            port_control,
++            port_commands: Some(port_commands),
++            allow_live_ports: deployment_profile == DeploymentProfile::SingleTenant,
+         })
+     }
+ 
+@@ -426,6 +435,7 @@ impl SmoltcpNetwork {
+         let secrets = self.secrets.clone();
+         let activation_gate = self.activation_gate.take();
+         let outbound_proxy = self.config.outbound_proxy().cloned().map(Arc::new);
++        let port_commands = self.port_commands.take().expect("network already started");
+ 
+         self.poll_handle = Some(
+             std::thread::Builder::new()
+@@ -442,6 +452,7 @@ impl SmoltcpNetwork {
+                         dns_config,
+                         tls_state,
+                         published_ports,
++                        port_commands,
+                         strict,
+                         max_tcp_connections,
+                         max_udp_connections,
+@@ -457,6 +468,11 @@ impl SmoltcpNetwork {
+         Ok(())
+     }
+ 
++    /// Host-owned live TCP publication authority.
++    pub fn port_control_handle(&self) -> Option<PortControlHandle> {
++        self.allow_live_ports.then(|| self.port_control.clone())
++    }
++
+     /// Take the `NetBackend` for `VmBuilder::net()`. One-shot.
+     pub fn take_backend(&mut self) -> Box<dyn NetBackend + Send> {
+         Box::new(self.backend.take().expect("backend already taken"))
+@@ -982,6 +998,26 @@ mod tests {
+         assert!(config.policy.default_egress.is_allow());
+     }
+ 
++    #[test]
++    fn multi_tenant_network_never_exposes_live_port_control() {
++        let single = SmoltcpNetwork::build(
++            resolved(NetworkConfig::default()),
++            0,
++            DeploymentProfile::SingleTenant,
++            routes(true, false),
++        )
++        .unwrap();
++        assert!(single.port_control_handle().is_some());
++        let multi = SmoltcpNetwork::build(
++            resolved(NetworkConfig::default()),
++            0,
++            DeploymentProfile::MultiTenant,
++            routes(true, false),
++        )
++        .unwrap();
++        assert!(multi.port_control_handle().is_none());
++    }
++
+     #[test]
+     fn deployment_profile_defaults_and_explicit_connection_limits() {
+         for profile in [
+diff --git a/crates/network/lib/engine/ports/mod.rs b/crates/network/lib/engine/ports/mod.rs
+index f7594dc69607dd6046106924fa33a77758dcc0f2..1bbf643265edf239b91babf66a01fe51fa1f4299 100644
+--- a/crates/network/lib/engine/ports/mod.rs
++++ b/crates/network/lib/engine/ports/mod.rs
+@@ -6,4 +6,6 @@ pub mod publisher;
+ // Re-Exports
+ //--------------------------------------------------------------------------------------------------
+ 
+-pub use publisher::{BoundPublishedPorts, PortPublisher, PublishedPortBindError};
++pub use publisher::{
++    BoundPublishedPorts, PortCommand, PortControlHandle, PortPublisher, PublishedPortBindError,
++};
+diff --git a/crates/network/lib/engine/ports/publisher.rs b/crates/network/lib/engine/ports/publisher.rs
+index 6c683aaa0e11f475311d137eab971c17b49a77ea..111b69941d4c6fc115655a16b40e55f3dea8e5e1 100644
+--- a/crates/network/lib/engine/ports/publisher.rs
++++ b/crates/network/lib/engine/ports/publisher.rs
+@@ -13,6 +13,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+ use std::num::NonZeroUsize;
+ use std::sync::Arc;
+ use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
++use std::sync::mpsc as sync_mpsc;
+ use std::time::{Duration, Instant};
+ 
+ use bytes::Bytes;
+@@ -23,7 +24,7 @@ use smoltcp::wire::{EthernetAddress, IpEndpoint};
+ use tokio::io::{AsyncReadExt, AsyncWriteExt};
+ use tokio::net::tcp::OwnedWriteHalf;
+ use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
+-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
++use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
+ 
+ use crate::config::{ConnectionLimit, PortProtocol, PublishedPort, TcpAcceptQueueSize};
+ use crate::netstack::shared::SharedState;
+@@ -84,6 +85,7 @@ const UDP_EPHEMERAL_PORT_COUNT: usize =
+ #[derive(Debug, Default)]
+ pub struct BoundPublishedPorts {
+     ports: Vec<BoundPublishedPort>,
++    tcp_accept_queue_size: TcpAcceptQueueSize,
+ }
+ 
+ /// One published port and its host socket.
+@@ -132,6 +134,7 @@ pub struct PortPublisher {
+     _inbound_tx: InboundSender,
+     /// Tracked inbound connections (smoltcp socket → relay state).
+     connections: Vec<InboundRelay>,
++    probes: Vec<PendingProbe>,
+     /// Guest IP that inbound connections are dialed to. Prefers IPv4 (the
+     /// common case — most services bind `0.0.0.0` or dual-stack `::`, both
+     /// of which accept v4) and falls back to IPv6 for v6-only sandboxes.
+@@ -153,6 +156,92 @@ pub struct PortPublisher {
+     last_capacity_warning: Option<Instant>,
+     /// UDP published-port routes, keyed by guest-side port.
+     udp_routes: PublishedUdpRoutes,
++    /// Live TCP listeners; dropping the publisher aborts every task.
++    live_tcp: HashMap<u16, LiveTcpListener>,
++    /// Accept-queue depth for live-published listeners (matches the boot-time ports).
++    tcp_accept_queue_size: TcpAcceptQueueSize,
++    /// Admission policy applied to live-published listeners (matches the boot-time ports).
++    inbound_limit: ConnectionLimit,
++}
++
++/// Host-control command processed by the network poll thread.
++pub enum PortCommand {
++    List(sync_mpsc::SyncSender<Result<Vec<PublishedPort>, String>>),
++    Add {
++        guest_port: u16,
++        host_port: u16,
++        reply: sync_mpsc::SyncSender<Result<Vec<PublishedPort>, String>>,
++    },
++    Remove {
++        guest_port: u16,
++        reply: sync_mpsc::SyncSender<Result<Vec<PublishedPort>, String>>,
++    },
++    Probe {
++        guest_port: u16,
++        reply: sync_mpsc::SyncSender<Result<bool, String>>,
++    },
++}
++
++/// Cloneable host-owned control handle. The poll thread owns all listeners.
++#[derive(Clone)]
++pub struct PortControlHandle {
++    tx: sync_mpsc::Sender<PortCommand>,
++    shared: Arc<SharedState>,
++}
++
++impl PortControlHandle {
++    pub fn channel(shared: Arc<SharedState>) -> (Self, sync_mpsc::Receiver<PortCommand>) {
++        let (tx, rx) = sync_mpsc::channel();
++        (Self { tx, shared }, rx)
++    }
++
++    pub fn list(&self) -> Result<Vec<PublishedPort>, String> {
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        self.request(PortCommand::List(reply), rx)
++    }
++
++    pub fn add(&self, guest_port: u16, host_port: u16) -> Result<Vec<PublishedPort>, String> {
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        self.request(
++            PortCommand::Add {
++                guest_port,
++                host_port,
++                reply,
++            },
++            rx,
++        )
++    }
++
++    pub fn probe(&self, guest_port: u16) -> Result<bool, String> {
++        if guest_port == 0 {
++            return Err("guest port must be nonzero".into());
++        }
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        self.tx
++            .send(PortCommand::Probe { guest_port, reply })
++            .map_err(|_| "network poll thread stopped".to_string())?;
++        self.shared.proxy_wake.wake();
++        rx.recv_timeout(Duration::from_millis(800))
++            .map_err(|_| "network port probe timed out".to_string())?
++    }
++
++    pub fn remove(&self, guest_port: u16) -> Result<Vec<PublishedPort>, String> {
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        self.request(PortCommand::Remove { guest_port, reply }, rx)
++    }
++
++    fn request(
++        &self,
++        command: PortCommand,
++        rx: sync_mpsc::Receiver<Result<Vec<PublishedPort>, String>>,
++    ) -> Result<Vec<PublishedPort>, String> {
++        self.tx
++            .send(command)
++            .map_err(|_| "network poll thread stopped".to_string())?;
++        self.shared.proxy_wake.wake();
++        rx.recv_timeout(Duration::from_secs(2))
++            .map_err(|_| "network port control timed out".to_string())?
++    }
+ }
+ 
+ /// An accepted host-side connection waiting to be wired to the guest.
+@@ -165,6 +254,8 @@ struct InboundConnection {
+     deadline: Option<Instant>,
+     /// Held through active relay cleanup, so admission cannot exceed the combined budget.
+     permit: Option<OwnedSemaphorePermit>,
++    /// Set when the live listener that accepted this connection is removed.
++    cancelled: Option<watch::Receiver<bool>>,
+ }
+ 
+ /// Listener handoff and a shared budget for accepted active and waiting clients.
+@@ -174,6 +265,30 @@ struct InboundSender {
+     budget: Option<Arc<Semaphore>>,
+ }
+ 
++/// A live-published listener owned by the poll thread.
++struct LiveTcpListener {
++    port: PublishedPort,
++    cancelled: watch::Sender<bool>,
++    task: tokio::task::JoinHandle<()>,
++    stopped: sync_mpsc::Receiver<()>,
++}
++
++/// A guest reachability probe in flight.
++struct PendingProbe {
++    handle: SocketHandle,
++    reply: sync_mpsc::SyncSender<Result<bool, String>>,
++    deadline: Instant,
++}
++
++/// Signals a synchronous receiver when the owning task exits or is aborted.
++struct ExitSignal(sync_mpsc::SyncSender<()>);
++
++impl Drop for ExitSignal {
++    fn drop(&mut self) {
++        let _ = self.0.send(());
++    }
++}
++
+ /// Shared UDP published-port route table.
+ type PublishedUdpRoutes = Arc<Mutex<HashMap<u16, Vec<PublishedUdpRoute>>>>;
+ 
+@@ -213,6 +328,9 @@ struct InboundRelay {
+     _permit: Option<OwnedSemaphorePermit>,
+     /// Set only after the host relay has finished draining or its client has gone away.
+     host_finished: Arc<AtomicBool>,
++    guest_port: u16,
++    task: tokio::task::JoinHandle<()>,
++    stopped: sync_mpsc::Receiver<()>,
+     /// Sends guest data to the host. Dropped after guest FIN and buffered data drain.
+     to_host: Option<mpsc::Sender<Bytes>>,
+     /// Data removed from smoltcp while the host relay channel was full.
+@@ -318,7 +436,10 @@ impl BoundPublishedPorts {
+             });
+         }
+ 
+-        Ok(Self { ports: bound })
++        Ok(Self {
++            ports: bound,
++            tcp_accept_queue_size,
++        })
+     }
+ }
+ 
+@@ -344,6 +465,7 @@ impl PortPublisher {
+         tokio_handle: &tokio::runtime::Handle,
+     ) -> Self {
+         let inbound_limit = max_inbound_tcp_connections.unwrap_or(ConnectionLimit::Unlimited);
++        let tcp_accept_queue_size = published_ports.tcp_accept_queue_size;
+         // Include still-unused active slots: a cold burst must not exhaust the
+         // waiting allowance before the poll loop has admitted its first clients.
+         // Clamp only at Tokio's representable channel/semaphore capacity.
+@@ -383,6 +505,7 @@ impl PortPublisher {
+             pending_inbound: None,
+             _inbound_tx: inbound_tx,
+             connections: Vec::new(),
++            probes: Vec::new(),
+             guest_ip,
+             guest_ipv4,
+             guest_ipv6,
+@@ -392,7 +515,254 @@ impl PortPublisher {
+             tcp_ports: HashSet::new(),
+             last_capacity_warning: None,
+             udp_routes,
++            live_tcp: HashMap::new(),
++            inbound_limit,
++            tcp_accept_queue_size,
++        }
++    }
++
++    /// Apply a host-control command while retaining listener ownership on this thread.
++    pub fn apply_command(
++        &mut self,
++        command: PortCommand,
++        policy: &Arc<NetworkPolicy>,
++        shared: &Arc<SharedState>,
++        tokio_handle: &tokio::runtime::Handle,
++        iface: &mut Interface,
++        sockets: &mut SocketSet<'_>,
++    ) {
++        match command {
++            PortCommand::List(reply) => {
++                let _ = reply.send(Ok(self.live_ports()));
++            }
++            PortCommand::Add {
++                guest_port,
++                host_port,
++                reply,
++            } => {
++                let result = self
++                    .add_live_tcp(guest_port, host_port, policy, shared, tokio_handle, sockets)
++                    .map(|()| self.live_ports());
++                let _ = reply.send(result);
++            }
++            PortCommand::Remove { guest_port, reply } => {
++                let result = self
++                    .remove_live_tcp(guest_port, sockets)
++                    .map(|()| self.live_ports());
++                let _ = reply.send(result);
++            }
++            PortCommand::Probe { guest_port, reply } => {
++                self.start_probe(guest_port, reply, policy, shared, iface, sockets);
++            }
++        }
++    }
++
++    fn live_ports(&self) -> Vec<PublishedPort> {
++        let mut ports: Vec<_> = self
++            .live_tcp
++            .values()
++            .filter(|listener| !listener.task.is_finished())
++            .map(|listener| listener.port.clone())
++            .collect();
++        ports.sort_by_key(|port| port.guest_port);
++        ports
++    }
++
++    fn add_live_tcp(
++        &mut self,
++        guest_port: u16,
++        host_port: u16,
++        policy: &Arc<NetworkPolicy>,
++        shared: &Arc<SharedState>,
++        tokio_handle: &tokio::runtime::Handle,
++        sockets: &mut SocketSet<'_>,
++    ) -> Result<(), String> {
++        if guest_port == 0 {
++            return Err("guest port must be nonzero".into());
++        }
++        self.live_tcp
++            .retain(|_, listener| !listener.task.is_finished());
++        if self.guest_ip.is_none() {
++            return Err("guest has no IP address".into());
++        }
++        if self.live_tcp.len() >= 128 && !self.live_tcp.contains_key(&guest_port) {
++            return Err("published port limit reached".into());
++        }
++        if self
++            .live_tcp
++            .get(&guest_port)
++            .is_some_and(|listener| host_port == 0 || listener.port.host_port == host_port)
++        {
++            return Ok(());
++        }
++        let listener = {
++            let _entered = tokio_handle.enter();
++            bind_listener(
++                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), host_port),
++                self.tcp_accept_queue_size,
++            )
++            .map_err(|e| e.to_string())?
++        };
++        let bound = listener.local_addr().map_err(|e| e.to_string())?;
++        if let Some(old) = self.live_tcp.remove(&guest_port) {
++            stop_listener(old)?;
++            self.close_relays(guest_port, sockets)?;
++        }
++        let tx = self._inbound_tx.clone();
++        let inbound_limit = self.inbound_limit;
++        let policy = policy.clone();
++        let shared = shared.clone();
++        let (cancelled, mut cancel_rx) = watch::channel(false);
++        let (stopped_tx, stopped) = sync_mpsc::sync_channel(1);
++        let exit = ExitSignal(stopped_tx);
++        let task = tokio_handle.spawn(async move {
++            let _exit = exit;
++            let loop_task = tcp_listener_loop(
++                listener,
++                guest_port,
++                inbound_limit,
++                tx,
++                policy,
++                shared,
++                Some(cancel_rx.clone()),
++            );
++            tokio::select! {
++                result = loop_task => {
++                    if let Err(error) = result {
++                        tracing::error!(guest_port, %error, "live published TCP listener failed");
++                    }
++                },
++                _ = cancel_rx.changed() => {},
++            }
++        });
++        let port = PublishedPort {
++            host_bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
++            host_port: bound.port(),
++            guest_port,
++            protocol: PortProtocol::Tcp,
++        };
++        self.live_tcp.insert(
++            guest_port,
++            LiveTcpListener {
++                port,
++                cancelled,
++                task,
++                stopped,
++            },
++        );
++        Ok(())
++    }
++
++    fn remove_live_tcp(
++        &mut self,
++        guest_port: u16,
++        sockets: &mut SocketSet<'_>,
++    ) -> Result<(), String> {
++        if let Some(listener) = self.live_tcp.remove(&guest_port) {
++            stop_listener(listener)?;
++        }
++        self.close_relays(guest_port, sockets)
++    }
++
++    fn close_relays(&mut self, guest_port: u16, sockets: &mut SocketSet<'_>) -> Result<(), String> {
++        let mut remaining = Vec::with_capacity(self.connections.len());
++        let mut removed = Vec::new();
++        for relay in self.connections.drain(..) {
++            if relay.guest_port == guest_port {
++                removed.push(relay);
++            } else {
++                remaining.push(relay);
++            }
++        }
++        self.connections = remaining;
++        for relay in &removed {
++            relay.task.abort();
++        }
++        for relay in removed {
++            relay
++                .stopped
++                .recv_timeout(Duration::from_secs(1))
++                .map_err(|_| "live relay did not stop".to_string())?;
++            if let Some(endpoint) = sockets.get::<tcp::Socket>(relay.handle).local_endpoint() {
++                self.tcp_ports.remove(&endpoint.port);
++            }
++            sockets.remove(relay.handle);
++        }
++        Ok(())
++    }
++
++    fn start_probe(
++        &mut self,
++        guest_port: u16,
++        reply: sync_mpsc::SyncSender<Result<bool, String>>,
++        policy: &Arc<NetworkPolicy>,
++        shared: &Arc<SharedState>,
++        iface: &mut Interface,
++        sockets: &mut SocketSet<'_>,
++    ) {
++        if guest_port == 0 {
++            let _ = reply.send(Err("guest port must be nonzero".into()));
++            return;
++        }
++        if policy
++            .evaluate_ingress(
++                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
++                guest_port,
++                Protocol::Tcp,
++                shared,
++            )
++            .is_deny()
++        {
++            let _ = reply.send(Ok(false));
++            return;
+         }
++        if self.probes.len() >= 16 {
++            let _ = reply.send(Err("network probes are busy".into()));
++            return;
++        }
++        let Some(guest_ip) = self.guest_ip else {
++            let _ = reply.send(Ok(false));
++            return;
++        };
++        let mut socket = tcp::Socket::new(
++            tcp::SocketBuffer::new(vec![0; 1]),
++            tcp::SocketBuffer::new(vec![0; 1]),
++        );
++        let remote = IpEndpoint::new(guest_ip.into(), guest_port);
++        let Some(local_port) = self.alloc_ephemeral_port() else {
++            let _ = reply.send(Err("no free source port for network probe".into()));
++            return;
++        };
++        if socket.connect(iface.context(), remote, local_port).is_err() {
++            let _ = reply.send(Ok(false));
++            return;
++        }
++        self.probes.push(PendingProbe {
++            handle: sockets.add(socket),
++            reply,
++            deadline: Instant::now() + Duration::from_millis(500),
++        });
++    }
++
++    fn service_probes(&mut self, sockets: &mut SocketSet<'_>) {
++        self.probes.retain(|probe| {
++            let socket = sockets.get_mut::<tcp::Socket>(probe.handle);
++            let ready = matches!(
++                socket.state(),
++                tcp::State::Established | tcp::State::CloseWait
++            );
++            if ready
++                || matches!(socket.state(), tcp::State::Closed)
++                || Instant::now() >= probe.deadline
++            {
++                let _ = probe.reply.send(Ok(ready));
++                socket.abort();
++                sockets.remove(probe.handle);
++                false
++            } else {
++                true
++            }
++        });
+     }
+ 
+     /// Accept queued inbound connections: create smoltcp sockets and
+@@ -432,6 +802,14 @@ impl PortPublisher {
+                 break;
+             };
+ 
++            if conn
++                .cancelled
++                .as_ref()
++                .is_some_and(|cancelled| *cancelled.borrow())
++            {
++                reject_with_rst(&conn.stream);
++                continue;
++            }
+             if !matches!(conn.stream.take_error(), Ok(None)) {
+                 continue;
+             }
+@@ -490,10 +868,21 @@ impl PortPublisher {
+             let shared_clone = shared.clone();
+             let host_finished = Arc::new(AtomicBool::new(false));
+             let finished = host_finished.clone();
+-            tokio_handle.spawn(async move {
+-                let _ =
+-                    inbound_relay_task(conn.stream, to_host_rx, from_host_tx, shared_clone.clone())
+-                        .await;
++            let (stopped_tx, stopped) = sync_mpsc::sync_channel(1);
++            let exit = ExitSignal(stopped_tx);
++            let task = tokio_handle.spawn(async move {
++                let _exit = exit;
++                let relay =
++                    inbound_relay_task(conn.stream, to_host_rx, from_host_tx, shared_clone.clone());
++                let _ = match conn.cancelled {
++                    Some(mut cancelled) => {
++                        tokio::select! {
++                            result = relay => result,
++                            _ = cancelled.changed() => return,
++                        }
++                    }
++                    None => relay.await,
++                };
+                 finished.store(true, Ordering::Release);
+                 shared_clone.proxy_wake.wake();
+             });
+@@ -502,6 +891,9 @@ impl PortPublisher {
+                 handle,
+                 _permit: conn.permit,
+                 host_finished,
++                guest_port: conn.guest_port,
++                task,
++                stopped,
+                 to_host: Some(to_host_tx),
+                 read_buf: None,
+                 from_host: from_host_rx,
+@@ -540,6 +932,7 @@ impl PortPublisher {
+ 
+     /// Relay data between smoltcp sockets and host relay tasks.
+     pub fn relay_data(&mut self, sockets: &mut SocketSet<'_>) {
++        self.service_probes(sockets);
+         let mut relay_buf = [0u8; RELAY_BUF_SIZE];
+ 
+         for relay in &mut self.connections {
+@@ -930,6 +1323,27 @@ async fn tcp_listener_task(
+ ) -> std::io::Result<()> {
+     log_published_port_listener("TCP", bind_addr, guest_port);
+ 
++    tcp_listener_loop(
++        listener,
++        guest_port,
++        inbound_limit,
++        inbound_tx,
++        policy,
++        shared,
++        None,
++    )
++    .await
++}
++
++async fn tcp_listener_loop(
++    listener: TcpListener,
++    guest_port: u16,
++    inbound_limit: ConnectionLimit,
++    inbound_tx: InboundSender,
++    policy: Arc<NetworkPolicy>,
++    shared: Arc<SharedState>,
++    cancelled: Option<watch::Receiver<bool>>,
++) -> std::io::Result<()> {
+     loop {
+         let (stream, peer) = tokio::select! {
+             accepted = listener.accept() => accepted?,
+@@ -956,6 +1370,7 @@ async fn tcp_listener_task(
+                 .cap()
+                 .map(|_| Instant::now() + INBOUND_QUEUE_TIMEOUT),
+             permit: None,
++            cancelled: cancelled.clone(),
+         };
+         if !queue_inbound_connection(&inbound_tx, conn, &shared).await {
+             break; // Publisher dropped.
+@@ -965,6 +1380,18 @@ async fn tcp_listener_task(
+     Ok(())
+ }
+ 
++impl Drop for PortPublisher {
++    fn drop(&mut self) {
++        for (_, listener) in self.live_tcp.drain() {
++            let _ = listener.cancelled.send(true);
++            listener.task.abort();
++        }
++        for relay in self.connections.drain(..) {
++            relay.task.abort();
++        }
++    }
++}
++
+ /// UDP listener task: receives host datagrams, injects them into the guest,
+ /// and sends guest replies back to active peers through the same socket.
+ #[allow(clippy::too_many_arguments)]
+@@ -1351,6 +1778,15 @@ fn write_host_data(socket: &mut tcp::Socket<'_>, relay: &mut InboundRelay) {
+     }
+ }
+ 
++fn stop_listener(listener: LiveTcpListener) -> Result<(), String> {
++    let _ = listener.cancelled.send(true);
++    listener.task.abort();
++    listener
++        .stopped
++        .recv_timeout(Duration::from_secs(1))
++        .map_err(|_| "live listener did not stop".to_string())
++}
++
+ //--------------------------------------------------------------------------------------------------
+ // Tests
+ //--------------------------------------------------------------------------------------------------
+@@ -1363,6 +1799,399 @@ mod tests {
+     use smoltcp::wire::{IpAddress, IpCidr};
+ 
+     use super::*;
++    use crate::netstack::device::SmoltcpDevice;
++    use crate::netstack::poll::{PollLoopConfig, create_interface};
++    use crate::stack::GatewayIps;
++
++    fn apply_test_command(
++        publisher: &mut PortPublisher,
++        command: PortCommand,
++        policy: &Arc<NetworkPolicy>,
++        shared: &Arc<SharedState>,
++        handle: &tokio::runtime::Handle,
++    ) {
++        let config = PollLoopConfig {
++            gateway_mac: [2, 0, 0, 0, 0, 1],
++            guest_mac: [2, 0, 0, 0, 0, 2],
++            gateway: GatewayIps {
++                ipv4: Some(Ipv4Addr::new(172, 16, 0, 1)),
++                ipv6: None,
++            },
++            guest_ipv4: Some(Ipv4Addr::new(172, 16, 0, 2)),
++            guest_ipv6: None,
++            mtu: 1500,
++        };
++        let mut device = SmoltcpDevice::new(shared.clone(), 1500);
++        let mut iface = create_interface(&mut device, &config);
++        let mut sockets = SocketSet::new(vec![]);
++        publisher.apply_command(command, policy, shared, handle, &mut iface, &mut sockets);
++    }
++
++    fn live_test_publisher(policy: Arc<NetworkPolicy>, shared: Arc<SharedState>) -> PortPublisher {
++        PortPublisher::new(
++            BoundPublishedPorts::default(),
++            None,
++            Some(Ipv4Addr::new(172, 16, 0, 2)),
++            None,
++            [2, 0, 0, 0, 0, 1],
++            [2, 0, 0, 0, 0, 2],
++            policy,
++            shared,
++            &tokio::runtime::Handle::current(),
++        )
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn live_tcp_add_list_remove_binds_and_releases_ephemeral_port() {
++        let shared = Arc::new(SharedState::new(4));
++        let policy = Arc::new(NetworkPolicy::allow_all());
++        let mut publisher = live_test_publisher(policy.clone(), shared.clone());
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        apply_test_command(
++            &mut publisher,
++            PortCommand::Add {
++                guest_port: 8080,
++                host_port: 0,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++        );
++        let ports = rx.recv().unwrap().unwrap();
++        assert_eq!(ports.len(), 1);
++        assert_eq!(ports[0].host_bind, IpAddr::V4(Ipv4Addr::LOCALHOST));
++        assert_ne!(ports[0].host_port, 0);
++        let addr = SocketAddr::new(ports[0].host_bind, ports[0].host_port);
++        let _client = TcpStream::connect(addr).await.unwrap();
++        let inbound = tokio::time::timeout(Duration::from_secs(1), publisher.inbound_rx.recv())
++            .await
++            .unwrap()
++            .unwrap();
++        assert_eq!(inbound.guest_port, 8080);
++
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        apply_test_command(
++            &mut publisher,
++            PortCommand::Add {
++                guest_port: 8080,
++                host_port: 0,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++        );
++        assert_eq!(
++            rx.recv().unwrap().unwrap()[0].host_port,
++            ports[0].host_port,
++            "repeat automatic publication must preserve its bound port"
++        );
++
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        apply_test_command(
++            &mut publisher,
++            PortCommand::Add {
++                guest_port: 8081,
++                host_port: ports[0].host_port,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++        );
++        assert!(
++            rx.recv().unwrap().is_err(),
++            "occupied host port must be rejected"
++        );
++        assert_eq!(publisher.live_ports().len(), 1);
++
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        apply_test_command(
++            &mut publisher,
++            PortCommand::Remove {
++                guest_port: 8080,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++        );
++        assert!(rx.recv().unwrap().unwrap().is_empty());
++        let rebound = std::net::TcpListener::bind(addr)
++            .expect("remove acknowledgement must release host port immediately");
++        drop(rebound);
++
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        apply_test_command(
++            &mut publisher,
++            PortCommand::Add {
++                guest_port: 8081,
++                host_port: 0,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++        );
++        let next = rx.recv().unwrap().unwrap().remove(0);
++        let next_addr = SocketAddr::new(next.host_bind, next.host_port);
++        drop(publisher);
++        tokio::time::timeout(Duration::from_secs(1), async {
++            loop {
++                if std::net::TcpListener::bind(next_addr).is_ok() {
++                    break;
++                }
++                tokio::time::sleep(Duration::from_millis(10)).await;
++            }
++        })
++        .await
++        .expect("publisher drop must release live listener");
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn live_tcp_remove_closes_accepted_relay_before_ack_and_republishes() {
++        let shared = Arc::new(SharedState::new(4));
++        let policy = Arc::new(NetworkPolicy::allow_all());
++        let mut publisher = live_test_publisher(policy.clone(), shared.clone());
++        let config = PollLoopConfig {
++            gateway_mac: [2, 0, 0, 0, 0, 1],
++            guest_mac: [2, 0, 0, 0, 0, 2],
++            gateway: GatewayIps {
++                ipv4: Some(Ipv4Addr::new(172, 16, 0, 1)),
++                ipv6: None,
++            },
++            guest_ipv4: Some(Ipv4Addr::new(172, 16, 0, 2)),
++            guest_ipv6: None,
++            mtu: 1500,
++        };
++        let mut device = SmoltcpDevice::new(shared.clone(), 1500);
++        let mut iface = create_interface(&mut device, &config);
++        let mut sockets = SocketSet::new(vec![]);
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        publisher.apply_command(
++            PortCommand::Add {
++                guest_port: 8080,
++                host_port: 0,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++            &mut iface,
++            &mut sockets,
++        );
++        let port = rx.recv().unwrap().unwrap().remove(0);
++        let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, port.host_port))
++            .await
++            .unwrap();
++        tokio::time::timeout(Duration::from_secs(1), async {
++            loop {
++                publisher.accept_inbound(
++                    &mut iface,
++                    &mut sockets,
++                    &shared,
++                    &tokio::runtime::Handle::current(),
++                );
++                if publisher.connections.len() == 1 {
++                    break;
++                }
++                tokio::time::sleep(Duration::from_millis(5)).await;
++            }
++        })
++        .await
++        .unwrap();
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        publisher.apply_command(
++            PortCommand::Remove {
++                guest_port: 8080,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++            &mut iface,
++            &mut sockets,
++        );
++        assert!(rx.recv().unwrap().unwrap().is_empty());
++        assert!(publisher.connections.is_empty());
++        let mut byte = [0u8; 1];
++        let read = tokio::time::timeout(Duration::from_secs(1), client.read(&mut byte))
++            .await
++            .unwrap();
++        assert!(
++            read.is_err() || read.unwrap() == 0,
++            "removed relay must close host stream"
++        );
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        publisher.apply_command(
++            PortCommand::Add {
++                guest_port: 8080,
++                host_port: port.host_port,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++            &mut iface,
++            &mut sockets,
++        );
++        assert_eq!(rx.recv().unwrap().unwrap()[0].host_port, port.host_port);
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn live_tcp_probe_times_out_without_guest_handshake_or_host_listener() {
++        let shared = Arc::new(SharedState::new(4));
++        let policy = Arc::new(NetworkPolicy::allow_all());
++        let mut publisher = live_test_publisher(policy.clone(), shared.clone());
++        let config = PollLoopConfig {
++            gateway_mac: [2, 0, 0, 0, 0, 1],
++            guest_mac: [2, 0, 0, 0, 0, 2],
++            gateway: GatewayIps {
++                ipv4: Some(Ipv4Addr::new(172, 16, 0, 1)),
++                ipv6: None,
++            },
++            guest_ipv4: Some(Ipv4Addr::new(172, 16, 0, 2)),
++            guest_ipv6: None,
++            mtu: 1500,
++        };
++        let mut device = SmoltcpDevice::new(shared.clone(), 1500);
++        let mut iface = create_interface(&mut device, &config);
++        let mut sockets = SocketSet::new(vec![]);
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        publisher.apply_command(
++            PortCommand::Probe {
++                guest_port: 8080,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++            &mut iface,
++            &mut sockets,
++        );
++        assert_eq!(publisher.probes.len(), 1);
++        assert!(publisher.live_ports().is_empty());
++        tokio::time::sleep(Duration::from_millis(510)).await;
++        publisher.service_probes(&mut sockets);
++        assert!(!rx.recv().unwrap().unwrap());
++        assert!(publisher.probes.is_empty());
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn live_tcp_probe_caps_pending_handshakes_at_sixteen() {
++        let shared = Arc::new(SharedState::new(4));
++        let policy = Arc::new(NetworkPolicy::allow_all());
++        let mut publisher = live_test_publisher(policy.clone(), shared.clone());
++        let config = PollLoopConfig {
++            gateway_mac: [2, 0, 0, 0, 0, 1],
++            guest_mac: [2, 0, 0, 0, 0, 2],
++            gateway: GatewayIps {
++                ipv4: Some(Ipv4Addr::new(172, 16, 0, 1)),
++                ipv6: None,
++            },
++            guest_ipv4: Some(Ipv4Addr::new(172, 16, 0, 2)),
++            guest_ipv6: None,
++            mtu: 1500,
++        };
++        let mut device = SmoltcpDevice::new(shared.clone(), 1500);
++        let mut iface = create_interface(&mut device, &config);
++        let mut sockets = SocketSet::new(vec![]);
++        let mut replies = Vec::new();
++        for _ in 0..16 {
++            let (reply, rx) = sync_mpsc::sync_channel(1);
++            publisher.apply_command(
++                PortCommand::Probe {
++                    guest_port: 8080,
++                    reply,
++                },
++                &policy,
++                &shared,
++                &tokio::runtime::Handle::current(),
++                &mut iface,
++                &mut sockets,
++            );
++            replies.push(rx);
++        }
++        assert_eq!(publisher.probes.len(), 16);
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        publisher.apply_command(
++            PortCommand::Probe {
++                guest_port: 8080,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++            &mut iface,
++            &mut sockets,
++        );
++        assert!(rx.recv().unwrap().is_err());
++        assert_eq!(publisher.probes.len(), 16);
++        drop(replies);
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn live_tcp_probe_respects_ingress_and_has_bounded_pending_work() {
++        let shared = Arc::new(SharedState::new(4));
++        let policy = Arc::new(NetworkPolicy {
++            default_ingress: crate::policy::Action::Deny,
++            ..NetworkPolicy::allow_all()
++        });
++        let mut publisher = live_test_publisher(policy.clone(), shared.clone());
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        apply_test_command(
++            &mut publisher,
++            PortCommand::Probe {
++                guest_port: 8080,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++        );
++        assert!(
++            !rx.recv().unwrap().unwrap(),
++            "denied probe must not connect to guest"
++        );
++        assert!(publisher.probes.is_empty());
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn live_tcp_still_applies_ingress_policy() {
++        let shared = Arc::new(SharedState::new(4));
++        let policy = Arc::new(NetworkPolicy {
++            default_ingress: crate::policy::Action::Deny,
++            ..NetworkPolicy::allow_all()
++        });
++        let mut publisher = live_test_publisher(policy.clone(), shared.clone());
++        let (reply, rx) = sync_mpsc::sync_channel(1);
++        apply_test_command(
++            &mut publisher,
++            PortCommand::Add {
++                guest_port: 8080,
++                host_port: 0,
++                reply,
++            },
++            &policy,
++            &shared,
++            &tokio::runtime::Handle::current(),
++        );
++        let port = rx.recv().unwrap().unwrap().remove(0);
++        let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, port.host_port))
++            .await
++            .unwrap();
++        let mut byte = [0u8; 1];
++        let result = tokio::time::timeout(Duration::from_secs(1), client.read(&mut byte))
++            .await
++            .expect("denied listener must close connection");
++        assert!(result.is_err() || result.unwrap() == 0);
++        assert!(
++            publisher.inbound_rx.try_recv().is_err(),
++            "denied connection reached guest queue"
++        );
++        drop(client);
++    }
+ 
+     const TEST_GUEST_PORT: u16 = 8080;
+ 
+@@ -1432,6 +2261,10 @@ mod tests {
+                 tcp_ports: HashSet::new(),
+                 last_capacity_warning: None,
+                 udp_routes: Arc::new(Mutex::new(HashMap::new())),
++                probes: Vec::new(),
++                live_tcp: HashMap::new(),
++                tcp_accept_queue_size: TcpAcceptQueueSize::default(),
++                inbound_limit: ConnectionLimit::Unlimited,
+             };
+ 
+             Self {
+@@ -1488,6 +2321,7 @@ mod tests {
+                             .max_inbound
+                             .map(|_| Instant::now() + INBOUND_QUEUE_TIMEOUT),
+                         permit: None,
++                        cancelled: None,
+                     },
+                     &self.shared,
+                 )
+@@ -1629,6 +2463,9 @@ mod tests {
+                 handle,
+                 _permit: None,
+                 host_finished: Arc::new(AtomicBool::new(true)),
++                guest_port: 8099,
++                task: tokio::spawn(async {}),
++                stopped: sync_mpsc::sync_channel(1).1,
+                 to_host: Some(to_host),
+                 read_buf: None,
+                 from_host: to_guest,
+@@ -2709,6 +3546,7 @@ mod tests {
+                 budget: None,
+             },
+             connections: Vec::new(),
++            probes: Vec::new(),
+             guest_ip: Some(IpAddr::V4(guest_ip)),
+             guest_ipv4: Some(guest_ip),
+             guest_ipv6: None,
+@@ -2719,6 +3557,9 @@ mod tests {
+             tcp_ports: HashSet::new(),
+             last_capacity_warning: None,
+             udp_routes: routes,
++            live_tcp: HashMap::new(),
++            tcp_accept_queue_size: TcpAcceptQueueSize::default(),
++            inbound_limit: ConnectionLimit::Unlimited,
+         };
+         let src = SocketAddr::new(IpAddr::V4(guest_ip), 5353);
+         let frame = construct_udp_response(
+@@ -2761,6 +3602,7 @@ mod tests {
+                 budget: None,
+             },
+             connections: Vec::new(),
++            probes: Vec::new(),
+             guest_ip: Some(IpAddr::V4(guest_ip)),
+             guest_ipv4: Some(guest_ip),
+             guest_ipv6: None,
+@@ -2771,6 +3613,9 @@ mod tests {
+             tcp_ports: HashSet::new(),
+             last_capacity_warning: None,
+             udp_routes: routes,
++            live_tcp: HashMap::new(),
++            tcp_accept_queue_size: TcpAcceptQueueSize::default(),
++            inbound_limit: ConnectionLimit::Unlimited,
+         };
+         let src = SocketAddr::new(IpAddr::V4(guest_ip), 5353);
+         let frame = construct_udp_response(
+diff --git a/crates/protocol/lib/control/message.rs b/crates/protocol/lib/control/message.rs
+index eca918cb56b9f295688dd302cc3eec1595bc8838..825cab5fcc3da4beabc0fffad3396331c8e95c0e 100644
+--- a/crates/protocol/lib/control/message.rs
++++ b/crates/protocol/lib/control/message.rs
+@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
+ 
+ use super::{
+     BranchCreate, CheckpointCreate, ControlRequest, CpuTarget, DiskCheckpointCreate, DiskCompact,
+-    Empty, MemoryTarget, Pause, RootDiskGrow, SecretsResult, SecretsUpdate,
++    Empty, MemoryTarget, Pause, PortAdd, PortProbe, PortRemove, RootDiskGrow, SecretsResult,
++    SecretsUpdate,
+ };
+ use crate::wire::{Envelope, WireError, decode_value, validate_record};
+ 
+@@ -50,6 +51,24 @@ pub const CONTROL_GENERATION_TWO_MESSAGES: &[&str] = &[
+     strum::EnumIter,
+ )]
+ pub enum ControlMessageType {
++    /// Query live publications.
++    #[strum(serialize = "control.ports.list")]
++    PortsList,
++    /// Add a live publication.
++    #[strum(serialize = "control.ports.add")]
++    PortAdd,
++    /// Probe a guest TCP service.
++    #[strum(serialize = "control.ports.probe")]
++    PortProbe,
++    /// Direct guest probe result.
++    #[strum(serialize = "control.ports.probe.result")]
++    PortProbeResult,
++    /// Remove a live publication.
++    #[strum(serialize = "control.ports.remove")]
++    PortRemove,
++    /// Complete publication state.
++    #[strum(serialize = "control.ports.state")]
++    PortsState,
+     /// Initial generation offer.
+     #[strum(serialize = "control.hello")]
+     Hello,
+@@ -131,6 +150,10 @@ impl ControlMessageType {
+         matches!(
+             self,
+             Self::Capabilities
++                | Self::PortsList
++                | Self::PortAdd
++                | Self::PortRemove
++                | Self::PortProbe
+                 | Self::MemoryState
+                 | Self::MemoryTarget
+                 | Self::CpuState
+@@ -214,6 +237,29 @@ impl ControlRequest {
+     /// Decode a known application request after the server validates its frame.
+     pub fn from_envelope(envelope: &Envelope) -> Result<Self, WireError> {
+         Ok(match ControlMessageType::from_wire_str(&envelope.t) {
++            Some(ControlMessageType::PortsList) => {
++                envelope.payload::<Empty>()?;
++                Self::PortsList
++            }
++            Some(ControlMessageType::PortAdd) => {
++                let payload: PortAdd = envelope.payload()?;
++                Self::PortAdd {
++                    guest_port: payload.guest_port,
++                    host_port: payload.host_port,
++                }
++            }
++            Some(ControlMessageType::PortProbe) => {
++                let payload: PortProbe = envelope.payload()?;
++                Self::PortProbe {
++                    guest_port: payload.guest_port,
++                }
++            }
++            Some(ControlMessageType::PortRemove) => {
++                let payload: PortRemove = envelope.payload()?;
++                Self::PortRemove {
++                    guest_port: payload.guest_port,
++                }
++            }
+             Some(ControlMessageType::Capabilities) => {
+                 envelope.payload::<Empty>()?;
+                 Self::Capabilities
+@@ -267,6 +313,36 @@ impl ControlRequest {
+     /// Encode the CBOR operation corresponding to this legacy-compatible value.
+     pub fn envelope(&self, generation: u8) -> Result<Envelope, WireError> {
+         match self {
++            Self::PortsList => Envelope::new(
++                generation,
++                ControlMessageType::PortsList.as_str(),
++                &Empty {},
++            ),
++            Self::PortAdd {
++                guest_port,
++                host_port,
++            } => Envelope::new(
++                generation,
++                ControlMessageType::PortAdd.as_str(),
++                &PortAdd {
++                    guest_port: *guest_port,
++                    host_port: *host_port,
++                },
++            ),
++            Self::PortProbe { guest_port } => Envelope::new(
++                generation,
++                ControlMessageType::PortProbe.as_str(),
++                &PortProbe {
++                    guest_port: *guest_port,
++                },
++            ),
++            Self::PortRemove { guest_port } => Envelope::new(
++                generation,
++                ControlMessageType::PortRemove.as_str(),
++                &PortRemove {
++                    guest_port: *guest_port,
++                },
++            ),
+             Self::Capabilities => Envelope::new(
+                 generation,
+                 ControlMessageType::Capabilities.as_str(),
+@@ -352,3 +428,33 @@ impl<'de> Deserialize<'de> for ControlMessageType {
+             .ok_or_else(|| serde::de::Error::custom("unknown control message type"))
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn live_ports_have_checked_framed_requests() {
++        for request in [
++            ControlRequest::PortsList,
++            ControlRequest::PortAdd {
++                guest_port: 3000,
++                host_port: 0,
++            },
++            ControlRequest::PortRemove { guest_port: 3000 },
++            ControlRequest::PortProbe { guest_port: 3000 },
++        ] {
++            let envelope = request.envelope(1).unwrap();
++            assert!(
++                ControlMessageType::from_wire_str(&envelope.t)
++                    .unwrap()
++                    .is_request()
++            );
++            let decoded = ControlRequest::from_envelope(&envelope).unwrap();
++            assert_eq!(
++                serde_json::to_value(decoded).unwrap(),
++                serde_json::to_value(request).unwrap()
++            );
++        }
++    }
++}
+diff --git a/crates/protocol/lib/control/types.rs b/crates/protocol/lib/control/types.rs
+index b5018723a930d08767e2662086370e75d80e8e75..8c77ea376d28b30a0fbfe5d0d353a7c87a4f6297 100644
+--- a/crates/protocol/lib/control/types.rs
++++ b/crates/protocol/lib/control/types.rs
+@@ -348,6 +348,25 @@ pub enum SecretsResult {
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(tag = "op", rename_all = "snake_case")]
+ pub enum ControlRequest {
++    /// List live host-loopback TCP publications.
++    PortsList,
++    /// Publish a guest TCP port on host loopback.
++    PortAdd {
++        /// Guest TCP port.
++        guest_port: u16,
++        /// Host TCP port, zero for an available port.
++        host_port: u16,
++    },
++    /// Probe a guest TCP service without a host listener.
++    PortProbe {
++        /// Guest TCP port.
++        guest_port: u16,
++    },
++    /// Revoke a live TCP publication.
++    PortRemove {
++        /// Guest TCP port.
++        guest_port: u16,
++    },
+     /// Query available host operations.
+     Capabilities,
+     /// Set the memory target.
+@@ -377,6 +396,12 @@ pub enum ControlRequest {
+ /// Raw JSON consumers must retain the original bytes to preserve unknown fields.
+ #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+ pub struct JsonControlResponse {
++    /// Live host-loopback TCP publications.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub ports: Option<Vec<PortState>>,
++    /// Direct guest TCP handshake result.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub reachable: Option<bool>,
+     /// Whether the operation succeeded.
+     pub ok: bool,
+     /// Legacy diagnostic; batch progress cannot be inferred from it.
+@@ -396,6 +421,54 @@ pub struct JsonControlResponse {
+     pub control_protocols: Option<Vec<String>>,
+ }
+ 
++/// One live public TCP publication.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct PortState {
++    /// Guest TCP port.
++    pub guest_port: u16,
++    /// Bound host TCP port.
++    pub host_port: u16,
++    /// Bound host address.
++    pub host_bind: String,
++}
++
++/// Payload for a live port add request.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct PortAdd {
++    /// Guest TCP port.
++    pub guest_port: u16,
++    /// Host TCP port, zero for an available port.
++    pub host_port: u16,
++}
++
++/// Payload for a direct guest TCP probe.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct PortProbe {
++    /// Guest TCP port.
++    pub guest_port: u16,
++}
++
++/// Direct guest TCP probe result.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct PortProbeResult {
++    /// Whether the guest completed a TCP handshake.
++    pub reachable: bool,
++}
++
++/// Payload for a live port remove request.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct PortRemove {
++    /// Guest TCP port.
++    pub guest_port: u16,
++}
++
++/// Complete live TCP publication state.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct PortsState {
++    /// Current publications.
++    pub ports: Vec<PortState>,
++}
++
+ //--------------------------------------------------------------------------------------------------
+ // Methods
+ //--------------------------------------------------------------------------------------------------
+diff --git a/crates/runtime/lib/client/control.rs b/crates/runtime/lib/client/control.rs
+index f5f88ae75e4baa052730e5b19206d41df2ebcb2c..4130f1cef42ba1a402a20b143860b1b24b1a4cda 100644
+--- a/crates/runtime/lib/client/control.rs
++++ b/crates/runtime/lib/client/control.rs
+@@ -35,6 +35,25 @@ pub const CONTROL_PROTOCOL_VERSION: u16 = 1;
+ #[derive(Clone, Debug, Serialize, Deserialize)]
+ #[serde(tag = "op", rename_all = "snake_case")]
+ pub enum ControlRequest {
++    /// List host-loopback TCP publications.
++    PortsList,
++    /// Publish a guest TCP port on host loopback (zero selects an available host port).
++    PortAdd {
++        /// Guest TCP port.
++        guest_port: u16,
++        /// Host TCP port, zero for an available port.
++        host_port: u16,
++    },
++    /// Probe a guest TCP service without a host listener.
++    PortProbe {
++        /// Guest TCP port.
++        guest_port: u16,
++    },
++    /// Revoke a guest TCP publication.
++    PortRemove {
++        /// Guest TCP port.
++        guest_port: u16,
++    },
+     /// Seal only the owned root disk; never capture guest RAM or execution state.
+     DiskCheckpointCreate {
+         /// Optional writeback policy. Absent preserves released clients' behavior.
+@@ -193,6 +212,12 @@ pub enum SecretLiveChange {
+ /// The reply to any control request.
+ #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+ pub struct ControlResponse {
++    /// Current live host-loopback TCP publications.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub ports: Option<Vec<LivePort>>,
++    /// Whether the guest completed a direct TCP handshake.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub reachable: Option<bool>,
+     /// In-process completion metadata for the framed adapter; never emitted in JSON.
+     #[serde(skip)]
+     pub secret_result: Option<microsandbox_protocol::control::SecretsResult>,
+@@ -243,6 +268,17 @@ pub struct ControlResponse {
+     pub disk_checkpoint: Option<DiskCheckpointControlState>,
+ }
+ 
++/// Public host-loopback TCP publication returned by live control.
++#[derive(Clone, Debug, Serialize, Deserialize)]
++pub struct LivePort {
++    /// Guest TCP port.
++    pub guest_port: u16,
++    /// Bound host TCP port.
++    pub host_port: u16,
++    /// Bound host address.
++    pub host_bind: String,
++}
++
+ /// Published checkpoint information returned by the runtime control executor.
+ #[derive(Clone, Debug, Serialize, Deserialize)]
+ pub struct CheckpointControlState {
+@@ -462,6 +498,55 @@ pub use crate::runner::control::{ControlContext, spawn_control_listener};
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn silo_live_port_json_contract() {
++        assert!(matches!(
++            serde_json::from_str::<ControlRequest>(r#"{"op":"ports_list"}"#).unwrap(),
++            ControlRequest::PortsList
++        ));
++        assert!(matches!(
++            serde_json::from_str::<ControlRequest>(
++                r#"{"op":"port_add","guest_port":3000,"host_port":0}"#
++            )
++            .unwrap(),
++            ControlRequest::PortAdd {
++                guest_port: 3000,
++                host_port: 0
++            }
++        ));
++        assert!(matches!(
++            serde_json::from_str::<ControlRequest>(r#"{"op":"port_remove","guest_port":3000}"#)
++                .unwrap(),
++            ControlRequest::PortRemove { guest_port: 3000 }
++        ));
++        assert!(matches!(
++            serde_json::from_str::<ControlRequest>(r#"{"op":"port_probe","guest_port":3000}"#)
++                .unwrap(),
++            ControlRequest::PortProbe { guest_port: 3000 }
++        ));
++        let probe = serde_json::to_value(ControlResponse {
++            ok: true,
++            reachable: Some(false),
++            ..Default::default()
++        })
++        .unwrap();
++        assert_eq!(probe["reachable"], false);
++        let response = ControlResponse {
++            ok: true,
++            ports: Some(vec![LivePort {
++                guest_port: 3000,
++                host_port: 49152,
++                host_bind: "127.0.0.1".into(),
++            }]),
++            ..Default::default()
++        };
++        let json = serde_json::to_value(response).unwrap();
++        assert_eq!(
++            json["ports"],
++            serde_json::json!([{"guest_port":3000,"host_port":49152,"host_bind":"127.0.0.1"}])
++        );
++    }
++
+     #[test]
+     fn secret_value_debug_is_redacted() {
+         let request = ControlRequest::SecretsUpdate {
+diff --git a/crates/runtime/lib/runner/control/executor.rs b/crates/runtime/lib/runner/control/executor.rs
+index 7cae30a5462a77f9e231d5bff752861bd9dd68e9..8134dc5b798aa0f3cd6768a88e79016359aff9ba 100644
+--- a/crates/runtime/lib/runner/control/executor.rs
++++ b/crates/runtime/lib/runner/control/executor.rs
+@@ -38,6 +38,8 @@ pub struct RuntimeControlExecutor {
+     vm: msb_krun::VmControl,
+     #[cfg(feature = "net")]
+     secrets: Option<microsandbox_network::secrets::handle::SecretsHandle>,
++    #[cfg(feature = "net")]
++    ports: Option<microsandbox_network::network::PortControlHandle>,
+     state: Mutex<ExecutorState>,
+ }
+ 
+@@ -57,6 +59,13 @@ struct DedupEntry {
+     response: ControlEnvelopeResponse,
+ }
+ 
++enum PortOperation {
++    List,
++    Add { guest_port: u16, host_port: u16 },
++    Remove { guest_port: u16 },
++    Probe { guest_port: u16 },
++}
++
+ //--------------------------------------------------------------------------------------------------
+ // Methods
+ //--------------------------------------------------------------------------------------------------
+@@ -74,6 +83,7 @@ impl RuntimeControlExecutor {
+         #[cfg(feature = "net")] secrets: Option<
+             microsandbox_network::secrets::handle::SecretsHandle,
+         >,
++        #[cfg(feature = "net")] ports: Option<microsandbox_network::network::PortControlHandle>,
+         runtime_dir: &Path,
+         vm_config: &VmConfig,
+         guest_bootstrap: &GuestBootstrap,
+@@ -127,6 +137,8 @@ impl RuntimeControlExecutor {
+             vm,
+             #[cfg(feature = "net")]
+             secrets,
++            #[cfg(feature = "net")]
++            ports,
+             state: Mutex::new(ExecutorState {
+                 runtime_boot_id,
+                 revision: 0,
+@@ -146,6 +158,9 @@ impl RuntimeControlExecutor {
+         if matches!(command, ControlRequest::PauseState) {
+             return self.pause_observation.read().unwrap().clone();
+         }
++        if let ControlRequest::PortProbe { guest_port } = command {
++            return self.handle_ports(PortOperation::Probe { guest_port });
++        }
+         let mut state = self.state.lock().unwrap();
+         let response = self.execute_locked(&mut state, command);
+         *self.pause_observation.write().unwrap() = pause_response(&state);
+@@ -353,6 +368,8 @@ impl RuntimeControlExecutor {
+                 | ControlRequest::RootDiskGrow { .. }
+                 | ControlRequest::CpuTarget { .. }
+                 | ControlRequest::SecretsUpdate { .. }
++                | ControlRequest::PortAdd { .. }
++                | ControlRequest::PortRemove { .. }
+                 | ControlRequest::CheckpointCreate { .. }
+                 | ControlRequest::DiskCheckpointCreate { .. }
+                 | ControlRequest::BranchCreate { .. }
+@@ -712,6 +729,20 @@ impl RuntimeControlExecutor {
+             }
+             ControlRequest::CpuState => cpu(self.vm.cpu_state()),
+             ControlRequest::SecretsUpdate { changes } => self.handle_secrets_update(changes),
++            ControlRequest::PortsList => self.handle_ports(PortOperation::List),
++            ControlRequest::PortProbe { guest_port } => {
++                self.handle_ports(PortOperation::Probe { guest_port })
++            }
++            ControlRequest::PortAdd {
++                guest_port,
++                host_port,
++            } => self.handle_ports(PortOperation::Add {
++                guest_port,
++                host_port,
++            }),
++            ControlRequest::PortRemove { guest_port } => {
++                self.handle_ports(PortOperation::Remove { guest_port })
++            }
+             ControlRequest::CheckpointCreate { .. }
+             | ControlRequest::DiskCheckpointCreate { .. }
+             | ControlRequest::BranchCreate { .. }
+@@ -727,6 +758,60 @@ impl RuntimeControlExecutor {
+         }
+     }
+ 
++    #[cfg(feature = "net")]
++    fn handle_ports(&self, operation: PortOperation) -> ControlResponse {
++        let Some(ports) = &self.ports else {
++            return control_error(
++                "ports_unavailable",
++                "live port publishing is unavailable for this sandbox",
++            );
++        };
++        if let PortOperation::Probe { guest_port } = operation {
++            return match ports.probe(guest_port) {
++                Ok(reachable) => ControlResponse {
++                    ok: true,
++                    reachable: Some(reachable),
++                    ..Default::default()
++                },
++                Err(error) => control_error("port_probe_failed", error),
++            };
++        }
++        let result = match operation {
++            PortOperation::List => ports.list(),
++            PortOperation::Add {
++                guest_port,
++                host_port,
++            } => ports.add(guest_port, host_port),
++            PortOperation::Remove { guest_port } => ports.remove(guest_port),
++            PortOperation::Probe { .. } => unreachable!(),
++        };
++        match result {
++            Ok(ports) => ControlResponse {
++                ok: true,
++                ports: Some(
++                    ports
++                        .into_iter()
++                        .map(|port| LivePort {
++                            guest_port: port.guest_port,
++                            host_port: port.host_port,
++                            host_bind: port.host_bind.to_string(),
++                        })
++                        .collect(),
++                ),
++                ..Default::default()
++            },
++            Err(error) => control_error("port_operation_failed", error),
++        }
++    }
++
++    #[cfg(not(feature = "net"))]
++    fn handle_ports(&self, _operation: PortOperation) -> ControlResponse {
++        control_error(
++            "ports_unavailable",
++            "live port publishing is unavailable for this sandbox",
++        )
++    }
++
+     fn secrets_update_supported(&self) -> bool {
+         #[cfg(feature = "net")]
+         {
+diff --git a/crates/runtime/lib/runner/control/handler.rs b/crates/runtime/lib/runner/control/handler.rs
+index 126e99e7b4d3081c5c098245069b7007fd67d4dc..84e9e8a9bc6ba88c3e05051faf66f7c759f669f9 100644
+--- a/crates/runtime/lib/runner/control/handler.rs
++++ b/crates/runtime/lib/runner/control/handler.rs
+@@ -76,6 +76,8 @@ pub(crate) struct Response {
+ pub(crate) enum Reply {
+     ExecSignal(microsandbox_protocol::exec_control::ExecControlResponse),
+     Job(microsandbox_protocol::jobs::JobResponse),
++    Ports(PortsState),
++    Probe(microsandbox_protocol::control::PortProbeResult),
+     Capabilities(Capabilities),
+     RuntimeCapabilities(RuntimeCapabilities),
+     Memory(MemoryState),
+@@ -118,6 +120,8 @@ impl Reply {
+             Self::Job(value) => {
+                 Envelope::new(generation, microsandbox_protocol::jobs::JOB_RESPONSE, value)
+             }
++            Self::Ports(value) => Envelope::new(generation, "control.ports.state", value),
++            Self::Probe(value) => Envelope::new(generation, "control.ports.probe.result", value),
+             Self::Capabilities(value) => {
+                 Envelope::new(generation, "control.capabilities.result", value)
+             }
+@@ -221,6 +225,19 @@ impl Handler for ControlContext {
+             })
+         } else if !result.ok {
+             Reply::Error(error())
++        } else if let Some(reachable) = result.reachable {
++            Reply::Probe(microsandbox_protocol::control::PortProbeResult { reachable })
++        } else if let Some(ports) = result.ports {
++            Reply::Ports(PortsState {
++                ports: ports
++                    .into_iter()
++                    .map(|port| PortState {
++                        guest_port: port.guest_port,
++                        host_port: port.host_port,
++                        host_bind: port.host_bind,
++                    })
++                    .collect(),
++            })
+         } else if let Some(caps) = result.capabilities {
+             let capabilities = RuntimeCapabilities {
+                 root_disk_grow: caps.root_disk_grow,
+@@ -313,6 +330,16 @@ fn operation_to_legacy(
+             ControlRequest::MemoryState => Legacy::MemoryState,
+             ControlRequest::CpuTarget { online } => Legacy::CpuTarget { online },
+             ControlRequest::CpuState => Legacy::CpuState,
++            ControlRequest::PortsList => Legacy::PortsList,
++            ControlRequest::PortAdd {
++                guest_port,
++                host_port,
++            } => Legacy::PortAdd {
++                guest_port,
++                host_port,
++            },
++            ControlRequest::PortProbe { guest_port } => Legacy::PortProbe { guest_port },
++            ControlRequest::PortRemove { guest_port } => Legacy::PortRemove { guest_port },
+             ControlRequest::SecretsUpdate { changes } => Legacy::SecretsUpdate {
+                 changes: changes
+                     .into_iter()
+diff --git a/crates/runtime/lib/runner/vm.rs b/crates/runtime/lib/runner/vm.rs
+index f2841d64fbadca68ba0cb82ee5c8f7ab80411d61..4364273e219d4c79f7554f307b50c296368369d2 100644
+--- a/crates/runtime/lib/runner/vm.rs
++++ b/crates/runtime/lib/runner/vm.rs
+@@ -463,12 +463,18 @@ type NetworkActivationHandle = microsandbox_network::network::NetworkActivationH
+ #[cfg(not(feature = "net"))]
+ type NetworkActivationHandle = ();
+ 
++#[cfg(feature = "net")]
++type NetworkPortControlHandle = microsandbox_network::network::PortControlHandle;
++#[cfg(not(feature = "net"))]
++type NetworkPortControlHandle = ();
++
+ type VmBuildOutput = (
+     msb_krun::Vm,
+     Option<NetworkTerminationHandle>,
+     Option<NetworkMetricsHandle>,
+     Option<NetworkSecretsHandle>,
+     Option<NetworkActivationHandle>,
++    Option<NetworkPortControlHandle>,
+     Option<Vec<u8>>,
+     GuestBootstrap,
+     BindIdentityMapRegistration,
+@@ -1145,6 +1151,7 @@ fn run(
+         network_metrics_handle,
+         _network_secrets_handle,
+         network_activation_handle,
++        network_port_control_handle,
+         bootstrap_frame,
+         resolved_bootstrap,
+         bind_identity_map,
+@@ -1211,6 +1218,8 @@ fn run(
+         let control = vm.control_handle();
+         #[cfg(feature = "net")]
+         let secrets = _network_secrets_handle.clone();
++        #[cfg(feature = "net")]
++        let ports = network_port_control_handle.clone();
+         #[cfg(not(feature = "net"))]
+         let secrets: Option<()> = None;
+         let control_sock_path = crate::control::control_socket_path_for(&config.agent_sock_path);
+@@ -1218,6 +1227,8 @@ fn run(
+             control,
+             #[cfg(feature = "net")]
+             secrets,
++            #[cfg(feature = "net")]
++            ports,
+             &config.runtime_dir,
+             &config.vm,
+             &resolved_bootstrap,
+@@ -2598,6 +2609,7 @@ fn build_vm(
+     let mut network_secrets_handle = None;
+     #[cfg(feature = "net")]
+     let mut network_activation_handle = None;
++    let mut network_port_control_handle = None;
+     #[cfg(not(feature = "net"))]
+     let network_activation_handle: Option<NetworkActivationHandle> = None;
+ 
+@@ -2719,6 +2731,7 @@ fn build_vm(
+         }
+         network_termination_handle = Some(network.termination_handle());
+         network_metrics_handle = Some(network.metrics_handle());
++        network_port_control_handle = network.port_control_handle();
+         // Only sandboxes that booted with secrets can be live-reconfigured:
+         // new placeholders cannot be introduced into a running guest, so a
+         // secret-free boot never needs the secrets side of the control socket.
+@@ -2895,6 +2908,7 @@ fn build_vm(
+         network_metrics_handle,
+         network_secrets_handle,
+         network_activation_handle,
++        network_port_control_handle,
+         bootstrap_frame,
+         bootstrap,
+         bind_identity_map,

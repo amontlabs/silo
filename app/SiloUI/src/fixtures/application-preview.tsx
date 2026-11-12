@@ -1,11 +1,15 @@
 import { computerTarget } from "@/features/application/model/connections"
 import { fixtureLogPage, type LogLoader } from "@/features/application/model/logs"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { macosApplicationComputers } from "@/features/application/model/macos-application-computers"
+import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
+import { withMacosFixtureContents } from "./macos-computers"
 import { fixtureDirectoryLoader } from "./directory-loader"
 import { fixtureComputerSteps, fixtureComputerTree } from "./computer-steps"
 import { fixtureFileTransfers } from "./file-transfers"
-import { fixtureListReviewRequests } from "./pending-changes"
-import { createReviewRequestFixtureActions } from "./review-requests"
+import { createApprovalFixture, type ApprovalFixtureMode } from "./approvals"
+import { createAgentFixture, type AgentFixtureMode } from "./agents"
+import { createNetworkFixture, type NetworkFixtureMode } from "./network-policy"
 import { useApplicationFixture } from "@/fixtures/application-state"
 import { ApplicationApp } from "@/features/application/application-app"
 import type { ApplicationActions, ApplicationSource, SshAccessRequest, SshAccessComputer } from "@/features/application/model/application-source"
@@ -38,7 +42,7 @@ const inactiveApplicationActions: ApplicationActions = {
   disconnectGitHub: () => undefined,
 }
 
-export function ApplicationPreview({ source, actions, backupPreviewMode, initialRoute, nativeOperations = false, preUpgradeBackup, editorInclude, unseenResult }: {
+export function ApplicationPreview({ source, actions, backupPreviewMode, initialRoute, nativeOperations = false, preUpgradeBackup, editorInclude, unseenResult, approvals, agents, network }: {
   source: ApplicationSource
   actions?: Partial<ApplicationActions>
   backupPreviewMode?: BackupFixtureMode
@@ -50,19 +54,30 @@ export function ApplicationPreview({ source, actions, backupPreviewMode, initial
   editorInclude?: EditorIncludeBackend
   /** An export or import result that was not shown yet; the application starts with it, as after an upgrade. */
   unseenResult?: FixtureUnseenResult
+  /** What the agents inside computers have asked for. Without it the preview lists no approvals and no review requests. */
+  approvals?: ApprovalFixtureMode
+  /** The state of the agents in every computer. Without it the preview has no agents to list or install. */
+  agents?: AgentFixtureMode
+  /** The network of every computer and Silo's tools in it. Without it the preview sets neither. */
+  network?: NetworkFixtureMode
 }) {
   const { store } = useSettings(source.preferences)
   const [systemIntegrations] = useState(() => createFixtureSystemIntegrationStore(store))
   const application = nativeOperations
     ? <UnavailableApplicationPreview source={source} actions={actions} initialRoute={initialRoute} />
-    : <FixtureApplicationPreview source={source} actions={actions} backupPreviewMode={backupPreviewMode} initialRoute={initialRoute} unseenResult={unseenResult} />
+    : <FixtureApplicationPreview source={source} actions={actions} backupPreviewMode={backupPreviewMode} initialRoute={initialRoute} unseenResult={unseenResult} approvals={approvals} agents={agents} network={network} />
   const withBackup = preUpgradeBackup ? <PreUpgradeBackupProvider backend={preUpgradeBackup}>{application}</PreUpgradeBackupProvider> : application
   const withInclude = editorInclude ? <EditorIncludeProvider backend={editorInclude}>{withBackup}</EditorIncludeProvider> : withBackup
   return <SettingsProvider store={store}><SystemIntegrationProvider store={systemIntegrations}>{withInclude}</SystemIntegrationProvider></SettingsProvider>
 }
 
-function FixtureApplicationPreview({ source, actions, backupPreviewMode, initialRoute, unseenResult }: Parameters<typeof ApplicationPreview>[0]) {
+function FixtureApplicationPreview({ source, actions, backupPreviewMode, initialRoute, unseenResult, approvals, agents, network }: Parameters<typeof ApplicationPreview>[0]) {
   const fixture = useApplicationFixture(source)
+  const [agentFixture] = useState(() => createAgentFixture({ mode: agents }))
+  const [networkFixture] = useState(() => createNetworkFixture({ mode: network }))
+  useEffect(() => networkFixture.setComputers(fixture.source.computers), [networkFixture, fixture.source.computers])
+  useEffect(() => agentFixture.setComputers(fixture.source.computers), [agentFixture, fixture.source.computers])
+  const [approvalFixture] = useState(() => approvals && createApprovalFixture({ mode: approvals, computers: source.computers.map(({ configuration }) => ({ id: configuration.id, name: configuration.name })) }))
   const [sshSettings, setSshSettings] = useState(() => new Map<string, SshAccessRequest>())
   const sshAccess = { computers: fixture.source.computers.map((w, index): SshAccessComputer => {
     const target = computerTarget(w)
@@ -71,13 +86,16 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
     return { ...settings, keys: settings.keys ?? [], state: !settings.enabled ? "disabled" : w.state === "running" ? "listening" : "waiting", message: null, fingerprint: settings.enabled ? "SHA256:fixtureHostKeyForVisualPreviewOnly" : null, deviceName: seeded?.deviceName ?? w.device?.name ?? "Ada’s Mac mini", addresses: seeded?.addresses ?? ["127.0.0.1", "192.168.1.42"] }
   }) }
 
+  // The macOS computers the application lists beside these, which the readers below must know too.
+  const macosSnapshot = useMacosComputers()?.snapshot
+  const readable = useMemo(() => [...fixture.source.computers, ...macosApplicationComputers(macosSnapshot, fixture.source).map(withMacosFixtureContents)], [fixture.source, macosSnapshot])
   const queryLogs = useMemo<LogLoader>(() => async request => {
-    const computer = fixture.source.computers.find(item => (item.device?.computerId ?? item.configuration.id) === request.computerId && item.device?.id === request.deviceId)
+    const computer = readable.find(item => (item.device?.computerId ?? item.configuration.id) === request.computerId && item.device?.id === request.deviceId)
     if (!computer) throw new Error("Computer unavailable")
     return fixtureLogPage(computer, request)
-  }, [fixture.source.computers])
-  const listComputerDirectory = useMemo(() => fixtureDirectoryLoader(source.computers), [source.computers])
-  const fileTransfers = useMemo(() => fixtureFileTransfers(source.computers), [source.computers])
+  }, [readable])
+  const listComputerDirectory = useMemo(() => fixtureDirectoryLoader(readable), [readable])
+  const fileTransfers = useMemo(() => fixtureFileTransfers(readable), [readable])
   // Read once, when the application opens: a result acknowledged on the screen about the backup is already seen.
   const [initialResult] = useState(() => unseenResult?.current())
   const backup = useBackupFixture({
@@ -88,7 +106,7 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
   })
 
   return <ApplicationCatalogProvider initialCatalog={fixtureApplicationCatalog}><ApplicationApp
-    source={{ ...fixture.source, sshAccess, network: fixture.source.network ?? { computers: fixture.source.computers.map(w => ({ computer:w.configuration.name,error:null,ports:w.ports.map(p => ({port:p.port,hostPort:p.port,scheme:"http" as const,state:p.listening === true ? "reachable" as const : p.listening === false ? "waiting" as const : "unknown" as const,configured:true})) })) } }}
+    source={{ ...fixture.source, sshAccess, network: fixture.source.network ?? { computers: readable.map(w => ({ computer:w.configuration.name,error:null,ports:w.ports.map(p => ({port:p.port,hostPort:p.port,scheme:"http" as const,state:p.listening === true ? "reachable" as const : p.listening === false ? "waiting" as const : "unknown" as const,configured:true})) })) } }}
     initialRoute={initialRoute}
     routeRequest={initialRoute}
     backup={backup}
@@ -102,8 +120,9 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       listComputerSteps: async () => fixtureComputerSteps,
       readComputerTree: async () => fixtureComputerTree,
       listComputerDirectory,
-      listReviewRequests: fixtureListReviewRequests,
-      reviewRequestActions: createReviewRequestFixtureActions(),
+      ...approvalFixture?.actions,
+      ...(network && { readNetworkPolicy: networkFixture.readNetworkPolicy, saveNetworkPolicy: networkFixture.saveNetworkPolicy, readComputerTools: networkFixture.readComputerTools, setComputerTools: networkFixture.setComputerTools }),
+      ...(agents && { listAgents: agentFixture.listAgents, installAgent: agentFixture.installAgent, ensureSshName: agentFixture.ensureSshName, openAgent: () => undefined }),
       fileTransfers,
       queryLogs,
       ...actions,

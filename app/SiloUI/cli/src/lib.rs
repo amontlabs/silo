@@ -2,28 +2,27 @@
 //! requests in `silo-api`.
 
 pub mod access;
-pub mod autokeep;
+pub mod approvals;
 pub mod cli;
 pub mod clock;
-pub mod config;
 pub mod driver;
+pub mod endpoint;
 pub mod engine;
 pub mod error;
 pub mod fanout;
 pub mod flows;
 pub mod folder;
-pub mod guest_client;
-pub mod guest_install;
 pub mod gui;
 pub mod hosted;
 pub mod hosts;
 pub mod mcp;
 pub mod ops;
 pub mod pr;
+pub mod recipe_file;
 pub mod render;
 pub mod review;
 pub mod share;
 pub mod steps;
 pub mod summary;
+pub mod tools;
 pub mod usetools;
-pub mod writeback;

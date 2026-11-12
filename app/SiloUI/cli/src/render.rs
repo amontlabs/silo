@@ -263,24 +263,38 @@ fn github_line(github: &Value) -> String {
 
 pub fn secrets(value: &Value) -> String {
     let items = value["secrets"].as_array().cloned().unwrap_or_default();
-    if items.is_empty() {
-        return "No secrets yet.".to_owned();
+    let mut out = if items.is_empty() {
+        "No secrets yet.".to_owned()
+    } else {
+        items
+            .iter()
+            .map(|item| {
+                format!(
+                    "{}  {}",
+                    text(item, "name"),
+                    names_or_none(&list_of(item, "computers"))
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    for warning in list_of(value, "warnings").iter().filter_map(Value::as_str) {
+        out.push_str(&format!("\nwarning: {warning}"));
     }
-    items
-        .iter()
-        .map(|item| {
-            format!(
-                "{}  {}",
-                text(item, "name"),
-                names_or_none(&list_of(item, "computers"))
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    out
 }
 
 pub fn computer_line(verb: &str, value: &Value) -> String {
-    format!("{verb} {} ({})", text(value, "name"), text(value, "state"))
+    let mut line = format!("{verb} {} ({})", text(value, "name"), text(value, "state"));
+    push_warning(&mut line, value);
+    line
+}
+
+/// The device's warning sentence, when a command left it short of memory or disk.
+fn push_warning(out: &mut String, value: &Value) {
+    if let Some(warning) = value["warning"].as_str().filter(|w| !w.is_empty()) {
+        out.push_str(&format!("\nwarning: {warning}"));
+    }
 }
 
 /// `Exported main to /path/main-2026-11-07.silo-backup (3.1 GiB)`.
@@ -291,6 +305,16 @@ pub fn exported(value: &Value) -> String {
         text(value, "archive"),
         text(value, "size")
     );
+    if let Some(left_out) = value["leftOut"]
+        .as_array()
+        .filter(|left_out| !left_out.is_empty())
+    {
+        let names: Vec<&str> = left_out.iter().filter_map(Value::as_str).collect();
+        line.push_str(&format!(
+            "\nRemoved from the exported computer: {}. Traces of them may remain in the file's disk layers, so keep the file private.",
+            names.join(", ")
+        ));
+    }
     if let Some(logins) = value["logins"]
         .as_array()
         .filter(|logins| !logins.is_empty())
@@ -318,39 +342,120 @@ pub fn exported(value: &Value) -> String {
 pub fn imported(value: &Value) -> String {
     let name = text(value, "name");
     format!(
-        "{}\nStart it with `silo start {name}`. If it was a fork, bring its work into main with `silo fold {name} --into main`.",
+        "{}\nStart it with `silo start {name}`. If it was a fork, bring its work into main with `silo merge {name} --into main`.",
         computer_line("Imported", value)
     )
 }
 
 /// `Forked try (stopped): main as of 14:02:31 (new checkpoint)`.
 pub fn forked(value: &Value) -> String {
-    let line = computer_line("Forked", value);
+    let mut line = format!("Forked {} ({})", text(value, "name"), text(value, "state"));
     let checkpoint = &value["checkpoint"];
-    if !checkpoint.is_object() || text(value, "forkedAsOf").is_empty() {
-        return line;
+    if checkpoint.is_object() && !text(value, "forkedAsOf").is_empty() {
+        let what = if checkpoint["reused"] == true {
+            match text(checkpoint, "kind") {
+                "" => "checkpoint".to_owned(),
+                kind => format!("{kind} checkpoint"),
+            }
+        } else {
+            "new checkpoint".to_owned()
+        };
+        let age = if checkpoint["reused"] == true {
+            format!(
+                ", {} old",
+                crate::clock::age_text(checkpoint["ageSeconds"].as_i64().unwrap_or(0))
+            )
+        } else {
+            String::new()
+        };
+        line = format!(
+            "{line}: {} as of {} ({what}{age})",
+            text(value, "source"),
+            text(value, "forkedAsOf")
+        );
     }
-    let what = if checkpoint["reused"] == true {
-        match text(checkpoint, "kind") {
-            "" => "checkpoint".to_owned(),
-            kind => format!("{kind} checkpoint"),
+    push_warning(&mut line, value);
+    line
+}
+
+/// `silo network policy`.
+pub fn network_policy(value: &Value) -> String {
+    let mode = text(&value["policy"], "mode");
+    let timing = match text(value, "timing") {
+        "applied" => "in force",
+        "nextStart" => "applies when it starts",
+        "nextRestart" => "applies when it restarts; it keeps its current rules until then",
+        other => other,
+    };
+    let described = match mode {
+        "open" => "open: any public address".to_owned(),
+        "closed" => "closed: no outbound traffic".to_owned(),
+        _ => "a list of allowed hosts".to_owned(),
+    };
+    let mut lines = vec![format!(
+        "{}: {described} ({timing})",
+        text(value, "computer")
+    )];
+    let hosts = value["allowedHosts"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if mode == "allowlist" {
+        if hosts.is_empty() {
+            lines.push("No hosts are allowed; names still resolve.".into());
+        }
+        for host in &hosts {
+            let ports: Vec<String> = host["ports"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_u64)
+                .map(|port| port.to_string())
+                .collect();
+            let from = match text(host, "from") {
+                "list" => "on the list".to_owned(),
+                "github" => "GitHub access".to_owned(),
+                other => other.replacen(':', " ", 1),
+            };
+            lines.push(format!(
+                "  {}  port {}  ({from})",
+                text(host, "host"),
+                ports.join(", ")
+            ));
         }
     } else {
-        "new checkpoint".to_owned()
-    };
-    let age = if checkpoint["reused"] == true {
-        format!(
-            ", {} old",
-            crate::clock::age_text(checkpoint["ageSeconds"].as_i64().unwrap_or(0))
-        )
-    } else {
-        String::new()
-    };
-    format!(
-        "{line}: {} as of {} ({what}{age})",
-        text(value, "source"),
-        text(value, "forkedAsOf")
-    )
+        let listed = value["policy"]["hosts"].as_array().map_or(0, Vec::len)
+            + value["policy"]["presets"].as_array().map_or(0, Vec::len);
+        if listed > 0 {
+            lines.push("Its hosts and presets are kept and apply in allowlist mode.".into());
+        }
+    }
+    let presets: Vec<&str> = value["presets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|preset| preset["name"].as_str())
+        .collect();
+    lines.push(format!("Presets: {}", presets.join(", ")));
+    for update in value["presetUpdates"].as_array().into_iter().flatten() {
+        let added: Vec<&str> = update["addedHosts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        lines.push(format!(
+            "The {} list has new hosts ({}). The computer keeps the list it was approved with until you set its policy again with this preset.",
+            text(update, "name"),
+            added.join(", ")
+        ));
+    }
+    for notice in value["notices"].as_array().into_iter().flatten() {
+        if let Some(notice) = notice.as_str() {
+            lines.push(format!("Note: {notice}"));
+        }
+    }
+    lines.join("\n")
 }
 
 pub fn ports(value: &Value) -> String {
@@ -567,6 +672,49 @@ pub fn tree(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_merge_result_names_its_computers() {
+        let mut value =
+            json!({"status": "kept", "report": {"fork": "id-f", "target": "id-t", "steps": []}});
+        name_merge_computers(
+            &mut value,
+            &[
+                ("id-f".into(), "feature".into()),
+                ("id-t".into(), "main".into()),
+            ],
+        );
+        assert!(
+            merge(&value).starts_with("Merged feature into main."),
+            "{}",
+            merge(&value)
+        );
+        assert!(merge(&value).contains("Undo with `silo undo main`."));
+        let mut unknown =
+            json!({"status": "kept", "report": {"fork": "id-f", "target": "id-x", "steps": []}});
+        name_merge_computers(&mut unknown, &[("id-f".into(), "feature".into())]);
+        assert!(merge(&unknown).starts_with("Merged feature into id-x."));
+    }
+
+    #[test]
+    fn a_network_policy_shows_its_notices_and_preset_updates() {
+        let text = network_policy(&json!({
+            "computer": "main",
+            "policy": {"mode": "open", "hosts": [], "presets": ["npm"]},
+            "allowedHosts": [], "timing": "applied",
+            "presets": [{"name": "npm"}],
+            "presetUpdates": [{"name": "npm", "title": "npm", "addedHosts": ["registry.example"]}],
+            "notices": ["A secret for *.example.com is not on the list."]
+        }));
+        assert!(
+            text.contains("The npm list has new hosts (registry.example)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Note: A secret for *.example.com is not on the list."),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn credentials_line_names_used_and_blocked() {
         let usage = json!({"used": [{"secret": "OPENAI_API_KEY", "host": "api.openai.com", "method": "POST", "count": 3}],
             "blocked": [{"secret": "GITHUB_TOKEN", "host": "evil.example", "method": "GET", "count": 1, "reason": "host_not_allowed"}]});
@@ -694,6 +842,7 @@ pub fn up(value: &Value) -> String {
     if let Some(error) = value["portsError"].as_str() {
         out.push_str(&format!(" Ports not published: {error}"));
     }
+    push_warning(&mut out, value);
     out
 }
 
@@ -705,7 +854,10 @@ pub fn recipes(value: &Value) -> String {
         .max()
         .unwrap_or(4)
         .max(4);
-    let mut out = format!("{:<width$}  {:<9}  BUILT\n", "NAME", "FROM");
+    let mut out = format!(
+        "{:<width$}  {:<9}  {:<6}  BUILT\n",
+        "NAME", "FROM", "SYSTEM"
+    );
     for row in rows {
         let built = if row["built"] == true {
             format!("{} ({})", text(&row, "builtAt"), text(&row, "imageVersion"))
@@ -713,12 +865,259 @@ pub fn recipes(value: &Value) -> String {
             "not built".to_owned()
         };
         out.push_str(&format!(
-            "{:<width$}  {:<9}  {built}\n",
+            "{:<width$}  {:<9}  {:<6}  {built}\n",
             text(&row, "name"),
-            text(&row, "origin")
+            text(&row, "origin"),
+            text(&row, "os"),
         ));
     }
     out.trim_end().to_owned()
+}
+
+/// `silo recipe add`.
+pub fn recipe_added(value: &Value) -> String {
+    let mut out = format!(
+        "Stored the recipe {} ({}). Computers already built from an earlier {} keep the text they were built from.",
+        text(value, "name"),
+        &text(value, "hash")[..12.min(text(value, "hash").len())],
+        text(value, "name"),
+    );
+    for warning in lines(value, "warnings") {
+        out.push_str(&format!("\nwarning: {warning}"));
+    }
+    out
+}
+
+/// `silo recipe show`: the recipe as a file, then what the engine knows about it.
+pub fn recipe_shown(value: &Value) -> String {
+    let recipe = serde_json::from_value::<silo_api::methods::recipes::RecipeDefinition>(
+        value["recipe"].clone(),
+    )
+    .map(|definition| crate::recipe_file::RecipeFile::of(&definition).to_yaml())
+    .unwrap_or_default();
+    let mut out = recipe.trim_end().to_owned();
+    if out.is_empty() {
+        out.push_str("(an empty recipe)");
+    }
+    out.push_str(&format!(
+        "\n---\n{}{}, hash {}",
+        text(value, "name"),
+        if value["builtIn"] == true {
+            " (ships with Silo)"
+        } else {
+            ""
+        },
+        &text(value, "hash")[..12.min(text(value, "hash").len())],
+    ));
+    out.push_str(if value["built"].is_object() {
+        ", built"
+    } else {
+        ", not built"
+    });
+    if value["recipe"]["commandsHidden"] == true {
+        out.push_str(
+            "\nThe setup commands, service commands and keep commands are hidden from a computer; the engine runs them. Put tokens in secrets, never in them.",
+        );
+    }
+    for warning in lines(value, "warnings") {
+        out.push_str(&format!("\nwarning: {warning}"));
+    }
+    out
+}
+
+fn gib(bytes: u64) -> String {
+    let tenths = (bytes as f64 / (1u64 << 30) as f64 * 10.0).round() as u64;
+    if tenths % 10 == 0 {
+        format!("{} GiB", tenths / 10)
+    } else {
+        format!("{}.{} GiB", tenths / 10, tenths % 10)
+    }
+}
+
+/// `silo resources`: what the device has left, and the computers running.
+pub fn resources(value: &Value) -> String {
+    let bytes = |key: &str| value[key].as_u64();
+    let mut out = String::new();
+    let memory = match (bytes("memoryAvailableBytes"), bytes("memoryTotalBytes")) {
+        (Some(free), Some(total)) => format!("{} free of {}", gib(free), gib(total)),
+        (None, Some(total)) => format!("{} (free memory unknown)", gib(total)),
+        _ => "unknown".to_owned(),
+    };
+    out.push_str(&format!("Memory: {memory}"));
+    if let Some(pressure) = value["memoryPressure"].as_str() {
+        out.push_str(&format!(", pressure {pressure}"));
+    }
+    out.push_str(&format!(
+        "\nDisk: {} free of {}\nCPUs: {}\nRunning: {} computer{} using {} GiB of memory and {} CPU{}",
+        gib(bytes("diskFreeBytes").unwrap_or(0)),
+        gib(bytes("diskTotalBytes").unwrap_or(0)),
+        number(value, "logicalCpus"),
+        number(value, "runningComputers"),
+        if number(value, "runningComputers") == 1 { "" } else { "s" },
+        number(value, "runningMemoryGib"),
+        number(value, "runningCpus"),
+        if number(value, "runningCpus") == 1 { "" } else { "s" },
+    ));
+    for computer in value["computers"].as_array().into_iter().flatten() {
+        out.push_str(&format!(
+            "\n  {}  {}  {} GiB, {} CPU{}",
+            text(computer, "name"),
+            if computer["running"] == true {
+                "running"
+            } else {
+                "stopped"
+            },
+            number(computer, "memoryGib"),
+            number(computer, "cpus"),
+            if number(computer, "cpus") == 1 {
+                ""
+            } else {
+                "s"
+            },
+        ));
+    }
+    out.push_str(&format!(
+        "\nState: {}. {}",
+        text(value, "state"),
+        text(value, "message")
+    ));
+    out
+}
+
+/// `silo access`: what each computer holds.
+pub fn held(value: &Value) -> String {
+    let mut blocks = Vec::new();
+    for computer in value["computers"].as_array().into_iter().flatten() {
+        let mut out = format!("{}", text(computer, "name"));
+        let secrets: Vec<String> = computer["secrets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|secret| {
+                let hosts: Vec<&str> = secret["hosts"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect();
+                format!("{} (to {})", text(secret, "name"), hosts.join(", "))
+            })
+            .collect();
+        out.push_str(&format!(
+            "\n  secrets: {}",
+            if secrets.is_empty() {
+                "none".to_owned()
+            } else {
+                secrets.join("; ")
+            }
+        ));
+        out.push_str(&format!(
+            "\n  GitHub: {}",
+            github_access(&computer["github"])
+        ));
+        let ports: Vec<String> = computer["ports"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|port| port["configured"] == true)
+            .map(|port| format!("{} ({})", number(port, "port"), text(port, "state")))
+            .collect();
+        out.push_str(&format!(
+            "\n  published ports: {}",
+            if ports.is_empty() {
+                "none".to_owned()
+            } else {
+                ports.join(", ")
+            }
+        ));
+        out.push_str(&format!("\n  SSH: {}", ssh_access(&computer["ssh"])));
+        out.push_str(&format!(
+            "\n  network: {}",
+            network_access(&computer["networkPolicy"])
+        ));
+        blocks.push(out);
+    }
+    if blocks.is_empty() {
+        return "No computers.".to_owned();
+    }
+    blocks.join("\n")
+}
+
+fn github_access(github: &Value) -> String {
+    if !github.is_object() {
+        return "none".to_owned();
+    }
+    let method = text(github, "method");
+    if github["allRepositories"] == true {
+        let write = if github["allRepositoriesWrite"] == true {
+            "with changes allowed"
+        } else {
+            "read-only"
+        };
+        return format!("every repository, {write} ({method})");
+    }
+    let repositories: Vec<String> = github["repositories"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|repository| {
+            let write = if repository["write"] == true {
+                " (can push)"
+            } else {
+                ""
+            };
+            format!("{}{write}", text(repository, "repository"))
+        })
+        .collect();
+    if repositories.is_empty() {
+        format!("signed in, no repository ({method})")
+    } else {
+        format!("{} ({method})", repositories.join(", "))
+    }
+}
+
+fn ssh_access(ssh: &Value) -> String {
+    if !ssh.is_object() || ssh["enabled"] != true {
+        return "off".to_owned();
+    }
+    format!("on, port {} ({})", number(ssh, "port"), text(ssh, "state"))
+}
+
+fn network_access(policy: &Value) -> String {
+    if !policy.is_object() {
+        return "open".to_owned();
+    }
+    let mode = text(policy, "mode");
+    let hosts: Vec<&str> = policy["hosts"]
+        .as_array()
+        .into_iter()
+        .chain(policy["presets"].as_array())
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if hosts.is_empty() {
+        mode.to_owned()
+    } else {
+        format!("{mode}: {}", hosts.join(", "))
+    }
+}
+
+/// `silo agents`: the coding agents a computer has.
+pub fn agents(value: &Value) -> String {
+    let rows = value["agents"].as_array().cloned().unwrap_or_default();
+    let mut out = format!("Agents in {}:", text(value, "computer"));
+    for row in rows {
+        let version = match row["version"].as_str() {
+            Some(version) => format!(" {version}"),
+            None => String::new(),
+        };
+        out.push_str(&format!(
+            "\n  {}  {}{version}",
+            text(&row, "name"),
+            text(&row, "state")
+        ));
+    }
+    out
 }
 
 pub fn recipe_built(value: &Value) -> String {
@@ -736,25 +1135,94 @@ pub fn recipe_built(value: &Value) -> String {
     )
 }
 
-pub fn promote(value: &Value) -> String {
+/// `silo replace-main`: what happened, what a dry run would do, or why nothing changed.
+pub fn replace_main(value: &Value) -> String {
     let report = &value["report"];
     let (fork, target) = (text(report, "fork"), text(report, "target"));
     let archive = text(report, "archive");
     let mut out = match text(value, "status") {
         "refused" => return text(&value["refusal"], "message").to_owned(),
         "dry-run" => {
-            format!("Would make {fork} the new {target}; {target} would be archived as {archive}.")
+            format!("Would replace {target} with {fork}; the old {target} would be kept aside as {archive}.")
         }
-        _ => format!("{fork} is now {target}. The old {target} is {archive} (stopped)."),
+        _ => format!("{fork} replaced {target}. The old {target} is {archive} (stopped)."),
     };
     for line in lines(report, "notes") {
         out.push_str(&format!("\nnote: {line}"));
     }
+    if text(value, "status") == "promoted" {
+        out.push_str(&format!("\nUndo with `silo undo {target}`."));
+    }
     out
 }
 
-/// `silo fold`: what was kept, what a dry run would keep, or why nothing was changed.
-pub fn fold(value: &Value) -> String {
+/// `silo rebuild`: report what happened.
+pub fn rebuild(value: &Value) -> String {
+    let name = text(value, "name");
+    let undo = text(value, "undoName");
+    let image = text(value, "image");
+    if undo.is_empty() {
+        return format!("Abandoned the rebuild of {name}. {name} is as it was before the rebuild.");
+    }
+    format!("Rebuilt {name} on {image}. The previous computer is {undo} (stopped).")
+}
+
+/// The conflicts of a merge that needs answers, one per item with the id to answer by and the
+/// answers that settle it.
+fn conflict_lines(refusal: &Value) -> String {
+    let mut out = String::new();
+    for conflict in refusal["conflicts"].as_array().into_iter().flatten() {
+        let id = text(conflict, "id");
+        out.push_str(&format!(
+            "\n  {} {}: {}",
+            text(conflict, "kind"),
+            text(conflict, "item"),
+            text(conflict, "detail")
+        ));
+        if !id.is_empty() {
+            let allowed: Vec<&str> = conflict["allowed"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            let (fork, main) = (text(conflict, "forkChange"), text(conflict, "mainChange"));
+            if !fork.is_empty() || !main.is_empty() {
+                out.push_str(&format!("\n    fork: {fork}; main: {main}"));
+            }
+            out.push_str(&format!(
+                "\n    id: {id}; answers: {}",
+                if allowed.is_empty() {
+                    "none".to_owned()
+                } else {
+                    allowed.join(", ")
+                }
+            ));
+        }
+    }
+    out
+}
+
+/// Replaces the computer ids in a merge report with the names in `names` (id, name pairs); an
+/// id with no known name stays as it is.
+pub fn name_merge_computers(value: &mut Value, names: &[(String, String)]) {
+    let Some(report) = value.get_mut("report").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for key in ["fork", "target"] {
+        let named = report
+            .get(key)
+            .and_then(Value::as_str)
+            .and_then(|id| names.iter().find(|(known, _)| known == id))
+            .map(|(_, name)| name.clone());
+        if let Some(name) = named {
+            report.insert(key.to_owned(), Value::String(name));
+        }
+    }
+}
+
+/// `silo merge`: what was merged, what a dry run would merge, or why nothing was changed.
+pub fn merge(value: &Value) -> String {
     let report = &value["report"];
     let (fork, target) = (text(report, "fork"), text(report, "target"));
     let mut out = String::new();
@@ -762,28 +1230,27 @@ pub fn fold(value: &Value) -> String {
         "refused" => {
             let refusal = &value["refusal"];
             out.push_str(text(refusal, "message"));
-            for conflict in refusal["conflicts"].as_array().into_iter().flatten() {
+            out.push_str(&conflict_lines(refusal));
+            if text(refusal, "reason") == "choices-needed" {
                 out.push_str(&format!(
-                    "\n  {} {}: {}",
-                    text(conflict, "kind"),
-                    text(conflict, "item"),
-                    text(conflict, "detail")
+                    "\nRun `silo merge {fork}` again with --choose <id>=<answer> for each item above (or --skip <id> to leave an item as {target} has it).",
                 ));
+            } else {
+                out.push_str(&format!("\n{}", text(refusal, "hint")));
             }
-            out.push_str(&format!("\n{}", text(refusal, "hint")));
             return out;
         }
         "unchanged" => {
             return lines(report, "steps").join("\n");
         }
         "dry-run" => {
-            out.push_str(&format!("Would keep {fork} into {target}:"));
+            out.push_str(&format!("Would merge {fork} into {target}:"));
             for line in lines(report, "summary") {
                 out.push_str(&format!("\n  {line}"));
             }
         }
         _ => {
-            out.push_str(&format!("Kept {fork} into {target}."));
+            out.push_str(&format!("Merged {fork} into {target}."));
             for line in lines(report, "steps") {
                 out.push_str(&format!("\n  {line}"));
             }
@@ -792,13 +1259,8 @@ pub fn fold(value: &Value) -> String {
     for note in lines(report, "notes") {
         out.push_str(&format!("\nnote: {note}"));
     }
-    if let Some(rule) = value["autoKeep"]["rule"].as_str() {
-        out.push_str(&format!(
-            "\nKept without asking: the auto_keep rule {rule} matched."
-        ));
-    }
-    if value["writeBack"].is_object() {
-        out.push_str(&write_back(&value["writeBack"]));
+    if value["report"]["recipe"].is_object() {
+        out.push_str(&recipe_update(&value["report"]["recipe"]));
     }
     if text(value, "status") == "kept" {
         out.push_str(&format!("\nUndo with `silo undo {target}`."));
@@ -806,17 +1268,50 @@ pub fn fold(value: &Value) -> String {
     out
 }
 
+/// What a merge appended to the recipe of the computer it merged into.
+fn recipe_update(update: &Value) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for (manager, names) in update["packages"].as_object().into_iter().flatten() {
+        let names: Vec<&str> = names
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        if !names.is_empty() {
+            parts.push(format!("{manager}: {}", names.join(", ")));
+        }
+    }
+    let files: Vec<&str> = update["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if !files.is_empty() {
+        parts.push(format!("files: {}", files.join(", ")));
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\nAdded to the recipe {}: {}.",
+        text(update, "name"),
+        parts.join("; ")
+    )
+}
+
 pub fn undo(value: &Value) -> String {
     let computer = text(value, "computer");
     match text(value, "status") {
         "undone" if text(value, "kind") == "promote" => {
             let how = if value["recovered"] == true {
-                " (an interrupted promote)"
+                " (an interrupted replace of main)"
             } else {
                 ""
             };
             format!(
-                "Undid the promote{how}: {computer} is main again, and {} has its own name back.",
+                "Undid the replace{how}: {computer} is main again, and {} has its own name back.",
                 text(value, "fork")
             )
         }
@@ -830,7 +1325,7 @@ pub fn undo(value: &Value) -> String {
             }
             let name = text(&value["checkpoint"], "name");
             let how = if value["recovered"] == true {
-                " (an interrupted keep)"
+                " (an interrupted merge)"
             } else {
                 ""
             };
@@ -843,7 +1338,7 @@ pub fn undo(value: &Value) -> String {
             }
             let changed = lines(value, "changedSince");
             if !changed.is_empty() {
-                out.push_str("\nThese changes made on the computer after the keep are gone:");
+                out.push_str("\nThese changes made on the computer after the merge are gone:");
                 for line in changed {
                     out.push_str(&format!("\n  {line}"));
                 }
@@ -887,7 +1382,7 @@ pub fn forks(value: &Value) -> String {
         out.push('\n');
     }
     out.push_str(&format!(
-        "{} fork{} of {}; review with `silo diff <fork>`, keep with `silo fold <fork>`.",
+        "{} fork{} of {}; review with `silo diff <fork>`, merge with `silo merge <fork>`.",
         forks.len(),
         if forks.len() == 1 { "" } else { "s" },
         text(value, "source"),
@@ -912,97 +1407,23 @@ pub fn folder_fork(value: &Value) -> String {
         out.push_str(&format!("\n{url}"));
     }
     out.push_str(&format!(
-        "\nBring the commits back with `silo fold {}`.",
+        "\nBring the commits back with `silo merge {}`.",
         text(value, "name")
     ));
     out
 }
 
-/// `silo fold --request`.
+/// `silo merge --request`.
 pub fn requested(value: &Value) -> String {
     let request = &value["request"];
-    let mut out = format!(
+    format!(
         "Requested a review of {} (request {}).",
         text(value, "fork"),
         text(request, "id")
-    );
-    if let Some(reason) = value["autoKeep"]["declined"].as_str() {
-        out.push_str(&format!("\nNot kept without asking: {reason}."));
-    }
-    out
+    )
 }
 
-/// What a keep appended to a recipe file (or why it could not).
-fn write_back(report: &Value) -> String {
-    let file = text(report, "file");
-    let mut parts: Vec<String> = Vec::new();
-    for (manager, names) in report["packages"].as_object().into_iter().flatten() {
-        let names: Vec<&str> = names
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .collect();
-        if !names.is_empty() {
-            parts.push(format!("{manager}: {}", names.join(", ")));
-        }
-    }
-    let files: Vec<&str> = report["files"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect();
-    if !files.is_empty() {
-        parts.push(format!("files: {}", files.join(", ")));
-    }
-    let mut out = String::new();
-    if let Some(error) = report["error"].as_str() {
-        let what = if file.is_empty() {
-            "No recipe file".to_owned()
-        } else {
-            file.to_owned()
-        };
-        out.push_str(&format!("\nnote: {what} was not changed ({error})."));
-        if !parts.is_empty() {
-            out.push_str(&format!(" Add by hand: {}.", parts.join("; ")));
-        }
-    } else if report["written"] == true {
-        out.push_str(&format!("\nAppended to {file}: {}.", parts.join("; ")));
-    }
-    for skipped in report["skipped"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-    {
-        out.push_str(&format!(
-            "\nnote: {skipped} has no list in a recipe; not written."
-        ));
-    }
-    out
-}
-
-/// One line for what the `auto_keep` rules did to a fork at the end of its command.
-pub fn auto_keep(value: &Value) -> String {
-    let fork = text(value, "fork");
-    if let Some(error) = value["error"].as_str() {
-        return format!("{fork}: could not check the auto_keep rules: {error}");
-    }
-    match value["autoKeep"]["rule"].as_str() {
-        Some(rule) => format!(
-            "Kept {fork} without asking: the auto_keep rule {rule} matched. Undo with `silo undo {}`.",
-            text(&value["report"], "target")
-        ),
-        None => format!(
-            "{fork} was not kept without asking ({}); left a review request ({}).",
-            text(&value["autoKeep"], "declined"),
-            text(&value["request"], "id")
-        ),
-    }
-}
-
-/// `silo fold --pr`.
+/// `silo merge --pr`.
 pub fn pull_request(value: &Value) -> String {
     let mut out = format!(
         "Pushed {} to {} and opened a pull request into {} of {}:\n{}",
@@ -1058,7 +1479,7 @@ pub fn requests_list(value: &Value) -> String {
     let entries = list_of(value, "requests");
     if entries.is_empty() {
         let mut out =
-            "No review requests. Ask for one with `silo fold <fork> --request`.".to_owned();
+            "No review requests. Ask for one with `silo merge <fork> --request`.".to_owned();
         let missed = unreachable_lines(value);
         if !missed.is_empty() {
             out.push('\n');
@@ -1152,22 +1573,22 @@ pub fn request_show(value: &Value) -> String {
     }
     if value["stale"] == true {
         out.push_str(&format!(
-            "\nThis fork changed since the request was made, so a keep refuses. Ask again with `silo fold {} --request`.",
+            "\nThis fork changed since the request was made, so a merge refuses. Ask again with `silo merge {} --request`.",
             text(value, "forkName")
         ));
     }
     out
 }
 
-/// `silo requests throw-away`.
-pub fn request_thrown_away(value: &Value) -> String {
+/// `silo requests decline`.
+pub fn request_declined(value: &Value) -> String {
     match text(value, "dropped") {
         "" => format!(
             "The fork was already gone. Closed {}.",
             text(&value["request"], "id")
         ),
         name => format!(
-            "Threw away {name} and closed {}.",
+            "Declined {name} and closed {}.",
             text(&value["request"], "id")
         ),
     }

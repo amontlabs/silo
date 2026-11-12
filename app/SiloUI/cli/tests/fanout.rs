@@ -9,7 +9,6 @@ use std::{
 use fake_engine::{finished, FakeEngine};
 use serde_json::{json, Value};
 use silo_cli::{
-    config::{parse_settings, Settings},
     engine::{Computer, Engine},
     fanout::{self, check_capacity, fork_names, ManyArgs, Prefixer},
     ops::ForkArgs,
@@ -37,29 +36,12 @@ fn computer(name: &str, kind: &'static str, state: &str, memory_gib: u64) -> Com
 // MARK: Budget and slots
 
 #[test]
-fn the_budget_counts_running_forks_and_the_new_ones() {
+fn computers_other_than_macos_have_no_count_to_stay_under() {
     let source = computer("main", "linux", "running", 2);
-    let all = vec![
-        source.clone(),
-        computer("f1", "linux", "running", 2),
-        computer("f2", "linux", "running", 2),
-        computer("old", "linux", "stopped", 8),
-    ];
-    let budget = Some(8u64 << 30);
-    // main is not a fork and a stopped computer uses nothing: 4 + 2 x 2 = 8 fits.
-    assert!(check_capacity(&source, &all, 2, budget).is_ok());
-    let error = check_capacity(&source, &all, 3, budget)
-        .unwrap_err()
-        .message;
-    assert!(error.contains("fork_ram_budget is 8 GiB"), "{error}");
-    assert!(error.contains("2 running forks use 4 GiB"), "{error}");
-    assert!(error.contains("3 more at 2 GiB each need 6 GiB"), "{error}");
-    assert!(error.contains("2 fit"), "{error}");
-    assert!(check_capacity(&source, &all, 3, None).is_ok());
-    // Nothing left: none fit.
-    let full = Some(4u64 << 30);
-    let error = check_capacity(&source, &all, 1, full).unwrap_err().message;
-    assert!(error.contains("none fits"), "{error}");
+    let all: Vec<Computer> = std::iter::once(source.clone())
+        .chain((0..40).map(|n| computer(&format!("f{n}"), "linux", "running", 8)))
+        .collect();
+    assert!(check_capacity(&source, &all, 32).is_ok());
 }
 
 #[test]
@@ -67,15 +49,13 @@ fn macos_forks_are_limited_to_the_free_virtual_machine_slots() {
     let source = computer("mac", "macos", "running", 8);
     let one_more = vec![source.clone(), computer("lin", "linux", "running", 4)];
     // The source itself runs, so one slot is free.
-    assert!(check_capacity(&source, &one_more, 1, None).is_ok());
-    let error = check_capacity(&source, &one_more, 2, None)
-        .unwrap_err()
-        .message;
+    assert!(check_capacity(&source, &one_more, 1).is_ok());
+    let error = check_capacity(&source, &one_more, 2).unwrap_err().message;
     assert!(error.contains("1 already run"), "{error}");
     assert!(error.contains("Linux"), "{error}");
     let stopped = computer("mac", "macos", "stopped", 8);
-    assert!(check_capacity(&stopped, &[stopped.clone()], 2, None).is_ok());
-    assert!(check_capacity(&stopped, &[stopped.clone()], 3, None).is_err());
+    assert!(check_capacity(&stopped, &[stopped.clone()], 2).is_ok());
+    assert!(check_capacity(&stopped, &[stopped.clone()], 3).is_err());
 }
 
 #[test]
@@ -194,10 +174,14 @@ fn engine(expected: usize, exec: &[(&str, i32, &'static str)]) -> (FakeEngine, A
             "operations.job.get" if params["jobId"] == "job:12" => Ok(finished(
                 json!({"checkpoint": {"id": "cp-shared", "name": "silo-fork", "kind": "manual"}}),
             )),
-            "network.state" => Ok(json!({"computers": [{
-                "computerId": "id-main", "computer": "main",
-                "ports": [{"port": 3000, "scheme": "http", "configured": true}]
-            }]})),
+            "computers.access" => Ok(json!({
+                "computerId": params["computerId"], "name": "main", "secrets": [],
+                "ports": if params["computerId"] == "id-main" {
+                    json!([{"port": 3000, "scheme": "http", "configured": true}])
+                } else {
+                    json!([])
+                }
+            })),
             "network.publish" => Ok(json!({})),
             "network.urls" => {
                 let id = params["computerId"].as_str().unwrap();
@@ -267,19 +251,16 @@ fn many(count: u32, name: Option<&str>, command: &[&str]) -> ManyArgs {
         count,
         command: command.iter().map(|word| (*word).to_owned()).collect(),
         cwd: None,
+        steps: Default::default(),
     }
 }
 
-async fn run(
-    engine: &FakeEngine,
-    args: &ManyArgs,
-    settings: Option<&Settings>,
-) -> Result<Value, silo_cli::error::CliError> {
+async fn run(engine: &FakeEngine, args: &ManyArgs) -> Result<Value, silo_cli::error::CliError> {
     let connected = Engine::connect(&engine.socket).await.unwrap();
     let sink = |_: &str, _: bool, _: &[u8]| {};
     tokio::time::timeout(
         Duration::from_secs(20),
-        fanout::fork_many(&connected, args, settings, &ignore, &sink),
+        fanout::fork_many(&connected, args, &ignore, &sink),
     )
     .await
     .expect("the forks were made at the same time")
@@ -288,9 +269,7 @@ async fn run(
 #[tokio::test]
 async fn forks_are_made_at_the_same_time_from_one_new_checkpoint() {
     let (engine, world) = engine(3, &[]);
-    let result = run(&engine, &many(3, Some("try"), &[]), None)
-        .await
-        .unwrap();
+    let result = run(&engine, &many(3, Some("try"), &[])).await.unwrap();
     let names: Vec<&str> = result["forks"]
         .as_array()
         .unwrap()
@@ -326,7 +305,7 @@ async fn forks_are_made_at_the_same_time_from_one_new_checkpoint() {
 async fn a_warm_checkpoint_of_an_earlier_version_is_not_given_to_the_forks() {
     let (engine, world) = engine(2, &[]);
     world.lock().unwrap().warm = true;
-    run(&engine, &many(2, None, &[]), None).await.unwrap();
+    run(&engine, &many(2, None, &[])).await.unwrap();
     assert_eq!(engine.calls("checkpoints.create").len(), 1);
     let forks = engine.calls("checkpoints.fork");
     assert!(forks.iter().all(|f| f["checkpointId"] == "cp-shared"));
@@ -335,9 +314,7 @@ async fn a_warm_checkpoint_of_an_earlier_version_is_not_given_to_the_forks() {
 #[tokio::test]
 async fn one_fork_with_no_count_takes_no_checkpoint_of_its_own() {
     let (engine, _) = engine(1, &[]);
-    let result = run(&engine, &many(1, Some("solo"), &[]), None)
-        .await
-        .unwrap();
+    let result = run(&engine, &many(1, Some("solo"), &[])).await.unwrap();
     assert!(engine.calls("checkpoints.create").is_empty());
     assert_eq!(
         engine.calls("checkpoints.fork")[0]["checkpointId"],
@@ -347,29 +324,10 @@ async fn one_fork_with_no_count_takes_no_checkpoint_of_its_own() {
 }
 
 #[tokio::test]
-async fn the_budget_refuses_before_anything_is_made() {
-    let (engine, _) = engine(2, &[]);
-    let settings = parse_settings("fork_ram_budget: 3G\n").unwrap();
-    let error = run(&engine, &many(2, None, &[]), Some(&settings))
-        .await
-        .unwrap_err();
-    assert!(
-        error.message.contains("fork_ram_budget is 3 GiB"),
-        "{}",
-        error.message
-    );
-    assert!(error.message.contains("1 fits"), "{}", error.message);
-    assert!(engine.calls("checkpoints.fork").is_empty());
-    assert!(engine.calls("checkpoints.create").is_empty());
-    let none = parse_settings("fork_ram_budget: 4G\n").unwrap();
-    assert!(run(&engine, &many(2, None, &[]), Some(&none)).await.is_ok());
-}
-
-#[tokio::test]
 async fn too_many_or_zero_forks_are_refused() {
     let (engine, _) = engine(1, &[]);
-    assert!(run(&engine, &many(0, None, &[]), None).await.is_err());
-    assert!(run(&engine, &many(fanout::MAX_FORKS + 1, None, &[]), None)
+    assert!(run(&engine, &many(0, None, &[])).await.is_err());
+    assert!(run(&engine, &many(fanout::MAX_FORKS + 1, None, &[]))
         .await
         .is_err());
 }
@@ -387,7 +345,7 @@ async fn a_command_runs_in_each_fork_and_its_exit_code_comes_back() {
     let args = many(2, Some("try"), &["make", "test"]);
     let result = tokio::time::timeout(
         Duration::from_secs(20),
-        fanout::fork_many(&connected, &args, None, &ignore, &sink),
+        fanout::fork_many(&connected, &args, &ignore, &sink),
     )
     .await
     .unwrap()
@@ -428,9 +386,7 @@ async fn a_signal_exit_is_passed_as_128_plus_the_signal() {
 #[tokio::test]
 async fn every_fork_publishes_the_ports_its_source_publishes() {
     let (engine, _) = engine(3, &[]);
-    let result = run(&engine, &many(3, Some("web"), &[]), None)
-        .await
-        .unwrap();
+    let result = run(&engine, &many(3, Some("web"), &[])).await.unwrap();
     let published = engine.calls("network.publish");
     assert_eq!(published.len(), 3);
     for fork in result["forks"].as_array().unwrap() {
@@ -455,7 +411,7 @@ async fn forks_on_another_device_run_their_command_there_and_publish_nothing_her
     let args = many(2, Some("try"), &["make", "test"]);
     let result = tokio::time::timeout(
         Duration::from_secs(20),
-        fanout::fork_many(&connected, &args, None, &ignore, &sink),
+        fanout::fork_many(&connected, &args, &ignore, &sink),
     )
     .await
     .unwrap()
@@ -484,7 +440,7 @@ async fn forks_on_another_device_run_their_command_there_and_publish_nothing_her
         assert_eq!(fork["ports"], json!([]));
         assert_eq!(fork["urls"], json!([]));
     }
-    for local in ["network.state", "network.publish", "network.urls"] {
+    for local in ["computers.access", "network.publish", "network.urls"] {
         assert!(engine.calls(local).is_empty(), "{local} was sent");
     }
 }

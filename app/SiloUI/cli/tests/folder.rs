@@ -13,11 +13,10 @@ use std::{
 use fake_engine::{finished, FakeEngine};
 use serde_json::{json, Value};
 use silo_cli::{
-    config::{parse_recipe, parse_settings, Project},
     engine::Engine,
     flows,
     folder::{self, is_folder},
-    ops::FoldOptions,
+    ops::MergeOptions,
 };
 
 fn ignore(_: &str) {}
@@ -231,8 +230,7 @@ impl Lab {
     }
 
     async fn fork(&self, engine: &Engine) -> (String, PathBuf) {
-        let recipe = Project::default().named_recipe("linux-dev").unwrap();
-        let value = folder::fork_folder(engine, &self.host, None, &recipe, None, &[], &ignore)
+        let value = folder::fork_folder(engine, &self.host, None, &[], &ignore)
             .await
             .unwrap();
         let name = value["name"].as_str().unwrap().to_owned();
@@ -240,16 +238,14 @@ impl Lab {
     }
 
     async fn fold(&self, engine: &Engine, fork: &str, dry_run: bool) -> Value {
-        flows::fold(
+        flows::merge(
             engine,
             fork,
             None,
-            None,
-            FoldOptions {
+            MergeOptions {
                 dry_run,
-                ..FoldOptions::default()
+                ..MergeOptions::default()
             },
-            false,
             &ignore,
         )
         .await
@@ -319,10 +315,9 @@ async fn a_folder_is_copied_into_a_started_fork_as_a_repository() {
 async fn a_folder_that_is_not_a_whole_repository_is_refused() {
     let lab = lab();
     let engine = lab.connect().await;
-    let recipe = Project::default().named_recipe("linux-dev").unwrap();
     let plain = lab.host.parent().unwrap().join("plain");
     std::fs::create_dir_all(&plain).unwrap();
-    let error = folder::fork_folder(&engine, &plain, None, &recipe, None, &[], &ignore)
+    let error = folder::fork_folder(&engine, &plain, None, &[], &ignore)
         .await
         .unwrap_err();
     assert!(
@@ -333,7 +328,7 @@ async fn a_folder_that_is_not_a_whole_repository_is_refused() {
 
     let inside = lab.host.join("sub");
     std::fs::create_dir_all(&inside).unwrap();
-    let error = folder::fork_folder(&engine, &inside, None, &recipe, None, &[], &ignore)
+    let error = folder::fork_folder(&engine, &inside, None, &[], &ignore)
         .await
         .unwrap_err();
     assert!(
@@ -345,7 +340,7 @@ async fn a_folder_that_is_not_a_whole_repository_is_refused() {
     let empty = lab.host.parent().unwrap().join("empty");
     std::fs::create_dir_all(&empty).unwrap();
     git(&empty, &["init", "-q"]);
-    let error = folder::fork_folder(&engine, &empty, None, &recipe, None, &[], &ignore)
+    let error = folder::fork_folder(&engine, &empty, None, &[], &ignore)
         .await
         .unwrap_err();
     assert!(error.message.contains("no commits"), "{}", error.message);
@@ -513,22 +508,20 @@ async fn undo_refuses_when_the_folder_has_new_commits_since_the_fold() {
 }
 
 #[tokio::test]
-async fn a_folder_fork_cannot_be_promoted_or_kept_into_a_computer() {
+async fn a_folder_fork_cannot_replace_main_or_be_merged_into_a_computer() {
     let lab = lab();
     let engine = lab.connect().await;
     let (fork, _) = lab.fork(&engine).await;
-    let promoted = silo_cli::ops::promote(&engine, &fork, None, false, &ignore).await;
+    let promoted = silo_cli::ops::replace_main(&engine, &fork, None, false, &ignore).await;
     assert!(promoted
         .unwrap_err()
         .message
-        .contains("Fold it into that folder"));
-    let into = flows::fold(
+        .contains("Merge it into that folder"));
+    let into = flows::merge(
         &engine,
         &fork,
         Some("main"),
-        None,
-        FoldOptions::default(),
-        false,
+        MergeOptions::default(),
         &ignore,
     )
     .await;
@@ -542,17 +535,7 @@ async fn a_review_request_records_the_fork_its_digest_and_a_summary() {
     let engine = lab.connect().await;
     let (fork, guest) = lab.fork(&engine).await;
     commit(&guest, "b.txt", "two\n", "add b");
-    let made = flows::fold(
-        &engine,
-        &fork,
-        None,
-        None,
-        FoldOptions::default(),
-        true,
-        &ignore,
-    )
-    .await
-    .unwrap();
+    let made = flows::request(&engine, &fork, None, &ignore).await.unwrap();
     assert_eq!(made["status"], "requested");
     assert_eq!(made["request"]["id"], "fr-1");
     assert_eq!(made["request"]["status"], "open");
@@ -574,17 +557,7 @@ async fn a_review_request_records_the_fork_its_digest_and_a_summary() {
 }
 
 async fn request_digest(lab: &Lab, engine: &Engine, fork: &str) -> String {
-    flows::fold(
-        engine,
-        fork,
-        None,
-        None,
-        FoldOptions::default(),
-        true,
-        &ignore,
-    )
-    .await
-    .unwrap();
+    flows::request(engine, fork, None, &ignore).await.unwrap();
     let sent = lab.requests.lock().unwrap().last().unwrap().clone();
     sent["reviewDigest"].as_str().unwrap().to_owned()
 }
@@ -604,16 +577,16 @@ async fn the_review_digest_follows_untracked_and_binary_contents_and_pins_the_fo
         first, second,
         "an untracked file's contents change the digest"
     );
-    let pinned = |digest: String| FoldOptions {
+    let pinned = |digest: String| MergeOptions {
         reviewed: Some(digest),
-        ..FoldOptions::default()
+        ..MergeOptions::default()
     };
-    let stale = flows::fold(&engine, &fork, None, None, pinned(first), false, &ignore)
+    let stale = flows::merge(&engine, &fork, None, pinned(first), &ignore)
         .await
         .unwrap();
     assert_eq!(stale["status"], "refused");
     assert_eq!(stale["refusal"]["reason"], "changed");
-    let kept = flows::fold(&engine, &fork, None, None, pinned(second), false, &ignore)
+    let kept = flows::merge(&engine, &fork, None, pinned(second), &ignore)
         .await
         .unwrap();
     assert_ne!(kept["status"], "refused", "{kept}");
@@ -697,15 +670,6 @@ fn mock_github(status: u16, reply: Value) -> (String, std::sync::mpsc::Receiver<
     (url, receive)
 }
 
-fn pr_context(project: &Project) -> flows::Context<'_> {
-    flows::Context {
-        project,
-        settings: None,
-        recipe: None,
-        write_back: true,
-    }
-}
-
 /// A bare repository that is the host folder's `origin`, holding its `main`.
 fn with_origin(lab: &Lab) -> PathBuf {
     let remote = lab.host.parent().unwrap().join("remote.git");
@@ -742,13 +706,11 @@ async fn fold_pr_pushes_a_branch_and_opens_a_pull_request_with_the_summary() {
         201,
         json!({"html_url": "https://github.com/acme/app/pull/7", "number": 7}),
     );
-    let project = Project::default();
     let value = flows::run(
         &engine,
         &name,
         None,
-        &pr_context(&project),
-        FoldOptions::default(),
+        MergeOptions::default(),
         pr_mode(Some("tok"), api),
         &ignore,
     )
@@ -802,13 +764,11 @@ async fn fold_pr_without_a_token_pushes_nothing_and_a_refused_call_names_the_bra
     let engine = lab.connect().await;
     let (name, guest) = lab.fork(&engine).await;
     commit(&guest, "b.txt", "two\n", "second");
-    let project = Project::default();
     let error = flows::run(
         &engine,
         &name,
         None,
-        &pr_context(&project),
-        FoldOptions::default(),
+        MergeOptions::default(),
         pr_mode(None, "http://127.0.0.1:1".into()),
         &ignore,
     )
@@ -831,8 +791,7 @@ async fn fold_pr_without_a_token_pushes_nothing_and_a_refused_call_names_the_bra
         &engine,
         &name,
         None,
-        &pr_context(&project),
-        FoldOptions::default(),
+        MergeOptions::default(),
         pr_mode(Some("tok"), api),
         &ignore,
     )
@@ -880,15 +839,13 @@ async fn a_computer_fork_never_chooses_where_the_token_goes() {
     let guest = computer_fork(&lab, &origin);
     std::fs::write(guest.join("new.txt"), "x\n").unwrap();
     let engine = lab.connect().await;
-    let project = Project::default();
     // The destination is built on this device and cannot be reached, so the push fails;
     // the fork's own remote is not asked.
     let error = flows::run(
         &engine,
         "plain",
         None,
-        &pr_context(&project),
-        FoldOptions::default(),
+        MergeOptions::default(),
         flows::Mode::PullRequest(
             silo_cli::pr::PrArgs {
                 base: Some("main".into()),
@@ -918,13 +875,11 @@ async fn a_computer_fork_with_a_matching_origin_pushes_to_the_host_built_url() {
     let guest = computer_fork(&lab, "https://github.com/acme/app.git");
     std::fs::write(guest.join("new.txt"), "x\n").unwrap();
     let engine = lab.connect().await;
-    let project = Project::default();
     let error = flows::run(
         &engine,
         "plain",
         None,
-        &pr_context(&project),
-        FoldOptions::default(),
+        MergeOptions::default(),
         flows::Mode::PullRequest(
             silo_cli::pr::PrArgs {
                 base: Some("main".into()),
@@ -949,13 +904,11 @@ async fn an_untracked_credential_file_in_a_computer_fork_stops_the_pull_request(
     let guest = computer_fork(&lab, "https://github.com/acme/app.git");
     std::fs::write(guest.join("deploy.pem"), "key\n").unwrap();
     let engine = lab.connect().await;
-    let project = Project::default();
     let error = flows::run(
         &engine,
         "plain",
         None,
-        &pr_context(&project),
-        FoldOptions::default(),
+        MergeOptions::default(),
         flows::Mode::PullRequest(
             silo_cli::pr::PrArgs {
                 base: Some("main".into()),
@@ -989,13 +942,11 @@ async fn fold_pr_for_a_folder_refuses_a_repository_other_than_its_origin() {
     let engine = lab.connect().await;
     let (name, guest) = lab.fork(&engine).await;
     commit(&guest, "b.txt", "two\n", "second");
-    let project = Project::default();
     let error = flows::run(
         &engine,
         &name,
         None,
-        &pr_context(&project),
-        FoldOptions::default(),
+        MergeOptions::default(),
         flows::Mode::PullRequest(
             silo_cli::pr::PrArgs {
                 repo: Some("other/thing".into()),
@@ -1024,8 +975,7 @@ async fn a_computer_fork_needs_a_host_named_repository_and_no_credentials_in_it(
     let lab = lab();
     let guest = computer_fork(&lab, "https://example.invalid/evil/app.git");
     let engine = lab.connect().await;
-    let project = Project::default();
-    let (engine, project) = (&engine, &project);
+    let engine = &engine;
     let run = |repository: Option<&str>| {
         let repository = repository.map(str::to_owned);
         async move {
@@ -1033,8 +983,7 @@ async fn a_computer_fork_needs_a_host_named_repository_and_no_credentials_in_it(
                 engine,
                 "plain",
                 None,
-                &pr_context(project),
-                FoldOptions::default(),
+                MergeOptions::default(),
                 flows::Mode::PullRequest(
                     silo_cli::pr::PrArgs::default(),
                     pr_env(repository.as_deref()),
@@ -1066,13 +1015,11 @@ async fn fold_pr_refuses_host_commits_that_origin_does_not_have() {
     commit(&lab.host, "private.txt", "x\n", "not pushed yet");
     let (name, guest) = lab.fork(&engine).await;
     commit(&guest, "b.txt", "two\n", "second");
-    let project = Project::default();
     let error = flows::run(
         &engine,
         &name,
         None,
-        &pr_context(&project),
-        FoldOptions::default(),
+        MergeOptions::default(),
         pr_mode(Some("tok"), "http://127.0.0.1:1".into()),
         &ignore,
     )
@@ -1100,13 +1047,11 @@ async fn fold_pr_ignores_host_commits_made_after_the_fork_started() {
     let (name, guest) = lab.fork(&engine).await;
     commit(&guest, "b.txt", "two\n", "second");
     commit(&lab.host, "later.txt", "x\n", "made later");
-    let project = Project::default();
     let error = flows::run(
         &engine,
         &name,
         None,
-        &pr_context(&project),
-        FoldOptions::default(),
+        MergeOptions::default(),
         pr_mode(Some("tok"), "http://127.0.0.1:1".into()),
         &ignore,
     )
@@ -1118,40 +1063,4 @@ async fn fold_pr_ignores_host_commits_made_after_the_fork_started() {
         error.message
     );
     drop(remote);
-}
-
-#[tokio::test]
-async fn an_auto_keep_test_that_changes_the_fork_leaves_a_request_for_a_folder_fork() {
-    let lab = lab();
-    let engine = lab.connect().await;
-    let (name, guest) = lab.fork(&engine).await;
-    commit(&guest, "b.txt", "two\n", "second");
-    let settings = parse_settings("auto_keep:\n  - when: { only: [code], tests: pass }\n").unwrap();
-    // The test command passes, and leaves an untracked file in the fork.
-    let recipe = parse_recipe("test: echo late > repo/late.txt\n").unwrap();
-    let project = Project::default();
-    let context = flows::Context {
-        project: &project,
-        settings: Some(&settings),
-        recipe: Some(&recipe),
-        write_back: true,
-    };
-    let value = flows::run(
-        &engine,
-        &name,
-        None,
-        &context,
-        FoldOptions::default(),
-        flows::Mode::Request,
-        &ignore,
-    )
-    .await
-    .unwrap();
-    assert_eq!(value["status"], "requested", "{value}");
-    assert!(value["autoKeep"]["declined"]
-        .as_str()
-        .unwrap()
-        .contains("changed since"));
-    // Nothing came back to the host folder.
-    assert_eq!(git(&lab.host, &["log", "--format=%s"]), "first");
 }

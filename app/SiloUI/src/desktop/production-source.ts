@@ -6,8 +6,8 @@ import { listen } from "@tauri-apps/api/event"
 import { useMemo, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { showOperationFailure } from "@/lib/operation-toast"
-import { computerTreeSchema, directoryPageShape, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
-import type { ComputerStep, ComputerTreeNode, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
+import { approvalJobSchema, approvalListSchema, approvalShape, auditListSchema, computerTreeSchema, computerToolsSchema, deviceResourcesSchema, directoryPageShape, networkPolicyStateSchema, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
+import type { AgentId, Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, ComputerStep, ComputerTreeNode, DeviceResources, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
 export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
 import { siloProgressEventSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
@@ -26,6 +26,8 @@ import type { ProductionContext } from "./production-context"
 import { createBackupControls } from "./production-backup"
 import { createDeviceServices } from "./production-services"
 import { createSetupQueue } from "./production-setup-queue"
+import * as agents from "./production-agents"
+import { agentToInstall } from "@/features/agents/model/agents"
 import type { EventHandler, ListedDevice, ProductionBridge, ProductionSnapshot } from "./production-types"
 import { PUSH_STATUS_ATTEMPTS, PUSH_STATUS_INTERVAL_MS, PUSH_STATUS_MAX_INTERVAL_MS, REFRESH_GATE_TIMEOUT_MS, REMOTE_READ_WAIT_MS, RETURN_REFRESH_MIN_AGE_MS, canonicalKey, derivePorts, errorMessage, isUpdateInProgress, lastCancelledLifecycle, pushKey, reportedCancellation, shareStructure, unavailableBackup } from "./production-helpers"
 
@@ -55,8 +57,11 @@ export async function showReviewRequest(target: ReviewRequestTarget, native: Pro
   return requestDetailSchema.parse(await native.invoke("show_review_request", target))
 }
 
-/** Keeps the fork's changes into its target; a stale request is refused. `dataOk` carries database changes. */
-export async function keepReviewRequest(target: ReviewRequestTarget & { dataOk?: boolean }, native: ProductionBridge = bridge): Promise<KeepRequestResult> {
+/** How a conflict is settled: the fork's version, main's, or (a repository) the fork's commits left as a branch. */
+export type MergeChoice = "fork" | "main" | "branch"
+
+/** Merges the fork's changes into its target; a stale request is refused. `dataOk` carries database changes; `choices` answers each conflict by its id. */
+export async function keepReviewRequest(target: ReviewRequestTarget & { dataOk?: boolean, choices?: Record<string, MergeChoice> }, native: ProductionBridge = bridge): Promise<KeepRequestResult> {
   return keepRequestResultSchema.parse(await native.invoke("keep_review_request", target))
 }
 
@@ -68,6 +73,44 @@ export async function throwAwayReviewRequest(target: ReviewRequestTarget, native
 /** Starts the fork when needed and returns where to reach it. */
 export async function openReviewRequest(target: ReviewRequestTarget, native: ProductionBridge = bridge): Promise<OpenRequestResult> {
   return openRequestResultSchema.parse(await native.invoke("open_review_request", target))
+}
+
+/** What the agents inside computers ask for; `state` keeps only the approvals in that state. */
+export async function listApprovals(options: { state?: ApprovalState } = {}, native: ProductionBridge = bridge): Promise<ApprovalList> {
+  return approvalListSchema.parse(await native.invoke("list_approvals", options))
+}
+
+/** Answers a waiting approval. Allowing it makes the engine run the stored call. */
+export async function decideApproval(answer: { id: string, decision: "allow" | "deny", note?: string }, native: ProductionBridge = bridge): Promise<Approval> {
+  return approvalShape.parse(await native.invoke("decide_approval", answer))
+}
+
+/** How the job an allowed approval started is going. */
+export async function readApprovalJob(jobId: string, native: ProductionBridge = bridge): Promise<ApprovalJob> {
+  return approvalJobSchema.parse(await native.invoke("read_approval_job", { jobId }))
+}
+
+/** Who did what, newest first. Pass the previous page's `nextBeforeId` as `beforeId` for the next page. */
+export async function listAudit(options: { computerId?: string, callerKind?: AuditCallerKind, beforeId?: number, limit?: number } = {}, native: ProductionBridge = bridge): Promise<AuditPage> {
+  return auditListSchema.parse(await native.invoke("list_audit", options))
+}
+
+/** What this device (or another) has left in memory and disk. */
+export async function readDeviceResources(deviceId?: string, native: ProductionBridge = bridge): Promise<DeviceResources> {
+  return deviceResourcesSchema.parse(await native.invoke("read_device_resources", { deviceId }))
+}
+
+export const APPROVALS_CHANGED_EVENT = "silo://approvals-changed"
+
+/** Calls `onChange` whenever an approval changes; returns the function that stops listening. */
+export function watchApprovals(onChange: () => void, native: ProductionBridge = bridge): () => void {
+  let stopped = false
+  let stop: (() => void) | undefined
+  native.listen(APPROVALS_CHANGED_EVENT, () => onChange()).then(
+    unlisten => { if (stopped) unlisten(); else stop = unlisten },
+    (cause: unknown) => console.error("Silo approvals:", errorMessage(cause)),
+  )
+  return () => { stopped = true; stop?.() }
 }
 
 /** The recorded steps of a computer, oldest first. */
@@ -97,6 +140,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   let lastVerificationKey: string | undefined
   let lastGitHubJob: { key: string; promise: Promise<void> } | undefined
   let lastIdentityJob: { key: string; promise: Promise<void> } | undefined
+  /** The agent install setup last queued, and what a retry installs again. */
+  let lastAgentJob: { key: string; computer: string; computerId: string; agent: AgentId } | undefined
   let activeConfiguration: ApplicationSource["computerConfigurationOperation"] = null
   let activeRequestId: string | null = null
   let operationSequence = 0
@@ -717,7 +762,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
 
   function setComputerFailure(action: string, computerId: string, cause: unknown) {
     const computer = view.source?.computers.find(computer => computer.configuration.id === computerId)
-    if (!computer) return
+    if (!computer) { reportActionFailure(`${action}:${computerId}`, `Could not ${action.replace(/-/g, " ")} for ${computerId}`, errorMessage(cause)); return }
     const message = errorMessage(cause)
     // A user-requested cancellation is not a failure: record it as a neutral,
     // retryable state so the row shows "<Action> cancelled", not a red error.
@@ -741,7 +786,9 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       return
     }
     const computerId = view.source?.computers.find(computer => computerTarget(computer) === name)?.configuration.id ?? name
-    const stillExists = () => view.source?.computers.some(computer => computer.configuration.id === computerId)
+    // A computer this list does not hold is a macOS computer: its terminal and editor still open here.
+    const listed = view.source?.computers.some(computer => computer.configuration.id === computerId)
+    const stillExists = () => !listed || view.source?.computers.some(computer => computer.configuration.id === computerId)
     const key = `${action}:${computerId}`
     if (pendingComputerActions.has(key) || pendingLifecycle.has(computerId)) return
     pendingComputerActions.add(key)
@@ -825,6 +872,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     lastVerificationKey = undefined
     lastIdentityJob = undefined
     lastGitHubJob = undefined
+    lastAgentJob = undefined
+    publish({ ...snapshot, setupAgent: undefined, setupQueue: snapshot.setupQueue.filter(({ id }) => id !== "agentInstall") })
     setSetupStatus(["identityRun", "identityVerify", "githubRun", "githubVerify", "completion"], "idle")
     const promise = enqueueSetup(["computerRun", "computerVerify"], async (job) => {
       setup.activeComputerJob = job
@@ -905,13 +954,54 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     }
   }
 
-  function submitSetupStep(step: "computers" | "github", request: OnboardingCompletionRequest): Promise<unknown> {
+  /**
+   * Queues installing the chosen agent in the first computer, behind the computer's creation.
+   * Setup never fails because of it: a failed install is left in the queue item for the final
+   * screen to offer a retry.
+   */
+  function queueAgentInstall(request: OnboardingCompletionRequest, computerJob: Promise<unknown>) {
+    const agent = agentToInstall(request.agent)
+    const computer = request.computerConfiguration.computers[0]
+    if (!agent || !computer) {
+      if (lastAgentJob || snapshot.setupAgent) { lastAgentJob = undefined; publish({ ...snapshot, setupAgent: undefined, setupQueue: snapshot.setupQueue.filter(({ id }) => id !== "agentInstall") }) }
+      return
+    }
+    const key = `${computer.id}:${agent}`
+    if (lastAgentJob?.key === key) return
+    runAgentInstall({ key, computer: computer.name, computerId: computer.id, agent }, computerJob)
+  }
+
+  function runAgentInstall(job: NonNullable<typeof lastAgentJob>, computerJob: Promise<unknown>) {
+    const { key, computer, computerId, agent } = job
+    lastAgentJob = job
+    // The agent has a queue item only while one was chosen, so "every item succeeded" still means setup is done.
+    const setupQueue = snapshot.setupQueue.some(({ id }) => id === "agentInstall") ? snapshot.setupQueue : [...snapshot.setupQueue, { id: "agentInstall" as const, status: "idle" as const }]
+    publish({ ...snapshot, setupAgent: { computer, agent }, setupQueue })
+    const promise = enqueueSetup(["agentInstall"], async () => {
+      await computerJob
+      // A computer that already has the agent needs nothing.
+      const listed = await agents.listAgents(native, computer)
+      if (listed.some(({ id, state }) => id === agent && state === "ready")) return
+      await agents.installAgent(native, computer, computerId, agent, progress => {
+        if (lastAgentJob?.key === key) publish({ ...snapshot, setupAgent: { computer, agent, step: progress.step, detail: progress.detail } })
+      })
+    })
+    void promise.catch(() => {})
+  }
+
+  /** Installs the chosen agent again after a failure. */
+  function retryAgentInstall() {
+    if (setup.isAccepting() && lastAgentJob) runAgentInstall(lastAgentJob, Promise.resolve())
+  }
+
+  function submitSetupStep(step: "computers" | "agent" | "github", request: OnboardingCompletionRequest): Promise<unknown> {
     if (!setup.isAccepting()) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
     ++identityVerificationSequence
     const current = snapshot.source
     const configurationsUnchanged = current && current.computers.length > 0
       && !current.computerConfigurationOperation && !activeConfiguration
-      && !setup.isBusy()
+      // Installing the agent does not make the computers unsettled.
+      && !setup.isBusy(["agentInstall"])
       && current.computers.every(({ freshness, state }) => freshness === "fresh" && state !== "failed" && state !== "starting")
       && JSON.stringify(current.computers.map(({ configuration }) => setupComputerConfigurationSchema.parse(configuration))) === JSON.stringify(request.computerConfiguration.computers.map((configuration) => setupComputerConfigurationSchema.parse(configuration)))
     // Initial setup and continues send the specific creations/edits as one batch. When
@@ -924,6 +1014,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       ? Promise.resolve(current)
       : configureConfigurations(request.computerConfiguration, changes.length > 0 ? { kind: "changes", changes } : { kind: "retry" })
     if (step === "computers") return computerJob
+    queueAgentInstall(request, computerJob)
+    if (step === "agent") return computerJob
     const activityId = crypto.randomUUID()
     const identities = request.github.computers.map(({ computer, identity }) => ({ computer, ...identity }))
     const identityKey = JSON.stringify([request.computerConfiguration, identities])
@@ -1032,7 +1124,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       }
       const message = `GitHub operation failed: ${errorMessage(cause)}`
       if (sequence === githubMutationSequence && snapshot.source) publish({ ...snapshot, error: message, source: { ...snapshot.source, github: { ...snapshot.source.github,
-        ...(!(["save_github_configuration", "save_github_personal_token", "remove_github_personal_token"].includes(command)) && { repositoryCatalogStatus: { status: "unavailable" as const, message, canRetry: command === "refresh_github_repositories" } }),
+        ...(command !== "save_github_configuration" && { repositoryCatalogStatus: { status: "unavailable" as const, message, canRetry: command === "refresh_github_repositories" } }),
       } } })
       throw cause
     } finally {
@@ -1181,6 +1273,19 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     reclaimWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("reclaim_workspace_storage", { computerId })),
     refreshSshAccess: services.refreshSshAccess,
     listReviewRequests: options => listReviewRequests(options, native),
+    listApprovals: options => listApprovals(options, native),
+    decideApproval: answer => decideApproval(answer, native),
+    watchApprovals: onChange => watchApprovals(onChange, native),
+    readApprovalJob: jobId => readApprovalJob(jobId, native),
+    listAgents: computer => agents.listAgents(native, computer),
+    installAgent: (computer, agent, onProgress) => agents.installAgent(native, computer, view.source?.computers.find(item => computerTarget(item) === computer)?.configuration.id ?? computer, agent, onProgress),
+    ensureSshName: computer => agents.ensureSshName(native, computer),
+    listAudit: options => listAudit(options, native),
+    readDeviceResources: deviceId => readDeviceResources(deviceId, native),
+    readNetworkPolicy: async computer => networkPolicyStateSchema.parse(await native.invoke("read_network_policy", { computer })),
+    saveNetworkPolicy: async (computer, policy, expected, options) => networkPolicyStateSchema.parse(await native.invoke("save_network_policy", { computer, policy, ...(expected ? { expected } : {}), ...(options?.acceptPresets ? { acceptPresets: true } : {}) })),
+    readComputerTools: async computer => computerToolsSchema.parse(await native.invoke("read_computer_tools", { computer })),
+    setComputerTools: async (computer, enabled) => computerToolsSchema.parse(await native.invoke(enabled ? "enable_computer_tools" : "revoke_computer_tools", { computer })),
     sshConnection: (computer, download, network) => {
       const remote = parseRemoteComputerTarget(computer)
       return native.invoke<string | null>("ssh_connection", remote ? { ...remote, download, ...(network === undefined ? {} : { network }) } : { computer, download, ...(network === undefined ? {} : { network }) })
@@ -1315,9 +1420,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       catch (cause) { reportActionFailure(`open-desktop:${computer}`, "Could not open the Linux desktop", errorMessage(cause)) }
     },
     openTerminal: (name) => computerAction("open-terminal", name),
+    openAgent: (name, agent) => computerAction("open-agent", name, { agent }),
     openEditor: (name, path) => computerAction("open-editor", name, path ? { path } : undefined),
-    saveGitHubPersonalToken: async token => { await githubMutation("save_github_personal_token", { token }) },
-    removeGitHubPersonalToken: async () => { await githubMutation("remove_github_personal_token") },
     connectGitHub: () => { void githubMutation("connect_github").catch(() => {}) },
     cancelGitHubConnection: () => { void githubMutation("cancel_github_connection").catch(() => {}) },
     reopenGitHubAuthorization: () => {
@@ -1342,10 +1446,15 @@ export function createProductionSource(native: ProductionBridge = bridge) {
 
   const statusActions: StatusBarActions = {
     listComputerDirectory: applicationActions.listComputerDirectory,
+    listApprovals: applicationActions.listApprovals,
+    listReviewRequests: applicationActions.listReviewRequests,
+    watchApprovals: applicationActions.watchApprovals,
     startComputer: applicationActions.startComputer,
     stopComputer: applicationActions.stopComputer,
     restartComputer: applicationActions.restartComputer,
     openTerminal: applicationActions.openTerminal,
+    openAgent: applicationActions.openAgent,
+    listAgents: applicationActions.listAgents,
     pushRepository: applicationActions.pushRepository,
     openSilo: (route?: StatusBarRoute) => { void native.invoke("open_main", { route: route ?? null }).catch((cause) => console.error("Silo main window:", errorMessage(cause))) },
     quit: (choice) => { void native.invoke("quit_app", { choice: choice ?? null }).catch((cause: unknown) => reportActionFailure("quit", "Could not quit Silo", errorMessage(cause))) },
@@ -1400,6 +1509,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     watchNetwork: services.watchNetwork,
     configureConfigurations,
     submitSetupStep,
+    retryAgentInstall,
     verifySetupIdentities,
     finishSetup,
     drainSetup,

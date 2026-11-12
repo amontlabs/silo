@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -24,6 +24,8 @@ use crate::context::Audience;
 pub const DISCOVERY_ID_BUDGET_BYTES: usize = 3 * 1024 * 1024;
 pub const MAX_INLINE_JOB_OUTCOME_BYTES: usize = 3 * 1024 * 1024;
 pub const MAX_JOB_OUTCOME_CHUNK_BYTES: usize = 1024 * 1024;
+/// How long a result kept for a reader that has not acknowledged it yet stays readable.
+pub(crate) const KEPT_RESULT_RETENTION_MS: i64 = 10 * 60 * 1000;
 const MAX_JOB_ID_BYTES: usize = 512;
 const MAX_NOTICE_BYTES: usize = 64 * 1024;
 const MAX_NOTICE_LIST_BYTES: usize = 3 * 1024 * 1024;
@@ -45,6 +47,22 @@ pub enum CancelRoute {
     UpdateDownload,
     MacosGate,
     GuestExec,
+}
+
+/// What an acknowledgement did to a finished job's result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Acknowledgement {
+    /// Every reader entitled to the result has acknowledged it: it is gone.
+    Released,
+    /// A reader entitled to the result has not read it yet: it stays readable.
+    Kept,
+}
+
+/// A finished job's result that is kept for readers who have not acknowledged it.
+#[derive(Debug)]
+struct KeptResult {
+    acknowledged_by: BTreeSet<String>,
+    expires_at_ms: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -147,6 +165,7 @@ pub struct JobRegistry {
     admission_gate: Arc<Mutex<()>>,
     admission_suspended: Arc<AtomicBool>,
     pending_outcomes: Arc<Mutex<HashMap<JobId, PendingCompletion>>>,
+    held_results: Arc<Mutex<HashMap<JobId, KeptResult>>>,
 }
 
 impl JobRegistry {
@@ -166,6 +185,7 @@ impl JobRegistry {
             admission_gate: Arc::new(Mutex::new(())),
             admission_suspended: Arc::new(AtomicBool::new(false)),
             pending_outcomes: Arc::new(Mutex::new(HashMap::new())),
+            held_results: Arc::new(Mutex::new(HashMap::new())),
         };
         registry.recover_interrupted_jobs()?;
         Ok(registry)
@@ -587,6 +607,7 @@ impl JobRegistry {
         job_id: &JobId,
         offset_bytes: Option<u64>,
     ) -> Result<Option<JobLookupResult>, RegistryError> {
+        self.release_expired(now_ms());
         let connection = self.lock_connection()?;
         let row: Option<(String, Option<i64>)> = connection
             .query_row(
@@ -647,6 +668,35 @@ impl JobRegistry {
         }))
     }
 
+    /// The state of a job the registry still holds, read without its outcome and without
+    /// freeing anything. `None` when the registry holds no record of the job: it never had one,
+    /// the job was acknowledged, or its kept result's retention has passed.
+    pub fn state_of(&self, job_id: &JobId) -> Result<Option<JobState>, RegistryError> {
+        let state: Option<String> = self
+            .lock_connection()?
+            .query_row(
+                "SELECT state FROM jobs WHERE job_id = ?1",
+                [job_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(state) = state else {
+            return Ok(None);
+        };
+        match state.as_str() {
+            "acknowledged" => Ok(None),
+            "waiting" => Ok(Some(JobState::Waiting)),
+            "running" => Ok(Some(JobState::Running)),
+            "finished" => Ok(self
+                .retention_deadline_ms(job_id)
+                .is_none_or(|deadline| deadline > now_ms())
+                .then_some(JobState::Finished)),
+            _ => Err(RegistryError::invalid(
+                "Job registry contains an invalid state.",
+            )),
+        }
+    }
+
     /// The method that created `job_id`, or `None` when the registry has no such job.
     pub fn method_of(&self, job_id: &JobId) -> Result<Option<String>, RegistryError> {
         let connection = self.lock_connection()?;
@@ -669,6 +719,145 @@ impl JobRegistry {
             JobId::new(value).map_err(|error| RegistryError::invalid(error.to_string()))
         })
         .collect()
+    }
+
+    /// Acknowledges `job_id` on behalf of `reader`. The result is freed once every reader in
+    /// `entitled` has acknowledged it (or its retention passes); until then it stays readable
+    /// for the others.
+    pub fn acknowledge_shared(
+        &self,
+        job_id: &JobId,
+        reader: &str,
+        entitled: &BTreeSet<String>,
+    ) -> Result<Acknowledgement, RegistryError> {
+        self.acknowledge_shared_at(job_id, reader, entitled, now_ms())
+    }
+
+    fn acknowledge_shared_at(
+        &self,
+        job_id: &JobId,
+        reader: &str,
+        entitled: &BTreeSet<String>,
+        now_ms: i64,
+    ) -> Result<Acknowledgement, RegistryError> {
+        self.release_expired(now_ms);
+        let state: Option<String> = self
+            .lock_connection()?
+            .query_row(
+                "SELECT state FROM jobs WHERE job_id = ?1",
+                [job_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if state.as_deref() != Some("finished") {
+            self.acknowledge(job_id)?;
+            return Ok(Acknowledgement::Released);
+        }
+        let complete = {
+            let mut held = self
+                .held_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let kept = held.entry(job_id.clone()).or_insert_with(|| KeptResult {
+                acknowledged_by: BTreeSet::new(),
+                expires_at_ms: now_ms.saturating_add(KEPT_RESULT_RETENTION_MS),
+            });
+            kept.acknowledged_by.insert(reader.to_owned());
+            entitled
+                .iter()
+                .all(|entitled| kept.acknowledged_by.contains(entitled))
+        };
+        if !complete {
+            return Ok(Acknowledgement::Kept);
+        }
+        self.acknowledge(job_id)?;
+        Ok(Acknowledgement::Released)
+    }
+
+    /// Keeps a finished result whose hold an earlier run lost: it expires `KEPT_RESULT_RETENTION_MS`
+    /// from now, with the readers that had acknowledged it still counted. Does nothing for a job
+    /// that is not finished or is already kept.
+    pub fn restore_hold(
+        &self,
+        job_id: &JobId,
+        acknowledged_by: &[String],
+    ) -> Result<(), RegistryError> {
+        self.restore_hold_at(job_id, acknowledged_by, now_ms())
+    }
+
+    fn restore_hold_at(
+        &self,
+        job_id: &JobId,
+        acknowledged_by: &[String],
+        now_ms: i64,
+    ) -> Result<(), RegistryError> {
+        let state: Option<String> = self
+            .lock_connection()?
+            .query_row(
+                "SELECT state FROM jobs WHERE job_id = ?1",
+                [job_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if state.as_deref() != Some("finished") {
+            return Ok(());
+        }
+        self.held_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(job_id.clone())
+            .or_insert_with(|| KeptResult {
+                acknowledged_by: acknowledged_by.iter().cloned().collect(),
+                expires_at_ms: now_ms.saturating_add(KEPT_RESULT_RETENTION_MS),
+            });
+        Ok(())
+    }
+
+    /// When a kept result is freed if nobody acknowledges it, in milliseconds since the epoch;
+    /// `None` when the registry holds no deadline for the job.
+    pub fn retention_deadline_ms(&self, job_id: &JobId) -> Option<i64> {
+        self.held_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(job_id)
+            .map(|kept| kept.expires_at_ms)
+    }
+
+    /// Frees the kept results whose retention has passed.
+    pub(crate) fn release_expired(&self, now_ms: i64) {
+        let expired: Vec<JobId> = {
+            let mut held = self
+                .held_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if held.is_empty() {
+                return;
+            }
+            let expired: Vec<JobId> = held
+                .iter()
+                .filter(|(_, kept)| kept.expires_at_ms <= now_ms)
+                .map(|(job_id, _)| job_id.clone())
+                .collect();
+            for job_id in &expired {
+                held.remove(job_id);
+            }
+            expired
+        };
+        for job_id in expired {
+            if self.acknowledge(&job_id).is_err() {
+                // Storage or admission is unavailable: try again at the next read.
+                self.held_results
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(
+                        job_id,
+                        KeptResult {
+                            acknowledged_by: BTreeSet::new(),
+                            expires_at_ms: now_ms,
+                        },
+                    );
+            }
+        }
     }
 
     pub fn acknowledge(&self, job_id: &JobId) -> Result<(), RegistryError> {
@@ -704,6 +893,10 @@ impl JobRegistry {
             }
         }
         transaction.commit()?;
+        self.held_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(job_id);
         self.cancel_handlers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -833,6 +1026,12 @@ impl JobRegistry {
         Ok(())
     }
 
+    pub fn clear_notice(&self, key: &str) -> Result<(), RegistryError> {
+        let connection = self.lock_connection()?;
+        connection.execute("DELETE FROM notices WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     fn recover_interrupted_jobs(&self) -> Result<(), RegistryError> {
         let interrupted = JobOutcome {
             result: None,
@@ -840,6 +1039,7 @@ impl JobRegistry {
                 code: ErrorCode::Internal,
                 message: INTERRUPTED_MESSAGE.to_owned(),
                 diagnostics: None,
+                details: None,
             }),
         };
         let not_started = JobOutcome {
@@ -848,6 +1048,7 @@ impl JobRegistry {
                 code: ErrorCode::Cancelled,
                 message: NOT_STARTED_MESSAGE.to_owned(),
                 diagnostics: None,
+                details: None,
             }),
         };
         let interrupted_json =
@@ -1662,6 +1863,221 @@ mod tests {
         let lookup = registry.get(&small_id).unwrap().unwrap();
         assert_eq!(lookup.outcome.unwrap().result, small.result);
         assert!(lookup.outcome_chunk.is_none());
+    }
+
+    fn finished_job(registry: &JobRegistry, id: &str) -> JobId {
+        let job_id = JobId::new(id).unwrap();
+        registry.accept(job_id.clone(), "changes.merge").unwrap();
+        registry
+            .finish(
+                &job_id,
+                &finished(job_id.clone(), serde_json::json!({"merged": true})),
+            )
+            .unwrap();
+        job_id
+    }
+
+    fn readers(names: &[&str]) -> std::collections::BTreeSet<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_result_stays_readable_for_a_reader_that_has_not_acknowledged_it() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = finished_job(&registry, "job:5247");
+        let entitled = readers(&["owner", "computer-1"]);
+
+        let kept = registry
+            .acknowledge_shared(&job_id, "owner", &entitled)
+            .unwrap();
+        assert_eq!(kept, Acknowledgement::Kept);
+        let seen = registry.get(&job_id).unwrap().expect("still readable");
+        assert_eq!(seen.state, JobState::Finished);
+        assert_eq!(seen.outcome.unwrap().result.unwrap()["merged"], true);
+
+        // The same reader acknowledging again does not release it.
+        assert_eq!(
+            registry
+                .acknowledge_shared(&job_id, "owner", &entitled)
+                .unwrap(),
+            Acknowledgement::Kept
+        );
+        assert!(registry.get(&job_id).unwrap().is_some());
+
+        let released = registry
+            .acknowledge_shared(&job_id, "computer-1", &entitled)
+            .unwrap();
+        assert_eq!(released, Acknowledgement::Released);
+        assert!(registry.get(&job_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn the_other_reader_can_acknowledge_first_too() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = finished_job(&registry, "job:2");
+        let entitled = readers(&["owner", "computer-1"]);
+        assert_eq!(
+            registry
+                .acknowledge_shared(&job_id, "computer-1", &entitled)
+                .unwrap(),
+            Acknowledgement::Kept
+        );
+        assert!(registry.get(&job_id).unwrap().is_some());
+        // The computer's own entitlement ended once it acknowledged; the owner is the last.
+        assert_eq!(
+            registry
+                .acknowledge_shared(&job_id, "owner", &readers(&["owner"]))
+                .unwrap(),
+            Acknowledgement::Released
+        );
+        assert!(registry.get(&job_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn the_state_of_a_job_is_read_without_its_outcome_and_none_means_released() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let running = JobId::new("job:9001").unwrap();
+        registry.accept(running.clone(), "changes.merge").unwrap();
+        registry.mark_running(&running).unwrap();
+        assert_eq!(
+            registry.state_of(&running).unwrap(),
+            Some(JobState::Running)
+        );
+        let job_id = finished_job(&registry, "job:9002");
+        assert_eq!(
+            registry.state_of(&job_id).unwrap(),
+            Some(JobState::Finished)
+        );
+        // A kept result whose retention has passed counts as released before it is freed.
+        registry
+            .restore_hold_at(&job_id, &[], now_ms() - KEPT_RESULT_RETENTION_MS - 1)
+            .unwrap();
+        assert_eq!(registry.state_of(&job_id).unwrap(), None);
+        registry.release_expired(now_ms());
+        assert_eq!(registry.state_of(&job_id).unwrap(), None);
+        assert_eq!(
+            registry.state_of(&JobId::new("job:9003").unwrap()).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_job_with_one_entitled_reader_is_released_at_once() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = finished_job(&registry, "job:3");
+        assert_eq!(
+            registry
+                .acknowledge_shared(&job_id, "owner", &readers(&["owner"]))
+                .unwrap(),
+            Acknowledgement::Released
+        );
+        assert!(registry.get(&job_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_kept_result_is_freed_when_its_retention_passes() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = finished_job(&registry, "job:4");
+        let entitled = readers(&["owner", "computer-1"]);
+        let start = now_ms();
+        registry
+            .acknowledge_shared_at(&job_id, "owner", &entitled, start)
+            .unwrap();
+
+        registry.release_expired(start + KEPT_RESULT_RETENTION_MS - 1);
+        assert!(registry.get(&job_id).unwrap().is_some());
+
+        registry.release_expired(start + KEPT_RESULT_RETENTION_MS);
+        assert!(registry.get(&job_id).unwrap().is_none());
+        // A late acknowledgement from the other reader is harmless.
+        assert_eq!(
+            registry
+                .acknowledge_shared(&job_id, "computer-1", &entitled)
+                .unwrap(),
+            Acknowledgement::Released
+        );
+    }
+
+    #[test]
+    fn a_result_kept_before_a_restart_is_held_again_and_freed_when_its_retention_passes() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = finished_job(&registry, "job:8");
+        // The reopened registry knows nothing of the hold the earlier run gave the result.
+        assert_eq!(registry.retention_deadline_ms(&job_id), None);
+        let start = now_ms();
+        registry
+            .restore_hold_at(&job_id, &["computer-1".to_owned()], start)
+            .unwrap();
+        assert_eq!(
+            registry.retention_deadline_ms(&job_id),
+            Some(start + KEPT_RESULT_RETENTION_MS)
+        );
+        // A second restore keeps the deadline of the first.
+        registry
+            .restore_hold_at(&job_id, &[], start + 1000)
+            .unwrap();
+        assert_eq!(
+            registry.retention_deadline_ms(&job_id),
+            Some(start + KEPT_RESULT_RETENTION_MS)
+        );
+        registry.release_expired(start + KEPT_RESULT_RETENTION_MS);
+        assert!(registry.get(&job_id).unwrap().is_none());
+        // The owner's acknowledgement frees a restored hold once the computer had acknowledged.
+        let other = finished_job(&registry, "job:9");
+        registry
+            .restore_hold_at(&other, &["computer-1".to_owned()], start)
+            .unwrap();
+        assert_eq!(
+            registry
+                .acknowledge_shared(&other, "owner", &readers(&["owner", "computer-1"]))
+                .unwrap(),
+            Acknowledgement::Released
+        );
+    }
+
+    #[test]
+    fn only_a_finished_result_is_held_again() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let running = JobId::new("job:10").unwrap();
+        registry.accept(running.clone(), "changes.merge").unwrap();
+        registry.mark_running(&running).unwrap();
+        let unknown = JobId::new("job:11").unwrap();
+        for job in [&running, &unknown] {
+            registry.restore_hold_at(job, &[], now_ms()).unwrap();
+            assert_eq!(registry.retention_deadline_ms(job), None);
+        }
+    }
+
+    #[test]
+    fn a_plain_acknowledgement_still_frees_a_kept_result() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = finished_job(&registry, "job:6");
+        registry
+            .acknowledge_shared(&job_id, "owner", &readers(&["owner", "computer-1"]))
+            .unwrap();
+        registry.acknowledge(&job_id).unwrap();
+        assert!(registry.get(&job_id).unwrap().is_none());
+        assert!(registry.held_results.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_running_job_cannot_be_acknowledged_by_any_reader() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = JobId::new("job:7").unwrap();
+        registry.accept(job_id.clone(), "changes.merge").unwrap();
+        registry.mark_running(&job_id).unwrap();
+        assert!(registry
+            .acknowledge_shared(&job_id, "owner", &readers(&["owner", "computer-1"]))
+            .is_err());
     }
 
     #[test]

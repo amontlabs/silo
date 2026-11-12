@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import { secretConfiguration, type SecretDraft } from "./secret-configuration"
 
-const draft: SecretDraft = { name: "SERVICE_TOKEN", value: "fixture-token", computers: ["dev"], domains: "api.example.test", allowAnyDomain: false }
+const draft: SecretDraft = { kind: "generic", name: "SERVICE_TOKEN", value: "fixture-token", computers: ["dev"], domains: "api.example.test", allowAnyDomain: false, allowSharedHosting: false }
 
 describe("secret configuration", () => {
   it.each([
@@ -76,5 +76,44 @@ describe("secret configuration", () => {
 
   it("rejects computer selections that are no longer available", () => {
     expect(secretConfiguration(draft, [], ["personal"]).errors?.computers).toBe("Select an available computer.")
+  })
+
+  describe("GitHub tokens", () => {
+    const tokenDraft: SecretDraft = { kind: "github-token", name: "work", value: "ghp_synthetic", computers: [], domains: "", allowAnyDomain: false, allowSharedHosting: false }
+    const existing = { id: "token-1", name: "work", kind: "github-token" as const, computers: ["dev"], allowedDomains: [], state: "active" as const }
+
+    it("asks for a label and a token only, with no computers or hosts", () => {
+      expect(secretConfiguration(tokenDraft, [], []).request).toEqual({
+        kind: "github-token", name: "work", computers: [], allowedDomains: [], operation: "add", value: "ghp_synthetic",
+      })
+      expect(secretConfiguration({ ...tokenDraft, value: " ghp_synthetic " }, [], []).request?.value).toBe("ghp_synthetic")
+    })
+
+    it.each(["", "-work", "has space", "has.dot", "a".repeat(65)])("rejects the label %j", (name) => {
+      expect(secretConfiguration({ ...tokenDraft, name }, [], []).errors?.name).toBeDefined()
+    })
+
+    it("accepts hyphens in a label and refuses a name another secret uses", () => {
+      expect(secretConfiguration({ ...tokenDraft, name: "work-laptop_2" }, [], []).errors).toBeUndefined()
+      expect(secretConfiguration(tokenDraft, [existing], []).errors?.name).toBe("A secret with this name already exists.")
+    })
+
+    it("requires a token that looks like one", () => {
+      expect(secretConfiguration({ ...tokenDraft, value: "" }, [], []).errors?.value).toBe("Enter a token.")
+      expect(secretConfiguration({ ...tokenDraft, value: "not a token" }, [], []).errors?.value).toBeDefined()
+    })
+
+    it("keeps the label and the kind when replacing, and keeps the token when left blank", () => {
+      const replace = secretConfiguration({ ...tokenDraft, name: "ignored", value: "ghp_new" }, [existing], [], existing)
+      expect(replace.request).toEqual({ kind: "github-token", name: "work", computers: [], allowedDomains: [], operation: "edit", id: "token-1", value: "ghp_new" })
+      expect(secretConfiguration({ ...tokenDraft, value: "" }, [existing], [], existing).request).not.toHaveProperty("value")
+    })
+  })
+
+  it("sends the any-destination confirmation only for a wildcard secret that was confirmed", () => {
+    const wildcard = secretConfiguration({ ...draft, domains: "*", allowAnyDomain: true }, [], ["dev"])
+    expect(wildcard.request).toMatchObject({ allowedDomains: ["*"], allowAnyDestination: true })
+    expect(secretConfiguration({ ...draft, domains: "*", allowAnyDomain: false }, [], ["dev"]).errors?.allowAnyDomain).toBeDefined()
+    expect(secretConfiguration({ ...draft, allowAnyDomain: true }, [], ["dev"]).request).not.toHaveProperty("allowAnyDestination")
   })
 })

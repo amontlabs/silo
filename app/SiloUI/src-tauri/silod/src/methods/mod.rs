@@ -3,9 +3,12 @@
 mod ownership;
 
 pub mod access;
+pub mod approvals;
+pub mod audit;
 pub mod checkpoints;
 pub mod computers;
 pub mod display;
+pub(crate) mod gate;
 pub mod guest;
 pub mod guest_client;
 pub mod guest_remote;
@@ -18,7 +21,7 @@ pub mod services;
 #[cfg(test)]
 pub(crate) static MACOS_REGISTRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -44,6 +47,8 @@ pub struct HandlerContext {
     client_id: ClientId,
     /// Set when the request is another device's, run here by `remote::serve_owner`.
     owner_bridge: bool,
+    /// For a computer's call: that computer and the computers it made.
+    visible: Option<Arc<BTreeSet<String>>>,
 }
 
 impl HandlerContext {
@@ -54,7 +59,29 @@ impl HandlerContext {
             client,
             client_id,
             owner_bridge: false,
+            visible: None,
         }
+    }
+
+    /// The same request, limited to `visible` computers for a handler that cuts its own answer.
+    fn with_visible(&self, visible: Option<Arc<BTreeSet<String>>>) -> Self {
+        Self {
+            engine: self.engine.clone(),
+            client: self.client.clone(),
+            client_id: self.client_id.clone(),
+            owner_bridge: self.owner_bridge,
+            visible,
+        }
+    }
+
+    /// Who is calling.
+    pub(crate) fn caller(&self) -> &silo_engine::policy::Caller {
+        &self.client.caller
+    }
+
+    /// For a computer's call: that computer and the computers it made.
+    pub(crate) fn visible(&self) -> Option<&BTreeSet<String>> {
+        self.visible.as_deref()
     }
 
     /// A request another device's engine sent over Connections, served as a local one. Its
@@ -150,6 +177,7 @@ impl HandlerContext {
             return DispatchError {
                 code,
                 message: error.message,
+                details: None,
             };
         }
         let code = match error.code {
@@ -165,6 +193,7 @@ impl HandlerContext {
         DispatchError {
             code,
             message: error.message,
+            details: None,
         }
     }
 
@@ -186,7 +215,7 @@ impl HandlerContext {
                 }
             }
         };
-        DispatchError { code, message }
+        DispatchError { code, message, details: None }
     }
 }
 
@@ -230,6 +259,8 @@ pub fn serves(method: MethodName) -> bool {
         || checkpoints::owns(method)
         || guest::owns(method)
         || guest_client::owns(method)
+        || audit::owns(method)
+        || approvals::owns(method)
         || access::owns(method)
         || display::owns(method)
         || services::owns(method)
@@ -263,6 +294,7 @@ fn changes_computer(method: MethodName) -> bool {
             | MethodName::TerminalCommand
             | MethodName::EditorCommand
             | MethodName::DesktopAction
+            | MethodName::AgentsInstall
             | MethodName::DisplayViewerOpen
             | MethodName::DisplayShow
             | MethodName::MacosDisplayConnect
@@ -287,8 +319,30 @@ fn changed_computer(method: MethodName, params: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Runs the request, moving the generation of the computer it can change.
+/// Marks the work a request does on its computer while its handler runs. A promote is not
+/// marked: its job moves the generation itself once it holds its lanes, so the generation an
+/// approval pinned for the fork still matches when the job checks it.
+fn begin_work(
+    method: MethodName,
+    computer: Option<&str>,
+) -> Option<silo_engine::generation::Touch> {
+    (method != MethodName::ChangesPromote).then(|| silo_engine::generation::touch(computer))
+}
+
+/// Runs the request once the policy admits it (`gate`), moving the generation of the computer
+/// it can change.
 pub(crate) async fn dispatch(
+    context: &HandlerContext,
+    method: MethodName,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let admitted = gate::admit(context, method, params).await?;
+    let scoped = context.with_visible(admitted.visible());
+    let result = run(&scoped, method, admitted.params(params)).await;
+    gate::finish(context, method, &admitted, result)
+}
+
+async fn run(
     context: &HandlerContext,
     method: MethodName,
     params: &Value,
@@ -297,7 +351,7 @@ pub(crate) async fn dispatch(
         return route(context, method, params).await;
     }
     let computer = changed_computer(method, params);
-    let _touch = silo_engine::generation::touch(computer.as_deref());
+    let _touch = begin_work(method, computer.as_deref());
     let output = route(context, method, params).await?;
     if let Some(job) = output.value.get("jobId").and_then(Value::as_str) {
         silo_engine::generation::note_job(job, computer.as_deref());
@@ -329,6 +383,12 @@ async fn route(
     if let Some(result) = guest_client::handle(method, params, context).await {
         return result;
     }
+    if let Some(result) = audit::handle(method, params, context).await {
+        return result;
+    }
+    if let Some(answer) = approvals::handle(method, params, context) {
+        return answer.await;
+    }
     if let Some(result) = access::handle(method, params, context).await {
         return result;
     }
@@ -346,9 +406,33 @@ mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
     use super::{
-        access, changed_computer, changes_computer, checkpoints, computers, display, guest,
-        guest_client, serves, services,
+        access, approvals, audit, changed_computer, changes_computer, checkpoints, computers,
+        display, guest, guest_client, serves, services,
     };
+
+    #[test]
+    fn a_promote_approved_for_a_fork_passes_its_own_check_after_the_dispatcher_ran_it() {
+        use silo_engine::changes::promote::service::{promote_guard, promote_pin};
+        let fork = "dispatcher-pin-fork";
+        let params = serde_json::json!({"forkId": fork});
+        let guard = promote_guard(Some(promote_pin(fork)), fork.to_owned());
+        // The dispatcher wraps the handler that starts the job, then the job checks.
+        drop(super::begin_work(
+            MethodName::ChangesPromote,
+            changed_computer(MethodName::ChangesPromote, &params).as_deref(),
+        ));
+        assert_eq!(guard(), Ok(()));
+        // Anything else that happened to the fork in between is seen.
+        let guard = promote_guard(Some(promote_pin(fork)), fork.to_owned());
+        drop(super::begin_work(MethodName::GuestExec, Some(fork)));
+        assert!(guard().unwrap_err().contains("fork changed"));
+        // So is a change no computer is named for.
+        let guard = promote_guard(Some(promote_pin(fork)), fork.to_owned());
+        drop(super::begin_work(MethodName::ChangesKeep, None));
+        assert!(guard().is_err());
+        // A promote nobody pinned runs whatever happened.
+        assert_eq!(promote_guard(None, fork.to_owned())(), Ok(()));
+    }
 
     #[test]
     fn commands_and_file_writes_change_a_computer_but_ports_do_not() {
@@ -356,6 +440,8 @@ mod tests {
         assert!(changes_computer(MethodName::GuestExec));
         assert!(changes_computer(MethodName::GuestFilesWrite));
         assert!(changes_computer(MethodName::ComputersStart));
+        assert!(changes_computer(MethodName::AgentsInstall));
+        assert!(!changes_computer(MethodName::AgentsList));
         assert!(!changes_computer(MethodName::NetworkPublish));
         assert!(!changes_computer(MethodName::NetworkUnpublish));
         assert!(!changes_computer(MethodName::GuestFilesRead));
@@ -383,6 +469,8 @@ mod tests {
             "exports.state",
             "migration.state",
             "display.show",
+            "agents.list",
+            "agents.install",
             "settings.read",
             "engine.shutdown",
         ] {
@@ -429,6 +517,8 @@ mod tests {
             checkpoints::owns,
             guest::owns,
             guest_client::owns,
+            audit::owns,
+            approvals::owns,
             access::owns,
             display::owns,
             services::owns,

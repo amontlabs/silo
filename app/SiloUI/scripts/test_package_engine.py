@@ -18,6 +18,7 @@ spec.loader.exec_module(engine)
 
 COMMIT = 'ab' * 20
 VERSION = engine.engine_version()
+TOOLCHAIN = engine.toolchain_version()
 ROOT = f'silo-engine-{VERSION}'
 ARCHIVE = f'silo-engine-{VERSION}-macos-arm64.tar.gz'
 
@@ -32,7 +33,7 @@ class PackageEngineTests(unittest.TestCase):
         self.out = self.root / 'out'
 
     def package(self, silod=engine.SILOD, commit=COMMIT):
-        return engine.package(self.out, commit=commit, binary=self.binary, toolchain='1.94.0', silod=silod)
+        return engine.package(self.out, commit=commit, binary=self.binary, toolchain=TOOLCHAIN, silod=silod)
 
     def members(self, archive):
         with tarfile.open(archive) as tar:
@@ -66,7 +67,7 @@ class PackageEngineTests(unittest.TestCase):
         self.assertEqual(info['engineVersion'], VERSION)
         self.assertEqual(info['sourceCommit'], COMMIT)
         self.assertEqual(info['targets'], ['aarch64-apple-darwin'])
-        self.assertEqual(info['rustToolchain'], '1.94.0')
+        self.assertEqual(info['rustToolchain'], TOOLCHAIN)
         self.assertEqual(info['schemaSha256'], hashlib.sha256(schema).hexdigest())
         self.assertEqual(self.read(archive, 'api/silo-api.schema.json'), schema)
         manifest = json.loads(self.read(archive, 'macos/resources/engine-manifest.production.json'))
@@ -126,7 +127,7 @@ class PackageEngineTests(unittest.TestCase):
             engine.engine_version(self.copy_silod(version='0.1', engine_version='0.1'))
 
     def test_the_checked_in_engine_is_packageable(self):
-        self.assertEqual(engine.toolchain_version(), '1.94.0')
+        self.assertRegex(TOOLCHAIN, r'^\d+\.\d+\.\d+$')
         self.assertEqual(engine.engine_version(), VERSION)
 
     def test_the_embedded_plist_must_not_pin_a_signer(self):
@@ -146,7 +147,7 @@ class PackageEngineTests(unittest.TestCase):
             return self.binary
 
         engine.main(['--out-dir', str(self.out)], build=build, commit_of=lambda: COMMIT)
-        self.assertEqual(built, [('aarch64-apple-darwin', '1.94.0')])
+        self.assertEqual(built, [('aarch64-apple-darwin', TOOLCHAIN)])
         self.assertEqual(json.loads(self.read(self.out / ARCHIVE, 'release.json'))['sourceCommit'], COMMIT)
         shutil.rmtree(self.out)
         engine.main(['--out-dir', str(self.out), '--source-commit', 'cd' * 20], build=build,
@@ -166,9 +167,9 @@ class PackageEngineTests(unittest.TestCase):
             calls.append(command)
             return subprocess.CompletedProcess(command, 0, json.dumps({'target_directory': '/t'}))
 
-        binary = engine.cargo_build('aarch64-apple-darwin', '1.94.0', run)
+        binary = engine.cargo_build('aarch64-apple-darwin', TOOLCHAIN, run)
         self.assertEqual(binary, Path('/t/aarch64-apple-darwin/release/silod'))
-        self.assertEqual(calls[0], ['cargo', '+1.94.0', 'build', '--locked', '--release', '-p', 'silod',
+        self.assertEqual(calls[0], ['cargo', f'+{TOOLCHAIN}', 'build', '--locked', '--release', '-p', 'silod',
                                     '--target', 'aarch64-apple-darwin'])
 
 
@@ -240,10 +241,16 @@ class LinuxPackageTests(unittest.TestCase):
         (transfer / 'git-lfs-transfer').write_bytes(elf(machine, 'transfer'))
         (transfer / 'git-lfs-transfer').chmod(0o755)
         (transfer / 'manifest.json').write_text(json.dumps({'architecture': guest}))
+        silo = runtime / 'guest-silo'
+        silo.mkdir(parents=True, exist_ok=True)
+        (silo / 'silo').write_bytes(elf(machine, 'guest silo'))
+        (silo / 'silo').chmod(0o755)
+        (silo / 'manifest.json').write_text(json.dumps({'schemaVersion': 1, 'available': True, 'architecture': guest,
+                                                       'binarySha256': engine.sha256_of(silo / 'silo')}))
 
     def package(self, platform='linux-x64', channel='production', commit=COMMIT):
         return engine.package_linux(self.out, platform=platform, commit=commit, silod_binary=self.silod,
-                                    cli_binary=self.cli, runner_binary=self.runner, toolchain='1.94.0',
+                                    cli_binary=self.cli, runner_binary=self.runner, toolchain=TOOLCHAIN,
                                     channel=channel, tauri=self.tauri, runner_licenses=self.licenses)
 
     def members(self, archive):
@@ -280,6 +287,8 @@ class LinuxPackageTests(unittest.TestCase):
             'resources/git-support/lfs-transfer/LICENSE-MIT.txt': 0o644,
             'resources/git-support/lfs-transfer/licenses/Go-LICENSE': 0o644,
             'resources/git-support/lfs-transfer/git-lfs-transfer': 0o755,
+            'resources/guest-support/silo/manifest.json': 0o644,
+            'resources/guest-support/silo/silo': 0o755,
         })
         self.assertTrue(all(name == 'silo-engine' or name.startswith('silo-engine/') for name in members))
         for member in members.values():
@@ -288,6 +297,7 @@ class LinuxPackageTests(unittest.TestCase):
         self.assertEqual(self.read(archive, 'silo'), self.cli.read_bytes())
         self.assertEqual(self.read(archive, 'silo-runner'), self.runner.read_bytes())
         self.assertEqual(self.read(archive, 'msb'), (self.tauri / f'binaries/msb-{X64}').read_bytes())
+        self.assertEqual(self.read(archive, 'resources/guest-support/silo/silo'), (self.tauri / 'runtime/guest-silo/silo').read_bytes())
         self.assertEqual(checksum.read_text(), f'{hashlib.sha256(archive.read_bytes()).hexdigest()}  {LINUX_ARCHIVE}\n')
 
     def test_the_certificate_bundle_linux_git_needs_is_required(self):
@@ -310,6 +320,7 @@ class LinuxPackageTests(unittest.TestCase):
         self.assertIn('resource_dir.join("git-support/manifest.json")', dependencies)
         self.assertIn('resource_dir.join("microsandbox/manifest.json")', dependencies)
         self.assertIn('support.join("lfs-transfer/git-lfs-transfer")', (engine.TAURI / 'engine/src/host_push.rs').read_text())
+        self.assertIn('"guest-support/silo"', (engine.TAURI / 'engine/src/guest_components/artifact.rs').read_text())
         conf = json.loads((engine.TAURI / 'tauri.conf.json').read_text())
         self.assertEqual(sorted(Path(name).name for name in conf['bundle']['externalBin']), sorted(engine.LINUX_TOOLS))
 
@@ -373,6 +384,31 @@ class LinuxPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'symbolic link'):
             self.package()
 
+    def test_a_build_without_the_linux_program_of_silos_tools_is_not_packaged(self):
+        silo = self.tauri / 'runtime/guest-silo'
+        (silo / 'manifest.json').write_text(json.dumps({'schemaVersion': 1, 'available': False, 'architecture': 'amd64',
+                                                       'reason': 'Zig is not installed.'}))
+        (silo / 'silo').unlink()
+        with self.assertRaisesRegex(RuntimeError, "no Linux program for Silo's tools: Zig is not installed.*SILO_REQUIRE_GUEST_SILO"):
+            self.package()
+        self.assertFalse(self.out.exists() and any(self.out.iterdir()))
+
+    def test_a_program_that_is_not_the_manifests_or_not_for_the_architecture_is_refused(self):
+        silo = self.tauri / 'runtime/guest-silo'
+        (silo / 'silo').write_bytes(elf(62, 'another program'))
+        with self.assertRaisesRegex(RuntimeError, 'does not match the guest silo manifest'):
+            self.package()
+        self.stage(X64, 62, 'amd64')
+        manifest = json.loads((silo / 'manifest.json').read_text())
+        (silo / 'manifest.json').write_text(json.dumps(dict(manifest, architecture='arm64')))
+        with self.assertRaisesRegex(RuntimeError, "Linux program of Silo's tools is for arm64"):
+            self.package()
+        self.stage(X64, 62, 'amd64')
+        (silo / 'silo').write_bytes(elf(183, 'arm program'))
+        (silo / 'manifest.json').write_text(json.dumps(dict(manifest, binarySha256=engine.sha256_of(silo / 'silo'))))
+        with self.assertRaisesRegex(RuntimeError, 'resources/guest-support/silo/silo is not a linux-x64 executable'):
+            self.package()
+
     def test_a_missing_runtime_says_to_prepare_it(self):
         shutil.rmtree(self.tauri / 'runtime/microsandbox')
         with self.assertRaisesRegex(RuntimeError, 'runtime:prepare'):
@@ -382,7 +418,7 @@ class LinuxPackageTests(unittest.TestCase):
     def test_the_macos_archive_is_unchanged_by_linux_packaging(self):
         binary = self.root / 'binary'
         binary.write_bytes(b'fake arm64 silod')
-        archive, _ = engine.package(self.root / 'mac', commit=COMMIT, binary=binary, toolchain='1.94.0')
+        archive, _ = engine.package(self.root / 'mac', commit=COMMIT, binary=binary, toolchain=TOOLCHAIN)
         self.assertEqual(archive.name, ARCHIVE)
         self.assertNotIn('linux', json.dumps(json.loads(
             tarfile.open(archive).extractfile(f'{ROOT}/release.json').read())))
@@ -420,7 +456,7 @@ class LinuxPackageTests(unittest.TestCase):
         engine.main(['--out-dir', str(self.out), '--platform', 'linux-x64', '--channel', 'development'],
                     build=lambda *_: self.fail('the macOS build is not used'), build_linux=build_linux,
                     build_runner=build_runner, commit_of=lambda: COMMIT)
-        self.assertEqual(built, [(X64, '1.94.0', 'development')])
+        self.assertEqual(built, [(X64, TOOLCHAIN, 'development')])
         self.assertEqual(calls[0]['channel'], 'development')
         self.assertEqual(runners, [('linux-x64', VERSION)])
         self.assertFalse(build_dirs[0].exists(), 'the runner build directory is removed after packaging')
@@ -480,10 +516,10 @@ class LinuxPackageTests(unittest.TestCase):
 
             with self.subTest(channel=channel), unittest.mock.patch.dict(
                     engine.os.environ, {'SILO_CHANNEL_IDENTIFIER': 'org.silo.stale'}):
-                silod, cli = engine.cargo_build_linux(X64, '1.94.0', channel, run)
+                silod, cli = engine.cargo_build_linux(X64, TOOLCHAIN, channel, run)
                 self.assertEqual((silod, cli), (Path(f'/t/{X64}/release/silod'), Path(f'/t/{X64}/release/silo')))
                 command, options = calls[0]
-                self.assertEqual(command, ['cargo', '+1.94.0', 'build', '--locked', '--release', '-p', 'silod',
+                self.assertEqual(command, ['cargo', f'+{TOOLCHAIN}', 'build', '--locked', '--release', '-p', 'silod',
                                            '-p', 'silo-cli', '-p', 'silo-container-shim', '--target', X64])
                 self.assertEqual(options['env'].get('SILO_CHANNEL_IDENTIFIER'), expected)
 

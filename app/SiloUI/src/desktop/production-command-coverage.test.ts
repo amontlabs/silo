@@ -4,7 +4,8 @@ import type { BackupState } from "@/features/application/model/backup-source"
 import { remoteComputerTarget } from "@/features/application/model/connections"
 import { assertNativeBridgeMocksHandled, nativeBridgeMock, type NativeCommandHandlers } from "@/test/native-bridge-mock"
 import contracts from "@/test/contracts/review-requests.json"
-import { createProductionSource, keepReviewRequest, listComputerSteps, listReviewRequests, openReviewRequest, readComputerTree, showReviewRequest, throwAwayReviewRequest, type ProductionBridge } from "./production-source"
+import approvalContracts from "@/test/contracts/approvals.json"
+import { createProductionSource, decideApproval, keepReviewRequest, listApprovals, listAudit, readApprovalJob, readDeviceResources, watchApprovals, listComputerSteps, listReviewRequests, openReviewRequest, readComputerTree, showReviewRequest, throwAwayReviewRequest, type ProductionBridge } from "./production-source"
 
 afterEach(assertNativeBridgeMocksHandled)
 
@@ -422,5 +423,87 @@ describe("review request commands", () => {
     const list = await listReviewRequests({}, native)
     expect(list.requests).toHaveLength(1)
     expect(list.unreachable).toEqual([])
+  })
+})
+
+describe("approval commands", () => {
+  const fixtures = approvalContracts as Record<string, unknown>
+
+  it("lists, answers, reads the audit log, the job and the device's resources through their commands", async () => {
+    const native = bridge({
+      list_approvals: () => fixtures.list,
+      decide_approval: () => fixtures.decided,
+      list_audit: () => fixtures.audit,
+      read_device_resources: () => fixtures.resources,
+      read_approval_job: () => fixtures.job,
+    })
+    const list = await listApprovals({ state: "pending" }, native)
+    expect(list.approvals.map(({ id, kind, state }) => [id, kind, state])).toEqual([["ap-merge", "merge", "pending"], ["ap-port", "port", "pending"], ["ap-done", "github", "allowed"], ["ap-failed", "resources", "allowed"]])
+    expect(list.approvals[0]).toMatchObject({ note: "The login page redirected in a loop.", reviewRequestId: "req-1", summary: "Merge login-fix into main" })
+    expect(list.approvals[3]?.outcome?.error).toMatch(/3.1 GiB/)
+    const decided = await decideApproval({ id: "ap-port", decision: "deny", note: "no" }, native)
+    expect(decided).toMatchObject({ state: "allowed", outcome: { jobId: "job:7" } })
+    const audit = await listAudit({ computerId: "main-1", callerKind: "computer", beforeId: 50, limit: 25 }, native)
+    expect(audit.nextBeforeId).toBe(40)
+    expect(audit.entries[1]).toMatchObject({ count: 5, lastAt: "2026-11-11T08:10:00Z", outcome: "refused", errorCode: "permission_denied" })
+    expect(audit.entries[0]).toMatchObject({ approvalId: "ap-merge", outcome: "asked" })
+    expect((await readDeviceResources("dev-2", native)).computers).toEqual([{ id: "main-1", name: "main", running: true, cpus: 4, memoryGib: 4, diskGib: 42, workspaceStorageGib: 30, runtimeStorageGib: 12 }])
+    expect(await readApprovalJob("job:7", native)).toMatchObject({ state: "finished", status: "refused" })
+    expect(native.invoke.mock.calls).toEqual([
+      ["list_approvals", { state: "pending" }],
+      ["decide_approval", { id: "ap-port", decision: "deny", note: "no" }],
+      ["list_audit", { computerId: "main-1", callerKind: "computer", beforeId: 50, limit: 25 }],
+      ["read_device_resources", { deviceId: "dev-2" }],
+      ["read_approval_job", { jobId: "job:7" }],
+    ])
+  })
+
+  it("reads what a newer engine adds as the safest known value and drops rows it cannot read", async () => {
+    const native = bridge({
+      list_approvals: () => ({ approvals: [
+        { id: "ap-x", kind: "from-the-future", computerId: "c", computerName: "dev", summary: "Do a new thing", state: "waiting-for-tea", createdAt: "2026-11-11T09:00:00Z" },
+        { nonsense: 1 },
+      ] }),
+      list_audit: () => ({ entries: [{ id: 1, at: "2026-11-11T09:00:00Z", callerKind: "robot", method: "x.y", outcome: "maybe" }, { broken: true }] }),
+    })
+    const list = await listApprovals({}, native)
+    // A state it does not know is never offered for an answer.
+    expect(list.approvals).toHaveLength(1)
+    expect(list.approvals[0]).toMatchObject({ kind: "from-the-future", state: "cancelled" })
+    const audit = await listAudit({}, native)
+    expect(audit.entries).toHaveLength(1)
+    expect(audit.entries[0]).toMatchObject({ callerKind: "computer", outcome: "error", count: 1 })
+  })
+
+  it("keeps a merge's choices when keeping a review request", async () => {
+    const native = bridge({ keep_review_request: () => (contracts as Record<string, unknown>).choicesNeeded })
+    const result = await keepReviewRequest({ requestId: "req-1", choices: { "repo:/root/app": "branch" } }, native)
+    expect(native.invoke).toHaveBeenCalledWith("keep_review_request", { requestId: "req-1", choices: { "repo:/root/app": "branch" } })
+    expect(result.refusal?.conflicts.map(({ id, allowed }) => [id, allowed])).toEqual([["file:/etc/app.conf", ["fork", "main"]], ["repo:/root/app", ["branch", "main"]]])
+    expect(result.request.approvalId).toBe("ap-merge")
+  })
+
+  it("listens for approval changes and stops when told", async () => {
+    const stop = vi.fn()
+    let emit!: () => void
+    const native: ProductionBridge = { invoke: vi.fn(), listen: vi.fn(async (_event, handler) => { emit = () => handler(); return stop }) }
+    const changed = vi.fn()
+    const dispose = watchApprovals(changed, native)
+    await Promise.resolve()
+    expect(native.listen).toHaveBeenCalledWith("silo://approvals-changed", expect.any(Function))
+    emit()
+    expect(changed).toHaveBeenCalledOnce()
+    dispose()
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it("stops listening even when told before the listener is ready", async () => {
+    const stop = vi.fn()
+    let ready!: (stop: () => void) => void
+    const native: ProductionBridge = { invoke: vi.fn(), listen: vi.fn(() => new Promise<() => void>(resolve => { ready = resolve })) }
+    watchApprovals(() => {}, native)()
+    ready(stop)
+    await Promise.resolve()
+    expect(stop).toHaveBeenCalledOnce()
   })
 })

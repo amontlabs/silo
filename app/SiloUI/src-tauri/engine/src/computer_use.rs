@@ -635,6 +635,13 @@ install -m 0644 -o root -g root \"$cu_stage/pinned.json\" /var/lib/silo-computer
     )
 }
 
+/// The guest command that registers the computer-use server with agents installed since the
+/// last apply. It does nothing in a computer that has no helper, and a failure never matters:
+/// the helper tries again at the next boot and login.
+pub(crate) fn register_installed_agents_command() -> String {
+    format!("if [ -x {GUEST_HELPER} ]; then {GUEST_HELPER} reconcile >/dev/null 2>&1 || true; fi")
+}
+
 /// The guest command that reads computer-use status (empty object when no helper yet).
 pub(crate) const STATUS_COMMAND: &str =
     "if [ -x /usr/local/libexec/silo-computer-use ]; then /usr/local/libexec/silo-computer-use status; else printf '%s\\n' '{}'; fi";

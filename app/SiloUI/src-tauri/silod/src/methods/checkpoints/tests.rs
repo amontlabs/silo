@@ -131,8 +131,9 @@ fn fixture_with(converted_backup: bool) -> Fixture {
         silod.clone(),
         RequestContext {
             client_id: "test-client".into(),
-            protocol: 7,
+            protocol: 8,
             client: None,
+            caller: silo_engine::policy::Caller::owner("test"),
         },
     );
     Fixture {
@@ -561,8 +562,8 @@ async fn requests_keep_refuses_what_the_engine_cannot_keep() {
         json!({"requestId": folder["id"]}),
     )
     .await
-    .expect_err("a folder fork is kept with silo fold");
-    assert!(error.message.contains("silo fold"), "{}", error.message);
+    .expect_err("a folder fork is merged with silo merge");
+    assert!(error.message.contains("silo merge"), "{}", error.message);
     let undigested = call(
         &fixture,
         MethodName::ChangesRequest,
@@ -1142,6 +1143,86 @@ async fn exports_create_resolves_a_macos_computer_and_hands_it_to_the_archive_wr
 }
 
 #[tokio::test]
+async fn the_logins_check_says_whether_the_export_leaves_them_out() {
+    let fixture = fixture();
+    let check = |include: Option<bool>| {
+        let mut params = json!({"computerId": LINUX_ID});
+        if let Some(include) = include {
+            params["includeLogins"] = json!(include);
+        }
+        params
+    };
+    let left_out = job_id(
+        call(&fixture, MethodName::ExportsCheck, check(None))
+            .await
+            .unwrap(),
+    );
+    let found = finished(&fixture, &left_out).await.outcome.unwrap();
+    assert_eq!(found.result.unwrap()["leavesOut"], json!(true));
+    let included = job_id(
+        call(&fixture, MethodName::ExportsCheck, check(Some(true)))
+            .await
+            .unwrap(),
+    );
+    let found = finished(&fixture, &included).await.outcome.unwrap();
+    assert!(found.result.unwrap().get("leavesOut").is_none());
+    // A macOS computer's logins stay in its file, whatever the choice.
+    let macos = job_id(
+        call(
+            &fixture,
+            MethodName::ExportsCheck,
+            json!({"computerId": fixture.macos_id}),
+        )
+        .await
+        .unwrap(),
+    );
+    let found = finished(&fixture, &macos).await.outcome.unwrap();
+    assert!(found
+        .result
+        .map_or(true, |result| result.get("leavesOut").is_none()));
+    let refused = call(
+        &fixture,
+        MethodName::ExportsCheck,
+        json!({"computerId": LINUX_ID, "includeLogins": "yes"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(refused.message.contains("Invalid params"), "{}", refused.message);
+}
+
+#[tokio::test]
+async fn exports_create_takes_the_choice_to_include_logins_as_a_boolean() {
+    let fixture = fixture();
+    let folder = fixture.directory.path().join("exports");
+    std::fs::create_dir_all(&folder).unwrap();
+    call(
+        &fixture,
+        MethodName::ExportsDestinationSet,
+        json!({"path": folder}),
+    )
+    .await
+    .unwrap();
+    let refused = call(
+        &fixture,
+        MethodName::ExportsCreate,
+        json!({"destination": folder, "computerIds": [fixture.macos_id], "includeLogins": "yes"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(refused.message.contains("Invalid params"), "{}", refused.message);
+    let started = call(
+        &fixture,
+        MethodName::ExportsCreate,
+        json!({"destination": folder, "computerIds": [fixture.macos_id], "includeLogins": true}),
+    )
+    .await
+    .unwrap();
+    let id = job_id(started);
+    assert!(id.as_str().starts_with("exports:"));
+    let _ = finished(&fixture, &id).await;
+}
+
+#[tokio::test]
 async fn exports_import_validates_its_inputs_before_it_starts_a_job() {
     let fixture = fixture();
     let relative = call(
@@ -1405,6 +1486,290 @@ async fn a_recipe_build_reads_the_computers_without_an_event_client() {
     // event client session.
     if let Err(message) = read {
         assert!(!message.contains("event client"), "{message}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recipes_are_saved_read_listed_and_removed_by_the_engine() {
+    let fixture = fixture();
+    let recipe = json!({
+        "spec": {"os": "linux", "packages": {"apt": ["nginx"]},
+                 "services": [{"name": "web", "run": "python3 -m http.server"}]},
+        "quiet": ["web", "poller"], "scrub": ["/root/.env"],
+        "keep": {"restart": ["web"], "migrate": [], "after": ["make check"]},
+        "test": "make test", "files": ["/etc/app.conf"]
+    });
+    let saved = call(
+        &fixture,
+        MethodName::RecipesSave,
+        json!({"name": "web", "recipe": recipe}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved["name"], "web");
+    assert_eq!(saved["builtIn"], false);
+    assert_eq!(saved["recipe"], recipe);
+    assert!(saved["warnings"][0].as_str().unwrap().contains("service web"));
+
+    let got = call(&fixture, MethodName::RecipesGet, json!({"name": "web"}))
+        .await
+        .unwrap();
+    assert_eq!(got["recipe"], recipe);
+    assert_eq!(got["hash"], saved["hash"]);
+
+    let listed = call(&fixture, MethodName::RecipesList, json!({}))
+        .await
+        .unwrap();
+    let names: Vec<&str> = listed["saved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["linux-dev", "macos-xcode", "web"]);
+    assert_eq!(listed["saved"][0]["builtIn"], true);
+
+    // A recipe that ships with Silo can be read, and saved over until that copy is removed.
+    let shipped = call(&fixture, MethodName::RecipesGet, json!({"name": "linux-dev"}))
+        .await
+        .unwrap();
+    assert_eq!(shipped["builtIn"], true);
+    assert_eq!(shipped["recipe"]["spec"]["packages"]["apt"][0], "build-essential");
+
+    call(&fixture, MethodName::RecipesRemove, json!({"name": "web"}))
+        .await
+        .unwrap();
+    let gone = call(&fixture, MethodName::RecipesGet, json!({"name": "web"}))
+        .await
+        .unwrap_err();
+    assert!(gone.message.contains("no recipe named web"), "{}", gone.message);
+    let nothing = call(&fixture, MethodName::RecipesRemove, json!({"name": "linux-dev"}))
+        .await
+        .unwrap_err();
+    assert!(nothing.message.contains("ships with Silo"), "{}", nothing.message);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bad_recipe_is_refused_before_it_is_stored() {
+    let fixture = fixture();
+    for recipe in [
+        json!({"spec": {"os": "linux", "packages": {"brew": ["jq"]}}}),
+        json!({"spec": {"os": "linux"}, "scrub": ["relative"]}),
+        json!({"spec": {"os": "linux", "packages": {"apt": ["--evil"]}}}),
+    ] {
+        let refused = call(
+            &fixture,
+            MethodName::RecipesSave,
+            json!({"name": "bad", "recipe": recipe}),
+        )
+        .await;
+        assert!(refused.is_err(), "{recipe}");
+    }
+    let name = call(
+        &fixture,
+        MethodName::RecipesSave,
+        json!({"name": "Not A Name", "recipe": {"spec": {"os": "linux"}}}),
+    )
+    .await;
+    assert!(name.is_err());
+    let listed = call(&fixture, MethodName::RecipesList, json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed["saved"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computers_recipe_is_read_from_its_record_and_is_absent_when_it_has_none() {
+    let fixture = fixture();
+    let none = call(
+        &fixture,
+        MethodName::ComputersRecipe,
+        json!({"computerId": LINUX_ID}),
+    )
+    .await
+    .unwrap();
+    assert!(none.get("recipe").is_none() || none["recipe"].is_null());
+}
+
+/// The call as the agent inside computer `id` makes it.
+async fn call_as_computer(
+    fixture: &Fixture,
+    id: &str,
+    method: MethodName,
+    params: Value,
+) -> Result<Value, DispatchError> {
+    let context = HandlerContext::new(
+        fixture.silod.clone(),
+        RequestContext {
+            client_id: "computer-client".into(),
+            protocol: 8,
+            client: None,
+            caller: silo_engine::policy::Caller::Computer { id: id.to_owned() },
+        },
+    );
+    handle(method, &params, &context)
+        .await
+        .expect("the domain owns the method")
+        .map(|output| output.value)
+}
+
+/// Writes the record of the recipe `name` for computer `id`, as the engine keeps them.
+fn build_from(fixture: &Fixture, id: &str, name: &str, recipe: &Value) {
+    let path = fixture.directory.path().join("data").join("recipe-records.json");
+    std::fs::write(
+        path,
+        json!({"version": 1, "computers": {id: {
+            "name": name, "hash": "h", "builtAt": "2026-11-11T00:00:00Z", "recipe": recipe
+        }}})
+        .to_string(),
+    )
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_reads_only_the_recipe_it_was_built_from() {
+    let fixture = fixture();
+    let secret = json!({"spec": {"os": "linux", "setup": ["export TOKEN=hunter2"]}});
+    let mine = json!({"spec": {"os": "linux", "packages": {"apt": ["nginx"]}}});
+    for (name, recipe) in [("secret", &secret), ("mine", &mine)] {
+        call(
+            &fixture,
+            MethodName::RecipesSave,
+            json!({"name": name, "recipe": recipe}),
+        )
+        .await
+        .unwrap();
+    }
+    build_from(&fixture, LINUX_ID, "mine", &mine);
+
+    let own = call_as_computer(
+        &fixture,
+        LINUX_ID,
+        MethodName::RecipesGet,
+        json!({"name": "mine"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(own["recipe"]["spec"], mine["spec"]);
+    for other in ["secret", "linux-dev"] {
+        let refused = call_as_computer(
+            &fixture,
+            LINUX_ID,
+            MethodName::RecipesGet,
+            json!({"name": other}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::PermissionDenied, "{other}");
+        assert!(!refused.message.contains("hunter2"), "{}", refused.message);
+    }
+    // A computer built from no recipe reads none.
+    let stranger = call_as_computer(
+        &fixture,
+        "nobody",
+        MethodName::RecipesGet,
+        json!({"name": "mine"}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(stranger.code, ErrorCode::PermissionDenied);
+    // The owner reads every recipe.
+    let all = call(&fixture, MethodName::RecipesGet, json!({"name": "secret"}))
+        .await
+        .unwrap();
+    assert_eq!(all["recipe"]["spec"]["setup"], secret["spec"]["setup"]);
+}
+
+const SECRET_RECIPE: &str = r#"{"spec": {"os": "linux", "packages": {"apt": ["nginx"]},
+    "setup": ["export TOKEN=hunter2"],
+    "services": [{"name": "web", "run": "web --token hunter2"}]},
+    "keep": {"restart": ["web"], "migrate": ["migrate --token hunter2"], "after": ["notify hunter2"]},
+    "test": "make test", "files": ["/etc/app.conf"]}"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_reads_its_recipe_without_the_command_lines() {
+    let fixture = fixture();
+    let recipe: Value = serde_json::from_str(SECRET_RECIPE).unwrap();
+    call(
+        &fixture,
+        MethodName::RecipesSave,
+        json!({"name": "mine", "recipe": recipe}),
+    )
+    .await
+    .unwrap();
+    build_from(&fixture, LINUX_ID, "mine", &recipe);
+
+    let shown = call_as_computer(
+        &fixture,
+        LINUX_ID,
+        MethodName::RecipesGet,
+        json!({"name": "mine"}),
+    )
+    .await
+    .unwrap();
+    let recorded = call_as_computer(
+        &fixture,
+        LINUX_ID,
+        MethodName::ComputersRecipe,
+        json!({"computerId": LINUX_ID}),
+    )
+    .await
+    .unwrap();
+    for definition in [&shown["recipe"], &recorded["recipe"]["recipe"]] {
+        assert!(!definition.to_string().contains("hunter2"), "{definition}");
+        assert_eq!(definition["commandsHidden"], true);
+        assert!(definition["spec"].get("setup").is_none());
+        assert_eq!(definition["spec"]["packages"]["apt"], json!(["nginx"]));
+        assert_eq!(definition["spec"]["services"][0]["name"], "web");
+        assert_eq!(definition["keep"]["restart"], json!(["web"]));
+        assert_eq!(definition["test"], "make test");
+        assert_eq!(definition["files"], json!(["/etc/app.conf"]));
+    }
+
+    // The owner still reads everything.
+    let owner = call(&fixture, MethodName::RecipesGet, json!({"name": "mine"}))
+        .await
+        .unwrap();
+    assert_eq!(owner["recipe"], recipe);
+    let owner = call(
+        &fixture,
+        MethodName::ComputersRecipe,
+        json!({"computerId": LINUX_ID}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(owner["recipe"]["recipe"], recipe);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_lists_recipe_names_without_their_contents() {
+    let fixture = fixture();
+    call(
+        &fixture,
+        MethodName::RecipesSave,
+        json!({"name": "secret", "recipe": {"spec": {"os": "linux", "setup": ["export TOKEN=hunter2"]}}}),
+    )
+    .await
+    .unwrap();
+    let listed = call_as_computer(&fixture, LINUX_ID, MethodName::RecipesList, json!({}))
+        .await
+        .unwrap();
+    let rows = listed["saved"].as_array().unwrap();
+    let names: Vec<&str> = rows
+        .iter()
+        .map(|row| row["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["linux-dev", "macos-xcode", "secret"]);
+    assert!(!listed.to_string().contains("hunter2"));
+    for row in rows {
+        let mut keys: Vec<&str> = row
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["built", "builtIn", "hash", "name", "os"], "{row}");
     }
 }
 

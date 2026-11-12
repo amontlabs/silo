@@ -1,0 +1,5 @@
+---
+"silo-ui": minor
+---
+
+You can now choose how much of the network a computer can reach. On a computer's page, the new Network section offers Open (any public address), Allowlist (only the hosts you list, plus presets such as npm or Python packages) and Closed (nothing out). It lists what Silo adds on its own, such as GitHub's hosts and the hosts of a secret, shows notes about secrets that cannot be used as network rules, and offers to accept a preset that gained hosts in a newer Silo. A change to a running computer says it applies when the computer restarts and offers a Restart button. The Network page shows each computer's mode, and the new-computer form can set one. A new "Silo's tools" row turns on or off whether the agent inside a computer can use the `silo` command and its MCP server, and says when a restart is needed or which part could not be set up. Settings, General has a "Keep free for this device" section for the memory and disk an agent inside a computer cannot take when starting or creating computers, with the values that apply now and the device's state.

@@ -1,15 +1,17 @@
 # Recipes and `silo up`
 
 A recipe is a text spec for a clean computer. Silo builds it once into a hidden computer
-with a checkpoint, then forks from that checkpoint, so a fork from a recipe starts from a
-known state without repeating the install. Recipes are text and can be committed; the
-built computer stays on your Mac.
+with a checkpoint, then forks from that checkpoint, so a computer made from a recipe starts from
+a known state without repeating the install. The engine on a device stores the recipes by name;
+there are no project files. The built computer stays on the device.
 
-## Files
+## Storing a recipe
 
-`.silo/recipe.yaml` is the project's recipe (it also holds the fork and keep settings).
-Named recipes live in `.silo/recipes/<name>.yaml`; a project file with the name of a
-built-in recipe replaces it. Unknown keys are errors that name the file and line.
+`silo recipe add <file> [--name <name>]` reads a YAML file and gives it to the engine, which
+stores it under the name (the file's name without its extension unless `--name` says otherwise;
+lowercase letters, digits, `-` and `_`). Adding a name that exists replaces it; computers already
+built from the old text keep it (see [What a computer remembers](#what-a-computer-remembers)).
+Unknown keys are errors that name the line.
 
 ```yaml
 os: linux              # linux (default) or macos
@@ -29,48 +31,101 @@ services:              # started at boot
   web: python3 -m http.server 8080
 ports: [8080]          # published (as websites) on main by `silo up` and on each recipe fork
 desktop: false         # optional; Linux only. No desktop in this computer or its forks (default: true)
-quiet: [poller]        # fork rules (see SiloUI-CLI.md); not part of the build
-scrub: [/root/.env]
-keep:
-  after: [make test]
-test: make test        # run in a fork by auto_keep rules with tests: pass
-files: [/etc/app.conf] # settings files kept into the computer (silo fold appends them)
+quiet: [poller]        # stopped in a fork, so it does not act twice (see below)
+scrub: [/root/.env]    # removed from a fork
+keep:                  # run when changes are merged into a computer built from this recipe
+  migrate: [make migrate]   # run after the files are in place; lets database changes through
+  restart: [web]       # services restarted after that
+  after: [make test]   # run last
+test: make test        # how to test the project: a note for people and agents, never run by Silo
+files: [/etc/app.conf] # settings files kept into the computer; a merge appends to this list
 ```
 
-Package names are single words (a version suffix such as `name@1.2` or `name==1.0` is
-fine); they are passed to the package manager as arguments, never as shell text. `setup`
-commands are shell text. Services start at boot through an XDG autostart entry on Linux
+`silo recipe list` shows the stored recipes and which are built. `silo recipe show <name>` prints
+one with its hash and any warnings. `silo recipe remove <name>` forgets it and drops its build
+(removing a saved recipe that replaced a shipped one brings the shipped one back). Storing, removing and building belong to the owner. A
+computer's agent can list the recipes (names, system, a one-way hash and whether each is built) and
+show the one its computer was built from; asking to show another is refused. It cannot change any.
+A computer that forks a recipe's hidden build gets a record of that recipe, so it can read that
+one through `computers.recipe`.
+
+**A computer never sees a recipe's command lines.** In what `recipes.get` and `computers.recipe`
+answer to a computer, the `setup` list, each service's `run`, and the `migrate` and `after`
+steps of `keep` are left out and the recipe says `"commandsHidden": true` (`silo recipe show`
+prints a line saying so). Packages, service names, `restart`, `quiet`, `scrub`, `files`, `test`
+and the resources stay visible. The engine runs the hidden commands itself (at build, at boot
+and at merge), so nothing needs them in the agent's hands. The owner sees everything.
+
+Anything a setup command writes to disk is on every computer built from the recipe, and so is
+readable by its agent. A token in a setup line is exposed both ways. Keep tokens in
+[secrets](SiloUI-SECRETS.md), never in setup, service or hook lines, and never in `test`, which
+a computer can read.
+
+Package names are single words (a version suffix such as `name@1.2` or `name==1.0` is fine);
+they are passed to the package manager as arguments, never as shell text. `setup` commands are
+shell text. Services start at boot through an XDG autostart entry on Linux
 (`/etc/xdg/autostart/<name>.desktop`) and a LaunchAgent labelled `<name>` on macOS. Each runs a
 launcher file named `<name>`; for a plain command (a program and arguments, no shell syntax)
-the launcher `exec`s it, so the process runs under its own name. A `quiet:` entry that names
-the service stops its entry or label and also the name the command runs under: the script after
-an interpreter, by its full file name, when it names a file with an extension (`python3
-/opt/app/poller.py` is `poller.py`; `node server` and `python3 -m app` name none), else the
-program (`openclaw gateway` is `openclaw`). A launcher (`env`, `sudo`, `nohup`, `nice`, `exec`,
-`timeout`, `java`, `npm`, `npx`, `yarn`, `pnpm`, `uv`, `docker`, `make`, `bun`, `deno`, `bash`,
-`sh`) names none either. When no name can be derived, `silo fork` warns: add the program or
-script to `quiet:` yourself. The fork's `silo status` lists both names.
+the launcher `exec`s it, so the process runs under its own name.
+
+A `quiet:` entry that names the service stops its entry or label and also the name the command
+runs under: the script after an interpreter, by its full file name, when it names a file with an
+extension (`python3 /opt/app/poller.py` is `poller.py`; `node server` and `python3 -m app` name
+none), else the program (`openclaw gateway` is `openclaw`). A launcher (`env`, `sudo`, `nohup`,
+`nice`, `exec`, `timeout`, `java`, `npm`, `npx`, `yarn`, `pnpm`, `uv`, `docker`, `make`, `bun`,
+`deno`, `bash`, `sh`) names none either. When no name can be derived, `silo recipe show` warns
+and a fork says so: add the program or script to `quiet:` yourself. The fork's `silo status`
+lists both names.
 
 On macOS, a recipe that needs Homebrew (brew packages, or pip, pipx, npm or cargo when their
-tool is missing) installs it first as the account with the official non-interactive
-installer.
+tool is missing) installs it first as the account with the official non-interactive installer.
 
 Built-in recipes, minimal on purpose:
 
 | Name | What it is |
 | --- | --- |
 | `linux-dev` | Linux with `build-essential`, `jq` and `ripgrep` |
-| `openclaw`, `hermes` | Linux with the agent installed and its gateway started as a service; `quiet:` and `scrub:` set for a fork ([resident agents](SiloUI-CLI.md#resident-agents)) |
 | `macos-xcode` | macOS that must already have Xcode: the build runs `xcode-select -p` and `xcodebuild -version`, and fails if they do not |
+
+## What a computer remembers
+
+A computer made from a recipe records which one: its name, its hash and its full text as it was
+when the computer was built. A later `recipe add` of the same name changes nothing about it.
+`computers.recipe` reads the record (a computer may read its own and its tree's). A fork has its
+source's record, so every computer in a tree knows the recipe it descends from. A computer that
+was imported or not made from a recipe has none.
+
+The engine uses the record in two places:
+
+- **At fork:** the recipe's `quiet:` and `scrub:` apply to the new computer. A fork made from
+  a recipe's build and a fork of a computer made from it both get them.
+- **At merge:** the target's `keep:` hooks run, in the order `migrate`, `restart`, `after`, after
+  the changes are applied (see [the merge](SiloUI-CHANGES.md)). A database change is carried
+  only when the target's recipe has a `migrate` step and the merge brings changed migration
+  files, or the merge says `--data-ok`.
+
+After a merge brings packages or settings files into a computer, the engine appends them to
+that computer's recipe: packages under their manager (`apt`, `brew`, `pip`, `pipx`, `npm`,
+`cargo`; a package the recipe's system cannot install is left out) and files under `files:`. It
+always changes the computer's record. It changes the stored recipe of the same name only when the
+owner saved that recipe and the owner ran the merge or approved it (an approved call runs as the
+owner, and the approval says so): a computer's agent that merges into a computer it made changes
+that computer's record alone, so it cannot add packages that the owner's next rebuild installs
+from the saved recipe. A recipe that ships with Silo is never edited. A merge into a computer
+built from a recipe runs that recipe's `keep:` hooks; hooks the caller supplies are refused, and
+the merge summary shows the recipe's. The merge result lists what was added, so that
+rebuilding from the recipe makes the machine the merged computer now is. Undoing the merge takes
+those entries back out of the record and out of the stored recipe; entries that were already
+there before the merge stay.
 
 ## Build and cache
 
-`silo recipe build <name>` (or the first `silo fork --recipe <name>` or `silo up`) asks the
-engine (`recipes.build`) to create a computer named `silo-build-<name>-<8 hex>`, run the packages,
-the setup commands and the services, check that each package manager lists its packages and
-each service entry exists, save a checkpoint, and stop it. A failed step drops the builder
-computer and leaves no cache entry. Builds of one recipe run one at a time in the engine (a
-second waits and then finds the first build in the cache), each with its own builder name. A
+`silo recipe build <name>` (or the first `silo fork <name> --recipe <recipe>` or `silo up`) asks
+the engine (`recipes.build`) to create a computer named `silo-build-<name>-<8 hex>`, run the
+packages, the setup commands and the services, check that each package manager lists its
+packages and each service entry exists, save a checkpoint, and stop it. A failed step drops the
+builder computer and leaves no cache entry. Builds of one recipe run one at a time in the engine
+(a second waits and then finds the first build in the cache), each with its own builder name. A
 rebuild keeps the previous builder and cache entry until the new build succeeds, and a failed
 rebuild keeps them; builders an interrupted build left behind are dropped by the next build
 of the same recipe.
@@ -86,21 +141,23 @@ needs a free slot.
 
 | Command | What it does |
 | --- | --- |
-| `silo recipe ls` | built-in and project recipes, and which are built |
+| `silo recipe list` | stored recipes, and which are built |
 | `silo recipe build <name> [--force]` | build now |
-| `silo recipe rm <name>` | remove the build and its builder computer |
-| `silo fork <name> --recipe <r>` | fork named `<name>` from the cached build of `<r>`; the recipe's `quiet:` and `scrub:` apply, and `recipes:` in `silo.yaml` limits which `<r>` are allowed |
+| `silo recipe remove <name>` | forget the recipe and remove its build and builder computer |
+| `silo fork <new-name> --recipe <name>` | make a computer named `<new-name>` from the cached build of the recipe, building it first when needed; it starts unless `--no-start` |
 
-The engine methods are `recipes.build` (a job), `recipes.list` and `recipes.remove`; the
-MCP tools `recipe_list`, `up` and `fork` (with `recipe`) use the same calls.
+The engine methods are `recipes.save`, `.get`, `.list`, `.remove`, `.build` (a job) and
+`computers.recipe`. The MCP tools `recipe_list`, `create` and `fork` (with `recipe`) use the same
+calls. Inside a computer, any computer may fork a recipe's hidden build (the one place a fork's
+source is outside its tree); the new computer gets nothing beyond what the caller has.
 
 ## `silo up`
 
-`silo up [--recipe <r>]` checks that the engine answers, makes `main` from the recipe
+`silo up [--recipe <name>]` checks that the engine answers, makes `main` from the recipe
 (default `linux-dev`) when it does not exist, starts it if it is stopped, publishes the
-recipe's ports on it and, with `ssh`, makes `ssh main.silo` work. It saves no checkpoint. A
-warm checkpoint that an earlier version saved is removed by the next `up` (one that a fork still
-depends on stays until a later `up`).
+recipe's ports on it and, with `ssh`, makes `ssh main.silo` work. It saves no checkpoint. It
+does nothing to a `main` that exists: to change what `main` is built from, merge into it or
+[replace it](SiloUI-CLI.md#merge-and-replace-main).
 
 A fork starts from the computer as it is when the fork is made. A fork with no `--checkpoint`
 takes a "Fork point" of the source first: on Linux its disks only, flushed from the running
@@ -110,7 +167,7 @@ all N forks start from it. Name a checkpoint (`--checkpoint`) to fork from an ea
 instead.
 
 The fork reports which checkpoint it used, for example
-`Forked try (stopped): main as of 14:02:31 (new checkpoint)`; `--json` carries `checkpoint`
+`Forked try (started): main as of 14:02:31 (new checkpoint)`; `--json` carries `checkpoint`
 (`id`, `kind`, `createdAt`, `ageSeconds`, `reused`) and `forkedAsOf`. The MCP `fork` tool
 behaves the same.
 
@@ -138,3 +195,12 @@ recipe's checkpoint does not discard it.
 
 For a fork from a recipe, `silo diff --baseline` measures a missing baseline on a throwaway
 fork of the recipe's cached checkpoint.
+
+## Coming from `.silo`
+
+Earlier versions read `.silo/recipe.yaml`, `.silo/recipes/<name>.yaml` and `.silo/silo.yaml` from
+the project. None of them is read now. Move the recipe's keys into one file (the `fork:` rules
+become `quiet:` and `scrub:`, `keep:` and `test:` stay) and run `silo recipe add <file>`. The
+other settings (`recipes:` limits, `auto_keep`, `fork_ram_budget`, per-agent settings) have no
+replacement: what an agent may do is decided by the engine's [policy](SiloUI-POLICY.md), and how
+many computers a device runs by what it has left (`silo resources`).

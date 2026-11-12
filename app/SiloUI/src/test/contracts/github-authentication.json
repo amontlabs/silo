@@ -39,6 +39,20 @@
         },
         "repositories": [],
         "repositoryMode": "selected"
+      },
+      {
+        "allRepositoriesAllowChanges": false,
+        "authenticationMethod": "token",
+        "computer": "dev-3",
+        "identity": {
+          "apply": false,
+          "email": "",
+          "name": ""
+        },
+        "repositories": [],
+        "repositoryMode": "selected",
+        "tokenMissing": true,
+        "tokenSecretId": "00000000-0000-4000-8000-0000000000aa"
       }
     ],
     "deviceIdentity": null,

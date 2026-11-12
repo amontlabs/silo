@@ -1,3 +1,4 @@
+import type { AgentId, AgentInstallStep } from "./production-schemas"
 import type { z } from "zod"
 
 import type { SetupComputerConfiguration, SiloProgressEvent, SetupComputerConfigurationRequest } from "@/contracts/silo"
@@ -22,6 +23,8 @@ export interface ProductionSnapshot {
   setupActivity?: SiloProgressEvent[]
   setupActivityError?: string
   setupCandidate?: SetupComputerConfigurationRequest
+  /** The agent setup is installing, and where that install is. */
+  setupAgent?: { computer: string; agent: AgentId; step?: AgentInstallStep; detail?: string }
   /** The setup work Quit is waiting for while it drains setup. */
   setupDrain?: string
   /** `source` is a shell for connected devices while this device's computers update. */

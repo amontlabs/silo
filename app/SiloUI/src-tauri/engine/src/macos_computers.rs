@@ -12,6 +12,8 @@
 //! computer's disk and memory and forks new computers from them.
 #[path = "macos_computers/checkpoints.rs"]
 mod checkpoints;
+#[path = "macos_computers/agent_install.rs"]
+mod agent_install;
 #[path = "macos_computers/developer_tools.rs"]
 mod developer_tools;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -1358,6 +1360,7 @@ fn macos_job_finished(
                 code,
                 message,
                 diagnostics: None,
+                details: None,
             }),
             outcome_chunked: false,
         },
@@ -1457,6 +1460,7 @@ fn publish_checkpoint_completion<T: serde::Serialize>(
                     code: silo_api::jobs::ErrorCode::Internal,
                     message: format!("Could not encode the macOS checkpoint result: {error}"),
                     diagnostics: None,
+                    details: None,
                 }),
                 outcome_chunked: false,
             },
@@ -1473,6 +1477,7 @@ fn publish_checkpoint_completion<T: serde::Serialize>(
                 },
                 message: message.clone(),
                 diagnostics: None,
+                details: None,
             }),
             outcome_chunked: false,
         },
@@ -2028,13 +2033,15 @@ pub async fn create_macos_computer(
 pub async fn create_macos_computer_accepting(
     app: MacosContext,
     request: CreateRequest,
+    network_policy: Option<crate::network_policy::NetworkPolicy>,
     allocate_job: impl FnOnce() -> Result<silo_api::jobs::JobId, String> + Send + 'static,
 ) -> Result<(MacosComputer, silo_api::jobs::JobId), String> {
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || {
-        create_accepting(
+        create_accepting_with(
             &app,
             request,
+            network_policy.as_ref(),
             require_supported,
             allocate_job,
             &runtime::OPERATIONS,
@@ -2193,6 +2200,65 @@ pub async fn macos_agent_tools_state(
         ))
     })
     .await
+}
+
+/// The agents of a macOS computer: Claude Code comes with its template, Codex is read from the
+/// computer while it runs and `unknown` while it does not.
+pub async fn macos_agents(
+    app: MacosContext,
+    id: String,
+) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (_, state) = computer(&id)?;
+        let running = state == State::Running && !guest_computer_use::update_running(&id);
+        agent_install::list(&app, &id, running)
+    })
+    .await
+}
+
+/// Installs an agent in the running macOS computer `id` as the job `job`, and answers with the
+/// computer's agents. `step` is told where the install is.
+pub fn macos_install_agent(
+    app: &MacosContext,
+    id: &str,
+    agent: silo_api::methods::agents::AgentId,
+    job: &crate::desktop::JobLink,
+    step: &dyn Fn(silo_api::methods::agents::AgentInstallStep, Option<String>),
+) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    ensure_loaded(app)?;
+    let (record, _) = computer(id)?;
+    let guard = runtime::OPERATIONS
+        .kind(runtime::operation_gate::OperationKind::Other)
+        .acquire_for_job(
+            runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+            Some(record.name.clone()),
+            &format!("Installing {} in {}", agent.display_name(), record.name),
+            None,
+            job.job_id.clone(),
+            Some(job.cancellation.clone()),
+        )
+        .map_err(|error| error.to_string())?;
+    job.registry
+        .mark_running(&job.job_id)
+        .map_err(|error| error.to_string())?;
+    job.registry
+        .associate_gate(guard.request_id(), job.job_id.clone());
+    guard.allow_cancel();
+    guard.expect_within(Duration::from_secs(40 * 60));
+    let (_, state) = computer(id)?;
+    if state != State::Running {
+        return Err(format!(
+            "Start the computer before installing {} in it.",
+            agent.display_name()
+        ));
+    }
+    let token = guard.cancel_token();
+    agent_install::install(app, id, agent, step, &|| {
+        token.load(std::sync::atomic::Ordering::SeqCst)
+    })?;
+    agent_install::list(app, id, true)
 }
 
 /// Stores desired computer-use approval and schedules the existing guest updater when running.
@@ -3220,6 +3286,9 @@ fn capture_archive_sources(
         let computer_use_fingerprint = source_computer_use_fingerprint.ok_or_else(|| {
             "This computer has no Computer Use fingerprint. Use Retry setup before exporting it.".to_string()
         })?;
+        // The archive describes the disk it carries, whatever an older record or checkpoint
+        // said after a disk expansion that failed.
+        let source_disk_gib = store::disk_file_gib(&capture.path().join("disk.img"), source_disk_gib);
         let hardware_model_digest = digest_file(&capture.path().join("hardware-model.bin"))?;
         let config = crate::backup::MacosArchiveConfig {
             payload_version: 1,
@@ -3631,6 +3700,8 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     record.pending_restore = None;
     record.inherited_access = false;
     record.imported = true;
+    // The disk comes from an archive, which an agent may have written.
+    record.agent_may_have_used = true;
     engine::validate_archive_configuration(app, &record, &stage_layout)?;
     store::save(&stage_layout, &record)?;
     std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o700))
@@ -3645,10 +3716,7 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
             MacosArchiveImportError::Failed(message)
         });
     }
-    std::fs::rename(&stage, &final_dir)
-        .map_err(|error| store::io_error("publish the imported computer", &error))?;
-    store::sync_dir(&root)
-        .map_err(|error| store::io_error("save the imported computer", &error))?;
+    publish_import_folder(&stage, &final_dir, &root, &id)?;
     {
         let mut registry = registry();
         if registry.entries.iter().any(|entry| entry.record.id == id) {
@@ -3665,6 +3733,27 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     }
     emit(app);
     Ok(imported_source_name)
+}
+
+/// Saves the imported computer's closed network policy, then moves its staging folder into
+/// place. The policy exists before the computer can, so a published import never runs without
+/// one (a computer with no saved policy is not treated as closed); a folder that could not be
+/// moved leaves no policy behind.
+fn publish_import_folder(
+    stage: &std::path::Path,
+    final_dir: &std::path::Path,
+    root: &std::path::Path,
+    id: &str,
+) -> Result<(), String> {
+    crate::network_policy::store::set_stored(
+        id,
+        crate::network_policy::store::Stored::closed_without_incoming(),
+    )?;
+    if let Err(error) = std::fs::rename(stage, final_dir) {
+        let _ = crate::network_policy::store::remove(id);
+        return Err(store::io_error("publish the imported computer", &error));
+    }
+    store::sync_dir(root).map_err(|error| store::io_error("save the imported computer", &error))
 }
 
 /// Settle a journaled archive import. Returns true only when the final record
@@ -3692,10 +3781,19 @@ fn recover_archive_import_in(
     };
     if committed {
         discard_import_folder(&stage, detach)?;
+        // The policy is saved before the folder is published; one that is missing is closed
+        // again rather than left to be read as open.
+        if crate::network_policy::store::get_stored(&id)?.is_none() {
+            crate::network_policy::store::set_stored(
+                &id,
+                crate::network_policy::store::Stored::closed_without_incoming(),
+            )?;
+        }
         return Ok(true);
     }
     discard_import_folder(&stage, detach)?;
     discard_import_folder(&final_dir, detach)?;
+    crate::network_policy::store::remove(&id)?;
     Ok(false)
 }
 
@@ -3759,8 +3857,9 @@ pub fn remove_ssh_alias(app: &MacosContext, computer_id: &str) -> Result<(), Str
 pub fn terminal_command(
     app: &MacosContext,
     computer_id: &str,
+    agent: Option<silo_api::methods::agents::AgentId>,
 ) -> Result<silo_api::methods::terminal::CommandResult, String> {
-    ssh_alias::terminal_command(app, computer_id)
+    ssh_alias::terminal_command(app, computer_id, agent)
 }
 
 pub fn editor_command(
@@ -4172,6 +4271,31 @@ fn create_accepting(
     workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
     spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
 ) -> Result<(MacosComputer, silo_api::jobs::JobId), String> {
+    create_accepting_with(
+        app,
+        request,
+        None,
+        support_check,
+        allocate_job,
+        gate,
+        workflow,
+        spawn,
+    )
+}
+
+/// [`create_accepting`] that saves `network_policy` for the new computer before anything can
+/// start it, and removes it again when the creation is refused.
+#[allow(clippy::too_many_arguments)]
+fn create_accepting_with(
+    app: &MacosContext,
+    request: CreateRequest,
+    network_policy: Option<&crate::network_policy::NetworkPolicy>,
+    support_check: impl FnOnce() -> Result<(), String>,
+    allocate_job: impl FnOnce() -> Result<silo_api::jobs::JobId, String>,
+    gate: &'static runtime::operation_gate::OperationGate,
+    workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
+) -> Result<(MacosComputer, silo_api::jobs::JobId), String> {
     support_check()?;
     let data = app_data(app)?;
     let admitted = admission()?;
@@ -4193,7 +4317,16 @@ fn create_accepting(
     let registry_handle = app.engine.job_registry()?;
     let job = accept_macos_job_with_id(registry_handle.clone(), job_id.clone(), gate)?;
     let record = store::new_record(&request, engine::random_mac());
+    if let Some(policy) = network_policy {
+        if let Err(message) = crate::network_policy::store::set(&record.id, policy) {
+            abandon_macos_job(app.engine.as_ref(), &job, &message);
+            return Err(message);
+        }
+    }
     if let Err(message) = store::save(&Layout::new(&data, &record.id), &record) {
+        if network_policy.is_some() {
+            let _ = crate::network_policy::store::remove(&record.id);
+        }
         abandon_macos_job(app.engine.as_ref(), &job, &message);
         return Err(message);
     }
@@ -4208,8 +4341,13 @@ fn create_accepting(
     emit(app);
 
     let worker_app = app.clone();
-    let work: Box<dyn FnOnce() + Send> =
-        Box::new(move || create_admitted_work(&worker_app, data, record, job, cancel, workflow));
+    let layout = Layout::new(&data, &record.id);
+    let work: Box<dyn FnOnce() + Send> = Box::new(move || {
+        let id = record.id.clone();
+        end_workflow_on_panic(&worker_app, &id, &layout, || {
+            create_admitted_work(&worker_app, data, record, job, cancel, workflow);
+        });
+    });
     if let Err(message) = spawn(work) {
         // No thread will wait for the turn: end the preparing computer and its job.
         let message = format!("Could not start the computer creation: {message}");
@@ -4337,7 +4475,8 @@ fn create_job_worker(
         }
         emit(app);
         let _ = response.send(Ok(row));
-        workflow(app, &data, record, &cancel);
+        let (id, layout) = (record.id.clone(), Layout::new(&data, &record.id));
+        end_workflow_on_panic(app, &id, &layout, || workflow(app, &data, record, &cancel));
         Ok(())
     })();
     if let Err(message) = result {
@@ -4401,6 +4540,26 @@ fn setup_workflow(
     let layout = Layout::new(data, &id);
     let result = run_setup(app, &layout, &mut record, cancel, None);
     end_workflow(app, &id, &layout, result);
+}
+
+/// Runs a computer's background work and, if it panics, ends the computer's workflow and its
+/// job as failed, so neither stays running with nothing behind it.
+fn end_workflow_on_panic(app: &MacosContext, id: &str, layout: &Layout, work: impl FnOnce()) {
+    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
+        let detail = panic
+            .downcast_ref::<&str>()
+            .map(|text| (*text).to_owned())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        end_workflow(
+            app,
+            id,
+            layout,
+            Err(Stop::Failed(format!(
+                "The work on this computer stopped unexpectedly: {detail}"
+            ))),
+        );
+    }
 }
 
 fn end_workflow(app: &MacosContext, id: &str, layout: &Layout, result: Result<(), Stop>) {
@@ -5221,9 +5380,11 @@ fn mark_proxy_bootstrap(
         return Ok(());
     }
     record.setup.proxy_bootstrap = true;
+    record.note_agent_use();
     store::save(layout, &record)?;
     update(app, &record.id, |entry| {
         entry.record.setup.proxy_bootstrap = true;
+        entry.record.note_agent_use();
     });
     emit(app);
     Ok(())
@@ -5615,7 +5776,9 @@ fn setup_job_worker(
     };
     emit(app);
     let _ = response.send(Ok(()));
-    setup_workflow(app, &data, record, &cancel);
+    end_workflow_on_panic(app, &id, &Layout::new(&data, &id), || {
+        setup_workflow(app, &data, record, &cancel);
+    });
 }
 
 /// Reserves a Retry request without publishing `SettingUp` before the operation queue admits it.
@@ -5923,6 +6086,9 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
             Ok(()) => {
                 registry().entries.retain(|entry| entry.record.id != id);
                 crate::changes::store::forget(app.engine.as_ref(), &[id.to_owned()]);
+                crate::policy::store::computer_removed(id);
+                crate::network_policy::computer_removed(id);
+                crate::guest_client::computer_removed(id);
                 if let Err(message) = ports::computer_removed(app, id) {
                     eprintln!("A deleted macOS computer's published ports could not be removed: {message}");
                 }
@@ -6672,6 +6838,10 @@ fn fork_checkpoint_with_workflow(
         record.computer_use_desired_approval = held.record.computer_use_desired_approval;
         // A crash before the files are copied leaves a failed computer that can be deleted.
         store::save(&Layout::new(&data, &record.id), &record)?;
+        // The fork keeps its source's network policy unless the call gave it another.
+        crate::network_policy::store::inherit(id, &record.id, options.network_policy.as_ref())?;
+        crate::guest_client::inherit(id, &record.id)?;
+        crate::recipes::records::inherit(id, &record.id)?;
         let entry = Entry::new(record.clone(), State::Copying, None);
         let cancel = entry.cancel.clone();
         registry.entries.push(entry);
@@ -6814,6 +6984,8 @@ fn fork_setup(record: &mut Record, checkpoint: &checkpoints::Meta) {
         needs_personalizing: true,
         proxy_bootstrap: false,
     };
+    // The disk is the checkpoint's, which an agent may have written.
+    record.agent_may_have_used = true;
 }
 
 fn fork_workflow(
@@ -7848,6 +8020,98 @@ mod tests {
         assert!(root.join(&id).join("computer.json").exists());
     }
 
+    fn import_policy_file(directory: &std::path::Path) {
+        crate::network_policy::store::use_test_path(Some(directory.join("network-policy.json")));
+    }
+
+    #[test]
+    fn a_published_import_has_a_closed_policy_that_refuses_incoming_connections() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        let stage = root.join(format!(".partial-import-{id}"));
+        let final_dir = root.join(&id);
+        std::fs::create_dir_all(&stage).unwrap();
+
+        publish_import_folder(&stage, &final_dir, &root, &id).unwrap();
+
+        assert!(final_dir.exists() && !stage.exists());
+        assert_eq!(
+            crate::network_policy::store::get_stored(&id).unwrap(),
+            Some(crate::network_policy::store::Stored::closed_without_incoming())
+        );
+        crate::network_policy::store::use_test_path(None);
+    }
+
+    #[test]
+    fn an_import_that_could_not_be_published_leaves_no_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        std::fs::create_dir_all(&root).unwrap();
+        // The staging folder is gone, so the move fails.
+        let missing = root.join(format!(".partial-import-{id}"));
+        assert!(publish_import_folder(&missing, &root.join(&id), &root, &id).is_err());
+        assert_eq!(crate::network_policy::store::get_stored(&id).unwrap(), None);
+        crate::network_policy::store::use_test_path(None);
+    }
+
+    #[test]
+    fn import_recovery_drops_the_policy_of_an_import_that_was_not_published() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        crate::network_policy::store::set_stored(
+            &id,
+            crate::network_policy::store::Stored::closed_without_incoming(),
+        )
+        .unwrap();
+        let accept = |_: &std::path::Path| Ok(());
+        assert!(!recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(crate::network_policy::store::get_stored(&id).unwrap(), None);
+        crate::network_policy::store::use_test_path(None);
+    }
+
+    #[test]
+    fn import_recovery_keeps_the_policy_of_a_published_import_and_closes_one_without() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "imported".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:0a".into(),
+        );
+        record.id = id.clone();
+        store::save(&Layout::new(directory.path(), &id), &record).unwrap();
+        let accept = |_: &std::path::Path| Ok(());
+
+        // The engine stopped after the folder was published but before anything else was
+        // written, from an older Silo that saved no policy: the import is closed.
+        assert!(recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        let closed = crate::network_policy::store::Stored::closed_without_incoming();
+        assert_eq!(
+            crate::network_policy::store::get_stored(&id).unwrap(),
+            Some(closed)
+        );
+
+        // A policy the owner set since stays.
+        let open = crate::network_policy::NetworkPolicy::default();
+        crate::network_policy::store::set(&id, &open).unwrap();
+        assert!(recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(
+            crate::network_policy::store::get(&id).unwrap(),
+            Some(open)
+        );
+        crate::network_policy::store::use_test_path(None);
+    }
+
     #[test]
     fn interrupted_export_captures_are_found_by_their_operation_and_removed() {
         let directory = tempfile::tempdir().unwrap();
@@ -8756,6 +9020,115 @@ mod tests {
     }
 
     #[test]
+    fn a_creation_whose_work_panics_ends_its_job_and_keeps_the_computer_failed() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        reset_macos_registry();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let gate = isolated_operation_gate();
+        let (row, job_id, work) =
+            accept_creation(&app, &context, gate, "panic-mac", |_, _, _, _| {
+                panic!("installer exploded")
+            })
+            .unwrap();
+        let worker = std::thread::spawn(work.recv().unwrap());
+        worker.join().expect("the panic is caught by the worker");
+        let registry = context.job_registry().unwrap();
+        let finished = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(finished.state, silo_api::jobs::JobState::Finished);
+        let message = finished.outcome.unwrap().error.unwrap().message;
+        assert!(
+            message.contains("stopped unexpectedly: installer exploded"),
+            "{message}"
+        );
+        assert_eq!(registry_row(&row.id)["state"], "failed");
+        reset_macos_registry();
+    }
+
+    #[test]
+    fn a_new_computers_network_policy_is_saved_before_its_creation_can_start() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        reset_macos_registry();
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("network-policy.json");
+        crate::network_policy::store::use_test_path(Some(file.clone()));
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let gate = isolated_operation_gate();
+        let closed = crate::network_policy::NetworkPolicy {
+            mode: crate::network_policy::NetworkPolicyMode::Closed,
+            ..Default::default()
+        };
+        let request = |name: &str| CreateRequest {
+            name: name.into(),
+            cpus: 2,
+            memory_gib: 4,
+            disk_gib: 64,
+        };
+        // The worker is handed over only after the policy is saved for the new id.
+        let jobs = context.job_registry().unwrap();
+        let seen = Arc::new(Mutex::new(None));
+        let observed = seen.clone();
+        let (row, _) = create_accepting_with(
+            &app,
+            request("first"),
+            Some(&closed),
+            || Ok(()),
+            move || {
+                jobs.allocate("computers.create")
+                    .map(|accepted| accepted.job_id)
+                    .map_err(|error| error.to_string())
+            },
+            gate,
+            |_, _, _, _| {},
+            |_work| {
+                *observed.lock().unwrap() = Some(
+                    crate::network_policy::store::get_stored_ids_for_test().unwrap(),
+                );
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(seen.lock().unwrap().clone().unwrap(), vec![row.id.clone()]);
+        assert_eq!(
+            crate::network_policy::store::get(&row.id).unwrap(),
+            Some(closed.clone())
+        );
+        reset_macos_registry();
+        // A policy that cannot be saved refuses the creation: no computer, no worker.
+        std::fs::write(&file, "{ not json").unwrap();
+        let refused = create_accepting_with(
+            &app,
+            request("second"),
+            Some(&closed),
+            || Ok(()),
+            || {
+                context
+                    .job_registry()
+                    .unwrap()
+                    .allocate("computers.create")
+                    .map(|accepted| accepted.job_id)
+                    .map_err(|error| error.to_string())
+            },
+            gate,
+            |_, _, _, _| panic!("nothing runs"),
+            |_| panic!("no worker"),
+        );
+        assert!(refused.is_err());
+        assert!(registry()
+            .entries
+            .iter()
+            .all(|entry| entry.record.name != "second"));
+        crate::network_policy::store::use_test_path(None);
+        reset_macos_registry();
+    }
+
+    #[test]
     fn a_refused_creation_request_leaves_no_job_and_no_computer() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -9457,6 +9830,44 @@ mod tests {
         not(all(target_os = "macos", target_arch = "aarch64")),
         ignore = "macOS computers are loaded only on an Apple silicon host"
     )]
+    fn an_export_describes_the_disk_file_it_carries() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (app, source_id, checkpoint_id) = export_fixture(directory.path());
+        let layout = Layout::new(directory.path(), &source_id);
+        // The records say 64 GiB; the disks, after a disk expansion that failed, are larger.
+        for disk in [
+            layout.disk(),
+            checkpoints::dir(&layout, &checkpoint_id).join("disk.img"),
+        ] {
+            let file = std::fs::OpenOptions::new().write(true).open(disk).unwrap();
+            file.set_len(128 * 1024 * 1024 * 1024).unwrap();
+        }
+        for checkpoint in [None, Some(checkpoint_id.as_str())] {
+            let (sources, _captures) = capture_archive_sources(
+                &app,
+                &["source-mac".into()],
+                checkpoint,
+                &Default::default(),
+                None,
+                &|_, _, _| {
+                    Box::new(ExportedMachine {
+                        data: directory.path().to_path_buf(),
+                        calls: Arc::new(Mutex::new(Vec::new())),
+                        fail_flush: false,
+                    })
+                },
+            )
+            .unwrap();
+            assert_eq!(sources[0].runtime_config.disk_gib, 128);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn fork_workflow_job_records_setup_failure_without_overwriting_fork_command() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -9905,9 +10316,45 @@ mod tests {
         assert_eq!(names, ["operations.job.finished"]);
     }
 
+    /// Empties the process-wide job maps, which job ids like `job:1` repeat across
+    /// tests, and again when dropped so no entry outlives its test.
+    struct ClearedJobMaps;
+
+    impl ClearedJobMaps {
+        fn new() -> Self {
+            Self::clear();
+            Self
+        }
+
+        fn clear() {
+            MACOS_JOBS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+            MACOS_CHECKPOINT_JOBS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+            MACOS_PENDING_CHECKPOINT_JOBS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+        }
+    }
+
+    impl Drop for ClearedJobMaps {
+        fn drop(&mut self) {
+            Self::clear();
+        }
+    }
+
     #[test]
     fn checkpoint_completion_removes_both_progress_guards_under_the_publication_lock() {
         let _test_state = crate::test_support::global_state();
+        let _job_maps = ClearedJobMaps::new();
         let directory = tempfile::tempdir().unwrap();
         let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
         let app = macos_context(context.clone());
@@ -11389,6 +11836,8 @@ mod tests {
             proxy_bootstrap: true,
         };
         record.developer_tools_version = Some(developer_tools::version());
+        // A complete setup is saved and loaded with the flag.
+        record.agent_may_have_used = true;
         let old = record.clone();
         let layout = Layout::new(data.path(), &id);
         store::save(&layout, &old).unwrap();

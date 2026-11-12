@@ -5,7 +5,8 @@ import { z } from "zod"
 import type { StatusBarRoute } from "@/features/status-bar/status-bar-types"
 
 const routeShape = z.object({
-  tab: z.enum(["computers", "github", "secrets", "system", "settings"]).optional(),
+  tab: z.enum(["computers", "changes", "github", "secrets", "system", "settings"]).optional(),
+  approval: z.string().optional(),
   computerSection: z.enum(["overview", "files", "logs", "network", "activity"]).optional(),
   computer: z.string().optional(),
   computerTab: z.enum(["overview", "checkpoints", "storage", "access"]).optional(),

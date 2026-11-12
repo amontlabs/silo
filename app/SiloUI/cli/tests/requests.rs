@@ -36,9 +36,9 @@ fn cli(engine: &FakeEngine, args: &[&str]) -> Result<Cli, clap::Error> {
 }
 
 #[tokio::test]
-async fn fold_request_records_the_digest_and_summary_and_keeps_nothing() {
+async fn merge_request_records_the_digest_and_summary_and_keeps_nothing() {
     let engine = engine();
-    let parsed = cli(&engine, &["fold", "try", "--request", "--into", "main"]).unwrap();
+    let parsed = cli(&engine, &["merge", "try", "--request", "--into", "main"]).unwrap();
     assert_eq!(
         run(parsed, std::env::temp_dir().as_path()).await.unwrap(),
         0
@@ -55,9 +55,21 @@ async fn fold_request_records_the_digest_and_summary_and_keeps_nothing() {
 }
 
 #[tokio::test]
+async fn fold_is_still_accepted_and_does_what_merge_does() {
+    let engine = engine();
+    let parsed = cli(&engine, &["fold", "try", "--request"]).unwrap();
+    assert_eq!(
+        run(parsed, std::env::temp_dir().as_path()).await.unwrap(),
+        0
+    );
+    assert_eq!(engine.calls("changes.request")[0]["forkId"], "id-try");
+    assert!(engine.calls("changes.keep").is_empty());
+}
+
+#[tokio::test]
 async fn without_into_the_engine_picks_the_forks_source() {
     let engine = engine();
-    let parsed = cli(&engine, &["fold", "try", "--request", "--json"]).unwrap();
+    let parsed = cli(&engine, &["merge", "try", "--request", "--json"]).unwrap();
     assert_eq!(
         run(parsed, std::env::temp_dir().as_path()).await.unwrap(),
         0
@@ -68,8 +80,8 @@ async fn without_into_the_engine_picks_the_forks_source() {
 #[tokio::test]
 async fn a_request_cannot_be_combined_with_promote_or_a_dry_run() {
     let engine = engine();
-    assert!(cli(&engine, &["fold", "try", "--request", "--promote"]).is_err());
-    assert!(cli(&engine, &["fold", "try", "--request", "--dry-run"]).is_err());
+    assert!(cli(&engine, &["merge", "try", "--request", "--promote"]).is_err());
+    assert!(cli(&engine, &["merge", "try", "--request", "--dry-run"]).is_err());
 }
 
 #[tokio::test]
@@ -168,7 +180,7 @@ async fn the_fork_command_passes_its_exit_code_through() {
 }
 
 #[tokio::test]
-async fn mcp_fold_takes_request_and_fork_takes_count_and_command() {
+async fn mcp_merge_takes_request_and_fork_takes_count_and_command() {
     let engine = engine();
     let (server_side, client_side) = tokio::io::duplex(64 * 1024);
     let (server_read, server_write) = tokio::io::split(server_side);
@@ -213,7 +225,7 @@ async fn mcp_fold_takes_request_and_fork_takes_count_and_command() {
         tools.iter().find(|t| t["name"] == tool).unwrap()["inputSchema"]["properties"][name]
             .is_object()
     };
-    assert!(property("fold", "request"));
+    assert!(property("merge", "request") && property("merge", "choices"));
     assert!(property("fork", "count") && property("fork", "command"));
 
     line.clear();
@@ -222,7 +234,7 @@ async fn mcp_fold_takes_request_and_fork_takes_count_and_command() {
             ask(
                 3,
                 "tools/call",
-                json!({"name": "fold", "arguments": {"fork": "try", "request": true}}),
+                json!({"name": "merge", "arguments": {"fork": "try", "request": true}}),
             )
             .as_bytes(),
         )

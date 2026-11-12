@@ -75,7 +75,7 @@ class Engine:
         self.sock.settimeout(self.timeout)
         self.sock.connect(self.path)
         _frame(self.sock, {"id": "hs", "method": "engine.handshake", "params": {
-            "protocol": {"min": 7, "max": 7}, "client": {"name": self.name, "version": "0"}}})
+            "protocol": {"min": 8, "max": 8}, "client": {"name": self.name, "version": "0"}}})
         reply = _read(self.sock)
         if "error" in reply:
             raise EngineError(json.dumps(reply["error"]))

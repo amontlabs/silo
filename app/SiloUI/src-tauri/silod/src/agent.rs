@@ -126,6 +126,9 @@ pub(crate) fn serve(
     // Checkpoint records written before automatic checkpoints existed become manual ones,
     // once, before anything reads them.
     silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &context.migration_controller())?;
+    // Computers created before protected storage stay closed until the launch pass has moved
+    // them (or reported why not); see `startup::move_to_protected_storage`.
+    context.migration_controller().hold_for_protected_storage();
     // Computers made before the network bootstrap existed are converted once per launch. Start
     // and computer-changing work stay closed until the pass ends; the pass boots guests, so it
     // runs on its own thread and waits for the main-thread loop to start.
@@ -150,6 +153,8 @@ pub(crate) fn serve(
         &runtime_home,
     )?;
     silo_engine::backup_controller::reconcile_jobs_before_serving(context.as_ref())?;
+    // An approval allowed just before the engine stopped is ended, never run again on its own.
+    crate::methods::approvals::recover(&context);
 
     let runtime = Builder::new_multi_thread()
         .enable_all()
@@ -387,8 +392,8 @@ mod channel_startup_tests {
             channel_identifier: identifier.clone(),
             engine_version: "0.1.0".to_owned(),
             engine_build: "test".to_owned(),
-            protocol_min: 7,
-            protocol_max: 7,
+            protocol_min: 8,
+            protocol_max: 8,
         };
         let channel = initialize_channel(&manifest).unwrap();
         let identity: EngineIdentity =

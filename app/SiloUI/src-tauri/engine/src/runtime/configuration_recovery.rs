@@ -96,6 +96,32 @@ pub(super) fn pending_request(
     Ok(load(paths)?.map(|journal| journal.request))
 }
 
+/// Whether `name`, a runtime computer no saved computer has, is one the pending configuration
+/// is creating: it is new in the request and carries the label of the id requested for it.
+pub(super) fn is_being_created(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    journal: &Journal,
+    name: &str,
+) -> Result<bool, RuntimeError> {
+    let Some(requested) = journal.request.computers.iter().find(|computer| {
+        computer.name() == name
+            && !journal
+                .previous
+                .computers
+                .iter()
+                .any(|old| old.id() == computer.id())
+    }) else {
+        return Ok(false);
+    };
+    let inspected = inspect_computer(runner, paths, name)?;
+    Ok(inspected
+        .config
+        .pointer("/labels/silo.machine-id")
+        .and_then(Value::as_str)
+        == Some(requested.id()))
+}
+
 pub(super) fn begin(
     paths: &RuntimePaths,
     request: &ComputerConfigurationRequest,
@@ -197,36 +223,122 @@ pub(super) fn finish(paths: &RuntimePaths) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-/// A parent-held command lock releases the shared flock even when a concurrent
-/// fork temporarily inherited its descriptor before exec closed it.
+const CHILD_RECORD_PREFIX: &str = ".silo-configuration-worker.child-";
+/// Written before a runtime command is started and replaced by the command's own record once
+/// its pid is known, so there is no moment where a started command has no record at all.
+const PENDING_RECORD_PREFIX: &str = ".silo-configuration-worker.child-pending-";
+/// How long a new holder waits for a command whose engine died between starting it and
+/// recording it. Nothing names that command, so this is a fixed bound, not a wait for an exit.
+const PENDING_WAIT: Duration = Duration::from_secs(3);
+/// Added to a record's command timeout before the record is called stale.
+const RECORD_SLACK: Duration = Duration::from_secs(10);
+static RECORD_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Makes the next `record_child` fail, to exercise the caller's recovery.
+#[cfg(test)]
+pub(crate) static FAIL_CHILD_RECORD: AtomicBool = AtomicBool::new(false);
+
+/// The lock lives only in the engine's descriptor: the runtime commands it starts do not
+/// inherit it, so the computers those commands leave running never hold it, and it ends
+/// with the engine. A parent-held command lock releases the shared flock even when a
+/// concurrent fork temporarily inherited its descriptor before exec closed it.
 pub(crate) struct CommandLock {
     file: File,
-    inherited_by_child: bool,
+    home: PathBuf,
+    child_record: Option<PathBuf>,
+    record_is_pending: bool,
     release_on_drop: bool,
 }
 
 impl CommandLock {
     /// A shutdown worker shares the parent's flock. Only the parent unlocks after
-    /// all workers have joined; each runtime child still inherits its own descriptor.
+    /// all workers have joined.
     pub(crate) fn duplicate_for_shutdown(&self) -> Result<Self, RuntimeError> {
         Ok(Self {
             file: self.file.try_clone().map_err(failure)?,
-            inherited_by_child: false,
+            home: self.home.clone(),
+            child_record: None,
+            record_is_pending: false,
             release_on_drop: false,
         })
     }
 
-    /// Keep the flock until the deliberately inheriting runtime child exits.
-    /// Call only after a child with the lock's close-on-exec flag cleared spawned.
-    pub(crate) fn mark_inherited_by_child(&mut self) {
-        self.inherited_by_child = true;
+    /// Note that this engine is about to start the runtime command this lock covers. The
+    /// record names the engine, so a new holder can tell it from a command that is running.
+    pub(crate) fn begin_command(&mut self, timeout: Duration) -> Result<(), RuntimeError> {
+        let record = self.home.join(format!(
+            "{PENDING_RECORD_PREFIX}{}-{}",
+            std::process::id(),
+            RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        write_record(&self.home, &record, std::process::id(), timeout).map_err(failure)?;
+        self.child_record = Some(record);
+        self.record_is_pending = true;
+        Ok(())
     }
 
-    /// Once the child is reaped, the parent can release any copies temporarily
-    /// inherited by unrelated forks while that child was running.
-    pub(crate) fn mark_child_exited(&mut self) {
-        self.inherited_by_child = false;
+    /// Note the runtime command this lock covers, so that a new engine started after this one
+    /// died waits for that command to exit before it takes the lock itself. The record names
+    /// the `msb` process only: a helper that command detaches (`create` and `restore` detach
+    /// the computer's VM by design) is not covered and never holds the lock.
+    pub(crate) fn record_child(&mut self, pid: u32, timeout: Duration) -> Result<(), RuntimeError> {
+        let record = self.home.join(format!("{CHILD_RECORD_PREFIX}{pid}"));
+        #[cfg(test)]
+        if FAIL_CHILD_RECORD.swap(false, Ordering::SeqCst) {
+            return Err(failure("the record could not be written"));
+        }
+        write_record(&self.home, &record, pid, timeout).map_err(failure)?;
+        if let Some(pending) = self.child_record.replace(record) {
+            if self.record_is_pending {
+                let _ = fs::remove_file(pending);
+            }
+        }
+        self.record_is_pending = false;
+        Ok(())
     }
+
+    /// The command exited, so nothing outlives this lock on its behalf.
+    pub(crate) fn mark_child_exited(&mut self) {
+        if let Some(record) = self.child_record.take() {
+            let _ = fs::remove_file(record);
+        }
+        self.record_is_pending = false;
+    }
+}
+
+fn unix_seconds(time: SystemTime) -> u64 {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// Writes a record through a temporary file and a rename, so a reader never finds a partly
+/// written one. `subject` is the process whose start time is stored; when that is not
+/// available the record still carries when it was written and how long its command may run.
+fn write_record(home: &Path, record: &Path, subject: u32, timeout: Duration) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut text = String::new();
+    if let Some(start) = process_start(subject) {
+        text.push_str(&format!("start={start}\n"));
+    }
+    text.push_str(&format!(
+        "written={}\ntimeout={}\n",
+        unix_seconds(SystemTime::now()),
+        timeout.as_secs()
+    ));
+    let temporary = home.join(format!(
+        ".silo-configuration-worker.record-{}-{}.tmp",
+        std::process::id(),
+        RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = File::create(&temporary)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temporary, record)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 impl AsRawFd for CommandLock {
@@ -237,7 +349,13 @@ impl AsRawFd for CommandLock {
 
 impl Drop for CommandLock {
     fn drop(&mut self) {
-        if self.release_on_drop && !self.inherited_by_child {
+        if self.release_on_drop {
+            // A pending record that was never replaced belongs to a command that did not start.
+            if self.record_is_pending {
+                if let Some(record) = self.child_record.take() {
+                    let _ = fs::remove_file(record);
+                }
+            }
             // SAFETY: this descriptor remains owned by self until after Drop.
             // LOCK_UN also releases copies inherited by unrelated forks.
             unsafe {
@@ -245,6 +363,128 @@ impl Drop for CommandLock {
             }
         }
     }
+}
+
+/// When the process started, in a unit that is only compared with itself. It tells a pid
+/// that was reused by another program from the process a record was written for.
+fn process_start(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // SAFETY: info is a writable buffer of exactly `size` bytes.
+        let written = unsafe {
+            libc::proc_pidinfo(
+                pid as libc::c_int,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                size,
+            )
+        };
+        (written == size).then(|| info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        proc_stat_start(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// The start time (field 22, in clock ticks after boot) from the text of `/proc/<pid>/stat`.
+/// The command name in field 2 may hold spaces and parentheses, so fields are counted from
+/// the last closing parenthesis.
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+fn proc_stat_start(stat: &str) -> Option<u64> {
+    let after_name = stat.get(stat.rfind(')')? + 1..)?;
+    after_name.split_whitespace().nth(19)?.parse().ok()
+}
+
+fn process_exists(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 only checks that the process exists.
+    let status = unsafe { libc::kill(pid, 0) };
+    status == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Which process a record is about: a runtime command, or the engine that was about to start one.
+#[derive(Clone, Copy)]
+enum RecordKind {
+    Command(u32),
+    Pending(u32),
+}
+
+fn record_kind(name: &str) -> Option<RecordKind> {
+    if let Some(rest) = name.strip_prefix(PENDING_RECORD_PREFIX) {
+        let pid = rest.split('-').next()?.parse().ok()?;
+        return Some(RecordKind::Pending(pid));
+    }
+    let pid = name.strip_prefix(CHILD_RECORD_PREFIX)?.parse().ok()?;
+    Some(RecordKind::Command(pid))
+}
+
+fn record_field(text: &str, key: &str) -> Option<u64> {
+    text.lines()
+        .find_map(|line| line.strip_prefix(key)?.strip_prefix('=')?.trim().parse().ok())
+}
+
+/// Whether the command (or the starting engine) a record names must still be waited for.
+/// A record that cannot be read falls back to the file's modification time and the longest
+/// ordinary command timeout, and every record expires once its command's timeout has passed,
+/// so a damaged record never holds the lock on behalf of an unrelated long-lived process.
+fn record_running(
+    kind: RecordKind,
+    text: &str,
+    modified: Option<SystemTime>,
+    now: SystemTime,
+) -> bool {
+    let now = unix_seconds(now);
+    let written = record_field(text, "written")
+        .or_else(|| modified.map(unix_seconds))
+        .unwrap_or(0)
+        .min(now);
+    let timeout = record_field(text, "timeout").unwrap_or(MUTATION_TIMEOUT.as_secs());
+    if now > written + timeout + RECORD_SLACK.as_secs() {
+        return false;
+    }
+    let (RecordKind::Command(pid) | RecordKind::Pending(pid)) = kind;
+    let same_process = process_exists(pid)
+        && match (record_field(text, "start"), process_start(pid)) {
+            (Some(recorded), Some(current)) => recorded == current,
+            _ => true,
+        };
+    match kind {
+        RecordKind::Command(_) => same_process,
+        RecordKind::Pending(_) => same_process || now - written < PENDING_WAIT.as_secs(),
+    }
+}
+
+/// Whether a runtime command that a dead engine started is still running. Records of
+/// commands that have exited, or whose pid now belongs to another program, are removed.
+fn child_command_running(home: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(home) else {
+        return false;
+    };
+    let mut running = false;
+    for entry in entries.flatten() {
+        let Some(kind) = entry.file_name().to_str().and_then(record_kind) else {
+            continue;
+        };
+        let text = fs::read_to_string(entry.path()).unwrap_or_default();
+        let modified = entry.metadata().and_then(|meta| meta.modified()).ok();
+        if record_running(kind, &text, modified, SystemTime::now()) {
+            running = true;
+        } else {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+    running
 }
 
 pub fn command_lock(paths: &RuntimePaths, timeout: Duration) -> Result<CommandLock, RuntimeError> {
@@ -260,15 +500,22 @@ pub fn command_lock(paths: &RuntimePaths, timeout: Duration) -> Result<CommandLo
     loop {
         // SAFETY: the open file owns this descriptor until the lock is dropped.
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            return Ok(CommandLock {
-                file,
-                inherited_by_child: false,
-                release_on_drop: true,
-            });
-        }
-        let error = std::io::Error::last_os_error();
-        if error.kind() != std::io::ErrorKind::WouldBlock {
-            return Err(failure(error));
+            if !child_command_running(&paths.home) {
+                return Ok(CommandLock {
+                    file,
+                    home: paths.home.clone(),
+                    child_record: None,
+                    record_is_pending: false,
+                    release_on_drop: true,
+                });
+            }
+            // SAFETY: as above.
+            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+        } else {
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::WouldBlock {
+                return Err(failure(error));
+            }
         }
         if started.elapsed() >= timeout {
             return Err(failure(
@@ -277,6 +524,37 @@ pub fn command_lock(paths: &RuntimePaths, timeout: Duration) -> Result<CommandLo
         }
         thread::sleep(Duration::from_millis(100));
     }
+}
+
+/// Removes the storage folder reserved for a computer that was never saved. A folder Silo did
+/// not reserve for this computer is only removed when it is empty.
+fn discard_unsaved_storage(
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<(), RuntimeError> {
+    let folder = paths.volumes.join(configuration.name());
+    if !folder.exists() {
+        return Ok(());
+    }
+    if fs::read_to_string(folder.join(OWNER)).ok().as_deref() != Some(configuration.id()) {
+        if fs::remove_dir(&folder).is_ok() {
+            return Ok(());
+        }
+        return Err(failure("Incomplete storage ownership could not be verified. No files were removed."));
+    }
+    fs::remove_dir_all(folder).map_err(failure)
+}
+
+/// Whether the tools check ran in the computer and exited with a failure, as opposed to a
+/// check that could not finish (a timeout, a runtime that did not answer or was killed).
+fn tools_check_failed(error: &RuntimeError) -> bool {
+    matches!(
+        error,
+        RuntimeError::Failed {
+            exit_code: Some(code),
+            ..
+        } if *code != -1
+    )
 }
 
 fn reconcile(
@@ -318,13 +596,36 @@ fn reconcile(
                     "A different computer now owns the requested name. Its data was preserved.",
                 ));
             }
-            verify_computer_configuration(runner, paths, configuration)?;
-            if !current
+            let unsaved = !current
                 .computers
                 .iter()
-                .any(|entry| entry.id() == configuration.id())
-            {
-                verify_guest_tools(runner, paths, configuration.name())?;
+                .any(|entry| entry.id() == configuration.id());
+            // A computer that was never saved is not worth keeping when it cannot be used: its
+            // leftovers are removed so that the replay below creates it again. A check that did
+            // not finish (a timeout, a runtime that does not answer) says nothing about it, so
+            // the computer stays for the next launch.
+            let mismatched = configuration_attention(paths, configuration, &inspected).is_some();
+            if !(unsaved && mismatched) {
+                verify_computer_configuration(runner, paths, configuration)?;
+            }
+            let unusable = if !unsaved {
+                false
+            } else if mismatched {
+                true
+            } else {
+                settle_unsaved_computer(runner, paths, &inspected, configuration.name())?;
+                match verify_guest_tools(runner, paths, configuration.name()) {
+                    Ok(()) => false,
+                    Err(error) if tools_check_failed(&error) => true,
+                    Err(error) => return Err(error),
+                }
+            };
+            if unusable {
+                cleanup_failed_create(runner, paths, configuration.name(), configuration.id())
+                    .and_then(|()| discard_unsaved_storage(paths, configuration))?;
+                continue;
+            }
+            if unsaved {
                 if let Some(desktop) = crate::desktop::configuration(configuration) {
                     crate::desktop::configure_with(
                         runner,
@@ -353,18 +654,7 @@ fn reconcile(
                     "A saved computer is missing from the runtime. Its disk files were preserved.",
                 ));
             }
-            let folder = paths.volumes.join(configuration.name());
-            if folder.exists() {
-                if fs::read_to_string(folder.join(OWNER)).ok().as_deref()
-                    != Some(configuration.id())
-                {
-                    if fs::remove_dir(&folder).is_ok() {
-                        continue;
-                    }
-                    return Err(failure("Incomplete storage ownership could not be verified. No files were removed."));
-                }
-                fs::remove_dir_all(folder).map_err(failure)?;
-            }
+            discard_unsaved_storage(paths, configuration)?;
         }
     }
     for configuration in journal.previous.computers.iter().filter(|configuration| {
@@ -837,58 +1127,11 @@ mod tests {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = super::super::tests::paths(&directory);
-        for completed_child in [false, true] {
-            let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
-            if completed_child {
-                lock.mark_inherited_by_child();
-                lock.mark_child_exited();
-            }
-            let mut ready = [0; 2];
-            let mut release = [0; 2];
-            // SAFETY: only async-signal-safe libc calls run in the child. The pipes
-            // keep it alive until the parent has tested the inherited descriptor.
-            unsafe {
-                assert_eq!(libc::pipe(ready.as_mut_ptr()), 0);
-                assert_eq!(libc::pipe(release.as_mut_ptr()), 0);
-                let child = libc::fork();
-                assert!(child >= 0);
-                if child == 0 {
-                    libc::close(ready[0]);
-                    libc::close(release[1]);
-                    let marker = [1u8];
-                    libc::write(ready[1], marker.as_ptr().cast(), 1);
-                    let mut finish = [0u8];
-                    libc::read(release[0], finish.as_mut_ptr().cast(), 1);
-                    libc::_exit(0);
-                }
-                libc::close(ready[1]);
-                libc::close(release[0]);
-                let mut marker = [0u8];
-                assert_eq!(libc::read(ready[0], marker.as_mut_ptr().cast(), 1), 1);
-                drop(lock);
-                let reacquired = command_lock(&paths, Duration::ZERO).is_ok();
-                libc::write(release[1], marker.as_ptr().cast(), 1);
-                assert_eq!(libc::waitpid(child, std::ptr::null_mut(), 0), child);
-                libc::close(ready[0]);
-                libc::close(release[1]);
-                assert!(
-                    reacquired,
-                    "an unrelated fork kept the released command lock"
-                );
-            }
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn deliberately_inherited_command_lock_survives_parent_release() {
-        let _test_state = crate::test_support::global_state();
-        let directory = tempfile::tempdir().unwrap();
-        let paths = super::super::tests::paths(&directory);
-        let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
+        let lock = command_lock(&paths, Duration::ZERO).unwrap();
         let mut ready = [0; 2];
         let mut release = [0; 2];
-        // SAFETY: only async-signal-safe libc calls run in the child.
+        // SAFETY: only async-signal-safe libc calls run in the child. The pipes
+        // keep it alive until the parent has tested the inherited descriptor.
         unsafe {
             assert_eq!(libc::pipe(ready.as_mut_ptr()), 0);
             assert_eq!(libc::pipe(release.as_mut_ptr()), 0);
@@ -907,16 +1150,242 @@ mod tests {
             libc::close(release[0]);
             let mut marker = [0u8];
             assert_eq!(libc::read(ready[0], marker.as_mut_ptr().cast(), 1), 1);
-            lock.mark_inherited_by_child();
             drop(lock);
-            let held = command_lock(&paths, Duration::ZERO).is_err();
+            let reacquired = command_lock(&paths, Duration::ZERO).is_ok();
             libc::write(release[1], marker.as_ptr().cast(), 1);
             assert_eq!(libc::waitpid(child, std::ptr::null_mut(), 0), child);
             libc::close(ready[0]);
             libc::close(release[1]);
-            assert!(held, "the surviving child lost the command lock");
-            drop(command_lock(&paths, Duration::ZERO).unwrap());
+            assert!(
+                reacquired,
+                "an unrelated fork kept the released command lock"
+            );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_lock_waits_for_a_recorded_command_that_is_still_running() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let mut child = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
+        lock.record_child(child.id(), Duration::from_secs(60)).unwrap();
+        drop(lock);
+        assert!(command_lock(&paths, Duration::ZERO).is_err());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        drop(command_lock(&paths, Duration::ZERO).unwrap());
+        assert!(!paths
+            .home
+            .join(format!("{CHILD_RECORD_PREFIX}{}", child.id()))
+            .exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_lock_ignores_a_record_whose_pid_belongs_to_another_program() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
+        lock.record_child(std::process::id(), Duration::from_secs(60)).unwrap();
+        let record = paths
+            .home
+            .join(format!("{CHILD_RECORD_PREFIX}{}", std::process::id()));
+        drop(lock);
+        assert!(command_lock(&paths, Duration::ZERO).is_err());
+        if process_start(std::process::id()).is_some() {
+            fs::write(
+                &record,
+                format!(
+                    "start=1\nwritten={}\ntimeout=60\n",
+                    unix_seconds(SystemTime::now())
+                ),
+            )
+            .unwrap();
+            drop(command_lock(&paths, Duration::ZERO).unwrap());
+            assert!(!record.exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exiting_a_recorded_command_removes_its_record() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
+        lock.record_child(std::process::id(), Duration::from_secs(60)).unwrap();
+        lock.mark_child_exited();
+        drop(lock);
+        drop(command_lock(&paths, Duration::ZERO).unwrap());
+    }
+
+    #[cfg(unix)]
+    fn record_in(paths: &RuntimePaths, name: &str, text: &str) -> PathBuf {
+        fs::create_dir_all(&paths.home).unwrap();
+        let record = paths.home.join(name);
+        fs::write(&record, text).unwrap();
+        record
+    }
+
+    #[cfg(unix)]
+    fn written_ago(seconds: u64) -> u64 {
+        unix_seconds(SystemTime::now()) - seconds
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn waiting_on_a_recorded_command_ends_with_a_plain_timeout_message() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let mut child = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
+        lock.record_child(child.id(), Duration::from_secs(60)).unwrap();
+        drop(lock);
+        let started = Instant::now();
+        let error = match command_lock(&paths, Duration::from_millis(350)) {
+            Ok(_) => panic!("a recorded command that is running did not hold the lock"),
+            Err(error) => error,
+        };
+        assert!(started.elapsed() >= Duration::from_millis(350));
+        assert!(
+            error
+                .to_string()
+                .contains("The previous computer command is still finishing. Retry after it exits."),
+            "{error}"
+        );
+        child.kill().unwrap();
+        child.wait().unwrap();
+        drop(command_lock(&paths, Duration::ZERO).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_record_replaces_the_pending_record_and_leaves_no_temporary_file() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let names = || -> Vec<String> {
+            let mut names: Vec<String> = fs::read_dir(&paths.home)
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| name.starts_with(".silo-configuration-worker.") && name != ".silo-configuration-worker.lock")
+                .collect();
+            names.sort();
+            names
+        };
+        let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
+        lock.begin_command(Duration::from_secs(60)).unwrap();
+        let pending = names();
+        assert_eq!(pending.len(), 1);
+        assert!(pending[0].starts_with(PENDING_RECORD_PREFIX), "{pending:?}");
+        lock.record_child(std::process::id(), Duration::from_secs(60)).unwrap();
+        assert_eq!(
+            names(),
+            vec![format!("{CHILD_RECORD_PREFIX}{}", std::process::id())]
+        );
+        lock.mark_child_exited();
+        assert!(names().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pending_record_is_removed_when_its_lock_is_dropped_without_a_command() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
+        lock.begin_command(Duration::from_secs(60)).unwrap();
+        drop(lock);
+        drop(command_lock(&paths, Duration::ZERO).unwrap());
+        assert!(!fs::read_dir(&paths.home)
+            .unwrap()
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().contains("pending")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pending_record_of_a_dead_engine_is_waited_for_briefly_then_removed() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let name = format!("{PENDING_RECORD_PREFIX}2000000000-0");
+        let record = record_in(
+            &paths,
+            &name,
+            &format!("start=1\nwritten={}\ntimeout=180\n", written_ago(0)),
+        );
+        assert!(command_lock(&paths, Duration::ZERO).is_err());
+        assert!(record.exists());
+        fs::write(
+            &record,
+            format!("start=1\nwritten={}\ntimeout=180\n", written_ago(10)),
+        )
+        .unwrap();
+        drop(command_lock(&paths, Duration::ZERO).unwrap());
+        assert!(!record.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_record_without_a_start_time_expires_with_its_command_timeout() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let name = format!("{CHILD_RECORD_PREFIX}{}", std::process::id());
+        let record = record_in(
+            &paths,
+            &name,
+            &format!("written={}\ntimeout=60\n", written_ago(5)),
+        );
+        assert!(command_lock(&paths, Duration::ZERO).is_err());
+        fs::write(
+            &record,
+            format!("written={}\ntimeout=60\n", written_ago(600)),
+        )
+        .unwrap();
+        drop(command_lock(&paths, Duration::ZERO).unwrap());
+        assert!(!record.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_record_does_not_hold_the_lock_for_an_unrelated_long_lived_process() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = super::super::tests::paths(&directory);
+        let name = format!("{CHILD_RECORD_PREFIX}{}", std::process::id());
+        for garbage in ["", "not a record", "start=abc\nwritten=\n"] {
+            let record = record_in(&paths, &name, garbage);
+            // Fresh, it is treated like any record whose process is still running.
+            assert!(command_lock(&paths, Duration::ZERO).is_err());
+            let old = SystemTime::now() - Duration::from_secs(3600);
+            File::options()
+                .write(true)
+                .open(&record)
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+            drop(command_lock(&paths, Duration::ZERO).unwrap());
+            assert!(!record.exists());
+        }
+    }
+
+    #[test]
+    fn the_start_time_is_read_from_a_linux_process_status_line() {
+        // Field 22 follows a command name that may hold spaces and parentheses.
+        let stat = "4242 (my (odd) name) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 3 0 987654 \
+                    1000 50 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 17 2 0 0 0 0 0";
+        assert_eq!(proc_stat_start(stat), Some(987654));
+        assert_eq!(proc_stat_start("4242 (short) S 1"), None);
+        assert_eq!(proc_stat_start("no parenthesis"), None);
+        assert_eq!(proc_stat_start(""), None);
     }
 
     #[test]
@@ -1182,5 +1651,206 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("changed since"), "{error}");
+    }
+
+    /// A runtime holding the computer an interrupted creation made: it is `status` and keeps
+    /// it until it is stopped. An `exec` leaves the status as it is, as the real one does.
+    struct InterruptedCreation {
+        id: String,
+        status: Mutex<&'static str>,
+        exec_error: Option<fn() -> RuntimeError>,
+        stop_error: Option<fn() -> RuntimeError>,
+        cpus: u64,
+        removed: AtomicBool,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl InterruptedCreation {
+        fn new(id: &str, status: &'static str, exec_error: Option<fn() -> RuntimeError>) -> Self {
+            Self {
+                id: id.into(),
+                status: Mutex::new(status),
+                exec_error,
+                stop_error: None,
+                cpus: 1,
+                removed: AtomicBool::new(false),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn ran(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl RuntimeRunner for InterruptedCreation {
+        fn run(
+            &self,
+            _paths: &RuntimePaths,
+            args: &[String],
+            _timeout: Duration,
+        ) -> Result<CommandOutput, RuntimeError> {
+            self.calls.lock().unwrap().push(args[0].clone());
+            let value = match args[0].as_str() {
+                "list" if self.removed.load(Ordering::SeqCst) => json!([]),
+                "list" => json!([{"name":"dev"}]),
+                "inspect" => json!({"name":"dev","status":*self.status.lock().unwrap(),"config":{
+                    "image":{"Oci":{"root_disk":{"kind":"managed","size_mib":10240}}},
+                    "resources":{"cpus":self.cpus,"max_cpus":2,"memory_mib":4096,"max_memory_mib":8192},
+                    "labels":{"silo.managed":"true","silo.machine-id":self.id},
+                    "mounts":[{"type":"Owned","guest":"/workspace","storage":{"kind":"disk","capacity_mib":10240}}]
+                }}),
+                "stop" if self.stop_error.is_some() => return Err((self.stop_error.unwrap())()),
+                "stop" => {
+                    *self.status.lock().unwrap() = "Stopped";
+                    Value::Null
+                }
+                "exec" if self.exec_error.is_some() => return Err((self.exec_error.unwrap())()),
+                "exec" => Value::Null,
+                "remove" => {
+                    self.removed.store(true, Ordering::SeqCst);
+                    Value::Null
+                }
+                other => panic!("Unexpected recovery operation: {other}"),
+            };
+            Ok(CommandOutput {
+                stdout: value.to_string(),
+                stderr: String::new(),
+            })
+        }
+    }
+
+    fn interrupted_creation(
+        directory: &tempfile::TempDir,
+    ) -> (RuntimePaths, ComputerConfiguration, ComputerConfigurationRequest) {
+        let root = directory.path();
+        let paths = RuntimePaths {
+            executable: root.join("msb"),
+            library: root.join("library"),
+            home: root.join("home"),
+            storage_home: None,
+            guest_image: root.join("image"),
+            metadata: root.join("computers.json"),
+            volumes: root.join("volumes"),
+        };
+        let configuration = computer(&uuid::Uuid::new_v4().to_string(), "dev");
+        let configuration = ComputerConfiguration {
+            cpus: 1,
+            max_cpus: 2,
+            workspace_storage_gib: 10,
+            runtime_storage_gib: 10,
+            ..configuration
+        };
+        let request = ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![configuration.clone()],
+        };
+        begin(&paths, &request).unwrap();
+        claim(&paths, &configuration).unwrap();
+        (paths, configuration, request)
+    }
+
+    #[test]
+    fn recovery_stops_the_running_computer_an_interrupted_creation_left() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, configuration, request) = interrupted_creation(&directory);
+        let runtime = InterruptedCreation::new(configuration.id(), "Running", None);
+        prepare_retry(&runtime, &paths, None).unwrap();
+        assert_eq!(read_metadata(&paths.metadata).unwrap(), request);
+        let calls = runtime.ran();
+        let position = |command: &str| calls.iter().position(|call| call == command).unwrap();
+        assert!(position("stop") < position("exec"), "{calls:?}");
+        assert!(!calls.iter().any(|call| call == "remove"), "{calls:?}");
+    }
+
+    fn tools_failed() -> RuntimeError {
+        RuntimeError::Failed {
+            operation: "Running a command".into(),
+            exit_code: Some(1),
+            detail: "tools missing".into(),
+        }
+    }
+
+    fn timed_out() -> RuntimeError {
+        RuntimeError::TimedOut {
+            operation: "Running a command".into(),
+        }
+    }
+
+    fn unavailable() -> RuntimeError {
+        RuntimeError::Unavailable("The runtime is not answering.".into())
+    }
+
+    #[test]
+    fn recovery_removes_an_interrupted_creation_whose_tools_check_failed() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, configuration, request) = interrupted_creation(&directory);
+        let runtime = InterruptedCreation::new(configuration.id(), "Running", Some(tools_failed));
+        prepare_retry(&runtime, &paths, None).unwrap();
+        // The computer was never saved, so nothing of it stays; the replay creates it again.
+        assert!(runtime.removed.load(Ordering::SeqCst));
+        assert!(read_metadata(&paths.metadata).unwrap().computers.is_empty());
+        assert!(!paths.volumes.join("dev").exists());
+        assert_eq!(pending_request(&paths).unwrap(), Some(request));
+    }
+
+    #[test]
+    fn recovery_keeps_an_interrupted_creation_when_the_tools_check_did_not_finish() {
+        for exec_error in [timed_out as fn() -> RuntimeError, unavailable] {
+            let _test_state = crate::test_support::global_state();
+            let directory = tempfile::tempdir().unwrap();
+            let (paths, configuration, request) = interrupted_creation(&directory);
+            let runtime = InterruptedCreation::new(configuration.id(), "Running", Some(exec_error));
+            assert!(prepare_retry(&runtime, &paths, None).is_err());
+            // Nothing was removed: the next launch checks the same computer again.
+            assert!(!runtime.removed.load(Ordering::SeqCst));
+            assert!(paths.volumes.join("dev").exists());
+            assert_eq!(pending_request(&paths).unwrap(), Some(request));
+            assert!(read_metadata(&paths.metadata).unwrap().computers.is_empty());
+        }
+    }
+
+    #[test]
+    fn recovery_keeps_an_interrupted_creation_that_would_not_stop() {
+        for stop_error in [timed_out as fn() -> RuntimeError, unavailable] {
+            let _test_state = crate::test_support::global_state();
+            let directory = tempfile::tempdir().unwrap();
+            let (paths, configuration, request) = interrupted_creation(&directory);
+            let mut runtime = InterruptedCreation::new(configuration.id(), "Running", None);
+            runtime.stop_error = Some(stop_error);
+            assert!(prepare_retry(&runtime, &paths, None).is_err());
+            assert!(!runtime.ran().iter().any(|call| call == "remove"));
+            assert!(paths.volumes.join("dev").exists());
+            assert_eq!(pending_request(&paths).unwrap(), Some(request));
+        }
+    }
+
+    #[test]
+    fn recovery_removes_an_interrupted_creation_whose_resources_do_not_match() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, configuration, request) = interrupted_creation(&directory);
+        let mut runtime = InterruptedCreation::new(configuration.id(), "Running", None);
+        runtime.cpus = 2;
+        prepare_retry(&runtime, &paths, None).unwrap();
+        assert!(runtime.removed.load(Ordering::SeqCst));
+        assert!(!paths.volumes.join("dev").exists());
+        assert!(read_metadata(&paths.metadata).unwrap().computers.is_empty());
+        assert_eq!(pending_request(&paths).unwrap(), Some(request));
+    }
+
+    #[test]
+    fn recovery_never_removes_a_saved_computer_whose_tools_cannot_be_checked() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, configuration, request) = interrupted_creation(&directory);
+        write_metadata(&paths.metadata, &request).unwrap();
+        let runtime = InterruptedCreation::new(configuration.id(), "Running", Some(unavailable));
+        prepare_retry(&runtime, &paths, None).unwrap();
+        let calls = runtime.ran();
+        assert!(!calls.iter().any(|call| matches!(call.as_str(), "stop" | "exec" | "remove")), "{calls:?}");
+        assert_eq!(read_metadata(&paths.metadata).unwrap(), request);
     }
 }

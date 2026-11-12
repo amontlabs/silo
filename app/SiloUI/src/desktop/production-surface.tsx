@@ -17,6 +17,7 @@ import type { SiloPreflightCheck } from "@/contracts/silo"
 import { SiloWindow } from "@/components/silo-window"
 import { InlineAlert } from "@/components/inline-alert"
 import { useDependencyStore, type DependencyStore } from "@/desktop/dependencies"
+import { onEngineConnected } from "@/desktop/engine-connection"
 import { ProductionOnboarding } from "@/desktop/production-onboarding"
 import { localUpdatingNotice, useProductionSource, type ProductionSource } from "@/desktop/production-source"
 import { StatusPanel } from "@/desktop/status-panel"
@@ -49,6 +50,10 @@ export function Unavailable({ message, retry, retryLabel = "Retry checks", check
     </SiloWindow>
   )
 }
+
+const MAX_RECOVERY_TRIES = 30
+/** Waits between automatic re-runs: quick at first, then every 10 seconds (about 5 minutes in all). */
+function recoveryDelayMs(tries: number) { return [2_000, 3_000, 5_000][tries] ?? 10_000 }
 
 type ProductionSurfaceProps = { source: ProductionSource; dependencyStore: DependencyStore | null; statusPanel?: boolean }
 export function ProductionSurface(props: ProductionSurfaceProps) {
@@ -89,6 +94,27 @@ function ProductionContent({ source, dependencyStore, statusPanel = false }: Pro
   // Initialize again rather than refresh: after a failed start it also restores live
   // events, polling and refresh-on-focus; once live it only refreshes.
   const retryChecks = useStableCallback(() => { dependencies?.retry(); void source.initialize().catch((error: unknown) => console.error("Silo live updates:", error)) })
+  // The engine can start after the app: checks and loads that ran before it was there failed
+  // for that reason alone, so run them again when it connects instead of waiting for Retry.
+  // A connection made while the engine is still starting or upgrading storage can be answered
+  // with errors and no second event follows, so the same re-run also repeats on a timer.
+  const [recoveryTries, setRecoveryTries] = useState(0)
+  const recoverOnEngineConnected = useStableCallback(() => {
+    if (!current.source || current.error || checking || failures.length) { setRecoveryTries(1); retryChecks() } else setRecoveryTries(0)
+  })
+  useEffect(() => onEngineConnected(recoverOnEngineConnected), [recoverOnEngineConnected])
+  const unhealthy = !current.source || failures.length > 0
+  const settling = current.loading || checking
+  useEffect(() => {
+    if (!unhealthy) {
+      // oxlint-disable-next-line react/set-state-in-effect
+      setRecoveryTries(0)
+      return
+    }
+    if (settling || recoveryTries >= MAX_RECOVERY_TRIES) return
+    const timer = globalThis.setTimeout(() => { setRecoveryTries((tries) => tries + 1); retryChecks() }, recoveryDelayMs(recoveryTries))
+    return () => globalThis.clearTimeout(timer)
+  }, [unhealthy, settling, recoveryTries, retryChecks])
   // Finish persists completion; keep this session on its preferences screen until Open Silo.
   // Settings that could not be read (or a damaged, write-protected file) report defaults,
   // so a missing completion flag is unknown, not "new user": never route to onboarding

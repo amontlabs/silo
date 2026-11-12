@@ -1,9 +1,9 @@
 //! Bounded guest execution (`guest.exec`) and the pieces long-running jobs share: request
 //! validation, the guest-side supervisor and the process-group control helper.
 use super::{
-    process::{self, Stopped},
+    process::{self, StderrLimit, Stopped},
     target::Target,
-    GuestError, MAX_RESPONSE_RAW_BYTES,
+    GuestError, HELPER_STDERR_BYTES, MAX_RESPONSE_RAW_BYTES,
 };
 use silo_api::jobs::ErrorCode;
 use std::{collections::HashSet, sync::atomic::AtomicBool, time::Duration};
@@ -117,7 +117,15 @@ fn control(
     let arguments: Vec<String> = arguments.iter().map(|word| (*word).to_owned()).collect();
     let argv = perl_argv(CONTROL, &arguments);
     let plan = target.plan(&argv, &[], root, false)?;
-    match process::run_collect(&plan, None, timeout, 4096, 4096, None, &|| {})? {
+    match process::run_collect(
+        &plan,
+        None,
+        timeout,
+        4096,
+        StderrLimit::Keep(HELPER_STDERR_BYTES),
+        None,
+        &|| {},
+    )? {
         Ok(collected) => Ok((
             collected.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&collected.stdout).trim().to_owned(),
@@ -210,8 +218,8 @@ pub(crate) fn settle_exit_with(
 /// Runs a request to completion within its deadline and stdout allowance.
 ///
 /// Errors: `not_running` (the computer is never started), `timed_out`,
-/// `output_too_large` (standard output only; standard error is spooled, not capped) and
-/// `internal` when the complete result cannot fit one response frame.
+/// `output_too_large` (standard output past `max_stdout`, or standard error past one
+/// response's worth of bytes; the command is stopped when either goes over).
 pub fn run_bounded(target: &Target, request: &ExecRequest) -> Result<ExecOutput, GuestError> {
     run_bounded_cancellable(target, request, None)
 }
@@ -236,7 +244,7 @@ pub(crate) fn run_bounded_cancellable(
         request.stdin.as_deref(),
         request.timeout,
         request.max_stdout,
-        MAX_RESPONSE_RAW_BYTES + 1,
+        StderrLimit::Stop(MAX_RESPONSE_RAW_BYTES),
         cancel,
         &end_guest,
     )?;
@@ -249,6 +257,10 @@ pub(crate) fn run_bounded_cancellable(
             ErrorCode::OutputTooLarge,
             "The command in the computer printed too much.",
         )),
+        Err(Stopped::StderrOverflow) => Err(GuestError::new(
+            ErrorCode::OutputTooLarge,
+            "The command in the computer printed too much error output.",
+        )),
         Err(Stopped::Cancelled) => Err(GuestError::new(
             ErrorCode::Cancelled,
             "The command in the computer was cancelled.",
@@ -258,11 +270,6 @@ pub(crate) fn run_bounded_cancellable(
                 GuestError::internal("The connection to the computer ended unexpectedly.")
             })?;
             let stderr_text = String::from_utf8_lossy(&collected.stderr).into_owned();
-            if collected.stderr_len as usize > MAX_RESPONSE_RAW_BYTES {
-                return Err(GuestError::internal(
-                    "The command printed more error output than one response can carry.",
-                ));
-            }
             let (exit_code, signal) = settle_exit(target, root, &token, code, &stderr_text)?;
             Ok(ExecOutput {
                 exit_code,
@@ -372,7 +379,7 @@ mod tests {
             None,
             Duration::from_secs(20),
             1024,
-            1024,
+            StderrLimit::Stop(1024),
             None,
             &|| {},
         )
@@ -462,6 +469,29 @@ mod tests {
         run.max_stdout = 999;
         let error = run_bounded(&target, &run).unwrap_err();
         assert_eq!(error.code, ErrorCode::OutputTooLarge);
+    }
+
+    #[test]
+    fn standard_error_beyond_the_allowance_stops_the_run() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let mut run = request(&["sh", "-c", "head -c 100000000 /dev/zero >&2"]);
+        run.timeout = Duration::from_secs(20);
+        let error = run_bounded(&target, &run).unwrap_err();
+        assert_eq!(error.code, ErrorCode::OutputTooLarge);
+        assert!(error.message.contains("error output"), "{}", error.message);
+    }
+
+    #[test]
+    fn an_endless_standard_error_writer_is_stopped_early() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let mut run = request(&["sh", "-c", "while :; do printf xxxxxxxx >&2; done"]);
+        run.timeout = Duration::from_secs(20);
+        let started = std::time::Instant::now();
+        let error = run_bounded(&target, &run).unwrap_err();
+        assert_eq!(error.code, ErrorCode::OutputTooLarge);
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     #[test]

@@ -1,0 +1,247 @@
+diff --git a/crates/image/lib/checkpoint/manifest.rs b/crates/image/lib/checkpoint/manifest.rs
+index e67c9c9f71d479d9b783e39886f4635e10885e1e..760d622417310c82a5dc099dc21a9d822808c1ad 100644
+--- a/crates/image/lib/checkpoint/manifest.rs
++++ b/crates/image/lib/checkpoint/manifest.rs
+@@ -17,6 +17,8 @@ const MAX_MANIFEST_BYTES: usize = 8 * 1024 * 1024;
+ const MAX_COMPONENTS: usize = 4096;
+ const MAX_MEMORY_EXTENTS: usize = 4 * 1024 * 1024;
+ const VIRTIO_TYPE_FS: u32 = 26;
++const MAX_TOTAL_DEVICE_STATE_BYTES: u64 = 64 * 1024 * 1024;
++const DEVICE_STATE_FRAME_BYTES: u64 = 1024 * 1024;
+ #[cfg(test)]
+ pub(crate) const DEFAULT_FS_STATE_LIMIT: usize = msb_krun::DEFAULT_MAX_FS_BACKEND_STATE_BYTES;
+ 
+@@ -238,6 +240,27 @@ impl DeviceStateRef {
+     }
+ }
+ 
++/// Add one device state object to the checkpoint's retained total, refusing a checkpoint whose
++/// device states together exceed the aggregate budget however many devices it names.
++///
++/// The budget is 64 MiB, or one maximal virtio-fs state when `fs_state_limit` is configured
++/// larger than that.
++pub fn charge_device_state(
++    retained: &mut u64,
++    len: u64,
++    fs_state_limit: usize,
++) -> Result<(), String> {
++    let one_fs_state = (fs_state_limit as u64).saturating_add(DEVICE_STATE_FRAME_BYTES);
++    let budget = MAX_TOTAL_DEVICE_STATE_BYTES.max(one_fs_state);
++    *retained = retained.saturating_add(len);
++    if *retained > budget {
++        return Err(format!(
++            "checkpoint device state exceeds the aggregate {budget} byte budget"
++        ));
++    }
++    Ok(())
++}
++
+ /// Error for a virtio-fs state object larger than the configured budget.
+ pub fn fs_state_budget_error(fs_state_limit: usize) -> String {
+     format!(
+diff --git a/crates/image/lib/checkpoint/mod.rs b/crates/image/lib/checkpoint/mod.rs
+index 5445ec9dc3d028cd507fd62b5491601864b66cc1..9ce7e843d2807299436a516aadfb4ba46800df23 100644
+--- a/crates/image/lib/checkpoint/mod.rs
++++ b/crates/image/lib/checkpoint/mod.rs
+@@ -24,7 +24,8 @@ pub use layer_selection::{DiskCompactionPlan, DiskLayerExportPlan, LayerSelectio
+ pub use manifest::{
+     CaptureIntent, CheckpointGeometry, CheckpointManifest, ContentRef, DeviceStateRef,
+     DiskGenerationManifest, DiskLayerRef, MemoryCaptureMode, MemoryExtent, MemoryExtentContent,
+-    MemoryManifest, ResourceDescriptor, ResourceTreatment, fs_state_budget_error,
++    MemoryManifest, ResourceDescriptor, ResourceTreatment, charge_device_state,
++    fs_state_budget_error,
+ };
+ pub use qcow::{
+     create_qcow2_overlay, qcow2_backing_basename, relocate_qcow2_backing, relocated_qcow2_header,
+diff --git a/crates/image/lib/checkpoint/resolver.rs b/crates/image/lib/checkpoint/resolver.rs
+index 1b256e7d8168000ee9c5bb9b040e909f2ed77205..9c27cbe89b82860e34c2dba0ed328341451b3cf0 100644
+--- a/crates/image/lib/checkpoint/resolver.rs
++++ b/crates/image/lib/checkpoint/resolver.rs
+@@ -11,7 +11,7 @@ use sha2::{Digest as _, Sha256};
+ use super::admitted_disk::AdmittedDiskLayers;
+ use super::{
+     CheckpointManifest, DiskGenerationManifest, DiskLayerRef, MemoryExtentContent, MemoryManifest,
+-    ObjectId, fs_state_budget_error,
++    ObjectId, charge_device_state, fs_state_budget_error,
+ };
+ use crate::error::{ImageError, ImageResult};
+ 
+@@ -121,12 +121,15 @@ impl CheckpointClosure {
+             &checkpoint.execution_state,
+             MAX_EXECUTION_STATE_BYTES,
+         )?;
++        let mut retained = 0u64;
+         for device in &checkpoint.devices {
+             let max_len = device.max_state_bytes(fs_state_limit);
+             if device.is_virtio_fs() && object_len(&root, &device.state)? > max_len {
+                 return checkpoint_error(fs_state_budget_error(fs_state_limit));
+             }
+             let bytes = read_object_verified(&root, &device.state, max_len)?;
++            charge_device_state(&mut retained, bytes.len() as u64, fs_state_limit)
++                .map_err(checkpoint_error_value)?;
+             if device.is_virtio_fs() {
+                 device
+                     .decode_virtio_state(&bytes, fs_state_limit)
+@@ -487,6 +490,16 @@ mod tests {
+         bytes
+     }
+ 
++    #[test]
++    fn device_state_total_is_bounded() {
++        let mut retained = 0;
++        for _ in 0..32 {
++            charge_device_state(&mut retained, 2 * 1024 * 1024, 8 << 20).unwrap();
++        }
++        let error = charge_device_state(&mut retained, 1, 8 << 20).unwrap_err();
++        assert!(error.contains("aggregate"), "{error}");
++    }
++
+     fn fixture() -> (tempfile::TempDir, ObjectId) {
+         let directory = tempfile::tempdir().unwrap();
+         let store = super::super::LocalObjectStore::open(directory.path()).unwrap();
+diff --git a/crates/runtime/lib/checkpoint/restore.rs b/crates/runtime/lib/checkpoint/restore.rs
+index 7aa2928b5f77c7518c108a79c899d45cd26cc52d..9937c65f39aa39fc88acec0e34aaf69fd5f473c6 100644
+--- a/crates/runtime/lib/checkpoint/restore.rs
++++ b/crates/runtime/lib/checkpoint/restore.rs
+@@ -207,6 +207,7 @@ impl PreparedCheckpointRestore {
+         root: PathBuf,
+         expected_root: &str,
+         fs_state_limit: usize,
++        max_fs_devices: usize,
+     ) -> Result<Self, String> {
+         let total_started = Instant::now();
+         let expected = ObjectId::new(expected_root).map_err(|error| error.to_string())?;
+@@ -214,6 +215,7 @@ impl PreparedCheckpointRestore {
+         let closure = CheckpointClosure::open(root, Some(&expected), fs_state_limit)
+             .map_err(|error| format!("validate checkpoint closure: {error}"))?;
+         let closure_open_us = closure_started.elapsed().as_micros();
++        validate_device_inventory(&closure.checkpoint().devices, max_fs_devices)?;
+         let pause_generation = closure.checkpoint().pause_generation;
+         let agent_started = Instant::now();
+         let agent = parse_restored_agent(&closure)?;
+@@ -510,6 +512,7 @@ fn decode_devices(
+     mut read: impl FnMut(&ObjectId, u64) -> Result<Vec<u8>, String>,
+ ) -> Result<Vec<PreparedDeviceRestore>, String> {
+     let mut devices = Vec::with_capacity(references.len());
++    let mut retained = 0u64;
+     for device in references {
+         let max_state_bytes = device.max_state_bytes(fs_state_limit);
+         if device.is_virtio_fs()
+@@ -525,6 +528,13 @@ fn decode_devices(
+         }
+         let bytes = read(&device.state, max_state_bytes)
+             .map_err(|error| format!("read checkpoint device {}: {error}", device.device_id))?;
++        // Decoded states are retained until the VM is built, so bound them in total.
++        microsandbox_image::checkpoint::charge_device_state(
++            &mut retained,
++            bytes.len() as u64,
++            fs_state_limit,
++        )
++        .map_err(|error| format!("read checkpoint device {}: {error}", device.device_id))?;
+         if device.device_type == 2 {
+             let state = msb_krun::BlockDeviceState::decode(&bytes).map_err(|error| {
+                 format!(
+@@ -563,6 +573,28 @@ fn decode_devices(
+     Ok(devices)
+ }
+ 
++/// Check the captured device inventory against what this sandbox can contain, from manifest
++/// metadata alone, before any payload is read or retained.
++///
++/// A sandbox has at most one virtio-fs transport for its root, one for the runtime share and one
++/// per mount, so a checkpoint naming more virtio-fs devices than `max_fs_devices` cannot belong to
++/// it.
++fn validate_device_inventory(
++    references: &[microsandbox_image::checkpoint::DeviceStateRef],
++    max_fs_devices: usize,
++) -> Result<(), String> {
++    let fs_devices = references
++        .iter()
++        .filter(|device| device.is_virtio_fs())
++        .count();
++    if fs_devices > max_fs_devices {
++        return Err(format!(
++            "checkpoint names {fs_devices} virtio-fs devices but this sandbox has at most {max_fs_devices}"
++        ));
++    }
++    Ok(())
++}
++
+ fn parse_restored_agent(closure: &CheckpointClosure) -> Result<RestoredAgentState, String> {
+     let resource = closure
+         .checkpoint()
+@@ -690,6 +722,39 @@ mod tests {
+         }
+     }
+ 
++    fn device_refs(count: usize, device_type: u32) -> Vec<DeviceStateRef> {
++        let object = ObjectId::from_bytes(b"state").unwrap();
++        (0..count)
++            .map(|index| DeviceStateRef {
++                device_type,
++                device_id: format!("device{index}"),
++                state: object.clone(),
++            })
++            .collect()
++    }
++
++    #[test]
++    fn device_inventory_bounds_virtio_fs_devices_before_any_read() {
++        assert!(validate_device_inventory(&device_refs(3, 26), 3).is_ok());
++        assert!(validate_device_inventory(&device_refs(4096, 2), 3).is_ok());
++        let error = validate_device_inventory(&device_refs(4, 26), 3).unwrap_err();
++        assert!(error.contains("at most 3"), "{error}");
++    }
++
++    #[test]
++    fn decoded_device_state_is_bounded_in_total() {
++        const MIB: u64 = 1024 * 1024;
++        let mut retained = 0;
++        for _ in 0..9 {
++            microsandbox_image::checkpoint::charge_device_state(&mut retained, 7 * MIB, 8 << 20)
++                .unwrap();
++        }
++        let error =
++            microsandbox_image::checkpoint::charge_device_state(&mut retained, 7 * MIB, 8 << 20)
++                .unwrap_err();
++        assert!(error.contains("aggregate"), "{error}");
++    }
++
+     #[test]
+     fn oversized_virtio_fs_state_names_the_budget_setting() {
+         const MIB: u64 = 1024 * 1024;
+diff --git a/crates/runtime/lib/runner/vm.rs b/crates/runtime/lib/runner/vm.rs
+index 4364273e219d4c79f7554f307b50c296368369d2..99eafa28d31124220d667280b57070e3452b6b9d 100644
+--- a/crates/runtime/lib/runner/vm.rs
++++ b/crates/runtime/lib/runner/vm.rs
+@@ -1946,6 +1946,22 @@ struct VmBuildRuntime {
+     startup_progress: crate::startup_progress::StartupProgressCallback,
+ }
+ 
++/// Upper bound on the virtio-fs transports this configuration constructs: the root, the runtime
++/// share, and one per mount, owned volume, file mount and embedded backend.
++fn max_virtio_fs_devices(vm: &VmConfig) -> usize {
++    let backends = {
++        #[cfg(unix)]
++        {
++            vm.backends.len()
++        }
++        #[cfg(not(unix))]
++        {
++            0
++        }
++    };
++    2 + vm.mounts.len() + vm.owned_volumes.len() + vm.file_mounts.len() + backends
++}
++
+ #[allow(clippy::too_many_arguments)]
+ fn build_vm(
+     config: &mut Config,
+@@ -1994,6 +2010,7 @@ fn build_vm(
+                     restore.closure.clone(),
+                     &restore.checkpoint_root,
+                     vm.fs_state_limit(),
++                    max_virtio_fs_devices(vm),
+                 )
+             }
+             .map_err(|error| {

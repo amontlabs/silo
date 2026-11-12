@@ -35,9 +35,13 @@ pub struct Sources<'a> {
     pub open_request: &'a dyn Fn(&str) -> Option<String>,
 }
 
-/// Names of the throwaway computers Silo makes for its own measurements.
+/// Names of the throwaway computers Silo makes for its own measurements, recipe builds,
+/// exports without logins and rebuilds on the newest image.
 pub fn hidden(name: &str) -> bool {
-    name.starts_with("silo-baseline-") || name.starts_with("silo-build-")
+    name.starts_with("silo-baseline-")
+        || name.starts_with("silo-build-")
+        || name.starts_with(crate::export_scrub::COPY_PREFIX)
+        || name.starts_with(crate::rebuild::BUILD_PREFIX)
 }
 
 fn from_of(
@@ -297,6 +301,7 @@ mod tests {
                 },
                 fork_was_running: false,
                 target_was_running: false,
+                makers: Default::default(),
             },
             state: State::Promoted,
             at: 1,
@@ -332,6 +337,7 @@ mod tests {
             computer("a", "a", &[]),
             computer("d", "d", &[]),
             computer("h", "silo-baseline-1", &[]),
+            computer("e", "silo-export-0123abcd", &[]),
         ]);
         let ids: Vec<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
         assert_eq!(

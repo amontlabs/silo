@@ -8,7 +8,6 @@ use serde_json::{json, Map, Value};
 use silo_api::methods::{
     github::{
         GitHubAccessSetParams, GitHubConfigurationRetryParams, GitHubConfigurationSaveParams,
-        GitHubPersonalTokenSaveParams,
     },
     operations::{CancelJobParams, GetJobParams},
     requests, Kind, Request,
@@ -112,14 +111,18 @@ fn configuration_for_engine(configuration: &Value, roster: &Roster) -> Result<Va
                     .cloned()
                     .unwrap_or(default)
             };
-            Ok(json!({
+            let mut engine_policy = json!({
                 "computerId": roster.id_of(name)?,
                 "identity": field("identity", Value::Null),
                 "repositoryMode": field("repositoryMode", json!("selected")),
                 "repositories": field("repositories", json!([])),
                 "allRepositoriesAllowChanges": field("allRepositoriesAllowChanges", json!(false)),
                 "authenticationMethod": field("authenticationMethod", json!("oauth")),
-            }))
+            });
+            if let Some(token) = policy.get("tokenSecretId").filter(|value| !value.is_null()) {
+                engine_policy["tokenSecretId"] = token.clone();
+            }
+            Ok(engine_policy)
         })
         .collect::<Result<Vec<_>, EngineError>>()?;
     Ok(json!({
@@ -394,36 +397,6 @@ pub async fn retry_github_configuration(
     retry_configuration(&engine, computer).await
 }
 
-#[tauri::command]
-pub async fn save_github_personal_token(
-    engine: Engine<'_>,
-    window: WebviewWindow,
-    token: String,
-) -> Result<Value, EngineError> {
-    require_main(&window)?;
-    mutate(
-        &engine,
-        requests::github_personal_token_save(GitHubPersonalTokenSaveParams {
-            token,
-            device_id: None,
-        }),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn remove_github_personal_token(
-    engine: Engine<'_>,
-    window: WebviewWindow,
-) -> Result<Value, EngineError> {
-    require_main(&window)?;
-    mutate(
-        &engine,
-        requests::github_personal_token_remove(device(None)),
-    )
-    .await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,6 +475,33 @@ mod forwarding_tests {
         assert_eq!(failed["diagnosticDetails"], "{\"a\":1}");
         assert_eq!(state["computerOperations"][1]["computer"], "gone");
         assert_eq!(state["policyRevision"], 3);
+    }
+
+    #[tokio::test]
+    async fn saving_a_configuration_forwards_the_chosen_token_secret() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        save_configuration(
+            &engine,
+            &json!({
+                "baseRevision": 3,
+                "computers": [{
+                    "computer": "dev", "identity": {"name": "N", "email": "e@x", "apply": true},
+                    "authenticationMethod": "token", "tokenSecretId": "secret-1", "repositories": []
+                }]
+            }),
+        )
+        .await
+        .unwrap();
+        let calls = fake.calls(MethodName::GitHubConfigurationSave);
+        assert_eq!(
+            calls[0]["configuration"]["computers"][0]["tokenSecretId"],
+            "secret-1"
+        );
+        assert_eq!(
+            calls[0]["configuration"]["computers"][0]["authenticationMethod"],
+            "token"
+        );
     }
 
     #[tokio::test]

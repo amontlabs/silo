@@ -385,6 +385,7 @@ mod tests {
             checkpoint,
             fork_was_running: false,
             target_was_running: false,
+            makers: Default::default(),
         };
         let none: &dyn Fn(&str, &str) -> Result<(), String> = &|_, _| Ok(());
         let guest: &dyn Fn(&str, &[String]) -> Result<String, String> = &|_, _| Ok(String::new());

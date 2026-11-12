@@ -232,11 +232,59 @@ fn locate(previous: &Path, selected: &Path) -> Backup {
     }
 }
 
+/// The clone of the storage folder taken before computers were moved to protected storage
+/// (`runtime_migration::PROTECTED_STORAGE_BACKUP`). Unlike the previous generation it can exist
+/// without it, and is never in use: only a real folder counts, a link is left alone.
+fn protected_storage_backup(app_data: &Path) -> Option<PathBuf> {
+    let folder = app_data.join(runtime_migration::PROTECTED_STORAGE_BACKUP);
+    fs::symlink_metadata(&folder)
+        .ok()
+        .filter(|metadata| metadata.is_dir())
+        .map(|_| folder)
+}
+
 fn inspect(app_data: &Path) -> Backup {
-    match runtime_migration::backup_locations(app_data) {
+    let previous = match runtime_migration::backup_locations(app_data) {
         Some(at) => locate(&at.previous, &at.selected),
         None => Backup::NotABackup,
+    };
+    match (previous, protected_storage_backup(app_data)) {
+        (Backup::Gone | Backup::NotABackup, Some(folder)) => Backup::Present(folder),
+        (previous, _) => previous,
     }
+}
+
+/// Every folder the backup consists of, given the one `inspect` found.
+fn backup_folders(app_data: &Path, found: PathBuf) -> Vec<PathBuf> {
+    let mut folders = vec![found];
+    folders.extend(protected_storage_backup(app_data).filter(|extra| *extra != folders[0]));
+    folders
+}
+
+/// Puts a finished protected-storage clone in place of any earlier one and starts the 14 days
+/// again: a new clone is a new backup and must not be deleted on the window of an older one.
+/// The whole swap holds the deletion lock, so a check that comes due cannot delete the fresh
+/// clone between the rename and the new window.
+pub(crate) fn install_clone(app_data: &Path, partial: &Path, backup: &Path) -> Result<(), String> {
+    let _deletion = lock(&DELETION);
+    match fs::symlink_metadata(backup) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(backup)
+            .map_err(|_| "the earlier backup could not be replaced".to_string())?,
+        Ok(_) => return Err("something else is in the backup's place".into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => return Err("the backup's place could not be read".into()),
+    }
+    fs::rename(partial, backup)
+        .and_then(|()| fs::File::open(app_data).and_then(|directory| directory.sync_all()))
+        .map_err(|_| "the backup could not be completed".to_string())?;
+    let _held = lock(&RECORD);
+    forget(app_data);
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn hold_deletion_for_test() -> MutexGuard<'static, ()> {
+    lock(&DELETION)
 }
 
 /// The start of the window for a backup that is present, recording it now when this is the
@@ -356,9 +404,11 @@ fn allocated_bytes(root: &Path) -> io::Result<u64> {
 
 fn measure(app_data: &Path) -> Result<Option<u64>, String> {
     match inspect(app_data) {
-        Backup::Present(previous) => allocated_bytes(&previous)
+        Backup::Present(found) => backup_folders(app_data, found)
+            .iter()
+            .try_fold(0, |total, folder| Ok(total + allocated_bytes(folder)?))
             .map(Some)
-            .map_err(|_| "Silo could not measure the pre-upgrade backup.".into()),
+            .map_err(|_: io::Error| "Silo could not measure the pre-upgrade backup.".into()),
         _ => Ok(None),
     }
 }
@@ -428,8 +478,8 @@ fn tidy_alias_of_deleted_backup(app_data: &Path, user_home: Option<&Path>) {
 /// was already gone.
 fn delete_backup(app_data: &Path, user_home: Option<&Path>) -> Result<bool, String> {
     let _deletion = lock(&DELETION);
-    let previous = match inspect(app_data) {
-        Backup::Present(previous) => previous,
+    let found = match inspect(app_data) {
+        Backup::Present(found) => found,
         Backup::Gone => {
             remove_previous_alias(app_data, user_home);
             forget(app_data);
@@ -438,12 +488,19 @@ fn delete_backup(app_data: &Path, user_home: Option<&Path>) -> Result<bool, Stri
         Backup::NotABackup => return Err(NOT_A_BACKUP.into()),
         Backup::Refused(reason) => return Err(reason.into()),
     };
-    ensure_converted_runtime_is_independent(app_data, &previous)?;
+    // The clone is deleted first: the previous generation's checks and alias come after the
+    // part that cannot make a converted computer depend on it.
+    let folders = backup_folders(app_data, found);
+    if folders.contains(&app_data.join("runtime")) {
+        ensure_converted_runtime_is_independent(app_data, &app_data.join("runtime"))?;
+    }
     // `remove_dir_all` unlinks symlinks instead of following them. A failure part-way keeps
     // the rest, the record and the row, so the user can retry.
-    fs::remove_dir_all(&previous).map_err(|error| {
-        format!("Silo could not finish deleting the pre-upgrade backup: {error}. Your computers were not affected. Try again.")
-    })?;
+    for folder in folders.iter().rev() {
+        fs::remove_dir_all(folder).map_err(|error| {
+            format!("Silo could not finish deleting the pre-upgrade backup: {error}. Your computers were not affected. Try again.")
+        })?;
+    }
     let _ = fs::File::open(app_data).and_then(|directory| directory.sync_all());
     remove_previous_alias(app_data, user_home);
     let _held = lock(&RECORD);
@@ -1330,5 +1387,75 @@ mod tests {
         // The next check finds the folder gone and the alias still there, and finishes.
         assert!(!delete_if_due(dir.path(), Some(home.path()), at("2026-10-01T12:00:00Z")).unwrap());
         assert!(!present(&alias));
+    }
+
+    fn protected_clone(app_data: &Path) -> PathBuf {
+        let clone = app_data.join(runtime_migration::PROTECTED_STORAGE_BACKUP);
+        fs::create_dir_all(clone.join("microsandbox")).unwrap();
+        fs::write(clone.join("microsandbox/db"), vec![3; 8192]).unwrap();
+        clone
+    }
+
+    #[test]
+    fn the_protected_storage_clone_is_measured_and_deleted_with_the_previous_generation() {
+        let dir = complete();
+        let alone = measure(dir.path()).unwrap().unwrap();
+        let clone = protected_clone(dir.path());
+        assert!(measure(dir.path()).unwrap().unwrap() > alone);
+        assert_eq!(reveal_path(dir.path()).unwrap(), dir.path().join("runtime"));
+        assert!(delete_backup(dir.path(), None).unwrap());
+        assert!(!dir.path().join("runtime").exists());
+        assert!(!clone.exists());
+        assert!(dir.path().join("runtime-checkpoints-converted").is_dir());
+    }
+
+    #[test]
+    fn the_clone_alone_is_a_backup_once_the_previous_generation_is_gone() {
+        let dir = complete();
+        assert!(delete_backup(dir.path(), None).unwrap());
+        let clone = protected_clone(dir.path());
+        assert_eq!(reveal_path(dir.path()).unwrap(), clone);
+        let first = status(dir.path(), at("2026-11-01T10:00:00Z")).unwrap().unwrap();
+        assert_eq!(first.delete_at.as_deref(), Some("2026-11-15T10:00:00Z"));
+        assert!(!delete_if_due(dir.path(), None, at("2026-11-14T10:00:00Z")).unwrap());
+        assert!(clone.is_dir());
+        assert!(delete_if_due(dir.path(), None, at("2026-11-15T10:00:00Z")).unwrap());
+        assert!(!clone.exists());
+        assert_eq!(status(dir.path(), at("2026-11-15T11:00:00Z")).unwrap(), None);
+    }
+
+    #[test]
+    fn a_new_clone_gets_its_own_fourteen_days() {
+        let dir = complete();
+        save(dir.path(), at("2026-10-01T10:00:00Z"), true).unwrap();
+        runtime_migration::clone_protected_storage_backup_for_test(
+            dir.path(),
+            &dir.path().join("runtime-checkpoints-converted"),
+        );
+        let first = status(dir.path(), at("2026-10-14T10:00:00Z")).unwrap().unwrap();
+        assert_eq!(first.delete_at.as_deref(), Some("2026-10-28T10:00:00Z"));
+        assert!(first.notice_pending);
+    }
+
+    #[test]
+    fn the_clone_never_stands_in_for_the_folder_silo_reads_and_a_link_is_left_alone() {
+        // The clean generation keeps the only copy in `runtime`: only the clone is a backup.
+        let dir = migrated(Some(CLEAN), Some("complete"));
+        let clone = protected_clone(dir.path());
+        assert!(delete_backup(dir.path(), None).unwrap());
+        assert!(!clone.exists());
+        assert!(dir.path().join("runtime").is_dir());
+        // A link in the clone's place is not inspected, followed or removed.
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                outside.path(),
+                dir.path().join(runtime_migration::PROTECTED_STORAGE_BACKUP),
+            )
+            .unwrap();
+            assert!(matches!(inspect(dir.path()), Backup::NotABackup));
+            assert!(outside.path().is_dir());
+        }
     }
 }

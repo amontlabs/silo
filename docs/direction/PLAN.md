@@ -65,7 +65,7 @@ would show another computer are filtered, as `Filter` does today.
 
 ### 3. The channel inside a computer
 
-Decided by spike S1 (below). Planned shape:
+Spike S1 confirmed this shape with the real runtime ([evidence](evidence/S1.md)); no new runtime patch is needed:
 
 - The engine listens on one loopback TCP port per computer and serves the normal engine protocol
   on it with `Caller::Computer`. The computer's network rules allow exactly that port on the
@@ -77,9 +77,14 @@ Decided by spike S1 (below). Planned shape:
   start; macOS: the device's own `silo`, copied over SSH). It reads `/etc/silo/endpoint.json`.
   `silo mcp` is registered with Claude Code and Codex the way Cua Driver is.
 - The `/.msb` spool bridge and its folder parsing are removed.
-- If S1 shows the gateway rule cannot be used (create grammar, restore, fork or export refuse
-  it), the fallback is a runtime patch that maps gateway port to a Unix socket per computer
-  (`--silo-local-service`), which also gives a fixed port; the engine side stays the same.
+- The rule is `--net-rule allow@host:tcp:<P>`, passed at create; it survives stop and start. A
+  restore resets rules unless they are all passed again, so restore and fork build them from the
+  stored policy, and a fork swaps in its own port. An import gets its rule at its first start.
+  An existing computer gets it through the engine's restore in place while it is stopped.
+- The device side always sees `127.0.0.1`, so the token is what identifies the computer. The
+  client reconnects after a memory restore.
+- Later hardening, not in this build: a runtime patch mapping the gateway port to a Unix socket,
+  so no loopback port is open on the device.
 
 Protocol version goes to 8 with this change, once, because `guestClient.*` is retyped.
 
@@ -120,7 +125,7 @@ No fixed caps on how many computers an agent makes. Instead:
   the same facts when available memory or free disk is below the floor (defaults: memory
   `max(4 GiB, 10 %)`, disk `max(10 GiB, 5 %)`, changeable in settings). Above the floor but
   below twice the floor, the call works and its result carries a warning.
-- The CLI's `fork_ram_budget` and the in-guest caps (32 forks, 3 running) go away.
+- The in-guest caps (32 forks, 3 running) go away. The CLI's `fork_ram_budget` goes with `silo.yaml` (item T6).
 
 ### 7. Merge
 
@@ -164,6 +169,15 @@ No fixed caps on how many computers an agent makes. Instead:
 - In allowlist mode the rule that lets the computer use any public resolver is dropped, so names
   resolve only through Silo's resolver.
 - A `Computer` caller widening its own policy is an approval; narrowing is free.
+- From S1: hostname rules for hosts no secret covers work only with the runtime's strict mode
+  off, because under strict a TLS connection that is not intercepted is refused when only a
+  hostname rule admitted it. Allowlist computers are created with strict off; `restore` needs a
+  small runtime patch to carry the setting, the export code must reset it, and the macOS gateway
+  needs a `policy` and a `strict` field in its init request. The threat model must say what
+  strict off costs: a host that shares an address with an allowed host may be reachable.
+- Rule sets. Open: default egress deny, `allow@dns`, the channel rule, `allow@public`.
+  Allowlist: the same without `allow@public`, plus `allow@<host>:tcp:443` per entry (and the
+  `*.` form). Closed: default deny and the channel rule only.
 - Not in this build: the DNS query log (needs a runtime patch).
 
 ### 10. macOS computers
@@ -193,9 +207,14 @@ No fixed caps on how many computers an agent makes. Instead:
 - A personal GitHub token is a secret of kind `github-token`. Several can exist. A computer
   uses signed-in access or one token secret. The engine still hands the proxy the same token
   profile, so the runtime patch does not change. The saved single token is migrated.
-- Exports: a temporary fork is scrubbed of known login files, trimmed, exported and dropped.
+- Exports: a temporary fork is scrubbed of known login files, exported and dropped.
   Shipped only if a canary check shows the login's bytes are not in the file; otherwise today's
-  warning stays. `~/.claude.json` joins the known login paths.
+  warning stays. `~/.claude.json` joins the known login paths. **Built as best effort (T14):** the
+  canary finds the bytes in the file, because a fork's disks are layers over the computer's and the
+  shared read-only layers are written whole (trimming the copy does not reach them; the root is an
+  overlay whose ext4 disk has to be mounted a second time to be trimmed). So the files are removed from
+  the exported computer and the wording says traces may remain. Checkpoint, macOS and container exports
+  keep today's warning. Evidence: `docs/direction/evidence/T14.txt`.
 
 ### 13. Onboarding
 

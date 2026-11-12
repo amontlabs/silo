@@ -13,7 +13,7 @@ use std::{
 const SCRIPT: &str = include_str!("../../../guest/macos/silo-developer-tools.zsh");
 const PIN: &str = include_str!("../../../guest/macos/developer-tools-lock.json");
 const GITHUB_SETUP: &str = include_str!("../../../guest/setup-github.sh");
-const CACHE_DIR: &str = "macos-developer-tools";
+pub(super) const CACHE_DIR: &str = "macos-developer-tools";
 const STAGE: &str = "/private/tmp/silo-developer-tools";
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const COPY_TIMEOUT: Duration = Duration::from_secs(60 * 60);
@@ -21,11 +21,11 @@ static DOWNLOAD_TURN: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Asset {
-    file: String,
-    url: String,
-    bytes: u64,
-    sha256: String,
+pub(super) struct Asset {
+    pub(super) file: String,
+    pub(super) url: String,
+    pub(super) bytes: u64,
+    pub(super) sha256: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,7 +87,7 @@ fn valid_file(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
-fn validate_asset(asset: &Asset, host: &str, extension: &str) -> bool {
+pub(super) fn validate_asset(asset: &Asset, host: &str, extension: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(&asset.url) else {
         return false;
     };
@@ -181,6 +181,13 @@ fn lock() -> Result<Lock, String> {
         return Err(invalid());
     }
     Ok(lock)
+}
+
+/// The Claude Code version and installer the developer tools lock pins. The host downloads and
+/// checks the installer; `agents.install` copies it into a computer to repair or update it.
+pub(super) fn claude_code_pin() -> Result<(String, Asset), String> {
+    let lock = lock()?;
+    Ok((lock.claude_code.version, lock.claude_code.asset))
 }
 
 pub(crate) fn supports_guest_build(build: &str) -> Result<bool, String> {
@@ -316,6 +323,19 @@ fn cached(
     asset: &Asset,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PathBuf, String> {
+    cached_with(cache, asset, cancelled, &|detail| {
+        super::set_detail(app, id, detail)
+    })
+}
+
+/// Downloads `asset` into `cache` (or finds it there) and returns the file once its size and
+/// SHA-256 match the lock; `report` is told how the download goes.
+pub(super) fn cached_with(
+    cache: &Path,
+    asset: &Asset,
+    cancelled: &dyn Fn() -> bool,
+    report: &dyn Fn(&str),
+) -> Result<PathBuf, String> {
     for attempt in 0..2 {
         let path = super::restore_image::download_as(
             &asset.url,
@@ -324,15 +344,11 @@ fn cached(
             cancelled,
             &mut |done, total| {
                 let total = total.unwrap_or(asset.bytes).max(1);
-                super::set_detail(
-                    app,
-                    id,
-                    &format!(
-                        "Downloading {} ({}%)",
-                        asset.file,
-                        (done.saturating_mul(100) / total).min(100)
-                    ),
-                );
+                report(&format!(
+                    "Downloading {} ({}%)",
+                    asset.file,
+                    (done.saturating_mul(100) / total).min(100)
+                ));
             },
         )
         .map_err(|error| match error {
@@ -357,7 +373,7 @@ fn cached(
     ))
 }
 
-fn download_turn(cancelled: &dyn Fn() -> bool) -> Result<MutexGuard<'static, ()>, String> {
+pub(super) fn download_turn(cancelled: &dyn Fn() -> bool) -> Result<MutexGuard<'static, ()>, String> {
     loop {
         match DOWNLOAD_TURN.try_lock() {
             Ok(turn) => return Ok(turn),

@@ -40,8 +40,9 @@ pub enum Step {
     /// the archive), because the alias entries are keyed by computer id.
     Alias,
     /// The fork's lineage. The record itself is the lineage: forks of the old main resolve to
-    /// the new main and the new main's source is the old main's (see `lineage`), so nothing
-    /// is stored apart from the journal.
+    /// the new main and the new main's source is the old main's (see `lineage`). The record of
+    /// which computer's agent made which moves with it: the fork is no longer made by the old
+    /// main, which loses what it made to the fork.
     Lineage,
     /// macOS only: main's proxy CA and hostname go to the new main, and the archive gets the
     /// fork's hostname.
@@ -97,6 +98,9 @@ pub struct Swap {
     /// The same for main.
     #[serde(default)]
     pub target_was_running: bool,
+    /// Who made which of the two before the swap (see `policy::handoff`).
+    #[serde(default)]
+    pub makers: crate::policy::handoff::Handoff,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

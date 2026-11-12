@@ -2,6 +2,8 @@ import { useLifecycleToasts } from "./model/use-lifecycle-toasts"
 import { useRepositoryPushToasts } from "./components/use-repository-push-toasts"
 import { computerTarget } from "./model/connections"
 import { useBackendNotices } from "@/features/application/model/use-backend-notices"
+import { usePending } from "@/features/application/model/use-pending-changes"
+import { dismissOperationToast } from "@/lib/operation-toast"
 import { useUpdates } from "@/features/updates/update-store"
 import { updateCommands } from "@/features/updates/update-commands"
 import { useAppMenu } from "@/desktop/app-menu"
@@ -19,7 +21,7 @@ import { ComputerConfigurationToast } from "@/features/application/components/co
 import { OperationQueueToast } from "@/features/application/components/operation-queue-panel"
 import { QuitRequestConfirmation, type ConnectQuitConfirmation } from "@/features/application/components/quit-request-confirmation"
 import { applicationCommands, type ComputerCommandRequest } from "@/features/application/components/application-commands"
-import type { ApplicationActions, ApplicationSource, RepositoryPushOperation, RepositoryPushTarget, ComputerConfigurationOperation } from "@/features/application/model/application-source"
+import type { ApplicationActions, ApplicationTab, ApplicationSource, RepositoryPushOperation, RepositoryPushTarget, ComputerConfigurationOperation } from "@/features/application/model/application-source"
 import { useApplicationNavigation, type ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
 import { defaultStartupComputerIds } from "@/features/application/model/startup-computers"
 import { AlphaNotice } from "@/features/application/components/alpha-notice"
@@ -35,9 +37,12 @@ import { PendingChangesPage } from "@/features/application/pages/pending-changes
 import { ComputersPage, computerSectionPages } from "@/features/application/pages/computers-page"
 import { applicationPreferenceChanges, type ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 import { useStableCallback } from "@/lib/use-stable-callback"
+import { useRunningComputerAgents } from "@/features/agents/model/use-computer-agents"
+import { AgentInstallSupport, usePlannedAgentInstalls } from "@/features/agents/model/planned-installs"
+import { NetworkPolicySupport, usePlannedNetworkModes } from "@/features/network-policy/model/planned-network"
 import { SettingsProvider, useSettings } from "@/features/preferences/settings-store"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
-import { selectableMacosIds } from "@/features/application/model/macos-log-computers"
+import { selectableMacosIds, useMacosApplication } from "@/features/application/model/macos-application-computers"
 import { PageContainer } from "@/components/page"
 
 function computerAttentionCounts(source: Pick<ApplicationSource, "computers" | "computerConfigurationOperation">): { errors: number; warnings: number } {
@@ -103,7 +108,7 @@ const SecretsPageView = memo(secretsPage.Component, (a, b) => a.source.secrets =
 const GeneralPageView = memo(generalPage.Component, (a, b) => a.source.preferences === b.source.preferences
   && a.source.computers === b.source.computers
   && a.applicationPreferences === b.applicationPreferences && a.onApplicationPreferencesChange === b.onApplicationPreferencesChange && a.reduceMotion === b.reduceMotion
-  && a.onReduceMotionChange === b.onReduceMotionChange)
+  && a.onReduceMotionChange === b.onReduceMotionChange && a.readDeviceResources === b.readDeviceResources)
 const ConnectionsSettingsView = memo(ConnectionsSettings, (a, b) => a.actions === b.actions
   && a.source.devices === b.source.devices && a.source.devicesError === b.source.devicesError
   && a.source.connections === b.source.connections && a.source.connectionsError === b.source.connectionsError)
@@ -134,8 +139,8 @@ export function ApplicationApp(props: ApplicationAppProps) {
   return <SettingsProvider initialSettings={initialSettings}><ApplicationContent {...props} /></SettingsProvider>
 }
 
-function ApplicationContent({ source, actions, backup, initialRoute, routeRequest, connectQuitConfirmation, onOpenRequest }: ApplicationAppProps) {
-  useBackendNotices()
+function ApplicationContent({ source: nativeSource, actions: nativeActions, backup, initialRoute, routeRequest, connectQuitConfirmation, onOpenRequest }: ApplicationAppProps) {
+  const { source, actions } = useMacosApplication(nativeSource, nativeActions)
   useEffect(() => preloadWhenIdle(secondaryPages), [])
   const updates = useUpdates()
   const installingUpdate = updates?.snapshot?.phase === "installing"
@@ -191,6 +196,31 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   // Reported by the page once it is mounted; backend activity is derived from the source.
   const [githubBusy, setGitHubBusy] = useState(false)
   const visibleTab = activeTab
+  const pending = usePending(actions, visibleTab === "changes")
+  const [openApproval, setOpenApproval] = useState<{ id: string; token: number }>()
+  // Pending, clicked while its page is already showing a request, goes back to the list.
+  const [pendingListRequest, setPendingListRequest] = useState(0)
+  const selectTabOrList = (tab: ApplicationTab) => {
+    if (tab === "changes" && visibleTab === "changes") setPendingListRequest(request => request + 1)
+    navigation.selectTab(tab)
+  }
+  // The approvals the Pending page can open: the ones waiting and the ones answered lately.
+  const openableApprovals = useMemo(() => pending.loaded
+    ? new Set([...pending.waiting.flatMap(row => row.kind === "approval" ? [row.approval.id] : []), ...pending.answered.map(({ id }) => id)])
+    : undefined, [pending.loaded, pending.waiting, pending.answered])
+  useBackendNotices((notice) => {
+    navigation.selectTab("changes")
+    const id = notice.key.startsWith("approval:") ? notice.key.slice("approval:".length) : undefined
+    if (id) setOpenApproval({ id, token: nextRequestToken() })
+  })
+  // An approval answered elsewhere, or gone, no longer needs its toast.
+  const waitingIds = pending.waiting.flatMap(row => row.kind === "approval" ? [row.approval.id] : []).join("\n")
+  const toasted = useRef(new Set<string>())
+  useEffect(() => {
+    const current = new Set(waitingIds ? waitingIds.split("\n") : [])
+    for (const id of toasted.current) if (!current.has(id)) dismissOperationToast(`approval:${id}`)
+    toasted.current = current
+  }, [waitingIds])
   const visibleComputerSection = computerSection
   const preferences = useMemo(() => ({ ...source.preferences, ...settings }), [source.preferences, settings])
   const applicationSource = useMemo<ApplicationSource>(() => ({
@@ -295,7 +325,8 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   const { forgetComputers } = navigation
   useEffect(() => {
     const known = new Set<string>()
-    for (const computer of source.computers) known.add(computer.configuration.id)
+    // A macOS computer of another device has no page to keep.
+    for (const computer of source.computers) if (!(computer.macos && computer.device)) known.add(computer.configuration.id)
     for (const configuration of computerConfigurationOperation?.candidate.computers ?? []) known.add(configuration.id)
     forgetComputers((computer) => known.has(computer))
   }, [source.computers, computerConfigurationOperation, forgetComputers])
@@ -312,6 +343,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
     if (route.computerSection || route.computer) navigation.selectComputerSection(route.computerSection ?? "overview")
     else if (route.settingsSection) navigation.selectSettingsSection(route.settingsSection)
     else if (route.tab) navigation.selectTab(route.tab)
+    if (route.tab === "changes" && route.approval) setOpenApproval({ id: route.approval, token: nextRequestToken() })
   })
 
   const navigateRequested = useEffectEvent(navigateCommand)
@@ -343,15 +375,21 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   const openImport = useStableCallback(() => { navigation.selectComputerSection("overview"); navigation.closeComputer(); void transfer.beginImport() })
   const exportComputerByName = useStableCallback((name: string) => { void transfer.exportComputer(name) })
   const openGeneralSettings = useStableCallback(() => navigation.selectSettingsSection("general"))
-  const computerAttention = useMemo(() => computerAttentionCounts(applicationSource), [applicationSource])
-  const navigationLoading = useMemo(() => navigationLoadingState(applicationSource, githubBusy, backupBusy), [applicationSource, githubBusy, backupBusy])
+  // The navigation badges follow the Linux computers; a macOS computer shows its own state on its row and page.
+  const navigationSource = useMemo(() => ({ ...applicationSource, computers: nativeSource.computers }), [applicationSource, nativeSource.computers])
+  const computerAttention = useMemo(() => computerAttentionCounts(navigationSource), [navigationSource])
+  const navigationLoading = useMemo(() => navigationLoadingState(navigationSource, githubBusy, backupBusy), [navigationSource, githubBusy, backupBusy])
+  const { agentsOf } = useRunningComputerAgents(applicationSource, actions.listAgents)
+  usePlannedAgentInstalls(applicationSource, actions.installAgent)
+  usePlannedNetworkModes(applicationSource, actions.saveNetworkPolicy)
   const commands = useMemo(() => [...applicationCommands(applicationSource, actions, navigateCommand, {
     onImportComputer: canImport ? openImport : undefined,
     onNewComputer: canCreateComputer ? requestNewComputer : undefined,
     onExportComputer: canImport ? exportComputerByName : undefined,
     onComputerRequest: requestOnComputerPage,
+    agentsOf,
   }), ...updateCommands(updates, openGeneralSettings)],
-  [applicationSource, actions, navigateCommand, canImport, canCreateComputer, openImport, requestNewComputer, exportComputerByName, requestOnComputerPage, updates, openGeneralSettings])
+  [applicationSource, actions, agentsOf, navigateCommand, canImport, canCreateComputer, openImport, requestNewComputer, exportComputerByName, requestOnComputerPage, updates, openGeneralSettings])
   const nativeMenu = useAppMenu({ ready: true, busy: installingUpdate,
     canGoBack: navigation.canGoBack, canGoForward: navigation.canGoForward,
     canCreateComputer, canImport, canCheckUpdates, sidebarCollapsed,
@@ -385,6 +423,8 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
 
   return (
     // Keeps unsaved computer edits while navigating between sections (I-37).
+    <AgentInstallSupport value={Boolean(actions.installAgent)}>
+    <NetworkPolicySupport value={Boolean(actions.saveNetworkPolicy)}>
     <ComputerEditorDraftsProvider>
     <FileTransfersProvider api={actions.fileTransfers}>
     <ApplicationShell
@@ -399,7 +439,8 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       systemIssueStatus={activeRuntimeRepair?.status ?? null}
       computerAttention={computerAttention}
       navigationLoading={navigationLoading}
-      onTabChange={navigation.selectTab}
+      pendingCount={pending.count}
+      onTabChange={selectTabOrList}
       onComputerSectionChange={navigation.selectComputerSection}
       onSettingsSectionChange={navigation.selectSettingsSection}
       canGoBack={navigation.canGoBack}
@@ -452,12 +493,15 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
             operationQueue={source.operationQueue}
             onDismissRepositoryPush={dismissRepositoryPush}
             onCreateComputer={canCreateComputer && !installingUpdate ? requestNewComputer : undefined}
+            onOpenApproval={(id) => { navigation.selectTab("changes"); setOpenApproval({ id, token: nextRequestToken() }) }}
+            openableApprovals={openableApprovals}
+            onOpenComputer={(id) => navigation.openComputer(id)}
           />
         )}
       </section>
       <section id="application-panel-changes" role="region" aria-labelledby="application-nav-changes" hidden={visibleTab !== "changes"}>
         <PanelContent active={visibleTab === "changes"}>
-          <PendingChangesPage listReviewRequests={actions.listReviewRequests} reviewActions={actions.reviewRequestActions} active={visibleTab === "changes"} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
+          <PendingChangesPage pending={pending} actions={actions} reviewActions={actions.reviewRequestActions} openApproval={openApproval} listRequest={pendingListRequest} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
         </PanelContent>
       </section>
       <section id="application-panel-github" role="region" aria-labelledby="application-nav-github" hidden={visibleTab !== "github"} className="h-full min-h-0 overflow-hidden">
@@ -478,7 +522,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       <section id="application-panel-settings" role="region" aria-labelledby="application-nav-settings" hidden={visibleTab !== "settings"}>
         <div hidden={settingsSection !== "general"}>
           <PanelContent active={visibleTab === "settings" && settingsSection === "general"}>
-            <GeneralPageView source={source} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} />
+            <GeneralPageView source={nativeSource} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} readDeviceResources={actions.readDeviceResources} />
           </PanelContent>
         </div>
         <PageContainer hidden={settingsSection !== "connections"}>
@@ -493,5 +537,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
     </ApplicationShell>
     </FileTransfersProvider>
     </ComputerEditorDraftsProvider>
+    </NetworkPolicySupport>
+    </AgentInstallSupport>
   )
 }

@@ -5,7 +5,7 @@ import { interruptionPrompt, lifecycleGuard, type LifecyclePrompt } from "@/feat
 import { computerTarget } from "@/features/application/model/connections"
 import { DeviceBadge } from "@/features/computers/components/device-badge"
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react"
-import { CircleAlert, Code, GitBranch, Monitor, Play, Power, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
+import { Bot, CircleAlert, Code, GitBranch, GitPullRequestArrow, Monitor, Play, Power, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
 
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { SiloMark } from "@/components/silo-mark"
@@ -15,6 +15,7 @@ import { ComputerStateLabel } from "@/features/application/components/applicatio
 import { RepositoryPushButton, RepositoryPushFeedback } from "@/features/application/components/repository-push-feedback"
 import type { ApplicationSource, ApplicationComputer } from "@/features/application/model/application-source"
 import { commitLabel } from "@/features/application/model/repository-push"
+import { usePending, type PendingRow } from "@/features/application/model/use-pending-changes"
 import { ComputerAction, ComputerListItem, ComputerListRow } from "@/features/computers/components/computer-list"
 import { SecretChangesLabel } from "@/features/computers/components/secret-changes-label"
 import { computerIconState, computerRowTone } from "@/features/computers/model/computer-presentation"
@@ -22,6 +23,9 @@ import { cn } from "@/lib/utils"
 import { visibleText } from "@/lib/visible-text"
 import { lifecycleOutcome, computerTargetLabel } from "./status-bar-model"
 import { computerAvailability } from "@/features/application/model/computer-availability"
+import { preferredAgent } from "@/features/agents/model/agents"
+import { useRunningComputerAgents } from "@/features/agents/model/use-computer-agents"
+import { useSettingsSelector } from "@/features/preferences/settings-store"
 import type { StatusBarActions, ComputerMenuProps } from "./status-bar-types"
 import { ComputerMenu } from "./computer-menu"
 import { StatusFolderPicker } from "./status-folder-picker"
@@ -42,6 +46,23 @@ function OperationIssue({ title, detail, actionLabel, actionText = "Details", to
           <Button variant="outline" size="xs" aria-label={actionLabel} onClick={onReview}>{actionText}</Button>
           {retry}
         </div>}
+      />
+    </ListCard>
+  )
+}
+
+/** One row for everything waiting for the person; it opens the Pending page, at the request when there is only one. */
+function WaitingForYou({ rows, onOpen }: { rows: PendingRow[]; onOpen: (approvalId?: string) => void }) {
+  const newest = rows[0]
+  const only = rows.length === 1 && newest?.kind === "approval" ? newest.approval.id : undefined
+  const detail = newest?.kind === "approval" ? `${newest.approval.computerName}: ${newest.approval.summary}` : newest ? `Changes in ${newest.entry.forkName ?? newest.entry.request.forkId} to review` : undefined
+  return (
+    <ListCard className="mb-2" role="status" aria-label="Waiting for you">
+      <ListRow
+        icon={<ListRowIcon className="bg-primary/10 text-primary"><GitPullRequestArrow className="size-3.5" aria-hidden="true" /></ListRowIcon>}
+        title={`${rows.length} waiting for you`}
+        detail={detail}
+        actions={<Button variant="outline" size="xs" aria-label="Review what is waiting for you" onClick={() => onOpen(only)}>Review</Button>}
       />
     </ListCard>
   )
@@ -110,6 +131,9 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
   const [confirmation, setConfirmation] = useState<{ computer: string; action: "stop" | "restart" } | null>(null)
   const [startPrompt, setStartPrompt] = useState<{ target: string; prompt: LifecyclePrompt } | null>(null)
   const [lifecycleIssue, setLifecycleIssue] = useState<{ title: string; message: string } | null>(null)
+  const waiting = usePending(actions, false)
+  const { agentsOf } = useRunningComputerAgents(source, actions.listAgents)
+  const rememberedAgent = useSettingsSelector((view) => view.settings.agent)
   const guarded = lifecycleGuard(source, actions, {
     notify: (title, message) => setLifecycleIssue({ title, message }),
     prompt: (prompt, _confirm, computer) => {
@@ -152,6 +176,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
   return (
     <div key="computers" className={cn("status-page status-panel-page flex shrink-0 flex-col overflow-hidden", hasNavigated && "status-page-back")}>
       <div className="shrink-0 px-2 pt-2">
+        {waiting.count > 0 && <WaitingForYou rows={waiting.waiting} onOpen={(approval) => actions.openSilo(approval ? { tab: "changes", approval } : { tab: "changes" })} />}
         {lifecycleIssue && <OperationIssue
           title={lifecycleIssue.title}
           detail={lifecycleIssue.message}
@@ -205,6 +230,8 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
               const { configuration } = computer
   const target = computerTarget(computer)
               const availability = computerAvailability(computer, source)
+              const agents = agentsOf(target)
+              const agent = preferredAgent(agents, rememberedAgent)
               const pending = confirmation?.computer === target ? confirmation : null
               const pendingPrompt = pending ? interruptionPrompt(computer, pending.action) : null
               const pendingSecrets = !computer.device ? source.secrets.filter((secret) => secret.state === "restart-required" && secret.computers.includes(configuration.name)).map(({ name }) => name) : []
@@ -236,10 +263,11 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
                       : computer.freshness === "stale" ? <ComputerAction label={`Retry ${configuration.name} status`} onClick={actions.refresh}><RotateCw /></ComputerAction>
                         : availability.canOpen ? <>
                           <ComputerAction label={`Open ${configuration.name} in ${source.preferences.terminal}`} onClick={() => actions.openTerminal(target)}><Terminal /></ComputerAction>
+                          {actions.openAgent && agent && <ComputerAction label={`Open ${agent.name} in ${configuration.name}`} onClick={() => actions.openAgent?.(target, agent.id)}><Bot /></ComputerAction>}
                           <ComputerAction label={`Open ${configuration.name} in ${source.preferences.editor}`} onClick={() => openFolders(configuration.id)}><Code /></ComputerAction>
                         </> : availability.canStart ? <ComputerAction label={`Start ${configuration.name}`} onClick={() => guardedActions.startComputer(target)}><Play /></ComputerAction>
                           : <ComputerAction label="Open Silo" onClick={() => actions.openSilo({ computer: target })}><SiloMark /></ComputerAction>)}
-                    <ComputerActions computer={computer} source={source} actions={guardedActions} onFolders={() => openFolders(configuration.id)} onConfirm={(action) => setConfirmation({ computer: target, action })} />
+                    <ComputerActions computer={computer} source={source} actions={guardedActions} agents={agents} onFolders={() => openFolders(configuration.id)} onConfirm={(action) => setConfirmation({ computer: target, action })} />
                   </>}
                 />
                 <RepositoryPushes computer={computer} source={source} actions={actions} />

@@ -1,12 +1,15 @@
-import type { ApplicationSecret, SecretConfigurationRequest } from "./application-source"
+import type { ApplicationSecret, SecretConfigurationRequest, SecretKind } from "./application-source"
+import { hostWarning } from "@/features/network-policy/model/network-policy"
 import reservedSecretNames from "./reserved-secret-names.json"
 
 export interface SecretDraft {
+  kind: SecretKind
   name: string
   value: string
   computers: string[]
   domains: string
   allowAnyDomain: boolean
+  allowSharedHosting: boolean
 }
 
 export type SecretValidationErrors = Partial<Record<keyof SecretDraft, string>>
@@ -28,10 +31,16 @@ function validDomain(domain: string) {
     /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
 }
 
+/** The hosts among `domains` that lead to sites anyone can publish, each with what that allows. */
+export function sharedHostingWarnings(domains: readonly string[]): string[] {
+  return domains.flatMap((domain) => hostWarning(domain) ?? [])
+}
+
 export function secretConfiguration(draft: SecretDraft, secrets: readonly ApplicationSecret[], availableComputers: readonly string[], original?: ApplicationSecret):
   { request: SecretConfigurationRequest; errors?: never } | { errors: SecretValidationErrors; request?: never } {
   const errors: SecretValidationErrors = {}
   const name = original?.name ?? draft.name.trim()
+  if ((original?.kind ?? draft.kind) === "github-token") return githubTokenConfiguration(draft, secrets, name, original)
   const allowedDomains = [...new Set(draft.domains.split(/[\s,]+/).filter(Boolean).map((domain) => domain.toLowerCase()))]
 
   if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name)) {
@@ -53,8 +62,34 @@ export function secretConfiguration(draft: SecretDraft, secrets: readonly Applic
   if (allowedDomains.includes("*") && !draft.allowAnyDomain) errors.allowAnyDomain = "Confirm access to any HTTPS destination."
   if (Object.keys(errors).length > 0) return { errors }
 
-  const metadata = { name, computers: [...draft.computers], allowedDomains }
+  const confirmed = draft.allowSharedHosting && sharedHostingWarnings(allowedDomains).length > 0
+  const metadata = {
+    name, computers: [...draft.computers], allowedDomains,
+    ...(allowedDomains.includes("*") ? { allowAnyDestination: true as const } : {}),
+    ...(confirmed ? { allowSharedHosting: true as const } : {}),
+  }
   return { request: original
     ? { ...metadata, operation: "edit", id: original.id, ...(draft.value ? { value: draft.value } : {}) }
     : { ...metadata, operation: "add", value: draft.value } }
+}
+
+/** A GitHub token takes a label and a value. Its computers are chosen in GitHub access and
+ * its hosts are GitHub's, so neither is asked for here. */
+function githubTokenConfiguration(draft: SecretDraft, secrets: readonly ApplicationSecret[], name: string, original?: ApplicationSecret):
+  { request: SecretConfigurationRequest; errors?: never } | { errors: SecretValidationErrors; request?: never } {
+  const errors: SecretValidationErrors = {}
+  const value = draft.value.trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) {
+    errors.name = "Use up to 64 letters, digits, hyphens or underscores, starting with a letter or digit."
+  } else if (secrets.some((secret) => secret.id !== original?.id && secret.name === name)) {
+    errors.name = "A secret with this name already exists."
+  }
+  if (!original && !value) errors.value = "Enter a token."
+  else if (value && !/^[A-Za-z0-9_]{1,4096}$/.test(value)) errors.value = "Enter a GitHub personal access token."
+  if (Object.keys(errors).length > 0) return { errors }
+
+  const metadata = { kind: "github-token" as const, name, computers: [], allowedDomains: [] }
+  return { request: original
+    ? { ...metadata, operation: "edit", id: original.id, ...(value ? { value } : {}) }
+    : { ...metadata, operation: "add", value } }
 }

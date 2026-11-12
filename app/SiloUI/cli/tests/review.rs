@@ -95,7 +95,7 @@ async fn requests_show_asks_the_engine_for_the_request_by_id() {
 }
 
 #[tokio::test]
-async fn requests_keep_passes_the_flags_and_exits_two_when_refused() {
+async fn requests_merge_passes_the_flags_and_exits_two_when_refused() {
     let kept = json!({"status": "kept", "report": {"fork": "try", "target": "main",
         "summary": [], "steps": [], "notes": [], "checkpoint": "cp1"}, "request": request("kept")});
     let refused = json!({"status": "refused", "report": {"fork": "try", "target": "main",
@@ -105,7 +105,7 @@ async fn requests_keep_passes_the_flags_and_exits_two_when_refused() {
         "request": request("open")});
     let engine = engine(vec![("changes.requests.keep", kept)]);
     assert_eq!(
-        exit_code(&engine, &["requests", "keep", "fr-ab12cd34", "--data-ok"]).await,
+        exit_code(&engine, &["requests", "merge", "fr-ab12cd34", "--data-ok"]).await,
         0
     );
     let sent = &engine.calls("changes.requests.keep")[0];
@@ -115,13 +115,13 @@ async fn requests_keep_passes_the_flags_and_exits_two_when_refused() {
     assert!(engine.calls("changes.keep").is_empty());
     let engine = self::engine(vec![("changes.requests.keep", refused)]);
     assert_eq!(
-        exit_code(&engine, &["requests", "keep", "fr-ab12cd34"]).await,
+        exit_code(&engine, &["requests", "merge", "fr-ab12cd34"]).await,
         2
     );
 }
 
 #[tokio::test]
-async fn requests_throw_away_and_open_call_their_methods() {
+async fn requests_decline_and_open_call_their_methods() {
     let engine = engine(vec![
         (
             "changes.requests.throwAway",
@@ -135,7 +135,7 @@ async fn requests_throw_away_and_open_call_their_methods() {
         ),
     ]);
     assert_eq!(
-        exit_code(&engine, &["requests", "throw-away", "fr-ab12cd34"]).await,
+        exit_code(&engine, &["requests", "decline", "fr-ab12cd34"]).await,
         0
     );
     assert_eq!(
@@ -175,7 +175,7 @@ fn show_renders_the_buckets_then_the_credentials_line() {
     assert!(text.contains("Credentials used: GITHUB_TOKEN to api.github.com (POST x3)"));
     assert!(text.contains("Blocked: GET evil.example x1 (not allowed for this secret)"));
     assert!(text.contains("last look"));
-    assert!(text.contains("a keep refuses"));
+    assert!(text.contains("a merge refuses"));
 }
 
 #[test]
@@ -203,10 +203,10 @@ fn list_renders_each_request_with_its_fork_target_and_counts() {
 }
 
 #[test]
-fn throw_away_and_open_render_short_lines() {
+fn decline_and_open_render_short_lines() {
     assert_eq!(
-        render::request_thrown_away(&json!({"request": request("thrown-away"), "dropped": "try"})),
-        "Threw away try and closed fr-ab12cd34."
+        render::request_declined(&json!({"request": request("thrown-away"), "dropped": "try"})),
+        "Declined try and closed fr-ab12cd34."
     );
     let text = render::request_open(&json!({
         "name": "try", "state": "running", "started": true, "sshAlias": "try.silo",
@@ -217,7 +217,7 @@ fn throw_away_and_open_render_short_lines() {
 }
 
 #[tokio::test]
-async fn mcp_serves_the_five_request_tools_on_the_same_methods() {
+async fn mcp_serves_the_request_tools_on_the_same_methods() {
     let engine = engine(vec![(
         "changes.requests.throwAway",
         json!({"request": request("thrown-away"), "dropped": "try"}),
@@ -271,8 +271,8 @@ async fn mcp_serves_the_five_request_tools_on_the_same_methods() {
     for expected in [
         "requests_list",
         "request_show",
-        "request_keep",
-        "request_throw_away",
+        "request_merge",
+        "request_decline",
         "request_open",
     ] {
         assert!(
@@ -301,7 +301,7 @@ async fn mcp_serves_the_five_request_tools_on_the_same_methods() {
             ask(
                 4,
                 "tools/call",
-                json!({"name": "request_throw_away", "arguments": {"id": "fr-ab12cd34"}}),
+                json!({"name": "request_decline", "arguments": {"id": "fr-ab12cd34"}}),
             )
             .as_bytes(),
         )

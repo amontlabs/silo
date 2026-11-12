@@ -9,10 +9,9 @@ use fake_engine::{finished, listing, FakeEngine};
 use serde_json::{json, Value};
 use silo_cli::{
     cli::{run, Cli},
-    config::{parse_settings, Settings, StepSettings},
     engine::Engine,
     ops::ExecArgs,
-    steps,
+    steps::{self, StepSettings},
 };
 
 fn ignore(_: &str) {}
@@ -65,44 +64,79 @@ fn engine(
     (engine, recorded)
 }
 
-fn settings(yaml: &str) -> StepSettings {
-    Settings::step_settings(Some(&parse_settings(yaml).unwrap()))
-}
-
 #[test]
-fn step_settings_default_off_with_twenty_kept_and_resolve_in_one_place() {
+fn step_settings_default_off_with_twenty_kept() {
     assert_eq!(
-        Settings::step_settings(None),
+        StepSettings::default(),
         StepSettings {
             checkpoints: false,
             keep: 20
         }
     );
-    assert_eq!(settings(""), StepSettings::default());
     assert_eq!(
-        settings("step_checkpoints: true\n"),
+        StepSettings::new(true, None),
         StepSettings {
             checkpoints: true,
             keep: 20
         }
     );
     assert_eq!(
-        settings("step_checkpoints: true\nstep_checkpoints_keep: 5\n"),
+        StepSettings::new(true, Some(5)),
         StepSettings {
             checkpoints: true,
             keep: 5
         }
     );
-    assert!(parse_settings("step_checkpoints: sometimes\n").is_err());
+}
+
+#[test]
+fn the_step_options_of_a_command_choose_the_settings() {
+    let parse = |args: &[&str]| {
+        let parsed = <Cli as clap::Parser>::try_parse_from(
+            std::iter::once("silo").chain(args.iter().copied()),
+        )
+        .unwrap();
+        match parsed.command {
+            silo_cli::cli::Command::Exec(exec) => exec.steps.settings(),
+            _ => panic!("not an exec"),
+        }
+    };
+    assert_eq!(
+        parse(&["exec", "main", "--", "ls"]),
+        StepSettings::default()
+    );
+    assert_eq!(
+        parse(&[
+            "exec",
+            "main",
+            "--step-checkpoints",
+            "--keep-steps",
+            "3",
+            "--",
+            "ls"
+        ]),
+        StepSettings::new(true, Some(3))
+    );
+    assert!(<Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "exec",
+        "main",
+        "--keep-steps",
+        "3",
+        "--",
+        "ls"
+    ])
+    .is_err());
 }
 
 #[tokio::test]
 async fn a_step_without_step_checkpoints_is_recorded_and_takes_no_checkpoint() {
     let (engine, _) = engine(json!([]), json!([]), false);
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    let (output, step) = steps::run_exec(&connected, &exec_args(), settings(""), &ignore)
-        .await
-        .unwrap();
+    let (output, step) =
+        steps::run_exec(&connected, &exec_args(), StepSettings::default(), &ignore)
+            .await
+            .unwrap();
     assert_eq!(output.process_exit_code(), 3);
     assert_eq!(step["number"], 1);
     assert!(engine.calls("checkpoints.create").is_empty());
@@ -118,7 +152,7 @@ async fn a_step_without_step_checkpoints_is_recorded_and_takes_no_checkpoint() {
 async fn with_step_checkpoints_a_step_checkpoint_is_taken_and_linked() {
     let (engine, _) = engine(json!([]), json!([]), false);
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    let on = settings("step_checkpoints: true\nstep_checkpoints_keep: 7\n");
+    let on = StepSettings::new(true, Some(7));
     let (_, step) = steps::run_exec(&connected, &exec_args(), on, &ignore)
         .await
         .unwrap();
@@ -141,9 +175,10 @@ async fn with_step_checkpoints_a_step_checkpoint_is_taken_and_linked() {
 async fn a_step_that_cannot_be_recorded_never_fails_the_command() {
     let (engine, _) = engine(json!([]), json!([]), true);
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    let (output, step) = steps::run_exec(&connected, &exec_args(), settings(""), &ignore)
-        .await
-        .unwrap();
+    let (output, step) =
+        steps::run_exec(&connected, &exec_args(), StepSettings::default(), &ignore)
+            .await
+            .unwrap();
     assert_eq!(output.process_exit_code(), 3);
     assert_eq!(step["error"], "The engine is busy.");
     assert_eq!(steps::note(&step), "step not recorded: The engine is busy.");
@@ -304,7 +339,7 @@ async fn a_computers_steps_run_one_at_a_time_in_order() {
         }
     });
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    let on = settings("step_checkpoints: true\n");
+    let on = StepSettings::new(true, None);
     let args = exec_args();
     let (a, b) = tokio::join!(
         steps::run_exec(&connected, &args, on, &ignore),
@@ -338,7 +373,7 @@ async fn without_step_checkpoints_nothing_waits_for_the_step_lock() {
     let _held = connected.lock_steps("id-main").await.unwrap();
     let ran = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        steps::run_exec(&connected, &exec_args(), settings(""), &ignore),
+        steps::run_exec(&connected, &exec_args(), StepSettings::default(), &ignore),
     )
     .await;
     assert!(ran.expect("the command must not wait for the lock").is_ok());
@@ -360,7 +395,7 @@ async fn a_step_lock_that_cannot_be_taken_does_not_fail_the_command() {
     let (output, step) = steps::run_exec(
         &connected,
         &exec_args(),
-        settings("step_checkpoints: true\n"),
+        StepSettings::new(true, None),
         &ignore,
     )
     .await
@@ -376,7 +411,7 @@ async fn run_exec_keeps_the_timeout_limit_without_overflowing() {
     for timeout_secs in [0, 181, u64::MAX] {
         let mut args = exec_args();
         args.timeout_secs = timeout_secs;
-        let error = steps::run_exec(&connected, &args, settings(""), &ignore)
+        let error = steps::run_exec(&connected, &args, StepSettings::default(), &ignore)
             .await
             .unwrap_err();
         assert!(error.message.contains("timeout"), "{}", error.message);
@@ -421,7 +456,7 @@ async fn a_step_belongs_to_the_computer_the_command_ran_on_even_if_the_name_move
         other => Err(("internal", format!("unexpected {other}"))),
     });
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    steps::run_exec(&connected, &exec_args(), settings(""), &ignore)
+    steps::run_exec(&connected, &exec_args(), StepSettings::default(), &ignore)
         .await
         .unwrap();
     assert_eq!(engine.calls("guest.exec")[0]["computerId"], "id-main");

@@ -2,9 +2,11 @@
 //!
 //! A keep pins to the diff the user reviewed (a digest), takes a `before-keep` checkpoint of
 //! main, holds main's operation lane, and only then compares the fork with main and the
-//! fork-time base (three-way). Everything it will write is read from the fork first; a keep
-//! that would clash, bring credentials, or carry a database change nothing migrates stops
-//! before main is touched and returns a structured refusal. A journal written before the
+//! fork-time base (three-way). Everything it will write is read from the fork first. An item
+//! both sides changed is a question: the request's `choices` answer it (the fork's version,
+//! main's, or for a repository a branch), and a conflict without an answer stops the keep
+//! before main is touched with the list of questions. A keep that would bring credentials or
+//! carry a database change nothing migrates stops the same way. A journal written before the
 //! first change lets a restart put main back from the checkpoint.
 
 pub mod apply;
@@ -27,9 +29,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+pub use crate::changes::items::{Answer, Choices};
 pub use env::{CheckpointRef, ExecOut, GuestCmd, KeepEnv, ManifestStore, Os, RunAs};
 pub use journal::Journal;
-pub use plan::{Conflict, Plan};
+pub use plan::{Conflict, Plan, ReportItem};
 pub use prepare::review_digest;
 
 /// The recipe's `keep:` section.
@@ -43,6 +46,12 @@ pub struct Hooks {
     pub after: Vec<String>,
 }
 
+impl Hooks {
+    pub fn is_empty(&self) -> bool {
+        self.restart.is_empty() && self.migrate.is_empty() && self.after.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Request {
     pub fork: String,
@@ -54,6 +63,16 @@ pub struct Request {
     pub data_ok: bool,
     /// The review digest the user saw (`silo diff --json`); the keep refuses if the fork moved.
     pub reviewed: Option<String>,
+    /// How the caller settles items both sides changed, and which items to leave out.
+    pub choices: Choices,
+    /// Whether to update the saved recipe in the library (true when approved by owner or caller is Device).
+    pub save_recipe: bool,
+    /// Whether the caller is a computer, which reads the recipe's hook steps by number and
+    /// never by command line.
+    pub hide_recipe_commands: bool,
+    /// Set by the keep itself when the hooks came from the target's recipe and the caller may
+    /// not read them; callers leave it false.
+    pub hooks_hidden: bool,
 }
 
 /// How long a keep or undo waits for another one on the same target.
@@ -61,7 +80,7 @@ pub const LANE_WAIT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Refusal {
-    /// `divergent`, `database`, `git`, `credentials` or `changed`.
+    /// `choices-needed`, `database`, `credentials`, `changed` or `main-changed`.
     pub reason: String,
     pub message: String,
     pub conflicts: Vec<Conflict>,
@@ -79,6 +98,28 @@ pub struct Report {
     pub checkpoint: Option<String>,
     /// The digest of the fork's changes this keep acted on.
     pub review_digest: Option<String>,
+    /// What was done with each item, by id; empty when the keep was refused.
+    pub items: Vec<ReportItem>,
+    /// Whether main was unchanged since the fork was made, so nothing could conflict. Unknown
+    /// (`None`) when the keep stopped before main was looked at.
+    pub fast_forward: Option<bool>,
+    /// The packages and settings files this keep brings over, as the recipe of the target would
+    /// list them.
+    #[serde(skip)]
+    pub additions: crate::recipes::Additions,
+    /// What was appended to the recipe of the target after the keep; absent when nothing was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<RecipeUpdate>,
+}
+
+/// What a keep added to the recipe of the computer it merged into.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecipeUpdate {
+    /// The recipe's name.
+    pub name: String,
+    pub packages: std::collections::BTreeMap<String, Vec<String>>,
+    pub files: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,7 +208,8 @@ impl UndoOutcome {
     }
 }
 
-fn refused_early(request: &Request, target: &str, digest: &str) -> Outcome {
+fn refused_early(env: &dyn KeepEnv, request: &Request, target: &str, digest: &str) -> Outcome {
+    let (fork_label, target_label) = (env.name_of(&request.fork), env.name_of(target));
     Outcome::Refused {
         report: Report {
             fork: request.fork.clone(),
@@ -178,20 +220,26 @@ fn refused_early(request: &Request, target: &str, digest: &str) -> Outcome {
         refusal: Refusal {
             reason: "changed".into(),
             message: format!(
-                "{} changed since it was reviewed. {target} was not changed.",
-                request.fork
+                "{fork_label} changed since it was reviewed. {target_label} was not changed."
             ),
             conflicts: vec![Conflict::new(
                 "fork",
-                request.fork.clone(),
+                fork_label.clone(),
                 "its changes differ from the reviewed diff",
             )],
-            hint: "Review it again with `silo diff --json` and keep with the new digest.".into(),
+            hint: "Review it again with `silo diff --json` and merge with the new digest.".into(),
         },
     }
 }
 
-fn main_changed(request: &Request, target: &str, digest: &str, lines: Vec<String>) -> Outcome {
+fn main_changed(
+    env: &dyn KeepEnv,
+    request: &Request,
+    target: &str,
+    digest: &str,
+    lines: Vec<String>,
+) -> Outcome {
+    let target_label = env.name_of(target);
     Outcome::Refused {
         report: Report {
             fork: request.fork.clone(),
@@ -202,13 +250,13 @@ fn main_changed(request: &Request, target: &str, digest: &str, lines: Vec<String
         refusal: Refusal {
             reason: "main-changed".into(),
             message: format!(
-                "{target} changed while the keep was starting. {target} was not changed by the keep."
+                "{target_label} changed while the keep was starting. {target_label} was not changed by the keep."
             ),
             conflicts: lines
                 .into_iter()
-                .map(|line| Conflict::new("main", target.to_owned(), line))
+                .map(|line| Conflict::new("main", target_label.clone(), line))
                 .collect(),
-            hint: "Keep again once nothing else is changing it.".into(),
+            hint: "Merge again once nothing else is changing it.".into(),
         },
     }
 }
@@ -216,7 +264,13 @@ fn main_changed(request: &Request, target: &str, digest: &str, lines: Vec<String
 /// What differs between two manifests of the same computer, as report lines; `None` when
 /// nothing the keep will write or check moved: its files, packages, crontabs, agents and the
 /// repos it merges. Processes, ports and background churn elsewhere do not count.
-fn main_moved(view: &prepare::ForkView, os: Os, before: &str, now: &str) -> Option<Vec<String>> {
+fn main_moved(
+    view: &prepare::ForkView,
+    os: Os,
+    request: &Request,
+    before: &str,
+    now: &str,
+) -> Option<Vec<String>> {
     use crate::changes::manifest::Manifest;
     if before == now {
         return None;
@@ -227,7 +281,7 @@ fn main_moved(view: &prepare::ForkView, os: Os, before: &str, now: &str) -> Opti
         ]);
     };
     let items = |main: &Manifest| {
-        let plan = plan::build(&view.diff, &view.base, &view.fork, main, os);
+        let plan = plan::build(&view.diff, &view.base, &view.fork, main, os, request);
         prepare::read_signature(&plan, main)
     };
     let (first, second) = (items(&before), items(&now));
@@ -243,6 +297,28 @@ fn main_moved(view: &prepare::ForkView, os: Os, before: &str, now: &str) -> Opti
         lines.push("what the keep would write changed".into());
     }
     Some(lines)
+}
+
+/// The request with the `keep` hooks of the recipe `target` was built from, when it has one:
+/// the engine applies the computer's own rules, whatever the caller sent. A computer built
+/// from no recipe runs the hooks the caller sent.
+fn with_recipe_hooks(request: &Request, target: &str) -> Result<Request, String> {
+    let mut effective = request.clone();
+    if let Some(record) = crate::recipes::records::get(target)? {
+        if !request.hooks.is_empty() {
+            return Err(format!(
+                "{target} was built from a recipe; its keep hooks come from the recipe."
+            ));
+        }
+        let keep = crate::recipes::hooks_of(&record.recipe);
+        effective.hooks = Hooks {
+            restart: keep.restart,
+            migrate: keep.migrate,
+            after: keep.after,
+        };
+        effective.hooks_hidden = request.hide_recipe_commands;
+    }
+    Ok(effective)
 }
 
 /// Keeps `request.fork` into its target.
@@ -265,6 +341,8 @@ pub fn keep(
     if target == request.fork {
         return Err("A computer cannot be kept into itself.".into());
     }
+    let effective = with_recipe_hooks(request, &target)?;
+    let request = &effective;
     let os = env.os(&target).map_err(|_| {
         format!("{target} is not a computer on this device. Name the computer to keep into.")
     })?;
@@ -277,8 +355,12 @@ pub fn keep(
         .as_deref()
         .is_some_and(|reviewed| reviewed != view.digest)
     {
-        return Ok(refused_early(request, &target, &view.digest));
+        return Ok(refused_early(env, request, &target, &view.digest));
     }
+    // The digest matched (or none was sent), so the diff in hand is the reviewed one. The
+    // choices are checked against it and are not part of the digest: it pins what the fork
+    // changed, and a choice answers how that meets main, which moves on its own.
+    crate::changes::items::validate(&request.choices, &view.diff)?;
     let mut tracker = prepare::Tracker {
         fork: request.fork.clone(),
         target: target.clone(),
@@ -306,7 +388,7 @@ pub fn keep(
     let main_before = store.capture(&target)?;
     env.note("Saving a checkpoint of main");
     let checkpoint =
-        env.checkpoint_before_keep(&target, &format!("Before keep of {}", request.fork))?;
+        env.checkpoint_before_keep(&target, &format!("Before keep of {}", env.name_of(&request.fork)))?;
     journal.record_pending(&target, &checkpoint)?;
     journal.tag(
         &target,
@@ -328,7 +410,7 @@ pub fn keep(
 
     // From here to the end of the apply, main's lane is held.
     let applied = {
-        let _gate = match env.hold(&target, &format!("Keeping {}", request.fork)) {
+        let _gate = match env.hold(&target, &format!("Keeping {}", env.name_of(&request.fork))) {
             Ok(gate) => gate,
             Err(error) => {
                 consume(journal);
@@ -339,12 +421,12 @@ pub fn keep(
         // the checkpoint saved now that nothing else can change it.
         let moved = store
             .capture(&target)
-            .map(|now| main_moved(&view, os, &main_before, &now));
+            .map(|now| main_moved(&view, os, request, &main_before, &now));
         match moved {
             Ok(None) => {}
             Ok(Some(lines)) => {
                 consume(journal);
-                return Ok(main_changed(request, &target, &view.digest, lines));
+                return Ok(main_changed(env, request, &target, &view.digest, lines));
             }
             Err(error) => {
                 consume(journal);
@@ -359,7 +441,13 @@ pub fn keep(
             Ok(prepare::Prepared::Ready(ready)) => {
                 apply::apply(env, &ready, request, &target).map(|applied| Ok((ready, applied)))
             }
-            Err(error) => Err(error),
+            // Looking at main and the fork changed nothing on main, so there is nothing to
+            // put back.
+            Err(error) => {
+                tracker.cleanup(env);
+                consume(journal);
+                return Err(error);
+            }
         };
         tracker.cleanup(env);
         result
@@ -415,6 +503,10 @@ pub fn keep(
     }
 }
 
+/// A check a job makes once it holds its lane, before it changes anything; its error is the
+/// refusal.
+pub type UnderLane<'a> = &'a dyn Fn() -> Result<(), String>;
+
 /// Puts main back from the latest before-keep checkpoint a successful keep made.
 pub fn undo(
     env: &dyn KeepEnv,
@@ -423,7 +515,20 @@ pub fn undo(
     computer: &str,
     wait: Duration,
 ) -> Result<UndoOutcome, String> {
+    undo_checked(env, store, journal, computer, wait, &|| Ok(()))
+}
+
+/// [`undo`], after `under_lane` accepts what the undo would take back.
+pub fn undo_checked(
+    env: &dyn KeepEnv,
+    store: &dyn ManifestStore,
+    journal: &Journal,
+    computer: &str,
+    wait: Duration,
+    under_lane: UnderLane<'_>,
+) -> Result<UndoOutcome, String> {
     let _lane = lane::acquire(computer, wait)?;
+    under_lane()?;
     if let Some(entry) = journal.pending(computer)? {
         let checkpoint = CheckpointRef {
             id: entry.checkpoint_id.clone(),

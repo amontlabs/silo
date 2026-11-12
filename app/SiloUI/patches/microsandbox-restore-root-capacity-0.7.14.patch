@@ -1,0 +1,377 @@
+diff --git a/sdk/rust/lib/backend/local/sandbox/create.rs b/sdk/rust/lib/backend/local/sandbox/create.rs
+index 495605a874c74af6425db7a5efd57cbd835b7f40..fe7efd56a40dda1cec4520916b44e49b1aeb5ffa 100644
+--- a/sdk/rust/lib/backend/local/sandbox/create.rs
++++ b/sdk/rust/lib/backend/local/sandbox/create.rs
+@@ -396,6 +396,10 @@ impl LocalBackend {
+                                 self.config().fs_state_limit(),
+                             )
+                             .await?;
++                            crate::sandbox::apply_snapshot_root_capacity(
++                                &mut config,
++                                materialized.root_virtual_size,
++                            )?;
+                             config.checkpoint_restore = Some(materialized.restore);
+                             crate::snapshot::apply_additional_disks(
+                                 &mut config,
+@@ -416,6 +420,10 @@ impl LocalBackend {
+                                     self.config().fs_state_limit(),
+                                 )
+                                 .await?;
++                            crate::sandbox::apply_snapshot_root_capacity(
++                                &mut config,
++                                materialized.root_virtual_size,
++                            )?;
+                             crate::snapshot::apply_additional_disks(
+                                 &mut config,
+                                 materialized.disk_mounts,
+@@ -458,6 +466,10 @@ impl LocalBackend {
+                         &root_layout,
+                     )
+                     .await?;
++                    crate::sandbox::apply_snapshot_root_capacity(
++                        &mut config,
++                        materialized.root_virtual_size,
++                    )?;
+                     config.snapshot_upper_layers = materialized.upper_layers;
+                 }
+                 if let Some((source, owned)) = config.snapshot_owned_source.take() {
+diff --git a/sdk/rust/lib/backend/local/snapshot/archive.rs b/sdk/rust/lib/backend/local/snapshot/archive.rs
+index 1661febdbeb885ca25ed3a793d0000a34e27c050..362dca3307e22940465b5de329866b57cf3f5925 100644
+--- a/sdk/rust/lib/backend/local/snapshot/archive.rs
++++ b/sdk/rust/lib/backend/local/snapshot/archive.rs
+@@ -202,6 +202,7 @@ pub(crate) struct ArchiveChildMaterialization {
+     pub(crate) manifest: microsandbox_image::snapshot::Manifest,
+     pub(crate) checkpoint_restore: Option<microsandbox_runtime::launch::CheckpointRestoreConfig>,
+     pub(crate) upper_layers: Vec<microsandbox_runtime::launch::RootfsUpperLayerConfig>,
++    pub(crate) root_virtual_size: Option<u64>,
+     pub(crate) disk_mounts: Vec<microsandbox_types::VolumeMount>,
+     /// Guest paths of captured external binds that a disk-only restore of a checkpoint needs
+     /// destination mounts for.
+@@ -329,6 +330,8 @@ impl LocalBackend {
+                 ))
+             })?;
+ 
++            let root_virtual_size = file.virtual_size;
++
+             tokio::fs::rename(head.layer_path(layer), child_stage.join(DEFAULT_UPPER_FILE)).await?;
+ 
+             let cache_operation =
+@@ -351,6 +354,7 @@ impl LocalBackend {
+                 manifest,
+                 checkpoint_restore: None,
+                 upper_layers: Vec::new(),
++                root_virtual_size: Some(root_virtual_size),
+                 disk_mounts: Vec::new(),
+                 required_bind_paths: Vec::new(),
+             });
+@@ -446,6 +450,7 @@ impl LocalBackend {
+                     manifest,
+                     checkpoint_restore: None,
+                     upper_layers: materialized.upper_layers,
++                    root_virtual_size: materialized.root_virtual_size,
+                     disk_mounts: materialized.disk_mounts,
+                     required_bind_paths,
+                 });
+@@ -482,6 +487,7 @@ impl LocalBackend {
+                 manifest,
+                 checkpoint_restore: Some(materialized.restore),
+                 upper_layers: materialized.upper_layers,
++                root_virtual_size: materialized.root_virtual_size,
+                 disk_mounts: materialized.disk_mounts,
+                 required_bind_paths: Vec::new(),
+             });
+@@ -560,6 +566,7 @@ impl LocalBackend {
+             manifest,
+             checkpoint_restore: None,
+             upper_layers: materialized.upper_layers,
++            root_virtual_size: materialized.root_virtual_size,
+             disk_mounts: materialized.disk_mounts,
+             required_bind_paths: Vec::new(),
+         })
+@@ -5472,6 +5479,7 @@ mod tests {
+                 let restored = materialize_archive_for_child(&local, &archive, &child_stage, false)
+                     .await
+                     .unwrap();
++                assert_eq!(restored.root_virtual_size, Some(payload.len() as u64));
+                 assert_eq!(restored.manifest.snapshot_id, snapshot_id);
+                 assert_eq!(
+                     inspected
+@@ -5805,6 +5813,7 @@ mod tests {
+             .unwrap();
+ 
+         assert_eq!(restored.manifest.snapshot_id, snapshot_id);
++        assert_eq!(restored.root_virtual_size, Some(16 * 1024 * 1024));
+         assert_eq!(restored.upper_layers.len(), 3);
+         assert_eq!(restored.upper_layers[0].format, "raw");
+         assert_eq!(restored.upper_layers[1].format, "qcow2");
+@@ -6127,6 +6136,7 @@ mod tests {
+             .unwrap();
+ 
+         assert_eq!(restored.manifest.snapshot_id, snapshot_id);
++        assert_eq!(restored.root_virtual_size, Some(4 * 1024 * 1024));
+         assert!(restored.checkpoint_restore.is_some());
+         assert_eq!(restored.upper_layers.len(), 2);
+         assert!(child_stage.join(".checkpoint-restore").exists());
+diff --git a/sdk/rust/lib/backend/local/snapshot/dispatch.rs b/sdk/rust/lib/backend/local/snapshot/dispatch.rs
+index 478e8adff52a4275103c7c57f7a4bd4b040ff04d..961786fe43493383d81b7ea53cd0f526955f29f1 100644
+--- a/sdk/rust/lib/backend/local/snapshot/dispatch.rs
++++ b/sdk/rust/lib/backend/local/snapshot/dispatch.rs
+@@ -97,6 +97,7 @@ impl LocalBackend {
+     ) -> MicrosandboxResult<microsandbox_image::GlobalCache> {
+         crate::sandbox::require_recorded_mounts(config, &materialized.manifest)?;
+         crate::sandbox::require_guest_mounts(config, materialized.required_bind_paths)?;
++        crate::sandbox::apply_snapshot_root_capacity(config, materialized.root_virtual_size)?;
+ 
+         config.snapshot_parent = Some(materialized.manifest.snapshot_id.to_string());
+         crate::snapshot::apply_additional_disks(config, materialized.disk_mounts);
+diff --git a/sdk/rust/lib/backend/local/snapshot/restore.rs b/sdk/rust/lib/backend/local/snapshot/restore.rs
+index fb27364fa8cbfb430f24cbcc73f4ffcd830bd5ac..5858b5676548e0b530aa4c43d6b0cf3e14ffcaeb 100644
+--- a/sdk/rust/lib/backend/local/snapshot/restore.rs
++++ b/sdk/rust/lib/backend/local/snapshot/restore.rs
+@@ -34,6 +34,8 @@ pub(crate) struct CheckpointChildMaterialization {
+     pub(crate) restore: CheckpointRestoreConfig,
+     /// Complete root chain ending in a fresh child-private writable head.
+     pub(crate) upper_layers: Vec<RootfsUpperLayerConfig>,
++    /// Capacity declared by the captured root disk, in bytes.
++    pub(crate) root_virtual_size: Option<u64>,
+     /// Independent managed-volume images, keyed by their captured guest mount paths.
+     pub(crate) disk_mounts: Vec<microsandbox_types::VolumeMount>,
+ }
+@@ -42,6 +44,8 @@ pub(crate) struct CheckpointChildMaterialization {
+ pub(crate) struct CheckpointDiskMaterialization {
+     /// Complete root chain ending in a fresh child-private writable head.
+     pub(crate) upper_layers: Vec<RootfsUpperLayerConfig>,
++    /// Capacity declared by the captured root disk, in bytes.
++    pub(crate) root_virtual_size: Option<u64>,
+     pub(crate) disk_mounts: Vec<microsandbox_types::VolumeMount>,
+ }
+ 
+@@ -105,12 +109,14 @@ pub(crate) async fn materialize_checkpoint_disk_for_child(
+         open_checkpoint_closure(closure, checkpoint_root, true, fs_state_limit).await?;
+     validate_checkpoint_identity(&source_closure, checkpoint_id)?;
+     validate_root_disk_closure(&source_closure, root_disk, true)?;
++    let root_virtual_size = checkpoint_root_virtual_size(&source_closure, root_disk)?;
+     let upper_layers =
+         materialize_checkpoint_disk_layers(&source_closure, child_stage, root_disk).await?;
+     let disk_mounts =
+         materialize_closure_disks(&source_closure, child_stage, root_disk, choices).await?;
+     Ok(CheckpointDiskMaterialization {
+         upper_layers,
++        root_virtual_size,
+         disk_mounts,
+     })
+ }
+@@ -134,6 +140,7 @@ pub(crate) async fn materialize_checkpoint_child_state(
+             .await?;
+     validate_checkpoint_identity(&child_closure, checkpoint_id)?;
+     validate_root_disk_closure(&child_closure, root_disk, false)?;
++    let root_virtual_size = checkpoint_root_virtual_size(&child_closure, root_disk)?;
+     let upper_layers =
+         materialize_checkpoint_disk_layers(&child_closure, child_stage, root_disk).await?;
+     let disk_mounts =
+@@ -156,6 +163,7 @@ pub(crate) async fn materialize_checkpoint_child_state(
+             checkpoint_id: checkpoint_id.to_string(),
+         },
+         upper_layers,
++        root_virtual_size,
+         disk_mounts,
+     })
+ }
+@@ -204,10 +212,33 @@ pub(crate) async fn materialize_file_snapshot_for_child(
+     append_private_writable_head(&mut layers, virtual_size, child_stage, root_disk).await?;
+     Ok(CheckpointDiskMaterialization {
+         upper_layers: layers,
++        root_virtual_size: Some(virtual_size),
+         disk_mounts: Vec::new(),
+     })
+ }
+ 
++fn checkpoint_root_virtual_size(
++    closure: &CheckpointClosure,
++    root_disk: &SnapshotRootDisk,
++) -> MicrosandboxResult<Option<u64>> {
++    let Some(device_id) = root_device(root_disk) else {
++        return Ok(None);
++    };
++    let disk = closure
++        .disks()
++        .iter()
++        .find(|disk| disk.device_id == device_id)
++        .ok_or_else(|| {
++            MicrosandboxError::SnapshotIntegrity("missing root disk generation".into())
++        })?;
++    disk.layers
++        .last()
++        .map(|layer| Some(layer.virtual_size))
++        .ok_or_else(|| {
++            MicrosandboxError::SnapshotIntegrity("checkpoint disk closure is empty".into())
++        })
++}
++
+ /// Adopt a local handoff using independent directory entries, without duplicating disk bytes.
+ pub(crate) async fn adopt_local_branch_for_child(
+     sources: &[RootfsUpperLayerConfig],
+@@ -648,7 +679,7 @@ mod tests {
+                     assert_eq!(child.join(predecessor), pair[0].path);
+                 }
+                 let restored = dir.path().join("durable-child");
+-                materialize_file_snapshot_for_child(
++                let materialized = materialize_file_snapshot_for_child(
+                     &result[..result.len() - 1],
+                     131072,
+                     &CreationStorage::for_test(&restored),
+@@ -656,6 +687,8 @@ mod tests {
+                 )
+                 .await
+                 .unwrap();
++                assert_eq!(materialized.root_virtual_size, Some(131072));
++                assert_eq!(materialized.upper_layers.len(), result.len());
+                 assert_eq!(
+                     std::fs::read(child.join(base_name)).unwrap(),
+                     vec![29; 131072]
+@@ -786,6 +819,7 @@ mod tests {
+         )
+         .await
+         .unwrap();
++        assert_eq!(disk_materialized.root_virtual_size, Some(4 * 1024 * 1024));
+         assert_eq!(disk_materialized.upper_layers.len(), 2);
+         assert_eq!(
+             disk_materialized.upper_layers[0]
+@@ -815,6 +849,7 @@ mod tests {
+         .unwrap();
+         std::fs::remove_dir_all(source).unwrap();
+ 
++        assert_eq!(materialized.root_virtual_size, Some(4 * 1024 * 1024));
+         assert_eq!(materialized.upper_layers.len(), 2);
+         assert_eq!(materialized.upper_layers[0].format, "raw");
+         assert_eq!(materialized.upper_layers[1].format, "qcow2");
+diff --git a/sdk/rust/lib/sandbox/builder.rs b/sdk/rust/lib/sandbox/builder.rs
+index 9498f44c91d657da1788726cb18b8d95b96a8920..634dd26d0c8d9973ca10be2fd06e1553f3ea6bb0 100644
+--- a/sdk/rust/lib/sandbox/builder.rs
++++ b/sdk/rust/lib/sandbox/builder.rs
+@@ -2366,6 +2366,42 @@ pub(crate) fn apply_snapshot_root_layout(
+     Ok(())
+ }
+ 
++#[cfg(feature = "local")]
++pub(crate) fn apply_snapshot_root_capacity(
++    config: &mut SandboxConfig,
++    virtual_size_bytes: Option<u64>,
++) -> MicrosandboxResult<()> {
++    let Some(virtual_size_bytes) = virtual_size_bytes else {
++        return Ok(());
++    };
++    const MIB_BYTES: u64 = 1024 * 1024;
++    if virtual_size_bytes == 0 {
++        return Err(MicrosandboxError::SnapshotIntegrity(
++            "snapshot root-disk capacity is zero".into(),
++        ));
++    }
++    // Declared sizes are whole MiB. A disk that is not an exact multiple (hand-built or
++    // foreign archives) is declared at the next whole MiB, never below its real size.
++    let size_mib = u32::try_from(virtual_size_bytes.div_ceil(MIB_BYTES)).map_err(|_| {
++        MicrosandboxError::SnapshotIntegrity("snapshot root-disk capacity exceeds its bound".into())
++    })?;
++    let RootfsSource::Oci(oci) = &mut config.spec.image else {
++        return Err(MicrosandboxError::SnapshotIntegrity(
++            "snapshot image did not resolve to an OCI rootfs".into(),
++        ));
++    };
++    match oci.root_disk.as_mut() {
++        Some(microsandbox_types::RootDisk::Managed { size_mib: size })
++        | Some(microsandbox_types::RootDisk::Flat { size_mib: size, .. }) => *size = Some(size_mib),
++        _ => {
++            return Err(MicrosandboxError::SnapshotIntegrity(
++                "snapshot root capacity does not match its root-disk layout".into(),
++            ));
++        }
++    }
++    Ok(())
++}
++
+ fn validate_config_script_name(name: &str) -> Result<(), String> {
+     let path = std::path::Path::new(name);
+     if name.is_empty()
+@@ -2606,6 +2642,8 @@ mod tests {
+         BackendConfig, ConfigSource, SandboxBuilder, SandboxConfig, SandboxConfigPatch,
+         checkpoint_network_override_conflicts,
+     };
++    #[cfg(feature = "local")]
++    use super::{apply_snapshot_root_capacity, apply_snapshot_root_layout};
+     use crate::config::GlobalConfigPatch;
+     #[cfg(feature = "local")]
+     use crate::sandbox::{GuestClockPolicy, require_recorded_mounts};
+@@ -2613,6 +2651,59 @@ mod tests {
+     use crate::{LogLevel, MicrosandboxError, MicrosandboxResult, RestoreKind};
+     use std::collections::BTreeMap;
+ 
++    #[cfg(feature = "local")]
++    fn restored_oci_config() -> SandboxConfig {
++        let mut config = SandboxConfig::default();
++        config.spec.image = microsandbox_types::RootfsSource::oci("ubuntu:24.04");
++        apply_snapshot_root_layout(
++            &mut config,
++            &microsandbox_image::snapshot::SnapshotRootDisk::Managed,
++        )
++        .unwrap();
++        config
++    }
++
++    #[cfg(feature = "local")]
++    #[test]
++    fn restored_managed_root_uses_materialized_virtual_size() {
++        let mut config = restored_oci_config();
++
++        apply_snapshot_root_capacity(&mut config, Some(40 * 1024 * 1024 * 1024)).unwrap();
++
++        assert_eq!(
++            config.spec.image.oci_root_disk(),
++            Some(&microsandbox_types::RootDisk::Managed {
++                size_mib: Some(40 * 1024),
++            })
++        );
++    }
++
++    #[cfg(feature = "local")]
++    #[test]
++    fn restored_root_rejects_unrepresentable_virtual_size() {
++        let mut config = restored_oci_config();
++
++        assert!(apply_snapshot_root_capacity(&mut config, Some(0)).is_err());
++        assert!(apply_snapshot_root_capacity(&mut config, Some(u64::MAX)).is_err());
++        assert_eq!(
++            config.spec.image.oci_root_disk(),
++            Some(&microsandbox_types::RootDisk::Managed { size_mib: None })
++        );
++    }
++
++    #[cfg(feature = "local")]
++    #[test]
++    fn restored_root_rounds_partial_mib_up() {
++        let mut config = restored_oci_config();
++
++        apply_snapshot_root_capacity(&mut config, Some(1024 * 1024 + 1)).unwrap();
++
++        assert_eq!(
++            config.spec.image.oci_root_disk(),
++            Some(&microsandbox_types::RootDisk::Managed { size_mib: Some(2) })
++        );
++    }
++
+     #[test]
+     fn rebuild_preserves_resolved_init_and_honors_new_init_edits() {
+         let image = microsandbox_image::ImageConfig {
+diff --git a/sdk/rust/lib/sandbox/mod.rs b/sdk/rust/lib/sandbox/mod.rs
+index db3a111db2f0e3505d43baa44103adadf3a55d84..46da7cfc191618af02ade80004ec8790b1d5115a 100644
+--- a/sdk/rust/lib/sandbox/mod.rs
++++ b/sdk/rust/lib/sandbox/mod.rs
+@@ -126,7 +126,8 @@ pub(crate) fn reserved_label_prefix(key: &str) -> Option<&'static str> {
+ // local backend's lifecycle and create methods under `backend/local/` call.
+ #[cfg(feature = "local")]
+ pub(crate) use builder::{
+-    apply_checkpoint_restore_constraints, apply_snapshot_guest_clock, apply_snapshot_root_layout,
++    apply_checkpoint_restore_constraints, apply_snapshot_guest_clock, apply_snapshot_root_capacity,
++    apply_snapshot_root_layout,
+ };
+ #[cfg(feature = "local")]
+ pub(crate) use patch::{apply_patches, build_flat_tree, build_upper_tree};

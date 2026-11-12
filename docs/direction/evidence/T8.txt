@@ -1,0 +1,68 @@
+/Users/polarzero/.t8/bin/msb: replacing existing signature
+[00:31:32] runtime: msb 0.7.6, restore probe: 1
+[00:31:32] restore --net-strict: 2 line(s) in its help
+[00:31:32] built binary sha256: f545fc8872263b1c12c369e84ee08221ca2e0444580fafb5142ba620bb039924
+[00:31:32] == modes, change on start, fork and restore (engine test live_network_policy_modes_restore_and_fork)
+warning: function `assert_fixture` is never used
+6 | pub(crate) fn assert_fixture(name: &str, actual: impl Serialize) {
+PROBE open (e2e-t8-main):
+allowed host, HTTPS (example.com): 200
+other host, HTTPS (example.org): 200
+secret-covered host, HTTPS (api.github.com): 200
+name example.org through the gateway: 2606:4700:10::6814:1a88
+direct public IP, TCP connect (1.1.1.1:443): connected
+another resolver (1.1.1.1) for example.org: rcode=0 answers=2
+PROBE allowlist after the change (e2e-t8-main):
+allowed host, HTTPS (example.com): 200
+other host, HTTPS (example.org): 000
+secret-covered host, HTTPS (api.github.com): 200
+name example.org through the gateway: 2606:4700:10::ac42:9ded
+direct public IP, TCP connect (1.1.1.1:443): failed (ConnectionRefusedError)
+another resolver (1.1.1.1) for example.org: rcode=3 answers=0
+PROBE allowlist while the stored policy is closed (e2e-t8-main):
+allowed host, HTTPS (example.com): 200
+other host, HTTPS (example.org): 000
+secret-covered host, HTTPS (api.github.com): 200
+name example.org through the gateway: 2606:4700:10::6814:1a88
+direct public IP, TCP connect (1.1.1.1:443): failed (ConnectionRefusedError)
+another resolver (1.1.1.1) for example.org: rcode=3 answers=0
+PROBE closed (e2e-t8-main):
+allowed host, HTTPS (example.com): 000
+other host, HTTPS (example.org): 000
+secret-covered host, HTTPS (api.github.com): 000
+name example.org through the gateway: 
+direct public IP, TCP connect (1.1.1.1:443): failed (ConnectionRefusedError)
+another resolver (1.1.1.1) for example.org: rcode=3 answers=0
+PROBE open again (e2e-t8-main):
+allowed host, HTTPS (example.com): 200
+other host, HTTPS (example.org): 200
+secret-covered host, HTTPS (api.github.com): 200
+name example.org through the gateway: 2606:4700:10::ac42:9ded
+direct public IP, TCP connect (1.1.1.1:443): connected
+another resolver (1.1.1.1) for example.org: rcode=0 answers=2
+PROBE fork of an allowlist computer (e2e-t8-fork):
+allowed host, HTTPS (example.com): 200
+other host, HTTPS (example.org): 000
+secret-covered host, HTTPS (api.github.com): 200
+name example.org through the gateway: 2606:4700:10::ac42:9ded
+direct public IP, TCP connect (1.1.1.1:443): failed (ConnectionRefusedError)
+another resolver (1.1.1.1) for example.org: rcode=3 answers=0
+PROBE allowlist computer restored in place (e2e-t8-main):
+allowed host, HTTPS (example.com): 200
+other host, HTTPS (example.org): 000
+secret-covered host, HTTPS (api.github.com): 200
+name example.org through the gateway: 2606:4700:10::6814:1a88
+direct public IP, TCP connect (1.1.1.1:443): failed (ConnectionRefusedError)
+another resolver (1.1.1.1) for example.org: rcode=3 answers=0
+Verified the network policy modes, the change on start, a fork and a restore.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3625 filtered out; finished in 28.63s
+[00:32:31] == export code paths on the runtime's own configurations (engine test live_export_accepts_each_network_policy)
+EXPORT allowlist-fork: runtime strict=false, 9 rules; as it runs: refused: e2e-t8-fork has custom network dns settings that Silo cannot carry in an export.; export reset: accepted; after the reset: accepted; strict now true
+EXPORT allowlist-restored: runtime strict=false, 9 rules; as it runs: refused: e2e-t8-main has custom network dns settings that Silo cannot carry in an export.; export reset: refused: e2e-t8-main has custom network interface settings that Silo cannot carry in an export.; after the reset: refused: e2e-t8-main has custom network dns settings that Silo cannot carry in an export.; strict now false
+EXPORT allowlist: runtime strict=false, 9 rules; as it runs: refused: e2e-t8-main has custom network dns settings that Silo cannot carry in an export.; export reset: accepted; after the reset: accepted; strict now true
+EXPORT closed: runtime strict=true, 0 rules; as it runs: refused: e2e-t8-main has custom network dns settings that Silo cannot carry in an export.; export reset: accepted; after the reset: accepted; strict now true
+EXPORT open: runtime strict=true, 2 rules; as it runs: accepted; export reset: accepted; after the reset: accepted; strict now true
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3625 filtered out; finished in 0.00s
+[00:32:31] live test exit: 0; export test exit: 0
+[00:32:31] cleanup: private runtime homes under /Users/polarzero/.t8
+[00:32:31] removed /Users/polarzero/.t8

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { visibleText } from "./visible-text"
+import { sanitizeAgentText, visibleText } from "./visible-text"
 
 describe("visible text for guest-controlled names", () => {
   it("reveals bidirectional overrides, isolates and marks", () => {
@@ -27,5 +27,11 @@ describe("visible text for guest-controlled names", () => {
 
   it("leaves ordinary names, including non-Latin ones, unchanged", () => {
     for (const name of ["acme/silo", "projects/my app", "données", "donne\u0301es", "项目", "שלום", "📁"]) expect(visibleText(name)).toBe(name)
+  })
+
+  it("sanitizes agent text by removing bidi overrides and control chars", () => {
+    expect(sanitizeAgentText("dev\u202Efake\u200Bcomputer")).toBe("devfakecomputer")
+    expect(sanitizeAgentText("Line 1\nLine 2\tTab")).toBe("Line 1 Line 2 Tab")
+    expect(sanitizeAgentText("Line 1\nLine 2\u202Ebad\r\nLine 3", { preserveNewlines: true })).toBe("Line 1\nLine 2bad\r\nLine 3")
   })
 })

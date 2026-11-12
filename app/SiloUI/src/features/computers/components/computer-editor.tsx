@@ -22,6 +22,11 @@ import {
 } from "@/features/onboarding/model/computer-configuration"
 import { divergentComputerFields, sameComputerConfiguration } from "@/features/application/model/computer-change"
 import { useComputerUseBridge } from "@/desktop/computer-use-bridge"
+import { AgentChoiceField } from "@/features/agents/components/agent-choice-field"
+import { planAgentInstall, useAgentInstallSupport, useRememberedAgentChoice } from "@/features/agents/model/planned-installs"
+import type { AgentChoice } from "@/features/agents/model/agents"
+import { NetworkModeField } from "@/features/network-policy/components/network-mode-field"
+import { planNetworkMode, useNetworkPolicySupport, type NetworkChoice } from "@/features/network-policy/model/planned-network"
 import type { ComputerEditorDraft } from "@/features/onboarding/model/onboarding-draft"
 import { computerFieldLabel, type ComputerReview } from "@/features/computers/model/computer-review"
 import { parseWholeNumber, presetsWithin, resourceFields, resourceMaximums, runtimeLimits, validateComputerResources, type DeviceCapacity } from "@/features/computers/model/computer-limits"
@@ -157,6 +162,12 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
   // A computer whose desktop is built into its image has it unless it is turned off; older computers install theirs here.
   const builtInDesktop = created && original?.desktop?.builtIn === true
   const computerUse = useComputerUseBridge()
+  const offersAgent = useAgentInstallSupport() && !editor.originalID && !deviceId
+  const rememberedAgent = useRememberedAgentChoice()
+  const [agentChoice, setAgentChoice] = useState<AgentChoice | null>(null)
+  const chosenAgent = agentChoice ?? rememberedAgent
+  const offersNetwork = useNetworkPolicySupport() && !editor.originalID && !deviceId
+  const [networkChoice, setNetworkChoice] = useState<NetworkChoice>("default")
   // Every Linux computer on a build with computer use gets the built-in desktop.
   const newVmSupport = computerUse ? "yes" : "no"
   const builtInNewVm = !created && newVmSupport === "yes"
@@ -231,7 +242,11 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
     }
     // Stopping a running computer is always confirmed first (decision 8).
     else if (requiresStop && !stopConfirmed) setConfirmingStop(true)
-    else onSave(draft)
+    else {
+      if (offersAgent) planAgentInstall(draft.name, chosenAgent)
+      if (offersNetwork) planNetworkMode(draft.name, networkChoice)
+      onSave(draft)
+    }
   }
 
   // Escape cancels only an untouched editor, so a keystroke never discards typed changes.
@@ -308,6 +323,10 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
         <SelectField custom readOnly={created} label="Workspace disk" value={draft.workspaceStorageGiB} values={supportedStorageGiB} max={runtimeLimits.storageGiB} suffix="GiB" error={errors.workspaceStorageGiB} onChange={(workspaceStorageGiB) => update({ workspaceStorageGiB } as Partial<SetupComputerConfiguration>)} />
         <SelectField custom readOnly={created} label="Runtime disk" value={draft.runtimeStorageGiB} values={supportedStorageGiB} max={runtimeLimits.storageGiB} suffix="GiB" error={errors.runtimeStorageGiB} onChange={(runtimeStorageGiB) => update({ runtimeStorageGiB } as Partial<SetupComputerConfiguration>)} />
       </div>
+
+      {offersAgent && <AgentChoiceField value={chosenAgent} onChange={setAgentChoice} />}
+
+      {offersNetwork && <NetworkModeField value={networkChoice} onChange={setNetworkChoice} />}
 
       {builtIn && <section aria-label="Linux desktop" className="grid gap-2 border-t border-border pt-3">
         <label className="flex items-center justify-between gap-3 text-xs">

@@ -1,7 +1,7 @@
 //! Silo's durable names and lifecycle intent for upstream MicroSandbox snapshots.
 //! Snapshot data and its reference graph remain owned by MicroSandbox.
 use super::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
 
@@ -9,6 +9,9 @@ pub const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
 mod native;
 #[path = "checkpoints/reclaim.rs"]
 mod reclaim;
+#[cfg(test)]
+#[path = "checkpoints/resume_memory_tests.rs"]
+mod resume_memory_tests;
 #[cfg(test)]
 #[path = "checkpoints/running_retry_tests.rs"]
 mod running_retry_tests;
@@ -148,10 +151,23 @@ pub struct ForkOptions {
     pub secrets: Vec<String>,
     pub stop: Vec<String>,
     pub scrub: Vec<String>,
+    /// The fork starts on a deny-all network policy instead of its parent's.
+    pub closed_network: bool,
+    /// The fork's network policy; `None` keeps the source's.
+    pub network_policy: Option<crate::network_policy::NetworkPolicy>,
 }
 
 /// The name of the assignment that stands for GitHub access.
 const GITHUB_SECRET_NAME: &str = "github";
+
+/// A policy that allows no traffic in either direction.
+fn closed_network_policy() -> Value {
+    serde_json::json!({
+        "default_egress": "deny",
+        "default_ingress": "deny",
+        "rules": []
+    })
+}
 
 impl ForkOptions {
     fn copies_github(&self) -> bool {
@@ -166,11 +182,14 @@ impl ForkOptions {
             .collect()
     }
 
-    /// A fork never carries its parent's in-guest client token, whoever made the fork.
+    /// A fork never carries its parent's channel token, whoever made the fork: the endpoint
+    /// file and the earlier in-guest client's token file are scrubbed.
     pub(super) fn scrub_guest_client_token(&mut self) {
-        let path = silo_api::methods::guest_client::GUEST_TOKEN_PATH;
-        if !self.scrub.iter().any(|existing| existing == path) {
-            self.scrub.push(path.into());
+        use silo_api::methods::guest_client::{GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH};
+        for path in [GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH] {
+            if !self.scrub.iter().any(|existing| existing == path) {
+                self.scrub.push(path.into());
+            }
         }
     }
 
@@ -610,13 +629,28 @@ fn current_network_args(config: &Value) -> Result<Vec<String>, RuntimeError> {
             .as_str()
             .filter(|value| matches!(*value, "ingress" | "egress"))
             .ok_or_else(|| error("A current network rule is unsupported."))?;
-        let group = rule
+        // A group (`host`, `public`, ...), or a host name rule: `domain` is one name and
+        // `domain_suffix` is a name and every name under it (written `*.<name>`).
+        let name_rule = |key: &str| {
+            rule.pointer(&format!("/destination/{key}"))
+                .and_then(Value::as_str)
+                .filter(|name| crate::network_policy::validate_host(name).is_ok())
+        };
+        let group = if let Some(group) = rule
             .pointer("/destination/group")
             .and_then(Value::as_str)
             .filter(|value| {
                 !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_lowercase())
-            })
-            .ok_or_else(|| error("A current network destination is unsupported."))?;
+            }) {
+            group.to_owned()
+        } else if let Some(domain) = name_rule("domain") {
+            domain.to_owned()
+        } else if let Some(suffix) = name_rule("domain_suffix") {
+            format!("*.{suffix}")
+        } else {
+            return Err(error("A current network destination is unsupported."));
+        };
+        let group = group.as_str();
         let protocols = rule["protocols"]
             .as_array()
             .ok_or_else(|| error("A current network protocol is unsupported."))?;
@@ -867,7 +901,13 @@ fn capture_with_kind(
             paths,
             id,
             (snapshot_group.clone(), interrupted.native_id().to_owned()),
-        ) {
+        ) && !adopt_finished_capture(
+            runner,
+            paths,
+            &mut record,
+            &snapshot_group,
+            configuration.name(),
+        )? {
             return Err(error("An interrupted checkpoint could not be removed. Retry after its dependencies are released."));
         }
         record.inflight_checkpoint = None;
@@ -901,11 +941,6 @@ fn capture_with_kind(
         "--group".into(),
         snapshot_group.clone(),
     ];
-    let _bridge_hold = (scope == "full").then(|| {
-        let hold = crate::guest_client::hold_bridge(configuration.name());
-        release_stale_share_entries(runner, paths, configuration.name());
-        hold
-    });
     if scope == "full" {
         args.push("--full".into());
     }
@@ -921,14 +956,7 @@ fn capture_with_kind(
             }),
             "Verification failed",
         ),
-        Err(failure) => (
-            Err(explain_rejected_capture(
-                paths,
-                configuration.name(),
-                failure,
-            )),
-            "Checkpoint failed",
-        ),
+        Err(failure) => (Err(failure), "Checkpoint failed"),
     };
     match result {
         Ok(_) => {
@@ -1130,8 +1158,26 @@ pub fn create_for_job(
     admitted()?;
     guard.allow_cancel();
     guard.expect_within(std::time::Duration::from_secs(15 * 60));
-    shutdown::ensure_accepting_operations()?;
+    let checkpoint = create_while_held(paths, computer_id, name, kind, retention)?;
+    drop(guard);
+    Ok(checkpoint)
+}
+
+/// [`create_for_job`] for a caller that already holds the computer's operation gate.
+pub fn create_while_held(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    name: &str,
+    kind: silo_api::methods::checkpoints::CheckpointKind,
+    retention: &dyn Fn() -> Result<u32, String>,
+) -> Result<silo_api::methods::checkpoints::Checkpoint, String> {
     use silo_api::methods::checkpoints::CheckpointKind;
+
+    debug_assert!(
+        super::operation_gate::held(),
+        "a checkpoint is captured under the computer's operation gate"
+    );
+    shutdown::ensure_accepting_operations()?;
     if kind == CheckpointKind::Automatic && retention()? == 0 {
         return Err(crate::checkpoints::AUTOMATIC_OFF.into());
     }
@@ -1146,7 +1192,6 @@ pub fn create_for_job(
         depth,
     )
     .map_err(|error| error.to_string())?;
-    drop(guard);
     Ok(api_checkpoint(checkpoint))
 }
 
@@ -1403,6 +1448,97 @@ pub(super) fn view_pending(record: &Record, name: &str) -> Option<PendingRestore
     })
 }
 
+/// The memory, in MiB, a pending restore of a full checkpoint resumes `id` at. It is the memory
+/// the capture recorded, which is not the size the computer is saved with now. `None` when no
+/// full restore is pending.
+pub(super) fn pending_resume_memory_mib(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    id: &str,
+    name: &str,
+) -> Result<Option<u64>, RuntimeError> {
+    let record = load(paths, id)?;
+    let Some(pending) = view_pending(&record, name).filter(|pending| pending.state == "full")
+    else {
+        return Ok(None);
+    };
+    captured_memory_mib(
+        runner,
+        paths,
+        &pending.source_computer,
+        &pending.checkpoint_id,
+    )
+    .map(Some)
+}
+
+/// The memory, in MiB, that restoring the checkpoint `checkpoint_id` of `id` and starting the
+/// computer resumes at. `None` when the checkpoint is not a full one or the computer has no
+/// such checkpoint.
+pub(super) fn checkpoint_resume_memory_mib(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    id: &str,
+    checkpoint_id: &str,
+) -> Result<Option<u64>, RuntimeError> {
+    let record = load(paths, id)?;
+    let Some(checkpoint) = record
+        .checkpoints
+        .iter()
+        .find(|checkpoint| checkpoint.id == checkpoint_id && checkpoint.scope == "full")
+    else {
+        return Ok(None);
+    };
+    let group = record
+        .snapshot_group
+        .as_deref()
+        .ok_or_else(|| error("The memory the saved checkpoint resumes with could not be read."))?;
+    captured_memory_mib(runner, paths, group, checkpoint.native_id()).map(Some)
+}
+
+/// The memory, in MiB, the capture `native_id` of the snapshot group `group` recorded.
+fn captured_memory_mib(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    group: &str,
+    native_id: &str,
+) -> Result<u64, RuntimeError> {
+    let unreadable = || error("The memory the saved checkpoint resumes with could not be read.");
+    if !valid_snapshot_group(group) || !valid_native_id(native_id) {
+        return Err(unreadable());
+    }
+    let member = native::inventory_in_group(runner, paths, group)?
+        .into_iter()
+        .find(|member| member.name.as_deref() == Some(native_id))
+        .ok_or_else(unreadable)?;
+    let store = paths
+        .storage_home
+        .as_deref()
+        .unwrap_or(&paths.home)
+        .join("snapshots");
+    let artifact = member
+        .artifact_path
+        .as_deref()
+        .and_then(|artifact| fs::canonicalize(artifact).ok())
+        .filter(|artifact| fs::canonicalize(&store).is_ok_and(|store| artifact.starts_with(store)))
+        .ok_or_else(unreadable)?;
+    let descriptor = fs::File::open(artifact.join("snapshot.json"))
+        .and_then(|file| {
+            let mut bytes = Vec::new();
+            file.take(1024 * 1024).read_to_end(&mut bytes)?;
+            Ok(bytes)
+        })
+        .map_err(|_| unreadable())?;
+    serde_json::from_slice::<Value>(&descriptor)
+        .ok()
+        .and_then(|descriptor| {
+            descriptor
+                .pointer("/state/requirements_summary/memory_mib")
+                .and_then(Value::as_u64)
+        })
+        .filter(|memory| *memory > 0)
+        .ok_or_else(unreadable)
+}
+
 pub fn forget_removed(paths: &RuntimePaths, id: &str) -> Result<(), RuntimeError> {
     crate::computer_use::forget(paths, id)?;
     let target = path(paths, id);
@@ -1428,6 +1564,7 @@ pub(super) fn pending_computer(
         attention: None,
         freshness: Freshness::Fresh,
         settling: false,
+        needs_storage_upgrade: false,
         repositories: Vec::new(),
         files: Vec::new(),
         ports: Vec::new(),
@@ -1585,6 +1722,18 @@ pub fn import_pending_restore_with_environment(
         "default_ingress": "deny",
         "rules": []
     }));
+    // An import starts closed, whatever policy a computer of this id had here, and keeps the
+    // deny-all in both directions until the owner sets one. The stored policy says so, so
+    // nothing has to infer it from the rules the computer carries.
+    crate::network_policy::store::set_stored(
+        computer_id,
+        crate::network_policy::store::Stored::closed_without_incoming(),
+    )
+    .map_err(RuntimeError::Unavailable)?;
+    // An import was built from no recipe of this device.
+    crate::recipes::records::remove(computer_id).map_err(RuntimeError::Unavailable)?;
+    // An import has no Silo tools until the owner turns them on.
+    crate::guest_client::turn_off(&[computer_id]).map_err(RuntimeError::Unavailable)?;
     save(paths, computer_id, &record)
 }
 
@@ -1610,6 +1759,7 @@ fn running_child_matches(
     attempt_id: &str,
     material: &secrets_runtime::Material,
     policy: &Value,
+    strict: bool,
 ) -> bool {
     inspected.status == "Running"
         && inspected
@@ -1627,7 +1777,15 @@ fn running_child_matches(
             .pointer("/labels/silo.restore-attempt")
             .and_then(Value::as_str)
             == Some(attempt_id)
-        && inspected.config.pointer("/network/policy") == Some(policy)
+        && inspected
+            .config
+            .pointer("/network/policy")
+            .is_some_and(|observed| crate::network_policy::same_policy(observed, policy))
+        && inspected
+            .config
+            .pointer("/network/strict")
+            .map_or(Some(true), Value::as_bool)
+            == Some(strict)
         && secrets_runtime::verify_config(&inspected.config, material)
         && inspected
             .config
@@ -1641,6 +1799,230 @@ fn running_child_matches(
                         && secret["source"]["var"] == "SILO_GITHUB"
                 })
             })
+}
+
+/// The runtime's `restore` must take `--net-strict` (Silo's `restore-net-strict` patch) before an
+/// allowlist computer is restored, or it would come back strict and its allowed hosts would fail.
+fn ensure_restore_strict(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<(), RuntimeError> {
+    let probe = runner.run(
+        paths,
+        &["--silo-restore-strict-protocol".into()],
+        READ_TIMEOUT,
+    );
+    match probe {
+        Ok(output) if output.stdout.trim() == "1" => Ok(()),
+        _ => Err(RuntimeError::Unavailable(
+            "The bundled runtime cannot restore a computer with a list of allowed hosts. Update or repair Silo, then start the computer again.".into(),
+        )),
+    }
+}
+
+/// The rules a virtual machine's stored network policy asks for, with the computer as the
+/// runtime reports it, when the runtime holds other rules. A computer with no stored policy is
+/// planned from the rules the runtime holds plus Silo's own, and only when it has Silo's own.
+/// `None` for a computer with nothing to change, a container, and one with a restore in progress.
+fn changed_network_plan(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<Option<(crate::network_policy::Plan, InspectedSandbox)>, RuntimeError> {
+    if configuration.runtime.is_some() {
+        return Ok(None);
+    }
+    // A saved policy that cannot be read is an error: the computer does not start on a guess.
+    let stored = crate::network_policy::store::get_stored(configuration.id())
+        .map_err(RuntimeError::Unavailable)?;
+    // A computer with no saved policy keeps the rules it was made with. It is looked at only
+    // when Silo's own rules (its channel to Silo's tools) are missing from it.
+    if stored.is_none() && crate::network_policy::extra_rules(configuration.id()).is_empty() {
+        return Ok(None);
+    }
+    let record = load(paths, configuration.id())?;
+    if record.pending_checkpoint_restore.is_some() || record.restore_journal.is_some() {
+        return Ok(None);
+    }
+    let inspected = inspect_computer(runner, paths, configuration.name())?;
+    ensure_managed(&inspected)?;
+    if inspected
+        .config
+        .pointer("/labels/silo.machine-id")
+        .and_then(Value::as_str)
+        != Some(configuration.id())
+    {
+        return Ok(None);
+    }
+    let plan = match &stored {
+        Some(stored) => {
+            let mut plan = crate::network_policy::plan_held(
+                &stored.held(),
+                &crate::network_policy::Grants::of_computer(configuration.name()),
+                &crate::network_policy::extra_rules(configuration.id()),
+            );
+            plan.ingress_allowed = !stored.incoming_denied;
+            plan
+        }
+        None => {
+            // Without a stored policy the rules to keep are the ones the runtime holds for the
+            // computer; the channel's rule is added to them. When they cannot be read, nothing
+            // is guessed.
+            let recorded = inspected
+                .config
+                .pointer("/network/policy")
+                .or(record.desired_network_policy.as_ref())
+                .ok_or_else(|| {
+                    RuntimeError::Unavailable(format!(
+                        "Silo cannot read the network rules {} was made with, so it was not started. Start it again from Silo once its network policy is set.",
+                        configuration.name()
+                    ))
+                })?;
+            crate::network_policy::plan_for(configuration.id(), configuration.name(), Some(recorded))
+                .map_err(RuntimeError::Unavailable)?
+        }
+    };
+    let network = inspected.config.get("network").cloned().unwrap_or(Value::Null);
+    if plan.matches(&network) {
+        return Ok(None);
+    }
+    Ok(Some((plan, inspected)))
+}
+
+/// Whether a virtual machine's runtime holds other rules than its stored network policy asks
+/// for, so its next start applies them.
+pub(crate) fn network_policy_changed(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<bool, RuntimeError> {
+    Ok(changed_network_plan(runner, paths, configuration)?.is_some())
+}
+
+/// Refuses to start a virtual machine whose runtime holds other rules than its saved network
+/// policy asks for. Starts that go through [`apply_network_policy_change`] never reach this with
+/// a difference; the others (a finished restore attempt, a recovered start) must not run the
+/// computer with rules the owner did not choose.
+pub(super) fn ensure_network_rules_current(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<(), RuntimeError> {
+    if changed_network_plan(runner, paths, configuration)?.is_some() {
+        return Err(RuntimeError::Invalid(format!(
+            "{} does not have the network rules its saved network policy asks for, so it was not started. Start it again from Silo to apply them.",
+            configuration.name()
+        )));
+    }
+    Ok(())
+}
+
+/// What `network.policy.get` needs to know about a Linux computer.
+pub struct NetworkPolicyView {
+    pub name: String,
+    pub container: bool,
+    pub running: bool,
+    /// A restore, fork or import is waiting for the computer's next start.
+    pub pending: bool,
+    /// `config.network` as the runtime reports it, when the computer exists in the runtime.
+    pub network: Option<Value>,
+    /// The policy the engine last asked the runtime for.
+    pub recorded: Option<Value>,
+}
+
+/// Reads a Linux computer's network as the runtime holds it.
+pub fn network_policy_view(paths: &RuntimePaths, computer_id: &str) -> Result<NetworkPolicyView, String> {
+    let configuration =
+        computer_configuration(paths, computer_id).map_err(|error| error.to_string())?;
+    let record = load(paths, computer_id).map_err(|error| error.to_string())?;
+    let pending = record.pending_checkpoint_restore.is_some() || record.restore_journal.is_some();
+    let inspected = if pending {
+        None
+    } else {
+        Some(inspect_computer(&ProcessRunner, paths, configuration.name()).map_err(|error| error.to_string())?)
+    };
+    Ok(NetworkPolicyView {
+        name: configuration.name().to_owned(),
+        container: configuration.runtime.is_some(),
+        running: inspected
+            .as_ref()
+            .is_some_and(|inspected| matches!(inspected.status.as_str(), "Running" | "Paused")),
+        pending,
+        network: inspected.and_then(|inspected| inspected.config.get("network").cloned()),
+        recorded: record.desired_network_policy,
+    })
+}
+
+/// Applies a changed network policy to a stopped virtual machine before it starts. The runtime
+/// cannot change a computer's rules, so the engine restores it in place: a disk checkpoint
+/// ("Before network policy change"), then the computer is replaced from that checkpoint with
+/// the new rules, as a Restore does. Returns whether it did this and started the computer.
+/// A computer with no stored policy and no rule of Silo's own, a container, a running computer
+/// and one whose runtime already holds the rules are left alone.
+pub(super) fn apply_network_policy_change(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<bool, RuntimeError> {
+    let Some((plan, inspected)) = changed_network_plan(runner, paths, configuration)? else {
+        return Ok(false);
+    };
+    if !matches!(inspected.status.as_str(), "Stopped" | "Created") {
+        return Ok(false);
+    }
+    if !plan.strict {
+        ensure_restore_strict(runner, paths)?;
+    }
+    let lineage_group = ensure_snapshot_group(paths, configuration.id(), configuration.name())?;
+    let checkpoint = capture_with_kind(
+        runner,
+        paths,
+        configuration.id(),
+        "Before network policy change",
+        "before-restore",
+        "manual",
+        CaptureDepth::DisksOnly,
+    )?;
+    let mut record = load(paths, configuration.id())?;
+    record.snapshot_group = Some(lineage_group.clone());
+    record.desired_network_policy = Some(plan.policy_value());
+    record.legacy_mounts = crate::legacy_mounts::recorded(&inspected.config);
+    // Until the original is removed and the pending restore saved, an interruption leaves an
+    // unfinished Restore to this checkpoint, which Start and Abandon already resolve.
+    record.restore_journal = Some(RestoreJournal {
+        target_checkpoint_id: checkpoint.id.clone(),
+        recovery_checkpoint: checkpoint.clone(),
+        prior_running: false,
+        phase: "secured".into(),
+    });
+    record.checkpoint_operation = Some(Operation {
+        kind: "restore".into(),
+        status: "running".into(),
+        stage: "Applying the network policy".into(),
+        error: None,
+    });
+    save(paths, configuration.id(), &record)?;
+    crate::ssh_access::close_computer(configuration.name());
+    crate::desktop_viewer::close_computer(configuration.name());
+    runner.run(
+        paths,
+        &[
+            "remove".into(),
+            "--quiet".into(),
+            configuration.name().into(),
+        ],
+        STOP_TIMEOUT,
+    )?;
+    record.pending_checkpoint_restore = Some(PendingRestore {
+        checkpoint_id: checkpoint.native_id().to_owned(),
+        source_computer: lineage_group,
+        state: checkpoint.scope.clone(),
+    });
+    record.restore_journal = None;
+    record.restore_attempted = false;
+    record.restore_attempt_ran = false;
+    record.restore_attempt_id = None;
+    record.checkpoint_operation = None;
+    save(paths, configuration.id(), &record)?;
+    start_pending(runner, paths, configuration)?;
+    Ok(true)
 }
 
 pub(super) fn start_pending(
@@ -1708,10 +2090,27 @@ pub(super) fn start_pending(
             "Silo cannot match the pending checkpoint to this computer's history. The checkpoint was preserved. Relaunch Silo and retry Start.",
         ));
     }
-    let policy = record.desired_network_policy.clone().ok_or_else(|| {
+    let recorded = record.desired_network_policy.clone().ok_or_else(|| {
         error("The fork's desired network policy is missing. The checkpoint was preserved.")
     })?;
-    let network_args = current_network_args(&serde_json::json!({"network":{"policy":policy}}))?;
+    // The rules come from the computer's stored network policy, so a restore, a fork or an
+    // import starts with that policy and its strict setting.
+    let plan = crate::network_policy::plan_for(
+        configuration.id(),
+        configuration.name(),
+        Some(&recorded),
+    )
+    .map_err(RuntimeError::Unavailable)?;
+    let policy = plan.policy_value();
+    let mut network_args = current_network_args(&serde_json::json!({"network":{"policy":policy}}))?;
+    if !plan.strict {
+        ensure_restore_strict(runner, paths)?;
+        network_args.push(plan.strict_arg());
+    }
+    if record.desired_network_policy.as_ref() != Some(&policy) {
+        record.desired_network_policy = Some(policy.clone());
+        save(paths, configuration.id(), &record)?;
+    }
     let material = crate::secrets::runtime_material(configuration.name())
         .map_err(RuntimeError::Unavailable)?;
     secrets_runtime::validate_material(&material).map_err(RuntimeError::Invalid)?;
@@ -1753,6 +2152,7 @@ pub(super) fn start_pending(
             attempt_id,
             &material,
             &policy,
+            plan.strict,
         ) {
             record.pending_checkpoint_restore = None;
             record.checkpoint_operation = None;
@@ -1876,6 +2276,14 @@ pub(super) fn start_pending(
             "--memory".into(),
             format!("{memory_gib}G"),
         ]);
+        // A disk snapshot records the guest path of each host mount it cannot carry, and
+        // MicroSandbox 0.7.15 refuses to restore one that has no mount for it. Silo gives a
+        // computer no host mounts but the legacy ones above, so a recorded path without one
+        // (an import, or a computer whose legacy mounts were removed) is a leftover to start
+        // without. A full restore keeps the refusal: its guest still holds the mount.
+        if legacy_mounts.is_empty() {
+            args.push("--allow-missing-resources".into());
+        }
     }
     for label in [
         MANAGED_LABEL.to_string(),
@@ -1920,7 +2328,7 @@ pub(super) fn start_pending(
         .is_ok_and(|computer| matches!(computer.status.as_str(), "Running" | "Paused" | "Crashed"));
     let result = restored
         .and_then(|_| inspect_computer(runner, paths, configuration.name()))
-        .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy) {
+        .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy, plan.strict) {
             Ok(observed)
         } else { Err(error("The restored computer did not reach a verified running state. Its checkpoint was preserved.")) })
         ;
@@ -2123,49 +2531,6 @@ fn quiet_labels(name: &str, quiet: &QuietRecord) -> Vec<String> {
         format!("silo.quiet-host={}", fork_hostname(name)),
         format!("silo.quiet-args={}", quiet_entries(quiet).join(" ")),
     ]
-}
-
-/// Script run in a running guest before a full capture: writes back, then drops the kernel's
-/// cached directory entries.
-const RELEASE_ENTRIES_SCRIPT: &str = "sync; echo 2 > /proc/sys/vm/drop_caches";
-
-/// The arguments that run [`RELEASE_ENTRIES_SCRIPT`] as root in the computer.
-fn release_entries_args(name: &str) -> Vec<String> {
-    root_exec(name, "30s", &["sh", "-c", RELEASE_ENTRIES_SCRIPT])
-}
-
-/// A full capture of a running computer serializes the runtime share's open entries and is
-/// refused when the host removed a file the guest had looked up, which is what the engine does
-/// with every request and answer in the in-guest client's bridge folder. Dropping the guest's
-/// cached entries first lets the share forget them. Best effort, and only for a computer that has
-/// a bridge folder; a capture that still fails reports its own error.
-fn release_stale_share_entries(runner: &dyn RuntimeRunner, paths: &RuntimePaths, name: &str) {
-    if !crate::guest_client::spool_dir(&paths.home, name).exists() {
-        return;
-    }
-    let _ = runner.run(paths, &release_entries_args(name), Duration::from_secs(40));
-}
-
-/// What MicroSandbox says when the guest holds a file of the runtime share that the host removed
-/// and the guest cannot drop it (an open file keeps it): the capture cannot be made until the
-/// computer restarts.
-const REJECTED_BY_PEER: &str = "control operation rejected by peer";
-
-fn explain_rejected_capture(
-    paths: &RuntimePaths,
-    name: &str,
-    failure: RuntimeError,
-) -> RuntimeError {
-    let rejected = matches!(
-        &failure,
-        RuntimeError::Failed { detail, .. } if detail.contains(REJECTED_BY_PEER)
-    );
-    if rejected && crate::guest_client::spool_dir(&paths.home, name).exists() {
-        return error(
-            "The computer holds a file of the in-guest client that Silo has since removed, so its memory cannot be captured. Restart the computer and try again.",
-        );
-    }
-    failure
 }
 
 fn root_exec(name: &str, timeout: &str, command: &[&str]) -> Vec<String> {
@@ -2466,7 +2831,11 @@ fn fork_commit_with_metadata_writer(
         // is restored disk-only, so the fork never resumes the source's memory.
         state: "disk".into(),
     });
-    child_record.desired_network_policy = Some(fork.desired_policy.clone());
+    child_record.desired_network_policy = Some(if fork.options.closed_network {
+        closed_network_policy()
+    } else {
+        fork.desired_policy.clone()
+    });
     child_record.quiet = Some(QuietRecord {
         scheduled_jobs_disabled: true,
         new_identity: true,
@@ -2487,6 +2856,29 @@ fn fork_commit_with_metadata_writer(
     let mut copied_secrets = false;
     let result = (|| {
         crate::computer_use::inherit_settings(paths, source.id(), &child_id)?;
+        // The copy an export makes refuses connections in both directions.
+        if fork.options.network_policy.is_none() && fork.options.closed_network {
+            crate::network_policy::store::set_stored(
+                &child_id,
+                crate::network_policy::store::Stored::closed_without_incoming(),
+            )
+        } else {
+            crate::network_policy::store::inherit(
+                source.id(),
+                &child_id,
+                fork.options.network_policy.as_ref(),
+            )
+        }
+        .map_err(RuntimeError::Unavailable)?;
+        // A fork of a computer with Silo's tools has them too, on its own port and token. The
+        // closed copy an export makes has no channel at all.
+        if !fork.options.closed_network {
+            crate::guest_client::inherit(source.id(), &child_id)
+                .map_err(RuntimeError::Unavailable)?;
+        }
+        // A fork was built from the recipe its source was built from.
+        crate::recipes::records::inherit(source.id(), &child_id)
+            .map_err(RuntimeError::Unavailable)?;
         // Nothing is copied unless the fork names it; GitHub access is always read-only.
         if fork.options.copies_github() {
             assignments
@@ -2536,6 +2928,9 @@ fn fork_commit_with_metadata_writer(
     if copied_github {
         failed.extend(assignments.forget_github(new_name).err());
     }
+    failed.extend(crate::network_policy::store::remove(&child_id).err());
+    failed.extend(crate::recipes::records::remove(&child_id).err());
+    failed.extend(crate::guest_client::turn_off(&[child_id.as_str()]).err());
     failed.extend(
         forget_removed(paths, &child_id)
             .err()
@@ -2926,12 +3321,6 @@ fn restore_steps(
     // retry (phase "secured") a container that is running again has writes the capture lacks.
     let captured_now = journal.phase == "capturing";
     if journal.phase == "capturing" {
-        let memory_capture = journal.prior_running && with_memory;
-        let _bridge_hold = (memory_capture && inspected.status == "Running")
-            .then(|| crate::guest_client::hold_bridge(configuration.name()));
-        if memory_capture && inspected.status == "Running" {
-            release_stale_share_entries(runner, paths, configuration.name());
-        }
         if journal.prior_running
             && matches!(inspected.status.as_str(), "Stopped" | "Created" | "Crashed")
         {
@@ -2995,7 +3384,6 @@ fn restore_steps(
         args.push("--integrity".into());
         let capture = runner
             .run(paths, &args, Duration::from_secs(900))
-            .map_err(|failure| explain_rejected_capture(paths, configuration.name(), failure))
             .and_then(|_| {
                 verify_snapshot(runner, paths, &lineage_group, &journal.recovery_checkpoint)
             });
@@ -3510,9 +3898,36 @@ struct Survey {
     uses: HashMap<native::Key, Vec<native::Use>>,
     inventory: Vec<native::Member>,
     positions: HashMap<String, String>,
+    /// The computers the reader may name, by id; `None` when it may name every one.
+    visible: Option<BTreeSet<String>>,
+    /// The id of each computer, by name.
+    ids: HashMap<String, String>,
+}
+
+/// What a reader who may not name a computer is told in its place.
+const HIDDEN_COMPUTER: &str = "a computer you can’t see";
+
+impl Survey {
+    fn sees_id(&self, id: &str) -> bool {
+        self.visible.as_ref().is_none_or(|visible| visible.contains(id))
+    }
+
+    fn sees_name(&self, name: &str) -> bool {
+        self.visible.is_none()
+            || self.ids.get(name).is_some_and(|id| self.sees_id(id))
+    }
 }
 
 fn survey(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<Survey, RuntimeError> {
+    survey_as(runner, paths, None)
+}
+
+/// A survey whose messages name only the computers in `visible`, when given.
+fn survey_as(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    visible: Option<&BTreeSet<String>>,
+) -> Result<Survey, RuntimeError> {
     let metadata = read_metadata(&paths.metadata)?;
     let uses = native::uses(paths, &metadata)?;
     let inventory = native::inventory(runner, paths)?;
@@ -3521,7 +3936,17 @@ fn survey(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<Survey, Ru
         uses,
         inventory,
         positions,
+        visible: visible.cloned(),
+        ids: computer_ids(&metadata),
     })
+}
+
+fn computer_ids(metadata: &ComputerConfigurationRequest) -> HashMap<String, String> {
+    metadata
+        .computers
+        .iter()
+        .map(|computer| (computer.name().to_owned(), computer.id().to_owned()))
+        .collect()
 }
 
 /// What deleting one checkpoint entry does to native data.
@@ -3564,6 +3989,9 @@ fn blocker_message(
     blocker: &native::Blocker,
 ) -> String {
     match blocker {
+        native::Blocker::Used(uses) if uses.iter().any(|used| !survey.sees_id(&used.computer_id)) => {
+            format!("Used by {HIDDEN_COMPUTER}.")
+        }
         native::Blocker::Used(uses) => {
             let mut names: Vec<String> = uses.iter().map(|used| used.computer.clone()).collect();
             names.sort();
@@ -3573,6 +4001,9 @@ fn blocker_message(
         native::Blocker::Lineage(owner) if owner == computer => format!(
             "{computer}’s next checkpoint and export build on this one, so it can’t be deleted while it is the latest state {computer} builds on."
         ),
+        native::Blocker::Lineage(owner) if !survey.sees_name(owner) => {
+            format!("Used by {HIDDEN_COMPUTER}.")
+        }
         native::Blocker::Lineage(owner) => format!(
             "Used by {owner}. {owner} was started from this checkpoint and still builds on it."
         ),
@@ -3585,8 +4016,10 @@ fn blocker_message(
                     if let native::Purpose::Checkpoint(_, label) = &used.purpose {
                         if used.computer_id == computer_id {
                             own.push(format!("“{label}”"));
-                        } else {
+                        } else if survey.sees_id(&used.computer_id) {
                             others.push(format!("{}’s checkpoint “{label}”", used.computer));
+                        } else {
+                            others.push(format!("a checkpoint of {HIDDEN_COMPUTER}"));
                         }
                     }
                 }
@@ -3688,6 +4121,17 @@ fn delete_checkpoint_with(
     computer_id: &str,
     checkpoint_id: &str,
 ) -> Result<(), RuntimeError> {
+    delete_checkpoint_as(runner, paths, computer_id, checkpoint_id, None)
+}
+
+/// [`delete_checkpoint_with`], whose refusals name only the computers in `visible`, when given.
+fn delete_checkpoint_as(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    checkpoint_id: &str,
+    visible: Option<&BTreeSet<String>>,
+) -> Result<(), RuntimeError> {
     let configuration = computer_configuration(paths, computer_id)?;
     let _ = ensure_snapshot_group(paths, computer_id, configuration.name())?;
     let mut record = load(paths, computer_id)?;
@@ -3697,7 +4141,7 @@ fn delete_checkpoint_with(
         .find(|checkpoint| checkpoint.id == checkpoint_id)
         .ok_or_else(|| RuntimeError::Invalid("The selected checkpoint no longer exists.".into()))?
         .clone();
-    let survey = survey(runner, paths)?;
+    let survey = survey_as(runner, paths, visible)?;
     match deletion(
         &survey,
         computer_id,
@@ -3757,6 +4201,7 @@ pub fn delete_for_job(
     checkpoint_id: &str,
     job_id: silo_api::jobs::JobId,
     cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    visible: Option<&BTreeSet<String>>,
 ) -> Result<(), String> {
     use super::operation_gate::{OperationKind, Scope};
 
@@ -3774,7 +4219,7 @@ pub fn delete_for_job(
     admitted()?;
     guard.expect_within(std::time::Duration::from_secs(5 * 60));
     shutdown::ensure_accepting_operations()?;
-    delete_checkpoint_with(&ProcessRunner, paths, computer_id, checkpoint_id)
+    delete_checkpoint_as(&ProcessRunner, paths, computer_id, checkpoint_id, visible)
         .map_err(|error| error.to_string())
 }
 
@@ -3806,6 +4251,17 @@ fn usage_with(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer_id: &str,
+) -> Result<CheckpointUsage, RuntimeError> {
+    usage_as(runner, paths, computer_id, None)
+}
+
+/// [`usage_with`] for a reader who may name only the computers in `visible`; a dependant it
+/// cannot name is reported as a computer it can’t see.
+fn usage_as(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    visible: Option<&BTreeSet<String>>,
 ) -> Result<CheckpointUsage, RuntimeError> {
     let configuration = computer_configuration(paths, computer_id)?;
     let record = load(paths, computer_id)?;
@@ -3842,6 +4298,8 @@ fn usage_with(
         uses,
         inventory,
         positions,
+        visible: visible.cloned(),
+        ids: computer_ids(&metadata),
     };
     let mut counted = HashSet::new();
     let mut total = Some(0u64);
@@ -3866,12 +4324,24 @@ fn usage_with(
             .into_iter()
             .flatten()
             .filter(|used| used.computer_id != computer_id)
-            .map(|used| used.computer.clone())
+            .map(|used| {
+                if survey.sees_id(&used.computer_id) {
+                    used.computer.clone()
+                } else {
+                    HIDDEN_COMPUTER.to_owned()
+                }
+            })
             .chain(
                 member
                     .and_then(|member| survey.positions.get(&member.snapshot_id))
                     .filter(|owner| owner.as_str() != configuration.name())
-                    .cloned(),
+                    .map(|owner| {
+                        if survey.sees_name(owner) {
+                            owner.clone()
+                        } else {
+                            HIDDEN_COMPUTER.to_owned()
+                        }
+                    }),
             )
             .collect();
         used_by.sort();
@@ -3896,8 +4366,13 @@ fn usage_with(
     })
 }
 
-pub fn read_usage(paths: &RuntimePaths, computer_id: &str) -> Result<CheckpointUsage, String> {
-    usage_with(&ProcessRunner, paths, computer_id).map_err(|error| safe_activity_error(&error))
+pub fn read_usage(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    visible: Option<&BTreeSet<String>>,
+) -> Result<CheckpointUsage, String> {
+    usage_as(&ProcessRunner, paths, computer_id, visible)
+        .map_err(|error| safe_activity_error(&error))
 }
 
 /// Host allocation of one computer's checkpoints and how many it has, for the Storage tab.
@@ -4163,6 +4638,49 @@ fn queue_unowned_import_groups(
     Ok(())
 }
 
+/// Keeps the capture an interrupted engine left in flight as a checkpoint when the runtime
+/// finished it, the computer already builds on it (its next capture would follow it, so it
+/// cannot be discarded) and the runtime's snapshot verification passes. Returns whether it
+/// did; a capture that builds on nothing or is not ready is left to the caller, while one
+/// the computer builds on that fails verification is an error.
+fn adopt_finished_capture(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    record: &mut Record,
+    group: &str,
+    computer_name: &str,
+) -> Result<bool, RuntimeError> {
+    let Some(finished) = record.inflight_checkpoint.clone() else {
+        return Ok(false);
+    };
+    let key = (group.to_owned(), finished.native_id().to_owned());
+    if snapshot_ready(runner, paths, group, &key.1, &finished.scope).is_err() {
+        return Ok(false);
+    }
+    let Ok(survey) = survey(runner, paths) else {
+        return Ok(false);
+    };
+    let Some(member) = survey
+        .inventory
+        .iter()
+        .find(|member| member.key().as_ref() == Some(&key))
+    else {
+        return Ok(false);
+    };
+    if survey.positions.get(&member.snapshot_id).map(String::as_str) != Some(computer_name) {
+        return Ok(false);
+    }
+    if verify_snapshot(runner, paths, group, &finished).is_err() {
+        return Err(error(
+            "An interrupted checkpoint did not pass the runtime's check, and the computer builds on it. It was preserved.",
+        ));
+    }
+    record.checkpoints.insert(0, finished);
+    record.inflight_checkpoint = None;
+    record.checkpoint_operation = None;
+    Ok(true)
+}
+
 /// Remove the member a failed capture may have published, unless something already
 /// builds on it. Returns true when it is gone. Runs even after a cancel.
 pub fn discard_failed_capture(
@@ -4244,8 +4762,12 @@ pub(crate) fn recover_interrupted(
                 runner,
                 paths,
                 configuration.id(),
-                (group, inflight.native_id().to_owned()),
+                (group.clone(), inflight.native_id().to_owned()),
             ) {
+                if adopt_finished_capture(runner, paths, &mut record, &group, configuration.name())?
+                {
+                    return save(paths, configuration.id(), &record);
+                }
                 return Err(error("Interrupted checkpoint data is still in use or could not be removed. It was preserved."));
             }
             record.inflight_checkpoint = None;

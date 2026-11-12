@@ -49,6 +49,8 @@ pub(crate) async fn create(
         .call(requests::computers_create(ComputerCreateParams::Macos {
             request: decode(request, "macOS computer request")?,
             device_id: Some(device_id.to_owned()),
+            agents: Vec::new(),
+            network_policy: None,
         }))
         .await?;
     created

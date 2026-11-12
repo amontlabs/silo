@@ -2,7 +2,7 @@ import type { LifecycleStep } from "./lifecycle-progress"
 import type { OperationQueue } from "./operation-queue"
 import type { WorkspaceStorageState } from "./workspace-storage"
 import type { ComputerStep, ComputerTreeNode } from "@/desktop/production-schemas"
-import type { QuietState } from "../../macos-computers/model/macos-computers"
+import type { MacosComputer, QuietState } from "../../macos-computers/model/macos-computers"
 import type { CheckpointUsage, PendingCheckpointRestore, UnfinishedRestore, ComputerCheckpoint, ComputerCheckpointOperation } from "./checkpoint-source"
 import type { LogLoader, LogQuery } from "./logs"
 import type { Device, ConnectionsStatus, ComputerDevice } from "./connections"
@@ -15,7 +15,7 @@ import type {
   SiloProgressEvent,
   SiloProtocolError,
 } from "@/contracts/silo"
-import type { RequestList } from "@/desktop/production-schemas"
+import type { AgentId, AgentInfo, AgentInstallProgress, Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, ComputerTools, DeviceResources, NetworkPolicy, NetworkPolicyState, RequestList, SshName } from "@/desktop/production-schemas"
 import type { ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 
 export type ApplicationTab = "computers" | "changes" | "github" | "secrets" | "system" | "settings"
@@ -25,6 +25,8 @@ export type ComputerDetailSection = Exclude<ComputerSection, "overview">
 /** Tabs on a single computer's detail page, reached from the Computers overview. */
 export type ComputerDetailTab = "overview" | "checkpoints" | "storage" | "access"
 export type ComputerState = "running" | "starting" | "stopped" | "failed"
+/** The system a computer runs. */
+export type ComputerOs = "linux" | "macos"
 
 export type RuntimeRepairPresentation = {
   status: "needed" | "unavailable"
@@ -164,6 +166,10 @@ export interface ApplicationActivity {
 
 export interface ApplicationComputer {
   device?: ComputerDevice
+  /** The system the computer runs; absent means Linux. */
+  os?: ComputerOs
+  /** A macOS computer's own record (setup state, progress, checkpoints); absent on Linux. */
+  macos?: MacosComputer
   configuration: SetupComputerConfiguration
   purpose: string
   state: ComputerState
@@ -188,6 +194,8 @@ export interface ApplicationComputer {
   freshness: "fresh" | "stale"
   /** The native read overlapped an operation; runtime fields retain their last settled values. */
   settling?: boolean
+  /** Its storage could not be moved to the new runtime's protected layout; it cannot start. `attention` says why. */
+  needsStorageUpgrade?: boolean
   repositories: ApplicationRepository[]
   files: ApplicationFileEntry[]
   ports: ApplicationPort[]
@@ -204,11 +212,22 @@ export interface ApplicationComputer {
   quiet?: QuietState | null
 }
 
+/** A secret reaches a computer as a placeholder for its allowed hosts (`generic`), or only as
+ * the computer's GitHub access (`github-token`). */
+export type SecretKind = "generic" | "github-token"
+
 export interface ApplicationSecret {
   id: string
   name: string
+  /** Absent means `generic`. */
+  kind?: SecretKind
+  /** For a GitHub token, the computers whose GitHub access uses it. */
   computers: string[]
   allowedDomains: string[]
+  /** The GitHub account a token belongs to, once GitHub confirmed it. */
+  account?: string
+  /** Whether GitHub accepts a token; a disconnected token gives its computers no access. */
+  connection?: { state: "connected" | "disconnected"; message?: string }
   state: "active" | "applying" | "restart-required"
   pendingComputers?: string[]
   error?: string
@@ -218,8 +237,13 @@ export interface ApplicationSecret {
 // Values travel only with a save request, never in the published secret metadata.
 export type SecretConfigurationRequest = {
   name: string
+  kind?: SecretKind
   computers: string[]
   allowedDomains: string[]
+  /** Set when the person confirmed that `*` among `allowedDomains` lets the secret go to any HTTPS destination. */
+  allowAnyDestination?: true
+  /** Set when the person confirmed the wildcard hosts over shared hosting among `allowedDomains`. */
+  allowSharedHosting?: true
 } & ({ operation: "add"; value: string } | { operation: "edit"; id: string; value?: string })
 
 export interface ApplicationGitIdentity {
@@ -238,6 +262,10 @@ export interface ApplicationGitHubRepositoryPolicy {
 
 export interface ApplicationGitHubComputerPolicy {
   authenticationMethod?: "oauth" | "token"
+  /** With token access, the `github-token` secret this computer uses. */
+  tokenSecretId?: string
+  /** Set by the engine when the chosen token secret no longer exists. */
+  tokenMissing?: boolean
   repositoryMode?: "selected" | "all"
   allRepositoriesAllowChanges?: boolean
   computer: string
@@ -288,7 +316,6 @@ export interface ApplicationSource {
   computerConfigurationOperation: ComputerConfigurationOperation | null
   repositoryPushOperations: RepositoryPushOperation[]
   github: {
-    personalToken?: { state: "connected" | "disconnected"; saved: boolean; account?: string; message?: string }
     policyRevision?: number
     state: "disconnected" | "connecting" | "connected"
     account?: string
@@ -327,6 +354,34 @@ export interface ApplicationActions {
   reviewRequestActions?: import("@/features/application/components/review-request").ReviewRequestActions
   /** The review requests of this device and, with `allDevices`, every connected device. */
   listReviewRequests?: (options?: { status?: "open" | "kept" | "thrown-away" | "all"; allDevices?: boolean }) => Promise<RequestList>
+  /** What the agents inside computers ask the person who runs Silo for. */
+  listApprovals?: (options?: { state?: ApprovalState }) => Promise<ApprovalList>
+  /** Allow or deny a waiting approval; the note is shown to the agent with the answer. */
+  decideApproval?: (answer: { id: string; decision: "allow" | "deny"; note?: string }) => Promise<Approval>
+  /** How the job an allowed approval started is going. */
+  readApprovalJob?: (jobId: string) => Promise<ApprovalJob>
+  /** Calls the handler whenever an approval changes. Returns the function that stops it. */
+  watchApprovals?: (onChange: () => void) => () => void
+  /** Who did what, newest first; `beforeId` continues from the previous page. */
+  listAudit?: (options?: { computerId?: string; callerKind?: AuditCallerKind; beforeId?: number; limit?: number }) => Promise<AuditPage>
+  /** What the device has left in memory and disk. */
+  readDeviceResources?: (deviceId?: string) => Promise<DeviceResources>
+  /** The agents Silo can install in a computer, each with its state; `unknown` while the computer is stopped. */
+  listAgents?: (computer: string) => Promise<AgentInfo[]>
+  /** Installs an agent in a running computer. `onProgress` hears each step; it resolves with the computer's agents. */
+  installAgent?: (computer: string, agent: AgentId, onProgress?: (progress: AgentInstallProgress) => void) => Promise<AgentInfo[]>
+  /** Opens the person's terminal on a running computer with the agent started in its workspace folder. */
+  openAgent?: (computer: string, agent: AgentId) => void
+  /** The SSH host name this device's desktop apps use to reach the computer. Adds it to the SSH configuration. */
+  ensureSshName?: (computer: string) => Promise<SshName>
+  /** A computer's network policy: its mode and hosts, what Silo adds, and whether a change applies now or at the next start. Computers of this device only. */
+  readNetworkPolicy?: (computer: string) => Promise<NetworkPolicyState>
+  /** Saves a policy. `expected` is the one the person was looking at; the engine saves nothing if it has changed since. */
+  saveNetworkPolicy?: (computer: string, policy: NetworkPolicy, expected?: NetworkPolicy, options?: { acceptPresets?: boolean }) => Promise<NetworkPolicyState>
+  /** Whether the agent inside a computer can use Silo's tools, and when a change takes effect. Computers of this device only. */
+  readComputerTools?: (computer: string) => Promise<ComputerTools>
+  /** Turns Silo's tools on or off for a computer. */
+  setComputerTools?: (computer: string, enabled: boolean) => Promise<ComputerTools>
   createCheckpoint?: (computer: string, name: string) => Promise<void>
   forkCheckpoint?: (computer: string, checkpointId: string | null, newName: string) => Promise<void>
   restoreCheckpoint?: (computer: string, checkpointId: string) => Promise<void>
@@ -385,8 +440,6 @@ export interface ApplicationActions {
   cancelGitHubConnection?: () => void
   reopenGitHubAuthorization?: () => void
   manageGitHubRepositories?: () => void
-  saveGitHubPersonalToken?: (token: string) => Promise<void>
-  removeGitHubPersonalToken?: () => Promise<void>
   connectGitHub?: () => void
   disconnectGitHub?: () => void
   setGitHubAccessEnabled?: (enabled: boolean) => void

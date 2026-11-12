@@ -43,6 +43,7 @@ export function StatusBar({ source, actions, defaultOpen = false }: { source: Ap
     openSilo: (route) => dismissThen(() => actions.openSilo(route)),
     quit: (choice) => dismissThen(() => actions.quit(choice)),
     openTerminal: (name) => dismissThen(() => actions.openTerminal(name)),
+    ...(actions.openAgent && { openAgent: (name, agent) => dismissThen(() => actions.openAgent?.(name, agent)) }),
     openEditor: (name, path) => dismissThen(() => actions.openEditor(name, path)),
     openSite: (name, port) => dismissThen(() => actions.openSite(name, port)),
   }

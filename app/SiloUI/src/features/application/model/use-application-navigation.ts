@@ -12,7 +12,7 @@ interface Location {
   computerTab?: ComputerDetailTab
 }
 
-export type ApplicationInitialRoute = Partial<Location> & { computer?: string }
+export type ApplicationInitialRoute = Partial<Location> & { computer?: string; /** With the Pending tab: the approval to open. */ approval?: string }
 
 interface History {
   entries: Location[]

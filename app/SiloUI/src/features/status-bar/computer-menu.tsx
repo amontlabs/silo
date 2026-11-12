@@ -1,11 +1,12 @@
 import type { ReactNode } from "react"
-import { ChevronRight, Code, ExternalLink, Globe, MoreHorizontal, Play, RotateCw, Square, Terminal } from "lucide-react"
+import { Bot, ChevronRight, Code, ExternalLink, Globe, MoreHorizontal, Play, RotateCw, Square, Terminal } from "lucide-react"
 import { DropdownMenu } from "radix-ui"
 
 import { CopyButton } from "@/components/copy-button"
 import { Button } from "@/components/ui/button"
 import { computerTarget } from "@/features/application/model/connections"
 import { cn } from "@/lib/utils"
+import { openableAgents } from "@/features/agents/model/agents"
 import type { ComputerMenuProps } from "./status-bar-types"
 import { computerMenuItems, type ComputerMenuItem } from "./computer-menu-items"
 
@@ -42,7 +43,7 @@ function MenuItems({ items, reduceMotion }: { items: ComputerMenuItem[]; reduceM
       </DropdownMenu.Sub>
     }
     return <DropdownMenu.Item key={item.id} className={menuItemClass} disabled={!item.enabled} onSelect={item.run}>
-      {icons[item.id] ?? (item.id.startsWith("site:") ? <ExternalLink /> : null)}{item.label}
+      {icons[item.id] ?? (item.id.startsWith("site:") ? <ExternalLink /> : item.id.startsWith("agent:") ? <Bot /> : null)}{item.label}
     </DropdownMenu.Item>
   })
 }
@@ -51,12 +52,14 @@ function MenuItems({ items, reduceMotion }: { items: ComputerMenuItem[]; reduceM
  * The computer "…" menu rendered with Radix for the browser preview and tests. The desktop
  * app renders the same `computerMenuItems` natively (`desktop/native-computer-menu.tsx`).
  */
-export function ComputerMenu({ computer, source, actions, onFolders, onConfirm }: ComputerMenuProps) {
+export function ComputerMenu({ computer, source, actions, onFolders, onConfirm, agents }: ComputerMenuProps) {
   const target = computerTarget(computer)
   const items = computerMenuItems(computer, source, {
     start: () => actions.startComputer(target),
     confirm: onConfirm,
     openTerminal: () => actions.openTerminal(target),
+    agents: openableAgents(agents),
+    openAgent: actions.openAgent && ((agent) => actions.openAgent?.(target, agent)),
     chooseFolder: onFolders,
     openSite: (port) => actions.openSite(target, port),
   })

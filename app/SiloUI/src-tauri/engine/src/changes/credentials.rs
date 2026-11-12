@@ -1,5 +1,7 @@
 //! The logins found on a computer before it is shared: its disk, listed through the change
-//! manifest capture, and its fork-time record. Nothing is filtered; this only names them.
+//! manifest capture, and its fork-time record. This only names them; an export of a Linux
+//! virtual machine removes them from the exported computer through [`crate::export_scrub`],
+//! which removes the files this lists.
 
 use std::sync::Arc;
 
@@ -30,6 +32,11 @@ pub struct Found {
     /// Why Silo could not check the whole computer, when it could not (a stopped computer, a checkpoint).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unchecked: Option<String>,
+    /// The export removes these logins from the computer it writes: it is made from a copy they
+    /// are removed from. False when they stay in the file (a checkpoint, a computer that is not a
+    /// Linux virtual machine) or when the person asked to include them.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub leaves_out: bool,
 }
 
 /// The login names among the file paths of a manifest.
@@ -43,6 +50,17 @@ pub fn logins_in(manifest_text: &str) -> Result<Vec<String>, String> {
     logins.sort();
     logins.dedup();
     Ok(logins)
+}
+
+/// The paths of the files of a manifest that [`login_label`] names, sorted.
+pub fn login_paths_in(manifest_text: &str) -> Result<Vec<String>, String> {
+    let manifest = Manifest::parse(manifest_text).map_err(|error| error.to_string())?;
+    Ok(manifest
+        .files
+        .keys()
+        .filter(|path| login_label(path).is_some())
+        .cloned()
+        .collect())
 }
 
 fn merge(found: &mut Found, logins: Vec<String>) {
@@ -59,10 +77,16 @@ pub fn check(
     host: &Arc<dyn runtime::RuntimeHost>,
     id: &str,
     from_checkpoint: bool,
+    include_logins: bool,
 ) -> Result<Found, String> {
     let context = host.engine_context();
     let store = Store::for_engine(context.as_ref());
-    let mut found = Found::default();
+    let mut found = Found {
+        leaves_out: !from_checkpoint
+            && !include_logins
+            && crate::backup_controller::leaves_logins_out(host.as_ref(), id),
+        ..Found::default()
+    };
     if let Some((record, _)) = store.get(id, Slot::Base)? {
         merge(&mut found, logins_in(&record)?);
         found.checked.push("fork-time record".into());
@@ -123,9 +147,10 @@ pub fn start_check(
     host: Arc<dyn runtime::RuntimeHost>,
     computer_id: String,
     from_checkpoint: bool,
+    include_logins: bool,
 ) -> Result<JobId, Failure> {
     service::start(host, "exports.check", move |host| {
-        let found = check(host, &computer_id, from_checkpoint)?;
+        let found = check(host, &computer_id, from_checkpoint, include_logins)?;
         serde_json::to_value(found).map_err(|error| error.to_string())
     })
 }
@@ -223,10 +248,35 @@ F\t/home/dev/app/main.rs\t10\t1\tee\n";
             logins: vec!["a".into()],
             checked: vec!["disk".into()],
             unchecked: None,
+            leaves_out: false,
         };
         assert_eq!(
             serde_json::to_value(found).unwrap(),
             serde_json::json!({"logins": ["a"], "checked": ["disk"]})
         );
+    }
+
+    #[test]
+    fn found_says_when_the_export_leaves_the_logins_out() {
+        let found = Found {
+            leaves_out: true,
+            ..Found::default()
+        };
+        assert_eq!(
+            serde_json::to_value(found).unwrap(),
+            serde_json::json!({"logins": [], "checked": [], "leavesOut": true})
+        );
+    }
+
+    #[test]
+    fn the_paths_of_a_manifest_that_are_logins_are_the_ones_the_scan_names() {
+        assert_eq!(
+            login_paths_in(MANIFEST).unwrap(),
+            vec![
+                "/home/dev/.config/gh/hosts.yml".to_owned(),
+                "/root/.claude/.credentials.json".to_owned(),
+            ]
+        );
+        assert!(login_paths_in("F\t/x\n").is_err());
     }
 }

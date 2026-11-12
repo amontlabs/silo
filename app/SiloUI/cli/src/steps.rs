@@ -10,11 +10,40 @@ use silo_api::methods::{
 
 use crate::{
     clock,
-    config::StepSettings,
     engine::{Computer, Engine, Progress},
     error::CliError,
     ops::{self, ExecArgs, ExecOutput},
 };
+
+/// How many step checkpoints a computer keeps when the command names no count.
+pub const DEFAULT_STEP_CHECKPOINTS_KEEP: u32 = 20;
+
+/// Whether a command is followed by a checkpoint of its step, and how many of a computer's
+/// step checkpoints are kept. Chosen per command (`--step-checkpoints`, `--keep-steps`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepSettings {
+    pub checkpoints: bool,
+    pub keep: u32,
+}
+
+impl Default for StepSettings {
+    fn default() -> Self {
+        Self {
+            checkpoints: false,
+            keep: DEFAULT_STEP_CHECKPOINTS_KEEP,
+        }
+    }
+}
+
+impl StepSettings {
+    /// `keep` of 0 keeps every step checkpoint.
+    pub fn new(checkpoints: bool, keep: Option<u32>) -> Self {
+        Self {
+            checkpoints,
+            keep: keep.unwrap_or(DEFAULT_STEP_CHECKPOINTS_KEEP),
+        }
+    }
+}
 
 /// The CLI memory file that records which forks hold a host folder (see `folder`).
 const FOLDER_MEMORY: &str = "cli-folders.json";
@@ -219,7 +248,7 @@ pub async fn checkpoint_for(
         .any(|known| known["id"].as_str() == Some(checkpoint))
     {
         return Err(CliError::new(format!(
-            "The checkpoint of step {number} of {} was removed (only the newest step checkpoints are kept; step_checkpoints_keep sets how many).",
+            "The checkpoint of step {number} of {} was removed (only the newest step checkpoints are kept; --keep-steps sets how many).",
             found.name
         )));
     }

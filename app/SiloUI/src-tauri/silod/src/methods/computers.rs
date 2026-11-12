@@ -30,7 +30,8 @@ use silo_api::{
             ApplicationSource, ComputerConfigurationChange as ApiChange,
             ComputerConfigurationChangeParams, ComputerConfigurationRetryParams,
             ComputerCreateParams, ComputerCreateResult, ComputerDeleteParams,
-            ComputerIdentitiesParams, ComputerIdentity, ComputerListParams, ComputerShellParams,
+            ComputerIdentitiesParams, ComputerIdentity, ComputerListParams, ComputerRebuildParams,
+            ComputerShellParams,
             ComputersListResult, LaunchStatus,
         },
         credentials_used::ComputerCredentialsParams,
@@ -58,10 +59,14 @@ use crate::{
 use super::{ownership::owns_prefix, HandlerContext};
 
 pub(super) fn owns(method: MethodName) -> bool {
-    owns_prefix(
-        method,
-        &["computers.", "activity.", "logs.", "storage.", "macos."],
-    )
+    // `computers.access` reads what a computer holds, beside approvals; `computers.recipe`
+    // reads the recipe a computer was built from, beside the recipes.
+    method != MethodName::ComputersAccess
+        && method != MethodName::ComputersRecipe
+        && owns_prefix(
+            method,
+            &["computers.", "activity.", "logs.", "storage.", "macos."],
+        )
 }
 
 // MARK: Hosts
@@ -317,6 +322,7 @@ fn invalid(message: impl ToString) -> DispatchError {
     DispatchError {
         code: error_code(&message),
         message,
+        details: None,
     }
 }
 
@@ -324,6 +330,7 @@ fn not_found(message: &str) -> DispatchError {
     DispatchError {
         code: ErrorCode::NotFound,
         message: message.to_owned(),
+        details: None,
     }
 }
 
@@ -331,6 +338,7 @@ fn unsupported(message: &str) -> DispatchError {
     DispatchError {
         code: ErrorCode::UnsupportedRemoteOperation,
         message: message.to_owned(),
+        details: None,
     }
 }
 
@@ -447,6 +455,7 @@ fn accept_setup_job(
                 "This setup request ID is already in use."
             }
             .to_owned(),
+            details: None,
         });
     }
     Ok(JobStartResult {
@@ -956,6 +965,48 @@ pub fn install_credential_source(context: Arc<SilodContext>) {
 
 // MARK: Lifecycle
 
+async fn begin_rebuild(
+    context: &HandlerContext,
+    params: ComputerRebuildParams,
+) -> Result<HandlerOutput, DispatchError> {
+    require_local_device(context, params.device_id.as_deref())?;
+    let host = SilodRuntimeHost::new(context);
+    if is_macos_computer(&host, &params.computer_id) {
+        return Err(unsupported(
+            "Rebuild on the newest image is currently only supported for Linux computers.",
+        ));
+    }
+    let silod = context.silod_context().clone();
+    let runtime_host = silod.runtime_host();
+    let service = super::checkpoints::service_for(&silod);
+    let started = tokio::task::spawn_blocking(move || {
+        silo_engine::rebuild::service::start_rebuild(
+            runtime_host,
+            service,
+            params.computer_id,
+            params.force.unwrap_or(false),
+            params.abandon.unwrap_or(false),
+        )
+    })
+    .await
+    .map_err(|_| DispatchError::internal("The rebuild could not start."))?;
+    started
+        .map(|job_id| JobStartResult { job_id })
+        .map_err(|failure| DispatchError {
+            code: failure.code,
+            message: failure.message,
+            details: None,
+        })
+        .and_then(|result| {
+            serde_json::to_value(result)
+                .map(|value| HandlerOutput {
+                    value,
+                    event_barrier: None,
+                })
+                .map_err(|error| DispatchError::internal(error.to_string()))
+        })
+}
+
 /// Linux start/stop/restart, and macOS start/stop, as jobs.
 async fn begin_lifecycle(
     context: &HandlerContext,
@@ -1188,6 +1239,16 @@ async fn begin_configuration_retry(
     job_output(job)
 }
 
+/// Turns Silo's tools on for a computer being created. A failure leaves the computer without
+/// them; the owner can turn them on later.
+fn tools_for_new_computer(context: &HandlerContext, computer_id: &str) {
+    let store =
+        silo_engine::guest_client::TokenStore::new(&context.silod_context().paths().app_data);
+    if let Err(error) = silo_engine::guest_client::turn_on_in(&store, computer_id) {
+        eprintln!("silod: Silo's tools for {computer_id}: {error}");
+    }
+}
+
 async fn begin_create(
     context: &HandlerContext,
     params: ComputerCreateParams,
@@ -1198,11 +1259,35 @@ async fn begin_create(
             configuration,
             request_id,
             device_id,
+            agents,
+            network_policy,
         } => {
             require_local_device(context, device_id.as_deref())?;
-            let configuration = serde_json::from_value(encode(configuration)?).map_err(invalid)?;
+            let configuration: silo_engine::runtime::ComputerConfiguration =
+                serde_json::from_value(encode(configuration)?).map_err(invalid)?;
+            let network_policy = network_policy
+                .as_ref()
+                .map(silo_engine::network_policy::validate)
+                .transpose()
+                .map_err(invalid)?;
             let request_id = new_request_id(request_id)?;
-            let job = accept_linux_setup_job(context, "computers.create", &request_id)?;
+            // Saved before the computer is created, so its creation passes the policy's rules.
+            if let Some(policy) = &network_policy {
+                silo_engine::network_policy::store::set(configuration.id(), policy)
+                    .map_err(DispatchError::internal)?;
+            }
+            let job = match accept_linux_setup_job(context, "computers.create", &request_id) {
+                Ok(job) => job,
+                Err(refused) => {
+                    // A refused creation leaves no policy behind for an id nothing uses.
+                    let _ = silo_engine::network_policy::store::remove(configuration.id());
+                    return Err(refused);
+                }
+            };
+            // A new computer has Silo's tools, so its creation passes the channel's rule too.
+            tools_for_new_computer(context, configuration.id());
+            // Only an accepted creation remembers its agents; the job has not started yet.
+            silo_engine::agents::request_for_creation(configuration.id(), &agents);
             let change = silo_engine::runtime::ComputerConfigurationChange::Upsert {
                 configuration,
                 expected: None,
@@ -1213,8 +1298,23 @@ async fn begin_create(
                 computer: None,
             })?))
         }
-        ComputerCreateParams::Macos { request, device_id } => {
+        ComputerCreateParams::Macos {
+            request,
+            device_id,
+            agents,
+            network_policy,
+        } => {
             require_local_device(context, device_id.as_deref())?;
+            let network_policy = network_policy
+                .as_ref()
+                .map(silo_engine::network_policy::validate)
+                .transpose()
+                .map_err(invalid)?;
+            if !agents.is_empty() {
+                return Err(invalid(
+                    "Silo cannot install an agent while it creates a macOS computer yet. Create the computer, start it, then install the agent from its page.",
+                ));
+            }
             let request: silo_engine::macos_computers::CreateRequest =
                 serde_json::from_value(encode(request)?).map_err(invalid)?;
             // A refused request is an error and leaves no job: the job is allocated after
@@ -1224,6 +1324,7 @@ async fn begin_create(
             let (row, job_id) = silo_engine::macos_computers::create_macos_computer_accepting(
                 host.macos_context(),
                 request,
+                network_policy,
                 move || {
                     silo_engine::jobs::allocate(engine.as_ref(), "computers.create")
                         .map(|accepted| accepted.job_id)
@@ -1233,6 +1334,9 @@ async fn begin_create(
             .await
             .map_err(invalid)?;
             let value = with_kind(json!({"computers": [encode(row)?]}), "macos");
+            if let Some(id) = value["computers"][0]["id"].as_str() {
+                tools_for_new_computer(context, id);
+            }
             let computer = serde_json::from_value(value["computers"][0].clone())
                 .map_err(|error| DispatchError::internal(error.to_string()))?;
             Ok(plain(encode(ComputerCreateResult {
@@ -1549,6 +1653,7 @@ pub(crate) fn register_display(
             return Err(DispatchError {
                 code: ErrorCode::Cancelled,
                 message: "The client disconnected before its screen opened.".to_owned(),
+                details: None,
             });
         }
         gateways.insert(key, gateway)
@@ -1610,6 +1715,7 @@ async fn macos_display_session(
             return Err(DispatchError {
                 code: ErrorCode::Busy,
                 message: "Close an unused screen first.".to_owned(),
+                details: None,
             });
         }
     }
@@ -1756,6 +1862,7 @@ async fn route(
         MethodName::ComputersRestart => {
             begin_lifecycle(context, decoded!(), "computers.restart").await
         }
+        MethodName::ComputersRebuild => begin_rebuild(context, decoded!()).await,
         MethodName::ComputersForceStop => force_stop(context, decoded!()).await,
         MethodName::ComputersDismissError => dismiss_error(context, decoded!()).await,
         MethodName::ComputersConfigurationChange => {
@@ -1869,6 +1976,7 @@ pub(crate) mod tests {
                 client_id,
                 protocol: silo_api::transport::PROTOCOL_VERSION,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         );
         Fixture {
@@ -2799,6 +2907,35 @@ pub(crate) mod tests {
             .is_err());
         let registry = f.context.job_registry().unwrap();
         assert!(registry.list_unacknowledged().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_agents_of_a_creation_are_remembered_only_once_its_job_is_accepted() {
+        let f = fixture();
+        let other = "00000000-0000-4000-8000-0000000000d1";
+        let create = |id: &str, request_id: &str| {
+            let mut configuration = linux_configuration();
+            configuration["id"] = json!(id);
+            json!({
+                "kind": "linux",
+                "configuration": configuration,
+                "requestId": request_id,
+                "agents": ["codex"]
+            })
+        };
+        f.call(MethodName::ComputersCreate, create(LINUX, "agents-1"))
+            .await
+            .unwrap();
+        assert_eq!(
+            silo_engine::agents::take_requested(LINUX),
+            vec![silo_api::methods::agents::AgentId::Codex]
+        );
+        // The request id is taken, so the job is refused and nothing is remembered.
+        assert!(f
+            .call(MethodName::ComputersCreate, create(other, "agents-1"))
+            .await
+            .is_err());
+        assert!(silo_engine::agents::take_requested(other).is_empty());
     }
 
     #[tokio::test]

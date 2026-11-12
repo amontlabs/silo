@@ -13,6 +13,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::env::CheckpointRef;
+use crate::recipes::Recorded;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
@@ -49,6 +50,10 @@ pub struct Record {
     /// The review digest the keep was pinned to, when it was.
     #[serde(default)]
     pub review_digest: String,
+    /// What the keep appended to the recipes of the target, so an undo takes it back; absent
+    /// when it appended nothing, and in a record from before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe_update: Option<Recorded>,
 }
 
 #[derive(Clone, Debug)]
@@ -125,6 +130,7 @@ impl Journal {
             undoable_at: 0,
             fork: String::new(),
             review_digest: String::new(),
+            recipe_update: None,
         });
         self.save_records(target, &all)
     }
@@ -148,6 +154,30 @@ impl Journal {
             record.review_digest = digest.to_owned();
         }
         self.save_records(target, &all)
+    }
+
+    /// Notes what the keep that took checkpoint `id` appended to the recipes of the target; `None`
+    /// forgets it.
+    pub fn set_recipe_update(
+        &self,
+        target: &str,
+        id: &str,
+        update: Option<&Recorded>,
+    ) -> Result<(), String> {
+        let mut all = self.records(target);
+        for record in all.iter_mut().filter(|r| r.checkpoint.id == id) {
+            record.recipe_update = update.cloned();
+        }
+        self.save_records(target, &all)
+    }
+
+    /// What the keep that took checkpoint `id` appended to the recipes of the target and an
+    /// undo has not yet taken back.
+    pub fn recipe_update(&self, target: &str, id: &str) -> Option<Recorded> {
+        self.records(target)
+            .into_iter()
+            .find(|r| r.checkpoint.id == id)
+            .and_then(|r| r.recipe_update)
     }
 
     /// The before-keep checkpoint of a keep of `fork` into `target`, pinned to `digest`, that

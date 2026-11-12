@@ -98,6 +98,8 @@ pub(crate) async fn create(
         .call(requests::computers_create(ComputerCreateParams::Macos {
             request,
             device_id: None,
+            agents: Vec::new(),
+            network_policy: None,
         }))
         .await?;
     acknowledge_in_background(engine, &started);
@@ -335,6 +337,7 @@ pub(crate) async fn fork_macos_checkpoint(
             secrets: Vec::new(),
             quiet: None,
             recipe_hash: None,
+            network_policy: None,
         }),
     )
     .await
@@ -521,6 +524,7 @@ mod forwarding_tests {
                 secrets: Vec::new(),
                 quiet: None,
                 recipe_hash: None,
+                network_policy: None,
             }),
         )
         .await

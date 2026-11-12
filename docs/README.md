@@ -24,10 +24,10 @@ that every platform or live VM workflow has been exercised.
 | Area | Documents |
 | --- | --- |
 | Security | [Threat model](THREAT-MODEL.md): attacker, assets, trust boundaries with code references, and non-goals |
-| Vocabulary | [Silo vocabulary](SiloUI-VOCABULARY.md): the terms (computer, device, Connections, workspace, sandboxed) and the identifiers that keep older names |
+| Vocabulary | [Silo vocabulary](SiloUI-VOCABULARY.md): the terms (computer, device, Connections, workspace, merge, replace main, approval, recipe) and the identifiers that keep older names |
 | Build and release | [Build from source](SiloUI-BUILD-FROM-SOURCE.md), [build channels (production and Dev)](SiloUI-BUILD-CHANNELS.md), [release workflow and CI](SiloUI-RELEASES.md), [historical Linux system updates](SiloUI-LINUX-UPDATES.md), [historical distribution acceptance](SiloUI-DISTRIBUTION-PLAN.md), [release history](releases/) |
 | Command line | [`silo` CLI and MCP server](SiloUI-CLI.md): commands, `.silo/` files, and MCP setup |
-| In-guest client | [`silo --in-guest`](SiloUI-IN-GUEST-CLIENT.md): a scoped token and bridge folder so an agent inside a computer can fork and ask for review; what it may and may not do |
+| Silo's tools in a computer | [`silo` inside a computer](SiloUI-IN-GUEST-CLIENT.md): a loopback port and a token per computer, so an agent inside it uses Silo as that computer; what it may and may not do is [the policy](SiloUI-POLICY.md) |
 | Recipes | [Recipes and `silo up`](SiloUI-RECIPES.md): the recipe format, the build cache, forks and the desktop setting |
 | CI runner | [Silo as the machine GitHub Actions jobs run on](SiloUI-CI-RUNNER.md): `silo-runner`, a fresh computer per job, private repositories only |
 | Forks, sharing, CI runner and container computers | [Build plan](forks-ci/PLAN.md) and [log](forks-ci/BUILD_LOG.md) of the November 2026 build; [container computers plan](forks-ci/CONTAINERS-PLAN.md): an opt-in kind for Linux hosts that is less isolated than a VM, set up as in [the engine on a Linux host](SiloUI-ENGINE.md#container-computers-optional) |

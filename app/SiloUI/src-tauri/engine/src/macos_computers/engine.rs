@@ -58,7 +58,8 @@ struct Slot {
     save_restore: Result<(), String>,
     /// A private proxy-bootstrap boot must not complete the user's Start projection.
     lifecycle_managed: bool,
-    /// Ready guests own a per-VM helper; install and Recovery retain Apple NAT.
+    /// A machine on the gateway network owns a per-VM helper; the installer and the bootstrap
+    /// boots of a clean disk use Apple's network, and Recovery has none.
     gateway: Option<super::proxy::PreparedGateway>,
     _network_file_handle: Option<Retained<NSFileHandle>>,
     _network_attachment: Option<Retained<VZFileHandleNetworkDeviceAttachment>>,
@@ -512,6 +513,24 @@ fn nsurl(path: &Path) -> Retained<NSURL> {
     NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()))
 }
 
+/// The network card a machine is built with.
+enum GuestNetwork<'a> {
+    /// Frames go to the computer's gateway process, which applies Silo's network rules.
+    Gateway(&'a VZFileHandleNetworkDeviceAttachment),
+    /// Apple's own network: no rules, and the Mac and the local network are reachable.
+    AppleNat,
+    /// No card at all.
+    Disconnected,
+}
+
+/// Which network a boot gets, apart from the framework objects that carry it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BootNetwork {
+    Gateway,
+    AppleNat,
+    Disconnected,
+}
+
 /// Builds and validates the machine configuration of a computer whose hardware
 /// model and identifier are already on disk (or passed in for a new one).
 fn configuration(
@@ -520,7 +539,7 @@ fn configuration(
     hardware_model: &[u8],
     auxiliary_storage: &VZMacAuxiliaryStorage,
     machine_identifier: &VZMacMachineIdentifier,
-    network_attachment: Option<&VZFileHandleNetworkDeviceAttachment>,
+    network: GuestNetwork<'_>,
 ) -> Result<Retained<VZVirtualMachineConfiguration>, String> {
     // SAFETY: Every call below uses framework classes with valid arguments; arrays
     // contain only the declared element classes.
@@ -568,20 +587,29 @@ fn configuration(
         );
         configuration.setStorageDevices(&NSArray::from_retained_slice(&[disk.into_super()]));
 
-        let network = VZVirtioNetworkDeviceConfiguration::new();
-        if let Some(attachment) = network_attachment {
-            let attachment: &VZNetworkDeviceAttachment = attachment;
-            network.setAttachment(Some(attachment));
-        } else {
-            network.setAttachment(Some(&VZNATNetworkDeviceAttachment::new()));
-        }
-        let address = VZMACAddress::initWithString(
-            VZMACAddress::alloc(),
-            &NSString::from_str(&record.mac_address),
-        )
-        .ok_or("The computer's network address is damaged. Delete it and create it again.")?;
-        network.setMACAddress(&address);
-        configuration.setNetworkDevices(&NSArray::from_retained_slice(&[network.into_super()]));
+        let devices: Retained<NSArray<VZNetworkDeviceConfiguration>> = match network {
+            GuestNetwork::Disconnected => NSArray::new(),
+            GuestNetwork::Gateway(_) | GuestNetwork::AppleNat => {
+                let device = VZVirtioNetworkDeviceConfiguration::new();
+                match network {
+                    GuestNetwork::Gateway(attachment) => {
+                        let attachment: &VZNetworkDeviceAttachment = attachment;
+                        device.setAttachment(Some(attachment));
+                    }
+                    _ => device.setAttachment(Some(&VZNATNetworkDeviceAttachment::new())),
+                }
+                let address = VZMACAddress::initWithString(
+                    VZMACAddress::alloc(),
+                    &NSString::from_str(&record.mac_address),
+                )
+                .ok_or(
+                    "The computer's network address is damaged. Delete it and create it again.",
+                )?;
+                device.setMACAddress(&address);
+                NSArray::from_retained_slice(&[device.into_super()])
+            }
+        };
+        configuration.setNetworkDevices(&devices);
 
         configuration.setPointingDevices(&NSArray::from_retained_slice(&[
             VZMacTrackpadConfiguration::new().into_super(),
@@ -683,7 +711,14 @@ pub(super) fn validate_archive_configuration(
                 &nsurl(&layout.auxiliary_storage()),
             )
         };
-        configuration(&record, &layout, &model, &auxiliary, &identifier, None)?;
+        configuration(
+            &record,
+            &layout,
+            &model,
+            &auxiliary,
+            &identifier,
+            GuestNetwork::Disconnected,
+        )?;
         Ok(())
     })?
 }
@@ -816,8 +851,15 @@ pub(super) fn install(
                     identifier.dataRepresentation().to_vec(),
                 )
                 .map_err(|error| store::io_error("save the computer's identity", &error))?;
-                let configuration =
-                    configuration(&record, &layout, &model, &auxiliary, &identifier, None)?;
+                // The installer machine belongs to a new disk that nothing has written yet.
+                let configuration = configuration(
+                    &record,
+                    &layout,
+                    &model,
+                    &auxiliary,
+                    &identifier,
+                    GuestNetwork::AppleNat,
+                )?;
                 let generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let slot = register(
                     mtm,
@@ -952,11 +994,27 @@ pub(super) fn defer(work: impl FnOnce() + Send + 'static) {
 
 // MARK: Running
 
-/// Only a computer whose setup, personalization and network bootstrap all finished runs behind
-/// its gateway. Any other one, including a computer whose bootstrap is still being retried,
-/// boots over the temporary Apple NAT so the bootstrap can be staged.
-pub(super) fn boots_behind_gateway(record: &Record) -> bool {
-    record.setup.complete()
+/// The record in hand with the use flag the saved one has, so a copy read before the flag was
+/// set cannot choose Apple's network. A saved record that cannot be read does not count as clean.
+fn used_on_disk_or_in_hand(record: &Record, layout: &Layout) -> Result<Record, String> {
+    let saved = store::read_record(layout).map_err(|_| UNREADABLE_RECORD.to_string())?;
+    let mut checked = record.clone();
+    if saved.may_hold_agent_work() {
+        checked.agent_may_have_used = true;
+    }
+    Ok(checked)
+}
+
+const UNREADABLE_RECORD: &str = "Silo could not read this computer's record, so it cannot tell whether it is safe to start on the Mac's own network.";
+
+/// Refuses to build a machine on Apple's own network for a disk an agent may have written.
+/// A record that cannot be read does not count as clean.
+fn ensure_apple_network_allowed(record: &Record, layout: &Layout) -> Result<(), String> {
+    let saved = store::read_record(layout).map_err(|_| UNREADABLE_RECORD.to_string())?;
+    if record.may_hold_agent_work() || saved.may_hold_agent_work() {
+        return Err(store::NETWORK_NOT_PREPARED.into());
+    }
+    Ok(())
 }
 
 pub(super) fn start(
@@ -965,7 +1023,9 @@ pub(super) fn start(
     layout: &Layout,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), String> {
-    if !boots_behind_gateway(record) {
+    if store::network_plan(&used_on_disk_or_in_hand(record, layout)?)?
+        == store::NetworkPlan::AppleNat
+    {
         start_machine(app, record, layout, &Boot::BootstrapNat)?;
         count_boot(app, record, layout, "setup boot");
         return Ok(());
@@ -1020,7 +1080,8 @@ fn count_boot(app: &MacosContext, record: &Record, layout: &Layout, reason: &str
     }
 }
 
-/// Temporary Apple NAT boot used only while staging the guest's persistent bootstrap.
+/// Temporary Apple NAT boot used only while staging the guest's persistent bootstrap. A
+/// computer an agent may have used is refused.
 #[allow(dead_code)] // Launch migration is integrated by the runtime-migration owner.
 pub(super) fn start_bootstrap_nat(
     app: &MacosContext,
@@ -1050,6 +1111,19 @@ enum Boot {
     Recovery,
     /// Restores the memory saved in this file, then resumes.
     State(std::path::PathBuf),
+}
+
+impl Boot {
+    /// The network the machine of this boot is built with. Only the two bootstrap boots, which
+    /// the caller has checked against a disk no agent can have written, get Apple's network;
+    /// Recovery gets no network card.
+    fn network(&self) -> BootNetwork {
+        match self {
+            Self::Normal | Self::State(_) => BootNetwork::Gateway,
+            Self::BootstrapNat | Self::ProxyBootstrapNat => BootNetwork::AppleNat,
+            Self::Recovery => BootNetwork::Disconnected,
+        }
+    }
 }
 
 /// Why a start failed.
@@ -1156,11 +1230,15 @@ fn start_machine_once(
 ) -> Result<u64, BootFailure> {
     let model = read_hardware_model(&layout.hardware_model()).map_err(BootFailure::Setup)?;
     let identifier = read(&layout.machine_identifier(), "identity").map_err(BootFailure::Setup)?;
-    let gateway = match boot {
-        Boot::Normal | Boot::State(_) => {
+    let network = boot.network();
+    if network == BootNetwork::AppleNat {
+        ensure_apple_network_allowed(record, layout).map_err(BootFailure::Setup)?;
+    }
+    let gateway = match network {
+        BootNetwork::Gateway => {
             Some(prepare_gateway(app, record, layout).map_err(BootFailure::Setup)?)
         }
-        Boot::BootstrapNat | Boot::ProxyBootstrapNat | Boot::Recovery => None,
+        BootNetwork::AppleNat | BootNetwork::Disconnected => None,
     };
     let vm_gateway = gateway.clone();
     let activation_id = record.id.clone();
@@ -1223,13 +1301,23 @@ fn start_machine_once(
             network_file_handle = Some(file_handle);
             network_attachment = Some(attachment);
         }
+        let guest_network = match (network, network_attachment.as_deref()) {
+            (BootNetwork::Gateway, Some(attachment)) => GuestNetwork::Gateway(attachment),
+            (BootNetwork::Gateway, None) => {
+                return Err(BootFailure::Setup(
+                    "The computer's network gateway is not ready.".into(),
+                ));
+            }
+            (BootNetwork::AppleNat, _) => GuestNetwork::AppleNat,
+            (BootNetwork::Disconnected, _) => GuestNetwork::Disconnected,
+        };
         let configuration = configuration(
             &record,
             &layout,
             &model,
             &auxiliary,
             &identifier,
-            network_attachment.as_deref(),
+            guest_network,
         )
         .map_err(BootFailure::Setup)?;
         let slot = register(
@@ -2381,6 +2469,80 @@ mod tests {
         });
         assert!(result.is_err());
         assert_eq!(calls, 1);
+    }
+
+    fn saved_computer(app_data: &Path) -> (Layout, Record) {
+        let record = store::new_record(
+            &store::CreateRequest {
+                name: "mac-one".into(),
+                cpus: 4,
+                memory_gib: 8,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:01".into(),
+        );
+        let layout = Layout::new(app_data, &record.id);
+        store::save(&layout, &record).unwrap();
+        (layout, record)
+    }
+
+    #[test]
+    fn only_the_bootstrap_boots_get_apple_network_and_recovery_gets_none() {
+        assert_eq!(Boot::Normal.network(), BootNetwork::Gateway);
+        assert_eq!(
+            Boot::State(std::path::PathBuf::new()).network(),
+            BootNetwork::Gateway
+        );
+        assert_eq!(Boot::BootstrapNat.network(), BootNetwork::AppleNat);
+        assert_eq!(Boot::ProxyBootstrapNat.network(), BootNetwork::AppleNat);
+        assert_eq!(Boot::Recovery.network(), BootNetwork::Disconnected);
+    }
+
+    #[test]
+    fn apple_network_is_refused_for_a_disk_an_agent_may_have_written() {
+        let app_data = tempfile::tempdir().unwrap();
+        let (layout, record) = saved_computer(app_data.path());
+        // A clean first install may use it.
+        assert_eq!(ensure_apple_network_allowed(&record, &layout), Ok(()));
+        // The copy in hand says so.
+        let mut in_hand = record.clone();
+        in_hand.agent_may_have_used = true;
+        assert_eq!(
+            ensure_apple_network_allowed(&in_hand, &layout),
+            Err(store::NETWORK_NOT_PREPARED.to_string())
+        );
+        // A copy read before the flag was set cannot hide what is saved.
+        store::save(&layout, &in_hand).unwrap();
+        assert_eq!(
+            ensure_apple_network_allowed(&record, &layout),
+            Err(store::NETWORK_NOT_PREPARED.to_string())
+        );
+        assert_eq!(
+            store::network_plan(&used_on_disk_or_in_hand(&record, &layout).unwrap()),
+            Err(store::NETWORK_NOT_PREPARED.to_string())
+        );
+        // A record that cannot be read does not count as clean.
+        std::fs::write(layout.record(), b"not json").unwrap();
+        assert!(ensure_apple_network_allowed(&record, &layout).is_err());
+        assert!(used_on_disk_or_in_hand(&record, &layout).is_err());
+    }
+
+    #[test]
+    fn a_complete_setup_counts_as_used_even_when_the_flag_is_missing() {
+        let app_data = tempfile::tempdir().unwrap();
+        let (layout, mut record) = saved_computer(app_data.path());
+        record.setup = store::SetupProgress {
+            account: true,
+            sip: true,
+            developer_tools: true,
+            computer_use: true,
+            clipboard: true,
+            roots: true,
+            needs_personalizing: false,
+            proxy_bootstrap: true,
+        };
+        assert!(!record.agent_may_have_used);
+        assert!(ensure_apple_network_allowed(&record, &layout).is_err());
     }
 
     #[test]

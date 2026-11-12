@@ -225,6 +225,9 @@ struct InitRequest<'a> {
     ca: CaInput<'a>,
     secrets: Vec<SecretInput<'a>>,
     github_profile_json: Option<&'a str>,
+    /// The computer's network policy, in the shape MicroSandbox saves one.
+    policy: Value,
+    strict: bool,
 }
 
 #[derive(Serialize)]
@@ -375,6 +378,12 @@ pub(in crate::macos_computers_engine) fn prepare(
         })
         .collect::<Vec<_>>();
     let guest_mac = parse_mac(&record.mac_address)?;
+    // The stored network policy is read at every gateway start; a change applies at the next
+    // start of the computer.
+    let (network_policy, strict) = crate::network_policy::gateway_policy(
+        &crate::network_policy::plan_for_gateway(&record.id, &record.name)?,
+    );
+    crate::network_policy::service::gateway_started(&record.id, &network_policy, strict);
     let request = InitRequest {
         version: PROTOCOL_VERSION,
         kind: "init",
@@ -402,6 +411,8 @@ pub(in crate::macos_computers_engine) fn prepare(
         },
         secrets,
         github_profile_json: github_profile.as_deref().map(String::as_str),
+        policy: network_policy,
+        strict,
     };
     let mut body = Zeroizing::new(
         serde_json::to_vec(&request)

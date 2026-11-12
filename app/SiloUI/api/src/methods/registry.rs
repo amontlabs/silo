@@ -65,6 +65,14 @@ pub struct MethodDescriptor {
 
 define_registry! {
     ActivitySetupRead => ("activity.setup.read", Query, common::DeviceParams, Vec<computers::ComputerConfigurationProgress>);
+    ApprovalsCancel => ("approvals.cancel", Command, approvals::ApprovalsCancelParams, approvals::Approval);
+    ApprovalsDecide => ("approvals.decide", Command, approvals::ApprovalsDecideParams, approvals::Approval);
+    ApprovalsGet => ("approvals.get", Query, approvals::ApprovalsGetParams, approvals::Approval);
+    ApprovalsList => ("approvals.list", Query, approvals::ApprovalsListParams, approvals::ApprovalsListResult);
+    ApprovalsNote => ("approvals.note", Command, approvals::ApprovalsNoteParams, approvals::Approval);
+    AuditList => ("audit.list", Query, audit::AuditListParams, audit::AuditListResult);
+    AgentsInstall => ("agents.install", Job, agents::AgentsInstallParams, common::JobStartResult);
+    AgentsList => ("agents.list", Query, agents::AgentsListParams, agents::AgentsListResult);
     ChangesKeep => ("changes.keep", Job, keep::ChangesKeepParams, common::JobStartResult);
     ChangesPromote => ("changes.promote", Job, keep::ChangesPromoteParams, common::JobStartResult);
     ChangesRequest => ("changes.request", Command, keep::ChangesRequestParams, keep::ChangesRequestResult);
@@ -93,6 +101,7 @@ define_registry! {
     ComputersConfigurationChange => ("computers.configuration.change", Job, computers::ComputerConfigurationChangeParams, common::JobStartResult);
     ComputersConfigurationRead => ("computers.configuration.read", Query, computers::ComputerConfigurationReadParams, computers::ComputerConfigurationRequest);
     ComputersConfigurationRetry => ("computers.configuration.retry", Job, computers::ComputerConfigurationRetryParams, common::JobStartResult);
+    ComputersAccess => ("computers.access", Query, approvals::ComputersAccessParams, approvals::ComputerAccess);
     ComputersCreate => ("computers.create", Job, computers::ComputerCreateParams, computers::ComputerCreateResult);
     ComputersCredentials => ("computers.credentials", Query, credentials_used::ComputerCredentialsParams, credentials_used::CredentialsUsage);
     ComputersDelete => ("computers.delete", Job, computers::ComputerDeleteParams, common::JobStartResult);
@@ -103,9 +112,11 @@ define_registry! {
     ComputersLaunch => ("computers.launch", Query, computers::ComputerLaunchParams, computers::LaunchStatus);
     ComputersList => ("computers.list", Query, computers::ComputerListParams, computers::ComputersListResult);
     ComputersRestart => ("computers.restart", Job, common::ComputerTargetParams, common::JobStartResult);
+    ComputersRebuild => ("computers.rebuild", Job, computers::ComputerRebuildParams, common::JobStartResult);
     ComputersShell => ("computers.shell", Query, computers::ComputerShellParams, computers::ApplicationSource);
     ComputersStart => ("computers.start", Job, common::ComputerTargetParams, common::JobStartResult);
     ComputersStop => ("computers.stop", Job, common::ComputerTargetParams, common::JobStartResult);
+    ComputersRecipe => ("computers.recipe", Query, common::ComputerTargetParams, recipes::ComputerRecipeResult);
     ComputersTree => ("computers.tree", Query, steps::ComputersTreeParams, steps::ComputersTreeResult);
     ConnectionsDevicesConnect => ("connections.devices.connect", Command, connections::ConnectDeviceParams, connections::Device);
     ConnectionsDevicesHealth => ("connections.devices.health", Query, connections::DeviceHealthParams, connections::DeviceHealthResult);
@@ -124,6 +135,7 @@ define_registry! {
     DesktopStatus => ("desktop.status", Query, desktop::DesktopStatusParams, desktop::DesktopStatus);
     DeviceDependencies => ("device.dependencies", Query, device::DependencyReportParams, device::DependencyReport);
     DeviceFacts => ("device.facts", Query, device::DeviceFactsParams, device::DeviceFacts);
+    DeviceResources => ("device.resources", Query, device::DeviceResourcesParams, device::DeviceResources);
     DisplayClose => ("display.close", Command, display::DisplayCloseParams, ());
     DisplayNativeAttach => ("display.native.attach", Stream, display::NativeDisplayAttachParams, display::NativeDisplayMessage);
     DisplayShow => ("display.show", Command, display::DisplayShowParams, ());
@@ -181,7 +193,7 @@ define_registry! {
     GuestFilesWatch => ("guest.files.watch", Subscription, guest::GuestFilesWatchParams, guest::GuestFilesWatchResult);
     GuestFilesWrite => ("guest.files.write", Command, guest::GuestFilesWriteParams, guest::GuestFilesWriteResult);
     GuestPrepare => ("guest.prepare", Command, guest::GuestPrepareParams, guest::GuestPrepareResult);
-    GuestClientEnable => ("guestClient.enable", Command, guest_client::GuestClientEnableParams, guest_client::GuestClientEnableResult);
+    GuestClientEnable => ("guestClient.enable", Command, guest_client::GuestClientEnableParams, guest_client::GuestClientStatus);
     GuestClientRevoke => ("guestClient.revoke", Command, guest_client::GuestClientComputerParams, guest_client::GuestClientStatus);
     GuestClientStatus => ("guestClient.status", Query, guest_client::GuestClientComputerParams, guest_client::GuestClientStatus);
     GuestSsh => ("guest.ssh", Stream, guest::GuestSshParams, ());
@@ -205,6 +217,8 @@ define_registry! {
     NetworkState => ("network.state", Query, network::NetworkStateParams, network::NetworkState);
     NetworkUnpublish => ("network.unpublish", Command, network::NetworkUnpublishParams, network::NetworkState);
     NetworkUrls => ("network.urls", Query, network::NetworkTargetParams, network::NetworkUrlsResult);
+    NetworkPolicyGet => ("network.policy.get", Query, network::NetworkTargetParams, network::NetworkPolicyState);
+    NetworkPolicySet => ("network.policy.set", Command, network::NetworkPolicySetParams, network::NetworkPolicyState);
     NotificationsList => ("notifications.list", Query, notifications::NotificationsListParams, notifications::NotificationsListResult);
     OperationsCancel => ("operations.cancel", Command, operations::CancelJobParams, ());
     OperationsJobAcknowledge => ("operations.job.acknowledge", Command, operations::AcknowledgeJobParams, ());
@@ -217,8 +231,10 @@ define_registry! {
     PushStart => ("push.start", Job, push::PushStartParams, common::JobStartResult);
     PushStatus => ("push.status", Query, push::PushStatusParams, Option<push::PushOperation>);
     RecipesBuild => ("recipes.build", Job, recipes::RecipeBuildParams, common::JobStartResult);
+    RecipesGet => ("recipes.get", Query, recipes::RecipeGetParams, recipes::RecipeDocument);
     RecipesList => ("recipes.list", Query, common::DeviceParams, recipes::RecipesListResult);
     RecipesRemove => ("recipes.remove", Command, recipes::RecipeRemoveParams, ());
+    RecipesSave => ("recipes.save", Command, recipes::RecipeSaveParams, recipes::RecipeDocument);
     SecretsList => ("secrets.list", Query, common::DeviceParams, Vec<secrets::Secret>);
     SecretsRemove => ("secrets.remove", Command, secrets::SecretsRemoveParams, Vec<secrets::Secret>);
     SecretsRetry => ("secrets.retry", Command, secrets::SecretsRetryParams, Vec<secrets::Secret>);
@@ -251,27 +267,27 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 175);
+        assert_eq!(METHOD_REGISTRY.len(), 191);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            54
+            63
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            73
+            78
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            42
+            44
         );
         assert_eq!(
             METHOD_REGISTRY

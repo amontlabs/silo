@@ -444,4 +444,85 @@ describe("SecretsPage", () => {
     expect(screen.getByText("2 configured")).toBeVisible()
     expect(screen.getByRole("button", { name: "Remove PACKAGE_TOKEN" })).toBeVisible()
   })
+
+  describe("GitHub tokens", () => {
+    const tokenRow = (extra: Partial<ApplicationSource["secrets"][number]> = {}): ApplicationSource["secrets"][number] => ({
+      id: "token-1", name: "work", kind: "github-token", computers: ["dev"], allowedDomains: [], state: "active",
+      account: "alice", connection: { state: "connected" }, ...extra,
+    })
+
+    it("adds a token with a name and a value only and sends it as a GitHub token", async () => {
+      const user = userEvent.setup()
+      const save = vi.fn()
+      render(<SecretsPage source={applicationSourceForScenario("running")} onSaveSecret={save} onRemoveSecret={vi.fn()} />)
+      await user.click(screen.getByRole("button", { name: "Add GitHub token" }))
+      const form = screen.getByRole("form", { name: "Add GitHub token" })
+      expect(within(form).queryByRole("textbox", { name: "Allowed domains" })).not.toBeInTheDocument()
+      expect(within(form).queryByText("Computers")).not.toBeInTheDocument()
+      expect(within(form).getByText(/everything the token allows/)).toBeInTheDocument()
+      await user.type(within(form).getByLabelText("Name"), "work")
+      await user.type(within(form).getByLabelText("Token"), "ghp_synthetic")
+      await user.click(within(form).getByRole("button", { name: "Save" }))
+      expect(save).toHaveBeenCalledExactlyOnceWith({ kind: "github-token", name: "work", computers: [], allowedDomains: [], operation: "add", value: "ghp_synthetic" })
+    })
+
+    it("still adds an ordinary secret from Add", async () => {
+      const user = userEvent.setup()
+      render(<SecretsPage source={applicationSourceForScenario("running")} onSaveSecret={vi.fn()} onRemoveSecret={vi.fn()} />)
+      await user.click(screen.getByRole("button", { name: "Add secret" }))
+      expect(screen.getByRole("form", { name: "Add secret" })).toBeInTheDocument()
+      expect(screen.getByRole("textbox", { name: "Allowed domains" })).toBeInTheDocument()
+    })
+
+    it("shows the account of a connected token and the computers using it", () => {
+      const source = { ...applicationSourceForScenario("running"), secrets: [tokenRow()] }
+      render(<SecretsPage source={source} onSaveSecret={vi.fn()} onRemoveSecret={vi.fn()} />)
+      const row = screen.getByRole("listitem")
+      expect(within(row).getByText("GitHub token")).toBeInTheDocument()
+      expect(within(row).getByText("@alice")).toBeInTheDocument()
+      expect(within(screen.getByRole("group", { name: "Computers using work" })).getByLabelText(/^dev,/)).toBeVisible()
+      expect(within(row).getByText(/Sent only to GitHub/)).toBeInTheDocument()
+      expect(within(row).queryByLabelText("Allowed domains for work")).not.toBeInTheDocument()
+    })
+
+    it("shows a token GitHub rejected as disconnected, and a token no computer uses", () => {
+      const rejected = tokenRow({ computers: [], connection: { state: "disconnected", message: "Could not validate the GitHub token. Check its validity and your connection." } })
+      render(<SecretsPage source={{ ...applicationSourceForScenario("running"), secrets: [rejected] }} onSaveSecret={vi.fn()} onRemoveSecret={vi.fn()} />)
+      expect(screen.getByRole("status")).toHaveTextContent("Disconnected (@alice): Could not validate the GitHub token.")
+      expect(screen.getByText(/No computer uses this token yet/)).toBeInTheDocument()
+    })
+
+    it("replaces a token without asking for computers and shows GitHub's refusal", async () => {
+      const user = userEvent.setup()
+      const save = vi.fn().mockRejectedValue(new Error("Could not validate the GitHub token. Check its validity and your connection."))
+      render(<SecretsPage source={{ ...applicationSourceForScenario("running"), secrets: [tokenRow()] }} onSaveSecret={save} onRemoveSecret={vi.fn()} />)
+      await user.click(screen.getByRole("button", { name: "Edit work" }))
+      expect(screen.getByLabelText("Name")).toBeDisabled()
+      await user.type(screen.getByLabelText("Replacement token"), "ghp_new")
+      await user.click(screen.getByRole("button", { name: "Save" }))
+      expect(save).toHaveBeenCalledExactlyOnceWith({ kind: "github-token", name: "work", computers: [], allowedDomains: [], operation: "edit", id: "token-1", value: "ghp_new" })
+      expect(await screen.findByText("Could not validate the GitHub token. Check its validity and your connection.")).toBeInTheDocument()
+    })
+
+    it("closes the editor when nothing was entered to replace", async () => {
+      const user = userEvent.setup()
+      const save = vi.fn()
+      render(<SecretsPage source={{ ...applicationSourceForScenario("running"), secrets: [tokenRow()] }} onSaveSecret={save} onRemoveSecret={vi.fn()} />)
+      await user.click(screen.getByRole("button", { name: "Edit work" }))
+      await user.click(screen.getByRole("button", { name: "Save" }))
+      expect(save).not.toHaveBeenCalled()
+      expect(screen.queryByRole("form", { name: "Edit work" })).not.toBeInTheDocument()
+    })
+
+    it("previews a saved token with an account and without its value", async () => {
+      const user = userEvent.setup()
+      render(<SecretsPreview source={applicationSourceForScenario("running")} />)
+      await user.click(screen.getByRole("button", { name: "Add GitHub token" }))
+      await user.type(screen.getByLabelText("Name"), "work")
+      await user.type(screen.getByLabelText("Token"), "ghp_synthetic")
+      await user.click(screen.getByRole("button", { name: "Save" }))
+      expect(await screen.findByText("@preview-user")).toBeInTheDocument()
+      expect(document.body.textContent).not.toContain("ghp_synthetic")
+    })
+  })
 })

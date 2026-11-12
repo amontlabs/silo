@@ -46,7 +46,7 @@ it("only applies valid explicit GitHub fixture overrides", () => {
 })
 
 
-it("navigates four steps with GitHub going directly to Review", async () => {
+it("navigates five steps, with the agent chosen before GitHub and GitHub going directly to Review", async () => {
   const user = userEvent.setup()
   renderScenario()
 
@@ -54,8 +54,13 @@ it("navigates four steps with GitHub going directly to Review", async () => {
   await user.click(screen.getByRole("button", { name: "Continue" }))
   expectHiddenPanelHeading("Creating your computers")
   await user.click(screen.getByRole("button", { name: "Continue" }))
+  expectHiddenPanelHeading("Your agent")
+  expect(screen.getAllByRole("tab").map(tab => tab.getAttribute("aria-label"))).toEqual(["Dependencies", "Computers", "Your agent", "GitHub", "Review"])
+  // Continue waits for a choice.
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled()
+  await user.click(screen.getByRole("radio", { name: "Codex" }))
+  await user.click(screen.getByRole("button", { name: "Continue" }))
   expectHiddenPanelHeading("GitHub")
-  expect(screen.getAllByRole("tab").map(tab => tab.getAttribute("aria-label"))).toEqual(["Dependencies", "Computers", "GitHub", "Review"])
   await user.click(screen.getByRole("button", { name: "Continue" }))
   expectHiddenPanelHeading("Review setup")
   await user.click(screen.getByRole("tab", { name: /Review/ }))
@@ -82,12 +87,12 @@ it("shares the application choices in onboarding and keeps the selected browser"
 })
 
 
-it("renders four borderless setup navigation items", () => {
+it("renders five borderless setup navigation items", () => {
   renderScenario()
 
   const navigation = screen.getByRole("navigation", { name: "Setup steps" })
   const tabs = within(navigation).getAllByRole("tab")
-  expect(tabs).toHaveLength(4)
+  expect(tabs).toHaveLength(5)
   for (const tab of tabs) expect(tab).toHaveAttribute("data-appearance", "borderless")
 })
 
@@ -109,7 +114,7 @@ it("shows running computer feedback only in the sidebar outside Computers", asyn
   const user = userEvent.setup()
   renderScenario()
 
-  for (const step of ["GitHub", "Review"]) {
+  for (const step of ["Your agent", "GitHub", "Review"]) {
     await user.click(screen.getByRole("tab", { name: new RegExp(step) }))
     const panel = screen.getByRole("tabpanel")
     expect(within(panel).queryByRole("progressbar", { name: "Computer setup progress" })).not.toBeInTheDocument()

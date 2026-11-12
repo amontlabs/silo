@@ -129,7 +129,7 @@ describe("onboarding restart recovery", () => {
     expect(handlers.submitStep).toHaveBeenCalledOnce()
     expect(handlers.submitStep).toHaveBeenCalledWith("computers", expect.objectContaining({ computerConfiguration: { schemaVersion: 1, computers: [configuration] }, github: expect.objectContaining({ computers: [{ computer: "recovered", repositories: [], identity: { name: "Saved Author", email: "saved@example.test", apply: true } }] }) }))
     expect(handlers.saveComputerConfiguration).not.toHaveBeenCalled()
-    expect(screen.getByRole("tab", { name: /GitHub/ })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: /Your agent/ })).toHaveAttribute("aria-selected", "true")
   })
 
   it("applies saved reduced motion and follows shared changes without remounting the shell", async () => {

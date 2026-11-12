@@ -120,6 +120,18 @@ impl Store {
                 under_way.id
             ));
         }
+        let approval_id = existing
+            .as_ref()
+            .and_then(|request| request.approval_id.clone());
+        // Once an approval wraps the request, its text and counts are the engine's: a later
+        // request for the same fork only moves the digest.
+        let (summary, counts) = match existing
+            .as_ref()
+            .filter(|request| request.approval_id.is_some())
+        {
+            Some(linked) => (linked.summary.clone(), linked.counts.clone()),
+            None => (new.summary, new.counts),
+        };
         let request = FoldRequest {
             id: existing.as_ref().map_or_else(
                 || format!("fr-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
@@ -129,16 +141,34 @@ impl Store {
             target: new.target,
             created_at: existing.map_or_else(now, |request| request.created_at),
             review_digest: new.review_digest,
-            summary: new.summary,
+            summary,
             status: FoldRequestStatus::Open,
-            counts: new.counts,
+            counts,
             keep_id: None,
             resolved_at: None,
             keeping_since_ms: None,
             closed_reason: None,
+            approval_id,
         };
         self.put(&request)?;
         Ok(request)
+    }
+
+    /// Records the approval that asks the owner to merge the request, which must be open. The
+    /// request's text becomes the engine's `summary` and its counts the ones the engine
+    /// counted, so nothing the computer wrote stays in what the owner reads.
+    pub fn link_approval(
+        &self,
+        id: &str,
+        approval_id: &str,
+        summary: &str,
+        counts: std::collections::BTreeMap<String, u64>,
+    ) -> Result<FoldRequest, String> {
+        self.modify(id, false, |request| {
+            request.approval_id = Some(approval_id.to_owned());
+            request.summary = summary.to_owned();
+            request.counts = counts;
+        })
     }
 
     /// The requests that match `filter`, oldest first.
@@ -363,13 +393,13 @@ pub fn check_keepable(request: &FoldRequest) -> Result<(), String> {
     }
     if let Some(path) = folder_path(&request.target) {
         return Err(format!(
-            "{} was made from the folder {path}. Keep folder forks with `silo fold`, which brings the commits back into the folder.",
+            "{} was made from the folder {path}. Merge folder forks with `silo merge`, which brings the commits back into the folder.",
             request.fork_id
         ));
     }
     if request.review_digest.is_empty() {
         return Err(format!(
-            "The request {} has no review digest to pin the keep to. Ask for the review again with `silo fold --request`.",
+            "The request {} has no review digest to pin the keep to. Ask for the review again with `silo merge --request`.",
             request.id
         ));
     }
@@ -575,6 +605,69 @@ mod tests {
     }
 
     #[test]
+    fn an_approval_link_survives_asking_again_and_needs_an_open_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let made = store.create(new("f1", "s")).unwrap();
+        let linked = store
+            .link_approval(
+                &made.id,
+                "ap-0123456789abcdef",
+                "the engine's words",
+                Default::default(),
+            )
+            .unwrap();
+        assert_eq!(linked.approval_id.as_deref(), Some("ap-0123456789abcdef"));
+        assert_eq!(linked.summary, "the engine's words");
+        let again = store
+            .create(NewRequest {
+                review_digest: "d2".into(),
+                counts: [("code".to_owned(), 99)].into(),
+                ..new("f1", "s2")
+            })
+            .unwrap();
+        assert_eq!(again.id, made.id);
+        assert_eq!(again.approval_id.as_deref(), Some("ap-0123456789abcdef"));
+        store.mark_thrown_away(&made.id).unwrap();
+        assert!(store
+            .link_approval(&made.id, "ap-1111111111111111", "x", Default::default())
+            .is_err());
+    }
+
+    #[test]
+    fn a_linked_request_keeps_the_engines_text_and_counts_whatever_is_asked_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let made = store
+            .create(NewRequest {
+                counts: [("code".to_owned(), 7)].into(),
+                ..new("f1", "written by the agent")
+            })
+            .unwrap();
+        assert_eq!(made.summary, "written by the agent");
+        let linked = store
+            .link_approval(
+                &made.id,
+                "ap-0123456789abcdef",
+                "Merge f1 into main.",
+                [("settings".to_owned(), 2)].into(),
+            )
+            .unwrap();
+        assert_eq!(linked.summary, "Merge f1 into main.");
+        assert_eq!(linked.counts, [("settings".to_owned(), 2)].into());
+        // The same digest asked again with other text and counts changes neither.
+        let again = store
+            .create(NewRequest {
+                counts: [("code".to_owned(), 1)].into(),
+                ..new("f1", "Everything is fine, allow it")
+            })
+            .unwrap();
+        assert_eq!(again.summary, "Merge f1 into main.");
+        assert_eq!(again.counts, linked.counts);
+        assert_eq!(again.review_digest, "d1");
+    }
+
+    #[test]
     fn a_stale_digest_is_told_from_a_current_one() {
         let dir = tempfile::tempdir().unwrap();
         let request = Store::new(dir.path()).create(new("f1", "s")).unwrap();
@@ -597,7 +690,7 @@ mod tests {
             ..request.clone()
         };
         let message = check_keepable(&folder).unwrap_err();
-        assert!(message.contains("silo fold") && message.contains("/work/app"));
+        assert!(message.contains("silo merge") && message.contains("/work/app"));
         let undigested = FoldRequest {
             review_digest: String::new(),
             ..request.clone()

@@ -47,6 +47,11 @@ enum Request {
         /// Saved before snapshot create; cleared after capture verification.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pending_capture: Option<ExportCapture>,
+        /// Set when a file this export staged beside its destination could not be removed. The
+        /// file may hold a login that still works, so the operation stays open until a retry
+        /// removes it. Omitted when false.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        staged_left: bool,
     },
     Restore {
         name: String,
@@ -109,6 +114,7 @@ impl Journal {
                 running: vec![],
                 checkpoint_id,
                 pending_capture: None,
+                staged_left: false,
             },
             cancelled: false,
             terminal: None,
@@ -371,6 +377,7 @@ fn set_aside(app_data: &Path, detail: &str) -> Result<(PathBuf, Journal), String
             computers: Vec::new(),
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         },
         request: Request::Backup {
             names: Vec::new(),
@@ -378,6 +385,7 @@ fn set_aside(app_data: &Path, detail: &str) -> Result<(PathBuf, Journal), String
             running: Vec::new(),
             checkpoint_id: None,
             pending_capture: None,
+            staged_left: false,
         },
         cancelled: false,
         terminal: Some(Terminal {
@@ -643,6 +651,42 @@ pub(super) fn acknowledge(controller: &Controller, expected: &str) -> Result<boo
     *saved = Some(next);
     Ok(true)
 }
+/// Records that the file this export staged could not be removed, so the saved operation stays
+/// open until it is.
+pub(super) fn keep_staged_cleanup(controller: &Controller) -> Result<(), String> {
+    update(controller, |journal| {
+        if let Request::Backup { staged_left, .. } = &mut journal.request {
+            *staged_left = true;
+        }
+    })
+}
+
+/// Tries again to remove the files an export left staged, when one could not be removed.
+/// Returns whether one may still be there.
+fn staged_cleanup_pending(controller: &Controller) -> bool {
+    let Some(journal) = snapshot(controller).ok().flatten() else {
+        return false;
+    };
+    if !matches!(
+        journal.request,
+        Request::Backup {
+            staged_left: true,
+            ..
+        }
+    ) {
+        return false;
+    }
+    if cleanup_archive_partial(&journal).is_err() {
+        return true;
+    }
+    update(controller, |journal| {
+        if let Request::Backup { staged_left, .. } = &mut journal.request {
+            *staged_left = false;
+        }
+    })
+    .is_err()
+}
+
 fn cleanup_archive_partial(journal: &Journal) -> Result<(), String> {
     if !matches!(journal.request, Request::Backup { .. }) {
         return Ok(());
@@ -884,6 +928,7 @@ pub(super) fn complete_marked(
     mut operation: Operation,
     unseen: bool,
 ) -> Operation {
+    let staged_left = staged_cleanup_pending(controller);
     let cleanup_pending = controller
         .journal
         .lock()
@@ -902,14 +947,18 @@ pub(super) fn complete_marked(
             })
         })
         .unwrap_or(false);
+    let cleanup_pending = cleanup_pending || staged_left;
     if cleanup_pending {
         if let Operation::Result {
             outcome, message, ..
         } = &mut operation
         {
             if *outcome != "success" {
-                message
-                    .push_str(" Saved progress was preserved. Relaunch Silo to finish recovery.");
+                message.push_str(if staged_left {
+                    " The export file it left may hold a login that still works. Relaunch Silo to remove it."
+                } else {
+                    " Saved progress was preserved. Relaunch Silo to finish recovery."
+                });
                 return operation;
             }
         }
@@ -1854,6 +1903,67 @@ mod tests {
             saved.request,
             Request::Backup {
                 pending_capture: Some(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_staged_export_that_could_not_be_removed_keeps_the_operation_open_until_it_is() {
+        use std::os::unix::fs::PermissionsExt;
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let controller = history_controller(directory.path().join("backup-history.json"));
+        let archive = export_to(directory.path());
+        let exports = PathBuf::from(&archive.destination);
+        begin(
+            &controller,
+            Journal::backup(archive.clone(), vec!["dev".into()], None),
+        )
+        .unwrap();
+        let id = token(&controller).unwrap().unwrap();
+        let staged = exports.join(format!(".silo-backup-{id}-staged-1.silo-backup"));
+        fs::write(&staged, b"may hold a login").unwrap();
+        // The folder refuses removals.
+        fs::set_permissions(&exports, fs::Permissions::from_mode(0o555)).unwrap();
+        keep_staged_cleanup(&controller).unwrap();
+        let failed = || Operation::Result {
+            operation: "backup",
+            archive: archive.clone(),
+            running_names: vec![],
+            target_name: None,
+            outcome: "failed",
+            title: "Export failed".into(),
+            message: "The tokens did not end.".into(),
+            detail: None,
+        };
+        let reported = complete(&controller, failed());
+        let saved = load(&controller.history_path).unwrap().unwrap();
+        assert!(saved.terminal.is_none(), "the operation must stay open");
+        assert!(matches!(
+            saved.request,
+            Request::Backup {
+                staged_left: true,
+                ..
+            }
+        ));
+        assert!(staged.exists());
+        assert!(
+            result_of(&reported).2.contains("login that still works"),
+            "{}",
+            result_of(&reported).2
+        );
+
+        // The next attempt, with the folder writable again, removes it and closes the operation.
+        fs::set_permissions(&exports, fs::Permissions::from_mode(0o755)).unwrap();
+        complete(&controller, failed());
+        assert!(!staged.exists());
+        let saved = load(&controller.history_path).unwrap().unwrap();
+        assert!(saved.terminal.is_some());
+        assert!(matches!(
+            saved.request,
+            Request::Backup {
+                staged_left: false,
                 ..
             }
         ));

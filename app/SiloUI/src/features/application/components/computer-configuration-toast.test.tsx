@@ -44,6 +44,13 @@ describe("describeConfiguration", () => {
     expect(described).toMatchObject({ title: "Creating fresh", step: "Preparing the computer image (first time only, about a minute)", progress: null, kind: "creating" })
   })
 
+  it("names the agent installation after computer use and does not move the bar back", () => {
+    const at = (step: string) => describeConfiguration(operation([event(step, 0)]), committed)
+    expect(at("agent-installation").step).toBe("Installing agents")
+    expect(at("agent-installation-failed").step).toBe("Installing agents")
+    expect(at("agent-installation").progress!).toBeGreaterThanOrEqual(at("computer-use-setup").progress!)
+  })
+
   it("shows a bar from the very first event, before any step arrives", () => {
     const described = describeConfiguration(operation([]), committed)
     expect(described.step).toBe("Starting…")

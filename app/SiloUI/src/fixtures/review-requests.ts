@@ -3,7 +3,7 @@ import type { ReviewRequestActions } from "@/features/application/components/rev
 
 const request = (id: string, forkId: string) => ({
   id, forkId, target: "main", createdAt: "2026-11-05T09:30:00Z", reviewDigest: "d1", summary: "", status: "open" as const, counts: {},
-  keepId: undefined, resolvedAt: undefined, keepingSinceMs: undefined, closedReason: undefined,
+  keepId: undefined, resolvedAt: undefined, keepingSinceMs: undefined, closedReason: undefined, approvalId: undefined,
 })
 
 const text = [
@@ -18,7 +18,7 @@ const text = [
 ].join("\n")
 
 const base = (id: string, forkName: string): RequestDetail => ({
-  request: request(id, `${forkName}-id`), forkName, forkState: "running", stale: false, reviewDigest: "d1", fresh: true,
+  request: request(id, `${forkName}-id`), forkName, forkState: "running", targetName: undefined, stale: false, reviewDigest: "d1", fresh: true,
   diff: null, text, counts: { code: 1, packages: 1, settings: 1 }, credentials: { used: [], blocked: [] },
 })
 
@@ -54,7 +54,7 @@ export function createReviewRequestFixtureActions(overrides: Partial<ReviewReque
       const detail = reviewRequestFixtures[requestId]
       return {
         status: "kept",
-        report: { fork: detail.forkName, target: "main", summary: [], steps: [], notes: [], checkpoint: "cp-before-keep", reviewDigest: detail.reviewDigest },
+        report: { fork: detail.forkName, target: "main", summary: [], steps: [], notes: [], checkpoint: "cp-before-keep", reviewDigest: detail.reviewDigest, fastForward: undefined },
         refusal: undefined,
         request: { ...detail.request, status: "kept", keepId: "cp-before-keep" },
       }

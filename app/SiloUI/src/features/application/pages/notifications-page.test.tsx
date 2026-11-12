@@ -81,3 +81,14 @@ it("waits for verified permission before enabling categories and prevents duplic
   expect(screen.getByRole("switch", { name: "Long tasks finished" })).not.toBeChecked()
   expect(settings.getSnapshot().settings.notificationsEnabled).toBe(true)
 })
+
+it("has a switch for requests from agents, on by default, saved under its own setting", async () => {
+  const user = userEvent.setup()
+  const { store, ui } = page()
+  render(ui)
+  expect(await screen.findByText("An agent in a computer asks for something only you can allow, such as a merge or a published port.")).toBeInTheDocument()
+  const requests = screen.getByRole("switch", { name: "Requests from agents" })
+  expect(requests).toBeChecked()
+  await user.click(requests)
+  expect(store.getSnapshot().settings).toMatchObject({ notifyApprovals: false, notifyFailures: true })
+})

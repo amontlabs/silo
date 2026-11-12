@@ -40,4 +40,40 @@ describe("SecretEditor current access settings", () => {
     fireEvent.submit(screen.getByRole("form"))
     expect(save).toHaveBeenCalledOnce()
   })
+
+  it("clears a GitHub token when it is submitted and asks for it again after a failed save", () => {
+    const source = structuredClone(applicationSourceForScenario("running"))
+    const save = vi.fn()
+    const props = { source, onSave: save, onCancel: vi.fn(), kind: "github-token" as const }
+    const { rerender } = render(<SecretEditor {...props} />)
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "work" } })
+    fireEvent.change(screen.getByLabelText("Token"), { target: { value: "synthetic_token" } })
+    fireEvent.submit(screen.getByRole("form"))
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: "github-token", name: "work", value: "synthetic_token" }))
+    expect(screen.getByLabelText("Token")).toHaveValue("")
+
+    rerender(<SecretEditor {...props} saveError="Silo could not reach GitHub to check this token. Try again." />)
+    expect(screen.getByLabelText("Token")).toHaveValue("")
+    expect(screen.getByLabelText("Name")).toHaveValue("work")
+    fireEvent.submit(screen.getByRole("form"))
+    expect(save).toHaveBeenCalledOnce()
+    expect(screen.getByText("Enter the token again to retry.")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Token"), { target: { value: "synthetic_token_2" } })
+    fireEvent.submit(screen.getByRole("form"))
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ value: "synthetic_token_2" }))
+    expect(screen.getByLabelText("Token")).toHaveValue("")
+  })
+
+  it("keeps an ordinary secret value through a failed save", () => {
+    const source = structuredClone(applicationSourceForScenario("running"))
+    const save = vi.fn()
+    render(<SecretEditor source={source} onSave={save} onCancel={vi.fn()} initialComputers={[]} />)
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "SERVICE_TOKEN" } })
+    fireEvent.change(screen.getByLabelText("Value"), { target: { value: "synthetic-value" } })
+    fireEvent.change(screen.getByRole("textbox", { name: "Allowed domains" }), { target: { value: "api.example.test" } })
+    fireEvent.submit(screen.getByRole("form"))
+    expect(screen.getByLabelText("Value")).toHaveValue("synthetic-value")
+  })
 })

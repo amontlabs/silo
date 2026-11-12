@@ -213,6 +213,75 @@ describe("createMacosComputersStore", () => {
     vi.useRealTimers()
   })
 
+  describe("following the engine without events", () => {
+    const stable = { ...state, computers: [{ ...computer, state: "running" as const }] }
+    const preparing = { ...state, computers: [{ ...computer, state: "preparing" as const, progress: 0.5 }] }
+    const settle = (ms: number) => vi.advanceTimersByTimeAsync(ms)
+    const fakeTimers = () => { vi.useFakeTimers(); return () => { vi.useRealTimers(); vi.unstubAllGlobals() } }
+    const stubWindow = () => { const target = new EventTarget(); vi.stubGlobal("window", target); vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" })); return target }
+
+    it("reads again every few seconds while a computer is being prepared, until it is running", async () => {
+      const done = fakeTimers()
+      const { value } = backend()
+      value.read = vi.fn().mockResolvedValueOnce(preparing).mockResolvedValueOnce(preparing).mockResolvedValue(stable)
+      const store = createMacosComputersStore(value)
+      const stop = store.subscribe(() => {})
+      await settle(0)
+      expect(store.getSnapshot().state?.computers[0].state).toBe("preparing")
+      await settle(10_000)
+      expect(store.getSnapshot().state?.computers[0].state).toBe("running")
+      const reads = vi.mocked(value.read).mock.calls.length
+      expect(reads).toBeGreaterThanOrEqual(3)
+      await settle(10_000)
+      expect(vi.mocked(value.read).mock.calls.length).toBe(reads)
+      stop()
+      done()
+    })
+    it("picks up a computer made elsewhere within the idle interval", async () => {
+      const done = fakeTimers()
+      const { value } = backend()
+      value.read = vi.fn().mockResolvedValueOnce(state).mockResolvedValue({ ...state, computers: [computer, { ...computer, id: "cli", name: "from-cli" }] })
+      const store = createMacosComputersStore(value)
+      const stop = store.subscribe(() => {})
+      await settle(0)
+      expect(store.getSnapshot().state?.computers).toHaveLength(1)
+      await settle(30_000)
+      expect(store.getSnapshot().state?.computers.map(({ name }) => name)).toEqual(["daily", "from-cli"])
+      stop()
+      done()
+    })
+    it("reads when the window gets focus back and stops polling with the last listener", async () => {
+      const done = fakeTimers()
+      const window = stubWindow()
+      const { value } = backend()
+      const store = createMacosComputersStore(value)
+      const stop = store.subscribe(() => {})
+      await settle(0)
+      const reads = vi.mocked(value.read).mock.calls.length
+      window.dispatchEvent(new Event("focus"))
+      await settle(0)
+      expect(value.read).toHaveBeenCalledTimes(reads + 1)
+      stop()
+      window.dispatchEvent(new Event("focus"))
+      await settle(120_000)
+      expect(value.read).toHaveBeenCalledTimes(reads + 1)
+      done()
+    })
+    it("keeps polling after a read fails", async () => {
+      const done = fakeTimers()
+      const { value } = backend()
+      value.read = vi.fn().mockRejectedValueOnce("busy").mockResolvedValue(state)
+      const store = createMacosComputersStore(value)
+      const stop = store.subscribe(() => {})
+      await settle(0)
+      expect(store.getSnapshot().error).toBe("busy")
+      await settle(30_000)
+      expect(store.getSnapshot()).toMatchObject({ state, error: null })
+      stop()
+      done()
+    })
+  })
+
   it("keeps a failed first read as an error and refreshes on request", async () => {
     const { value } = backend()
     value.read = vi.fn().mockRejectedValueOnce("Virtualization is unavailable.").mockResolvedValue(state)

@@ -3,7 +3,7 @@
 mod registry;
 
 pub use registry::{
-    Acceptance, CancelRoute, JobRegistry, RegistryError, RegistryErrorKind,
+    Acceptance, Acknowledgement, CancelRoute, JobRegistry, RegistryError, RegistryErrorKind,
     DISCOVERY_ID_BUDGET_BYTES, MAX_INLINE_JOB_OUTCOME_BYTES, MAX_JOB_OUTCOME_CHUNK_BYTES,
 };
 
@@ -273,6 +273,7 @@ pub fn finish_with_error(
                 code,
                 message: message.into(),
                 diagnostics: None,
+                details: None,
             }),
             outcome_chunked: false,
         },
@@ -288,7 +289,8 @@ fn progress_job_id(progress: &JobProgress) -> JobId {
         | JobProgress::Backup { job_id, .. }
         | JobProgress::Push { job_id, .. }
         | JobProgress::Macos { job_id, .. }
-        | JobProgress::Update { job_id, .. } => job_id.clone(),
+        | JobProgress::Update { job_id, .. }
+        | JobProgress::Agent { job_id, .. } => job_id.clone(),
     }
 }
 

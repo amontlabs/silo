@@ -256,6 +256,31 @@ pub fn git_precheck(repo: &str, bundle: &str, tmp_ref: &str) -> GuestCmd {
     .arg("ref", tmp_ref)
 }
 
+/// Prints the name the fork's commits get as a branch (`name`, or the first of `name-2`,
+/// `name-3`, ... that is free) and `new`, or `same` when that branch already points at them.
+/// An existing branch is never moved.
+pub fn git_branch_plan(repo: &str, tmp_ref: &str, name: &str) -> GuestCmd {
+    git_cmd(
+        "git_branch_plan",
+        "set -e\ncd \"$A_repo\"\nwant=$(git rev-parse \"$A_ref^{commit}\")\nn=\"$A_name\"; i=1\nwhile :; do\n  git check-ref-format \"refs/heads/$n\" || { echo \"$n is not a branch name\" >&2; exit 3; }\n  if ! git show-ref --verify -q \"refs/heads/$n\"; then echo \"$n\"; echo new; exit 0; fi\n  if [ \"$(git rev-parse \"refs/heads/$n\")\" = \"$want\" ]; then echo \"$n\"; echo same; exit 0; fi\n  i=$((i+1)); n=\"$A_name-$i\"\n  [ $i -le 100 ] || { echo 'no free branch name' >&2; exit 3; }\ndone",
+    )
+    .arg("repo", repo)
+    .arg("ref", tmp_ref)
+    .arg("name", name)
+}
+
+/// Creates the branch `name` at the fetched commits. It fails if the branch exists: nothing
+/// is merged, moved or checked out.
+pub fn git_branch(repo: &str, tmp_ref: &str, name: &str) -> GuestCmd {
+    git_cmd(
+        "git_branch",
+        "set -e\ncd \"$A_repo\"\ngit update-ref \"refs/heads/$A_name\" \"$A_ref^{commit}\" \"\"\ngit rev-parse --short \"refs/heads/$A_name\"",
+    )
+    .arg("repo", repo)
+    .arg("ref", tmp_ref)
+    .arg("name", name)
+}
+
 pub fn git_drop_ref(repo: &str, tmp_ref: &str) -> GuestCmd {
     git_cmd(
         "git_drop_ref",

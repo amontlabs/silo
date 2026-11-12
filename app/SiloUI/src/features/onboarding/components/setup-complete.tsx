@@ -1,5 +1,5 @@
 import { useLayoutEffect } from "react"
-import { Bell, Boxes, Check, CircleAlert, CircleCheck, GitFork, HeartPulse, Power } from "lucide-react"
+import { Bell, Bot, Boxes, Check, CircleAlert, CircleCheck, GitFork, HeartPulse, Power, RotateCw, ShieldQuestion } from "lucide-react"
 
 import { FilterCombobox } from "@/components/filter-combobox"
 import { SectionHeading } from "@/components/page"
@@ -9,23 +9,35 @@ import { Button } from "@/components/ui/button"
 import { useSettings } from "@/features/preferences/settings-store"
 import { useSystemIntegrations } from "@/features/preferences/system-integrations-store"
 import type { SetupComputerConfiguration } from "@/contracts/silo"
+import { SshNameLine } from "@/features/agents/components/ssh-name-line"
+import type { AgentChoice } from "@/features/agents/model/agents"
+import type { ApplicationActions } from "@/features/application/model/application-source"
+import type { AgentSetupView } from "@/features/onboarding/model/onboarding-state"
+import { agentSetupText } from "@/features/onboarding/model/agent-setup-text"
 
 const notificationCategories = [
   { id: "notifyFailures", label: "Failures", icon: CircleAlert },
   { id: "notifyChanges", label: "Unexpected computer changes", icon: HeartPulse },
   { id: "notifyCompletions", label: "Long tasks finished", icon: CircleCheck },
+  { id: "notifyApprovals", label: "Requests from agents", icon: ShieldQuestion },
 ] as const
 
-export function SetupComplete({ configurations, githubSummary }: {
+export function SetupComplete({ configurations, githubSummary, agent = null, agentChoice, onRetryAgent, ensureSshName }: {
   configurations: readonly SetupComputerConfiguration[]
   githubSummary: string
+  /** The agent install of setup, when one was chosen. */
+  agent?: AgentSetupView | null
+  agentChoice?: AgentChoice | null
+  onRetryAgent?: () => void
+  /** Makes the SSH host name for desktop apps; absent where the app cannot. */
+  ensureSshName?: NonNullable<ApplicationActions["ensureSshName"]>
 }) {
   const { settings, store, updateSettings } = useSettings()
   const integrations = useSystemIntegrations()
   const notificationsEnabled = settings.notificationsEnabled && integrations.notificationsAuthorized
 
   useLayoutEffect(() => {
-    const initial = configurations.find(({ name }) => name === "dev") ?? configurations[0]
+    const initial = configurations.find(({ name }) => name === "main") ?? configurations.find(({ name }) => name === "dev") ?? configurations[0]
     store.updateDefaults({ startupComputerIds: initial ? [initial.id] : [] })
   }, [configurations, store])
 
@@ -45,6 +57,22 @@ export function SetupComplete({ configurations, githubSummary }: {
           detail={githubSummary}
           detailClassName="whitespace-normal"
         />
+        {agent ? <ListRow
+          role={agent.status === "failed" ? "alert" : "group"}
+          aria-label="Your agent"
+          icon={<ListRowIcon aria-hidden="true"><Bot className="size-3.5" /></ListRowIcon>}
+          title="Your agent"
+          detail={agentSetupText(agent)}
+          detailClassName={agent.status === "failed" ? "whitespace-normal break-words text-destructive" : "whitespace-normal"}
+          actions={agent.status === "failed" && onRetryAgent ? <Button type="button" variant="outline" size="xs" onClick={onRetryAgent}><RotateCw aria-hidden="true" data-icon="inline-start" />Retry</Button> : undefined}
+        /> : agentChoice === "none" ? <ListRow
+          aria-label="Your agent"
+          role="group"
+          icon={<ListRowIcon aria-hidden="true"><Bot className="size-3.5" /></ListRowIcon>}
+          title="Your agent"
+          detail="You set up the agent yourself."
+        /> : null}
+        {agent?.status === "succeeded" && ensureSshName && <SshNameLine key={agent.computer} target={agent.computer} running ensure={ensureSshName} />}
       </ListCard>
       <section aria-labelledby="setup-preferences-title" className="grid gap-2">
         <SectionHeading id="setup-preferences-title">Stay informed</SectionHeading>

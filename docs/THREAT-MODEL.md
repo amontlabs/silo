@@ -18,7 +18,7 @@ issue, web page or dependency and now follows the attacker's instructions with r
 Silo tries to keep that agent from reaching the Mac, the Mac's network, other computers, raw
 credentials and repositories the user did not grant. It does **not** try to keep the agent from
 sending the data it can already see to the internet: outbound traffic to public addresses is
-allowed, and there is no per-host egress filter yet.
+allowed by default, and the per-computer network policy (an allowlist or closed) narrows that but does not stop sending data to a host it allows.
 
 | The agent in a computer can | The agent in a computer cannot (if the boundary holds) |
 | --- | --- |
@@ -108,6 +108,82 @@ configuration, which exports compare against, is
 So the guest cannot open a connection to a service listening on the Mac's loopback or LAN address,
 to a router admin page, to a Tailscale peer, or to another computer's guest address.
 
+#### Network policy per computer
+
+Each computer has a mode, set by you (`silo network policy`, `network.policy.set`) and stored with
+the computer ([`network_policy/`](../app/SiloUI/src-tauri/engine/src/network_policy/mod.rs)):
+
+| Mode | Rules the runtime gets | What the guest can reach |
+| --- | --- | --- |
+| `open` (the default; every computer saved before the policy existed) | name lookups, Silo's own rules, every public address | what this boundary describes above |
+| `allowlist` | name lookups, one rule per allowed host on TCP port 443 (the registry presets also name port 80 for Ubuntu's archives), Silo's own rules, and **no** public-address rule | only the listed hosts, plus GitHub's hosts while the computer has GitHub access and the hosts of each secret assigned to it |
+| `closed` | Silo's own rules only | nothing outbound, and no name lookups. A container's blocked state is the same mode. |
+
+Host patterns are lowercase DNS names of at least two labels, or `*.` and such a name (which also
+covers the name itself); addresses, ports, bare top-level names, names that stay on the device and
+a `*.` pattern over a registry suffix (`*.co.uk`, `*.com`) are refused. A `*.` pattern over a name where anyone can publish a site (`*.github.io`, `*.duckdns.org`, `*.netlify.app`) is accepted with a warning shown wherever the list is set and in the approval that adds it. The
+suffixes are those of the Public Suffix List, ICANN and private, compiled into the engine from the
+`psl` crate, plus a few shared-hosting names that the list does not carry
+([`public_suffixes.json`](../app/SiloUI/src-tauri/engine/src/network_policy/public_suffixes.json));
+see [the choice](SiloUI-NETWORK-PLAN.md#public-suffix-list-for-allowlist-wildcards). A policy saved
+before a name was refused keeps working until it is saved again. Presets (npm, PyPI, crates.io,
+Ubuntu, Homebrew, GitHub, Anthropic, OpenAI) expand to host lists from one data file in the engine.
+Each preset has a version and a policy stores the version it was approved at: when an update of
+Silo adds hosts to a preset, a computer keeps the list it was approved with until you accept the
+update (`network.policy.get` lists it as a preset update; setting the policy again with the same
+presets accepts it). The hosts that GitHub access adds are pinned the same way, under their own
+entry that follows the GitHub preset's version; a policy saved before that entry existed holds the
+first version, which is the list GitHub access has always added, so nothing changes when it loads. A fork keeps the versions of its source, whatever policy it is given, and a decision to make a fork or change a policy counts the GitHub hosts at the version each computer holds, so only an approval moves a computer to a newer list. The data file keeps the list of every earlier version of a preset for as long
+as a saved policy may name it; a version Silo does not know allows nothing. A policy is read from
+one file; when it cannot be read (damaged, or written by a newer Silo) a computer does not start,
+is not created, and its gateway gets no way out, and the file is left alone. A computer with no
+saved policy is judged and run by the rules its runtime holds (deny-all rules are closed), never
+as open by default; an import saves an explicit closed policy. The policy follows the computer: a
+checkpoint restore and a fork keep it, an export drops it, an import starts closed, and a computer from before the
+policy loads as open. A computer's agent may read its own policy and those of computers it made,
+may narrow either freely, and asks you to widen one (see [the policy page](SiloUI-POLICY.md)); a
+computer it makes gets its own policy or a narrower one.
+
+What the allowlist stops: a connection to a public address that is not on the list, by name or by
+address (the runtime checks the name the guest asks for, so pointing an allowed name's address at
+another name fails), a query sent straight to another resolver such as 1.1.1.1 or 8.8.8.8 (the
+rule that lets the guest use any public resolver is absent), and UDP and other ports to listed
+hosts.
+
+What it does **not** stop, and why you should still treat the computer as hostile:
+
+- **Sending data to an allowed host.** A gist, an issue, a package upload or an API call to a host
+  on the list carries whatever the agent can read. The list limits where data can go, not what is
+  sent. A GitHub grant adds GitHub's hosts, which include places the agent can publish to.
+- **A name lookup reaches the internet, so DNS is a way to send data out.** In open and allowlist
+  modes the gateway's resolver answers any name by asking that name's authoritative server on the
+  internet. A guest can therefore put data in the name it looks up (a long label under a domain
+  whose server it or an attacker runs) and it arrives, whatever the list says. This is a usable
+  channel, not a narrow one. A closed computer has no lookups at all.
+- **With `strict` off, a host that shares an address with an allowed host may be reachable.**
+  Hostname rules for hosts that no secret covers work only while the runtime's strict mode is off
+  (under strict, a TLS connection the runtime does not intercept is refused when only a hostname
+  rule admitted it, so allowed hosts would fail). An allowlist computer therefore runs with strict
+  off. The connection is still checked against the name in the TLS request, but a service that
+  answers on an allowed host's address for another name, or a name that resolves to the same
+  address, is not distinguished by address alone. With strict off, traffic that carries no TLS
+  server name (raw TCP, or TLS without one) is admitted to an address the resolver's cache ties to
+  an allowed name, so an agent that can make an allowed name resolve to an address it controls
+  can open any TCP stream to it. Open and closed computers run with strict on.
+- **A secret's hosts are allowed hosts too.** The hosts a secret may be sent to (wildcards
+  included, unless over a public suffix) are added to the list of each computer it is assigned to,
+  and the approval for an agent adding a secret says so. A GitHub grant likewise adds GitHub's
+  hosts at the version of Silo that is running.
+- **The macOS gateway and containers** apply the same rules through their gateway's start-up
+  request and take them when the gateway starts, so a running computer keeps its rules until it
+  restarts; the answer to a change says when it applies. A Linux virtual machine changes by being
+  restored in place from a checkpoint taken just before its next start.
+
+The runtime cannot change a created computer's rules, so a change is applied by Silo restoring the
+stopped computer in place with the new rules (`restore --net-strict`, the
+`microsandbox-restore-net-strict` patch). A Linux host builds its runtime in CI; the allowlist has
+not been run on one.
+
 macOS computers that have finished setup run behind a per-computer gateway child,
 `silo-macos-gateway` ([source](../app/SiloUI/src-tauri/macos-gateway/README.md)), which uses
 the same MicroSandbox network stack. The VM's only network device is a file-handle attachment to
@@ -117,15 +193,27 @@ and the child applies the `Public` profile when no other policy is given
 
 Limits of this boundary:
 
-- **No hostname or destination allowlist.** Any public host, any port, TCP and UDP (except UDP to port 443). This is what
-  "no egress filter yet" means.
-- **macOS computers before setup completes use Apple NAT.** Until a macOS computer's setup,
-  personalization and network bootstrap are complete, and when it boots into Recovery, it runs on
-  `VZNATNetworkDeviceAttachment` with no Silo policy
-  ([`boots_behind_gateway`, `engine.rs#L959`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs#L959);
-  [`engine.rs#L577`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs#L577)). In that
-  state it can reach the Mac and the LAN. Silo's own provisioning is the expected workload then,
-  but a user can start a computer whose setup failed.
+- **In the default mode, open, there is no hostname or destination filter.** Any public host, any
+  port, TCP and UDP (except UDP to port 443). The other two modes are described under
+  [Network policy per computer](#network-policy-per-computer).
+- **macOS computers: only a disk no agent can have written runs on Apple NAT.** A first
+  install and the setup of a copy of a template run on `VZNATNetworkDeviceAttachment` with no
+  Silo policy until their setup completes
+  ([`network_plan`, `store.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers/store.rs);
+  [`engine::start`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs)). In that
+  state the guest can reach the Mac and the LAN. The disk then holds only Apple's image and
+  Silo's scripts, so that is the expected workload. A computer's record carries
+  `agentMayHaveUsed`, set when its setup first completes and never cleared, and set at birth
+  for every fork and import. A flagged computer never gets Apple's NAT: a boot that finishes
+  its setup goes behind the gateway after Silo has replaced the network bootstrap program, its
+  launch daemon and its configuration on the stopped disk, and is refused, with a message that
+  says what to do, when the disk has no such files, a link stands where one should be, the
+  build has no signed program, or the saved network identity does not match. Recovery gets no
+  network card. The choice is made where the machine is built, so nothing the guest does
+  changes it. One case remains: a computer made before the gateway existed is converted once,
+  at launch, over Apple's NAT, because its setup never completed and so its record is not
+  flagged. The details are in
+  [`SiloUI-MACOS-COMPUTERS.md`](SiloUI-MACOS-COMPUTERS.md#network).
 - The classification is by IP, with no notion of "the LAN" beyond the private ranges. A LAN host
   reachable by a global IPv6 address (SLAAC) or a non-RFC 1918 IPv4 address is "public" and
   reachable, as is a service on the Mac's own public address, if it has one. The IPv6 case applies
@@ -267,12 +355,18 @@ reads the token from an inherited pipe, never from arguments, environment or fil
 
 Limits:
 
-- **Personal access token mode has no repository scoping.** The proxy sends the personal token for
-  every request to the GitHub hosts (`profile.version == 2`,
+- **A personal access token is not scoped by Silo.** A personal token is a secret of kind
+  `github-token`; you can keep several and choose one per computer. For a computer that uses one,
+  the proxy sends that token for every request to the GitHub hosts (`profile.version == 2`,
   [patch line 394](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L394)), so the agent
-  has the token's full permissions. The README says so. Host push in this mode also uses the full
-  personal token, which is not narrowed or revoked
-  ([`github.rs#L2369`](../app/SiloUI/src-tauri/engine/src/github.rs#L2369)).
+  has whatever permissions the token has: the scope is the one you gave it on GitHub, and Silo adds
+  no repository limit. The README says so. A computer only ever receives the token it was given,
+  never another one in the list, and a token secret is never delivered as an environment
+  placeholder. Host push for such a computer also uses the full token it chose, which is not
+  narrowed or revoked (`personal_push_credential` in
+  [`github.rs`](../app/SiloUI/src-tauri/engine/src/github.rs)). A token GitHub rejects
+  disconnects, and the computers using it lose GitHub access instead of falling back to another
+  credential.
 - **Read is still read.** With a read grant the agent can read every granted repository, including
   private ones, and send their contents anywhere (boundary 2 does not stop it).
 - A write grant includes `workflows: write`: the agent can change GitHub Actions workflows in those
@@ -299,7 +393,10 @@ also holds MicroSandbox's per-computer checkpoint state (`root-disk.json`, `chec
 hashes but which the guest can overwrite or delete. An eval run on a Mac
 found the share read-write from the guest and could not reach a host canary file through it.
 **This share has not had a security review.** The guest can change what the host later reads
-there, and any escape from the passthrough root would be a host file write.
+there, and any escape from the passthrough root would be a host file write. Silo itself reads
+nothing from it: the agent in a computer reaches Silo over a network port
+([boundary 9](#9-silos-tools-in-a-computer-a-port-and-a-token)), and Silo writes no requests or
+answers into the share and parses no file a guest wrote there.
 
 The other two, present only on computers created before Cua Driver (v4 guest image), are
 Silo-managed **read-only** legacy shares at `/opt/silo/chatgpt` and `/opt/silo/lcu`. Silo no
@@ -313,6 +410,17 @@ file transfers use `sftp` as the working account with sizes bounded on the host
 ([`transfer.rs`](../app/SiloUI/src-tauri/engine/src/transfer.rs)). The two read-only shares are
 served by the `msb` process on the Mac (virtiofs), so that process parses the guest's filesystem
 requests; read-only is enforced on the host side.
+
+The commands the engine runs in a guest and reads back (checks, file helpers, a bounded run) are
+held in memory on the host with a limit on both standard output and standard error
+([`process.rs`](../app/SiloUI/src-tauri/engine/src/guest/process.rs)): a command that prints past
+its limit (one byte over, even while it keeps its pipe open) is stopped and the call fails with "printed too much" (standard error of a bounded run:
+one response's worth). A helper command keeps the first 64 KiB of its standard error and the engine
+reads and drops the rest, so a hostile guest cannot make file operations fail by printing a lot;
+its standard output stays bounded. The file helper runs under the guest supervisor, so when the
+engine stops it (deadline, overflow) the helper is ended in the guest too. A folder watch refuses
+output that is not a path (a record over 8 KiB) and ends. It reports only the watched folders, holds each at most once in a short queue and hands them on at most ten times a second, so a guest that prints without end costs the device neither memory nor work, on this device or across devices. Nothing the guest prints is written to
+the device's disk by the engine.
 
 Imported Linux computer archives are parsed on the Mac: a zstd-compressed tar is streamed through
 caps on entry types, paths, entry count and size
@@ -338,23 +446,49 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
 - **The fork-time record travels** when the exported computer is a fork: the list of its files as
   they were at the fork, which paths and digests, not contents. Import stores it as the new
   computer's record, with no source and no origin, so the receiver names the target
-  (`silo fold <imported> --into main`).
-- **Files are never filtered.** Everything on the computer's disks is in the file: anything the
-  agent could read could already leave through the computer's network, and the export is no
-  stricter. A login on the disk is a secret in the file. Before an export Silo lists the logins it
-  recognises, on the disk and in the fork-time record (Claude Code, Codex, Gemini CLI, GitHub CLI,
-  cloud and registry credentials, SSH private keys; not what every computer has: system password
-  files, its SSH host keys, the desktop's connection password and Silo's own certificate authority),
-  and asks; the CLI refuses without a terminal
-  unless `--yes` is passed, and the app asks in a dialog. When Silo could not check (a stopped
-  computer, whose disk is not listed, an export of a checkpoint, or a check that failed) it asks
-  too: "Silo could not check <name> for logins (<reason>). Share anyway?", in the CLI and in the
-  app, and `--json` reports the reason as `unchecked`. The list is a warning, not a guarantee: a
-  secret in a file Silo does not recognise (an `.env`, a token in a shell history) is not named.
-  The disk is listed with the walk `silo diff` does (`/etc`, `/root`, `/home`, `/usr/local`,
-  `/opt`, `/srv` and the crontabs on Linux; the home folder, `/usr/local`, `/opt/homebrew/etc` and
-  the launch agents and daemons on macOS), so a login anywhere else,
-  such as under `/workspace`, is not named either.
+  (`silo merge <imported> --into main`).
+- **A Linux computer's known login files are removed from the exported computer, and traces
+  may remain in the file.** An export of the current state of a Linux virtual machine is made from a
+  hidden, short-lived copy of it (`silo-export-<8 hex>`, never listed): forked with no secrets, no
+  GitHub access and a deny-all network, started, stripped of the files Silo recognises as logins (Claude
+  Code `~/.claude/.credentials.json` and `~/.claude.json`, Codex, Gemini CLI, GitHub CLI, cloud and registry
+  credentials, SSH private keys and key files in `/etc`, `/root`, `/home`, `/usr/local`, `/opt`, `/srv`),
+  stopped, captured under the computer's name and dropped
+  ([`export_scrub.rs`](../app/SiloUI/src-tauri/engine/src/export_scrub.rs)). The list is the one the scan and
+  the diff's "Not kept" use. The result names the files removed; `--include-logins` (or the dialog's Include
+  logins) keeps them. What the removal does and does not give:
+  - **The files are not in the imported computer.** The check in
+    [`t14_export_scrub_check.sh`](direction/checks/t14_export_scrub_check.sh) imports a default export,
+    starts it, and finds none of the login files and neither marker among its files
+    ([`T14.txt`](direction/evidence/T14.txt)).
+  - **Their bytes are still in the file.** The copy is a fork, and a fork's disks are layers over the
+    computer's own. The layers it shares with the computer (everything up to the fork's checkpoint) are
+    read-only and are written into the file whole, deleted files' blocks included. Discarding the copy's free
+    blocks (`fstrim`) reaches only its own top layer, and the same check finds a long random marker, written to
+    every known login path and then deleted, in the layers of the default export. Anyone with the file and the
+    tools to read a disk layer can recover them. Neither the app nor the CLI says the file is free of them;
+    they say traces may remain. Removing them for real needs the layers flattened, which the runtime's
+    snapshot export does not offer.
+  - **It is a list, not a guarantee.** A secret in a file Silo does not recognise (an `.env`, a token in
+    a shell history, a key under `/workspace`) stays in the file; the listing walks the folders `silo diff`
+    walks. A key-material file (`*.pem`, `*.key`, ...) anywhere in those folders is removed too, which can
+    include a certificate an installed program needs; the removed list names every path.
+  - **The computer's own fork-time record travels** (paths and digests, not contents).
+  - **It does not apply to a checkpoint, a macOS computer or a container computer.** A checkpoint is
+    another disk than the live one; a macOS computer's login files and Keychain would need an offline edit
+    of a copied disk, and a fork's rekey already clears the login keychain, but nothing here has verified
+    that the removed bytes leave the disk image; a container has nothing to discard. These exports keep the
+    logins in the file and ask first, as before: Silo lists the logins it recognises, on the disk and in the
+    fork-time record, and asks; the CLI refuses without a terminal unless `--yes` is passed, and the app asks
+    in a dialog. When Silo could not check (a stopped computer, whose disk is not listed, an export of a
+    checkpoint, or a check that failed) it asks too: "Silo could not check <name> for logins (<reason>).
+    Share anyway?", and `--json` reports the reason as `unchecked`. The list is a warning, not a guarantee.
+    The disk is listed with the walk `silo diff` does (`/etc`, `/root`, `/home`, `/usr/local`, `/opt`, `/srv` and
+    the crontabs on Linux; the home folder, `/usr/local`, `/opt/homebrew/etc` and the launch agents and
+    daemons on macOS), so a login anywhere else, such as under `/workspace`, is not named either.
+  - **The copy has the computer's own CPUs and memory** while it exists, and holds a second copy of its
+    writable disks until it is dropped. A copy that the engine could not drop (it stopped mid-export) stays
+    hidden and is dropped by the next export.
 - **No memory is in the file**, for any kind of computer: an export carries disks only, as a
   fork does. A running computer is captured from its disks: the guest writes its cached file data
   out and the disks are copied, with a macOS computer paused for the copy the way a fork point
@@ -368,11 +502,11 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
   computer has no memory checkpoints. A file written before this rule can hold memory; an import
   never uses it, because an imported computer always starts from its disks.
 - **Secrets, published ports, the network policy and host-folder mounts are not carried**; an
-  imported computer starts stopped with a deny-all policy.
+  imported computer starts stopped with a closed network policy.
 - **An export is a plain file.** Keep it where you would keep the secrets in it. Importing one
   from someone else adds a computer whose disk you did not make; it starts stopped and is as
   untrusted as any new agent computer.
-- **An imported computer is untrusted until it is kept.** `silo fold <imported> --into main`
+- **An imported computer is untrusted until it is kept.** `silo merge <imported> --into main`
   writes the sender's files into the computer that holds your secrets and network policy, and
   that includes shell startup files, agent settings and instructions, and a crontab: whatever
   the sender's agent changed runs in your main afterwards. Read `silo diff <imported>` before
@@ -437,7 +571,8 @@ process identity are not checked)
 That is the whole client check. **Any process running as the same user has the engine's full
 authority**: it can list, export or delete computers, change GitHub and secret assignments, and
 open the guest over SSH. There is no authenticated client identity (the handshake's client name
-is self-declared) and no audit log of which client asked for what. The guest is not such a
+is self-declared) and the audit log records only that name. Calls from a computer are not this
+caller (boundary 9, boundary 10). The guest is not such a
 process: the socket is on the Mac's filesystem, which the guest cannot see.
 
 A second path exists for Connections. With **Allow connections from other devices** on, a paired
@@ -504,68 +639,166 @@ binary serves the socket, not who connects to it.
 | Guest agent | In every Linux computer, MicroSandbox's `agentd` talks to the `msb` process on the Mac over virtio-serial (CBOR) for readiness, exec and heartbeats. Silo parses `msb exec` output (repository discovery, directory listings). Silo configures no virtio-vsock routes. | [`runtime/mod.rs`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), [MicroSandbox `protocol/lib.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/protocol/lib/lib.rs) |
 | Published ports | Guest services appear on Mac loopback; opening one in a browser runs guest content at a per-computer `.localhost` origin; a page there can still send cross-site requests to other loopback services ([`network.rs#L87`](../app/SiloUI/src-tauri/engine/src/network.rs#L87)). | [`network.rs`](../app/SiloUI/src-tauri/engine/src/network.rs) |
 
-### 9. The in-guest client: a scoped token for a computer's own agent
+### 9. Silo's tools in a computer: a port and a token
 
-Design and install steps: [the in-guest client](SiloUI-IN-GUEST-CLIENT.md). A Linux computer can be
-given a token (`silo guest-client install`) that lets an agent in it call a short list of engine
-methods through the `/.msb/silo-bridge` folder. The engine serves it from
-[`guest_bridge.rs`](../app/SiloUI/src-tauri/silod/src/guest_bridge.rs) and checks each call in
-[`guest_client/scope.rs`](../app/SiloUI/src-tauri/engine/src/guest_client/scope.rs).
+Design: [Silo's tools in a computer](SiloUI-IN-GUEST-CLIENT.md). An agent in a computer calls the
+engine over TCP: the engine listens on one port **on the device's loopback** (`127.0.0.1`, never
+another address) for each computer with the tools on
+([`channel.rs`](../app/SiloUI/src-tauri/silod/src/channel.rs)), and that computer's network rules
+allow exactly that port on its gateway address (`allow@host:tcp:<port>`), which the runtime maps to
+the device's loopback ([`network_policy::extra_rules`](../app/SiloUI/src-tauri/engine/src/network_policy/mod.rs)).
+This is the one exception to "the gateway itself is not public" in [boundary 2](#2-network-egress-public-addresses-only):
+one port, one computer. No other computer's rules contain that port.
 
-What the token can do: fork its own computer (secrets only those the settings list for that agent,
-none by default; at most 32 forks per token and 3 running or starting), start, stop and diff the
-forks it made, ask for review of those forks, read the review requests and steps of itself and those
-forks, and follow the jobs it started. Forks the person made, or another token made, are not
-reachable, and list results hold only the computer and its own forks.
+**What the port exposes on the device.** Any program on the device, of any account, can open a
+connection to a computer's port: it is a TCP port on `127.0.0.1`, not a socket file with an owner.
+The device side sees every peer as `127.0.0.1`, computers included, so the address says nothing
+about who connects. **The token is the identity, and it never crosses the connection.** On
+accepting a connection the engine sends a fresh 32-byte nonce from `getentropy`. Within 2 seconds
+the client must answer with `engine.handshake` (at most 16 KiB) whose `proof` is HMAC-SHA-256,
+keyed by SHA-256 of the token, over a fixed context string, the nonce and the port the client
+believes it is connecting to. The engine keeps exactly SHA-256 of the token
+(`<app data>/guest-client/tokens.json`, `0600`), computes the same HMAC for the port the
+connection arrived on and compares in constant time; the record's port must be that port, so a
+token is valid on its own computer's port alone. The computer is taken from the port and no field
+of the frame can name another. Anything else gets no answer, an audit row (a refused
+`engine.handshake` by that computer, at most one a second, so the rows collapse and cannot fill
+the audit queue; one log line a minute) and a close after one second. Connections that have not
+finished their handshake have their own 4 places per computer, apart from the 8 places of
+sessions, so a program that opens connections and says nothing delays a computer's new sessions
+by at most the 2 seconds of each attempt and cannot take a session's place.
 
-What it cannot do, and the engine refuses before any handler runs: keep, promote, undo, throw away
-or drop (`changes.keep`, `changes.promote`, `changes.undo`, `changes.requests.keep`,
-`changes.requests.throwAway`, `computers.delete`), change secrets or GitHub access, run commands or
-move files in any computer, publish ports, act for another device, act on a computer that is
-neither itself nor a fork it made, or mint, revoke or read tokens. It cannot make checkpoints,
-capture or baseline either. `fold` and `auto_keep` are not part of its policy: nothing is kept from
-inside.
+What a holder of the token gets: the computer's own calls, judged by [the policy](SiloUI-POLICY.md)
+(free, asked of the owner, or refused; owner-only methods such as settings, Connections, exports,
+approvals and `events.subscribe` are refused), with every refused or held call and every call that
+can change something in the audit log under that computer. A program on the device that reads the
+token gets exactly that and nothing of the owner's.
 
-What a compromised guest gains: the agent already controls the computer, so the token adds the
-ability to make up to 32 forks of it, 3 running at once (a disk and CPU cost; the engine adds no
-total RAM limit, each running fork uses the memory it was created with, and `fork_ram_budget`
-applies only to forks the host CLI makes) and to put review requests in front of
-the person, whose summary text the agent wrote. A fork, request or summary can be flooded or
-misleading; a keep still shows the engine's own diff, pinned to its digest. It gains no host file,
-secret, GitHub token or other computer's data.
+- **Where the token is.** In the computer, in `/etc/silo/endpoint.json`: root-owned, `0640` with
+  the `silo` account's group (on a macOS computer that group is `staff`), written by the engine as
+  root. Anything in the computer that can read the file can use the token; anything in the
+  computer could already act through the agent. The token never travels on the connection, in an
+  answer or in a log.
+- **Copies.** A token is valid on its own computer's port alone. A fork's copy of its parent's file
+  reaches nothing: the fork's rules do not allow the parent's port and the parent's proof is
+  refused on the fork's port. A Linux fork has the file scrubbed by its fork options and a macOS
+  fork in its offline preparation; either gets its own token at its first start. An export of a
+  Linux virtual machine is made from a hidden copy that has the file removed; any other export (a
+  checkpoint, a macOS or container computer, or with the logins kept) carries the file, and the
+  engine ends the computer's token right after it, so the copy proves nothing. On import a
+  computer has no tools until the owner turns them on.
+- **A program that takes the port.** While the engine is not running, another program can bind a
+  computer's port. A client in that computer that connects is challenged by that program and
+  answers with a proof good for that program's nonce on that port only, which opens nothing. At
+  start the engine forgets every token hash, so a token learned while it was down is dead, and
+  each running computer gets a new one when its file is next checked (`silo` reads the file again
+  when a handshake is refused). It rebinds every port; one found taken moves to a new port that is
+  held (accepting and closing) and not served, the computer is marked as needing a restart
+  (`guestClient.status` shows `restartNeeded`), and only when it runs with rules naming the new
+  port is it served and its file written. Until that restart its network still allows the old
+  port, which the other program holds: from inside the computer that program is reachable, in any
+  network mode.
+- **A port that is no longer the computer's.** Turning the tools off, or a move, leaves the port in
+  the computer's rules until its next start. The engine keeps that port bound with a listener that
+  accepts and closes every connection without reading it, and saves it
+  (`<app data>/guest-client/held-ports.json`) so it is bound again at the next engine start, until
+  the computer runs with rules that no longer name it, or is deleted. A port another program took
+  while the engine was not running cannot be held.
+- **Promote and undo** turn the tools off in the computers they swap; **delete** and **disable**
+  forget the hash and close open sessions at once; a new token closes every session opened with the
+  old one.
+- **Limits.** 8 sessions, 4 connections waiting in the handshake and 16 running requests per
+  computer, 4 MiB frames as on `engine.sock`, at most 16 unacknowledged jobs; forks and running
+  forks are not counted (the device's memory and disk floors apply, see
+  [the policy](SiloUI-POLICY.md#limits)).
+- **The file check.** The engine reads and writes the endpoint file as root in the computer, with
+  an 8-second limit per command, at most 4 computers at once and one check per computer; a
+  computer whose check fails or stalls is tried again after 5 seconds, doubling up to 5 minutes,
+  and holds up no other computer's check.
+- **Parsing.** The engine parses the computer's frames with the same framing and envelope parser
+  as `engine.sock`; it no longer parses any file a guest wrote for this purpose.
+- **What remains.** Any program on the device can still connect to a computer's port and be
+  refused, costing it nothing but a place for 2 seconds. A shared Linux host is a weaker place than
+  a single-user device: another account can connect, take a port while the engine is down (and so
+  be reachable from that computer until it restarts), and fill a computer's 4 handshake places so
+  its new sessions wait; it never gets a token or a usable proof. The planned runtime patch that
+  maps the gateway port to a Unix socket in a private folder removes the open port.
 
-- **Replay and theft.** Frames are files the guest writes, so anything in the guest that can read
-  the token file can use the token, and a copy of it elsewhere is refused unless it is in the
-  folder of the computer it was minted for. There is no per-request signature or nonce check; the
-  folder is the identity, and the token is the installer's intent. Request ids are consumed when
-  read, and answers expire after ten minutes.
-- **Forks.** A token verifies only for its own computer, so a fork that kept the file cannot use it
-  and forks made from inside also have the file scrubbed.
-- **Promote and undo.** Both revoke the tokens of the computers they swap, so the agent in a former
-  main stops; a new token is installed on purpose.
-- **Parsing and links.** The guest can replace `silo-bridge`, `req` or `resp` with links, and on a
-  macOS host a guest symlink is a real host symlink. The engine opens each component with
-  `openat(O_NOFOLLOW | O_DIRECTORY)` through directory descriptors (`rustix`), afresh each pass,
-  and stops serving a computer whose folder is a link. Request files are regular files only
-  (checked after opening), at most 256 KiB, `<32 hex>.json` names only; answers are written `0600`
-  by rename. At most 64 answers wait unread and a full folder drops new requests; a call with no
-  valid token gets no answer; at most 256 directory entries are examined per look. The share itself
-  still has no security review (boundary 6); this adds a parser of guest-written JSON on the Mac.
-- **Other guest users.** `req/` is `1733` and `resp/` `0711`, requests and answers `0600`; the
-  engine gives each answer the stat override of the user that wrote the request, so that user
-  (and root) reads it and no other guest user does. (In a container the folders carry real owners: see [Container computers](#container-computers).) The override format is taken from MicroSandbox
-  0.7.6 source and is not yet checked in a running guest.
-- **Forks and jobs.** A fork is the token's only after its job finished and the fork exists below
-  the computer (recorded by id); forks the person made are never reachable, and a failed fork
-  never claims a computer. A token holds at most 32 forks, 3 running or starting, and 16
-  unacknowledged jobs.
-- **Logging.** The engine writes one line per call to its log: the computer, the method (only a
-  name from the allow-list; anything else is logged as "not offered"), and whether it was refused.
-  Parameters and tokens are not logged, and a call with a bad token is logged without its method.
-  There is no audit trail beyond that.
+What a compromised guest gains is unchanged by the transport: the agent already controls the
+computer, and the token adds the computer's policy-judged calls (forks of itself and the
+computers it made, their diffs and commands, review requests whose summary it wrote, and asks
+the owner must answer).
 
-The 2026-10-02 security review checked these surfaces in source
-([report](SiloUI-CODE-REVIEW-PASS-3-SECURITY-2026-10-02.md)); it was not a live exploit campaign.
+### 10. Who calls the engine, and what a computer may do
+
+Every call carries who made it, set by the way it arrived and never by the program that sent it
+([`policy/`](../app/SiloUI/src-tauri/engine/src/policy/rules.rs), described in full in
+[the policy page](SiloUI-POLICY.md)):
+
+| Caller | Arrives through | Authority |
+| --- | --- | --- |
+| Owner | the engine's socket on this device (the app, the `silo` command on the device) | everything; any same-user process is this caller (boundary 7) |
+| Device | Connections, from another device of yours | the methods the Connections bridge serves (boundary 7) |
+| Computer | the computer's own channel (boundary 9) | the rules below |
+
+For a computer the rule is: it can do anything that gives it no more than it already has;
+anything that widens what it has asks the owner; it never touches a computer outside its tree.
+Its tree is itself and every computer it made, directly or through one it made. "Made" is
+recorded by the engine when the computer's agent creates or forks, not taken from lineage: a fork
+you made by hand from `main` may hold more access than `main` and is not `main`'s agent's to touch.
+A new method does not compile until the policy classifies it.
+
+| A computer may, alone | A computer must ask | A computer never |
+| --- | --- | --- |
+| Fork itself or a computer it made, make a new computer of any size (free memory permitting), with no more access than it has | Merge into a computer it did not make, or replace main | Read a secret's value |
+| Hand a fork access it has itself | A new repository, write access, a new secret or an assignment | Touch a computer outside its tree |
+| Run commands in, read, checkpoint, restore, stop and delete computers it made; read its own files, logs and diff | A wider network policy, a published port, SSH access from outside | Change settings or Connections, export or import, answer an approval, read the event stream |
+| Narrow its network policy, unpublish a port | A container computer | Name another device |
+| Read what it holds (`computers.access`, names and hosts only), the device's resources, and the audit rows of its tree | | |
+
+A call that must ask returns at once, the engine writes what is asked from the call's own
+parameters (never from the agent's words), and the Silo app shows it. The agent's note is shown
+apart, as its own. Allowing it makes the engine check the call again as if the computer had just
+made it, then run the stored call itself; nothing a computer does changes the stored call. A
+call can be allowed once only. The agent's words are stored and printed as plain text: control
+characters, terminal escapes and direction overrides are removed. A computer creates at most 30
+approvals an hour and has at most 20 waiting; a waiting one expires after 7 days; a secret's value
+is removed from the stored file when the approval ends. Why the agent cannot answer for itself:
+approvals are shown by the Silo app, and `approvals.decide` is owner only.
+
+Every call that can change something, and every refused or held call, is a row in the audit log
+(who, method, computer, outcome; never parameters or results). A computer cannot push out any
+other caller's rows.
+
+**Resource floors.** A computer's agent cannot start, restart or create a computer, take or
+restore a checkpoint, or fork while the device's available memory or free disk is below a floor
+(by default the larger of 4 GiB and 10 % of memory, and of 10 GiB and 5 % of the disk; the owner
+can change them). Admitted starts hold their memory until they end, at most 5 minutes, and a start
+larger than the free memory above the floor is refused. This protects the device from being
+frozen or filled; it is not a cap on how many computers an agent makes. The owner's calls are not
+held back. A start the owner approved checks the floor but does not hold memory, so several approved
+starts at once can pass together.
+
+**Recipes.** Saving, removing and building recipes belongs to the owner. A computer reads in full
+only the recipe it was built from, and even that without its command lines (setup, service
+commands, the migrate and after hooks), because they may hold a token the owner pasted; for
+the others it sees names, system and a one-way hash. Whatever a setup command writes is on every
+computer built from the recipe, so tokens belong in secrets, never in setup lines. A merge changes a saved recipe only when the
+owner runs it or approves it, and undoing the merge takes back exactly what it added. A merge
+into a computer built from a recipe runs that recipe's hooks, never hooks the caller supplied;
+its result tells the agent that asked only "Ran the recipe's migrate step 2", and a failing hook
+only its step and exit code, never the command or its output.
+See [Recipes](SiloUI-RECIPES.md).
+
+**What is trusted and what is the computer's own claim.** The engine trusts the channel the call
+arrived on, the engine's own records and what Silo ran itself. It does not trust what a computer
+says about itself. The tools receipt in the computer (`/var/lib/silo/components.json`), the hash of
+the `silo` program it reports, and a "tools OK" shown for it are the computer's own claim: an agent
+with root can write any of them. They only decide what Silo does next (send the program again,
+register again) and are never shown as proof; with the tools off, the receipt's explanations
+are not shown at all. The same holds for the results of tests a fork runs, which is why nothing is
+kept without asking when they pass. A summary shown to the owner names the computer by its id as
+well as its name, because an agent chooses the name.
 
 ## Linux hosts
 
@@ -603,9 +836,7 @@ until a scenario has run there, this document claims nothing stronger for a Linu
 reading of boundary 2.
 
 **Host folders a guest sees.** The same as boundary 6: the read-write runtime share at `/.msb`
-(served from the runtime's per-computer directory,
-[`guest_client/spool.rs#L123`](../app/SiloUI/src-tauri/engine/src/guest_client/spool.rs#L123) for the bridge folder in
-it), the two empty read-only legacy folders on older computers, and `/workspace` as a disk image.
+(served from the runtime's per-computer directory), the two empty read-only legacy folders on older computers, and `/workspace` as a disk image.
 The credential directory is never a mount source or inside or above one; a unit test checks that
 against the storage, share, guest-image and legacy paths
 ([`credential_file_store.rs#L942`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L942)).
@@ -624,8 +855,8 @@ inside a directory nobody else can change
 it used first and refuses a different `SILO_CREDENTIAL_STORE` later
 ([`linux.rs#L192`](../app/SiloUI/src-tauri/silod/src/linux.rs#L192)).
 
-**Engine socket and in-guest client.** Boundaries 7 and 9 unchanged, with `SO_PEERCRED` in place of
-`getpeereid`.
+**Engine socket and Silo's tools in a computer.** Boundaries 7 and 9 unchanged, with `SO_PEERCRED` in
+place of `getpeereid` for the socket; a computer's port is on the host's loopback as on a Mac.
 
 **Connections on the host.** A controller reaches the host through the host's sshd, as the engine's
 account, with the Ed25519 key its own engine made. `silo host init --authorize <key>` has the engine
@@ -698,9 +929,9 @@ recovery ([`startup.rs#L395`](../app/SiloUI/src-tauri/silod/src/startup.rs#L395)
 [`#L447`](../app/SiloUI/src-tauri/silod/src/startup.rs#L447)), and the names of computers a session
 end left running ([`process.rs#L47`](../app/SiloUI/src-tauri/silod/src/process.rs#L47)). None of
 those lines carries a credential or token value: the file store's refusal names the file
-([`credential_store.rs#L50`](../app/SiloUI/src-tauri/engine/src/credential_store.rs#L50)), a guest
-client's rejected call is logged without its token
-([`frames.rs#L220`](../app/SiloUI/src-tauri/silod/src/guest_bridge/frames.rs#L220)), and `msb`'s
+([`credential_store.rs#L50`](../app/SiloUI/src-tauri/engine/src/credential_store.rs#L50)), a refused
+connection on a computer's channel is logged without its token
+([`channel.rs`](../app/SiloUI/src-tauri/silod/src/channel.rs)), and `msb`'s
 output is captured by the engine or discarded, never inherited
 ([`runtime/mod.rs#L1846`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1846),
 [`#L1863`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1863)). Error texts do carry paths,
@@ -738,9 +969,10 @@ Not defended on a Linux host:
   signed.
 - **A controller's key.** It is as good as the controller's engine: whoever holds it has the host
   engine's authority (above) until the host revokes it. Silo cannot tell a stolen key from its owner.
-- **Other local users reaching loopback listeners.** Published ports, SSH access to a computer and
-  host-push listen on the host's loopback, which every account on the host can reach. Use a
-  single-tenant host.
+- **Other local users reaching loopback listeners.** Published ports, SSH access to a computer,
+  host-push and the ports of Silo's tools ([boundary 9](#9-silos-tools-in-a-computer-a-port-and-a-token))
+  listen on the host's loopback, which every account on the host can reach. Use a single-tenant
+  host.
 - **The Secret Service backend**, which has never been exercised.
 
 ### Container computers
@@ -762,14 +994,12 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   it did not have as the engine's user, and removes none of the engine's. This is a change from a container whose root was the engine's
   user: now a process that escapes as the *agent* lands as the engine, which is the process an
   agent runs as; an escape as container root (which Silo's own commands use, with seven file
-  capabilities) lands as a sub-id and needs a second step. The mapping is what makes the
-  in-guest client work (below) and why SSH sessions and files the agent writes are readable to
+  capabilities) lands as a sub-id and needs a second step. The mapping is why SSH sessions and files the agent writes are readable to
   the engine; it is not what keeps the agent from the engine. The namespaces do: the container's
   pid namespace shows no engine, gateway or holder process (nothing to signal or trace, `/proc`
   masked), its mount namespace holds none of the engine's files or sockets except one folder, the
-  computer's own share bound at `/.msb` (its runtime folder, which holds the in-guest client's
-  bridge folder: the account writes there, the engine reads and answers, and every other user of
-  the container may only search the folder), its network namespace holds only the TAP, its user namespace gives it no capability over anything outside it, and the
+  computer's own share bound at `/.msb` (its runtime folder; every user of the container but the
+  account may only search it), its network namespace holds only the TAP, its user namespace gives it no capability over anything outside it, and the
   baseline below applies to the agent's commands as to any. The engine's user owns the computer's
   upper directory and what the agent writes in it; the upper directory's root, the unpacked image,
   and the init shim's layer belong to the container's root (a sub-id), so the agent cannot replace
@@ -865,19 +1095,11 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   local users); the authorized key is the whole check, as for a virtual machine's. SSH sessions do
   not survive the engine stopping the container or the listener; a container that an engine
   restart leaves running is taken back by the next engine (see Checkpoints and forks below).
-- **The in-guest client (boundary 9) in a container.** The per-computer share is the computer's
-  runtime folder, bound at `/.msb` (read-write, no exec, no devices) and sealed by mode instead of
-  by stat override: its parent `sandboxes/<name>` is `0700`, the runtime folder `0711`, and
-  `silo-bridge`, `req/` and `resp/` keep the modes of a virtual machine's (`0755`, `1733`, `0711`).
-  Because the working account is the engine's own user, the agent's `0600` request files are
-  readable by the engine and the engine's `0600` answers by the agent; a file owned by any other
-  id (another guest user, root) is not the account's, gets no owner, and its answer (if the
-  engine could read the request at all) is the agent's alone. The agent owns the folders it
-  writes in, so it can loosen their modes (a virtual machine's folders are root's to it): the
-  worker restores the runtime folder's mode every pass, `req/` and `resp/` stay below it, and
-  what the agent gains by loosening them is access for other guest users to its own requests,
-  which it can already give them. The token, the allow-list and the folder parsing (links, sizes,
-  counts) are the same code and the same limits.
+- **Silo's tools (boundary 9) in a container.** The same port, rule, token and handshake as a
+  virtual machine; the container's gateway takes the rule in the policy it is started with. The endpoint
+  file is written through the container's own exec path. The per-computer share at `/.msb` is
+  bound read-write (no exec, no devices), its parent `sandboxes/<name>` is `0700` and the runtime
+  folder `0711`; Silo reads nothing from it.
 - **No memory checkpoints.** The capability list in `containers/capability.rs` names one thing a
   container computer lacks, "memory snapshots": a container's checkpoints, and so its exports, save the disks only, whether the
   computer runs or not. No memory is ever carried into an export.
@@ -964,7 +1186,7 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   rest of the browser or the account: its files, its network as the gateway allows, and the authority
   the computer holds. **It can act with this computer's GitHub access and use its secrets** (the
   gateway swaps a secret's placeholder for the real value on the hosts that secret is allowed for), and
-  **it can use the computer's in-guest `silo` client**, with what that client may do from this computer. It stays inside the container's baseline (no capability, seccomp, Landlock,
+  **it can use Silo's tools in the computer** (its `silo`), with what the policy lets this computer do. It stays inside the container's baseline (no capability, seccomp, Landlock,
   only the TAP and the gateway), and the app, the CLI and `silo list` label the kind; the computer's
   page repeats the warning when it has a desktop. The launchers do not make a single browser safer:
   each runs the first installed of Google Chrome and the two Chromium paths, whatever name was called,
@@ -1082,7 +1304,7 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   processes for up to 10 seconds of waiting plus 30 seconds of copying. A program can write the
   whole margin between two looks, and the margin itself is the only protection against that. Sealed layers belong to
   checkpoints and forks and are not counted against a computer; the per-computer share
-  (`/.msb`, the in-guest client's bridge folder, in the engine's `sandboxes` folder) is outside
+  (`/.msb`, in the engine's `sandboxes` folder) is outside
   every size, the computer's and the guard's.
 - **Over Connections** nothing is container-specific beyond what the earlier items say. A container
   is listed, run in and has its desktop switched through the same routed methods as a VM, answered
@@ -1225,6 +1447,63 @@ last bullets cover a runner on a Linux host.
   and `linux-x64` and checks the one for the computer's architecture (`uname -m`) when it builds. The
   refresh reads both digests from the same release and rewrites the recipe only when both are there. It
   has the same trust as before: whoever controls the release feed controls both digests.
+## Known gaps
+
+Things that are open today, stated plainly. Each is also in the [roadmap](ROADMAP.md) where it is
+planned.
+
+**Calls from a computer**
+
+- A program on the device of any account can connect to a computer's port. It gets a nonce and a
+  closed connection, but it can keep that computer's 4 handshake places busy for 2 seconds at a
+  time. A port another program already holds when the engine starts stays reachable from the
+  computer until it restarts (boundary 9).
+- The wiring that ends a computer's token right after an export is not covered by a test.
+- A computer cannot read the event stream, notifications or the list of all jobs (only its own), because they are not
+  cut per computer yet; its agent polls instead. A job result too large to send in one piece is
+  withheld from it.
+- A start the owner approved checks the memory floor but does not hold memory, so several approved
+  starts at once can pass together. The check and the hold are not under one lock.
+- A computer whose tools check keeps failing is checked less and then not until its next start; a
+  hostile computer can hold its own check slot for up to 90 seconds.
+- Declining a merge approval leaves the fork's review request open, so it appears again as its own
+  row. The engine can close a request only by keeping it or deleting the fork.
+
+**Merge and recipes**
+
+- A merge carries a `.env` that Git ignores without a check for credentials; the credential wall
+  covers Git history only.
+- Every computer can list the saved recipes' names, systems and hashes.
+- A merge changes a saved recipe only when the owner runs or approves it, so a recipe can fall
+  behind a computer an agent has changed; rebuilding from it makes the computer the recipe says.
+
+**Network**
+
+- Name lookups carry data out in open and allowlist modes, and with `strict` off traffic with no
+  TLS name is admitted to an address tied to an allowed name (see
+  [Network policy per computer](#network-policy-per-computer)). There is no DNS query log.
+- The allowlist has been run against a Linux virtual machine on a Mac. A Linux host's runtime is
+  built by CI and has not run it, and a live macOS or container gateway has not run it either.
+- A computer restored or forked from a memory checkpoint under an allowlist is refused by export
+  because of its pinned network interface.
+- A macOS computer made before the gateway existed boots once on Apple's NAT when it is converted,
+  and the Claude Code installer in a macOS computer still downloads inside it.
+
+**Logins, exports and updates**
+
+- A login in a Linux export is removed from the computer but its bytes can remain in the shared
+  disk layers (boundary 6). Checkpoint, macOS and container exports keep logins and warn first.
+- A fork keeps its parent's agent login, because the same agent already controls both.
+- Rebuilding a computer on the newest image, keeping its workspace and home, is not built yet.
+
+**The device**
+
+- Any process running as your user is the Owner (boundary 7). Programs on the device have no
+  identity or scope yet.
+- Silo's own releases are not signed or notarized.
+- The "cannot" column rests on code reading, unit tests and live checks of single features, not
+  on an adversarial test suite.
+
 ## What Silo does not protect
 
 These follow from the design today, not from bugs:
@@ -1247,10 +1526,11 @@ These follow from the design today, not from bugs:
   ([`network.rs#L209`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L209)). Host-side readers are bounded:
   guest writes to `/.msb` at 16 MiB, relayed command output at 1 MiB
   ([`runtime/mod.rs#L125`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L125)).
-- **Personal access token mode.** The agent's GitHub requests carry the whole token, unscoped
-  (boundary 5).
-- **macOS computers before setup completes.** They run on Apple NAT and can reach the Mac and the
-  LAN (boundary 2).
+- **Personal access tokens.** A computer that uses one sends the whole token, unscoped, with its
+  GitHub requests (boundary 5).
+- **macOS computers during a first install.** Until their setup completes, a first install
+  and the setup of a copy of a template run on Apple NAT and can reach the Mac and the LAN
+  (boundary 2). A computer an agent may have used never does.
 - **Untrusted imported archives.** A macOS import mounts the guest's disk on the Mac; import only
   archives you trust (boundary 6).
 
@@ -1265,18 +1545,20 @@ its own Keychain prompts. Silo does not
   defence-in-depth layer today.
 - **Reflected-secret exfiltration.** If an allowed host returns the request's headers (debug echo
   endpoints, some error pages), the guest sees the real value. Restrict secrets to hosts you trust.
-- **Egress filtering.** The policy is default-deny with one allow rule for every public address.
-  There is no per-computer hostname or destination allowlist, no mode that blocks public
-  addresses, and no DNS query log yet; DNS queries go to the Mac's resolvers unfiltered. See
-  [planned changes](#planned-changes-that-will-change-this-document).
+- **Egress filtering.** A new computer's policy is open: default-deny with one allow rule for
+  every public address. The allowlist and closed modes narrow it per computer (see
+  [Network policy per computer](#network-policy-per-computer)) but do not stop sending data to an
+  allowed host, name lookups still reach the Mac's resolvers unfiltered, and there is no DNS
+  query log yet. See [planned changes](#planned-changes-that-will-change-this-document).
 - **Hostile apps that embed the engine.** An app that talks to `silod` is trusted with the same
   authority as Silo.app.
 
 ## Planned changes that will change this document
 
-- Per-computer egress policy (block public addresses by default, or an allowlist, with a DNS log).
-- Per-client socket authentication (macOS code signature, Linux `SO_PEERCRED`) and an audit log of
-  client, method and computer.
+- A DNS query log and a filter for lookups of names outside an allowlist.
+- Per-client socket authentication for programs on the device (macOS code signature, Linux
+  `SO_PEERCRED`). The audit log of caller, method and computer exists; the client name in it is
+  still self-declared.
 - On a Linux host: signed engine archives (roadmap milestone 11), and the isolation evals run on a
   KVM host (roadmap milestone 9); the KVM CI job runs the computer lifecycle, not an eval.
 - A security review of the read-write `/.msb` share (boundary 6).

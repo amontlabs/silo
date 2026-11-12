@@ -9,7 +9,6 @@ use fake_engine::{finished, listing, listing_without_desktop, FakeEngine};
 use serde_json::{json, Value};
 use silo_cli::{
     cli::{run, Cli},
-    config::parse_settings,
     engine::Engine,
     ops::{self, ForkArgs},
 };
@@ -84,7 +83,7 @@ async fn fork_names_the_source_and_waits_for_the_job() {
         checkpoint: Some("cp1".into()),
         ..ForkArgs::default()
     };
-    let fork = ops::fork(&connected, &args, None, &ignore).await.unwrap();
+    let fork = ops::fork(&connected, &args, &ignore).await.unwrap();
     let name = fork["name"].as_str().unwrap();
     assert!(
         name.starts_with("main-") && name.len() == "main-".len() + 6,
@@ -98,23 +97,6 @@ async fn fork_names_the_source_and_waits_for_the_job() {
     assert_eq!(engine.calls("operations.job.acknowledge").len(), 1);
     // The engine takes the fork-time record itself; the client asks for nothing more.
     assert!(engine.calls("changes.capture").is_empty());
-}
-
-#[tokio::test]
-async fn fork_refuses_secrets_outside_fork_secrets() {
-    let (engine, _) = engine_with(&["main"]);
-    let connected = Engine::connect(&engine.socket).await.unwrap();
-    let settings = parse_settings("fork_secrets: [OPENAI_API_KEY]\n").unwrap();
-    let args = ForkArgs {
-        source: "main".into(),
-        secrets: vec!["github".into()],
-        ..ForkArgs::default()
-    };
-    let error = ops::fork(&connected, &args, Some(&settings), &ignore)
-        .await
-        .unwrap_err();
-    assert!(error.message.contains("github"));
-    assert!(engine.calls("checkpoints.fork").is_empty());
 }
 
 #[tokio::test]
@@ -271,53 +253,99 @@ async fn exec_output_keeps_raw_bytes() {
 }
 
 #[tokio::test]
-async fn fork_sends_named_secrets_and_the_recipe_quiet_lists() {
+async fn fork_sends_the_named_secrets_and_leaves_the_recipe_rules_to_the_engine() {
     let (engine, _) = engine_with(&["main"]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
     let args = ForkArgs {
         source: "main".into(),
         secrets: vec!["github".into()],
-        recipe: Some(
-            silo_cli::config::parse_recipe("quiet: [poller]\nscrub: [/root/.bot.env]\n").unwrap(),
-        ),
         ..ForkArgs::default()
     };
-    ops::fork(&connected, &args, None, &ignore).await.unwrap();
+    ops::fork(&connected, &args, &ignore).await.unwrap();
     let sent = &engine.calls("checkpoints.fork")[0];
     assert_eq!(sent["secrets"], json!(["github"]));
-    assert_eq!(sent["quiet"]["stop"], json!(["poller"]));
-    assert_eq!(sent["quiet"]["scrub"], json!(["/root/.bot.env"]));
+    // The quiet and scrub lists of the recipe the source was built from are the engine's to
+    // apply: the client sends none.
+    assert!(sent.get("quiet").is_none() || sent["quiet"].is_null());
+}
+
+/// An engine whose forks are made stopped and run once started.
+fn stopped_fork_engine() -> FakeEngine {
+    let forked = Arc::new(Mutex::new(Vec::<(String, bool)>::new()));
+    FakeEngine::start(move |method, params| match method {
+        "computers.list" => {
+            let forks = forked.lock().unwrap().clone();
+            let mut all = vec![("main", "running")];
+            all.extend(forks.iter().map(|(name, running)| {
+                (name.as_str(), if *running { "running" } else { "stopped" })
+            }));
+            Ok(listing(&all))
+        }
+        "checkpoints.fork" => {
+            forked
+                .lock()
+                .unwrap()
+                .push((params["newName"].as_str().unwrap().to_owned(), false));
+            Ok(json!({"jobId": "job:1"}))
+        }
+        "computers.start" => {
+            for fork in forked.lock().unwrap().iter_mut() {
+                if format!("id-{}", fork.0) == params["computerId"].as_str().unwrap() {
+                    fork.1 = true;
+                }
+            }
+            Ok(json!({"jobId": "job:1"}))
+        }
+        "device.resources" => Ok(json!({
+            "state": "low", "message": "Memory is running short: 2 GiB are free.",
+            "computers": []
+        })),
+        "operations.job.get" => Ok(finished(json!({}))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    })
 }
 
 #[tokio::test]
-async fn the_command_line_finds_the_project_recipe() {
+async fn a_fork_made_to_work_in_is_started_and_the_device_is_warned_when_it_runs_short() {
+    let engine = stopped_fork_engine();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ForkArgs {
+        source: "main".into(),
+        name: Some("try".into()),
+        ..ForkArgs::default()
+    };
+    let value = ops::fork(&connected, &args, &ignore).await.unwrap();
+    assert_eq!(engine.calls("computers.start")[0]["computerId"], "id-try");
+    assert_eq!(value["state"], "running");
+    assert_eq!(value["warning"], "Memory is running short: 2 GiB are free.");
+    let text = silo_cli::render::forked(&value);
+    assert!(text.contains("warning: Memory is running short"), "{text}");
+}
+
+#[tokio::test]
+async fn no_start_leaves_the_fork_stopped() {
+    let engine = stopped_fork_engine();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ForkArgs {
+        source: "main".into(),
+        name: Some("try".into()),
+        no_start: true,
+        ..ForkArgs::default()
+    };
+    ops::fork(&connected, &args, &ignore).await.unwrap();
+    assert!(engine.calls("computers.start").is_empty());
+}
+
+#[tokio::test]
+async fn the_command_line_needs_no_project_folder() {
     let (engine, _) = engine_with(&["main"]);
     let socket = engine.socket.to_str().unwrap();
     let project = tempfile::tempdir().unwrap();
+    // A leftover `.silo` folder is ignored: nothing reads it any more.
     std::fs::create_dir_all(project.path().join(".silo")).unwrap();
-    std::fs::write(
-        project.path().join(".silo/recipe.yaml"),
-        "quiet: [poller]\n",
-    )
-    .unwrap();
-    let nested = project.path().join("src");
-    std::fs::create_dir_all(&nested).unwrap();
-    let cli = <Cli as clap::Parser>::try_parse_from([
-        "silo",
-        "--socket",
-        socket,
-        "--allow-other-channel",
-        "fork",
-        "main",
-    ])
-    .unwrap();
-    run(cli, &nested).await.unwrap();
-    assert_eq!(
-        engine.calls("checkpoints.fork")[0]["quiet"]["stop"],
-        json!(["poller"])
-    );
-
     std::fs::write(project.path().join(".silo/recipe.yaml"), "bogus: 1\n").unwrap();
+    std::fs::write(project.path().join(".silo/silo.yaml"), "bogus: 1\n").unwrap();
     let cli = <Cli as clap::Parser>::try_parse_from([
         "silo",
         "--socket",
@@ -327,8 +355,8 @@ async fn the_command_line_finds_the_project_recipe() {
         "main",
     ])
     .unwrap();
-    let error = run(cli, &nested).await.unwrap_err();
-    assert!(error.message.contains("bogus"), "{}", error.message);
+    run(cli, project.path()).await.unwrap();
+    assert_eq!(engine.calls("checkpoints.fork").len(), 1);
 }
 
 #[tokio::test]
@@ -429,6 +457,10 @@ fn engine_with_secrets() -> FakeEngine {
             stored["allowedDomains"] = request["allowedDomains"].clone();
             Ok(json!([stored.clone()]))
         }
+        "network.policy.get" => Ok(json!({"notices": [
+            "`*.surge.sh` lets this computer reach any site hosted under surge.sh, since anyone can publish there.",
+            "The secret OTHER may be sent to *.com, which covers too many hosts."
+        ]})),
         "github.state" => Ok(json!({"computers": [{
             "computerId": "id-fork", "repositoryMode": "selected",
             "repositories": [{"repository": "o/r", "allowPushes": false}],
@@ -502,7 +534,7 @@ async fn secrets_assign_and_unassign_edit_the_computer_list() {
 async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
     let engine = engine_with_secrets();
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    ops::secret_set(&connected, "API_KEY", "v2".into(), &[], &[])
+    ops::secret_set(&connected, "API_KEY", "v2".into(), &[], &[], false)
         .await
         .unwrap();
     let saved = &engine.calls("secrets.save")[0]["request"];
@@ -510,7 +542,7 @@ async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
     assert_eq!(saved["value"], "v2");
     assert_eq!(saved["computerIds"], json!(["id-main"]));
     assert_eq!(saved["allowedDomains"], json!(["api.example.com"]));
-    let error = ops::secret_set(&connected, "NEW_KEY", "v".into(), &[], &[])
+    let error = ops::secret_set(&connected, "NEW_KEY", "v".into(), &[], &[], false)
         .await
         .unwrap_err();
     assert!(error.message.contains("--computer"));
@@ -520,6 +552,7 @@ async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
         "v".into(),
         &["fork".into()],
         &["x.example.com".into()],
+        false,
     )
     .await
     .unwrap();
@@ -527,9 +560,48 @@ async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
     assert_eq!(added["operation"], "add");
     assert!(added.get("id").is_none());
     assert_eq!(added["computerIds"], json!(["id-fork"]));
-    assert!(ops::secret_set(&connected, "K", String::new(), &[], &[])
+    assert!(
+        ops::secret_set(&connected, "K", String::new(), &[], &[], false)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn secrets_set_sends_shared_hosting_approval_only_when_asked() {
+    let engine = engine_with_secrets();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let wildcard = ["*.surge.sh".to_owned()];
+    let plain = ops::secret_set(&connected, "API_KEY", "v".into(), &[], &wildcard, false)
         .await
-        .is_err());
+        .unwrap();
+    let saved = &engine.calls("secrets.save")[0]["request"];
+    assert!(saved.get("allowSharedHosting").is_none());
+    assert!(plain.get("warnings").is_none());
+    assert!(engine.calls("network.policy.get").is_empty());
+
+    let allowed = ops::secret_set(&connected, "API_KEY", "v".into(), &[], &wildcard, true)
+        .await
+        .unwrap();
+    let saved = &engine.calls("secrets.save")[1]["request"];
+    assert_eq!(saved["allowSharedHosting"], true);
+    assert_eq!(
+        allowed["warnings"],
+        json!(["`*.surge.sh` lets this computer reach any site hosted under surge.sh, since anyone can publish there."])
+    );
+    assert!(
+        silo_cli::render::secrets(&allowed).contains("warning: `*.surge.sh` lets this computer")
+    );
+
+    assert_eq!(engine.calls("secrets.save").len(), 2);
+
+    let engine = engine_with_secrets();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let error = ops::secret_set(&connected, "API_KEY", "v".into(), &[], &[], true)
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("--allow-shared-hosting"));
+    assert!(engine.calls("secrets.save").is_empty());
 }
 
 #[tokio::test]
@@ -732,53 +804,116 @@ fn status_leaves_out_computer_use_for_a_computer_with_no_desktop() {
 fn keep_engine(result: Value) -> FakeEngine {
     FakeEngine::start(move |method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
-        "changes.keep" | "changes.undo" | "changes.promote" => Ok(json!({"jobId": "job:1"})),
+        "changes.keep" | "changes.undo" | "changes.promote" | "computers.rebuild" => {
+            Ok(json!({"jobId": "job:1"}))
+        }
         "operations.job.get" => Ok(finished(result.clone())),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
     })
 }
 
-fn fold_cli(engine: &FakeEngine, extra: &[&str]) -> Cli {
+fn merge_cli(engine: &FakeEngine, extra: &[&str]) -> Cli {
     let socket = engine.socket.to_str().unwrap();
-    let mut args = vec!["silo", "--socket", socket, "--allow-other-channel", "fold"];
+    let mut args = vec!["silo", "--socket", socket, "--allow-other-channel", "merge"];
     args.extend_from_slice(extra);
     <Cli as clap::Parser>::try_parse_from(args).unwrap()
 }
 
 #[tokio::test]
-async fn fold_sends_the_fork_the_target_and_the_recipe_keep_section() {
+async fn merge_sends_the_fork_the_target_and_no_hooks_the_engine_reads_them_from_the_recipe() {
     let engine = keep_engine(json!({
         "status": "kept",
         "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": ["restart web: pid 1 -> 2"], "notes": [], "checkpoint": "cp1"}
     }));
     let project = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(project.path().join(".silo")).unwrap();
-    std::fs::write(
-        project.path().join(".silo/recipe.yaml"),
-        "keep:\n  restart: [web]\n  migrate: [make migrate]\n",
-    )
-    .unwrap();
-    let cli = fold_cli(&engine, &["try", "--into", "main", "--dry-run"]);
+    let cli = merge_cli(&engine, &["try", "--into", "main", "--dry-run"]);
     assert_eq!(run(cli, project.path()).await.unwrap(), 0);
     let sent = &engine.calls("changes.keep")[0];
     assert_eq!(sent["forkId"], "id-try");
     assert_eq!(sent["targetId"], "id-main");
     assert_eq!(sent["dryRun"], true);
-    assert_eq!(sent["keep"]["restart"], json!(["web"]));
-    assert_eq!(sent["keep"]["migrate"], json!(["make migrate"]));
+    assert!(sent.get("keep").is_none() || sent["keep"].is_null());
 }
 
 #[tokio::test]
-async fn a_refused_fold_is_a_result_with_a_distinct_exit_code() {
+async fn a_refused_merge_is_a_result_with_a_distinct_exit_code() {
     let engine = keep_engine(json!({
         "status": "refused",
         "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": [], "notes": [], "checkpoint": null},
-        "refusal": {"reason": "database", "message": "Database changed and nothing migrates it.", "conflicts": [], "hint": "Use Make this main."}
+        "refusal": {"reason": "database", "message": "Database changed and nothing migrates it.", "conflicts": [], "hint": "Replace main with the fork."}
     }));
-    let cli = fold_cli(&engine, &["try"]);
+    let cli = merge_cli(&engine, &["try"]);
     assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 2);
     assert!(engine.calls("changes.keep")[0]["targetId"].is_null());
+}
+
+fn choices_needed() -> Value {
+    json!({
+        "status": "refused",
+        "report": {"fork": "try", "target": "main", "summary": [], "steps": [], "notes": [], "checkpoint": null},
+        "refusal": {
+            "reason": "choices-needed",
+            "message": "2 items need an answer before try can be merged into main.",
+            "hint": "Merge again with choices.",
+            "conflicts": [
+                {"kind": "file", "item": "/etc/app.conf", "detail": "both changed it",
+                 "id": "file:/etc/app.conf", "allowed": ["fork", "main"],
+                 "forkChange": "modified", "mainChange": "modified"},
+                {"kind": "git", "item": "/work/app", "detail": "diverged",
+                 "id": "repo:/work/app", "allowed": ["branch", "main"],
+                 "forkChange": "2 commits", "mainChange": "1 commit"}
+            ]
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_merge_that_needs_answers_lists_the_conflicts_and_exits_with_its_own_code() {
+    let engine = keep_engine(choices_needed());
+    let cli = merge_cli(&engine, &["try"]);
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 3);
+    let text = silo_cli::render::merge(&choices_needed());
+    assert!(text.contains("file:/etc/app.conf"), "{text}");
+    assert!(text.contains("answers: fork, main"), "{text}");
+    assert!(
+        text.contains("repo:/work/app") && text.contains("answers: branch, main"),
+        "{text}"
+    );
+    assert!(text.contains("--choose <id>=<answer>"), "{text}");
+    assert!(!text.contains("fold") && !text.contains("keep"), "{text}");
+}
+
+#[tokio::test]
+async fn the_answers_of_choose_and_skip_reach_the_engine() {
+    let engine = keep_engine(json!({
+        "status": "kept",
+        "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": [], "notes": [], "checkpoint": "cp1"}
+    }));
+    let cli = merge_cli(
+        &engine,
+        &[
+            "try",
+            "--choose",
+            "file:/etc/app.conf=fork",
+            "--choose",
+            "repo:/work/app=branch",
+            "--skip",
+            "package:dpkg:jq",
+        ],
+    );
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    let sent = &engine.calls("changes.keep")[0];
+    assert_eq!(
+        sent["choices"],
+        json!({"file:/etc/app.conf": "fork", "repo:/work/app": "branch"})
+    );
+    assert_eq!(sent["skip"], json!(["package:dpkg:jq"]));
+    // A wrong answer is refused before the engine is asked.
+    let engine = keep_engine(json!({}));
+    let cli = merge_cli(&engine, &["try", "--choose", "file:/x=theirs"]);
+    assert!(run(cli, std::env::temp_dir().as_path()).await.is_err());
+    assert!(engine.calls("changes.keep").is_empty());
 }
 
 #[tokio::test]
@@ -804,7 +939,7 @@ async fn an_undone_promote_is_reported_as_a_promote_not_a_keep() {
     let text = silo_cli::render::undo(&value);
     assert_eq!(
         text,
-        "Undid the promote: main is main again, and try has its own name back."
+        "Undid the replace: main is main again, and try has its own name back."
     );
     assert!(!text.contains("Put "));
 }
@@ -1058,7 +1193,7 @@ async fn a_macos_baseline_is_refused_when_two_virtual_machines_already_run() {
 }
 
 #[tokio::test]
-async fn fold_defaults_to_the_digest_the_last_diff_of_that_fork_showed() {
+async fn merge_defaults_to_the_digest_the_last_diff_of_that_fork_showed() {
     let engine = FakeEngine::start(|method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
         "changes.diff" | "changes.keep" => Ok(json!({"jobId": "job:1"})),
@@ -1081,30 +1216,29 @@ async fn fold_defaults_to_the_digest_the_last_diff_of_that_fork_showed() {
     };
     let value = ops::diff(&connected, &args, &ignore).await.unwrap();
     assert_eq!(value["reviewDigest"], "abc123");
-    ops::fold(
+    ops::merge(
         &connected,
         "try",
         None,
-        None,
-        ops::FoldOptions::default(),
+        ops::MergeOptions::default(),
         &ignore,
     )
     .await
     .unwrap();
     assert_eq!(engine.calls("changes.keep")[0]["reviewDigest"], "abc123");
     // An explicit digest wins.
-    let options = ops::FoldOptions {
+    let options = ops::MergeOptions {
         reviewed: Some("zzz".into()),
         ..Default::default()
     };
-    ops::fold(&connected, "try", None, None, options, &ignore)
+    ops::merge(&connected, "try", None, options, &ignore)
         .await
         .unwrap();
     assert_eq!(engine.calls("changes.keep")[1]["reviewDigest"], "zzz");
 }
 
 #[tokio::test]
-async fn a_dry_run_fold_never_sends_a_review_digest() {
+async fn a_dry_run_merge_never_sends_a_review_digest() {
     let engine = FakeEngine::start(|method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
         "changes.diff" | "changes.keep" => Ok(json!({"jobId": "job:1"})),
@@ -1125,12 +1259,12 @@ async fn a_dry_run_fold_never_sends_a_review_digest() {
         compute_baseline: false,
     };
     ops::diff(&connected, &args, &ignore).await.unwrap();
-    let options = ops::FoldOptions {
+    let options = ops::MergeOptions {
         dry_run: true,
         reviewed: Some("older".into()),
         ..Default::default()
     };
-    ops::fold(&connected, "try", None, None, options, &ignore)
+    ops::merge(&connected, "try", None, options, &ignore)
         .await
         .unwrap();
     assert!(engine.calls("changes.keep")[0]["reviewDigest"].is_null());
@@ -1192,25 +1326,142 @@ fn order_state(order: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn fold_promote_sends_changes_promote_and_prints_the_archive_name() {
+async fn replace_main_sends_changes_promote_and_prints_the_archive_name() {
     let engine = keep_engine(json!({
         "status": "promoted",
         "report": {"fork": "try", "target": "main", "archive": "main-before-20261105-1432", "steps": [], "notes": [], "checkpoint": "cp1"}
     }));
-    let cli = fold_cli(&engine, &["try", "--promote", "--dry-run"]);
+    let socket = engine.socket.to_str().unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "replace-main",
+        "try",
+        "--dry-run",
+    ])
+    .unwrap();
     assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
     let sent = &engine.calls("changes.promote")[0];
     assert_eq!(sent["forkId"], "id-try");
     assert_eq!(sent["dryRun"], true);
     assert!(engine.calls("changes.keep").is_empty());
-    let text = silo_cli::render::promote(&json!({
+    let text = silo_cli::render::replace_main(&json!({
         "status": "promoted",
         "report": {"fork": "try", "target": "main", "archive": "main-before-x", "notes": []}
     }));
     assert!(
-        text.contains("try is now main") && text.contains("main-before-x"),
+        text.contains("try replaced main") && text.contains("main-before-x"),
         "{text}"
     );
+    assert!(!text.contains("promot"), "{text}");
+}
+
+#[tokio::test]
+async fn rebuild_sends_computers_rebuild_and_prints_result() {
+    let engine = keep_engine(json!({
+        "computerId": "id-main",
+        "name": "main",
+        "undoName": "main-undo",
+        "image": "ubuntu-24.04-v5",
+    }));
+    let socket = engine.socket.to_str().unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "rebuild",
+        "main",
+    ])
+    .unwrap();
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    let sent = &engine.calls("computers.rebuild")[0];
+    assert_eq!(sent["computerId"], "id-main");
+    assert!(sent.get("force").is_none(), "{sent}");
+    let text = silo_cli::render::rebuild(&json!({
+        "name": "main",
+        "undoName": "main-undo",
+        "image": "ubuntu-24.04-v5",
+    }));
+    assert!(text.contains("Rebuilt main on ubuntu-24.04-v5"), "{text}");
+    assert!(text.contains("main-undo (stopped)"), "{text}");
+}
+
+#[tokio::test]
+async fn rebuild_force_is_sent_when_asked_for() {
+    let engine = keep_engine(json!({
+        "computerId": "id-main",
+        "name": "main",
+        "undoName": "main-undo",
+        "image": "ubuntu-24.04-v5",
+    }));
+    let socket = engine.socket.to_str().unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "rebuild",
+        "main",
+        "--force",
+    ])
+    .unwrap();
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    assert_eq!(engine.calls("computers.rebuild")[0]["force"], true);
+}
+
+#[tokio::test]
+async fn rebuild_abandon_is_sent_when_asked_for_and_reads_plainly() {
+    let engine = keep_engine(json!({
+        "computerId": "id-main",
+        "name": "main",
+        "undoName": "",
+        "image": "",
+    }));
+    let socket = engine.socket.to_str().unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "rebuild",
+        "main",
+        "--abandon",
+    ])
+    .unwrap();
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    let sent = &engine.calls("computers.rebuild")[0];
+    assert_eq!(sent["abandon"], true);
+    assert!(sent.get("force").is_none(), "{sent}");
+    let text = silo_cli::render::rebuild(&json!({"name": "main", "undoName": "", "image": ""}));
+    assert!(text.contains("Abandoned the rebuild of main"), "{text}");
+    let both = ["silo", "rebuild", "main", "--abandon", "--force"];
+    assert!(<Cli as clap::Parser>::try_parse_from(both).is_err());
+}
+
+#[tokio::test]
+async fn fold_promote_still_replaces_main_through_the_old_name() {
+    let engine = keep_engine(json!({
+        "status": "promoted",
+        "report": {"fork": "try", "target": "main", "archive": "a", "steps": [], "notes": [], "checkpoint": "cp1"}
+    }));
+    let socket = engine.socket.to_str().unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "fold",
+        "try",
+        "--promote",
+        "--dry-run",
+    ])
+    .unwrap();
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    assert_eq!(engine.calls("changes.promote").len(), 1);
+    assert!(engine.calls("changes.keep").is_empty());
 }
 
 fn names_in(state: &Arc<Mutex<Baseline>>) -> Vec<String> {
@@ -1284,7 +1535,7 @@ async fn a_fork_sweeps_after_it_returns_silently_and_keeps_its_own_job() {
         checkpoint: Some("cp1".into()),
         ..ForkArgs::default()
     };
-    ops::fork(&connected, &args, None, &progress).await.unwrap();
+    ops::fork(&connected, &args, &progress).await.unwrap();
     // The fork's job, and everything it reads, comes before the sweep's drop.
     let started = state.lock().unwrap().started.clone();
     assert_eq!(

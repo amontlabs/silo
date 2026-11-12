@@ -67,6 +67,20 @@ fn quiet_lists(record: &Record) -> (&[String], &[String]) {
         .unwrap_or_default()
 }
 
+/// What a fork's offline preparation deletes: what its recipe asked for, and the source's
+/// endpoint file of Silo's tools (and the earlier client's token file), which the fork never
+/// keeps. The fork gets its own file at its first start when it has the tools.
+fn fork_scrub(record: &Record) -> Vec<String> {
+    use silo_api::methods::guest_client::{GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH};
+    let mut scrub = quiet_lists(record).0.to_vec();
+    for path in [GUEST_ENDPOINT_PATH, LEGACY_GUEST_TOKEN_PATH] {
+        if !scrub.iter().any(|existing| existing == path) {
+            scrub.push(path.to_owned());
+        }
+    }
+    scrub
+}
+
 /// Adds scheduled work that was moved aside to the fork's record of what it was made quiet
 /// with. A repeated run parks nothing new and keeps what the first run recorded.
 fn note_parked(record: &mut Record, parked: &[String], still_scheduled: &[String]) {
@@ -169,6 +183,7 @@ impl Provision<'_> {
         finished: impl FnOnce(&mut SetupProgress),
     ) -> Result<(), Stop> {
         finished(&mut record.setup);
+        record.note_agent_use();
         self.keep_chosen_approval(record);
         self.log(&format!(
             "setup step finished: {}",
@@ -188,32 +203,33 @@ impl Provision<'_> {
     }
 
     fn steps(&self, record: &mut Record) -> Result<(), Stop> {
-        if waits_for_first_start(record) {
-            // Its key exists only after the first Start installs it, so a boot here could not
-            // log in. The Start finishes the setup; developer tools or computer use that are
-            // out of date are updated by a Retry after it.
-            self.log("the fork's first Start finishes its setup");
-            return Ok(());
-        }
         let developer_tools_version = developer_tools::version();
-        // A fork is personalized in the boot that also finishes its setup, which then goes on.
+        // A fork or an import is personalized on its stopped disk, which also gets its network
+        // bootstrap, so its first boot is already behind its gateway.
         let mut running = false;
         if record.setup.needs_personalizing {
             if record.imported {
-                self.personalize_import(record)?;
+                self.stage_import_offline(record)?;
+            } else if record.inherited_access {
+                self.personalize_fork_offline(record)?;
             } else {
-                let offline = record.inherited_access
-                    && fork_needs_no_guest_work(record, &developer_tools_version)
-                    && self.personalize_fork_offline(record)?;
-                if offline {
-                    // The first Start finishes it.
-                } else if record.inherited_access {
-                    self.personalize_fork(record)?;
-                    running = true;
-                } else {
-                    self.personalize(record)?;
-                }
+                self.personalize(record)?;
             }
+        }
+        if waits_for_first_start(record) {
+            if fork_needs_no_guest_work(record, &developer_tools_version) {
+                // Its first Start installs its key, name and trust and finishes the setup;
+                // developer tools or computer use that are out of date are updated by a
+                // Retry after it.
+                self.log("the first Start finishes the setup");
+                return Ok(());
+            }
+            // The rest of the setup needs the guest, so that boot is made here. It installs
+            // the key, name and trust itself, behind the gateway.
+            self.say("Starting macOS")?;
+            self.boot(Login::Key)?;
+            self.adopt_current_record(record)?;
+            running = true;
         }
         // The account step leaves the language Recovery uses set.
         let mut language_ready = false;
@@ -388,6 +404,11 @@ impl Provision<'_> {
     /// early is repeated whole: the template's key stays valid until the last command of
     /// the script, and a copy that already has its own key skips the script.
     fn personalize(&self, record: &mut Record) -> Result<(), Stop> {
+        // A copy of a template is a disk Silo alone has written, which is why it may boot on
+        // Apple's network here.
+        if record.may_hold_agent_work() {
+            return Err(Stop::Failed(store::NETWORK_NOT_PREPARED.into()));
+        }
         let data = app_data(self.app)?;
         // A resumed personalization writes as much as a first one, so it needs the space too.
         let _space = match self.reservation.take() {
@@ -419,7 +440,6 @@ impl Provision<'_> {
         let template_gib = lease.template.meta.disk_gib;
         let grow = requested > template_gib;
         let mut unallocated = None;
-        let mut reconciled = None;
         // The copy still has the template's password hash; it is replaced on the stopped disk.
         offline_setup::ensure_detached(&self.layout.disk())?;
         offline_setup::run_template_rekey(&self.layout.disk(), &own)?;
@@ -468,7 +488,6 @@ impl Provision<'_> {
                 self.log("personalization: the disk could not be expanded");
                 shortfall = Some(disk_shortfall(requested, disk.gib));
             }
-            reconciled = Some(disk.gib);
         }
         self.shut_down()?;
         guest_access::reset_host_keys(self.layout)?;
@@ -488,11 +507,7 @@ impl Provision<'_> {
             })?;
         }
         self.shut_down()?;
-        // Only a verified computer records the size it really has.
-        if let Some(gib) = reconciled.filter(|gib| *gib != record.disk_gib) {
-            record.disk_gib = gib;
-        }
-        record.disk_note = shortfall;
+        settle_disk_record(record, grow.then_some(requested), shortfall);
         self.mark(record, |setup| {
             setup.needs_personalizing = false;
             setup.proxy_bootstrap = staged;
@@ -503,12 +518,11 @@ impl Provision<'_> {
 
     /// Personalizes a fork without starting it. Its password, automatic login and keychain are
     /// changed on the stopped disk, the source's scheduled work is moved aside, and its
-    /// gateway address and proxy CA are allocated and written to the network configuration
-    /// the guest reads at boot. The fork's first Start is its only boot: it installs the key,
-    /// name, host keys and trust over the new password (see `fork_first_boot`). Returns false,
-    /// leaving the fork for the setup boot, when the source disk has no network configuration
-    /// to take over.
-    fn personalize_fork_offline(&self, record: &mut Record) -> Result<bool, Stop> {
+    /// network bootstrap is brought up to date for its own gateway address and proxy CA. Its
+    /// first boot is behind its gateway: it installs the key, name, host keys and trust over
+    /// the new password (see `fork_first_boot`). A source disk that has no network bootstrap
+    /// is refused before anything on it is changed.
+    fn personalize_fork_offline(&self, record: &mut Record) -> Result<(), Stop> {
         let data = app_data(self.app)?;
         let _space = match self.reservation.take() {
             Some(held) => held,
@@ -519,23 +533,19 @@ impl Provision<'_> {
             log.hide(&own.password);
         }
         self.say("Personalizing the computer")?;
-        let config = super::proxy::prepare_fork_bootstrap(self.app, record, self.layout)?;
+        let bootstrap = super::proxy::prepare_offline_bootstrap(self.app, record, self.layout)?;
         offline_setup::ensure_detached(&self.layout.disk())?;
+        let scrub = fork_scrub(record);
         let rekey = offline_setup::run_fork_rekey(
             &self.layout.disk(),
             &own,
-            Some(&config),
-            Some(quiet_lists(record)),
+            Some(&bootstrap),
+            Some((&scrub, quiet_lists(record).1)),
         )?;
         self.check()?;
         note_parked(record, &rekey.parked, &rekey.still_scheduled);
-        if !rekey.bootstrap_staged {
-            self.log("the source has no network configuration; the fork gets a setup boot");
-            self.mark(record, |_| {})?;
-            return Ok(false);
-        }
         record.first_boot = true;
-        // The source's password and key are not needed again: the first Start logs in with
+        // The source's password and key are not needed again: the first boot logs in with
         // the fork's own.
         record.inherited_access = false;
         self.mark(record, |setup| {
@@ -543,120 +553,37 @@ impl Provision<'_> {
             setup.proxy_bootstrap = true;
         })?;
         let _ = std::fs::remove_dir_all(checkpoints::inherited_access(self.layout));
-        Ok(true)
-    }
-
-    /// Gives a fork its own password, key, name, host keys and keychain without a boot of
-    /// its own: the password hash, automatic login and keychain are changed on the stopped
-    /// disk, and the one boot that follows logs in with that password to install the key,
-    /// name and host keys. The guest is left running for the rest of the setup. A run that
-    /// ends early is repeated whole.
-    fn personalize_fork(&self, record: &mut Record) -> Result<(), Stop> {
-        let data = app_data(self.app)?;
-        let _space = match self.reservation.take() {
-            Some(held) => held,
-            None => templates::reserve_space(&data, templates::COPY_ESTIMATE)?,
-        };
-        let own = guest_access::ensure_account(self.layout)?;
-        if let Some(log) = &self.log {
-            log.hide(&own.password);
-        }
-        self.say("Personalizing the computer")?;
-        offline_setup::ensure_detached(&self.layout.disk())?;
-        let rekey = offline_setup::run_fork_rekey(
-            &self.layout.disk(),
-            &own,
-            None,
-            Some(quiet_lists(record)),
-        )?;
-        self.check()?;
-        note_parked(record, &rekey.parked, &rekey.still_scheduled);
-        self.say("Starting macOS")?;
-        boot_import_with_host_key_reset(self.layout, || self.boot(Login::Password))?;
-        finalize_fork_guest(self.layout, record, &own, self.log.as_ref()).map_err(Stop::Failed)?;
-        let output = guest_access::run(
-            self.layout,
-            record,
-            "/usr/bin/sudo -n true",
-            None,
-            GUEST_COMMAND,
-        )?;
-        self.log_command("fork key login with sudo -n", &output);
-        if output.status != 0 {
-            return Err(Stop::Failed(
-                "Silo could not log in to the fork with its new key.".into(),
-            ));
-        }
-        // The automatic login with the new password is what proves the password took effect.
-        self.verify_personalized()?;
-        self.quiet_running_fork(record)?;
-        // The offline password change cannot keep the account's SecureToken.
-        let token = self.enable_secure_token(record, &own)?;
-        record.secure_token_missing = secure_token_missing(token);
-        record.inherited_access = false;
-        self.mark(record, |setup| setup.needs_personalizing = false)?;
-        // Its own credentials are the only ones left.
-        let _ = std::fs::remove_dir_all(checkpoints::inherited_access(self.layout));
         Ok(())
     }
 
-    /// Stops the processes and launchd labels a quiet fork names, in the guest this setup
-    /// booted. What was scheduled on the disk was already moved aside before the boot.
-    fn quiet_running_fork(&self, record: &mut Record) -> Result<(), Stop> {
-        let Some(quiet) = record.quiet.as_mut() else {
-            return Ok(());
-        };
-        if let Some(script) = super::quiet::runtime_script(&quiet.stop) {
-            let command = format!(
-                "echo {} | /usr/bin/base64 -D | /usr/bin/sudo -n /bin/sh",
-                base64_encode(script.as_bytes())
-            );
-            let (layout, current) = layout_and_record(self.app, &self.id)?;
-            let output = guest_access::run(&layout, &current, &command, None, GUEST_COMMAND)?;
-            self.log_command("quiet the fork", &output);
-            if output.status != 0 {
-                return Err(Stop::Failed(
-                    "Silo could not stop the processes named for the fork.".into(),
-                ));
-            }
-        }
-        quiet.applied = true;
-        Ok(())
-    }
-
-    /// An imported disk has already had its managed password hash changed offline.
-    /// Its first setup boot accepts that password, installs this computer's new
-    /// host key and authorization, then proves key login before any other setup runs.
-    /// A SecureToken that cannot be restored is not a failure: the computer is complete
-    /// without one, and the record keeps an informational note (95 §3, SecureToken).
-    fn personalize_import(&self, record: &mut Record) -> Result<(), Stop> {
+    /// Prepares an imported disk, whose account was rekeyed when it was imported, for its
+    /// first boot behind its gateway: its network bootstrap is brought up to date on the
+    /// stopped disk for its own gateway address and proxy CA. That boot logs in with the new
+    /// password and installs the key, name, host keys and trust (see `fork_first_boot`). A disk
+    /// that has no network bootstrap is refused before anything on it is changed.
+    fn stage_import_offline(&self, record: &mut Record) -> Result<(), Stop> {
         let account = guest_access::account(self.layout)?;
         if let Some(log) = &self.log {
             log.hide(&account.password);
         }
         self.say("Personalizing the imported computer")?;
-        boot_import_with_host_key_reset(self.layout, || self.boot(Login::Password))?;
-        finalize_import_guest(self.layout, record, &account, self.log.as_ref())
-            .map_err(Stop::Failed)?;
-        let output = guest_access::run(
-            self.layout,
-            record,
-            "/usr/bin/sudo -n true",
-            None,
-            GUEST_COMMAND,
-        )?;
-        self.log_command("imported key login with sudo -n", &output);
-        if output.status != 0 {
-            return Err(Stop::Failed(
-                "Silo could not log in to the imported computer with its new key.".into(),
-            ));
-        }
-        // The offline password rewrite could not keep SecureToken; give it back now that
-        // the computer is up and the password is known.
-        let token = self.enable_secure_token(record, &account)?;
-        self.shut_down()?;
-        record.secure_token_missing = secure_token_missing(token);
-        self.mark(record, |setup| setup.needs_personalizing = false)?;
+        let bootstrap = super::proxy::prepare_offline_bootstrap(self.app, record, self.layout)?;
+        offline_setup::ensure_detached(&self.layout.disk())?;
+        offline_setup::stage_bootstrap_on_disk(&self.layout.disk(), &bootstrap)?;
+        self.check()?;
+        record.first_boot = true;
+        self.mark(record, |setup| {
+            setup.needs_personalizing = false;
+            setup.proxy_bootstrap = true;
+        })?;
+        Ok(())
+    }
+
+    /// Takes the record as the registry holds it now, which a boot that finished a first Start
+    /// has changed.
+    fn adopt_current_record(&self, record: &mut Record) -> Result<(), Stop> {
+        let (_, current) = layout_and_record(self.app, &self.id)?;
+        *record = current;
         Ok(())
     }
 
@@ -824,6 +751,10 @@ impl Provision<'_> {
     fn first_boot(&self, settle: Duration) -> Result<(), Stop> {
         self.check()?;
         let (layout, record) = layout_and_record(self.app, &self.id)?;
+        // It waits for an address from Apple's network, which only a clean disk may use.
+        if record.may_hold_agent_work() {
+            return Err(Stop::Failed(store::NETWORK_NOT_PREPARED.into()));
+        }
         offline_setup::ensure_detached(&layout.disk())?;
         engine::start(self.app, &record, &layout, &|| self.cancelled())?;
         let deadline = Instant::now() + FIRST_BOOT_ADDRESS;
@@ -1037,91 +968,6 @@ fn finalize_guest(
     Ok(())
 }
 
-/// Imported finalization can rotate the guest's SSH host keys before its result
-/// reaches the owner. Clear any previous pin before each retry's password boot
-/// so `accept-new` can learn the key from the current disk state.
-fn boot_import_with_host_key_reset(
-    layout: &Layout,
-    boot: impl FnOnce() -> Result<(), Stop>,
-) -> Result<(), Stop> {
-    guest_access::reset_host_keys(layout)?;
-    boot()
-}
-
-/// Finish a rekeyed archive import using the new password once, then verify the
-/// newly installed device key. The source key is never read or used.
-fn finalize_import_guest(
-    layout: &Layout,
-    record: &Record,
-    account: &guest_access::GuestAccount,
-    log: Option<&SetupLog>,
-) -> Result<(), String> {
-    let public_key = guest_access::public_key(account)?;
-    let script = base64_encode(
-        offline_setup::import_finalization_script(&public_key, &record.name).as_bytes(),
-    );
-    let command =
-        format!("/usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'");
-    let password = format!("{}\n", account.password);
-    let output = guest_access::run_with_password(
-        layout,
-        record,
-        &command,
-        Some(password.as_bytes()),
-        GUEST_COMMAND,
-    )?;
-    if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
-        if let Some(log) = log {
-            log.command(
-                "import account script",
-                output.status,
-                &output.stdout,
-                &output.stderr,
-            );
-        }
-        return Err(finalization_failure(output.status));
-    }
-    guest_access::reset_host_keys(layout)?;
-    Ok(())
-}
-
-/// Installs the fork's key, name and host keys over the password login the offline rekey
-/// allows, then proves the key works.
-fn finalize_fork_guest(
-    layout: &Layout,
-    record: &Record,
-    account: &guest_access::GuestAccount,
-    log: Option<&SetupLog>,
-) -> Result<(), String> {
-    let public_key = guest_access::public_key(account)?;
-    let script = base64_encode(
-        offline_setup::fork_finalization_script(&public_key, &record.name).as_bytes(),
-    );
-    let command =
-        format!("/usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'");
-    let password = format!("{}\n", account.password);
-    let output = guest_access::run_with_password(
-        layout,
-        record,
-        &command,
-        Some(password.as_bytes()),
-        GUEST_COMMAND,
-    )?;
-    if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
-        if let Some(log) = log {
-            log.command(
-                "fork account script",
-                output.status,
-                &output.stdout,
-                &output.stderr,
-            );
-        }
-        return Err(finalization_failure(output.status));
-    }
-    guest_access::reset_host_keys(layout)?;
-    Ok(())
-}
-
 /// A one-sentence reason for a failed account script; the details go to the log.
 fn finalization_failure(status: i32) -> String {
     if status == offline_setup::PREBOOT_FAILED {
@@ -1138,7 +984,16 @@ fn sip_disabled(csrutil_status: &str) -> bool {
 /// Whether the working account has no SecureToken after an import. Anything but a
 /// confirmed token counts as missing: the note is informational, never a setup failure.
 fn disk_shortfall(requested: u64, actual: u64) -> String {
-    format!("Silo could not expand the disk to {requested} GiB, so the computer has {actual} GiB. It is otherwise ready to start.")
+    format!("Silo could not make macOS use all of the {requested} GiB disk, so the computer can use only {actual} GiB of it. It is otherwise ready to start.")
+}
+
+/// Records the disk after personalization. The record has the backing file's size whether or
+/// not the guest could use all of it; what it can use is told only in the note.
+fn settle_disk_record(record: &mut Record, file_gib: Option<u64>, note: Option<String>) {
+    if let Some(gib) = file_gib {
+        record.disk_gib = gib;
+    }
+    record.disk_note = note;
 }
 
 fn secure_token_missing(token: personalize::SecureToken) -> bool {
@@ -1252,9 +1107,11 @@ mod tests {
         assert!(store::setup_allowed(store::State::Failed, &record).is_ok());
         assert!(store::setup_allowed(store::State::Stopped, &record).is_ok());
         assert!(!setup_finished(&record, &developer_tools::version()));
-        // The retry boots over the temporary Apple NAT, never behind the gateway.
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        assert!(!engine::boots_behind_gateway(&record));
+        // A first install that has not finished retries over the temporary Apple NAT.
+        assert_eq!(
+            store::network_plan(&record),
+            Ok(store::NetworkPlan::AppleNat)
+        );
 
         let mut staged = 0;
         stage_bootstrap(&record, |_| {
@@ -1269,8 +1126,7 @@ mod tests {
         assert!(record.setup_complete());
         assert!(setup_finished(&record, &developer_tools::version()));
         assert!(store::setup_allowed(store::State::Stopped, &record).is_err());
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        assert!(engine::boots_behind_gateway(&record));
+        assert_eq!(store::network_plan(&record), Ok(store::NetworkPlan::Gateway));
     }
 
     #[test]
@@ -1278,7 +1134,7 @@ mod tests {
         let message = disk_shortfall(64, 40);
         assert_eq!(
             message,
-            "Silo could not expand the disk to 64 GiB, so the computer has 40 GiB. It is otherwise ready to start."
+            "Silo could not make macOS use all of the 64 GiB disk, so the computer can use only 40 GiB of it. It is otherwise ready to start."
         );
         // The copy's remaining steps run: the shortfall is stored on the record, which setup
         // completeness does not read.
@@ -1286,6 +1142,28 @@ mod tests {
         record.disk_note = Some(message);
         record.setup.proxy_bootstrap = true;
         assert!(setup_finished(&record, &developer_tools::version()));
+    }
+
+    #[test]
+    fn a_failed_expansion_leaves_the_record_with_the_files_size() {
+        let mut record = finished_record();
+        // A copy of a 40 GiB template whose file was made 64 GiB.
+        record.disk_gib = 64;
+        let disk = personalize::reconcile_disk(64, 40, Some(24 * (1 << 30)));
+        assert_eq!(disk, personalize::Disk { gib: 40, short: true });
+        settle_disk_record(&mut record, Some(64), Some(disk_shortfall(64, disk.gib)));
+        assert_eq!(record.disk_gib, 64);
+        assert_eq!(
+            record.disk_note.as_deref(),
+            Some("Silo could not make macOS use all of the 64 GiB disk, so the computer can use only 40 GiB of it. It is otherwise ready to start.")
+        );
+        // A record an earlier attempt lowered is put back to the file's size.
+        record.disk_gib = 40;
+        settle_disk_record(&mut record, Some(64), None);
+        assert_eq!((record.disk_gib, record.disk_note.as_deref()), (64, None));
+        // A copy that asked for no growth keeps its record.
+        settle_disk_record(&mut record, None, None);
+        assert_eq!(record.disk_gib, 64);
     }
 
     #[test]
@@ -1303,40 +1181,6 @@ mod tests {
         assert_eq!(
             setup_summary(&setup),
             "account, sip, developer tools, workspace folders done"
-        );
-    }
-
-    #[test]
-    fn imported_password_boot_forgets_the_previous_host_key_before_retrying() {
-        let temp = tempfile::tempdir().unwrap();
-        let layout = Layout {
-            dir: temp.path().to_path_buf(),
-            access: None,
-        };
-        let known_hosts = layout.dir.join("guest-access/known_hosts");
-        std::fs::create_dir_all(known_hosts.parent().unwrap()).unwrap();
-        std::fs::write(&known_hosts, b"inherited guest host key").unwrap();
-
-        let first_boot = boot_import_with_host_key_reset(&layout, || {
-            assert!(
-                !known_hosts.exists(),
-                "the inherited key must not pin this boot"
-            );
-            std::fs::write(&known_hosts, b"host key learned from the guest").unwrap();
-            Ok(())
-        });
-        assert!(first_boot.is_ok());
-        assert!(known_hosts.is_file());
-
-        let result = boot_import_with_host_key_reset(&layout, || {
-            assert!(
-                !known_hosts.exists(),
-                "a retry must discard a stale pin first"
-            );
-            Err(Stop::Failed("simulated interrupted finalization".into()))
-        });
-        assert!(
-            matches!(result, Err(Stop::Failed(message)) if message == "simulated interrupted finalization")
         );
     }
 
@@ -1412,6 +1256,36 @@ mod tests {
         assert!(waits_for_first_start(&fork));
         fork.first_boot = false;
         assert!(!waits_for_first_start(&fork));
+    }
+
+    #[test]
+    fn a_forks_offline_preparation_deletes_the_sources_endpoint_file() {
+        let mut fork = finished_record();
+        let scrub = fork_scrub(&fork);
+        assert_eq!(
+            scrub,
+            ["/etc/silo/endpoint.json", "/etc/silo/guest-client.json"]
+        );
+        fork.quiet = Some(super::super::quiet::QuietRecord {
+            scrub: vec!["/Users/silo/.env".into(), "/etc/silo/endpoint.json".into()],
+            ..Default::default()
+        });
+        assert_eq!(
+            fork_scrub(&fork),
+            [
+                "/Users/silo/.env",
+                "/etc/silo/endpoint.json",
+                "/etc/silo/guest-client.json"
+            ]
+        );
+        let root = tempfile::tempdir().unwrap();
+        let silo = root.path().join("private/etc/silo");
+        std::fs::create_dir_all(&silo).unwrap();
+        std::fs::write(silo.join("endpoint.json"), "{\"token\":\"silo_gc_x\"}").unwrap();
+        std::fs::write(silo.join("other.conf"), "kept").unwrap();
+        super::super::quiet::apply_offline(root.path(), &scrub, &[]).unwrap();
+        assert!(!silo.join("endpoint.json").exists());
+        assert!(silo.join("other.conf").exists());
     }
 
     #[test]

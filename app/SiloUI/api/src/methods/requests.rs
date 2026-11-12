@@ -4,6 +4,9 @@
 //! Regenerate with `cargo run -p silo-api --example generate_requests`.
 
 use crate::transport;
+use super::agents;
+use super::approvals;
+use super::audit;
 use super::changes;
 use super::checkpoints;
 use super::clipboard;
@@ -45,6 +48,46 @@ use super::MethodParams;
 /// `activity.setup.read`
 pub fn activity_setup_read(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::ActivitySetupRead(params))
+}
+
+/// `approvals.cancel`
+pub fn approvals_cancel(params: approvals::ApprovalsCancelParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ApprovalsCancel(params))
+}
+
+/// `approvals.decide`
+pub fn approvals_decide(params: approvals::ApprovalsDecideParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ApprovalsDecide(params))
+}
+
+/// `approvals.get`
+pub fn approvals_get(params: approvals::ApprovalsGetParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ApprovalsGet(params))
+}
+
+/// `approvals.list`
+pub fn approvals_list(params: approvals::ApprovalsListParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ApprovalsList(params))
+}
+
+/// `approvals.note`
+pub fn approvals_note(params: approvals::ApprovalsNoteParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ApprovalsNote(params))
+}
+
+/// `audit.list`
+pub fn audit_list(params: audit::AuditListParams) -> Request<kind::Query> {
+    Request::new(MethodParams::AuditList(params))
+}
+
+/// `agents.install`
+pub fn agents_install(params: agents::AgentsInstallParams) -> Request<kind::Job> {
+    Request::new(MethodParams::AgentsInstall(params))
+}
+
+/// `agents.list`
+pub fn agents_list(params: agents::AgentsListParams) -> Request<kind::Query> {
+    Request::new(MethodParams::AgentsList(params))
 }
 
 /// `changes.keep`
@@ -201,6 +244,11 @@ pub fn computers_configuration_retry(
     Request::new(MethodParams::ComputersConfigurationRetry(params))
 }
 
+/// `computers.access`
+pub fn computers_access(params: approvals::ComputersAccessParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ComputersAccess(params))
+}
+
 /// `computers.create`
 pub fn computers_create(params: computers::ComputerCreateParams) -> Request<kind::Job> {
     Request::new(MethodParams::ComputersCreate(params))
@@ -259,6 +307,11 @@ pub fn computers_restart(params: common::ComputerTargetParams) -> Request<kind::
     Request::new(MethodParams::ComputersRestart(params))
 }
 
+/// `computers.rebuild`
+pub fn computers_rebuild(params: computers::ComputerRebuildParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ComputersRebuild(params))
+}
+
 /// `computers.shell`
 pub fn computers_shell(params: computers::ComputerShellParams) -> Request<kind::Query> {
     Request::new(MethodParams::ComputersShell(params))
@@ -272,6 +325,11 @@ pub fn computers_start(params: common::ComputerTargetParams) -> Request<kind::Jo
 /// `computers.stop`
 pub fn computers_stop(params: common::ComputerTargetParams) -> Request<kind::Job> {
     Request::new(MethodParams::ComputersStop(params))
+}
+
+/// `computers.recipe`
+pub fn computers_recipe(params: common::ComputerTargetParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ComputersRecipe(params))
 }
 
 /// `computers.tree`
@@ -372,6 +430,11 @@ pub fn device_dependencies(params: device::DependencyReportParams) -> Request<ki
 /// `device.facts`
 pub fn device_facts(params: device::DeviceFactsParams) -> Request<kind::Query> {
     Request::new(MethodParams::DeviceFacts(params))
+}
+
+/// `device.resources`
+pub fn device_resources(params: device::DeviceResourcesParams) -> Request<kind::Query> {
+    Request::new(MethodParams::DeviceResources(params))
 }
 
 /// `display.close`
@@ -811,6 +874,16 @@ pub fn network_urls(params: network::NetworkTargetParams) -> Request<kind::Query
     Request::new(MethodParams::NetworkUrls(params))
 }
 
+/// `network.policy.get`
+pub fn network_policy_get(params: network::NetworkTargetParams) -> Request<kind::Query> {
+    Request::new(MethodParams::NetworkPolicyGet(params))
+}
+
+/// `network.policy.set`
+pub fn network_policy_set(params: network::NetworkPolicySetParams) -> Request<kind::Command> {
+    Request::new(MethodParams::NetworkPolicySet(params))
+}
+
 /// `notifications.list`
 pub fn notifications_list(params: notifications::NotificationsListParams) -> Request<kind::Query> {
     Request::new(MethodParams::NotificationsList(params))
@@ -873,6 +946,11 @@ pub fn recipes_build(params: recipes::RecipeBuildParams) -> Request<kind::Job> {
     Request::new(MethodParams::RecipesBuild(params))
 }
 
+/// `recipes.get`
+pub fn recipes_get(params: recipes::RecipeGetParams) -> Request<kind::Query> {
+    Request::new(MethodParams::RecipesGet(params))
+}
+
 /// `recipes.list`
 pub fn recipes_list(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::RecipesList(params))
@@ -881,6 +959,11 @@ pub fn recipes_list(params: common::DeviceParams) -> Request<kind::Query> {
 /// `recipes.remove`
 pub fn recipes_remove(params: recipes::RecipeRemoveParams) -> Request<kind::Command> {
     Request::new(MethodParams::RecipesRemove(params))
+}
+
+/// `recipes.save`
+pub fn recipes_save(params: recipes::RecipeSaveParams) -> Request<kind::Command> {
+    Request::new(MethodParams::RecipesSave(params))
 }
 
 /// `secrets.list`
