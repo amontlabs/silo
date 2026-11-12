@@ -71,18 +71,20 @@ default_state() {
 }
 
 cmd_start() {
-  local check=${1:-} st="" a prev="" pid run rc
+  local check=${1:-} st="" a prev="" pid run rc rlog
   [ -n "$check" ] || { usage >&2; exit 2; }
   for a in "$@"; do [ "$prev" = --state ] && st=$a; prev=$a; done
   [ -n "$st" ] || { st=$(default_state "$check"); set -- "$@" --state "$st"; }
   case "$st" in /*) ;; *) st=$PWD/$st; set -- "${@:1:$#-1}" "$st";; esac
   mkdir -p "$st" || exit 2
-  nohup "$HERE/live" "$@" >"$st/runner.log" 2>&1 </dev/null & pid=$!
+  # The runner logs to its own file: a refused start must not truncate the log of the run holding the lock.
+  rlog=$(mktemp "$st/runner.log.XXXXXX") || exit 2
+  nohup "$HERE/live" "$@" >"$rlog" 2>&1 </dev/null & pid=$!
   while :; do
     run=$(cat "$st/run" 2>/dev/null)
-    case "$run" in "$pid"-*) echo "$st $run"; exit 0;; esac
+    case "$run" in "$pid"-*) mv -f "$rlog" "$st/runner.log"; echo "$st $run"; exit 0;; esac
     if ! kill -0 "$pid" 2>/dev/null; then
-      wait "$pid"; rc=$?; cat "$st/runner.log" >&2; echo "live start: the runner ended (exit $rc) before taking the state dir" >&2; exit "$rc"
+      wait "$pid"; rc=$?; cat "$rlog" >&2; rm -f "$rlog"; echo "live start: the runner ended (exit $rc) before taking the state dir" >&2; exit "$rc"
     fi
     sleep 0.1
   done
