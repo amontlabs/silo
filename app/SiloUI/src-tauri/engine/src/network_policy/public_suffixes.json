@@ -24,6 +24,14 @@
     "azurewebsites.net", "cloudapp.azure.com", "blob.core.windows.net",
     "cloudfront.net", "amazonaws.com", "s3.amazonaws.com", "elasticbeanstalk.com",
     "blogspot.com", "wordpress.com", "myshopify.com", "weebly.com", "wixsite.com",
-    "github.dev", "githubusercontent.com", "gist.github.com", "supabase.co", "railway.app"
+    "github.dev", "githubusercontent.com", "gist.github.com", "supabase.co", "railway.app",
+    "azure.com", "azure.net", "windows.net", "core.windows.net", "database.windows.net",
+    "search.windows.net", "scm.azurewebsites.net", "vault.azure.net", "openai.azure.com",
+    "cognitiveservices.azure.com", "googleusercontent.com", "firebaseio.com",
+    "firebasestorage.app", "oraclecloud.com", "aliyuncs.com", "myqcloud.com",
+    "myhuaweicloud.com", "herokudns.com", "scw.cloud", "backblazeb2.com",
+    "r2.cloudflarestorage.com", "netlify.com", "glitch.com", "webcontainer.io",
+    "codesandbox.io", "gitpod.io", "fastly.net", "b-cdn.net", "visualstudio.com",
+    "appdomain.cloud", "mybluemix.net", "salesforce.com", "force.com"
   ]
 }

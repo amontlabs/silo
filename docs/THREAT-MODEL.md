@@ -414,9 +414,13 @@ requests; read-only is enforced on the host side.
 The commands the engine runs in a guest and reads back (checks, file helpers, a bounded run) are
 held in memory on the host with a limit on both standard output and standard error
 ([`process.rs`](../app/SiloUI/src-tauri/engine/src/guest/process.rs)): a command that prints past
-its limit is stopped and the call fails with "printed too much" (error output: 64 KiB for helper
-commands, one response's worth for a bounded run). Nothing the guest prints is written to the
-device's disk by the engine.
+its limit is stopped and the call fails with "printed too much" (standard error of a bounded run:
+one response's worth). A helper command keeps the first 64 KiB of its standard error and the engine
+reads and drops the rest, so a hostile guest cannot make file operations fail by printing a lot;
+its standard output stays bounded. The file helper runs under the guest supervisor, so when the
+engine stops it (deadline, overflow) the helper is ended in the guest too. A folder watch refuses
+output that is not a path (a record over 8 KiB) and ends. Nothing the guest prints is written to
+the device's disk by the engine.
 
 Imported Linux computer archives are parsed on the Mac: a zstd-compressed tar is streamed through
 caps on entry types, paths, entry count and size

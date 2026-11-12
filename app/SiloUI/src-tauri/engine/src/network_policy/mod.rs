@@ -186,7 +186,10 @@ fn load_presets(text: &str) -> Result<Vec<Preset>, String> {
                     .bytes()
                     .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
             {
-                return Err(format!("preset name {:?} is invalid or repeated", entry.name));
+                return Err(format!(
+                    "preset name {:?} is invalid or repeated",
+                    entry.name
+                ));
             }
             if entry.version < FIRST_PRESET_VERSION {
                 return Err(format!("preset {} has no version", entry.name));
@@ -194,7 +197,9 @@ fn load_presets(text: &str) -> Result<Vec<Preset>, String> {
             let mut history = Vec::new();
             for earlier in entry.history {
                 if earlier.version >= entry.version
-                    || history.iter().any(|(version, _)| *version == earlier.version)
+                    || history
+                        .iter()
+                        .any(|(version, _)| *version == earlier.version)
                 {
                     return Err(format!(
                         "preset {} lists version {} twice or after its own",
@@ -285,16 +290,29 @@ impl Held {
             .presets
             .iter()
             .filter_map(|name| preset(name).map(|preset| (name.clone(), preset.version)))
-            .chain(
-                preset("github").map(|preset| (GITHUB_GRANT_PIN.to_owned(), preset.version)),
-            )
+            .chain(preset("github").map(|preset| (GITHUB_GRANT_PIN.to_owned(), preset.version)))
             .collect();
         Self { policy, pins }
     }
 
+    /// `policy` for a computer with no saved entry: every preset and the GitHub grant hold the
+    /// first version, like an entry saved before versions existed, so a newer list reaches it
+    /// only when the owner accepts it.
+    pub fn unpinned(policy: NetworkPolicy) -> Self {
+        Self {
+            policy,
+            pins: Pins::new(),
+        }
+    }
+
     /// The hosts of every preset of the policy as approved, and per preset the hosts an update
     /// would add: `(name, title, added)`.
-    fn preset_hosts(&self) -> (Vec<(String, Vec<Allowed>)>, Vec<(String, String, Vec<Allowed>)>) {
+    fn preset_hosts(
+        &self,
+    ) -> (
+        Vec<(String, Vec<Allowed>)>,
+        Vec<(String, String, Vec<Allowed>)>,
+    ) {
         let mut hosts = Vec::new();
         let mut updates = Vec::new();
         for name in &self.policy.presets {
@@ -385,17 +403,18 @@ pub fn validate_host(host: &str) -> Result<(), String> {
     if host.contains(':') {
         return refuse("give a name without a port; port 443 is allowed");
     }
-    if !name
-        .bytes()
-        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'.')
-    {
+    if !name.bytes().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'.'
+    }) {
         return refuse("use lowercase letters, digits, hyphens and dots only");
     }
     let labels: Vec<&str> = name.split('.').collect();
     if labels.iter().any(|label| {
         label.is_empty() || label.len() > 63 || label.starts_with('-') || label.ends_with('-')
     }) {
-        return refuse("each part between dots has 1 to 63 characters and does not start or end with a hyphen");
+        return refuse(
+            "each part between dots has 1 to 63 characters and does not start or end with a hyphen",
+        );
     }
     if labels.len() < 2 {
         return refuse("a top-level name alone would allow a whole domain");
@@ -459,7 +478,9 @@ pub fn validate(policy: &NetworkPolicy) -> Result<NetworkPolicy, String> {
         return Err(format!("A network policy lists at most {MAX_HOSTS} hosts."));
     }
     if policy.presets.len() > MAX_PRESETS {
-        return Err(format!("A network policy uses at most {MAX_PRESETS} presets."));
+        return Err(format!(
+            "A network policy uses at most {MAX_PRESETS} presets."
+        ));
     }
     for host in &policy.hosts {
         validate_host(host)?;
@@ -556,10 +577,7 @@ fn uncovered(new: &BTreeSet<Allowed>, current: &BTreeSet<Allowed>) -> Vec<Allowe
 /// narrowest, open the widest; an allowlist is no wider than another when every host it allows
 /// is covered by the other. An allowlist is wider than closed: it resolves names.
 pub fn no_wider(new: &NetworkPolicy, current: &NetworkPolicy) -> bool {
-    no_wider_held(
-        &Held::latest(new.clone()),
-        &Held::latest(current.clone()),
-    )
+    no_wider_held(&Held::latest(new.clone()), &Held::latest(current.clone()))
 }
 
 /// [`no_wider`] with the preset versions each policy was approved at.
@@ -696,7 +714,11 @@ impl Grants {
         if self.github {
             if let Some(preset) = preset("github") {
                 let (approved, _) = preset.hosts_at(pins.get(GITHUB_GRANT_PIN).copied());
-                hosts.extend(approved.into_iter().map(|allowed| (allowed, "github".to_owned())));
+                hosts.extend(
+                    approved
+                        .into_iter()
+                        .map(|allowed| (allowed, "github".to_owned())),
+                );
             }
         }
         for (name, domains) in &self.secrets {
@@ -1043,10 +1065,7 @@ pub fn effective(stored: Option<NetworkPolicy>, recorded: Option<&Value>) -> Net
 /// What a computer runs with and the preset versions it was approved at: the stored policy,
 /// else what the runtime's recorded rules mean (see [`effective`]). The error is a stored
 /// policy that cannot be read: the computer must not start on a guess.
-pub fn held_for(
-    computer_id: &str,
-    recorded: Option<&Value>,
-) -> Result<(Held, bool), String> {
+pub fn held_for(computer_id: &str, recorded: Option<&Value>) -> Result<(Held, bool), String> {
     match store::get_stored(computer_id)? {
         Some(stored) => Ok((stored.held(), stored.incoming_denied)),
         None => {
@@ -1058,7 +1077,7 @@ pub fn held_for(
                     .and_then(|recorded| recorded.get("default_ingress"))
                     .and_then(Value::as_str)
                     == Some("deny");
-            Ok((Held::latest(policy), denied))
+            Ok((Held::unpinned(policy), denied))
         }
     }
 }

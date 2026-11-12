@@ -1,7 +1,7 @@
 //! Bounded guest execution (`guest.exec`) and the pieces long-running jobs share: request
 //! validation, the guest-side supervisor and the process-group control helper.
 use super::{
-    process::{self, Stopped},
+    process::{self, StderrLimit, Stopped},
     target::Target,
     GuestError, HELPER_STDERR_BYTES, MAX_RESPONSE_RAW_BYTES,
 };
@@ -122,7 +122,7 @@ fn control(
         None,
         timeout,
         4096,
-        HELPER_STDERR_BYTES,
+        StderrLimit::Keep(HELPER_STDERR_BYTES),
         None,
         &|| {},
     )? {
@@ -244,7 +244,7 @@ pub(crate) fn run_bounded_cancellable(
         request.stdin.as_deref(),
         request.timeout,
         request.max_stdout,
-        MAX_RESPONSE_RAW_BYTES,
+        StderrLimit::Stop(MAX_RESPONSE_RAW_BYTES),
         cancel,
         &end_guest,
     )?;
@@ -379,7 +379,7 @@ mod tests {
             None,
             Duration::from_secs(20),
             1024,
-            1024,
+            StderrLimit::Stop(1024),
             None,
             &|| {},
         )

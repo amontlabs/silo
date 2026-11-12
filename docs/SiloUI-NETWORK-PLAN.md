@@ -37,6 +37,13 @@ engine decides this with the Public Suffix List (ICANN and private sections) fro
 crate, which compiles Mozilla's list into the build. The bundled `public_suffixes.json` stays
 as an addition for shared-hosting names the list does not carry (`amazonaws.com`,
 `wordpress.com` and others Silo already refused) and as the early answer in the settings view.
+The list holds registrable domains only when they have no tenant sub-suffix of their own, so a
+cloud provider's base such as `azure.com`, `windows.net` or `oraclecloud.com`, under which
+customers get their own names, is not on it. The hand list covers those names, one entry per
+base that hosts tenant subdomains and per service name under it (`core.windows.net`,
+`openai.azure.com`). When a provider adds such a base, add it to `public_suffixes.json`; the
+test `cloud_bases_that_host_tenant_subdomains_are_refused_for_a_wildcard` lists the ones
+checked.
 A base is also refused when every name directly under it is a suffix (`*.sch.uk`, which the
 list covers with a `*.` rule).
 

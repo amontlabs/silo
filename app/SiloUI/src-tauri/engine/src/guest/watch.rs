@@ -41,6 +41,46 @@ const LIVENESS_POLL: Duration = Duration::from_millis(250);
 /// How long the helper may take to record its baselines (a very large folder, a slow channel).
 const READY_DEADLINE: Duration = Duration::from_secs(30);
 
+const OVERFLOW_MESSAGE: &str =
+    "The folder watch was stopped: the computer sent output that is not a folder path.";
+/// The longest record the helper prints: an absolute path (the guest's `PATH_MAX`), its NUL.
+const MAX_RECORD_BYTES: usize = 8 * 1024;
+
+/// The helper's output split into NUL-terminated records.
+#[derive(Default)]
+struct Records {
+    pending: Vec<u8>,
+    overflowed: bool,
+}
+
+impl Records {
+    /// Adds `data` and hands each complete record (without its NUL) to `record`. A record
+    /// longer than `MAX_RECORD_BYTES` is not a path: the stream is then refused for good, so
+    /// a guest cannot make the host hold its output.
+    fn feed(&mut self, data: &[u8], mut record: impl FnMut(&[u8])) {
+        if self.overflowed {
+            return;
+        }
+        self.pending.extend_from_slice(data);
+        while let Some(end) = self.pending.iter().position(|byte| *byte == 0) {
+            let path: Vec<u8> = self.pending.drain(..=end).collect();
+            if path.len() > MAX_RECORD_BYTES {
+                self.overflow();
+                return;
+            }
+            record(&path[..path.len() - 1]);
+        }
+        if self.pending.len() > MAX_RECORD_BYTES {
+            self.overflow();
+        }
+    }
+
+    fn overflow(&mut self) {
+        self.overflowed = true;
+        self.pending = Vec::new();
+    }
+}
+
 fn active_watches() -> std::sync::MutexGuard<'static, HashMap<String, usize>> {
     static ACTIVE: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
     ACTIVE
@@ -126,11 +166,13 @@ pub fn start_watch(
     arguments.extend(paths.iter().cloned());
     let argv = exec::supervised(&token, None, &perl_argv(exec::FILES, &arguments));
     let plan = target.plan(&argv, &[], false, false)?;
-    let pending = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let records = Arc::new(Mutex::new(Records::default()));
+    let overflowed = Arc::new(AtomicBool::new(false));
     let (armed, ready) = mpsc::channel::<()>();
     let stderr_head = Arc::new(Mutex::new(Vec::<u8>::new()));
     let chunks = {
         let stderr_head = stderr_head.clone();
+        let overflowed = overflowed.clone();
         Arc::new(move |kind: StreamKind, data: Vec<u8>| {
             if kind == StreamKind::Stderr {
                 let mut head = stderr_head
@@ -140,18 +182,19 @@ pub fn start_watch(
                 head.extend_from_slice(&data[..data.len().min(room)]);
                 return;
             }
-            let mut buffered = pending
+            let mut records = records
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            buffered.extend_from_slice(&data);
-            while let Some(end) = buffered.iter().position(|byte| *byte == 0) {
-                let path: Vec<u8> = buffered.drain(..=end).collect();
-                if path.len() == 1 {
+            records.feed(&data, |path| {
+                if path.is_empty() {
                     // The empty record: every baseline is recorded.
                     let _ = armed.send(());
                 } else {
-                    emit(String::from_utf8_lossy(&path[..path.len() - 1]).into_owned());
+                    emit(String::from_utf8_lossy(path).into_owned());
                 }
+            });
+            if records.overflowed {
+                overflowed.store(true, Ordering::SeqCst);
             }
         })
     };
@@ -186,6 +229,9 @@ pub fn start_watch(
                 });
             }
         }
+        if overflowed.load(Ordering::SeqCst) {
+            break Some(OVERFLOW_MESSAGE.to_owned());
+        }
         if let Ok(Some(status)) = streaming.child.try_wait() {
             break Some(explain(&mut streaming, status));
         }
@@ -205,7 +251,7 @@ pub fn start_watch(
     thread::spawn(move || {
         let _slot = slot;
         loop {
-            if stop.load(Ordering::SeqCst) || !still_wanted() {
+            if stop.load(Ordering::SeqCst) || !still_wanted() || overflowed.load(Ordering::SeqCst) {
                 let _ = terminate(&target, false, &token);
                 let _ = streaming.child.kill();
                 break;
@@ -471,5 +517,34 @@ esac"#,
         for handle in handles {
             handle.stop();
         }
+    }
+
+    #[test]
+    fn records_split_on_nul_and_refuse_a_stream_that_never_ends_a_record() {
+        let mut records = Records::default();
+        let mut seen: Vec<Vec<u8>> = Vec::new();
+        records.feed(b"/a\0\0/b", |record| seen.push(record.to_vec()));
+        records.feed(b"c\0", |record| seen.push(record.to_vec()));
+        assert_eq!(seen, [b"/a".to_vec(), Vec::new(), b"/bc".to_vec()]);
+        assert!(!records.overflowed);
+
+        let mut records = Records::default();
+        let mut count = 0;
+        for _ in 0..64 {
+            records.feed(&[b'x'; 65536], |_| count += 1);
+        }
+        assert!(records.overflowed);
+        assert_eq!(count, 0);
+        assert!(records.pending.len() <= MAX_RECORD_BYTES);
+        // Nothing more is taken, even a well-formed record.
+        records.feed(b"/ok\0", |_| count += 1);
+        assert_eq!(count, 0);
+
+        let mut records = Records::default();
+        let mut long = vec![b'y'; MAX_RECORD_BYTES + 1];
+        long.push(0);
+        records.feed(&long, |_| count += 1);
+        assert!(records.overflowed, "a record longer than any path");
+        assert_eq!(count, 0);
     }
 }

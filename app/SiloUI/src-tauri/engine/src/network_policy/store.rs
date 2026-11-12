@@ -53,24 +53,31 @@ impl Stored {
 
     /// `policy` saved over `before`: a preset already there keeps the version it was approved
     /// at (none means the first), and a preset added now is pinned to the version this Silo has.
-    /// The GitHub grant's hosts keep the version they were approved at the same way.
+    /// The GitHub grant's hosts keep the version they were approved at the same way; with no
+    /// `before` the grant holds the first version.
     pub fn preserving_pins(
         policy: &NetworkPolicy,
         before: Option<&Stored>,
         incoming_denied: bool,
     ) -> Self {
         let mut pins = Held::latest(policy.clone()).pins;
+        // Without an entry nothing was approved yet: the grant holds the first version.
+        let grant_pin = before.and_then(|before| before.preset_versions.get(GITHUB_GRANT_PIN));
+        match grant_pin {
+            Some(version) => pins.insert(GITHUB_GRANT_PIN.to_owned(), *version),
+            None => pins.remove(GITHUB_GRANT_PIN),
+        };
         if let Some(before) = before {
-            for preset in before.presets.iter().filter(|name| policy.presets.contains(name)) {
+            for preset in before
+                .presets
+                .iter()
+                .filter(|name| policy.presets.contains(name))
+            {
                 match before.preset_versions.get(preset) {
                     Some(version) => pins.insert(preset.clone(), *version),
                     None => pins.remove(preset),
                 };
             }
-            match before.preset_versions.get(GITHUB_GRANT_PIN) {
-                Some(version) => pins.insert(GITHUB_GRANT_PIN.to_owned(), *version),
-                None => pins.remove(GITHUB_GRANT_PIN),
-            };
         }
         Self {
             mode: policy.mode,
@@ -191,11 +198,15 @@ fn write(path: &PathBuf, document: &Document) -> Result<(), String> {
 }
 
 /// Changes the stored policies. Without an installed store (no engine) nothing is kept.
-fn update(change: impl FnOnce(&mut BTreeMap<String, Stored>) -> Result<(), String>) -> Result<(), String> {
+fn update(
+    change: impl FnOnce(&mut BTreeMap<String, Stored>) -> Result<(), String>,
+) -> Result<(), String> {
     let Some(path) = path() else {
         return Ok(());
     };
-    let _held = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _held = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut document = read(&path)?;
     let before = document.clone();
     change(&mut document.computers)?;
@@ -213,7 +224,9 @@ pub fn get_stored(computer_id: &str) -> Result<Option<Stored>, String> {
     let Some(path) = path() else {
         return Ok(None);
     };
-    let _held = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _held = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     Ok(read(&path)?.computers.get(computer_id).cloned())
 }
 
@@ -256,11 +269,7 @@ pub const CHANGED: &str =
 
 /// Gives `target` the policy `policy`, or `source`'s (with its approvals) when `policy` is
 /// `None`. A source with no entry gives nothing, so the target is treated like its source.
-pub fn inherit(
-    source: &str,
-    target: &str,
-    policy: Option<&NetworkPolicy>,
-) -> Result<(), String> {
+pub fn inherit(source: &str, target: &str, policy: Option<&NetworkPolicy>) -> Result<(), String> {
     update(|computers| {
         let chosen = match policy {
             Some(policy) => Some(Stored::approved(policy)),

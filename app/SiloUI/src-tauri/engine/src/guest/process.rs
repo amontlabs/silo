@@ -57,6 +57,23 @@ pub(crate) enum Stopped {
     Cancelled,
 }
 
+/// What happens when standard error passes its allowance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StderrLimit {
+    /// The run is stopped (`Stopped::StderrOverflow`).
+    Stop(usize),
+    /// The first bytes are kept and the rest is read and thrown away, so the run goes on.
+    Keep(usize),
+}
+
+impl StderrLimit {
+    fn bytes(self) -> usize {
+        match self {
+            Self::Stop(bytes) | Self::Keep(bytes) => bytes,
+        }
+    }
+}
+
 /// How long cleanup waits for output threads after a stop. A descendant that outlived the
 /// command in another process group could hold the pipes open for good, so the wait ends and
 /// the threads are left to finish on their own.
@@ -105,7 +122,7 @@ pub(crate) fn run_collect(
     stdin: Option<&[u8]>,
     timeout: Duration,
     max_stdout: usize,
-    max_stderr: usize,
+    max_stderr: StderrLimit,
     cancel: Option<&AtomicBool>,
     before_stop: &dyn Fn(),
 ) -> Result<Result<Collected, Stopped>, GuestError> {
@@ -138,29 +155,33 @@ pub(crate) fn run_collect(
     });
     let stdout_exceeded = Arc::new(AtomicBool::new(false));
     let stderr_exceeded = Arc::new(AtomicBool::new(false));
-    let mut capped =
-        |stream: Option<Box<dyn Read + Send>>, limit: usize, exceeded: &Arc<AtomicBool>| {
-            let (exceeded, done) = (exceeded.clone(), flag());
-            thread::spawn(move || {
-                let _done = Done(done);
-                let mut bytes = Vec::new();
-                if let Some(mut stream) = stream {
-                    let _ = (&mut stream).take(limit as u64 + 1).read_to_end(&mut bytes);
-                }
-                if bytes.len() > limit {
-                    exceeded.store(true, Ordering::SeqCst);
-                }
-                bytes
-            })
-        };
+    let mut capped = |stream: Option<Box<dyn Read + Send>>,
+                      limit: usize,
+                      discard_excess: bool,
+                      exceeded: &Arc<AtomicBool>| {
+        let (exceeded, done) = (exceeded.clone(), flag());
+        thread::spawn(move || {
+            let _done = Done(done);
+            let Some(stream) = stream else {
+                return Vec::new();
+            };
+            let (bytes, over) = read_capped(stream, limit, discard_excess);
+            if over && !discard_excess {
+                exceeded.store(true, Ordering::SeqCst);
+            }
+            bytes
+        })
+    };
     let stdout = capped(
         child.stdout.take().map(|stream| Box::new(stream) as _),
         max_stdout,
+        false,
         &stdout_exceeded,
     );
     let stderr = capped(
         child.stderr.take().map(|stream| Box::new(stream) as _),
-        max_stderr,
+        max_stderr.bytes(),
+        matches!(max_stderr, StderrLimit::Keep(_)),
         &stderr_exceeded,
     );
     let deadline = Instant::now() + timeout;
@@ -218,7 +239,7 @@ pub(crate) fn run_collect(
     if stdout.len() > max_stdout {
         return Ok(Err(Stopped::Overflow));
     }
-    if stderr.len() > max_stderr {
+    if stderr.len() > max_stderr.bytes() && matches!(max_stderr, StderrLimit::Stop(_)) {
         return Ok(Err(Stopped::StderrOverflow));
     }
     Ok(Ok(Collected {
@@ -226,6 +247,43 @@ pub(crate) fn run_collect(
         stdout,
         stderr,
     }))
+}
+
+/// The size of one read of a bounded stream.
+const READ_STEP: usize = 8 * 1024;
+
+/// Reads `stream` into a buffer whose capacity never passes `limit + 1`. Returns the bytes
+/// kept and whether the stream held more than `limit`. Without `discard_excess` reading stops
+/// at the first byte past `limit`; with it the first `limit` bytes are kept and the rest is
+/// read to the end and dropped.
+fn read_capped(mut stream: impl Read, limit: usize, discard_excess: bool) -> (Vec<u8>, bool) {
+    let room = limit.saturating_add(1);
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut step = [0u8; READ_STEP];
+    let mut over = false;
+    loop {
+        let count = match stream.read(&mut step) {
+            Ok(0) | Err(_) => break,
+            Ok(count) => count,
+        };
+        let space = if discard_excess { limit } else { room };
+        let take = count.min(space - bytes.len());
+        if bytes.capacity() - bytes.len() < take {
+            let wanted = (bytes.len() + take).max(bytes.capacity() * 2).min(space);
+            bytes.reserve_exact(wanted - bytes.len());
+        }
+        bytes.extend_from_slice(&step[..take]);
+        if take < count {
+            over = true;
+            if !discard_excess {
+                break;
+            }
+        }
+    }
+    if bytes.len() > limit {
+        over = true;
+    }
+    (bytes, over)
 }
 
 pub(crate) fn kill(child: &mut Child) {
@@ -380,7 +438,7 @@ mod tests {
                 None,
                 Duration::from_secs(300),
                 1024,
-                1024,
+                StderrLimit::Stop(1024),
                 Some(&cancel),
                 &|| {},
             )
@@ -399,7 +457,7 @@ mod tests {
             None,
             Duration::from_secs(60),
             1024,
-            1024,
+            StderrLimit::Stop(1024),
             None,
             &|| {},
         )
@@ -419,7 +477,7 @@ mod tests {
             None,
             Duration::from_secs(60),
             1024,
-            1024,
+            StderrLimit::Stop(1024),
             None,
             &|| {},
         )
@@ -435,7 +493,7 @@ mod tests {
             None,
             Duration::from_secs(60),
             1024,
-            5,
+            StderrLimit::Stop(5),
             None,
             &|| {},
         )
@@ -448,11 +506,65 @@ mod tests {
             None,
             Duration::from_secs(60),
             1024,
-            5,
+            StderrLimit::Stop(5),
             None,
             &|| {},
         )
         .unwrap();
         assert!(matches!(outcome, Err(Stopped::StderrOverflow)));
+    }
+
+    #[test]
+    fn reading_never_holds_much_more_than_the_allowance() {
+        let limit = 100_000;
+        let (bytes, over) = read_capped(std::io::repeat(b'x'), limit, false);
+        assert!(over);
+        assert_eq!(bytes.len(), limit + 1);
+        assert!(
+            bytes.capacity() <= limit + 1,
+            "the buffer grew to {} for an allowance of {limit}",
+            bytes.capacity()
+        );
+        let (bytes, over) = read_capped(&b"abcdef"[..], 6, false);
+        assert!(!over);
+        assert_eq!(bytes, b"abcdef");
+        let (bytes, over) = read_capped(std::io::repeat(b'x').take(1_000_000), limit, true);
+        assert!(over);
+        assert_eq!(bytes.len(), limit);
+        assert!(bytes.capacity() <= limit + 1);
+    }
+
+    #[test]
+    fn kept_standard_error_drops_the_excess_and_the_run_completes() {
+        let outcome = run_collect(
+            &shell("i=0; while [ $i -lt 400 ]; do printf '%0200d' 0 >&2; i=$((i+1)); done; printf out; exit 4"),
+            None,
+            Duration::from_secs(60),
+            1024,
+            StderrLimit::Keep(1000),
+            None,
+            &|| {},
+        )
+        .unwrap()
+        .ok()
+        .unwrap();
+        assert_eq!(outcome.status.code(), Some(4));
+        assert_eq!(outcome.stdout, b"out");
+        assert_eq!(outcome.stderr.len(), 1000);
+    }
+
+    #[test]
+    fn kept_standard_error_does_not_excuse_standard_output_past_its_allowance() {
+        let outcome = run_collect(
+            &shell("while :; do printf xxxxxxxx; done"),
+            None,
+            Duration::from_secs(60),
+            1024,
+            StderrLimit::Keep(1000),
+            None,
+            &|| {},
+        )
+        .unwrap();
+        assert!(matches!(outcome, Err(Stopped::Overflow)));
     }
 }
