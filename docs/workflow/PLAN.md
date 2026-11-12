@@ -33,32 +33,45 @@ current setup and its advice is folded in.
    checked locally when the Linux machine answers; if it is offline, skip it.
 4. **Flaky tests get fixed, not retried.** A test that fails then passes goes to
    `docs/workflow/FLAKY.md` and becomes a fix item; nobody loops on it.
-5. **One review per item, by the orchestrator.** Children never start reviewers. The `review`
-   agent (Fable first) reports every instance of each problem in one pass, with a concrete
-   failure each. One fix round, then one confirmation pass limited to those findings. What
-   remains, and anything that is a judgement call or a guess, goes to the owner's log
-   (`OWNER_REVIEW.md` of the build) without blocking the merge.
+5. **Reviews at the orchestrator's judgement, made cheap.** Only the orchestrator starts
+   reviewers (children never review themselves). How many rounds is its call, by risk and by
+   what the last round found. Each round is made cheap: the brief asks for every instance of
+   each problem in one pass, with a concrete failure each; a follow-up round only checks the
+   fixes and what they touch; fixes go back to the child that wrote the code; reviews run in
+   the background while other work continues. Judgement calls and guesses go to the owner's log
+   (`OWNER_REVIEW.md` of the build) and never block a merge.
 6. **Judgement goes to Fable.** Design calls and disputed findings go to the `judge` agent; the
    orchestrator decides with it, records what the owner may want to change, and moves on.
 7. **Agents by name only.** The orchestrator picks a lastdrop agent by its name and description.
    Models, fallbacks and limits are lastdrop's job and the owner's, not the agents'.
-8. **One topic per child.** A fix goes back to the same child (it keeps its context and warm
-   build). Children block on long commands and report once; they never end a turn to wait.
+8. **One topic per child; reuse context.** Fixes and closely related follow-ups go back to the
+   child that already holds the context (and its warm build), as long as its session stays
+   small; a child whose session has grown large is replaced by a fresh one with a short
+   handover. Children block on long commands and report once; they never end a turn to wait.
+9. **Clean up as soon as nothing depends on it.** When an item is merged and no stacked item
+   builds on it, its worktree, branch, build folder and temporary data (logs, temp homes, live
+   test leftovers) are removed at once. `stack clean` does this and refuses while a dependent
+   branch exists.
 
 ## Agents (set in lastdrop)
 
+Models are ordered so that separately limited quotas are used first (Antigravity's Claude
+quota, Codex) and the main Claude plan last. Two Claude models on the same plan are never each
+other's fallback.
+
 | Name | Models in order (effort) | For | Started with |
 |---|---|---|---|
-| `build` | sonnet (high) → opus (medium) | All implementation and fixes, one topic each | `delegate_task`, worktree or stacked |
-| `build-hard` | opus (high) → sonnet (high) | Cross-crate, concurrency, migration items; 1–2 per wave | `delegate_task` |
-| `review` | fable (medium) → opus (high) → codex sol (high) | One review per item | `Agent`, background, read-only |
-| `judge` | fable (high) → opus (high) | Design calls, disputed findings, advice | `Agent`, background |
-| `live` | sonnet (medium) → opus (medium) | Runs the `live` harness, reads its logs | `delegate_task` |
-| `scout` | haiku → sonnet (low) | Read-only lookups, preflight facts | `Agent`, background |
+| `build` | antigravity claude-sonnet-5-5 → claude sonnet (high) | Implementation and fixes, one topic each | `delegate_task`, worktree or stacked |
+| `build-hard` | antigravity claude-opus-5-5 → claude opus (high) | Cross-crate, concurrency, migration items | `delegate_task` |
+| `review` | codex gpt-6.1-sol (high) → antigravity claude-opus-5-5 → claude opus (high) | Code reviews | `Agent`, background, read-only |
+| `judge` | claude fable (high) | Design calls, disputed findings, advice | `Agent`, background |
+| `live` | antigravity claude-sonnet-5-5 → claude sonnet (medium) | Runs the `live` harness, reads its logs | `delegate_task` |
+| `scout` | claude haiku | Read-only lookups, preflight facts | `Agent`, background |
+| `cheap` | zai glm-5.3-flash → antigravity gemini-3.8-flash | Only when the owner asks for cheap agents | as the role it replaces |
 | `computer-use` | unchanged | GUI steps, called by `live` or the orchestrator | `Agent` |
 
-Removed: `reviewer`, `advisor`, `gemini`, `flash` (a name that exists gets used).
-One check after the change: confirm lastdrop falls back mid-task, not only at launch.
+Removed: `reviewer`, `advisor`, `gemini`, `flash`. Open check: whether Antigravity's Claude
+models handle long Rust tasks as well as Claude's own (try on the dry run).
 
 ## Where the rules live
 
@@ -81,9 +94,17 @@ One check after the change: confirm lastdrop falls back mid-task, not only at la
   codex-review-loops, codex-bridge-wait-command, review-when-codex-out,
   reviewer-from-orchestrator, delegate-through-lastdrop, gemini-lastdrop-cargo-limits,
   never-idle-waiting, watch-upstream-prs, worktree-build-clones (its facts move to `CHILD.md`).
-  The second account's memories get the same purge.
+  Other accounts (`~/.claude-accounts/*`) have no memories of their own, so children running
+  on them never saw these memories anyway; rules in the repo reach every account.
 
 ## Scripts (`tools/agent/`)
+
+Scripts only take over what is repetitive, intricate and deterministic (choosing test commands
+from a diff, merge mechanics, setup of live tests, cleanup). Judgement stays with the agents:
+which tests prove a change, whether a failure matters, what to review. Before writing any of
+them, existing tools are researched and preferred (research in progress: test selection and
+caching; worktrees, stacking, harnesses and boards).
+
 
 1. **`select-tests [base]`** — maps changed paths to the smallest useful commands and prints
    them: crate → `cargo nextest run -p <crate> <module filter>`; `api/` → both generators;
@@ -114,6 +135,7 @@ One check after the change: confirm lastdrop falls back mid-task, not only at la
 
 | Step | What | Who | Parallel with |
 |---|---|---|---|
+| 0 | Research existing tools; adopt them in place of scripts where they fit | 2 research agents | — |
 | 1 | lastdrop agents changed; memories purged; fallback checked | orchestrator | 2–5 |
 | 2 | `CLAUDE.md`, `AGENTS.md` trim, `docs/workflow/` documents and briefs | `build` child | 3–5 |
 | 3 | `select-tests`, `check`, `rust-toolchain.toml` | `build` child | 2, 4, 5 |
