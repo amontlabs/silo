@@ -2,6 +2,8 @@
 # Tests merge-batch (start guard, suite worktree), board restack after a rewind, and clean's handling of
 # a symlink named with a trailing "/". Temporary git repos only; no cargo, node or engine is started.
 set -uo pipefail
+# Start from a clean environment for every variable the tools read.
+unset BOARD BOARD_INTEGRATION SILO_INTEGRATION_BRANCH SILO_AGENT_ITEM SILO_AGENT_CACHE RUNTIME_PREPARE_CMD SILO_BIN SILO_RUNTIME_TARGET LIVE_D LIVE_LINUX_HOST LIVE_SHORT_BASE LIVE_SSH LIVE_STEP
 A=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 W=$(mktemp -d "${TMPDIR:-/tmp}/fix2-test.XXXXXX"); W=$(cd "$W" && pwd -P); trap 'rm -rf "$W"' EXIT
 export TMPDIR=$W/tmp; mkdir -p "$TMPDIR"
