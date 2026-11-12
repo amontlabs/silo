@@ -236,12 +236,12 @@ def cmd_restack(args, rows, path):
         # the branch it was stacked on until now (still present after a merge)
         old = next((p for p in parents if p["branch"] == r["base"]), None) or \
             (open_parents[0] if open_parents else parents[0])
-        # old fork point: the old parent tip, which must be known exactly
+        # old fork point: the newest old parent tip (reflog) that the branch contains, so a parent
+        # that was rewound or rewritten still gives the commits it used to have; else its current tip
         tip = git("rev-parse", "--verify", "-q", old["branch"]).stdout.strip()
-        if tip and git("merge-base", "--is-ancestor", tip, r["branch"]).returncode == 0:
+        up = git("merge-base", "--fork-point", old["branch"], r["branch"]).stdout.strip()
+        if not up and tip and git("merge-base", "--is-ancestor", tip, r["branch"]).returncode == 0:
             up = tip
-        else:
-            up = git("merge-base", "--fork-point", old["branch"], r["branch"]).stdout.strip()
         if not up:
             die("%s: cannot tell where %s was stacked on %s (its old tip is not in the reflog); "
                 "rebase it by hand with `git rebase --onto %s <old tip>`"

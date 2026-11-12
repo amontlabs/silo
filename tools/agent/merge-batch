@@ -25,7 +25,7 @@ current branch is the integration branch: --into, else $BOARD_INTEGRATION, else 
 --last prints the newest full-suite verdict; on failure also the failing tests and, for each,
 the merged branches that touched that crate or file.
 """
-import argparse, glob, json, os, re, subprocess, sys
+import argparse, glob, json, os, re, subprocess, sys, tempfile
 
 ROOT = None
 WS = "app/SiloUI"
@@ -187,10 +187,16 @@ def main():
 
 SUITE = r'''
 root="$1"; base="$2"; sha="$3"; wt="$4"; log="$base.log"; fail=""
-cleanup() { rm -f "$base.running"; git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"; git -C "$root" worktree prune; }
+made=""
+cleanup() {
+  [ "$(cat "$base.running" 2>/dev/null)" = "$$" ] && rm -f "$base.running"
+  [ -n "$made" ] && { git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1; git -C "$root" worktree prune; }
+  rmdir "$wt" 2>/dev/null
+}
 trap cleanup EXIT
 echo "== full suite on $sha started $(date)" > "$log"
 git -C "$root" worktree add -q --detach "$wt" "$sha" >> "$log" 2>&1 || { printf 'FAIL\nfailed: worktree\n' > "$base.done"; exit 1; }
+made=1
 src="$root/app/SiloUI"; dst="$wt/app/SiloUI"
 cp -cR "$src/target" "$dst/target" 2>/dev/null && rm -rf "$dst/target/agent"
 [ -d "$src/node_modules" ] && { cp -cR "$src/node_modules" "$dst/node_modules" 2>/dev/null || ln -s "$src/node_modules" "$dst/node_modules"; }
@@ -210,6 +216,7 @@ step script-tests python3 scripts/run-script-tests.py
 step macos-release python3 -m unittest discover -s scripts -p test_macos_release.py
 step evals python3 -m unittest discover -s ../../docs/evals -p "test_*.py"
 step reviewer-service python3 -m pytest -q ../../reviewer-service
+step release-tests npm run test:release
 step updater-tests cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib
 if [ -z "$fail" ]; then echo PASS > "$base.done"; else echo FAIL > "$base.done"; echo "failed:$fail" >> "$base.done"; fi
 echo "sha $sha" >> "$base.done"
@@ -229,30 +236,50 @@ def start_suite(sha, merged):
     d = out_dir()
     os.makedirs(d, exist_ok=True)
     base = os.path.join(d, "full-suite." + sha)
-    if os.path.exists(base + ".running") and running(base + ".running"):
-        die("a full suite for %s is already running (%s.log)" % (sha[:9], base), 3)
-    for ext in (".done", ".log", ".merged", ".running"):
-        if ext == ".running" and not os.path.exists(base + ext):
-            continue
+    guard = base + ".running"
+    # The guard is created exclusively. A guard whose pid is dead is replaced while holding a
+    # takeover lock (mkdir), re-reading the guard under it, so two starters cannot remove each
+    # other's fresh guard.
+    fd = None
+    for _ in range(2):
+        try:
+            fd = os.open(guard, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            if running(guard):
+                die("a full suite for %s is already running or starting (%s.log)" % (sha[:9], base), 3)
+            try:
+                os.mkdir(guard + ".takeover")
+            except FileExistsError:
+                die("another starter is replacing a stale guard for %s; if none is, remove %s.takeover" % (sha[:9], guard), 3)
+            try:
+                if not running(guard):
+                    os.remove(guard)
+            except OSError:
+                pass
+            finally:
+                os.rmdir(guard + ".takeover")
+    if fd is None:
+        die("cannot take the start guard for %s (%s)" % (sha[:9], guard), 3)
+    os.write(fd, str(os.getpid()).encode())
+    os.close(fd)
+    for ext in (".done", ".log", ".merged"):
         if os.path.exists(base + ext):
             os.remove(base + ext)
     with open(base + ".merged", "w") as f:
         for b, fs in merged:
             for x in fs:
                 f.write("%s\t%s\n" % (b, x))
-    wt = os.path.join(os.path.realpath(os.environ.get("TMPDIR") or "/tmp"), "silo-agent", "suite-" + sha[:12])
-    os.makedirs(os.path.dirname(wt), exist_ok=True)
-    fd = None
-    try:
-        fd = os.open(base + ".running", os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        die("a full suite for %s is already starting (%s)" % (sha[:9], base), 3)
-    os.write(fd, str(os.getpid()).encode())
-    os.close(fd)
+    parent = os.path.join(os.path.realpath(os.environ.get("TMPDIR") or "/tmp"), "silo-agent")
+    os.makedirs(parent, exist_ok=True)
+    wt = tempfile.mkdtemp(prefix="suite-%s-" % sha[:12], dir=parent)  # unique per launch
     p = subprocess.Popen(["bash", "-c", SUITE, "x", ROOT, base, sha, wt], stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    with open(base + ".running", "w") as f:
-        f.write(str(p.pid))
+    try:
+        with open(guard, "r+") as f:
+            f.write(str(p.pid))
+    except OSError:
+        pass
     print("full suite started in the background on %s (detached worktree %s)" % (sha[:9], wt))
     print("  log:     %s.log" % base)
     print("  verdict: %s.done (appears when it ends; first line PASS or FAIL)" % base)
