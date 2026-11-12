@@ -15,8 +15,8 @@ You are one agent building one item. Your task message names it and gives a base
 ## Build folder
 
 - Build in your worktree's own `app/SiloUI/target`. Never set `CARGO_TARGET_DIR`.
-- A git post-checkout hook fills that folder at worktree creation with a copy-on-write clone of the main checkout's build, so dependencies are already built and the folder only takes space for what you change.
-- `sccache` is shared across worktrees (15 GiB). `rust-toolchain.toml` at the root pins the Rust version: run plain `cargo`, never `+1.94.0`, `+stable` or similar. Tests run with cargo-nextest 0.9.149 (`cargo install cargo-nextest --locked --version 0.9.149`).
+- Rust builds go through mbx (the `cargo` on PATH is its shim): compiled crates are shared from one cache across every checkout, so a fresh worktree restores what is already built and only compiles what you changed. `target` is a link into that cache; never replace it with a real folder or copy it.
+- `rust-toolchain.toml` at the root pins the Rust version: run plain `cargo`, never `+1.94.0`, `+stable` or similar. Tests run with cargo-nextest 0.9.149 (`cargo install cargo-nextest --locked --version 0.9.149`).
 - Do not delete the folder when you finish; the orchestrator does after the merge (`tools/agent/clean`).
 - Disk is tight. Send build and test output to a log file and read the summary lines. No release profiles unless your item needs one.
 
