@@ -9,12 +9,12 @@
 
 pub mod access;
 pub mod handoff;
+#[cfg(test)]
+mod network_tests;
 pub mod resources;
 mod rules;
 pub mod store;
 mod summary;
-#[cfg(test)]
-mod network_tests;
 #[cfg(test)]
 mod tests;
 
@@ -27,8 +27,8 @@ use silo_api::{
     transport::ApprovalKind,
 };
 
-pub use access::{Access, GitHubAccess};
 use crate::network_policy::{Grants, Held, NetworkPolicy, NetworkPolicyMode, GITHUB_GRANT_PIN};
+pub use access::{Access, GitHubAccess};
 pub use resources::Resources;
 pub use rules::{rule, Rule};
 use summary::{github_access, github_identity, github_writes, listed, quoted};
@@ -404,8 +404,9 @@ impl<'a> Judge<'a> {
                     "{} is for the person who runs Silo; a computer's agent cannot do it.",
                     sentence_start(command)
                 ),
-                None => "This is for the person who runs Silo; a computer's agent cannot do it."
-                    .into(),
+                None => {
+                    "This is for the person who runs Silo; a computer's agent cannot do it.".into()
+                }
             }),
         };
         decided.unwrap_or_else(refuse)
@@ -473,9 +474,10 @@ impl<'a> Judge<'a> {
             MethodName::GuestClientStatus => {
                 match text(&params, "computerId") {
                     Some(id) if id == self.caller => {}
-                    Some(_) => {
-                        return Err("A computer's agent can read the tools status of its own computer only.".into())
-                    }
+                    Some(_) => return Err(
+                        "A computer's agent can read the tools status of its own computer only."
+                            .into(),
+                    ),
                     None => return Err("The call must name a computer (computerId).".into()),
                 }
                 Ok(allow_with(json!({ "computerId": self.caller })))
@@ -721,41 +723,35 @@ impl<'a> Judge<'a> {
                 };
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
                 let network = self.new_computer_network(asked_network.clone(), None, false, name);
-                rewritten["networkPolicy"] =
-                    json!(Self::chosen_network(&network, asked_network));
+                rewritten["networkPolicy"] = json!(Self::chosen_network(&network, asked_network));
                 let asked = Resources::of_linux(configuration)
                     .ok_or("A Linux computer's CPUs, memory and storage are numbers.")?;
-                let more = self.more_than_it_has(&asked);
                 let container =
                     configuration.get("runtime").and_then(Value::as_str) == Some("container");
-                if let (false, None, Err(summary)) = (container, &more, &network) {
-                    return Ok(ask_to_create(
-                        ApprovalKind::Network,
-                        summary.clone(),
-                        rewritten,
-                        creates,
-                    ));
-                }
-                if container || more.is_some() {
-                    let mut summary = if container {
-                        format!(
-                            "Less isolated: make {}, a container computer that shares this device's kernel",
-                            quoted(name)
-                        )
-                    } else {
-                        format!("More resources: make {}", quoted(name))
-                    };
-                    summary.push_str(&self.sizes_sentence(&asked, more.as_deref()));
+                if container {
+                    let mut summary = format!(
+                        "Less isolated: make {}, a container computer that shares this device's kernel with {}.",
+                        quoted(name),
+                        asked.describe()
+                    );
                     if let Err(network) = &network {
                         summary.push(' ');
                         summary.push_str(network);
                     }
-                    let kind = if container {
-                        ApprovalKind::Container
-                    } else {
-                        ApprovalKind::Resources
-                    };
-                    return Ok(ask_to_create(kind, summary, rewritten, creates));
+                    return Ok(ask_to_create(
+                        ApprovalKind::Container,
+                        summary,
+                        rewritten,
+                        creates,
+                    ));
+                }
+                if let Err(summary) = network {
+                    return Ok(ask_to_create(
+                        ApprovalKind::Network,
+                        summary,
+                        rewritten,
+                        creates,
+                    ));
                 }
                 Ok(Decision::Allow(Allowed {
                     params: Some(rewritten),
@@ -766,34 +762,16 @@ impl<'a> Judge<'a> {
             Some("macos") => {
                 let request = params.get("request").ok_or("The request is missing.")?;
                 let name = self.checked_name(text(request, "name"), false)?;
-                let asked = Resources::of_macos(request)
+                Resources::of_macos(request)
                     .ok_or("A macOS computer's CPUs, memory and disk are numbers.")?;
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
                 let network = self.new_computer_network(asked_network.clone(), None, false, name);
-                rewritten["networkPolicy"] =
-                    json!(Self::chosen_network(&network, asked_network));
+                rewritten["networkPolicy"] = json!(Self::chosen_network(&network, asked_network));
                 let creates = Creation {
                     name: name.to_owned(),
                     id: None,
                     source: None,
                 };
-                if let Some(more) = self.more_than_it_has(&asked) {
-                    let mut summary = format!(
-                        "More resources: make {}{}",
-                        quoted(name),
-                        self.sizes_sentence(&asked, Some(&more))
-                    );
-                    if let Err(network) = &network {
-                        summary.push(' ');
-                        summary.push_str(network);
-                    }
-                    return Ok(ask_to_create(
-                        ApprovalKind::Resources,
-                        summary,
-                        rewritten,
-                        creates,
-                    ));
-                }
                 if let Err(summary) = network {
                     return Ok(ask_to_create(
                         ApprovalKind::Network,
@@ -826,35 +804,6 @@ impl<'a> Judge<'a> {
                 mode: NetworkPolicyMode::Closed,
                 ..NetworkPolicy::default()
             }),
-        }
-    }
-
-    /// What a new computer of these sizes has more of than the caller: `Some` (and empty) when
-    /// the caller's own sizes cannot be read, so it asks.
-    fn more_than_it_has(&self, asked: &Resources) -> Option<Vec<String>> {
-        match self.world.resources(self.caller) {
-            Some(own) => {
-                let more = asked.exceeding(&own);
-                (!more.is_empty()).then_some(more)
-            }
-            None => Some(Vec::new()),
-        }
-    }
-
-    /// ", with <sizes>, which is more than <caller> has: <what>." for the summary of a request.
-    fn sizes_sentence(&self, asked: &Resources, more: Option<&[String]>) -> String {
-        let sizes = asked.describe();
-        match more {
-            None => format!(" with {sizes}."),
-            Some([]) => format!(
-                " with {sizes}; the sizes of {} could not be read to compare them.",
-                self.shown(self.caller)
-            ),
-            Some(more) => format!(
-                " with {sizes}, which is more than {} has: {}.",
-                self.shown(self.caller),
-                more.join(", ")
-            ),
         }
     }
 
