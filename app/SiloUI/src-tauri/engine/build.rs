@@ -17,7 +17,7 @@ fn main() {
     if !configured {
         // Contributors without a GitHub App still get a working engine; GitHub
         // reports "not configured in this build" at runtime.
-        println!("cargo:warning=No GitHub App configuration: this engine cannot connect GitHub. See docs/SiloUI-RELEASES.md.");
+        println!("cargo:warning=No GitHub App configuration: this engine cannot connect GitHub. See docs/SiloUI-RELEASES.md. If you add github-build.local.json later, touch app/SiloUI/src-tauri/engine/build.rs (or set SILO_GITHUB_*) so the next build picks it up.");
         return;
     }
     // A partial or invalid configuration fails the build, as in the desktop crate.
