@@ -18,6 +18,7 @@ pub enum RecipeOs {
 
 wire_struct! {
     /// Packages per manager, installed in this order: apt, brew, pip, pipx, npm, cargo.
+    #[derive(Default)]
     RecipePackages {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         apt: Vec<String>,
@@ -31,19 +32,6 @@ wire_struct! {
         pipx: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         cargo: Vec<String>,
-    }
-}
-
-impl Default for RecipePackages {
-    fn default() -> Self {
-        Self {
-            apt: Vec::new(),
-            brew: Vec::new(),
-            npm: Vec::new(),
-            pip: Vec::new(),
-            pipx: Vec::new(),
-            cargo: Vec::new(),
-        }
     }
 }
 

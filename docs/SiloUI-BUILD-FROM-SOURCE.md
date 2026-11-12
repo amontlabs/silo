@@ -11,7 +11,7 @@ Build on the supported host: Apple Silicon macOS 15+. Linux is a guest operating
 Install [Node.js 24](https://nodejs.org/en/download), Python 3.11 or newer, [Go 1.25 or newer](https://go.dev/doc/install), Git, and [Rust through rustup](https://rustup.rs/). Install the pinned Rust toolchain used by the bundled VM runtime:
 
 ```sh
-rustup toolchain install 1.95.0 --profile minimal
+rustup toolchain install 1.100.0 --profile minimal
 ```
 
 **macOS:** install Apple's command-line tools if you do not already have them:
@@ -27,7 +27,7 @@ Linux guests on a Mac use Apple's Virtualization framework and the host's Keycha
 ```sh
 git clone https://github.com/amontlabs/silo.git
 cd silo
-rustup override set 1.95.0
+rustup override set 1.100.0
 npm --prefix app/SiloUI ci
 ```
 

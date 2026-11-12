@@ -13,7 +13,7 @@ t() { if eval "$2"; then ok "$1" 0; else ok "$1" 1 "${3:-}"; fi; }
 
 R=$W/repo; S=$R/app/SiloUI; T=$S/src-tauri; mkdir -p $R/tools/agent $S/scripts $S/src-tauri/guest/macos $S/src-tauri/macos-gateway $S/cli/src $S/other
 cp $A/runtime-cache $R/tools/agent/
-echo '{"toolchain":"1.95.0","patches":[]}' >$S/runtime-inputs.json
+echo '{"toolchain":"1.100.0","patches":[]}' >$S/runtime-inputs.json
 for f in package.json scripts/prepare-microsandbox-runtime.mjs scripts/microsandbox-runtime.mjs scripts/git-runtime.mjs scripts/linux-package-tools.mjs \
   scripts/build-input.mjs scripts/preflight.mjs scripts/guest-silo-runtime.mjs scripts/stage-guest-silo.mjs src-tauri/guest/macos/build-network-bootstrap.sh \
   src-tauri/guest/macos/silo-network-bootstrap.swift src-tauri/macos-gateway/a Cargo.toml Cargo.lock; do echo "$f" >$S/$f; done
@@ -23,7 +23,7 @@ echo lib1 >$S/cli/src/lib.rs; echo unrelated1 >$S/other/lib.rs
 mkdir -p $W/bin
 cat >$W/bin/rustc <<'X'
 #!/bin/sh
-case "$*" in *host-tuple*) echo aarch64-apple-darwin;; *) echo "rustc 1.95.0";; esac
+case "$*" in *host-tuple*) echo aarch64-apple-darwin;; *) echo "rustc 1.100.0";; esac
 X
 cat >$W/bin/cargo <<X
 #!/bin/sh
