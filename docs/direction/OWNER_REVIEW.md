@@ -153,3 +153,13 @@ was chosen and why; any can be changed. Older items are also in the build log un
     recipe's setup steps ("runs 1 step last") instead of quoting them; you still see the full
     commands. A merge waiting for you shows the computer "A merge waiting for the approval of
     the person who runs Silo."
+
+## Undo computer's network policy after a rebuild (R15)
+
+36. **The undo copy keeps the policy the computer had at the swap:** a policy you change during
+    the rebuild reaches the `-undo` computer; a change landing in the second or two of the swap
+    itself does not (it keeps the policy from one change earlier, which you had approved).
+37. **Rebuilds interrupted by an older Silo close the undo copy:** if an older Silo stopped a
+    rebuild after publishing it but before saving the undo policy, this Silo closes the `-undo`
+    computer instead of guessing its allowlist from the disk's recorded rules; you reopen it by
+    hand. Rules read from a disk with no saved policy also hold every list at its first version.
