@@ -203,6 +203,12 @@ def analyse(root, base):
     for path in files:
         exists = (root / path).exists()
         is_rust = path.endswith(('.rs', 'Cargo.toml', 'build.rs'))
+        for prefix, tests in FRONTEND_READERS:  # before the early `continue` below
+            if path.startswith(prefix) and (prefix != f'{APP}/src-tauri/' or path in NATIVE_CONFIG or
+                                            path.startswith(NATIVE_CONFIG_DIRS)):
+                found = desktop_tests(tests)
+                result['frontend'].extend(found)
+                why.append((path, f'read by {len(found)} frontend test file(s)'))
         if path in RUST_EVERYTHING:
             result['everything'] = True
             why.append((path, 'changes every crate: all Rust checks and tests'))
@@ -225,12 +231,6 @@ def analyse(root, base):
         if path.endswith('.css') and path.startswith(f'{APP}/'):
             result['frontend'].extend(t for t in CSS_TESTS if (root / t).exists())
             why.append((path, 'stylesheet: the tests that read CSS from disk'))
-        for prefix, tests in FRONTEND_READERS:
-            if path.startswith(prefix) and (prefix != f'{APP}/src-tauri/' or path in NATIVE_CONFIG or
-                                            path.startswith(NATIVE_CONFIG_DIRS)):
-                found = desktop_tests(tests)
-                result['frontend'].extend(found)
-                why.append((path, f'read by {len(found)} frontend test file(s)'))
         # Workflow and agent tooling.
         if path.startswith('.github/'):
             result['script_tests'].extend(t for t in all_script_tests if '.github' in (root / t).read_text(errors='replace'))
@@ -288,8 +288,7 @@ def analyse(root, base):
         selected = []
         if candidate and (scripts / candidate).exists():
             selected.append(f'{APP}/scripts/{candidate}')
-        if path.startswith(f'{APP}/scripts/') or path.endswith(('.py', '.sh', '.mjs')) or not exists:
-            selected += reading_tests(path)
+        selected += reading_tests(path)  # any extension: lock files and extensionless shims count
         if not selected and path.startswith(f'{APP}/scripts/') and (not exists or name.endswith(('.py', '.mjs', '.sh'))) \
                 and not name.startswith('test_') and not name.endswith('.test.mjs'):
             # Unknown consumers (or a deleted file): broader is safer than nothing.

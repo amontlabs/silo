@@ -38,6 +38,11 @@ sha=$(git -C "$root" rev-parse --verify "$ref^{commit}")
 toolchain=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$root/rust-toolchain.toml" 2>/dev/null || true)
 [ -n "$toolchain" ] || { echo "linux-warm: no channel in $root/rust-toolchain.toml" >&2; exit 1; }
 case $dir in *[!A-Za-z0-9._/~+-]*|"") echo "linux-warm: unsupported characters in --dir '$dir'" >&2; exit 2 ;; esac
+# One spelling per directory, so the lock file is the same: no repeated or trailing slashes, no . or .. parts.
+while case $dir in *//*) true ;; *) false ;; esac; do dir=${dir//\/\//\/}; done
+[ "$dir" = / ] || dir=${dir%/}
+case /$dir/ in */./*|*/../*) echo "linux-warm: --dir '$dir' must not contain . or .. parts" >&2; exit 2 ;; esac
+[ -n "$dir" ] && [ "$dir" != / ] || { echo "linux-warm: --dir '$dir' is not a usable directory" >&2; exit 2; }
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=3)
 
 if ! ssh "${ssh_opts[@]}" "$host" true 2>/dev/null; then
