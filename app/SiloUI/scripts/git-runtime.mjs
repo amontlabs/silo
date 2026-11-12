@@ -16,7 +16,7 @@ import {
 } from "node:fs/promises"
 import { basename, join, relative, resolve, sep } from "node:path"
 
-import { fetchVerifiedFile } from "./build-input.mjs"
+import { fetchVerifiedFile, runtimeCacheRoot } from "./build-input.mjs"
 
 const execFileAsync = promisify(execFile)
 
@@ -214,13 +214,13 @@ export async function stageGitRuntime({
 }) {
   const tauriRoot = resolve(appRoot, "src-tauri")
   const runtimeRoot = join(tauriRoot, "runtime")
-  const cacheRoot = join(tauriRoot, "target", "runtime-cache", "dugite", DUGITE_RELEASE)
+  const cacheRoot = join(runtimeCacheRoot(tauriRoot), "dugite", DUGITE_RELEASE)
   const stagedRoot = join(runtimeRoot, `.git-staging-${process.pid}`)
   const bundledRoot = join(runtimeRoot, "git")
   const binariesRoot = join(tauriRoot, "binaries")
   const stagedBinariesRoot = join(stagedRoot, ".external-binaries")
   const archiveFile = join(cacheRoot, selected.archive)
-  for (const candidate of [runtimeRoot, cacheRoot, stagedRoot, bundledRoot, binariesRoot, stagedBinariesRoot, archiveFile]) {
+  for (const candidate of [runtimeRoot, stagedRoot, bundledRoot, binariesRoot, stagedBinariesRoot]) {
     assertInside(tauriRoot, candidate)
   }
 

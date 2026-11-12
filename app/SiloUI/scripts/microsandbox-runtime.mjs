@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto"
 import { execFileSync } from "node:child_process"
-import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { basename, dirname, join, relative, resolve, sep } from "node:path"
 
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { fetchVerifiedFile, isVerifiedFile } from "./build-input.mjs"
+import { fetchVerifiedFile, isVerifiedFile, runtimeCacheRoot } from "./build-input.mjs"
 
 const inputs = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../runtime-inputs.json"), "utf8"))
 export const MICRO_SANDBOX_VERSION = inputs.microsandboxVersion
@@ -106,6 +106,9 @@ export async function buildPatchedExecutable({
     "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_RUSTFLAGS",
     `CARGO_TARGET_${targetEnvironment}_RUSTFLAGS`,
     ...Object.keys(process.env).filter(name => name.startsWith("CARGO_PROFILE_RELEASE_")).sort(),
+    // Read by rustc and the C build scripts of the dependencies (minimum macOS, SDK, C compiler).
+    "MACOSX_DEPLOYMENT_TARGET", "SDKROOT", "DEVELOPER_DIR", "CC", "CXX", "CFLAGS", "CXXFLAGS", "LDFLAGS",
+    `CC_${targetEnvironment.toLowerCase()}`, `CFLAGS_${targetEnvironment.toLowerCase()}`,
   ].map(name => [name, process.env[name] ?? null]))
   const gatewayInputs = appRoot
     ? await readMacosGatewayInputs(appRoot)
@@ -164,7 +167,8 @@ export async function buildPatchedExecutable({
     for (const patchPath of patchPaths) applyRuntimePatch(source[0], patchPath)
     if (gatewayInputs) {
       const gatewaySource = join(source[0], "macos-gateway")
-      await cp(resolve(appRoot, "src-tauri/macos-gateway"), gatewaySource, { recursive: true })
+      const gatewayRoot = resolve(appRoot, "src-tauri/macos-gateway")
+      await cp(gatewayRoot, gatewaySource, { recursive: true, filter: path => path !== join(gatewayRoot, "target") })
     }
     runBuildTool("cargo", [`+${MICROSANDBOX_BUILD_TOOLCHAIN}`, "fetch", "--locked", "--target", targetTriple], { cwd: source[0] })
     const agentdPath = join(source[0], "build", "agentd")
@@ -230,19 +234,23 @@ export async function buildPatchedExecutable({
   }
 }
 
-async function readMacosGatewayInputs(appRoot) {
+// Every file of the gateway crate that the build copies into the MicroSandbox checkout, in a
+// fixed order, so a new module, build script or data file changes the cache key.
+async function gatewayFiles(directory, prefix = "") {
+  const files = []
+  for (const entry of (await readdir(join(directory, prefix), { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (prefix === "" && entry.name === "target") continue
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name
+    if (entry.isDirectory()) files.push(...await gatewayFiles(directory, name))
+    else if (entry.isFile()) files.push(name)
+    else throw new Error(`The macOS gateway sources contain an unsupported file type: ${name}`)
+  }
+  return files
+}
+
+export async function readMacosGatewayInputs(appRoot) {
   const directory = resolve(appRoot, "src-tauri/macos-gateway")
-  const names = [
-    "Cargo.toml",
-    "Cargo.lock",
-    "reserved-secret-names.json",
-    "src/control.rs",
-    "src/frames.rs",
-    "src/main.rs",
-    "src/network.rs",
-    "src/ports.rs",
-  ]
-  return Promise.all(names.map(async name => [name, await readFile(join(directory, name))]))
+  return Promise.all((await gatewayFiles(directory)).map(async name => [name, await readFile(join(directory, name))]))
 }
 
 export async function stageRuntime({
@@ -259,13 +267,13 @@ export async function stageRuntime({
   const tauriRoot = resolve(appRoot, "src-tauri")
   const binariesRoot = join(tauriRoot, "binaries")
   const runtimeRoot = join(tauriRoot, "runtime")
-  const cacheRoot = join(tauriRoot, "target", "runtime-cache", `v${MICRO_SANDBOX_VERSION}`)
+  const cacheRoot = join(runtimeCacheRoot(tauriRoot), `v${MICRO_SANDBOX_VERSION}`)
   const stagedRoot = join(runtimeRoot, `.staging-${process.pid}`)
   const bundledRoot = join(runtimeRoot, "microsandbox")
   const executablePath = join(binariesRoot, `msb-${targetTriple}`)
   const macosGatewayPath = join(binariesRoot, `silo-macos-gateway-${targetTriple}`)
   const libraryPath = join(stagedRoot, targetTriple, "lib", selected.libraryName)
-  for (const path of [binariesRoot, runtimeRoot, cacheRoot, stagedRoot, bundledRoot, executablePath, libraryPath]) {
+  for (const path of [binariesRoot, runtimeRoot, stagedRoot, bundledRoot, executablePath, libraryPath]) {
     assertInside(tauriRoot, path)
   }
 

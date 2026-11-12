@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { createReadStream, createWriteStream } from "node:fs"
 import { mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises"
-import { basename, dirname, join } from "node:path"
+import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 import { Readable, Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 
@@ -85,4 +85,13 @@ export async function writeVerifiedFile(path, openSource, expectedSha256, label,
 export async function fetchVerifiedFile(fetchInput, url, expectedSha256, label, path, limits = {}) {
   if (await isVerifiedFile(path, expectedSha256, label, limits)) return path
   return writeVerifiedFile(path, signal => fetchInput(url, { signal }), expectedSha256, label, limits)
+}
+
+// Where preparation keeps downloads and content-keyed builds. SILO_RUNTIME_CACHE_DIR (absolute)
+// lets every checkout of a machine share one root; otherwise each checkout keeps its own.
+export function runtimeCacheRoot(tauriRoot, environment = process.env) {
+  const shared = environment.SILO_RUNTIME_CACHE_DIR?.trim()
+  if (!shared) return join(tauriRoot, "target", "runtime-cache")
+  if (!isAbsolute(shared)) throw new Error("SILO_RUNTIME_CACHE_DIR must be an absolute path")
+  return resolve(shared)
 }

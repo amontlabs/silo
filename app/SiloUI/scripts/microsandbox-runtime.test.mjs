@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import { Readable } from "node:stream"
-import { MICROSANDBOX_PATCHES, runtimeTargets, sha256, stageRuntime } from "./microsandbox-runtime.mjs"
+import { MICROSANDBOX_PATCHES, readMacosGatewayInputs, runtimeTargets, sha256, stageRuntime } from "./microsandbox-runtime.mjs"
 
 const runtimeModule = new URL("./microsandbox-runtime.mjs", import.meta.url).href
 const toolScript = `#!${process.execPath}
@@ -184,3 +184,16 @@ for (const failure of ["permissions", "probe exit"]) {
     execFileSync(cached, ["--version"])
   })
 }
+
+
+test("every file of the gateway crate except its build output feeds the cache key", async t => {
+  const appRoot = await mkdtemp(join(tmpdir(), "silo-gateway-inputs-"))
+  t.after(() => rm(appRoot, { recursive: true, force: true }))
+  const gateway = join(appRoot, "src-tauri/macos-gateway")
+  for (const name of ["Cargo.toml", "build.rs", "src/main.rs", "src/later/module.rs", "target/debug/ignored"]) {
+    await mkdir(join(gateway, name, ".."), { recursive: true })
+    await writeFile(join(gateway, name), name)
+  }
+  const names = (await readMacosGatewayInputs(appRoot)).map(([name]) => name)
+  assert.deepEqual(names, ["Cargo.toml", "build.rs", "src/later/module.rs", "src/main.rs"])
+})

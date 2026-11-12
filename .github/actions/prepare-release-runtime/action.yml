@@ -52,9 +52,9 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         lookup-only: ${{ inputs.lookup-only }}
-        key: silo-runtime-v1-${{ inputs.runner }}-${{ inputs.target }}-rust${{ steps.runtime-inputs.outputs.toolchain }}-go${{ steps.go-compiler.outputs.version }}-${{ hashFiles('.github/actions/prepare-release-runtime/action.yml', 'app/SiloUI/runtime-inputs.json', 'app/SiloUI/scripts/preflight.mjs', 'app/SiloUI/scripts/prepare-microsandbox-runtime.mjs', 'app/SiloUI/scripts/microsandbox-runtime.mjs', 'app/SiloUI/scripts/git-runtime.mjs', 'app/SiloUI/scripts/lfs-transfer-runtime.mjs', 'app/SiloUI/patches/microsandbox-*.patch', 'app/SiloUI/src-tauri/macos-gateway/Cargo.*', 'app/SiloUI/src-tauri/macos-gateway/reserved-secret-names.json', 'app/SiloUI/src-tauri/macos-gateway/src/**') }}
+        key: silo-runtime-v1-${{ inputs.runner }}-${{ inputs.target }}-rust${{ steps.runtime-inputs.outputs.toolchain }}-go${{ steps.go-compiler.outputs.version }}-${{ hashFiles('.github/actions/prepare-release-runtime/action.yml', 'app/SiloUI/runtime-inputs.json', 'app/SiloUI/scripts/preflight.mjs', 'app/SiloUI/scripts/prepare-microsandbox-runtime.mjs', 'app/SiloUI/scripts/microsandbox-runtime.mjs', 'app/SiloUI/scripts/git-runtime.mjs', 'app/SiloUI/scripts/lfs-transfer-runtime.mjs', 'app/SiloUI/patches/microsandbox-*.patch', 'app/SiloUI/src-tauri/macos-gateway/**') }}
         # The macOS gateway sources are part of the patched MicroSandbox build
-        # key (readMacosGatewayInputs), so they must change this key too.
+        # key (readMacosGatewayInputs hashes the whole crate), so they must change this key too.
         # Older cache archives are input candidates only; preparation below
         # rechecks pinned bytes and the source/patch/toolchain build key.
         restore-keys: silo-runtime-v1-${{ inputs.runner }}-${{ inputs.target }}-rust${{ steps.runtime-inputs.outputs.toolchain }}-

@@ -11,3 +11,4 @@ export function verifyFile(path: string, expectedSha256: string, label: string, 
 export function isVerifiedFile(path: string, expectedSha256: string, label: string, limits?: InputLimits): Promise<boolean>
 export function writeVerifiedFile(path: string, openSource: (signal: AbortSignal) => Promise<Readable>, expectedSha256: string, label: string, limits?: InputLimits): Promise<string>
 export function fetchVerifiedFile(fetchInput: FetchStream, url: string, expectedSha256: string, label: string, path: string, limits?: InputLimits): Promise<string>
+export function runtimeCacheRoot(tauriRoot: string, environment?: Record<string, string | undefined>): string

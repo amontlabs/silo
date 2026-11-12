@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Readable } from "node:stream"
 import test from "node:test"
-import { fetchStream, fetchVerifiedFile, verifyFile, writeVerifiedFile } from "./build-input.mjs"
+import { fetchStream, fetchVerifiedFile, runtimeCacheRoot, verifyFile, writeVerifiedFile } from "./build-input.mjs"
 
 const bytes = Buffer.from("verified build input")
 const digest = createHash("sha256").update(bytes).digest("hex")
@@ -93,3 +93,9 @@ for (const mode of ["headers", "body", "status", "chunked"]) {
     assert.deepEqual(await readdir(root), ["archive.tar.gz"])
   })
 }
+
+test("the runtime cache root is per checkout unless an absolute shared root is configured", () => {
+  assert.equal(runtimeCacheRoot("/work/src-tauri", {}), "/work/src-tauri/target/runtime-cache")
+  assert.equal(runtimeCacheRoot("/work/src-tauri", { SILO_RUNTIME_CACHE_DIR: " /shared/silo " }), "/shared/silo")
+  assert.throws(() => runtimeCacheRoot("/work/src-tauri", { SILO_RUNTIME_CACHE_DIR: "relative" }), /absolute/)
+})

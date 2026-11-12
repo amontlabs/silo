@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { runtimeCacheRoot } from './build-input.mjs'
 import { MICROSANDBOX_BUILD_TOOLCHAIN } from './microsandbox-runtime.mjs'
 
 const execute = promisify(execFile)
@@ -58,30 +59,39 @@ export const archiverWrapper = zig => `#!/bin/sh
 exec "${zig}" ar "$@"
 `
 
-async function build({ appRoot, selected, zig, toolchain, run, environment }) {
-  const tools = await mkdtemp(join(process.env.TMPDIR ?? '/tmp', 'silo-guest-cc.'))
-  try {
-    await writeFile(join(tools, 'cc'), compilerWrapper(zig, selected.zigTarget), { mode: 0o755 })
-    await writeFile(join(tools, 'ar'), archiverWrapper(zig), { mode: 0o755 })
-    const triple = selected.rustTarget.toUpperCase().replaceAll('-', '_')
-    const targetDirectory = environment.CARGO_TARGET_DIR?.trim() || resolve(appRoot, 'src-tauri/target/guest-silo')
-    await run('cargo', [...(toolchain ? [`+${toolchain}`] : []), 'build', '--release', '-p', 'silo-cli', '--target', selected.rustTarget, '--locked'], {
-      cwd: appRoot,
-      maxBuffer: 64 * 1024 * 1024,
-      env: {
-        ...environment,
-        [`CC_${selected.rustTarget.replaceAll('-', '_')}`]: join(tools, 'cc'),
-        [`AR_${selected.rustTarget.replaceAll('-', '_')}`]: join(tools, 'ar'),
-        [`CARGO_TARGET_${triple}_LINKER`]: join(tools, 'cc'),
-        [`CARGO_TARGET_${triple}_RUSTFLAGS`]: '-C link-self-contained=no',
-        CARGO_TARGET_DIR: targetDirectory,
-        RUSTC_WRAPPER: '',
-      },
-    })
-    return join(targetDirectory, selected.rustTarget, 'release', 'silo')
-  } finally {
-    await rm(tools, { recursive: true, force: true })
+// Cargo keys every compilation on the linker path, so the wrappers live at a path that depends only
+// on their content (never a fresh temporary directory): an unchanged guest silo is not rebuilt, and
+// checkouts sharing a cache root reuse each other's compiled dependencies.
+async function wrapperDirectory(appRoot, files) {
+  const digest = sha256(Buffer.from(JSON.stringify(files))).slice(0, 16)
+  const tools = join(runtimeCacheRoot(resolve(appRoot, 'src-tauri'), process.env), 'guest-cc', digest)
+  await mkdir(tools, { recursive: true })
+  for (const [name, content] of Object.entries(files)) {
+    const temporary = join(tools, `.${name}.${process.pid}`)
+    await writeFile(temporary, content, { mode: 0o755 })
+    await rename(temporary, join(tools, name))
   }
+  return tools
+}
+
+async function build({ appRoot, selected, zig, toolchain, run, environment }) {
+  const tools = await wrapperDirectory(appRoot, { cc: compilerWrapper(zig, selected.zigTarget), ar: archiverWrapper(zig) })
+  const triple = selected.rustTarget.toUpperCase().replaceAll('-', '_')
+  const targetDirectory = environment.CARGO_TARGET_DIR?.trim() || resolve(appRoot, 'src-tauri/target/guest-silo')
+  await run('cargo', [...(toolchain ? [`+${toolchain}`] : []), 'build', '--release', '-p', 'silo-cli', '--target', selected.rustTarget, '--locked'], {
+    cwd: appRoot,
+    maxBuffer: 64 * 1024 * 1024,
+    env: {
+      ...environment,
+      [`CC_${selected.rustTarget.replaceAll('-', '_')}`]: join(tools, 'cc'),
+      [`AR_${selected.rustTarget.replaceAll('-', '_')}`]: join(tools, 'ar'),
+      [`CARGO_TARGET_${triple}_LINKER`]: join(tools, 'cc'),
+      [`CARGO_TARGET_${triple}_RUSTFLAGS`]: '-C link-self-contained=no',
+      CARGO_TARGET_DIR: targetDirectory,
+      RUSTC_WRAPPER: '',
+    },
+  })
+  return join(targetDirectory, selected.rustTarget, 'release', 'silo')
 }
 
 async function selectToolchain(run, selected, required) {

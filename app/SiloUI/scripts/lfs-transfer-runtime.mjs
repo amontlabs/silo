@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { chmod, copyFile, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { fetchVerifiedFile } from './build-input.mjs'
+import { fetchVerifiedFile, runtimeCacheRoot } from './build-input.mjs'
 import { validateArchiveEntries } from './git-runtime.mjs'
 
 const execute = promisify(execFile)
@@ -68,7 +68,7 @@ export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStre
   const architecture = lfsTransferGuestArchitecture(targetTriple)
   const tauriRoot = resolve(appRoot, 'src-tauri')
   const root = join(tauriRoot, 'runtime', 'lfs-transfer')
-  const cache = join(tauriRoot, 'target', 'runtime-cache', 'git-lfs-transfer', LFS_TRANSFER_COMMIT)
+  const cache = join(runtimeCacheRoot(tauriRoot), 'git-lfs-transfer', LFS_TRANSFER_COMMIT)
   const environment = { ...process.env, CGO_ENABLED: '0', GOOS: 'linux', GOARCH: architecture, GOWORK: 'off', GOSUMDB: 'sum.golang.org' }
   await mkdir(cache, { recursive: true })
   const context = await mkdtemp(join(cache, 'compiler-'))
@@ -170,10 +170,19 @@ export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStre
       binarySha256: sha256(await readFile(join(stage, 'git-lfs-transfer'))), licenseSha256: await licenseDigests(stage),
     }, null, 2)}\n`)
     await normalizeModes(stage)
+    // Publish the cache copy whole: copy beside it, then rename, so a reader (or another
+    // checkout sharing this cache) never sees a half-written build.
+    const publishing = `${cachedBuild}.tmp-${process.pid}`
+    await mkdir(dirname(cachedBuild), { recursive: true })
+    await rm(publishing, { recursive: true, force: true })
+    await cp(stage, publishing, { recursive: true })
     await rm(root, { recursive: true, force: true })
     await rename(stage, root)
     await rm(cachedBuild, { recursive: true, force: true })
-    await cp(root, cachedBuild, { recursive: true })
+    await rename(publishing, cachedBuild).catch(async error => {
+      await rm(publishing, { recursive: true, force: true })
+      if (!(await valid(cachedBuild))) throw error
+    })
     return { root, binaryPath, manifestPath }
   } catch (error) {
     await rm(stage, { recursive: true, force: true })

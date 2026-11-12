@@ -123,14 +123,12 @@ class ReleaseCacheTests(unittest.TestCase):
         self.assertLess(ACTION.index('node app/SiloUI/scripts/preflight.mjs'), ACTION.index('actions/cache/restore'))
         self.assertIn("'app/SiloUI/runtime-inputs.json'", ACTION)
         self.assertIn('restore-keys: silo-runtime-v1-', ACTION)
-        # Every macOS gateway input read by readMacosGatewayInputs feeds the
-        # patched MicroSandbox build key, so it must also change the cache key.
-        runtime_script = (ROOT / 'app/SiloUI/scripts/microsandbox-runtime.mjs').read_text()
-        gateway_names = runtime_script.split('async function readMacosGatewayInputs', 1)[1].split('const names = [', 1)[1].split(']', 1)[0]
+        # readMacosGatewayInputs hashes every file of the gateway crate into the
+        # patched MicroSandbox build key, so any file of it must change the cache key.
         key_line = next(line for line in ACTION.splitlines() if 'key: silo-runtime-v1-' in line and 'restore-keys' not in line)
-        for name in re.findall(r'"([^"]+)"', gateway_names):
-            path = 'app/SiloUI/src-tauri/macos-gateway/' + name
-            self.assertTrue(any(fnmatch.fnmatch(path, pattern) for pattern in re.findall(r"'([^']+)'", key_line)), path)
+        patterns = re.findall(r"'([^']+)'", key_line)
+        for path in ['app/SiloUI/src-tauri/macos-gateway/build.rs', 'app/SiloUI/src-tauri/macos-gateway/src/later/module.rs']:
+            self.assertTrue(any(fnmatch.fnmatch(path, pattern) for pattern in patterns), path)
         validate = WORKFLOW.split('\n  validate:', 1)[1].split('\n  macos-minimum-constraints:', 1)[0]
         self.assertIn('node app/SiloUI/scripts/preflight.mjs', validate)
 

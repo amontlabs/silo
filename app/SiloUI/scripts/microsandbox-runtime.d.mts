@@ -70,3 +70,4 @@ export function stageRuntime(options: {
   libraryPath: string
   manifestPath: string
 }>
+export function readMacosGatewayInputs(appRoot: string): Promise<[string, Buffer][]>
