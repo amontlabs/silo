@@ -20,7 +20,7 @@ was chosen and why; any can be changed. Older items are also in the build log un
 
 ## Resources (T3 follow-up)
 
-5. **Starts admitted but not yet booted reserve their memory**, and a request larger than the
+5. *(Superseded by 38.)* **Starts admitted but not yet booted reserve their memory**, and a request larger than the
    free headroom is refused rather than admitted (being built, R2). Why: a burst of starts could
    each pass the floor before any computer took memory.
 
@@ -54,7 +54,7 @@ was chosen and why; any can be changed. Older items are also in the build log un
 
 ## Resources (R2)
 
-14. **A start's memory is held for it until the start ends, at most 5 minutes**, and a start that
+14. *(Superseded by 38: approved starts reserve too.)* **A start's memory is held for it until the start ends, at most 5 minutes**, and a start that
     asks for more than the free memory above the floor is refused. A start the owner approved
     checks the floor but does not hold memory, so several approved starts at once can still pass
     together. Left as is: the owner approved each one.
@@ -133,13 +133,14 @@ was chosen and why; any can be changed. Older items are also in the build log un
 
 ## Allowlist wildcards (R16)
 
-32. **Shared-hosting wildcards are refused:** the allowlist now checks wildcards against the
-    full Public Suffix List (the `psl` crate, compiled in), so `*.cloudfront.net`,
-    `*.githubusercontent.com`, `*.pages.dev`, `*.netlify.app` and `*.duckdns.org` are refused:
-    anyone can host a site under them. Exact names (`raw.githubusercontent.com`) still work.
-    Saved lists that already contain such a wildcard keep working until they are saved again.
-    The list is as fresh as the `psl` version in the build; refreshing it each release is a
-    possible routine. Decide whether these stay refused and whether to refresh per release.
+32. **Shared-hosting wildcards are allowed with a warning** (owner decision, R19): `*.netlify.app`,
+    `*.github.io`, `*.cloudfront.net` and the like are saved with a plain warning ("lets this
+    computer reach any site hosted there"); wildcards over a whole domain ending (`*.com`,
+    `*.co.uk`) stay refused. A secret only opens such a wildcard once you tick "Let computers reach
+    every site under these" in its editor, or approve a computer's ask that showed the warning;
+    secrets saved before R19 stay as they were until then. Gap: hosts that only the full Public
+    Suffix List knows (e.g. `*.surge.sh`) get no checkbox in the editor and the CLI has no flag,
+    so for those you add the wildcard to the computer's network list directly.
 33. **Guest output limits:** a command the engine runs in a computer is stopped when it prints
     more than 64 KiB of errors (helper runs) or 960 KiB (other runs); nothing it prints is
     written to the device's disk.
@@ -170,9 +171,9 @@ was chosen and why; any can be changed. Older items are also in the build log un
     ends, when the computer it boots is seen running, or 2 hours after the job starts its work
     (a backstop for a job whose worker died). A creation still queued more than 2 hours behind
     others loses its reservation; a restore-image download over 2 hours too. Is 2 hours right?
-39. **Undo and restart of a running computer reserve its full memory again:** an undo or restart
-    is refused when free memory is below that computer's size, even though it already holds it.
-    Same rule restart and restore used before.
+39. **Restart, undo and restore of a running computer need no free memory** (owner decision, R19):
+    the computer's own memory stays set aside while it is stopped mid-restart, so nothing else
+    can take it; only a larger saved state needs the difference.
 40. **Deleted computers' jobs:** finished jobs of a computer that is gone for two housekeeping
     passes (1-2 minutes) are acknowledged for you at once, so they stop counting against the
     512-job limit; you can't read their results afterwards.
