@@ -16,7 +16,8 @@ affected set and mode is skipped ("already green"). Tests that fail and then pas
 retry are recorded in docs/workflow/FLAKY.md. Exit code: 0 green, 1 a step failed, 2 PARTIAL (a
 crate could not be checked, or the tree changed during the run): never green, no marker written.
 The green key covers the tree hash, rustc, nextest or cargo test, RUSTFLAGS/CARGO_*/SILO_GITHUB_*
-values, the GitHub build file's presence, node/npm versions, the touched files and the mode.
+values, the GitHub build file's presence, whether the prepared runtime is present (when silo-ui is
+affected), node/npm/python versions (when frontend or script tests run), the touched files and the mode.
 """
 import argparse
 import datetime
@@ -134,14 +135,17 @@ def main():
     nextest = run(['cargo', 'nextest', '--version'], root)
     has_nextest = nextest[0] == 0
     runner = nextest[1].strip() if has_nextest else 'cargo test'
+    # Node, npm and Python run every frontend and script test, so they are part of the key whenever either runs.
     tool_versions = [run(command, root)[1].strip() for command in (['node', '--version'], ['npm', '--version'])] \
-        if run_frontend else []
+        if run_frontend or plan['script_tests'] else []
+    if plan['script_tests']:
+        tool_versions.append(f'{sys.executable} {sys.version}')
     github_file = (app / 'github-build.local.json').exists()
     relevant_env = sorted((k, v) for k, v in os.environ.items()
                           if k in ('RUSTFLAGS', 'RUSTDOCFLAGS', 'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER', 'RUSTUP_TOOLCHAIN')
                           or k.startswith(('CARGO_', 'SILO_GITHUB_')) and not k.startswith('CARGO_TERM_'))
     tree = tree_hash(root)
-    key_text = json.dumps([tree, toolchain, runner, relevant_env, github_file, tool_versions, plan['changed'],
+    key_text = json.dumps([tree, toolchain, runner, relevant_env, github_file, tool_versions, skip_ui, plan['changed'],
                            plan['crates'], plan['filterset'], frontend, plan['frontend_all'],
                            plan['script_tests'], plan['other_manifests'], plan['everything']])
     key = hashlib.sha256(key_text.encode()).hexdigest()[:24]
@@ -149,7 +153,7 @@ def main():
     markers = state / 'green'
     markers.mkdir(parents=True, exist_ok=True)
     marker = markers / f'{key}.{mode}'
-    if marker.exists() or (args.quick and (markers / f'{key}.full').exists()):
+    if not partial and (marker.exists() or (args.quick and (markers / f'{key}.full').exists())):
         print(f'check: already green — same tree {tree[:9]}, rustc {version}, {mode} — skipped')
         return 0
 
