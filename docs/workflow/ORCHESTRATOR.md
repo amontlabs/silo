@@ -67,7 +67,7 @@ tools/agent/board ready        # item<TAB>stack-on=<branch>
 4. Fixes go to the **same child** (SendMessage, or `delegate_task` into its worktree) with [briefs/fix.md](briefs/fix.md). Reuse it while its session is small; if the session has grown large, start a fresh `build` in the same worktree with a short handover.
 5. Follow-up round: the review brief's round 2 checks only the listed fixes and what they touch. Stop when a round finds nothing that matters.
 6. Live checks: start `live` ([brief](briefs/live.md)). It runs with `SILO_AGENT_ITEM=<item>` so its state belongs to the item.
-7. Flaky tests: `check` appends them to `$SILO_BUILD_STATE/flaky.log` and edits no tracked file. At the end of every round move new lines into [FLAKY.md](FLAKY.md) (commit it in your own worktree), remove them from the log, and make a fix item on the board for each.
+7. Flaky tests: `check` appends them to `$SILO_BUILD_STATE/flaky.log` and edits no tracked file. At the end of every round move new lines into [FLAKY.md](FLAKY.md) (commit it in the integration checkout between merges; merge-batch needs a clean tree), remove them from the log, and make a fix item on the board for each.
 8. A lower branch changed after fixes: `tools/agent/board restack <item>`. It stops with exit 2 on a conflict and names the files; give those to the child.
 9. Reviewed or waived: `tools/agent/board set <item> state=reviewed`.
 
