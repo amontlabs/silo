@@ -152,7 +152,30 @@ $LIVE wait $S --timeout 2 >$W/wout 2>&1; rc=$?
 ok "wait does not return a verdict of an earlier run" $([ $rc = 4 ] && echo 0 || echo 1)
 ( sleep 1; printf 'verdict: pass\nrun: new\n' >$S/VERDICT ) & $LIVE wait $S --timeout 8 >/dev/null 2>&1
 ok "wait returns the verdict of the current run" $([ $? = 0 ] && echo 0 || echo 1)
-$LIVE wait $S --timeout 2 >/dev/null 2>&1; ok "wait ignores a verdict that was already there when it began, even with the current run id" $([ $? = 4 ] && echo 0 || echo 1); kill $SP
+$LIVE wait $S --timeout 2 >/dev/null 2>&1; ok "wait returns at once a verdict of the current run that already exists" $([ $? = 0 ] && echo 0 || echo 1)
+$LIVE wait $S old --timeout 2 >/dev/null 2>&1; ok "wait for an explicit run id never returns another run's verdict" $([ $? = 1 ] && echo 0 || echo 1); kill $SP
+# live start: returns with the run id once the runner holds the lock; wait then gets that run's verdict
+cat >"$LIVE_D/instant.sh" <<'C'
+STEPS=(a)
+step_a() { echo "boom"; return 1; }
+C
+S=$W/s20; mkdir -p $S; printf 'verdict: pass\nrun: old\n' >$S/VERDICT; echo old >$S/run
+out=$($LIVE start instant --state $S 2>&1); rc=$?; id=${out##* }
+ok "start prints the state dir and a new run id" $([ $rc = 0 ] && [ "$out" = "$S $id" ] && [ "$id" != old ] && [ "$(cat $S/run)" = "$id" ] && echo 0 || echo 1)
+$LIVE wait $S --timeout 10 >$W/wout 2>&1; rc=$?
+ok "a run that fails instantly is still returned by wait" $([ $rc = 1 ] && grep -q "run: $id" $W/wout && grep -q 'verdict: fail' $W/wout && echo 0 || echo 1)
+$LIVE wait $S $id --timeout 2 >/dev/null 2>&1; ok "wait with the run id returns the existing verdict at once" $([ $? = 1 ] && echo 0 || echo 1)
+$LIVE wait $S old --timeout 2 >/dev/null 2>&1; ok "an old run's id is never answered with the new verdict" $([ $? = 1 ] && ! $LIVE wait $S old --timeout 2 2>/dev/null | grep -q verdict && echo 0 || echo 1)
+S=$W/s21; mkdir -p $S; echo 'STEPS=(nostep)' >"$LIVE_D/broken2.sh"
+out=$($LIVE start broken2 --state $S 2>/dev/null); rc=$?
+$LIVE wait $S ${out##* } --timeout 5 >/dev/null 2>&1; wrc=$?
+ok "start on a config error returns its run id and wait gets the fail verdict" $([ $rc = 0 ] && [ $wrc = 1 ] && [ "$(verdict $S verdict)" = fail ] && echo 0 || echo 1)
+S=$W/s22; mkdir -p $S; touch $S/hang-two
+$LIVE start fake --state $S >/dev/null 2>&1
+$LIVE start fake --state $S >$W/out 2>&1; rc=$?
+ok "start on a busy state dir fails with the runner's exit code" $([ $rc = 2 ] && grep -q 'already active' $W/out && echo 0 || echo 1)
+$LIVE start nothing --state $W/s23 >/dev/null 2>&1; ok "start of an unknown check exits 2" $([ $? = 2 ] && echo 0 || echo 1)
+kill -TERM "$(cat $S/lock/pid)"; $LIVE wait $S --timeout 20 >/dev/null 2>&1
 # a started runner drops the old verdict before anything else
 S=$W/s15; mkdir -p $S; touch $S/hang-two; printf 'verdict: pass\nrun: old\n' >$S/VERDICT
 $LIVE fake --state $S >/dev/null 2>&1 & P=$!
