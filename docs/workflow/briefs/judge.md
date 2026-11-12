@@ -8,4 +8,4 @@ Read-only. Give a recommendation, not a survey.
 - Constraints: {CONSTRAINTS}
 - Files to read: {FILES}
 
-Answer in at most 250 words: the option you recommend, the one reason that decides it, what would change your mind, and what the owner may want to review.
+Your final message is the whole answer (stop any background wait first, never end a turn to wait), at most 250 words: the option you recommend, the one reason that decides it, what would change your mind, and what the owner may want to review.

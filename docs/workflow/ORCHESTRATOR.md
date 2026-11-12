@@ -4,17 +4,17 @@ You plan, launch, review, merge and clean. Children build. Rules: [AGENTS.md](..
 
 ## Setup (once per build)
 
-A build keeps its board and owner log in `docs/<build>/` of **your own worktree**, never in the integration checkout (`merge-batch` forbids edits there while the suite runs). Commit them with your work.
+A build has one fixed **state directory** outside every checkout: `<integration checkout>.state`, next to the integration checkout (for example `/Users/polarzero/code/projects/silo-direction.state`). It holds `board.tsv`, `flaky.log` and the logs, survives any worktree cleanup, and is where `board`, `clean`, `merge-batch` and `check` look by default. You may work from any checkout; the board does not live in one. The owner log is `OWNER_REVIEW.md` in the state directory, unless the build already has one in its docs folder (Direction: `docs/direction/OWNER_REVIEW.md`); then keep using that one, edited and committed in your own worktree and merged like any item, never directly in `INT`.
 
 ```sh
-export BUILD=<absolute path of your worktree>/docs/<build>
-export BOARD=$BUILD/board.tsv
-export BOARD_INTEGRATION=<integration branch: main or direction>
+export INT=<absolute path of the integration checkout>
+export SILO_BUILD_STATE=$INT.state
+export BOARD_INTEGRATION=$(git -C "$INT" branch --show-current)   # main or direction
 export SILO_INTEGRATION_BRANCH=$BOARD_INTEGRATION
-mkdir -p "$BUILD" && touch "$BOARD" "$BUILD/OWNER_REVIEW.md"
+mkdir -p "$SILO_BUILD_STATE" && touch "$SILO_BUILD_STATE/board.tsv" "$SILO_BUILD_STATE/OWNER_REVIEW.md"
 ```
 
-`INT` below is the integration checkout (the checkout of `$BOARD_INTEGRATION`). Only you edit the board.
+`INT` below is the integration checkout. The three variables are the defaults when unset, so setting them only matters if you want another place. Only you edit the board.
 
 ## 1. Preflight
 
@@ -67,7 +67,7 @@ tools/agent/board ready        # item<TAB>stack-on=<branch>
 4. Fixes go to the **same child** (SendMessage, or `delegate_task` into its worktree) with [briefs/fix.md](briefs/fix.md). Reuse it while its session is small; if the session has grown large, start a fresh `build` in the same worktree with a short handover.
 5. Follow-up round: the review brief's round 2 checks only the listed fixes and what they touch. Stop when a round finds nothing that matters.
 6. Live checks: start `live` ([brief](briefs/live.md)). It runs with `SILO_AGENT_ITEM=<item>` so its state belongs to the item.
-7. A flaky test in a report: make a fix item on the board (`check` already logged it in [FLAKY.md](FLAKY.md)).
+7. Flaky tests: `check` appends them to `$SILO_BUILD_STATE/flaky.log` and edits no tracked file. At the end of every round move new lines into [FLAKY.md](FLAKY.md) (commit it in your own worktree), remove them from the log, and make a fix item on the board for each.
 8. A lower branch changed after fixes: `tools/agent/board restack <item>`. It stops with exit 2 on a conflict and names the files; give those to the child.
 9. Reviewed or waived: `tools/agent/board set <item> state=reviewed`.
 
@@ -76,11 +76,17 @@ tools/agent/board ready        # item<TAB>stack-on=<branch>
 In `INT` (clean tree), merge reviewed items in dependency order, in one batch:
 
 ```sh
-cd <INT> && tools/agent/merge-batch --into $BOARD_INTEGRATION <branch> [<branch> ...]
-tools/agent/board set <item> state=merged     # for each merged item
+cd $INT && tools/agent/merge-batch --into $BOARD_INTEGRATION <branch> [<branch> ...]
 ```
 
-It merges with `--no-ff`, regenerates the API files once, runs `check` on the union in the foreground, and starts the full suite in the background (`app/SiloUI/target/agent/full-suite.<sha>.{log,merged,done}` in `INT`). A conflict exits 2 and names the files; after resolving it by hand (merge in `INT`, commit), `tools/agent/merge-batch --suite` starts the same background suite on the current `HEAD` without merging or running `check`. The suite worktree gets the native runtime (`runtime-cache` on a hit, else a clone of `INT`'s `src-tauri/binaries` and `runtime`) and `INT`'s `github-build.local.json` (synthetic test values when absent). The isolation evals (Linux only in CI) and `reviewer-service` (when no pytest and no cached venv can be had) are skipped, not failed: the log and the verdict's `skipped:` lines say so. **Do not edit files in `INT` while the suite runs** (the board and owner log are elsewhere). Keep launching and reviewing. At the **next merge**, run `tools/agent/merge-batch --last` first: it prints the verdict, and on FAIL the failing tests (nextest, cargo test, unittest, pytest, vitest, node --test, cargo build errors) with their step and the merged branches that touched them. Send that to the child that wrote it; fix before merging more.
+- **Merges are recorded by `merge-batch`.** It sets `state=merged` on the board for each branch it actually merged. Never set `state=merged` by hand, and never filter its output away: a branch is merged only if `merge-batch` printed `merged <branch>`.
+- **A branch needs a green `check` for its exact tree** (run it in the child's worktree). `merge-batch` refuses one without; `--force` merges it anyway (record why in the owner log).
+- It merges with `--no-ff`, regenerates the API files once, runs `check` on the union in the foreground, and starts the full suite in the background.
+- **The suite runs in `<INT>.suite`**, one fixed worktree reset to the exact SHA each run, so builds stay warm. Files: `app/SiloUI/target/agent/full-suite.<sha>.{log,merged,done}` there. A new suite cancels any older running suite of the same integration branch; its verdict says it was superseded. Edits in `INT` do not disturb the suite, but `merge-batch` refuses a dirty `INT`.
+- It stops with exit 2 on a conflict and names the files. After resolving by hand (merge in `INT`, commit), run `tools/agent/merge-batch --suite`: it records the merged branches on the board and starts the suite on the current `HEAD` without merging or running `check`.
+- The suite worktree gets the native runtime (`runtime-cache` on a hit, else a clone of `INT`'s `src-tauri/binaries` and `runtime`) and `INT`'s `github-build.local.json` (synthetic test values when absent). The isolation evals (Linux only in CI) and `reviewer-service` (no pytest and no cached venv) are skipped, not failed: the log and the verdict's `skipped:` lines say so.
+
+Keep launching and reviewing while the suite runs. At the **next merge**, run `tools/agent/merge-batch --last` first: it prints the verdict, and on FAIL the failing tests (nextest, cargo test, unittest, pytest, vitest, node --test, cargo build errors) with their step and the merged branches that touched them. Send that to the child that wrote it; fix before merging more.
 
 ## 6. Clean
 
@@ -92,9 +98,18 @@ tools/agent/clean <item> --yes    # then do it
 
 `clean` refuses while an unmerged item depends on it. It removes the worktree, the merged branch, the temp data (`$TMPDIR/silo-agent/<item>`, temp homes, the board's `temp` paths) and sets `state=cleaned`. It never deletes computers: if a `live` state still lists some, it refuses; stop them first, or pass `--leave-computers` when they are not yours to stop. Run it right after each merge for everything `cleanable` lists, and remove any other temporary data you made.
 
+**At the end of every build, and whenever free disk is low (`df -h ~`: under about 80 GiB), also run:**
+
+```sh
+tools/agent/clean --merged          # dry run: worktrees whose branch is merged into the integration branch or main and has no local changes
+tools/agent/clean --merged --yes    # then do it; it also deletes those merged branches
+```
+
+It never touches a worktree with local changes or an unmerged branch.
+
 ## 7. Owner log
 
-Append to `$BUILD/OWNER_REVIEW.md`: every judgement call, guess, skipped review and decision the owner may want to change, one or two lines each, with the item. Never ask the owner and never block on the log.
+Append to the owner log (see Setup): every judgement call, guess, skipped review and decision the owner may want to change, one or two lines each, with the item. Never ask the owner and never block on the log.
 
 ## 8. How to wait
 
