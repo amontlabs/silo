@@ -65,7 +65,11 @@ impl Stored {
     ) -> Self {
         let mut pins = Held::latest(policy.clone()).pins;
         if let Some(before) = before {
-            for preset in before.presets.iter().filter(|name| policy.presets.contains(name)) {
+            for preset in before
+                .presets
+                .iter()
+                .filter(|name| policy.presets.contains(name))
+            {
                 match before.preset_versions.get(preset) {
                     Some(version) => pins.insert(preset.clone(), *version),
                     None => pins.remove(preset),
@@ -229,7 +233,9 @@ pub fn get_stored(computer_id: &str) -> Result<Option<Stored>, String> {
     let Some(path) = path() else {
         return Ok(None);
     };
-    let _held = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _held = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     Ok(read(&path)?.computers.get(computer_id).cloned())
 }
 
@@ -272,11 +278,7 @@ pub const CHANGED: &str =
 
 /// Gives `target` the policy `policy`, or `source`'s (with its approvals) when `policy` is
 /// `None`. A source with no entry gives nothing, so the target is treated like its source.
-pub fn inherit(
-    source: &str,
-    target: &str,
-    policy: Option<&NetworkPolicy>,
-) -> Result<(), String> {
+pub fn inherit(source: &str, target: &str, policy: Option<&NetworkPolicy>) -> Result<(), String> {
     update_computer(target, |computers| {
         let chosen = match policy {
             Some(policy) => Some(Stored::approved(policy)),
@@ -323,6 +325,20 @@ pub fn set_stand_in(computer_id: &str) -> Result<(), String> {
     })
 }
 
+/// Saves `stored` for `computer_id` as a stand-in: a later [`resolve`] or [`resolve_from`]
+/// replaces it. A computer that already has a policy of its own keeps it.
+pub fn set_provisional(computer_id: &str, stored: Stored) -> Result<(), String> {
+    update_document(|document| {
+        if document.computers.contains_key(computer_id) && !document.stand_in.contains(computer_id)
+        {
+            return Ok(());
+        }
+        document.computers.insert(computer_id.to_owned(), stored);
+        document.stand_in.insert(computer_id.to_owned());
+        Ok(())
+    })
+}
+
 /// Gives `target` the policy `chosen`, only if `target` has no policy of its own yet (see
 /// [`is_unresolved`]). Returns whether it was saved; a policy the computer has stays, whatever
 /// it holds.
@@ -341,11 +357,14 @@ pub fn resolve(target: &str, chosen: Stored) -> Result<bool, String> {
 }
 
 /// [`resolve`] with the policy `source` has saved, with its approvals. Returns whether `source`
-/// had one and `target` took it.
+/// had one of its own and `target` took it; a stand-in `source` gives nothing.
 pub fn resolve_from(source: &str, target: &str) -> Result<bool, String> {
     let mut saved = false;
     update_document(|document| {
         if document.computers.contains_key(target) && !document.stand_in.contains(target) {
+            return Ok(());
+        }
+        if document.stand_in.contains(source) {
             return Ok(());
         }
         if let Some(chosen) = document.computers.get(source).cloned() {

@@ -1881,7 +1881,9 @@ fn a_closed_policy_the_undo_computer_was_given_is_not_replaced_by_a_wider_one() 
         store::get_stored(&plan.undo_id).unwrap(),
         Some(Stored::closed_without_incoming())
     );
-    // The rebuilt computer is given a wider policy afterwards, and the swap is settled again.
+    // The swap binds it, the rebuilt computer is given a wider policy afterwards, and the swap
+    // is settled again.
+    bind_undo_policy(&plan, &|| Ok(None)).unwrap();
     store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
     bind_undo_policy(&plan, &|| Ok(None)).unwrap();
     bind_undo_policy(&plan, &|| Err("unreadable".into())).unwrap();
@@ -2477,10 +2479,8 @@ fn an_older_swap_that_cannot_read_the_rules_publishes_a_closed_undo_computer() {
         undo_id: plan.undo_id.clone(),
         seen: Mutex::new(Vec::new()),
     };
-    // The first attempt publishes the undo computer, then stops on the unread rules.
-    let error =
-        swap_with_policy(&plan, &watched, &|| Err("unreadable".into()), &|| Ok(())).unwrap_err();
-    assert!(error.contains("unreadable"));
+    // The first attempt publishes the undo computer and goes on with the unread rules.
+    swap_with_policy(&plan, &watched, &|| Err("unreadable".into()), &|| Ok(())).unwrap();
     assert!(watched
         .seen
         .lock()
@@ -2513,10 +2513,77 @@ fn a_swap_stopped_halfway_is_closed_before_it_goes_on() {
         undo_id: plan.undo_id.clone(),
         seen: Mutex::new(Vec::new()),
     };
-    let error =
-        swap_with_policy(&plan, &watched, &|| Err("unreadable".into()), &|| Ok(())).unwrap_err();
-    assert!(error.contains("unreadable"));
+    swap_with_policy(&plan, &watched, &|| Err("unreadable".into()), &|| Ok(())).unwrap();
     assert!(watched.seen.lock().unwrap().iter().all(Option::is_some));
+    store::use_test_path(None);
+}
+
+#[test]
+fn rules_that_cannot_be_read_after_the_publish_leave_a_closed_undo_computer_to_settle() {
+    let _dir = policy_store();
+    let plan = plan();
+    let table = before();
+    let published = Mutex::new(false);
+    // The rules cannot be read before or after the publish: the undo computer stays closed
+    // and the swap still ends well.
+    swap_with_policy(&plan, &table, &|| Err("unreadable".into()), &|| {
+        *published.lock().unwrap() = true;
+        Ok(())
+    })
+    .unwrap();
+    assert!(*published.lock().unwrap());
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(Stored::closed_without_incoming())
+    );
+    assert!(store::is_unresolved(&plan.undo_id).unwrap());
+    // Settling the rebuild reads them.
+    let open = serde_json::json!({"default_egress": "allow"});
+    bind_undo_policy(&plan, &|| Ok(Some(open.clone()))).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap().unwrap().mode,
+        NetworkPolicyMode::Open
+    );
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_policy_narrowed_while_the_build_was_made_is_the_undo_computers_at_the_swap() {
+    let _dir = policy_store();
+    let plan = plan();
+    let table = before();
+    store::set_stored(&plan.old_id, allowlist_stored()).unwrap();
+    save_build_policies(&plan, None).unwrap();
+    assert_eq!(
+        store::get_stored(&plan.undo_id).unwrap(),
+        Some(allowlist_stored())
+    );
+    // The computer is closed to the network after the build was created.
+    let closed = Stored::closed_without_incoming();
+    store::set_stored(&plan.old_id, closed.clone()).unwrap();
+    swap_with_policy(&plan, &table, &|| Ok(None), &|| Ok(())).unwrap();
+    assert_eq!(store::get_stored(&plan.undo_id).unwrap(), Some(closed));
+    assert!(!store::is_unresolved(&plan.undo_id).unwrap());
+    store::use_test_path(None);
+}
+
+#[test]
+fn a_stand_in_policy_is_not_copied_as_if_it_were_real_rules() {
+    let _dir = policy_store();
+    store::set_stand_in("source").unwrap();
+    assert!(!store::resolve_from("source", "target").unwrap());
+    assert!(store::is_unresolved("target").unwrap());
+    store::set_stand_in("target").unwrap();
+    assert!(!store::resolve_from("source", "target").unwrap());
+    assert!(store::is_unresolved("target").unwrap());
+    // Once the source has rules of its own, the target takes them.
+    store::set_stored("source", allowlist_stored()).unwrap();
+    assert!(store::resolve_from("source", "target").unwrap());
+    assert!(!store::is_unresolved("target").unwrap());
+    assert_eq!(
+        store::get_stored("target").unwrap(),
+        Some(allowlist_stored())
+    );
     store::use_test_path(None);
 }
 

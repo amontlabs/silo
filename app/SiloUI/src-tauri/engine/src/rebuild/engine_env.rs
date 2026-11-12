@@ -500,17 +500,19 @@ impl swap::Sandboxes for RuntimeSandboxes<'_> {
 /// so neither is ever treated as a computer without a policy (which runs open). `recorded` is
 /// the network policy the computer's sandbox holds, read when the computer has no saved policy.
 /// Neither copy has the computer's channel rule: that rule is planned for a computer's own port.
+/// The undo computer's copy is a stand-in: the swap replaces it with the policy the computer
+/// has then, which may have changed while the build was made.
 pub(super) fn save_build_policies(plan: &Plan, recorded: Option<&Value>) -> Result<(), String> {
     use crate::network_policy::store;
     let (held, incoming_denied) = crate::network_policy::held_for(&plan.old_id, recorded)?;
     let stored = store::Stored::of(held, incoming_denied);
     store::set_stored(&plan.new_id, stored.clone())?;
-    store::set_stored(&plan.undo_id, stored)
+    store::set_provisional(&plan.undo_id, stored)
 }
 
 /// Gives the undo computer the policy of the computer it was, with its approvals, when it has
-/// none of its own. A computer with no saved policy leaves the one saved for the undo computer
-/// when the build was made. When neither exists (a rebuild begun before the build was given
+/// none of its own (or only a stand-in). A computer with no saved policy leaves the stand-in
+/// saved for the undo computer when the build was made. When neither exists (a rebuild begun before the build was given
 /// one), the undo computer takes the rules its own sandbox holds, which `recorded` reads: they
 /// are what the computer ran under. When they cannot be read the undo computer is given a
 /// closed policy (no network, no connections to its ports) marked as a stand-in, so that
@@ -559,7 +561,8 @@ pub(super) fn secure_undo_policy(
 
 /// The swap: the undo computer's policy is saved first, then the sandboxes are renamed and the
 /// inventory published, then the rules the original ran under are bound if they could not be
-/// read before.
+/// read before. Once the inventory is published the swap is done: rules that still cannot be
+/// read leave the undo computer closed, and settling the rebuild binds them later.
 pub(super) fn swap_with_policy(
     plan: &Plan,
     sandboxes: &dyn swap::Sandboxes,
@@ -569,7 +572,10 @@ pub(super) fn swap_with_policy(
     secure_undo_policy(plan, recorded)?;
     swap::apply(sandboxes, plan)?;
     publish_inventory()?;
-    bind_undo_policy(plan, recorded)
+    if let Err(error) = bind_undo_policy(plan, recorded) {
+        eprintln!("rebuild: {error}");
+    }
+    Ok(())
 }
 
 /// Forgets the policies the build and the undo computer were given.
