@@ -33,7 +33,7 @@ You are one agent building one item. Your task message names it and gives a base
 - `tools/agent/affected [--base REF] [--why]` shows what your diff touches. `tools/agent/check [--base REF] [--quick]` runs fmt, `cargo check --tests`, the affected tests, touched script tests and, for frontend changes, typecheck, oxlint and related Vitest files, then prints failures and a verdict. `--quick` stops after compile and typecheck. The base defaults to the nearest of `main`/`direction` (`$SILO_INTEGRATION_BRANCH`). The full log is in `app/SiloUI/target/agent-check/`; "already green" means the same tree already passed.
 - Use a narrower command (one test, one file) when it proves the point faster.
 - Never run `--workspace` or the whole frontend suite; the orchestrator runs the full suites once per merge batch.
-- A test that fails then passes: `check` logs it in [FLAKY.md](FLAKY.md); report it, do not loop on it. Tests that fail only in a way you can show are yours to fix.
+- A test that fails then passes: `check` logs it in [FLAKY.md](FLAKY.md); report it, do not loop on it.
 - Linux: `tools/agent/linux-warm [--ref REF] [-- NEXTEST_ARGS]` syncs and tests on the Linux machine; it prints `skipped: offline` and exits 0 when it does not answer. Report that as "Linux skipped: offline".
 
 ## Waiting
