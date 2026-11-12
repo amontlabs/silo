@@ -53,3 +53,12 @@ jobs:
             set -- "$@" --allow-unnotarized
           fi
           python3 app/SiloUI/scripts/publish-release.py "$RELEASE_VERSION" --publish "$@"
+
+      # Refresh amontlabs.com now rather than on its next scheduled run. Never fails the release.
+      - name: Refresh amontlabs.com
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::warning::No SITE_DISPATCH_TOKEN; amontlabs.com refreshes on its schedule"; exit 0; fi
+          gh api repos/amontlabs/amontlabs.com/dispatches -f event_type=release
