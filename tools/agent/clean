@@ -57,6 +57,11 @@ def main():
     ap.add_argument("item")
     args = ap.parse_args()
     path = board.path_of(args)
+    with board.locked(path):
+        run(args, path)
+
+
+def run(args, path):
     rows = board.load(path)
     r = board.find(rows, args.item)
     into = board.integration(args)
@@ -74,10 +79,13 @@ def main():
     item_tmp = os.path.join(tmp_root, "silo-agent", args.item)
     temps = [item_tmp] + [t for t in r["temp"].split(",") if t]
 
-    # which checkouts must never be touched
-    main_wt = board.git("worktree", "list", "--porcelain", check=True).stdout.split("\n")[0][9:]
-    wts = board.worktrees()
-    protected = {os.path.realpath(main_wt)}
+    # which checkouts must never be touched: every worktree (the first is the main checkout)
+    wt_list = board.worktree_list()
+    wts = {b: p for p, b in wt_list if b}
+    all_wts = {os.path.realpath(p) for p, _ in wt_list}
+    git_dir = board.git("rev-parse", "--path-format=absolute", "--git-common-dir", check=True).stdout.strip()
+    all_wts.add(os.path.realpath(git_dir))
+    protected = {os.path.realpath(wt_list[0][0])}
     if into in wts:
         protected.add(os.path.realpath(wts[into]))
 
@@ -85,24 +93,36 @@ def main():
 
     # 1. live state: leftover computers are reported, short temp homes join the temp data
     leftovers = []
-    for root, _, files in os.walk(item_tmp):
-        for f in files:
-            full = os.path.join(root, f)
-            if f == "computers":
-                leftovers += [l.strip() for l in open(full) if l.strip()]
-            elif f == "tempdirs":
-                temps += [l.strip() for l in open(full) if l.strip()]
+    if os.path.isdir(item_tmp) and not os.path.islink(item_tmp):
+        for root, _, files in os.walk(item_tmp):
+            for f in files:
+                full = os.path.join(root, f)
+                if os.path.islink(full):
+                    continue
+                if f == "computers":
+                    leftovers += [l.strip() for l in open(full) if l.strip()]
+                elif f == "tempdirs":
+                    temps += [l.strip() for l in open(full) if l.strip()]
     if leftovers:
         print("live checks of %s list computers: %s" % (args.item, ", ".join(leftovers)))
         print("  stop and delete them with the Dev engine that ran the check, or rerun the check's cleanup")
         if not args.leave_computers:
             board.die("refusing: computers may still exist (use --leave-computers once they are gone)")
 
-    # 2. worktree
-    wt = r["worktree"] or wts.get(r["branch"], "")
+    # 2. worktree: only where the item's own branch is checked out
+    br = r["branch"]
+    wt = wts.get(br, "")
+    saved = r["worktree"]
+    if saved and (not wt or os.path.realpath(saved) != os.path.realpath(wt)):
+        if os.path.exists(saved):
+            say("leave %s alone: %s is not checked out there" % (saved, br))
+        else:
+            say("worktree %s already gone" % saved)
+            if act:
+                board.git("worktree", "prune")
     if wt and os.path.exists(wt):
         real = os.path.realpath(wt)
-        if real in protected:
+        if real in protected or br == into:
             board.die("refusing: %s is the main or integration checkout" % wt)
         freed += size(real)
         say("remove worktree %s (%s)" % (wt, human(size(real))))
@@ -111,37 +131,46 @@ def main():
             if p.returncode:
                 board.die("worktree remove failed (uncommitted work?): " + p.stderr.strip())
             board.git("worktree", "prune")
+        wt = ""
     elif wt:
         say("worktree %s already gone" % wt)
         if act:
             board.git("worktree", "prune")
 
-    # 3. branch, only if merged into the integration branch
-    br = r["branch"]
-    if board.git("rev-parse", "--verify", "-q", "refs/heads/" + br).returncode == 0:
-        if br in wts and os.path.realpath(wts[br]) != os.path.realpath(wt or "/nonexistent"):
+    # 3. branch, only if merged into the integration branch; compare-and-delete on the checked sha
+    sha = board.git("rev-parse", "--verify", "-q", "refs/heads/" + br).stdout.strip()
+    if sha:
+        if wt or (br in wts and os.path.exists(wts[br])):
             say("keep branch %s: checked out in %s" % (br, wts[br]))
-        elif board.git("merge-base", "--is-ancestor", br, into).returncode == 0:
+        elif board.git("merge-base", "--is-ancestor", sha, into).returncode == 0:
             say("delete branch %s (merged into %s)" % (br, into))
             if act:
-                board.git("branch", "-D", br, "--quiet")
+                p = board.git("update-ref", "-d", "refs/heads/" + br, sha)
+                if p.returncode:
+                    say("keep branch %s: it moved while cleaning (%s)" % (br, p.stderr.strip()))
         else:
             say("keep branch %s: not merged into %s" % (br, into))
 
-    # 4. temp data
+    # 4. temp data: never a worktree, anything containing or inside one, or outside $TMPDIR
     for t in temps:
-        real = os.path.realpath(t)
-        if not os.path.exists(real):
+        if not os.path.isabs(t):
+            say("skip temp path %s (not absolute)" % t)
             continue
-        parent = os.path.dirname(real)
-        if real in roots or not any(real.startswith(x + os.sep) for x in roots) or real in protected:
-            say("skip temp path %s (outside %s)" % (t, tmp_root))
+        link = os.path.islink(t)
+        # a symlink is removed itself; its target is never touched
+        real = os.path.join(os.path.realpath(os.path.dirname(t)), os.path.basename(t)) if link else os.path.realpath(t)
+        if not os.path.lexists(real):
+            continue
+        bad = (real in roots or not any(real.startswith(x + os.sep) for x in roots) or real in protected
+               or any(real == w or w.startswith(real + os.sep) or real.startswith(w + os.sep) for w in all_wts))
+        if bad:
+            say("skip temp path %s (outside %s or part of a checkout)" % (t, tmp_root))
             continue
         n = size(real)
         freed += n
-        say("remove %s (%s)" % (real, human(n)))
+        say("remove %s%s (%s)" % (real, " (symlink only)" if link else "", human(n)))
         if act:
-            shutil.rmtree(real) if os.path.isdir(real) and not os.path.islink(real) else os.remove(real)
+            shutil.rmtree(real) if os.path.isdir(real) and not os.path.islink(real) else os.unlink(real)
 
     if act:
         r["state"] = "cleaned"

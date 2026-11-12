@@ -20,7 +20,7 @@ unmerged dependencies is not ready (merge one first).
 Restack never forces: on a conflict it stops, exits 2, and reports the files. If the branch is
 checked out in a worktree the rebase is left in progress there; otherwise it is aborted.
 """
-import argparse, os, subprocess, sys, tempfile
+import argparse, contextlib, fcntl, os, subprocess, sys, tempfile
 
 COLS = ["item", "branch", "base", "depends_on", "worktree", "state", "note", "temp"]
 STATES = ["planned", "running", "committed", "reviewed", "merged", "cleaned"]
@@ -38,6 +38,15 @@ def path_of(args):
     if not p:
         die("no board file: pass --file or set BOARD")
     return p
+
+
+@contextlib.contextmanager
+def locked(path):
+    """Exclusive lock around a read-modify-write of the board (sidecar file <board>.lock)."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path + ".lock", "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        yield
 
 
 def load(path):
@@ -80,7 +89,8 @@ def deps(r):
 
 
 def git(*a, cwd=None, check=False):
-    p = subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+    p = subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True,
+                       encoding="utf-8", errors="surrogateescape")
     if check and p.returncode:
         die("git %s failed: %s" % (" ".join(a), p.stderr.strip()))
     return p
@@ -165,33 +175,49 @@ def cmd_cleanable(args, rows, path):
             print(r["item"])
 
 
-def worktrees():
-    """branch -> worktree path for the repository in the cwd."""
-    out, cur = {}, None
-    for line in git("worktree", "list", "--porcelain", check=True).stdout.splitlines():
-        if line.startswith("worktree "):
-            cur = line[9:]
-        elif line.startswith("branch refs/heads/"):
-            out[line[18:]] = cur
+def worktree_list():
+    """[(path, branch or None)] for every worktree of the repository in the cwd (first = main)."""
+    out = []
+    for rec in git("worktree", "list", "--porcelain", "-z", check=True).stdout.split("\0\0"):
+        path, branch = None, None
+        for field in rec.split("\0"):
+            if field.startswith("worktree "):
+                path = field[9:]
+            elif field.startswith("branch refs/heads/"):
+                branch = field[18:]
+        if path:
+            out.append((path, branch))
     return out
 
 
+def worktrees():
+    """branch -> worktree path for the repository in the cwd."""
+    return {b: p for p, b in worktree_list() if b}
+
+
 def dependents_bottom_up(rows, item):
-    """Unmerged transitive dependents; each comes after everything it depends on."""
-    order, seen = [], {item}
-    changed = True
+    """Unmerged transitive dependents in topological order: each comes after all it depends on."""
+    members, changed = {item}, True
     while changed:
         changed = False
         for r in rows:
-            if r["item"] not in seen and r["state"] not in DONE and any(d in seen for d in deps(r)):
-                seen.add(r["item"])
-                order.append(r)
+            if r["item"] not in members and r["state"] not in DONE and any(d in members for d in deps(r)):
+                members.add(r["item"])
                 changed = True
+    rest = [r for r in rows if r["item"] in members and r["item"] != item]
+    order, placed = [], {item}
+    while rest:
+        nxt = next((r for r in rest if all(d in placed or d not in members for d in deps(r))), None)
+        if nxt is None:
+            die("dependency cycle among: " + ", ".join(r["item"] for r in rest))
+        rest.remove(nxt)
+        placed.add(nxt["item"])
+        order.append(nxt)
     return order
 
 
 def conflict(where, branch, new_base, extra):
-    files = git("diff", "--name-only", "--diff-filter=U", cwd=where).stdout.split()
+    files = [f for f in git("diff", "--name-only", "--diff-filter=U", "-z", cwd=where).stdout.split("\0") if f]
     print("CONFLICT while rebasing %s onto %s" % (branch, new_base))
     print("  conflicting files: " + (", ".join(files) or "unknown"))
     print("  " + extra)
@@ -210,9 +236,19 @@ def cmd_restack(args, rows, path):
         # the branch it was stacked on until now (still present after a merge)
         old = next((p for p in parents if p["branch"] == r["base"]), None) or \
             (open_parents[0] if open_parents else parents[0])
-        # old fork point: from the parent's reflog if it was rewritten, else the merge base
-        up = git("merge-base", "--fork-point", old["branch"], r["branch"]).stdout.strip() or \
-            git("merge-base", old["branch"], r["branch"], check=True).stdout.strip()
+        # old fork point: the old parent tip, which must be known exactly
+        tip = git("rev-parse", "--verify", "-q", old["branch"]).stdout.strip()
+        if tip and git("merge-base", "--is-ancestor", tip, r["branch"]).returncode == 0:
+            up = tip
+        else:
+            up = git("merge-base", "--fork-point", old["branch"], r["branch"]).stdout.strip()
+        if not up:
+            die("%s: cannot tell where %s was stacked on %s (its old tip is not in the reflog); "
+                "rebase it by hand with `git rebase --onto %s <old tip>`"
+                % (r["item"], r["branch"], old["branch"], new_base), 2)
+        if git("rev-list", "--merges", "-n", "1", "%s..%s" % (up, r["branch"])).stdout.strip():
+            die("%s: %s contains merge commits, which a rebase would drop; restack it by hand"
+                % (r["item"], r["branch"]), 2)
         if up == git("rev-parse", new_base, check=True).stdout.strip():
             print("%s: already on %s" % (r["item"], new_base))
             r["base"] = new_base
@@ -264,8 +300,12 @@ def main():
     r = sub.add_parser("restack")
     r.add_argument("item")
     args = ap.parse_args()
-    rows = load(path_of(args))
-    globals()["cmd_" + args.cmd](args, rows, path_of(args))
+    path = path_of(args)
+    if args.cmd in ("add", "set", "restack"):
+        with locked(path):
+            globals()["cmd_" + args.cmd](args, load(path), path)
+    else:
+        globals()["cmd_" + args.cmd](args, load(path), path)
 
 
 if __name__ == "__main__":
