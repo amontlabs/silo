@@ -10,9 +10,9 @@ current setup and its advice is folded in.
 | Measured cost (T3 era) | Cause | Fix in this plan |
 |---|---|---|
 | ~31% of working time: a child polling GitHub CI until green | CI used as the gate | No CI waits at all (rule 1) |
-| ~2/3 of child time had one child running | Serial phases, no lookahead | Board + stacking + 4–6 children (rule 2, `stack`) |
+| ~2/3 of child time had one child running | Serial phases, no lookahead | Board + stacking + 4–6 children (rule 2, `board`) |
 | ~12%: live tests, mostly polling, rerun from scratch, failing on setup | Ad-hoc scripts per item | One `live` harness with steps, resume and a done-file |
-| ~10%: Rust test loops, 1/3 failing (most on compile errors), full suites, cold or mixed-toolchain builds | Tests run as a reflex | `select-tests` + `check`, pinned toolchain |
+| ~10%: Rust test loops, 1/3 failing (most on compile errors), full suites, cold or mixed-toolchain builds | Tests run as a reflex | `affected` + `check`, pinned toolchain |
 | 9-minute `runtime:prepare` run 4× in one effort | No cache | `runtime-cache` |
 | Review rounds up to 7, each re-running tests; children reviewing themselves | Loose review rules | One review per item, by the orchestrator, max 2 rounds |
 | Gemini/Flash implementers always redone by Sonnet; Gemini advisor 43 min vs Fable 2 min | Models picked ad hoc | Named lastdrop agents only |
