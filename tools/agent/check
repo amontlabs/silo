@@ -182,7 +182,7 @@ def main():
         has_nextest = run(['cargo', 'nextest', '--version'], root)[0] == 0
         if has_nextest:
             command = ['cargo', 'nextest', 'run', '--manifest-path', manifest, '--locked', '--profile', 'check',
-                       '--no-fail-fast', '-E', filterset]
+                       '--no-fail-fast'] + scope + ['-E', filterset]
         else:
             notes.append(f'cargo-nextest is not installed: ran cargo test (install: cargo install cargo-nextest --locked --version {NEXTEST_VERSION})')
             command = ['cargo', 'test', '--manifest-path', manifest, '--locked', '--no-fail-fast', '--tests'] + \
