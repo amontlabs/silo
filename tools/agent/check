@@ -59,8 +59,7 @@ def tree_hash(root):
 def excerpt(name, output, limit=60):
     lines = output.splitlines()
     if name == 'tests':
-        keep = [l for l in lines if any(k in l for k in ('FAIL', 'SIGABRT', 'SIGSEGV', 'TIMEOUT', 'panicked', 'error'))
-                or l.startswith(('failures:', '    ', 'test result'))]
+        keep = [l for l in lines if any(k in l for k in ('FAIL', 'SIGABRT', 'SIGSEGV', 'TIMEOUT', 'panicked'))]
         lines = keep or lines
     elif name == 'cargo check':
         start = next((i for i, l in enumerate(lines) if l.startswith('error')), 0)
@@ -85,7 +84,7 @@ def record_flaky(root, junit, command):
     added = [t for t in flaky if f'`{t}`' not in existing]
     if added:
         with path.open('w') as out:
-            out.write(existing.rstrip('\n') + '\n')
+            out.write(existing if existing.endswith('\n') else existing + '\n')
             for test in added:
                 out.write(f'- {today} `{test}` failed, then passed on retry (`{command}`)\n')
     return flaky
@@ -106,8 +105,16 @@ def main():
         return 1
     plan = json.loads(out)
     crates, frontend = plan['crates'], plan['frontend']
+    notes, filterset = [], plan['filterset']
+    # silo-ui's build script needs the prepared MicroSandbox runtime (src-tauri/binaries, ignored by git).
+    skip_ui = 'silo-ui' in crates and not list((root / APP / 'src-tauri/binaries').glob('msb-*'))
+    if skip_ui:
+        crates = [c for c in crates if c != 'silo-ui']
+        filterset = f'({filterset}) & not package(silo-ui)'
+        notes.append('silo-ui was NOT checked or tested: the runtime is not prepared in this worktree '
+                     '(restore it with tools/agent/runtime-cache or npm --prefix app/SiloUI run runtime:prepare)')
     run_frontend = bool(frontend) or plan['frontend_all']
-    if not (crates or plan['other_manifests'] or run_frontend or plan['script_tests']):
+    if not (plan['crates'] or plan['other_manifests'] or run_frontend or plan['script_tests']):
         print('check: nothing to check — the diff touches no Rust crate, frontend file or script test')
         return 0
 
@@ -132,7 +139,7 @@ def main():
         for name, value in SYNTHETIC_GITHUB.items():
             env.setdefault(name, value)
     log = state / f'{datetime.datetime.now():%Y%m%d-%H%M%S}.log'
-    notes, failed, steps = [], [], []
+    failed, steps = [], []
     manifest = str(app / 'Cargo.toml')
 
     def step(name, command, cwd=root):
@@ -154,7 +161,8 @@ def main():
             print('fix with: rustfmt --edition 2021 ' + ' '.join(rust_files))
     # 2. cargo check.
     if crates:
-        scope = ['--workspace'] if plan['everything'] else [a for c in crates for a in ('-p', c)]
+        scope = ['--workspace'] + (['--exclude', 'silo-ui'] if skip_ui else []) if plan['everything'] \
+            else [a for c in crates for a in ('-p', c)]
         step('cargo check', ['cargo', 'check', '--tests', '--locked', '--manifest-path', manifest] + scope)
     for other in plan['other_manifests']:
         step(f'cargo check {other}', ['cargo', 'check', '--tests', '--locked', '--manifest-path', f'{other}/Cargo.toml'])
@@ -174,12 +182,15 @@ def main():
         has_nextest = run(['cargo', 'nextest', '--version'], root)[0] == 0
         if has_nextest:
             command = ['cargo', 'nextest', 'run', '--manifest-path', manifest, '--locked', '--profile', 'check',
-                       '--no-fail-fast', '-E', plan['filterset']]
+                       '--no-fail-fast', '-E', filterset]
         else:
             notes.append(f'cargo-nextest is not installed: ran cargo test (install: cargo install cargo-nextest --locked --version {NEXTEST_VERSION})')
-            command = ['cargo', 'test', '--manifest-path', manifest, '--locked', '--no-fail-fast'] + \
+            command = ['cargo', 'test', '--manifest-path', manifest, '--locked', '--no-fail-fast', '--tests'] + \
                 [a for c in crates for a in ('-p', c)]
-        step('tests', command)
+        _, test_output = step('tests', command)
+        if 'prepare the bundled Git runtime' in test_output:
+            notes.append('some tests need the prepared runtime (bundled Git), which this worktree lacks: '
+                         'restore it with tools/agent/runtime-cache or npm --prefix app/SiloUI run runtime:prepare')
         if has_nextest:
             flaky = record_flaky(root, junit, ' '.join(command))
             if flaky:
