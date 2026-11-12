@@ -23,9 +23,7 @@ use silo_api::methods::recipes::RecipeSpec;
 use super::{journal::Plan, swap, Info, RebuildEnv};
 use crate::{
     changes::{
-        keep::{
-            guest_env::GuestEnv, journal::Journal as KeepJournal, CheckpointRef, KeepEnv, Os,
-        },
+        keep::{guest_env::GuestEnv, journal::Journal as KeepJournal, CheckpointRef, KeepEnv, Os},
         promote::engine_env::stored_under_its_name,
     },
     checkpoints::Service,
@@ -135,7 +133,9 @@ pub(super) struct PackReport {
 pub(super) fn parse_pack_report(stdout: &[u8]) -> Result<PackReport, String> {
     let text = String::from_utf8_lossy(stdout);
     let line = text.lines().rev().find(|line| !line.trim().is_empty());
-    let fields: Vec<&str> = line.map(|l| l.split_whitespace().collect()).unwrap_or_default();
+    let fields: Vec<&str> = line
+        .map(|l| l.split_whitespace().collect())
+        .unwrap_or_default();
     match fields.as_slice() {
         [uid, gid, sum]
             if uid.chars().all(|c| c.is_ascii_digit())
@@ -238,7 +238,12 @@ fn run_root(
     args: &[&str],
     timeout: Duration,
 ) -> Result<guest::ExecOutput, String> {
-    let mut argv = vec!["sh".to_owned(), "-c".to_owned(), script.to_owned(), "silo-rebuild".to_owned()];
+    let mut argv = vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        script.to_owned(),
+        "silo-rebuild".to_owned(),
+    ];
     argv.extend(args.iter().map(|arg| (*arg).to_owned()));
     guest::run_bounded(
         target,
@@ -299,10 +304,7 @@ pub(super) fn replay_steps(
         let out = run(step).map_err(|error| format!("{} failed: {error}", step.label))?;
         if out.code != 0 {
             let said = tail(&out.stdout, &out.stderr);
-            return Err(format!(
-                "{} failed (exit {}): {said}",
-                step.label, out.code
-            ));
+            return Err(format!("{} failed (exit {}): {said}", step.label, out.code));
         }
     }
     Ok(())
@@ -494,7 +496,186 @@ impl swap::Sandboxes for RuntimeSandboxes<'_> {
     }
 }
 
+/// Saves the network policy the computer runs with under the build and under the undo computer,
+/// so neither is ever treated as a computer without a policy (which runs open). `recorded` is
+/// the network policy the computer's sandbox holds, read when the computer has no saved policy.
+/// Neither copy has the computer's channel rule: that rule is planned for a computer's own port.
+/// The undo computer's copy is provisional: the swap replaces it with the policy the computer
+/// has saved then, which may have changed while the build was made. A computer with no saved
+/// policy keeps the copy, since nothing it runs under can have changed.
+pub(super) fn save_build_policies(plan: &Plan, recorded: Option<&Value>) -> Result<(), String> {
+    use crate::network_policy::store;
+    let (held, incoming_denied) = crate::network_policy::held_for(&plan.old_id, recorded)?;
+    let stored = store::Stored::of(held, incoming_denied);
+    store::set_stored(&plan.new_id, stored.clone())?;
+    store::set_provisional(&plan.undo_id, stored)
+}
+
+/// Why the undo computer's policy could not be bound.
+enum Unbound {
+    /// The rules the original's sandbox holds could not be read. The undo computer keeps the
+    /// policy it has, or the closed stand-in it was given.
+    Rules(String),
+    /// The saved policies could not be read or written.
+    Store(String),
+}
+
+impl Unbound {
+    fn message(self) -> String {
+        match self {
+            Self::Rules(message) | Self::Store(message) => message,
+        }
+    }
+}
+
+/// Gives the undo computer a policy of its own when it has none (or only a stand-in).
+/// `from_computer` is true while the computer's id still names the original: the undo computer
+/// then takes the policy the computer has saved, with its approvals, which may have changed
+/// since the build was made. When the computer has none saved, it takes what the rules its own
+/// sandbox holds mean (`recorded`), which are what the computer ran under.
+/// Once the computer's id names the rebuilt computer, only `recorded` is left, and only rules
+/// that name their policy outright are used (closed, or allowing everything by default): an
+/// allowlist and a closed computer with grants record rules that read as open, so they are not
+/// turned into a policy. Otherwise, and when the rules cannot be read, the undo computer keeps
+/// the policy it was given when the build was made, or else a closed policy (no network, no
+/// connections to its ports) marked as a stand-in, so that starting it is safe; the rules are
+/// bound when a later attempt can read them. A policy the undo computer has, other than a
+/// stand-in, is never replaced.
+fn bind(
+    plan: &Plan,
+    recorded: &dyn Fn() -> Result<Option<Value>, String>,
+    from_computer: bool,
+) -> Result<(), Unbound> {
+    use crate::network_policy::store;
+    let stored = Unbound::Store;
+    if !store::is_unresolved(&plan.undo_id).map_err(stored)? {
+        return Ok(());
+    }
+    if from_computer && store::resolve_from(&plan.old_id, &plan.undo_id).map_err(stored)? {
+        return Ok(());
+    }
+    let keep_closed = || -> Result<(), Unbound> {
+        if store::get_stored(&plan.undo_id)
+            .map_err(Unbound::Store)?
+            .is_none()
+        {
+            store::set_stand_in(&plan.undo_id).map_err(Unbound::Store)?;
+        }
+        Ok(())
+    };
+    match recorded() {
+        Ok(recorded) => {
+            let chosen = if from_computer {
+                Some(
+                    crate::network_policy::held_for(&plan.old_id, recorded.as_ref())
+                        .map_err(stored)?,
+                )
+            } else {
+                crate::network_policy::held_from_exact_recorded(recorded.as_ref())
+            };
+            match chosen {
+                Some((held, incoming_denied)) => {
+                    store::resolve(&plan.undo_id, store::Stored::of(held, incoming_denied))
+                        .map_err(stored)?;
+                    Ok(())
+                }
+                None => keep_closed(),
+            }
+        }
+        Err(error) => {
+            keep_closed()?;
+            Err(Unbound::Rules(error))
+        }
+    }
+}
+
+/// [`bind`] for an undo computer whose original is still the computer.
+pub(super) fn bind_undo_policy(
+    plan: &Plan,
+    recorded: &dyn Fn() -> Result<Option<Value>, String>,
+) -> Result<(), String> {
+    bind(plan, recorded, true).map_err(Unbound::message)
+}
+
+/// [`bind`] for an undo computer whose original has been moved aside: the computer's id names
+/// the rebuilt computer by now, so only the rules the original's sandbox holds are used.
+pub(super) fn settle_undo_policy(
+    plan: &Plan,
+    recorded: &dyn Fn() -> Result<Option<Value>, String>,
+) -> Result<(), String> {
+    bind(plan, recorded, false).map_err(Unbound::message)
+}
+
+/// Saves the undo computer's policy before its sandbox is published under the undo name, so no
+/// moment exists in which it can start without one. When the rules cannot be read yet the
+/// policy [`bind`] leaves saved stands until they can; the swap goes on. A policy that cannot
+/// be saved stops the swap, since what the undo computer holds may be wider than the computer's.
+fn secure_undo_policy(
+    plan: &Plan,
+    recorded: &dyn Fn() -> Result<Option<Value>, String>,
+    from_computer: bool,
+) -> Result<(), String> {
+    match bind(plan, recorded, from_computer) {
+        Err(Unbound::Rules(error)) => {
+            eprintln!("rebuild: {error}");
+            Ok(())
+        }
+        result => result.map_err(Unbound::message),
+    }
+}
+
+/// The swap: the undo computer's policy is saved first, then the sandboxes are renamed and the
+/// inventory published, then the rules the original ran under are bound if they could not be
+/// read before. `published` is whether an earlier attempt already published the inventory: until
+/// then the computer's id names the original in whatever state the sandboxes were left, so the
+/// undo computer takes the policy the computer has saved; afterwards the computer's id names the
+/// rebuilt computer and is not used. Once the inventory is published the swap is done: rules
+/// that still cannot be read leave the undo computer with the policy it has, and settling the
+/// rebuild binds them later.
+pub(super) fn swap_with_policy(
+    plan: &Plan,
+    sandboxes: &dyn swap::Sandboxes,
+    recorded: &dyn Fn() -> Result<Option<Value>, String>,
+    published: &dyn Fn() -> Result<bool, String>,
+    publish_inventory: &dyn Fn() -> Result<(), String>,
+) -> Result<(), String> {
+    let from_computer = !published()?;
+    secure_undo_policy(plan, recorded, from_computer)?;
+    swap::apply(sandboxes, plan)?;
+    publish_inventory()?;
+    if let Err(error) = settle_undo_policy(plan, recorded) {
+        eprintln!("rebuild: {error}");
+    }
+    Ok(())
+}
+
+/// Forgets the policies the build and the undo computer were given.
+pub(super) fn forget_build_policies(plan: &Plan) -> Result<(), String> {
+    use crate::network_policy::store;
+    store::remove(&plan.new_id)?;
+    store::remove(&plan.undo_id)
+}
+
 impl EngineRebuildEnv {
+    /// The network rules held by the sandbox the computer had before the swap, wherever the
+    /// swap has moved it to. `None` for a sandbox that records none.
+    fn original_recorded_policy(
+        &self,
+        paths: &RuntimePaths,
+        plan: &Plan,
+    ) -> Result<Option<Value>, String> {
+        let unreadable = |error: String| {
+            format!(
+                "The network rules of {} could not be read, so the computer it can be undone to is closed to the network until they can: {error}",
+                plan.old_name
+            )
+        };
+        let name = swap::original_name(&RuntimeSandboxes { paths }, plan).map_err(unreadable)?;
+        let original = runtime::inspect_computer(&ProcessRunner, paths, name)
+            .map_err(|error| unreadable(error.to_string()))?;
+        Ok(original.config.pointer("/network/policy").cloned())
+    }
+
     /// Starts or stops the sandbox of computer `id` under the gate the rebuild holds.
     fn lifecycle(&self, action: &str, id: &str) -> Result<(), String> {
         debug_assert!(runtime::operation_gate::held());
@@ -564,6 +745,13 @@ impl EngineRebuildEnv {
         .map_err(|error| error.to_string())
     }
 
+    /// Whether the saved computers include the computer `id`.
+    fn inventory_has(&self, paths: &RuntimePaths, id: &str) -> Result<bool, String> {
+        runtime::read_metadata(&paths.metadata)
+            .map(|saved| saved.computers.iter().any(|c| c.id() == id))
+            .map_err(|error| error.to_string())
+    }
+
     /// Stops the sandbox of computer `id` if it runs, waiting for it to be down.
     fn ensure_stopped(&self, id: &str) -> Result<(), String> {
         let info = self.info(id)?;
@@ -629,28 +817,25 @@ impl RebuildEnv for EngineRebuildEnv {
         let paths = self.paths()?;
         let configuration = self.configuration(id)?;
         let mut image = None;
-        let (running, busy) = match runtime::observe_computer(
-            &ProcessRunner,
-            &paths,
-            configuration.name(),
-        )
-        .map_err(|error| error.to_string())?
-        {
-            runtime::ComputerRuntime::Absent => {
-                (false, Some("a checkpoint restore is pending".to_owned()))
-            }
-            runtime::ComputerRuntime::Present(inspected) => {
-                image = inspected
-                    .config
-                    .pointer("/image/Oci/reference")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                (
-                    !matches!(inspected.status.as_str(), "Stopped" | "Created" | "Crashed"),
-                    None,
-                )
-            }
-        };
+        let (running, busy) =
+            match runtime::observe_computer(&ProcessRunner, &paths, configuration.name())
+                .map_err(|error| error.to_string())?
+            {
+                runtime::ComputerRuntime::Absent => {
+                    (false, Some("a checkpoint restore is pending".to_owned()))
+                }
+                runtime::ComputerRuntime::Present(inspected) => {
+                    image = inspected
+                        .config
+                        .pointer("/image/Oci/reference")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    (
+                        !matches!(inspected.status.as_str(), "Stopped" | "Created" | "Crashed"),
+                        None,
+                    )
+                }
+            };
         Ok(Info {
             id: id.into(),
             name: configuration.name().to_owned(),
@@ -778,6 +963,11 @@ impl RebuildEnv for EngineRebuildEnv {
         let mut configuration = self.configuration(&plan.old_id)?;
         configuration.id = plan.new_id.clone();
         configuration.name = plan.new_name.clone();
+        // The build is created, and runs the recipe, under the policy of the computer.
+        let paths = self.paths()?;
+        let original = runtime::inspect_computer(&ProcessRunner, &paths, &plan.old_name)
+            .map_err(|error| error.to_string())?;
+        save_build_policies(plan, original.config.pointer("/network/policy"))?;
         runtime::change_computer_configuration_while_held(
             self.host.as_ref(),
             ComputerConfigurationChange::Upsert {
@@ -815,14 +1005,22 @@ impl RebuildEnv for EngineRebuildEnv {
             ProcessRunner
                 .run(
                     &paths,
-                    &["cp".into(), format!("{}:{tar}", plan.old_name), stage_path.clone()],
+                    &[
+                        "cp".into(),
+                        format!("{}:{tar}", plan.old_name),
+                        stage_path.clone(),
+                    ],
                     COPY_TIMEOUT,
                 )
                 .map_err(|error| format!("Copying the home folder out failed: {error}"))?;
             ProcessRunner
                 .run(
                     &paths,
-                    &["cp".into(), stage_path.clone(), format!("{}:{tar}", plan.new_name)],
+                    &[
+                        "cp".into(),
+                        stage_path.clone(),
+                        format!("{}:{tar}", plan.new_name),
+                    ],
                     COPY_TIMEOUT,
                 )
                 .map_err(|error| format!("Copying the home folder in failed: {error}"))?;
@@ -854,7 +1052,9 @@ impl RebuildEnv for EngineRebuildEnv {
             workspace_capacity_mib(&paths, &plan.new_name),
         );
         if old != new {
-            return Err("The new computer's workspace disk is not the size of the old one's.".into());
+            return Err(
+                "The new computer's workspace disk is not the size of the old one's.".into(),
+            );
         }
         let sandboxes = paths.home.join("sandboxes");
         clone_workspace(
@@ -907,11 +1107,16 @@ impl RebuildEnv for EngineRebuildEnv {
     fn swap_apply(&self, plan: &Plan) -> Result<(), String> {
         debug_assert!(runtime::operation_gate::held());
         let paths = self.paths()?;
-        swap::apply(&RuntimeSandboxes { paths: &paths }, plan)?;
-        self.write_inventory(&paths, |computers| swap::swap_inventory(computers, plan))?;
         // What the undo computer is bound by follows the computer it was: the same network
-        // policy and computer-use approval, never its secrets, ports or Silo's tools.
-        crate::network_policy::store::inherit(&plan.old_id, &plan.undo_id, None)?;
+        // policy and computer-use approval, never its secrets, ports or Silo's tools. Its
+        // policy is saved before its sandbox appears under the undo name.
+        swap_with_policy(
+            plan,
+            &RuntimeSandboxes { paths: &paths },
+            &|| self.original_recorded_policy(&paths, plan),
+            &|| self.inventory_has(&paths, &plan.undo_id),
+            &|| self.write_inventory(&paths, |computers| swap::swap_inventory(computers, plan)),
+        )?;
         crate::computer_use::inherit_settings(&paths, &plan.old_id, &plan.undo_id)
             .map_err(|error| error.to_string())?;
         // The rebuilt computer applies its approval again on its first start, and gets a token
@@ -919,7 +1124,10 @@ impl RebuildEnv for EngineRebuildEnv {
         crate::computer_use::inherit_settings(&paths, &plan.old_id, &plan.old_id)
             .map_err(|error| error.to_string())?;
         if let Some(store) = crate::guest_client::TokenStore::current() {
-            if store.status(&plan.old_id)?.is_some_and(|record| record.enabled()) {
+            if store
+                .status(&plan.old_id)?
+                .is_some_and(|record| record.enabled())
+            {
                 store.mint(&plan.old_id)?;
             }
         }
@@ -948,6 +1156,10 @@ impl RebuildEnv for EngineRebuildEnv {
                 problems.push(error);
             }
         };
+        // The undo computer has the network policy its computer had, wherever the swap stopped.
+        keep(settle_undo_policy(plan, &|| {
+            self.original_recorded_policy(&paths, plan)
+        }));
         // The undo computer has the recipe record its computer had.
         keep(recipes::records::inherit(&plan.old_id, &plan.undo_id).map_err(|e| e.to_string()));
         // What the build was given under its own id and name goes; the sandbox lives on as
@@ -975,7 +1187,10 @@ impl RebuildEnv for EngineRebuildEnv {
     }
 
     fn clean_old_computer(&self, plan: &Plan) {
-        let running = self.info(&plan.old_id).map(|info| info.running).unwrap_or(false);
+        let running = self
+            .info(&plan.old_id)
+            .map(|info| info.running)
+            .unwrap_or(false);
         if !running && self.start(&plan.old_id).is_err() {
             return;
         }
@@ -1022,13 +1237,17 @@ impl RebuildEnv for EngineRebuildEnv {
             None => context.clear_notice(&key, &plan.old_id, Audience::All),
         };
         if let Err(error) = result {
-            eprintln!("rebuild: could not update the notice of {}: {error}", plan.old_name);
+            eprintln!(
+                "rebuild: could not update the notice of {}: {error}",
+                plan.old_name
+            );
         }
     }
 
     fn remove_build(&self, plan: &Plan) -> Result<(), String> {
         let _ = fs::remove_file(self.stage_file(plan));
         let paths = self.paths()?;
+        forget_build_policies(plan)?;
         match self
             .inventory()?
             .into_iter()

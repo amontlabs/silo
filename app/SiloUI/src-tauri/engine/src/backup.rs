@@ -4938,7 +4938,7 @@ fn write_immutable_package_from_readers(
     Ok(size_bytes)
 }
 
-fn publish_package(
+pub(crate) fn publish_package(
     source: &Path,
     destination: &Path,
     parent: &Path,

@@ -52,6 +52,15 @@ pub fn state(sandboxes: &dyn Sandboxes, plan: &Plan) -> Result<u8, String> {
     })
 }
 
+/// The name the sandbox that was the computer before the rebuild goes by now: the computer's
+/// own name before the swap begins, the undo name from then on.
+pub fn original_name<'a>(sandboxes: &dyn Sandboxes, plan: &'a Plan) -> Result<&'a str, String> {
+    Ok(match state(sandboxes, plan)? {
+        0 => &plan.old_name,
+        _ => &plan.undo_name,
+    })
+}
+
 /// Moves the sandboxes forward to state 4.
 pub fn apply(sandboxes: &dyn Sandboxes, plan: &Plan) -> Result<(), String> {
     loop {

@@ -1144,18 +1144,34 @@ pub fn effective(stored: Option<NetworkPolicy>, recorded: Option<&Value>) -> Net
 pub fn held_for(computer_id: &str, recorded: Option<&Value>) -> Result<(Held, bool), String> {
     match store::get_stored(computer_id)? {
         Some(stored) => Ok((stored.held(), stored.incoming_denied)),
-        None => {
-            let policy = effective(None, recorded);
-            // An import saved before policies were stored keeps the deny-all it was imported
-            // with until the owner sets one.
-            let denied = policy.mode == NetworkPolicyMode::Closed
-                && recorded
-                    .and_then(|recorded| recorded.get("default_ingress"))
-                    .and_then(Value::as_str)
-                    == Some("deny");
-            Ok((Held::unpinned(policy), denied))
-        }
+        None => Ok(held_from_recorded(recorded)),
     }
+}
+
+/// What the runtime's recorded rules mean for a computer with no stored policy (see
+/// [`effective`]), and whether its incoming connections are denied.
+pub fn held_from_recorded(recorded: Option<&Value>) -> (Held, bool) {
+    let policy = effective(None, recorded);
+    // An import saved before policies were stored keeps the deny-all it was imported with
+    // until the owner sets one.
+    let denied = policy.mode == NetworkPolicyMode::Closed
+        && recorded
+            .and_then(|recorded| recorded.get("default_ingress"))
+            .and_then(Value::as_str)
+            == Some("deny");
+    (Held::unpinned(policy), denied)
+}
+
+/// [`held_from_recorded`] for rules that name their policy outright: closed (see
+/// [`is_closed_runtime_policy`]) or allowing everything by default. `None` for any other rules,
+/// which allow some destinations under a default deny (an allowlist, or a closed computer with
+/// grants): `effective` reads those as open, so they say nothing safe about the policy they
+/// came from.
+pub fn held_from_exact_recorded(recorded: Option<&Value>) -> Option<(Held, bool)> {
+    let recorded = recorded?;
+    let allows_by_default = recorded.get("default_egress").and_then(Value::as_str) == Some("allow");
+    (allows_by_default || is_closed_runtime_policy(recorded))
+        .then(|| held_from_recorded(Some(recorded)))
 }
 
 /// The plan for a computer: its stored policy (see [`held_for`]), its grants and Silo's own
