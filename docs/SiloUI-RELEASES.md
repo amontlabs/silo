@@ -16,7 +16,7 @@ pushing its version tag builds a draft. Publication is a separate explicit step.
 Normal branch pushes do not release the app.
 
 Run these commands from `app/SiloUI`. Install dependencies with `npm ci` first.
-Use Node.js 24, Python 3.11 or newer, Go 1.25 or newer for cold native runtime
+Use Node.js 26, Python 3.11 or newer, Go 1.25 or newer for cold native runtime
 preparation, Zig 0.15.2 (the C compiler for the Linux `silo` Silo installs in Linux
 computers; the release workflows install it pinned by checksum, see
 [runtime packaging](SiloUI-RUNTIME-PACKAGING.md#the-silo-program-for-linux-computers)),

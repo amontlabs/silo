@@ -5,7 +5,7 @@
 **SiloRelease** is the 59-second, silent 1920×1080 release film, with
 animated brand typography, an illustrated agent desktop task, production Silo
 interfaces, SSH agent handoff, local backup, and a browser-preview payoff. The source remains editable in the
-existing Remotion studio. Use Node.js 24:
+existing Remotion studio. Use Node.js 26:
 
 ```sh
 npm --prefix demo run render:release
@@ -32,7 +32,7 @@ the main film shortens pauses and text entry while preserving its camera speed.
 
 ## Run
 
-Use Node.js 24. From the repository root:
+Use Node.js 26. From the repository root:
 
 ```sh
 npm --prefix app/SiloUI ci
@@ -167,7 +167,7 @@ This starts (or reuses) the showcase server on port 3410, renders with headless
 Chrome at device pixel ratio 2 through the Chrome DevTools Protocol, and writes
 `docs/silo-showcase.webp` (3200×2200, the README image) and
 `docs/silo-showcase-screens.webp` (the screens variant, WebP with alpha). It needs
-Node.js 24, Google Chrome (`CHROME_PATH` overrides the macOS default path) and
+Node.js 26, Google Chrome (`CHROME_PATH` overrides the macOS default path) and
 python3 with Pillow for the WebP encoding (`PYTHON` selects the interpreter).
 The screenshot composition explicitly shows the standard glass appearance even
 if the capture device requests reduced transparency; production accessibility
