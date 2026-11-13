@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { chmod, copyFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { cacheTemporaryRoot, fetchVerifiedFile, makeWorkFolder, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry } from './build-input.mjs'
+import { RUNTIME_CACHE_FORMAT, cacheTemporaryRoot, fetchVerifiedFile, makeWorkFolder, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry } from './build-input.mjs'
 import { validateArchiveEntries } from './git-runtime.mjs'
 
 const execute = promisify(execFile)
@@ -63,9 +63,10 @@ async function normalizeModes(directory) {
 }
 
 // The shared cache holds one compiled build per source and build identity, as one entry
-// (`publishEntry`): the executable, the MIT notice and the `licenses/` notices.
+// (`publishEntry`): the executable, the MIT notice and the `licenses/` notices. The key includes
+// the cache format, so an entry written in an older format is never looked up.
 export function lfsTransferBuildKey(architecture, buildIdentity) {
-  return `linux-${architecture}-${sha256(JSON.stringify([LFS_TRANSFER_SOURCE_SHA256, buildIdentity]))}`
+  return `linux-${architecture}-${sha256(JSON.stringify([LFS_TRANSFER_SOURCE_SHA256, RUNTIME_CACHE_FORMAT, buildIdentity]))}`
 }
 
 const usableBuild = files => Boolean(files?.['git-lfs-transfer'] && files['LICENSE-MIT.txt'] && files['licenses/Go-LICENSE']) &&

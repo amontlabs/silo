@@ -50,12 +50,26 @@ class ReleaseCacheTests(unittest.TestCase):
                     **os.environ, 'GITHUB_OUTPUT': str(output), 'RUNTIME_TARGET': 'aarch64-apple-darwin',
                     'SILO_RUNTIME_CACHE_DIR': directory, **extra,
                 })
-                self.assertRegex(output.read_text(), r'^digest=[0-9a-f]{16}\n$')
+                self.assertRegex(output.read_text(), r'^digest=[0-9a-f]{16}\nformat=\d+\n$')
                 digests.append(output.read_text())
             # Stable, blind to debug-build settings, and changed by what changes msb's bytes.
             self.assertEqual(digests[0], digests[1])
             self.assertEqual(digests[0], digests[2])
             self.assertNotEqual(digests[0], digests[3])
+
+    def test_runtime_cache_key_follows_the_cache_format_and_its_code(self):
+        # The format is part of the compiled build keys too (RUNTIME_CACHE_FORMAT); a change to the
+        # code that writes or prunes entries also changes the key and starts the warmer.
+        self.assertIn('-format${{ steps.build-tools.outputs.format }}-', ACTION)
+        warmer = (ROOT / '.github/workflows/warm-release-caches.yml').read_text()
+        for script in ('app/SiloUI/scripts/build-input.mjs', 'app/SiloUI/scripts/runtime-cache-entries.mjs'):
+            self.assertIn(f"'{script}'", ACTION.split('key: silo-runtime-v1-', 1)[1].split('\n', 1)[0])
+            self.assertIn(f"      - '{script}'\n", warmer)
+
+    def test_a_push_to_main_saves_the_runtime_cache_on_an_exact_miss(self):
+        step = ACTION.split('    - name: Save public runtime cache\n', 1)[1].split('\n', 1)[0]
+        self.assertEqual(step, "      if: inputs.lookup-only != 'true' && inputs.artifact-name == '' && (inputs.save == 'true' || github.event_name == 'push')"
+                               " && github.ref == 'refs/heads/main' && steps.runtime.outputs.cache-hit != 'true'")
 
     def test_only_this_runs_compiled_entries_are_saved_or_transferred(self):
         keep = ACTION.index('node scripts/runtime-cache-entries.mjs keep-current')

@@ -327,7 +327,7 @@ test("each build tool identity part changes the cache key", async t => {
     changed.push([tool, await key()])
     versions[tool] = previous
   }
-  for (const [name, value] of [["RUSTFLAGS", "-C target-cpu=native"], ["CARGO_ENCODED_RUSTFLAGS", "-Copt-level=1"], ["CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER", "/x/ld"], ["CARGO_PROFILE_RELEASE_LTO", "false"], ["CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_OPT_LEVEL", "3"], ["CARGO_INCREMENTAL", "1"], ["CARGO_UNSTABLE_BUILD_STD", "std"], ["CC_aarch64_apple_darwin", "/x/cc"], ["SDKROOT", "/x/sdk"]]) {
+  for (const [name, value] of [["RUSTFLAGS", "-C target-cpu=native"], ["CARGO_ENCODED_RUSTFLAGS", "-Copt-level=1"], ["CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER", "/x/ld"], ["CARGO_PROFILE_RELEASE_LTO", "false"], ["CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_OPT_LEVEL", "3"], ["CARGO_INCREMENTAL", "1"], ["CARGO_UNSTABLE_BUILD_STD", "std"], ["CC_aarch64_apple_darwin", "/x/cc"], ["SDKROOT", "/x/sdk"], ["LIBCLANG_PATH", "/x/llvm/lib"], ["BINDGEN_EXTRA_CLANG_ARGS", "-I/x"]]) {
     changed.push([name, await key({ [name]: value })])
   }
   // Only whether the release build is incremental is keyed, whichever setting decides it.
@@ -340,6 +340,34 @@ test("each build tool identity part changes the cache key", async t => {
   changed.push(["parent .cargo/config", await key()])
   const keys = [base, ...changed.map(([, value]) => value)]
   assert.equal(new Set(keys).size, keys.length, JSON.stringify(changed))
+})
+
+test("on Linux the pkg-config results of the system libraries change the cache key", async t => {
+  const root = await mkdtemp(join(tmpdir(), "silo-build-key-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const libraries = { "dbus-1": ["1.16.2", "-I/usr/include/dbus-1.0 -ldbus-1"], "libcap-ng": ["0.8.5", "-lcap-ng"] }
+  const calls = []
+  const output = (executable, args) => {
+    if (executable !== "pkg-config") return "unavailable"
+    calls.push(args)
+    const [version, flags] = libraries[args.at(-1)]
+    return args[0] === "--modversion" ? version : flags
+  }
+  const key = async (platform = "linux") => patchedBuildKey({
+    agentdSha256: sha256("agent"), rustcVersion: "rustc 1.100.0", targetTriple: "x86_64-unknown-linux-gnu", gatewaySourceDigest: "", recipeSha256: "",
+    tools: await readBuildToolIdentity({ cargoDirectory: root, targetTriple: "x86_64-unknown-linux-gnu", environment: { HOME: root, CARGO_HOME: root, PATH: "" }, output, platform }),
+  })
+  const base = await key()
+  assert.deepEqual(calls, [["--modversion", "dbus-1"], ["--cflags", "--libs", "dbus-1"], ["--modversion", "libcap-ng"], ["--cflags", "--libs", "libcap-ng"]])
+  libraries["dbus-1"][0] = "1.16.4"
+  const version = await key()
+  libraries["dbus-1"][0] = "1.16.2"
+  libraries["libcap-ng"][1] = "-L/opt/cap-ng/lib -lcap-ng"
+  const flags = await key()
+  calls.length = 0
+  await key("darwin")
+  assert.deepEqual(calls, [])
+  assert.equal(new Set([base, version, flags]).size, 3)
 })
 
 test("the programs and files a build uses are keyed by their contents", async t => {

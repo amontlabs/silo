@@ -12,10 +12,12 @@ export function verifyFile(path: string, expectedSha256: string, label: string, 
 export function isVerifiedFile(path: string, expectedSha256: string, label: string, limits?: InputLimits): Promise<boolean>
 export function writeVerifiedFile(path: string, openSource: (signal: AbortSignal) => Promise<Readable>, expectedSha256: string, label: string, limits?: InputLimits): Promise<string>
 export function fetchVerifiedFile(fetchInput: FetchStream, url: string, expectedSha256: string, label: string, path: string, limits?: InputLimits): Promise<string>
+export const RUNTIME_CACHE_FORMAT: number
 export function runtimeCacheRoot(tauriRoot: string, environment?: Record<string, string | undefined>): string
 export function cacheTemporaryRoot(cacheRoot: string): string
 export function ownerTag(): string
 export function removeAbandoned(directory: string, prefix?: string): Promise<void>
+export function otherLiveWork(temporaryRoot: string): Promise<string[]>
 export function makeWorkFolder(temporaryRoot: string): Promise<string>
 export function takePublishedEntry(
   directory: string,

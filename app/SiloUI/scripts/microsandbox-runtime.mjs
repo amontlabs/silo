@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, join, relative, resolve, sep } from "node
 
 import { constants, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { cacheTemporaryRoot, fetchVerifiedFile, makeWorkFolder, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry } from "./build-input.mjs"
+import { RUNTIME_CACHE_FORMAT, cacheTemporaryRoot, fetchVerifiedFile, makeWorkFolder, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry } from "./build-input.mjs"
 
 const inputs = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../runtime-inputs.json"), "utf8"))
 export const MICRO_SANDBOX_VERSION = inputs.microsandboxVersion
@@ -112,12 +112,13 @@ async function hasRequiredCapabilities(executable, temporaryRoot) {
 // Environment that changes the bytes of the release build (`cargo build --release --target
 // <triple>`) of msb and the gateway: compiler flags for that target, the release profile (with
 // its build-script overrides), the programs cargo runs as rustc, wrapper or linker, unstable cargo
-// features, the C toolchain variables of cc-rs and the Apple SDK selection. Other profiles,
+// features, the C toolchain variables of cc-rs, the Apple SDK selection and the libclang
+// selection of clang-sys and bindgen. Other profiles,
 // other targets, display, network, credentials and locations are not part of it.
 // https://doc.rust-lang.org/cargo/reference/environment-variables.html
 function buildEnvironmentPattern(targetTriple) {
   const triple = targetTriple.toUpperCase().replaceAll("-", "_")
-  return new RegExp(`^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_RUSTFLAGS|CARGO_TARGET_${triple}_(RUSTFLAGS|LINKER)|CARGO_HOST_(RUSTFLAGS|LINKER)|CARGO_PROFILE_RELEASE_(?!INCREMENTAL$).+|CARGO_UNSTABLE_.+|RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|RUSTC_BOOTSTRAP|CARGO_BUILD_RUSTC(_WRAPPER|_WORKSPACE_WRAPPER)?|(TARGET_|HOST_)?(CC|CXX|AR|RANLIB|CFLAGS|CXXFLAGS|CPPFLAGS|ARFLAGS|LDFLAGS)(_.+)?|CRATE_CC_NO_DEFAULTS|MACOSX_DEPLOYMENT_TARGET|SDKROOT|DEVELOPER_DIR)$`)
+  return new RegExp(`^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_RUSTFLAGS|CARGO_TARGET_${triple}_(RUSTFLAGS|LINKER)|CARGO_HOST_(RUSTFLAGS|LINKER)|CARGO_PROFILE_RELEASE_(?!INCREMENTAL$).+|CARGO_UNSTABLE_.+|RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|RUSTC_BOOTSTRAP|CARGO_BUILD_RUSTC(_WRAPPER|_WORKSPACE_WRAPPER)?|(TARGET_|HOST_)?(CC|CXX|AR|RANLIB|CFLAGS|CXXFLAGS|CPPFLAGS|ARFLAGS|LDFLAGS)(_.+)?|CRATE_CC_NO_DEFAULTS|MACOSX_DEPLOYMENT_TARGET|SDKROOT|DEVELOPER_DIR|LIBCLANG_PATH|LIBCLANG_STATIC_PATH|CLANG_PATH|LLVM_CONFIG_PATH|BINDGEN_EXTRA_CLANG_ARGS(_.+)?)$`)
 }
 // The variables above whose value names a program (cc-rs also takes "wrapper compiler").
 const PROGRAM_VARIABLE = /^(RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|CARGO_BUILD_RUSTC(_WRAPPER|_WORKSPACE_WRAPPER)?|CARGO_TARGET_.+_LINKER|CARGO_HOST_LINKER|(TARGET_|HOST_)?(CC|CXX|AR|RANLIB)(_.+)?)$/
@@ -169,6 +170,11 @@ async function programIdentity(command, environment) {
     throw error
   }
 }
+
+// The system libraries the Linux build finds through pkg-config (libdbus-sys probes dbus-1;
+// the build hosts install libcap-ng with it). Their versions and flags are keyed, not
+// PKG_CONFIG_PATH, which setup actions change without changing these results.
+const PKG_CONFIG_LIBRARIES = ["dbus-1", "libcap-ng"]
 
 // The C tools cargo and the build scripts find on PATH, with the flag that prints their version.
 const PATH_TOOLS = [["cc", ["--version"]], ["c++", ["--version"]], ["clang", ["--version"]], ["ld", ["-v"]], ["ar", null]]
@@ -243,9 +249,9 @@ async function cargoConfiguration(cargoDirectory, environment) {
 // Identity of everything outside the pinned inputs that shapes the compiled runtime: the Apple
 // SDK and developer folder, the C compiler, linker and archiver found on PATH, the cargo
 // configuration files, the programs the build environment and configuration name (by content),
-// and the build environment.
-export async function readBuildToolIdentity({ cargoDirectory, targetTriple, environment = process.env, output = toolOutput }) {
-  const darwin = process.platform === "darwin"
+// the build environment and, on Linux, the pkg-config results of the system libraries.
+export async function readBuildToolIdentity({ cargoDirectory, targetTriple, environment = process.env, output = toolOutput, platform = process.platform }) {
+  const darwin = platform === "darwin"
   const configuration = await cargoConfiguration(cargoDirectory, environment)
   const variables = buildEnvironment(environment, targetTriple)
   const programs = []
@@ -266,11 +272,13 @@ export async function readBuildToolIdentity({ cargoDirectory, targetTriple, envi
     cargoConfig: configuration.files,
     programs: [...programs, ...configuration.programs],
     environment: variables,
+    ...(platform === "linux" ? { pkgConfig: Object.fromEntries(PKG_CONFIG_LIBRARIES.map(library => [library, [["--modversion"], ["--cflags", "--libs"]].map(flags => output("pkg-config", [...flags, library], environment))])) } : {}),
   }
 }
 
 export function patchedBuildKey({ agentdSha256, rustcVersion, targetTriple, gatewaySourceDigest, recipeSha256, tools }) {
   return sha256(Buffer.from([
+    `cache format ${RUNTIME_CACHE_FORMAT}`,
     MICROSANDBOX_SOURCE_SHA256,
     ...MICROSANDBOX_PATCHES.map(({ sha256: digest }) => digest),
     agentdSha256,

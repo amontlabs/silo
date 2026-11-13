@@ -52,6 +52,7 @@ export function readBuildToolIdentity(options: {
   targetTriple: string
   environment?: Readonly<Record<string, string | undefined>>
   output?: (executable: string, args: string[], environment: Readonly<Record<string, string | undefined>>) => string
+  platform?: NodeJS.Platform
 }): Promise<Record<string, unknown>>
 export function patchedBuildEntry(cacheRoot: string, cacheKey: string): string
 export function patchedBuildInputs(options: {
