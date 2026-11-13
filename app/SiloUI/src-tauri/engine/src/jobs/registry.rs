@@ -1071,6 +1071,32 @@ impl JobRegistry {
             .lock()
             .map_err(|_| RegistryError::storage("Job registry storage lock failed."))
     }
+
+    /// Runs `setup` with commits that are not flushed to disk, then restores full
+    /// durability. For test fixtures that create hundreds of jobs; the behaviour under
+    /// test runs after it with every commit flushed.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn without_flushing<T>(&self, setup: impl FnOnce() -> T) -> T {
+        struct Restore<'a>(&'a JobRegistry);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                let connection = self
+                    .0
+                    .connection
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                connection
+                    .execute_batch("PRAGMA synchronous=FULL;")
+                    .expect("restore the job registry's durability");
+            }
+        }
+        self.lock_connection()
+            .unwrap()
+            .execute_batch("PRAGMA synchronous=OFF;")
+            .unwrap();
+        let _restore = Restore(self);
+        setup()
+    }
 }
 
 fn read_outcome_chunk(

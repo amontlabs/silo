@@ -661,6 +661,14 @@ fn finished_job() -> String {
     job.as_str().to_owned()
 }
 
+/// `count` finished jobs, created without flushing each commit to disk.
+fn finished_jobs(count: usize) -> Vec<String> {
+    engine()
+        .job_registry()
+        .unwrap()
+        .without_flushing(|| (0..count).map(|_| finished_job()).collect())
+}
+
 /// A finished job of the computer `id`, which the computer has not acknowledged.
 fn finished_job_of(id: &str) -> String {
     let job = finished_job();
@@ -1711,9 +1719,7 @@ fn open_jobs_the_registry_has_released_stop_counting_toward_any_limit() {
 fn the_jobs_of_a_deleted_computer_count_until_the_registry_releases_them() {
     let _exclusive = super::test_exclusive();
     let (_directory, store) = own_store();
-    let jobs: Vec<String> = (0..super::MAX_COMPUTER_JOBS)
-        .map(|_| finished_job())
-        .collect();
+    let jobs = finished_jobs(super::MAX_COMPUTER_JOBS);
     let owned: Vec<(String, u64)> = jobs.iter().map(|job| (job.clone(), 1)).collect();
     store.import_legacy("gate-gone", &[], &owned).unwrap();
     store.remove_computers(&["gate-gone"]).unwrap();
@@ -1729,11 +1735,13 @@ fn the_jobs_of_a_deleted_computer_count_until_the_registry_releases_them() {
     }
     let slot = super::reserve_job_slot(engine(), &store, "gate-other").unwrap();
     super::release_job_slot(slot);
-    for job in &jobs {
-        registry
-            .acknowledge(&silo_api::jobs::JobId::new(job).unwrap())
-            .unwrap();
-    }
+    registry.without_flushing(|| {
+        for job in &jobs {
+            registry
+                .acknowledge(&silo_api::jobs::JobId::new(job).unwrap())
+                .unwrap();
+        }
+    });
 }
 
 #[test]
@@ -1746,9 +1754,7 @@ fn the_jobs_of_deleted_computers_stop_counting_once_they_are_over() {
             .state_of(&silo_api::jobs::JobId::new(job).unwrap())
             .unwrap()
     };
-    let mut jobs: Vec<String> = (0..super::MAX_COMPUTER_JOBS - 1)
-        .map(|_| finished_job())
-        .collect();
+    let mut jobs = finished_jobs(super::MAX_COMPUTER_JOBS - 1);
     let running = silo_engine::jobs::allocate(engine(), "changes.merge")
         .unwrap()
         .job_id;
