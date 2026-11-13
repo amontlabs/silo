@@ -21,7 +21,7 @@ mkdir -p "$SILO_BUILD_STATE" && touch "$SILO_BUILD_STATE/board.tsv" "$SILO_BUILD
 Start a `scout` ([brief](briefs/scout.md)) in the background for facts that would otherwise break an item late:
 
 - release files and version numbers the items touch (`docs/SiloUI-RELEASES.md`, changesets);
-- the toolchain: `rust-toolchain.toml` equals `toolchain` in `app/SiloUI/runtime-inputs.json`; `cargo nextest --version` is 0.9.149 (`cargo install cargo-nextest --locked --version 0.9.149`);
+- the toolchain: `rust-toolchain.toml` equals `toolchain` in `app/SiloUI/runtime-inputs.json`; `cargo nextest --version` is 0.9.151 (`cargo install cargo-nextest --locked --version 0.9.151`);
 - hard-coded versions, paths or counts the items would have to change (pinned counts in `registry.rs` and `schema.rs`, API generator output);
 - whether the Linux machine answers: `tools/agent/linux-warm --dry-run` (prints `skipped: offline` when not).
 

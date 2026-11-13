@@ -231,9 +231,9 @@ jobs:
       # pinned to the release asset digest.
       - name: Install cargo-nextest
         env:
-          NEXTEST_VERSION: 0.9.149
+          NEXTEST_VERSION: 0.9.151
           NEXTEST_ASSET: x86_64-unknown-linux-gnu
-          NEXTEST_SHA256: 32d1d8c0567b7a80bee2bad8bb09125c846da96bc009b2de11ec08557290c770
+          NEXTEST_SHA256: 1d4ce302b820c41f4b89c5fb9bce45f0f0c94882c1cf08fc360caf08be6e7df4
         run: |
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/nextest.tar.gz" "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION/cargo-nextest-$NEXTEST_VERSION-$NEXTEST_ASSET.tar.gz"
           echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
@@ -323,9 +323,9 @@ jobs:
       # pinned to the release asset digest.
       - name: Install cargo-nextest
         env:
-          NEXTEST_VERSION: 0.9.149
+          NEXTEST_VERSION: 0.9.151
           NEXTEST_ASSET: universal-apple-darwin
-          NEXTEST_SHA256: 47b9941765a9ff94e304a3fe5444ac1c7593da655525b8b69f8f2b31a9217507
+          NEXTEST_SHA256: d1d7d025d4bfc9fb154cd76aea3949bd78534829a0589abefa6e5dd4edb135dd
         run: |
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/nextest.tar.gz" "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION/cargo-nextest-$NEXTEST_VERSION-$NEXTEST_ASSET.tar.gz"
           echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -

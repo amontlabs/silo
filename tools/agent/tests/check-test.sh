@@ -89,7 +89,7 @@ cat >$W/bin/cargo <<'S'
 case "$1" in
   metadata) printf '{"packages":[{"id":"1","name":"silo-ui","edition":"2021","manifest_path":"%s/app/SiloUI/src-tauri/Cargo.toml","dependencies":[]}]}' "$ROOT_UNDER_TEST";;
   nextest)
-    [ "$2" = --version ] && { echo "cargo-nextest 0.9.149"; exit 0; }
+    [ "$2" = --version ] && { echo "cargo-nextest 0.9.151"; exit 0; }
     cfg=$4; junit=$(sed -n 's/^path = "\(.*\)"/\1/p' "$cfg")
     printf '<testsuites><testsuite><testcase classname="silo-ui" name="a::flaky_one"><flakyFailure/></testcase><testcase classname="silo-ui" name="a::fine"/></testsuite></testsuites>' >"$junit";;
 esac
