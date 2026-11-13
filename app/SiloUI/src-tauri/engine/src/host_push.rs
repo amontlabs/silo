@@ -1553,9 +1553,25 @@ mod tests {
             fs::create_dir(&repo).unwrap();
             symlink(seed.join(".git"), repo.join(".git")).unwrap();
         }
+        // The scan runs Git six times per repository. Git's own directory goes first on
+        // the path so each run skips a launcher such as macOS's /usr/bin/git.
+        let git_directory = String::from_utf8(
+            Command::new("git")
+                .arg("--exec-path")
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        let path = std::env::join_paths(
+            std::iter::once(std::path::PathBuf::from(git_directory.trim()))
+                .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+        )
+        .unwrap();
         let output = Command::new("sh")
             .args(["-c", DISCOVER_REPOSITORIES, "silo-host-push"])
             .arg(&computer)
+            .env("PATH", path)
             .output()
             .unwrap();
         assert!(
