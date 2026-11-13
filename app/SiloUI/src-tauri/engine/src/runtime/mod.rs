@@ -9008,6 +9008,8 @@ case "$1" in
 esac
 "#.replace("SILO_TEST_COMPUTER_ID", computer().id())).unwrap();
         fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        // An argument the fake does not know does nothing.
+        crate::test_support::run_new_executable_once(&paths.executable, &["--first-run"]);
         write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
     }
 

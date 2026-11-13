@@ -6102,13 +6102,21 @@ mod tests {
         .unwrap();
     }
 
+    /// A fake runtime running `script`, already run once (with `--first-run`, which only exits)
+    /// so the time limits of a test bound the script's own work.
     fn script_command(directory: &Path, script: &str) -> MsbCommand {
         use std::os::unix::fs::PermissionsExt;
         let executable = directory.join("msb");
         let home = directory.join("home");
         fs::create_dir_all(&home).unwrap();
-        fs::write(&executable, script).unwrap();
+        let (interpreter, body) = script.split_once('\n').unwrap();
+        fs::write(
+            &executable,
+            format!("{interpreter}\nif [ \"$1\" = --first-run ]; then exit 0; fi\n{body}"),
+        )
+        .unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::test_support::run_new_executable_once(&executable, &["--first-run"]);
         MsbCommand {
             executable,
             home,
