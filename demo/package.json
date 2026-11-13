@@ -19,16 +19,16 @@
     "build:showcase": "../app/SiloUI/node_modules/.bin/vite build --config showcase.vite.config.mjs --configLoader native"
   },
   "dependencies": {
-    "@remotion/cli": "4.0.539",
-    "@remotion/bundler": "4.0.539",
-    "@remotion/renderer": "4.0.539",
-    "remotion": "4.0.539",
+    "@remotion/cli": "4.0.541",
+    "@remotion/bundler": "4.0.541",
+    "@remotion/renderer": "4.0.541",
+    "remotion": "4.0.541",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "lucide-react": "1.66.0"
+    "lucide-react": "1.70.0"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "4.3.3",
+    "@tailwindcss/cli": "4.3.5",
     "@types/node": "24.13.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
