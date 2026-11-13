@@ -16,10 +16,7 @@ use std::{
     time::Duration,
 };
 
-#[cfg(not(test))]
 const FILE_TIMEOUT: Duration = Duration::from_secs(30);
-#[cfg(test)]
-const FILE_TIMEOUT: Duration = Duration::from_secs(3);
 const LIST_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 
 /// A file read: the requested bytes and the metadata of the file they came from.
@@ -307,14 +304,17 @@ fn run(
     max_stdout: usize,
 ) -> Result<Vec<u8>, GuestError> {
     let argv = perl_argv(FILES, &arguments.into());
-    run_argv(target, &argv, stdin, max_stdout)
+    run_argv(target, &argv, stdin, max_stdout, FILE_TIMEOUT)
 }
 
-pub(crate) fn run_argv(
+/// Runs `argv` in the guest as the file helper, ending it there if it takes longer than
+/// `timeout`.
+fn run_argv(
     target: &Target,
     argv: &[String],
     stdin: Option<&[u8]>,
     max_stdout: usize,
+    timeout: Duration,
 ) -> Result<Vec<u8>, GuestError> {
     target.ensure_running()?;
     let token = uuid::Uuid::new_v4().simple().to_string();
@@ -327,7 +327,7 @@ pub(crate) fn run_argv(
     let outcome = process::run_collect(
         &plan,
         stdin,
-        FILE_TIMEOUT,
+        timeout,
         max_stdout,
         StderrLimit::Keep(HELPER_STDERR_BYTES),
         None,
@@ -683,6 +683,7 @@ mod tests {
             format!("{root}/config/../config/settings.json"),
             format!("{root}/link/settings.json"),
         ];
+        // Writers queue in the guest for the folder's lock, each within the production limit.
         for round in 0..6 {
             std::fs::write(&file, b"v1").unwrap();
             let barrier = std::sync::Barrier::new(8);
@@ -713,10 +714,13 @@ mod tests {
             });
             let winners = results.iter().filter(|result| result.is_ok()).count();
             assert_eq!(winners, 1, "round {round}: {results:?}");
-            assert!(results
-                .iter()
-                .filter_map(|result| result.as_ref().err())
-                .all(|error| error.code == ErrorCode::Changed));
+            assert!(
+                results
+                    .iter()
+                    .filter_map(|result| result.as_ref().err())
+                    .all(|error| error.code == ErrorCode::Changed),
+                "round {round}: {results:?}"
+            );
         }
     }
 
@@ -788,6 +792,7 @@ mod tests {
             &sh("printf 'silo-files: nothing here\\n' >&2; head -c 300000 /dev/zero | tr '\\0' x >&2; exit 64"),
             None,
             1024,
+            FILE_TIMEOUT,
         )
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::NotFound);
@@ -802,11 +807,13 @@ mod tests {
         let error = run_argv(
             &target,
             &sh(&format!(
-                "echo $$ > '{}'; exec sleep 300",
+                "echo $$ > '{0}.new' && mv '{0}.new' '{0}'; exec sleep 300",
                 pid_file.display()
             )),
             None,
             1024,
+            // A short limit of its own keeps this test quick.
+            Duration::from_secs(3),
         )
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::TimedOut);

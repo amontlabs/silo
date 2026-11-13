@@ -624,7 +624,11 @@ mod transport_tests {
         let pid_file = directory.join("forward.pid");
         let mut command = Command::new("/bin/sh");
         command
-            .args(["-c", "echo $$ > \"$1\"; exec sleep 30", "forward"])
+            .args([
+                "-c",
+                "echo $$ > \"$1.new\" && mv \"$1.new\" \"$1\"; exec sleep 30",
+                "forward",
+            ])
             .arg(&pid_file);
         (command, pid_file)
     }
@@ -684,14 +688,14 @@ mod transport_tests {
     #[test]
     fn closing_or_crashing_reaps_term_ignoring_forward_processes() {
         for (script, crashed) in [
-            ("trap '' TERM; echo $$ > \"$1\"; exec sleep 30", false),
-            ("trap '' TERM; echo $$ > \"$1\"; exec sleep 30", true),
+            ("trap '' TERM; echo $$ > \"$1.new\" && mv \"$1.new\" \"$1\"; exec sleep 30", false),
+            ("trap '' TERM; echo $$ > \"$1.new\" && mv \"$1.new\" \"$1\"; exec sleep 30", true),
             (
-                "sh -c 'trap \"\" TERM; echo $$ > \"$1\"; exec sleep 30' forward \"$1\" & wait",
+                "sh -c 'trap \"\" TERM; echo $$ > \"$1.new\" && mv \"$1.new\" \"$1\"; exec sleep 30' forward \"$1\" & wait",
                 false,
             ),
             (
-                "sh -c 'trap \"\" TERM; echo $$ > \"$1\"; exec sleep 30' forward \"$1\" & wait",
+                "sh -c 'trap \"\" TERM; echo $$ > \"$1.new\" && mv \"$1.new\" \"$1\"; exec sleep 30' forward \"$1\" & wait",
                 true,
             ),
         ] {

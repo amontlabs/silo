@@ -190,17 +190,14 @@ pub fn require_client_protocol(request: &Value) -> Result<(), String> {
 
 #[cfg(test)]
 pub(crate) fn test_runtime(path: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
     let inspected = serde_json::json!({"name":"dev","status":"Running","config":{"labels":{"silo.managed":"true"}}});
-    std::fs::write(
+    crate::test_support::write_run_shell_script(
         path,
         format!(
             "#!/bin/sh\nif [ \"$1\" = --silo-working-account-protocol ]; then printf '1\\n'; exit; fi\n[ \"$1\" = inspect ] || exit 2\nprintf '%s\\n' '{}'\n",
             inspected
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    );
 }
 
 #[cfg(test)]
@@ -439,6 +436,7 @@ mod tests {
         assert_eq!(inspect_user(&paths, "dev").unwrap(), "silo");
         let script = std::fs::read_to_string(&paths.executable).unwrap();
         std::fs::write(&paths.executable, script.replace("printf '1", "printf '0")).unwrap();
+        crate::test_support::run_new_executable_once(&paths.executable, &["--first-run"]);
         let error = inspect_user(&paths, "dev").unwrap_err();
         assert!(
             error.contains("Relaunch Silo") && error.contains("repair or update Silo"),
@@ -460,17 +458,13 @@ mod tests {
             volumes: root.join("volumes"),
         };
         let probes = root.join("probes");
-        std::fs::write(
+        crate::test_support::write_run_shell_script(
             &paths.executable,
             format!(
                 "#!/bin/sh\necho probe >>'{}'\nprintf '1\\n'\n",
                 probes.display()
             ),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&paths.executable, std::fs::Permissions::from_mode(0o700))
-            .unwrap();
+        );
         for _ in 0..3 {
             require_runtime(&paths).unwrap();
         }

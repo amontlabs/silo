@@ -1234,8 +1234,8 @@ mod tests {
     // A deterministic runtime substitute validates actual TCP ownership, stream
     // cleanup and command arguments. It never starts or accesses a real computer.
     fn fake_runtime(p: &RuntimePaths) {
-        fs::write(
-            &p.executable,
+        install(
+            p,
             r#"#!/usr/bin/python3
 import socket, sys, threading
 args = sys.argv[1:]
@@ -1264,9 +1264,17 @@ def echo():
 threading.Thread(target=echo, daemon=True).start()
 sys.stdin.buffer.read()
 "#,
-        )
-        .unwrap();
+        );
+    }
+    /// Installs `script` as the runtime and runs it once, so the listener and read limits of a
+    /// test bound only the script's work.
+    fn install(p: &RuntimePaths, script: &str) {
+        fs::write(&p.executable, script).unwrap();
         fs::set_permissions(&p.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::test_support::run_new_executable_once(
+            &p.executable,
+            &["--silo-working-account-protocol"],
+        );
     }
     fn unused_port() -> u16 {
         TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
@@ -1412,7 +1420,7 @@ sys.stdin.buffer.read()
             "s = socket.socket()",
             "if args[args.index('--host')+1] != '127.0.0.1': sys.exit(1)\ns = socket.socket()",
         );
-        fs::write(&p.executable, script).unwrap();
+        install(&p, &script);
         let mut c = config();
         c.port = unused_port();
         c.bind_address = "192.0.2.1".into();
@@ -1426,7 +1434,7 @@ sys.stdin.buffer.read()
             "args = sys.argv[1:]",
             "args = sys.argv[1:]\nif args[0] == 'inspect':\n    import json, os, pathlib\n    running = (pathlib.Path(os.environ['MSB_HOME'])/'running').exists()\n    print(json.dumps({'name':'dev','status':'Running' if running else 'Stopped','config':{'labels':{'silo.managed':'true','silo.machine-id':'00000000-0000-4000-8000-000000000001'}}}))\n    sys.exit(0)",
         );
-        fs::write(&p.executable, script).unwrap();
+        install(&p, &script);
         fs::write(&p.library, "fixture").unwrap();
         fs::write(
             &p.metadata,
@@ -1453,7 +1461,7 @@ sys.stdin.buffer.read()
         let script = fs::read_to_string(&p.executable)
             .unwrap()
             .replace("print('1')", "print('0')");
-        fs::write(&p.executable, script).unwrap();
+        install(&p, &script);
         let c = config();
         let mut owned = Owners::default();
         owned
@@ -1836,7 +1844,7 @@ sys.stdin.buffer.read()
             "print('SILO_SSH_READY', flush=True)",
             &format!("import time; time.sleep({delay})\nprint('SILO_SSH_READY', flush=True)"),
         );
-        fs::write(&p.executable, script).unwrap();
+        install(&p, &script);
         fs::write(p.home.join("running"), "").unwrap();
         let mut c = config();
         c.port = unused_port();
