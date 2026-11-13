@@ -89,8 +89,8 @@ it("opens the Checkpoints tab from the Overview menu and drives fork, restore, a
   render(<><OverviewPage source={source} actions={actions} onConfigurationsChange={vi.fn()} /><Toaster /></>)
 
   await user.click(screen.getByRole("button", { name: `More actions for ${computer.configuration.name}` }))
-  await user.click(screen.getByRole("menuitem", { name: `Checkpoints for ${computer.configuration.name}` }))
-  const panel = within(screen.getByRole("region", { name: `Checkpoints for ${computer.configuration.name}` }))
+  await user.click(await screen.findByRole("menuitem", { name: `Checkpoints for ${computer.configuration.name}` }))
+  const panel = within(await screen.findByRole("region", { name: `Checkpoints for ${computer.configuration.name}` }))
   const savedRow = within(panel.getByText("Before deploy").closest("[data-checkpoint-name]")!)
   expect(savedRow.getByRole("button", { name: "Restore" })).toBeVisible()
 

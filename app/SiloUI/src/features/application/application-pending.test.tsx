@@ -62,7 +62,7 @@ it("lists the audit rows of the Activity section and opens the request a row bel
   await user.click(await navigation().findByRole("button", { name: "Activity" }))
   await user.click(await screen.findByRole("tab", { name: "Who did what" }))
   const table = await screen.findByRole("table", { name: "Who did what" })
-  expect(within(table).getAllByRole("row").length).toBeGreaterThan(10)
+  await waitFor(() => expect(within(table).getAllByRole("row").length).toBeGreaterThan(10))
   await user.click(within(table).getAllByRole("button", { name: "Open request" })[0]!)
   expect(await screen.findByLabelText("What is asked")).toHaveTextContent("Publish port 8080 on this device")
 })
