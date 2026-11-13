@@ -15,6 +15,7 @@ version=$("$lychee" --version 2>&1)
 patterns=(
   '*.md'
   'docs/**/*.md'
+  '.atelier/**/*.md'
   'app/SiloUI/runner/**/*.md'
   'app/SiloUI/*.md'
   'app/SiloUI/api/**/*.md'
