@@ -57,6 +57,10 @@ async function fixture(t) {
   const archive = join(root, "source.tar.gz")
   execFileSync("/usr/bin/tar", ["-czf", archive, "-C", root, "source"])
   for (const tool of ["rustc", "cargo"]) await writeFile(join(bin, tool), toolScript, { mode: 0o755 })
+  // The first run of a new executable can take seconds while the system checks it; it happens here,
+  // not inside the waits of the tests.
+  execFileSync(join(bin, "rustc"), ["--version"])
+  execFileSync(join(bin, "cargo"), ["fetch"], { cwd: source, env: { ...process.env, FIXTURE_ROLE: "" } })
   // GNU tar decompresses through an external gzip found on PATH, and the workers run with only this directory on PATH.
   await symlink(execFileSync("/bin/sh", ["-c", "command -v gzip"], { encoding: "utf8" }).trim(), join(bin, "gzip"))
   const app = join(root, "app")
