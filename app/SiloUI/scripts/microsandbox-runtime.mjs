@@ -159,11 +159,9 @@ export async function buildPatchedExecutable({
     const entries = await import("node:fs/promises").then(({ readdir }) => readdir(workRoot, { withFileTypes: true }))
     const source = entries.filter((entry) => entry.isDirectory()).map((entry) => join(workRoot, entry.name))
     if (source.length !== 1) throw new Error("Pinned MicroSandbox source archive has an unexpected layout")
-    for (let index = 0; index < patches.length; index += 1) {
-      const patchPath = join(workRoot, `patch-${index}.patch`)
-      await writeFile(patchPath, patches[index])
-      applyRuntimePatch(source[0], patchPath)
-    }
+    const patchPaths = patches.map((_, index) => join(workRoot, `patch-${index}.patch`))
+    await Promise.all(patches.map((patch, index) => writeFile(patchPaths[index], patch)))
+    for (const patchPath of patchPaths) applyRuntimePatch(source[0], patchPath)
     if (gatewayInputs) {
       const gatewaySource = join(source[0], "macos-gateway")
       await cp(resolve(appRoot, "src-tauri/macos-gateway"), gatewaySource, { recursive: true })
@@ -298,14 +296,13 @@ export async function stageRuntime({
       selected.agentdAsset,
       join(cacheRoot, selected.agentdAsset),
     )
-    const patches = []
-    for (const [index, patchInput] of MICROSANDBOX_PATCHES.entries()) {
+    const patches = await Promise.all(MICROSANDBOX_PATCHES.map(async (patchInput, index) => {
       const patchPath = resolve(appRoot, patchInput.path)
       assertInside(appRoot, patchPath)
       const patch = await readFile(patchPath)
       verifySha256(patch, patchInput.sha256, `Silo runtime patch ${index + 1}`)
-      patches.push(patch)
-    }
+      return patch
+    }))
     const buildOutput = await buildExecutable({
       appRoot,
       targetTriple,
