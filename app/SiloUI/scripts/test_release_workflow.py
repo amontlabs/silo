@@ -118,6 +118,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
 
 
+def run_block(step):
+    """Return the body of the first `run: |` block, up to the first line indented less than it."""
+    lines = step.split('        run: |\n', 1)[1].splitlines(keepends=True)
+    body = []
+    for line in lines:
+        if line.strip() and not line.startswith(' ' * 10):
+            break
+        body.append(line)
+    return ''.join(body)
+
+
 class PublicationWorkflowTests(unittest.TestCase):
     def test_distinct_publication_requests_are_queued_without_replacement(self):
         publication = (ROOT / '.github/workflows/publish-release.yml').read_text()
@@ -137,7 +148,7 @@ class PublicationWorkflowTests(unittest.TestCase):
             python.write_text(f'#!{sys.executable}\nimport json, os, sys\nfrom pathlib import Path\nPath(os.environ["ARGUMENTS"]).write_text(json.dumps(sys.argv[1:]))\n')
             python.chmod(0o755)
             for step, action in commands:
-                command = textwrap.dedent(step.split('        run: |\n', 1)[1])
+                command = textwrap.dedent(run_block(step))
                 for allowed in ('false', 'true'):
                     with self.subTest(action=action, allowed=allowed):
                         result = subprocess.run(['bash', '-c', command], env={
