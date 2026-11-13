@@ -317,13 +317,27 @@ check or a push to `main` runs them.
 The link check includes first-party source documentation, guest notices and
 changesets. A coverage regression compares its globs with tracked Markdown,
 excluding documentation in the partial upstream vendor tree.
-To run the link check locally, install lychee and run from the repository root:
+
+Every CI test job runs scripts in `app/SiloUI/scripts/ci/`; `tools/agent/check`
+does not call them yet (atelier will). `frontend.sh` (typecheck, lint, Vitest,
+website and demo; `checks` or `tests [VITEST_ARGS]` runs one half),
+`scripts.sh` (release tooling, script tests, isolation evals on Linux, reviewer
+service; its Python tests run through [uv](https://docs.astral.sh/uv/) with
+pinned packages), `links.sh` (lychee 0.24.2 on `PATH` or in `$LYCHEE`),
+`runner.sh` (Go helper), `macos.sh` (`checks`: signing fixtures and formatting;
+`tests`: workspace tests), `updater.sh` (patched updater), and on a Linux host
+`linux-prepare.sh` then `linux.sh` (`engine`, `daemon` or `host`). With no
+argument a script runs all its parts. `ci.yml` only installs tools, restores
+caches, runs the runtime preflight and calls them, one part per step so each
+keeps its own time limit. Every `cargo nextest run` takes `SILO_NEXTEST_FLAGS`
+from `common.sh`: the `ci` profile, no retries, a flaky test fails, every test
+runs and no default filter applies. `scripts/test_ci_scripts.py` fails when
+`ci.yml` runs anything but an install or a plain script call, hides a failure
+(`continue-on-error`, a skipping `if:`, its own shell), or a script calls
+nextest without those flags or weakens them. To run the link check locally, from any folder:
 
 ```sh
-lychee --offline --no-progress README.md AGENTS.md 'docs/**/*.md' 'app/SiloUI/*.md' \
-  'app/SiloUI/tests/**/*.md' 'app/SiloUI/src/**/*.md' 'app/SiloUI/.changeset/*.md' \
-  'app/SiloUI/src-tauri/guest/**/*.md' 'app/SiloUI/docs/**/*.html' \
-  'artifacts/**/*.md' 'website/*.md' 'demo/*.md'
+app/SiloUI/scripts/ci/links.sh
 ```
 
 Linux host build, package-installation and AppImage verification workflows have

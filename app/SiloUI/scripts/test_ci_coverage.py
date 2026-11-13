@@ -11,6 +11,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 APP = ROOT / 'app/SiloUI'
+CI = APP / 'scripts/ci'
+
+
+def ci_commands():
+    """The text of CI's test scripts, with the shared nextest flags written out."""
+    flags = re.search(r'(?m)^SILO_NEXTEST_FLAGS=\((.*)\)$', (CI / 'common.sh').read_text())[1]
+    return '\n'.join(path.read_text().replace('"${SILO_NEXTEST_FLAGS[@]}"', flags)
+                     for path in sorted(CI.glob('*.sh')))
 
 
 class ReleaseDiscoveryTests(unittest.TestCase):
@@ -57,9 +65,8 @@ class CargoCoverageTests(unittest.TestCase):
     def test_ci_selects_local_patched_packages_with_unit_tests(self):
         manifest = tomllib.loads((APP / 'Cargo.toml').read_text())
         package_manifest = tomllib.loads((APP / 'src-tauri/Cargo.toml').read_text())
-        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         selected = set()
-        for command in re.findall(r'(?m)^ +(?:- )?(?:run: )?(cargo (?:test|nextest run) .+)$', workflow):
+        for command in re.findall(r'(?m)^\s*(?:step \S+ )?(cargo (?:test|nextest run) .+)$', ci_commands()):
             arguments = shlex.split(command)
             self.assertIn('--locked', arguments)
             if '-p' in arguments:
@@ -81,9 +88,11 @@ class CargoCoverageTests(unittest.TestCase):
 
 class NextestCoverageTests(unittest.TestCase):
     def test_nextest_profile_exists_and_no_doctests_are_skipped(self):
-        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         config = tomllib.loads((APP / '.config/nextest.toml').read_text())
-        for profile in re.findall(r'cargo nextest run .*--profile (\S+)', workflow):
+        profiles = re.findall(r'cargo nextest run .*--profile (\S+)', ci_commands())
+        self.assertTrue(profiles)
+        self.assertEqual(set(profiles), {'ci'})
+        for profile in profiles:
             self.assertIn(profile, config['profile'])
         # nextest does not run doctests; add a `cargo test --doc` step before adding one.
         tracked = subprocess.check_output(['git', 'ls-files', 'app/SiloUI/*.rs'], cwd=ROOT, text=True).splitlines()
@@ -100,18 +109,18 @@ class PlatformCoverageTests(unittest.TestCase):
         rust = re.search(r'(?ms)^  rust:\n(.*?)(?=^  [\w-]+:\n|\Z)', workflow)[1]
         self.assertIn('runs-on: macos-15', rust)
         self.assertNotIn('matrix.runner', rust)
-        signing = [step for step in re.split(r'(?m)^ {6}- ', rust) if "-p 'test_macos_release.py'" in step]
+        signing = [step for step in re.split(r'(?m)^ {6}- ', rust) if 'run: scripts/ci/macos.sh checks' in step]
         self.assertEqual(len(signing), 1, 'the macOS signing suite must execute on macOS')
         self.assertNotIn("if: runner.os == 'macOS'", signing[0])
+        self.assertRegex((CI / 'macos.sh').read_text(), r"(?m)^\s*step \S+ python3 -m unittest discover -s scripts -p 'test_macos_release.py'$")
 
 
 class DocumentationCoverageTests(unittest.TestCase):
     def test_ci_link_check_includes_tracked_first_party_markdown(self):
-        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
-        step = workflow.split('      - name: Check relative links in documentation\n', 1)[1].split('\n  rust:', 1)[0]
-        command = ' '.join(step.split('        run: >-\n', 1)[1].splitlines())
+        script = (CI / 'links.sh').read_text()
+        patterns = re.search(r'(?ms)^patterns=\(\n(.*?)^\)$', script)[1]
         covered = set()
-        for pattern in shlex.split(command):
+        for pattern in shlex.split(patterns):
             if pattern.endswith('.md'):
                 covered.update(str(path.relative_to(ROOT)) for path in ROOT.glob(pattern) if path.is_file())
         tracked = subprocess.check_output(['git', 'ls-files', '*.md'], cwd=ROOT, text=True).splitlines()

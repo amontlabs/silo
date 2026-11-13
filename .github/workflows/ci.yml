@@ -65,7 +65,7 @@ jobs:
           cache: npm
           cache-dependency-path: app/SiloUI/package-lock.json
       - run: npm ci
-      - run: npm test -- --maxWorkers=2 --shard=${{ matrix.shard }}/3
+      - run: scripts/ci/frontend.sh tests --maxWorkers=2 --shard=${{ matrix.shard }}/3
 
   frontend:
     name: Frontend checks and scripts
@@ -89,34 +89,22 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      # scripts.sh runs its Python tests through uv with pinned packages.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.8'
       - run: node scripts/preflight.mjs
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run test:release
-      - run: python3 scripts/validate-release-version.py
-      - name: Check build.rs declares every registered Tauri command
-        run: python3 scripts/check-command-manifest.py
-      - name: Run every release and packaging script test
-        run: python3 scripts/run-script-tests.py
-      - name: Run the isolation eval self-tests
-        run: python3 -m unittest discover -s ../../docs/evals -p 'test_*.py'
-      - name: Run the hosted reviewer service tests
-        run: |
-          python3 -m pip install --quiet -r ../../reviewer-service/requirements-dev.txt
-          python3 -m pytest -q ../../reviewer-service
-      - name: Check the website demo
-        working-directory: website
-        run: |
-          npm ci
-          npm run typecheck
-          npm test -- --maxWorkers=2
-      - name: Check the demo films
-        working-directory: demo
-        run: |
-          npm ci
-          npm run typecheck
-          npm test
+      # Typecheck, lint, the website demo and the demo films (frontend.sh
+      # installs their dependencies); the app's Vitest suite runs in frontend-tests.
+      - name: Frontend checks
+        run: scripts/ci/frontend.sh checks
+      # Node script suites, release version, Tauri command manifest, every
+      # scripts/test_*.py module, isolation evals and the reviewer service.
+      # They run whatever the frontend checks found.
+      - name: Release-tooling and script tests
+        if: ${{ !cancelled() }}
+        run: scripts/ci/scripts.sh
 
   # silo-runner is a Go program of its own (app/SiloUI/runner); it shells out to `silo` and is
   # tested against fakes, so it needs no engine, Rust or macOS.
@@ -135,10 +123,8 @@ jobs:
         with:
           go-version-file: app/SiloUI/runner/go.mod
           cache-dependency-path: app/SiloUI/runner/go.sum
-      - name: Check formatting
-        run: test -z "$(gofmt -l .)"
-      - run: go vet ./...
-      - run: go test -race -count=1 ./...
+      - name: Check formatting, vet and test
+        run: ../scripts/ci/runner.sh
 
   docs:
     name: Documentation links
@@ -163,12 +149,7 @@ jobs:
           test -x "$lychee"
           echo "LYCHEE=$lychee" >> "$GITHUB_ENV"
       - name: Check relative links in documentation
-        run: >-
-          "$LYCHEE" --offline --no-progress
-          '*.md' 'docs/**/*.md' 'app/SiloUI/runner/**/*.md' 'app/SiloUI/*.md' 'app/SiloUI/api/**/*.md' 'app/SiloUI/tests/**/*.md'
-          'app/SiloUI/docs/**/*.html' 'app/SiloUI/src/**/*.md'
-          'app/SiloUI/src-tauri/guest/**/*.md' 'app/SiloUI/src-tauri/macos-gateway/*.md' 'app/SiloUI/.changeset/*.md'
-          'artifacts/**/*.md' 'website/*.md' 'demo/*.md' 'reviewer-service/*.md'
+        run: app/SiloUI/scripts/ci/links.sh
 
   # The engine and its daemon run on Linux hosts (Linux computers over KVM), so the
   # engine, silod, the CLI and the client crates build and pass their tests there.
@@ -217,15 +198,10 @@ jobs:
         with:
           key: silo-git-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/SiloUI/scripts/git-runtime.mjs') }}
           path: app/SiloUI/src-tauri/target/runtime-cache/dugite
-      # Host-push tests drive the bundled Git; stage only that part of the
-      # runtime (pinned and checksummed), not MicroSandbox.
-      - name: Stage the bundled Git runtime
-        run: >-
-          node --input-type=module -e 'import { execFileSync } from "node:child_process";
-          import { stageGitRuntime } from "./scripts/git-runtime.mjs";
-          import { fetchStream } from "./scripts/build-input.mjs";
-          const targetTriple = execFileSync("rustc", ["--print", "host-tuple"], { encoding: "utf8" }).trim();
-          await stageGitRuntime({ appRoot: process.cwd(), targetTriple, fetchStream })'
+      # The bundled Git that host-push tests drive (pinned and checksummed),
+      # not MicroSandbox.
+      - name: Prepare the Linux tests
+        run: scripts/ci/linux-prepare.sh
       # nextest runs each test in its own process, so tests that serialize on
       # process-wide state in one libtest binary run in parallel. The download is
       # pinned to the release asset digest.
@@ -239,26 +215,19 @@ jobs:
           echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$(dirname "$(command -v cargo)")"
           cargo nextest --version
+      # Each part has its own time limit, and a failed part does not hide the
+      # later ones.
       - name: Run engine tests
         timeout-minutes: 30
-        run: cargo nextest run -p silo-engine --locked --profile ci
-      # The headless daemon must not need GTK: silo-host's desktop feature stays off.
-      - name: Check that silod does not depend on GTK
-        run: |
-          if cargo tree -p silod -e normal --locked --prefix none | grep -E '^(gtk|gdk|gio|glib|webkit2gtk)(-sys)? v'; then
-            echo "silod depends on the GTK stack" >&2
-            exit 1
-          fi
-      # One run for the daemon side, so silo-host builds without its desktop feature as in
-      # silod; silo-host's own tests run with its default (desktop) feature, then without.
-      - name: Run daemon, CLI and client tests
+        run: scripts/ci/linux.sh engine
+      - name: Check that silod does not depend on GTK, then run daemon, CLI and client tests
+        if: ${{ !cancelled() }}
         timeout-minutes: 30
-        run: cargo nextest run -p silod -p silo-cli -p silo-client -p silo-api -p silo-container-shim --locked --profile ci
+        run: scripts/ci/linux.sh daemon
       - name: Run host helper tests
+        if: ${{ !cancelled() }}
         timeout-minutes: 15
-        run: |
-          cargo nextest run -p silo-host --locked --profile ci
-          cargo nextest run -p silo-host --no-default-features --locked --profile ci
+        run: scripts/ci/linux.sh host
 
   rust:
     name: Rust tests
@@ -299,10 +268,10 @@ jobs:
           python-version: '3.12'
       - name: Install the hosted reviewer service dependencies
         run: python3 -m pip install --quiet -r ../../reviewer-service/requirements.txt
-      - name: Test macOS release signing with disposable fixtures
-        run: python3 -m unittest discover -s scripts -p 'test_macos_release.py'
-      - name: Check Rust formatting
-        run: cargo fmt --check -p silo-api -p silo-cli -p silo-client -p silo-host -p silo-container-shim -p silo-ui -p silo-engine -p silod
+      # Release signing with disposable fixtures and Rust formatting need no
+      # native runtime, so they report before its preparation.
+      - name: Test macOS release signing and check Rust formatting
+        run: scripts/ci/macos.sh checks
       # The Cargo workspace root is app/SiloUI, so its build output is
       # app/SiloUI/target; src-tauri/target holds only the runtime cache.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -331,12 +300,11 @@ jobs:
           echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$(dirname "$(command -v cargo)")"
           cargo nextest --version
-      # The workspace has no doctests, which nextest does not run.
       - name: Run Rust tests
         timeout-minutes: 30
         env:
           # The CLI's end-to-end test of the reviewer service fails instead of skipping.
           SILO_REVIEWER_E2E_REQUIRED: '1'
-        run: cargo nextest run --manifest-path Cargo.toml --workspace --locked --profile ci
+        run: scripts/ci/macos.sh tests
       - name: Test patched updater transport and atomic installation
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib
+        run: scripts/ci/updater.sh
