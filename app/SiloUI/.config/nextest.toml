@@ -33,7 +33,6 @@ filter = '''
 (package(silo-engine) and test(=runtime::runtime_logs::tests::search_finds_old_error_across_more_than_100000_rotated_records))
   or (package(silo-engine) and test(=runtime_migration::interrupted_tests::what_only_the_runtime_can_remove_is_cleaned_from_the_converted_generation_after_the_migration))
   or (package(silo-engine) and test(=guest::watch::tests::a_huge_folder_is_followed_by_its_own_metadata_at_bounded_cost))
-  or (package(silo-engine) and test(=runtime_migration::vocabulary_tests::an_interruption_at_any_point_is_finished_by_the_next_run))
   or (package(silo-engine) and test(=runtime::tests::writers_of_the_saved_computers_do_not_lose_each_others_changes))
   or (package(silo-engine) and test(=secrets::tests::oversized_save_preserves_readable_settings))
   or (package(silo-engine) and test(=guest::files::tests::path_aliases_of_one_file_share_one_compare_and_replace_turn))
