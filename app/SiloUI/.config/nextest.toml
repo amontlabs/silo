@@ -3,15 +3,10 @@
 fail-fast = false
 failure-output = "immediate-final"
 
-# tools/agent/check retries a failed test once. A test that fails and then passes is flaky:
-# check reads the JUnit report and records it in docs/workflow/FLAKY.md.
+# tools/agent/check runs every test once; a failure is a failure.
 [profile.check]
-retries = 1
 fail-fast = false
 failure-output = "immediate-final"
-
-[profile.check.junit]
-path = "junit.xml"
 
 # The SSH listener tests pick a free port, release it and bind it again later,
 # and assert that a dropped listener refuses connections. Under libtest the

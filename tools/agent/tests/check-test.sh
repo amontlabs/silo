@@ -17,7 +17,7 @@ R=$W/main; mkdir -p $R/tools/agent $R/app/SiloUI/scripts $R/app/SiloUI/.config $
 git -C $R init -q -b main
 cp $A/check $A/affected $R/tools/agent/; cp $SRC/app/SiloUI/scripts/ci-native-changes.py $R/app/SiloUI/scripts/
 cp $SRC/rust-toolchain.toml $R/
-printf '[profile.check]\nretries = 1\n[profile.check.junit]\npath = "junit.xml"\n' >$R/app/SiloUI/.config/nextest.toml
+printf '[profile.check]\nfail-fast = false\n[profile.check.junit]\npath = "junit.xml"\n' >$R/app/SiloUI/.config/nextest.toml
 cat >$R/tools/agent/runtime-cache <<'S'
 #!/bin/sh
 d=$(cd "$(dirname "$0")/../.." && pwd)
