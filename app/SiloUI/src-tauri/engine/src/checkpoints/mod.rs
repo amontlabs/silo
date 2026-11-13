@@ -371,8 +371,8 @@ impl Service {
         if self.platform(new_name).is_ok() {
             return Err(Failure::from_message(crate::computer_names::TAKEN));
         }
-        let options = options_with_recipe_rules(computer_id, options)
-            .map_err(Failure::from_message)?;
+        let options =
+            options_with_recipe_rules(computer_id, options).map_err(Failure::from_message)?;
         // Noted first: the fork's source is resolved on the job and replaces the key.
         crate::changes::fork_base::expect(
             self.context(),

@@ -149,12 +149,7 @@ pub fn refusal(host: &Host, floors: &Floors) -> Option<String> {
 /// The reason an agent's call that starts or creates a computer with `requested` bytes must fail,
 /// taking into account the floor, existing `reserved` bytes from starts already admitted, and whether
 /// the request exceeds the free headroom.
-pub fn refusal_for(
-    host: &Host,
-    floors: &Floors,
-    reserved: u64,
-    requested: u64,
-) -> Option<String> {
+pub fn refusal_for(host: &Host, floors: &Floors, reserved: u64, requested: u64) -> Option<String> {
     if let Some(refusal) = refusal(host, floors) {
         return Some(refusal);
     }

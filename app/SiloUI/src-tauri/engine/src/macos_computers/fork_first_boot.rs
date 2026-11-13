@@ -386,10 +386,7 @@ mod tests {
         };
         let result = finish(&guest, &[], "identity", &|| false);
         assert!(result.is_err());
-        assert_eq!(
-            guest.logged.borrow().as_slice(),
-            ["account script: 1 oops"]
-        );
+        assert_eq!(guest.logged.borrow().as_slice(), ["account script: 1 oops"]);
         let guest = Fake {
             fail_quiet: true,
             ..Default::default()

@@ -55,8 +55,10 @@ pub fn command(args: &[String]) -> Result<i32, String> {
     };
     let _ = stream.set_nodelay(true);
     let mut out = std::io::stdout().lock();
-    out.write_all(&[0]).map_err(|error| io_err("report the connection", &error))?;
-    out.flush().map_err(|error| io_err("report the connection", &error))?;
+    out.write_all(&[0])
+        .map_err(|error| io_err("report the connection", &error))?;
+    out.flush()
+        .map_err(|error| io_err("report the connection", &error))?;
     drop(out);
     relay(stream, std::io::stdin(), std::io::stdout());
     Ok(0)
@@ -69,11 +71,7 @@ pub fn command(_: &[String]) -> Result<i32, String> {
 
 /// Copies `input` to the connection and the connection to `output`, and returns when the
 /// connection has ended (the other direction may still wait for input that never comes).
-pub fn relay(
-    stream: TcpStream,
-    mut input: impl Read + Send + 'static,
-    mut output: impl Write,
-) {
+pub fn relay(stream: TcpStream, mut input: impl Read + Send + 'static, mut output: impl Write) {
     if let Ok(mut write) = stream.try_clone() {
         std::thread::spawn(move || {
             let mut buffer = vec![0u8; 32 * 1024];
@@ -128,7 +126,14 @@ mod tests {
 
     #[test]
     fn only_the_containers_loopback_is_a_destination() {
-        for host in ["localhost", "LOCALHOST", "127.0.0.1", "127.1.2.3", "::1", "[::1]"] {
+        for host in [
+            "localhost",
+            "LOCALHOST",
+            "127.0.0.1",
+            "127.1.2.3",
+            "::1",
+            "[::1]",
+        ] {
             assert!(loopback_addresses(host, 80).is_ok(), "{host}");
         }
         for host in [
@@ -149,9 +154,19 @@ mod tests {
 
     #[test]
     fn the_arguments_are_exactly_the_state_the_host_and_the_port() {
-        let (state, host, port) =
-            parse(&args(&["--state", "/s", "--host", "localhost", "--port", "8080"])).unwrap();
-        assert_eq!((state.as_str(), host.as_str(), port), ("/s", "localhost", 8080));
+        let (state, host, port) = parse(&args(&[
+            "--state",
+            "/s",
+            "--host",
+            "localhost",
+            "--port",
+            "8080",
+        ]))
+        .unwrap();
+        assert_eq!(
+            (state.as_str(), host.as_str(), port),
+            ("/s", "localhost", 8080)
+        );
         for bad in [
             args(&[]),
             args(&["--state", "/s", "--host", "h"]),
@@ -177,7 +192,8 @@ mod tests {
                     break;
                 }
                 received.extend_from_slice(&buffer[..count]);
-                peer.write_all(&buffer[..count].to_ascii_uppercase()).unwrap();
+                peer.write_all(&buffer[..count].to_ascii_uppercase())
+                    .unwrap();
             }
             received
         });

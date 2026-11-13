@@ -343,9 +343,9 @@ pub fn rebuild(
                 "{error} The rebuild was rolled back; {} is as it was.",
                 info.name
             ),
-            Err(also) => format!(
-                "{error} Rolling back also failed ({also}); restarting Silo retries it."
-            ),
+            Err(also) => {
+                format!("{error} Rolling back also failed ({also}); restarting Silo retries it.")
+            }
         });
     }
     if let Err(error) = finish(env, journal, &record) {
@@ -556,10 +556,13 @@ pub fn abandon(
 ) -> Result<ComputerRebuildResult, String> {
     let _lane = lane::acquire(computer_id, wait)?;
     let _gate = env.hold(computer_id)?;
-    let record = journal.get(computer_id).ok_or_else(|| {
-        "No rebuild of this computer is waiting. Nothing was changed.".to_owned()
-    })?;
-    env.relabel(&format!("Abandoning the rebuild of {}", record.plan.old_name));
+    let record = journal
+        .get(computer_id)
+        .ok_or_else(|| "No rebuild of this computer is waiting. Nothing was changed.".to_owned())?;
+    env.relabel(&format!(
+        "Abandoning the rebuild of {}",
+        record.plan.old_name
+    ));
     shielded(env, || undo_rebuild(env, journal, &record, true))
         .map_err(|error| format!("The rebuild could not be abandoned: {error}"))?;
     Ok(ComputerRebuildResult {
@@ -621,7 +624,10 @@ pub fn recover_one(
         }
     }
     if let (Err(error), Some(record)) = (&last, journal.get(computer_id)) {
-        env.stuck_notice(&record.plan, Some(&stuck_message(&record.plan.old_name, error)));
+        env.stuck_notice(
+            &record.plan,
+            Some(&stuck_message(&record.plan.old_name, error)),
+        );
     }
     last
 }

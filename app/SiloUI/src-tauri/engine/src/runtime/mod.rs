@@ -732,7 +732,9 @@ impl ApplicationSource {
         let mut value = serde_json::to_value(self)?;
         if let Some(computers) = value.get_mut("computers").and_then(Value::as_array_mut) {
             for computer in computers {
-                let kind = if computer.pointer("/configuration/runtime").and_then(Value::as_str)
+                let kind = if computer
+                    .pointer("/configuration/runtime")
+                    .and_then(Value::as_str)
                     == Some("container")
                 {
                     "container"
@@ -4273,7 +4275,12 @@ fn computer_progress(
         message,
         safe_for_display: true,
         timestamp: activity_timestamp(),
-        level: if step == "agent-installation-failed" { "warning" } else { "info" }.into(),
+        level: if step == "agent-installation-failed" {
+            "warning"
+        } else {
+            "info"
+        }
+        .into(),
         elapsed_seconds: 0,
         downloaded_bytes: None,
         total_bytes: None,
@@ -5329,8 +5336,7 @@ pub fn change_computer_configuration_while_held(
             host.macos_computer_names()
         })?;
     let deleted = change.deleted_ids();
-    let result =
-        apply_configuration_with_progress(host, &paths, request, &request_id, None);
+    let result = apply_configuration_with_progress(host, &paths, request, &request_id, None);
     if result.is_ok() {
         host.clear_computer_notices(&deleted);
         crate::changes::store::forget(host.engine_context().as_ref(), &deleted);
@@ -6159,7 +6165,11 @@ fn application_computer(
             }),
         ),
     };
-    let purpose = if configuration.is_container() { "Local container" } else { "Local MicroSandbox" };
+    let purpose = if configuration.is_container() {
+        "Local container"
+    } else {
+        "Local MicroSandbox"
+    };
     ApplicationComputer {
         configuration,
         purpose: purpose.into(),
@@ -10080,7 +10090,11 @@ esac
             one
         };
         let writers = 6;
-        write_metadata(&paths.metadata, &request((0..writers).map(numbered).collect())).unwrap();
+        write_metadata(
+            &paths.metadata,
+            &request((0..writers).map(numbered).collect()),
+        )
+        .unwrap();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(writers));
         let threads: Vec<_> = (0..writers)
             .map(|n| {
@@ -10426,7 +10440,10 @@ esac
         let vm = computer();
         for (from, to) in [(&vm, &container), (&container, &vm)] {
             let error = validate_computer_update(from, to).unwrap_err();
-            assert!(error.to_string().contains("cannot change between"), "{error}");
+            assert!(
+                error.to_string().contains("cannot change between"),
+                "{error}"
+            );
         }
         // A virtual machine still takes a desktop.
         let mut vm_with_desktop = vm.clone();
@@ -10865,12 +10882,7 @@ exit 9
         paths.home = home.clone().into();
         paths.executable = paths.home.join("fake-msb");
         paths.library = paths.home.join("fake-lib");
-        let _ = run_msb_process(
-            &paths,
-            &["create".into()],
-            Duration::from_secs(60),
-            &|_| {},
-        );
+        let _ = run_msb_process(&paths, &["create".into()], Duration::from_secs(60), &|_| {});
     }
 
     #[cfg(unix)]
@@ -10898,7 +10910,11 @@ exit 9
         .unwrap();
         fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
         let mut engine = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "runtime::tests::lock_survival_helper_engine", "--nocapture"])
+            .args([
+                "--exact",
+                "runtime::tests::lock_survival_helper_engine",
+                "--nocapture",
+            ])
             .env(LOCK_SURVIVAL_HELPER, &home)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -10953,13 +10969,8 @@ exit 9
         .unwrap();
         fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
         configuration_recovery::FAIL_CHILD_RECORD.store(true, Ordering::SeqCst);
-        let error = run_msb_process(
-            &paths,
-            &["create".into()],
-            Duration::from_secs(30),
-            &|_| {},
-        )
-        .unwrap_err();
+        let error = run_msb_process(&paths, &["create".into()], Duration::from_secs(30), &|_| {})
+            .unwrap_err();
         assert!(
             error
                 .to_string()
@@ -10970,7 +10981,11 @@ exit 9
         if let Ok(pid) = fs::read_to_string(paths.home.join("command.pid")) {
             let pid: libc::pid_t = pid.trim().parse().unwrap();
             // SAFETY: signal 0 only checks that the process exists.
-            assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "the command is still running");
+            assert_ne!(
+                unsafe { libc::kill(pid, 0) },
+                0,
+                "the command is still running"
+            );
         }
         drop(configuration_recovery::command_lock(&paths, Duration::ZERO).unwrap());
     }
@@ -12715,8 +12730,7 @@ exit 9
         write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
         let mut created = second_computer();
         created.name = "made".into();
-        configuration_recovery::begin(&paths, &request(vec![computer(), created.clone()]))
-            .unwrap();
+        configuration_recovery::begin(&paths, &request(vec![computer(), created.clone()])).unwrap();
         (paths, created)
     }
 
@@ -12739,8 +12753,8 @@ exit 9
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let (paths, created) = being_created_fixture(&directory);
-        let state = read_application_state_with(&listed_with_made(&paths, created.id()), &paths)
-            .unwrap();
+        let state =
+            read_application_state_with(&listed_with_made(&paths, created.id()), &paths).unwrap();
         assert_eq!(state.computers.len(), 1);
         // A managed computer no journal names is still refused.
         configuration_recovery::finish(&paths).unwrap();
@@ -12773,8 +12787,8 @@ exit 9
         configuration_recovery::begin(&paths, &request(vec![computer(), stale.clone()])).unwrap();
         // The journal's previous list names `made`, which the metadata no longer has.
         write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
-        let error = read_application_state_with(&listed_with_made(&paths, stale.id()), &paths)
-            .unwrap_err();
+        let error =
+            read_application_state_with(&listed_with_made(&paths, stale.id()), &paths).unwrap_err();
         assert!(error.to_string().contains("does not match"), "{error}");
     }
 
@@ -12784,14 +12798,18 @@ exit 9
         let directory = tempfile::tempdir().unwrap();
         let (paths, created) = being_created_fixture(&directory);
         std::fs::write(
-            paths.metadata.with_file_name("configuration-operation.json"),
+            paths
+                .metadata
+                .with_file_name("configuration-operation.json"),
             b"{ not json",
         )
         .unwrap();
         let error = read_application_state_with(&listed_with_made(&paths, created.id()), &paths)
             .unwrap_err();
         assert!(
-            error.to_string().contains("Could not recover computer configuration"),
+            error
+                .to_string()
+                .contains("Could not recover computer configuration"),
             "{error}"
         );
     }
@@ -13699,8 +13717,13 @@ exit 9
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
         write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
-        let reason = "Its files were kept untouched. Report this problem before using the computer.";
-        crate::runtime_migration::set_protected_storage_attention_for_test(&paths.metadata, "dev", Some(reason));
+        let reason =
+            "Its files were kept untouched. Report this problem before using the computer.";
+        crate::runtime_migration::set_protected_storage_attention_for_test(
+            &paths.metadata,
+            "dev",
+            Some(reason),
+        );
         let runner = StubRunner::successful_json(vec![]);
 
         for action in ["start", "restart"] {
@@ -13708,7 +13731,10 @@ exit 9
                 .unwrap_err();
             assert_eq!(error.to_string(), reason);
         }
-        assert!(runner.calls.lock().unwrap().is_empty(), "msb is never asked");
+        assert!(
+            runner.calls.lock().unwrap().is_empty(),
+            "msb is never asked"
+        );
 
         let mut computers = vec![unread_computer(computer())];
         flag_unmoved_storage(&paths, &mut computers);
@@ -13717,7 +13743,11 @@ exit 9
         assert!(matches!(attention.level, AttentionLevel::Error));
         assert_eq!(attention.message, format!("Needs attention: {reason}"));
 
-        crate::runtime_migration::set_protected_storage_attention_for_test(&paths.metadata, "dev", None);
+        crate::runtime_migration::set_protected_storage_attention_for_test(
+            &paths.metadata,
+            "dev",
+            None,
+        );
         let mut computers = vec![unread_computer(computer())];
         flag_unmoved_storage(&paths, &mut computers);
         assert!(!computers[0].needs_storage_upgrade && computers[0].attention.is_none());
@@ -13732,8 +13762,15 @@ exit 9
 
         let checker = StubRunner::successful_json(vec![]);
         crate::runtime_migration::check_protected_storage_of_arrival(&checker, &paths, "dev");
-        assert!(checker.calls.lock().unwrap().is_empty(), "no runtime folder, nothing to check");
-        assert!(!directory.path().join("computers.json").with_file_name("protected-storage.json").exists());
+        assert!(
+            checker.calls.lock().unwrap().is_empty(),
+            "no runtime folder, nothing to check"
+        );
+        assert!(!directory
+            .path()
+            .join("computers.json")
+            .with_file_name("protected-storage.json")
+            .exists());
 
         let mut computers = vec![unread_computer(computer())];
         flag_unmoved_storage(&paths, &mut computers);

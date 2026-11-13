@@ -109,12 +109,16 @@ impl runtime::RuntimeRunner for Runtime {
         };
         let mut computers = self.computers.borrow_mut();
         // A running computer with protected storage is no legacy writer.
-        let any_running = computers.values().any(|fake| fake.running && fake.status != "ready");
+        let any_running = computers
+            .values()
+            .any(|fake| fake.running && fake.status != "ready");
         match args[0].as_str() {
             "inspect" => {
                 let fake = computers.get(&args[1]).unwrap();
                 let status = if fake.running { "Running" } else { "Stopped" };
-                Ok(output(serde_json::json!({"name":args[1],"status":status}).to_string()))
+                Ok(output(
+                    serde_json::json!({"name":args[1],"status":status}).to_string(),
+                ))
             }
             "--silo-storage-repair-protocol" => self
                 .probe
@@ -134,7 +138,8 @@ impl runtime::RuntimeRunner for Runtime {
                 } else {
                     fake.status
                 };
-                let mut item = serde_json::json!({"name":args[2],"status":status,"running":fake.running});
+                let mut item =
+                    serde_json::json!({"name":args[2],"status":status,"running":fake.running});
                 match fake.running_field {
                     RunningField::Bool => {}
                     RunningField::Missing => {
@@ -236,11 +241,7 @@ fn paths_with_sandboxes(directory: &Path, sandboxes: &[(&str, bool)]) -> runtime
     }
 }
 
-fn run_in(
-    fake: &Runtime,
-    paths: &runtime::RuntimePaths,
-    list: &[&str],
-) -> Result<Report, String> {
+fn run_in(fake: &Runtime, paths: &runtime::RuntimePaths, list: &[&str]) -> Result<Report, String> {
     upgrade(
         fake,
         paths,
@@ -280,9 +281,8 @@ fn stopped_legacy_computers_are_backed_up_once_then_repaired_and_verified() {
         .position(|call| call.starts_with("self repair"))
         .unwrap();
     assert!(backup < first_repair, "the backup precedes every repair");
-    assert!(calls.contains(
-        &"self repair --sandbox a --format json --legacy-writers-stopped".to_string()
-    ));
+    assert!(calls
+        .contains(&"self repair --sandbox a --format json --legacy-writers-stopped".to_string()));
     assert_eq!(
         calls.last().unwrap(),
         "doctor --sandbox b --format json",
@@ -294,7 +294,9 @@ fn stopped_legacy_computers_are_backed_up_once_then_repaired_and_verified() {
 fn the_maintenance_confirmation_is_sent_only_where_the_platform_asks_for_it() {
     let fake = Runtime::new(&[("a", computer("eligible", false))]);
     run(&fake, &["a"], false, Ok(())).unwrap();
-    assert!(fake.calls().contains(&"self repair --sandbox a --format json".to_string()));
+    assert!(fake
+        .calls()
+        .contains(&"self repair --sandbox a --format json".to_string()));
 }
 
 #[test]
@@ -305,7 +307,10 @@ fn ready_computers_are_left_alone_and_cost_no_backup() {
     assert!(report.complete());
     assert_eq!(
         fake.calls(),
-        ["inspect a --format json", "doctor --sandbox a --format json"]
+        [
+            "inspect a --format json",
+            "doctor --sandbox a --format json"
+        ]
     );
 }
 
@@ -315,7 +320,12 @@ fn a_running_computer_is_stopped_before_the_backup_and_the_repair() {
     let report = run(&fake, &["a"], true, Ok(())).unwrap();
     assert_eq!(outcome(&report, "a"), &Outcome::Repaired);
     let calls = fake.calls();
-    let position = |prefix: &str| calls.iter().position(|call| call.starts_with(prefix)).unwrap();
+    let position = |prefix: &str| {
+        calls
+            .iter()
+            .position(|call| call.starts_with(prefix))
+            .unwrap()
+    };
     assert!(position("stop a") < position("<backup>"));
     assert!(position("<backup>") < position("self repair"));
 }
@@ -335,8 +345,14 @@ fn one_launch_finishes_when_a_running_computer_makes_doctor_rate_the_others_reco
     assert_eq!(outcome(&report, "ready"), &Outcome::AlreadyReady);
     let calls = fake.calls();
     let stop = calls.iter().position(|call| call == "stop run").unwrap();
-    let first_doctor = calls.iter().position(|call| call.starts_with("doctor")).unwrap();
-    assert!(stop < first_doctor, "everything running is stopped before any doctor call");
+    let first_doctor = calls
+        .iter()
+        .position(|call| call.starts_with("doctor"))
+        .unwrap();
+    assert!(
+        stop < first_doctor,
+        "everything running is stopped before any doctor call"
+    );
 }
 
 #[test]
@@ -345,10 +361,16 @@ fn a_computer_that_will_not_stop_is_kept_untouched_and_the_others_continue() {
     stuck.stays_running = true;
     let fake = Runtime::new(&[("stuck", stuck), ("b", computer("eligible", false))]);
     let report = run(&fake, &["stuck", "b"], true, Ok(())).unwrap();
-    assert!(matches!(outcome(&report, "stuck"), Outcome::NeedsAttention(_)));
+    assert!(matches!(
+        outcome(&report, "stuck"),
+        Outcome::NeedsAttention(_)
+    ));
     assert_eq!(outcome(&report, "b"), &Outcome::Repaired);
     assert!(!report.complete());
-    assert!(!fake.calls().iter().any(|call| call.contains("--sandbox stuck --format json --")));
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.contains("--sandbox stuck --format json --")));
 }
 
 #[test]
@@ -359,9 +381,15 @@ fn disks_that_need_a_manual_decision_are_reported_and_never_repaired() {
             ("b", computer("eligible", false)),
         ]);
         let report = run(&fake, &["odd", "b"], true, Ok(())).unwrap();
-        assert!(matches!(outcome(&report, "odd"), Outcome::NeedsAttention(_)), "{status}");
+        assert!(
+            matches!(outcome(&report, "odd"), Outcome::NeedsAttention(_)),
+            "{status}"
+        );
         assert_eq!(outcome(&report, "b"), &Outcome::Repaired);
-        assert!(!fake.calls().iter().any(|call| call.contains("repair --sandbox odd")));
+        assert!(!fake
+            .calls()
+            .iter()
+            .any(|call| call.contains("repair --sandbox odd")));
     }
 }
 
@@ -371,7 +399,10 @@ fn a_refused_repair_is_reported_for_that_computer_only() {
     refused.repair_exit = Some(2);
     let fake = Runtime::new(&[("refused", refused), ("b", computer("eligible", false))]);
     let report = run(&fake, &["refused", "b"], true, Ok(())).unwrap();
-    assert!(matches!(outcome(&report, "refused"), Outcome::NeedsAttention(_)));
+    assert!(matches!(
+        outcome(&report, "refused"),
+        Outcome::NeedsAttention(_)
+    ));
     assert_eq!(outcome(&report, "b"), &Outcome::Repaired);
     assert!(!report.complete());
 }
@@ -382,7 +413,10 @@ fn a_repair_whose_result_cannot_be_verified_does_not_count() {
     liar.repair_is_a_no_op = true;
     let fake = Runtime::new(&[("liar", liar)]);
     let report = run(&fake, &["liar"], true, Ok(())).unwrap();
-    assert!(matches!(outcome(&report, "liar"), Outcome::NeedsAttention(_)));
+    assert!(matches!(
+        outcome(&report, "liar"),
+        Outcome::NeedsAttention(_)
+    ));
 }
 
 #[test]
@@ -391,13 +425,24 @@ fn a_failed_backup_blocks_only_the_computers_that_needed_repair_and_says_why() {
         ("a", computer("eligible", false)),
         ("ok", computer("ready", false)),
     ]);
-    let report = run(&fake, &["a", "ok"], true, Err("there is not enough free disk space")).unwrap();
+    let report = run(
+        &fake,
+        &["a", "ok"],
+        true,
+        Err("there is not enough free disk space"),
+    )
+    .unwrap();
     assert_eq!(outcome(&report, "ok"), &Outcome::AlreadyReady);
-    let Outcome::NeedsAttention(message) = outcome(&report, "a") else { panic!() };
+    let Outcome::NeedsAttention(message) = outcome(&report, "a") else {
+        panic!()
+    };
     assert!(message.contains("not enough free disk space"), "{message}");
     assert!(!message.starts_with("Relaunch"), "{message}");
     assert!(report.backed_up.is_empty());
-    assert!(!fake.calls().iter().any(|call| call.starts_with("self repair")));
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.starts_with("self repair")));
 }
 
 #[test]
@@ -407,10 +452,18 @@ fn a_missing_or_unreadable_running_flag_is_never_taken_for_stopped() {
         unsure.running_field = field;
         let fake = Runtime::new(&[("unsure", unsure), ("b", computer("eligible", false))]);
         let report = run(&fake, &["unsure", "b"], true, Ok(())).unwrap();
-        let Outcome::NeedsAttention(message) = outcome(&report, "unsure") else { panic!() };
-        assert!(message.contains("whether this computer is running"), "{message}");
+        let Outcome::NeedsAttention(message) = outcome(&report, "unsure") else {
+            panic!()
+        };
+        assert!(
+            message.contains("whether this computer is running"),
+            "{message}"
+        );
         assert_eq!(outcome(&report, "b"), &Outcome::Repaired);
-        assert!(!fake.calls().iter().any(|call| call.contains("repair --sandbox unsure")));
+        assert!(!fake
+            .calls()
+            .iter()
+            .any(|call| call.contains("repair --sandbox unsure")));
     }
 }
 
@@ -421,9 +474,15 @@ fn a_computer_that_runs_again_before_its_repair_is_not_repaired() {
     restarted.starts_after_doctors = Some(1);
     let fake = Runtime::new(&[("late", restarted), ("b", computer("eligible", false))]);
     let report = run(&fake, &["late", "b"], true, Ok(())).unwrap();
-    assert!(matches!(outcome(&report, "late"), Outcome::NeedsAttention(_)));
+    assert!(matches!(
+        outcome(&report, "late"),
+        Outcome::NeedsAttention(_)
+    ));
     assert_eq!(outcome(&report, "b"), &Outcome::Repaired);
-    assert!(!fake.calls().iter().any(|call| call.contains("repair --sandbox late")));
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.contains("repair --sandbox late")));
 }
 
 #[test]
@@ -442,7 +501,11 @@ fn the_report_records_which_computers_the_backup_covers() {
         &fake,
         &paths(),
         &names(&["a", "stuck", "ok"]),
-        &Options { confirm_maintenance: true, backup: &backup, progress: &|_| {} },
+        &Options {
+            confirm_maintenance: true,
+            backup: &backup,
+            progress: &|_| {},
+        },
     )
     .unwrap();
     assert_eq!(report.backed_up, ["a"]);
@@ -452,7 +515,11 @@ fn the_report_records_which_computers_the_backup_covers() {
 fn storage_with_a_disk(directory: &Path) -> PathBuf {
     let storage = directory.join("runtime");
     fs::create_dir_all(storage.join("microsandbox/sandboxes/dev")).unwrap();
-    fs::write(storage.join("microsandbox/sandboxes/dev/upper.ext4"), b"disk").unwrap();
+    fs::write(
+        storage.join("microsandbox/sandboxes/dev/upper.ext4"),
+        b"disk",
+    )
+    .unwrap();
     fs::write(storage.join("computers.json"), b"{}").unwrap();
     storage
 }
@@ -469,7 +536,11 @@ fn the_backup_is_a_complete_clone_made_once() {
         b"disk"
     );
     // A later run never replaces a finished backup that covers the same computers.
-    fs::write(storage.join("microsandbox/sandboxes/dev/upper.ext4"), b"changed").unwrap();
+    fs::write(
+        storage.join("microsandbox/sandboxes/dev/upper.ext4"),
+        b"changed",
+    )
+    .unwrap();
     clone_backup(directory.path(), &storage, &covered).unwrap();
     assert_eq!(
         fs::read(backup.join("microsandbox/sandboxes/dev/upper.ext4")).unwrap(),
@@ -486,7 +557,11 @@ fn an_unfinished_backup_is_discarded_not_trusted() {
     fs::write(partial.join("half"), b"x").unwrap();
     clone_backup(directory.path(), &storage, &names(&["dev"])).unwrap();
     assert!(!partial.exists());
-    assert!(directory.path().join(BACKUP).join("computers.json").is_file());
+    assert!(directory
+        .path()
+        .join(BACKUP)
+        .join("computers.json")
+        .is_file());
     assert!(!directory.path().join(BACKUP).join("half").exists());
 }
 
@@ -518,7 +593,11 @@ fn the_backup_keeps_absolute_links_as_they_are_and_names_a_failure() {
 
     let other = tempfile::tempdir().unwrap();
     let storage = storage_with_a_disk(other.path());
-    assert!(std::process::Command::new("mkfifo").arg(storage.join("pipe")).status().unwrap().success());
+    assert!(std::process::Command::new("mkfifo")
+        .arg(storage.join("pipe"))
+        .status()
+        .unwrap()
+        .success());
     let error = clone_backup(other.path(), &storage, &names(&["dev"])).unwrap_err();
     assert!(error.contains("unsupported filesystem entry"), "{error}");
     assert!(!other.path().join(BACKUP).exists());
@@ -534,9 +613,13 @@ fn a_fresh_backup_is_not_deleted_by_a_check_that_came_due_before_it() {
     // Hold the deletion lock as a due check does: the swap waits for it instead of racing it.
     let swapped = std::thread::scope(|scope| {
         let guard = crate::pre_upgrade_backup::hold_deletion_for_test();
-        let handle = scope.spawn(|| clone_backup(directory.path(), &storage, &names(&["dev", "x"])));
+        let handle =
+            scope.spawn(|| clone_backup(directory.path(), &storage, &names(&["dev", "x"])));
         std::thread::sleep(Duration::from_millis(200));
-        assert!(!handle.is_finished(), "the swap waits for the deletion lock");
+        assert!(
+            !handle.is_finished(),
+            "the swap waits for the deletion lock"
+        );
         assert_eq!(fs::read(backup.join("computers.json")).unwrap(), b"{}");
         drop(guard);
         handle.join().unwrap()
@@ -581,17 +664,12 @@ fn a_runtime_without_the_repair_protocol_moves_nothing_and_takes_no_backup() {
 fn the_repair_protocol_is_not_probed_when_nothing_needs_repair() {
     let fake = Runtime::new(&[("ok", computer("ready", false))]);
     run(&fake, &["ok"], true, Ok(())).unwrap();
-    assert!(!fake
-        .calls()
-        .iter()
-        .any(|call| call.starts_with("--silo-")));
+    assert!(!fake.calls().iter().any(|call| call.starts_with("--silo-")));
 }
 
 // MARK: Launch driver
 
-use super::{
-    fresh, protected_computers, select_generation, write, Controller, CONVERTED, FILE,
-};
+use super::{fresh, protected_computers, select_generation, write, Controller, CONVERTED, FILE};
 
 /// An app-data folder after a finished migration whose converted storage holds `names`.
 fn launched(names: &[&str]) -> tempfile::TempDir {
@@ -635,13 +713,21 @@ fn the_launch_driver_holds_the_computers_moves_them_and_opens_them_again() {
     let stages = RefCell::new(Vec::new());
     controller
         .run_protected_storage(&fake, &paths(), &|| {
-            stages.borrow_mut().push(controller.snapshot().unwrap().stage)
+            stages
+                .borrow_mut()
+                .push(controller.snapshot().unwrap().stage)
         })
         .unwrap();
 
     let stages = stages.into_inner();
-    assert!(stages.contains(&"Backing up computer storage".to_string()), "{stages:?}");
-    assert!(stages.contains(&"Upgrading computer storage (1 of 1)".to_string()), "{stages:?}");
+    assert!(
+        stages.contains(&"Backing up computer storage".to_string()),
+        "{stages:?}"
+    );
+    assert!(
+        stages.contains(&"Upgrading computer storage (1 of 1)".to_string()),
+        "{stages:?}"
+    );
     assert_eq!(controller.snapshot().unwrap().status, "complete");
     assert!(!controller.blocks_operations());
     assert!(dir.path().join(BACKUP).join("microsandbox/db").is_file());
@@ -649,7 +735,10 @@ fn the_launch_driver_holds_the_computers_moves_them_and_opens_them_again() {
     assert!(report.complete());
     assert_eq!(outcome(&report, "drv-a"), &Outcome::Repaired);
     assert_eq!(outcome(&report, "drv-b"), &Outcome::AlreadyReady);
-    assert_eq!(attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-a"), None);
+    assert_eq!(
+        attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-a"),
+        None
+    );
     // Nothing left to do at the next launch.
     assert!(!Controller::new(dir.path().to_path_buf()).hold_for_protected_storage());
 }
@@ -663,12 +752,21 @@ fn a_computer_that_cannot_be_moved_is_refused_with_its_reason_and_retried_at_the
         ("drv-odd", computer("recovery_required", false)),
         ("drv-ok", computer("eligible", false)),
     ]);
-    controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
+    controller
+        .run_protected_storage(&fake, &paths(), &|| {})
+        .unwrap();
 
     assert!(!controller.blocks_operations(), "the other computers work");
-    let message = attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-odd").unwrap();
+    let message = attention_message(
+        &dir.path().join(CONVERTED).join("computers.json"),
+        "drv-odd",
+    )
+    .unwrap();
     assert!(message.contains("kept untouched"), "{message}");
-    assert_eq!(attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-ok"), None);
+    assert_eq!(
+        attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-ok"),
+        None
+    );
     let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
     assert!(!report.complete());
     assert!(Controller::new(dir.path().to_path_buf()).hold_for_protected_storage());
@@ -679,14 +777,27 @@ fn a_failed_backup_repairs_nothing_and_every_pending_computer_says_so() {
     let dir = launched(&["drv-x"]);
     // An entry the clone refuses to copy.
     #[cfg(unix)]
-    assert!(std::process::Command::new("mkfifo").arg(dir.path().join(CONVERTED).join("pipe")).status().unwrap().success());
+    assert!(std::process::Command::new("mkfifo")
+        .arg(dir.path().join(CONVERTED).join("pipe"))
+        .status()
+        .unwrap()
+        .success());
     let controller = Controller::new(dir.path().to_path_buf());
     assert!(controller.hold_for_protected_storage());
     let fake = Runtime::new(&[("drv-x", computer("maintenance_required", false))]);
-    controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
-    assert!(!fake.calls().iter().any(|call| call.starts_with("self repair")));
-    let message = attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-x").unwrap();
-    assert!(message.contains("could not back up") && message.contains("unsupported filesystem entry"), "{message}");
+    controller
+        .run_protected_storage(&fake, &paths(), &|| {})
+        .unwrap();
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.starts_with("self repair")));
+    let message =
+        attention_message(&dir.path().join(CONVERTED).join("computers.json"), "drv-x").unwrap();
+    assert!(
+        message.contains("could not back up") && message.contains("unsupported filesystem entry"),
+        "{message}"
+    );
     assert!(!controller.blocks_operations());
     assert!(!dir.path().join(BACKUP).exists());
     let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
@@ -700,8 +811,13 @@ fn a_computer_that_arrives_after_the_move_is_checked_and_flagged_until_it_is_rea
     let controller = Controller::new(dir.path().to_path_buf());
     assert!(controller.hold_for_protected_storage());
     let fake = Runtime::new(&[("drv-a", computer("ready", false))]);
-    controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
-    assert!(read_report(&dir.path().join(CONVERTED)).unwrap().unwrap().complete());
+    controller
+        .run_protected_storage(&fake, &paths(), &|| {})
+        .unwrap();
+    assert!(read_report(&dir.path().join(CONVERTED))
+        .unwrap()
+        .unwrap()
+        .complete());
 
     let storage_home = dir.path().join(CONVERTED).join("microsandbox");
     for name in ["new-ready", "new-old", "new-odd"] {
@@ -719,14 +835,24 @@ fn a_computer_that_arrives_after_the_move_is_checked_and_flagged_until_it_is_rea
     ]);
     check_arrival(&fake, &arrival_paths, "new-ready");
     assert_eq!(attention_message(&metadata, "new-ready"), None);
-    assert!(read_report(&dir.path().join(CONVERTED)).unwrap().unwrap().complete());
+    assert!(read_report(&dir.path().join(CONVERTED))
+        .unwrap()
+        .unwrap()
+        .complete());
 
     check_arrival(&fake, &arrival_paths, "new-old");
     check_arrival(&fake, &arrival_paths, "new-odd");
-    assert!(attention_message(&metadata, "new-old").unwrap().contains("Relaunch Silo"));
-    assert!(attention_message(&metadata, "new-odd").unwrap().contains("manual decision"));
+    assert!(attention_message(&metadata, "new-old")
+        .unwrap()
+        .contains("Relaunch Silo"));
+    assert!(attention_message(&metadata, "new-odd")
+        .unwrap()
+        .contains("manual decision"));
     assert_eq!(attention_message(&metadata, "drv-a"), None);
-    assert!(!fake.calls().iter().any(|call| call.starts_with("self repair")));
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.starts_with("self repair")));
     let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
     assert!(!report.complete(), "the next launch runs the step again");
     assert_eq!(outcome(&report, "drv-a"), &Outcome::AlreadyReady);
@@ -765,7 +891,9 @@ fn nothing_is_held_without_a_finished_migration_computers_or_work() {
     assert!(!controller.hold_for_protected_storage());
     // Running without a hold does nothing.
     let fake = Runtime::new(&[]);
-    controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
+    controller
+        .run_protected_storage(&fake, &paths(), &|| {})
+        .unwrap();
     assert!(fake.calls().is_empty());
 }
 
@@ -780,7 +908,9 @@ fn containers_are_not_part_of_the_move() {
 
 #[test]
 fn a_blocked_repair_reads_its_diagnosis_from_stdout() {
-    assert!(blocked_message_for_test(&blocked_detail("recovery_required")).contains("manual decision"));
+    assert!(
+        blocked_message_for_test(&blocked_detail("recovery_required")).contains("manual decision")
+    );
     assert!(blocked_message_for_test(&blocked_detail("running")).contains("stopping"));
     assert!(blocked_message_for_test("not json").contains("refused"));
 }
@@ -802,13 +932,22 @@ fn a_running_computer_with_protected_storage_is_never_stopped_beside_one_that_ne
         let report = run_in(&fake, &paths, &["healthy", "odd"]).unwrap();
         assert!(!report.complete(), "launch {launch}");
         assert_eq!(outcome(&report, "healthy"), &Outcome::AlreadyReady);
-        assert!(matches!(outcome(&report, "odd"), Outcome::NeedsAttention(_)));
+        assert!(matches!(
+            outcome(&report, "odd"),
+            Outcome::NeedsAttention(_)
+        ));
         assert!(
-            !fake.calls().iter().any(|call| call.starts_with("stop healthy")),
+            !fake
+                .calls()
+                .iter()
+                .any(|call| call.starts_with("stop healthy")),
             "launch {launch}: {:?}",
             fake.calls()
         );
-        assert!(fake.computers.borrow()["healthy"].running, "launch {launch}");
+        assert!(
+            fake.computers.borrow()["healthy"].running,
+            "launch {launch}"
+        );
     }
 }
 
@@ -843,11 +982,14 @@ fn add_saved_computers(dir: &Path, names: &[&str]) {
     let metadata = dir.join(CONVERTED).join("computers.json");
     let mut inventory = serde_json::to_value(runtime::read_metadata(&metadata).unwrap()).unwrap();
     for (index, name) in names.iter().enumerate() {
-        inventory["computers"].as_array_mut().unwrap().push(serde_json::json!({
-            "id": format!("00000000-0000-4000-8000-0000000001{index:02}"), "name": name,
-            "cpus": 1, "maxCPUs": 1, "memoryGiB": 1, "maxMemoryGiB": 1,
-            "workspaceStorageGiB": 1, "runtimeStorageGiB": 1
-        }));
+        inventory["computers"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": format!("00000000-0000-4000-8000-0000000001{index:02}"), "name": name,
+                "cpus": 1, "maxCPUs": 1, "memoryGiB": 1, "maxMemoryGiB": 1,
+                "workspaceStorageGiB": 1, "runtimeStorageGiB": 1
+            }));
     }
     runtime::write_metadata(&metadata, &serde_json::from_value(inventory).unwrap()).unwrap();
 }
@@ -865,15 +1007,24 @@ fn computers_that_were_never_started_are_neither_inspected_nor_flagged_across_la
         let held = controller.hold_for_protected_storage();
         assert_eq!(held, launch == 0, "launch {launch}");
         if held {
-            controller.run_protected_storage(&fake, &paths(), &|| {}).unwrap();
+            controller
+                .run_protected_storage(&fake, &paths(), &|| {})
+                .unwrap();
         }
         controller.release_protected_storage();
         for name in ["pending-import", "unstarted-fork"] {
-            assert_eq!(attention_message(&metadata, name), None, "{name}, launch {launch}");
+            assert_eq!(
+                attention_message(&metadata, name),
+                None,
+                "{name}, launch {launch}"
+            );
         }
         let report = read_report(&dir.path().join(CONVERTED)).unwrap().unwrap();
         assert!(report.complete(), "launch {launch}: {:?}", report.computers);
-        assert!(report.computers.iter().all(|computer| computer.name == "drv-a"));
+        assert!(report
+            .computers
+            .iter()
+            .all(|computer| computer.name == "drv-a"));
     }
 }
 
@@ -896,7 +1047,10 @@ fn a_computer_without_a_runtime_folder_is_not_checked_when_it_arrives() {
     let fake = Runtime::new(&[]);
     check_arrival(&fake, &arrival_paths, "restore-waiting-for-start");
     assert!(fake.calls().is_empty());
-    assert_eq!(attention_message(&metadata, "restore-waiting-for-start"), None);
+    assert_eq!(
+        attention_message(&metadata, "restore-waiting-for-start"),
+        None
+    );
     assert!(read_report(&dir.path().join(CONVERTED)).unwrap().is_none());
 }
 
@@ -914,7 +1068,11 @@ struct Recorder {
 
 impl Recorder {
     fn new(published: PathBuf) -> Self {
-        Self { published, events: RefCell::default(), published_early: RefCell::default() }
+        Self {
+            published,
+            events: RefCell::default(),
+            published_early: RefCell::default(),
+        }
     }
 
     fn record(&self, kind: &'static str, path: &Path) {
@@ -954,48 +1112,100 @@ fn walk(root: &Path) -> (BTreeSet<PathBuf>, BTreeSet<PathBuf>) {
 }
 
 #[test]
-fn the_backup_is_flushed_files_then_folders_bottom_up_then_the_certificate_before_it_is_published() {
+fn the_backup_is_flushed_files_then_folders_bottom_up_then_the_certificate_before_it_is_published()
+{
     let directory = tempfile::tempdir().unwrap();
     let storage = storage_with_a_disk(directory.path());
     fs::create_dir_all(storage.join("microsandbox/sandboxes/dev/runtime/deep")).unwrap();
-    fs::write(storage.join("microsandbox/sandboxes/dev/runtime/deep/state"), b"s").unwrap();
+    fs::write(
+        storage.join("microsandbox/sandboxes/dev/runtime/deep/state"),
+        b"s",
+    )
+    .unwrap();
     fs::create_dir_all(storage.join("empty")).unwrap();
     let backup = directory.path().join(BACKUP);
     let recorder = Recorder::new(backup.clone());
     clone_backup_with(directory.path(), &storage, &names(&["dev"]), &recorder).unwrap();
-    assert!(!*recorder.published_early.borrow(), "everything is flushed before the rename");
+    assert!(
+        !*recorder.published_early.borrow(),
+        "everything is flushed before the rename"
+    );
     assert!(backup.is_dir());
 
     let partial = directory.path().join(format!("{BACKUP}.partial"));
     let events = recorder.events.borrow();
     let position = |kind: &str, path: &Path, last: bool| {
-        let mut found = events.iter().enumerate().filter(|(_, (k, p))| *k == kind && p == path);
+        let mut found = events
+            .iter()
+            .enumerate()
+            .filter(|(_, (k, p))| *k == kind && p == path);
         if last { found.last() } else { found.next() }.map(|(index, _)| index)
     };
-    let certificate = position("file", &partial.join(COVERS), false).expect("certificate is flushed");
+    let certificate =
+        position("file", &partial.join(COVERS), false).expect("certificate is flushed");
     let (files, directories) = walk(&backup);
-    for file in files.iter().filter(|file| file.file_name().unwrap() != COVERS) {
-        let at = position("file", &partial.join(file.strip_prefix(&backup).unwrap()), false)
-            .unwrap_or_else(|| panic!("{} is flushed", file.display()));
-        assert!(at < certificate, "{} before the certificate", file.display());
+    for file in files
+        .iter()
+        .filter(|file| file.file_name().unwrap() != COVERS)
+    {
+        let at = position(
+            "file",
+            &partial.join(file.strip_prefix(&backup).unwrap()),
+            false,
+        )
+        .unwrap_or_else(|| panic!("{} is flushed", file.display()));
+        assert!(
+            at < certificate,
+            "{} before the certificate",
+            file.display()
+        );
     }
-    let first_directory = events.iter().position(|(kind, _)| *kind == "directory").unwrap();
-    let last_file = events.iter().rposition(|(kind, path)| *kind == "file" && path != &partial.join(COVERS)).unwrap();
-    assert!(last_file < first_directory, "every file is flushed before any folder");
+    let first_directory = events
+        .iter()
+        .position(|(kind, _)| *kind == "directory")
+        .unwrap();
+    let last_file = events
+        .iter()
+        .rposition(|(kind, path)| *kind == "file" && path != &partial.join(COVERS))
+        .unwrap();
+    assert!(
+        last_file < first_directory,
+        "every file is flushed before any folder"
+    );
     let flushed_folder = |path: &Path| {
-        events.iter().position(|(kind, p)| *kind == "directory" && p == path && true)
+        events
+            .iter()
+            .position(|(kind, p)| *kind == "directory" && p == path && true)
     };
     for folder in &directories {
         let relative = folder.strip_prefix(&backup).unwrap();
-        let at = flushed_folder(&partial.join(relative)).unwrap_or_else(|| panic!("{} is flushed", relative.display()));
-        assert!(at < certificate, "{} before the certificate", relative.display());
-        for other in directories.iter().filter(|other| other.starts_with(folder) && *other != folder) {
-            let inside = flushed_folder(&partial.join(other.strip_prefix(&backup).unwrap())).unwrap();
-            assert!(inside < at, "{} before its parent {}", other.display(), folder.display());
+        let at = flushed_folder(&partial.join(relative))
+            .unwrap_or_else(|| panic!("{} is flushed", relative.display()));
+        assert!(
+            at < certificate,
+            "{} before the certificate",
+            relative.display()
+        );
+        for other in directories
+            .iter()
+            .filter(|other| other.starts_with(folder) && *other != folder)
+        {
+            let inside =
+                flushed_folder(&partial.join(other.strip_prefix(&backup).unwrap())).unwrap();
+            assert!(
+                inside < at,
+                "{} before its parent {}",
+                other.display(),
+                folder.display()
+            );
         }
     }
     let last = events.last().unwrap();
-    assert_eq!((last.0, &last.1), ("directory", &partial), "the folder holding the certificate is flushed last");
+    assert_eq!(
+        (last.0, &last.1),
+        ("directory", &partial),
+        "the folder holding the certificate is flushed last"
+    );
     assert!(position("directory", &partial, true).unwrap() > certificate);
 }
 
@@ -1017,14 +1227,20 @@ fn a_backup_whose_certificate_is_missing_or_older_than_its_contents_is_not_trust
     // Untouched: trusted, so the later change in the storage is not copied.
     assert_eq!(remake(&|| {}), b"old");
     // No certificate.
-    assert_eq!(remake(&|| fs::remove_file(backup.join(COVERS)).unwrap()), b"new");
+    assert_eq!(
+        remake(&|| fs::remove_file(backup.join(COVERS)).unwrap()),
+        b"new"
+    );
     fs::write(storage.join(disk), b"old").unwrap();
     fs::remove_dir_all(&backup).unwrap();
     // A file written after the certificate.
     assert_eq!(
         remake(&|| {
             let later = std::time::SystemTime::now() + Duration::from_secs(60);
-            let file = fs::File::options().write(true).open(backup.join(disk)).unwrap();
+            let file = fs::File::options()
+                .write(true)
+                .open(backup.join(disk))
+                .unwrap();
             file.set_modified(later).unwrap();
         }),
         b"new"
@@ -1035,7 +1251,10 @@ fn a_backup_whose_certificate_is_missing_or_older_than_its_contents_is_not_trust
     assert_eq!(
         remake(&|| {
             let earlier = std::time::SystemTime::now() - Duration::from_secs(3600);
-            let file = fs::File::options().write(true).open(backup.join(COVERS)).unwrap();
+            let file = fs::File::options()
+                .write(true)
+                .open(backup.join(COVERS))
+                .unwrap();
             file.set_modified(earlier).unwrap();
         }),
         b"new"

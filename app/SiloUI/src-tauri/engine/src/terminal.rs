@@ -172,7 +172,13 @@ mod tests {
         assert!(container.ends_with("'--tty'"), "{container}");
         let machine = command(&paths, "dev").unwrap();
         assert!(!machine.contains("container-runtime"), "{machine}");
-        assert!(machine.contains(&format!("{} 'exec' 'dev'", quote(paths.executable.to_str().unwrap()))), "{machine}");
+        assert!(
+            machine.contains(&format!(
+                "{} 'exec' 'dev'",
+                quote(paths.executable.to_str().unwrap())
+            )),
+            "{machine}"
+        );
     }
 
     #[test]

@@ -618,24 +618,23 @@ fn agents_with(
 ) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
     runtime::validate_name(computer).map_err(|e| e.to_string())?;
     let configuration = computer_at(runner, paths, computer, expected_id)?;
-    let mut agents = match runtime::observe_computer(runner, paths, computer)
-        .map_err(|e| e.to_string())?
-    {
-        runtime::ComputerRuntime::Present(inspected) if inspected.status == "Running" => {
-            ensure_computer_identity(&configuration, &inspected)?;
-            let output = guest(
-                runner,
-                paths,
-                computer,
-                &crate::agent_tools::status_command(),
-                Duration::from_secs(15),
-                false,
-            )
-            .map_err(|e| e.to_string())?;
-            crate::agents::from_linux_status(output.trim().lines().next())
-        }
-        _ => crate::agents::unknown(),
-    };
+    let mut agents =
+        match runtime::observe_computer(runner, paths, computer).map_err(|e| e.to_string())? {
+            runtime::ComputerRuntime::Present(inspected) if inspected.status == "Running" => {
+                ensure_computer_identity(&configuration, &inspected)?;
+                let output = guest(
+                    runner,
+                    paths,
+                    computer,
+                    &crate::agent_tools::status_command(),
+                    Duration::from_secs(15),
+                    false,
+                )
+                .map_err(|e| e.to_string())?;
+                crate::agents::from_linux_status(output.trim().lines().next())
+            }
+            _ => crate::agents::unknown(),
+        };
     crate::agents::mark_installing(configuration.id(), &mut agents);
     Ok(agents)
 }
@@ -2620,7 +2619,9 @@ mod tests {
         ]);
         let agents =
             agents_with(&runner, &paths(dir.path()), "dev", Some(configuration.id())).unwrap();
-        assert!(agents.iter().all(|agent| agent.state == AgentState::Unknown));
+        assert!(agents
+            .iter()
+            .all(|agent| agent.state == AgentState::Unknown));
         runner.assert_finished();
 
         let status = crate::agent_tools::status_command();
@@ -2666,8 +2667,18 @@ mod tests {
             args.push("--no-start");
         }
         args.extend([
-            "--no-tty", "--quiet", "--timeout", timeout, "--user", "root", "--workdir", "/", "--",
-            "sh", "-c", script,
+            "--no-tty",
+            "--quiet",
+            "--timeout",
+            timeout,
+            "--user",
+            "root",
+            "--workdir",
+            "/",
+            "--",
+            "sh",
+            "-c",
+            script,
         ]);
         ExpectedCommand::error(args, error)
     }
@@ -2683,7 +2694,8 @@ mod tests {
     }
 
     #[test]
-    fn agents_requested_at_creation_are_installed_in_the_creation_boot_and_nothing_else_runs_without() {
+    fn agents_requested_at_creation_are_installed_in_the_creation_boot_and_nothing_else_runs_without(
+    ) {
         use silo_api::methods::agents::AgentId;
         let _test_state = crate::test_support::global_state();
         let dir = tempfile::tempdir().unwrap();
@@ -2853,9 +2865,7 @@ mod tests {
     #[test]
     fn the_guest_commands_run_the_install_in_its_own_group_and_stop_only_that_group() {
         let install = stoppable_script("/run/x.pid", "echo 'it''s'");
-        assert!(
-            install.starts_with("setsid -w sh -c 'echo \"$$\" > /run/x.pid; eval \"$1\"' sh ")
-        );
+        assert!(install.starts_with("setsid -w sh -c 'echo \"$$\" > /run/x.pid; eval \"$1\"' sh "));
         assert!(install.contains("'echo '\\''it'\\'''\\''s'\\'''"));
         assert!(install.ends_with("code=$?\nrm -f /run/x.pid\nexit $code\n"));
         let stop = stop_script("/run/x.pid");

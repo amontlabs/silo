@@ -247,7 +247,8 @@ mod linux {
     /// later engine can open it again.
     pub fn keep_tap(tun: &File) -> Result<(), String> {
         // SAFETY: TUNSETPERSIST takes an integer argument; the descriptor is open.
-        let rc = unsafe { libc::ioctl(tun.as_raw_fd(), libc::TUNSETPERSIST as _, 1 as libc::c_int) };
+        let rc =
+            unsafe { libc::ioctl(tun.as_raw_fd(), libc::TUNSETPERSIST as _, 1 as libc::c_int) };
         if rc != 0 {
             return Err(os_err("TUNSETPERSIST tap0"));
         }

@@ -1063,7 +1063,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.status, 4);
-        assert!(output.stderr.len() <= STDERR_TAIL_BYTES, "{}", output.stderr.len());
+        assert!(
+            output.stderr.len() <= STDERR_TAIL_BYTES,
+            "{}",
+            output.stderr.len()
+        );
         assert!(output.stderr.ends_with("the-last-line"));
     }
 

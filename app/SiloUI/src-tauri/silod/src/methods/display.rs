@@ -12,13 +12,13 @@ use serde_json::{json, Value};
 use silo_api::{
     jobs::{ErrorCode, JobFinished, JobProgress},
     methods::{
-        clipboard::{
-            ClipboardAction, ClipboardTransferContent, ClipboardTransferResult,
-            ClipboardTransferStatus,
-        },
         agents::{
             AgentId, AgentInfo, AgentInstallProgress, AgentInstallStep, AgentsInstallParams,
             AgentsListParams, AgentsListResult,
+        },
+        clipboard::{
+            ClipboardAction, ClipboardTransferContent, ClipboardTransferResult,
+            ClipboardTransferStatus,
         },
         computer_use::{ApprovalMode, ComputerUseState},
         desktop::{DesktopAction, DesktopStatus},
@@ -43,7 +43,13 @@ use super::{ownership::owns_prefix, HandlerContext};
 pub(super) fn owns(method: MethodName) -> bool {
     owns_prefix(
         method,
-        &["display.", "desktop.", "computerUse.", "clipboard.", "agents."],
+        &[
+            "display.",
+            "desktop.",
+            "computerUse.",
+            "clipboard.",
+            "agents.",
+        ],
     )
 }
 
@@ -146,7 +152,11 @@ fn map_error(message: impl Into<String>) -> DispatchError {
     } else {
         ErrorCode::Internal
     };
-    DispatchError { code, message, details: None }
+    DispatchError {
+        code,
+        message,
+        details: None,
+    }
 }
 
 fn decode<T: serde::de::DeserializeOwned>(
@@ -434,7 +444,8 @@ async fn agents_install(
     if is_macos_computer(context, &computer_id).await? {
         let app = macos_context(context);
         return start_job(context, "agents.install", move |link| {
-            let step = |step, detail| publish_agent_step(&engine, link, &computer_id, agent, step, detail);
+            let step =
+                |step, detail| publish_agent_step(&engine, link, &computer_id, agent, step, detail);
             step(AgentInstallStep::Waiting, None);
             let agents = silo_engine::macos_computers_engine::macos_install_agent(
                 &app,
@@ -452,7 +463,8 @@ async fn agents_install(
     start_job(context, "agents.install", move |link| {
         let paths = runtime::runtime_paths(&host).map_err(|error| error.to_string())?;
         let name = runtime::remote_ops::local_computer_name_in(&paths, &computer_id)?;
-        let step = |step, detail| publish_agent_step(&engine, link, &computer_id, agent, step, detail);
+        let step =
+            |step, detail| publish_agent_step(&engine, link, &computer_id, agent, step, detail);
         step(AgentInstallStep::Waiting, None);
         let agents: Vec<AgentInfo> = silo_engine::desktop::install_agent_for_job(
             &paths,

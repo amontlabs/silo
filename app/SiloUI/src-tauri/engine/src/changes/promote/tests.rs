@@ -627,7 +627,14 @@ fn an_undo_or_promote_whose_pin_moved_under_the_lanes_changes_nothing() {
     let before = fake.snapshot();
     let moved = || Err("the pin moved".to_owned());
     assert_eq!(
-        super::undo_checked(fake.as_ref(), &journal, FORK, Duration::from_secs(1), &moved).unwrap_err(),
+        super::undo_checked(
+            fake.as_ref(),
+            &journal,
+            FORK,
+            Duration::from_secs(1),
+            &moved
+        )
+        .unwrap_err(),
         "the pin moved"
     );
     assert_eq!(fake.snapshot(), before);

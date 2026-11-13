@@ -1356,7 +1356,12 @@ mod tests {
             .unwrap();
         child.stdin.as_mut().unwrap().write_all(b"x").unwrap();
         let mut echoed = [0u8; 1];
-        child.stdout.as_mut().unwrap().read_exact(&mut echoed).unwrap();
+        child
+            .stdout
+            .as_mut()
+            .unwrap()
+            .read_exact(&mut echoed)
+            .unwrap();
         child
     }
 

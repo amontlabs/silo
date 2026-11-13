@@ -17,6 +17,7 @@ pub mod capability;
 pub mod cli;
 pub mod desktop;
 pub mod hold;
+pub mod host_disk;
 pub mod idmap;
 pub mod image;
 pub mod layers;
@@ -26,7 +27,6 @@ pub mod lifecycle;
 pub mod oci;
 #[cfg(target_os = "linux")]
 pub mod ports;
-pub mod host_disk;
 pub mod secrets;
 pub mod snapshots;
 pub mod ssh;
@@ -84,7 +84,11 @@ use std::{path::PathBuf, time::Duration};
 /// scrubs) is the virtual machine's script unchanged.
 pub fn quiet_script(script: &str) -> String {
     script
-        .replacen("hostname \"$host\" || exit 1", "hostname \"$host\" || true", 1)
+        .replacen(
+            "hostname \"$host\" || exit 1",
+            "hostname \"$host\" || true",
+            1,
+        )
         .replacen(
             "cat \"$quiet/hosts.new\" > /etc/hosts || exit 1",
             "cat \"$quiet/hosts.new\" > /etc/hosts || true",
@@ -230,12 +234,8 @@ pub fn run(
         Command::SnapshotHead { group } => {
             snapshots::head(paths, &group).map(|value| output(value.to_string()))
         }
-        Command::SnapshotSave(save) => {
-            archive::save(paths, &save).map(|()| output(String::new()))
-        }
-        Command::SnapshotLoad(load) => {
-            archive::load(paths, &load).map(|()| output(String::new()))
-        }
+        Command::SnapshotSave(save) => archive::save(paths, &save).map(|()| output(String::new())),
+        Command::SnapshotLoad(load) => archive::load(paths, &load).map(|()| output(String::new())),
         Command::Restore(restore) => {
             snapshots::make_fork(paths, &restore)?;
             start(paths, &restore.name, timeout, material).map(|()| output(String::new()))
@@ -1202,16 +1202,35 @@ mod tests {
         let route = |parts: &[&str]| route(&paths, &strings(parts));
         // A capture goes where its computer lives.
         assert_eq!(
-            route(&["snapshot", "create", "c1", "--from-sandbox", "box", "--group", "box"]),
+            route(&[
+                "snapshot",
+                "create",
+                "c1",
+                "--from-sandbox",
+                "box",
+                "--group",
+                "box"
+            ]),
             Route::Container
         );
         assert_eq!(
-            route(&["snapshot", "create", "c1", "--from-sandbox", "vm", "--group", "vm"]),
+            route(&[
+                "snapshot",
+                "create",
+                "c1",
+                "--from-sandbox",
+                "vm",
+                "--group",
+                "vm"
+            ]),
             Route::Runtime
         );
         // Everything else by the group, which only exists once a container checkpoint does.
         assert_eq!(route(&["snapshot", "verify", "box:c1"]), Route::Runtime);
-        assert_eq!(route(&["restore", "box:c1", "--name", "kid"]), Route::Runtime);
+        assert_eq!(
+            route(&["restore", "box:c1", "--name", "kid"]),
+            Route::Runtime
+        );
         let layout = Layout::new(home.path());
         layers::Store::new(&layout)
             .write(&layers::Snapshot::new("box", "c1", Vec::new(), {
@@ -1219,15 +1238,36 @@ mod tests {
             }))
             .unwrap();
         assert_eq!(route(&["snapshot", "verify", "box:c1"]), Route::Container);
-        assert_eq!(route(&["snapshot", "remove", "--force", "box:c1", "--quiet"]), Route::Container);
+        assert_eq!(
+            route(&["snapshot", "remove", "--force", "box:c1", "--quiet"]),
+            Route::Container
+        );
         assert_eq!(route(&["snapshot", "remove", "vm:c2"]), Route::Runtime);
-        assert_eq!(route(&["restore", "box:c1", "--name", "kid"]), Route::Container);
-        assert_eq!(route(&["restore", "vm:c2", "--name", "kid"]), Route::Runtime);
-        assert_eq!(route(&["snapshot", "list", "--group", "box", "--format", "json"]), Route::Container);
-        assert_eq!(route(&["snapshot", "list", "--group", "vm", "--format", "json"]), Route::Runtime);
-        assert_eq!(route(&["snapshot", "list", "--format", "json"]), Route::MergeList);
+        assert_eq!(
+            route(&["restore", "box:c1", "--name", "kid"]),
+            Route::Container
+        );
+        assert_eq!(
+            route(&["restore", "vm:c2", "--name", "kid"]),
+            Route::Runtime
+        );
+        assert_eq!(
+            route(&["snapshot", "list", "--group", "box", "--format", "json"]),
+            Route::Container
+        );
+        assert_eq!(
+            route(&["snapshot", "list", "--group", "vm", "--format", "json"]),
+            Route::Runtime
+        );
+        assert_eq!(
+            route(&["snapshot", "list", "--format", "json"]),
+            Route::MergeList
+        );
         assert_eq!(route(&["stop", "--force", "box"]), Route::Container);
-        assert_eq!(route(&["pause", "box", "--guest-flush", "required"]), Route::Container);
+        assert_eq!(
+            route(&["pause", "box", "--guest-flush", "required"]),
+            Route::Container
+        );
         assert_eq!(route(&["resume", "box"]), Route::Container);
     }
 
@@ -1245,11 +1285,19 @@ mod tests {
         std::fs::remove_dir_all(layout.computer("box").path()).unwrap();
         assert!(layout.names().is_empty());
         layers::Store::new(&layout)
-            .write(&layers::Snapshot::new("silo-import-ab", "c1", Vec::new(), template))
+            .write(&layers::Snapshot::new(
+                "silo-import-ab",
+                "c1",
+                Vec::new(),
+                template,
+            ))
             .unwrap();
         assert_eq!(route(&paths, &list), Route::MergeList);
         assert_eq!(
-            route(&paths, &strings(&["restore", "silo-import-ab:c1", "--name", "kid"])),
+            route(
+                &paths,
+                &strings(&["restore", "silo-import-ab:c1", "--name", "kid"])
+            ),
             Route::Container
         );
     }
@@ -1258,7 +1306,10 @@ mod tests {
     fn the_container_quiet_step_tolerates_only_the_host_name_and_hosts_file() {
         let script = include_str!("../runtime/checkpoints/quiet.sh");
         let adapted = quiet_script(script);
-        assert_eq!(script.matches("|| exit 1").count() - 2, adapted.matches("|| exit 1").count());
+        assert_eq!(
+            script.matches("|| exit 1").count() - 2,
+            adapted.matches("|| exit 1").count()
+        );
         assert!(adapted.contains("hostname \"$host\" || true"));
         assert!(adapted.contains("> /etc/hosts || true"));
         // The machine identity and the scheduled-job steps still stop the script when they fail.
@@ -1279,7 +1330,9 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            error.to_string().contains("cannot rename a container computer yet"),
+            error
+                .to_string()
+                .contains("cannot rename a container computer yet"),
             "{error}"
         );
     }
@@ -1314,12 +1367,14 @@ mod tests {
         assert_eq!(secrets.len(), 1);
         assert_eq!(secrets[0]["env_var"], "TOKEN");
         assert_eq!(secrets[0]["placeholder"], "$MSB_TOKEN");
-        assert_eq!(secrets[0]["allowed_hosts"][1]["wildcard"], "*.cdn.example.test");
+        assert_eq!(
+            secrets[0]["allowed_hosts"][1]["wildcard"],
+            "*.cdn.example.test"
+        );
         // Never a value: the record holds names and hosts only.
-        let record = std::fs::read_to_string(
-            Layout::new(home.path()).computer("box").record_path(),
-        )
-        .unwrap();
+        let record =
+            std::fs::read_to_string(Layout::new(home.path()).computer("box").record_path())
+                .unwrap();
         assert!(!record.contains("value"), "{record}");
         let remove = modify_args(&["--secret-rm", "TOKEN"]);
         run(&paths, &remove, Duration::from_secs(1), &Material::NONE).unwrap();
@@ -1357,7 +1412,9 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            error.to_string().contains("cannot modify a container computer yet"),
+            error
+                .to_string()
+                .contains("cannot modify a container computer yet"),
             "{error}"
         );
     }

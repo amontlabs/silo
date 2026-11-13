@@ -1347,7 +1347,10 @@ mod tests {
         write_disk(&layout, 64);
         assert_eq!(disk_file_gib(&layout.disk(), 40), 64);
         // A file that is not a whole number of gibibytes is not trusted.
-        let file = fs::OpenOptions::new().write(true).open(layout.disk()).unwrap();
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(layout.disk())
+            .unwrap();
         file.set_len(64 * 1024 * 1024 * 1024 + 4096).unwrap();
         assert_eq!(disk_file_gib(&layout.disk(), 40), 40);
     }
@@ -1527,7 +1530,10 @@ mod tests {
         assert!(!computer.agent_may_have_used);
         assert!(!computer.may_hold_agent_work());
         computer.setup.proxy_bootstrap = true;
-        assert!(computer.may_hold_agent_work(), "complete setup counts at once");
+        assert!(
+            computer.may_hold_agent_work(),
+            "complete setup counts at once"
+        );
         computer.note_agent_use();
         assert!(computer.agent_may_have_used);
         // Nothing clears it, even a setup that is no longer complete.
@@ -1573,7 +1579,11 @@ mod tests {
         assert_eq!(network_plan(&first_install), Ok(AppleNat));
         let mut half_set_up = setup_done();
         half_set_up.setup.proxy_bootstrap = false;
-        assert_eq!(network_plan(&half_set_up), Ok(AppleNat), "retry of a first install");
+        assert_eq!(
+            network_plan(&half_set_up),
+            Ok(AppleNat),
+            "retry of a first install"
+        );
         let mut template_copy = setup_done();
         template_copy.template = Some("25G83-abcd".into());
         template_copy.setup.needs_personalizing = true;
@@ -1596,7 +1606,11 @@ mod tests {
         fork.setup.proxy_bootstrap = true;
         fork.first_boot = true;
         fork.setup.developer_tools = false;
-        assert_eq!(network_plan(&fork), Ok(Gateway), "a fork with guest work left");
+        assert_eq!(
+            network_plan(&fork),
+            Ok(Gateway),
+            "a fork with guest work left"
+        );
         fork.setup.proxy_bootstrap = false;
         assert_eq!(network_plan(&fork), Err(NETWORK_NOT_PREPARED.to_string()));
 

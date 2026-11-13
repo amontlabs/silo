@@ -595,12 +595,7 @@ impl Dispatcher {
                                 method == MethodName::EngineDisconnect,
                             )
                         }
-                        Err(error) => (
-                            error_response_with_details(id, error),
-                            None,
-                            None,
-                            false,
-                        ),
+                        Err(error) => (error_response_with_details(id, error), None, None, false),
                     };
                 DispatchResult {
                     response: Some(response),

@@ -1126,7 +1126,10 @@ mod tests {
         assert!(record.setup_complete());
         assert!(setup_finished(&record, &developer_tools::version()));
         assert!(store::setup_allowed(store::State::Stopped, &record).is_err());
-        assert_eq!(store::network_plan(&record), Ok(store::NetworkPlan::Gateway));
+        assert_eq!(
+            store::network_plan(&record),
+            Ok(store::NetworkPlan::Gateway)
+        );
     }
 
     #[test]
@@ -1150,7 +1153,13 @@ mod tests {
         // A copy of a 40 GiB template whose file was made 64 GiB.
         record.disk_gib = 64;
         let disk = personalize::reconcile_disk(64, 40, Some(24 * (1 << 30)));
-        assert_eq!(disk, personalize::Disk { gib: 40, short: true });
+        assert_eq!(
+            disk,
+            personalize::Disk {
+                gib: 40,
+                short: true
+            }
+        );
         settle_disk_record(&mut record, Some(64), Some(disk_shortfall(64, disk.gib)));
         assert_eq!(record.disk_gib, 64);
         assert_eq!(

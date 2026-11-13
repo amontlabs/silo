@@ -325,7 +325,13 @@ mod tests {
     #[test]
     fn only_directories_nobody_needs_are_unused_and_partial_ones_are_left_to_their_maker() {
         let root = tempfile::tempdir().unwrap();
-        for directory in ["aaa-keepid", "bbb-keepid", "ccc", "partial-123", "d.partial"] {
+        for directory in [
+            "aaa-keepid",
+            "bbb-keepid",
+            "ccc",
+            "partial-123",
+            "d.partial",
+        ] {
             std::fs::create_dir(root.path().join(directory)).unwrap();
         }
         std::fs::write(root.path().join("note.txt"), "x").unwrap();

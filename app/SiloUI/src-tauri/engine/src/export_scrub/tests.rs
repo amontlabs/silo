@@ -26,7 +26,8 @@ impl Fake {
             ..Fake::default()
         };
         fake.computers
-            .lock().unwrap()
+            .lock()
+            .unwrap()
             .push(("src".into(), "main".into()));
         fake
     }
@@ -40,7 +41,8 @@ impl Fake {
         self.calls.lock().unwrap().push(call.clone());
         let fails = self
             .fail
-            .lock().unwrap()
+            .lock()
+            .unwrap()
             .iter()
             .any(|prefix| call.starts_with(prefix.as_str()));
         if fails {
@@ -68,7 +70,8 @@ impl ScrubEnv for Fake {
         let result = self.step(format!("fork {source} {name}"));
         if result.is_ok() || self.half_made {
             self.computers
-                .lock().unwrap()
+                .lock()
+                .unwrap()
                 .push(("copy".into(), name.to_owned()));
         }
         result.map(|()| "copy".to_owned())
@@ -115,7 +118,10 @@ impl ScrubEnv for Fake {
     fn delete(&self, id: &str) -> Result<(), String> {
         let result = self.step(format!("delete {id}"));
         if result.is_ok() {
-            self.computers.lock().unwrap().retain(|(known, _)| known != id);
+            self.computers
+                .lock()
+                .unwrap()
+                .retain(|(known, _)| known != id);
             self.deleted.lock().unwrap().insert(id.to_owned());
         }
         result
@@ -126,10 +132,7 @@ fn progress_into(lines: &Mutex<Vec<String>>) -> impl Fn(&str) + '_ {
     |line| lines.lock().unwrap().push(line.to_owned())
 }
 
-const LOGINS: [&str; 2] = [
-    "/root/.claude/.credentials.json",
-    "/home/silo/.claude.json",
-];
+const LOGINS: [&str; 2] = ["/root/.claude/.credentials.json", "/home/silo/.claude.json"];
 
 #[test]
 fn a_copy_is_named_so_that_only_silo_can_make_one() {
@@ -209,16 +212,32 @@ fn the_copy_always_loses_the_endpoint_file_of_silos_tools() {
 
 #[test]
 fn the_copy_is_dropped_whatever_step_fails() {
-    for failing in ["start", "logins", "run copy remove", "run copy survivors", "stop"] {
+    for failing in [
+        "start",
+        "logins",
+        "run copy remove",
+        "run copy survivors",
+        "stop",
+    ] {
         let env = Fake::new(&LOGINS).failing(failing);
         let error = prepare(&env, "src", &|_| {}, &|| false).unwrap_err();
         let Failure::Failed(message) = error else {
             panic!("{failing}: not a failure")
         };
-        assert!(message.contains("failed") || message.contains("Silo could not"), "{message}");
-        assert!(env.deleted.lock().unwrap().contains("copy"), "{failing}: the copy stays");
         assert!(
-            env.computers.lock().unwrap().iter().all(|(_, name)| !is_copy(name)),
+            message.contains("failed") || message.contains("Silo could not"),
+            "{message}"
+        );
+        assert!(
+            env.deleted.lock().unwrap().contains("copy"),
+            "{failing}: the copy stays"
+        );
+        assert!(
+            env.computers
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|(_, name)| !is_copy(name)),
             "{failing}"
         );
     }
@@ -242,7 +261,10 @@ fn files_that_survive_the_removal_fail_the_export_and_are_named() {
     let Failure::Failed(message) = prepare(&env, "src", &|_| {}, &|| false).unwrap_err() else {
         panic!("expected a failure")
     };
-    assert!(message.contains("/root/.claude/.credentials.json"), "{message}");
+    assert!(
+        message.contains("/root/.claude/.credentials.json"),
+        "{message}"
+    );
     assert!(!env.called("stop copy"));
     assert!(env.deleted.lock().unwrap().contains("copy"));
 }
@@ -254,7 +276,10 @@ fn a_cleanup_that_fails_is_reported_with_the_failure() {
         panic!("expected a failure")
     };
     assert!(message.contains("start copy failed"), "{message}");
-    assert!(message.contains("could not drop the temporary copy"), "{message}");
+    assert!(
+        message.contains("could not drop the temporary copy"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -293,10 +318,12 @@ fn a_second_computers_copy_leaves_the_first_ones_alone() {
 fn copies_an_earlier_run_left_behind_are_dropped_first() {
     let env = Fake::new(&LOGINS);
     env.computers
-        .lock().unwrap()
+        .lock()
+        .unwrap()
         .push(("stale".into(), "silo-export-0123abcd".into()));
     env.computers
-        .lock().unwrap()
+        .lock()
+        .unwrap()
         .push(("other".into(), "silo-build-dev-0123abcd".into()));
     drop_stale(&env);
     prepare(&env, "src", &|_| {}, &|| false).unwrap();
@@ -311,7 +338,10 @@ fn dropping_a_prepared_copy_removes_it_and_a_copy_that_will_not_go_is_reported()
     let prepared = prepare(&env, "src", &|_| {}, &|| false).unwrap();
     env.fail.lock().unwrap().push("delete copy".into());
     let error = drop_copy(&env, &prepared).unwrap_err();
-    assert!(error.contains("could not drop the temporary copy"), "{error}");
+    assert!(
+        error.contains("could not drop the temporary copy"),
+        "{error}"
+    );
     env.fail.lock().unwrap().clear();
     drop_copy(&env, &prepared).unwrap();
     assert!(env.deleted.lock().unwrap().contains("copy"));

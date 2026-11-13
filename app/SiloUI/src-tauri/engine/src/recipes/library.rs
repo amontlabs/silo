@@ -176,7 +176,8 @@ pub fn hide_commands(mut recipe: RecipeDefinition) -> RecipeDefinition {
 static LOCK: Mutex<()> = Mutex::new(());
 
 pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
-    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 pub struct Library {

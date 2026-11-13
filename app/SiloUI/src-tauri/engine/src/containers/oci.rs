@@ -307,7 +307,10 @@ mod tests {
         );
         // The kernel only raises an ambient capability that is also permitted and inheritable.
         for set in ["ambient", "inheritable", "permitted", "bounding"] {
-            assert_eq!(root["capabilities"][set], root["capabilities"]["effective"], "{set}");
+            assert_eq!(
+                root["capabilities"][set], root["capabilities"]["effective"],
+                "{set}"
+            );
         }
         // The shape is a valid OCI process.
         let _: oci_spec::runtime::Process = serde_json::from_value(root).unwrap();
@@ -329,8 +332,16 @@ mod tests {
             // Container 0 (root) is holder id 1, never the holder's own root (the engine's user).
             assert_eq!(find(0)["hostID"], 1, "{key}");
             // The working account is the holder's root, the engine's own user.
-            assert_eq!((find(1001)["hostID"].as_u64(), find(1001)["size"].as_u64()), (Some(0), Some(1)));
-            assert_eq!(maps.iter().map(|m| m["size"].as_u64().unwrap()).sum::<u64>(), 65536);
+            assert_eq!(
+                (find(1001)["hostID"].as_u64(), find(1001)["size"].as_u64()),
+                (Some(0), Some(1))
+            );
+            assert_eq!(
+                maps.iter()
+                    .map(|m| m["size"].as_u64().unwrap())
+                    .sum::<u64>(),
+                65536
+            );
         }
     }
 
@@ -419,7 +430,8 @@ mod tests {
     }
 
     #[test]
-    fn proc_and_sys_are_masked_or_read_only_and_only_three_files_and_the_share_are_bound_from_the_host() {
+    fn proc_and_sys_are_masked_or_read_only_and_only_three_files_and_the_share_are_bound_from_the_host(
+    ) {
         let spec = spec();
         let linux = spec.linux().as_ref().unwrap();
         assert!(linux

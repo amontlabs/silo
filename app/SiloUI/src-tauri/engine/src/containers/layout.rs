@@ -205,7 +205,9 @@ impl ComputerDir {
         change: impl FnOnce(&mut ComputerRecord),
     ) -> Result<ComputerRecord, String> {
         static RECORDS: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = RECORDS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = RECORDS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut record = self.read_record()?;
         change(&mut record);
         self.write_record(&record)?;

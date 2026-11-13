@@ -225,29 +225,54 @@ fn live_network_policy_modes_restore_and_fork() {
     // Open: created with the engine's rules for a new computer.
     super::super::super::start_disposable_test_computer(&fixture.paths, source).unwrap();
     let open = probe(&fixture, source, "open");
-    assert!(reached(&open.example_com) && reached(&open.example_org), "{open:?}");
-    assert!(reached(&open.public_ip) && reached(&open.github), "{open:?}");
-    assert!(answered(&open.resolver) && !open.gateway_name.is_empty(), "{open:?}");
+    assert!(
+        reached(&open.example_com) && reached(&open.example_org),
+        "{open:?}"
+    );
+    assert!(
+        reached(&open.public_ip) && reached(&open.github),
+        "{open:?}"
+    );
+    assert!(
+        answered(&open.resolver) && !open.gateway_name.is_empty(),
+        "{open:?}"
+    );
     keep_config(&fixture, source, "open");
 
     // Open to allowlist on a stopped computer: the next start restores it in place.
     fixture.stop(source);
     store::set(&id, &allowlist()).unwrap();
-    assert!(stopped_changed(&fixture, source), "the runtime still holds the open rules");
+    assert!(
+        stopped_changed(&fixture, source),
+        "the runtime still holds the open rules"
+    );
     super::super::super::start_disposable_test_computer(&fixture.paths, source).unwrap();
-    assert!(!stopped_changed(&fixture, source), "the start applied the stored policy");
+    assert!(
+        !stopped_changed(&fixture, source),
+        "the start applied the stored policy"
+    );
     let listed = probe(&fixture, source, "allowlist after the change");
-    assert!(reached(&listed.example_com) && reached(&listed.github), "{listed:?}");
+    assert!(
+        reached(&listed.example_com) && reached(&listed.github),
+        "{listed:?}"
+    );
     assert!(!reached(&listed.example_org), "{listed:?}");
     unlisted_ip_is_refused(&listed, "allowlist");
     assert!(!answered(&listed.resolver), "{listed:?}");
-    assert!(!listed.gateway_name.is_empty(), "names still resolve through the gateway: {listed:?}");
+    assert!(
+        !listed.gateway_name.is_empty(),
+        "names still resolve through the gateway: {listed:?}"
+    );
     keep_config(&fixture, source, "allowlist");
 
     // A running computer keeps its rules until it restarts.
     store::set(&id, &of_mode(NetworkPolicyMode::Closed)).unwrap();
     assert!(stopped_changed(&fixture, source));
-    let still = probe(&fixture, source, "allowlist while the stored policy is closed");
+    let still = probe(
+        &fixture,
+        source,
+        "allowlist while the stored policy is closed",
+    );
     assert!(reached(&still.example_com), "{still:?}");
 
     // Closed.
@@ -259,7 +284,10 @@ fn live_network_policy_modes_restore_and_fork() {
         "{closed:?}"
     );
     unlisted_ip_is_refused(&closed, "closed");
-    assert!(!reached(&closed.github) && !answered(&closed.resolver), "{closed:?}");
+    assert!(
+        !reached(&closed.github) && !answered(&closed.resolver),
+        "{closed:?}"
+    );
     assert!(closed.gateway_name.is_empty(), "{closed:?}");
     keep_config(&fixture, source, "closed");
 
@@ -268,7 +296,10 @@ fn live_network_policy_modes_restore_and_fork() {
     store::set(&id, &of_mode(NetworkPolicyMode::Open)).unwrap();
     super::super::super::start_disposable_test_computer(&fixture.paths, source).unwrap();
     let again = probe(&fixture, source, "open again");
-    assert!(reached(&again.example_org) && reached(&again.public_ip), "{again:?}");
+    assert!(
+        reached(&again.example_org) && reached(&again.public_ip),
+        "{again:?}"
+    );
     assert!(answered(&again.resolver), "{again:?}");
 
     // Allowlist, then a checkpoint of the running computer, a fork of it and a restore.
@@ -278,8 +309,22 @@ fn live_network_policy_modes_restore_and_fork() {
     let checkpoint = capture_for_test(&fixture.paths, &id, "Allowlist").unwrap();
     let fork_name = "e2e-t8-fork";
     fixture.track(fork_name);
-    let fork = fork_source(&ProcessRunner, &fixture.paths, &id, Some(&checkpoint), fork_name).unwrap();
-    fork_commit(&ProcessRunner, &fixture.paths, &FakeAssignments::new(&[]), &fork, fork_name).unwrap();
+    let fork = fork_source(
+        &ProcessRunner,
+        &fixture.paths,
+        &id,
+        Some(&checkpoint),
+        fork_name,
+    )
+    .unwrap();
+    fork_commit(
+        &ProcessRunner,
+        &fixture.paths,
+        &FakeAssignments::new(&[]),
+        &fork,
+        fork_name,
+    )
+    .unwrap();
     let fork_id = fixture.computer_configuration(fork_name).id().to_owned();
     assert_eq!(
         store::get(&fork_id).unwrap(),
@@ -288,7 +333,10 @@ fn live_network_policy_modes_restore_and_fork() {
     );
     super::super::super::start_disposable_test_import(&fixture.paths, fork_name).unwrap();
     let forked = probe(&fixture, fork_name, "fork of an allowlist computer");
-    assert!(reached(&forked.example_com) && reached(&forked.github), "{forked:?}");
+    assert!(
+        reached(&forked.example_com) && reached(&forked.github),
+        "{forked:?}"
+    );
     assert!(!reached(&forked.example_org), "{forked:?}");
     unlisted_ip_is_refused(&forked, "fork");
     keep_config(&fixture, fork_name, "allowlist-fork");
@@ -298,7 +346,10 @@ fn live_network_policy_modes_restore_and_fork() {
     restore_with(&ProcessRunner, &fixture.paths, &id, &checkpoint).unwrap();
     super::super::super::start_disposable_test_import(&fixture.paths, source).unwrap();
     let restored = probe(&fixture, source, "allowlist computer restored in place");
-    assert!(reached(&restored.example_com) && reached(&restored.github), "{restored:?}");
+    assert!(
+        reached(&restored.example_com) && reached(&restored.github),
+        "{restored:?}"
+    );
     assert!(!reached(&restored.example_org), "{restored:?}");
     unlisted_ip_is_refused(&restored, "restore");
     keep_config(&fixture, source, "allowlist-restored");

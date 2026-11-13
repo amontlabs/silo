@@ -751,7 +751,8 @@ mod tests {
     #[test]
     fn publishing_never_replaces_and_falls_back_when_a_volume_lacks_a_primitive() {
         let dir = tempfile::tempdir().unwrap();
-        let unsupported = |_: &Path, _: &Path| Err(std::io::Error::from_raw_os_error(libc::ENOTSUP));
+        let unsupported =
+            |_: &Path, _: &Path| Err(std::io::Error::from_raw_os_error(libc::ENOTSUP));
         let einval = |_: &Path, _: &Path| Err(std::io::Error::from_raw_os_error(libc::EINVAL));
         let eperm = |_: &Path, _: &Path| Err(std::io::Error::from_raw_os_error(libc::EPERM));
         let make = |name: &str| {
@@ -788,9 +789,8 @@ mod tests {
         assert!(!source.exists());
         assert_eq!(fs::read(&destination).unwrap(), b"c.part");
         let source = make("c2.part");
-        let error =
-            publish_without_replacing_with(&source, &destination, unsupported, unsupported)
-                .unwrap_err();
+        let error = publish_without_replacing_with(&source, &destination, unsupported, unsupported)
+            .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read(&destination).unwrap(), b"c.part");
         assert!(source.exists());
@@ -798,13 +798,11 @@ mod tests {
         // An error that is not "unsupported" is reported, not worked around.
         let denied = |_: &Path, _: &Path| Err(std::io::Error::from_raw_os_error(libc::EACCES));
         let source = make("d.part");
-        let error = publish_without_replacing_with(
-            &source,
-            &dir.path().join("d"),
-            denied,
-            |s, d| fs::hard_link(s, d),
-        )
-        .unwrap_err();
+        let error =
+            publish_without_replacing_with(&source, &dir.path().join("d"), denied, |s, d| {
+                fs::hard_link(s, d)
+            })
+            .unwrap_err();
         assert_eq!(error.raw_os_error(), Some(libc::EACCES));
     }
 

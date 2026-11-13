@@ -1141,8 +1141,15 @@ fn local_proxy(paths: &RuntimePaths, name: &str) -> Result<String, String> {
     ];
     parts.extend(leading);
     parts.extend(
-        ["ssh", "serve", name, "--stdio", "--no-start", "--no-inactivity-timeout"]
-            .map(str::to_owned),
+        [
+            "ssh",
+            "serve",
+            name,
+            "--stdio",
+            "--no-start",
+            "--no-inactivity-timeout",
+        ]
+        .map(str::to_owned),
     );
     Ok(proxy_command(&parts))
 }
@@ -1651,10 +1658,15 @@ mod tests {
         );
         let machine = local_proxy(&paths, "dev").unwrap();
         assert!(!machine.contains("container-runtime"), "{machine}");
-        assert!(machine.contains("'ssh' 'serve' 'dev' '--stdio'"), "{machine}");
+        assert!(
+            machine.contains("'ssh' 'serve' 'dev' '--stdio'"),
+            "{machine}"
+        );
         // The AppImage-style transport arguments take either kind.
         for name in ["box", "dev"] {
-            assert!(transport_args(&[paths.home.to_string_lossy().into_owned(), name.into()]).is_ok());
+            assert!(
+                transport_args(&[paths.home.to_string_lossy().into_owned(), name.into()]).is_ok()
+            );
         }
     }
 
@@ -3331,13 +3343,9 @@ mod tests {
 
     #[test]
     fn remote_terminal_and_editor_argvs_name_the_alias() {
-        let argv = remote_terminal_argv(
-            Path::new("/tmp/a b/x.conf"),
-            "silo-remote-d-c",
-            None,
-            false,
-        )
-        .unwrap();
+        let argv =
+            remote_terminal_argv(Path::new("/tmp/a b/x.conf"), "silo-remote-d-c", None, false)
+                .unwrap();
         assert_eq!(
             argv,
             [

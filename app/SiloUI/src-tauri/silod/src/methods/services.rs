@@ -215,7 +215,11 @@ fn update_error(message: String) -> DispatchError {
     } else {
         ErrorCode::Internal
     };
-    DispatchError { code, message, details: None }
+    DispatchError {
+        code,
+        message,
+        details: None,
+    }
 }
 
 fn job_output(job_id: JobId) -> Result<HandlerOutput, DispatchError> {
@@ -745,7 +749,10 @@ pub fn start(context: Arc<SilodContext>) -> Arc<UpdateRecoveryOutcome> {
 /// Resumes the saved set on its own thread once the move of computers to protected storage has
 /// ended: while it runs the runtime is closed to everything, and a recovery that ran then would
 /// fail for every computer and not try again in this launch.
-fn spawn_recovery(context: &Arc<SilodContext>, state: &Arc<UpdateState>) -> Arc<UpdateRecoveryOutcome> {
+fn spawn_recovery(
+    context: &Arc<SilodContext>,
+    state: &Arc<UpdateState>,
+) -> Arc<UpdateRecoveryOutcome> {
     let outcome = Arc::new(UpdateRecoveryOutcome::default());
     let recovery_context = context.clone();
     let recovery_state = state.clone();
@@ -756,7 +763,9 @@ fn spawn_recovery(context: &Arc<SilodContext>, state: &Arc<UpdateState>) -> Arc<
             // A panic still settles the outcome, as "resumed": no launch pass runs over a
             // recovery that did not finish.
             let guard = SettleOnDrop(settle, true);
-            recovery_context.migration_controller().wait_for_protected_storage();
+            recovery_context
+                .migration_controller()
+                .wait_for_protected_storage();
             let resumed = recover_saved_computers(&recovery_context, &recovery_state);
             guard.finish(resumed);
         });

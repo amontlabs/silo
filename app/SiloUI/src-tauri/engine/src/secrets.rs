@@ -910,9 +910,10 @@ pub(crate) fn valid_domain(domain: &str) -> bool {
 pub(crate) fn valid_token_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
-        && name.bytes().enumerate().all(|(i, c)| {
-            c.is_ascii_alphanumeric() || (i > 0 && (c == b'_' || c == b'-'))
-        })
+        && name
+            .bytes()
+            .enumerate()
+            .all(|(i, c)| c.is_ascii_alphanumeric() || (i > 0 && (c == b'_' || c == b'-')))
 }
 fn validate(request: &Request, document: &Document) -> Result<(), String> {
     let token = request.kind == SecretKind::GithubToken;
@@ -970,7 +971,10 @@ fn validate(request: &Request, document: &Document) -> Result<(), String> {
     if token {
         // A token's computers are chosen in GitHub access and its hosts are GitHub's.
         if !request.computers.is_empty() || !request.allowed_domains.is_empty() {
-            return Err("A GitHub token is given to computers in GitHub access, with no hosts of its own.".into());
+            return Err(
+                "A GitHub token is given to computers in GitHub access, with no hosts of its own."
+                    .into(),
+            );
         }
         return Ok(());
     }
@@ -1415,15 +1419,11 @@ pub fn install() -> Result<(), String> {
             for secret in document.secrets.iter().filter(|secret| secret.removing) {
                 let _ = remove_from_store(&secret.id, &mut operation);
             }
-            for secret in document
-                .secrets
-                .iter()
-                .filter(|secret| {
-                    !secret.removing
-                        && secret.kind == SecretKind::Generic
-                        && !secret.affected.is_empty()
-                })
-            {
+            for secret in document.secrets.iter().filter(|secret| {
+                !secret.removing
+                    && secret.kind == SecretKind::Generic
+                    && !secret.affected.is_empty()
+            }) {
                 let _ = reconcile(&secret.id, &mut operation);
             }
         }
@@ -1573,9 +1573,10 @@ mod tests {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         use_test_store(Some(directory.path().join("secrets.json")));
-        use_test_vault(Some(BTreeMap::from([
-            ("private-reference".to_string(), "synthetic_token".to_string()),
-        ])));
+        use_test_vault(Some(BTreeMap::from([(
+            "private-reference".to_string(),
+            "synthetic_token".to_string(),
+        )])));
         let mut assigned = token_secret();
         assigned.computers = vec!["dev".into()];
         let document = Document {
@@ -1598,7 +1599,9 @@ mod tests {
                 "dev"
             )
         );
-        assert!(unassigned_names(&document, "dev", &["work".to_string()]).contains(&"work".to_string()));
+        assert!(
+            unassigned_names(&document, "dev", &["work".to_string()]).contains(&"work".to_string())
+        );
         use_test_store(None);
         use_test_vault(None);
     }

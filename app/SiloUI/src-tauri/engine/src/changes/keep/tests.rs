@@ -813,7 +813,9 @@ fn simple_world() -> Arc<World> {
     world
 }
 
-fn main_recipe(keep: Option<silo_api::methods::keep::KeepHooks>) -> silo_api::methods::recipes::RecipeRecord {
+fn main_recipe(
+    keep: Option<silo_api::methods::keep::KeepHooks>,
+) -> silo_api::methods::recipes::RecipeRecord {
     use silo_api::methods::recipes::{
         RecipeDefinition, RecipeOs, RecipePackages, RecipeRecord, RecipeSpec,
     };
@@ -917,7 +919,10 @@ fn recipe_with_hooks(migrate: &str, after: &str) {
 fn a_computer_caller_does_not_see_the_recipe_hook_commands_in_the_steps() {
     let dir = tempfile::tempdir().unwrap();
     crate::recipes::records::use_test_path(Some(dir.path().join("recipe-records.json")));
-    recipe_with_hooks("psql -c 'set password=hunter2'", "curl -u admin:hunter2 https://x");
+    recipe_with_hooks(
+        "psql -c 'set password=hunter2'",
+        "curl -u admin:hunter2 https://x",
+    );
     let world = simple_world();
     let (_dir, journal) = journal();
     let mut asked = request(Hooks::default());
@@ -943,7 +948,10 @@ fn a_computer_caller_does_not_see_the_recipe_hook_commands_in_the_steps() {
     world.with("main", |c| {
         assert_eq!(
             c.hooks,
-            ["psql -c 'set password=hunter2'", "curl -u admin:hunter2 https://x"]
+            [
+                "psql -c 'set password=hunter2'",
+                "curl -u admin:hunter2 https://x"
+            ]
         )
     });
     crate::recipes::records::use_test_path(None);
@@ -966,7 +974,9 @@ fn the_owner_still_sees_the_recipe_hook_commands_in_the_steps() {
     let Outcome::Kept(report) = outcome else {
         panic!("{outcome:?}")
     };
-    assert!(report.steps.contains(&"migrate: npm run migrate".to_owned()));
+    assert!(report
+        .steps
+        .contains(&"migrate: npm run migrate".to_owned()));
     assert!(report.steps.contains(&"after: npm test".to_owned()));
     crate::recipes::records::use_test_path(None);
 }
@@ -987,7 +997,10 @@ fn a_failing_recipe_hook_names_its_step_and_exit_code_for_a_computer_caller() {
         &asked,
     )
     .unwrap_err();
-    assert!(!error.contains("hunter2") && !error.contains("fail --"), "{error}");
+    assert!(
+        !error.contains("hunter2") && !error.contains("fail --"),
+        "{error}"
+    );
     assert!(!error.contains("boom"), "{error}");
     assert!(
         error.contains("The recipe's after step 1 failed (exit 2)"),
@@ -1225,7 +1238,11 @@ fn a_fork_and_its_parent_each_with_their_own_silo_files_merge_without_a_conflict
     let silo_files = [
         ("/etc/silo/endpoint.json", "fork-endpoint", "main-endpoint"),
         ("/etc/silo/guest-client.json", "fork-token", "main-token"),
-        ("/var/lib/silo/components.json", "fork-receipt", "main-receipt"),
+        (
+            "/var/lib/silo/components.json",
+            "fork-receipt",
+            "main-receipt",
+        ),
     ];
     let mut fork_manifest = SIMPLE_FORK.to_owned();
     let mut main_manifest = SIMPLE_BASE.to_owned();
@@ -1464,7 +1481,11 @@ fn a_database_change_is_carried_only_with_a_migrate_step_and_migration_files_or_
     let refusal = refused(try_keep(Hooks::default(), &["src/a.js"], false));
     assert_eq!(refusal.reason, "database");
     assert!(refusal.hint.contains("replace main"));
-    assert!(refusal.hint.contains("silo replace-main"), "{}", refusal.hint);
+    assert!(
+        refusal.hint.contains("silo replace-main"),
+        "{}",
+        refusal.hint
+    );
     // A migrate step but no migration file changed: still refused.
     let hooks = Hooks {
         migrate: vec!["make migrate".into()],
@@ -3517,12 +3538,23 @@ fn the_branch_scripts_leave_a_real_repositorys_checkout_and_branches_alone() {
     let root = tempfile::tempdir().unwrap();
     let git = |dir: &std::path::Path, args: &[&str]| {
         let out = std::process::Command::new("git")
-            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
             .args(args)
             .current_dir(dir)
             .output()
             .unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).trim().to_owned()
     };
     let (main, fork) = (root.path().join("main"), root.path().join("fork"));
@@ -3537,11 +3569,21 @@ fn the_branch_scripts_leave_a_real_repositorys_checkout_and_branches_alone() {
     std::fs::write(main.join("a.txt"), "main\n").unwrap();
     git(&main, &["commit", "-q", "-am", "main edit"]);
     std::fs::write(main.join("scratch.txt"), "untracked\n").unwrap();
-    let (head, fork_head) = (git(&main, &["rev-parse", "HEAD"]), git(&fork, &["rev-parse", "HEAD"]));
+    let (head, fork_head) = (
+        git(&main, &["rev-parse", "HEAD"]),
+        git(&fork, &["rev-parse", "HEAD"]),
+    );
 
     let bin = tempfile::tempdir().unwrap();
-    let bundle = root.path().join("fork.bundle").to_string_lossy().into_owned();
-    let (main_path, fork_path) = (main.to_string_lossy().into_owned(), fork.to_string_lossy().into_owned());
+    let bundle = root
+        .path()
+        .join("fork.bundle")
+        .to_string_lossy()
+        .into_owned();
+    let (main_path, fork_path) = (
+        main.to_string_lossy().into_owned(),
+        fork.to_string_lossy().into_owned(),
+    );
     let tmp_ref = "refs/silo-tmp/t-0";
     let ran = |cmd: GuestCmd, dir: &std::path::Path| {
         let (code, err) = run_script(&cmd, bin.path(), dir);
@@ -3555,28 +3597,51 @@ fn the_branch_scripts_leave_a_real_repositorys_checkout_and_branches_alone() {
             command.env(format!("A_{name}"), value);
         }
         let out = command.output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
     let state = output(scripts::git_precheck(&main_path, &bundle, tmp_ref));
     assert!(state.starts_with("conflict"), "{state}");
 
-    assert_eq!(output(scripts::git_branch_plan(&main_path, tmp_ref, "silo/fork")), "silo/fork\nnew\n");
+    assert_eq!(
+        output(scripts::git_branch_plan(&main_path, tmp_ref, "silo/fork")),
+        "silo/fork\nnew\n"
+    );
     output(scripts::git_branch(&main_path, tmp_ref, "silo/fork"));
     assert_eq!(git(&main, &["rev-parse", "silo/fork"]), fork_head);
     // Nothing is checked out or merged: main's branch, head, files and untracked file are as they were.
     assert_eq!(git(&main, &["rev-parse", "HEAD"]), head);
     assert_eq!(git(&main, &["symbolic-ref", "--short", "HEAD"]), "trunk");
-    assert_eq!(std::fs::read_to_string(main.join("a.txt")).unwrap(), "main\n");
-    assert_eq!(std::fs::read_to_string(main.join("scratch.txt")).unwrap(), "untracked\n");
+    assert_eq!(
+        std::fs::read_to_string(main.join("a.txt")).unwrap(),
+        "main\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(main.join("scratch.txt")).unwrap(),
+        "untracked\n"
+    );
     assert_eq!(git(&main, &["status", "--porcelain"]), "?? scratch.txt");
 
     // The same commits again find the branch; other commits under the name get the next free one.
-    assert_eq!(output(scripts::git_branch_plan(&main_path, tmp_ref, "silo/fork")), "silo/fork\nsame\n");
+    assert_eq!(
+        output(scripts::git_branch_plan(&main_path, tmp_ref, "silo/fork")),
+        "silo/fork\nsame\n"
+    );
     git(&main, &["branch", "silo/other", "trunk"]);
-    assert_eq!(output(scripts::git_branch_plan(&main_path, tmp_ref, "silo/other")), "silo/other-2\nnew\n");
+    assert_eq!(
+        output(scripts::git_branch_plan(&main_path, tmp_ref, "silo/other")),
+        "silo/other-2\nnew\n"
+    );
     // Creating over an existing branch fails instead of moving it.
-    let (code, _) = run_script(&scripts::git_branch(&main_path, tmp_ref, "silo/other"), bin.path(), &main);
+    let (code, _) = run_script(
+        &scripts::git_branch(&main_path, tmp_ref, "silo/other"),
+        bin.path(),
+        &main,
+    );
     assert_ne!(code, 0);
     assert_eq!(git(&main, &["rev-parse", "silo/other"]), head);
 }
@@ -3592,9 +3657,17 @@ fn ignored_files_of_a_repository_left_as_main_or_on_a_branch_are_not_written() {
         *world.git_state.lock().unwrap() = "merge".into();
         let (_dir, journal) = journal();
         let report = kept(
-            run(&world, &store(base, fork, base), &journal, &choosing(&[(APP, answer)])).unwrap(),
+            run(
+                &world,
+                &store(base, fork, base),
+                &journal,
+                &choosing(&[(APP, answer)]),
+            )
+            .unwrap(),
         );
-        world.with("main", |c| assert!(!c.files.contains_key("/root/app/build.out")));
+        world.with("main", |c| {
+            assert!(!c.files.contains_key("/root/app/build.out"))
+        });
         assert_eq!(item(&report, ignored).outcome, "left-as-main");
     }
     // Without an answer for the repository the file comes along.
@@ -3602,8 +3675,16 @@ fn ignored_files_of_a_repository_left_as_main_or_on_a_branch_are_not_written() {
     world.put("fork", "/root/app/build.out", "built");
     *world.git_state.lock().unwrap() = "merge".into();
     let (_dir, journal) = journal();
-    run(&world, &store(base, fork, base), &journal, &request(Hooks::default())).unwrap();
-    world.with("main", |c| assert!(c.files.contains_key("/root/app/build.out")));
+    run(
+        &world,
+        &store(base, fork, base),
+        &journal,
+        &request(Hooks::default()),
+    )
+    .unwrap();
+    world.with("main", |c| {
+        assert!(c.files.contains_key("/root/app/build.out"))
+    });
 }
 
 #[test]
@@ -3644,7 +3725,8 @@ fn a_failure_while_reading_the_fork_does_not_put_main_back() {
 #[test]
 fn a_repository_left_on_a_branch_keeps_its_uncommitted_files_but_not_files_outside_it() {
     let base = "F\t/etc/app.conf\t1\t1\tc:old\nGIT\t/root\taaa\tmain\t0\t0\n";
-    let fork = "F\t/etc/app.conf\t2\t2\tbb\nGIT\t/root\tbbb\tmain\t0\t0\nGITF\t/root\t_M\tnotes.txt\n";
+    let fork =
+        "F\t/etc/app.conf\t2\t2\tbb\nGIT\t/root\tbbb\tmain\t0\t0\nGITF\t/root\t_M\tnotes.txt\n";
     let world = World::new(Os::Linux, &["fork", "main"]);
     world.put("fork", "/etc/app.conf", "fork conf");
     world.put("fork", "/root/notes.txt", "fork notes");
@@ -3665,7 +3747,10 @@ fn a_repository_left_on_a_branch_keeps_its_uncommitted_files_but_not_files_outsi
         assert!(!c.files.contains_key("/root/notes.txt"));
     });
     assert_eq!(item(&report, "file:/etc/app.conf").outcome, "brought-over");
-    assert_eq!(item(&report, "file:/root/notes.txt").outcome, "left-as-main");
+    assert_eq!(
+        item(&report, "file:/root/notes.txt").outcome,
+        "left-as-main"
+    );
 }
 
 #[test]
@@ -3676,7 +3761,13 @@ fn credentials_are_found_by_a_repositorys_full_path_too() {
     let fork = "GIT\t/etc\tbbb\tmain\t0\t0\n";
     let (_dir, journal) = journal();
     let refusal = refused(
-        run(&world, &store(base, fork, base), &journal, &request(Hooks::default())).unwrap(),
+        run(
+            &world,
+            &store(base, fork, base),
+            &journal,
+            &request(Hooks::default()),
+        )
+        .unwrap(),
     );
     assert_eq!(refusal.reason, "credentials");
     assert_eq!(refusal.conflicts[0].item, "/etc/shadow");

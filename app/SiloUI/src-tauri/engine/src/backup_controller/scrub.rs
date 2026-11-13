@@ -161,7 +161,9 @@ pub(super) fn make_copies(
                 return Err(match failure {
                     // A cancel that left a copy behind says so instead of passing for clean.
                     Failure::Cancelled => match cleanup {
-                        Err(note) => TransferError::from(format!("The export was cancelled. {note}")),
+                        Err(note) => {
+                            TransferError::from(format!("The export was cancelled. {note}"))
+                        }
                         Ok(()) => TransferError::cancelled(),
                     },
                     Failure::Failed(message) => {
@@ -191,7 +193,10 @@ fn show_progress(controller: &Controller, detail: &str) {
     let Some(Operation::Running { phases, .. }) = view.operation.as_mut() else {
         return;
     };
-    if let Some(first) = phases.first_mut().filter(|phase| phase.title == SCRUB_PHASE) {
+    if let Some(first) = phases
+        .first_mut()
+        .filter(|phase| phase.title == SCRUB_PHASE)
+    {
         first.detail = detail.to_owned();
         return;
     }
@@ -217,7 +222,10 @@ fn end_progress(controller: &Controller) {
     let Some(Operation::Running { phases, .. }) = view.operation.as_mut() else {
         return;
     };
-    if phases.first().is_some_and(|phase| phase.title == SCRUB_PHASE) {
+    if phases
+        .first()
+        .is_some_and(|phase| phase.title == SCRUB_PHASE)
+    {
         phases.remove(0);
         if let Some(next) = phases.first_mut() {
             next.tone = "running";
@@ -342,7 +350,10 @@ mod tests {
         assert_eq!(export[1], "mac");
         let presented = copies.presented();
         assert_eq!(
-            presented.iter().map(|p| (p.name.as_str(), p.id.as_str())).collect::<Vec<_>>(),
+            presented
+                .iter()
+                .map(|p| (p.name.as_str(), p.id.as_str()))
+                .collect::<Vec<_>>(),
             [("main", "id-main"), ("dev", "id-dev")]
         );
         assert_eq!(
@@ -351,7 +362,10 @@ mod tests {
         );
         assert!(env.deleted.lock().unwrap().is_empty());
         // The export's own phase leads again once the copies are ready.
-        assert_eq!(phases(&controller), [("Capture and verify".to_owned(), "running")]);
+        assert_eq!(
+            phases(&controller),
+            [("Capture and verify".to_owned(), "running")]
+        );
         copies.drop_all().unwrap();
         assert_eq!(
             *env.deleted.lock().unwrap(),
@@ -377,12 +391,17 @@ mod tests {
         assert!(!error.cancelled);
         assert!(error.message.contains("no room"), "{}", error.message);
         assert!(
-            error.message.contains("No export file was saved, and the logins stay on the computer"),
+            error
+                .message
+                .contains("No export file was saved, and the logins stay on the computer"),
             "{}",
             error.message
         );
         assert_eq!(*env.deleted.lock().unwrap(), ["copy-of-id-main"]);
-        assert_eq!(phases(&controller), [("Capture and verify".to_owned(), "running")]);
+        assert_eq!(
+            phases(&controller),
+            [("Capture and verify".to_owned(), "running")]
+        );
     }
 
     #[test]
@@ -417,6 +436,9 @@ mod tests {
         assert_eq!(detail, "Starting the copy");
         end_progress(&controller);
         end_progress(&controller);
-        assert_eq!(phases(&controller), [("Capture and verify".to_owned(), "running")]);
+        assert_eq!(
+            phases(&controller),
+            [("Capture and verify".to_owned(), "running")]
+        );
     }
 }

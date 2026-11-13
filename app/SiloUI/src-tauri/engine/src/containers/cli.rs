@@ -277,6 +277,9 @@ mod tests {
     #[test]
     fn a_server_for_a_computer_that_does_not_exist_says_so() {
         let error = run_with(&paths(), &args(&["ssh", "serve", "ghost", "--stdio"])).unwrap_err();
-        assert!(error.contains("not found") || error.contains("Linux host"), "{error}");
+        assert!(
+            error.contains("not found") || error.contains("Linux host"),
+            "{error}"
+        );
     }
 }

@@ -3828,7 +3828,11 @@ fn a_capture_the_runtime_finished_and_the_computer_builds_on_is_kept_at_launch()
     let recovered = load(&paths, ID).unwrap();
     assert!(recovered.inflight_checkpoint.is_none());
     assert!(recovered.checkpoint_operation.is_none());
-    let ids: Vec<_> = recovered.checkpoints.iter().map(|c| c.id.as_str()).collect();
+    let ids: Vec<_> = recovered
+        .checkpoints
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
     assert_eq!(ids, [B, A]);
 }
 
@@ -3848,7 +3852,12 @@ fn only_a_ready_capture_the_computer_builds_on_is_adopted() {
     cursor(&paths, "dev", "snap_b");
     let mut adopted = load(&paths, ID).unwrap();
     assert!(adopt_finished_capture(&store, &paths, &mut adopted, "dev", "dev").unwrap());
-    assert!(store.calls.lock().unwrap().iter().any(|call| call[..2] == ["snapshot", "verify"]));
+    assert!(store
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|call| call[..2] == ["snapshot", "verify"]));
     assert!(adopted.inflight_checkpoint.is_none());
     assert_eq!(adopted.checkpoints[0].id, B);
     // A capture nothing builds on is not adopted (it is discarded instead).
@@ -3879,11 +3888,20 @@ fn a_finished_capture_that_fails_the_runtimes_check_is_not_adopted() {
     cursor(&paths, "dev", "snap_b");
     let error = recover_interrupted(&store, &paths).unwrap().unresolved;
     assert_eq!(error.len(), 1, "{error:?}");
-    assert!(error.values().next().unwrap().to_string().contains("did not pass"));
+    assert!(error
+        .values()
+        .next()
+        .unwrap()
+        .to_string()
+        .contains("did not pass"));
     assert_eq!(store.names(), [A, B]);
     let preserved = load(&paths, ID).unwrap();
     assert!(preserved.inflight_checkpoint.is_some());
-    let ids: Vec<_> = preserved.checkpoints.iter().map(|c| c.id.as_str()).collect();
+    let ids: Vec<_> = preserved
+        .checkpoints
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
     assert_eq!(ids, [A]);
 }
 
@@ -6082,7 +6100,10 @@ fn a_fork_has_its_own_channel_port_and_the_closed_copy_of_an_export_has_none() {
     let (child, _) = fork_child(&paths);
     let child_port = tokens.port_of(&child).unwrap();
     assert_ne!(child_port, source_port);
-    assert_eq!(extra_rules(&child), vec![ExtraRule::GatewayPort(child_port)]);
+    assert_eq!(
+        extra_rules(&child),
+        vec![ExtraRule::GatewayPort(child_port)]
+    );
     let plan = plan_for(&child, "branch", None).unwrap();
     assert!(plan.rules.contains(&Rule::GatewayPort(child_port)));
     assert!(!plan.rules.contains(&Rule::GatewayPort(source_port)));
@@ -6102,7 +6123,10 @@ fn a_fork_has_its_own_channel_port_and_the_closed_copy_of_an_export_has_none() {
     )
     .unwrap();
     let (copy, _) = fork_child(&paths);
-    assert!(tokens.port_of(&copy).is_none(), "the closed copy has no channel");
+    assert!(
+        tokens.port_of(&copy).is_none(),
+        "the closed copy has no channel"
+    );
     assert!(extra_rules(&copy).is_empty());
     let plan = plan_for(&copy, "branch", None).unwrap();
     assert!(plan.rules.is_empty());
@@ -6165,11 +6189,17 @@ fn a_computer_with_no_saved_policy_gets_its_channel_rule_added_to_the_rules_it_w
 
     // With a channel the rule is added to the recorded rules, not to an assumed open policy.
     crate::guest_client::turn_on(ID).unwrap();
-    let port = crate::guest_client::TokenStore::current().unwrap().port_of(ID).unwrap();
+    let port = crate::guest_client::TokenStore::current()
+        .unwrap()
+        .port_of(ID)
+        .unwrap();
     let (planned, _) = changed_network_plan(&runner, &paths, &configuration)
         .unwrap()
         .unwrap();
-    assert_eq!(planned.rules, vec![Rule::Dns, Rule::GatewayPort(port), Rule::Public]);
+    assert_eq!(
+        planned.rules,
+        vec![Rule::Dns, Rule::GatewayPort(port), Rule::Public]
+    );
     let refused = ensure_network_rules_current(&runner, &paths, &configuration).unwrap_err();
     assert!(refused.to_string().contains("was not started"), "{refused}");
     let closed = inspected_with_policy(Some(serde_json::json!({
@@ -6204,7 +6234,8 @@ fn a_computer_with_no_saved_policy_gets_its_channel_rule_added_to_the_rules_it_w
 
 fn planned_value(open: &crate::network_policy::Plan, port: u16) -> Value {
     let mut plan = open.clone();
-    plan.rules.insert(1, crate::network_policy::Rule::GatewayPort(port));
+    plan.rules
+        .insert(1, crate::network_policy::Rule::GatewayPort(port));
     plan.policy_value()
 }
 
@@ -7034,7 +7065,10 @@ fn restoring_a_running_container_saves_its_disks_and_stops_it_without_pausing() 
     let calls = runner.calls.lock().unwrap();
     let position = |command: &str| calls.iter().position(|args| args[0] == command).unwrap();
     assert!(!calls.iter().any(|args| args[0] == "pause"));
-    let create = calls.iter().find(|call| call[..2] == ["snapshot", "create"]).unwrap();
+    let create = calls
+        .iter()
+        .find(|call| call[..2] == ["snapshot", "create"])
+        .unwrap();
     assert!(!create.iter().any(|arg| arg == "--full"), "{create:?}");
     assert!(position("snapshot") < position("stop"));
     assert!(position("stop") < position("remove"));
@@ -7083,10 +7117,17 @@ fn a_retried_restore_does_not_stop_a_container_that_is_running_again() {
     };
     let refused = restore_with(&runner, &paths, ID, selected).unwrap_err();
     assert!(
-        refused.to_string().contains("resumed after its recovery checkpoint"),
+        refused
+            .to_string()
+            .contains("resumed after its recovery checkpoint"),
         "{refused}"
     );
-    assert!(!runner.calls.lock().unwrap().iter().any(|args| args[0] == "stop"));
+    assert!(!runner
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|args| args[0] == "stop"));
 }
 
 #[test]
@@ -7127,7 +7168,10 @@ fn an_imported_container_starts_from_the_deny_all_policy_like_a_virtual_machine(
                 "{restore:?}"
             );
         }
-        assert!(!restore.iter().any(|arg| arg == "--net-rule"), "{restore:?}");
+        assert!(
+            !restore.iter().any(|arg| arg == "--net-rule"),
+            "{restore:?}"
+        );
     }
 }
 
@@ -7164,11 +7208,8 @@ fn an_import_saves_a_closed_policy_and_a_start_does_not_run_on_an_unreadable_one
     let file = directory.path().join("network-policy.json");
     crate::network_policy::store::use_test_path(Some(file.clone()));
     // A policy left over from a computer of this id is replaced by an explicit closed one.
-    crate::network_policy::store::set(
-        ID,
-        &crate::network_policy::NetworkPolicy::default(),
-    )
-    .unwrap();
+    crate::network_policy::store::set(ID, &crate::network_policy::NetworkPolicy::default())
+        .unwrap();
     crate::guest_client::tokens::use_test_directory(Some(directory.path().join("guest-client")));
     // Silo's tools left over from a computer of this id are turned off by the import.
     crate::guest_client::turn_on(ID).unwrap();
@@ -7179,8 +7220,13 @@ fn an_import_saves_a_closed_policy_and_a_start_does_not_run_on_an_unreadable_one
         "silo-backup-0-330418-1790360984903",
     )
     .unwrap();
-    let stored = crate::network_policy::store::get_stored(ID).unwrap().unwrap();
-    assert_eq!(stored.mode, crate::network_policy::NetworkPolicyMode::Closed);
+    let stored = crate::network_policy::store::get_stored(ID)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        stored.mode,
+        crate::network_policy::NetworkPolicyMode::Closed
+    );
     assert!(stored.incoming_denied);
     assert!(crate::network_policy::extra_rules(ID).is_empty());
     assert!(crate::guest_client::TokenStore::current()

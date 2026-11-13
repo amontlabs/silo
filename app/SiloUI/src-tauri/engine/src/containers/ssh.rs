@@ -100,10 +100,7 @@ pub fn signal_number(signal: &russh::Sig) -> Option<i32> {
 /// The refusal when `silo` in the computer's account files is not the working account. The
 /// container's id mapping gives the engine's own user the id `AGENT_ID` and nobody else
 /// (`containers::idmap`), so any other id would be a different, unmapped or privileged account.
-pub fn check_working_identity(
-    identity: &super::users::Identity,
-    name: &str,
-) -> Result<(), String> {
+pub fn check_working_identity(identity: &super::users::Identity, name: &str) -> Result<(), String> {
     use super::idmap::AGENT_ID;
     if identity.uid == AGENT_ID && identity.uid != 0 {
         Ok(())
@@ -119,9 +116,8 @@ pub fn check_working_identity(
 /// How long the listener waits before it accepts again after `accept` failed `failures` times in a
 /// row (out of file descriptors, say): 50 ms, doubling, at most 2 s.
 pub fn accept_backoff(failures: u32) -> std::time::Duration {
-    std::time::Duration::from_millis(50u64 << failures.saturating_sub(1).min(6)).min(
-        std::time::Duration::from_secs(2),
-    )
+    std::time::Duration::from_millis(50u64 << failures.saturating_sub(1).min(6))
+        .min(std::time::Duration::from_secs(2))
 }
 
 /// The public keys an authorized-keys file lists. Only plain `type base64 [comment]` lines count:
@@ -195,20 +191,14 @@ pub fn serve(_: &crate::runtime::RuntimePaths, _: &SshServe) -> Result<i32, Stri
 #[cfg(target_os = "linux")]
 mod server {
     use super::*;
+    use crate::containers::{args::Exec, hold::ExecGroup, layout::Layout, lifecycle, tools::Tools};
+    use crate::runtime::RuntimePaths;
+    use bytes::{Bytes, BytesMut};
+    use russh::server::Handle;
     use russh::server::{
         Auth, ChannelOpenHandle, Handler, Msg, PublicKeyOffer, Session, VerifiedPublicKey,
     };
     use russh::{Channel, ChannelId, ChannelOpenFailure};
-    use crate::containers::{
-        args::Exec,
-        hold::ExecGroup,
-        layout::Layout,
-        lifecycle,
-        tools::Tools,
-    };
-    use crate::runtime::RuntimePaths;
-    use bytes::{Bytes, BytesMut};
-    use russh::server::Handle;
     use std::collections::HashMap;
     use std::io::Write as _;
     use std::os::fd::{AsRawFd, OwnedFd};
@@ -290,7 +280,9 @@ mod server {
 
     impl Queue {
         fn lock(&self) -> std::sync::MutexGuard<'_, QueueState> {
-            self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+            self.state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
         }
 
         fn queued(&self) -> usize {
@@ -1005,9 +997,8 @@ mod server {
         }
         set_window_size(master.as_raw_fd(), pty.cols, pty.rows);
         let sizing = Arc::new(master.try_clone().map_err(|error| error.to_string())?);
-        let reader = tokio::fs::File::from_std(
-            master.try_clone().map_err(|error| error.to_string())?,
-        );
+        let reader =
+            tokio::fs::File::from_std(master.try_clone().map_err(|error| error.to_string())?);
         let writer = tokio::fs::File::from_std(master);
         let input = Input::new();
         let granting = handle.clone();
@@ -1151,7 +1142,10 @@ mod server {
                 let _ = handle.close(id).await;
             }
             Err(error) => {
-                eprintln!("silo: ssh forward to {host}:{port} in {}: {error}", shared.name);
+                eprintln!(
+                    "silo: ssh forward to {host}:{port} in {}: {error}",
+                    shared.name
+                );
                 reply.reject(ChannelOpenFailure::ConnectFailed).await;
             }
         }
@@ -1174,7 +1168,9 @@ mod server {
         if !(shared.holder_alive)(shared) {
             return Err(format!("Start {} first.", shared.name));
         }
-        let state = Layout::new(&shared.paths.home).computer(&shared.name).state();
+        let state = Layout::new(&shared.paths.home)
+            .computer(&shared.name)
+            .state();
         let mut child = tokio::process::Command::new(&shared.tools.ctr)
             .arg("connect")
             .arg("--state")
@@ -1314,8 +1310,8 @@ mod server {
     }
 
     fn load_host_key(path: &Path) -> Result<russh::keys::PrivateKey, String> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|error| format!("load SSH host key: {error}"))?;
+        let text =
+            std::fs::read_to_string(path).map_err(|error| format!("load SSH host key: {error}"))?;
         russh::keys::decode_secret_key(&text, None)
             .map_err(|error| format!("load SSH host key: {error}"))
     }
@@ -1344,7 +1340,10 @@ mod server {
         )?;
         let tools = Tools::locate(paths).map_err(|error| error.to_string())?;
         if !lifecycle::holder_alive(paths, &serve.name) {
-            return Err(format!("sandbox must already be running: start {} first.", serve.name));
+            return Err(format!(
+                "sandbox must already be running: start {} first.",
+                serve.name
+            ));
         }
         let authorized = serve
             .authorized_keys
@@ -1389,7 +1388,10 @@ mod server {
         result.map(|()| 0)
     }
 
-    async fn over_stdio(shared: &Arc<Shared>, config: Arc<russh::server::Config>) -> Result<(), String> {
+    async fn over_stdio(
+        shared: &Arc<Shared>,
+        config: Arc<russh::server::Config>,
+    ) -> Result<(), String> {
         let stream = tokio::io::join(tokio::io::stdin(), tokio::io::stdout());
         let session = russh::server::run_stream(config, stream, handler(shared, None))
             .await
@@ -1604,9 +1606,7 @@ mod server {
             }
         }
 
-        async fn connect(
-            fixture: &Fixture,
-        ) -> russh::client::Handle<Client> {
+        async fn connect(fixture: &Fixture) -> russh::client::Handle<Client> {
             connect_buffered(fixture, 256 * 1024).await
         }
 
@@ -1627,9 +1627,13 @@ mod server {
                     .unwrap();
                 let _ = session.await;
             });
-            russh::client::connect_stream(Arc::new(russh::client::Config::default()), client_end, Client)
-                .await
-                .unwrap()
+            russh::client::connect_stream(
+                Arc::new(russh::client::Config::default()),
+                client_end,
+                Client,
+            )
+            .await
+            .unwrap()
         }
 
         /// A fixture whose tools run `ctr` as `silo-ctr`.
@@ -1669,14 +1673,21 @@ mod server {
         }
 
         async fn client_over(stream: tokio::io::DuplexStream) -> russh::client::Handle<Client> {
-            russh::client::connect_stream(Arc::new(russh::client::Config::default()), stream, Client)
-                .await
-                .unwrap()
+            russh::client::connect_stream(
+                Arc::new(russh::client::Config::default()),
+                stream,
+                Client,
+            )
+            .await
+            .unwrap()
         }
 
         async fn login(client: &mut russh::client::Handle<Client>, key: &PrivateKey) -> bool {
             client
-                .authenticate_publickey("silo", PrivateKeyWithHashAlg::new(Arc::new(key.clone()), None))
+                .authenticate_publickey(
+                    "silo",
+                    PrivateKeyWithHashAlg::new(Arc::new(key.clone()), None),
+                )
                 .await
                 .is_ok_and(|result| result.success())
         }
@@ -1684,7 +1695,10 @@ mod server {
         async fn authenticates(fixture: &Fixture, user: &str, key: &PrivateKey) -> bool {
             let mut client = connect(fixture).await;
             client
-                .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key.clone()), None))
+                .authenticate_publickey(
+                    user,
+                    PrivateKeyWithHashAlg::new(Arc::new(key.clone()), None),
+                )
                 .await
                 .unwrap()
                 .success()
@@ -1791,13 +1805,19 @@ mod server {
             let mut pushed = 0usize;
             while input.push(&[9]) == Pushed::Queued {
                 pushed += 1;
-                assert!(pushed <= INPUT_WINDOW as usize + 16, "the window was passed");
+                assert!(
+                    pushed <= INPUT_WINDOW as usize + 16,
+                    "the window was passed"
+                );
                 if pushed.is_multiple_of(4096) {
                     tokio::task::yield_now().await;
                 }
             }
             // The window, and the few bytes the command took (the sink holds 16).
-            assert!(pushed >= INPUT_WINDOW as usize, "only {pushed} bytes were queued");
+            assert!(
+                pushed >= INPUT_WINDOW as usize,
+                "only {pushed} bytes were queued"
+            );
             let state = input.queue.lock();
             assert!(state.queued <= INPUT_WINDOW as usize);
             // What is not yet with the writer is in one buffer, not an entry per packet.
@@ -1818,7 +1838,10 @@ mod server {
             // Ending the input alone leaves the writer to finish what is queued...
             drop(input);
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            assert!(!queue.lock().closed, "the writer was cut off at the end of input");
+            assert!(
+                !queue.lock().closed,
+                "the writer was cut off at the end of input"
+            );
             // ...and what `Chan::end` does ends it.
             drop(guard);
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -1889,7 +1912,9 @@ mod server {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             // What was queued is dropped and given back; what came later is discarded at once
             // (the session grants it), so the client never waits on a command that is gone.
-            let discarded = (0..4).filter(|_| input.push(&[3u8; 10]) == Pushed::Discarded).count();
+            let discarded = (0..4)
+                .filter(|_| input.push(&[3u8; 10]) == Pushed::Discarded)
+                .count();
             assert_eq!(discarded, 4);
             assert!(granted.load(Ordering::Relaxed) >= 1000);
             assert!(granted.load(Ordering::Relaxed) <= sent);
@@ -1929,7 +1954,9 @@ mod server {
                 reply: russh::server::ChannelOpenHandle,
                 session: &mut Session,
             ) -> Result<(), Self::Error> {
-                self.inner.channel_open_session(channel, reply, session).await
+                self.inner
+                    .channel_open_session(channel, reply, session)
+                    .await
             }
 
             async fn exec_request(
@@ -1993,14 +2020,20 @@ mod server {
             let (reader, sink) = tokio::io::duplex(64 * 1024);
             let queue = Arc::new(std::sync::Mutex::new(None));
             let (client_end, server_end) = tokio::io::duplex(256 * 1024);
-            let (config, shared, tapped) = (fixture.config.clone(), fixture.shared.clone(), queue.clone());
+            let (config, shared, tapped) = (
+                fixture.config.clone(),
+                fixture.shared.clone(),
+                queue.clone(),
+            );
             tokio::spawn(async move {
                 let handler = Sinked {
                     inner: handler(&shared, None),
                     sink: Some(sink),
                     queue: tapped,
                 };
-                let session = russh::server::run_stream(config, server_end, handler).await.unwrap();
+                let session = russh::server::run_stream(config, server_end, handler)
+                    .await
+                    .unwrap();
                 let _ = session.await;
             });
             let mut client = client_over(client_end).await;
@@ -2012,7 +2045,10 @@ mod server {
             let chunk = vec![5u8; 32 * 1024];
             let sender = tokio::spawn(async move {
                 for _ in 0..TOTAL / chunk.len() {
-                    channel.data(&chunk[..]).await.expect("the command was ended");
+                    channel
+                        .data(&chunk[..])
+                        .await
+                        .expect("the command was ended");
                 }
                 channel.eof().await.unwrap();
                 channel
@@ -2027,7 +2063,10 @@ mod server {
             // Nothing reads yet: the client fills its window and then waits, far short of 12 MiB.
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             assert!(!sender.is_finished(), "the client was not held back");
-            assert!(queued() <= INPUT_WINDOW as usize, "the queue passed the window");
+            assert!(
+                queued() <= INPUT_WINDOW as usize,
+                "the queue passed the window"
+            );
 
             // The command now reads slowly (about 64 KiB every 2 ms).
             let mut reader = reader;
@@ -2046,7 +2085,10 @@ mod server {
             .await
             .expect("the transfer did not complete");
             assert_eq!(received, TOTAL);
-            assert!(most <= INPUT_WINDOW as usize, "the queue passed the window: {most}");
+            assert!(
+                most <= INPUT_WINDOW as usize,
+                "the queue passed the window: {most}"
+            );
             let _channel = tokio::time::timeout(std::time::Duration::from_secs(30), sender)
                 .await
                 .expect("the client never finished sending")
@@ -2080,14 +2122,23 @@ mod server {
             let (mut silent, task) =
                 listener_connection(&fixture, std::time::Duration::from_millis(300));
             let mut seen = Vec::new();
-            tokio::time::timeout(std::time::Duration::from_secs(10), silent.read_to_end(&mut seen))
-                .await
-                .expect("the server kept a silent connection open")
-                .unwrap();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                silent.read_to_end(&mut seen),
+            )
+            .await
+            .expect("the server kept a silent connection open")
+            .unwrap();
             task.await.unwrap();
             // Its place was given back.
-            assert_eq!(fixture.shared.unauthenticated.available_permits(), MAX_UNAUTHENTICATED);
-            assert_eq!(fixture.shared.connections.available_permits(), MAX_CONNECTIONS);
+            assert_eq!(
+                fixture.shared.unauthenticated.available_permits(),
+                MAX_UNAUTHENTICATED
+            );
+            assert_eq!(
+                fixture.shared.connections.available_permits(),
+                MAX_CONNECTIONS
+            );
 
             // One that connects and starts the key exchange but never proves a key.
             let (stream, task) =
@@ -2107,20 +2158,35 @@ mod server {
             let (stream, task) =
                 listener_connection(&fixture, std::time::Duration::from_millis(500));
             let mut client = client_over(stream).await;
-            assert_eq!(fixture.shared.unauthenticated.available_permits(), MAX_UNAUTHENTICATED - 1);
+            assert_eq!(
+                fixture.shared.unauthenticated.available_permits(),
+                MAX_UNAUTHENTICATED - 1
+            );
             assert!(login(&mut client, &allowed).await);
             // Logged in: it left the unauthenticated ones and now counts against the cap.
-            assert_eq!(fixture.shared.unauthenticated.available_permits(), MAX_UNAUTHENTICATED);
-            assert_eq!(fixture.shared.connections.available_permits(), MAX_CONNECTIONS - 1);
+            assert_eq!(
+                fixture.shared.unauthenticated.available_permits(),
+                MAX_UNAUTHENTICATED
+            );
+            assert_eq!(
+                fixture.shared.connections.available_permits(),
+                MAX_CONNECTIONS - 1
+            );
             tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
-            assert!(!task.is_finished(), "the grace ended a connection that had logged in");
+            assert!(
+                !task.is_finished(),
+                "the grace ended a connection that had logged in"
+            );
             client.channel_open_session().await.unwrap();
             drop(client);
             tokio::time::timeout(std::time::Duration::from_secs(10), task)
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(fixture.shared.connections.available_permits(), MAX_CONNECTIONS);
+            assert_eq!(
+                fixture.shared.connections.available_permits(),
+                MAX_CONNECTIONS
+            );
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -2137,12 +2203,18 @@ mod server {
             let (stream, _first) =
                 listener_connection(&fixture, std::time::Duration::from_secs(60));
             let mut client = client_over(stream).await;
-            assert!(login(&mut client, &allowed).await, "idle sockets locked out a login");
+            assert!(
+                login(&mut client, &allowed).await,
+                "idle sockets locked out a login"
+            );
             // The cap is on logged-in connections: the next one to log in is closed.
             let (stream, _second) =
                 listener_connection(&fixture, std::time::Duration::from_secs(60));
             let mut extra = client_over(stream).await;
-            assert!(!login(&mut extra, &allowed).await, "a connection over the cap logged in");
+            assert!(
+                !login(&mut extra, &allowed).await,
+                "a connection over the cap logged in"
+            );
             drop(idle);
         }
 
@@ -2218,7 +2290,10 @@ mod server {
                 true
             });
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            assert!(!sender.is_finished(), "the client was not held back by the target");
+            assert!(
+                !sender.is_finished(),
+                "the client was not held back by the target"
+            );
 
             // The same connection still answers: another forward and a new session channel.
             let mut echo = tokio::time::timeout(
@@ -2241,10 +2316,13 @@ mod server {
                 }
             }
             assert_eq!(echoed, b"still here");
-            tokio::time::timeout(std::time::Duration::from_secs(10), client.channel_open_session())
-                .await
-                .expect("a new channel could not open")
-                .unwrap();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                client.channel_open_session(),
+            )
+            .await
+            .expect("a new channel could not open")
+            .unwrap();
             assert!(!sender.is_finished(), "the stuck forward was let through");
             sender.abort();
         }
@@ -2272,7 +2350,10 @@ mod server {
                 for index in 0..TOTAL / CHUNK {
                     let chunk: Vec<u8> = (0..CHUNK).map(|at| (at + index * 7) as u8).collect();
                     hash.update(&chunk);
-                    write.data(&chunk[..]).await.expect("the forward was closed");
+                    write
+                        .data(&chunk[..])
+                        .await
+                        .expect("the forward was closed");
                 }
                 write.eof().await.unwrap();
                 hash.finalize()
@@ -2329,7 +2410,10 @@ mod server {
                 std::os::unix::net::UnixListener::bind(directory.path().join("c")).unwrap();
             listener.set_nonblocking(true).unwrap();
             let mut command = std::process::Command::new("sh");
-            command.args(["-c", "echo 'crun: the container is not running' >&2; exit 3"]);
+            command.args([
+                "-c",
+                "echo 'crun: the container is not running' >&2; exit 3",
+            ]);
             let started = std::time::Instant::now();
             let error = spawn_terminal(command, listener, std::time::Duration::from_secs(60))
                 .await
@@ -2338,7 +2422,10 @@ mod server {
                 error.contains("crun: the container is not running") && error.contains("exit"),
                 "{error}"
             );
-            assert!(started.elapsed() < std::time::Duration::from_secs(20), "waited out the limit");
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(20),
+                "waited out the limit"
+            );
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -2474,7 +2561,10 @@ mod tests {
     fn the_files_the_callers_prepare_are_where_the_server_looks() {
         let home = Path::new("/h");
         // The editor writes its shared file and the computer's host key here.
-        assert_eq!(default_authorized_keys(home), Path::new("/h/ssh/authorized_keys"));
+        assert_eq!(
+            default_authorized_keys(home),
+            Path::new("/h/ssh/authorized_keys")
+        );
         assert_eq!(
             host_key_path(home, "dev"),
             Path::new("/h/sandboxes/dev/ssh/host_ed25519")

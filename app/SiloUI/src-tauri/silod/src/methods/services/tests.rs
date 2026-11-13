@@ -975,7 +975,11 @@ async fn update_recovery_waits_for_the_storage_move_and_then_resumes_in_the_same
     .await
     .unwrap();
     assert!(resumed, "the saved set existed");
-    assert_eq!(world.calls("restore:"), 2, "both computers resume in this launch");
+    assert_eq!(
+        world.calls("restore:"),
+        2,
+        "both computers resume in this launch"
+    );
     assert!(!second.silod.engine_state().update_pending);
 }
 

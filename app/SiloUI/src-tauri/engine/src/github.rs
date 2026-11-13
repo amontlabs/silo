@@ -1856,7 +1856,8 @@ fn validate(computers: &[Value]) -> Result<(), String> {
         }
         match &w["tokenSecretId"] {
             Value::Null => {}
-            Value::String(id) if w["authenticationMethod"] == "token" && !id.is_empty() && id.len() <= 64 => {}
+            Value::String(id)
+                if w["authenticationMethod"] == "token" && !id.is_empty() && id.len() <= 64 => {}
             _ => return Err("Choose a GitHub token only with token access.".into()),
         }
         let mut repository_names = std::collections::HashSet::new();
@@ -3040,7 +3041,10 @@ fn sweep_retirement(
 
 /// The push credential of a computer that uses a personal token: the token it chose,
 /// never another one and never a sign-in token.
-fn personal_push_credential(policy: &Value, repository: &str) -> Result<HostPushCredential, String> {
+fn personal_push_credential(
+    policy: &Value,
+    repository: &str,
+) -> Result<HostPushCredential, String> {
     Ok(HostPushCredential {
         token: personal_token::value_of(policy)?,
         repository: repository.into(),
@@ -3994,7 +3998,8 @@ mod tests {
             };
             let before = serde_json::to_value(&d).unwrap();
             assert!(
-                apply_patches(&mut d, &[saved_policy("dev", true)], None, true, &|_| false).is_err()
+                apply_patches(&mut d, &[saved_policy("dev", true)], None, true, &|_| false)
+                    .is_err()
             );
             assert_eq!(serde_json::to_value(&d).unwrap(), before);
         }
@@ -4035,9 +4040,11 @@ mod tests {
         // A fork copied its source's assignment after the page last read the settings.
         d.computers.push(saved_policy("fork", true));
         stamp(&mut d, "fork", None);
-        let changed = apply_patches(&mut d, &[saved_policy("dev", true)], Some(4), true, &|_| false)
-            .unwrap()
-            .unwrap();
+        let changed = apply_patches(&mut d, &[saved_policy("dev", true)], Some(4), true, &|_| {
+            false
+        })
+        .unwrap()
+        .unwrap();
         assert_eq!(changed, vec!["dev".to_string()]);
         assert_eq!(
             d.computers,
@@ -4058,7 +4065,10 @@ mod tests {
         );
         // Saving what is already stored changes nothing.
         assert_eq!(
-            apply_patches(&mut d, &[saved_policy("dev", true)], Some(4), true, &|_| false).unwrap(),
+            apply_patches(&mut d, &[saved_policy("dev", true)], Some(4), true, &|_| {
+                false
+            })
+            .unwrap(),
             None
         );
         assert_eq!(d.revision, 6);
@@ -4073,44 +4083,66 @@ mod tests {
         };
         stamp(&mut d, "fork", None);
         // The page still showed the fork without its copied assignment.
-        assert!(
-            apply_patches(&mut d, &[saved_policy("fork", false)], Some(4), true, &|_| false).is_err()
-        );
+        assert!(apply_patches(
+            &mut d,
+            &[saved_policy("fork", false)],
+            Some(4),
+            true,
+            &|_| false
+        )
+        .is_err());
         assert_eq!(d.computers, vec![saved_policy("fork", true)]);
         assert_eq!(d.revision, 5);
         // After seeing it, the same edit applies.
-        assert!(
-            apply_patches(&mut d, &[saved_policy("fork", false)], Some(5), true, &|_| false)
-                .unwrap()
-                .is_some()
-        );
+        assert!(apply_patches(
+            &mut d,
+            &[saved_policy("fork", false)],
+            Some(5),
+            true,
+            &|_| false
+        )
+        .unwrap()
+        .is_some());
         // Rapid edits sent from one view before its first result arrived apply in order.
         let mut edit = saved_policy("fork", false);
         edit["identity"] = json!({"name":"Name","email":"name@example.test","apply":true});
-        assert!(apply_patches(&mut d, &[edit.clone()], Some(5), true, &|_| false)
-            .unwrap()
-            .is_some());
-        assert_eq!(d.computers, vec![edit.clone()]);
-        // A save from a newer view wins over a later-arriving one from an older view.
         assert!(
-            apply_patches(&mut d, &[saved_policy("fork", true)], Some(7), true, &|_| false)
+            apply_patches(&mut d, &[edit.clone()], Some(5), true, &|_| false)
                 .unwrap()
                 .is_some()
         );
+        assert_eq!(d.computers, vec![edit.clone()]);
+        // A save from a newer view wins over a later-arriving one from an older view.
+        assert!(apply_patches(
+            &mut d,
+            &[saved_policy("fork", true)],
+            Some(7),
+            true,
+            &|_| false
+        )
+        .unwrap()
+        .is_some());
         assert!(apply_patches(&mut d, &[edit], Some(5), true, &|_| false).is_err());
         // A deleted computer's stale choices are not brought back for a new one with its name.
         forget_computer(&mut d, "fork");
         d.revision += 1;
         stamp(&mut d, "fork", None);
-        assert!(
-            apply_patches(&mut d, &[saved_policy("fork", true)], Some(8), true, &|_| false).is_err()
-        );
+        assert!(apply_patches(
+            &mut d,
+            &[saved_policy("fork", true)],
+            Some(8),
+            true,
+            &|_| false
+        )
+        .is_err());
         assert!(d.computers.is_empty());
         // A caller without a base revision is not checked.
         assert!(
-            apply_patches(&mut d, &[saved_policy("fork", true)], None, true, &|_| false)
-                .unwrap()
-                .is_some()
+            apply_patches(&mut d, &[saved_policy("fork", true)], None, true, &|_| {
+                false
+            })
+            .unwrap()
+            .is_some()
         );
     }
     #[test]
@@ -5661,7 +5693,10 @@ mod tests {
             (Value::Null, Value::Null),
             (json!("oauth"), Value::Null),
             (json!("token"), Value::Null),
-            (json!("token"), json!("00000000-0000-4000-8000-0000000000aa")),
+            (
+                json!("token"),
+                json!("00000000-0000-4000-8000-0000000000aa"),
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -5702,7 +5737,10 @@ mod tests {
         let (revision, profile) =
             macos_proxy_policy_from(&document, "dev", Some(Ok("synthetic_token".into()))).unwrap();
         assert_eq!(revision, 4);
-        assert_eq!(profile, Some(personal_token::token_profile("synthetic_token")));
+        assert_eq!(
+            profile,
+            Some(personal_token::token_profile("synthetic_token"))
+        );
         // A token that could not be read fails closed.
         assert!(macos_proxy_policy_from(&document, "dev", Some(Err("no".into()))).is_err());
         // No token was read for this policy: it changed since, so nothing is answered.
@@ -5711,7 +5749,10 @@ mod tests {
             access_enabled: false,
             ..document
         };
-        assert_eq!(macos_proxy_policy_from(&off, "dev", None).unwrap(), (4, None));
+        assert_eq!(
+            macos_proxy_policy_from(&off, "dev", None).unwrap(),
+            (4, None)
+        );
     }
 
     #[test]

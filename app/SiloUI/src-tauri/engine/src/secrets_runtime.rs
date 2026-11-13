@@ -383,14 +383,25 @@ mod tests {
         let paths = crate::test_support::paths(home.path());
         crate::containers::capability::make_container(&paths.home, "box");
         let material: Material = vec![
-            ("TOKEN".into(), "synthetic-token".into(), vec!["api.example.test".into()]),
-            ("OTHER".into(), "synthetic-other".into(), vec!["*.example.test".into()]),
+            (
+                "TOKEN".into(),
+                "synthetic-token".into(),
+                vec!["api.example.test".into()],
+            ),
+            (
+                "OTHER".into(),
+                "synthetic-other".into(),
+                vec!["*.example.test".into()],
+            ),
         ];
         // Nothing here is a container rule: the same validation, the same plan, the same
         // verification of the saved and the active configuration as for a virtual machine.
         assert!(apply(&paths, "box", &material, false).unwrap().is_empty());
         let inspected = inspect_computer(&ProcessRunner, &paths, "box").unwrap();
-        assert_eq!(names(&inspected.config), ["OTHER", "TOKEN"].map(str::to_owned).into());
+        assert_eq!(
+            names(&inspected.config),
+            ["OTHER", "TOKEN"].map(str::to_owned).into()
+        );
         assert!(verify_config(&inspected.config, &material));
         let reduced: Material = vec![material[1].clone()];
         assert!(apply(&paths, "box", &reduced, false).unwrap().is_empty());

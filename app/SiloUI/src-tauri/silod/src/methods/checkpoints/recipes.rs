@@ -530,15 +530,15 @@ pub(super) async fn of_computer(
     let recipe = tokio::task::spawn_blocking(move || {
         recipes::records::get_at(&app_data, &params.computer_id)
     })
-        .await
-        .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?
-        .map_err(invalid)?
-        .map(|mut record| {
-            if hide {
-                record.recipe = recipes::hide_commands(record.recipe);
-            }
-            record
-        });
+    .await
+    .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?
+    .map_err(invalid)?
+    .map(|mut record| {
+        if hide {
+            record.recipe = recipes::hide_commands(record.recipe);
+        }
+        record
+    });
     output(ComputerRecipeResult { recipe })
 }
 

@@ -387,8 +387,10 @@ pub fn keep(
 
     let main_before = store.capture(&target)?;
     env.note("Saving a checkpoint of main");
-    let checkpoint =
-        env.checkpoint_before_keep(&target, &format!("Before keep of {}", env.name_of(&request.fork)))?;
+    let checkpoint = env.checkpoint_before_keep(
+        &target,
+        &format!("Before keep of {}", env.name_of(&request.fork)),
+    )?;
     journal.record_pending(&target, &checkpoint)?;
     journal.tag(
         &target,

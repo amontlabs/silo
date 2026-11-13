@@ -43,7 +43,9 @@ async fn list(params: &Value, context: &HandlerContext) -> Result<HandlerOutput,
     })
     .await
     .map_err(|_| DispatchError::internal("The audit log could not be read."))?
-    .map_err(|error| DispatchError::internal(format!("The audit log could not be read: {error}")))?;
+    .map_err(|error| {
+        DispatchError::internal(format!("The audit log could not be read: {error}"))
+    })?;
     serde_json::to_value(page)
         .map(|value| HandlerOutput {
             value,

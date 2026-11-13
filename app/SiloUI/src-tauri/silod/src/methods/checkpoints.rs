@@ -316,8 +316,16 @@ async fn abandon_restore(
 /// The computers a computer's agent may be told of, when the caller is one; a refusal or a
 /// list of dependants names no other.
 fn visible_to_computer(context: &HandlerContext) -> Option<std::collections::BTreeSet<String>> {
-    matches!(context.caller(), silo_engine::policy::Caller::Computer { .. })
-        .then(|| context.visible().map(|seen| (*seen).clone()).unwrap_or_default())
+    matches!(
+        context.caller(),
+        silo_engine::policy::Caller::Computer { .. }
+    )
+    .then(|| {
+        context
+            .visible()
+            .map(|seen| (*seen).clone())
+            .unwrap_or_default()
+    })
 }
 
 async fn usage(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {

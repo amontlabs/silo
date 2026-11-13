@@ -662,19 +662,17 @@ pub fn build(
                         && request.choices.said(id) != Said::Answered(Answer::Fork)
                 })
                 .collect();
-            let (dropped, kept): (Vec<FileCand>, Vec<FileCand>) = std::mem::take(&mut plan.file_cands)
-                .into_iter()
-                .partition(|c| ignored.contains(&c.id));
+            let (dropped, kept): (Vec<FileCand>, Vec<FileCand>) =
+                std::mem::take(&mut plan.file_cands)
+                    .into_iter()
+                    .partition(|c| ignored.contains(&c.id));
             plan.file_cands = kept;
             for cand in dropped {
                 plan.items.push(ReportItem::new(
                     &cand.id,
                     &cand.path,
                     outcome::LEFT_AS_MAIN,
-                    format!(
-                        "not carried: {} stays as main has it",
-                        repo.repo
-                    ),
+                    format!("not carried: {} stays as main has it", repo.repo),
                 ));
             }
         }

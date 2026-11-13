@@ -162,14 +162,22 @@ fn strip(
     let step = |what: &str, result: Result<(), String>| {
         result.map_err(|error| Failure::failed(format!("{what}: {error}.")))
     };
-    let proceed = || if cancelled() { Err(Failure::Cancelled) } else { Ok(()) };
+    let proceed = || {
+        if cancelled() {
+            Err(Failure::Cancelled)
+        } else {
+            Ok(())
+        }
+    };
     proceed()?;
     progress("Starting the copy");
     step("Silo could not start the temporary copy", env.start(&id))?;
     proceed()?;
     progress("Looking for logins in the copy");
     let paths = env.login_paths(&id).map_err(|error| {
-        Failure::failed(format!("Silo could not look for logins in the copy: {error}."))
+        Failure::failed(format!(
+            "Silo could not look for logins in the copy: {error}."
+        ))
     })?;
     progress("Removing the logins from the copy");
     step(

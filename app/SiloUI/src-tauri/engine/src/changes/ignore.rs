@@ -660,7 +660,10 @@ mod tests {
                 "{path}"
             );
         }
-        for path in ["/root/.claude/settings.json", "/home/dev/.claude.json.backup"] {
+        for path in [
+            "/root/.claude/settings.json",
+            "/home/dev/.claude.json.backup",
+        ] {
             assert_eq!(login_label(path), None, "{path}");
         }
     }
