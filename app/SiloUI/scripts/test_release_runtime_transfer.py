@@ -43,7 +43,9 @@ class RuntimeTransferTests(unittest.TestCase):
         self.write(MSB + '.sha256', hashlib.sha256(executable).hexdigest().encode())
         self.write('app/SiloUI/src-tauri/target/runtime-cache/dugite/v1/git.tar.gz')
         self.write('app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/source.tar.gz')
-        self.write('app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/builds/linux-arm64/git-lfs-transfer', executable, 0o755)
+        self.write('app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/builds/linux-arm64-key/git-lfs-transfer', executable, 0o755)
+        self.write('app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/builds/linux-arm64-key/manifest.json')
+        self.write('app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/builds/linux-arm64-key/licenses/Go-LICENSE')
         forbidden = [
             'app/SiloUI/github-build.local.json',
             'app/SiloUI/src-tauri/target/release/silo-ui',

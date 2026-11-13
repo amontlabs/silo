@@ -102,10 +102,16 @@ function digest(bytes) {
   return createHash("sha256").update(bytes).digest("hex")
 }
 
+// A file name inside an entry: a relative path of plain segments.
+function entryName(name) {
+  return name !== ENTRY_MANIFEST && name.split("/").every(part => part && part !== "." && part !== ".." && !part.includes("\\"))
+}
+
 // Takes a published cache entry: reads its manifest once, then reads each named file once into
 // memory and checks what it read against that one manifest. Returns the bytes, or null (a miss)
 // when anything is missing or differs. A publisher replacing the entry meanwhile can only turn a
 // hit into a miss: the bytes returned are the bytes hashed, against one read of the manifest.
+// With `names` null, the entry's files are the ones its manifest lists.
 export async function takePublishedEntry(directory, names, { afterManifest, afterFile } = {}) {
   let manifest
   try {
@@ -114,10 +120,11 @@ export async function takePublishedEntry(directory, names, { afterManifest, afte
     return null
   }
   const listed = manifest?.schemaVersion === 1 && manifest.files && typeof manifest.files === "object" ? Object.keys(manifest.files).sort() : null
-  if (!listed || JSON.stringify(listed) !== JSON.stringify([...names].sort())) return null
+  if (!listed || listed.length === 0 || !listed.every(entryName)) return null
+  if (names !== null && JSON.stringify(listed) !== JSON.stringify([...names].sort())) return null
   await afterManifest?.()
   const taken = {}
-  for (const name of names) {
+  for (const name of names ?? listed) {
     const expected = manifest.files[name]
     if (typeof expected?.sha256 !== "string" || !Number.isSafeInteger(expected.size)) return null
     let bytes
@@ -150,6 +157,8 @@ export async function publishEntry(directory, files, { accept = async () => true
   try {
     const manifest = { schemaVersion: 1, files: {} }
     for (const name of names) {
+      if (!entryName(name)) throw new Error(`Invalid cache entry file name: ${name}`)
+      await mkdir(dirname(join(staged, name)), { recursive: true })
       await writeFile(join(staged, name), files[name], { mode: 0o755 })
       manifest.files[name] = { sha256: digest(files[name]), size: files[name].length }
     }

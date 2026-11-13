@@ -14,7 +14,7 @@ export function fetchVerifiedFile(fetchInput: FetchStream, url: string, expected
 export function runtimeCacheRoot(tauriRoot: string, environment?: Record<string, string | undefined>): string
 export function takePublishedEntry(
   directory: string,
-  names: readonly string[],
+  names: readonly string[] | null,
   hooks?: { afterManifest?: () => Promise<void> | void; afterFile?: (name: string) => Promise<void> | void },
 ): Promise<Record<string, Buffer> | null>
 export function publishEntry(

@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, copyFile, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { fetchVerifiedFile, runtimeCacheRoot } from './build-input.mjs'
+import { fetchVerifiedFile, publishEntry, runtimeCacheRoot, takePublishedEntry } from './build-input.mjs'
 import { validateArchiveEntries } from './git-runtime.mjs'
 
 const execute = promisify(execFile)
@@ -62,9 +62,48 @@ async function normalizeModes(directory) {
   }
 }
 
+// The shared cache holds one compiled build per source and build identity, as one entry
+// (`publishEntry`): the executable, the MIT notice and the `licenses/` notices.
+export function lfsTransferBuildKey(architecture, buildIdentity) {
+  return `linux-${architecture}-${sha256(JSON.stringify([LFS_TRANSFER_SOURCE_SHA256, buildIdentity]))}`
+}
+
+const usableBuild = files => Boolean(files?.['git-lfs-transfer'] && files['LICENSE-MIT.txt'] && files['licenses/Go-LICENSE']) &&
+  Object.keys(files).every(name => name === 'git-lfs-transfer' || name === 'LICENSE-MIT.txt' || name.startsWith('licenses/'))
+
+const runtimeManifest = (architecture, buildIdentity, files) => `${JSON.stringify({
+  schemaVersion: 2, distribution: 'charmbracelet/git-lfs-transfer', commit: LFS_TRANSFER_COMMIT, buildIdentity,
+  sourceSha256: LFS_TRANSFER_SOURCE_SHA256, platform: 'linux', architecture, binarySha256: sha256(files['git-lfs-transfer']),
+  licenseSha256: Object.fromEntries(Object.keys(files).filter(name => name !== 'git-lfs-transfer').sort().map(name => [name, sha256(files[name])])),
+}, null, 2)}\n`
+
+async function readBuild(directory) {
+  const files = { 'git-lfs-transfer': await readFile(join(directory, 'git-lfs-transfer')) }
+  for (const name of Object.keys(await licenseDigests(directory))) files[name] = await readFile(join(directory, name))
+  return files
+}
+
+// Writes a build into the checkout's runtime folder beside it, then renames it into place.
+async function stageBuild(tauriRoot, root, files, manifest) {
+  const stage = join(tauriRoot, 'runtime', `.lfs-transfer-staging-${process.pid}`)
+  await rm(stage, { recursive: true, force: true })
+  try {
+    for (const [name, bytes] of Object.entries(files)) {
+      await mkdir(dirname(join(stage, name)), { recursive: true })
+      await writeFile(join(stage, name), bytes)
+    }
+    await writeFile(join(stage, 'manifest.json'), manifest)
+    await normalizeModes(stage)
+    await rm(root, { recursive: true, force: true })
+    await rename(stage, root)
+  } finally {
+    await rm(stage, { recursive: true, force: true })
+  }
+}
+
 // The server runs inside the Linux guest, including when Silo's host is macOS.
 // There is no stable upstream binary release; build the immutable source pin.
-export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStream, run = execute }) {
+export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStream, run = execute, hooks }) {
   const architecture = lfsTransferGuestArchitecture(targetTriple)
   const tauriRoot = resolve(appRoot, 'src-tauri')
   const root = join(tauriRoot, 'runtime', 'lfs-transfer')
@@ -95,7 +134,7 @@ export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStre
   // Use the selected compiler for the build and notices, without another auto switch.
   const go = join(compiler.GOROOT, 'bin/go')
   const buildEnvironment = { ...environment, ...buildIdentity.environment, GOTOOLCHAIN: 'local', GOROOT: compiler.GOROOT }
-  const cachedBuild = join(cache, 'builds', `linux-${architecture}`)
+  const cachedBuild = join(cache, 'builds', lfsTransferBuildKey(architecture, buildIdentity))
   const binaryPath = join(root, 'git-lfs-transfer')
   const manifestPath = join(root, 'manifest.json')
   const valid = async directory => {
@@ -113,17 +152,14 @@ export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStre
     await normalizeModes(root)
     return { root, binaryPath, manifestPath }
   }
-  if (await valid(cachedBuild)) {
-    await rm(root, { recursive: true, force: true })
-    await mkdir(root, { recursive: true })
-    for (const name of ['git-lfs-transfer', 'manifest.json', 'LICENSE-MIT.txt', 'licenses']) {
-      await cp(join(cachedBuild, name), join(root, name), { recursive: true })
-    }
-    await normalizeModes(root)
+  // The shared build is taken against its one manifest read; the files staged are the bytes checked.
+  const taken = await takePublishedEntry(cachedBuild, null, hooks)
+  if (usableBuild(taken)) {
+    await stageBuild(tauriRoot, root, taken, runtimeManifest(architecture, buildIdentity, taken))
     return { root, binaryPath, manifestPath }
   }
 
-  const stage = join(tauriRoot, 'runtime', `.lfs-transfer-staging-${process.pid}`)
+  const stage = join(tauriRoot, 'runtime', `.lfs-transfer-build-${process.pid}`)
   const archivePath = join(cache, 'source.tar.gz')
   await mkdir(cache, { recursive: true })
   await fetchVerifiedFile(fetchStream, LFS_TRANSFER_SOURCE_URL, LFS_TRANSFER_SOURCE_SHA256, 'Git LFS transfer source', archivePath)
@@ -163,29 +199,12 @@ export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStre
     } finally {
       await rm(source, { recursive: true, force: true })
     }
-    await chmod(join(stage, 'git-lfs-transfer'), 0o755)
-    await writeFile(join(stage, 'manifest.json'), `${JSON.stringify({
-      schemaVersion: 2, distribution: 'charmbracelet/git-lfs-transfer', commit: LFS_TRANSFER_COMMIT, buildIdentity,
-      sourceSha256: LFS_TRANSFER_SOURCE_SHA256, platform: 'linux', architecture,
-      binarySha256: sha256(await readFile(join(stage, 'git-lfs-transfer'))), licenseSha256: await licenseDigests(stage),
-    }, null, 2)}\n`)
-    await normalizeModes(stage)
-    // Publish the cache copy whole: copy beside it, then rename, so a reader (or another
-    // checkout sharing this cache) never sees a half-written build.
-    const publishing = `${cachedBuild}.tmp-${process.pid}`
-    await mkdir(dirname(cachedBuild), { recursive: true })
-    await rm(publishing, { recursive: true, force: true })
-    await cp(stage, publishing, { recursive: true })
-    await rm(root, { recursive: true, force: true })
-    await rename(stage, root)
-    await rm(cachedBuild, { recursive: true, force: true })
-    await rename(publishing, cachedBuild).catch(async error => {
-      await rm(publishing, { recursive: true, force: true })
-      if (!(await valid(cachedBuild))) throw error
-    })
+    const files = await readBuild(stage)
+    // An entry another checkout published meanwhile that passes the same take is kept.
+    await publishEntry(cachedBuild, files, { accept: async published => usableBuild(published) })
+    await stageBuild(tauriRoot, root, files, runtimeManifest(architecture, buildIdentity, files))
     return { root, binaryPath, manifestPath }
-  } catch (error) {
+  } finally {
     await rm(stage, { recursive: true, force: true })
-    throw error
   }
 }

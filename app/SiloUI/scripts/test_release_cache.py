@@ -94,7 +94,10 @@ class ReleaseCacheTests(unittest.TestCase):
                    runtime + 'v0.7.6/licenses/microsandbox-Apache-2.0.txt',
                    runtime + 'dugite/version/archive.tar.gz',
                    runtime + 'git-lfs-transfer/pin/source.tar.gz',
-                   runtime + 'git-lfs-transfer/pin/builds/linux-arm64/git-lfs-transfer',
+                   # lfs-transfer-runtime.mjs publishes one entry per build key, with its manifest and notices.
+                   runtime + 'git-lfs-transfer/pin/builds/linux-arm64-key/manifest.json',
+                   runtime + 'git-lfs-transfer/pin/builds/linux-arm64-key/git-lfs-transfer',
+                   runtime + 'git-lfs-transfer/pin/builds/linux-arm64-key/licenses/Go-LICENSE',
                    '.cargo/registry/cache/index/crate.tar.gz']
         forbidden = [runtime + 'v0.7.6/patched-builds/work-123-target/release/msb',
                      runtime + 'v0.7.6/patched-builds/work-123/source.rs',

@@ -1,11 +1,13 @@
 import { Readable } from 'node:stream'
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { LFS_TRANSFER_COMMIT, LFS_TRANSFER_SOURCE_SHA256, lfsTransferGuestArchitecture, readGoCompilerLicense, stageLfsTransferRuntime } from './lfs-transfer-runtime.mjs'
+import { publishEntry } from './build-input.mjs'
+import { LFS_TRANSFER_COMMIT, LFS_TRANSFER_SOURCE_SHA256, lfsTransferBuildKey, lfsTransferGuestArchitecture, readGoCompilerLicense, stageLfsTransferRuntime } from './lfs-transfer-runtime.mjs'
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const compiler = { GOVERSION: 'go1.25.1', GOROOT: '/fixture/go', GOTOOLCHAIN: 'auto',
@@ -38,6 +40,19 @@ async function compiledFixture(directory, identity = buildIdentity) {
   }))
 }
 
+const cacheBuilds = appRoot => join(appRoot, 'src-tauri/target/runtime-cache/git-lfs-transfer', LFS_TRANSFER_COMMIT, 'builds')
+const buildFiles = variant => ({
+  'git-lfs-transfer': Buffer.from(`cached executable fixture${variant}`), 'LICENSE-MIT.txt': Buffer.from('MIT'),
+  'licenses/Go-LICENSE': Buffer.from(`Go${variant}`), 'licenses/example-module/LICENSE': Buffer.from('Module license'),
+})
+
+// A build in the shared cache, published as the build that ran with `identity` publishes it.
+async function publishedFixture(appRoot, identity = buildIdentity, files = buildFiles('')) {
+  const entry = join(cacheBuilds(appRoot), lfsTransferBuildKey('arm64', identity))
+  await publishEntry(entry, files)
+  return entry
+}
+
 test('changed effective Go flags reject a previously compiled executable', async t => {
   const appRoot = await mkdtemp(join(tmpdir(), 'silo-lfs-effective-flags-'))
   t.after(() => rm(appRoot, { recursive: true, force: true }))
@@ -67,7 +82,7 @@ for (const name of ['source digest', 'binary digest']) {
   })
 }
 
-for (const location of ['runtime/lfs-transfer', `target/runtime-cache/git-lfs-transfer/${LFS_TRANSFER_COMMIT}/builds/linux-arm64`]) {
+for (const location of ['runtime/lfs-transfer', 'shared cache']) {
   for (const [name, identity] of [
     ['legacy manifest', undefined],
     ['compiler upgrade', { ...buildIdentity, goVersion: 'go1.25.0' }],
@@ -78,7 +93,10 @@ for (const location of ['runtime/lfs-transfer', `target/runtime-cache/git-lfs-tr
     test(`${name} invalidates ${location}`, async t => {
       const appRoot = await mkdtemp(join(tmpdir(), 'silo-lfs-cache-identity-'))
       t.after(() => rm(appRoot, { recursive: true, force: true }))
-      await compiledFixture(join(appRoot, 'src-tauri', location), identity ?? null)
+      if (location !== 'shared cache') await compiledFixture(join(appRoot, 'src-tauri', location), identity ?? null)
+      // A legacy shared build sat directly in builds/linux-<architecture>.
+      else if (!identity) await compiledFixture(join(cacheBuilds(appRoot), 'linux-arm64'), buildIdentity)
+      else await publishedFixture(appRoot, identity)
       let downloads = 0
       await assert.rejects(stageLfsTransferRuntime({ appRoot, targetTriple: 'aarch64-apple-darwin', run: probeCompiler,
         fetchStream: async () => { downloads++; return Readable.from([Buffer.from('unverified rebuild source')]) } }), /source checksum mismatch/)
@@ -90,14 +108,42 @@ for (const location of ['runtime/lfs-transfer', `target/runtime-cache/git-lfs-tr
 test('compiler selection changes reject both caches even when their binary digests match', async t => {
   const appRoot = await mkdtemp(join(tmpdir(), 'silo-lfs-selected-compiler-'))
   t.after(() => rm(appRoot, { recursive: true, force: true }))
-  for (const directory of ['runtime/lfs-transfer', `target/runtime-cache/git-lfs-transfer/${LFS_TRANSFER_COMMIT}/builds/linux-arm64`]) {
-    await compiledFixture(join(appRoot, 'src-tauri', directory))
-  }
+  await compiledFixture(join(appRoot, 'src-tauri/runtime/lfs-transfer'))
+  await publishedFixture(appRoot)
   await assert.rejects(stageLfsTransferRuntime({ appRoot, targetTriple: 'aarch64-apple-darwin',
     run: async (...args) => {
       await probeCompiler(...args)
       return { stdout: JSON.stringify({ ...compiler, GOVERSION: 'go1.25.2' }) }
     }, fetchStream: async () => { throw new Error('Rebuild required') } }), /Rebuild required/)
+})
+
+test('a published build is staged with the manifest a fresh build writes', async t => {
+  const appRoot = await mkdtemp(join(tmpdir(), 'silo-lfs-published-'))
+  t.after(() => rm(appRoot, { recursive: true, force: true }))
+  const files = buildFiles('')
+  await publishedFixture(appRoot, buildIdentity, files)
+  const result = await stageLfsTransferRuntime({ appRoot, targetTriple: 'aarch64-apple-darwin', run: probeCompiler,
+    fetchStream: async () => { throw new Error('A published build needs no download') } })
+  for (const [name, bytes] of Object.entries(files)) assert.deepEqual(await readFile(join(result.root, name)), bytes)
+  assert.deepEqual(JSON.parse(await readFile(result.manifestPath, 'utf8')), {
+    schemaVersion: 2, distribution: 'charmbracelet/git-lfs-transfer', commit: LFS_TRANSFER_COMMIT, buildIdentity,
+    sourceSha256: LFS_TRANSFER_SOURCE_SHA256, platform: 'linux', architecture: 'arm64', binarySha256: digest(files['git-lfs-transfer']),
+    licenseSha256: { 'LICENSE-MIT.txt': digest('MIT'), 'licenses/Go-LICENSE': digest('Go'), 'licenses/example-module/LICENSE': digest('Module license') },
+  })
+  // The checkout's staged copy is then used as it is.
+  await rm(cacheBuilds(appRoot), { recursive: true })
+  await stageLfsTransferRuntime({ appRoot, targetTriple: 'aarch64-apple-darwin', run: probeCompiler,
+    fetchStream: async () => { throw new Error('A staged build needs no download') } })
+})
+
+test('a published entry missing a required notice is not used', async t => {
+  const appRoot = await mkdtemp(join(tmpdir(), 'silo-lfs-incomplete-'))
+  t.after(() => rm(appRoot, { recursive: true, force: true }))
+  const files = buildFiles('')
+  delete files['licenses/Go-LICENSE']
+  await publishedFixture(appRoot, buildIdentity, files)
+  await assert.rejects(stageLfsTransferRuntime({ appRoot, targetTriple: 'aarch64-apple-darwin', run: probeCompiler,
+    fetchStream: async () => { throw new Error('Rebuild required') } }), /Rebuild required/)
 })
 
 test('Debian Go uses the copyright notice of the package owning its compiler', async t => {
@@ -152,20 +198,8 @@ test('unverified source is rejected before any Go build can execute', async t =>
 test('cached module licenses stay writable across repeated native resource copies', async t => {
   const appRoot = await mkdtemp(join(tmpdir(), 'silo-lfs-license-modes-'))
   t.after(() => rm(appRoot, { recursive: true, force: true }))
-  const cache = join(appRoot, 'src-tauri/target/runtime-cache/git-lfs-transfer', LFS_TRANSFER_COMMIT, 'builds/linux-arm64')
-  await mkdir(join(cache, 'licenses/example-module'), { recursive: true })
-  const binary = Buffer.from('cached executable fixture')
-  await writeFile(join(cache, 'git-lfs-transfer'), binary)
-  await writeFile(join(cache, 'LICENSE-MIT.txt'), 'MIT')
-  await writeFile(join(cache, 'licenses/Go-LICENSE'), 'Go')
-  await writeFile(join(cache, 'licenses/example-module/LICENSE'), 'Module license')
-  await chmod(join(cache, 'licenses/example-module/LICENSE'), 0o444)
-  await writeFile(join(cache, 'manifest.json'), JSON.stringify({
-    schemaVersion: 2, commit: LFS_TRANSFER_COMMIT, sourceSha256: LFS_TRANSFER_SOURCE_SHA256, architecture: 'arm64', buildIdentity,
-    binarySha256: createHash('sha256').update(binary).digest('hex'),
-    licenseSha256: { 'LICENSE-MIT.txt': digest('MIT'), 'licenses/Go-LICENSE': digest('Go'),
-      'licenses/example-module/LICENSE': digest('Module license') },
-  }))
+  const entry = await publishedFixture(appRoot)
+  await chmod(join(entry, 'licenses/example-module/LICENSE'), 0o444)
   const options = { appRoot, targetTriple: 'aarch64-apple-darwin', run: probeCompiler,
     fetchStream: async () => { throw new Error('A valid compiled cache needs no download') } }
   const result = await stageLfsTransferRuntime(options)
@@ -179,13 +213,13 @@ test('cached module licenses stay writable across repeated native resource copie
 })
 
 
-for (const location of ['runtime/lfs-transfer', `target/runtime-cache/git-lfs-transfer/${LFS_TRANSFER_COMMIT}/builds/linux-arm64`]) {
+for (const location of ['runtime/lfs-transfer', 'shared cache']) {
   for (const failure of ['missing', 'changed']) {
     test(`${failure} dependency license invalidates ${location}`, async t => {
       const appRoot = await mkdtemp(join(tmpdir(), 'silo-lfs-notice-integrity-'))
       t.after(() => rm(appRoot, { recursive: true, force: true }))
-      const directory = join(appRoot, 'src-tauri', location)
-      await compiledFixture(directory)
+      const directory = location === 'shared cache' ? await publishedFixture(appRoot) : join(appRoot, 'src-tauri', location)
+      if (location !== 'shared cache') await compiledFixture(directory)
       const notice = join(directory, 'licenses/example-module/LICENSE')
       if (failure === 'missing') await rm(notice)
       else await writeFile(notice, 'Truncated license')
@@ -193,4 +227,79 @@ for (const location of ['runtime/lfs-transfer', `target/runtime-cache/git-lfs-tr
         fetchStream: async () => { throw new Error('Rebuild required for damaged notices') } }), /Rebuild required for damaged notices/)
     })
   }
+}
+
+
+// A second process publishes build B under the same key while a reader holds build A's manifest.
+// The publisher is told A fails (as when it found a damaged entry, or checked before A appeared).
+async function publishInAnotherProcess(entry, variant) {
+  const files = Object.fromEntries(Object.entries(buildFiles(variant)).map(([name, bytes]) => [name, bytes.toString()]))
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+import { publishEntry } from ${JSON.stringify(new URL('./build-input.mjs', import.meta.url).href)}
+const files = Object.fromEntries(Object.entries(${JSON.stringify(files)}).map(([name, text]) => [name, Buffer.from(text)]))
+await publishEntry(${JSON.stringify(entry)}, files, { accept: async () => false })
+`], { stdio: ['ignore', 'ignore', 'pipe'] })
+  let output = ''
+  child.stderr.on('data', chunk => { output += chunk })
+  const code = await new Promise(resolve => child.on('close', resolve))
+  assert.equal(code, 0, output)
+}
+
+// The reader's result is a miss or exactly the build it checked; never another build or a mix.
+function assertOneBuild(taken, checked) {
+  if (taken !== null) assert.deepEqual(taken, checked)
+}
+
+const pausePoints = { afterManifest: 'afterManifest', 'after-git-lfs-transfer': 'afterFile' }
+
+for (const point of Object.keys(pausePoints)) {
+  test(`a reader paused at ${point} while another process publishes ends in a miss, never a mixed build`, { timeout: 30000 }, async t => {
+    const appRoot = await mkdtemp(join(tmpdir(), 'silo-lfs-paused-reader-'))
+    t.after(() => rm(appRoot, { recursive: true, force: true }))
+    const entry = await publishedFixture(appRoot)
+    let paused = false
+    const pause = async () => {
+      paused = true
+      await publishInAnotherProcess(entry, 'B')
+    }
+    const hooks = point === 'afterManifest' ? { afterManifest: pause } : { afterFile: name => name === 'git-lfs-transfer' && pause() }
+    await assert.rejects(stageLfsTransferRuntime({ appRoot, targetTriple: 'aarch64-apple-darwin', run: probeCompiler, hooks,
+      fetchStream: async () => { throw new Error('Missed: rebuild') } }), /Missed: rebuild/)
+    assert.equal(paused, true)
+    // Nothing was staged from either build, and B, a valid entry, is the one published.
+    await assert.rejects(stat(join(appRoot, 'src-tauri/runtime/lfs-transfer')), { code: 'ENOENT' })
+    assert.equal(await readFile(join(entry, 'licenses/Go-LICENSE'), 'utf8'), 'GoB')
+  })
+}
+
+// The order this cache used before: check the files in place, then read them a second time.
+async function verifyThenRead(directory, { afterManifest, afterFile } = {}) {
+  const manifest = JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8'))
+  const names = Object.keys(manifest.files).sort()
+  for (const name of names) if (digest(await readFile(join(directory, name))) !== manifest.files[name].sha256) return null
+  await afterManifest?.()
+  const files = {}
+  for (const name of names) {
+    files[name] = await readFile(join(directory, name))
+    await afterFile?.(name)
+  }
+  return files
+}
+
+for (const point of Object.keys(pausePoints)) {
+  test(`control: verifying in place then reading fails the paused reader test at ${point}`, { timeout: 30000 }, async t => {
+    const appRoot = await mkdtemp(join(tmpdir(), 'silo-lfs-paused-control-'))
+    t.after(() => rm(appRoot, { recursive: true, force: true }))
+    const entry = await publishedFixture(appRoot)
+    const pause = () => publishInAnotherProcess(entry, 'B')
+    const taken = await verifyThenRead(entry, point === 'afterManifest' ? { afterManifest: pause }
+      : { afterFile: name => name === 'git-lfs-transfer' && pause() })
+    // It checked A and returned B's files (or A's executable with B's notices).
+    assert.throws(() => assertOneBuild(taken, buildFiles('')))
+    if (point === 'afterManifest') assert.deepEqual(taken, buildFiles('B'))
+    else {
+      assert.equal(taken['git-lfs-transfer'].toString(), 'cached executable fixture')
+      assert.equal(taken['licenses/Go-LICENSE'].toString(), 'GoB')
+    }
+  })
 }
