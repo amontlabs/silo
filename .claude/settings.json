@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "sh -c 'atelier hook stop || true'",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "sh -c 'atelier hook stop || true'",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
