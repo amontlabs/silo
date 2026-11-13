@@ -81,7 +81,7 @@ The pinned upstream [configuration defaults to Full restoration](https://github.
 
 ### R-29 Checkpoint Start loses the GitHub CLI environment default
 
-**P2.** Locations: [runtime.rs](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), ordinary creation at 5307–5308 and policy modification at 2408–2416; [checkpoints.rs](../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), lines 1166–1210; [restore-policy patch](../app/SiloUI/patches/microsandbox-restore-policy-0.7.6.patch), lines 34–36, 91–98, and 167–170.
+**P2.** Locations: [runtime.rs](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), ordinary creation at 5307–5308 and policy modification at 2408–2416; [checkpoints.rs](../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), lines 1166–1210; [restore-policy patch](../app/SiloUI/patches/microsandbox-restore-policy-0.7.14.patch), lines 34–36, 91–98, and 167–170.
 
 **Trigger and cause.** Start a sandbox from a checkpoint or imported disk. Ordinary creation supplies `--env GH_TOKEN=$MSB_SILO_GITHUB`. The restore argument path recreates labels, secret bindings, network policy, resources, and mounts, but supplies no environment defaults. A secret binding alone does not put the placeholder into `GH_TOKEN`. The bundled restore patch already supports `--env` for future exec commands.
 

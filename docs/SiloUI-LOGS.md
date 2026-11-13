@@ -148,7 +148,7 @@ parameters are hidden too, including
 [Amazon S3 `X-Amz-Signature`](https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sigv4-query-string-auth.html),
 and [Cloud Storage `X-Goog-Signature`](https://cloud.google.com/storage/docs/authentication/canonical-requests).
 
-The pinned runtime's [retention patch](../app/SiloUI/patches/microsandbox-log-retention-desktop-start-0.7.6.patch)
+The pinned runtime's [retention patch](../app/SiloUI/patches/microsandbox-log-retention-desktop-start-0.7.14.patch)
 renames older segments to increasing numeric suffixes. Silo uses numeric suffix
 order rather than directory enumeration or guest timestamps for classification.
 Tests generate disposable RSA keys with OpenSSL and exercise the production
@@ -163,7 +163,7 @@ that arbitrary secrets are removed. Review exports before sharing them.
   files, search, pagination, surrounding records and remote owner routing.
 - [Retention policy](../app/SiloUI/src-tauri/engine/src/log_retention.rs): segment age,
   independent execution/console byte budgets and stopped-computer cleanup.
-- [Runtime patch](../app/SiloUI/patches/microsandbox-log-retention-desktop-start-0.7.6.patch):
+- [Runtime patch](../app/SiloUI/patches/microsandbox-log-retention-desktop-start-0.7.14.patch):
   execution, runtime and kernel writers.
 - [Logs view](../app/SiloUI/src/features/application/pages/logs-page.tsx):
   search, filters, refresh and follow controls.

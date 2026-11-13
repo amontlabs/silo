@@ -186,7 +186,7 @@ that journal. There is no age-based startup sweep. Deleting checkpoints of a
 sandbox on another computer is done in Silo on that computer.
 
 **E-03 import crash gap closed.** The bundled
-[operation-stage patch](../app/SiloUI/patches/microsandbox-import-stage-id-0.7.6.patch)
+[operation-stage patch](../app/SiloUI/patches/microsandbox-import-stage-id-0.7.14.patch)
 extends the pinned
 [archive loader](https://github.com/superradcompany/microsandbox/blob/60d4dc8a436fb9365491567ec21d073e924e3c6d/sdk/rust/lib/backend/local/snapshot/archive/batch.rs)
 with `snapshot load --stage-id <32 lowercase hex digits>` and Rust
