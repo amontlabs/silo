@@ -422,7 +422,7 @@ fn stop_uncommitted_computer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::sync::{Condvar, Mutex};
 
     #[test]
     fn cancelled_transfers_drain_before_computers_stop_within_the_shutdown_budget() {
@@ -463,7 +463,44 @@ mod tests {
         states: Mutex<HashMap<String, String>>,
         calls: Mutex<Vec<Vec<String>>>,
         fail: Option<String>,
-        stop_barrier: Option<std::sync::Barrier>,
+        stop_rendezvous: Option<Rendezvous>,
+    }
+
+    /// Far above any normal duration of the flows below, even on a machine saturated by other
+    /// builds and tests (their fsyncs, thread starts and first process runs alone can take
+    /// seconds). It only turns a deadlock into a failure; ordering is proven by the
+    /// synchronization the tests use, never by how long something takes.
+    const DEADLOCK_GUARD: Duration = Duration::from_secs(120);
+
+    /// Blocks each caller until `parties` callers have arrived.
+    struct Rendezvous {
+        arrived: Mutex<usize>,
+        all_arrived: Condvar,
+        parties: usize,
+    }
+    impl Rendezvous {
+        fn new(parties: usize) -> Self {
+            Self {
+                arrived: Mutex::new(0),
+                all_arrived: Condvar::new(),
+                parties,
+            }
+        }
+        fn wait(&self) {
+            let mut arrived = self.arrived.lock().unwrap();
+            *arrived += 1;
+            self.all_arrived.notify_all();
+            let (arrived, timeout) = self
+                .all_arrived
+                .wait_timeout_while(arrived, DEADLOCK_GUARD, |arrived| *arrived < self.parties)
+                .unwrap();
+            assert!(
+                !timeout.timed_out(),
+                "only {} of {} stop commands entered before the first one was waited on",
+                *arrived,
+                self.parties
+            );
+        }
     }
     impl RuntimeRunner for Runner {
         fn run(
@@ -474,8 +511,8 @@ mod tests {
         ) -> Result<CommandOutput, RuntimeError> {
             self.calls.lock().unwrap().push(args.to_vec());
             if args[0] == "stop" {
-                if let Some(barrier) = &self.stop_barrier {
-                    barrier.wait();
+                if let Some(rendezvous) = &self.stop_rendezvous {
+                    rendezvous.wait();
                 }
             }
             let mut states = self.states.lock().unwrap();
@@ -518,7 +555,7 @@ mod tests {
             ])),
             calls: Mutex::new(vec![]),
             fail: fail.map(str::to_owned),
-            stop_barrier: None,
+            stop_rendezvous: None,
         }
     }
     #[test]
@@ -531,7 +568,7 @@ mod tests {
             waiter = Some(std::thread::spawn(move || {
                 gate.computer("id-a", "a", "Starting a").map(drop)
             }));
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + DEADLOCK_GUARD;
             while gate.snapshot().waiting.is_empty() {
                 assert!(
                     Instant::now() < deadline,
@@ -563,7 +600,7 @@ mod tests {
                 || gate.device("Stopping local computers").map(drop),
             )
         });
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + DEADLOCK_GUARD;
         while gate.snapshot().waiting.is_empty() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(2));
         }
@@ -710,17 +747,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = setup(&dir);
         let mut runner = runner(None);
-        runner.stop_barrier = Some(std::sync::Barrier::new(2));
-        let (done, received) = std::sync::mpsc::channel();
-        let worker = thread::spawn(move || {
-            let result = stop_local_computers_with(&runner, &paths, &|_, _, _| {});
-            done.send((result, runtime_activity::read(&paths).unwrap()))
-                .unwrap();
-        });
-        let (result, history) = received
-            .recv_timeout(Duration::from_secs(5))
-            .expect("both stop commands must enter before either finishes");
-        worker.join().unwrap();
+        runner.stop_rendezvous = Some(Rendezvous::new(2));
+        // Each stub stop blocks until both stops have entered, so Quit can only finish if it
+        // dispatched the second stop before waiting for the first to return.
+        let result = stop_local_computers_with(&runner, &paths, &|_, _, _| {});
+        let history = runtime_activity::read(&paths).unwrap();
         result.unwrap();
         let first = history
             .iter()
