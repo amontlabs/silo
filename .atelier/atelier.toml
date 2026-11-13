@@ -9,7 +9,7 @@ nextest = "0.9.151"
 [prerequisites.mbx]
 version = "1.30.0"
 cargo = ["~/.local/bin/cargo", "~/Library/Application Support/mbx/bin/cargo", "~/.local/share/mbx/bin/cargo"]
-settings = { build_script_execution = false, learned_incremental = true, seed_incremental = true, "target.seed" = true, share_out_dir = false, eager_incremental = false, share_workspace_root = false }
+settings = { build_script_execution = false, learned_incremental = true, seed_incremental = true, "target.seed" = true, share_out_dir = false, eager_incremental = false, share_workspace_root = false, "gc.auto" = false }   # gc runs at the end of atelier clean, never during a run
 
 [[prerequisites.tools]]
 name = "node"
