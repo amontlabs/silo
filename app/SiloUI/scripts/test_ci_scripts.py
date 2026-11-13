@@ -6,22 +6,28 @@ CI only. No job or step may hide a failure (continue-on-error, a skipping
 `if:` or its own shell). Every `cargo nextest` call in those scripts takes its
 flags from the one shared variable in scripts/ci/common.sh.
 
-The workflow is parsed with PyYAML; scripts/ci/scripts.sh runs this module
-through uv with PyYAML pinned.
+The workflow is parsed with PyYAML 6.0.3. Without it, this module runs itself
+again through uv with that version.
 """
 import os
 import re
 import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import unittest
 
+PYYAML = 'pyyaml==6.0.3'
 try:
     import yaml
-except ImportError as error:
-    raise SystemExit('PyYAML is missing: run scripts/ci/scripts.sh, or from app/SiloUI '
-                     'uv run --no-project --with pyyaml==6.0.3 python -m unittest scripts/test_ci_scripts.py') from error
+except ImportError:
+    if os.environ.get('SILO_CI_SCRIPTS_UV') or not shutil.which('uv'):
+        raise SystemExit(f'PyYAML is missing: install uv (https://docs.astral.sh/uv/) or {PYYAML}')
+    os.environ['SILO_CI_SCRIPTS_UV'] = '1'
+    sys.stdout.flush()
+    os.execvp('uv', ['uv', 'run', '--quiet', '--no-project', '--with', PYYAML, 'python', *sys.orig_argv[1:]])
 
 ROOT = Path(__file__).resolve().parents[3]
 CI = ROOT / 'app/SiloUI/scripts/ci'
