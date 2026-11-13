@@ -785,7 +785,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_channel_connection_answers_the_challenge_and_never_sends_the_token() {
-        const TOKEN: &str = "silo_gc_abc";
+        const TOKEN: &str = "silo_gc_xyzzy";
         let nonce = [9_u8; 32];
         let (port, seen) = challenging_channel(nonce).await;
         let mut with_token = options();
@@ -812,7 +812,7 @@ mod tests {
         ));
         let sent = String::from_utf8_lossy(&sent);
         assert!(request["params"].get("token").is_none());
-        assert!(!sent.contains(TOKEN) && !sent.contains("abc"));
+        assert!(!sent.contains(TOKEN) && !sent.contains("xyzzy"));
         assert!(!sent.contains(&silo_api::transport::to_hex(&key)));
         assert!(matches!(
             Client::connect_channel("127.0.0.1", port, options()).await,
