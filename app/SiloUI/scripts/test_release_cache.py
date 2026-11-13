@@ -36,6 +36,66 @@ class ReleaseCacheTests(unittest.TestCase):
         self.assertIn('-go${{ steps.go-compiler.outputs.version }}-', ACTION)
         self.assertIn("'.github/actions/prepare-release-runtime/action.yml'", ACTION)
 
+    def test_runtime_cache_key_includes_the_build_tools_identified_before_lookup(self):
+        self.assertLess(ACTION.index('id: build-tools'), ACTION.index('actions/cache/restore@'))
+        self.assertIn('-tools${{ steps.build-tools.outputs.digest }}-', ACTION)
+        block = ACTION.split('      id: build-tools\n', 1)[1].split('    - name:', 1)[0]
+        command = block.split('      run: ', 1)[1].strip()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            digests = []
+            for extra in ({}, {}, {'CARGO_INCREMENTAL': '0', 'CARGO_PROFILE_DEV_DEBUG': '0'}, {'RUSTFLAGS': '-Copt-level=1'}):
+                output.unlink(missing_ok=True)
+                subprocess.run(['/bin/bash', '-eu', '-c', command], cwd=ROOT, check=True, env={
+                    **os.environ, 'GITHUB_OUTPUT': str(output), 'RUNTIME_TARGET': 'aarch64-apple-darwin',
+                    'SILO_RUNTIME_CACHE_DIR': directory, **extra,
+                })
+                self.assertRegex(output.read_text(), r'^digest=[0-9a-f]{16}\n$')
+                digests.append(output.read_text())
+            # Stable, blind to debug-build settings, and changed by what changes msb's bytes.
+            self.assertEqual(digests[0], digests[1])
+            self.assertEqual(digests[0], digests[2])
+            self.assertNotEqual(digests[0], digests[3])
+
+    def test_only_this_runs_compiled_entries_are_saved_or_transferred(self):
+        keep = ACTION.index('node scripts/runtime-cache-entries.mjs keep-current')
+        self.assertLess(ACTION.index('runtime-prepare -- npm run runtime:prepare'), keep)
+        self.assertLess(keep, ACTION.index('- name: Save public runtime cache'))
+        self.assertLess(PLATFORM.index('uses: ./.github/actions/prepare-release-runtime\n        with:\n          runner: ${{ inputs.runner }}\n          target: ${{ inputs.target }}\n      - name: Archive'),
+                        PLATFORM.index('release-runtime-cache.py pack'))
+
+    def test_jobs_that_prepare_the_runtime_compute_one_build_environment(self):
+        # The compiled runtime's key covers the job's build environment, so every job that prepares,
+        # saves or consumes the runtime must agree on it (job-level env; steps add none of it).
+        environments = {}
+        for path in sorted((ROOT / '.github/workflows').glob('*.yml')):
+            text = path.read_text()
+            if '\njobs:\n' not in text:
+                continue
+            parts = re.split(r'^  ([a-zA-Z0-9_-]+):\n', text.split('\njobs:\n', 1)[1], flags=re.M)
+            for name, job in zip(parts[1::2], parts[2::2]):
+                if 'prepare-release-runtime' not in job:
+                    continue
+                env = re.search(r'^    env:\n((?:      .*\n|\n)+)', job, re.M)
+                values = {}
+                for line in (env.group(1).splitlines() if env else []):
+                    if ':' in line.strip():
+                        key, value = line.strip().split(':', 1)
+                        values[key] = value.strip().strip("'")
+                environments[f'{path.name}:{name}'] = values
+        self.assertIn('release-platform.yml:runtime', environments)
+        self.assertIn('release-platform.yml:build', environments)
+        script = (
+            'const [module, environments] = process.argv.slice(1);'
+            'import(module).then(({ buildEnvironment }) => console.log(JSON.stringify(Object.fromEntries('
+            'Object.entries(JSON.parse(environments)).map(([job, env]) => [job, buildEnvironment(env, "aarch64-apple-darwin")])))))'
+        )
+        module = (ROOT / 'app/SiloUI/scripts/microsandbox-runtime.mjs').as_uri()
+        result = subprocess.run(['node', '-e', script, module, json.dumps(environments)], check=True, capture_output=True, text=True)
+        computed = json.loads(result.stdout)
+        for job, value in computed.items():
+            self.assertEqual(value, computed['release-platform.yml:runtime'], job)
+
     def test_jobs_that_prepare_and_build_share_one_go_toolchain_policy(self):
         for name in ('release-platform', 'warm-release-caches', 'benchmark-dependency-platform'):
             text = (ROOT / f'.github/workflows/{name}.yml').read_text()
@@ -103,6 +163,8 @@ class ReleaseCacheTests(unittest.TestCase):
                      runtime + 'v0.7.6/patched-builds/work-123/source.rs',
                      runtime + 'v0.7.6/patched-builds/key/published.publish-123/msb',
                      runtime + 'git-lfs-transfer/pin/source-123/main.go',
+                     runtime + 'tmp/123-0123456789ab-x/target/release/msb',
+                     runtime + 'tmp/123-0123456789ab-y/entry/manifest.json',
                      'app/SiloUI/src-tauri/target/release/silo-ui',
                      'app/SiloUI/src-tauri/target/debug/build/silo/output',
                      'app/SiloUI/github-build.local.json',

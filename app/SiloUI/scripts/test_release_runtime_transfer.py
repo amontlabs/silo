@@ -19,6 +19,7 @@ ACTION = (ROOT / '.github/actions/prepare-release-runtime/action.yml').read_text
 PLATFORM = (ROOT / '.github/workflows/release-platform.yml').read_text()
 WORKFLOW = (ROOT / '.github/workflows/release.yml').read_text()
 MSB = 'app/SiloUI/src-tauri/target/runtime-cache/v0.7.6/patched-builds/key/published/msb'
+PUBLISHED = MSB.removesuffix('/msb')
 
 
 class RuntimeTransferTests(unittest.TestCase):
@@ -39,8 +40,15 @@ class RuntimeTransferTests(unittest.TestCase):
 
     def test_one_producer_transfers_public_inputs_to_two_consumers_preserving_modes(self):
         executable = b'compiled public runtime'
+        gateway = b'compiled public gateway'
         self.write(MSB, executable, 0o755)
-        self.write(MSB + '.sha256', hashlib.sha256(executable).hexdigest().encode())
+        self.write(PUBLISHED + '/silo-macos-gateway', gateway, 0o755)
+        # The entry's manifest is what runtime:prepare checks the transferred bytes against.
+        manifest = json.dumps({'schemaVersion': 1, 'files': {
+            name: {'sha256': hashlib.sha256(value).hexdigest(), 'size': len(value)}
+            for name, value in (('msb', executable), ('silo-macos-gateway', gateway))
+        }}).encode()
+        self.write(PUBLISHED + '/manifest.json', manifest)
         self.write('app/SiloUI/src-tauri/target/runtime-cache/dugite/v1/git.tar.gz')
         self.write('app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/source.tar.gz')
         self.write('app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/builds/linux-arm64-key/git-lfs-transfer', executable, 0o755)
@@ -53,6 +61,9 @@ class RuntimeTransferTests(unittest.TestCase):
             'app/SiloUI/src-tauri/target/runtime-cache/v0.7.6/patched-builds/work-123-target/private',
             'app/SiloUI/src-tauri/target/runtime-cache/v0.7.6/patched-builds/work-123/private',
             'app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/source-123/main.go',
+            'app/SiloUI/src-tauri/target/runtime-cache/tmp/123-0123456789ab-x/target/release/msb',
+            'app/SiloUI/src-tauri/target/runtime-cache/tmp/123-0123456789ab-y/entry/git-lfs-transfer',
+            PUBLISHED + '/msb.sha256',
         ]
         for name in forbidden:
             self.write(name, b'private sentinel')
@@ -63,6 +74,8 @@ class RuntimeTransferTests(unittest.TestCase):
             CACHE.unpack(consumer, self.archive, approved_digest)
             self.assertEqual((consumer / MSB).read_bytes(), executable)
             self.assertEqual((consumer / MSB).stat().st_mode & 0o777, 0o755)
+            self.assertEqual((consumer / PUBLISHED / 'silo-macos-gateway').read_bytes(), gateway)
+            self.assertEqual((consumer / PUBLISHED / 'manifest.json').read_bytes(), manifest)
             for private in forbidden:
                 self.assertFalse((consumer / private).exists())
 
@@ -145,33 +158,34 @@ class RuntimeTransferTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'symlink'):
             CACHE.unpack(consumer, self.archive, expected)
 
-    def test_conditions_skip_warm_producer_and_preserve_cold_failure_and_benchmark_gates(self):
+    def test_conditions_wait_for_the_producer_and_preserve_failure_and_benchmark_gates(self):
         # Execute the actual small workflow expressions, with contexts replaced
         # by parameters, so changing a gate changes this behavioral test.
         conditions = {}
-        for job in ['runtime', 'native-tests', 'build']:
+        runtime = PLATFORM.split('\n  runtime:\n', 1)[1].split('\n  native-tests:\n', 1)[0]
+        # The producer always runs: it looks the cache up on the platform's own runner.
+        self.assertIsNone(re.search(r'^    if:', runtime, re.M))
+        for job in ['native-tests', 'build']:
             block = PLATFORM.split(f'\n  {job}:\n', 1)[1]
             condition = re.search(r'    if: \$\{\{ (.+) \}\}', block).group(1)
-            condition = condition.replace('inputs.runtime-cache-hit', 'cacheHit')
             condition = condition.replace('inputs.benchmark-schedule', 'schedule')
             condition = condition.replace('needs.runtime.result', 'runtimeResult')
             condition = condition.replace('cancelled()', 'cancelled')
             conditions[job] = condition
         cases = []
-        for cache_hit, runtime_result in [(True, 'skipped'), (False, 'success'), (False, 'failure'), (False, 'cancelled')]:
+        for runtime_result in ['success', 'failure', 'cancelled']:
             for schedule in ['parallel', 'sequential']:
                 cancelled = runtime_result == 'cancelled'
-                cases.append(dict(cacheHit=cache_hit, runtimeResult=runtime_result, schedule=schedule, cancelled=cancelled))
+                cases.append(dict(runtimeResult=runtime_result, schedule=schedule, cancelled=cancelled))
         javascript = '''
 const [conditions,cases]=JSON.parse(process.argv[1]);
-console.log(JSON.stringify(cases.map(({cacheHit,runtimeResult,schedule,cancelled}) =>
+console.log(JSON.stringify(cases.map(({runtimeResult,schedule,cancelled}) =>
 Object.fromEntries(Object.entries(conditions).map(([job,condition]) => [job,eval(condition)])))));
 '''
         result = subprocess.run(['node', '-e', javascript, json.dumps([conditions, cases])], check=True, capture_output=True, text=True)
         for case, result in zip(cases, json.loads(result.stdout)):
             with self.subTest(case=case):
-                self.assertEqual(result['runtime'], not case['cacheHit'])
-                allowed = case['runtimeResult'] in ['success', 'skipped']
+                allowed = case['runtimeResult'] == 'success'
                 self.assertEqual(result['build'], allowed)
                 self.assertEqual(result['native-tests'], allowed and case['schedule'] == 'parallel')
 
@@ -189,7 +203,8 @@ Object.fromEntries(Object.entries(conditions).map(([job,condition]) => [job,eval
         self.assertNotIn('strategy:', PLATFORM)
         self.assertIn('needs: [validate, frontend, platforms, macos-minimum-constraints]', WORKFLOW)
         self.assertIn('uses: ./.github/workflows/release-platform.yml', WORKFLOW)
-        self.assertEqual(WORKFLOW.count("lookup-only: 'true'"), 1)
+        self.assertNotIn('prepare-release-runtime', WORKFLOW)
+        self.assertNotIn('runtime-cache-hit', WORKFLOW + PLATFORM)
         self.assertNotIn('unknown-linux-gnu', WORKFLOW)
         optional_cache = re.search(
             r'      - name: Restore public release dependencies only\n(.*?)(?=      - name:)',
@@ -202,6 +217,26 @@ Object.fromEntries(Object.entries(conditions).map(([job,condition]) => [job,eval
         self.assertLess(ACTION.index('release-runtime-cache.py unpack'), ACTION.index('runtime-prepare -- npm run runtime:prepare'))
         for name in ['Restore Cargo downloads', 'Prepare native resources']:
             self.assertIn(f"- name: {name}\n      if: inputs.lookup-only != 'true'", ACTION)
+
+    def test_release_producer_looks_up_the_cache_on_the_platform_runner_before_preparing(self):
+        runtime = PLATFORM.split('\n  runtime:\n', 1)[1].split('\n  native-tests:\n', 1)[0]
+        self.assertIn('    runs-on: ${{ inputs.runner }}\n', runtime)
+        self.assertIn('      cache-hit: ${{ steps.lookup.outputs.cache-hit }}\n', runtime)
+        steps = re.split(r'\n      - ', runtime.split('\n    steps:\n', 1)[1])
+        uses = [index for index, step in enumerate(steps) if 'prepare-release-runtime' in step]
+        self.assertEqual(len(uses), 2)
+        lookup, prepare = (steps[index] for index in uses)
+        self.assertIn('id: lookup', lookup)
+        self.assertIn("lookup-only: 'true'", lookup)
+        self.assertNotIn('lookup-only', prepare)
+        # Every step after the lookup runs only on a miss; timings are uploaded when present.
+        for step in steps[uses[0] + 1:]:
+            with self.subTest(step=step.splitlines()[0]):
+                if 'name: Upload timing metrics only' in step:
+                    self.assertIn('if: always()', step)
+                    self.assertIn('if-no-files-found: ignore', step)
+                else:
+                    self.assertIn("if: steps.lookup.outputs.cache-hit != 'true'", step)
 
 
 if __name__ == '__main__':

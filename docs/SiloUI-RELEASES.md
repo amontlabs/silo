@@ -896,30 +896,41 @@ use the selected compiler's GOROOT with further toolchain switching disabled.
 The LFS manifest also records every bundled license file's SHA256; both caches
 reject missing, changed or unexpected notices instead of packaging an incomplete
 notice tree alongside a valid executable.
-Keys include the runner, target, Rust and selected Go versions, staging scripts and runtime patch,
-so app version changes alone do not invalidate the runtime. The guest image is not part of the
+Keys include the runner, target, Rust and selected Go versions, a digest of the build tools
+(`scripts/runtime-cache-entries.mjs tools`, the same tool identity the patched MicroSandbox key
+uses), staging scripts and runtime patch, so app version changes alone do not invalidate the
+runtime, and a runner image update misses once, rebuilds and saves under its new key. After
+preparation, CI keeps only this build's compiled MicroSandbox and Git LFS entries
+(`runtime-cache-entries.mjs keep-current`), so a restored older archive does not carry older
+builds into the next save or transfer. The guest image is not part of the
 runtime cache.
 Preparation always verifies and stages restored inputs and regenerates package
 metadata. Cache misses follow the normal build path.
 
 The patched MicroSandbox executable key also includes the staging-script recipe
-digest and the requested `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
-`CARGO_BUILD_RUSTFLAGS`, target-specific `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, and
-`CARGO_PROFILE_RELEASE_*` overrides, including build-script overrides. Profile
+digest; the Apple SDK and developer folder; the C compiler, linker and archiver
+found on `PATH`; the cargo configuration files that apply and the files they include;
+the contents of the programs the environment or configuration names as rustc,
+wrapper, linker or C tool; and the requested `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
+`CARGO_BUILD_RUSTFLAGS`, target-specific `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` and
+`_LINKER`, `CARGO_UNSTABLE_*`, C toolchain variables and `CARGO_PROFILE_RELEASE_*`
+overrides, including build-script overrides. Only whether the release build is
+incremental is keyed, so `CARGO_INCREMENTAL=0` and an unset value agree; settings of
+other profiles (`CARGO_PROFILE_DEV_*`, `CARGO_PROFILE_TEST_*`) are not keyed. Profile
 settings such as debug information and optimization change compiled bytes without
 changing the source pin or the runtime's capability probes.
 [Cargo documents these compiler inputs](https://doc.rust-lang.org/cargo/reference/environment-variables.html).
 Changing them rebuilds the executable even when a fallback public archive restores
 otherwise valid source, patch, compiler, and capability checks.
 
-Release validation checks exact runtime-cache availability for each target using
-`lookup-only` on the existing validation runner. Go setup runs before this lookup
+Each platform's `release-platform.yml` runtime job checks exact runtime-cache availability
+using `lookup-only` on that platform's runner, because the key includes the platform's build
+tools. Go setup runs before this lookup
 so a newer 1.25.x patch release cannot count as an exact hit for older executables;
 CI sets `GOTOOLCHAIN=local` at job scope in every job that prepares resources, so lookup,
-preparation and the later Tauri build hook record the same toolchain policy. Warm platforms start their native
-and package jobs directly, without an extra producer runner or artifact transfer.
-A missing exact cache starts one credential-free runtime producer inside that
-platform's `release-platform.yml` invocation. Its native and package jobs wait for
+preparation and the later Tauri build hook record the same toolchain policy. On a hit that job ends after the
+lookup and the native and package jobs restore the cache, without an artifact transfer.
+On a miss the same credential-free job prepares the runtime once. Its native and package jobs wait for
 that producer; another platform's runtime does not block them. Sequential benchmark
 mode still runs native tests in the package job before release compilation.
 
