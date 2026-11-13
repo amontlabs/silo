@@ -774,6 +774,9 @@ fn counts_saturate() {
 fn large_baselines_subtract_in_linear_time() {
     // Four times the files must cost about four times as much, not sixteen: comparing the
     // two sizes on the same run keeps the check independent of how fast the machine is.
+    // No path here is ignored, so an empty ignore list leaves the same diff and keeps the
+    // per-path pattern matching from drowning out the subtraction being timed.
+    let none = IgnoreList::parse("");
     let time = |n: usize| {
         let files = |h: &str| {
             (0..n)
@@ -782,7 +785,8 @@ fn large_baselines_subtract_in_linear_time() {
         };
         let (idle, task) = (files("a"), files("b"));
         let started = std::time::Instant::now();
-        let d = with_baseline("", &idle, &task);
+        let baseline = diff(&m(""), &m(&idle), None, &none);
+        let d = diff(&m(""), &m(&task), Some(&baseline), &none);
         let elapsed = started.elapsed();
         assert_eq!(d.idle_noise.len(), n);
         elapsed.as_secs_f64()
