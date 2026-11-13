@@ -52,7 +52,7 @@ Rendering does not call a computer, SSH, credential store, agent, or external se
 
 ## Render and verify
 
-Use Node.js 24 with the dependencies installed as described in the
+Use Node.js 26 with the dependencies installed as described in the
 [demo README](../demo/README.md). Run from the repository root:
 
 ```sh

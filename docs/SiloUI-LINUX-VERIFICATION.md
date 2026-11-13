@@ -30,7 +30,7 @@ test repositories and credentials; these Linux CI jobs never receive credentials
 
 ## Preparation
 
-Use native Ubuntu 24.04 ARM64 or x86-64 with Node 24, Python 3.11 or newer,
+Use native Ubuntu 24.04 ARM64 or x86-64 with Node 26, Python 3.11 or newer,
 Rust 1.100.0 and Go 1.25 for cold runtime preparation:
 
 ```sh

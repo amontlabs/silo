@@ -6,7 +6,7 @@ product demonstrations, self-hosted IBM Plex fonts, and direct release downloads
 
 ## Run
 
-Use Node.js 24. From the repository root:
+Use Node.js 26. From the repository root:
 
 ```sh
 npm --prefix app/SiloUI ci
@@ -99,7 +99,7 @@ The category links and player buttons use these starts:
 
 `demo/src/release-timeline.ts` is the timing authority. `scripts/tour.test.mjs`
 compares every category and chapter destination, caption cue, transcript entry,
-and duration label against it using Node.js 24's built-in TypeScript support.
+and duration label against it using Node.js 26's built-in TypeScript support.
 Update the film, poster, HTML starts and duration, captions, and transcript
 together. The player's last chapter ends at the media's actual duration.
 
@@ -131,7 +131,7 @@ repository website. The Vercel deployment is available at
 
 The Vercel `silo` project is connected to `amontlabs/silo`, and production is [silo.amontlabs.com](https://silo.amontlabs.com). Pushes and merges
 to `main` trigger production deployments; other branches receive preview deployments.
-The project settings use Node.js 24 and the repository root with:
+The project settings use Node.js 26 and the repository root with:
 
 - Install command: `npm --prefix app/SiloUI ci && npm --prefix website ci`
 - Build command: `npm --prefix website run build`
