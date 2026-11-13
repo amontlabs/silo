@@ -1397,6 +1397,7 @@ mod tests {
         assert!(prefix.is_empty() && pattern.is_empty() && wildcard.is_empty());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_stop_step_ends_the_named_process() {
         let dir = tempfile::tempdir().unwrap();
