@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto"
 import { execFileSync, spawnSync } from "node:child_process"
-import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
-import { homedir, tmpdir } from "node:os"
+import { chmod, copyFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
 import { basename, dirname, join, relative, resolve, sep } from "node:path"
 
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { fetchVerifiedFile, publishEntry, runtimeCacheRoot, takePublishedEntry } from "./build-input.mjs"
+import { cacheTemporaryRoot, fetchVerifiedFile, makeWorkFolder, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry } from "./build-input.mjs"
 
 const inputs = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../runtime-inputs.json"), "utf8"))
 export const MICRO_SANDBOX_VERSION = inputs.microsandboxVersion
@@ -91,8 +91,8 @@ export function applyRuntimePatch(sourceRoot, patchPath) {
 
 // Runs the capability probes on the bytes taken from the cache, written to a private file, so the
 // program that is checked is the program that is used.
-async function hasRequiredCapabilities(executable) {
-  const directory = await mkdtemp(join(tmpdir(), "silo-msb-probe-"))
+async function hasRequiredCapabilities(executable, temporaryRoot) {
+  const directory = await makeWorkFolder(temporaryRoot)
   try {
     const path = join(directory, "msb")
     await writeFile(path, executable, { mode: 0o755 })
@@ -162,11 +162,11 @@ export async function readBuildToolIdentity({ cargoDirectory, environment = proc
   }
 }
 
-export function patchedBuildKey({ agentd, rustcVersion, targetTriple, gatewaySourceDigest, recipeSha256, tools }) {
+export function patchedBuildKey({ agentdSha256, rustcVersion, targetTriple, gatewaySourceDigest, recipeSha256, tools }) {
   return sha256(Buffer.from([
     MICROSANDBOX_SOURCE_SHA256,
     ...MICROSANDBOX_PATCHES.map(({ sha256: digest }) => digest),
-    sha256(agentd),
+    agentdSha256,
     rustcVersion,
     targetTriple,
     MICROSANDBOX_BUILD_FEATURES,
@@ -174,6 +174,32 @@ export function patchedBuildKey({ agentd, rustcVersion, targetTriple, gatewaySou
     recipeSha256,
     JSON.stringify(tools),
   ].join("\n")))
+}
+
+// The published msb and gateway of one build key: `<cache>/patched-builds/<key>/published`.
+export function patchedBuildEntry(cacheRoot, cacheKey) {
+  return join(cacheRoot, "patched-builds", cacheKey, "published")
+}
+
+// The build key of msb and the gateway, and the gateway sources the build copies. Cargo runs inside
+// a work folder of `temporaryRoot`, so the cargo configuration that applies there is keyed.
+export async function patchedBuildInputs({ appRoot, targetTriple, agentdSha256, temporaryRoot, environment = process.env, readTools = readBuildToolIdentity }) {
+  const rustcVersion = runBuildTool("rustc", [`+${MICROSANDBOX_BUILD_TOOLCHAIN}`, "--version"]).trim()
+  const gatewayInputs = appRoot
+    ? await readMacosGatewayInputs(appRoot)
+    : null
+  const gatewaySourceDigest = gatewayInputs
+    ? sha256(Buffer.concat(gatewayInputs.flatMap(([name, bytes]) => [Buffer.from(`${name}\0`), bytes])))
+    : ""
+  const cacheKey = patchedBuildKey({
+    agentdSha256,
+    rustcVersion,
+    targetTriple,
+    gatewaySourceDigest,
+    recipeSha256: sha256(await readFile(new URL(import.meta.url))),
+    tools: await readTools({ cargoDirectory: temporaryRoot, targetTriple, environment }),
+  })
+  return { cacheKey, gatewayInputs }
 }
 
 export async function buildPatchedExecutable({
@@ -184,49 +210,36 @@ export async function buildPatchedExecutable({
   patches,
   agentd,
   cacheRoot,
+  temporaryRoot = cacheTemporaryRoot(cacheRoot),
   readTools,
   hooks,
 }) {
   if (targetTriple !== hostTriple) {
     throw new Error(`Patched MicroSandbox cross-builds are not supported: host ${hostTriple}, target ${targetTriple}`)
   }
-  const rustcVersion = runBuildTool("rustc", [`+${MICROSANDBOX_BUILD_TOOLCHAIN}`, "--version"]).trim()
-  const gatewayInputs = appRoot
-    ? await readMacosGatewayInputs(appRoot)
-    : null
-  const gatewaySourceDigest = gatewayInputs
-    ? sha256(Buffer.concat(gatewayInputs.flatMap(([name, bytes]) => [Buffer.from(`${name}\0`), bytes])))
-    : ""
-  const buildsRoot = join(cacheRoot, "patched-builds")
-  const cacheKey = patchedBuildKey({
-    agentd,
-    rustcVersion,
-    targetTriple,
-    gatewaySourceDigest,
-    recipeSha256: sha256(await readFile(new URL(import.meta.url))),
-    tools: await (readTools ?? readBuildToolIdentity)({ cargoDirectory: buildsRoot }),
-  })
-  const buildRoot = join(buildsRoot, cacheKey)
+  const { cacheKey, gatewayInputs } = await patchedBuildInputs({ appRoot, targetTriple, agentdSha256: sha256(agentd), temporaryRoot, readTools })
   // The executable, the gateway and their manifest are published together as this one directory.
-  const publishedRoot = join(buildRoot, "published")
+  const publishedRoot = patchedBuildEntry(cacheRoot, cacheKey)
   const publishedNames = gatewayInputs ? ["msb", "silo-macos-gateway"] : ["msb"]
   const taken = await takePublishedEntry(publishedRoot, publishedNames, hooks)
-  if (taken && await hasRequiredCapabilities(taken.msb)) {
+  if (taken && await hasRequiredCapabilities(taken.msb, temporaryRoot)) {
     return gatewayInputs
       ? { executable: taken.msb, macosGateway: taken["silo-macos-gateway"] }
       : taken.msb
   }
 
-  // The work folders sit beside the keys, so a failed build leaves no folder under its key.
-  await mkdir(buildsRoot, { recursive: true })
-  const workRoot = await mkdtemp(join(buildsRoot, "work-"))
+  // The extracted source and the cargo target live in a work folder of `temporaryRoot`, which the
+  // next run removes if this process is interrupted; a failed build leaves no folder under its key.
   // Build scripts bake in CARGO_MANIFEST_DIR, so a target directory is only valid for this
   // extraction of the source; it is not kept for a retry and not shared between processes.
-  const cargoTarget = `${workRoot}-target`
+  const workRoot = await makeWorkFolder(temporaryRoot)
+  const sourceRoot = join(workRoot, "source")
+  const cargoTarget = join(workRoot, "target")
   try {
-    runBuildTool("/usr/bin/tar", ["-xzf", sourceArchive, "-C", workRoot])
-    const entries = await import("node:fs/promises").then(({ readdir }) => readdir(workRoot, { withFileTypes: true }))
-    const source = entries.filter((entry) => entry.isDirectory()).map((entry) => join(workRoot, entry.name))
+    await mkdir(sourceRoot)
+    runBuildTool("/usr/bin/tar", ["-xzf", sourceArchive, "-C", sourceRoot])
+    const entries = await readdir(sourceRoot, { withFileTypes: true })
+    const source = entries.filter((entry) => entry.isDirectory()).map((entry) => join(sourceRoot, entry.name))
     if (source.length !== 1) throw new Error("Pinned MicroSandbox source archive has an unexpected layout")
     const patchPaths = patches.map((_, index) => join(workRoot, `patch-${index}.patch`))
     await Promise.all(patches.map((patch, index) => writeFile(patchPaths[index], patch)))
@@ -283,12 +296,12 @@ export async function buildPatchedExecutable({
       gatewayBytes = await readFile(join(cargoTarget, targetTriple, "release/silo-macos-gateway"))
     }
     await publishEntry(publishedRoot, gatewayBytes ? { msb: bytes, "silo-macos-gateway": gatewayBytes } : { msb: bytes }, {
-      accept: published => hasRequiredCapabilities(published.msb),
+      accept: published => hasRequiredCapabilities(published.msb, temporaryRoot),
+      temporaryRoot,
     })
     return gatewayBytes ? { executable: bytes, macosGateway: gatewayBytes } : bytes
   } finally {
     await rm(workRoot, { recursive: true, force: true })
-    await rm(cargoTarget, { recursive: true, force: true })
   }
 }
 
@@ -326,7 +339,9 @@ export async function stageRuntime({
   const binariesRoot = join(tauriRoot, "binaries")
   const runtimeRoot = join(tauriRoot, "runtime")
   const cacheRoot = join(runtimeCacheRoot(tauriRoot), `v${MICRO_SANDBOX_VERSION}`)
-  const stagedRoot = join(runtimeRoot, `.staging-${process.pid}`)
+  const temporaryRoot = cacheTemporaryRoot(runtimeCacheRoot(tauriRoot))
+  // Staging names carry the owning process, so a run removes what an interrupted run left.
+  const stagedRoot = join(runtimeRoot, `.staging-${ownerTag()}`)
   const bundledRoot = join(runtimeRoot, "microsandbox")
   const executablePath = join(binariesRoot, `msb-${targetTriple}`)
   const macosGatewayPath = join(binariesRoot, `silo-macos-gateway-${targetTriple}`)
@@ -335,8 +350,11 @@ export async function stageRuntime({
     assertInside(tauriRoot, path)
   }
 
-  const executableTemporary = `${executablePath}.tmp-${process.pid}`
-  const gatewayTemporary = `${macosGatewayPath}.tmp-${process.pid}`
+  const executableTemporary = `${executablePath}.tmp-${ownerTag()}`
+  const gatewayTemporary = `${macosGatewayPath}.tmp-${ownerTag()}`
+  await removeAbandoned(runtimeRoot, ".staging-")
+  await removeAbandoned(binariesRoot, `${basename(executablePath)}.tmp-`)
+  await removeAbandoned(binariesRoot, `${basename(macosGatewayPath)}.tmp-`)
   await rm(stagedRoot, { recursive: true, force: true })
   try {
     await mkdir(dirname(libraryPath), { recursive: true })
@@ -347,6 +365,7 @@ export async function stageRuntime({
       selected.executableSha256,
       selected.executableAsset,
       join(cacheRoot, selected.executableAsset),
+      { temporaryRoot },
     )
     const sourceArchive = await fetchVerifiedFile(
       fetchStream,
@@ -354,6 +373,7 @@ export async function stageRuntime({
       sourceArtifact.sha256,
       "MicroSandbox pinned source",
       join(cacheRoot, `microsandbox-${MICROSANDBOX_COMMIT}.tar.gz`),
+      { temporaryRoot },
     )
     const agentdPath = await fetchVerifiedFile(
       fetchStream,
@@ -361,6 +381,7 @@ export async function stageRuntime({
       selected.agentdSha256,
       selected.agentdAsset,
       join(cacheRoot, selected.agentdAsset),
+      { temporaryRoot },
     )
     const patches = await Promise.all(MICROSANDBOX_PATCHES.map(async (patchInput, index) => {
       const patchPath = resolve(appRoot, patchInput.path)
@@ -377,6 +398,7 @@ export async function stageRuntime({
       patches,
       agentd: await readFile(agentdPath),
       cacheRoot,
+      temporaryRoot,
     })
     const outputs = buildOutput && !ArrayBuffer.isView(buildOutput)
       ? buildOutput
@@ -392,6 +414,7 @@ export async function stageRuntime({
       selected.librarySha256,
       selected.libraryAsset,
       join(cacheRoot, selected.libraryAsset),
+      { temporaryRoot },
     )
 
     await mkdir(binariesRoot, { recursive: true })
@@ -435,7 +458,7 @@ export async function stageRuntime({
         license.sha256,
         license.name,
         join(cacheRoot, "licenses", basename(license.url)),
-        { maxBytes: 4 * 1024 * 1024 },
+        { maxBytes: 4 * 1024 * 1024, temporaryRoot },
       )
       await copyFile(licensePath, join(licensesRoot, license.name))
       await chmod(join(licensesRoot, license.name), 0o644)

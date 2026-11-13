@@ -1,6 +1,7 @@
+import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { createReadStream, createWriteStream } from "node:fs"
-import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 import { Readable, Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
@@ -61,11 +62,15 @@ export async function isVerifiedFile(path, expectedSha256, label, limits = {}) {
   }
 }
 
+// `limits.temporaryRoot` (a cache root's `tmp`, see makeWorkFolder) holds the download until it is
+// verified; without it the download is written beside `path`.
 export async function writeVerifiedFile(path, openSource, expectedSha256, label, limits = {}) {
   const verification = verifier(expectedSha256, label, limits)
   const signal = AbortSignal.timeout(limits.timeoutMs ?? INPUT_TIMEOUT_MS)
   await mkdir(dirname(path), { recursive: true })
-  const temporaryRoot = await mkdtemp(join(dirname(path), `.${basename(path)}.tmp-`))
+  const temporaryRoot = limits.temporaryRoot
+    ? await makeWorkFolder(limits.temporaryRoot)
+    : await mkdtemp(join(dirname(path), `.${basename(path)}.tmp-`))
   const temporary = join(temporaryRoot, "input")
   try {
     await pipeline(
@@ -94,6 +99,61 @@ export function runtimeCacheRoot(tauriRoot, environment = process.env) {
   if (!shared) return join(tauriRoot, "target", "runtime-cache")
   if (!isAbsolute(shared)) throw new Error("SILO_RUNTIME_CACHE_DIR must be an absolute path")
   return resolve(shared)
+}
+
+// The folder of a cache root that holds work in progress: extracted sources, cargo targets,
+// downloads and entries being published.
+export function cacheTemporaryRoot(cacheRoot) {
+  return join(cacheRoot, "tmp")
+}
+
+// A process is named by its pid and the hash of its start time, so a reused pid is a different
+// owner. `/bin/ps -o lstart=` prints the start time on macOS and Linux; it exits non-zero for no process.
+function processStart(pid) {
+  const result = spawnSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } })
+  if (result.error) throw result.error
+  const start = result.stdout.trim()
+  return result.status === 0 && start ? createHash("sha256").update(start).digest("hex").slice(0, 12) : null
+}
+
+let ownTag
+// `<pid>-<start>`: names a temporary folder or file for the process that owns it.
+export function ownerTag() {
+  if (!ownTag) {
+    const start = processStart(process.pid)
+    if (!start) throw new Error("Cannot read this process's start time")
+    ownTag = `${process.pid}-${start}`
+  }
+  return ownTag
+}
+
+// Removes the entries of `directory` named `<prefix><pid>-<start>…` whose owning process has
+// exited, so work an interrupted run left behind is removed by the next run. With `prefix` "", an
+// entry that is not named for an owner is removed too: such a folder holds only owned work.
+export async function removeAbandoned(directory, prefix = "") {
+  let names
+  try {
+    names = await readdir(directory)
+  } catch (error) {
+    if (error.code === "ENOENT") return
+    throw error
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue
+    const owner = /^(\d+)-([0-9a-f]{12})(?:$|[-.])/.exec(name.slice(prefix.length))
+    if (!owner && prefix) continue
+    if (owner && `${owner[1]}-${owner[2]}` === ownerTag()) continue
+    if (owner && processStart(Number(owner[1])) === owner[2]) continue
+    await rm(join(directory, name), { recursive: true, force: true })
+  }
+}
+
+// A new private folder in `temporaryRoot` (a cache root's `tmp`), after removing the folders of
+// processes that have exited. The caller removes it when done.
+export async function makeWorkFolder(temporaryRoot) {
+  await mkdir(temporaryRoot, { recursive: true })
+  await removeAbandoned(temporaryRoot)
+  return mkdtemp(join(temporaryRoot, `${ownerTag()}-`))
 }
 
 const ENTRY_MANIFEST = "manifest.json"
@@ -141,10 +201,12 @@ export async function takePublishedEntry(directory, names, { afterManifest, afte
 }
 
 // Publishes `files` (name to bytes, executable) as one entry with its manifest: written in a private
-// folder beside the entry, then renamed into place. An entry that `takePublishedEntry` accepts is
-// kept and this build discarded when `accept` (the reader's own further checks) agrees; only an
-// entry that fails is replaced.
-export async function publishEntry(directory, files, { accept = async () => true } = {}) {
+// folder of `temporaryRoot` (on the same file system as the entry), then renamed into place. An
+// entry that `takePublishedEntry` accepts is kept and this build discarded when `accept` (the
+// reader's own further checks) agrees; only an entry that fails is replaced, and it is moved into
+// the private folder first.
+export async function publishEntry(directory, files, { accept = async () => true, temporaryRoot }) {
+  if (!temporaryRoot) throw new Error("publishEntry needs a temporary folder")
   const names = Object.keys(files)
   const usable = async () => {
     const taken = await takePublishedEntry(directory, names)
@@ -152,8 +214,9 @@ export async function publishEntry(directory, files, { accept = async () => true
   }
   if (await usable()) return false
   await mkdir(dirname(directory), { recursive: true })
-  const staged = await mkdtemp(`${directory}.publish-`)
-  const replaced = `${staged}.replaced`
+  const work = await makeWorkFolder(temporaryRoot)
+  const staged = join(work, "entry")
+  const replaced = join(work, "replaced")
   try {
     const manifest = { schemaVersion: 1, files: {} }
     for (const name of names) {
@@ -173,7 +236,6 @@ export async function publishEntry(directory, files, { accept = async () => true
     }
     return true
   } finally {
-    await rm(staged, { recursive: true, force: true })
-    await rm(replaced, { recursive: true, force: true })
+    await rm(work, { recursive: true, force: true })
   }
 }

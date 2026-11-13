@@ -135,13 +135,39 @@ test("a completed preparation cannot remove another process's active source", { 
 })
 
 
+test("a preparation killed during its build leaves work that the next run removes", { timeout: 45000 }, async t => {
+  const paths = await fixture(t)
+  const child = spawn(process.execPath, [paths.worker], {
+    env: { ...process.env, PATH: paths.bin, HOME: paths.root, FIXTURE_ROOT: paths.root, FIXTURE_ROLE: "first" },
+    stdio: "ignore",
+    detached: true,
+  })
+  const closed = new Promise(resolve => child.on("close", resolve))
+  // The cargo stand-in waits at its gate inside the extracted source; the whole group is killed there.
+  const source = await waitForFile(join(paths.root, "ready"))
+  process.kill(-child.pid, "SIGKILL")
+  await closed
+  const temporaryRoot = join(paths.root, "cache", "tmp")
+  const [abandoned] = await readdir(temporaryRoot)
+  assert.ok(source.includes(`/cache/tmp/${abandoned}/source/`), source)
+  const next = await runWorker(t, paths, "second")
+  assert.equal(next.code, 0, next.output)
+  assert.deepEqual(await readdir(temporaryRoot), [])
+  // Only the published entry of the key is left beside the keys.
+  const [key, ...others] = await readdir(join(paths.root, "cache", "patched-builds"))
+  assert.deepEqual(others, [])
+  assert.deepEqual(await readdir(join(paths.root, "cache", "patched-builds", key)), ["published"])
+})
+
+
 test("a failed preparation removes its own extracted source", async t => {
   const paths = await fixture(t)
   const result = await runWorker(t, paths, "failure")
   assert.notEqual(result.code, 0)
   assert.match(result.output, /Fixture compiler failure/)
-  // Neither the work folders nor an empty folder for the failed key remain.
-  assert.deepEqual(await readdir(join(paths.root, "cache", "patched-builds")), [])
+  // Neither the work folder nor a folder for the failed key remains.
+  assert.deepEqual(await readdir(join(paths.root, "cache", "patched-builds")).catch(() => []), [])
+  assert.deepEqual(await readdir(join(paths.root, "cache", "tmp")), [])
 })
 
 
@@ -227,7 +253,7 @@ async function publishInAnotherProcess(t, paths, published, variant) {
   await writeFile(script, `
 import { publishEntry } from ${JSON.stringify(new URL("./build-input.mjs", import.meta.url).href)}
 const msb = Buffer.from(${JSON.stringify(program)})
-await publishEntry(${JSON.stringify(published)}, { msb, "silo-macos-gateway": Buffer.from("gateway ${variant}") }, { accept: async () => false })
+await publishEntry(${JSON.stringify(published)}, { msb, "silo-macos-gateway": Buffer.from("gateway ${variant}") }, { accept: async () => false, temporaryRoot: ${JSON.stringify(join(paths.root, "cache", "tmp"))} })
 `)
   const child = spawn(process.execPath, [script], { stdio: ["ignore", "pipe", "pipe"] })
   let output = ""
@@ -284,8 +310,8 @@ test("each build tool identity part changes the cache key", async t => {
   const versions = { "xcode-select": "/Applications/Xcode.app/Contents/Developer", xcodebuild: "Xcode 26.5", xcrun: "26.5", cc: "Apple clang 21", ld: "ld-1267" }
   const output = executable => versions[executable]
   const key = async (environment = {}) => patchedBuildKey({
-    agentd: Buffer.from("agent"), rustcVersion: "rustc 1.100.0", targetTriple: "aarch64-apple-darwin", gatewaySourceDigest: "", recipeSha256: "",
-    tools: await readBuildToolIdentity({ cargoDirectory: builds, environment: { HOME: root, CARGO_HOME: cargoHome, ...environment }, output }),
+    agentdSha256: sha256("agent"), rustcVersion: "rustc 1.100.0", targetTriple: "aarch64-apple-darwin", gatewaySourceDigest: "", recipeSha256: "",
+    tools: await readBuildToolIdentity({ cargoDirectory: builds, targetTriple: "aarch64-apple-darwin", environment: { HOME: root, CARGO_HOME: cargoHome, PATH: "", ...environment }, output }),
   })
   const base = await key()
   assert.equal(await key(), base)
@@ -308,7 +334,6 @@ test("each build tool identity part changes the cache key", async t => {
   const keys = [base, ...changed.map(([, value]) => value)]
   assert.equal(new Set(keys).size, keys.length, JSON.stringify(changed))
 })
-
 
 test("every file of the gateway crate except its build output feeds the cache key", async t => {
   const appRoot = await mkdtemp(join(tmpdir(), "silo-gateway-inputs-"))

@@ -89,8 +89,10 @@ test('every preparation builds the guest silo with cargo and stages its output, 
   const root = await appRoot()
   const targetDirectory = await mkdtemp(join(tmpdir(), 'guest-silo-target-'))
   const cacheRoot = await mkdtemp(join(tmpdir(), 'guest-silo-cache-'))
+  // The cache root comes from the environment passed in, not from this process's.
+  const processCacheRoot = await mkdtemp(join(tmpdir(), 'guest-silo-process-cache-'))
   const previousCacheRoot = process.env.SILO_RUNTIME_CACHE_DIR
-  process.env.SILO_RUNTIME_CACHE_DIR = cacheRoot
+  process.env.SILO_RUNTIME_CACHE_DIR = processCacheRoot
   let builds = 0
   const run = async (program, args, options) => {
     if (program !== 'cargo') return runner()(program, args, options)
@@ -103,7 +105,7 @@ test('every preparation builds the guest silo with cargo and stages its output, 
   }
   try {
     const options = { appRoot: root, targetTriple: 'aarch64-apple-darwin', required: false, log: quiet,
-      environment: { CARGO_TARGET_DIR: targetDirectory }, run }
+      environment: { CARGO_TARGET_DIR: targetDirectory, SILO_RUNTIME_CACHE_DIR: cacheRoot }, run }
     for (const [expectedBuilds, program] of [[1, 'ELF fixture program 1'], [2, 'ELF fixture program 1'], [3, 'ELF fixture program 3']]) {
       const staged = await stageGuestSilo(options)
       assert.equal(builds, expectedBuilds, 'cargo runs on every preparation, even when nothing changed')
@@ -111,13 +113,16 @@ test('every preparation builds the guest silo with cargo and stages its output, 
       assert.equal(JSON.parse(await readFile(staged.manifestPath, 'utf8')).binarySha256, digest(program))
     }
     // Only the compiler wrappers live in the shared cache; the program is never kept there.
-    assert.deepEqual(await readdir(cacheRoot), ['guest-cc'])
+    assert.deepEqual((await readdir(cacheRoot)).sort(), ['guest-cc', 'tmp'])
+    assert.deepEqual(await readdir(join(cacheRoot, 'tmp')), [])
+    assert.deepEqual(await readdir(processCacheRoot), [])
   } finally {
     if (previousCacheRoot === undefined) delete process.env.SILO_RUNTIME_CACHE_DIR
     else process.env.SILO_RUNTIME_CACHE_DIR = previousCacheRoot
     await rm(root, { recursive: true, force: true })
     await rm(targetDirectory, { recursive: true, force: true })
     await rm(cacheRoot, { recursive: true, force: true })
+    await rm(processCacheRoot, { recursive: true, force: true })
   }
 })
 

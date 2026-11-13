@@ -5,6 +5,7 @@ export interface InputLimits {
   bytes?: number
   maxBytes?: number
   timeoutMs?: number
+  temporaryRoot?: string
 }
 export const fetchStream: FetchStream
 export function verifyFile(path: string, expectedSha256: string, label: string, limits?: InputLimits): Promise<void>
@@ -12,6 +13,10 @@ export function isVerifiedFile(path: string, expectedSha256: string, label: stri
 export function writeVerifiedFile(path: string, openSource: (signal: AbortSignal) => Promise<Readable>, expectedSha256: string, label: string, limits?: InputLimits): Promise<string>
 export function fetchVerifiedFile(fetchInput: FetchStream, url: string, expectedSha256: string, label: string, path: string, limits?: InputLimits): Promise<string>
 export function runtimeCacheRoot(tauriRoot: string, environment?: Record<string, string | undefined>): string
+export function cacheTemporaryRoot(cacheRoot: string): string
+export function ownerTag(): string
+export function removeAbandoned(directory: string, prefix?: string): Promise<void>
+export function makeWorkFolder(temporaryRoot: string): Promise<string>
 export function takePublishedEntry(
   directory: string,
   names: readonly string[] | null,
@@ -20,5 +25,5 @@ export function takePublishedEntry(
 export function publishEntry(
   directory: string,
   files: Record<string, Buffer>,
-  options?: { accept?: (taken: Record<string, Buffer>) => Promise<boolean> },
+  options: { accept?: (taken: Record<string, Buffer>) => Promise<boolean>; temporaryRoot: string },
 ): Promise<boolean>

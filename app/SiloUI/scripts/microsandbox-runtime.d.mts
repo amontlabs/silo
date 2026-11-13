@@ -44,7 +44,16 @@ export function buildPatchedExecutable(options: {
   patches: ArrayBufferView[]
   agentd: ArrayBufferView
   cacheRoot: string
+  temporaryRoot?: string
 }): Promise<Buffer | { executable: Buffer; macosGateway: Buffer }>
+export function patchedBuildEntry(cacheRoot: string, cacheKey: string): string
+export function patchedBuildInputs(options: {
+  appRoot?: string
+  targetTriple: string
+  agentdSha256: string
+  temporaryRoot: string
+  environment?: Readonly<Record<string, string | undefined>>
+}): Promise<{ cacheKey: string; gatewayInputs: [string, Buffer][] | null }>
 export function stageRuntime(options: {
   appRoot: string
   targetTriple: string
@@ -61,6 +70,7 @@ export function stageRuntime(options: {
     patches: ArrayBufferView[]
     agentd: ArrayBufferView
     cacheRoot: string
+    temporaryRoot: string
   }) => Promise<ArrayBufferView | { executable: ArrayBufferView; macosGateway?: ArrayBufferView }>
   verifyExecutable?: boolean
 }): Promise<{

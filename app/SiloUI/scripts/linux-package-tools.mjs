@@ -1,4 +1,5 @@
-import { chmod, copyFile, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises"
+import { chmod, copyFile, mkdir, rename, rm, stat } from "node:fs/promises"
+import { ownerTag, removeAbandoned } from "./build-input.mjs"
 import { join, resolve } from "node:path"
 
 const TOOL_NAMES = [
@@ -31,7 +32,11 @@ export async function stageLinuxPackageTools({ appRoot, targetTriple }) {
 
   const packageRoot = join(sourceRoot, "linux-package")
   await mkdir(packageRoot, { recursive: true })
-  const staged = await mkdtemp(join(packageRoot, ".tools-"))
+  // The staging name carries the owning process, so a run removes what an interrupted run left.
+  await removeAbandoned(packageRoot, ".tools-")
+  const staged = join(packageRoot, `.tools-${ownerTag()}`)
+  await rm(staged, { recursive: true, force: true })
+  await mkdir(staged)
   try {
     for (const [index, source] of sources.entries()) {
       const target = join(staged, TOOL_NAMES[index])

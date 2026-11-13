@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { chmod, copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { runtimeCacheRoot } from './build-input.mjs'
+import { cacheTemporaryRoot, makeWorkFolder, ownerTag, removeAbandoned, runtimeCacheRoot } from './build-input.mjs'
 import { MICROSANDBOX_BUILD_TOOLCHAIN } from './microsandbox-runtime.mjs'
 
 const execute = promisify(execFile)
@@ -60,23 +60,28 @@ exec "${zig}" ar "$@"
 `
 
 // Cargo keys every compilation on the linker path, so the wrappers live at a path that depends only
-// on their content (never a fresh temporary directory): an unchanged guest silo is not rebuilt, and
-// checkouts sharing a cache root reuse each other's compiled dependencies.
-async function wrapperDirectory(appRoot, files, zigVersion) {
+// on their content (never a fresh temporary directory): an unchanged guest silo is not rebuilt in
+// its cargo target (per checkout, or shared through CARGO_TARGET_DIR).
+async function wrapperDirectory(appRoot, files, zigVersion, environment) {
   // The Zig release is part of the path too: cc-rs does not notice a new compiler behind the same wrapper.
   const digest = sha256(Buffer.from(JSON.stringify([files, zigVersion]))).slice(0, 16)
-  const tools = join(runtimeCacheRoot(resolve(appRoot, 'src-tauri'), process.env), 'guest-cc', digest)
+  const cacheRoot = runtimeCacheRoot(resolve(appRoot, 'src-tauri'), environment)
+  const tools = join(cacheRoot, 'guest-cc', digest)
   await mkdir(tools, { recursive: true })
-  for (const [name, content] of Object.entries(files)) {
-    const temporary = join(tools, `.${name}.${process.pid}`)
-    await writeFile(temporary, content, { mode: 0o755 })
-    await rename(temporary, join(tools, name))
+  const work = await makeWorkFolder(cacheTemporaryRoot(cacheRoot))
+  try {
+    for (const [name, content] of Object.entries(files)) {
+      await writeFile(join(work, name), content, { mode: 0o755 })
+      await rename(join(work, name), join(tools, name))
+    }
+  } finally {
+    await rm(work, { recursive: true, force: true })
   }
   return tools
 }
 
 async function build({ appRoot, selected, zig, zigVersion, toolchain, run, environment }) {
-  const tools = await wrapperDirectory(appRoot, { cc: compilerWrapper(zig, selected.zigTarget), ar: archiverWrapper(zig) }, zigVersion)
+  const tools = await wrapperDirectory(appRoot, { cc: compilerWrapper(zig, selected.zigTarget), ar: archiverWrapper(zig) }, zigVersion, environment)
   const triple = selected.rustTarget.toUpperCase().replaceAll('-', '_')
   const targetDirectory = environment.CARGO_TARGET_DIR?.trim() || resolve(appRoot, 'src-tauri/target/guest-silo')
   await run('cargo', [...(toolchain ? [`+${toolchain}`] : []), 'build', '--release', '-p', 'silo-cli', '--target', selected.rustTarget, '--locked'], {
@@ -116,7 +121,9 @@ async function selectToolchain(run, selected, required) {
 async function publish(appRoot, files) {
   const tauriRoot = resolve(appRoot, 'src-tauri')
   const root = join(tauriRoot, 'runtime', 'guest-silo')
-  const stage = join(tauriRoot, 'runtime', `.guest-silo-staging-${process.pid}`)
+  // The staging name carries the owning process, so a run removes what an interrupted run left.
+  await removeAbandoned(join(tauriRoot, 'runtime'), '.guest-silo-staging-')
+  const stage = join(tauriRoot, 'runtime', `.guest-silo-staging-${ownerTag()}`)
   await rm(stage, { recursive: true, force: true })
   await mkdir(stage, { recursive: true })
   try {

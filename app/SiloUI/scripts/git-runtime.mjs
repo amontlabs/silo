@@ -16,7 +16,7 @@ import {
 } from "node:fs/promises"
 import { basename, join, relative, resolve, sep } from "node:path"
 
-import { fetchVerifiedFile, runtimeCacheRoot } from "./build-input.mjs"
+import { cacheTemporaryRoot, fetchVerifiedFile, ownerTag, removeAbandoned, runtimeCacheRoot } from "./build-input.mjs"
 
 const execFileAsync = promisify(execFile)
 
@@ -215,7 +215,9 @@ export async function stageGitRuntime({
   const tauriRoot = resolve(appRoot, "src-tauri")
   const runtimeRoot = join(tauriRoot, "runtime")
   const cacheRoot = join(runtimeCacheRoot(tauriRoot), "dugite", DUGITE_RELEASE)
-  const stagedRoot = join(runtimeRoot, `.git-staging-${process.pid}`)
+  const temporaryRoot = cacheTemporaryRoot(runtimeCacheRoot(tauriRoot))
+  // The staging name carries the owning process, so a run removes what an interrupted run left.
+  const stagedRoot = join(runtimeRoot, `.git-staging-${ownerTag()}`)
   const bundledRoot = join(runtimeRoot, "git")
   const binariesRoot = join(tauriRoot, "binaries")
   const stagedBinariesRoot = join(stagedRoot, ".external-binaries")
@@ -224,6 +226,7 @@ export async function stageGitRuntime({
     assertInside(tauriRoot, candidate)
   }
 
+  await removeAbandoned(runtimeRoot, ".git-staging-")
   await rm(stagedRoot, { recursive: true, force: true })
   await mkdir(stagedRoot, { recursive: true })
   try {
@@ -233,6 +236,7 @@ export async function stageGitRuntime({
       selected.sha256,
       selected.archive,
       archiveFile,
+      { temporaryRoot },
     )
     await extractArchive(archiveFile, stagedRoot)
     await retainClientRuntime(stagedRoot, selected)
@@ -249,7 +253,7 @@ export async function stageGitRuntime({
         license.sha256,
         license.name,
         join(cacheRoot, "licenses", license.name),
-        { maxBytes: 4 * 1024 * 1024 },
+        { maxBytes: 4 * 1024 * 1024, temporaryRoot },
       )
       await copyFile(licensePath, join(licensesRoot, license.name))
       await chmod(join(licensesRoot, license.name), 0o644)

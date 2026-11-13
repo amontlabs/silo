@@ -41,6 +41,8 @@ async function compiledFixture(directory, identity = buildIdentity) {
 }
 
 const cacheBuilds = appRoot => join(appRoot, 'src-tauri/target/runtime-cache/git-lfs-transfer', LFS_TRANSFER_COMMIT, 'builds')
+// The cache root's work folder, from an entry `<root>/git-lfs-transfer/<commit>/builds/<key>`.
+const entryTemporaryRoot = entry => join(entry, '../../../../tmp')
 const buildFiles = variant => ({
   'git-lfs-transfer': Buffer.from(`cached executable fixture${variant}`), 'LICENSE-MIT.txt': Buffer.from('MIT'),
   'licenses/Go-LICENSE': Buffer.from(`Go${variant}`), 'licenses/example-module/LICENSE': Buffer.from('Module license'),
@@ -49,7 +51,7 @@ const buildFiles = variant => ({
 // A build in the shared cache, published as the build that ran with `identity` publishes it.
 async function publishedFixture(appRoot, identity = buildIdentity, files = buildFiles('')) {
   const entry = join(cacheBuilds(appRoot), lfsTransferBuildKey('arm64', identity))
-  await publishEntry(entry, files)
+  await publishEntry(entry, files, { temporaryRoot: entryTemporaryRoot(entry) })
   return entry
 }
 
@@ -237,7 +239,7 @@ async function publishInAnotherProcess(entry, variant) {
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
 import { publishEntry } from ${JSON.stringify(new URL('./build-input.mjs', import.meta.url).href)}
 const files = Object.fromEntries(Object.entries(${JSON.stringify(files)}).map(([name, text]) => [name, Buffer.from(text)]))
-await publishEntry(${JSON.stringify(entry)}, files, { accept: async () => false })
+await publishEntry(${JSON.stringify(entry)}, files, { accept: async () => false, temporaryRoot: ${JSON.stringify(entryTemporaryRoot(entry))} })
 `], { stdio: ['ignore', 'ignore', 'pipe'] })
   let output = ''
   child.stderr.on('data', chunk => { output += chunk })

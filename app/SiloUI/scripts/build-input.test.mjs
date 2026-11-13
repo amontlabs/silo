@@ -1,12 +1,13 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { spawn } from "node:child_process"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Readable } from "node:stream"
 import test from "node:test"
-import { fetchStream, fetchVerifiedFile, runtimeCacheRoot, verifyFile, writeVerifiedFile } from "./build-input.mjs"
+import { fetchStream, fetchVerifiedFile, makeWorkFolder, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry, verifyFile, writeVerifiedFile } from "./build-input.mjs"
 
 const bytes = Buffer.from("verified build input")
 const digest = createHash("sha256").update(bytes).digest("hex")
@@ -98,4 +99,49 @@ test("the runtime cache root is per checkout unless an absolute shared root is c
   assert.equal(runtimeCacheRoot("/work/src-tauri", {}), "/work/src-tauri/target/runtime-cache")
   assert.equal(runtimeCacheRoot("/work/src-tauri", { SILO_RUNTIME_CACHE_DIR: " /shared/silo " }), "/shared/silo")
   assert.throws(() => runtimeCacheRoot("/work/src-tauri", { SILO_RUNTIME_CACHE_DIR: "relative" }), /absolute/)
+})
+
+// A child process that has created its own work folder and exits without removing it, as a killed
+// run does. Returns the folder.
+async function abandonedFolder(temporaryRoot) {
+  const child = spawn(process.execPath, ["--input-type=module", "-e", `
+import { makeWorkFolder } from ${JSON.stringify(new URL("./build-input.mjs", import.meta.url).href)}
+console.log(await makeWorkFolder(${JSON.stringify(temporaryRoot)}))
+process.kill(process.pid, "SIGKILL")
+`], { stdio: ["ignore", "pipe", "inherit"] })
+  let output = ""
+  child.stdout.on("data", chunk => { output += chunk })
+  await new Promise(resolve => child.on("close", resolve))
+  return output.trim()
+}
+
+test("work folders of exited processes are removed by the next run; live ones are kept", async t => {
+  const { root } = await setup(t)
+  const temporaryRoot = join(root, "tmp")
+  const abandoned = await abandonedFolder(temporaryRoot)
+  assert.ok(abandoned.startsWith(temporaryRoot), abandoned)
+  // A live process with a reused pid is a different owner: its start time differs.
+  await mkdir(join(temporaryRoot, `${process.pid}-000000000000-reused`))
+  await mkdir(join(temporaryRoot, "unnamed"))
+  const own = await makeWorkFolder(temporaryRoot)
+  assert.deepEqual(await readdir(temporaryRoot), [own.slice(temporaryRoot.length + 1)])
+  // A staging name in a checkout folder is removed only when its owner has exited.
+  await mkdir(join(root, `.staging-${ownerTag()}`))
+  await mkdir(join(root, ".staging-1-000000000000"))
+  await mkdir(join(root, "other-1-000000000000"))
+  await removeAbandoned(root, ".staging-")
+  assert.deepEqual((await readdir(root)).filter(name => name !== "archive.tar.gz" && name !== "tmp").sort(), [`.staging-${ownerTag()}`, "other-1-000000000000"])
+})
+
+test("a published entry leaves nothing beside it or in the work folder", async t => {
+  const { root } = await setup(t)
+  const temporaryRoot = join(root, "tmp")
+  const entry = join(root, "builds", "key")
+  await publishEntry(entry, { tool: Buffer.from("first") }, { temporaryRoot })
+  await publishEntry(entry, { tool: Buffer.from("second") }, { temporaryRoot, accept: async () => false })
+  assert.deepEqual(await readdir(join(root, "builds")), ["key"])
+  assert.deepEqual(await readdir(temporaryRoot), [])
+  assert.equal((await takePublishedEntry(entry, ["tool"])).tool.toString(), "second")
+  await fetchVerifiedFile(async () => Readable.from([bytes]), "https://fixture.invalid", digest, "fixture", join(root, "download"), { temporaryRoot })
+  assert.deepEqual(await readdir(temporaryRoot), [])
 })
