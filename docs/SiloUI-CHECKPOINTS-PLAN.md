@@ -174,7 +174,7 @@ Rules a fork applies, recorded in its checkpoint record under `quiet`
 
 Mechanism: MicroSandbox 0.7.6 has no hook to edit a snapshot's disk before
 `msb restore` boots it, and the guest does not run only init and `/bin/bash`: the Silo
-boot hook in `microsandbox-create-stopped-0.7.6.patch` runs
+boot hook in `microsandbox-create-stopped-0.7.14.patch` runs
 `/usr/local/bin/silo-desktop boot` as root on every boot of a `silo.managed` computer
 before it is ready, which starts Xfce and its autostart entries. The restore therefore
 sets labels on the fork (`silo.quiet-token`, `silo.quiet-host`, `silo.quiet-args`; the
@@ -324,8 +324,8 @@ A Linux computer's checkpoints are one linear chain of MicroSandbox snapshots. E
 snapshot holds its own layer closure (hard links or copies), so parent links are
 lineage only, and removing old snapshots frees nothing while the computer's own disk
 chain and capture staging still carry their layers. The two Silo MicroSandbox patches
-(`microsandbox-reclaim-capture-dirs-0.7.6.patch`,
-`microsandbox-retired-layer-cleanup-0.7.6.patch`) make `msb modify --compact` plus
+(`microsandbox-reclaim-capture-dirs-0.7.14.patch`,
+`microsandbox-retired-layer-cleanup-0.7.14.patch`) make `msb modify --compact` plus
 `msb snapshot remove --force` return that disk; the live probe returned about
 807 MiB.
 
@@ -825,7 +825,7 @@ absence of a captured process and RAM-only file; it remains unexecuted here.
 ### Checkpoint environment defaults, 2026-10-02
 
 Every checkpoint Start sends `GH_TOKEN=$MSB_SILO_GITHUB`, matching fresh
-creation. The [bundled restore-policy patch](../app/SiloUI/patches/microsandbox-restore-policy-0.7.6.patch)
+creation. The [bundled restore-policy patch](../app/SiloUI/patches/microsandbox-restore-policy-0.7.14.patch)
 supports destination `--env` arguments for new exec commands; resumed processes
 retain their captured environments. The placeholder resolves through the
 current target's host-side GitHub profile, including the disabled profile.

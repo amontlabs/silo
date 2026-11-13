@@ -180,7 +180,7 @@ Recovery removes indexed members of that group, including an import interrupted
 before computer settings were saved. A failed cleanup keeps that ownership journal
 for another launch. Other groups and completed imports remain intact.
 
-The current [import-stage patch](../app/SiloUI/patches/microsandbox-import-stage-id-0.7.6.patch)
+The current [import-stage patch](../app/SiloUI/patches/microsandbox-import-stage-id-0.7.14.patch)
 adds `snapshot load --stage-id`. Silo journals `silo-import-<id>` before load
 starts, then passes its suffix as the stage ID. The loader uses
 `snapshots/.msb-snapshot-load-<id>` and `cache/tmp/snapshot-load-<id>` under the

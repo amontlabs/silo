@@ -221,7 +221,7 @@ Limits of this boundary:
   ([`macos-gateway/src/network.rs#L158`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L158)).
 
 **Ingress** (into the guest) is opened only by the user: published ports bind `127.0.0.1` on the Mac
-([`microsandbox-live-public-ports-0.7.6.patch`](../app/SiloUI/patches/microsandbox-live-public-ports-0.7.6.patch)),
+([`microsandbox-live-public-ports-0.7.14.patch`](../app/SiloUI/patches/microsandbox-live-public-ports-0.7.14.patch)),
 and opt-in SSH access binds `127.0.0.1`, plus one chosen interface address when the user picks
 one, never a wildcard
 ([`ssh_access.rs#L132`](../app/SiloUI/src-tauri/engine/src/ssh_access.rs#L132)). Any local process
@@ -243,7 +243,7 @@ placeholder in outbound requests ([docs/SiloUI-SECRETS.md](SiloUI-SECRETS.md)):
   in arguments, the configuration file or the host environment; the stored configuration holds
   only an opaque source name `SILO_SECRET_<hash>`
   ([`runtime/mod.rs#L1841`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1803),
-  [`microsandbox-secret-values-stdin-0.7.6.patch`](../app/SiloUI/patches/microsandbox-secret-values-stdin-0.7.6.patch)). MicroSandbox's parser then sets
+  [`microsandbox-secret-values-stdin-0.7.14.patch`](../app/SiloUI/patches/microsandbox-secret-values-stdin-0.7.14.patch)). MicroSandbox's parser then sets
   substitution to **headers only** (no query, no body) and, on Linux computers, lets the unchanged
   placeholder go to any host, `passthrough=*` ([MicroSandbox `common.rs` `parse_secret`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/cli/lib/commands/common.rs#L2893)).
 - The real value is written only into intercepted TLS requests whose SNI and DNS-resolved
@@ -254,7 +254,7 @@ placeholder in outbound requests ([docs/SiloUI-SECRETS.md](SiloUI-SECRETS.md)):
   allowed host such as `*.example.com` delivers the value to every matching subdomain.
 - Changing or removing a secret closes the computer's open TLS connections on port 443,
   intercepted or relayed, so a connection made under the old policy cannot keep using it (`until_policy_change` in
-  [`microsandbox-silo-network-0.7.6.patch#L1941`](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L1941)).
+  [`microsandbox-silo-network-0.7.14.patch#L1943`](../app/SiloUI/patches/microsandbox-silo-network-0.7.14.patch#L1943)).
 - macOS computers get the same secrets through their gateway child
   ([`macos-gateway/src/network.rs#L179`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L179)),
   with one difference: no passthrough hosts, so a placeholder sent to a host that is not allowed
@@ -277,7 +277,7 @@ To substitute a header, the proxy must terminate TLS, so it presents a certifica
 computer's interception CA, which the guest trusts. Silo patches MicroSandbox so that only
 connections whose SNI matches a **current secret's allowed hosts** are intercepted; every other TLS
 connection is relayed with the server's own certificate
-([`microsandbox-silo-network-0.7.6.patch#L1991`](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L1991),
+([`microsandbox-silo-network-0.7.14.patch#L2048`](../app/SiloUI/patches/microsandbox-silo-network-0.7.14.patch#L2048),
 with its test `intercepts_only_current_secret_destinations`). Interception is limited to port 443, and
 all UDP to port 443 (QUIC) is dropped for every destination, intercepted or not; the proxy verifies the upstream certificate
 (`intercepted_ports`, `block_quic_on_intercept`, `verify_upstream` in
@@ -333,7 +333,7 @@ which links the same patched proxy. The guest's
 ([`runtime/mod.rs#L6309`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6309)). For each
 request to the GitHub hosts (three on Linux computers, `github.com` and `api.github.com` on macOS
 computers) the patched proxy picks the owner and the read or write token
-([`microsandbox-silo-network-0.7.6.patch#L385`](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L385));
+([`microsandbox-silo-network-0.7.14.patch#L409`](../app/SiloUI/patches/microsandbox-silo-network-0.7.14.patch#L409));
 an unknown owner, a write without a write token, or an expired token is blocked. A request that
 names no owner uses the computer's only owner, or for reads the alphabetically first owner; such a
 write with several owners is blocked. For a GraphQL request with several owners and no
@@ -358,7 +358,7 @@ Limits:
 - **A personal access token is not scoped by Silo.** A personal token is a secret of kind
   `github-token`; you can keep several and choose one per computer. For a computer that uses one,
   the proxy sends that token for every request to the GitHub hosts (`profile.version == 2`,
-  [patch line 394](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L394)), so the agent
+  [patch line 394](../app/SiloUI/patches/microsandbox-silo-network-0.7.14.patch#L418)), so the agent
   has whatever permissions the token has: the scope is the one you gave it on GitHub, and Silo adds
   no repository limit. The README says so. A computer only ever receives the token it was given,
   never another one in the list, and a token secret is never delivered as an environment
