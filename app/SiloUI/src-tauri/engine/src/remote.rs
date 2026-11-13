@@ -6525,6 +6525,7 @@ mod bridge_link_tests {
         )
         .unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_support::run_new_executable_once(path, &["--print-channel-identifier"]);
     }
 
     #[test]
@@ -7008,7 +7009,10 @@ mod reply_tests {
         let pid_file = home.path().join("child.pid");
         let mut command = Command::new("/bin/sh");
         command
-            .args(["-c", r#"echo $$ > "$0"; exec sleep 60"#])
+            .args([
+                "-c",
+                r#"echo $$ > "$0.new" && mv "$0.new" "$0"; exec sleep 60"#,
+            ])
             .arg(&pid_file);
         let started = Instant::now();
         let result = run_exchange(

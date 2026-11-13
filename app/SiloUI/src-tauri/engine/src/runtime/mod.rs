@@ -8377,7 +8377,7 @@ mod tests {
         fs::create_dir_all(&paths.home).unwrap();
         fs::write(&paths.library, b"test").unwrap();
         fs::write(paths.home.join("state"), "Stopped").unwrap();
-        crate::test_support::write_shell_script(
+        crate::test_support::write_run_shell_script(
             &paths.executable,
             format!(
                 r#"#!/bin/sh
@@ -8711,7 +8711,6 @@ chown -R root:root /workspace"#,
     #[test]
     fn desktop_guest_configuration_preserves_computer_lifecycle_even_when_guest_fails() {
         let _test_state = crate::test_support::global_state();
-        use std::os::unix::fs::PermissionsExt;
         for installed in [false, true] {
             for running in [false, true] {
                 for guest_fails in [false, true] {
@@ -8727,7 +8726,9 @@ chown -R root:root /workspace"#,
                     if guest_fails {
                         fs::write(paths.home.join("fail"), b"1").unwrap();
                     }
-                    fs::write(&paths.executable, r#"#!/bin/sh
+                    crate::test_support::write_run_shell_script(
+                        &paths.executable,
+                        r#"#!/bin/sh
 set -eu
 printf '%s\n' "$1" >> "$MSB_HOME/calls"
 case "$1" in
@@ -8739,9 +8740,8 @@ case "$1" in
     if [ -f "$MSB_HOME/fail" ]; then echo 'Synthetic desktop setup failure' >&2; exit 1; fi ;;
   *) echo 'Unexpected runtime operation' >&2; exit 1 ;;
 esac
-"#).unwrap();
-                    fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700))
-                        .unwrap();
+"#,
+                    );
                     let old = crate::desktop::DesktopConfiguration {
                         start_with_computer: true,
                         built_in: false,
@@ -9751,7 +9751,7 @@ esac
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
         fs::write(&paths.library, "test").unwrap();
-        crate::test_support::write_shell_script(&paths.executable, "#!/bin/sh\nprintf '%s\\n' 'private token=SECRET' '{\"type\":\"silo-progress\",\"phase\":\"image-download\",\"layerIndex\":0,\"downloadedBytes\":7,\"totalBytes\":9}' '{\"type\":\"silo-progress\",\"phase\":\"image-ready\"}' >&2\n");
+        crate::test_support::write_run_shell_script(&paths.executable, "#!/bin/sh\nprintf '%s\\n' 'private token=SECRET' '{\"type\":\"silo-progress\",\"phase\":\"image-download\",\"layerIndex\":0,\"downloadedBytes\":7,\"totalBytes\":9}' '{\"type\":\"silo-progress\",\"phase\":\"image-ready\"}' >&2\n");
         let events = Mutex::new(Vec::new());
         let publish = |event| events.lock().unwrap().push(event);
         SetupRunner {
@@ -10001,7 +10001,7 @@ esac
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
         fs::write(&paths.library, "test").unwrap();
-        crate::test_support::write_shell_script(&paths.executable, "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"silo-progress\",\"phase\":\"image-download\",\"layerIndex\":0,\"downloadedBytes\":40123,\"totalBytes\":40399}' 'DNS lookup failed' >&2\nexit 1\n");
+        crate::test_support::write_run_shell_script(&paths.executable, "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"silo-progress\",\"phase\":\"image-download\",\"layerIndex\":0,\"downloadedBytes\":40123,\"totalBytes\":40399}' 'DNS lookup failed' >&2\nexit 1\n");
         let error = run_msb(
             &paths,
             &["create".into(), "--progress-json".into()],
@@ -10767,12 +10767,11 @@ esac
     #[test]
     fn shutdown_stops_share_the_worker_flock_without_serializing_children() {
         let _test_state = crate::test_support::global_state();
-        use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
         fs::create_dir_all(&paths.home).unwrap();
         fs::write(&paths.library, b"test library").unwrap();
-        fs::write(
+        crate::test_support::write_run_shell_script(
             &paths.executable,
             r#"#!/bin/sh
 cat >/dev/null
@@ -10783,9 +10782,7 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
 done
 exit 9
 "#,
-        )
-        .unwrap();
-        fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        );
         let parent = configuration_recovery::command_lock(&paths, Duration::ZERO).unwrap();
         thread::scope(|scope| {
             let workers: Vec<_> = ["first", "second"]
@@ -10836,7 +10833,6 @@ exit 9
     #[test]
     fn command_lock_remains_held_while_runtime_child_runs() {
         let _test_state = crate::test_support::global_state();
-        use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
         fs::write(&paths.library, b"test library").unwrap();
@@ -10846,12 +10842,10 @@ exit 9
             // SAFETY: fifo is a valid NUL-terminated path in this test directory.
             assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
         }
-        fs::write(
+        crate::test_support::write_run_shell_script(
             &paths.executable,
-            b"#!/bin/sh\nprintf x > \"$MSB_HOME/ready\"\nread line < \"$MSB_HOME/release\"\n",
-        )
-        .unwrap();
-        fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
+            "#!/bin/sh\nprintf x > \"$MSB_HOME/ready\"\nread line < \"$MSB_HOME/release\"\n",
+        );
         let worker_paths = paths.clone();
         let worker = thread::spawn(move || {
             run_msb_process(
@@ -10967,7 +10961,7 @@ exit 9
         fs::create_dir_all(&paths.home).unwrap();
         fs::write(
             &paths.executable,
-            b"#!/bin/sh\necho $$ > \"$MSB_HOME/command.pid\"\nexec sleep 60\n",
+            b"#!/bin/sh\necho $$ > \"$MSB_HOME/command.pid.new\" && mv \"$MSB_HOME/command.pid.new\" \"$MSB_HOME/command.pid\"\nexec sleep 60\n",
         )
         .unwrap();
         fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();

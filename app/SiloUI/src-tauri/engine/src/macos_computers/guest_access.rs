@@ -943,6 +943,7 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o700
         );
+        crate::test_support::run_new_executable_once(&path, &["Password:"]);
         let output = exec(
             path.to_str().unwrap(),
             &["Password:".to_string()],

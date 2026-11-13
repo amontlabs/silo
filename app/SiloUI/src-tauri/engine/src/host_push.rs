@@ -1612,7 +1612,6 @@ mod tests {
     /// A runtime whose guest runs the shell command `wait` during each discovery and
     /// counts them.
     fn slow_discovery_runtime(root: &Path, wait: &str) -> (RuntimePaths, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
         let paths = RuntimePaths {
             executable: root.join("msb"),
             home: root.join("home"),
@@ -1626,16 +1625,14 @@ mod tests {
         let count = root.join("discoveries");
         let inspected =
             json!({"name":"dev","status":"Running","config":{"labels":{"silo.managed":"true"}}});
-        fs::write(
+        crate::test_support::write_run_shell_script(
             &paths.executable,
             format!(
                 "#!/bin/sh\ncase \"$1\" in\n--silo-working-account-protocol) printf '1\\n' ;;\ninspect) printf '%s\\n' '{inspected}' ;;\nexec) echo run >>'{}'; {wait}; printf '/workspace/repo\\0main\\0001 0\\0\\0{}\\0https://github.com/owner/repo.git\\0' ;;\n*) exit 2 ;;\nesac\n",
                 count.display(),
                 "e".repeat(40),
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        );
         (paths, count)
     }
     fn runs(count: &Path) -> usize {

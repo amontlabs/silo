@@ -62,6 +62,22 @@ pub(crate) fn write_shell_script(path: &std::path::Path, script: impl AsRef<str>
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 
+/// Like `write_shell_script`, then runs the script once with `--first-run`, which it answers by
+/// exiting before its own lines. A test whose time limits bound the script uses this, so the
+/// limits measure only the script's work (see `run_new_executable_once`).
+pub(crate) fn write_run_shell_script(path: &std::path::Path, script: impl AsRef<str>) {
+    let script = script.as_ref();
+    let (interpreter, body) = match script.strip_prefix("#!") {
+        Some(_) => script.split_once('\n').unwrap_or((script, "")),
+        None => ("#!/bin/sh", script),
+    };
+    write_shell_script(
+        path,
+        format!("{interpreter}\nif [ \"${{1:-}}\" = --first-run ]; then exit 0; fi\n{body}"),
+    );
+    run_new_executable_once(path, &["--first-run"]);
+}
+
 /// Runs a freshly written executable once with `args` and waits for it to finish, however long
 /// that takes. On macOS the first run of a new executable file waits for a system check that
 /// took seconds while other tests ran (later runs start in milliseconds), so a test that bounds

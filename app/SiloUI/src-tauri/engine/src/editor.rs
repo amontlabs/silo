@@ -2099,17 +2099,26 @@ mod tests {
     fn an_editor_that_keeps_running_is_left_open_and_a_failed_launch_is_reported() {
         let started = Instant::now();
         let mut long = Command::new("/bin/sh");
-        long.args(["-c", "echo $$ > \"$0\"; exec sleep 30"]);
+        long.args([
+            "-c",
+            "echo $$ > \"$0.new\" && mv \"$0.new\" \"$0\"; exec sleep 30",
+        ]);
         let directory = tempfile::tempdir().unwrap();
         let pid_file = directory.path().join("editor.pid");
         long.arg(&pid_file);
         launch_editor(long, Duration::from_millis(300)).unwrap();
         assert!(started.elapsed() < Duration::from_secs(5));
-        let pid: i32 = fs::read_to_string(&pid_file)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        // The editor keeps running, so it records its pid even if that comes after the launch.
+        let pid: i32 = loop {
+            if let Ok(text) = fs::read_to_string(&pid_file) {
+                break text.trim().parse().unwrap();
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(60),
+                "the editor never started"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
         assert_eq!(
             unsafe { libc::kill(pid, 0) },
             0,

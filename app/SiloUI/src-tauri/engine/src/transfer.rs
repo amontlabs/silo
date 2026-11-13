@@ -2647,11 +2647,12 @@ mod tests {
         );
         let roots = vec![root.to_str().unwrap().to_owned()];
         let path = format!("{}/f", root.display());
-        // The get step writes some bytes and then fails.
+        // The get step writes some of the file's 4 bytes and then fails. More than 4 would be
+        // stopped as too large by the size check whenever it saw them before the failure.
         let failing = scripted(
             dir.path(),
             &format!(
-                "if grep -q '^get' \"$batch\"; then name=$(sed -n 's/^get [^ ]* \"\\.\\/\\(.*\\)\"$/\\1/p' \"$batch\"); echo partial > \"{}/$name\"; echo 'Permission denied' >&2; exit 1; fi\n{listing}",
+                "if grep -q '^get' \"$batch\"; then name=$(sed -n 's/^get [^ ]* \"\\.\\/\\(.*\\)\"$/\\1/p' \"$batch\"); printf pa > \"{}/$name\"; echo 'Permission denied' >&2; exit 1; fi\n{listing}",
                 root.display()
             ),
         );
@@ -2685,7 +2686,10 @@ mod tests {
         let pid_file = dir.path().join("child.pid");
         let sftp = scripted(
             dir.path(),
-            &format!("sleep 30 &\necho $! > {}\nwait", pid_file.display()),
+            &format!(
+                "sleep 30 &\necho $! > {0}.new && mv {0}.new {0}\nwait",
+                pid_file.display()
+            ),
         );
         let cancel = AtomicBool::new(false);
         let outcome = std::thread::scope(|scope| {
@@ -3509,9 +3513,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let pid_file = dir.path().join("child.pid");
         let mut command = Command::new("/bin/sh");
-        command
-            .arg("-c")
-            .arg(format!("sleep 30 & echo $! > {}; wait", pid_file.display()));
+        command.arg("-c").arg(format!(
+            "sleep 30 & echo $! > {0}.new && mv {0}.new {0}; wait",
+            pid_file.display()
+        ));
         let mut task = Tunnel::spawn_task(&command, None).unwrap();
         while fs::read_to_string(&pid_file).map_or(true, |text| text.trim().is_empty()) {
             std::thread::sleep(Duration::from_millis(20));

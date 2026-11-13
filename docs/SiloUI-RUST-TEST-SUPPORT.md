@@ -158,8 +158,18 @@ fake whose run is bounded by a time limit (a runtime or helper timeout) is
 therefore run once with `test_support::run_new_executable_once` before the timed
 call, so the limit measures only the fake's own work. The backup
 `script_command`, the GitHub `fake_github_msb` and the guest fake runtime do this.
+For shell fakes, `test_support::write_run_shell_script` writes the script with a
+`--first-run` guard after its interpreter line and runs it once that way; the
+runtime lifecycle, desktop and progress fakes, `working_account::test_runtime`,
+the host-push discovery runtime and the SSH access fakes use it. A fake rewritten
+in place is run once again after each rewrite.
 A fake that reports its process id writes it beside the file and renames it into
 place, so a test that waits for the file never reads it empty.
+
+A test proves ordering with its own synchronization, not by racing a production
+limit shortened for tests. The guest file helper keeps its 30-second limit in tests:
+eight writers queue in the guest for one folder lock, and the one test about the
+deadline passes its own short limit to `run_argv`.
 
 The desktop, checkpoint readiness/failure and application-read failure tests use
 this runner. Other stateful and output-queue runners remain; the new helper does
