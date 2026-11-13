@@ -107,7 +107,9 @@ fn save(paths: &RuntimePaths, id: &str, record: &Record) -> Result<(), RuntimeEr
         .map_err(|_| failure("Storage maintenance history could not be saved."))?;
     let mut file = tempfile::NamedTempFile::new_in(directory)
         .map_err(|_| failure("Storage maintenance history could not be saved."))?;
-    serde_json::to_writer(&mut file, record)
+    let bytes = serde_json::to_vec(record)
+        .map_err(|_| failure("Storage maintenance history could not be saved."))?;
+    file.write_all(&bytes)
         .map_err(|_| failure("Storage maintenance history could not be saved."))?;
     file.as_file()
         .sync_all()

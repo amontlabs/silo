@@ -4599,8 +4599,9 @@ fn persist_activity(path: &Path, events: &impl Serialize) -> Result<(), String> 
     fs::create_dir_all(parent).map_err(|_| "Silo could not prepare setup activity storage.")?;
     let mut file = tempfile::NamedTempFile::new_in(parent)
         .map_err(|_| "Silo could not save setup activity.")?;
-    serde_json::to_writer(&mut file, events)
-        .map_err(|_| "Silo could not encode setup activity.")?;
+    let bytes = serde_json::to_vec(events).map_err(|_| "Silo could not encode setup activity.")?;
+    file.write_all(&bytes)
+        .map_err(|_| "Silo could not save setup activity.")?;
     file.as_file()
         .sync_all()
         .map_err(|_| "Silo could not save setup activity.")?;
