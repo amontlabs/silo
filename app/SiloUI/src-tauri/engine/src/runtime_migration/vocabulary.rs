@@ -510,16 +510,25 @@ fn write_atomically(
     if let Some(permissions) = permissions {
         temporary.as_file().set_permissions(permissions)?;
     }
-    temporary.as_file().sync_all()?;
+    flush(temporary.as_file())?;
     temporary.persist(path).map_err(|error| error.error)?;
     sync_folder(Some(parent))
 }
 
 fn sync_folder(folder: Option<&Path>) -> io::Result<()> {
     match folder {
-        Some(folder) => fs::File::open(folder)?.sync_all(),
+        Some(folder) => flush(&fs::File::open(folder)?),
         None => Ok(()),
     }
+}
+
+/// Flushes a file or folder to disk. Unit tests stop a run before one of its writes inside
+/// one process, where a flush cannot change what the next run reads, so they skip it.
+fn flush(file: &fs::File) -> io::Result<()> {
+    if cfg!(test) {
+        return Ok(());
+    }
+    file.sync_all()
 }
 
 /// The record `vocabulary-migration.json`: `{"version": 1}`, written after every file.
