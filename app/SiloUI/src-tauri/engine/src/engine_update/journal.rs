@@ -372,10 +372,7 @@ impl Store {
         let mut bytes = serde_json::to_vec_pretty(journal).map_err(|_| failed("encoded"))?;
         bytes.push(b'\n');
         temporary.write_all(&bytes).map_err(|_| failed("written"))?;
-        temporary
-            .as_file()
-            .sync_all()
-            .map_err(|_| failed("synced"))?;
+        flush(temporary.as_file()).map_err(|_| failed("synced"))?;
         temporary
             .persist(self.path())
             .map_err(|_| failed("replaced"))?;
@@ -399,7 +396,16 @@ impl Store {
 }
 
 pub fn sync_directory(directory: &Path) -> std::io::Result<()> {
-    fs::File::open(directory).and_then(|directory| directory.sync_all())
+    fs::File::open(directory).and_then(|directory| flush(&directory))
+}
+
+/// Flushes a file or directory to disk. Unit tests crash a write with `Fault` inside one
+/// process, where a flush cannot change what the next owner reads, so they skip it.
+fn flush(file: &fs::File) -> std::io::Result<()> {
+    if cfg!(test) {
+        return Ok(());
+    }
+    file.sync_all()
 }
 
 #[cfg(test)]
