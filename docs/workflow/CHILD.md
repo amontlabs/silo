@@ -24,7 +24,7 @@ You are one agent building one item. Your task message names it and gives a base
 
 - Do your item and nothing beside it. Something broken that is not yours goes in your report.
 - Other children work at the same time. Keep changes to shared files small and additive (`api/src/methods/registry.rs`, `silod/src/methods/mod.rs`, `application-source.ts`, `production-source.ts`, `application-app.tsx`, `application-shell.tsx`, fixtures).
-- After an API change run both generators and commit their output: `cargo run -p silo-api --example generate_requests` and `--example generate_schema` (from `app/SiloUI`). Update the pinned counts in `registry.rs` and `schema.rs` tests.
+- After an API change run both generators and commit their output: `cargo run -p silo-api --example generate_requests` and `--example generate_schema` (from `app/SiloUI`). The committed-schema test (`committed_schema_matches_the_wire_types_and_registry`) pins the whole API surface; there are no counts to update.
 - Wire names, saved file formats and checkpoint kinds keep their spelling unless your item says otherwise. Old saved data must still load.
 - Do not start, stop or connect to a running Silo or Silo Dev engine or app, and do not touch production data, unless your task gives you the Dev engine for a live check.
 

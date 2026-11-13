@@ -245,8 +245,8 @@ These were not asked of the owner. Each is open to change.
 - **Merging two items that both add methods** conflicts in `api/src/methods/mod.rs`,
   `registry.rs`, `schema.rs`, `requests.rs`, the schema file and `engine/src/lib.rs`. Recipe:
   `git merge --no-ff --no-commit <branch>`; run `docs/direction/tools/union.py` on the hand-written
-  files (keeps both sides of additive hunks); set the pinned counts by hand (methods, per-kind,
-  job results); `git checkout --ours` the two generated files and run both generators; add the
+  files (keeps both sides of additive hunks); (the count asserts were later removed; the committed schema pins the surface);
+  `git checkout --ours` the two generated files and run both generators; add the
   new methods to `engine/src/policy/rules.rs`; run `docs/direction/tools/integrate.sh` or the
   focused suites; commit. Method count after T3: 179 (57 queries), 40 job results, 27 error codes.
 - **Integration run after T1, T4, T7, T9** (2026-11-10): api, silod, cli and the engine's policy,
