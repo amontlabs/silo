@@ -46,6 +46,13 @@ export function buildPatchedExecutable(options: {
   cacheRoot: string
   temporaryRoot?: string
 }): Promise<Buffer | { executable: Buffer; macosGateway: Buffer }>
+export function buildEnvironment(environment: Readonly<Record<string, string | undefined>>, targetTriple: string): Record<string, string | boolean>
+export function readBuildToolIdentity(options: {
+  cargoDirectory: string
+  targetTriple: string
+  environment?: Readonly<Record<string, string | undefined>>
+  output?: (executable: string, args: string[], environment: Readonly<Record<string, string | undefined>>) => string
+}): Promise<Record<string, unknown>>
 export function patchedBuildEntry(cacheRoot: string, cacheKey: string): string
 export function patchedBuildInputs(options: {
   appRoot?: string

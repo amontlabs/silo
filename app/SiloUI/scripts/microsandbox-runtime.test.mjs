@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import { Readable } from "node:stream"
-import { MICRO_SANDBOX_VERSION, MICROSANDBOX_PATCHES, patchedBuildKey, readBuildToolIdentity, readMacosGatewayInputs, runtimeTargets, sha256, stageRuntime } from "./microsandbox-runtime.mjs"
+import { MICRO_SANDBOX_VERSION, MICROSANDBOX_PATCHES, buildEnvironment, patchedBuildKey, readBuildToolIdentity, readMacosGatewayInputs, runtimeTargets, sha256, stageRuntime } from "./microsandbox-runtime.mjs"
 
 const runtimeModule = new URL("./microsandbox-runtime.mjs", import.meta.url).href
 const toolScript = `#!${process.execPath}
@@ -307,7 +307,7 @@ test("each build tool identity part changes the cache key", async t => {
   await mkdir(builds, { recursive: true })
   const cargoHome = join(root, "cargo-home")
   await mkdir(cargoHome)
-  const versions = { "xcode-select": "/Applications/Xcode.app/Contents/Developer", xcodebuild: "Xcode 26.5", xcrun: "26.5", cc: "Apple clang 21", ld: "ld-1267" }
+  const versions = { "xcode-select": "/Applications/Xcode.app/Contents/Developer", xcodebuild: "Xcode 26.5", xcrun: "26.5", cc: "Apple clang 21", "c++": "Apple clang 21", clang: "Apple clang 21", ld: "ld-1267" }
   const output = executable => versions[executable]
   const key = async (environment = {}) => patchedBuildKey({
     agentdSha256: sha256("agent"), rustcVersion: "rustc 1.100.0", targetTriple: "aarch64-apple-darwin", gatewaySourceDigest: "", recipeSha256: "",
@@ -316,6 +316,10 @@ test("each build tool identity part changes the cache key", async t => {
   const base = await key()
   assert.equal(await key(), base)
   assert.equal(await key({ CARGO_TERM_COLOR: "always", CARGO_BUILD_JOBS: "3", CARGO_TARGET_DIR: "/elsewhere", PATH: "/x" }), base)
+  // Settings of other profiles and other targets, and an incremental setting a release build
+  // already has, are not part of what a release build for this target produces.
+  assert.equal(await key({ CARGO_INCREMENTAL: "0", CARGO_PROFILE_DEV_DEBUG: "0", CARGO_PROFILE_TEST_DEBUG: "0", CARGO_PROFILE_BENCH_LTO: "true",
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-Copt-level=1", CARGO_BUILD_INCREMENTAL: "false" }), base)
   const changed = []
   for (const tool of Object.keys(versions)) {
     const previous = versions[tool]
@@ -323,9 +327,12 @@ test("each build tool identity part changes the cache key", async t => {
     changed.push([tool, await key()])
     versions[tool] = previous
   }
-  for (const [name, value] of [["RUSTFLAGS", "-C target-cpu=native"], ["CARGO_ENCODED_RUSTFLAGS", "-Copt-level=1"], ["CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER", "/x/ld"], ["CARGO_PROFILE_RELEASE_LTO", "false"], ["CC_aarch64_apple_darwin", "/x/cc"], ["SDKROOT", "/x/sdk"]]) {
+  for (const [name, value] of [["RUSTFLAGS", "-C target-cpu=native"], ["CARGO_ENCODED_RUSTFLAGS", "-Copt-level=1"], ["CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER", "/x/ld"], ["CARGO_PROFILE_RELEASE_LTO", "false"], ["CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_OPT_LEVEL", "3"], ["CARGO_INCREMENTAL", "1"], ["CARGO_UNSTABLE_BUILD_STD", "std"], ["CC_aarch64_apple_darwin", "/x/cc"], ["SDKROOT", "/x/sdk"]]) {
     changed.push([name, await key({ [name]: value })])
   }
+  // Only whether the release build is incremental is keyed, whichever setting decides it.
+  assert.equal(await key({ CARGO_PROFILE_RELEASE_INCREMENTAL: "true" }), await key({ CARGO_INCREMENTAL: "1" }))
+  assert.equal(await key({ CARGO_PROFILE_RELEASE_INCREMENTAL: "true", CARGO_INCREMENTAL: "0" }), base)
   await writeFile(join(cargoHome, "config.toml"), "[build]\nrustflags = [\"-Cdebuginfo=1\"]\n")
   changed.push(["cargo home config.toml", await key()])
   await mkdir(join(root, "work/.cargo"))
@@ -334,6 +341,62 @@ test("each build tool identity part changes the cache key", async t => {
   const keys = [base, ...changed.map(([, value]) => value)]
   assert.equal(new Set(keys).size, keys.length, JSON.stringify(changed))
 })
+
+test("the programs and files a build uses are keyed by their contents", async t => {
+  const root = await mkdtemp(join(tmpdir(), "silo-build-programs-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const builds = join(root, "work/cache/tmp")
+  await mkdir(builds, { recursive: true })
+  const bin = join(root, "bin")
+  await mkdir(bin)
+  const cargoHome = join(root, "cargo-home")
+  await mkdir(cargoHome)
+  const output = () => "fixed version"
+  const program = async (name, contents) => {
+    await writeFile(join(bin, name), contents, { mode: 0o755 })
+    return join(bin, name)
+  }
+  const wrapper = await program("wrapper", "#!/bin/sh\nexec \"$@\"\n")
+  const linker = await program("linker", "linker 1")
+  for (const name of ["clang", "c++", "ar", "configured-linker"]) await program(name, `${name} 1`)
+  await writeFile(join(cargoHome, "config.toml"), `include = "extra.toml"\n[target.aarch64-apple-darwin]\nlinker = "configured-linker"\n`)
+  await writeFile(join(cargoHome, "extra.toml"), "[build]\nrustflags = []\n")
+  const environment = { HOME: root, CARGO_HOME: cargoHome, PATH: bin, RUSTC_WRAPPER: wrapper, CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER: linker }
+  const key = async () => patchedBuildKey({
+    agentdSha256: sha256("agent"), rustcVersion: "rustc 1.100.0", targetTriple: "aarch64-apple-darwin", gatewaySourceDigest: "", recipeSha256: "",
+    tools: await readBuildToolIdentity({ cargoDirectory: builds, targetTriple: "aarch64-apple-darwin", environment, output }),
+  })
+  const base = await key()
+  assert.equal(await key(), base)
+  const changed = []
+  for (const [name, path, contents] of [
+    ["RUSTC_WRAPPER program", wrapper, "#!/bin/sh\nexec ccache \"$@\"\n"],
+    ["linker program", linker, "linker 2"],
+    ["clang on PATH", join(bin, "clang"), "clang 2"],
+    ["c++ on PATH", join(bin, "c++"), "c++ 2"],
+    ["ar on PATH", join(bin, "ar"), "ar 2"],
+    ["linker named by cargo configuration", join(bin, "configured-linker"), "configured-linker 2"],
+    ["included cargo configuration", join(cargoHome, "extra.toml"), "[build]\nrustflags = [\"-Cdebuginfo=2\"]\n"],
+  ]) {
+    const previous = await readFile(path)
+    await writeFile(path, contents)
+    changed.push([name, await key()])
+    await writeFile(path, previous)
+    assert.equal(await key(), base, name)
+  }
+  const keys = [base, ...changed.map(([, value]) => value)]
+  assert.equal(new Set(keys).size, keys.length, JSON.stringify(changed))
+})
+
+test("the build environment of a job does not depend on its debug-build settings", () => {
+  // The release runtime producer sets none of these; the jobs that consume its output set them
+  // for their own debug builds and tests.
+  const producer = { GOTOOLCHAIN: "local", RUNTIME_TARGET: "aarch64-apple-darwin" }
+  const consumer = { ...producer, CARGO_INCREMENTAL: "0", CARGO_PROFILE_DEV_DEBUG: "0", CARGO_PROFILE_TEST_DEBUG: "0", SILO_GITHUB_CLIENT_ID: "synthetic" }
+  assert.deepEqual(buildEnvironment(consumer, "aarch64-apple-darwin"), buildEnvironment(producer, "aarch64-apple-darwin"))
+  assert.notDeepEqual(buildEnvironment({ ...producer, CARGO_INCREMENTAL: "1" }, "aarch64-apple-darwin"), buildEnvironment(producer, "aarch64-apple-darwin"))
+})
+
 
 test("every file of the gateway crate except its build output feeds the cache key", async t => {
   const appRoot = await mkdtemp(join(tmpdir(), "silo-gateway-inputs-"))

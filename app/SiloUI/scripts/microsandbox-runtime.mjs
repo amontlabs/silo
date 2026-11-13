@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto"
 import { execFileSync, spawnSync } from "node:child_process"
-import { chmod, copyFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { access, chmod, copyFile, cp, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
-import { basename, dirname, join, relative, resolve, sep } from "node:path"
+import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path"
 
-import { readFileSync } from "node:fs"
+import { constants, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { cacheTemporaryRoot, fetchVerifiedFile, makeWorkFolder, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry } from "./build-input.mjs"
 
@@ -109,11 +109,34 @@ async function hasRequiredCapabilities(executable, temporaryRoot) {
   }
 }
 
-// Environment that changes what cargo, rustc and the C build scripts produce. Every `CARGO_*`
-// variable is cargo configuration, except the ones below: locations this build overrides,
-// display, network and credentials, and what cargo itself sets for a build script.
-const CARGO_ENVIRONMENT_IGNORED = /^CARGO(_HOME|_TARGET_DIR|_BUILD_TARGET_DIR|_BUILD_JOBS|_TERM_.*|_HTTP_.*|_NET_.*|_REGISTRY_.*|_REGISTRIES_.*|_LOG|_PKG_.*|_MANIFEST_.*|_CFG_.*|_CRATE_.*|_BIN_.*|_PRIMARY_PACKAGE|_MAKEFLAGS|_RUSTC_CURRENT_DIR|_TARGET_TMPDIR)?$/
-const BUILD_ENVIRONMENT = /^(CARGO_.*|RUSTFLAGS|RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|RUSTC_BOOTSTRAP|(TARGET_|HOST_)?(CC|CXX|AR|CFLAGS|CXXFLAGS|CPPFLAGS|ARFLAGS|LDFLAGS)(_.*)?|MACOSX_DEPLOYMENT_TARGET|SDKROOT|DEVELOPER_DIR)$/
+// Environment that changes the bytes of the release build (`cargo build --release --target
+// <triple>`) of msb and the gateway: compiler flags for that target, the release profile (with
+// its build-script overrides), the programs cargo runs as rustc, wrapper or linker, unstable cargo
+// features, the C toolchain variables of cc-rs and the Apple SDK selection. Other profiles,
+// other targets, display, network, credentials and locations are not part of it.
+// https://doc.rust-lang.org/cargo/reference/environment-variables.html
+function buildEnvironmentPattern(targetTriple) {
+  const triple = targetTriple.toUpperCase().replaceAll("-", "_")
+  return new RegExp(`^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_RUSTFLAGS|CARGO_TARGET_${triple}_(RUSTFLAGS|LINKER)|CARGO_HOST_(RUSTFLAGS|LINKER)|CARGO_PROFILE_RELEASE_(?!INCREMENTAL$).+|CARGO_UNSTABLE_.+|RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|RUSTC_BOOTSTRAP|CARGO_BUILD_RUSTC(_WRAPPER|_WORKSPACE_WRAPPER)?|(TARGET_|HOST_)?(CC|CXX|AR|RANLIB|CFLAGS|CXXFLAGS|CPPFLAGS|ARFLAGS|LDFLAGS)(_.+)?|CRATE_CC_NO_DEFAULTS|MACOSX_DEPLOYMENT_TARGET|SDKROOT|DEVELOPER_DIR)$`)
+}
+// The variables above whose value names a program (cc-rs also takes "wrapper compiler").
+const PROGRAM_VARIABLE = /^(RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|CARGO_BUILD_RUSTC(_WRAPPER|_WORKSPACE_WRAPPER)?|CARGO_TARGET_.+_LINKER|CARGO_HOST_LINKER|(TARGET_|HOST_)?(CC|CXX|AR|RANLIB)(_.+)?)$/
+
+// Whether the release build is incremental, as cargo decides it: CARGO_INCREMENTAL when set
+// ("1" is on, anything else off), then `build.incremental`, then the release profile (off by
+// default). Only the outcome is keyed, so "0" and unset agree for a release build.
+function releaseIncremental(environment) {
+  if (environment.CARGO_INCREMENTAL !== undefined) return environment.CARGO_INCREMENTAL === "1"
+  return (environment.CARGO_BUILD_INCREMENTAL ?? environment.CARGO_PROFILE_RELEASE_INCREMENTAL ?? "false") === "true"
+}
+
+export function buildEnvironment(environment, targetTriple) {
+  const pattern = buildEnvironmentPattern(targetTriple)
+  return {
+    ...Object.fromEntries(Object.keys(environment).filter(name => pattern.test(name)).sort().map(name => [name, environment[name]])),
+    releaseIncremental: releaseIncremental(environment),
+  }
+}
 
 function toolOutput(executable, args, environment) {
   // Some tools (`ld -v`) print their identity on standard error, so both streams are kept.
@@ -123,9 +146,70 @@ function toolOutput(executable, args, environment) {
   return `exit ${result.status}: ${result.stdout.trim()}\n${result.stderr.trim()}`
 }
 
+// A program by its resolved file and the sha256 of its contents: a command with a slash is a
+// path, a bare name is looked up on the environment's PATH like a shell does.
+async function programIdentity(command, environment) {
+  let path = null
+  if (command.includes("/")) path = resolve(command)
+  else {
+    for (const folder of (environment.PATH ?? "").split(delimiter)) {
+      if (!folder) continue
+      try {
+        await access(join(folder, command), constants.X_OK)
+        if ((await stat(join(folder, command))).isFile()) { path = join(folder, command); break }
+      } catch {}
+    }
+  }
+  if (!path) return { command, found: false }
+  try {
+    const real = await realpath(path)
+    return { command, path: real, sha256: sha256(await readFile(real)) }
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return { command, found: false }
+    throw error
+  }
+}
+
+// The C tools cargo and the build scripts find on PATH, with the flag that prints their version.
+const PATH_TOOLS = [["cc", ["--version"]], ["c++", ["--version"]], ["clang", ["--version"]], ["ld", ["-v"]], ["ar", null]]
+
+const configStrings = value => [...value.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g)].map(match => match[1] ?? match[2])
+
+// What a cargo configuration file makes cargo read or run besides itself: `include` files and the
+// `linker`, `rustc`, `rustc-wrapper` and `rustc-workspace-wrapper` programs. A line scan of the
+// TOML (one string, an array or `[[include]] path`), not a full parser.
+function configReferences(text) {
+  const includes = []
+  const programs = []
+  let table = ""
+  let array = null
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\s#.*$|^#.*$/, "").trim()
+    if (array !== null) {
+      array += ` ${line}`
+      if (line.includes("]")) { includes.push(...configStrings(array)); array = null }
+      continue
+    }
+    const header = /^\[\[?\s*(.+?)\s*\]\]?$/.exec(line)
+    if (header) { table = header[1]; continue }
+    const pair = /^([\w."'-]+?)\s*=\s*(.*)$/.exec(line)
+    if (!pair) continue
+    const key = [table, pair[1].replaceAll(/["']/g, "")].filter(Boolean).join(".")
+    if (key === "include" || key === "include.path") {
+      if (pair[2].startsWith("[") && !pair[2].includes("]")) array = pair[2]
+      else includes.push(...configStrings(pair[2]))
+    } else if (/^(build|host|target\..+)\.(linker|rustc|rustc-wrapper|rustc-workspace-wrapper)$/.test(key)) {
+      programs.push(...configStrings(pair[2]).slice(0, 1))
+    }
+  }
+  return { includes, programs }
+}
+
 // The cargo configuration files that apply to a build run below `cargoDirectory`: `.cargo/config`
-// and `.cargo/config.toml` in that folder and every parent, then the cargo home.
-async function cargoConfigFiles(cargoDirectory, environment) {
+// and `.cargo/config.toml` in that folder and every parent, then the cargo home, each followed by
+// the files it includes (relative to it). Returns their paths and digests, and the programs they
+// name (a path relative to the folder above `.cargo`, or a name found on PATH).
+async function cargoConfiguration(cargoDirectory, environment) {
   const folders = []
   for (let folder = resolve(cargoDirectory); ; folder = dirname(folder)) {
     folders.push(join(folder, ".cargo"))
@@ -133,32 +217,55 @@ async function cargoConfigFiles(cargoDirectory, environment) {
   }
   folders.push(resolve(environment.CARGO_HOME?.trim() || join(homedir(), ".cargo")))
   const files = []
-  for (const folder of [...new Set(folders)]) {
-    for (const name of ["config", "config.toml"]) {
-      const path = join(folder, name)
-      const bytes = await readFile(path).catch(error => { if (error.code === "ENOENT" || error.code === "ENOTDIR") return null; throw error })
-      if (bytes) files.push([path, sha256(bytes)])
+  const programs = []
+  const seen = new Set()
+  const read = async (path, included) => {
+    if (seen.has(path)) return
+    seen.add(path)
+    const bytes = await readFile(path).catch(error => { if (error.code === "ENOENT" || error.code === "ENOTDIR") return null; throw error })
+    if (!bytes) {
+      if (included) files.push([path, "missing"])
+      return
+    }
+    files.push([path, sha256(bytes)])
+    const references = configReferences(bytes.toString("utf8"))
+    for (const include of references.includes) await read(resolve(dirname(path), include), true)
+    for (const program of references.programs) {
+      programs.push({ source: path, ...await programIdentity(program.includes("/") ? resolve(dirname(dirname(path)), program) : program, environment) })
     }
   }
-  return files
+  for (const folder of [...new Set(folders)]) {
+    for (const name of ["config", "config.toml"]) await read(join(folder, name), false)
+  }
+  return { files, programs }
 }
 
 // Identity of everything outside the pinned inputs that shapes the compiled runtime: the Apple
-// SDK and developer folder, the C compiler and the linker cargo uses on this host, the cargo
-// configuration files, and the build environment.
-export async function readBuildToolIdentity({ cargoDirectory, environment = process.env, output = toolOutput }) {
+// SDK and developer folder, the C compiler, linker and archiver found on PATH, the cargo
+// configuration files, the programs the build environment and configuration name (by content),
+// and the build environment.
+export async function readBuildToolIdentity({ cargoDirectory, targetTriple, environment = process.env, output = toolOutput }) {
   const darwin = process.platform === "darwin"
+  const configuration = await cargoConfiguration(cargoDirectory, environment)
+  const variables = buildEnvironment(environment, targetTriple)
+  const programs = []
+  for (const name of Object.keys(variables).filter(name => PROGRAM_VARIABLE.test(name))) {
+    for (const word of variables[name].split(/\s+/).filter(word => word && !word.startsWith("-"))) {
+      programs.push({ source: name, ...await programIdentity(word, environment) })
+    }
+  }
+  const pathTools = {}
+  for (const [name, versionArgs] of PATH_TOOLS) {
+    pathTools[name] = { ...await programIdentity(name, environment), version: versionArgs ? output(name, versionArgs, environment) : null }
+  }
   return {
     developerDir: darwin ? output("xcode-select", ["-p"], environment) : null,
     xcode: darwin ? output("xcodebuild", ["-version"], environment) : null,
     sdk: darwin ? ["--show-sdk-path", "--show-sdk-version", "--show-sdk-build-version"].map(flag => output("xcrun", [flag], environment)) : null,
-    cc: output("cc", ["--version"], environment),
-    linker: output("ld", ["-v"], environment),
-    cargoConfig: await cargoConfigFiles(cargoDirectory, environment),
-    environment: Object.fromEntries(Object.keys(environment)
-      .filter(name => BUILD_ENVIRONMENT.test(name) && !CARGO_ENVIRONMENT_IGNORED.test(name))
-      .sort()
-      .map(name => [name, environment[name]])),
+    pathTools,
+    cargoConfig: configuration.files,
+    programs: [...programs, ...configuration.programs],
+    environment: variables,
   }
 }
 
