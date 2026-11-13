@@ -318,18 +318,23 @@ The link check includes first-party source documentation, guest notices and
 changesets. A coverage regression compares its globs with tracked Markdown,
 excluding documentation in the partial upstream vendor tree.
 
-Every CI test job runs one script in `app/SiloUI/scripts/ci/`, and local checks
-run the same scripts: `frontend.sh` (typecheck, lint, Vitest, website and demo;
-`checks` or `tests [VITEST_ARGS]` runs one half), `scripts.sh` (release tooling,
-script tests, isolation evals on Linux, reviewer service), `links.sh` (lychee
-0.24.2 on `PATH` or in `$LYCHEE`), `runner.sh` (Go helper), `macos.sh` (signing
-fixtures, formatting, workspace tests), `updater.sh` (patched updater), and on
-a Linux host `linux-prepare.sh` then `linux.sh`. `ci.yml` only installs tools,
-restores caches and calls them. Every `cargo nextest run` takes
-`SILO_NEXTEST_FLAGS` from `common.sh`: no retries, a flaky test fails, every
-test runs and no default filter applies. `scripts/test_ci_scripts.py` fails when
-`ci.yml` runs a test command directly or a script calls nextest without those
-flags. To run the link check locally, from any folder:
+Every CI test job runs scripts in `app/SiloUI/scripts/ci/`; `tools/agent/check`
+does not call them yet (atelier will). `frontend.sh` (typecheck, lint, Vitest,
+website and demo; `checks` or `tests [VITEST_ARGS]` runs one half),
+`scripts.sh` (release tooling, script tests, isolation evals on Linux, reviewer
+service; its Python tests run through [uv](https://docs.astral.sh/uv/) with
+pinned packages), `links.sh` (lychee 0.24.2 on `PATH` or in `$LYCHEE`),
+`runner.sh` (Go helper), `macos.sh` (`checks`: signing fixtures and formatting;
+`tests`: workspace tests), `updater.sh` (patched updater), and on a Linux host
+`linux-prepare.sh` then `linux.sh` (`engine`, `daemon` or `host`). With no
+argument a script runs all its parts. `ci.yml` only installs tools, restores
+caches, runs the runtime preflight and calls them, one part per step so each
+keeps its own time limit. Every `cargo nextest run` takes `SILO_NEXTEST_FLAGS`
+from `common.sh`: the `ci` profile, no retries, a flaky test fails, every test
+runs and no default filter applies. `scripts/test_ci_scripts.py` fails when
+`ci.yml` runs anything but an install or a plain script call, hides a failure
+(`continue-on-error`, a skipping `if:`, its own shell), or a script calls
+nextest without those flags or weakens them. To run the link check locally, from any folder:
 
 ```sh
 app/SiloUI/scripts/ci/links.sh

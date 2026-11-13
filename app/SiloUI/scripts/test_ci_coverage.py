@@ -66,7 +66,7 @@ class CargoCoverageTests(unittest.TestCase):
         manifest = tomllib.loads((APP / 'Cargo.toml').read_text())
         package_manifest = tomllib.loads((APP / 'src-tauri/Cargo.toml').read_text())
         selected = set()
-        for command in re.findall(r'(?m)^(?:step \S+ )?(cargo (?:test|nextest run) .+)$', ci_commands()):
+        for command in re.findall(r'(?m)^\s*(?:step \S+ )?(cargo (?:test|nextest run) .+)$', ci_commands()):
             arguments = shlex.split(command)
             self.assertIn('--locked', arguments)
             if '-p' in arguments:
@@ -91,6 +91,7 @@ class NextestCoverageTests(unittest.TestCase):
         config = tomllib.loads((APP / '.config/nextest.toml').read_text())
         profiles = re.findall(r'cargo nextest run .*--profile (\S+)', ci_commands())
         self.assertTrue(profiles)
+        self.assertEqual(set(profiles), {'ci'})
         for profile in profiles:
             self.assertIn(profile, config['profile'])
         # nextest does not run doctests; add a `cargo test --doc` step before adding one.
@@ -108,10 +109,10 @@ class PlatformCoverageTests(unittest.TestCase):
         rust = re.search(r'(?ms)^  rust:\n(.*?)(?=^  [\w-]+:\n|\Z)', workflow)[1]
         self.assertIn('runs-on: macos-15', rust)
         self.assertNotIn('matrix.runner', rust)
-        signing = [step for step in re.split(r'(?m)^ {6}- ', rust) if 'run: scripts/ci/macos.sh' in step]
+        signing = [step for step in re.split(r'(?m)^ {6}- ', rust) if 'run: scripts/ci/macos.sh checks' in step]
         self.assertEqual(len(signing), 1, 'the macOS signing suite must execute on macOS')
         self.assertNotIn("if: runner.os == 'macOS'", signing[0])
-        self.assertRegex((CI / 'macos.sh').read_text(), r"(?m)^step \S+ python3 -m unittest discover -s scripts -p 'test_macos_release.py'$")
+        self.assertRegex((CI / 'macos.sh').read_text(), r"(?m)^\s*step \S+ python3 -m unittest discover -s scripts -p 'test_macos_release.py'$")
 
 
 class DocumentationCoverageTests(unittest.TestCase):

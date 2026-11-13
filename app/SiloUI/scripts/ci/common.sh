@@ -1,5 +1,5 @@
-# Sourced by every script in this folder. CI calls these scripts, and local
-# checks call the same ones, so both run the same commands.
+# Sourced by every script in this folder. CI calls these scripts, and they run
+# the same way on a developer machine.
 
 set -uo pipefail
 

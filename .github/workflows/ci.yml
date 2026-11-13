@@ -89,21 +89,21 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      # scripts.sh runs its Python tests through uv with pinned packages.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.8'
       - run: node scripts/preflight.mjs
       - run: npm ci
-      - name: Install website and demo dependencies
-        run: |
-          npm --prefix ../../website ci
-          npm --prefix ../../demo ci
-      - name: Install the hosted reviewer service test dependencies
-        run: python3 -m pip install --quiet -r ../../reviewer-service/requirements-dev.txt
-      # Typecheck, lint, the website demo and the demo films; the app's Vitest
-      # suite runs in frontend-tests.
+      # Typecheck, lint, the website demo and the demo films (frontend.sh
+      # installs their dependencies); the app's Vitest suite runs in frontend-tests.
       - name: Frontend checks
         run: scripts/ci/frontend.sh checks
       # Node script suites, release version, Tauri command manifest, every
       # scripts/test_*.py module, isolation evals and the reviewer service.
+      # They run whatever the frontend checks found.
       - name: Release-tooling and script tests
+        if: ${{ !cancelled() }}
         run: scripts/ci/scripts.sh
 
   # silo-runner is a Go program of its own (app/SiloUI/runner); it shells out to `silo` and is
@@ -179,6 +179,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+      - run: node scripts/preflight.mjs
       # silo-host's desktop feature (the app's) links GTK on Linux and its tests run with
       # it; the keyring Secret Service backend needs D-Bus. The tests also run OpenSSH and zsh.
       - name: Install Linux build and test dependencies
@@ -197,8 +198,8 @@ jobs:
         with:
           key: silo-git-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/SiloUI/scripts/git-runtime.mjs') }}
           path: app/SiloUI/src-tauri/target/runtime-cache/dugite
-      # Runtime preflight, then the bundled Git that host-push tests drive
-      # (pinned and checksummed), not MicroSandbox.
+      # The bundled Git that host-push tests drive (pinned and checksummed),
+      # not MicroSandbox.
       - name: Prepare the Linux tests
         run: scripts/ci/linux-prepare.sh
       # nextest runs each test in its own process, so tests that serialize on
@@ -214,11 +215,19 @@ jobs:
           echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$(dirname "$(command -v cargo)")"
           cargo nextest --version
-      # Engine, daemon, CLI, client and host helper tests, and the check that
-      # silod does not depend on GTK.
-      - name: Run the Linux tests
-        timeout-minutes: 50
-        run: scripts/ci/linux.sh
+      # Each part has its own time limit, and a failed part does not hide the
+      # later ones.
+      - name: Run engine tests
+        timeout-minutes: 30
+        run: scripts/ci/linux.sh engine
+      - name: Check that silod does not depend on GTK, then run daemon, CLI and client tests
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
+        run: scripts/ci/linux.sh daemon
+      - name: Run host helper tests
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        run: scripts/ci/linux.sh host
 
   rust:
     name: Rust tests
@@ -259,6 +268,10 @@ jobs:
           python-version: '3.12'
       - name: Install the hosted reviewer service dependencies
         run: python3 -m pip install --quiet -r ../../reviewer-service/requirements.txt
+      # Release signing with disposable fixtures and Rust formatting need no
+      # native runtime, so they report before its preparation.
+      - name: Test macOS release signing and check Rust formatting
+        run: scripts/ci/macos.sh checks
       # The Cargo workspace root is app/SiloUI, so its build output is
       # app/SiloUI/target; src-tauri/target holds only the runtime cache.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -287,13 +300,11 @@ jobs:
           echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$(dirname "$(command -v cargo)")"
           cargo nextest --version
-      # Release signing with disposable fixtures, Rust formatting and every
-      # workspace test.
-      - name: Run the macOS tests
-        timeout-minutes: 35
+      - name: Run Rust tests
+        timeout-minutes: 30
         env:
           # The CLI's end-to-end test of the reviewer service fails instead of skipping.
           SILO_REVIEWER_E2E_REQUIRED: '1'
-        run: scripts/ci/macos.sh
+        run: scripts/ci/macos.sh tests
       - name: Test patched updater transport and atomic installation
         run: scripts/ci/updater.sh
