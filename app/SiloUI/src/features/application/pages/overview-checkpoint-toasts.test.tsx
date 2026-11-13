@@ -36,16 +36,16 @@ it("toasts a created fork with an Open action that navigates to the new computer
   const view = render(<Harness source={source} actions={actions} />)
 
   await user.click(screen.getByRole("button", { name: `More actions for ${computer.configuration.name}` }))
-  await user.click(screen.getByRole("menuitem", { name: `Checkpoints for ${computer.configuration.name}` }))
-  await user.click(within(screen.getByText("Before deploy").closest("[data-checkpoint-name]")!).getByRole("button", { name: "Checkpoint actions for Before deploy" }))
-  await user.click(screen.getByRole("menuitem", { name: "Fork Before deploy" }))
+  await user.click(await screen.findByRole("menuitem", { name: `Checkpoints for ${computer.configuration.name}` }))
+  await user.click(within((await screen.findByText("Before deploy")).closest("[data-checkpoint-name]")!).getByRole("button", { name: "Checkpoint actions for Before deploy" }))
+  await user.click(await screen.findByRole("menuitem", { name: "Fork Before deploy" }))
   expect(await screen.findByText("Fork from “Before deploy”")).toBeVisible()
   await user.type(await screen.findByRole("textbox", { name: "New computer name" }), "experiment")
-  await user.click(screen.getByRole("button", { name: "Fork" }))
+  await user.click(await screen.findByRole("button", { name: "Fork" }))
 
   await waitFor(() => expect(forkCheckpoint).toHaveBeenCalledWith(computer.configuration.name, "checkpoint-1", "experiment"))
   expect(await screen.findByText("Fork created")).toBeVisible()
-  expect(screen.getByText(/experiment is stopped/)).toBeVisible()
+  expect(await screen.findByText(/experiment is stopped/)).toBeVisible()
 
   // The backend snapshot now includes the forked computer; Open resolves it fresh and navigates.
   const forked = structuredClone(source)
@@ -55,8 +55,8 @@ it("toasts a created fork with an Open action that navigates to the new computer
   forked.computers.push(clone)
   view.rerender(<Harness source={forked} actions={actions} />)
 
-  await user.click(screen.getByRole("button", { name: "Open" }))
-  expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Computersexperiment")
+  await user.click(await screen.findByRole("button", { name: "Open" }))
+  await waitFor(() => expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Computersexperiment"))
 })
 
 it("toasts a created fork from the computer current-state menu", async () => {
@@ -67,13 +67,13 @@ it("toasts a created fork from the computer current-state menu", async () => {
   render(<Harness source={source} actions={actions} />)
 
   await user.click(screen.getByRole("button", { name: `More actions for ${computer.configuration.name}` }))
-  await user.click(screen.getByRole("menuitem", { name: `Fork ${computer.configuration.name}` }))
+  await user.click(await screen.findByRole("menuitem", { name: `Fork ${computer.configuration.name}` }))
   await user.type(await screen.findByRole("textbox", { name: "New computer name" }), "spinoff")
-  await user.click(screen.getByRole("button", { name: "Fork" }))
+  await user.click(await screen.findByRole("button", { name: "Fork" }))
 
   await waitFor(() => expect(forkCheckpoint).toHaveBeenCalledWith(computer.configuration.name, null, "spinoff"))
   expect(await screen.findByText("Fork created")).toBeVisible()
-  expect(screen.getByText(/spinoff is stopped/)).toBeVisible()
+  expect(await screen.findByText(/spinoff is stopped/)).toBeVisible()
 })
 
 it("toasts a restored checkpoint with a Start action that runs the guarded start", async () => {
@@ -85,18 +85,18 @@ it("toasts a restored checkpoint with a Start action that runs the guarded start
   const view = render(<Harness source={source} actions={actions} />)
 
   await user.click(screen.getByRole("button", { name: `More actions for ${computer.configuration.name}` }))
-  await user.click(screen.getByRole("menuitem", { name: `Checkpoints for ${computer.configuration.name}` }))
-  await user.click(within(screen.getByText("Before deploy").closest("[data-checkpoint-name]")!).getByRole("button", { name: "Restore" }))
+  await user.click(await screen.findByRole("menuitem", { name: `Checkpoints for ${computer.configuration.name}` }))
+  await user.click(within((await screen.findByText("Before deploy")).closest("[data-checkpoint-name]")!).getByRole("button", { name: "Restore" }))
   expect(await screen.findByText("Restore “Before deploy”?")).toBeVisible()
   await user.click(confirmButton("Restore"))
 
   await waitFor(() => expect(restoreCheckpoint).toHaveBeenCalledWith(computer.configuration.name, "checkpoint-1"))
   expect(await screen.findByText("Restored “Before deploy”")).toBeVisible()
-  expect(screen.getByText(new RegExp(`${computer.configuration.name} is stopped\\. A recovery checkpoint was saved first\\.`))).toBeVisible()
+  expect(await screen.findByText(new RegExp(`${computer.configuration.name} is stopped\\. A recovery checkpoint was saved first\\.`))).toBeVisible()
 
   // The snapshot then reports the restored computer stopped; Start acts on that state.
   view.rerender(<Harness source={{ ...source, computers: source.computers.map(item => item === computer ? { ...item, state: "stopped" as const } : item) }} actions={actions} />)
-  await user.click(screen.getByRole("button", { name: "Start" }))
+  await user.click(await screen.findByRole("button", { name: "Start" }))
   expect(startComputer).toHaveBeenCalledWith(computer.configuration.name)
 })
 
@@ -110,12 +110,12 @@ it("routes the restored-toast Start through the guard, so an unavailable compute
   render(<Harness source={source} actions={actions} />)
 
   await user.click(screen.getByRole("button", { name: `More actions for ${computer.configuration.name}` }))
-  await user.click(screen.getByRole("menuitem", { name: `Checkpoints for ${computer.configuration.name}` }))
-  await user.click(within(screen.getByText("Before deploy").closest("[data-checkpoint-name]")!).getByRole("button", { name: "Restore" }))
+  await user.click(await screen.findByRole("menuitem", { name: `Checkpoints for ${computer.configuration.name}` }))
+  await user.click(within((await screen.findByText("Before deploy")).closest("[data-checkpoint-name]")!).getByRole("button", { name: "Restore" }))
   await user.click(confirmButton("Restore"))
 
   await screen.findByText("Restored “Before deploy”")
-  await user.click(screen.getByRole("button", { name: "Start" }))
+  await user.click(await screen.findByRole("button", { name: "Start" }))
   expect(startComputer).not.toHaveBeenCalled()
-  expect(screen.getByText("Computer operation unavailable")).toBeVisible()
+  expect(await screen.findByText("Computer operation unavailable")).toBeVisible()
 })

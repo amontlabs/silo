@@ -15,9 +15,16 @@ const setup = (props: Partial<Parameters<typeof AuditLog>[0]> = {}) => {
   return { fixture, read, user: userEvent.setup(), ...render(<AuditLog read={fixture.actions.listAudit} computers={computers} active {...props} />) }
 }
 
+// The table is on screen while the first page is still being read; wait until it stops being busy.
+async function loadedTable() {
+  const table = await screen.findByRole("table", { name: "Who did what" })
+  await waitFor(() => expect(table).not.toHaveAttribute("aria-busy"))
+  return table
+}
+
 it("shows time, who, what in plain words, the computer, the outcome and a repeat count in a plain table", async () => {
   setup()
-  const table = await screen.findByRole("table", { name: "Who did what" })
+  const table = await loadedTable()
   expect(within(table).getAllByRole("columnheader").map(header => header.textContent)).toEqual(["Time", "Who", "What", "Computer", "Outcome", "Request"])
   const rows = within(table).getAllByRole("row").slice(1)
   expect(rows).toHaveLength(AUDIT_PAGE_SIZE)
@@ -53,7 +60,7 @@ it("leaves out bookkeeping calls that went fine, but keeps them when they failed
   expect(isAuditBookkeeping({ method: "computers.start", outcome: "ok" })).toBe(false)
   const entry = (id: number, method: string, outcome: "ok" | "error") => ({ id, at: "2026-11-11T12:00:00Z", callerKind: "owner" as const, callerId: undefined, client: undefined, method, computerId: undefined, outcome, errorCode: undefined, jobId: undefined, approvalId: undefined, count: 1, lastAt: undefined })
   render(<AuditLog read={async () => ({ entries: [entry(3, "operations.job.acknowledge", "ok"), entry(2, "operations.job.acknowledge", "error"), entry(1, "computers.start", "ok")], nextBeforeId: undefined })} computers={computers} active />)
-  const table = await screen.findByRole("table", { name: "Who did what" })
+  const table = await loadedTable()
   const rows = within(table).getAllByRole("row").slice(1)
   expect(rows.map(row => within(row).getAllByRole("cell")[2]?.textContent)).toEqual(["Marked a background job as seen", "Started a computer"])
   expect(table).not.toHaveTextContent(/operations\.|guestClient\./)
@@ -62,7 +69,7 @@ it("leaves out bookkeeping calls that went fine, but keeps them when they failed
 it("links a row to the request it belonged to", async () => {
   const onOpenApproval = vi.fn()
   const { user } = setup({ onOpenApproval })
-  const table = await screen.findByRole("table", { name: "Who did what" })
+  const table = await loadedTable()
   await user.click(within(table).getAllByRole("button", { name: "Open request" })[0]!)
   expect(onOpenApproval).toHaveBeenCalledWith("ap-port")
 })
@@ -70,7 +77,7 @@ it("links a row to the request it belonged to", async () => {
 it("opens a request Silo still lists", async () => {
   const onOpenApproval = vi.fn()
   const { user } = setup({ onOpenApproval, openableApprovals: new Set(["ap-port"]) })
-  const table = await screen.findByRole("table", { name: "Who did what" })
+  const table = await loadedTable()
   const button = within(table).getAllByRole("button", { name: "Open request" })[0]!
   expect(button).toBeEnabled()
   await user.click(button)
@@ -80,7 +87,7 @@ it("opens a request Silo still lists", async () => {
 it("disables Open request with the reason for a request Silo no longer lists", async () => {
   const onOpenApproval = vi.fn()
   const { user } = setup({ onOpenApproval, openableApprovals: new Set() })
-  const table = await screen.findByRole("table", { name: "Who did what" })
+  const table = await loadedTable()
   const button = within(table).getAllByRole("button", { name: "Open request" })[0]!
   expect(button).toBeDisabled()
   expect(button.parentElement).toHaveAttribute("title", expect.stringMatching(/no longer in the list/))
@@ -90,7 +97,7 @@ it("disables Open request with the reason for a request Silo no longer lists", a
 
 it("filters by computer and by who", async () => {
   const { user, read } = setup()
-  await screen.findByRole("table", { name: "Who did what" })
+  await loadedTable()
   await user.selectOptions(screen.getByRole("combobox", { name: "Computer" }), computers[0]!.configuration.id)
   await waitFor(() => expect(read).toHaveBeenLastCalledWith({ computerId: computers[0]!.configuration.id, callerKind: undefined, limit: AUDIT_PAGE_SIZE }))
   await user.selectOptions(screen.getByRole("combobox", { name: "Who" }), "owner")
@@ -104,7 +111,7 @@ it("filters by computer and by who", async () => {
 
 it("loads older rows from the cursor until the last page", async () => {
   const { user, read } = setup()
-  const table = await screen.findByRole("table", { name: "Who did what" })
+  const table = await loadedTable()
   const count = () => within(table).getAllByRole("row").length - 1
   expect(count()).toBe(AUDIT_PAGE_SIZE)
   await user.click(screen.getByRole("button", { name: "Load more" }))
