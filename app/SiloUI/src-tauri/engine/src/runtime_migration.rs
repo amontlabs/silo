@@ -282,7 +282,8 @@ impl Controller {
                     .map_err(|_| "Silo's saved computer configuration is invalid.".to_string())?,
             ),
         );
-        let backup = |covered: &[String]| protected_storage::clone_backup(&self.app_data, &storage, covered);
+        let backup =
+            |covered: &[String]| protected_storage::clone_backup(&self.app_data, &storage, covered);
         let progress = |step: protected_storage::Step| {
             protected_storage::hold(&self.app_data, &protected_storage::stage_text(&step));
             changed();
@@ -294,7 +295,10 @@ impl Controller {
         };
         match protected_storage::upgrade(runner, paths, &names, &options) {
             Ok(report) => {
-                protected_storage::set_attention(&storage, protected_storage::attention_of(&report));
+                protected_storage::set_attention(
+                    &storage,
+                    protected_storage::attention_of(&report),
+                );
                 protected_storage::write_report(&storage, &report)
             }
             Err(message) => {
@@ -302,7 +306,10 @@ impl Controller {
                     format!("{message} Its files were kept untouched. Relaunch Silo to try again.");
                 protected_storage::set_attention(
                     &storage,
-                    names.into_iter().map(|name| (name, message.clone())).collect(),
+                    names
+                        .into_iter()
+                        .map(|name| (name, message.clone()))
+                        .collect(),
                 );
                 Err(message)
             }
@@ -1235,8 +1242,8 @@ fn usable_storage(app_data: &Path, writable: bool, status: &str) -> Result<PathB
 /// available for this session. The persistence error is returned.
 pub async fn migration_snapshot(controller: Arc<Controller>) -> Result<MigrationState, String> {
     tokio::task::spawn_blocking(move || controller.snapshot())
-    .await
-    .map_err(|_| "Migration state is unavailable.".to_string())?
+        .await
+        .map_err(|_| "Migration state is unavailable.".to_string())?
 }
 
 fn prepare_retry(state: &mut MigrationState, app_data: &Path) -> Result<(), String> {
@@ -1319,11 +1326,11 @@ mod interrupted_tests;
 #[path = "runtime_migration/protected_storage.rs"]
 mod protected_storage;
 #[cfg(test)]
-#[path = "runtime_migration/protected_storage_tests.rs"]
-mod protected_storage_tests;
-#[cfg(test)]
 #[path = "runtime_migration/protected_storage_live_tests.rs"]
 mod protected_storage_live_tests;
+#[cfg(test)]
+#[path = "runtime_migration/protected_storage_tests.rs"]
+mod protected_storage_tests;
 #[path = "runtime_migration/vocabulary.rs"]
 pub mod vocabulary;
 #[cfg(test)]

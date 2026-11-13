@@ -373,7 +373,9 @@ pub(super) fn cached_with(
     ))
 }
 
-pub(super) fn download_turn(cancelled: &dyn Fn() -> bool) -> Result<MutexGuard<'static, ()>, String> {
+pub(super) fn download_turn(
+    cancelled: &dyn Fn() -> bool,
+) -> Result<MutexGuard<'static, ()>, String> {
     loop {
         match DOWNLOAD_TURN.try_lock() {
             Ok(turn) => return Ok(turn),

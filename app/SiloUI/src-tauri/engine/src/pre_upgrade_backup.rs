@@ -1415,13 +1415,18 @@ mod tests {
         assert!(delete_backup(dir.path(), None).unwrap());
         let clone = protected_clone(dir.path());
         assert_eq!(reveal_path(dir.path()).unwrap(), clone);
-        let first = status(dir.path(), at("2026-11-01T10:00:00Z")).unwrap().unwrap();
+        let first = status(dir.path(), at("2026-11-01T10:00:00Z"))
+            .unwrap()
+            .unwrap();
         assert_eq!(first.delete_at.as_deref(), Some("2026-11-15T10:00:00Z"));
         assert!(!delete_if_due(dir.path(), None, at("2026-11-14T10:00:00Z")).unwrap());
         assert!(clone.is_dir());
         assert!(delete_if_due(dir.path(), None, at("2026-11-15T10:00:00Z")).unwrap());
         assert!(!clone.exists());
-        assert_eq!(status(dir.path(), at("2026-11-15T11:00:00Z")).unwrap(), None);
+        assert_eq!(
+            status(dir.path(), at("2026-11-15T11:00:00Z")).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -1432,7 +1437,9 @@ mod tests {
             dir.path(),
             &dir.path().join("runtime-checkpoints-converted"),
         );
-        let first = status(dir.path(), at("2026-10-14T10:00:00Z")).unwrap().unwrap();
+        let first = status(dir.path(), at("2026-10-14T10:00:00Z"))
+            .unwrap()
+            .unwrap();
         assert_eq!(first.delete_at.as_deref(), Some("2026-10-28T10:00:00Z"));
         assert!(first.notice_pending);
     }

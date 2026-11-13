@@ -411,7 +411,12 @@ mod tests {
 
     #[test]
     fn an_answer_with_no_versions_means_both_agents_are_missing() {
-        for line in [Some("{}"), Some(r#"{"nodeVersion":null,"claudeVersion":null,"codexVersion":null,"recipeVersion":null}"#)] {
+        for line in [
+            Some("{}"),
+            Some(
+                r#"{"nodeVersion":null,"claudeVersion":null,"codexVersion":null,"recipeVersion":null}"#,
+            ),
+        ] {
             let agents = from_linux_status(line);
             assert!(agents
                 .iter()
@@ -422,7 +427,10 @@ mod tests {
 
     #[test]
     fn a_running_linux_computer_that_gave_no_readable_answer_is_unknown_not_missing() {
-        let too_long = format!(r#"{{"codexVersion":"0.167.0","pad":"{}"}}"#, "x".repeat(5000));
+        let too_long = format!(
+            r#"{{"codexVersion":"0.167.0","pad":"{}"}}"#,
+            "x".repeat(5000)
+        );
         for line in [
             None,
             Some(""),
@@ -435,7 +443,9 @@ mod tests {
             let agents = from_linux_status(line);
             assert_eq!(agents.len(), 2);
             assert!(
-                agents.iter().all(|agent| agent.state == AgentState::Unknown),
+                agents
+                    .iter()
+                    .all(|agent| agent.state == AgentState::Unknown),
                 "{line:?}"
             );
             assert!(agents.iter().all(|agent| agent.version.is_none()));
@@ -485,8 +495,12 @@ mod tests {
                 ..NetworkPolicy::default()
             })
         };
-        assert_eq!(network_reason(&held(NetworkPolicyMode::Open, &[]), "dev", AgentId::Codex), None);
-        let closed = network_reason(&held(NetworkPolicyMode::Closed, &[]), "dev", AgentId::Codex).unwrap();
+        assert_eq!(
+            network_reason(&held(NetworkPolicyMode::Open, &[]), "dev", AgentId::Codex),
+            None
+        );
+        let closed =
+            network_reason(&held(NetworkPolicyMode::Closed, &[]), "dev", AgentId::Codex).unwrap();
         assert!(closed.contains("dev has no network access"), "{closed}");
         let some = network_reason(
             &held(NetworkPolicyMode::Allowlist, &["example.com"]),
@@ -494,9 +508,15 @@ mod tests {
             AgentId::Codex,
         )
         .unwrap();
-        assert!(some.contains("does not allow nodejs.org and github.com"), "{some}");
+        assert!(
+            some.contains("does not allow nodejs.org and github.com"),
+            "{some}"
+        );
         let partly = network_reason(
-            &held(NetworkPolicyMode::Allowlist, &["nodejs.org", "api.github.com"]),
+            &held(
+                NetworkPolicyMode::Allowlist,
+                &["nodejs.org", "api.github.com"],
+            ),
             "dev",
             AgentId::Codex,
         )
@@ -504,7 +524,10 @@ mod tests {
         assert!(partly.contains("does not allow github.com,"), "{partly}");
         assert_eq!(
             network_reason(
-                &held(NetworkPolicyMode::Allowlist, &["nodejs.org", "downloads.claude.ai"]),
+                &held(
+                    NetworkPolicyMode::Allowlist,
+                    &["nodejs.org", "downloads.claude.ai"]
+                ),
                 "dev",
                 AgentId::ClaudeCode
             ),
@@ -519,7 +542,10 @@ mod tests {
         let long = safe_reason(&"é".repeat(70_000));
         assert_eq!(long.chars().count(), REASON_CHARS + 1);
         assert!(long.ends_with('…'));
-        assert_eq!(safe_reason(&"y".repeat(REASON_CHARS)).chars().count(), REASON_CHARS);
+        assert_eq!(
+            safe_reason(&"y".repeat(REASON_CHARS)).chars().count(),
+            REASON_CHARS
+        );
     }
 
     #[test]

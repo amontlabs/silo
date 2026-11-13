@@ -7,7 +7,13 @@ use super::{fresh, select_generation, write, Controller, CONVERTED, FILE};
 use crate::runtime::{self, ProcessRunner, RuntimePaths, RuntimeRunner};
 use std::{fs, path::PathBuf, time::Duration};
 
-const GOOD: [&str; 5] = ["e2e-mig-main", "e2e-mig-fork", "e2e-mig-disk", "e2e-mig-run", "e2e-mig-mfork"];
+const GOOD: [&str; 5] = [
+    "e2e-mig-main",
+    "e2e-mig-fork",
+    "e2e-mig-disk",
+    "e2e-mig-run",
+    "e2e-mig-mfork",
+];
 const T: Duration = Duration::from_secs(300);
 
 fn inventory(names: &[&str]) -> runtime::ComputerConfigurationRequest {
@@ -35,13 +41,26 @@ fn msb(paths: &RuntimePaths, args: &[&str]) -> Result<String, String> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
-        Err(format!("{args:?}: {}", String::from_utf8_lossy(&output.stderr)))
+        Err(format!(
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ))
     }
 }
 
 fn read(paths: &RuntimePaths, name: &str, file: &str) -> String {
-    msb(paths, &["exec", name, "--", "sh", "-c", &format!("cat {file} 2>/dev/null || printf MISSING")])
-        .unwrap_or_else(|error| panic!("{error}"))
+    msb(
+        paths,
+        &[
+            "exec",
+            name,
+            "--",
+            "sh",
+            "-c",
+            &format!("cat {file} 2>/dev/null || printf MISSING"),
+        ],
+    )
+    .unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn stopped(paths: &RuntimePaths, name: &str) {
@@ -77,7 +96,10 @@ fn live_old_home_moves_to_protected_storage() {
     // Launch 1: the 0.7.6 computer left running is still running when the new engine starts.
     let launch = |label: &str| -> (Vec<String>, Report) {
         let controller = Controller::new(app.clone());
-        assert!(controller.hold_for_protected_storage(), "{label}: the step has work");
+        assert!(
+            controller.hold_for_protected_storage(),
+            "{label}: the step has work"
+        );
         assert!(controller.blocks_operations());
         let stages = std::cell::RefCell::new(Vec::<String>::new());
         controller
@@ -90,41 +112,83 @@ fn live_old_home_moves_to_protected_storage() {
             .unwrap();
         assert!(!controller.blocks_operations());
         eprintln!("STAGES {label} {:?}", stages.borrow());
-        eprintln!("REPORT {label} {}", fs::read_to_string(storage.join(MARKER)).unwrap());
+        eprintln!(
+            "REPORT {label} {}",
+            fs::read_to_string(storage.join(MARKER)).unwrap()
+        );
         (stages.into_inner(), read_report(&storage).unwrap().unwrap())
     };
     let protected = |home: &std::path::Path, name: &str| {
-        home.join("microsandbox/sandboxes").join(name).join("state-layout.json").exists()
+        home.join("microsandbox/sandboxes")
+            .join(name)
+            .join("state-layout.json")
+            .exists()
     };
     let (stages1, report1) = launch("launch 1");
-    assert!(stages1.iter().any(|s| s.starts_with("Stopping")), "the running computer was stopped");
+    assert!(
+        stages1.iter().any(|s| s.starts_with("Stopping")),
+        "the running computer was stopped"
+    );
     assert!(stages1.iter().any(|s| s.starts_with("Backing up")));
     let backup = app.join(BACKUP);
     assert!(backup.join("computers.json").is_file());
-    assert!(!protected(&backup, "e2e-mig-run"), "the backup was taken before the repair");
+    assert!(
+        !protected(&backup, "e2e-mig-run"),
+        "the backup was taken before the repair"
+    );
     assert!(protected(&storage, "e2e-mig-run"));
     for name in GOOD {
-        let outcome = &report1.computers.iter().find(|c| c.name == name).unwrap().outcome;
+        let outcome = &report1
+            .computers
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap()
+            .outcome;
         eprintln!("LAUNCH1 {name}: {outcome:?}");
     }
-    assert!(report1.complete(), "the step finishes every computer in one launch: {report1:?}");
+    assert!(
+        report1.complete(),
+        "the step finishes every computer in one launch: {report1:?}"
+    );
     let report = read_report(&storage).unwrap().unwrap();
     for name in GOOD {
-        let outcome = &report.computers.iter().find(|c| c.name == name).unwrap().outcome;
-        assert!(matches!(outcome, Outcome::Repaired | Outcome::AlreadyReady), "{name}: {outcome:?}");
+        let outcome = &report
+            .computers
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap()
+            .outcome;
+        assert!(
+            matches!(outcome, Outcome::Repaired | Outcome::AlreadyReady),
+            "{name}: {outcome:?}"
+        );
         assert!(protected(&storage, name), "{name} repaired in place");
     }
     let covers: Vec<String> =
         serde_json::from_slice(&fs::read(backup.join("silo-backup-covers.json")).unwrap()).unwrap();
-    for name in ["e2e-mig-main", "e2e-mig-fork", "e2e-mig-disk", "e2e-mig-mfork"] {
-        assert!(covers.iter().any(|c| c == name), "{name} covered by the backup");
-        assert!(!protected(&backup, name), "{name}: the backup was taken before its repair");
+    for name in [
+        "e2e-mig-main",
+        "e2e-mig-fork",
+        "e2e-mig-disk",
+        "e2e-mig-mfork",
+    ] {
+        assert!(
+            covers.iter().any(|c| c == name),
+            "{name} covered by the backup"
+        );
+        assert!(
+            !protected(&backup, name),
+            "{name}: the backup was taken before its repair"
+        );
     }
     let marker_before = fs::read(storage.join(MARKER)).unwrap();
 
     // Next launch: nothing to do, nothing rewritten.
     let again = Controller::new(app.clone());
-    assert!(!again.hold_for_protected_storage(), "a complete report ends the step");
+    assert!(
+        !again.hold_for_protected_storage(),
+        "a complete report ends the step"
+    );
     assert_eq!(fs::read(storage.join(MARKER)).unwrap(), marker_before);
 
     // Every computer starts with its data.
@@ -148,24 +212,50 @@ fn live_old_home_moves_to_protected_storage() {
     for (name, file, content) in expect {
         assert_eq!(read(&paths, name, file), content, "{name}:{file}");
     }
-    assert_eq!(read(&paths, "e2e-mig-disk", "/workspace/b"), "MISSING", "the restore predates b");
-    assert_eq!(read(&paths, "e2e-mig-mfork", "/workspace/c"), "MISSING", "the fork predates c");
+    assert_eq!(
+        read(&paths, "e2e-mig-disk", "/workspace/b"),
+        "MISSING",
+        "the restore predates b"
+    );
+    assert_eq!(
+        read(&paths, "e2e-mig-mfork", "/workspace/c"),
+        "MISSING",
+        "the fork predates c"
+    );
     for name in GOOD {
         stopped(&paths, name);
     }
 
     // Checkpoints made by 0.7.6 restore: the disk one cold, the full one with its memory.
-    msb(&paths, &["restore", "e2e-mig-main:diskck", "--name", "e2e-mig-rdisk"]).unwrap();
+    msb(
+        &paths,
+        &["restore", "e2e-mig-main:diskck", "--name", "e2e-mig-rdisk"],
+    )
+    .unwrap();
     msb(&paths, &["start", "e2e-mig-rdisk"]).ok();
     assert_eq!(read(&paths, "e2e-mig-rdisk", "/workspace/a"), "main-1");
     assert_eq!(read(&paths, "e2e-mig-rdisk", "/workspace/b"), "MISSING");
     stopped(&paths, "e2e-mig-rdisk");
-    msb(&paths, &["restore", "e2e-mig-main:fullck", "--name", "e2e-mig-rfull"]).unwrap();
+    msb(
+        &paths,
+        &["restore", "e2e-mig-main:fullck", "--name", "e2e-mig-rfull"],
+    )
+    .unwrap();
     msb(&paths, &["start", "e2e-mig-rfull"]).ok();
     assert_eq!(read(&paths, "e2e-mig-rfull", "/workspace/b"), "main-2");
     assert_eq!(read(&paths, "e2e-mig-rfull", "/workspace/c"), "MISSING");
     stopped(&paths, "e2e-mig-rfull");
-    msb(&paths, &["restore", "e2e-mig-main:fullck", "--name", "e2e-mig-rcold", "--disk-only"]).unwrap();
+    msb(
+        &paths,
+        &[
+            "restore",
+            "e2e-mig-main:fullck",
+            "--name",
+            "e2e-mig-rcold",
+            "--disk-only",
+        ],
+    )
+    .unwrap();
     msb(&paths, &["start", "e2e-mig-rcold"]).ok();
     assert_eq!(read(&paths, "e2e-mig-rcold", "/workspace/b"), "main-2");
     assert_eq!(read(&paths, "e2e-mig-rcold", "/workspace/c"), "MISSING");
@@ -185,18 +275,34 @@ fn live_old_home_moves_to_protected_storage() {
     eprintln!("BAD doctor before: {}", state_of(&paths, bad));
     let third = Controller::new(app.clone());
     assert!(third.hold_for_protected_storage());
-    third.run_protected_storage(&ProcessRunner, &paths, &|| {}).unwrap();
+    third
+        .run_protected_storage(&ProcessRunner, &paths, &|| {})
+        .unwrap();
     let report = read_report(&storage).unwrap().unwrap();
-    eprintln!("REPORT2 {}", fs::read_to_string(storage.join(MARKER)).unwrap());
+    eprintln!(
+        "REPORT2 {}",
+        fs::read_to_string(storage.join(MARKER)).unwrap()
+    );
     assert!(!report.complete());
     let message = attention_message(&paths.metadata, bad).expect("flagged");
-    assert!(message.contains("kept untouched") || message.contains("kept"), "{message}");
+    assert!(
+        message.contains("kept untouched") || message.contains("kept"),
+        "{message}"
+    );
     for name in GOOD {
-        let outcome = &report.computers.iter().find(|c| c.name == name).unwrap().outcome;
+        let outcome = &report
+            .computers
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap()
+            .outcome;
         assert_eq!(outcome, &Outcome::AlreadyReady, "{name}");
     }
     assert!(!protected(&storage, bad));
-    assert!(Controller::new(app.clone()).hold_for_protected_storage(), "retried next launch");
+    assert!(
+        Controller::new(app.clone()).hold_for_protected_storage(),
+        "retried next launch"
+    );
     eprintln!("Verified the protected storage step on a 0.7.6 home.");
 }
 

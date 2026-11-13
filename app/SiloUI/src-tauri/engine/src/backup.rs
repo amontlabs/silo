@@ -1106,9 +1106,7 @@ impl<R: MsbRunner> BackupService<R> {
                     payload_path.to_string_lossy().into_owned(),
                 ];
                 // A container's layers sit on the guest image and the file never carries it.
-                if !container
-                    && !leaves_image_out(request.pinned_image.as_ref(), &runtime_config)
-                {
+                if !container && !leaves_image_out(request.pinned_image.as_ref(), &runtime_config) {
                     save_arguments.push("--with-image".into());
                 }
                 self.require_success_with(
@@ -1121,7 +1119,8 @@ impl<R: MsbRunner> BackupService<R> {
             })();
             let payload_path = capture_result?;
             // The guest image a row leaves out, and the build the importing Silo must have.
-            let lean = container || leaves_image_out(request.pinned_image.as_ref(), &runtime_config);
+            let lean =
+                container || leaves_image_out(request.pinned_image.as_ref(), &runtime_config);
             let image_digest = if container {
                 let header = crate::containers::archive::read_header(&payload_path)
                     .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
@@ -3426,7 +3425,10 @@ fn validate_linux_computer(computer: &PackageComputer) -> Result<(), BackupError
         .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
     // The settings and the data must agree on what kind of computer this is.
     if is_container_row(&computer.runtime_config)
-        != (computer.computer_configuration.get("runtime").and_then(Value::as_str)
+        != (computer
+            .computer_configuration
+            .get("runtime")
+            .and_then(Value::as_str)
             == Some("container"))
     {
         return Err(BackupError::InvalidArchive(
@@ -3739,7 +3741,11 @@ fn validate_computer_configuration(name: &str, config: &Value) -> Result<(), Bac
     // `runtime` is absent for a MicroSandbox virtual machine and "container" for a container.
     let optional = ["desktop", "runtime"];
     if object.len()
-        != FIELDS.len() + optional.iter().filter(|key| object.contains_key(**key)).count()
+        != FIELDS.len()
+            + optional
+                .iter()
+                .filter(|key| object.contains_key(**key))
+                .count()
         || object
             .keys()
             .any(|key| !optional.contains(&key.as_str()) && !FIELDS.contains(&key.as_str()))
@@ -5265,7 +5271,8 @@ mod tests {
                     fs::write(output, payload)?;
                     Ok(success())
                 }
-                ["snapshot", "load", _, "--group", group, "--stage-id", id, "--runtime", "container"] => {
+                ["snapshot", "load", _, "--group", group, "--stage-id", id, "--runtime", "container"] =>
+                {
                     assert_eq!(*id, &group["silo-import-".len()..]);
                     Ok(success())
                 }
@@ -5372,7 +5379,10 @@ mod tests {
                     }
                     if self.container.load(Ordering::Acquire) {
                         for entry in &mut entries {
-                            if entry["group"].as_str().is_some_and(|group| !group.starts_with("silo-import-")) {
+                            if entry["group"]
+                                .as_str()
+                                .is_some_and(|group| !group.starts_with("silo-import-"))
+                            {
                                 entry["artifact_path"] = Value::Null;
                             }
                         }
@@ -5683,7 +5693,10 @@ mod tests {
         configuration
     }
 
-    fn export_container(service: &BackupService<FakeRunner>, destination: PathBuf) -> Result<BackupResult, BackupError> {
+    fn export_container(
+        service: &BackupService<FakeRunner>,
+        destination: PathBuf,
+    ) -> Result<BackupResult, BackupError> {
         service.runner.container.store(true, Ordering::Release);
         service.create_backup(
             BackupRequest {
@@ -5714,7 +5727,9 @@ mod tests {
         // The checkpoint is named by `group:member`, not by a folder, and the file never carries
         // the image.
         let selector = format!("dev:{member}");
-        assert!(calls.iter().any(|call| call[..] == ["snapshot", "verify", selector.as_str()]));
+        assert!(calls
+            .iter()
+            .any(|call| call[..] == ["snapshot", "verify", selector.as_str()]));
         let save = calls.iter().find(|call| call[1] == "save").unwrap();
         assert_eq!(save[2], selector);
         assert!(!save.contains(&"--with-image".to_owned()), "{save:?}");
@@ -5722,7 +5737,10 @@ mod tests {
         assert_eq!(manifest.schema_version, 6);
         let row = &manifest.computers[0];
         assert!(!row.image_embedded);
-        assert_eq!(row.image_digest.as_deref(), Some(container_header().template.image_digest.as_str()));
+        assert_eq!(
+            row.image_digest.as_deref(),
+            Some(container_header().template.image_digest.as_str())
+        );
         assert!(is_container_row(&row.runtime_config));
     }
 
@@ -5761,14 +5779,23 @@ mod tests {
         // The runtime captured the copy, by its own name.
         let calls = service.runner.calls.lock().unwrap().clone();
         let capture = calls.iter().find(|call| call[1] == "create").unwrap();
-        assert!(capture.contains(&"silo-export-0123abcd".to_owned()), "{capture:?}");
+        assert!(
+            capture.contains(&"silo-export-0123abcd".to_owned()),
+            "{capture:?}"
+        );
         let manifest = manifest_of(&destination);
         let row = &manifest.computers[0];
         assert_eq!(row.name, "main");
         assert_eq!(row.runtime_config["name"], "main");
-        assert_eq!(row.runtime_config["labels"]["silo.machine-id"], "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8");
+        assert_eq!(
+            row.runtime_config["labels"]["silo.machine-id"],
+            "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8"
+        );
         assert_eq!(row.computer_configuration["name"], "main");
-        assert_eq!(row.computer_configuration["id"], "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8");
+        assert_eq!(
+            row.computer_configuration["id"],
+            "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8"
+        );
         validate_manifest(&manifest).unwrap();
     }
 
@@ -5839,22 +5866,34 @@ mod tests {
         let mut service = service(&temp, FakeRunner::default());
         let destination = temp.path().join("dev.silo-backup");
         export_container(&service, destination.clone()).unwrap();
-        service.container_host = || Err(crate::runtime::RuntimeError::Invalid("no containers here".into()));
+        service.container_host = || {
+            Err(crate::runtime::RuntimeError::Invalid(
+                "no containers here".into(),
+            ))
+        };
         let error = service
             .inspect_archive(&destination, &Cancellation::default())
             .unwrap_err();
         assert!(error.to_string().contains("no containers here"), "{error}");
         let before = service.runner.calls.lock().unwrap().len();
         let error = service
-            .prepare_restore(restore_request(destination.clone()), &Cancellation::default())
+            .prepare_restore(
+                restore_request(destination.clone()),
+                &Cancellation::default(),
+            )
             .err()
             .unwrap();
         assert!(error.to_string().contains("no containers here"), "{error}");
         // Nothing was copied or loaded.
         let calls = service.runner.calls.lock().unwrap().clone();
-        assert!(calls[before..].iter().all(|call| call[1] != "load"), "{calls:?}");
+        assert!(
+            calls[before..].iter().all(|call| call[1] != "load"),
+            "{calls:?}"
+        );
         assert!(fs::read_dir(&service.scratch_root).unwrap().all(|entry| {
-            fs::read_dir(entry.unwrap().path()).map(|mut dir| dir.next().is_none()).unwrap_or(true)
+            fs::read_dir(entry.unwrap().path())
+                .map(|mut dir| dir.next().is_none())
+                .unwrap_or(true)
         }));
 
         service.container_host = || Ok(());
@@ -5865,7 +5904,10 @@ mod tests {
         assert!(restored.snapshot_group.starts_with("silo-import-"));
         let load = import_group_calls(&service, "load");
         assert_eq!(load.len(), 1);
-        assert!(load[0].ends_with(&["--runtime".to_owned(), "container".to_owned()]), "{load:?}");
+        assert!(
+            load[0].ends_with(&["--runtime".to_owned(), "container".to_owned()]),
+            "{load:?}"
+        );
     }
 
     #[test]
@@ -5924,7 +5966,10 @@ mod tests {
             .prepare_restore(restore_request(rewritten), &Cancellation::default())
             .err()
             .unwrap();
-        assert!(error.to_string().contains("does not match its settings"), "{error}");
+        assert!(
+            error.to_string().contains("does not match its settings"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -5934,14 +5979,20 @@ mod tests {
         let destination = temp.path().join("dev.silo-backup");
         export_container(&service, destination.clone()).unwrap();
         let mut manifest = manifest_of(&destination);
-        assert_eq!(manifest.computers[0].computer_configuration["runtime"], "container");
+        assert_eq!(
+            manifest.computers[0].computer_configuration["runtime"],
+            "container"
+        );
         manifest.computers[0].computer_configuration["runtime"] = Value::Null;
         manifest.computers[0]
             .computer_configuration
             .as_object_mut()
             .unwrap()
             .remove("runtime");
-        assert!(validate_manifest(&manifest).unwrap_err().to_string().contains("kind of computer"));
+        assert!(validate_manifest(&manifest)
+            .unwrap_err()
+            .to_string()
+            .contains("kind of computer"));
         let mut other = manifest_of(&destination);
         other.computers[0].computer_configuration["runtime"] = "vm".into();
         assert!(validate_manifest(&other).is_err());
@@ -5956,7 +6007,10 @@ mod tests {
         let mut manifest = manifest_of(&destination);
         manifest.schema_version = 5;
         let error = validate_manifest(&manifest).unwrap_err();
-        assert!(error.to_string().contains("only format 6 allows"), "{error}");
+        assert!(
+            error.to_string().contains("only format 6 allows"),
+            "{error}"
+        );
         manifest.schema_version = 6;
         manifest.computers[0].image_embedded = true;
         manifest.computers[0].image_digest = None;
@@ -6404,7 +6458,12 @@ mod tests {
         let leftovers = fs::read_dir(temp.path())
             .unwrap()
             .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with(".silo-backup"))
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".silo-backup")
+            })
             .count();
         assert_eq!(leftovers, 0);
         // The same export under a roomy cap is written.
@@ -6976,7 +7035,10 @@ mod tests {
             config["network"] = captured_network("created-0.7.14");
             config["network"]["http"] = http.clone();
             let error = export_with_runtime(config).err().unwrap().to_string();
-            assert!(error.contains("custom network http settings"), "{http}: {error}");
+            assert!(
+                error.contains("custom network http settings"),
+                "{http}: {error}"
+            );
         }
     }
 
@@ -9363,7 +9425,10 @@ mod tests {
         let mut names: Vec<_> = std::fs::read_dir(&folder)
             .unwrap()
             .map(|entry| entry.unwrap().path())
-            .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
             .collect();
         names.sort();
         assert!(!names.is_empty());
@@ -9375,7 +9440,9 @@ mod tests {
                 config.as_object_mut().unwrap().remove(key);
             }
             let strict = config["network"]["strict"].clone();
-            let rules = config["network"]["policy"]["rules"].as_array().map_or(0, Vec::len);
+            let rules = config["network"]["policy"]["rules"]
+                .as_array()
+                .map_or(0, Vec::len);
             let name = config["name"].as_str().unwrap().to_owned();
             let before = validate_snapshottable_config(&name, &config);
             let exported = portable_export_network(&name, &mut config);

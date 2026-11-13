@@ -67,10 +67,11 @@ pub fn gateway_network(name: &str, record: &ComputerRecord) -> (Option<Value>, O
     }
     // A record that cannot say which computer it is, or a policy that cannot be read, gets no
     // way out rather than the gateway's own open policy.
-    let Some(plan) = record
-        .label("silo.machine-id")
-        .and_then(|id| crate::network_policy::plan_for_gateway(id, name).ok().map(|plan| (id, plan)))
-    else {
+    let Some(plan) = record.label("silo.machine-id").and_then(|id| {
+        crate::network_policy::plan_for_gateway(id, name)
+            .ok()
+            .map(|plan| (id, plan))
+    }) else {
         return (Some(blocked_gateway_policy()), None);
     };
     let (id, plan) = plan;
@@ -278,7 +279,10 @@ mod tests {
         );
         let (policy, strict) = gateway_network_for(&list);
         assert_eq!(strict, Some(false));
-        assert_eq!(policy.unwrap()["rules"][1]["destination"], json!({"domain": "example.com"}));
+        assert_eq!(
+            policy.unwrap()["rules"][1]["destination"],
+            json!({"domain": "example.com"})
+        );
         let closed = plan(
             &NetworkPolicy {
                 mode: NetworkPolicyMode::Closed,
@@ -309,10 +313,14 @@ mod tests {
         crate::network_policy::store::use_test_path(Some(file.clone()));
         let no_way_out = (Some(blocked_gateway_policy()), None);
         let mut unlabelled = record();
-        unlabelled.labels.retain(|(key, _)| key != "silo.machine-id");
+        unlabelled
+            .labels
+            .retain(|(key, _)| key != "silo.machine-id");
         assert_eq!(gateway_network("dev", &unlabelled), no_way_out);
         let mut labelled = record();
-        labelled.labels.push(("silo.machine-id".into(), "c1".into()));
+        labelled
+            .labels
+            .push(("silo.machine-id".into(), "c1".into()));
         assert_eq!(gateway_network("dev", &labelled), (None, None));
         std::fs::write(&file, "{ not json").unwrap();
         assert_eq!(gateway_network("dev", &labelled), no_way_out);

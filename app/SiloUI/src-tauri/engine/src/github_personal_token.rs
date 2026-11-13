@@ -66,7 +66,9 @@ pub(crate) fn connection(id: &str, removing: bool) -> Value {
             ..
         }) => json!({"state":"disconnected","message":message}),
         Some(_) => json!({"state":"disconnected"}),
-        None => json!({"state":"disconnected","message":"Waiting for GitHub to confirm this token."}),
+        None => {
+            json!({"state":"disconnected","message":"Waiting for GitHub to confirm this token."})
+        }
     }
 }
 /// The state of the secret earlier versions called "the personal token".
@@ -118,7 +120,10 @@ pub(crate) fn users() -> BTreeMap<String, Vec<String>> {
     let mut users: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for policy in load().map(|d| d.computers).unwrap_or_default() {
         if let (Some(id), Some(computer)) = (chosen(&policy), policy["computer"].as_str()) {
-            users.entry(id.to_owned()).or_default().push(computer.to_owned());
+            users
+                .entry(id.to_owned())
+                .or_default()
+                .push(computer.to_owned());
         }
     }
     users
@@ -834,7 +839,10 @@ mod tests {
         // Switching to tokens, or to another token, needs a connected token.
         // A save that selects token access without naming a token says what is missing.
         let missing = validate_method_change(None, &none, true, &connected).unwrap_err();
-        assert!(missing.contains("Choose a connected GitHub token"), "{missing}");
+        assert!(
+            missing.contains("Choose a connected GitHub token"),
+            "{missing}"
+        );
         assert!(validate_method_change(None, &bad, true, &connected).is_err());
         assert!(validate_method_change(Some(&oauth), &bad, true, &connected).is_err());
         assert!(validate_method_change(Some(&oauth), &good, false, &connected).is_ok());
@@ -1007,7 +1015,13 @@ mod tests {
         assert!(verdicts[0].status.as_ref().unwrap().connected);
         assert_eq!(verdicts[0].account.as_deref(), Some("alice"));
         assert!(!verdicts[1].status.as_ref().unwrap().connected);
-        let message = verdicts[1].status.as_ref().unwrap().message.clone().unwrap();
+        let message = verdicts[1]
+            .status
+            .as_ref()
+            .unwrap()
+            .message
+            .clone()
+            .unwrap();
         assert!(!message.contains("synthetic_bad"));
         assert_eq!(publish_verdicts(&verdicts, &both), ["a", "b"]);
         assert!(connected("a") && !connected("b"));
@@ -1027,7 +1041,8 @@ mod tests {
     #[test]
     fn a_computer_whose_token_was_removed_is_marked_and_stays_without_a_token() {
         let _fixture = Fixture::new();
-        let kept = crate::secrets::import_github_token("synthetic_token_a", "alice", "work").unwrap();
+        let kept =
+            crate::secrets::import_github_token("synthetic_token_a", "alice", "work").unwrap();
         connect(&[&kept]);
         let marked = with_missing_marks(&[
             token_policy("kept", Some(&kept)),
@@ -1048,7 +1063,10 @@ mod tests {
         let _fixture = Fixture::new();
         let values = || token_values(&[("a", "synthetic_a"), ("b", "synthetic_b")]);
         connect(&["a"]);
-        statuses().insert("b".into(), Status::disconnected("GitHub did not accept this token."));
+        statuses().insert(
+            "b".into(),
+            Status::disconnected("GitHub did not accept this token."),
+        );
         for failure in [
             "Cannot reach GitHub.",
             "GitHub is limiting requests.",
@@ -1169,13 +1187,12 @@ mod tests {
     #[test]
     fn a_token_secret_takes_a_label_and_no_computers_or_hosts() {
         let _fixture = Fixture::new();
-        use_test_lookup(Some(Box::new(|_| panic!("an invalid request reached GitHub"))));
+        use_test_lookup(Some(Box::new(|_| {
+            panic!("an invalid request reached GitHub")
+        })));
         for name in ["", "-leading", "has space", "has.dot"] {
-            let request = crate::secrets::github_token_request(
-                None,
-                name,
-                Some("synthetic_token_a".into()),
-            );
+            let request =
+                crate::secrets::github_token_request(None, name, Some("synthetic_token_a".into()));
             assert!(crate::secrets::save_secret(request, || Ok(())).is_err());
         }
     }
@@ -1366,8 +1383,8 @@ mod tests {
     fn the_single_token_status_follows_the_secret_named_github_token() {
         let _fixture = Fixture::new();
         assert_eq!(status(), json!({"state":"disconnected","saved":false}));
-        let id = crate::secrets::import_github_token("synthetic_legacy", "alice", LEGACY_NAME)
-            .unwrap();
+        let id =
+            crate::secrets::import_github_token("synthetic_legacy", "alice", LEGACY_NAME).unwrap();
         assert_eq!(status()["saved"], true);
         assert_eq!(status()["state"], "disconnected");
         connect(&[&id]);
@@ -1379,8 +1396,8 @@ mod tests {
     #[test]
     fn a_save_from_a_client_that_knows_only_token_mode_names_the_legacy_secret() {
         let _fixture = Fixture::new();
-        let id = crate::secrets::import_github_token("synthetic_legacy", "alice", LEGACY_NAME)
-            .unwrap();
+        let id =
+            crate::secrets::import_github_token("synthetic_legacy", "alice", LEGACY_NAME).unwrap();
         // Until a client has used the single-token methods, nothing is chosen for a save.
         let unmarked = with_legacy_choice(json!({"computers":[token_policy("one", None)]}));
         assert!(unmarked["computers"][0]["tokenSecretId"].is_null());

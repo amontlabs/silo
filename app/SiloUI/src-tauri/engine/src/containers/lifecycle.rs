@@ -16,12 +16,11 @@
 
 use super::{
     args::Exec,
-    Material,
     hold::{self, ExecGroup, Reaped, StartMark},
     layout::{ComputerDir, ComputerRecord, Layout},
     oci,
     tools::{run_checked, Tools},
-    users,
+    users, Material,
 };
 use crate::computer_gateway::{computer_ca, Gateway, Params, Secret};
 use crate::gateway_control::Ready;
@@ -167,7 +166,8 @@ fn for_user_manager(command: &mut Command) {
 
 fn for_user_manager_of(command: &mut Command, uid: u32, current: Option<&std::ffi::OsStr>) {
     use std::os::unix::fs::MetadataExt;
-    let owned = current.is_some_and(|dir| std::fs::metadata(dir).is_ok_and(|meta| meta.uid() == uid));
+    let owned =
+        current.is_some_and(|dir| std::fs::metadata(dir).is_ok_and(|meta| meta.uid() == uid));
     if !owned {
         command
             .env("XDG_RUNTIME_DIR", format!("/run/user/{uid}"))
@@ -280,7 +280,9 @@ pub fn reconcile(paths: &RuntimePaths, tools: &Tools) {
             // container, whose network device the namespace keeps. One that cannot be taken back
             // (its device is gone, a secret cannot be read) is stopped, as before.
             match adopt(paths, tools, &name, &record) {
-                Ok(()) => eprintln!("Container computer {name}: taken back after an engine restart."),
+                Ok(()) => {
+                    eprintln!("Container computer {name}: taken back after an engine restart.")
+                }
                 Err(detail) => {
                     eprintln!(
                         "Container computer {name}: stopping a leftover of an earlier Silo engine ({detail})."
@@ -319,7 +321,9 @@ pub fn adopt(
     let socket = state.join("adopt.sock");
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).map_err(|e| at("bind", &socket, e))?;
-    listener.set_nonblocking(true).map_err(|e| at("set up", &socket, e))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| at("set up", &socket, e))?;
     let mut command = Command::new(&tools.ctr);
     command
         .arg("tap")
@@ -330,7 +334,11 @@ pub fn adopt(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let mut child = Reaped::new(command.spawn().map_err(|e| format!("silo-ctr could not start: {e}"))?);
+    let mut child = Reaped::new(
+        command
+            .spawn()
+            .map_err(|e| format!("silo-ctr could not start: {e}"))?,
+    );
     let deadline = Instant::now() + Duration::from_secs(20);
     let stream = loop {
         match listener.accept() {
@@ -349,12 +357,16 @@ pub fn adopt(
         }
     };
     stream.set_nonblocking(false).map_err(io)?;
-    stream.set_read_timeout(Some(Duration::from_secs(30))).map_err(io)?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .map_err(io)?;
     let tap = receive_descriptor(&stream).map_err(|e| format!("network device: {e}"))?;
     let id = record.label("silo.machine-id").unwrap_or(name).to_owned();
-    let (ca_cert, ca_key) = computer_ca(&tools.gateway, &id).map_err(|e| format!("computer CA: {e}"))?;
-    let (gateway, _, active) =
-        start_gateway(paths, tools, name, record, &state, tap, &ca_cert, &ca_key, &material)?;
+    let (ca_cert, ca_key) =
+        computer_ca(&tools.gateway, &id).map_err(|e| format!("computer CA: {e}"))?;
+    let (gateway, _, active) = start_gateway(
+        paths, tools, name, record, &state, tap, &ca_cert, &ca_key, &material,
+    )?;
     register(paths, name, &state, gateway, active)?;
     let _ = std::fs::remove_file(&socket);
     Ok(())
@@ -573,7 +585,8 @@ fn prepare_upper(
 fn cgroup_dir(paths: &RuntimePaths, name: &str) -> PathBuf {
     // SAFETY: getuid has no preconditions.
     let uid = unsafe { libc::getuid() };
-    Path::new("/sys/fs/cgroup").join(cgroup_path(uid, &unit_name(paths, name)).trim_start_matches('/'))
+    Path::new("/sys/fs/cgroup")
+        .join(cgroup_path(uid, &unit_name(paths, name)).trim_start_matches('/'))
 }
 
 /// The file in a computer's state folder that says its user paused it. A checkpoint freezes the
@@ -583,7 +596,10 @@ fn cgroup_dir(paths: &RuntimePaths, name: &str) -> PathBuf {
 const PAUSED_FILE: &str = "paused";
 
 fn paused_file(paths: &RuntimePaths, name: &str) -> PathBuf {
-    Layout::new(&paths.home).computer(name).state().join(PAUSED_FILE)
+    Layout::new(&paths.home)
+        .computer(name)
+        .state()
+        .join(PAUSED_FILE)
 }
 
 /// Whether the computer's user paused it (and it has not been resumed, stopped or started since).
@@ -636,7 +652,8 @@ fn freeze_holding(
     let events = directory.join("cgroup.events");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if std::fs::read_to_string(&events).is_ok_and(|text| text.lines().any(|l| l == "frozen 1")) {
+        if std::fs::read_to_string(&events).is_ok_and(|text| text.lines().any(|l| l == "frozen 1"))
+        {
             return Ok(frozen);
         }
         if Instant::now() >= deadline {
@@ -702,8 +719,12 @@ pub enum CopyFailure {
 
 /// The arguments that run `command` as the container's owner in its user namespace.
 fn namespace_args<'a>(agent: &'a str, command: &[&'a std::ffi::OsStr]) -> Vec<&'a std::ffi::OsStr> {
-    let mut args: Vec<&std::ffi::OsStr> =
-        vec!["userns".as_ref(), "--keep-id".as_ref(), agent.as_ref(), "--".as_ref()];
+    let mut args: Vec<&std::ffi::OsStr> = vec![
+        "userns".as_ref(),
+        "--keep-id".as_ref(),
+        agent.as_ref(),
+        "--".as_ref(),
+    ];
     args.extend_from_slice(command);
     args
 }
@@ -731,7 +752,10 @@ pub fn copy_layer(
     ];
     match super::tools::run_bounded(&tools.ctr, &namespace_args(&agent, &copy), limit) {
         Ok(done) if done.success => Ok(()),
-        Ok(done) => Err(CopyFailure::Failed(format!("cp failed: {}", done.last_error))),
+        Ok(done) => Err(CopyFailure::Failed(format!(
+            "cp failed: {}",
+            done.last_error
+        ))),
         Err(super::tools::BoundedError::TimedOut) => Err(CopyFailure::TooSlow),
         Err(super::tools::BoundedError::CouldNotStart(detail)) => Err(CopyFailure::Failed(detail)),
     }
@@ -756,7 +780,10 @@ pub fn layer_bytes(tools: &Tools, layer: &Path) -> Option<Option<u64>> {
         Duration::from_secs(300),
     ) {
         Err(super::tools::BoundedError::CouldNotStart(detail)) => {
-            eprintln!("Container disk guard: measuring {}: {detail}", layer.display());
+            eprintln!(
+                "Container disk guard: measuring {}: {detail}",
+                layer.display()
+            );
             None
         }
         Err(super::tools::BoundedError::TimedOut) => Some(None),
@@ -801,7 +828,10 @@ pub fn flatten(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), St
     }
     let merged = super::layers::new_id();
     let _reservation = super::layers::reserve(&merged);
-    let sources: Vec<PathBuf> = record.layers[..count].iter().map(|id| layout.layer(id)).collect();
+    let sources: Vec<PathBuf> = record.layers[..count]
+        .iter()
+        .map(|id| layout.layer(id))
+        .collect();
     if let Err(detail) = merge_layers(tools, &layout.layer(&merged), &sources) {
         let _ = super::image::remove_tree(tools, &layout.layer(&merged));
         return Err(detail);
@@ -881,10 +911,15 @@ pub fn guard_pass(paths: &RuntimePaths, tools: &Tools) -> Vec<String> {
 /// The message the host disk guard left when it stopped the computer, if it did and nothing has
 /// started the computer since.
 pub fn guard_notice(paths: &RuntimePaths, name: &str) -> Option<String> {
-    std::fs::read_to_string(Layout::new(&paths.home).computer(name).state().join(super::host_disk::NOTICE))
-        .ok()
-        .map(|text| text.trim().to_owned())
-        .filter(|text| !text.is_empty())
+    std::fs::read_to_string(
+        Layout::new(&paths.home)
+            .computer(name)
+            .state()
+            .join(super::host_disk::NOTICE),
+    )
+    .ok()
+    .map(|text| text.trim().to_owned())
+    .filter(|text| !text.is_empty())
 }
 
 /// Starts the host disk guard once for this engine process. It holds nothing about any computer
@@ -955,7 +990,9 @@ fn usage_log_file(home: &Path, name: &str) -> Result<PathBuf, String> {
 }
 
 /// `recvmsg` of one file descriptor sent with `SCM_RIGHTS`.
-pub(super) fn receive_descriptor(stream: &std::os::unix::net::UnixStream) -> Result<OwnedFd, String> {
+pub(super) fn receive_descriptor(
+    stream: &std::os::unix::net::UnixStream,
+) -> Result<OwnedFd, String> {
     use std::os::fd::AsRawFd;
     let mut data = [0u8; 8];
     let mut iov = libc::iovec {
@@ -1233,8 +1270,9 @@ fn launch(
         .set_read_timeout(Some(Duration::from_secs(60)))
         .map_err(io)?;
     let tap = receive_descriptor(&stream).map_err(|e| format!("network device: {e}"))?;
-    let (gateway, ready, active) =
-        start_gateway(paths, tools, name, record, &state, tap, &ca_cert, &ca_key, material)?;
+    let (gateway, ready, active) = start_gateway(
+        paths, tools, name, record, &state, tap, &ca_cert, &ca_key, material,
+    )?;
     let mac = ready
         .guest_mac
         .iter()
@@ -1409,7 +1447,13 @@ fn systemctl(tools: &Tools, args: &[&str]) {
 
 /// The files of a computer's state folder that belong to one run: a stop or a start removes them
 /// (a pause with them).
-const STALE_STATE_FILES: [&str; 5] = ["ctl.sock", "holder.pid", "outer.pid", "container.pid", PAUSED_FILE];
+const STALE_STATE_FILES: [&str; 5] = [
+    "ctl.sock",
+    "holder.pid",
+    "outer.pid",
+    "container.pid",
+    PAUSED_FILE,
+];
 
 /// What an earlier run left: a scope, crun state, a socket.
 fn cleanup_stale(paths: &RuntimePaths, tools: &Tools, dir: &ComputerDir, name: &str) {
@@ -2012,7 +2056,12 @@ mod tests {
         std::fs::create_dir_all(&state).unwrap();
         std::fs::write(state.join("holder.pid"), "10\n").unwrap();
         std::fs::write(state.join("ctl.sock"), "").unwrap();
-        fake_process(proc.path(), 10, "silo-ctr", &scope_of(&unit_name(&paths, name)));
+        fake_process(
+            proc.path(),
+            10,
+            "silo-ctr",
+            &scope_of(&unit_name(&paths, name)),
+        );
         let (control, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
         let running = register_for_test(name, Gateway::for_test(control), Vec::new());
         let status = || status_in(proc.path(), &paths, name, &record(true));
@@ -2121,7 +2170,11 @@ mod tests {
         );
         assert_eq!(plan.group.process_file().parent().unwrap(), exec_directory);
         assert_eq!(
-            std::fs::metadata(&exec_directory).unwrap().permissions().mode() & 0o777,
+            std::fs::metadata(&exec_directory)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
             0o700
         );
         assert_eq!(args.last().unwrap(), "dev");
@@ -2192,18 +2245,27 @@ mod tests {
         let dir = layout.computer("dev");
         std::fs::create_dir_all(dir.path()).unwrap();
         let mut stored = record(true);
-        stored.env = ["PATH=/work/bin", "LD_PRELOAD=/work/evil.so", "HOME=/work", "OWN=1"]
-            .iter()
-            .map(|pair| {
-                let (key, value) = pair.split_once('=').unwrap();
-                (key.to_owned(), value.to_owned())
-            })
-            .collect();
+        stored.env = [
+            "PATH=/work/bin",
+            "LD_PRELOAD=/work/evil.so",
+            "HOME=/work",
+            "OWN=1",
+        ]
+        .iter()
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap();
+            (key.to_owned(), value.to_owned())
+        })
+        .collect();
         dir.write_record(&stored).unwrap();
         let made = layout.image("sha256:made-from");
         std::fs::create_dir_all(made.join("rootfs/etc")).unwrap();
         std::fs::write(made.join("digest"), "sha256:made-from\n").unwrap();
-        std::fs::write(made.join("rootfs/etc/passwd"), "root:x:0:0::/root:/bin/sh\n").unwrap();
+        std::fs::write(
+            made.join("rootfs/etc/passwd"),
+            "root:x:0:0::/root:/bin/sh\n",
+        )
+        .unwrap();
         let plan = exec_command(&paths, &fake_tools(home.path()), "dev", exec, true).unwrap();
         let process: serde_json::Value =
             serde_json::from_slice(&std::fs::read(plan.group.process_file()).unwrap()).unwrap();
@@ -2221,17 +2283,37 @@ mod tests {
         engine.fixed_environment = true;
         let env = process_environment(&engine);
         // A program an account can replace runs as root with the engine's defaults only.
-        for set in ["PATH=/work/bin", "LD_PRELOAD=/work/evil.so", "HOME=/work", "OWN=1", "A=b"] {
-            assert!(!env.iter().any(|entry| entry == set), "{set} reached {env:?}");
+        for set in [
+            "PATH=/work/bin",
+            "LD_PRELOAD=/work/evil.so",
+            "HOME=/work",
+            "OWN=1",
+            "A=b",
+        ] {
+            assert!(
+                !env.iter().any(|entry| entry == set),
+                "{set} reached {env:?}"
+            );
         }
-        assert!(env.iter().any(|entry| entry
-            == "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"));
+        assert!(env
+            .iter()
+            .any(|entry| entry
+                == "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"));
         assert!(env.iter().any(|entry| entry == "HOME=/root"));
         assert!(env.iter().any(|entry| entry == "SILO_RUNTIME=container"));
         // The owner's own command keeps the computer's variables and its own.
         let env = process_environment(&exec_of("root"));
-        for set in ["PATH=/work/bin", "LD_PRELOAD=/work/evil.so", "HOME=/work", "OWN=1", "A=b"] {
-            assert!(env.iter().any(|entry| entry == set), "{set} missing from {env:?}");
+        for set in [
+            "PATH=/work/bin",
+            "LD_PRELOAD=/work/evil.so",
+            "HOME=/work",
+            "OWN=1",
+            "A=b",
+        ] {
+            assert!(
+                env.iter().any(|entry| entry == set),
+                "{set} missing from {env:?}"
+            );
         }
     }
 
@@ -2254,7 +2336,11 @@ mod tests {
         let made = layout.image("sha256:made-from");
         std::fs::create_dir_all(made.join("rootfs/etc")).unwrap();
         std::fs::write(made.join("digest"), "sha256:made-from\n").unwrap();
-        std::fs::write(made.join("rootfs/etc/passwd"), "root:x:0:0::/root:/bin/sh\n").unwrap();
+        std::fs::write(
+            made.join("rootfs/etc/passwd"),
+            "root:x:0:0::/root:/bin/sh\n",
+        )
+        .unwrap();
         let tools = fake_tools(home.path());
         let first = exec_command(&paths, &tools, "dev", &exec_of("root"), true).unwrap();
         let mut leader = std::process::Command::new("sleep")
@@ -2269,7 +2355,10 @@ mod tests {
         std::fs::write(finished.join("exec.pid"), "999999999\n").unwrap();
         std::fs::write(finished.join("process.json"), "{}").unwrap();
         let second = exec_command(&paths, &tools, "dev", &exec_of("root"), true).unwrap();
-        assert!(first.group.process_file().exists(), "a running exec lost its files");
+        assert!(
+            first.group.process_file().exists(),
+            "a running exec lost its files"
+        );
         assert!(second.group.process_file().exists());
         assert!(!finished.exists(), "a finished exec's files stayed behind");
         // So the timeout can still end the command: a process of the computer's scope, as
@@ -2348,19 +2437,23 @@ mod tests {
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
-        let at = args.iter().position(|arg| arg == "--console-socket").unwrap();
+        let at = args
+            .iter()
+            .position(|arg| arg == "--console-socket")
+            .unwrap();
         assert_eq!(args[at + 1], "/tmp/silo-pty-x/c");
         // The container name stays last, after every option.
         assert_eq!(args.last().unwrap(), "dev");
-        let process: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(plan.group.process_file()).unwrap(),
-        )
-        .unwrap();
+        let process: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(plan.group.process_file()).unwrap()).unwrap();
         assert_eq!(process["terminal"], true);
         assert_eq!(process["user"]["uid"], 1001);
         // Without a terminal, no socket is passed.
         let plain = exec_command(&paths, &tools, "dev", &exec_of("silo"), false).unwrap();
-        assert!(!plain.command.get_args().any(|arg| arg == "--console-socket"));
+        assert!(!plain
+            .command
+            .get_args()
+            .any(|arg| arg == "--console-socket"));
     }
 
     #[test]
@@ -2368,7 +2461,10 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let (paths, tools) = a_computer_with_an_image(home.path());
         let identity = identity(&paths, &tools, "dev", "silo").unwrap();
-        assert_eq!((identity.uid, identity.gid, identity.home.as_str()), (1001, 1001, "/home/silo"));
+        assert_eq!(
+            (identity.uid, identity.gid, identity.home.as_str()),
+            (1001, 1001, "/home/silo")
+        );
         assert!(identity_error(&paths, &tools, "nobody").contains("does not exist"));
     }
 
@@ -2389,7 +2485,10 @@ mod tests {
         // One this process made is owned by the engine's own user, as an earlier build's was.
         std::fs::create_dir_all(&upper).unwrap();
         let error = check_upper_in(&upper, "dev", &sub_ids).unwrap_err();
-        assert!(error.contains("Recreate it") && error.contains("dev"), "{error}");
+        assert!(
+            error.contains("Recreate it") && error.contains("dev"),
+            "{error}"
+        );
         // A file in its place is no upper directory either.
         std::fs::remove_dir(&upper).unwrap();
         std::fs::write(&upper, "x").unwrap();
@@ -2409,7 +2508,11 @@ mod tests {
     }
 
     fn hex_prefix(digest: &[u8]) -> String {
-        digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect()
+        digest
+            .iter()
+            .take(8)
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 
     #[test]

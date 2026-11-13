@@ -552,7 +552,11 @@ fn failure(message: impl Into<String>) -> DispatchError {
     } else {
         ErrorCode::Internal
     };
-    DispatchError { code, message, details: None }
+    DispatchError {
+        code,
+        message,
+        details: None,
+    }
 }
 
 fn serialization(error: impl std::fmt::Display) -> DispatchError {
@@ -1336,9 +1340,7 @@ fn owner_job_operation(
                 &job_id,
             )
             .map_err(|error| match error {
-                super::operations::SharedAcknowledgeError::Registry(error) => {
-                    registry_error(error)
-                }
+                super::operations::SharedAcknowledgeError::Registry(error) => registry_error(error),
                 super::operations::SharedAcknowledgeError::Policy(message) => {
                     BridgeError::from(message)
                 }
@@ -3521,11 +3523,7 @@ pub(crate) mod tests {
             request(json!([]), json!(["api.example.com"])),
         ] {
             let error = expect_error(MethodName::SecretsSave, params).await;
-            assert!(
-                error.message.contains("GitHub access"),
-                "{}",
-                error.message
-            );
+            assert!(error.message.contains("GitHub access"), "{}", error.message);
         }
         let mut unknown_kind = request(json!([]), json!([]));
         unknown_kind["request"]["kind"] = json!("ssh-key");

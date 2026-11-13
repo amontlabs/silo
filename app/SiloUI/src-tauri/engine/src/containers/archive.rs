@@ -614,9 +614,13 @@ mod linux {
         #[test]
         fn a_full_disk_is_named_instead_of_the_helpers_broken_pipe() {
             let full = || std::io::Error::from_raw_os_error(libc::ENOSPC);
-            let error = packed(Err(full()), false, "silo-ctr: write the stream: Broken pipe\n")
-                .unwrap_err()
-                .to_string();
+            let error = packed(
+                Err(full()),
+                false,
+                "silo-ctr: write the stream: Broken pipe\n",
+            )
+            .unwrap_err()
+            .to_string();
             assert!(
                 error.starts_with("The export file could not be written:")
                     && !error.contains("Broken pipe"),

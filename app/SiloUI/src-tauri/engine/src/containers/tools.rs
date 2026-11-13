@@ -138,8 +138,18 @@ pub fn run_bounded(
             text
         })
     };
-    let stdout = read(child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
-    let stderr = read(child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    let stdout = read(
+        child
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>),
+    );
+    let stderr = read(
+        child
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>),
+    );
     let deadline = std::time::Instant::now() + limit;
     let status = loop {
         match child.try_wait() {
@@ -231,6 +241,9 @@ mod tests {
         assert_eq!(outcome.unwrap_err(), BoundedError::TimedOut);
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
         std::thread::sleep(std::time::Duration::from_millis(2300));
-        assert!(!marker.exists(), "the child of the killed program kept running");
+        assert!(
+            !marker.exists(),
+            "the child of the killed program kept running"
+        );
     }
 }

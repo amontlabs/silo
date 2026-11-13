@@ -1253,7 +1253,10 @@ fn a_secret_saved_before_shared_hosting_was_allowed_does_not_widen_the_list() {
         .iter()
         .map(Rule::token)
         .collect();
-    assert!(!tokens.iter().any(|token| token.contains("netlify")), "{tokens:?}");
+    assert!(
+        !tokens.iter().any(|token| token.contains("netlify")),
+        "{tokens:?}"
+    );
     assert_eq!(
         grants.too_wide(),
         [("SITE".to_owned(), "*.netlify.app".to_owned())]

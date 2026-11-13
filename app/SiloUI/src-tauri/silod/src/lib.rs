@@ -4,7 +4,6 @@
 compile_error!("silod is an engine for macOS and Linux hosts");
 
 pub mod agent;
-pub mod channel;
 #[cfg(target_os = "macos")]
 pub mod app;
 /// The Linux run loop, under the name `entry` dispatches to on both platforms.
@@ -13,6 +12,7 @@ pub mod app;
 pub mod app;
 #[cfg(target_os = "macos")]
 pub mod app_delegate;
+pub mod channel;
 #[cfg(target_os = "macos")]
 pub mod code_signature;
 pub mod context;
@@ -65,9 +65,7 @@ pub fn entry(args: &[String]) -> Result<i32, String> {
         Some(REMOTE_BRIDGE_FLAG) => app::run_remote_bridge(&args[2..]),
         // The runtime command of container computers (`ssh serve`, `exec --tty`), which the editor,
         // SSH access and terminals start where they start `msb` for a virtual machine.
-        Some(silo_engine::containers::cli::FLAG) => {
-            silo_engine::containers::cli::run(&args[2..])
-        }
+        Some(silo_engine::containers::cli::FLAG) => silo_engine::containers::cli::run(&args[2..]),
         Some("--agent") | None => app::run_agent(),
         Some(argument) => Err(format!("unsupported silod argument: {argument}")),
     }

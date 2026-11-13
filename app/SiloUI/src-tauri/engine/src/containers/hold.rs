@@ -217,9 +217,7 @@ pub fn in_scope(cgroup: &str, unit: &str) -> bool {
     cgroup
         .lines()
         .filter_map(|line| line.splitn(3, ':').nth(2))
-        .any(|path| {
-            path.split('/').find(|part| part.ends_with(".scope")) == Some(scope.as_str())
-        })
+        .any(|path| path.split('/').find(|part| part.ends_with(".scope")) == Some(scope.as_str()))
 }
 
 /// The warnings the holder wrote to its log at or after byte `from` (`silo-ctr: warning: ...`).
@@ -252,7 +250,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("cgroup"),
-            format!("0::/user.slice/user-1000.slice/user@1000.service/app.slice/{unit}.scope/ctr\n"),
+            format!(
+                "0::/user.slice/user-1000.slice/user@1000.service/app.slice/{unit}.scope/ctr\n"
+            ),
         )
         .unwrap();
     }
@@ -325,7 +325,11 @@ mod tests {
             .args(["-c", "trap 'exit 42' TERM; sleep 300 & wait"])
             .process_group(0);
         let mut leader = leader.spawn().unwrap();
-        std::fs::write(directory.path().join("exec.pid"), format!("{}\n", leader.id())).unwrap();
+        std::fs::write(
+            directory.path().join("exec.pid"),
+            format!("{}\n", leader.id()),
+        )
+        .unwrap();
         let proc = tempfile::tempdir().unwrap();
         in_computer(proc.path(), leader.id(), UNIT);
         in_computer(proc.path(), std::process::id(), UNIT);
@@ -334,11 +338,19 @@ mod tests {
         std::thread::sleep(Duration::from_millis(300));
         assert!(group.signal(libc::SIGTERM));
         let status = leader.wait().unwrap();
-        assert_eq!(status.code(), Some(42), "the command did not get SIGTERM: {status:?}");
+        assert_eq!(
+            status.code(),
+            Some(42),
+            "the command did not get SIGTERM: {status:?}"
+        );
         // The command is gone: nothing is signalled any more.
         assert!(!group.signal(libc::SIGTERM));
         // A process that does not lead its group is never signalled.
-        std::fs::write(directory.path().join("exec.pid"), format!("{}\n", std::process::id())).unwrap();
+        std::fs::write(
+            directory.path().join("exec.pid"),
+            format!("{}\n", std::process::id()),
+        )
+        .unwrap();
         // SAFETY: getpgrp has no preconditions.
         if unsafe { libc::getpgrp() } as u32 != std::process::id() {
             assert!(!group.signal(libc::SIGTERM));
@@ -390,8 +402,14 @@ mod tests {
         let leftover = exec_leftover(directory.path(), Duration::ZERO);
         starting.kill().unwrap();
         starting.wait().unwrap();
-        assert!(!leftover, "the files of an exec that is starting would be removed");
-        assert!(exec_leftover(directory.path(), Duration::from_secs(600)), "the command is gone");
+        assert!(
+            !leftover,
+            "the files of an exec that is starting would be removed"
+        );
+        assert!(
+            exec_leftover(directory.path(), Duration::from_secs(600)),
+            "the command is gone"
+        );
     }
 
     #[test]
@@ -437,8 +455,11 @@ mod tests {
         assert!(!group.kill());
         let dir = proc.path().join(bystander.id().to_string());
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("cgroup"), "0::/user.slice/user-1000.slice/session-3.scope\n")
-            .unwrap();
+        std::fs::write(
+            dir.join("cgroup"),
+            "0::/user.slice/user-1000.slice/session-3.scope\n",
+        )
+        .unwrap();
         assert!(!group.kill());
         in_computer(proc.path(), bystander.id(), "silo-ct-ab12cd34-other");
         assert!(!group.kill());
@@ -457,7 +478,11 @@ mod tests {
     fn the_folder_of_a_terminals_socket_is_the_accounts_alone() {
         use std::os::unix::fs::PermissionsExt;
         let directory = console_directory().unwrap();
-        let mode = std::fs::metadata(directory.path()).unwrap().permissions().mode() & 0o7777;
+        let mode = std::fs::metadata(directory.path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
         assert_eq!(mode, 0o700, "{mode:o}");
     }
 

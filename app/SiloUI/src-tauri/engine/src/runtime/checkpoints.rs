@@ -1803,7 +1803,10 @@ fn running_child_matches(
 
 /// The runtime's `restore` must take `--net-strict` (Silo's `restore-net-strict` patch) before an
 /// allowlist computer is restored, or it would come back strict and its allowed hosts would fail.
-fn ensure_restore_strict(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<(), RuntimeError> {
+fn ensure_restore_strict(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+) -> Result<(), RuntimeError> {
     let probe = runner.run(
         paths,
         &["--silo-restore-strict-protocol".into()],
@@ -1875,11 +1878,19 @@ fn changed_network_plan(
                         configuration.name()
                     ))
                 })?;
-            crate::network_policy::plan_for(configuration.id(), configuration.name(), Some(recorded))
-                .map_err(RuntimeError::Unavailable)?
+            crate::network_policy::plan_for(
+                configuration.id(),
+                configuration.name(),
+                Some(recorded),
+            )
+            .map_err(RuntimeError::Unavailable)?
         }
     };
-    let network = inspected.config.get("network").cloned().unwrap_or(Value::Null);
+    let network = inspected
+        .config
+        .get("network")
+        .cloned()
+        .unwrap_or(Value::Null);
     if plan.matches(&network) {
         return Ok(None);
     }
@@ -1928,7 +1939,10 @@ pub struct NetworkPolicyView {
 }
 
 /// Reads a Linux computer's network as the runtime holds it.
-pub fn network_policy_view(paths: &RuntimePaths, computer_id: &str) -> Result<NetworkPolicyView, String> {
+pub fn network_policy_view(
+    paths: &RuntimePaths,
+    computer_id: &str,
+) -> Result<NetworkPolicyView, String> {
     let configuration =
         computer_configuration(paths, computer_id).map_err(|error| error.to_string())?;
     let record = load(paths, computer_id).map_err(|error| error.to_string())?;
@@ -1936,7 +1950,10 @@ pub fn network_policy_view(paths: &RuntimePaths, computer_id: &str) -> Result<Ne
     let inspected = if pending {
         None
     } else {
-        Some(inspect_computer(&ProcessRunner, paths, configuration.name()).map_err(|error| error.to_string())?)
+        Some(
+            inspect_computer(&ProcessRunner, paths, configuration.name())
+                .map_err(|error| error.to_string())?,
+        )
     };
     Ok(NetworkPolicyView {
         name: configuration.name().to_owned(),
@@ -2095,12 +2112,9 @@ pub(super) fn start_pending(
     })?;
     // The rules come from the computer's stored network policy, so a restore, a fork or an
     // import starts with that policy and its strict setting.
-    let plan = crate::network_policy::plan_for(
-        configuration.id(),
-        configuration.name(),
-        Some(&recorded),
-    )
-    .map_err(RuntimeError::Unavailable)?;
+    let plan =
+        crate::network_policy::plan_for(configuration.id(), configuration.name(), Some(&recorded))
+            .map_err(RuntimeError::Unavailable)?;
     let policy = plan.policy_value();
     let mut network_args = current_network_args(&serde_json::json!({"network":{"policy":policy}}))?;
     if !plan.strict {
@@ -3296,7 +3310,12 @@ fn restore_steps(
             native_id: None,
             name: "Before restore".into(),
             created_at: activity_timestamp(),
-            scope: if prior_running && with_memory { "full" } else { "disk" }.into(),
+            scope: if prior_running && with_memory {
+                "full"
+            } else {
+                "disk"
+            }
+            .into(),
             reason: "before-restore".into(),
             kind: "manual".into(),
         };
@@ -3909,12 +3928,13 @@ const HIDDEN_COMPUTER: &str = "a computer you can’t see";
 
 impl Survey {
     fn sees_id(&self, id: &str) -> bool {
-        self.visible.as_ref().is_none_or(|visible| visible.contains(id))
+        self.visible
+            .as_ref()
+            .is_none_or(|visible| visible.contains(id))
     }
 
     fn sees_name(&self, name: &str) -> bool {
-        self.visible.is_none()
-            || self.ids.get(name).is_some_and(|id| self.sees_id(id))
+        self.visible.is_none() || self.ids.get(name).is_some_and(|id| self.sees_id(id))
     }
 }
 
@@ -4667,7 +4687,12 @@ fn adopt_finished_capture(
     else {
         return Ok(false);
     };
-    if survey.positions.get(&member.snapshot_id).map(String::as_str) != Some(computer_name) {
+    if survey
+        .positions
+        .get(&member.snapshot_id)
+        .map(String::as_str)
+        != Some(computer_name)
+    {
         return Ok(false);
     }
     if verify_snapshot(runner, paths, group, &finished).is_err() {

@@ -27,13 +27,13 @@ pub use exec::{run_bounded, validate_request, ExecOutput, ExecRequest, GuestUser
 pub use files::{
     list, read, remove, write, FileEntry, FileKind, FileRead, FileWrite, Replace, WriteRequest,
 };
+pub(crate) use hints::HintQueue;
 pub use session::{
     cancel_exec, exec_get, exec_input, forget_finished, ExecSnapshot, ExecStart, ExecState,
     StartedExec,
 };
 pub use ssh_alias::{ensure_alias, remove_alias, AliasEnsure, AliasOutcome};
 pub use target::{resolve, Account, Target};
-pub(crate) use hints::HintQueue;
 pub use watch::{start_watch, WatchHandle};
 
 use silo_api::jobs::ErrorCode;

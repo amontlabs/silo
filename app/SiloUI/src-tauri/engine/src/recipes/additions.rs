@@ -94,7 +94,9 @@ pub fn append(recipe: &RecipeDefinition, adds: &Additions) -> (RecipeDefinition,
                     continue;
                 }
                 list.push(name.clone());
-                let size = serde_json::to_vec(&out).map(|b| b.len()).unwrap_or(usize::MAX);
+                let size = serde_json::to_vec(&out)
+                    .map(|b| b.len())
+                    .unwrap_or(usize::MAX);
                 if size > super::library::MAX_BYTES {
                     if let Some(list) = packages_of(&mut out, key) {
                         list.pop();
@@ -112,7 +114,9 @@ pub fn append(recipe: &RecipeDefinition, adds: &Additions) -> (RecipeDefinition,
                 continue;
             }
             out.files.push(path.clone());
-            let size = serde_json::to_vec(&out).map(|b| b.len()).unwrap_or(usize::MAX);
+            let size = serde_json::to_vec(&out)
+                .map(|b| b.len())
+                .unwrap_or(usize::MAX);
             if size > super::library::MAX_BYTES {
                 out.files.pop();
                 continue;

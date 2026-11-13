@@ -195,7 +195,8 @@ pub fn create(paths: &RuntimePaths, request: &SnapshotCreate) -> Result<(), Runt
     let store = Store::new(&layout);
     // No start may begin while the layers are being sealed or copied. The computer is held, not
     // marked as starting: a running one stays running to a command or a secret change.
-    let _mark = StartMark::hold(&request.computer).ok_or_else(|| held_message(&request.computer))?;
+    let _mark =
+        StartMark::hold(&request.computer).ok_or_else(|| held_message(&request.computer))?;
     super::host_disk::require_room(&paths.home, "make a checkpoint")?;
     let exists = || {
         invalid(format!(
@@ -482,7 +483,9 @@ mod tests {
         );
         assert_eq!(
             parse(&strings(&["snapshot", "head", "box", "--format", "json"])).unwrap(),
-            Command::SnapshotHead { group: "box".into() }
+            Command::SnapshotHead {
+                group: "box".into()
+            }
         );
         assert_eq!(
             parse(&strings(&["snapshot", "save", "box:c1", "/out/file"])).unwrap(),
@@ -494,8 +497,15 @@ mod tests {
         );
         assert_eq!(
             parse(&strings(&[
-                "snapshot", "load", "/in/file", "--group", "silo-import-ab", "--stage-id", "ab",
-                "--runtime", "container"
+                "snapshot",
+                "load",
+                "/in/file",
+                "--group",
+                "silo-import-ab",
+                "--stage-id",
+                "ab",
+                "--runtime",
+                "container"
             ]))
             .unwrap(),
             Command::SnapshotLoad(Box::new(super::super::args::SnapshotLoad {

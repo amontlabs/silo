@@ -216,7 +216,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(sign_in.token_secret_id, None);
-        assert!(serde_json::to_value(&sign_in).unwrap().get("tokenSecretId").is_none());
+        assert!(serde_json::to_value(&sign_in)
+            .unwrap()
+            .get("tokenSecretId")
+            .is_none());
         let token = GitHubPolicy {
             authentication_method: GitHubAuthenticationMethod::Token,
             token_secret_id: Some("s1".into()),
@@ -236,10 +239,16 @@ mod tests {
         });
         let present: GitHubPolicy = serde_json::from_value(json.clone()).unwrap();
         assert!(!present.token_missing);
-        assert!(serde_json::to_value(&present).unwrap().get("tokenMissing").is_none());
+        assert!(serde_json::to_value(&present)
+            .unwrap()
+            .get("tokenMissing")
+            .is_none());
         json["tokenMissing"] = serde_json::json!(true);
         let missing: GitHubPolicy = serde_json::from_value(json).unwrap();
         assert!(missing.token_missing);
-        assert_eq!(serde_json::to_value(&missing).unwrap()["tokenMissing"], true);
+        assert_eq!(
+            serde_json::to_value(&missing).unwrap()["tokenMissing"],
+            true
+        );
     }
 }

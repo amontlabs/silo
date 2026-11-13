@@ -313,7 +313,12 @@ fn unix_seconds(time: SystemTime) -> u64 {
 /// Writes a record through a temporary file and a rename, so a reader never finds a partly
 /// written one. `subject` is the process whose start time is stored; when that is not
 /// available the record still carries when it was written and how long its command may run.
-fn write_record(home: &Path, record: &Path, subject: u32, timeout: Duration) -> std::io::Result<()> {
+fn write_record(
+    home: &Path,
+    record: &Path,
+    subject: u32,
+    timeout: Duration,
+) -> std::io::Result<()> {
     use std::io::Write;
     let mut text = String::new();
     if let Some(start) = process_start(subject) {
@@ -430,8 +435,13 @@ fn record_kind(name: &str) -> Option<RecordKind> {
 }
 
 fn record_field(text: &str, key: &str) -> Option<u64> {
-    text.lines()
-        .find_map(|line| line.strip_prefix(key)?.strip_prefix('=')?.trim().parse().ok())
+    text.lines().find_map(|line| {
+        line.strip_prefix(key)?
+            .strip_prefix('=')?
+            .trim()
+            .parse()
+            .ok()
+    })
 }
 
 /// Whether the command (or the starting engine) a record names must still be waited for.
@@ -540,7 +550,9 @@ fn discard_unsaved_storage(
         if fs::remove_dir(&folder).is_ok() {
             return Ok(());
         }
-        return Err(failure("Incomplete storage ownership could not be verified. No files were removed."));
+        return Err(failure(
+            "Incomplete storage ownership could not be verified. No files were removed.",
+        ));
     }
     fs::remove_dir_all(folder).map_err(failure)
 }
@@ -1169,9 +1181,13 @@ mod tests {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = super::super::tests::paths(&directory);
-        let mut child = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
         let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
-        lock.record_child(child.id(), Duration::from_secs(60)).unwrap();
+        lock.record_child(child.id(), Duration::from_secs(60))
+            .unwrap();
         drop(lock);
         assert!(command_lock(&paths, Duration::ZERO).is_err());
         child.kill().unwrap();
@@ -1190,7 +1206,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let paths = super::super::tests::paths(&directory);
         let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
-        lock.record_child(std::process::id(), Duration::from_secs(60)).unwrap();
+        lock.record_child(std::process::id(), Duration::from_secs(60))
+            .unwrap();
         let record = paths
             .home
             .join(format!("{CHILD_RECORD_PREFIX}{}", std::process::id()));
@@ -1217,7 +1234,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let paths = super::super::tests::paths(&directory);
         let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
-        lock.record_child(std::process::id(), Duration::from_secs(60)).unwrap();
+        lock.record_child(std::process::id(), Duration::from_secs(60))
+            .unwrap();
         lock.mark_child_exited();
         drop(lock);
         drop(command_lock(&paths, Duration::ZERO).unwrap());
@@ -1242,9 +1260,13 @@ mod tests {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = super::super::tests::paths(&directory);
-        let mut child = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
         let mut lock = command_lock(&paths, Duration::ZERO).unwrap();
-        lock.record_child(child.id(), Duration::from_secs(60)).unwrap();
+        lock.record_child(child.id(), Duration::from_secs(60))
+            .unwrap();
         drop(lock);
         let started = Instant::now();
         let error = match command_lock(&paths, Duration::from_millis(350)) {
@@ -1253,9 +1275,9 @@ mod tests {
         };
         assert!(started.elapsed() >= Duration::from_millis(350));
         assert!(
-            error
-                .to_string()
-                .contains("The previous computer command is still finishing. Retry after it exits."),
+            error.to_string().contains(
+                "The previous computer command is still finishing. Retry after it exits."
+            ),
             "{error}"
         );
         child.kill().unwrap();
@@ -1274,7 +1296,10 @@ mod tests {
                 .unwrap()
                 .flatten()
                 .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                .filter(|name| name.starts_with(".silo-configuration-worker.") && name != ".silo-configuration-worker.lock")
+                .filter(|name| {
+                    name.starts_with(".silo-configuration-worker.")
+                        && name != ".silo-configuration-worker.lock"
+                })
                 .collect();
             names.sort();
             names
@@ -1284,7 +1309,8 @@ mod tests {
         let pending = names();
         assert_eq!(pending.len(), 1);
         assert!(pending[0].starts_with(PENDING_RECORD_PREFIX), "{pending:?}");
-        lock.record_child(std::process::id(), Duration::from_secs(60)).unwrap();
+        lock.record_child(std::process::id(), Duration::from_secs(60))
+            .unwrap();
         assert_eq!(
             names(),
             vec![format!("{CHILD_RECORD_PREFIX}{}", std::process::id())]
@@ -1380,7 +1406,8 @@ mod tests {
     #[test]
     fn the_start_time_is_read_from_a_linux_process_status_line() {
         // Field 22 follows a command name that may hold spaces and parentheses.
-        let stat = "4242 (my (odd) name) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 3 0 987654 \
+        let stat =
+            "4242 (my (odd) name) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 3 0 987654 \
                     1000 50 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 17 2 0 0 0 0 0";
         assert_eq!(proc_stat_start(stat), Some(987654));
         assert_eq!(proc_stat_start("4242 (short) S 1"), None);
@@ -1722,7 +1749,11 @@ mod tests {
 
     fn interrupted_creation(
         directory: &tempfile::TempDir,
-    ) -> (RuntimePaths, ComputerConfiguration, ComputerConfigurationRequest) {
+    ) -> (
+        RuntimePaths,
+        ComputerConfiguration,
+        ComputerConfigurationRequest,
+    ) {
         let root = directory.path();
         let paths = RuntimePaths {
             executable: root.join("msb"),
@@ -1850,7 +1881,12 @@ mod tests {
         let runtime = InterruptedCreation::new(configuration.id(), "Running", Some(unavailable));
         prepare_retry(&runtime, &paths, None).unwrap();
         let calls = runtime.ran();
-        assert!(!calls.iter().any(|call| matches!(call.as_str(), "stop" | "exec" | "remove")), "{calls:?}");
+        assert!(
+            !calls
+                .iter()
+                .any(|call| matches!(call.as_str(), "stop" | "exec" | "remove")),
+            "{calls:?}"
+        );
         assert_eq!(read_metadata(&paths.metadata).unwrap(), request);
     }
 }

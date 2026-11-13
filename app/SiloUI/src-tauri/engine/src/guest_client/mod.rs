@@ -220,7 +220,11 @@ pub fn turn_off_copy(computer_id: &str) -> Result<usize, String> {
     }
 }
 
-fn end_tools(store: &TokenStore, computer_ids: &[&str], owe_removal: bool) -> Result<usize, String> {
+fn end_tools(
+    store: &TokenStore,
+    computer_ids: &[&str],
+    owe_removal: bool,
+) -> Result<usize, String> {
     // Silo's MCP server is registered with the agents of every computer that had the tools; it is
     // taken out when the computer next runs (at once for a running one, see `guestClient.revoke`).
     let had: Vec<&str> = computer_ids
@@ -566,7 +570,11 @@ mod tests {
         turn_off_in(&store, &["c"]).unwrap();
         end_tools(&store, &["copy"], false).unwrap();
         assert_eq!(Reports::new(store.directory()).owed(), vec!["c".to_owned()]);
-        assert_eq!(fake.bound(port).as_deref(), Some("c"), "its port is still held");
+        assert_eq!(
+            fake.bound(port).as_deref(),
+            Some("c"),
+            "its port is still held"
+        );
         assert!(store.status("copy").unwrap().is_none());
         reset();
     }

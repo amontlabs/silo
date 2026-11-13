@@ -237,7 +237,9 @@ impl Store {
 /// failure is an error: a folder that could not be read is not an empty one.
 fn entries(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     match std::fs::read_dir(dir) {
-        Ok(entries) => entries.map(|entry| entry.map(|entry| entry.path())).collect(),
+        Ok(entries) => entries
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect(),
         Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
             Ok(Vec::new())
         }
@@ -558,7 +560,12 @@ mod tests {
         let mut template = record();
         template.image_digest = older.clone();
         Store::new(&layout)
-            .write(&Snapshot::new("silo-import-ab", "c1", ids(&["l1"]), template))
+            .write(&Snapshot::new(
+                "silo-import-ab",
+                "c1",
+                ids(&["l1"]),
+                template,
+            ))
             .unwrap();
         assert!(layout.names().is_empty());
         assert_eq!(images_named(&layout).unwrap(), [older].into());

@@ -400,13 +400,14 @@ impl Reservation {
     /// than the reservation says nothing about whether the computer came back, and a host
     /// measured after the reservation may already show its memory free, so it stays counted.
     fn counted(&self, resident: &Residency) -> u64 {
-        let back = |computer: &str| {
-            resident.loaded_at > self.created_at && resident.contains(computer)
-        };
+        let back =
+            |computer: &str| resident.loaded_at > self.created_at && resident.contains(computer);
         self.held
             .iter()
             .filter(|(computer, _)| !back(computer))
-            .fold(self.memory_bytes, |sum, (_, bytes)| sum.saturating_add(*bytes))
+            .fold(self.memory_bytes, |sum, (_, bytes)| {
+                sum.saturating_add(*bytes)
+            })
     }
 }
 
@@ -903,8 +904,7 @@ fn assess_headroom(
     let Requested {
         extra: requested,
         held,
-    } = match requested_memory_bytes(method, params, sizes, &swapped)
-    {
+    } = match requested_memory_bytes(method, params, sizes, &swapped) {
         Ok(requested) => requested,
         Err(unreadable) => {
             // A device short of its floors is told so before anything else.

@@ -33,7 +33,11 @@ pub fn promote_pin(fork: &str) -> String {
 }
 
 /// Refuses a call whose `expected` pin is no longer the `current` one.
-fn pinned(expected: Option<&str>, current: impl FnOnce() -> String, refusal: &str) -> Result<(), String> {
+fn pinned(
+    expected: Option<&str>,
+    current: impl FnOnce() -> String,
+    refusal: &str,
+) -> Result<(), String> {
     match expected {
         Some(expected) if current() != expected => Err(refusal.to_owned()),
         _ => Ok(()),
@@ -42,7 +46,10 @@ fn pinned(expected: Option<&str>, current: impl FnOnce() -> String, refusal: &st
 
 /// The check a promote of `fork` makes once it holds its lanes: the fork is still as
 /// [`promote_pin`] saw it when `expected_pin` is given.
-pub fn promote_guard(expected_pin: Option<String>, fork: String) -> impl Fn() -> Result<(), String> {
+pub fn promote_guard(
+    expected_pin: Option<String>,
+    fork: String,
+) -> impl Fn() -> Result<(), String> {
     move || {
         pinned(
             expected_pin.as_deref(),
@@ -77,8 +84,15 @@ pub fn start_promote(
             crate::generation::bump_all();
             Ok(())
         };
-        super::promote_checked(&env, store.as_ref(), &journal, &request, LANE_WAIT, &under_lane)
-            .map(|outcome| outcome.to_json())
+        super::promote_checked(
+            &env,
+            store.as_ref(),
+            &journal,
+            &request,
+            LANE_WAIT,
+            &under_lane,
+        )
+        .map(|outcome| outcome.to_json())
     })
 }
 

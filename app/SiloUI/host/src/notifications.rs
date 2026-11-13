@@ -85,7 +85,11 @@ impl Notice {
     /// `desktop/use-main-route.ts`.
     pub fn route(&self) -> Value {
         if self.category == Category::Approvals {
-            return match self.key.strip_prefix("approval:").filter(|id| !id.is_empty()) {
+            return match self
+                .key
+                .strip_prefix("approval:")
+                .filter(|id| !id.is_empty())
+            {
                 Some(id) => serde_json::json!({"tab": "changes", "approval": id}),
                 None => serde_json::json!({"tab": "changes"}),
             };

@@ -184,7 +184,9 @@ fn recorded_ready(paths: &runtime::RuntimePaths, name: &str) -> bool {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
         .is_some_and(|record| {
-            record.get("schema").is_some_and(serde_json::Value::is_string)
+            record
+                .get("schema")
+                .is_some_and(serde_json::Value::is_string)
                 && record.get("phase").and_then(serde_json::Value::as_str) == Some("ready")
         })
 }
@@ -197,7 +199,9 @@ fn is_running(
     paths: &runtime::RuntimePaths,
     name: &str,
 ) -> Option<bool> {
-    let args: Vec<String> = ["inspect", name, "--format", "json"].map(String::from).into();
+    let args: Vec<String> = ["inspect", name, "--format", "json"]
+        .map(String::from)
+        .into();
     let output = runner.run(paths, &args, DIAGNOSE_TIMEOUT).ok()?;
     let value: serde_json::Value = serde_json::from_str(&output.stdout).ok()?;
     match value.get("status")?.as_str()? {
@@ -261,7 +265,10 @@ fn repair(
             detail,
             ..
         }) => return Err(blocked_message(&detail)),
-        Err(_) => return Err("The storage upgrade of this computer did not finish. Its original files were kept.".to_string()),
+        Err(_) => return Err(
+            "The storage upgrade of this computer did not finish. Its original files were kept."
+                .to_string(),
+        ),
     };
     let result: serde_json::Value = serde_json::from_str(&output.stdout)
         .map_err(|_| "The storage upgrade returned an unreadable result.".to_string())?;
@@ -348,7 +355,10 @@ pub(super) fn upgrade(
     let mut backed_up = Vec::new();
     if !repairable.is_empty() {
         (options.progress)(Step::BackingUp);
-        let covered: Vec<String> = repairable.iter().map(|&index| names[index].clone()).collect();
+        let covered: Vec<String> = repairable
+            .iter()
+            .map(|&index| names[index].clone())
+            .collect();
         match (options.backup)(&covered) {
             Ok(()) => backed_up = covered,
             // Only the computers that still need the move wait; the others are not affected.
@@ -413,22 +423,32 @@ fn covers_all(backup: &Path, covered: &[String]) -> bool {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
         .is_some_and(|have| covered.iter().all(|name| have.contains(name)));
-    listed && fs::metadata(backup.join(COVERS)).and_then(|meta| meta.modified()).is_ok_and(|written| !changed_after(backup, written))
+    listed
+        && fs::metadata(backup.join(COVERS))
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|written| !changed_after(backup, written))
 }
 
 /// Whether any entry below `root` (not the certificate itself) was modified after `moment`.
 fn changed_after(root: &Path, moment: std::time::SystemTime) -> bool {
     let mut stack = vec![root.to_path_buf()];
     while let Some(directory) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&directory) else { return true };
+        let Ok(entries) = fs::read_dir(&directory) else {
+            return true;
+        };
         for entry in entries {
             let Ok(entry) = entry else { return true };
             let path = entry.path();
             if directory == root && entry.file_name() == COVERS {
                 continue;
             }
-            let Ok(metadata) = fs::symlink_metadata(&path) else { return true };
-            if metadata.modified().map_or(true, |modified| modified > moment) {
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                return true;
+            };
+            if metadata
+                .modified()
+                .map_or(true, |modified| modified > moment)
+            {
                 return true;
             }
             if metadata.is_dir() {
@@ -482,7 +502,10 @@ pub(super) fn clone_backup_with(
     });
     if let Err(reason) = made {
         let _ = fs::remove_dir_all(&partial);
-        return Err(reason.trim_end_matches('.').trim_start_matches("Runtime copy ").to_owned());
+        return Err(reason
+            .trim_end_matches('.')
+            .trim_start_matches("Runtime copy ")
+            .to_owned());
     }
     crate::pre_upgrade_backup::install_clone(app_data, &partial, &backup)
 }
@@ -508,9 +531,9 @@ pub(super) fn write_report(storage: &Path, report: &Report) -> Result<(), String
 /// computers that need attention is retried at the next launch.
 pub(super) fn read_report(storage: &Path) -> Result<Option<Report>, String> {
     match fs::read(storage.join(MARKER)) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|_| "The saved storage upgrade result is damaged. Existing data was preserved.".to_string()),
+        Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|_| {
+            "The saved storage upgrade result is damaged. Existing data was preserved.".to_string()
+        }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err("The saved storage upgrade result could not be read.".into()),
     }
@@ -584,7 +607,9 @@ pub(super) fn check_arrival(
         Ok(Diagnosis::Repairable { .. }) => ARRIVED.to_owned(),
         Ok(Diagnosis::Blocked(message)) | Err(message) => message,
     };
-    let Some(storage) = paths.metadata.parent() else { return };
+    let Some(storage) = paths.metadata.parent() else {
+        return;
+    };
     with_gate(|gate| {
         gate.attention
             .entry(storage.to_path_buf())
@@ -593,7 +618,10 @@ pub(super) fn check_arrival(
     });
     let mut report = match read_report(storage) {
         Ok(Some(report)) => report,
-        Ok(None) => Report { version: VERSION, ..Report::default() },
+        Ok(None) => Report {
+            version: VERSION,
+            ..Report::default()
+        },
         Err(_) => return,
     };
     report.computers.retain(|computer| computer.name != name);
@@ -607,7 +635,12 @@ pub(super) fn check_arrival(
 /// Why this computer cannot start or be used until a later launch finishes moving its storage.
 /// `metadata` is the runtime's `computers.json` of the storage the computer lives in.
 pub fn attention_message(metadata: &Path, name: &str) -> Option<String> {
-    gate().as_ref()?.attention.get(metadata.parent()?)?.get(name).cloned()
+    gate()
+        .as_ref()?
+        .attention
+        .get(metadata.parent()?)?
+        .get(name)
+        .cloned()
 }
 
 /// What the owner sees as the stage while the step runs.

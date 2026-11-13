@@ -215,7 +215,11 @@ impl HandlerContext {
                 }
             }
         };
-        DispatchError { code, message, details: None }
+        DispatchError {
+            code,
+            message,
+            details: None,
+        }
     }
 }
 

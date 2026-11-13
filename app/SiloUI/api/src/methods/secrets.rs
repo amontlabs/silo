@@ -137,7 +137,10 @@ mod tests {
         });
         let parsed: Secret = serde_json::from_value(token.clone()).unwrap();
         assert_eq!(parsed.kind, SecretKind::GithubToken);
-        assert_eq!(parsed.connection.as_ref().unwrap().state, SecretConnectionState::Disconnected);
+        assert_eq!(
+            parsed.connection.as_ref().unwrap().state,
+            SecretConnectionState::Disconnected
+        );
         assert_eq!(serde_json::to_value(&parsed).unwrap(), token);
     }
 

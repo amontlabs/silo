@@ -722,12 +722,14 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert!(serde_json::from_value::<ComputerCreateParams>(serde_json::json!({
-            "kind": "macos",
-            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64},
-            "agents": ["pi"]
-        }))
-        .is_err());
+        assert!(
+            serde_json::from_value::<ComputerCreateParams>(serde_json::json!({
+                "kind": "macos",
+                "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64},
+                "agents": ["pi"]
+            }))
+            .is_err()
+        );
     }
 
     #[test]

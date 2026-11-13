@@ -107,12 +107,13 @@ pub fn restore_original(
             .find(|(_, owner)| owner.as_deref() == Some(id))
             .map(|(name, _)| *name)
     };
-    let original = named(&plan.undo_id).or_else(|| match (named(&plan.old_id), named(&plan.new_id)) {
-        // The computer's id beside a build: nothing was relabelled yet.
-        (Some(name), Some(_)) => Some(name),
-        (Some(name), None) if name == plan.undo_name || !swapping => Some(name),
-        _ => None,
-    });
+    let original =
+        named(&plan.undo_id).or_else(|| match (named(&plan.old_id), named(&plan.new_id)) {
+            // The computer's id beside a build: nothing was relabelled yet.
+            (Some(name), Some(_)) => Some(name),
+            (Some(name), None) if name == plan.undo_name || !swapping => Some(name),
+            _ => None,
+        });
     let Some(original) = original else {
         return Err(format!(
             "Silo cannot tell which of {}, {} and {} is the old computer. Nothing was changed.",

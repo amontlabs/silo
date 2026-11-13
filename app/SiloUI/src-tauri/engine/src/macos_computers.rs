@@ -10,10 +10,10 @@
 //! A finished computer becomes a template (`templates`); later computers are copied
 //! from it and made their own by `personalize`. `checkpoints` saves and restores a
 //! computer's disk and memory and forks new computers from them.
-#[path = "macos_computers/checkpoints.rs"]
-mod checkpoints;
 #[path = "macos_computers/agent_install.rs"]
 mod agent_install;
+#[path = "macos_computers/checkpoints.rs"]
+mod checkpoints;
 #[path = "macos_computers/developer_tools.rs"]
 mod developer_tools;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -3288,7 +3288,8 @@ fn capture_archive_sources(
         })?;
         // The archive describes the disk it carries, whatever an older record or checkpoint
         // said after a disk expansion that failed.
-        let source_disk_gib = store::disk_file_gib(&capture.path().join("disk.img"), source_disk_gib);
+        let source_disk_gib =
+            store::disk_file_gib(&capture.path().join("disk.img"), source_disk_gib);
         let hardware_model_digest = digest_file(&capture.path().join("hardware-model.bin"))?;
         let config = crate::backup::MacosArchiveConfig {
             payload_version: 1,
@@ -8105,10 +8106,7 @@ mod tests {
         let open = crate::network_policy::NetworkPolicy::default();
         crate::network_policy::store::set(&id, &open).unwrap();
         assert!(recover_archive_import_in(directory.path(), &id, &accept).unwrap());
-        assert_eq!(
-            crate::network_policy::store::get(&id).unwrap(),
-            Some(open)
-        );
+        assert_eq!(crate::network_policy::store::get(&id).unwrap(), Some(open));
         crate::network_policy::store::use_test_path(None);
     }
 
@@ -9087,9 +9085,8 @@ mod tests {
             gate,
             |_, _, _, _| {},
             |_work| {
-                *observed.lock().unwrap() = Some(
-                    crate::network_policy::store::get_stored_ids_for_test().unwrap(),
-                );
+                *observed.lock().unwrap() =
+                    Some(crate::network_policy::store::get_stored_ids_for_test().unwrap());
                 Ok(())
             },
         )

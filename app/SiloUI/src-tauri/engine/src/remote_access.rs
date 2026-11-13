@@ -578,9 +578,8 @@ mod typed_access_tests {
             ("github.state", ErrorCode::UnsupportedRemoteOperation),
         ] {
             assert!(ACCESS_METHODS.contains(&method));
-            let error =
-                dispatch_typed(&paths, method, &json!({}), checkpoints, &TypedAccess, None)
-                    .unwrap_err();
+            let error = dispatch_typed(&paths, method, &json!({}), checkpoints, &TypedAccess, None)
+                .unwrap_err();
             assert_eq!(error.code, code, "{method}");
         }
     }

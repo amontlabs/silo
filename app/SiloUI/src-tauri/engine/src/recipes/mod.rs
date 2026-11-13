@@ -16,16 +16,16 @@ mod scripts;
 use sha2::{Digest, Sha256};
 use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, RecipeSpec};
 
+pub use additions::{append, manager_key, record_merge, unrecord_merge, Additions, Recorded};
 pub use build::{build, remove, BuildEnv, BuildOutcome, Created, ExecOut, RunAs, BUILDER_PREFIX};
-pub(crate) use scripts::Step as BuildStep;
 #[cfg(test)]
 use build::{builder_name, is_builder_of};
-pub use additions::{append, manager_key, record_merge, unrecord_merge, Additions, Recorded};
 pub use cache::Cache;
-pub use quiet::{quiet_names, quiet_warnings};
 pub use library::{
     built_in, built_in_names, hide_commands, hooks_of, validate_definition, Library, DEFAULT_RECIPE,
 };
+pub use quiet::{quiet_names, quiet_warnings};
+pub(crate) use scripts::Step as BuildStep;
 
 /// Folded into every hash, so a change to how a build runs retires every cached build.
 const BUILD_VERSION: &str = "silo-recipe-build-3";

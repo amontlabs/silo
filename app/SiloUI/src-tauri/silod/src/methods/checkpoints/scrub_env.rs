@@ -7,12 +7,12 @@ use std::{sync::Arc, time::Duration};
 use serde_json::{json, Value};
 use silo_api::{jobs::JobState, methods::MethodName};
 use silo_engine::{
-    context::EngineContext,
     changes::{
         collect::{self, Options, TargetRunner},
         credentials::login_paths_in,
     },
     checkpoints::ForkOptions,
+    context::EngineContext,
     export_scrub::ScrubEnv,
     guest::{self, ExecRequest, GuestUser},
     recipes::{BuildEnv, ExecOut},
@@ -95,13 +95,15 @@ impl ScrubEnv for Scrub {
 
     fn start(&self, computer_id: &str) -> Result<(), String> {
         self.env
-            .job(MethodName::ComputersStart, json!({"computerId": computer_id}))
+            .job(
+                MethodName::ComputersStart,
+                json!({"computerId": computer_id}),
+            )
             .map(|_| ())
     }
 
     fn run(&self, computer_id: &str, script: &str, stdin: &[u8]) -> Result<ExecOut, String> {
-        let target =
-            resolve_target(&self.env.silod, computer_id).map_err(|error| error.message)?;
+        let target = resolve_target(&self.env.silod, computer_id).map_err(|error| error.message)?;
         let request = ExecRequest {
             argv: vec!["sh".into(), "-c".into(), script.to_owned()],
             cwd: None,
@@ -120,8 +122,7 @@ impl ScrubEnv for Scrub {
     }
 
     fn login_paths(&self, computer_id: &str) -> Result<Vec<String>, String> {
-        let target =
-            resolve_target(&self.env.silod, computer_id).map_err(|error| error.message)?;
+        let target = resolve_target(&self.env.silod, computer_id).map_err(|error| error.message)?;
         let manifest = collect::capture(&TargetRunner(target), &Options::default())
             .map_err(|error| error.message)?;
         login_paths_in(&manifest)

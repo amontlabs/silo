@@ -113,8 +113,15 @@ pub fn current_sub_ids() -> Option<std::ops::Range<u32>> {
     let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
     let mut found: *mut libc::passwd = std::ptr::null_mut();
     // SAFETY: `entry`, `buffer` and `found` are valid for the sizes passed.
-    let status =
-        unsafe { libc::getpwuid_r(uid, &mut entry, buffer.as_mut_ptr(), buffer.len(), &mut found) };
+    let status = unsafe {
+        libc::getpwuid_r(
+            uid,
+            &mut entry,
+            buffer.as_mut_ptr(),
+            buffer.len(),
+            &mut found,
+        )
+    };
     let name = if status == 0 && !found.is_null() {
         // SAFETY: on success pw_name points at a NUL-terminated string inside `buffer`.
         unsafe { std::ffi::CStr::from_ptr(entry.pw_name) }
@@ -162,7 +169,10 @@ mod tests {
 
     #[test]
     fn only_the_engines_own_user_and_group_is_the_account() {
-        let map = KeepId { uid: 1000, gid: 1000 };
+        let map = KeepId {
+            uid: 1000,
+            gid: 1000,
+        };
         assert_eq!(map.guest_owner(1000, 1000), Some((AGENT_ID, AGENT_ID)));
         // A sub-id owner (a root file, another guest user) and a half match are not the account.
         assert_eq!(map.guest_owner(165536, 165536), None);
@@ -173,7 +183,10 @@ mod tests {
 
     #[test]
     fn an_upper_is_current_only_when_a_sub_id_of_the_account_owns_it() {
-        let map = KeepId { uid: 1000, gid: 1000 };
+        let map = KeepId {
+            uid: 1000,
+            gid: 1000,
+        };
         let sub_ids = 165536..165536 + 65535;
         // The container's root is the range's first id.
         assert!(map.upper_owner_is_current(165536, &sub_ids));

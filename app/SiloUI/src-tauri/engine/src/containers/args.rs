@@ -203,8 +203,8 @@ pub fn target_name(args: &[String]) -> Option<&str> {
             .then(|| args.get(2).map(String::as_str))
             .flatten()
             .filter(|name| !name.starts_with('-')),
-        "inspect" | "start" | "restart" | "exec" | "rename" | "modify" | "cp" | "fork" | "pause"
-        | "resume" => args
+        "inspect" | "start" | "restart" | "exec" | "rename" | "modify" | "cp" | "fork"
+        | "pause" | "resume" => args
             .get(1)
             .map(String::as_str)
             .filter(|name| !name.starts_with('-')),
@@ -236,7 +236,11 @@ pub fn snapshot_group(args: &[String]) -> Option<&str> {
                 .iter()
                 .skip(2)
                 .find(|arg| !arg.starts_with('-'))
-                .map(|selector| selector.split_once(':').map_or(selector.as_str(), |(group, _)| group)),
+                .map(|selector| {
+                    selector
+                        .split_once(':')
+                        .map_or(selector.as_str(), |(group, _)| group)
+                }),
             _ => None,
         },
         "restore" => args
@@ -379,7 +383,10 @@ fn selector(text: &str) -> Result<(String, String), String> {
 }
 
 fn parse_snapshot(args: &[String]) -> Result<Command, String> {
-    let sub = args.get(1).map(String::as_str).ok_or("snapshot needs a verb.")?;
+    let sub = args
+        .get(1)
+        .map(String::as_str)
+        .ok_or("snapshot needs a verb.")?;
     let positional: Vec<&String> = {
         let mut found = Vec::new();
         let mut index = 2;
@@ -404,7 +411,10 @@ fn parse_snapshot(args: &[String]) -> Result<Command, String> {
                 ));
             }
             Ok(Command::SnapshotCreate(Box::new(SnapshotCreate {
-                name: positional.first().ok_or("snapshot create needs a name.")?.to_string(),
+                name: positional
+                    .first()
+                    .ok_or("snapshot create needs a name.")?
+                    .to_string(),
                 computer: flag_value(args, "--from-sandbox")
                     .ok_or("snapshot create needs --from-sandbox.")?
                     .to_owned(),
@@ -417,7 +427,11 @@ fn parse_snapshot(args: &[String]) -> Result<Command, String> {
             group: flag_value(args, "--group").map(str::to_owned),
         }),
         "verify" | "remove" => {
-            let (group, name) = selector(positional.first().ok_or("A checkpoint is named GROUP:NAME.")?)?;
+            let (group, name) = selector(
+                positional
+                    .first()
+                    .ok_or("A checkpoint is named GROUP:NAME.")?,
+            )?;
             Ok(if sub == "verify" {
                 Command::SnapshotVerify { group, name }
             } else {
@@ -434,16 +448,27 @@ fn parse_snapshot(args: &[String]) -> Result<Command, String> {
             })
         }
         "save" => {
-            let (group, name) =
-                selector(positional.first().ok_or("A checkpoint is named GROUP:NAME.")?)?;
+            let (group, name) = selector(
+                positional
+                    .first()
+                    .ok_or("A checkpoint is named GROUP:NAME.")?,
+            )?;
             Ok(Command::SnapshotSave(Box::new(SnapshotSave {
                 group,
                 name,
-                file: positional.get(1).ok_or("snapshot save needs a file.")?.as_str().into(),
+                file: positional
+                    .get(1)
+                    .ok_or("snapshot save needs a file.")?
+                    .as_str()
+                    .into(),
             })))
         }
         "load" => Ok(Command::SnapshotLoad(Box::new(SnapshotLoad {
-            file: positional.first().ok_or("snapshot load needs a file.")?.as_str().into(),
+            file: positional
+                .first()
+                .ok_or("snapshot load needs a file.")?
+                .as_str()
+                .into(),
             group: flag_value(args, "--group")
                 .ok_or("snapshot load needs --group.")?
                 .to_owned(),
@@ -491,7 +516,8 @@ fn parse_restore(args: &[String]) -> Result<Restore, String> {
                 }
             }
             "--secret" => restore.secrets.push(
-                parse_secret_spec(value(index + 1)?).ok_or("--secret needs NAME:passthrough=*@HOSTS.")?,
+                parse_secret_spec(value(index + 1)?)
+                    .ok_or("--secret needs NAME:passthrough=*@HOSTS.")?,
             ),
             // A container's network is its gateway's policy or none: the default for outgoing
             // connections says which, and there are no rules to keep.
@@ -515,7 +541,11 @@ fn parse_restore(args: &[String]) -> Result<Restore, String> {
                     crate::containers::capability::Capability::MemorySnapshots.verb(),
                 ))
             }
-            _ => return Err(format!("restore does not take {flag} for a container computer.")),
+            _ => {
+                return Err(format!(
+                    "restore does not take {flag} for a container computer."
+                ))
+            }
         }
         index += 2;
     }
@@ -549,9 +579,9 @@ fn parse_modify(args: &[String]) -> Result<Option<Modify>, String> {
         match args[index].as_str() {
             "--secret" => {
                 let text = args.get(index + 1).ok_or("--secret needs a value.")?;
-                modify
-                    .put
-                    .push(parse_secret_spec(text).ok_or("--secret needs NAME:passthrough=*@HOSTS.")?);
+                modify.put.push(
+                    parse_secret_spec(text).ok_or("--secret needs NAME:passthrough=*@HOSTS.")?,
+                );
                 index += 2;
             }
             "--secret-rm" => {
@@ -754,20 +784,46 @@ mod tests {
         );
         assert_eq!(target_name(&args(&["stop", "dev", "--quiet"])), Some("dev"));
         assert_eq!(target_name(&args(&["stop", "--force", "dev"])), Some("dev"));
-        assert_eq!(target_name(&args(&["pause", "dev", "--guest-flush", "required"])), Some("dev"));
+        assert_eq!(
+            target_name(&args(&["pause", "dev", "--guest-flush", "required"])),
+            Some("dev")
+        );
         assert_eq!(target_name(&args(&["resume", "dev"])), Some("dev"));
-        assert_eq!(snapshot_group(&args(&["snapshot", "verify", "box:c1"])), Some("box"));
-        assert_eq!(snapshot_group(&args(&["snapshot", "remove", "--quiet", "box:c1"])), Some("box"));
-        assert_eq!(snapshot_group(&args(&["snapshot", "list", "--format", "json"])), None);
-        assert_eq!(snapshot_group(&args(&["snapshot", "list", "--group", "box"])), Some("box"));
-        assert_eq!(snapshot_group(&args(&["restore", "box:c1", "--name", "kid"])), Some("box"));
+        assert_eq!(
+            snapshot_group(&args(&["snapshot", "verify", "box:c1"])),
+            Some("box")
+        );
+        assert_eq!(
+            snapshot_group(&args(&["snapshot", "remove", "--quiet", "box:c1"])),
+            Some("box")
+        );
+        assert_eq!(
+            snapshot_group(&args(&["snapshot", "list", "--format", "json"])),
+            None
+        );
+        assert_eq!(
+            snapshot_group(&args(&["snapshot", "list", "--group", "box"])),
+            Some("box")
+        );
+        assert_eq!(
+            snapshot_group(&args(&["restore", "box:c1", "--name", "kid"])),
+            Some("box")
+        );
         assert_eq!(snapshot_group(&args(&["restore", "--name", "kid"])), None);
         assert_eq!(
             target_name(&args(&["remove", "--quiet", "dev"])),
             Some("dev")
         );
         assert_eq!(
-            target_name(&args(&["snapshot", "create", "older", "--from-sandbox", "dev", "--group", "dev"])),
+            target_name(&args(&[
+                "snapshot",
+                "create",
+                "older",
+                "--from-sandbox",
+                "dev",
+                "--group",
+                "dev"
+            ])),
             Some("dev")
         );
         assert_eq!(target_name(&args(&["list", "--format", "json"])), None);
@@ -777,7 +833,15 @@ mod tests {
     #[test]
     fn a_checkpoint_named_like_a_computer_does_not_route_to_it() {
         assert_eq!(
-            target_name(&args(&["snapshot", "create", "dev", "--from-sandbox", "vm", "--group", "vm"])),
+            target_name(&args(&[
+                "snapshot",
+                "create",
+                "dev",
+                "--from-sandbox",
+                "vm",
+                "--group",
+                "vm"
+            ])),
             Some("vm")
         );
     }
@@ -987,8 +1051,16 @@ mod tests {
     #[test]
     fn a_terminal_runs_the_given_command_or_the_login_shell() {
         let Command::Exec(shell) = parse(&args(&[
-            "exec", "dev", "--user", "silo", "--env", "USER=silo", "--no-start", "--workdir",
-            "/workspace", "--tty",
+            "exec",
+            "dev",
+            "--user",
+            "silo",
+            "--env",
+            "USER=silo",
+            "--no-start",
+            "--workdir",
+            "/workspace",
+            "--tty",
         ]))
         .unwrap() else {
             panic!("an exec")
@@ -1012,7 +1084,12 @@ mod tests {
     fn ssh_serve_takes_the_flags_the_engines_callers_pass() {
         // The editor's ProxyCommand.
         let Command::SshServe(editor) = parse(&args(&[
-            "ssh", "serve", "dev", "--stdio", "--no-start", "--no-inactivity-timeout",
+            "ssh",
+            "serve",
+            "dev",
+            "--stdio",
+            "--no-start",
+            "--no-inactivity-timeout",
         ]))
         .unwrap() else {
             panic!("an ssh serve")
@@ -1029,20 +1106,41 @@ mod tests {
         );
         // SSH access's listener.
         let Command::SshServe(listener) = parse(&args(&[
-            "ssh", "serve", "dev", "--no-start", "--no-inactivity-timeout", "--exit-on-stdin-close",
-            "--authorized-keys", "/h/keys", "--expected-machine-id", "abc", "--host", "127.0.0.1",
-            "--port", "2222",
+            "ssh",
+            "serve",
+            "dev",
+            "--no-start",
+            "--no-inactivity-timeout",
+            "--exit-on-stdin-close",
+            "--authorized-keys",
+            "/h/keys",
+            "--expected-machine-id",
+            "abc",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "2222",
         ]))
         .unwrap() else {
             panic!("an ssh serve")
         };
-        assert_eq!(listener.authorized_keys.as_deref(), Some(std::path::Path::new("/h/keys")));
         assert_eq!(
-            (listener.expected_machine_id.as_deref(), listener.host.as_deref(), listener.port),
+            listener.authorized_keys.as_deref(),
+            Some(std::path::Path::new("/h/keys"))
+        );
+        assert_eq!(
+            (
+                listener.expected_machine_id.as_deref(),
+                listener.host.as_deref(),
+                listener.port
+            ),
             (Some("abc"), Some("127.0.0.1"), Some(2222))
         );
         assert!(listener.exit_on_stdin_close && !listener.stdio);
-        assert_eq!(target_name(&args(&["ssh", "serve", "dev", "--stdio"])), Some("dev"));
+        assert_eq!(
+            target_name(&args(&["ssh", "serve", "dev", "--stdio"])),
+            Some("dev")
+        );
         assert_eq!(target_name(&args(&["ssh", "authorize", "dev"])), None);
     }
 
@@ -1052,7 +1150,14 @@ mod tests {
             // These need --no-start, and the owner's pipe cannot be the connection.
             vec!["ssh", "serve", "dev", "--expected-machine-id", "abc"],
             vec!["ssh", "serve", "dev", "--exit-on-stdin-close"],
-            vec!["ssh", "serve", "dev", "--no-start", "--exit-on-stdin-close", "--stdio"],
+            vec![
+                "ssh",
+                "serve",
+                "dev",
+                "--no-start",
+                "--exit-on-stdin-close",
+                "--stdio",
+            ],
             vec!["ssh", "serve", "dev", "--port", "http"],
             vec!["ssh", "serve", "dev", "--port"],
             vec!["ssh", "serve", "dev", "--bogus"],

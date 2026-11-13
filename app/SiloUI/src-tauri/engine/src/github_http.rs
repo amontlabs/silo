@@ -611,7 +611,9 @@ mod tests {
             "{CREDENTIALS_REJECTED} Reconnect GitHub. Automatic retries stopped."
         )));
         assert!(!credentials_rejected("Cannot reach GitHub."));
-        assert!(!credentials_rejected("GitHub access update is waiting. Retrying in 2 seconds."));
+        assert!(!credentials_rejected(
+            "GitHub access update is waiting. Retrying in 2 seconds."
+        ));
     }
     #[test]
     fn catalog_retry_preserves_ambiguous_writes_and_unrelated_reads() {

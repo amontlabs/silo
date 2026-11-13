@@ -1187,7 +1187,11 @@ async fn the_logins_check_says_whether_the_export_leaves_them_out() {
     )
     .await
     .unwrap_err();
-    assert!(refused.message.contains("Invalid params"), "{}", refused.message);
+    assert!(
+        refused.message.contains("Invalid params"),
+        "{}",
+        refused.message
+    );
 }
 
 #[tokio::test]
@@ -1209,7 +1213,11 @@ async fn exports_create_takes_the_choice_to_include_logins_as_a_boolean() {
     )
     .await
     .unwrap_err();
-    assert!(refused.message.contains("Invalid params"), "{}", refused.message);
+    assert!(
+        refused.message.contains("Invalid params"),
+        "{}",
+        refused.message
+    );
     let started = call(
         &fixture,
         MethodName::ExportsCreate,
@@ -1509,7 +1517,10 @@ async fn recipes_are_saved_read_listed_and_removed_by_the_engine() {
     assert_eq!(saved["name"], "web");
     assert_eq!(saved["builtIn"], false);
     assert_eq!(saved["recipe"], recipe);
-    assert!(saved["warnings"][0].as_str().unwrap().contains("service web"));
+    assert!(saved["warnings"][0]
+        .as_str()
+        .unwrap()
+        .contains("service web"));
 
     let got = call(&fixture, MethodName::RecipesGet, json!({"name": "web"}))
         .await
@@ -1530,11 +1541,18 @@ async fn recipes_are_saved_read_listed_and_removed_by_the_engine() {
     assert_eq!(listed["saved"][0]["builtIn"], true);
 
     // A recipe that ships with Silo can be read, and saved over until that copy is removed.
-    let shipped = call(&fixture, MethodName::RecipesGet, json!({"name": "linux-dev"}))
-        .await
-        .unwrap();
+    let shipped = call(
+        &fixture,
+        MethodName::RecipesGet,
+        json!({"name": "linux-dev"}),
+    )
+    .await
+    .unwrap();
     assert_eq!(shipped["builtIn"], true);
-    assert_eq!(shipped["recipe"]["spec"]["packages"]["apt"][0], "build-essential");
+    assert_eq!(
+        shipped["recipe"]["spec"]["packages"]["apt"][0],
+        "build-essential"
+    );
 
     call(&fixture, MethodName::RecipesRemove, json!({"name": "web"}))
         .await
@@ -1542,11 +1560,23 @@ async fn recipes_are_saved_read_listed_and_removed_by_the_engine() {
     let gone = call(&fixture, MethodName::RecipesGet, json!({"name": "web"}))
         .await
         .unwrap_err();
-    assert!(gone.message.contains("no recipe named web"), "{}", gone.message);
-    let nothing = call(&fixture, MethodName::RecipesRemove, json!({"name": "linux-dev"}))
-        .await
-        .unwrap_err();
-    assert!(nothing.message.contains("ships with Silo"), "{}", nothing.message);
+    assert!(
+        gone.message.contains("no recipe named web"),
+        "{}",
+        gone.message
+    );
+    let nothing = call(
+        &fixture,
+        MethodName::RecipesRemove,
+        json!({"name": "linux-dev"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        nothing.message.contains("ships with Silo"),
+        "{}",
+        nothing.message
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1615,7 +1645,11 @@ async fn call_as_computer(
 
 /// Writes the record of the recipe `name` for computer `id`, as the engine keeps them.
 fn build_from(fixture: &Fixture, id: &str, name: &str, recipe: &Value) {
-    let path = fixture.directory.path().join("data").join("recipe-records.json");
+    let path = fixture
+        .directory
+        .path()
+        .join("data")
+        .join("recipe-records.json");
     std::fs::write(
         path,
         json!({"version": 1, "computers": {id: {

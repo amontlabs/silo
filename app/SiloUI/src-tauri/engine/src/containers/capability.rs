@@ -20,10 +20,7 @@ pub enum Capability {
 }
 
 impl Capability {
-    pub const ALL: [Capability; 2] = [
-        Capability::Desktop,
-        Capability::MemorySnapshots,
-    ];
+    pub const ALL: [Capability; 2] = [Capability::Desktop, Capability::MemorySnapshots];
 
     /// The name the app uses for the action.
     pub const fn id(self) -> &'static str {

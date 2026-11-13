@@ -61,12 +61,7 @@ fn plan(agent: AgentId) -> Result<Plan, String> {
         AgentId::Codex => {
             let codex = crate::agent_tools::codex_pin();
             let pinned = codex.assets.macos_arm64;
-            let file = pinned
-                .url
-                .rsplit('/')
-                .next()
-                .unwrap_or_default()
-                .to_owned();
+            let file = pinned.url.rsplit('/').next().unwrap_or_default().to_owned();
             let asset = Asset {
                 file,
                 url: pinned.url,
@@ -121,7 +116,9 @@ const REGISTER_COMMAND: &str = "REGISTER=\"$HOME/Library/Application Support/Sil
 fn register_command() -> String {
     format!(
         "{REGISTER_COMMAND}\n{}",
-        crate::guest_components::register_after_install_command(crate::guest_components::run::Kind::Macos)
+        crate::guest_components::register_after_install_command(
+            crate::guest_components::run::Kind::Macos
+        )
     )
 }
 
@@ -164,11 +161,7 @@ pub(super) fn read_receipts(
 
 /// The agents of the computer: Claude Code from its template and receipt, Codex from its
 /// receipt when the computer runs and answers, and `unknown` while it is stopped or does not.
-pub(super) fn list(
-    app: &MacosContext,
-    id: &str,
-    running: bool,
-) -> Result<Vec<AgentInfo>, String> {
+pub(super) fn list(app: &MacosContext, id: &str, running: bool) -> Result<Vec<AgentInfo>, String> {
     let (layout, record) = layout_and_record(app, id)?;
     let read: Option<Receipts> = if running {
         let cached = receipts()
@@ -239,7 +232,10 @@ pub(super) fn install(
     let _installing = crate::agents::begin_install(id, agent)?;
     let cancelled = || cancelled() || crate::runtime::OPERATIONS.removal_queued(id);
     let cache = super::app_data(app)?.join(developer_tools::CACHE_DIR);
-    step(AgentInstallStep::Downloading, Some(format!("Downloading {name}")));
+    step(
+        AgentInstallStep::Downloading,
+        Some(format!("Downloading {name}")),
+    );
     let archive = {
         let _turn = developer_tools::download_turn(&cancelled)?;
         developer_tools::cached_with(&cache, &plan.asset, &cancelled, &|detail| {
@@ -328,7 +324,11 @@ mod tests {
             .asset
             .url
             .starts_with("https://github.com/openai/codex/releases/download/rust-v0.167.0/"));
-        assert!(developer_tools::validate_asset(&plan.asset, "github.com", ".tar.gz"));
+        assert!(developer_tools::validate_asset(
+            &plan.asset,
+            "github.com",
+            ".tar.gz"
+        ));
     }
 
     #[test]
@@ -440,8 +440,7 @@ mod tests {
 
     #[test]
     fn the_receipts_are_read_per_line_and_a_missing_one_is_none() {
-        let (claude, codex) =
-            parse_receipts("{\"version\":\"2.1.287\"}\n\n");
+        let (claude, codex) = parse_receipts("{\"version\":\"2.1.287\"}\n\n");
         assert_eq!(claude.unwrap()["version"], "2.1.287");
         assert!(codex.is_none());
         let (claude, codex) = parse_receipts("not json\n[1]\n");
@@ -472,7 +471,9 @@ mod tests {
         // template's Claude Code and no Codex.
         let inputs = developer_tools::setup_inputs();
         assert!(!inputs.iter().any(|input| input.contains("codex")));
-        assert!(!inputs.iter().any(|input| input.contains("silo-agent-tools")));
+        assert!(!inputs
+            .iter()
+            .any(|input| input.contains("silo-agent-tools")));
     }
 
     #[test]

@@ -100,9 +100,8 @@ fn move_to_protected_storage(context: &Arc<SilodContext>) {
     let migration = context.migration_controller();
     let host = SilodRuntimeHost::for_engine(context.clone());
     let result = (|| {
-        let storage = silo_engine::runtime_migration::selected_runtime_storage(
-            &context.paths().app_data,
-        )?;
+        let storage =
+            silo_engine::runtime_migration::selected_runtime_storage(&context.paths().app_data)?;
         let paths = runtime::migration_runtime_paths(&host, &storage)?;
         migration.run_protected_storage(&runtime::ProcessRunner, &paths, &|| {
             silo_engine::runtime_migration::publish_state(context.as_ref(), &migration)

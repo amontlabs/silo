@@ -625,8 +625,8 @@ mod stored {
 
     use super::*;
     use crate::recipes::{
-        additions::manager_key, append, built_in, hide_commands, hooks_of, record_merge, records, unrecord_merge,
-        Additions, Library,
+        additions::manager_key, append, built_in, hide_commands, hooks_of, record_merge, records,
+        unrecord_merge, Additions, Library,
     };
 
     fn definition() -> RecipeDefinition {
@@ -705,7 +705,11 @@ mod stored {
         );
         assert!(!library.remove("linux-dev").unwrap());
 
-        let names: Vec<String> = library.list().into_iter().map(|(name, _, _)| name).collect();
+        let names: Vec<String> = library
+            .list()
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect();
         assert_eq!(names, ["linux-dev", "macos-xcode", "web"]);
         std::fs::remove_dir_all(app).unwrap();
     }
@@ -762,10 +766,12 @@ mod stored {
             scrub: vec!["/tmp/mine".into()],
             ..Default::default()
         };
-        let options = crate::checkpoints::options_with_recipe_rules("builder", asked.clone()).unwrap();
+        let options =
+            crate::checkpoints::options_with_recipe_rules("builder", asked.clone()).unwrap();
         assert_eq!(options.stop, ["poller", "extra"]);
         assert_eq!(options.scrub, ["/tmp/mine", "/home/silo/.env"]);
-        let plain = crate::checkpoints::options_with_recipe_rules("someone-else", asked.clone()).unwrap();
+        let plain =
+            crate::checkpoints::options_with_recipe_rules("someone-else", asked.clone()).unwrap();
         assert_eq!(plain, asked);
         records::use_test_path(None);
         std::fs::remove_dir_all(app).unwrap();
@@ -815,9 +821,13 @@ mod stored {
         let on_main = records::get("main").unwrap().unwrap();
         assert_eq!(on_main.recipe, stored);
         // The same again adds nothing.
-        assert!(record_merge(&library, "main", &adds, true).unwrap().is_none());
+        assert!(record_merge(&library, "main", &adds, true)
+            .unwrap()
+            .is_none());
         // A computer with no recipe has nothing to append to.
-        assert!(record_merge(&library, "nobody", &adds, true).unwrap().is_none());
+        assert!(record_merge(&library, "nobody", &adds, true)
+            .unwrap()
+            .is_none());
         records::use_test_path(None);
         std::fs::remove_dir_all(app).unwrap();
     }
@@ -866,7 +876,13 @@ mod stored {
             Vec::<String>::new()
         );
         assert_eq!(
-            records::get("main").unwrap().unwrap().recipe.spec.packages.npm,
+            records::get("main")
+                .unwrap()
+                .unwrap()
+                .recipe
+                .spec
+                .packages
+                .npm,
             ["typescript"]
         );
         records::use_test_path(None);

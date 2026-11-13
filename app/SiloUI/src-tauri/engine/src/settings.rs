@@ -485,7 +485,9 @@ fn valid_draft(value: &Value) -> bool {
                             .is_none_or(|method| matches!(method.as_str(), Some("oauth" | "token")))
                         && policy.get("tokenSecretId").is_none_or(|id| {
                             policy["authenticationMethod"] == "token"
-                                && id.as_str().is_some_and(|id| !id.is_empty() && id.len() <= 64)
+                                && id
+                                    .as_str()
+                                    .is_some_and(|id| !id.is_empty() && id.len() <= 64)
                         })
                 })
             })

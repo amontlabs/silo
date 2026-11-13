@@ -233,7 +233,14 @@ pub fn apply(
     }
     for (index, command) in request.hooks.migrate.iter().enumerate() {
         run_hook(
-            env, target, &cwd, request.hooks_hidden, "migrate", index, command, &mut done,
+            env,
+            target,
+            &cwd,
+            request.hooks_hidden,
+            "migrate",
+            index,
+            command,
+            &mut done,
         )?;
     }
 
@@ -272,7 +279,14 @@ pub fn apply(
 
     for (index, command) in request.hooks.after.iter().enumerate() {
         run_hook(
-            env, target, &cwd, request.hooks_hidden, "after", index, command, &mut done,
+            env,
+            target,
+            &cwd,
+            request.hooks_hidden,
+            "after",
+            index,
+            command,
+            &mut done,
         )?;
     }
     Ok(done)
@@ -294,7 +308,11 @@ fn run_hook(
 ) -> Result<(), String> {
     let number = index + 1;
     if !hidden {
-        let verb = if kind == "migrate" { "Migrating" } else { "Running" };
+        let verb = if kind == "migrate" {
+            "Migrating"
+        } else {
+            "Running"
+        };
         env.note(&format!("{verb}: {command}"));
         env.run(target, RunAs::Account, &scripts::hook(command, cwd))?
             .success(&format!("{kind} `{command}`"))?;
