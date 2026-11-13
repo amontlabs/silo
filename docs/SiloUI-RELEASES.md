@@ -317,13 +317,22 @@ check or a push to `main` runs them.
 The link check includes first-party source documentation, guest notices and
 changesets. A coverage regression compares its globs with tracked Markdown,
 excluding documentation in the partial upstream vendor tree.
-To run the link check locally, install lychee and run from the repository root:
+
+Every CI test job runs one script in `app/SiloUI/scripts/ci/`, and local checks
+run the same scripts: `frontend.sh` (typecheck, lint, Vitest, website and demo;
+`checks` or `tests [VITEST_ARGS]` runs one half), `scripts.sh` (release tooling,
+script tests, isolation evals on Linux, reviewer service), `links.sh` (lychee
+0.24.2 on `PATH` or in `$LYCHEE`), `runner.sh` (Go helper), `macos.sh` (signing
+fixtures, formatting, workspace tests), `updater.sh` (patched updater), and on
+a Linux host `linux-prepare.sh` then `linux.sh`. `ci.yml` only installs tools,
+restores caches and calls them. Every `cargo nextest run` takes
+`SILO_NEXTEST_FLAGS` from `common.sh`: no retries, a flaky test fails, every
+test runs and no default filter applies. `scripts/test_ci_scripts.py` fails when
+`ci.yml` runs a test command directly or a script calls nextest without those
+flags. To run the link check locally, from any folder:
 
 ```sh
-lychee --offline --no-progress README.md AGENTS.md 'docs/**/*.md' 'app/SiloUI/*.md' \
-  'app/SiloUI/tests/**/*.md' 'app/SiloUI/src/**/*.md' 'app/SiloUI/.changeset/*.md' \
-  'app/SiloUI/src-tauri/guest/**/*.md' 'app/SiloUI/docs/**/*.html' \
-  'artifacts/**/*.md' 'website/*.md' 'demo/*.md'
+app/SiloUI/scripts/ci/links.sh
 ```
 
 Linux host build, package-installation and AppImage verification workflows have
