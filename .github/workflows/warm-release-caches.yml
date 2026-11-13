@@ -9,6 +9,8 @@ on:
       - '.github/workflows/warm-release-caches.yml'
       - 'app/SiloUI/scripts/prepare-microsandbox-runtime.mjs'
       - 'app/SiloUI/scripts/microsandbox-runtime.mjs'
+      - 'app/SiloUI/scripts/build-input.mjs'
+      - 'app/SiloUI/scripts/runtime-cache-entries.mjs'
       - 'app/SiloUI/scripts/git-runtime.mjs'
       - 'app/SiloUI/scripts/lfs-transfer-runtime.mjs'
       - 'app/SiloUI/patches/microsandbox-*.patch'

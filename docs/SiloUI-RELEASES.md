@@ -896,30 +896,61 @@ use the selected compiler's GOROOT with further toolchain switching disabled.
 The LFS manifest also records every bundled license file's SHA256; both caches
 reject missing, changed or unexpected notices instead of packaging an incomplete
 notice tree alongside a valid executable.
-Keys include the runner, target, Rust and selected Go versions, staging scripts and runtime patch,
-so app version changes alone do not invalidate the runtime. The guest image is not part of the
+Keys include the runner, target, Rust and selected Go versions, a digest of the build tools
+(`scripts/runtime-cache-entries.mjs tools`, the same tool identity the patched MicroSandbox key
+uses), the runtime cache format, staging scripts and runtime patch, so app version changes
+alone do not invalidate the runtime. The cache format (`RUNTIME_CACHE_FORMAT` in
+`scripts/build-input.mjs`) is bumped whenever the entry layout or manifest, or what
+`keep-current` keeps, changes; the compiled MicroSandbox and Git LFS build keys include it too,
+so an entry of an older format is never looked up. A push to `main` (the warmer, `ci.yml`)
+saves the runtime cache whenever its exact key missed, so a runner image update or a changed
+key is prepared once on `main` and then hits; pull requests and tags only restore. After
+preparation, CI keeps only this build's compiled MicroSandbox and Git LFS entries and the
+inputs of this MicroSandbox version, Git LFS pin and Git release
+(`runtime-cache-entries.mjs keep-current`), so a restored older archive does not carry older
+builds or the downloads of older versions into the next save or transfer. `keep-current` is
+for CI, where each job owns its cache: elsewhere it refuses unless given
+`--yes-shared-cache-is-mine`, and it removes nothing while another process prepares from the
+same cache. Locally the runtime cache is the checkout's `src-tauri/target/runtime-cache`;
+`SILO_RUNTIME_CACHE_DIR` (absolute) shares one root between the checkouts of one user. A
+shared root that belongs to another user is skipped, with a message, for the checkout's own,
+and work folders of another user in it are left in place. The guest image is not part of the
 runtime cache.
 Preparation always verifies and stages restored inputs and regenerates package
 metadata. Cache misses follow the normal build path.
 
 The patched MicroSandbox executable key also includes the staging-script recipe
-digest and the requested `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
-`CARGO_BUILD_RUSTFLAGS`, target-specific `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, and
-`CARGO_PROFILE_RELEASE_*` overrides, including build-script overrides. Profile
+digest; the Apple SDK and developer folder; the C compiler, linker and archiver
+found on `PATH`; the cargo configuration files that apply and the files they include;
+the contents of the programs the environment or configuration names as rustc,
+wrapper, linker or C tool; and the requested `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
+`CARGO_BUILD_RUSTFLAGS`, target-specific `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` and
+`_LINKER`, `CARGO_UNSTABLE_*`, C toolchain variables and `CARGO_PROFILE_RELEASE_*`
+overrides, including build-script overrides. Only whether the release build is
+incremental is keyed, so `CARGO_INCREMENTAL=0` and an unset value agree; settings of
+other profiles (`CARGO_PROFILE_DEV_*`, `CARGO_PROFILE_TEST_*`) are not keyed. Profile
 settings such as debug information and optimization change compiled bytes without
-changing the source pin or the runtime's capability probes.
+changing the source pin or the runtime's capability probes. The libclang selection
+(`LIBCLANG_PATH`, `CLANG_PATH`, `LLVM_CONFIG_PATH`, `BINDGEN_EXTRA_CLANG_ARGS*`) is keyed as
+environment; the pinned MicroSandbox build uses neither bindgen nor clang-sys, so the libclang
+library itself is not. On Linux the key includes the `pkg-config` version and flags of `dbus-1`
+and `libcap-ng` (a few milliseconds), not `PKG_CONFIG_PATH`, which setup actions change without
+changing those results.
 [Cargo documents these compiler inputs](https://doc.rust-lang.org/cargo/reference/environment-variables.html).
 Changing them rebuilds the executable even when a fallback public archive restores
 otherwise valid source, patch, compiler, and capability checks.
 
-Release validation checks exact runtime-cache availability for each target using
-`lookup-only` on the existing validation runner. Go setup runs before this lookup
+Each platform's `release-platform.yml` runtime job checks exact runtime-cache availability
+using `lookup-only` on that platform's runner, because the key includes the platform's build
+tools. Go setup runs before this lookup
 so a newer 1.25.x patch release cannot count as an exact hit for older executables;
 CI sets `GOTOOLCHAIN=local` at job scope in every job that prepares resources, so lookup,
-preparation and the later Tauri build hook record the same toolchain policy. Warm platforms start their native
-and package jobs directly, without an extra producer runner or artifact transfer.
-A missing exact cache starts one credential-free runtime producer inside that
-platform's `release-platform.yml` invocation. Its native and package jobs wait for
+preparation and the later Tauri build hook record the same toolchain policy. On a hit that job ends after the
+lookup and the native and package jobs restore the cache, without an artifact transfer.
+The lookup runs on the platform's runner because the key includes that runner's build tools,
+so a warm release waits for a macOS runner, its checkout and its Node, Python and Go setup
+before the native and package jobs start: one more runner queue and about 1–2 minutes.
+On a miss the same credential-free job prepares the runtime once. Its native and package jobs wait for
 that producer; another platform's runtime does not block them. Sequential benchmark
 mode still runs native tests in the package job before release compilation.
 
@@ -928,7 +959,7 @@ archive preserves executable modes and excludes application build products, loca
 configuration, source-build work directories, and staged `release-info.json`.
 Consumers require the producing job's archive SHA256, reject unsafe paths and
 links, and then run normal preparation to validate and stage inputs for the current
-release. No release job saves a shared cache; only the main-branch warmer does.
+release. No release job saves a shared cache; only pushes to `main` do.
 If an exact cache is evicted or damaged after lookup, ordinary preparation retains
 its safe local rebuild fallback. Cache reuse is an optimization, not a prerequisite
 for correctness.

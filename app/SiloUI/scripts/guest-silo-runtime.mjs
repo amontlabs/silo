@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { cacheTemporaryRoot, makeWorkFolder, ownerTag, removeAbandoned, runtimeCacheRoot } from './build-input.mjs'
 import { MICROSANDBOX_BUILD_TOOLCHAIN } from './microsandbox-runtime.mjs'
 
 const execute = promisify(execFile)
@@ -58,30 +59,45 @@ export const archiverWrapper = zig => `#!/bin/sh
 exec "${zig}" ar "$@"
 `
 
-async function build({ appRoot, selected, zig, toolchain, run, environment }) {
-  const tools = await mkdtemp(join(process.env.TMPDIR ?? '/tmp', 'silo-guest-cc.'))
+// Cargo keys every compilation on the linker path, so the wrappers live at a path that depends only
+// on their content (never a fresh temporary directory): an unchanged guest silo is not rebuilt in
+// its cargo target (per checkout, or shared through CARGO_TARGET_DIR).
+async function wrapperDirectory(appRoot, files, zigVersion, environment) {
+  // The Zig release is part of the path too: cc-rs does not notice a new compiler behind the same wrapper.
+  const digest = sha256(Buffer.from(JSON.stringify([files, zigVersion]))).slice(0, 16)
+  const cacheRoot = runtimeCacheRoot(resolve(appRoot, 'src-tauri'), environment)
+  const tools = join(cacheRoot, 'guest-cc', digest)
+  await mkdir(tools, { recursive: true })
+  const work = await makeWorkFolder(cacheTemporaryRoot(cacheRoot))
   try {
-    await writeFile(join(tools, 'cc'), compilerWrapper(zig, selected.zigTarget), { mode: 0o755 })
-    await writeFile(join(tools, 'ar'), archiverWrapper(zig), { mode: 0o755 })
-    const triple = selected.rustTarget.toUpperCase().replaceAll('-', '_')
-    const targetDirectory = environment.CARGO_TARGET_DIR?.trim() || resolve(appRoot, 'src-tauri/target/guest-silo')
-    await run('cargo', [...(toolchain ? [`+${toolchain}`] : []), 'build', '--release', '-p', 'silo-cli', '--target', selected.rustTarget, '--locked'], {
-      cwd: appRoot,
-      maxBuffer: 64 * 1024 * 1024,
-      env: {
-        ...environment,
-        [`CC_${selected.rustTarget.replaceAll('-', '_')}`]: join(tools, 'cc'),
-        [`AR_${selected.rustTarget.replaceAll('-', '_')}`]: join(tools, 'ar'),
-        [`CARGO_TARGET_${triple}_LINKER`]: join(tools, 'cc'),
-        [`CARGO_TARGET_${triple}_RUSTFLAGS`]: '-C link-self-contained=no',
-        CARGO_TARGET_DIR: targetDirectory,
-        RUSTC_WRAPPER: '',
-      },
-    })
-    return join(targetDirectory, selected.rustTarget, 'release', 'silo')
+    for (const [name, content] of Object.entries(files)) {
+      await writeFile(join(work, name), content, { mode: 0o755 })
+      await rename(join(work, name), join(tools, name))
+    }
   } finally {
-    await rm(tools, { recursive: true, force: true })
+    await rm(work, { recursive: true, force: true })
   }
+  return tools
+}
+
+async function build({ appRoot, selected, zig, zigVersion, toolchain, run, environment }) {
+  const tools = await wrapperDirectory(appRoot, { cc: compilerWrapper(zig, selected.zigTarget), ar: archiverWrapper(zig) }, zigVersion, environment)
+  const triple = selected.rustTarget.toUpperCase().replaceAll('-', '_')
+  const targetDirectory = environment.CARGO_TARGET_DIR?.trim() || resolve(appRoot, 'src-tauri/target/guest-silo')
+  await run('cargo', [...(toolchain ? [`+${toolchain}`] : []), 'build', '--release', '-p', 'silo-cli', '--target', selected.rustTarget, '--locked'], {
+    cwd: appRoot,
+    maxBuffer: 64 * 1024 * 1024,
+    env: {
+      ...environment,
+      [`CC_${selected.rustTarget.replaceAll('-', '_')}`]: join(tools, 'cc'),
+      [`AR_${selected.rustTarget.replaceAll('-', '_')}`]: join(tools, 'ar'),
+      [`CARGO_TARGET_${triple}_LINKER`]: join(tools, 'cc'),
+      [`CARGO_TARGET_${triple}_RUSTFLAGS`]: '-C link-self-contained=no',
+      CARGO_TARGET_DIR: targetDirectory,
+      RUSTC_WRAPPER: '',
+    },
+  })
+  return join(targetDirectory, selected.rustTarget, 'release', 'silo')
 }
 
 async function selectToolchain(run, selected, required) {
@@ -105,7 +121,9 @@ async function selectToolchain(run, selected, required) {
 async function publish(appRoot, files) {
   const tauriRoot = resolve(appRoot, 'src-tauri')
   const root = join(tauriRoot, 'runtime', 'guest-silo')
-  const stage = join(tauriRoot, 'runtime', `.guest-silo-staging-${process.pid}`)
+  // The staging name carries the owning process, so a run removes what an interrupted run left.
+  await removeAbandoned(join(tauriRoot, 'runtime'), '.guest-silo-staging-')
+  const stage = join(tauriRoot, 'runtime', `.guest-silo-staging-${ownerTag()}`)
   await rm(stage, { recursive: true, force: true })
   await mkdir(stage, { recursive: true })
   try {
@@ -147,7 +165,7 @@ export async function stageGuestSilo({
       throw new Error(`Zig ${ZIG_VERSION} is required to build the Linux program of Silo's tools; found ${version}`)
     }
     const toolchain = await selectToolchain(run, selected, required)
-    built = { path: await build({ appRoot, selected, zig, toolchain, run, environment }), zigVersion: version, toolchain }
+    built = { path: await build({ appRoot, selected, zig, zigVersion: version, toolchain, run, environment }), zigVersion: version, toolchain }
   } catch (error) {
     if (required || !(error instanceof Unavailable)) {
       throw new Error(`The Linux program of Silo's tools could not be built: ${error.message}. A build that ships needs it (Zig ${ZIG_VERSION}).`, { cause: error })

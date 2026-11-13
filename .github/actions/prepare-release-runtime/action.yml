@@ -8,7 +8,7 @@ inputs:
     description: Rust target triple
     required: true
   save:
-    description: Populate default-branch caches from the credential-free warmer
+    description: Populate default-branch caches from the credential-free warmer (Cargo downloads, and the runtime on manual dispatch; a push to main saves the runtime without it)
     default: 'false'
   lookup-only:
     description: Check exact public-cache availability without restoring or preparing
@@ -46,15 +46,28 @@ runs:
       run: |
         go_version=$(go env GOVERSION)
         echo "version=${go_version#go}" >> "$GITHUB_OUTPUT"
+    # The compiled MicroSandbox key includes the Apple SDK, the C tools, cargo configuration and
+    # build environment of this runner (readBuildToolIdentity). Their digest is part of this cache
+    # key too, so a runner image update misses, rebuilds once and saves under the new key. So is
+    # the runtime cache format (RUNTIME_CACHE_FORMAT in scripts/build-input.mjs), which the
+    # compiled build keys also include.
+    - name: Identify build tools before public cache lookup
+      id: build-tools
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        GOTOOLCHAIN: local
+        RUNTIME_TARGET: ${{ inputs.target }}
+      run: node app/SiloUI/scripts/runtime-cache-entries.mjs tools --target "$RUNTIME_TARGET" >> "$GITHUB_OUTPUT"
     - name: Restore public runtime cache
       if: inputs.lookup-only == 'true' || inputs.artifact-name == ''
       id: runtime
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         lookup-only: ${{ inputs.lookup-only }}
-        key: silo-runtime-v1-${{ inputs.runner }}-${{ inputs.target }}-rust${{ steps.runtime-inputs.outputs.toolchain }}-go${{ steps.go-compiler.outputs.version }}-${{ hashFiles('.github/actions/prepare-release-runtime/action.yml', 'app/SiloUI/runtime-inputs.json', 'app/SiloUI/scripts/preflight.mjs', 'app/SiloUI/scripts/prepare-microsandbox-runtime.mjs', 'app/SiloUI/scripts/microsandbox-runtime.mjs', 'app/SiloUI/scripts/git-runtime.mjs', 'app/SiloUI/scripts/lfs-transfer-runtime.mjs', 'app/SiloUI/patches/microsandbox-*.patch', 'app/SiloUI/src-tauri/macos-gateway/Cargo.*', 'app/SiloUI/src-tauri/macos-gateway/reserved-secret-names.json', 'app/SiloUI/src-tauri/macos-gateway/src/**') }}
+        key: silo-runtime-v1-${{ inputs.runner }}-${{ inputs.target }}-rust${{ steps.runtime-inputs.outputs.toolchain }}-go${{ steps.go-compiler.outputs.version }}-tools${{ steps.build-tools.outputs.digest }}-format${{ steps.build-tools.outputs.format }}-${{ hashFiles('.github/actions/prepare-release-runtime/action.yml', 'app/SiloUI/runtime-inputs.json', 'app/SiloUI/scripts/preflight.mjs', 'app/SiloUI/scripts/prepare-microsandbox-runtime.mjs', 'app/SiloUI/scripts/microsandbox-runtime.mjs', 'app/SiloUI/scripts/build-input.mjs', 'app/SiloUI/scripts/runtime-cache-entries.mjs', 'app/SiloUI/scripts/git-runtime.mjs', 'app/SiloUI/scripts/lfs-transfer-runtime.mjs', 'app/SiloUI/patches/microsandbox-*.patch', 'app/SiloUI/src-tauri/macos-gateway/**') }}
         # The macOS gateway sources are part of the patched MicroSandbox build
-        # key (readMacosGatewayInputs), so they must change this key too.
+        # key (readMacosGatewayInputs hashes the whole crate), so they must change this key too.
         # Older cache archives are input candidates only; preparation below
         # rechecks pinned bytes and the source/patch/toolchain build key.
         restore-keys: silo-runtime-v1-${{ inputs.runner }}-${{ inputs.target }}-rust${{ steps.runtime-inputs.outputs.toolchain }}-
@@ -64,10 +77,9 @@ runs:
           app/SiloUI/src-tauri/target/runtime-cache/v*/agentd-*
           app/SiloUI/src-tauri/target/runtime-cache/v*/licenses
           app/SiloUI/src-tauri/target/runtime-cache/v*/libkrunfw-*
-          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/msb
-          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/msb.sha256
-          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/silo-macos-gateway
-          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/silo-macos-gateway.sha256
+          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/published/manifest.json
+          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/published/msb
+          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/published/silo-macos-gateway
           app/SiloUI/src-tauri/target/runtime-cache/dugite
           app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/*/source.tar.gz
           app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/*/builds
@@ -141,6 +153,16 @@ runs:
         GOTOOLCHAIN: local
         SILO_REQUIRE_GUEST_SILO: '1'
       run: python3 scripts/measure-command.py runtime-prepare -- npm run runtime:prepare
+    # Restored archives can carry builds of older keys; only this build's msb and Git LFS entries
+    # are kept, so what is saved or transferred below does not grow with every key.
+    - name: Keep only this run's compiled runtime entries
+      if: inputs.lookup-only != 'true'
+      shell: bash
+      working-directory: app/SiloUI
+      env:
+        GOTOOLCHAIN: local
+        RUNTIME_TARGET: ${{ inputs.target }}
+      run: node scripts/runtime-cache-entries.mjs keep-current --target "$RUNTIME_TARGET"
     - name: Warm application dependency downloads
       if: inputs.lookup-only != 'true' && inputs.save == 'true' && github.ref == 'refs/heads/main'
       shell: bash
@@ -148,8 +170,10 @@ runs:
       env:
         RUNTIME_TARGET: ${{ inputs.target }}
       run: cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target "$RUNTIME_TARGET"
+    # A push to main saves on every exact miss, not only the warmer, so a runner image update or a
+    # changed key is prepared once and then hits. Pull requests and tags never save.
     - name: Save public runtime cache
-      if: inputs.lookup-only != 'true' && inputs.save == 'true' && github.ref == 'refs/heads/main' && steps.runtime.outputs.cache-hit != 'true'
+      if: inputs.lookup-only != 'true' && inputs.artifact-name == '' && (inputs.save == 'true' || github.event_name == 'push') && github.ref == 'refs/heads/main' && steps.runtime.outputs.cache-hit != 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         key: ${{ steps.runtime.outputs.cache-primary-key }}
@@ -159,10 +183,9 @@ runs:
           app/SiloUI/src-tauri/target/runtime-cache/v*/agentd-*
           app/SiloUI/src-tauri/target/runtime-cache/v*/licenses
           app/SiloUI/src-tauri/target/runtime-cache/v*/libkrunfw-*
-          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/msb
-          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/msb.sha256
-          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/silo-macos-gateway
-          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/silo-macos-gateway.sha256
+          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/published/manifest.json
+          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/published/msb
+          app/SiloUI/src-tauri/target/runtime-cache/v*/patched-builds/*/published/silo-macos-gateway
           app/SiloUI/src-tauri/target/runtime-cache/dugite
           app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/*/source.tar.gz
           app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/*/builds

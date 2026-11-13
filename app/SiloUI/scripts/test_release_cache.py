@@ -36,6 +36,80 @@ class ReleaseCacheTests(unittest.TestCase):
         self.assertIn('-go${{ steps.go-compiler.outputs.version }}-', ACTION)
         self.assertIn("'.github/actions/prepare-release-runtime/action.yml'", ACTION)
 
+    def test_runtime_cache_key_includes_the_build_tools_identified_before_lookup(self):
+        self.assertLess(ACTION.index('id: build-tools'), ACTION.index('actions/cache/restore@'))
+        self.assertIn('-tools${{ steps.build-tools.outputs.digest }}-', ACTION)
+        block = ACTION.split('      id: build-tools\n', 1)[1].split('    - name:', 1)[0]
+        command = block.split('      run: ', 1)[1].strip()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            digests = []
+            for extra in ({}, {}, {'CARGO_INCREMENTAL': '0', 'CARGO_PROFILE_DEV_DEBUG': '0'}, {'RUSTFLAGS': '-Copt-level=1'}):
+                output.unlink(missing_ok=True)
+                subprocess.run(['/bin/bash', '-eu', '-c', command], cwd=ROOT, check=True, env={
+                    **os.environ, 'GITHUB_OUTPUT': str(output), 'RUNTIME_TARGET': 'aarch64-apple-darwin',
+                    'SILO_RUNTIME_CACHE_DIR': directory, **extra,
+                })
+                self.assertRegex(output.read_text(), r'^digest=[0-9a-f]{16}\nformat=\d+\n$')
+                digests.append(output.read_text())
+            # Stable, blind to debug-build settings, and changed by what changes msb's bytes.
+            self.assertEqual(digests[0], digests[1])
+            self.assertEqual(digests[0], digests[2])
+            self.assertNotEqual(digests[0], digests[3])
+
+    def test_runtime_cache_key_follows_the_cache_format_and_its_code(self):
+        # The format is part of the compiled build keys too (RUNTIME_CACHE_FORMAT); a change to the
+        # code that writes or prunes entries also changes the key and starts the warmer.
+        self.assertIn('-format${{ steps.build-tools.outputs.format }}-', ACTION)
+        warmer = (ROOT / '.github/workflows/warm-release-caches.yml').read_text()
+        for script in ('app/SiloUI/scripts/build-input.mjs', 'app/SiloUI/scripts/runtime-cache-entries.mjs'):
+            self.assertIn(f"'{script}'", ACTION.split('key: silo-runtime-v1-', 1)[1].split('\n', 1)[0])
+            self.assertIn(f"      - '{script}'\n", warmer)
+
+    def test_a_push_to_main_saves_the_runtime_cache_on_an_exact_miss(self):
+        step = ACTION.split('    - name: Save public runtime cache\n', 1)[1].split('\n', 1)[0]
+        self.assertEqual(step, "      if: inputs.lookup-only != 'true' && inputs.artifact-name == '' && (inputs.save == 'true' || github.event_name == 'push')"
+                               " && github.ref == 'refs/heads/main' && steps.runtime.outputs.cache-hit != 'true'")
+
+    def test_only_this_runs_compiled_entries_are_saved_or_transferred(self):
+        keep = ACTION.index('node scripts/runtime-cache-entries.mjs keep-current')
+        self.assertLess(ACTION.index('runtime-prepare -- npm run runtime:prepare'), keep)
+        self.assertLess(keep, ACTION.index('- name: Save public runtime cache'))
+        self.assertLess(PLATFORM.index('uses: ./.github/actions/prepare-release-runtime\n        with:\n          runner: ${{ inputs.runner }}\n          target: ${{ inputs.target }}\n      - name: Archive'),
+                        PLATFORM.index('release-runtime-cache.py pack'))
+
+    def test_jobs_that_prepare_the_runtime_compute_one_build_environment(self):
+        # The compiled runtime's key covers the job's build environment, so every job that prepares,
+        # saves or consumes the runtime must agree on it (job-level env; steps add none of it).
+        environments = {}
+        for path in sorted((ROOT / '.github/workflows').glob('*.yml')):
+            text = path.read_text()
+            if '\njobs:\n' not in text:
+                continue
+            parts = re.split(r'^  ([a-zA-Z0-9_-]+):\n', text.split('\njobs:\n', 1)[1], flags=re.M)
+            for name, job in zip(parts[1::2], parts[2::2]):
+                if 'prepare-release-runtime' not in job:
+                    continue
+                env = re.search(r'^    env:\n((?:      .*\n|\n)+)', job, re.M)
+                values = {}
+                for line in (env.group(1).splitlines() if env else []):
+                    if ':' in line.strip():
+                        key, value = line.strip().split(':', 1)
+                        values[key] = value.strip().strip("'")
+                environments[f'{path.name}:{name}'] = values
+        self.assertIn('release-platform.yml:runtime', environments)
+        self.assertIn('release-platform.yml:build', environments)
+        script = (
+            'const [module, environments] = process.argv.slice(1);'
+            'import(module).then(({ buildEnvironment }) => console.log(JSON.stringify(Object.fromEntries('
+            'Object.entries(JSON.parse(environments)).map(([job, env]) => [job, buildEnvironment(env, "aarch64-apple-darwin")])))))'
+        )
+        module = (ROOT / 'app/SiloUI/scripts/microsandbox-runtime.mjs').as_uri()
+        result = subprocess.run(['node', '-e', script, module, json.dumps(environments)], check=True, capture_output=True, text=True)
+        computed = json.loads(result.stdout)
+        for job, value in computed.items():
+            self.assertEqual(value, computed['release-platform.yml:runtime'], job)
+
     def test_jobs_that_prepare_and_build_share_one_go_toolchain_policy(self):
         for name in ('release-platform', 'warm-release-caches', 'benchmark-dependency-platform'):
             text = (ROOT / f'.github/workflows/{name}.yml').read_text()
@@ -84,22 +158,27 @@ class ReleaseCacheTests(unittest.TestCase):
         self.assertEqual(paths[0], paths[2], 'Runtime restore/save paths must match')
         self.assertEqual(paths[1], paths[3], 'Cargo restore/save paths must match')
         runtime = 'app/SiloUI/src-tauri/target/runtime-cache/'
-        allowed = [runtime + 'v0.7.6/patched-builds/key/msb',
-                   runtime + 'v0.7.6/patched-builds/key/msb.sha256',
-                   # microsandbox-runtime.mjs reuses msb only with a verified gateway beside it.
-                   runtime + 'v0.7.6/patched-builds/key/silo-macos-gateway',
-                   runtime + 'v0.7.6/patched-builds/key/silo-macos-gateway.sha256',
+        # microsandbox-runtime.mjs reuses msb and the gateway only as the pair its manifest names.
+        allowed = [runtime + 'v0.7.6/patched-builds/key/published/manifest.json',
+                   runtime + 'v0.7.6/patched-builds/key/published/msb',
+                   runtime + 'v0.7.6/patched-builds/key/published/silo-macos-gateway',
                    runtime + 'v0.7.6/microsandbox-09df3d4b9d832adaede1fb9a198cfc660bfab8cd.tar.gz',
                    runtime + 'v0.7.6/agentd-aarch64',
                    runtime + 'v0.7.6/libkrunfw-darwin-aarch64.dylib',
                    runtime + 'v0.7.6/licenses/microsandbox-Apache-2.0.txt',
                    runtime + 'dugite/version/archive.tar.gz',
                    runtime + 'git-lfs-transfer/pin/source.tar.gz',
-                   runtime + 'git-lfs-transfer/pin/builds/linux-arm64/git-lfs-transfer',
+                   # lfs-transfer-runtime.mjs publishes one entry per build key, with its manifest and notices.
+                   runtime + 'git-lfs-transfer/pin/builds/linux-arm64-key/manifest.json',
+                   runtime + 'git-lfs-transfer/pin/builds/linux-arm64-key/git-lfs-transfer',
+                   runtime + 'git-lfs-transfer/pin/builds/linux-arm64-key/licenses/Go-LICENSE',
                    '.cargo/registry/cache/index/crate.tar.gz']
-        forbidden = [runtime + 'v0.7.6/patched-builds/key/cargo-target/release/msb',
-                     runtime + 'v0.7.6/patched-builds/key/work/source.rs',
+        forbidden = [runtime + 'v0.7.6/patched-builds/work-123-target/release/msb',
+                     runtime + 'v0.7.6/patched-builds/work-123/source.rs',
+                     runtime + 'v0.7.6/patched-builds/key/published.publish-123/msb',
                      runtime + 'git-lfs-transfer/pin/source-123/main.go',
+                     runtime + 'tmp/123-0123456789ab-x/target/release/msb',
+                     runtime + 'tmp/123-0123456789ab-y/entry/manifest.json',
                      'app/SiloUI/src-tauri/target/release/silo-ui',
                      'app/SiloUI/src-tauri/target/debug/build/silo/output',
                      'app/SiloUI/github-build.local.json',
@@ -123,14 +202,12 @@ class ReleaseCacheTests(unittest.TestCase):
         self.assertLess(ACTION.index('node app/SiloUI/scripts/preflight.mjs'), ACTION.index('actions/cache/restore'))
         self.assertIn("'app/SiloUI/runtime-inputs.json'", ACTION)
         self.assertIn('restore-keys: silo-runtime-v1-', ACTION)
-        # Every macOS gateway input read by readMacosGatewayInputs feeds the
-        # patched MicroSandbox build key, so it must also change the cache key.
-        runtime_script = (ROOT / 'app/SiloUI/scripts/microsandbox-runtime.mjs').read_text()
-        gateway_names = runtime_script.split('async function readMacosGatewayInputs', 1)[1].split('const names = [', 1)[1].split(']', 1)[0]
+        # readMacosGatewayInputs hashes every file of the gateway crate into the
+        # patched MicroSandbox build key, so any file of it must change the cache key.
         key_line = next(line for line in ACTION.splitlines() if 'key: silo-runtime-v1-' in line and 'restore-keys' not in line)
-        for name in re.findall(r'"([^"]+)"', gateway_names):
-            path = 'app/SiloUI/src-tauri/macos-gateway/' + name
-            self.assertTrue(any(fnmatch.fnmatch(path, pattern) for pattern in re.findall(r"'([^']+)'", key_line)), path)
+        patterns = re.findall(r"'([^']+)'", key_line)
+        for path in ['app/SiloUI/src-tauri/macos-gateway/build.rs', 'app/SiloUI/src-tauri/macos-gateway/src/later/module.rs']:
+            self.assertTrue(any(fnmatch.fnmatch(path, pattern) for pattern in patterns), path)
         validate = WORKFLOW.split('\n  validate:', 1)[1].split('\n  macos-minimum-constraints:', 1)[0]
         self.assertIn('node app/SiloUI/scripts/preflight.mjs', validate)
 

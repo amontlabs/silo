@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, copyFile, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { fetchVerifiedFile } from './build-input.mjs'
+import { RUNTIME_CACHE_FORMAT, cacheTemporaryRoot, fetchVerifiedFile, makeWorkFolder, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry } from './build-input.mjs'
 import { validateArchiveEntries } from './git-runtime.mjs'
 
 const execute = promisify(execFile)
@@ -62,16 +62,59 @@ async function normalizeModes(directory) {
   }
 }
 
-// The server runs inside the Linux guest, including when Silo's host is macOS.
-// There is no stable upstream binary release; build the immutable source pin.
-export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStream, run = execute }) {
+// The shared cache holds one compiled build per source and build identity, as one entry
+// (`publishEntry`): the executable, the MIT notice and the `licenses/` notices. The key includes
+// the cache format, so an entry written in an older format is never looked up.
+export function lfsTransferBuildKey(architecture, buildIdentity) {
+  return `linux-${architecture}-${sha256(JSON.stringify([LFS_TRANSFER_SOURCE_SHA256, RUNTIME_CACHE_FORMAT, buildIdentity]))}`
+}
+
+const usableBuild = files => Boolean(files?.['git-lfs-transfer'] && files['LICENSE-MIT.txt'] && files['licenses/Go-LICENSE']) &&
+  Object.keys(files).every(name => name === 'git-lfs-transfer' || name === 'LICENSE-MIT.txt' || name.startsWith('licenses/'))
+
+const runtimeManifest = (architecture, buildIdentity, files) => `${JSON.stringify({
+  schemaVersion: 2, distribution: 'charmbracelet/git-lfs-transfer', commit: LFS_TRANSFER_COMMIT, buildIdentity,
+  sourceSha256: LFS_TRANSFER_SOURCE_SHA256, platform: 'linux', architecture, binarySha256: sha256(files['git-lfs-transfer']),
+  licenseSha256: Object.fromEntries(Object.keys(files).filter(name => name !== 'git-lfs-transfer').sort().map(name => [name, sha256(files[name])])),
+}, null, 2)}\n`
+
+async function readBuild(directory) {
+  const files = { 'git-lfs-transfer': await readFile(join(directory, 'git-lfs-transfer')) }
+  for (const name of Object.keys(await licenseDigests(directory))) files[name] = await readFile(join(directory, name))
+  return files
+}
+
+// Writes a build into the checkout's runtime folder beside it, then renames it into place. The
+// staging name carries the owning process, so a run removes what an interrupted run left.
+async function stageBuild(tauriRoot, root, files, manifest) {
+  await removeAbandoned(join(tauriRoot, 'runtime'), '.lfs-transfer-staging-')
+  const stage = join(tauriRoot, 'runtime', `.lfs-transfer-staging-${ownerTag()}`)
+  await rm(stage, { recursive: true, force: true })
+  try {
+    for (const [name, bytes] of Object.entries(files)) {
+      await mkdir(dirname(join(stage, name)), { recursive: true })
+      await writeFile(join(stage, name), bytes)
+    }
+    await writeFile(join(stage, 'manifest.json'), manifest)
+    await normalizeModes(stage)
+    await rm(root, { recursive: true, force: true })
+    await rename(stage, root)
+  } finally {
+    await rm(stage, { recursive: true, force: true })
+  }
+}
+
+// The shared folder of the pinned source and its builds.
+export function lfsTransferCache(tauriRoot) {
+  return join(runtimeCacheRoot(tauriRoot), 'git-lfs-transfer', LFS_TRANSFER_COMMIT)
+}
+
+// The Go compiler the build would use and the identity a build is keyed and recorded with.
+export async function readLfsBuildIdentity({ appRoot, targetTriple, run = execute }) {
   const architecture = lfsTransferGuestArchitecture(targetTriple)
   const tauriRoot = resolve(appRoot, 'src-tauri')
-  const root = join(tauriRoot, 'runtime', 'lfs-transfer')
-  const cache = join(tauriRoot, 'target', 'runtime-cache', 'git-lfs-transfer', LFS_TRANSFER_COMMIT)
   const environment = { ...process.env, CGO_ENABLED: '0', GOOS: 'linux', GOARCH: architecture, GOWORK: 'off', GOSUMDB: 'sum.golang.org' }
-  await mkdir(cache, { recursive: true })
-  const context = await mkdtemp(join(cache, 'compiler-'))
+  const context = await makeWorkFolder(cacheTemporaryRoot(runtimeCacheRoot(tauriRoot)))
   let compiler
   try {
     // Resolve auto/+auto in the guest module's context, not the host app's cwd.
@@ -92,10 +135,21 @@ export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStre
     recipeSha256: sha256(await readFile(new URL(import.meta.url))),
     environment: Object.fromEntries(goRecipeEnvironment.map(key => [key, compiler[key]])),
   }
+  return { architecture, environment, compiler, buildIdentity, buildKey: lfsTransferBuildKey(architecture, buildIdentity) }
+}
+
+// The server runs inside the Linux guest, including when Silo's host is macOS.
+// There is no stable upstream binary release; build the immutable source pin.
+export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStream, run = execute, hooks }) {
+  const tauriRoot = resolve(appRoot, 'src-tauri')
+  const root = join(tauriRoot, 'runtime', 'lfs-transfer')
+  const cache = lfsTransferCache(tauriRoot)
+  const temporaryRoot = cacheTemporaryRoot(runtimeCacheRoot(tauriRoot))
+  const { architecture, environment, compiler, buildIdentity, buildKey } = await readLfsBuildIdentity({ appRoot, targetTriple, run })
   // Use the selected compiler for the build and notices, without another auto switch.
   const go = join(compiler.GOROOT, 'bin/go')
   const buildEnvironment = { ...environment, ...buildIdentity.environment, GOTOOLCHAIN: 'local', GOROOT: compiler.GOROOT }
-  const cachedBuild = join(cache, 'builds', `linux-${architecture}`)
+  const cachedBuild = join(cache, 'builds', buildKey)
   const binaryPath = join(root, 'git-lfs-transfer')
   const manifestPath = join(root, 'manifest.json')
   const valid = async directory => {
@@ -113,28 +167,26 @@ export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStre
     await normalizeModes(root)
     return { root, binaryPath, manifestPath }
   }
-  if (await valid(cachedBuild)) {
-    await rm(root, { recursive: true, force: true })
-    await mkdir(root, { recursive: true })
-    for (const name of ['git-lfs-transfer', 'manifest.json', 'LICENSE-MIT.txt', 'licenses']) {
-      await cp(join(cachedBuild, name), join(root, name), { recursive: true })
-    }
-    await normalizeModes(root)
+  // The shared build is taken against its one manifest read; the files staged are the bytes checked.
+  const taken = await takePublishedEntry(cachedBuild, null, hooks)
+  if (usableBuild(taken)) {
+    await stageBuild(tauriRoot, root, taken, runtimeManifest(architecture, buildIdentity, taken))
     return { root, binaryPath, manifestPath }
   }
 
-  const stage = join(tauriRoot, 'runtime', `.lfs-transfer-staging-${process.pid}`)
+  // The extracted source and the build are in a work folder of the cache's `tmp`, which the next
+  // run removes if this process is interrupted.
   const archivePath = join(cache, 'source.tar.gz')
   await mkdir(cache, { recursive: true })
-  await fetchVerifiedFile(fetchStream, LFS_TRANSFER_SOURCE_URL, LFS_TRANSFER_SOURCE_SHA256, 'Git LFS transfer source', archivePath)
-  await rm(stage, { recursive: true, force: true })
-  await mkdir(stage, { recursive: true })
+  await fetchVerifiedFile(fetchStream, LFS_TRANSFER_SOURCE_URL, LFS_TRANSFER_SOURCE_SHA256, 'Git LFS transfer source', archivePath, { temporaryRoot })
+  const work = await makeWorkFolder(temporaryRoot)
+  const stage = join(work, 'build')
+  await mkdir(stage)
   try {
     const listing = await run('tar', ['-tzf', archivePath], { maxBuffer: 1024 * 1024 })
     validateArchiveEntries(listing.stdout.trim().split('\n'), 'Git LFS transfer source')
-    const source = join(cache, `source-${process.pid}`)
-    await rm(source, { recursive: true, force: true })
-    await mkdir(source, { recursive: true })
+    const source = join(work, 'source')
+    await mkdir(source)
     try {
       await run('tar', ['-xzf', archivePath, '--strip-components=1', '-C', source])
       const selection = (await readFile(join(source, 'go.mod'), 'utf8')).split('\n').filter(line => /^(go|toolchain)\s/.test(line)).join('\n')
@@ -163,20 +215,12 @@ export async function stageLfsTransferRuntime({ appRoot, targetTriple, fetchStre
     } finally {
       await rm(source, { recursive: true, force: true })
     }
-    await chmod(join(stage, 'git-lfs-transfer'), 0o755)
-    await writeFile(join(stage, 'manifest.json'), `${JSON.stringify({
-      schemaVersion: 2, distribution: 'charmbracelet/git-lfs-transfer', commit: LFS_TRANSFER_COMMIT, buildIdentity,
-      sourceSha256: LFS_TRANSFER_SOURCE_SHA256, platform: 'linux', architecture,
-      binarySha256: sha256(await readFile(join(stage, 'git-lfs-transfer'))), licenseSha256: await licenseDigests(stage),
-    }, null, 2)}\n`)
-    await normalizeModes(stage)
-    await rm(root, { recursive: true, force: true })
-    await rename(stage, root)
-    await rm(cachedBuild, { recursive: true, force: true })
-    await cp(root, cachedBuild, { recursive: true })
+    const files = await readBuild(stage)
+    // An entry another checkout published meanwhile that passes the same take is kept.
+    await publishEntry(cachedBuild, files, { accept: async published => usableBuild(published), temporaryRoot })
+    await stageBuild(tauriRoot, root, files, runtimeManifest(architecture, buildIdentity, files))
     return { root, binaryPath, manifestPath }
-  } catch (error) {
-    await rm(stage, { recursive: true, force: true })
-    throw error
+  } finally {
+    await rm(work, { recursive: true, force: true })
   }
 }

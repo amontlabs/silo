@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto"
-import { execFileSync } from "node:child_process"
-import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
-import { basename, dirname, join, relative, resolve, sep } from "node:path"
+import { execFileSync, spawnSync } from "node:child_process"
+import { access, chmod, copyFile, cp, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path"
 
-import { readFileSync } from "node:fs"
+import { constants, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { fetchVerifiedFile, isVerifiedFile } from "./build-input.mjs"
+import { RUNTIME_CACHE_FORMAT, cacheTemporaryRoot, fetchVerifiedFile, makeWorkFolder, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry } from "./build-input.mjs"
 
 const inputs = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../runtime-inputs.json"), "utf8"))
 export const MICRO_SANDBOX_VERSION = inputs.microsandboxVersion
@@ -88,6 +89,234 @@ export function applyRuntimePatch(sourceRoot, patchPath) {
   runBuildTool("/usr/bin/git", ["apply", patchPath], { cwd: sourceRoot })
 }
 
+// Runs the capability probes on the bytes taken from the cache, written to a private file, so the
+// program that is checked is the program that is used.
+async function hasRequiredCapabilities(executable, temporaryRoot) {
+  const directory = await makeWorkFolder(temporaryRoot)
+  try {
+    const path = join(directory, "msb")
+    await writeFile(path, executable, { mode: 0o755 })
+    const version = runBuildTool(path, ["--version"]).trim()
+    const createHelp = runBuildTool(path, ["create", "--help"])
+    const execHelp = runBuildTool(path, ["exec", "--help"])
+    const sshHelp = runBuildTool(path, ["ssh", "serve", "--help"])
+    return runBuildTool(path, ["snapshot", "load", "--help"]).includes("--stage-id") && sshHelp.includes("--no-start") && sshHelp.includes("--authorized-keys") && sshHelp.includes("--exit-on-stdin-close") && sshHelp.includes("--expected-machine-id") && execHelp.includes("--no-start") && execHelp.includes("--no-stdin") && hasSiloProtocolProbes(path) && version === `msb ${MICRO_SANDBOX_VERSION}` && createHelp.includes("--mount-owned") && createHelp.includes("--no-start") && createHelp.includes("--progress-json") && ["--from-sandbox", "--group", "--dest-dir", "--full", "--guest-flush", "--integrity"].every(flag => runBuildTool(path, ["snapshot", "create", "--help"]).includes(flag)) && ["--cow-mem", "--name", "--net-strict"].every(flag => runBuildTool(path, ["restore", "--help"]).includes(flag))
+  } catch {
+    // A verified cache entry can still be unusable; rebuild from pinned inputs.
+    return false
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}
+
+// Environment that changes the bytes of the release build (`cargo build --release --target
+// <triple>`) of msb and the gateway: compiler flags for that target, the release profile (with
+// its build-script overrides), the programs cargo runs as rustc, wrapper or linker, unstable cargo
+// features, the C toolchain variables of cc-rs, the Apple SDK selection and the libclang
+// selection of clang-sys and bindgen. Other profiles,
+// other targets, display, network, credentials and locations are not part of it.
+// https://doc.rust-lang.org/cargo/reference/environment-variables.html
+function buildEnvironmentPattern(targetTriple) {
+  const triple = targetTriple.toUpperCase().replaceAll("-", "_")
+  return new RegExp(`^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_RUSTFLAGS|CARGO_TARGET_${triple}_(RUSTFLAGS|LINKER)|CARGO_HOST_(RUSTFLAGS|LINKER)|CARGO_PROFILE_RELEASE_(?!INCREMENTAL$).+|CARGO_UNSTABLE_.+|RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|RUSTC_BOOTSTRAP|CARGO_BUILD_RUSTC(_WRAPPER|_WORKSPACE_WRAPPER)?|(TARGET_|HOST_)?(CC|CXX|AR|RANLIB|CFLAGS|CXXFLAGS|CPPFLAGS|ARFLAGS|LDFLAGS)(_.+)?|CRATE_CC_NO_DEFAULTS|MACOSX_DEPLOYMENT_TARGET|SDKROOT|DEVELOPER_DIR|LIBCLANG_PATH|LIBCLANG_STATIC_PATH|CLANG_PATH|LLVM_CONFIG_PATH|BINDGEN_EXTRA_CLANG_ARGS(_.+)?)$`)
+}
+// The variables above whose value names a program (cc-rs also takes "wrapper compiler").
+const PROGRAM_VARIABLE = /^(RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|CARGO_BUILD_RUSTC(_WRAPPER|_WORKSPACE_WRAPPER)?|CARGO_TARGET_.+_LINKER|CARGO_HOST_LINKER|(TARGET_|HOST_)?(CC|CXX|AR|RANLIB)(_.+)?)$/
+
+// Whether the release build is incremental, as cargo decides it: CARGO_INCREMENTAL when set
+// ("1" is on, anything else off), then `build.incremental`, then the release profile (off by
+// default). Only the outcome is keyed, so "0" and unset agree for a release build.
+function releaseIncremental(environment) {
+  if (environment.CARGO_INCREMENTAL !== undefined) return environment.CARGO_INCREMENTAL === "1"
+  return (environment.CARGO_BUILD_INCREMENTAL ?? environment.CARGO_PROFILE_RELEASE_INCREMENTAL ?? "false") === "true"
+}
+
+export function buildEnvironment(environment, targetTriple) {
+  const pattern = buildEnvironmentPattern(targetTriple)
+  return {
+    ...Object.fromEntries(Object.keys(environment).filter(name => pattern.test(name)).sort().map(name => [name, environment[name]])),
+    releaseIncremental: releaseIncremental(environment),
+  }
+}
+
+function toolOutput(executable, args, environment) {
+  // Some tools (`ld -v`) print their identity on standard error, so both streams are kept.
+  const result = spawnSync(executable, args, { encoding: "utf8", env: environment, stdio: ["ignore", "pipe", "pipe"] })
+  if (result.error?.code === "ENOENT") return "unavailable"
+  if (result.error) throw result.error
+  return `exit ${result.status}: ${result.stdout.trim()}\n${result.stderr.trim()}`
+}
+
+// A program by its resolved file and the sha256 of its contents: a command with a slash is a
+// path, a bare name is looked up on the environment's PATH like a shell does.
+async function programIdentity(command, environment) {
+  let path = null
+  if (command.includes("/")) path = resolve(command)
+  else {
+    for (const folder of (environment.PATH ?? "").split(delimiter)) {
+      if (!folder) continue
+      try {
+        await access(join(folder, command), constants.X_OK)
+        if ((await stat(join(folder, command))).isFile()) { path = join(folder, command); break }
+      } catch {}
+    }
+  }
+  if (!path) return { command, found: false }
+  try {
+    const real = await realpath(path)
+    return { command, path: real, sha256: sha256(await readFile(real)) }
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return { command, found: false }
+    throw error
+  }
+}
+
+// The system libraries the Linux build finds through pkg-config (libdbus-sys probes dbus-1;
+// the build hosts install libcap-ng with it). Their versions and flags are keyed, not
+// PKG_CONFIG_PATH, which setup actions change without changing these results.
+const PKG_CONFIG_LIBRARIES = ["dbus-1", "libcap-ng"]
+
+// The C tools cargo and the build scripts find on PATH, with the flag that prints their version.
+const PATH_TOOLS = [["cc", ["--version"]], ["c++", ["--version"]], ["clang", ["--version"]], ["ld", ["-v"]], ["ar", null]]
+
+const configStrings = value => [...value.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g)].map(match => match[1] ?? match[2])
+
+// What a cargo configuration file makes cargo read or run besides itself: `include` files and the
+// `linker`, `rustc`, `rustc-wrapper` and `rustc-workspace-wrapper` programs. A line scan of the
+// TOML (one string, an array or `[[include]] path`), not a full parser.
+function configReferences(text) {
+  const includes = []
+  const programs = []
+  let table = ""
+  let array = null
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\s#.*$|^#.*$/, "").trim()
+    if (array !== null) {
+      array += ` ${line}`
+      if (line.includes("]")) { includes.push(...configStrings(array)); array = null }
+      continue
+    }
+    const header = /^\[\[?\s*(.+?)\s*\]\]?$/.exec(line)
+    if (header) { table = header[1]; continue }
+    const pair = /^([\w."'-]+?)\s*=\s*(.*)$/.exec(line)
+    if (!pair) continue
+    const key = [table, pair[1].replaceAll(/["']/g, "")].filter(Boolean).join(".")
+    if (key === "include" || key === "include.path") {
+      if (pair[2].startsWith("[") && !pair[2].includes("]")) array = pair[2]
+      else includes.push(...configStrings(pair[2]))
+    } else if (/^(build|host|target\..+)\.(linker|rustc|rustc-wrapper|rustc-workspace-wrapper)$/.test(key)) {
+      programs.push(...configStrings(pair[2]).slice(0, 1))
+    }
+  }
+  return { includes, programs }
+}
+
+// The cargo configuration files that apply to a build run below `cargoDirectory`: `.cargo/config`
+// and `.cargo/config.toml` in that folder and every parent, then the cargo home, each followed by
+// the files it includes (relative to it). Returns their paths and digests, and the programs they
+// name (a path relative to the folder above `.cargo`, or a name found on PATH).
+async function cargoConfiguration(cargoDirectory, environment) {
+  const folders = []
+  for (let folder = resolve(cargoDirectory); ; folder = dirname(folder)) {
+    folders.push(join(folder, ".cargo"))
+    if (dirname(folder) === folder) break
+  }
+  folders.push(resolve(environment.CARGO_HOME?.trim() || join(homedir(), ".cargo")))
+  const files = []
+  const programs = []
+  const seen = new Set()
+  const read = async (path, included) => {
+    if (seen.has(path)) return
+    seen.add(path)
+    const bytes = await readFile(path).catch(error => { if (error.code === "ENOENT" || error.code === "ENOTDIR") return null; throw error })
+    if (!bytes) {
+      if (included) files.push([path, "missing"])
+      return
+    }
+    files.push([path, sha256(bytes)])
+    const references = configReferences(bytes.toString("utf8"))
+    for (const include of references.includes) await read(resolve(dirname(path), include), true)
+    for (const program of references.programs) {
+      programs.push({ source: path, ...await programIdentity(program.includes("/") ? resolve(dirname(dirname(path)), program) : program, environment) })
+    }
+  }
+  for (const folder of [...new Set(folders)]) {
+    for (const name of ["config", "config.toml"]) await read(join(folder, name), false)
+  }
+  return { files, programs }
+}
+
+// Identity of everything outside the pinned inputs that shapes the compiled runtime: the Apple
+// SDK and developer folder, the C compiler, linker and archiver found on PATH, the cargo
+// configuration files, the programs the build environment and configuration name (by content),
+// the build environment and, on Linux, the pkg-config results of the system libraries.
+export async function readBuildToolIdentity({ cargoDirectory, targetTriple, environment = process.env, output = toolOutput, platform = process.platform }) {
+  const darwin = platform === "darwin"
+  const configuration = await cargoConfiguration(cargoDirectory, environment)
+  const variables = buildEnvironment(environment, targetTriple)
+  const programs = []
+  for (const name of Object.keys(variables).filter(name => PROGRAM_VARIABLE.test(name))) {
+    for (const word of variables[name].split(/\s+/).filter(word => word && !word.startsWith("-"))) {
+      programs.push({ source: name, ...await programIdentity(word, environment) })
+    }
+  }
+  const pathTools = {}
+  for (const [name, versionArgs] of PATH_TOOLS) {
+    pathTools[name] = { ...await programIdentity(name, environment), version: versionArgs ? output(name, versionArgs, environment) : null }
+  }
+  return {
+    developerDir: darwin ? output("xcode-select", ["-p"], environment) : null,
+    xcode: darwin ? output("xcodebuild", ["-version"], environment) : null,
+    sdk: darwin ? ["--show-sdk-path", "--show-sdk-version", "--show-sdk-build-version"].map(flag => output("xcrun", [flag], environment)) : null,
+    pathTools,
+    cargoConfig: configuration.files,
+    programs: [...programs, ...configuration.programs],
+    environment: variables,
+    ...(platform === "linux" ? { pkgConfig: Object.fromEntries(PKG_CONFIG_LIBRARIES.map(library => [library, [["--modversion"], ["--cflags", "--libs"]].map(flags => output("pkg-config", [...flags, library], environment))])) } : {}),
+  }
+}
+
+export function patchedBuildKey({ agentdSha256, rustcVersion, targetTriple, gatewaySourceDigest, recipeSha256, tools }) {
+  return sha256(Buffer.from([
+    `cache format ${RUNTIME_CACHE_FORMAT}`,
+    MICROSANDBOX_SOURCE_SHA256,
+    ...MICROSANDBOX_PATCHES.map(({ sha256: digest }) => digest),
+    agentdSha256,
+    rustcVersion,
+    targetTriple,
+    MICROSANDBOX_BUILD_FEATURES,
+    gatewaySourceDigest,
+    recipeSha256,
+    JSON.stringify(tools),
+  ].join("\n")))
+}
+
+// The published msb and gateway of one build key: `<cache>/patched-builds/<key>/published`.
+export function patchedBuildEntry(cacheRoot, cacheKey) {
+  return join(cacheRoot, "patched-builds", cacheKey, "published")
+}
+
+// The build key of msb and the gateway, and the gateway sources the build copies. Cargo runs inside
+// a work folder of `temporaryRoot`, so the cargo configuration that applies there is keyed.
+export async function patchedBuildInputs({ appRoot, targetTriple, agentdSha256, temporaryRoot, environment = process.env, readTools = readBuildToolIdentity }) {
+  const rustcVersion = runBuildTool("rustc", [`+${MICROSANDBOX_BUILD_TOOLCHAIN}`, "--version"]).trim()
+  const gatewayInputs = appRoot
+    ? await readMacosGatewayInputs(appRoot)
+    : null
+  const gatewaySourceDigest = gatewayInputs
+    ? sha256(Buffer.concat(gatewayInputs.flatMap(([name, bytes]) => [Buffer.from(`${name}\0`), bytes])))
+    : ""
+  const cacheKey = patchedBuildKey({
+    agentdSha256,
+    rustcVersion,
+    targetTriple,
+    gatewaySourceDigest,
+    recipeSha256: sha256(await readFile(new URL(import.meta.url))),
+    tools: await readTools({ cargoDirectory: temporaryRoot, targetTriple, environment }),
+  })
+  return { cacheKey, gatewayInputs }
+}
+
 export async function buildPatchedExecutable({
   appRoot,
   targetTriple,
@@ -96,75 +325,44 @@ export async function buildPatchedExecutable({
   patches,
   agentd,
   cacheRoot,
+  temporaryRoot = cacheTemporaryRoot(cacheRoot),
+  readTools,
+  hooks,
 }) {
   if (targetTriple !== hostTriple) {
     throw new Error(`Patched MicroSandbox cross-builds are not supported: host ${hostTriple}, target ${targetTriple}`)
   }
-  const rustcVersion = runBuildTool("rustc", [`+${MICROSANDBOX_BUILD_TOOLCHAIN}`, "--version"]).trim()
-  const targetEnvironment = targetTriple.toUpperCase().replaceAll("-", "_")
-  const compilerFlags = Object.fromEntries([
-    "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_RUSTFLAGS",
-    `CARGO_TARGET_${targetEnvironment}_RUSTFLAGS`,
-    ...Object.keys(process.env).filter(name => name.startsWith("CARGO_PROFILE_RELEASE_")).sort(),
-  ].map(name => [name, process.env[name] ?? null]))
-  const gatewayInputs = appRoot
-    ? await readMacosGatewayInputs(appRoot)
-    : null
-  const gatewaySourceDigest = gatewayInputs
-    ? sha256(Buffer.concat(gatewayInputs.flatMap(([name, bytes]) => [Buffer.from(`${name}\0`), bytes])))
-    : ""
-  const cacheKey = sha256(Buffer.from([
-    MICROSANDBOX_SOURCE_SHA256,
-    ...MICROSANDBOX_PATCHES.map(({ sha256: digest }) => digest),
-    sha256(agentd),
-    rustcVersion,
-    targetTriple,
-    MICROSANDBOX_BUILD_FEATURES,
-    gatewaySourceDigest,
-    sha256(await readFile(new URL(import.meta.url))),
-    JSON.stringify(compilerFlags),
-  ].join("\n")))
-  const buildRoot = join(cacheRoot, "patched-builds", cacheKey)
-  const cachedExecutable = join(buildRoot, "msb")
-  const cachedDigest = join(buildRoot, "msb.sha256")
-  const cachedGateway = join(buildRoot, "silo-macos-gateway")
-  const cachedGatewayDigest = join(buildRoot, "silo-macos-gateway.sha256")
-  const cachedGatewayValid = !gatewayInputs || await isVerifiedFile(
-    cachedGateway,
-    (await readFile(cachedGatewayDigest, "utf8").catch(() => "")).trim(),
-    "Compiled Silo macOS gateway",
-  )
-  if (cachedGatewayValid && await isVerifiedFile(cachedExecutable, (await readFile(cachedDigest, "utf8").catch(() => "")).trim(), "Compiled MicroSandbox")) {
-    try {
-      const version = runBuildTool(cachedExecutable, ["--version"]).trim()
-      const createHelp = runBuildTool(cachedExecutable, ["create", "--help"])
-      const execHelp = runBuildTool(cachedExecutable, ["exec", "--help"])
-      const sshHelp = runBuildTool(cachedExecutable, ["ssh", "serve", "--help"])
-      if (runBuildTool(cachedExecutable, ["snapshot", "load", "--help"]).includes("--stage-id") && sshHelp.includes("--no-start") && sshHelp.includes("--authorized-keys") && sshHelp.includes("--exit-on-stdin-close") && sshHelp.includes("--expected-machine-id") && execHelp.includes("--no-start") && execHelp.includes("--no-stdin") && hasSiloProtocolProbes(cachedExecutable) && version === `msb ${MICRO_SANDBOX_VERSION}` && createHelp.includes("--mount-owned") && createHelp.includes("--no-start") && createHelp.includes("--progress-json") && ["--from-sandbox", "--group", "--dest-dir", "--full", "--guest-flush", "--integrity"].every(flag => runBuildTool(cachedExecutable, ["snapshot", "create", "--help"]).includes(flag)) && ["--cow-mem", "--name", "--net-strict"].every(flag => runBuildTool(cachedExecutable, ["restore", "--help"]).includes(flag))) {
-        const executable = await readFile(cachedExecutable)
-        return gatewayInputs
-          ? { executable, macosGateway: await readFile(cachedGateway) }
-          : executable
-      }
-    } catch {
-      // A verified cache file can still be unusable; rebuild from pinned inputs.
-    }
+  const { cacheKey, gatewayInputs } = await patchedBuildInputs({ appRoot, targetTriple, agentdSha256: sha256(agentd), temporaryRoot, readTools })
+  // The executable, the gateway and their manifest are published together as this one directory.
+  const publishedRoot = patchedBuildEntry(cacheRoot, cacheKey)
+  const publishedNames = gatewayInputs ? ["msb", "silo-macos-gateway"] : ["msb"]
+  const taken = await takePublishedEntry(publishedRoot, publishedNames, hooks)
+  if (taken && await hasRequiredCapabilities(taken.msb, temporaryRoot)) {
+    return gatewayInputs
+      ? { executable: taken.msb, macosGateway: taken["silo-macos-gateway"] }
+      : taken.msb
   }
 
-  await mkdir(buildRoot, { recursive: true })
-  const workRoot = await mkdtemp(join(buildRoot, "work-"))
-  const cargoTarget = join(buildRoot, "cargo-target")
+  // The extracted source and the cargo target live in a work folder of `temporaryRoot`, which the
+  // next run removes if this process is interrupted; a failed build leaves no folder under its key.
+  // Build scripts bake in CARGO_MANIFEST_DIR, so a target directory is only valid for this
+  // extraction of the source; it is not kept for a retry and not shared between processes.
+  const workRoot = await makeWorkFolder(temporaryRoot)
+  const sourceRoot = join(workRoot, "source")
+  const cargoTarget = join(workRoot, "target")
   try {
-    runBuildTool("/usr/bin/tar", ["-xzf", sourceArchive, "-C", workRoot])
-    const entries = await import("node:fs/promises").then(({ readdir }) => readdir(workRoot, { withFileTypes: true }))
-    const source = entries.filter((entry) => entry.isDirectory()).map((entry) => join(workRoot, entry.name))
+    await mkdir(sourceRoot)
+    runBuildTool("/usr/bin/tar", ["-xzf", sourceArchive, "-C", sourceRoot])
+    const entries = await readdir(sourceRoot, { withFileTypes: true })
+    const source = entries.filter((entry) => entry.isDirectory()).map((entry) => join(sourceRoot, entry.name))
     if (source.length !== 1) throw new Error("Pinned MicroSandbox source archive has an unexpected layout")
     const patchPaths = patches.map((_, index) => join(workRoot, `patch-${index}.patch`))
     await Promise.all(patches.map((patch, index) => writeFile(patchPaths[index], patch)))
     for (const patchPath of patchPaths) applyRuntimePatch(source[0], patchPath)
     if (gatewayInputs) {
       const gatewaySource = join(source[0], "macos-gateway")
-      await cp(resolve(appRoot, "src-tauri/macos-gateway"), gatewaySource, { recursive: true })
+      const gatewayRoot = resolve(appRoot, "src-tauri/macos-gateway")
+      await cp(gatewayRoot, gatewaySource, { recursive: true, filter: path => path !== join(gatewayRoot, "target") })
     }
     runBuildTool("cargo", [`+${MICROSANDBOX_BUILD_TOOLCHAIN}`, "fetch", "--locked", "--target", targetTriple], { cwd: source[0] })
     const agentdPath = join(source[0], "build", "agentd")
@@ -212,37 +410,33 @@ export async function buildPatchedExecutable({
       ], { cwd: source[0], env: { ...process.env, CARGO_TARGET_DIR: cargoTarget } })
       gatewayBytes = await readFile(join(cargoTarget, targetTriple, "release/silo-macos-gateway"))
     }
-    await mkdir(buildRoot, { recursive: true })
-    await writeFile(`${cachedExecutable}.tmp-${process.pid}`, bytes, { mode: 0o755 })
-    await rename(`${cachedExecutable}.tmp-${process.pid}`, cachedExecutable)
-    await writeFile(cachedDigest, `${sha256(bytes)}\n`)
-    if (gatewayBytes) {
-      const gatewayTemporary = `${cachedGateway}.tmp-${process.pid}`
-      await writeFile(gatewayTemporary, gatewayBytes, { mode: 0o755 })
-      await chmod(gatewayTemporary, 0o755)
-      await rename(gatewayTemporary, cachedGateway)
-      await writeFile(cachedGatewayDigest, `${sha256(gatewayBytes)}\n`)
-      return { executable: bytes, macosGateway: gatewayBytes }
-    }
-    return bytes
+    await publishEntry(publishedRoot, gatewayBytes ? { msb: bytes, "silo-macos-gateway": gatewayBytes } : { msb: bytes }, {
+      accept: published => hasRequiredCapabilities(published.msb, temporaryRoot),
+      temporaryRoot,
+    })
+    return gatewayBytes ? { executable: bytes, macosGateway: gatewayBytes } : bytes
   } finally {
     await rm(workRoot, { recursive: true, force: true })
   }
 }
 
-async function readMacosGatewayInputs(appRoot) {
+// Every file of the gateway crate that the build copies into the MicroSandbox checkout, in a
+// fixed order, so a new module, build script or data file changes the cache key.
+async function gatewayFiles(directory, prefix = "") {
+  const files = []
+  for (const entry of (await readdir(join(directory, prefix), { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (prefix === "" && entry.name === "target") continue
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name
+    if (entry.isDirectory()) files.push(...await gatewayFiles(directory, name))
+    else if (entry.isFile()) files.push(name)
+    else throw new Error(`The macOS gateway sources contain an unsupported file type: ${name}`)
+  }
+  return files
+}
+
+export async function readMacosGatewayInputs(appRoot) {
   const directory = resolve(appRoot, "src-tauri/macos-gateway")
-  const names = [
-    "Cargo.toml",
-    "Cargo.lock",
-    "reserved-secret-names.json",
-    "src/control.rs",
-    "src/frames.rs",
-    "src/main.rs",
-    "src/network.rs",
-    "src/ports.rs",
-  ]
-  return Promise.all(names.map(async name => [name, await readFile(join(directory, name))]))
+  return Promise.all((await gatewayFiles(directory)).map(async name => [name, await readFile(join(directory, name))]))
 }
 
 export async function stageRuntime({
@@ -259,18 +453,23 @@ export async function stageRuntime({
   const tauriRoot = resolve(appRoot, "src-tauri")
   const binariesRoot = join(tauriRoot, "binaries")
   const runtimeRoot = join(tauriRoot, "runtime")
-  const cacheRoot = join(tauriRoot, "target", "runtime-cache", `v${MICRO_SANDBOX_VERSION}`)
-  const stagedRoot = join(runtimeRoot, `.staging-${process.pid}`)
+  const cacheRoot = join(runtimeCacheRoot(tauriRoot), `v${MICRO_SANDBOX_VERSION}`)
+  const temporaryRoot = cacheTemporaryRoot(runtimeCacheRoot(tauriRoot))
+  // Staging names carry the owning process, so a run removes what an interrupted run left.
+  const stagedRoot = join(runtimeRoot, `.staging-${ownerTag()}`)
   const bundledRoot = join(runtimeRoot, "microsandbox")
   const executablePath = join(binariesRoot, `msb-${targetTriple}`)
   const macosGatewayPath = join(binariesRoot, `silo-macos-gateway-${targetTriple}`)
   const libraryPath = join(stagedRoot, targetTriple, "lib", selected.libraryName)
-  for (const path of [binariesRoot, runtimeRoot, cacheRoot, stagedRoot, bundledRoot, executablePath, libraryPath]) {
+  for (const path of [binariesRoot, runtimeRoot, stagedRoot, bundledRoot, executablePath, libraryPath]) {
     assertInside(tauriRoot, path)
   }
 
-  const executableTemporary = `${executablePath}.tmp-${process.pid}`
-  const gatewayTemporary = `${macosGatewayPath}.tmp-${process.pid}`
+  const executableTemporary = `${executablePath}.tmp-${ownerTag()}`
+  const gatewayTemporary = `${macosGatewayPath}.tmp-${ownerTag()}`
+  await removeAbandoned(runtimeRoot, ".staging-")
+  await removeAbandoned(binariesRoot, `${basename(executablePath)}.tmp-`)
+  await removeAbandoned(binariesRoot, `${basename(macosGatewayPath)}.tmp-`)
   await rm(stagedRoot, { recursive: true, force: true })
   try {
     await mkdir(dirname(libraryPath), { recursive: true })
@@ -281,6 +480,7 @@ export async function stageRuntime({
       selected.executableSha256,
       selected.executableAsset,
       join(cacheRoot, selected.executableAsset),
+      { temporaryRoot },
     )
     const sourceArchive = await fetchVerifiedFile(
       fetchStream,
@@ -288,6 +488,7 @@ export async function stageRuntime({
       sourceArtifact.sha256,
       "MicroSandbox pinned source",
       join(cacheRoot, `microsandbox-${MICROSANDBOX_COMMIT}.tar.gz`),
+      { temporaryRoot },
     )
     const agentdPath = await fetchVerifiedFile(
       fetchStream,
@@ -295,6 +496,7 @@ export async function stageRuntime({
       selected.agentdSha256,
       selected.agentdAsset,
       join(cacheRoot, selected.agentdAsset),
+      { temporaryRoot },
     )
     const patches = await Promise.all(MICROSANDBOX_PATCHES.map(async (patchInput, index) => {
       const patchPath = resolve(appRoot, patchInput.path)
@@ -311,6 +513,7 @@ export async function stageRuntime({
       patches,
       agentd: await readFile(agentdPath),
       cacheRoot,
+      temporaryRoot,
     })
     const outputs = buildOutput && !ArrayBuffer.isView(buildOutput)
       ? buildOutput
@@ -326,6 +529,7 @@ export async function stageRuntime({
       selected.librarySha256,
       selected.libraryAsset,
       join(cacheRoot, selected.libraryAsset),
+      { temporaryRoot },
     )
 
     await mkdir(binariesRoot, { recursive: true })
@@ -369,7 +573,7 @@ export async function stageRuntime({
         license.sha256,
         license.name,
         join(cacheRoot, "licenses", basename(license.url)),
-        { maxBytes: 4 * 1024 * 1024 },
+        { maxBytes: 4 * 1024 * 1024, temporaryRoot },
       )
       await copyFile(licensePath, join(licensesRoot, license.name))
       await chmod(join(licensesRoot, license.name), 0o644)

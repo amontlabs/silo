@@ -1,5 +1,5 @@
 import { Readable } from "node:stream"
-import { execFileSync, type ExecFileSyncOptions } from "node:child_process"
+import { execFileSync, spawnSync, type ExecFileSyncOptions, type SpawnSyncOptions } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -21,7 +21,7 @@ import {
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>()
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync) }
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync), spawnSync: vi.fn(actual.spawnSync) }
 })
 
 describe("bundled MicroSandbox release staging", () => {
@@ -241,22 +241,24 @@ describe("bundled MicroSandbox release staging", () => {
         return ""
       }
       if (command.startsWith(appRoot) && command.endsWith("/msb")) {
-        if (outdated.outdatedCachedAccount && !command.includes("cargo-target") && args[0] === "--silo-working-account-protocol") return "0"
-        if (outdated.outdatedCachedStdin && !command.includes("cargo-target") && args[0] === "--silo-secret-values-protocol") return "0"
-        if (outdated.outdatedCachedInstance && !command.includes("cargo-target") && args[0] === "--silo-runtime-instance-protocol") return "0"
-        if (outdated.outdatedCachedRestoreStrict && !command.includes("cargo-target") && args[0] === "--silo-restore-strict-protocol") return "0"
+        // A build's own output is in its cargo target; a cached copy is probed from a work folder.
+        const fresh = command.includes("/release/msb")
+        if (outdated.outdatedCachedAccount && !fresh && args[0] === "--silo-working-account-protocol") return "0"
+        if (outdated.outdatedCachedStdin && !fresh && args[0] === "--silo-secret-values-protocol") return "0"
+        if (outdated.outdatedCachedInstance && !fresh && args[0] === "--silo-runtime-instance-protocol") return "0"
+        if (outdated.outdatedCachedRestoreStrict && !fresh && args[0] === "--silo-restore-strict-protocol") return "0"
         if (["--silo-storage-protocol", "--silo-desktop-protocol", "--silo-github-token-protocol", "--silo-github-protocol", "--silo-working-account-protocol", "--silo-secret-values-protocol", "--silo-runtime-instance-protocol", "--silo-restore-strict-protocol"].includes(args[0])) return "1"
         if (args[0] === "--version") return `msb ${MICRO_SANDBOX_VERSION}`
-        if (outdated.outdatedCachedStaging && !command.includes("cargo-target") && args[0] === "snapshot" && args[1] === "load") return "--group"
+        if (outdated.outdatedCachedStaging && !fresh && args[0] === "snapshot" && args[1] === "load") return "--group"
         if (args.includes("--help")) {
           const oldFlags = "--mount-owned --no-start --progress-json"
           const currentFlags = `${oldFlags} --no-stdin`
           if (args[0] === "snapshot") return "--from-sandbox --group --dest-dir --full --guest-flush --integrity --stage-id"
           if (args[0] === "restore") {
-            return outdated.outdatedCachedRestoreHelp && !command.includes("cargo-target") ? "--cow-mem --name" : "--cow-mem --name --net-strict"
+            return outdated.outdatedCachedRestoreHelp && !fresh ? "--cow-mem --name" : "--cow-mem --name --net-strict"
           }
-          if (outdated.outdatedCachedNoStdin && !command.includes("cargo-target") && args[0] === "exec") return oldFlags
-          return outdated.outdatedCachedSsh && !command.includes("cargo-target") && args[0] === "ssh"
+          if (outdated.outdatedCachedNoStdin && !fresh && args[0] === "exec") return oldFlags
+          return outdated.outdatedCachedSsh && !fresh && args[0] === "ssh"
             ? oldFlags
             : `${currentFlags} --authorized-keys --exit-on-stdin-close --expected-machine-id`
         }
@@ -264,7 +266,14 @@ describe("bundled MicroSandbox release staging", () => {
       throw new Error(`Unexpected tool invocation: ${command} ${args.join(" ")}`)
     }) as typeof execFileSync
     const stage = () => stageRuntime({ appRoot, targetTriple, fetchStream, selected, licenses: [], sourceArtifact, verifyExecutable: false })
-    const run = (body: () => Promise<void>) => vi.mocked(execFileSync).withImplementation(compiler, body)
+    // The build tool identity asks the developer tools for their versions; fixed answers keep
+    // the fixture fast and the same on every machine.
+    const realSpawnSync = vi.mocked(spawnSync).getMockImplementation()!
+    const identityTools = new Set(["xcode-select", "xcodebuild", "xcrun", "cc", "c++", "clang", "ld"])
+    const tools = ((command: string, args: string[], options: SpawnSyncOptions) => identityTools.has(command)
+      ? { pid: 0, output: [], stdout: `${command} fixture`, stderr: "", status: 0, signal: null }
+      : realSpawnSync(command, args, options)) as typeof spawnSync
+    const run = (body: () => Promise<void>) => vi.mocked(spawnSync).withImplementation(tools, () => vi.mocked(execFileSync).withImplementation(compiler, body))
     const changeAgent = (revision: string) => {
       agentd = Buffer.from(revision)
       selected.agentdSha256 = sha256(agentd)

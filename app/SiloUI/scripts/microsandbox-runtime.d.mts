@@ -44,7 +44,24 @@ export function buildPatchedExecutable(options: {
   patches: ArrayBufferView[]
   agentd: ArrayBufferView
   cacheRoot: string
+  temporaryRoot?: string
 }): Promise<Buffer | { executable: Buffer; macosGateway: Buffer }>
+export function buildEnvironment(environment: Readonly<Record<string, string | undefined>>, targetTriple: string): Record<string, string | boolean>
+export function readBuildToolIdentity(options: {
+  cargoDirectory: string
+  targetTriple: string
+  environment?: Readonly<Record<string, string | undefined>>
+  output?: (executable: string, args: string[], environment: Readonly<Record<string, string | undefined>>) => string
+  platform?: NodeJS.Platform
+}): Promise<Record<string, unknown>>
+export function patchedBuildEntry(cacheRoot: string, cacheKey: string): string
+export function patchedBuildInputs(options: {
+  appRoot?: string
+  targetTriple: string
+  agentdSha256: string
+  temporaryRoot: string
+  environment?: Readonly<Record<string, string | undefined>>
+}): Promise<{ cacheKey: string; gatewayInputs: [string, Buffer][] | null }>
 export function stageRuntime(options: {
   appRoot: string
   targetTriple: string
@@ -61,6 +78,7 @@ export function stageRuntime(options: {
     patches: ArrayBufferView[]
     agentd: ArrayBufferView
     cacheRoot: string
+    temporaryRoot: string
   }) => Promise<ArrayBufferView | { executable: ArrayBufferView; macosGateway?: ArrayBufferView }>
   verifyExecutable?: boolean
 }): Promise<{
@@ -70,3 +88,4 @@ export function stageRuntime(options: {
   libraryPath: string
   manifestPath: string
 }>
+export function readMacosGatewayInputs(appRoot: string): Promise<[string, Buffer][]>

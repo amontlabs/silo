@@ -43,7 +43,6 @@ jobs:
       draft: ${{ steps.release.outputs.draft }}
       signing: ${{ steps.release.outputs.signing }}
       source-ref: ${{ steps.source.outputs.ref }}
-      runtime-macos: ${{ steps.runtime-macos.outputs.cache-hit }}
     steps:
       - name: Validate source revision before checkout
         id: source
@@ -76,13 +75,6 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
-      - name: Check exact public runtime cache for aarch64-apple-darwin
-        id: runtime-macos
-        uses: ./.github/actions/prepare-release-runtime
-        with:
-          runner: macos-15
-          target: aarch64-apple-darwin
-          lookup-only: 'true'
       - name: Validate release inputs before building
         id: release
         env:
@@ -189,7 +181,6 @@ jobs:
             target: aarch64-apple-darwin
             bundles: app
             asset: macos-arm64
-            cache-output: runtime-macos
     uses: ./.github/workflows/release-platform.yml
     with:
       runner: ${{ matrix.runner }}
@@ -199,7 +190,6 @@ jobs:
       asset: ${{ matrix.asset }}
       draft: ${{ needs.validate.outputs.draft == 'true' }}
       signing: ${{ needs.validate.outputs.signing }}
-      runtime-cache-hit: ${{ needs.validate.outputs[matrix.cache-output] == 'true' }}
       benchmark-schedule: ${{ inputs.benchmark_schedule || 'parallel' }}
     secrets:
       SILO_GITHUB_APP_SLUG: ${{ secrets.SILO_GITHUB_APP_SLUG }}

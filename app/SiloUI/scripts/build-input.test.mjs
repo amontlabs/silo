@@ -1,12 +1,13 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { spawn } from "node:child_process"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Readable } from "node:stream"
 import test from "node:test"
-import { fetchStream, fetchVerifiedFile, verifyFile, writeVerifiedFile } from "./build-input.mjs"
+import { fetchStream, fetchVerifiedFile, makeWorkFolder, otherLiveWork, ownerTag, publishEntry, removeAbandoned, runtimeCacheRoot, takePublishedEntry, verifyFile, writeVerifiedFile } from "./build-input.mjs"
 
 const bytes = Buffer.from("verified build input")
 const digest = createHash("sha256").update(bytes).digest("hex")
@@ -93,3 +94,104 @@ for (const mode of ["headers", "body", "status", "chunked"]) {
     assert.deepEqual(await readdir(root), ["archive.tar.gz"])
   })
 }
+
+test("the runtime cache root is per checkout unless an absolute shared root is configured", () => {
+  assert.equal(runtimeCacheRoot("/work/src-tauri", {}), "/work/src-tauri/target/runtime-cache")
+  assert.equal(runtimeCacheRoot("/work/src-tauri", { SILO_RUNTIME_CACHE_DIR: " /shared/silo " }), "/shared/silo")
+  assert.throws(() => runtimeCacheRoot("/work/src-tauri", { SILO_RUNTIME_CACHE_DIR: "relative" }), /absolute/)
+})
+
+test("a shared runtime cache root of another user is skipped for the checkout's own", { skip: process.getuid() === 0 && "runs as root" }, t => {
+  const warn = t.mock.method(console, "warn", () => {})
+  assert.equal(runtimeCacheRoot("/work/src-tauri", { SILO_RUNTIME_CACHE_DIR: "/" }), "/work/src-tauri/target/runtime-cache")
+  assert.match(warn.mock.calls[0].arguments[0], /^\/ belongs to another user; SILO_RUNTIME_CACHE_DIR is skipped/)
+})
+
+// A child process that has created its own work folder and exits without removing it, as a killed
+// run does. Returns the folder.
+async function abandonedFolder(temporaryRoot) {
+  const child = spawn(process.execPath, ["--input-type=module", "-e", `
+import { makeWorkFolder } from ${JSON.stringify(new URL("./build-input.mjs", import.meta.url).href)}
+console.log(await makeWorkFolder(${JSON.stringify(temporaryRoot)}))
+process.kill(process.pid, "SIGKILL")
+`], { stdio: ["ignore", "pipe", "inherit"] })
+  let output = ""
+  child.stdout.on("data", chunk => { output += chunk })
+  await new Promise(resolve => child.on("close", resolve))
+  return output.trim()
+}
+
+test("work folders of exited processes are removed by the next run; live ones are kept", async t => {
+  const { root } = await setup(t)
+  const temporaryRoot = join(root, "tmp")
+  const abandoned = await abandonedFolder(temporaryRoot)
+  assert.ok(abandoned.startsWith(temporaryRoot), abandoned)
+  // A live process with a reused pid is a different owner: its start time differs.
+  await mkdir(join(temporaryRoot, `${process.pid}-000000000000-reused`))
+  await mkdir(join(temporaryRoot, "unnamed"))
+  const own = await makeWorkFolder(temporaryRoot)
+  assert.deepEqual(await readdir(temporaryRoot), [own.slice(temporaryRoot.length + 1)])
+  // A staging name in a checkout folder is removed only when its owner has exited.
+  await mkdir(join(root, `.staging-${ownerTag()}`))
+  await mkdir(join(root, ".staging-1-000000000000"))
+  await mkdir(join(root, "other-1-000000000000"))
+  await removeAbandoned(root, ".staging-")
+  assert.deepEqual((await readdir(root)).filter(name => name !== "archive.tar.gz" && name !== "tmp").sort(), [`.staging-${ownerTag()}`, "other-1-000000000000"])
+})
+
+test("a live owner is recognised whatever the time zone of the owner and the checker", async t => {
+  const { root } = await setup(t)
+  const temporaryRoot = join(root, "tmp")
+  const child = spawn(process.execPath, ["--input-type=module", "-e", `
+import { makeWorkFolder } from ${JSON.stringify(new URL("./build-input.mjs", import.meta.url).href)}
+console.log(await makeWorkFolder(${JSON.stringify(temporaryRoot)}))
+process.stdin.resume()
+`], { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, TZ: "America/New_York" } })
+  const exited = new Promise(resolve => child.on("close", resolve))
+  t.after(() => { child.stdin.end(); return exited })
+  const folder = await new Promise(resolve => child.stdout.once("data", chunk => resolve(chunk.toString().trim())))
+  const zone = process.env.TZ
+  process.env.TZ = "Asia/Tokyo"
+  try {
+    await removeAbandoned(temporaryRoot)
+    assert.deepEqual(await readdir(temporaryRoot), [folder.slice(temporaryRoot.length + 1)])
+    assert.deepEqual(await otherLiveWork(temporaryRoot), [folder])
+  } finally {
+    if (zone === undefined) delete process.env.TZ
+    else process.env.TZ = zone
+  }
+  child.stdin.end()
+  await exited
+  await removeAbandoned(temporaryRoot)
+  assert.deepEqual(await readdir(temporaryRoot), [])
+})
+
+test("abandoned work that cannot be removed is left in place instead of failing", { skip: process.getuid() === 0 && "runs as root" }, async t => {
+  const { root } = await setup(t)
+  const temporaryRoot = join(root, "tmp")
+  const locked = join(temporaryRoot, "1-000000000000-x", "locked")
+  await mkdir(locked, { recursive: true })
+  await writeFile(join(locked, "file"), "")
+  await chmod(locked, 0o555)
+  const warn = t.mock.method(console, "warn", () => {})
+  try {
+    await removeAbandoned(temporaryRoot)
+  } finally {
+    await chmod(locked, 0o755)
+  }
+  assert.deepEqual(await readdir(temporaryRoot), ["1-000000000000-x"])
+  assert.match(warn.mock.calls[0].arguments[0], /cannot be removed \(EACCES\); it is left in place/)
+})
+
+test("a published entry leaves nothing beside it or in the work folder", async t => {
+  const { root } = await setup(t)
+  const temporaryRoot = join(root, "tmp")
+  const entry = join(root, "builds", "key")
+  await publishEntry(entry, { tool: Buffer.from("first") }, { temporaryRoot })
+  await publishEntry(entry, { tool: Buffer.from("second") }, { temporaryRoot, accept: async () => false })
+  assert.deepEqual(await readdir(join(root, "builds")), ["key"])
+  assert.deepEqual(await readdir(temporaryRoot), [])
+  assert.equal((await takePublishedEntry(entry, ["tool"])).tool.toString(), "second")
+  await fetchVerifiedFile(async () => Readable.from([bytes]), "https://fixture.invalid", digest, "fixture", join(root, "download"), { temporaryRoot })
+  assert.deepEqual(await readdir(temporaryRoot), [])
+})

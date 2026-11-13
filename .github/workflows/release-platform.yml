@@ -21,9 +21,6 @@ on:
       draft:
         required: true
         type: boolean
-      runtime-cache-hit:
-        required: true
-        type: boolean
       benchmark-schedule:
         default: parallel
         type: string
@@ -61,14 +58,17 @@ permissions:
   contents: read
 
 jobs:
+  # The exact public cache key includes this platform's build tools, so it is looked up on the
+  # platform's own runner. On a hit the job ends there and the native and package jobs restore the
+  # cache; on a miss it prepares once and hands both jobs its archive.
   runtime:
-    if: ${{ !inputs.runtime-cache-hit }}
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 45
     env:
       GOTOOLCHAIN: local
       RUNTIME_TARGET: ${{ inputs.target }}
     outputs:
+      cache-hit: ${{ steps.lookup.outputs.cache-hit }}
       artifact-name: ${{ steps.archive.outputs.artifact-name }}
       archive-sha256: ${{ steps.archive.outputs.sha256 }}
     steps:
@@ -82,9 +82,18 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      - name: Check exact public runtime cache
+        id: lookup
+        uses: ./.github/actions/prepare-release-runtime
+        with:
+          runner: ${{ inputs.runner }}
+          target: ${{ inputs.target }}
+          lookup-only: 'true'
       - name: Explain one-time cold preparation
+        if: steps.lookup.outputs.cache-hit != 'true'
         run: echo 'Exact runtime cache was missing. Prepare once for both native and package jobs on this platform.'
       - name: Install pinned Rust toolchain
+        if: steps.lookup.outputs.cache-hit != 'true'
         shell: bash
         run: |
           runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
@@ -92,17 +101,20 @@ jobs:
           rustup default "$runtime_toolchain"
           test "$(rustc --print host-tuple)" = "$RUNTIME_TARGET"
       # No environment, signing key, or GitHub App configuration enters this job.
-      - uses: ./.github/actions/prepare-release-runtime
+      - if: steps.lookup.outputs.cache-hit != 'true'
+        uses: ./.github/actions/prepare-release-runtime
         with:
           runner: ${{ inputs.runner }}
           target: ${{ inputs.target }}
       - name: Archive allowlisted public runtime inputs
+        if: steps.lookup.outputs.cache-hit != 'true'
         id: archive
         shell: bash
         run: |
           python3 app/SiloUI/scripts/release-runtime-cache.py pack --archive "$RUNNER_TEMP/runtime-cache.tar.gz" >> "$GITHUB_OUTPUT"
           echo "artifact-name=runtime-cache-$RUNTIME_TARGET-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.archive.outputs.artifact-name }}
           path: ${{ runner.temp }}/runtime-cache.tar.gz
@@ -120,7 +132,7 @@ jobs:
 
   native-tests:
     needs: runtime
-    if: ${{ !cancelled() && inputs.benchmark-schedule != 'sequential' && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') }}
+    if: ${{ !cancelled() && inputs.benchmark-schedule != 'sequential' && needs.runtime.result == 'success' }}
     runs-on: ${{ inputs.runner }}
     # Headroom: runtime:prepare took about 20 minutes on macos-15 when the cache was stale.
     timeout-minutes: 60
@@ -178,7 +190,7 @@ jobs:
 
   build:
     needs: runtime
-    if: ${{ !cancelled() && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.runtime.result == 'success' }}
     environment: ${{ inputs.draft && 'release-signing' || 'release-verification' }}
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 90
