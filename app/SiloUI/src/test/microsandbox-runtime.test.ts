@@ -181,22 +181,24 @@ describe("bundled MicroSandbox release staging", () => {
     expect(await readFile(staged.libraryPath)).toEqual(library)
   })
 
-  it("reuses an unchanged compiled runtime but rebuilds when verified embedded agent bytes change", async () => {
+  async function compiledRuntimeFixture() {
     const appRoot = await mkdtemp(join(tmpdir(), "silo-agentd-cache-test-"))
     const targetTriple = "aarch64-apple-darwin"
     const releaseExecutable = Buffer.from("official release fixture")
     const source = Buffer.from("unchanged source archive fixture")
     const library = Buffer.from("library fixture")
     let agentd = Buffer.from("agent revision one")
-    let compilations = 0
-    let outdatedCachedSsh = false
-    let outdatedCachedAccount = false
-    let outdatedCachedStdin = false
-    let outdatedCachedInstance = false
-    let outdatedCachedStaging = false
-    let outdatedCachedNoStdin = false
-    let outdatedCachedRestoreStrict = false
-    let outdatedCachedRestoreHelp = false
+    const state = { compilations: 0 }
+    const outdated = {
+      outdatedCachedSsh: false,
+      outdatedCachedAccount: false,
+      outdatedCachedStdin: false,
+      outdatedCachedInstance: false,
+      outdatedCachedStaging: false,
+      outdatedCachedNoStdin: false,
+      outdatedCachedRestoreStrict: false,
+      outdatedCachedRestoreHelp: false,
+    }
     const sourceArtifact = { url: "https://example.test/source.tar.gz", sha256: sha256(source) }
     const selected = {
       ...runtimeTargets[targetTriple],
@@ -204,10 +206,8 @@ describe("bundled MicroSandbox release staging", () => {
       agentdSha256: sha256(agentd),
       librarySha256: sha256(library),
     }
-    for (const patch of MICROSANDBOX_PATCHES) {
-      await mkdir(join(appRoot, "patches"), { recursive: true })
-      await writeFile(join(appRoot, patch.path), await readFile(join(process.cwd(), patch.path)))
-    }
+    await mkdir(join(appRoot, "patches"), { recursive: true })
+    await Promise.all(MICROSANDBOX_PATCHES.map(async patch => writeFile(join(appRoot, patch.path), await readFile(join(process.cwd(), patch.path)))))
     // The compiled runtime also bundles the macOS gateway, which the build reads from the app root.
     await cp(join(process.cwd(), "src-tauri/macos-gateway"), join(appRoot, "src-tauri/macos-gateway"), { recursive: true })
     const fetchStream = async (url: string) => {
@@ -235,145 +235,129 @@ describe("bundled MicroSandbox release staging", () => {
           writeFileSync(join(output, "silo-macos-gateway"), Buffer.from("compiled gateway"))
           return ""
         }
-        compilations += 1
+        state.compilations += 1
         const embeddedAgent = readFileSync(join(String(options.cwd), "build/agentd"))
         writeFileSync(join(output, "msb"), Buffer.concat([Buffer.from("compiled runtime:"), embeddedAgent]))
         return ""
       }
       if (command.startsWith(appRoot) && command.endsWith("/msb")) {
-        if (outdatedCachedAccount && !command.includes("cargo-target") && args[0] === "--silo-working-account-protocol") return "0"
-        if (outdatedCachedStdin && !command.includes("cargo-target") && args[0] === "--silo-secret-values-protocol") return "0"
-        if (outdatedCachedInstance && !command.includes("cargo-target") && args[0] === "--silo-runtime-instance-protocol") return "0"
-        if (outdatedCachedRestoreStrict && !command.includes("cargo-target") && args[0] === "--silo-restore-strict-protocol") return "0"
+        if (outdated.outdatedCachedAccount && !command.includes("cargo-target") && args[0] === "--silo-working-account-protocol") return "0"
+        if (outdated.outdatedCachedStdin && !command.includes("cargo-target") && args[0] === "--silo-secret-values-protocol") return "0"
+        if (outdated.outdatedCachedInstance && !command.includes("cargo-target") && args[0] === "--silo-runtime-instance-protocol") return "0"
+        if (outdated.outdatedCachedRestoreStrict && !command.includes("cargo-target") && args[0] === "--silo-restore-strict-protocol") return "0"
         if (["--silo-storage-protocol", "--silo-desktop-protocol", "--silo-github-token-protocol", "--silo-github-protocol", "--silo-working-account-protocol", "--silo-secret-values-protocol", "--silo-runtime-instance-protocol", "--silo-restore-strict-protocol"].includes(args[0])) return "1"
         if (args[0] === "--version") return `msb ${MICRO_SANDBOX_VERSION}`
-        if (outdatedCachedStaging && !command.includes("cargo-target") && args[0] === "snapshot" && args[1] === "load") return "--group"
+        if (outdated.outdatedCachedStaging && !command.includes("cargo-target") && args[0] === "snapshot" && args[1] === "load") return "--group"
         if (args.includes("--help")) {
           const oldFlags = "--mount-owned --no-start --progress-json"
           const currentFlags = `${oldFlags} --no-stdin`
           if (args[0] === "snapshot") return "--from-sandbox --group --dest-dir --full --guest-flush --integrity --stage-id"
           if (args[0] === "restore") {
-            return outdatedCachedRestoreHelp && !command.includes("cargo-target") ? "--cow-mem --name" : "--cow-mem --name --net-strict"
+            return outdated.outdatedCachedRestoreHelp && !command.includes("cargo-target") ? "--cow-mem --name" : "--cow-mem --name --net-strict"
           }
-          if (outdatedCachedNoStdin && !command.includes("cargo-target") && args[0] === "exec") return oldFlags
-          return outdatedCachedSsh && !command.includes("cargo-target") && args[0] === "ssh"
+          if (outdated.outdatedCachedNoStdin && !command.includes("cargo-target") && args[0] === "exec") return oldFlags
+          return outdated.outdatedCachedSsh && !command.includes("cargo-target") && args[0] === "ssh"
             ? oldFlags
             : `${currentFlags} --authorized-keys --exit-on-stdin-close --expected-machine-id`
         }
       }
       throw new Error(`Unexpected tool invocation: ${command} ${args.join(" ")}`)
     }) as typeof execFileSync
+    const stage = () => stageRuntime({ appRoot, targetTriple, fetchStream, selected, licenses: [], sourceArtifact, verifyExecutable: false })
+    const run = (body: () => Promise<void>) => vi.mocked(execFileSync).withImplementation(compiler, body)
+    const changeAgent = (revision: string) => {
+      agentd = Buffer.from(revision)
+      selected.agentdSha256 = sha256(agentd)
+    }
+    return { appRoot, state, outdated, stage, run, changeAgent, getAgent: () => agentd }
+  }
+
+  async function withCompiledRuntime(body: (fixture: Awaited<ReturnType<typeof compiledRuntimeFixture>>) => Promise<void>) {
+    const fixture = await compiledRuntimeFixture()
     try {
-      await vi.mocked(execFileSync).withImplementation(compiler, async () => {
-        const stage = () => stageRuntime({ appRoot, targetTriple, fetchStream, selected, licenses: [], sourceArtifact, verifyExecutable: false })
-        const first = await stage()
-        const firstBytes = await readFile(first.executablePath)
-        expect(firstBytes.toString()).toBe("compiled runtime:agent revision one")
-        expect(compilations).toBe(1)
-
-        const warm = await stage()
-        expect(await readFile(warm.executablePath)).toEqual(firstBytes)
-        expect(compilations).toBe(1)
-
-        outdatedCachedSsh = true
-        await stage()
-        expect(compilations).toBe(2)
-        outdatedCachedSsh = false
-
-        outdatedCachedAccount = true
-        await stage()
-        expect(compilations).toBe(3)
-        outdatedCachedAccount = false
-
-        outdatedCachedStdin = true
-        await stage()
-        expect(compilations).toBe(4)
-        outdatedCachedStdin = false
-
-        // A cached runtime whose inspect output lacks the running instance is rebuilt.
-        outdatedCachedInstance = true
-        await stage()
-        expect(compilations).toBe(5)
-        outdatedCachedInstance = false
-
-        outdatedCachedStaging = true
-        await stage()
-        expect(compilations).toBe(6)
-        outdatedCachedStaging = false
-
-        outdatedCachedNoStdin = true
-        await stage()
-        expect(compilations).toBe(7)
-        outdatedCachedNoStdin = false
-
-        agentd = Buffer.from("agent revision two")
-        selected.agentdSha256 = sha256(agentd)
-        const changed = await stage()
-        expect(await readFile(changed.executablePath, "utf8")).toBe("compiled runtime:agent revision two")
-        expect(compilations).toBe(8)
-        const manifest = JSON.parse(await readFile(changed.manifestPath, "utf8"))
-        expect(manifest.executable.embeddedAgentdReleaseSha256).toBe(sha256(agentd))
-        expect(manifest.executable.sha256).toBe(sha256(await readFile(changed.executablePath)))
-
-        vi.stubEnv("RUSTFLAGS", "-C opt-level=1")
-        await stage()
-        expect(compilations).toBe(9)
-        await stage()
-        expect(compilations).toBe(9)
-
-        vi.stubEnv("CARGO_ENCODED_RUSTFLAGS", "-C\u001fopt-level=2")
-        await stage()
-        expect(compilations).toBe(10)
-
-        vi.stubEnv("CARGO_BUILD_RUSTFLAGS", "-C opt-level=3")
-        await stage()
-        expect(compilations).toBe(11)
-        vi.stubEnv("CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS", "-C target-cpu=generic")
-        await stage()
-        expect(compilations).toBe(12)
-        await stage()
-        expect(compilations).toBe(12)
-
-        vi.stubEnv("CARGO_PROFILE_RELEASE_DEBUG", "2")
-        await stage()
-        expect(compilations).toBe(13)
-        await stage()
-        expect(compilations).toBe(13)
-        vi.stubEnv("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1")
-        await stage()
-        expect(compilations).toBe(14)
-        vi.stubEnv("CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_OPT_LEVEL", "1")
-        await stage()
-        expect(compilations).toBe(15)
-        // Environment insertion order does not change an equivalent profile.
-        delete process.env.CARGO_PROFILE_RELEASE_DEBUG
-        vi.stubEnv("CARGO_PROFILE_RELEASE_DEBUG", "2")
-        await stage()
-        expect(compilations).toBe(15)
-
-        // A cached runtime whose restore cannot take --net-strict is rebuilt, by its probe or
-        // by its help.
-        outdatedCachedRestoreStrict = true
-        await stage()
-        expect(compilations).toBe(16)
-        outdatedCachedRestoreStrict = false
-        outdatedCachedRestoreHelp = true
-        await stage()
-        expect(compilations).toBe(17)
-        outdatedCachedRestoreHelp = false
-        await stage()
-        expect(compilations).toBe(17)
-
-        // A change to the gateway's published-port code rebuilds it.
-        const ports = join(appRoot, "src-tauri/macos-gateway/src/ports.rs")
-        await writeFile(ports, `${await readFile(ports, "utf8")}\n// changed\n`)
-        await stage()
-        expect(compilations).toBe(18)
-      })
+      await fixture.run(() => body(fixture))
     } finally {
       vi.unstubAllEnvs()
-      await rm(appRoot, { recursive: true, force: true })
+      await rm(fixture.appRoot, { recursive: true, force: true })
     }
-  })
+  }
+
+  it("reuses an unchanged compiled runtime but rebuilds when verified embedded agent bytes change", () => withCompiledRuntime(async ({ stage, state, changeAgent, getAgent }) => {
+    const first = await stage()
+    const firstBytes = await readFile(first.executablePath)
+    expect(firstBytes.toString()).toBe("compiled runtime:agent revision one")
+    expect(state.compilations).toBe(1)
+
+    const warm = await stage()
+    expect(await readFile(warm.executablePath)).toEqual(firstBytes)
+    expect(state.compilations).toBe(1)
+
+    changeAgent("agent revision two")
+    const changed = await stage()
+    expect(await readFile(changed.executablePath, "utf8")).toBe("compiled runtime:agent revision two")
+    expect(state.compilations).toBe(2)
+    const manifest = JSON.parse(await readFile(changed.manifestPath, "utf8"))
+    expect(manifest.executable.embeddedAgentdReleaseSha256).toBe(sha256(getAgent()))
+    expect(manifest.executable.sha256).toBe(sha256(await readFile(changed.executablePath)))
+  }))
+
+  // A cached runtime that fails one capability probe or help check is rebuilt.
+  it.each([
+    "outdatedCachedSsh",
+    "outdatedCachedAccount",
+    "outdatedCachedStdin",
+    "outdatedCachedInstance",
+    "outdatedCachedStaging",
+    "outdatedCachedNoStdin",
+    "outdatedCachedRestoreStrict",
+    "outdatedCachedRestoreHelp",
+  ] as const)("rebuilds a cached runtime that is %s", (flag) => withCompiledRuntime(async ({ stage, state, outdated }) => {
+    await stage()
+    expect(state.compilations).toBe(1)
+    outdated[flag] = true
+    await stage()
+    expect(state.compilations).toBe(2)
+    outdated[flag] = false
+    await stage()
+    expect(state.compilations).toBe(2)
+  }))
+
+  it.each([
+    ["RUSTFLAGS", "-C opt-level=1"],
+    ["CARGO_ENCODED_RUSTFLAGS", "-C\u001fopt-level=2"],
+    ["CARGO_BUILD_RUSTFLAGS", "-C opt-level=3"],
+    ["CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS", "-C target-cpu=generic"],
+    ["CARGO_PROFILE_RELEASE_DEBUG", "2"],
+    ["CARGO_PROFILE_RELEASE_OPT_LEVEL", "1"],
+    ["CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_OPT_LEVEL", "1"],
+  ])("rebuilds a cached runtime once when %s changes", (name, value) => withCompiledRuntime(async ({ stage, state }) => {
+    await stage()
+    expect(state.compilations).toBe(1)
+    vi.stubEnv(name, value)
+    await stage()
+    expect(state.compilations).toBe(2)
+    await stage()
+    expect(state.compilations).toBe(2)
+  }))
+
+  it("does not rebuild when only the order of equivalent profile variables changes", () => withCompiledRuntime(async ({ stage, state }) => {
+    vi.stubEnv("CARGO_PROFILE_RELEASE_DEBUG", "2")
+    vi.stubEnv("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1")
+    await stage()
+    expect(state.compilations).toBe(1)
+    delete process.env.CARGO_PROFILE_RELEASE_DEBUG
+    vi.stubEnv("CARGO_PROFILE_RELEASE_DEBUG", "2")
+    await stage()
+    expect(state.compilations).toBe(1)
+  }))
+
+  it("rebuilds the gateway when its published-port code changes", () => withCompiledRuntime(async ({ appRoot, stage, state }) => {
+    await stage()
+    expect(state.compilations).toBe(1)
+    const ports = join(appRoot, "src-tauri/macos-gateway/src/ports.rs")
+    await writeFile(ports, `${await readFile(ports, "utf8")}\n// changed\n`)
+    await stage()
+    expect(state.compilations).toBe(2)
+  }))
 
 })
