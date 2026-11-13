@@ -61,3 +61,18 @@ pub(crate) fn write_shell_script(path: &std::path::Path, script: impl AsRef<str>
     std::fs::write(path, script).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
+
+/// Runs a freshly written executable once with `args` and waits for it to finish, however long
+/// that takes. On macOS the first run of a new executable file waits for a system check that
+/// took seconds while other tests ran (later runs start in milliseconds), so a test that bounds
+/// a fake's run with a time limit runs it once first and the limit measures only the fake.
+pub(crate) fn run_new_executable_once(path: &std::path::Path, args: &[&str]) {
+    let status = std::process::Command::new(path)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success(), "{} {args:?}: {status}", path.display());
+}

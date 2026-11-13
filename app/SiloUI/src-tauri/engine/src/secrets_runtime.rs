@@ -727,7 +727,8 @@ mod tests {
         fs::write(&paths.library, b"test").unwrap();
         fs::write(
             &paths.executable,
-            "#!/bin/sh\necho $$ > \"$MSB_HOME/modify.pid\"\nexec sleep 30\n",
+            // The pid is renamed into place so the file the canceller waits for is never empty.
+            "#!/bin/sh\necho $$ > \"$MSB_HOME/modify.pid.tmp\"\nmv \"$MSB_HOME/modify.pid.tmp\" \"$MSB_HOME/modify.pid\"\nexec sleep 30\n",
         )
         .unwrap();
         fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();

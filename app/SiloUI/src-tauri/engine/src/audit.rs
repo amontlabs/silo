@@ -1005,6 +1005,8 @@ mod tests {
                 None,
             ));
         }
+        // A list waits for the writer only briefly; the trim comes after the last row is written.
+        log.flush(Duration::from_secs(30));
         let rows = log
             .list(
                 &AuditListParams {
@@ -1101,6 +1103,8 @@ mod tests {
             ));
         }
         log.record(row("computer", AuditCallerKind::Computer, Some("a"), None));
+        // A list waits for the writer only briefly; the trim comes after the last row is written.
+        log.flush(Duration::from_secs(30));
         let rows = log.list(&kinds(), Scope::All).unwrap();
         assert_eq!(rows.entries.len(), 4);
         assert_eq!(rows.entries[1].method, format!("m{}", TRIM_EVERY - 1));

@@ -8988,7 +8988,8 @@ esac
 
     /// A fake runtime for GitHub access updates. `modify` records its arguments, the
     /// secret values it read on standard input and its environment, then blocks while
-    /// `modify-block` exists and fails when `modify-fail` exists.
+    /// `modify-block` exists and fails when `modify-fail` exists. Its process id is renamed
+    /// into `modify.pid` whole, so a reader never sees the file empty.
     fn fake_github_msb(paths: &RuntimePaths) {
         use std::os::unix::fs::PermissionsExt;
         fs::create_dir_all(&paths.home).unwrap();
@@ -9001,12 +9002,14 @@ case "$1" in
     printf '%s\n' "$*" >> "$MSB_HOME/modify-args"
     cat > "$MSB_HOME/modify-values"
     env > "$MSB_HOME/modify-env"
-    echo $$ > "$MSB_HOME/modify.pid"
+    echo $$ > "$MSB_HOME/modify.pid.tmp" && mv "$MSB_HOME/modify.pid.tmp" "$MSB_HOME/modify.pid"
     while [ -f "$MSB_HOME/modify-block" ]; do sleep 0.05; done
     if [ -f "$MSB_HOME/modify-fail" ]; then echo "rejected $(cat "$MSB_HOME/modify-values")" >&2; exit 3; fi ;;
 esac
 "#.replace("SILO_TEST_COMPUTER_ID", computer().id())).unwrap();
         fs::set_permissions(&paths.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        // An argument the fake does not know does nothing.
+        crate::test_support::run_new_executable_once(&paths.executable, &["--first-run"]);
         write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
     }
 

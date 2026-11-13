@@ -60,14 +60,28 @@ mod tests {
 
     #[test]
     fn a_child_that_ignores_sigterm_is_killed_after_the_grace() {
+        use std::io::BufRead;
+        use std::process::Stdio;
+        // The shell says when its trap is in place, then waits in the `read` builtin on a pipe
+        // this test keeps open, so it starts no process of its own that could outlive it.
         let mut child = Command::new("sh")
-            .args(["-c", "trap '' TERM; while :; do sleep 1; done"])
+            .args(["-c", "trap '' TERM; echo ready; read line"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
             .spawn()
             .unwrap();
-        thread::sleep(Duration::from_millis(200));
+        let mut ready = String::new();
+        io::BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert_eq!(ready, "ready\n");
         let started = Instant::now();
-        terminate_child(&mut child, Duration::from_millis(300)).unwrap();
+        let status = terminate_child(&mut child, Duration::from_millis(300)).unwrap();
         assert!(started.elapsed() >= Duration::from_millis(300));
+        assert_eq!(
+            std::os::unix::process::ExitStatusExt::signal(&status),
+            Some(libc::SIGKILL)
+        );
         assert!(child.try_wait().unwrap().is_some());
     }
 }

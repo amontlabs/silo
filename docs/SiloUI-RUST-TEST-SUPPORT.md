@@ -151,6 +151,16 @@ runtime identity, filesystem side effects or cancellation while a process runs.
 `write_shell_script` centralizes executable installation for those process-boundary
 tests; the caller still owns the temporary directory and explicit script behavior.
 
+On macOS the first run of a newly written executable waits for a system check:
+about 0.2 s on an idle machine, and more than 10 s was seen while the engine suite
+ran beside other builds. Later runs of the same file start in milliseconds. A
+fake whose run is bounded by a time limit (a runtime or helper timeout) is
+therefore run once with `test_support::run_new_executable_once` before the timed
+call, so the limit measures only the fake's own work. The backup
+`script_command`, the GitHub `fake_github_msb` and the guest fake runtime do this.
+A fake that reports its process id writes it beside the file and renames it into
+place, so a test that waits for the file never reads it empty.
+
 The desktop, checkpoint readiness/failure and application-read failure tests use
 this runner. Other stateful and output-queue runners remain; the new helper does
 not silently accept commands on their behalf.

@@ -276,11 +276,15 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let leaf = directory.path().join("leaf.pid");
         // A leader of its own group (as silo-init --own-group makes it) with a background child.
+        // The pid is written beside the file and renamed into place, so the file appears whole.
         let mut leader = Command::new("sh");
         leader
             .args([
                 "-c",
-                &format!("sleep 300 & echo $! > {}; wait", leaf.display()),
+                &format!(
+                    "sleep 300 & echo $! > {leaf}.tmp && mv {leaf}.tmp {leaf}; wait",
+                    leaf = leaf.display()
+                ),
             ])
             .process_group(0);
         let mut leader = leader.spawn().unwrap();

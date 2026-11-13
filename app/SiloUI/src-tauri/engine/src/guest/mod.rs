@@ -192,6 +192,10 @@ exit 2
             &paths.executable,
             &FAKE_MSB.replace("__EXEC_PRELUDE__", prelude),
         );
+        crate::test_support::run_new_executable_once(
+            &paths.executable,
+            &["--silo-working-account-protocol"],
+        );
         std::fs::create_dir_all(&paths.home).unwrap();
         std::fs::write(&paths.library, b"").unwrap();
         let inventory = serde_json::json!({
