@@ -9691,22 +9691,40 @@ esac
     fn a_full_journal_keeps_its_first_event_and_drops_the_oldest_progress() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
-        let mut journal = ActivityJournal::start(&paths(&directory), "attempt").unwrap();
-        journal.append(computer_progress("attempt", "setup-started", "", 0));
-        for index in 0..MAX_ACTIVITY_EVENTS {
-            let name = format!("computer{index}");
-            journal.append(computer_progress(
+        let paths = paths(&directory);
+        let mut journal = ActivityJournal::start(&paths, "attempt").unwrap();
+        let progress = |index: usize| {
+            computer_progress(
                 "attempt",
                 "computer-configuration",
-                &name,
+                &format!("computer{index}"),
                 0,
-            ));
+            )
+        };
+        // Every append saves the journal durably; filling it one short of full directly
+        // keeps the test to the two appends that reach and then cross the limit.
+        journal.push(computer_progress("attempt", "setup-started", "", 0));
+        for index in 0..MAX_ACTIVITY_EVENTS - 2 {
+            journal.push(progress(index));
         }
+        journal.append(progress(MAX_ACTIVITY_EVENTS - 2));
+        assert_eq!(journal.events.len(), MAX_ACTIVITY_EVENTS);
+        assert_eq!(journal.events[1].computer, "computer0");
+        journal.append(progress(MAX_ACTIVITY_EVENTS - 1));
         assert_eq!(journal.events.len(), MAX_ACTIVITY_EVENTS);
         assert_eq!(journal.events[0].step, "setup-started");
         assert_eq!(journal.events[1].computer, "computer1");
         assert_eq!(
             journal.events.back().unwrap().computer,
+            format!("computer{}", MAX_ACTIVITY_EVENTS - 1)
+        );
+        // The saved history holds the same events.
+        let saved = read_activity(&paths, false).unwrap();
+        assert_eq!(saved.len(), MAX_ACTIVITY_EVENTS);
+        assert_eq!(saved[0].step, "setup-started");
+        assert_eq!(saved[1].computer, "computer1");
+        assert_eq!(
+            saved.last().unwrap().computer,
             format!("computer{}", MAX_ACTIVITY_EVENTS - 1)
         );
     }
