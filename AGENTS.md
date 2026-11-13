@@ -86,6 +86,7 @@ Binding rules for every agent; the details are in [docs/workflow/](docs/workflow
 
 - **No CI waits.** Never push to wait for CI, never poll `gh run` or `gh pr checks`, never rerun CI.
 - **Tests prove or find something.** Run `tools/agent/check` (or `tools/agent/affected` to see what a diff touches) instead of full suites; narrower commands are fine when faster. Children never run `--workspace` or the whole frontend suite. The full suites run once per merge batch, in the background, started by `tools/agent/merge-batch`; `rust-toolchain.toml` pins Rust, so use plain `cargo` (no `+toolchain`) and cargo-nextest 0.9.151.
+- **Live checks run through the harness** in `app/SiloUI/scripts/live/` (`run <check> [--host mac|linux]`, tests in `live-test.sh`); a check that drives the Dev engine holds the machine-wide lock `~/.local/state/silo-live/dev-engine.lock`, so a second one exits 3 naming the holder. See [docs/workflow/CHILD.md](docs/workflow/CHILD.md).
 - **Flaky tests get fixed, not retried.** Log a test that fails then passes in [docs/workflow/FLAKY.md](docs/workflow/FLAKY.md).
 - **Only the orchestrator starts reviews.** Children never review their own work.
 - **Agents are chosen by lastdrop name** (`build`, `build-hard`, `review`, `judge`, `live`, `scout`, `computer-use`; `cheap` only when the owner asks), never by provider model. See [docs/workflow/ROLES.md](docs/workflow/ROLES.md).

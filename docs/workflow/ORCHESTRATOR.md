@@ -114,6 +114,6 @@ Append to the owner log (see Setup): every judgement call, guess, skipped review
 ## 8. How to wait
 
 - Never end a turn unless something will wake it: a running child or reviewer (completion arrives as a notification), a background command, or a scheduled wake-up.
-- Background command: run it with `run_in_background` and wait for its notification, or block on its `.done` file with one command. For a live check: `tools/agent/live wait <state-dir>`.
+- Background command: run it with `run_in_background` and wait for its notification, or block on its `.done` file with one command. For a live check: `app/SiloUI/scripts/live/run wait <state-dir>`.
 - Never poll CI and never push to see CI. The owner watches `main`.
 - If nothing is running and `board ready` is empty, the build is done or blocked: say which in the final message.

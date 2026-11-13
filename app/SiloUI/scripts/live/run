@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+# run: step-runner for live checks (checks that drive a real Dev engine or the Linux machine).
+usage() { cat <<'U'
+usage: run <check> [--from STEP] [--host mac|linux] [--state DIR]
+       run start <check> [args]            (background run; prints "<state-dir> <run-id>")
+       run wait <state-dir> [<run-id>] [--timeout SECONDS]
+       run list
+
+Runs app/SiloUI/scripts/live/live.d/<check>.sh: an ordered list STEPS=(...) of step_<name> functions.
+A finished step leaves <state>/steps/<name>.ok; a rerun skips those. --from STEP reruns STEP and all
+after it. Logs: <state>/logs/<step>.log. Every exit writes <state>/VERDICT:
+  verdict: pass|fail|skipped, check, host, step, reason, log, at
+Exit codes: 0 pass, 1 fail, 2 usage, 3 skipped (also: --host linux and the machine is offline).
+State dir default: $ATELIER_TMP/live/<check> when `atelier tmp -- run ...` set ATELIER_TMP (short sockets and
+temp homes live under it too: use `atelier tmp --short`), else ${TMPDIR}/silo-agent/[$SILO_AGENT_ITEM/]live/<check>
+(set SILO_AGENT_ITEM so `clean <item>` removes it). Throwaway computers are listed in <state>/computers and
+temporary directories in <state>/tempdirs (for `clean`); under ATELIER_TMP each computer is also one line in
+$ATELIER_TMP/leftovers, removed once the computer is gone.
+A check that drives a shared system names it in CHECK_LOCKS="dev-engine" (one line, space-separated). The runner
+then holds an exclusive machine-wide lock per name (${LIVE_LOCK_DIR:-~/.local/state/silo-live}/<name>.lock) from
+before the state dir lock until it exits, together with everything it started; when another run holds it, the
+runner prints the holder and exits 3 (skipped) without touching the state dir.
+`run start <check> [args]` runs the same in the background and returns once the runner holds the lock and has
+written its new run id (or has already ended, e.g. a config error or a busy state dir: then it prints why and exits
+with the runner's code); it prints "<state-dir> <run-id>". `run wait <state-dir> [<run-id>]` blocks until the
+verdict of that run (default: the run id in <state>/run) exists, or the runner died, prints it, exits with its code;
+an existing matching verdict is returned at once, a verdict of another run never. Use `run start` + `run wait`,
+never `run <check> &` + `run wait` (the wait could still see the previous run).
+Check files may define cleanup(); it runs on every exit. Env: LIVE_D (check dir), LIVE_SSH,
+LIVE_LINUX_HOST. Never starts anything by itself: the checks decide what to run.
+U
+}
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO=$(cd "$HERE/../../../.." && pwd)
+LIVE_D=${LIVE_D:-$HERE/live.d}
+
+code_of() { case "$(sed -n 's/^verdict: //p' "$1")" in pass) return 0;; skipped) return 3;; *) return 1;; esac; }
+
+write_verdict() { # verdict step reason
+  local v=$1 step=${2:--} reason=${3:--} log=-
+  [ "$step" != - ] && log="$LOGS/$step.log"
+  [ "$step" = - ] && [ -f "$LOGS/cleanup.log" ] && [ "$v" = fail ] && log="$LOGS/cleanup.log"
+  printf 'verdict: %s\ncheck: %s\nhost: %s\nstep: %s\nreason: %s\nlog: %s\nat: %s\nrun: %s\n' \
+    "$v" "$CHECK" "$HOST" "$step" "$reason" "$log" "$(date -u +%FT%TZ)" "$(cat "$STATE/run" 2>/dev/null)" >"$STATE/VERDICT.tmp"
+  mv "$STATE/VERDICT.tmp" "$STATE/VERDICT"
+}
+
+cmd_wait() {
+  local state=${1:-} timeout=0 want="" cr vr lp start=$SECONDS
+  [ -d "$state" ] || { echo "run wait: no such state dir: $state" >&2; exit 2; }
+  shift; [ "${1:-}" != --timeout ] && [ -n "${1:-}" ] && { want=$1; shift; }
+  [ "${1:-}" = --timeout ] && timeout=${2:-0}
+  vrun() { sed -n 's/^run: //p' "$state/VERDICT" 2>/dev/null; }
+  while :; do
+    cr=${want:-$(cat "$state/run" 2>/dev/null)}; vr=$(vrun)
+    if [ -n "$cr" ] && [ -s "$state/VERDICT" ] && [ "$vr" = "$cr" ]; then break; fi
+    if [ -n "$want" ] && [ -s "$state/run" ] && [ "$(cat "$state/run")" != "$want" ]; then
+      echo "run wait: run $want was replaced by run $(cat "$state/run")" >&2; exit 1
+    fi
+    lp=$(cat "$state/lock/pid" 2>/dev/null)
+    if [ -n "$cr" ] && [ -d "$state/lock" ] && [ -n "$lp" ] && ! kill -0 "$lp" 2>/dev/null; then
+      sleep 1  # the runner may have just written it
+      [ -s "$state/VERDICT" ] && [ "$(vrun)" = "$cr" ] && break
+      STATE=$state LOGS=$state/logs CHECK=$(cat "$state/check" 2>/dev/null || echo "?") HOST=$(cat "$state/host" 2>/dev/null || echo "?")
+      write_verdict fail "$(cat "$state/current" 2>/dev/null || echo -)" "runner died without a verdict"
+      break
+    fi
+    [ "$timeout" -gt 0 ] && [ $((SECONDS-start)) -ge "$timeout" ] && { echo "run wait: timeout after ${timeout}s" >&2; exit 4; }
+    sleep 1
+  done
+  cat "$state/VERDICT"; code_of "$state/VERDICT"; exit $?
+}
+
+# Default state dir of a check (also used by `live start`, which must name it before the runner does).
+default_state() {
+  local st=${TMPDIR:-/tmp}/silo-agent/${SILO_AGENT_ITEM:+$SILO_AGENT_ITEM/}live/$1
+  [ -n "${ATELIER_TMP:-}" ] && st=${ATELIER_TMP%/}/live/$1
+  st=${st%/}
+  case "$st" in /*) ;; *) st=$PWD/$st;; esac; echo "$st"
+}
+
+cmd_start() {
+  local check=${1:-} st="" a prev="" pid run rc rlog
+  [ -n "$check" ] || { usage >&2; exit 2; }
+  for a in "$@"; do [ "$prev" = --state ] && st=$a; prev=$a; done
+  [ -n "$st" ] || { st=$(default_state "$check"); set -- "$@" --state "$st"; }
+  case "$st" in /*) ;; *) st=$PWD/$st; set -- "${@:1:$#-1}" "$st";; esac
+  mkdir -p "$st" || exit 2
+  # The runner logs to its own file: a refused start must not truncate the log of the run holding the lock.
+  rlog=$(mktemp "$st/runner.log.XXXXXX") || exit 2
+  nohup "$HERE/run" "$@" >"$rlog" 2>&1 </dev/null & pid=$!
+  while :; do
+    run=$(cat "$st/run" 2>/dev/null)
+    case "$run" in "$pid"-*) mv -f "$rlog" "$st/runner.log"; echo "$st $run"; exit 0;; esac
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid"; rc=$?; cat "$rlog" >&2; rm -f "$rlog"; echo "run start: the runner ended (exit $rc) before taking the state dir" >&2; exit "$rc"
+    fi
+    sleep 0.1
+  done
+}
+
+cmd_list() {
+  local f
+  for f in "$LIVE_D"/*.sh; do [ -e "$f" ] || continue
+    echo "$(basename "$f" .sh)  $(sed -n 's/^CHECK_DESC="\(.*\)"$/\1/p' "$f" | head -1)"
+  done
+}
+
+case "${1:-}" in -h|--help|"") usage; exit 0;; wait) shift; cmd_wait "$@";; start) shift; cmd_start "$@";; list) cmd_list; exit 0;; esac
+
+ARGS=("$@")
+CHECK=$1; shift; FROM=""; HOST=mac; STATE=""
+while [ $# -gt 0 ]; do case "$1" in
+  --from) FROM=${2:-}; shift 2;; --host) HOST=${2:-}; shift 2;; --state) STATE=${2:-}; shift 2;;
+  -h|--help) usage; exit 0;; *) echo "live: unknown argument: $1" >&2; usage >&2; exit 2;;
+esac; done
+case "$HOST" in mac|linux) ;; *) echo "live: --host must be mac or linux" >&2; exit 2;; esac
+CHECK_FILE=$LIVE_D/$CHECK.sh
+[ -f "$CHECK_FILE" ] || { echo "live: no check '$CHECK' in $LIVE_D (try: live list)" >&2; exit 2; }
+STATE=${STATE:-$(default_state "$CHECK")}; STATE=${STATE%/}
+case "$STATE" in /*) ;; *) STATE=$PWD/$STATE;; esac
+LOGS=$STATE/logs
+mkdir -p "$STATE/steps" "$LOGS" || exit 2
+
+# Shared systems the check drives (CHECK_LOCKS="dev-engine"): this run takes an exclusive machine-wide lock on
+# each, before anything else, by re-running itself under with-lock.py, which holds it until the run and
+# everything it started have ended. Refused: exit 3 (skipped), naming the holder, state dir untouched.
+CHECK_LOCKS=$(sed -n 's/^CHECK_LOCKS="\(.*\)"$/\1/p' "$CHECK_FILE" | head -1)
+if [ -n "$CHECK_LOCKS" ] && [ "${LIVE_HELD:-}" != "$CHECK_LOCKS" ]; then
+  # shellcheck disable=SC2086
+  LIVE_HELD=$CHECK_LOCKS exec python3 -I "$HERE/with-lock.py" \
+    --info "pid $$, check $CHECK, host $HOST, state $STATE, since $(date -u +%FT%TZ)" $CHECK_LOCKS -- "$HERE/run" "${ARGS[@]}"
+fi
+
+# One runner per state dir: mkdir is the atomic test-and-set. A lock whose pid is dead is replaced
+# while holding lock.takeover (also a mkdir), re-reading the owner under it, so a second starter
+# can never move a lock a first one just took.
+acquire_lock() {
+  local p
+  if mkdir "$STATE/lock" 2>/dev/null; then echo $$ >"$STATE/lock/pid"; return 0; fi
+  p=$(cat "$STATE/lock/pid" 2>/dev/null)
+  if [ -z "$p" ] || kill -0 "$p" 2>/dev/null; then echo "live: a run is already active in $STATE (pid ${p:-?})" >&2; exit 2; fi
+  if ! mkdir "$STATE/lock.takeover" 2>/dev/null; then
+    echo "live: another run is replacing a stale lock in $STATE; if none is, remove $STATE/lock.takeover" >&2; exit 2
+  fi
+  if [ "$(cat "$STATE/lock/pid" 2>/dev/null)" = "$p" ] && rm -rf "$STATE/lock" && mkdir "$STATE/lock" 2>/dev/null; then
+    echo $$ >"$STATE/lock/pid"; rmdir "$STATE/lock.takeover"; return 0
+  fi
+  rmdir "$STATE/lock.takeover"
+  echo "live: lock changed hands in $STATE" >&2; exit 2
+}
+acquire_lock
+trap 'rm -rf "$STATE/lock"' EXIT
+# First thing under the lock: this run's id replaces the old one and the old verdict goes, so `live wait`
+# can never take an earlier run's verdict for this one.
+RUN=$$-$(date +%s); echo "$RUN" >"$STATE/run.tmp"; mv "$STATE/run.tmp" "$STATE/run"; rm -f "$STATE/VERDICT"
+
+# shellcheck source=live-lib.sh
+. "$HERE/live-lib.sh"
+live_sync_leftovers
+STEPS=()
+# shellcheck disable=SC1090
+. "$CHECK_FILE"
+early_fail() { echo "live: $*" >&2; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; write_verdict fail - "$*"; exit 2; }
+[ ${#STEPS[@]} -gt 0 ] || early_fail "$CHECK_FILE defines no STEPS"
+for s in "${STEPS[@]}"; do declare -F "step_$s" >/dev/null || early_fail "step_$s is not defined in $CHECK_FILE"; done
+
+# Stamps count only for the same inputs: check file, runner, HEAD and tracked changes, host, engine identity.
+FP=$( { cat "$CHECK_FILE" "$HERE/run" "$HERE/live-lib.sh" | shasum; git -C "$REPO" rev-parse HEAD 2>/dev/null
+        git -C "$REPO" diff HEAD 2>/dev/null | shasum; echo "$HOST"; [ "$HOST" = linux ] && echo "$LIVE_LINUX_HOST"
+        declare -F fingerprint_extra >/dev/null && fingerprint_extra; } | shasum | cut -c1-40 )
+if [ "$(cat "$STATE/fingerprint" 2>/dev/null)" != "$FP" ]; then rm -f "$STATE"/steps/*.ok "$STATE/runid"; fi
+echo "$FP" >"$STATE/fingerprint"
+
+if [ -n "$FROM" ]; then
+  found=""; for s in "${STEPS[@]}"; do [ "$s" = "$FROM" ] && found=1; [ -n "$found" ] && rm -f "$STATE/steps/$s.ok"; done
+  [ -n "$found" ] || early_fail "--from $FROM is not a step of $CHECK (steps: ${STEPS[*]})"
+fi
+
+rm -f "$STATE/skip-reason" "$STATE"/steps/*.failed
+echo $$ >"$STATE/pid"; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; : >"$STATE/current"
+export STATE LOGS CHECK HOST REPO
+
+RESULT=fail; FAIL_STEP=-; REASON="exited unexpectedly"; STEP_PID=""; FINISHED=""; CLEANING=""; CLEAN_FAIL=""
+
+finish() { # runs once, from the EXIT trap
+  [ -n "$FINISHED" ] && return; FINISHED=1
+  stop_step
+  if declare -F cleanup >/dev/null; then
+    local had; had=$(cat "$STATE/computers" 2>/dev/null)
+    CLEANING=1; live_say "cleanup" >>"$LOGS/cleanup.log"
+    ( cleanup ) >>"$LOGS/cleanup.log" 2>&1; local crc=$?
+    # What the step stamps stand for is gone once cleanup destroyed any computer: do not resume over it.
+    if [ -n "$had" ] && [ "$had" != "$(cat "$STATE/computers" 2>/dev/null)" ]; then rm -f "$STATE"/steps/*.ok "$STATE/runid"; fi
+    if [ $crc != 0 ]; then
+      if [ "$RESULT" = fail ]; then REASON="$REASON; cleanup failed (exit $crc)"
+      else RESULT=fail; FAIL_STEP=-; REASON="cleanup failed (exit $crc)"; CLEAN_FAIL=1; fi
+    fi
+  fi
+  write_verdict "$RESULT" "$FAIL_STEP" "$REASON"
+  echo "== VERDICT ($STATE/VERDICT)"; cat "$STATE/VERDICT"
+  rm -rf "$STATE/lock"
+  [ -n "$CLEAN_FAIL" ] && exit 1
+}
+# Ends the running step and everything it started (its process group) and waits for them to be gone.
+stop_step() {
+  [ -n "$STEP_PID" ] || return 0
+  kill -TERM -- "-$STEP_PID" 2>/dev/null
+  local i; for i in $(seq 1 100); do kill -0 -- "-$STEP_PID" 2>/dev/null || break; sleep 0.1; done
+  kill -0 -- "-$STEP_PID" 2>/dev/null && { kill -KILL -- "-$STEP_PID" 2>/dev/null; sleep 0.5; }
+  wait "$STEP_PID" 2>/dev/null; STEP_PID=""
+}
+on_signal() { # $1 = signal name
+  REASON="interrupted by $1"; RESULT=fail; FAIL_STEP=$(cat "$STATE/current")
+  if [ -n "$CLEANING" ]; then FINISHED=1; write_verdict fail "$FAIL_STEP" "$REASON (cleanup cut short)"; rm -rf "$STATE/lock"; exit 130; fi
+  stop_step
+  exit 130
+}
+trap finish EXIT
+trap 'on_signal INT' INT; trap 'on_signal TERM' TERM; trap 'on_signal HUP' HUP
+
+echo "== live $CHECK host=$HOST state=$STATE"
+if [ "$HOST" = linux ] && ! live_linux_up; then
+  RESULT=skipped; REASON="skipped: offline ($LIVE_LINUX_HOST did not answer ssh in 3 s)"; echo "$REASON"; exit 3
+fi
+
+for s in "${STEPS[@]}"; do
+  if [ -e "$STATE/steps/$s.ok" ]; then echo "-- skip $s (done)"; continue; fi
+  echo "$s" >"$STATE/current"; echo "-- step $s ($LOGS/$s.log)"
+  rm -f "$STATE/steps/$s.failed"
+  set -m  # the step gets its own process group, so an interrupt can stop everything it started
+  ( set +m; export LIVE_STEP=$s; set -euo pipefail; "step_$s" ) >"$LOGS/$s.log" 2>&1 &
+  STEP_PID=$!; set +m; wait "$STEP_PID"; rc=$?; STEP_PID=""
+  [ $rc = 0 ] && [ -e "$STATE/steps/$s.failed" ] && rc=1
+  if [ $rc = 77 ]; then
+    RESULT=skipped; FAIL_STEP=$s; REASON="skipped: $(cat "$STATE/skip-reason" 2>/dev/null)"; echo "$REASON"; exit 3
+  elif [ $rc != 0 ]; then
+    RESULT=fail; FAIL_STEP=$s; REASON="step $s failed (exit $rc)"
+    [ -e "$STATE/steps/$s.failed" ] && REASON="step $s had failing checks"
+    echo "-- FAILED $s; last lines of its log:"; tail -n 15 "$LOGS/$s.log"; exit 1
+  fi
+  touch "$STATE/steps/$s.ok"
+done
+RESULT=pass; FAIL_STEP=-; REASON="all steps done"; exit 0
