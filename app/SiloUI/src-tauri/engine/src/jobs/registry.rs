@@ -1085,9 +1085,12 @@ impl JobRegistry {
                     .connection
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                connection
-                    .execute_batch("PRAGMA synchronous=FULL;")
-                    .expect("restore the job registry's durability");
+                let restored = connection.execute_batch("PRAGMA synchronous=FULL;");
+                // While the setup is already panicking, a second panic would abort the
+                // test process and hide the first message.
+                if !std::thread::panicking() {
+                    restored.expect("restore the job registry's durability");
+                }
             }
         }
         self.lock_connection()
