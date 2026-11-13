@@ -3,13 +3,13 @@
 # skip, failing checks, wait on a dead runner, short paths. Touches no engine.
 set -uo pipefail
 # Start from a clean environment for every variable the tools read.
-unset BOARD BOARD_INTEGRATION SILO_INTEGRATION_BRANCH SILO_AGENT_ITEM SILO_AGENT_CACHE RUNTIME_PREPARE_CMD SILO_BIN SILO_RUNTIME_TARGET LIVE_D LIVE_LINUX_HOST LIVE_SHORT_BASE LIVE_SSH LIVE_STEP
-LIVE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/live
+unset BOARD BOARD_INTEGRATION SILO_INTEGRATION_BRANCH SILO_AGENT_ITEM SILO_AGENT_CACHE RUNTIME_PREPARE_CMD SILO_BIN SILO_RUNTIME_TARGET LIVE_D LIVE_LINUX_HOST LIVE_SHORT_BASE LIVE_SSH LIVE_STEP ATELIER_TMP LIVE_LOCK_DIR LIVE_HELD
+LIVE_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); LIVE=$LIVE_LIB_DIR/run
 W=$(mktemp -d "${TMPDIR:-/tmp}/live-test.XXXXXX"); trap 'rm -rf "$W"' EXIT
-export LIVE_D=$W/d; mkdir -p "$LIVE_D"
+export LIVE_D=$W/d LIVE_LOCK_DIR=$W/locks; mkdir -p "$LIVE_D"  # the machine-wide locks live in the test folder: no real lock is touched
 N=0; BAD=0
 ok() { N=$((N+1)); if [ "$2" = 0 ]; then echo "PASS $1"; else echo "FAIL $1 ${3:-}"; BAD=$((BAD+1)); fi; }
-verdict() { sed -n "s/^$2: //p" "$1/VERDICT"; }
+verdict() { sed -n "s/^$2: //p" "$1/VERDICT" 2>/dev/null; }
 cat >"$LIVE_D/fake.sh" <<'C'
 CHECK_DESC="fake check for the runner tests"
 STEPS=(one two three)
@@ -217,4 +217,60 @@ $LIVE kids --state $S >$W/out 2>&1 & P=$!
 for _ in $(seq 1 50); do [ "$(cat $S/current 2>/dev/null)" = go ] && break; sleep 0.1; done
 sleep 0.5; kill -TERM $P; wait $P; sleep 3
 ok "interrupt kills the step's children before cleanup" $([ ! -e $S/late ] && [ -e $S/clean-before-late ] && echo 0 || echo 1)
+
+# machine-wide lock per shared system
+cat >"$LIVE_D/locked.sh" <<'C'
+CHECK_LOCKS="dev-engine"
+STEPS=(a)
+step_a() { echo ran >>"$STATE/count-a"; [ -e "$STATE/hang" ] && { sleep 30 & echo $! >"$STATE/sleep.pid"; wait; }; return 0; }
+C
+S=$W/s30; mkdir -p $S; touch $S/hang
+$LIVE locked --state $S >$W/out 2>&1 & P=$!
+for _ in $(seq 1 50); do [ "$(cat $S/current 2>/dev/null)" = a ] && break; sleep 0.1; done
+ok "the lock file names the holder" $(grep -q "pid $P," $W/locks/dev-engine.lock && grep -q "check locked" $W/locks/dev-engine.lock && echo 0 || echo 1)
+S2=$W/s31; mkdir -p $S2
+$LIVE locked --state $S2 >$W/out2 2>&1; rc=$?
+ok "a second check on the same shared system is refused: exit 3 naming the holder" $([ $rc = 3 ] && grep -q "busy: dev-engine is held" $W/out2 && grep -q "pid $P," $W/out2 && [ ! -e $S2/run ] && echo 0 || echo 1)
+$LIVE fake --state $W/s32 >/dev/null 2>&1; ok "a check without CHECK_LOCKS is not blocked" $([ "$(verdict $W/s32 verdict)" = pass ] && echo 0 || echo 1)
+$LIVE start locked --state $S2 >$W/out2 2>&1; rc=$?
+ok "start of a refused check exits 3 with the reason" $([ $rc = 3 ] && grep -q 'busy: dev-engine' $W/out2 && echo 0 || echo 1)
+kill -TERM $P; wait $P 2>/dev/null; rm -f $S/hang
+$LIVE locked --state $S2 >$W/out2 2>&1; rc=$?
+ok "the lock is released when the holder ends" $([ $rc = 0 ] && [ "$(verdict $S2 verdict)" = pass ] && echo 0 || echo 1)
+S=$W/s33; mkdir -p $S; touch $S/hang
+$LIVE locked --state $S >/dev/null 2>&1 & P=$!
+for _ in $(seq 1 50); do [ "$(cat $S/current 2>/dev/null)" = a ] && break; sleep 0.1; done
+for _ in $(seq 1 50); do [ -s $S/sleep.pid ] && break; sleep 0.1; done
+kill -KILL "$P"; wait $P 2>/dev/null; sleep 0.5
+$LIVE locked --state $W/s34 >/dev/null 2>&1; rc=$?
+ok "a killed holder's lock stays while something it started still runs" $([ $rc = 3 ] && echo 0 || echo 1)
+kill -TERM "$(cat $S/sleep.pid)" 2>/dev/null; sleep 0.5
+$LIVE locked --state $W/s34 >/dev/null 2>&1; ok "the lock is released once the killed holder and what it started are gone" $([ "$(verdict $W/s34 verdict)" = pass ] && echo 0 || echo 1)
+LIVE_LOCK_DIR=$W/locks2 $LIVE locked --state $W/s35 >/dev/null 2>&1; ok "LIVE_LOCK_DIR moves the lock folder" $([ -f $W/locks2/dev-engine.lock ] && echo 0 || echo 1)
+$LIVE locked --state $W/s36 >/dev/null 2>&1 & $LIVE locked --state $W/s37 >/dev/null 2>&1 & $LIVE locked --state $W/s38 >/dev/null 2>&1 & wait
+ok "parallel runs of a locked check all end with a verdict or a refusal" $(for d in s36 s37 s38; do [ "$(verdict $W/$d verdict 2>/dev/null)" = pass ] || [ ! -e $W/$d/run ]; done && echo 0 || echo 1)
+
+# under atelier tmp: state, short home and leftovers live in $ATELIER_TMP
+cat >"$LIVE_D/vm.sh" <<'C'
+STEPS=(make)
+step_make() { echo ran >>"$STATE/count-make"; live_computer_named a >/dev/null; live_computer >/dev/null; cp "$ATELIER_TMP/leftovers" "$STATE/leftovers-mid"; }
+cleanup() { [ -e "$STATE/keep" ] && return 1; for c in $(live_computers); do live_forget_computer "$c"; done; }
+C
+AT=$W/atl; mkdir -p $AT
+ATELIER_TMP=$AT $LIVE vm >$W/out 2>&1; rc=$?
+ok "ATELIER_TMP holds the default state dir" $([ $rc = 0 ] && [ "$(verdict $AT/live/vm verdict)" = pass ] && echo 0 || echo 1)
+ok "each computer is a leftovers line while it exists" $([ "$(grep -c '^computer e2e-vm-' $AT/live/vm/leftovers-mid)" = 2 ] && echo 0 || echo 1)
+ok "leftovers is empty once the computers are gone" $([ -f $AT/leftovers ] && [ ! -s $AT/leftovers ] && echo 0 || echo 1)
+mkdir -p $AT/live/vm; touch $AT/live/vm/keep; ATELIER_TMP=$AT $LIVE vm --from make >$W/out 2>&1; rc=$?
+ok "a computer that is not gone stays in leftovers" $([ $rc = 1 ] && [ "$(grep -c '^computer e2e-vm-' $AT/leftovers)" = 2 ] && echo 0 || echo 1)
+rm -f $AT/leftovers; mkdir $W/atl2; rm $AT/live/vm/keep
+ATELIER_TMP=$W/atl2 $LIVE vm --state $AT/live/vm >$W/out 2>&1
+ok "computers a resumed state still lists join the new folder's leftovers, then go" $([ ! -s $W/atl2/leftovers ] && [ -f $W/atl2/leftovers ] && echo 0 || echo 1)
+H=$(ATELIER_TMP=$AT bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/h; mkdir -p \$STATE; live_short_home" 2>/dev/null)
+ok "short home goes under ATELIER_TMP" $([ "${H#$AT/sl-}" != "$H" ] && echo 0 || echo 1)
+( ATELIER_TMP=$AT HOME=$FH bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/h; mkdir -p \$STATE; live_assert_dev_sock $AT/sl-1/engine.sock" ) >/dev/null 2>&1
+ok "a socket under the ATELIER_TMP short home counts as a Dev path" $?
+# the old command still reaches the runner
+OLD=$(cd "$(dirname "$LIVE")/../../../.." && pwd)/tools/agent/live
+LIVE_D=$LIVE_D "$OLD" fake --state $W/s40 >/dev/null 2>&1; ok "tools/agent/live execs the new runner" $([ "$(verdict $W/s40 verdict)" = pass ] && echo 0 || echo 1)
 echo "$N tests, $BAD failed"; [ $BAD = 0 ]

@@ -42,7 +42,7 @@ You are one agent building one item. Your task message names it and gives a base
 - Run long commands in the foreground and block until they finish. Never end a turn to wait, never sleep-poll.
 - Start no background wait (Monitor, `sleep` loop, watcher, `&`) unless you must. Stop every one before your final message: a wait that fires after it replaces your last message and the orchestrator loses the report.
 - Never push to see CI. Never run `gh run` or `gh pr checks`.
-- Live checks: `SILO_AGENT_ITEM=<item> tools/agent/live <check> [--host mac|linux]` blocks until done; its exit code is 0 pass, 1 fail, 2 usage, 3 skipped. To keep working meanwhile, `live start <check> ...` (prints `<state-dir> <run-id>`) then `live wait <state-dir> [<run-id>]` (same exit codes; never `live <check> &` + `live wait`). A check's `cleanup()` must stop the computers it started.
+- Live checks: `SILO_AGENT_ITEM=<item> app/SiloUI/scripts/live/run <check> [--host mac|linux]` blocks until done; its exit code is 0 pass, 1 fail, 2 usage, 3 skipped (also when another check holds the shared Dev engine: the message names the holder, wait and rerun). To keep working meanwhile, `run start <check> ...` (prints `<state-dir> <run-id>`) then `run wait <state-dir> [<run-id>]` (same exit codes; never `run <check> &` + `run wait`). Under `atelier tmp --short -- ...` the harness keeps its state, short temp homes and one `leftovers` line per throwaway computer in `$ATELIER_TMP`. A check's `cleanup()` must stop the computers it started.
 
 ## Changesets and comments
 

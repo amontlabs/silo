@@ -1,8 +1,9 @@
 # R7 live check, ported from docs/direction/checks/r7_lock_check.sh (not yet run through `live`):
 # running computers must not keep the engine's command lock after an engine crash.
 # Dev engine only (~/.silo-dev), throwaway computers named by live_computer_named.
-#   tools/agent/live r7_lock [--from STEP]      T=<build folder> holds debug/silo and the Dev bundle
+#   app/SiloUI/scripts/live/run r7_lock [--from STEP]      T=<build folder> holds debug/silo and the Dev bundle
 CHECK_DESC="engine crash must not leave computers holding the command lock (Dev engine, macOS)"
+CHECK_LOCKS="dev-engine"
 STEPS=(preflight engine create crash_stop crash_create quit)
 
 T=${T:-$REPO/app/SiloUI/target}

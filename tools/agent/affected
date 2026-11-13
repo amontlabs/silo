@@ -235,6 +235,9 @@ def analyse(root, base):
         if path.startswith('.github/'):
             result['script_tests'].extend(t for t in all_script_tests if '.github' in (root / t).read_text(errors='replace'))
             why.append((path, 'workflow: the script tests that read .github'))
+        if path.startswith(f'{APP}/scripts/live/'):
+            result['script_tests'].append(f'{APP}/scripts/live/live-test.sh')
+            why.append((path, 'live-check harness: its own test'))
         if path.startswith(AGENT_TESTS) or path.startswith('tools/agent/'):
             result['script_tests'].extend(str(p.relative_to(root)) for p in sorted((root / AGENT_TESTS).glob('*.sh')))
             why.append((path, 'agent tooling: tools/agent/tests'))

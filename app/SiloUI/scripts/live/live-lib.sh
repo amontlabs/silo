@@ -1,4 +1,4 @@
-# Helpers for live checks (sourced by tools/agent/live and by the checks in live.d/).
+# Helpers for live checks (sourced by app/SiloUI/scripts/live/run and by the checks in live.d/).
 # Inside a step these are available: STATE, LOGS, CHECK, HOST, REPO, LIVE_STEP.
 
 live_say() { echo "[$(date +%H:%M:%S)] $*"; }
@@ -24,10 +24,13 @@ live_need_path() { [ -e "$1" ] || live_die "missing path: $1${2:+ ($2)}"; }
 # live_register_tempdir <dir>: tells `clean` which directories belong to this run.
 live_register_tempdir() { echo "$1" >>"$STATE/tempdirs"; }
 
+# Where short per-run directories go: LIVE_SHORT_BASE, else ATELIER_TMP (`atelier tmp --short` makes it short), else /tmp.
+live_short_base() { echo "${LIVE_SHORT_BASE:-${ATELIER_TMP:-/tmp}}"; }
+
 # live_short_home: a short, per-run base directory (prints it). macOS refuses Unix socket paths of
 # 104 bytes or more and $TMPDIR alone is ~50, so sockets must live under this, not under $STATE.
 live_short_home() {
-  local d="${LIVE_SHORT_BASE:-/tmp}/sl-$(printf %s "$STATE" | cksum | cut -d' ' -f1)"
+  local d; d="$(live_short_base)/sl-$(printf %s "$STATE" | cksum | cut -d' ' -f1)"
   mkdir -p "$d" && live_register_tempdir "$d" && echo "$d"
 }
 
@@ -67,7 +70,7 @@ live_assert_dev_engine() {
 }
 live_assert_dev_sock() {
   live_is_production "$1" && live_die "refusing the production engine path: $1 ($(live_canon "$1"))"
-  local c h st sb; c=$(live_canon "$1"); h=$(live_canon "$HOME"); st=$(live_canon "$STATE"); sb=$(live_canon "${LIVE_SHORT_BASE:-/tmp}")
+  local c h st sb; c=$(live_canon "$1"); h=$(live_canon "$HOME"); st=$(live_canon "$STATE"); sb=$(live_canon "$(live_short_base)")
   case "$c" in "$h/.silo-dev/"*|"$st/"*|"$sb/sl-"*) ;; *) live_die "not a Dev engine path: $1 ($c)" ;; esac
 }
 # live_foreign_engines <silod>: pids of `silod --agent` processes that are not <silod> (never touched).
@@ -94,18 +97,41 @@ live_computer() {
   local base n=1; base=$(live_computer_base)
   touch "$STATE/computers"
   while grep -qx "$base-$n" "$STATE/computers"; do n=$((n+1)); done
-  echo "$base-$n" | tee -a "$STATE/computers"
+  echo "$base-$n" >>"$STATE/computers"; live_leftover_add "$base-$n"
+  echo "$base-$n"
 }
 # live_computer_named <suffix>: e2e-<check>-<runid>-<suffix>, recorded once (when first used).
 live_computer_named() {
   local name; name="$(live_computer_base)-$1"
-  touch "$STATE/computers"; grep -qx "$name" "$STATE/computers" || echo "$name" >>"$STATE/computers"
+  touch "$STATE/computers"
+  grep -qx "$name" "$STATE/computers" || { echo "$name" >>"$STATE/computers"; live_leftover_add "$name"; }
   echo "$name"
 }
 live_computers() { cat "$STATE/computers" 2>/dev/null; }
 # live_forget_computer <name>: call from cleanup() once the computer is really gone.
 live_forget_computer() {
   grep -vxF -- "$1" "$STATE/computers" >"$STATE/computers.tmp" 2>/dev/null; mv "$STATE/computers.tmp" "$STATE/computers"
+  live_leftover_remove "$1"
+}
+
+# Outside resources under `atelier tmp`: one line per throwaway computer in $ATELIER_TMP/leftovers (the folder's
+# contract: `atelier clean` refuses while the file is not empty), removed once the computer is gone. No-ops
+# without ATELIER_TMP.
+live_leftover_line() { echo "computer $1 (live check ${CHECK:-?}, Dev engine, state $STATE)"; }
+live_leftover_add() {
+  [ -n "${ATELIER_TMP:-}" ] || return 0
+  live_leftover_remove "$1"; live_leftover_line "$1" >>"$ATELIER_TMP/leftovers"
+}
+live_leftover_remove() {
+  [ -n "${ATELIER_TMP:-}" ] && [ -f "$ATELIER_TMP/leftovers" ] || return 0
+  local f=$ATELIER_TMP/leftovers
+  grep -vxF -- "$(live_leftover_line "$1")" "$f" >"$f.$$.tmp" || true
+  mv "$f.$$.tmp" "$f"
+}
+# Computers a resumed state dir still lists must be in the (possibly new) folder's leftovers file too.
+live_sync_leftovers() {
+  [ -n "${ATELIER_TMP:-}" ] || return 0
+  local c; for c in $(live_computers); do live_leftover_add "$c"; done
 }
 
 # Linux machine: reachable in 3 s or the run is "skipped: offline".
