@@ -43,7 +43,7 @@ from pathlib import Path
 APP = 'app/SiloUI'
 SYNTHETIC_GITHUB = {'SILO_GITHUB_APP_SLUG': 'silo-test', 'SILO_GITHUB_CLIENT_ID': 'test-client',
                     'SILO_GITHUB_CLIENT_SECRET': 'test-secret'}
-NEXTEST_VERSION = '0.9.149'  # the version CI pins
+NEXTEST_VERSION = '0.9.151'  # the version CI pins
 
 
 def run(command, cwd, env=None):

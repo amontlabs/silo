@@ -17,7 +17,7 @@ R=$W/main; mkdir -p $R/tools/agent $R/app/SiloUI/scripts $R/app/SiloUI/.config $
 git -C $R init -q -b main
 cp $A/check $A/affected $R/tools/agent/; cp $SRC/app/SiloUI/scripts/ci-native-changes.py $R/app/SiloUI/scripts/
 cp $SRC/rust-toolchain.toml $R/
-printf '[profile.check]\nretries = 1\n[profile.check.junit]\npath = "junit.xml"\n' >$R/app/SiloUI/.config/nextest.toml
+printf '[profile.check]\nfail-fast = false\n[profile.check.junit]\npath = "junit.xml"\n' >$R/app/SiloUI/.config/nextest.toml
 cat >$R/tools/agent/runtime-cache <<'S'
 #!/bin/sh
 d=$(cd "$(dirname "$0")/../.." && pwd)
@@ -89,7 +89,7 @@ cat >$W/bin/cargo <<'S'
 case "$1" in
   metadata) printf '{"packages":[{"id":"1","name":"silo-ui","edition":"2021","manifest_path":"%s/app/SiloUI/src-tauri/Cargo.toml","dependencies":[]}]}' "$ROOT_UNDER_TEST";;
   nextest)
-    [ "$2" = --version ] && { echo "cargo-nextest 0.9.149"; exit 0; }
+    [ "$2" = --version ] && { echo "cargo-nextest 0.9.151"; exit 0; }
     cfg=$4; junit=$(sed -n 's/^path = "\(.*\)"/\1/p' "$cfg")
     printf '<testsuites><testsuite><testcase classname="silo-ui" name="a::flaky_one"><flakyFailure/></testcase><testcase classname="silo-ui" name="a::fine"/></testsuite></testsuites>' >"$junit";;
 esac
