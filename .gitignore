@@ -14,8 +14,9 @@ smithers.db
 smithers.db-shm
 smithers.db-wal
 
-# Local Claude Code settings, worktrees and agent state
-/.claude/
+# Local Claude Code settings, worktrees and agent state; the shared settings hold atelier's stop hook
+/.claude/*
+!/.claude/settings.json
 
 # Generated browser snapshots and console logs
 /.playwright-mcp/

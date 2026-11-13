@@ -1,0 +1,78 @@
+atelier = "0.1.0"
+integration_branch = "main"
+workspaces = ["app/SiloUI"]
+promotion_wait_seconds = 300
+
+[rust]
+nextest = "0.9.151"
+
+[prerequisites.mbx]
+version = "1.30.0"
+cargo = ["~/.local/bin/cargo", "~/Library/Application Support/mbx/bin/cargo", "~/.local/share/mbx/bin/cargo"]
+settings = { build_script_execution = false, learned_incremental = true, seed_incremental = true, "target.seed" = true, share_out_dir = false, eager_incremental = false, share_workspace_root = false }
+
+[[prerequisites.tools]]
+name = "node"
+run = ["node", "--version"]
+expect = "v26."
+
+[[prerequisites.tools]]
+platforms = ["macos-aarch64"]
+name = "lychee"
+run = ["lychee", "--version"]
+expect = "lychee 0.24.2"
+
+[[prerequisites.tools]]
+platforms = ["macos-aarch64"]
+name = "uv"
+run = ["uv", "--version"]
+expect = "uv "
+
+# Before the Rust steps and before every platform run. They write only git-ignored files.
+[[check.prepare]]
+name = "private-build-file"
+platforms = ["macos-aarch64"]
+run = [".atelier/hooks/private-build-file.sh"]
+
+[[check.prepare]]
+name = "npm-ci"
+platforms = ["macos-aarch64"]
+run = ["npm", "--prefix", "app/SiloUI", "ci"]
+
+[[check.prepare]]
+name = "runtime"
+platforms = ["macos-aarch64"]
+run = [".atelier/hooks/runtime.sh"]
+
+# After the Rust steps; each is a script CI calls too.
+[[check.steps]]
+name = "typecheck"
+run = ["npm", "--prefix", "app/SiloUI", "run", "typecheck"]
+compile = true
+
+[[check.steps]]
+name = "frontend"
+run = ["app/SiloUI/scripts/ci/frontend.sh"]
+
+[[check.steps]]
+name = "scripts"
+run = ["app/SiloUI/scripts/ci/scripts.sh"]
+
+[[check.steps]]
+name = "links"
+run = ["app/SiloUI/scripts/ci/links.sh"]
+
+# In the gate worktree, after merging; its changes are committed. A conflict only in the
+# regenerated files is settled by this hook.
+[[merge.after]]
+name = "api-regenerate"
+run = [".atelier/hooks/api-regenerate.sh"]
+commit = "Regenerate API files"
+regenerates = ["app/SiloUI/api/src/methods/requests.rs", "app/SiloUI/api/schema/silo-api.schema.json"]
+
+[platforms.macos-aarch64]
+run = "check"
+
+[platforms.linux-x86_64]
+prepare = ["app/SiloUI/scripts/ci/linux-prepare.sh"]
+run = ["app/SiloUI/scripts/ci/linux.sh"]
