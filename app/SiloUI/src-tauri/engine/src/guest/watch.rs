@@ -135,6 +135,22 @@ impl Drop for Slot {
 /// stops; `stop` ends it at once. Dropping the handle does not stop it.
 pub struct WatchHandle {
     stop: Arc<AtomicBool>,
+    /// Set once the helper process has been ended and reaped.
+    #[cfg(test)]
+    finished: Arc<AtomicBool>,
+}
+
+/// In tests the helper is a local process that nothing else would end, so a handle that goes
+/// away (also while a test panics) stops its watch and waits until the helper is gone.
+#[cfg(test)]
+impl Drop for WatchHandle {
+    fn drop(&mut self) {
+        self.stop();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !self.finished.load(Ordering::SeqCst) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
 }
 
 impl WatchHandle {
@@ -262,7 +278,13 @@ pub fn start_watch(
         return Err(GuestError::new(ErrorCode::Internal, message));
     }
     let stop = Arc::new(AtomicBool::new(false));
-    let handle = WatchHandle { stop: stop.clone() };
+    #[cfg(test)]
+    let finished = Arc::new(AtomicBool::new(false));
+    let handle = WatchHandle {
+        stop: stop.clone(),
+        #[cfg(test)]
+        finished: finished.clone(),
+    };
     let target = target.clone();
     {
         let queue = queue.clone();
@@ -294,6 +316,8 @@ pub fn start_watch(
         let _ = streaming.child.wait();
         streaming.finish_output();
         queue.close();
+        #[cfg(test)]
+        finished.store(true, Ordering::SeqCst);
     });
     Ok(handle)
 }
