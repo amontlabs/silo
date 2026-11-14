@@ -34,6 +34,8 @@ pub use session::{
 };
 pub use ssh_alias::{ensure_alias, remove_alias, AliasEnsure, AliasOutcome};
 pub use target::{resolve, Account, Target};
+#[cfg(any(test, feature = "test-support"))]
+pub use watch::{end_all_watches, EndWatchesOnDrop};
 pub use watch::{start_watch, WatchHandle};
 
 use silo_api::jobs::ErrorCode;
