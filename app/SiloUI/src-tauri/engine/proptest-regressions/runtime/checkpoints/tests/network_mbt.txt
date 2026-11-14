@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc afd4d6a1fb04bdd17caa8c1cc1893cb2882b4d179a81758cb9eff4a71bcc4f7f # shrinks to (initial_state, transitions, seen_counter) = (Model { computers: [], version: 1, grants: {}, damaged: false, waiting: [], rebuild: None, next: 0 }, [Init(UnmarkedEntry(Spec { mode: Open, hosts: 0, tools: false })), Op(Damage { kind: 0 }), Op(Restart), Op(Repair), Op(RemoveFile)], None)

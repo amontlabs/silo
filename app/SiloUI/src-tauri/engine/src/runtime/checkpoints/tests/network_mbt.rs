@@ -1089,9 +1089,11 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             Want::default()
         }
         Op::Restart => {
-            // The engine marks every computer that has an entry.
-            for computer in &mut state.computers {
-                computer.marked |= computer.entry;
+            // The engine marks every computer that has an entry, when the file can be read.
+            if !state.damaged {
+                for computer in &mut state.computers {
+                    computer.marked |= computer.entry;
+                }
             }
             Want::default()
         }
