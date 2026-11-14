@@ -7493,6 +7493,47 @@ pub fn seed_test_computer(app_data: &std::path::Path, name: &str) -> (String, St
     (record.id, checkpoint.id)
 }
 
+/// The import publish and recovery steps, for tests outside this module.
+#[cfg(test)]
+pub(crate) mod test_access {
+    use std::path::Path;
+
+    use super::store::{self, CreateRequest, Layout};
+
+    /// The staging and final folders of an import of `id`.
+    pub(crate) fn import_folders(
+        data: &Path,
+        id: &str,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        let root = store::root(data);
+        (root.join(format!(".partial-import-{id}")), root.join(id))
+    }
+
+    pub(crate) fn publish_import_folder(data: &Path, id: &str) -> Result<(), String> {
+        let (stage, final_dir) = import_folders(data, id);
+        super::publish_import_folder(&stage, &final_dir, &store::root(data), id)
+    }
+
+    /// Writes the record that marks the import of `id` as published.
+    pub(crate) fn write_published_record(data: &Path, id: &str, name: &str) {
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: name.into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:0b".into(),
+        );
+        record.id = id.to_owned();
+        store::save(&Layout::new(data, id), &record).unwrap();
+    }
+
+    pub(crate) fn recover_archive_import(data: &Path, id: &str) -> Result<bool, String> {
+        super::recover_archive_import_in(data, id, &|_: &Path| Ok(()))
+    }
+}
+
 /// Fork assignments that record what was copied and fail for names the source lacks.
 #[cfg(test)]
 #[derive(Default)]
