@@ -462,12 +462,12 @@ fn the_store_keeps_policies_by_computer_and_forgets_removed_ones() {
     let list = validate(&allowlist(&["example.com"], &["npm"])).unwrap();
     store::set("c1", &list).unwrap();
     assert_eq!(store::get("c1").unwrap(), Some(list.clone()));
-    store::inherit("c1", "c2", None).unwrap();
+    store::inherit("c1", "c2", None, None).unwrap();
     assert_eq!(store::get("c2").unwrap(), Some(list.clone()));
     let closed = mode(NetworkPolicyMode::Closed);
-    store::inherit("c1", "c3", Some(&closed)).unwrap();
+    store::inherit("c1", "c3", Some(&closed), None).unwrap();
     assert_eq!(store::get("c3").unwrap(), Some(closed));
-    store::inherit("unknown", "c4", None).unwrap();
+    store::inherit("unknown", "c4", None, None).unwrap();
     assert_eq!(store::get("c4").unwrap(), None);
     computer_removed("c1");
     assert_eq!(store::get("c1").unwrap(), None);
@@ -652,7 +652,7 @@ fn a_fork_of_an_import_is_closed_and_a_closed_network_copy_denies_incoming() {
     let directory = tempfile::tempdir().unwrap();
     store::use_test_path(Some(directory.path().join("network-policy.json")));
     store::set_stored("imported", store::Stored::closed_without_incoming()).unwrap();
-    store::inherit("imported", "fork", None).unwrap();
+    store::inherit("imported", "fork", None, None).unwrap();
     assert_eq!(
         store::get("fork").unwrap(),
         Some(mode(NetworkPolicyMode::Closed))
@@ -676,7 +676,7 @@ fn a_policy_file_that_cannot_be_read_refuses_instead_of_running_open() {
         assert!(plan_for_gateway("c", "c").is_err(), "{contents}");
         assert!(held_for("c", None).is_err(), "{contents}");
         assert!(store::set("c", &mode(NetworkPolicyMode::Closed)).is_err());
-        assert!(store::inherit("a", "c", None).is_err());
+        assert!(store::inherit("a", "c", None, None).is_err());
         assert!(store::remove("c").is_err());
         // Nothing was overwritten.
         assert_eq!(std::fs::read_to_string(&file).unwrap(), contents);
@@ -1123,7 +1123,7 @@ fn a_computer_with_no_policy_entry_holds_the_first_github_list_until_the_owner_a
     let resolved = service::judged_from_view("legacy", None, view(None, None));
     assert!(resolved.pins.is_empty());
     // A copy of a computer with no entry has none either.
-    store::inherit("legacy", "copy", None).unwrap();
+    store::inherit("legacy", "copy", None, None).unwrap();
     assert!(store::get_stored("copy").unwrap().is_none());
     assert_eq!(
         service::get("copy", macos()).unwrap().preset_updates.len(),
@@ -1131,7 +1131,7 @@ fn a_computer_with_no_policy_entry_holds_the_first_github_list_until_the_owner_a
     );
     // A copy given a policy holds its source's versions too: handing a policy on takes no
     // update.
-    store::inherit("legacy", "chosen", Some(&allowlist(&["example.com"], &[]))).unwrap();
+    store::inherit("legacy", "chosen", Some(&allowlist(&["example.com"], &[])), None).unwrap();
     assert_eq!(
         service::get("chosen", macos())
             .unwrap()

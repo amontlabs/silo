@@ -190,6 +190,11 @@ pub(super) struct Record {
     /// Apple's own network (see `engine::network_plan`).
     #[serde(default)]
     pub agent_may_have_used: bool,
+    /// The computer has had a saved network policy: one missing from the policy store is
+    /// lost, not a computer from before policies existed (see `network_policy::marks`). Once
+    /// set, a save keeps it; only [`set_network_policy_mark`] clears it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub network_policy_saved: bool,
 }
 
 /// A checkpoint of a source computer that a fork depends on.
@@ -386,6 +391,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         quiet: None,
         forked_from: None,
         agent_may_have_used: false,
+        network_policy_saved: false,
     }
 }
 
@@ -656,11 +662,82 @@ fn saved_agent_use(bytes: &[u8]) -> bool {
             .unwrap_or(false)
 }
 
+/// Serialises the writes of computer records, so a network policy mark set between another
+/// writer's read and its save is kept.
+static RECORD_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn record_writes() -> std::sync::MutexGuard<'static, ()> {
+    RECORD_WRITES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Whether saved record bytes carry the network policy mark.
+fn saved_policy_mark(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .and_then(|value| value.get("networkPolicySaved")?.as_bool())
+        .unwrap_or(false)
+}
+
+/// The record of computer `id`: its folder's, else its import staging folder's (the record
+/// moves with that folder when the import is published). `None` when it has neither.
+fn policy_mark_layout(app_data: &Path, id: &str) -> Option<Layout> {
+    let published = Layout::new(app_data, id);
+    if published.record().exists() {
+        return Some(published);
+    }
+    let staged = Layout {
+        dir: root(app_data).join(format!(".partial-import-{id}")),
+        access: None,
+    };
+    staged.record().exists().then_some(staged)
+}
+
+/// Whether macOS computer `id` has had a saved network policy; `None` when no macOS computer
+/// record of that id exists.
+pub(crate) fn network_policy_mark(app_data: &Path, id: &str) -> Result<Option<bool>, String> {
+    let Some(layout) = policy_mark_layout(app_data, id) else {
+        return Ok(None);
+    };
+    let bytes = fs::read(layout.record()).map_err(|error| io_error("read the computer", &error))?;
+    let record: Record = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    Ok(Some(record.network_policy_saved))
+}
+
+/// Sets or clears the network policy mark of macOS computer `id`. Returns whether a record of
+/// that id exists.
+pub(crate) fn set_network_policy_mark(app_data: &Path, id: &str, on: bool) -> Result<bool, String> {
+    let _writing = record_writes();
+    let Some(layout) = policy_mark_layout(app_data, id) else {
+        return Ok(false);
+    };
+    let bytes = fs::read(layout.record()).map_err(|error| io_error("read the computer", &error))?;
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    let fields = record
+        .as_object_mut()
+        .ok_or("The saved computer is not a record.")?;
+    if saved_policy_mark(&bytes) == on {
+        return Ok(true);
+    }
+    if on {
+        fields.insert("networkPolicySaved".into(), true.into());
+    } else {
+        fields.remove("networkPolicySaved");
+    }
+    let json = serde_json::to_vec_pretty(&record).map_err(|error| error.to_string())?;
+    write_record(&layout, &json, &mut sync_dir)
+        .map_err(|error| io_error("save the computer", &error))?;
+    Ok(true)
+}
+
 pub(super) fn save_with_sync(
     layout: &Layout,
     record: &Record,
     mut sync: impl FnMut(&Path) -> std::io::Result<()>,
 ) -> Result<(), String> {
+    let _writing = record_writes();
     fs::create_dir_all(&layout.dir).map_err(|error| io_error("create the computer", &error))?;
     let previous = match fs::read(layout.record()) {
         Ok(bytes) => Some(bytes),
@@ -677,6 +754,18 @@ pub(super) fn save_with_sync(
         copy.agent_may_have_used = true;
         flagged = copy;
         &flagged
+    } else {
+        record
+    };
+    // The network policy mark only turns off through `set_network_policy_mark`.
+    let marked;
+    let record = if !record.network_policy_saved
+        && previous.as_deref().is_some_and(saved_policy_mark)
+    {
+        let mut copy = record.clone();
+        copy.network_policy_saved = true;
+        marked = copy;
+        &marked
     } else {
         record
     };

@@ -98,6 +98,7 @@ use std::{
     time::{Duration, Instant},
 };
 pub use store::{Action, CreateRequest, ExpectedResources};
+pub(crate) use store::{network_policy_mark, set_network_policy_mark};
 
 /// Where a macOS computer's gateway appends credential-use events.
 pub fn usage_file(app_data: &std::path::Path, computer_id: &str) -> std::path::PathBuf {
@@ -3784,7 +3785,7 @@ fn recover_archive_import_in(
         discard_import_folder(&stage, detach)?;
         // The policy is saved before the folder is published; one that is missing is closed
         // again rather than left to be read as open.
-        if crate::network_policy::store::get_stored(&id)?.is_none() {
+        if !crate::network_policy::store::has_entry(&id)? {
             crate::network_policy::store::set_stored(
                 &id,
                 crate::network_policy::store::Stored::closed_without_incoming(),
@@ -4317,19 +4318,20 @@ fn create_accepting_with(
     let job_id = allocate_job()?;
     let registry_handle = app.engine.job_registry()?;
     let job = accept_macos_job_with_id(registry_handle.clone(), job_id.clone(), gate)?;
-    let record = store::new_record(&request, engine::random_mac());
+    let mut record = store::new_record(&request, engine::random_mac());
+    // The record says it has a saved policy before the policy is saved, so a computer whose
+    // policy is lost later is never read as one from before policies existed.
+    record.network_policy_saved = network_policy.is_some();
+    if let Err(message) = store::save(&Layout::new(&data, &record.id), &record) {
+        abandon_macos_job(app.engine.as_ref(), &job, &message);
+        return Err(message);
+    }
     if let Some(policy) = network_policy {
         if let Err(message) = crate::network_policy::store::set(&record.id, policy) {
+            let _ = store::remove(&Layout::new(&data, &record.id));
             abandon_macos_job(app.engine.as_ref(), &job, &message);
             return Err(message);
         }
-    }
-    if let Err(message) = store::save(&Layout::new(&data, &record.id), &record) {
-        if network_policy.is_some() {
-            let _ = crate::network_policy::store::remove(&record.id);
-        }
-        abandon_macos_job(app.engine.as_ref(), &job, &message);
-        return Err(message);
     }
     let entry = Entry::new(record.clone(), State::Preparing, None);
     let cancel = entry.cancel.clone();
@@ -6840,7 +6842,12 @@ fn fork_checkpoint_with_workflow(
         // A crash before the files are copied leaves a failed computer that can be deleted.
         store::save(&Layout::new(&data, &record.id), &record)?;
         // The fork keeps its source's network policy unless the call gave it another.
-        crate::network_policy::store::inherit(id, &record.id, options.network_policy.as_ref())?;
+        crate::network_policy::store::inherit(
+            id,
+            &record.id,
+            options.network_policy.as_ref(),
+            None,
+        )?;
         crate::guest_client::inherit(id, &record.id)?;
         crate::recipes::records::inherit(id, &record.id)?;
         let entry = Entry::new(record.clone(), State::Copying, None);
@@ -7514,8 +7521,23 @@ pub(crate) mod test_access {
         super::publish_import_folder(&stage, &final_dir, &store::root(data), id)
     }
 
-    /// Writes the record that marks the import of `id` as published.
-    pub(crate) fn write_published_record(data: &Path, id: &str, name: &str) {
+    /// Writes the record of the import of `id` into its staging folder, as an import does
+    /// before it publishes the folder.
+    pub(crate) fn write_staged_record(data: &Path, id: &str, name: &str) {
+        let (stage, _) = import_folders(data, id);
+        let mut record = record(id, name);
+        record.imported = true;
+        store::save(
+            &Layout {
+                dir: stage,
+                access: None,
+            },
+            &record,
+        )
+        .unwrap();
+    }
+
+    fn record(id: &str, name: &str) -> store::Record {
         let mut record = store::new_record(
             &CreateRequest {
                 name: name.into(),
@@ -7526,7 +7548,12 @@ pub(crate) mod test_access {
             "02:00:00:00:00:0b".into(),
         );
         record.id = id.to_owned();
-        store::save(&Layout::new(data, id), &record).unwrap();
+        record
+    }
+
+    /// Writes the record that marks the import of `id` as published.
+    pub(crate) fn write_published_record(data: &Path, id: &str, name: &str) {
+        store::save(&Layout::new(data, id), &record(id, name)).unwrap();
     }
 
     pub(crate) fn recover_archive_import(data: &Path, id: &str) -> Result<bool, String> {

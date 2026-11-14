@@ -379,6 +379,9 @@ struct Computer {
     approved: Approved,
     /// Whether the store has an entry; without one the runtime's recorded rules are read.
     entry: bool,
+    /// Whether the computer's record says it has had a saved policy: marked with no entry, its
+    /// policy is missing and it is treated as unreadable.
+    marked: bool,
     /// The rules the runtime holds for it (Linux): what a start without an entry reads.
     recorded: Value,
     channel: bool,
@@ -387,6 +390,37 @@ struct Computer {
     parent: Option<String>,
     /// For an undo computer: the policies it may hold (see [`Rebuild::allowed`]).
     undo_allowed: Vec<Approved>,
+}
+
+impl Computer {
+    /// Its policy was saved and is gone: it is read like an unreadable store.
+    fn missing(&self) -> bool {
+        self.marked && !self.entry
+    }
+
+    /// Whether it refuses incoming connections, as a policy set or handed on keeps: the saved
+    /// refusal, else what its recorded rules mean.
+    fn refusal(&self) -> bool {
+        if self.entry {
+            self.approved.incoming_denied
+        } else {
+            self.recorded == deny_all()
+        }
+    }
+
+    /// What it runs with by its recorded rules alone, as a computer from before policies.
+    fn legacy(&self) -> Approved {
+        if self.recorded == deny_all() {
+            Approved::closed_without_incoming()
+        } else {
+            Spec {
+                mode: Mode::Open,
+                hosts: 0,
+                tools: false,
+            }
+            .approved(1, None, false)
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -412,6 +446,9 @@ struct Rebuild {
     /// The rules the computer's sandbox held when the build was made.
     recorded: Value,
     published: bool,
+    /// The policy file was removed while the build ran: the build's and the undo computer's
+    /// policies are missing.
+    lost: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -423,15 +460,13 @@ struct Model {
     waiting: Vec<Waiting>,
     rebuild: Option<Rebuild>,
     next: u32,
-    /// Whether incoming connections a computer refuses must stay refused when its agent
-    /// narrows its policy or forks it. The engine does not do this (see the report), so only
-    /// the `STRICT_INGRESS` variant expects it.
-    strict_ingress: bool,
 }
 
 #[derive(Clone, Debug)]
 enum Root {
     Entry(Spec),
+    /// An entry saved by a Silo from before computers were marked as having one.
+    UnmarkedEntry(Spec),
     LegacyOpen,
     LegacyImport,
 }
@@ -581,7 +616,10 @@ impl Model {
         if !self.tree(caller).contains(target) {
             return Expect::Refuse;
         }
-        if self.damaged {
+        if self.damaged || self.get(target).unwrap().missing() {
+            return Expect::Ask;
+        }
+        if target != caller && self.get(caller).unwrap().missing() {
             return Expect::Ask;
         }
         let asked = policy_reach(&spec.asked(self.version));
@@ -638,15 +676,18 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
             waiting: Vec::new(),
             rebuild: None,
             next: 0,
-            strict_ingress: VARIANT == STRICT_INGRESS,
         })
         .boxed()
     }
 
     fn transitions(state: &Model) -> BoxedStrategy<Transition> {
         if state.computers.is_empty() && state.next == 0 {
+            if VARIANT == STRICT_INGRESS {
+                return Just(Transition::Init(Root::LegacyImport)).boxed();
+            }
             return prop_oneof![
                 spec_strategy().prop_map(Root::Entry),
+                spec_strategy().prop_map(Root::UnmarkedEntry),
                 Just(Root::LegacyOpen),
                 Just(Root::LegacyImport),
             ]
@@ -695,8 +736,11 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
     fn apply(mut state: Model, transition: &Transition) -> Model {
         match transition {
             Transition::Init(root) => {
-                let (approved, entry, recorded) = match root {
-                    Root::Entry(spec) => (spec.approved(1, None, false), true, open_rules()),
+                let (approved, entry, marked, recorded) = match root {
+                    Root::Entry(spec) => (spec.approved(1, None, false), true, true, open_rules()),
+                    Root::UnmarkedEntry(spec) => {
+                        (spec.approved(1, None, false), true, false, open_rules())
+                    }
                     Root::LegacyOpen => (
                         Spec {
                             mode: Mode::Open,
@@ -705,9 +749,15 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
                         }
                         .approved(1, None, false),
                         false,
+                        false,
                         open_rules(),
                     ),
-                    Root::LegacyImport => (Approved::closed_without_incoming(), false, deny_all()),
+                    Root::LegacyImport => (
+                        Approved::closed_without_incoming(),
+                        false,
+                        false,
+                        deny_all(),
+                    ),
                 };
                 state.next = 1;
                 state.computers.push(Computer {
@@ -716,6 +766,7 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
                     kind: Kind::Linux,
                     approved,
                     entry,
+                    marked,
                     recorded,
                     channel: false,
                     maker: None,
@@ -758,15 +809,18 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             if state.damaged {
                 return ok_if(false);
             }
+            // The owner's policy replaces a missing one; the refusal of incoming connections
+            // stays as it was.
             let computer = state.get_mut(&target).unwrap();
             let before = computer.entry.then(|| computer.approved.clone());
-            let incoming = before.as_ref().is_some_and(|b| b.incoming_denied);
+            let incoming = computer.refusal();
             computer.approved = if *accept {
                 spec.approved(version, None, incoming)
             } else {
                 spec.approved(version, before.as_ref(), incoming)
             };
             computer.entry = true;
+            computer.marked = true;
             state.note_rebuild(&target);
             ok_if(true)
         }
@@ -791,14 +845,14 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                     spec: *spec,
                 }),
                 Expect::Allow => {
-                    let strict = state.strict_ingress;
                     let computer = state.get_mut(&target).unwrap();
                     let before = computer.approved.clone();
-                    // A narrowing keeps the refused incoming connections a saved policy holds;
-                    // strictly, also those of the rules of a computer with none saved.
-                    let incoming = before.incoming_denied && (strict || computer.entry);
+                    // A narrowing keeps the refused incoming connections: the saved ones, or
+                    // those of the rules of a computer with none saved.
+                    let incoming = computer.refusal();
                     computer.approved = spec.approved(version, Some(&before), incoming);
                     computer.entry = true;
+                    computer.marked = true;
                     state.note_rebuild(&target);
                 }
             }
@@ -822,9 +876,10 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                     }
                     let computer = state.get_mut(&target).unwrap();
                     let before = computer.entry.then(|| computer.approved.clone());
-                    let incoming = before.as_ref().is_some_and(|b| b.incoming_denied);
+                    let incoming = computer.refusal();
                     computer.approved = spec.approved(version, before.as_ref(), incoming);
                     computer.entry = true;
+                    computer.marked = true;
                     state.note_rebuild(&target);
                     ok_if(true)
                 }
@@ -839,7 +894,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                     {
                         return Want::default();
                     }
-                    if state.damaged {
+                    if state.damaged || state.get(&source).unwrap().missing() {
                         return ok_if(false);
                     }
                     model_fork(state, &source, Some(spec_of(&policy)), Some(caller), false);
@@ -854,7 +909,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             if state.computers.len() >= MAX_COMPUTERS {
                 return Want::default();
             }
-            if state.damaged {
+            if state.damaged || state.get(&source).unwrap().missing() {
                 return ok_if(false);
             }
             model_fork(state, &source, *spec, None, false);
@@ -885,7 +940,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                 decision: Some(Expect::Ask),
                 ok: None,
             };
-            if state.damaged {
+            if state.damaged || state.get(&caller).unwrap().missing() {
                 // The caller's policy cannot be read: the fork asks, for the policy asked for
                 // or else a closed one.
                 let policy = match spec {
@@ -905,25 +960,31 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                 return ask;
             }
             let own = state.get(&caller).unwrap().approved.clone();
-            let from = state.get(&source).unwrap().approved.clone();
-            let held = |spec: Spec| spec.approved(version, Some(&from), false);
-            let chosen = match spec {
-                Some(spec) => held(*spec),
-                None => {
-                    let inherited = held(spec_of_approved(&from));
+            // A source whose policy is missing is judged as one with none: the policy is
+            // approved now, and the fork itself fails.
+            let lost = state.get(&source).unwrap().missing();
+            let from = (!lost).then(|| state.get(&source).unwrap().approved.clone());
+            let held = |spec: Spec| spec.approved(version, from.as_ref(), false);
+            let chosen = match (spec, &from) {
+                (Some(spec), _) => held(*spec),
+                (None, Some(from)) => {
+                    let inherited = held(spec_of_approved(from));
                     if policy_reach(&inherited).within(&policy_reach(&own)).is_ok() {
                         inherited
                     } else {
                         held(spec_of_approved(&own))
                     }
                 }
+                (None, None) => held(spec_of_approved(&own)),
             };
             let chosen_spec = spec_of_approved(&chosen);
             if policy_reach(&chosen).within(&policy_reach(&own)).is_ok() {
-                model_fork(state, &source, Some(chosen_spec), Some(caller), false);
+                if !lost {
+                    model_fork(state, &source, Some(chosen_spec), Some(caller), false);
+                }
                 Want {
                     decision: Some(Expect::Allow),
-                    ok: Some(true),
+                    ok: Some(!lost),
                 }
             } else {
                 state.waiting.push(Waiting::Fork {
@@ -941,7 +1002,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             if state.computers.len() >= MAX_COMPUTERS {
                 return Want::default();
             }
-            if state.damaged {
+            if state.damaged || state.get(&source).unwrap().missing() {
                 return ok_if(false);
             }
             model_fork(state, &source, None, None, true);
@@ -961,6 +1022,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                 kind: Kind::Linux,
                 approved: Approved::closed_without_incoming(),
                 entry: true,
+                marked: true,
                 recorded: deny_all(),
                 channel: false,
                 maker: None,
@@ -982,6 +1044,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             let computer = state.get_mut(&target).unwrap();
             computer.approved = Approved::closed_without_incoming();
             computer.entry = true;
+            computer.marked = true;
             computer.recorded = deny_all();
             computer.channel = false;
             ok_if(true)
@@ -1013,7 +1076,13 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             state.version = 2;
             Want::default()
         }
-        Op::Restart => Want::default(),
+        Op::Restart => {
+            // The engine marks every computer that has an entry.
+            for computer in &mut state.computers {
+                computer.marked |= computer.entry;
+            }
+            Want::default()
+        }
         Op::Damage { .. } => {
             state.damaged = true;
             Want::default()
@@ -1024,9 +1093,17 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
         }
         Op::RemoveFile => {
             if !state.damaged {
-                // Every saved policy is gone. What the owner approved does not change.
+                // Every saved policy is gone. A marked computer's is missing: it does not start
+                // until the owner sets one. An unmarked one (saved before marks, not started
+                // since) is read as a computer from before policies, by its recorded rules.
                 for computer in &mut state.computers {
+                    if computer.entry && !computer.marked {
+                        computer.approved = computer.legacy();
+                    }
                     computer.entry = false;
+                }
+                if let Some(rebuild) = state.rebuild.as_mut() {
+                    rebuild.lost = true;
                 }
             }
             Want::default()
@@ -1040,7 +1117,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             };
             let (new_id, new_name) = state.fresh("silo-rebuild-");
             let (undo_id, undo_name) = state.fresh("undo");
-            if state.damaged {
+            if state.damaged || computer.missing() {
                 return ok_if(false);
             }
             let plan = RebuildPlan {
@@ -1059,6 +1136,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                 allowed: vec![computer.approved.clone()],
                 recorded: computer.recorded.clone(),
                 published: false,
+                lost: false,
             });
             ok_if(true)
         }
@@ -1081,6 +1159,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                         kind: Kind::Macos,
                         approved: Approved::closed_without_incoming(),
                         entry: true,
+                        marked: true,
                         recorded: Value::Null,
                         channel: false,
                         maker: None,
@@ -1157,14 +1236,9 @@ fn model_fork(
         (Approved::closed_without_incoming(), true)
     } else {
         match spec {
-            // A fork given a policy accepts incoming connections; strictly, one an agent made
-            // refuses those its source refuses.
+            // A fork given a policy refuses the incoming connections its source refuses.
             Some(spec) => (
-                spec.approved(
-                    version,
-                    Some(&from.approved),
-                    state.strict_ingress && maker.is_some() && from.approved.incoming_denied,
-                ),
+                spec.approved(version, Some(&from.approved), from.refusal()),
                 true,
             ),
             None => (from.approved.clone(), from.entry),
@@ -1177,6 +1251,8 @@ fn model_fork(
         kind: Kind::Linux,
         approved,
         entry,
+        // Marked when it gets an entry.
+        marked: entry,
         recorded: if closed_copy {
             deny_all()
         } else {
@@ -1386,6 +1462,10 @@ const IMPORT_MEMBER: &str = "silo-backup-1-2-3";
 impl Engine {
     fn install(&self) {
         policy_store::use_test_path(Some(self.policy_file.clone()));
+        np::marks::use_test_roots(Some(np::marks::Roots {
+            app_data: self.data.clone(),
+            linux_records: Some(self.linux_records()),
+        }));
         crate::guest_client::tokens::use_test_directory(Some(self.tokens.clone()));
         np::use_test_presets(Some(presets_at(self.model.version)));
         np::use_test_grants(Some(Grants {
@@ -1404,9 +1484,15 @@ impl Engine {
 
     fn uninstall() {
         policy_store::use_test_path(None);
+        np::marks::use_test_roots(None);
         crate::guest_client::tokens::use_test_directory(None);
         np::use_test_presets(None);
         np::use_test_grants(None);
+    }
+
+    /// Where Linux computers' checkpoint records, and so their marks, are kept.
+    fn linux_records(&self) -> PathBuf {
+        self.paths.metadata.with_file_name("checkpoints")
     }
 
     /// The engine's id of the computer the model calls `id`.
@@ -1758,8 +1844,12 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
         }
         Op::Restart => {
             // The engine stops and starts again: nothing it held in memory is left, and every
-            // store is read again from its files.
+            // store is read again from its files. At start it marks every computer with an
+            // entry, when the policy file can be read.
             Engine::uninstall();
+            engine.install();
+            let marked = policy_store::mark_saved();
+            assert_eq!(marked.is_ok(), !before.damaged, "marking at start: {marked:?}");
         }
         Op::Damage { kind } => {
             if engine.saved.is_none() {
@@ -1865,6 +1955,7 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
                         kind: Kind::Undo,
                         approved: Approved::closed_without_incoming(),
                         entry: true,
+                        marked: true,
                         recorded: rebuild.recorded.clone(),
                         channel: false,
                         maker: None,
@@ -1905,15 +1996,11 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
                 use crate::macos_computers::test_access as mac;
                 let id = format!("00000000-0000-4000-8000-{:012}", 100 + after.next);
                 let name = format!("mac{}", after.next);
-                let (stage, _) = mac::import_folders(&engine.data, &id);
                 ok = Some(match interrupt {
                     0 => {
-                        std::fs::create_dir_all(&stage).unwrap();
-                        let published = mac::publish_import_folder(&engine.data, &id);
-                        if published.is_ok() {
-                            mac::write_published_record(&engine.data, &id, &name);
-                        }
-                        published.is_ok()
+                        // The record is staged with the disk, then the folder is published.
+                        mac::write_staged_record(&engine.data, &id, &name);
+                        mac::publish_import_folder(&engine.data, &id).is_ok()
                     }
                     1 => mac::publish_import_folder(&engine.data, &id).is_ok(),
                     2 => {
@@ -2038,6 +2125,15 @@ fn check(engine: &Engine) {
             );
             continue;
         }
+        if computer.missing() {
+            assert_eq!(
+                actual,
+                Err(policy_store::MISSING.to_owned()),
+                "{id} would start while its saved policy is missing"
+            );
+            note("checked missing");
+            continue;
+        }
         let actual = actual.unwrap_or_else(|error| panic!("{id} cannot start: {error}"));
         note(format!("checked {:?}", computer.kind));
         if computer.kind == Kind::Undo {
@@ -2097,6 +2193,14 @@ fn check(engine: &Engine) {
                 "checked rebuild sandbox {}",
                 if id == &plan.undo_id { "undo" } else { "build" }
             ));
+            if rebuild.lost {
+                assert_eq!(
+                    np::plan_for(id, name, recorded).err().as_deref(),
+                    Some(policy_store::MISSING),
+                    "{name} would start while its saved policy is missing"
+                );
+                continue;
+            }
             let plan = np::plan_for(id, name, recorded)
                 .unwrap_or_else(|error| panic!("{name} cannot start: {error}"));
             let actual = reach_of_runtime(&plan.policy_value(), plan.strict).unwrap();
@@ -2154,13 +2258,22 @@ impl StateMachineTest for NetworkTest {
                 record.snapshot_group = Some(GROUP.into());
                 record.desired_network_policy = Some(after.computers[0].recorded.clone());
                 save(&engine.paths, ID, &record).unwrap();
-                if let Root::Entry(spec) = root {
+                if let Root::Entry(spec) | Root::UnmarkedEntry(spec) = &root {
                     service::set(
                         ID,
                         &spec.policy(),
                         None,
                         None,
                         service::Target::Linux(&engine.paths),
+                    )
+                    .unwrap();
+                }
+                if let Root::UnmarkedEntry(_) = root {
+                    // Saved by a Silo from before marks.
+                    crate::runtime::checkpoints::set_network_policy_mark(
+                        &engine.linux_records(),
+                        ID,
+                        false,
                     )
                     .unwrap();
                 }
@@ -2206,7 +2319,6 @@ prop_state_machine! {
 
     /// The same with the policy file removed among the operations.
     #[test]
-    #[ignore = "fails: a missing policy file reads every computer by its runtime rules, see the report"]
     fn missing_policy_file_never_widens(sequential 1..50 => MissingFileTest);
 }
 
@@ -2239,7 +2351,6 @@ prop_state_machine! {
 
     /// The same, expecting an agent's narrowing or fork to keep refusing incoming connections.
     #[test]
-    #[ignore = "fails: an agent's fork or narrowing of a computer that refuses incoming connections accepts them, see the report"]
     fn incoming_connections_stay_refused(sequential 1..50 => StrictIngressTest);
 }
 
