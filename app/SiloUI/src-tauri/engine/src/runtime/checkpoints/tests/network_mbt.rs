@@ -27,7 +27,8 @@
 //! | secret hosts added to an allowlist (`Grants`) | partly: one owner-assigned grant for every computer through `use_test_grants`; per-computer assignment through `secrets::save_secret` needs the vault |
 //! | restart: the store, tokens and rebuild state reread from disk | yes |
 //! | damaged policy file (bad JSON, newer version, unknown mode) and repair | yes |
-//! | missing policy file | yes, in `missing_policy_file_never_widens` (ignored: it fails, see its comment) |
+//! | missing policy file (marked computers do not start, fork or copy; the owner sets the policy again) | yes, in `missing_policy_file_never_widens` |
+//! | `network_policy::store::mark_saved` (marks at engine start) and the marks the store sets and clears | yes: on restart, and for an entry saved before marks (`Root::UnmarkedEntry`) |
 //! | `silod` `computers.create` (`store::set` before the create job) | no: the create job needs the runtime (a VM) |
 //! | macOS create (`macos_computers` `set_stored` at create) and macOS fork (`store::inherit`) | no: need an APFS clone and a VM |
 //! | `runtime::update_save` (engine update restores `desired_network_policy`) | no: needs a running computer |
@@ -37,14 +38,14 @@
 //! | container blocked policy (`containers::secrets`) | no: needs the container runtime |
 //! | GitHub grant hosts and their pin | no: GitHub access needs the GitHub stores |
 //!
-//! Two variants are ignored because the engine fails them:
-//! - `missing_policy_file_never_widens`: with `network-policy.json` gone, a macOS computer has no
-//!   entry and runs open (`effective(None, None)`), and a Linux computer runs by the rules its
-//!   runtime holds, which are open for a computer the owner closed before its next start.
-//! - `incoming_connections_stay_refused`: an agent's fork of a computer that refuses incoming
-//!   connections (an import) accepts them (`store::inherit` with a policy saves
-//!   `incoming_denied: false`), and an agent's narrowing of a computer with no saved policy whose
-//!   rules deny incoming connections saves a policy that accepts them.
+//! Variants:
+//! - `missing_policy_file_never_widens` also removes `network-policy.json` among the operations.
+//!   A computer marked as having had a policy then reads like a damaged file; one saved before
+//!   marks and not restarted since runs by its recorded rules, as a computer from before
+//!   policies does.
+//! - `incoming_connections_stay_refused` starts from an import saved before policies (no entry,
+//!   deny-all rules), so the refusal of incoming connections comes from the recorded rules when
+//!   an agent narrows its policy or forks it.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -657,7 +658,7 @@ fn spec_strategy() -> impl Strategy<Value = Spec> {
 const DEFAULT: u8 = 0;
 /// Also removes the policy file among the operations.
 const MISSING_FILE: u8 = 1;
-/// Expects incoming connections to stay refused on an agent's change too.
+/// Starts from an import saved before policies, whose rules refuse incoming connections.
 const STRICT_INGRESS: u8 = 2;
 
 /// The reference state machine for one variant.
@@ -987,10 +988,21 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                     ok: Some(!lost),
                 }
             } else {
+                // A request carries the policy asked for, else a closed one for the owner to
+                // widen: the caller's own policy can be wider than itself once it takes the
+                // source's preset versions (a preset the source lacks is pinned at this Silo's).
+                let requested = match spec {
+                    Some(spec) => *spec,
+                    None => Spec {
+                        mode: Mode::Closed,
+                        hosts: 0,
+                        tools: false,
+                    },
+                };
                 state.waiting.push(Waiting::Fork {
                     caller,
                     source,
-                    policy: json!(chosen_spec.policy()),
+                    policy: json!(requested.policy()),
                 });
                 ask
             }
@@ -2299,7 +2311,6 @@ fn cases() -> u32 {
 prop_state_machine! {
     #![proptest_config(Config {
         cases: cases(),
-        failure_persistence: None,
         max_shrink_iters: 4096,
         .. Config::default()
     })]
@@ -2312,7 +2323,6 @@ prop_state_machine! {
 prop_state_machine! {
     #![proptest_config(Config {
         cases: cases(),
-        failure_persistence: None,
         max_shrink_iters: 4096,
         .. Config::default()
     })]
@@ -2344,12 +2354,11 @@ impl StateMachineTest for MissingFileTest {
 prop_state_machine! {
     #![proptest_config(Config {
         cases: cases(),
-        failure_persistence: None,
         max_shrink_iters: 4096,
         .. Config::default()
     })]
 
-    /// The same, expecting an agent's narrowing or fork to keep refusing incoming connections.
+    /// The same from an import saved before policies: incoming connections stay refused.
     #[test]
     fn incoming_connections_stay_refused(sequential 1..50 => StrictIngressTest);
 }

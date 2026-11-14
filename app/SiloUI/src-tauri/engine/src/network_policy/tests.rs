@@ -1373,3 +1373,95 @@ fn counting_what_a_policy_reaches_includes_the_hosts_its_github_grant_adds() {
     assert!(summary.contains("new.github.example"), "{summary}");
     use_test_presets(None);
 }
+
+/// A policy store with marks kept under `directory`: macOS records in its app data, Linux
+/// checkpoint records in `runtime/checkpoints`.
+fn marked_store(directory: &std::path::Path) -> std::path::PathBuf {
+    let records = directory.join("runtime").join("checkpoints");
+    store::use_test_path(Some(directory.join("network-policy.json")));
+    marks::use_test_roots(Some(marks::Roots {
+        app_data: directory.to_path_buf(),
+        linux_records: Some(records.clone()),
+    }));
+    records
+}
+
+fn unmarked_store() {
+    store::use_test_path(None);
+    marks::use_test_roots(None);
+}
+
+const MARKED: &str = "00000000-0000-4000-8000-000000000101";
+const LEGACY: &str = "00000000-0000-4000-8000-000000000102";
+
+#[test]
+fn a_computer_whose_saved_policy_is_missing_reads_like_a_damaged_file_until_the_owner_sets_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let records = marked_store(directory.path());
+    store::set(MARKED, &mode(NetworkPolicyMode::Closed)).unwrap();
+    assert!(crate::runtime::checkpoints::network_policy_mark(&records, MARKED).unwrap());
+
+    std::fs::remove_file(directory.path().join("network-policy.json")).unwrap();
+    assert_eq!(store::get_stored(MARKED), Err(store::MISSING.to_owned()));
+    assert_eq!(
+        plan_for(MARKED, "marked", Some(&json!({"default_egress": "allow", "default_ingress": "allow", "rules": []}))).err().as_deref(),
+        Some(store::MISSING)
+    );
+    assert_eq!(plan_for_gateway(MARKED, "marked").err().as_deref(), Some(store::MISSING));
+    assert!(store::is_unresolved(MARKED).is_err());
+    assert!(store::inherit(MARKED, "00000000-0000-4000-8000-000000000204", None, None).is_err());
+    assert!(store::inherit(MARKED, "00000000-0000-4000-8000-000000000204", Some(&mode(NetworkPolicyMode::Closed)), None).is_err());
+    // A computer from before policies runs as it did.
+    assert_eq!(store::get_stored(LEGACY), Ok(None));
+    assert_eq!(plan_for(LEGACY, "legacy", None).unwrap().mode, NetworkPolicyMode::Open);
+
+    // The owner sets the policy again; the mark stays.
+    store::set_stored(MARKED, store::Stored::approved(&mode(NetworkPolicyMode::Closed))).unwrap();
+    assert_eq!(store::get(MARKED).unwrap(), Some(mode(NetworkPolicyMode::Closed)));
+
+    // Removing the policy clears the mark after it.
+    store::remove(MARKED).unwrap();
+    assert!(!crate::runtime::checkpoints::network_policy_mark(&records, MARKED).unwrap());
+    assert_eq!(store::get_stored(MARKED), Ok(None));
+    unmarked_store();
+}
+
+#[test]
+fn policies_saved_before_marks_are_marked_at_start_only_for_computers_that_have_a_record() {
+    let directory = tempfile::tempdir().unwrap();
+    let records = marked_store(directory.path());
+    store::set(MARKED, &mode(NetworkPolicyMode::Closed)).unwrap();
+    store::set(LEGACY, &mode(NetworkPolicyMode::Closed)).unwrap();
+    // As an older Silo left them: entries, no marks, and no record for a computer that is gone.
+    crate::runtime::checkpoints::set_network_policy_mark(&records, MARKED, false).unwrap();
+    std::fs::remove_file(records.join(format!("{LEGACY}.json"))).unwrap();
+
+    store::mark_saved().unwrap();
+    assert!(crate::runtime::checkpoints::network_policy_mark(&records, MARKED).unwrap());
+    assert!(!records.join(format!("{LEGACY}.json")).exists());
+
+    // A missing file has no entries and marks nothing.
+    std::fs::remove_file(directory.path().join("network-policy.json")).unwrap();
+    store::mark_saved().unwrap();
+    // An unreadable one is an error.
+    std::fs::write(directory.path().join("network-policy.json"), b"{ not json").unwrap();
+    assert!(store::mark_saved().is_err());
+    unmarked_store();
+}
+
+#[test]
+fn a_policy_given_to_a_fork_keeps_the_refusal_of_incoming_connections_of_its_source() {
+    let directory = tempfile::tempdir().unwrap();
+    marked_store(directory.path());
+    let given = mode(NetworkPolicyMode::Closed);
+    store::set_stored(MARKED, store::Stored::closed_without_incoming()).unwrap();
+    store::inherit(MARKED, "00000000-0000-4000-8000-000000000201", Some(&given), None).unwrap();
+    assert!(store::get_stored("00000000-0000-4000-8000-000000000201").unwrap().unwrap().incoming_denied);
+    // A source with no entry: its recorded rules say.
+    store::inherit(LEGACY, "00000000-0000-4000-8000-000000000202", Some(&given), Some(&deny_all())).unwrap();
+    assert!(store::get_stored("00000000-0000-4000-8000-000000000202").unwrap().unwrap().incoming_denied);
+    let open = json!({"default_egress": "allow", "default_ingress": "allow", "rules": []});
+    store::inherit(LEGACY, "00000000-0000-4000-8000-000000000203", Some(&given), Some(&open)).unwrap();
+    assert!(!store::get_stored("00000000-0000-4000-8000-000000000203").unwrap().unwrap().incoming_denied);
+    unmarked_store();
+}
