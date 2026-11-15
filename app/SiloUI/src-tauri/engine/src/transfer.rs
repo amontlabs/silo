@@ -2862,8 +2862,11 @@ mod tests {
     #[test]
     fn a_guest_that_sends_more_than_it_listed_is_stopped_and_its_partial_removed() {
         let dir = tempfile::tempdir().unwrap();
-        let (world, destination, path) =
-            download_world(&dir, 4, "head -c 100 /dev/zero > \"$partial\"; exec sleep 30");
+        let (world, destination, path) = download_world(
+            &dir,
+            4,
+            "head -c 100 /dev/zero > \"$partial\"; exec sleep 30",
+        );
         let cancel = AtomicBool::new(false);
         let started = Instant::now();
         let error = download(

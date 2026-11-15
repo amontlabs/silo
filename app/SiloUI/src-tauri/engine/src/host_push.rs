@@ -2214,7 +2214,8 @@ mod tests {
             ("[remote rejected] (hook declined)", false),
         ] {
             let script = if summary.is_empty() {
-                "#!/bin/sh\nprintf updated >published.tmp && mv published.tmp published\nexit 128\n".to_owned()
+                "#!/bin/sh\nprintf updated >published.tmp && mv published.tmp published\nexit 128\n"
+                    .to_owned()
             } else {
                 format!("#!/bin/sh\nprintf '!\\trefs/silo/push:refs/heads/main\\t%s\\n' '{summary}'\nexit 1\n")
             };

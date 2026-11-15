@@ -1652,7 +1652,10 @@ esac
         let state = observe(&paths, "dev", &config, &BTreeMap::new());
         done.store(true, std::sync::atomic::Ordering::SeqCst);
         let served = server.join().unwrap();
-        assert!(served >= 1, "the observation never asked for the published ports");
+        assert!(
+            served >= 1,
+            "the observation never asked for the published ports"
+        );
         assert!(state.error.is_none(), "{:?}", state.error);
         assert_eq!(state.ports.len(), 1);
         let port = &state.ports[0];
