@@ -358,7 +358,7 @@ class ScriptGuardTests(unittest.TestCase):
 class ScriptPartTests(unittest.TestCase):
     """Runs the scripts with a cargo and python3 that record their arguments."""
 
-    def run_script(self, *arguments, cargo_tree_fails=False):
+    def run_script(self, *arguments, cargo_tree_fails=False, cargo_tree_output=''):
         with tempfile.TemporaryDirectory() as folder:
             log = Path(folder) / 'calls.log'
             for tool in ('cargo', 'python3'):
@@ -366,6 +366,7 @@ class ScriptPartTests(unittest.TestCase):
                 fake.write_text('#!/bin/sh\n'
                                 f'echo "{tool} $*" >> "{log}"\n'
                                 + ('[ "$1" = tree ] && exit 101\n' if cargo_tree_fails and tool == 'cargo' else '')
+                                + (f'[ "$1" = tree ] && echo \'{cargo_tree_output}\'\n' if cargo_tree_output and tool == 'cargo' else '')
                                 + 'exit 0\n')
                 fake.chmod(0o755)
             env = {**os.environ, 'PATH': f'{folder}{os.pathsep}{os.environ["PATH"]}'}
@@ -400,17 +401,25 @@ class ScriptPartTests(unittest.TestCase):
         self.assertNotIn('depends on the GTK stack', result.stderr)
         self.assertEqual(len(self.nextest_packages(calls)), 1, 'the daemon tests still run')
 
+    def test_shipped_binaries_with_test_support_fail(self):
+        for script, part in (('linux.sh', 'daemon'), ('macos.sh', 'checks')):
+            with self.subTest(script=script):
+                result, calls = self.run_script(str(CI / script), part, cargo_tree_output='silo-engine feature "test-support"')
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('silod or silo-cli builds with the test-support feature', result.stderr)
+                self.assertIn('cargo tree -p silod -p silo-cli -e normal,build,features --target all --locked --prefix none', calls)
+
     def test_macos_parts(self):
         result, calls = self.run_script(str(CI / 'macos.sh'), 'checks')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([call.split()[:3] for call in calls],
-                         [['python3', '-m', 'unittest'], ['cargo', 'fmt', '--check']])
+                         [['python3', '-m', 'unittest'], ['cargo', 'tree', '-p'], ['cargo', 'fmt', '--check']])
         result, calls = self.run_script(str(CI / 'macos.sh'), 'tests')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.nextest_packages(calls), ['--manifest-path Cargo.toml --workspace'])
         result, calls = self.run_script(str(CI / 'macos.sh'))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 4)
 
 
 if __name__ == '__main__':

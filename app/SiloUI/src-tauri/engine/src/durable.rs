@@ -37,13 +37,27 @@ pub mod guard {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    /// Method names that wait for the storage device. Built from parts so this file does not
+    /// The methods that wait for the storage device. Built from parts so this file does not
     /// match its own scan.
-    pub(super) fn flush_calls() -> [String; 2] {
+    pub(super) fn flush_methods() -> [String; 2] {
         [
-            format!(".{}{}(", "sync_", "all"),
-            format!(".{}{}(", "sync_", "data"),
+            format!("{}{}", "sync_", "all"),
+            format!("{}{}", "sync_", "data"),
         ]
+    }
+
+    /// Whether the code of `line`, before any `//` comment, names a flush method as a method
+    /// call (`file.sync_all()`) or as a path (`File::sync_all`, `.and_then(File::sync_all)`).
+    fn names_a_flush(line: &str, methods: &[String]) -> bool {
+        let code = line.split("//").next().unwrap_or_default();
+        methods.iter().any(|method| {
+            code.match_indices(method.as_str()).any(|(start, _)| {
+                let before = &code[..start];
+                let after = code[start + method.len()..].chars().next();
+                (before.ends_with('.') || before.ends_with("::"))
+                    && !after.is_some_and(|next| next.is_alphanumeric() || next == '_')
+            })
+        })
     }
 
     fn rust_files(directory: &Path, found: &mut Vec<PathBuf>) {
@@ -63,12 +77,12 @@ pub mod guard {
         let mut files = Vec::new();
         rust_files(source, &mut files);
         files.sort();
-        let calls = flush_calls();
+        let methods = flush_methods();
         let mut found = Vec::new();
         for file in files.iter().filter(|file| file.as_path() != helper) {
             let text = fs::read_to_string(file).unwrap();
             for (index, line) in text.lines().enumerate() {
-                if calls.iter().any(|call| line.contains(call.as_str())) {
+                if names_a_flush(line, &methods) {
                     found.push(format!("{}:{}", file.display(), index + 1));
                 }
             }
@@ -90,7 +104,7 @@ pub mod guard {
 
 #[cfg(test)]
 mod tests {
-    use super::guard::{assert_no_direct_flushes, direct_flushes, flush_calls};
+    use super::guard::{assert_no_direct_flushes, direct_flushes, flush_methods};
     use std::fs;
     use std::path::Path;
 
@@ -102,29 +116,36 @@ mod tests {
 
     #[test]
     fn the_scan_finds_a_direct_flush() {
+        let [all, data] = flush_methods();
         let directory = tempfile::tempdir().unwrap();
         let helper = directory.path().join("durable.rs");
-        fs::write(
-            &helper,
-            format!("fn f(file: &File) {{ file{}) }}\n", flush_calls()[0]),
-        )
-        .unwrap();
+        fs::write(&helper, format!("fn f(file: &File) {{ file.{all}() }}\n")).unwrap();
         fs::create_dir(directory.path().join("nested")).unwrap();
-        fs::write(
-            directory.path().join("nested/store.rs"),
-            format!(
-                "fn ok() {{}}\nfn f(file: &File) {{ file{}) }}\n",
-                flush_calls()[1]
-            ),
-        )
-        .unwrap();
-        let found = direct_flushes(directory.path(), &helper);
-        assert_eq!(
-            found,
-            [format!(
-                "{}:2",
-                directory.path().join("nested/store.rs").display()
-            )]
-        );
+        let store = directory.path().join("nested/store.rs");
+        let lines = [
+            ("fn ok() {}", false),
+            ("file.{all}()?;", true),
+            ("// file.{all}()", false),
+            ("/// Calls `File::{all}` first.", false),
+            ("let done = 1; // then file.{data}()", false),
+            ("File::{all}(&file)?;", true),
+            ("open(path).and_then(|file| file.{data}())?;", true),
+            ("open(path).and_then(File::{all})?;", true),
+            ("std::fs::File::{data}(&file)?;", true),
+            ("file.{all}_later();", false),
+            ("let {all} = true;", false),
+        ];
+        let text: String = lines
+            .iter()
+            .map(|(line, _)| line.replace("{all}", &all).replace("{data}", &data) + "\n")
+            .collect();
+        fs::write(&store, text).unwrap();
+        let expected: Vec<String> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, flushes))| *flushes)
+            .map(|(index, _)| format!("{}:{}", store.display(), index + 1))
+            .collect();
+        assert_eq!(direct_flushes(directory.path(), &helper), expected);
     }
 }
