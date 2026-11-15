@@ -26,9 +26,10 @@ const nodeTests = [
   "src/test/{git-runtime,microsandbox-runtime,native-permissions,transition-styles}.test.ts",
 ]
 
-// Scale with the machine: about one worker per 1.3 cores, at most 12 (gains
-// flatten beyond that). CI passes --maxWorkers=2 on the command line.
-const maxWorkers = Math.min(12, Math.max(1, Math.floor(availableParallelism() / 1.3)))
+// Scale with the machine: about one worker per 1.3 cores, at most 8 (12 is only
+// a little faster and leaves no room for the Rust tests that run beside these in
+// the merge check). CI passes --maxWorkers=2 on the command line.
+const maxWorkers = Math.min(8, Math.max(1, Math.floor(availableParallelism() / 1.3)))
 
 // Share transforms and aliases only. Inheriting maxWorkers into each project
 // would override the root CLI limit used by CI (for example --maxWorkers=2).
