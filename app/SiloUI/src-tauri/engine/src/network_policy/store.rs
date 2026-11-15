@@ -368,7 +368,11 @@ pub fn inherit(
                     Some(from) => from.incoming_denied,
                     None => super::held_from_recorded(recorded).1,
                 };
-                Some(Stored::preserving_pins(policy, from.as_ref(), incoming_denied))
+                Some(Stored::preserving_pins(
+                    policy,
+                    from.as_ref(),
+                    incoming_denied,
+                ))
             }
             None => from,
         };

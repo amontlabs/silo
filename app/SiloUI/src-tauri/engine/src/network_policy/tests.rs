@@ -1131,7 +1131,13 @@ fn a_computer_with_no_policy_entry_holds_the_first_github_list_until_the_owner_a
     );
     // A copy given a policy holds its source's versions too: handing a policy on takes no
     // update.
-    store::inherit("legacy", "chosen", Some(&allowlist(&["example.com"], &[])), None).unwrap();
+    store::inherit(
+        "legacy",
+        "chosen",
+        Some(&allowlist(&["example.com"], &[])),
+        None,
+    )
+    .unwrap();
     assert_eq!(
         service::get("chosen", macos())
             .unwrap()
@@ -1404,20 +1410,45 @@ fn a_computer_whose_saved_policy_is_missing_reads_like_a_damaged_file_until_the_
     std::fs::remove_file(directory.path().join("network-policy.json")).unwrap();
     assert_eq!(store::get_stored(MARKED), Err(store::MISSING.to_owned()));
     assert_eq!(
-        plan_for(MARKED, "marked", Some(&json!({"default_egress": "allow", "default_ingress": "allow", "rules": []}))).err().as_deref(),
+        plan_for(
+            MARKED,
+            "marked",
+            Some(&json!({"default_egress": "allow", "default_ingress": "allow", "rules": []}))
+        )
+        .err()
+        .as_deref(),
         Some(store::MISSING)
     );
-    assert_eq!(plan_for_gateway(MARKED, "marked").err().as_deref(), Some(store::MISSING));
+    assert_eq!(
+        plan_for_gateway(MARKED, "marked").err().as_deref(),
+        Some(store::MISSING)
+    );
     assert!(store::is_unresolved(MARKED).is_err());
     assert!(store::inherit(MARKED, "00000000-0000-4000-8000-000000000204", None, None).is_err());
-    assert!(store::inherit(MARKED, "00000000-0000-4000-8000-000000000204", Some(&mode(NetworkPolicyMode::Closed)), None).is_err());
+    assert!(store::inherit(
+        MARKED,
+        "00000000-0000-4000-8000-000000000204",
+        Some(&mode(NetworkPolicyMode::Closed)),
+        None
+    )
+    .is_err());
     // A computer from before policies runs as it did.
     assert_eq!(store::get_stored(LEGACY), Ok(None));
-    assert_eq!(plan_for(LEGACY, "legacy", None).unwrap().mode, NetworkPolicyMode::Open);
+    assert_eq!(
+        plan_for(LEGACY, "legacy", None).unwrap().mode,
+        NetworkPolicyMode::Open
+    );
 
     // The owner sets the policy again; the mark stays.
-    store::set_stored(MARKED, store::Stored::approved(&mode(NetworkPolicyMode::Closed))).unwrap();
-    assert_eq!(store::get(MARKED).unwrap(), Some(mode(NetworkPolicyMode::Closed)));
+    store::set_stored(
+        MARKED,
+        store::Stored::approved(&mode(NetworkPolicyMode::Closed)),
+    )
+    .unwrap();
+    assert_eq!(
+        store::get(MARKED).unwrap(),
+        Some(mode(NetworkPolicyMode::Closed))
+    );
 
     // Removing the policy clears the mark after it.
     store::remove(MARKED).unwrap();
@@ -1455,13 +1486,46 @@ fn a_policy_given_to_a_fork_keeps_the_refusal_of_incoming_connections_of_its_sou
     marked_store(directory.path());
     let given = mode(NetworkPolicyMode::Closed);
     store::set_stored(MARKED, store::Stored::closed_without_incoming()).unwrap();
-    store::inherit(MARKED, "00000000-0000-4000-8000-000000000201", Some(&given), None).unwrap();
-    assert!(store::get_stored("00000000-0000-4000-8000-000000000201").unwrap().unwrap().incoming_denied);
+    store::inherit(
+        MARKED,
+        "00000000-0000-4000-8000-000000000201",
+        Some(&given),
+        None,
+    )
+    .unwrap();
+    assert!(
+        store::get_stored("00000000-0000-4000-8000-000000000201")
+            .unwrap()
+            .unwrap()
+            .incoming_denied
+    );
     // A source with no entry: its recorded rules say.
-    store::inherit(LEGACY, "00000000-0000-4000-8000-000000000202", Some(&given), Some(&deny_all())).unwrap();
-    assert!(store::get_stored("00000000-0000-4000-8000-000000000202").unwrap().unwrap().incoming_denied);
+    store::inherit(
+        LEGACY,
+        "00000000-0000-4000-8000-000000000202",
+        Some(&given),
+        Some(&deny_all()),
+    )
+    .unwrap();
+    assert!(
+        store::get_stored("00000000-0000-4000-8000-000000000202")
+            .unwrap()
+            .unwrap()
+            .incoming_denied
+    );
     let open = json!({"default_egress": "allow", "default_ingress": "allow", "rules": []});
-    store::inherit(LEGACY, "00000000-0000-4000-8000-000000000203", Some(&given), Some(&open)).unwrap();
-    assert!(!store::get_stored("00000000-0000-4000-8000-000000000203").unwrap().unwrap().incoming_denied);
+    store::inherit(
+        LEGACY,
+        "00000000-0000-4000-8000-000000000203",
+        Some(&given),
+        Some(&open),
+    )
+    .unwrap();
+    assert!(
+        !store::get_stored("00000000-0000-4000-8000-000000000203")
+            .unwrap()
+            .unwrap()
+            .incoming_denied
+    );
     unmarked_store();
 }

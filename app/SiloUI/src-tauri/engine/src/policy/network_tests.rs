@@ -732,7 +732,13 @@ fn a_computer_pinned_to_an_older_github_list_forks_with_its_pin_not_the_newest_l
     let copy = store::get_stored("copy").unwrap().unwrap().held();
     assert_eq!(copy.pins.get(GITHUB_GRANT_PIN), Some(&1), "{:?}", copy.pins);
     // Asking for a policy changes nothing about the versions either.
-    store::inherit("main", "asked", Some(&allowlist(&["other.example.com"])), None).unwrap();
+    store::inherit(
+        "main",
+        "asked",
+        Some(&allowlist(&["other.example.com"])),
+        None,
+    )
+    .unwrap();
     let asked = store::get_stored("asked").unwrap().unwrap().held();
     assert_eq!(asked.pins.get(GITHUB_GRANT_PIN), Some(&1));
     GITHUB_ACCESS.with(|access| access.set(false));

@@ -1863,7 +1863,11 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
             Engine::uninstall();
             engine.install();
             let marked = policy_store::mark_saved();
-            assert_eq!(marked.is_ok(), !before.damaged, "marking at start: {marked:?}");
+            assert_eq!(
+                marked.is_ok(),
+                !before.damaged,
+                "marking at start: {marked:?}"
+            );
         }
         Op::Damage { kind } => {
             if engine.saved.is_none() {

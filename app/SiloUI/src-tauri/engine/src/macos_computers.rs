@@ -97,8 +97,8 @@ use std::{
     },
     time::{Duration, Instant},
 };
-pub use store::{Action, CreateRequest, ExpectedResources};
 pub(crate) use store::{network_policy_mark, set_network_policy_mark};
+pub use store::{Action, CreateRequest, ExpectedResources};
 
 /// Where a macOS computer's gateway appends credential-use events.
 pub fn usage_file(app_data: &std::path::Path, computer_id: &str) -> std::path::PathBuf {

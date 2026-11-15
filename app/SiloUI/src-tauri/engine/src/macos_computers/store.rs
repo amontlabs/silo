@@ -759,16 +759,15 @@ pub(super) fn save_with_sync(
     };
     // The network policy mark only turns off through `set_network_policy_mark`.
     let marked;
-    let record = if !record.network_policy_saved
-        && previous.as_deref().is_some_and(saved_policy_mark)
-    {
-        let mut copy = record.clone();
-        copy.network_policy_saved = true;
-        marked = copy;
-        &marked
-    } else {
-        record
-    };
+    let record =
+        if !record.network_policy_saved && previous.as_deref().is_some_and(saved_policy_mark) {
+            let mut copy = record.clone();
+            copy.network_policy_saved = true;
+            marked = copy;
+            &marked
+        } else {
+            record
+        };
     let json = serde_json::to_vec_pretty(record).map_err(|error| error.to_string())?;
     match write_record(layout, &json, &mut sync) {
         Ok(()) => Ok(()),
