@@ -75,10 +75,12 @@ step_preflight() {
 }
 step_engine() {
   local out; out=$(start_engine) || live_die "engine start: $out"
-  live_say "engine start: $out"; live_set engine_pid "$(our_engine)"; lock_file | grep . || live_die "no lock file found"; }
+  live_say "engine start: $out"; live_set engine_pid "$(our_engine)"; }
 step_create() {
   ensure_engine
   timed "create a" silo create "$(live_computer_named a)"; timed "create b" silo create "$(live_computer_named b)"
+  # The runtime makes its command lock file on first use (a fresh engine home has none before).
+  lock_file | grep . || live_die "no lock file found"
   timed "start a" silo start "$(live_computer_named a)"; timed "start b" silo start "$(live_computer_named b)"
   mine; live_say "lock holders at rest: $(holders)"
 }
