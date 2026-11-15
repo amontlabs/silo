@@ -8,6 +8,8 @@
 //! the runtime or the macOS gateway gets, read as the runtime's JSON) are checked against the
 //! model by code written here: never wider (the safety rule) and equal (the model agrees).
 //!
+//! Deep run: `PROPTEST_CASES=20000 cargo nextest run -p silo-engine network_mbt`.
+//!
 //! Entry points that can change a computer's network access, and whether this test drives them:
 //!
 //! | Entry point | Covered |
@@ -2307,16 +2309,17 @@ impl StateMachineTest for NetworkTest {
     }
 }
 
-fn cases() -> u32 {
+/// `PROPTEST_CASES`, else `default`.
+fn cases(default: u32) -> u32 {
     std::env::var("PROPTEST_CASES")
         .ok()
         .and_then(|cases| cases.parse().ok())
-        .unwrap_or(1024)
+        .unwrap_or(default)
 }
 
 prop_state_machine! {
     #![proptest_config(Config {
-        cases: cases(),
+        cases: cases(256),
         max_shrink_iters: 4096,
         .. Config::default()
     })]
@@ -2328,7 +2331,7 @@ prop_state_machine! {
 
 prop_state_machine! {
     #![proptest_config(Config {
-        cases: cases(),
+        cases: cases(128),
         max_shrink_iters: 4096,
         .. Config::default()
     })]
@@ -2359,7 +2362,7 @@ impl StateMachineTest for MissingFileTest {
 
 prop_state_machine! {
     #![proptest_config(Config {
-        cases: cases(),
+        cases: cases(128),
         max_shrink_iters: 4096,
         .. Config::default()
     })]

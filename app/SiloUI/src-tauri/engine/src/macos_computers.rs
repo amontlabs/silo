@@ -6839,17 +6839,7 @@ fn fork_checkpoint_with_workflow(
         record.computer_use_version = checkpoint.computer_use_version.clone();
         record.computer_use_approval = held.record.computer_use_approval;
         record.computer_use_desired_approval = held.record.computer_use_desired_approval;
-        // A crash before the files are copied leaves a failed computer that can be deleted.
-        store::save(&Layout::new(&data, &record.id), &record)?;
-        // The fork keeps its source's network policy unless the call gave it another.
-        crate::network_policy::store::inherit(
-            id,
-            &record.id,
-            options.network_policy.as_ref(),
-            None,
-        )?;
-        crate::guest_client::inherit(id, &record.id)?;
-        crate::recipes::records::inherit(id, &record.id)?;
+        save_fork_record(&data, id, &record, options.network_policy.as_ref())?;
         let entry = Entry::new(record.clone(), State::Copying, None);
         let cancel = entry.cancel.clone();
         registry.entries.push(entry);
@@ -7561,6 +7551,29 @@ pub(crate) mod test_access {
     }
 }
 
+/// Saves a fork's record and gives it what it keeps of its source `source_id`: the network
+/// policy (`policy`, else the source's), Silo's tools and the recipe. A crash before the files
+/// are copied leaves a failed computer that can be deleted; a refusal here removes the fork's
+/// folder, so nothing is left to list.
+fn save_fork_record(
+    data: &std::path::Path,
+    source_id: &str,
+    record: &Record,
+    policy: Option<&crate::network_policy::NetworkPolicy>,
+) -> Result<(), String> {
+    let layout = Layout::new(data, &record.id);
+    store::save(&layout, record)?;
+    let inherited = (|| {
+        crate::network_policy::store::inherit(source_id, &record.id, policy, None)?;
+        crate::guest_client::inherit(source_id, &record.id)?;
+        crate::recipes::records::inherit(source_id, &record.id)
+    })();
+    if inherited.is_err() {
+        let _ = store::remove(&layout);
+    }
+    inherited
+}
+
 /// Fork assignments that record what was copied and fail for names the source lacks.
 #[cfg(test)]
 #[derive(Default)]
@@ -8091,6 +8104,28 @@ mod tests {
 
     fn import_policy_file(directory: &std::path::Path) {
         crate::network_policy::store::use_test_path(Some(directory.join("network-policy.json")));
+    }
+
+    #[test]
+    fn a_fork_whose_network_policy_is_refused_leaves_no_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        std::fs::write(directory.path().join("network-policy.json"), b"{ not json").unwrap();
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "fork".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:0c".into(),
+        );
+        record.id = uuid::Uuid::new_v4().to_string();
+        let source = uuid::Uuid::new_v4().to_string();
+
+        assert!(save_fork_record(directory.path(), &source, &record, None).is_err());
+        assert!(!Layout::new(directory.path(), &record.id).dir.exists());
+        crate::network_policy::store::use_test_path(None);
     }
 
     #[test]
