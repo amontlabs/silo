@@ -318,8 +318,8 @@ The link check includes first-party source documentation, guest notices and
 changesets. A coverage regression compares its globs with tracked Markdown,
 excluding documentation in the partial upstream vendor tree.
 
-Every CI test job runs scripts in `app/SiloUI/scripts/ci/`; `tools/agent/check`
-does not call them yet (atelier will). `frontend.sh` (typecheck, lint, Vitest,
+Every CI test job runs scripts in `app/SiloUI/scripts/ci/`; `atelier check`
+calls them too. `frontend.sh` (typecheck, lint, Vitest,
 website and demo; `checks` or `tests [VITEST_ARGS]` runs one half),
 `scripts.sh` (release tooling, script tests, isolation evals on Linux, reviewer
 service; its Python tests run through [uv](https://docs.astral.sh/uv/) with

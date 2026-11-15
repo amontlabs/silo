@@ -270,7 +270,4 @@ H=$(ATELIER_TMP=$AT bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/h; mkdir -p \
 ok "short home goes under ATELIER_TMP" $([ "${H#$AT/sl-}" != "$H" ] && echo 0 || echo 1)
 ( ATELIER_TMP=$AT HOME=$FH bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/h; mkdir -p \$STATE; live_assert_dev_sock $AT/sl-1/engine.sock" ) >/dev/null 2>&1
 ok "a socket under the ATELIER_TMP short home counts as a Dev path" $?
-# the old command still reaches the runner
-OLD=$(cd "$(dirname "$LIVE")/../../../.." && pwd)/tools/agent/live
-LIVE_D=$LIVE_D "$OLD" fake --state $W/s40 >/dev/null 2>&1; ok "tools/agent/live execs the new runner" $([ "$(verdict $W/s40 verdict)" = pass ] && echo 0 || echo 1)
 echo "$N tests, $BAD failed"; [ $BAD = 0 ]
