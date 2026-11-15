@@ -1,3 +1,5 @@
+import { availableParallelism } from "node:os"
+
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vitest/config"
 
@@ -24,6 +26,10 @@ const nodeTests = [
   "src/test/{git-runtime,microsandbox-runtime,native-permissions,transition-styles}.test.ts",
 ]
 
+// Scale with the machine: about one worker per 1.3 cores, at most 12 (gains
+// flatten beyond that). CI passes --maxWorkers=2 on the command line.
+const maxWorkers = Math.min(12, Math.max(1, Math.floor(availableParallelism() / 1.3)))
+
 // Share transforms and aliases only. Inheriting maxWorkers into each project
 // would override the root CLI limit used by CI (for example --maxWorkers=2).
 const projectConfig = {
@@ -47,7 +53,7 @@ export default defineConfig({
   test: {
     // Full-window interaction tests compete for CPU when every jsdom file runs
     // at once. Keep their normal timeout meaningful under the complete suite.
-    maxWorkers: 4,
+    maxWorkers,
     projects: [
       {
         ...projectConfig,
