@@ -188,9 +188,36 @@ pub fn request_key(method: &str, asked: &Value) -> String {
 }
 
 pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
+    let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_millis() as u64)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64);
+    #[cfg(any(test, feature = "test-support"))]
+    let now = now.saturating_add(test_clock::ahead_ms());
+    now
+}
+
+/// A clock a test moves forward on its own thread, so approvals expire and leave the hour's
+/// count without waiting.
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_clock {
+    use std::cell::Cell;
+
+    thread_local! {
+        static AHEAD_MS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// How far this thread's clock is ahead of the real one.
+    pub fn ahead_ms() -> u64 {
+        AHEAD_MS.with(Cell::get)
+    }
+
+    pub fn advance(ms: u64) {
+        AHEAD_MS.with(|ahead| ahead.set(ahead.get().saturating_add(ms)));
+    }
+
+    pub fn reset() {
+        AHEAD_MS.with(|ahead| ahead.set(0));
+    }
 }
 
 fn rfc3339(at_ms: u64) -> String {
@@ -236,6 +263,16 @@ impl Store {
         Self {
             root: app_data.join("approvals"),
         }
+    }
+
+    /// Forgets what was read of this folder, as a new engine process would: the next call
+    /// reads the approvals and the request times from disk again.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn forget_loaded(&self) {
+        INDEXES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.root);
     }
 
     fn file(&self, id: &str) -> Result<PathBuf, String> {
