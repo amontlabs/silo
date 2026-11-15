@@ -2468,6 +2468,23 @@ fn a_fork_never_shares_its_sources_channel_port() {
     ]);
 }
 
+/// A restart with a damaged policy file marks nothing, so a computer saved before marks still
+/// runs by its recorded rules once the file is repaired and then removed (seed `cc afd4d6a1…`).
+#[test]
+fn a_restart_with_a_damaged_file_marks_nothing() {
+    replay::<MissingFileTest, MISSING_FILE>(vec![
+        Transition::Init(Root::UnmarkedEntry(Spec {
+            mode: Mode::Open,
+            hosts: 0,
+            tools: false,
+        })),
+        Transition::Op(Op::Damage { kind: 0 }),
+        Transition::Op(Op::Restart),
+        Transition::Op(Op::Repair),
+        Transition::Op(Op::RemoveFile),
+    ]);
+}
+
 prop_state_machine! {
     #![proptest_config(Config {
         cases: cases(128),
