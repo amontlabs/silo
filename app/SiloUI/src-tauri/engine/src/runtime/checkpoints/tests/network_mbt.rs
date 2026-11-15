@@ -645,9 +645,10 @@ enum Expect {
 
 fn spec_strategy() -> impl Strategy<Value = Spec> {
     (
-        prop_oneof![Just(Mode::Open), Just(Mode::List), Just(Mode::Closed)],
+        // Lists with the preset are where preset versions matter, so they come often.
+        prop_oneof![1 => Just(Mode::Open), 2 => Just(Mode::List), 1 => Just(Mode::Closed)],
         0u8..16,
-        any::<bool>(),
+        proptest::bool::weighted(0.75),
     )
         .prop_map(|(mode, hosts, tools)| Spec {
             mode,
@@ -711,7 +712,7 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
             2 => sel().prop_map(|c| Op::ToolsOn { c }),
             1 => sel().prop_map(|c| Op::ToolsOff { c }),
             1 => (0u8..2).prop_map(|host| Op::Grant { host }),
-            1 => Just(Op::PresetUpdate),
+            3 => Just(Op::PresetUpdate),
             2 => Just(Op::Restart),
             1 => (0u8..3).prop_map(|kind| Op::Damage { kind }),
             2 => Just(Op::Repair),
