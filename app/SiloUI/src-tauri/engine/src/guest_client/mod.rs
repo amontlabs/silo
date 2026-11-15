@@ -101,6 +101,8 @@ pub fn turn_on(computer_id: &str) -> Result<Record, String> {
     turn_on_in(&store, computer_id)
 }
 
+const NOT_READY: &str = "Silo's tools are not ready yet. Try again in a moment.";
+
 /// [`turn_on`] with the store given. The store stays locked from reading the record to saving
 /// it, across binding and serving the port, so two calls cannot leave a record on a port nothing
 /// serves. The port the computer had (on, or held since its tools were turned off) is reused
@@ -115,11 +117,10 @@ pub fn turn_on_in(store: &TokenStore, computer_id: &str) -> Result<Record, Strin
         .iter()
         .find(|record| record.computer_id == computer_id && record.enabled())
         .cloned();
-    let channels = channels();
+    let Some(channels) = channels() else {
+        return Err(NOT_READY.into());
+    };
     if let Some(record) = &current {
-        let Some(channels) = &channels else {
-            return Ok(record.clone());
-        };
         let bound = record
             .port
             .is_some_and(|port| channels.bound(port).as_deref() == Some(computer_id));
@@ -136,17 +137,14 @@ pub fn turn_on_in(store: &TokenStore, computer_id: &str) -> Result<Record, Strin
     let open = |error: std::io::Error| {
         format!("Silo could not open a port for the computer's tools: {error}")
     };
-    let (port, restart_needed, fresh) = match &channels {
-        Some(channels)
-            if wanted.is_some_and(|port| channels.bound(port).as_deref() == Some(computer_id)) =>
-        {
+    let (port, restart_needed, fresh) =
+        if wanted.is_some_and(|port| channels.bound(port).as_deref() == Some(computer_id)) {
             let port = wanted.unwrap_or_default();
             if !channels.serve_held(computer_id, port) {
                 return Err("Silo could not serve the computer's tools.".into());
             }
             (port, false, false)
-        }
-        Some(channels) => {
+        } else {
             let (listener, port) = bind(wanted).map_err(open)?;
             let moved = wanted.is_some_and(|wanted| wanted != port);
             if moved {
@@ -155,12 +153,7 @@ pub fn turn_on_in(store: &TokenStore, computer_id: &str) -> Result<Record, Strin
                 channels.serve(computer_id, listener)?;
             }
             (port, moved, true)
-        }
-        None => {
-            let (_listener, port) = bind(wanted).map_err(open)?;
-            (port, false, false)
-        }
-    };
+        };
     let saved = set_port_in(&mut records, &mut held, computer_id, port, restart_needed).and_then(
         |record| {
             locked.save_held(&held)?;
@@ -169,11 +162,9 @@ pub fn turn_on_in(store: &TokenStore, computer_id: &str) -> Result<Record, Strin
         },
     );
     if saved.is_err() {
-        if let Some(channels) = &channels {
-            channels.close(computer_id);
-            if fresh {
-                channels.release(port);
-            }
+        channels.close(computer_id);
+        if fresh {
+            channels.release(port);
         }
     }
     saved
@@ -347,6 +338,9 @@ pub fn end_token(computer_id: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
+pub(crate) mod fake;
+
+#[cfg(test)]
 mod tests {
     use std::{
         collections::HashMap,
@@ -354,96 +348,7 @@ mod tests {
         time::Duration,
     };
 
-    use super::*;
-
-    /// Channels that keep their listeners bound and record what they were asked.
-    #[derive(Default)]
-    struct Fake {
-        /// port -> (computer, served)
-        ports: Mutex<HashMap<u16, (String, bool, TcpListener)>>,
-        ended: Mutex<Vec<String>>,
-        fail_serve: Mutex<bool>,
-        /// The first serve waits up to this long for a second one.
-        first_waits: Mutex<Option<Duration>>,
-        serves: Mutex<usize>,
-        served_again: Condvar,
-    }
-
-    impl Channels for Fake {
-        fn serve(&self, computer_id: &str, listener: TcpListener) -> Result<(), String> {
-            if *self.fail_serve.lock().unwrap() {
-                return Err("the channel could not be served".into());
-            }
-            let wait = self.first_waits.lock().unwrap().take();
-            {
-                let mut serves = self.serves.lock().unwrap();
-                *serves += 1;
-                self.served_again.notify_all();
-                if let Some(wait) = wait {
-                    let _ = self
-                        .served_again
-                        .wait_timeout_while(serves, wait, |serves| *serves < 2)
-                        .unwrap();
-                }
-            }
-            let port = listener.local_addr().unwrap().port();
-            let mut ports = self.ports.lock().unwrap();
-            for (computer, served, _) in ports.values_mut() {
-                if computer == computer_id {
-                    *served = false;
-                }
-            }
-            ports.insert(port, (computer_id.to_owned(), true, listener));
-            Ok(())
-        }
-        fn hold(&self, computer_id: &str, listener: TcpListener) -> Result<(), String> {
-            let port = listener.local_addr().unwrap().port();
-            self.ports
-                .lock()
-                .unwrap()
-                .insert(port, (computer_id.to_owned(), false, listener));
-            Ok(())
-        }
-        fn serve_held(&self, computer_id: &str, port: u16) -> bool {
-            let mut ports = self.ports.lock().unwrap();
-            match ports.get_mut(&port) {
-                Some((computer, served, _)) if computer == computer_id => {
-                    *served = true;
-                    true
-                }
-                _ => false,
-            }
-        }
-        fn close(&self, computer_id: &str) {
-            for (computer, served, _) in self.ports.lock().unwrap().values_mut() {
-                if computer == computer_id {
-                    *served = false;
-                }
-            }
-            self.ended.lock().unwrap().push(computer_id.to_owned());
-        }
-        fn end_sessions(&self, computer_id: &str) {
-            self.ended.lock().unwrap().push(computer_id.to_owned());
-        }
-        fn release(&self, port: u16) {
-            self.ports.lock().unwrap().remove(&port);
-        }
-        fn serving(&self, computer_id: &str) -> Option<u16> {
-            self.ports
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|(_, (computer, served, _))| computer == computer_id && *served)
-                .map(|(port, _)| *port)
-        }
-        fn bound(&self, port: u16) -> Option<String> {
-            self.ports
-                .lock()
-                .unwrap()
-                .get(&port)
-                .map(|(computer, _, _)| computer.clone())
-        }
-    }
+    use super::{fake::Fake, *};
 
     /// The tests that bind ports run one at a time, so none takes a port another just freed.
     static PORTS: Mutex<()> = Mutex::new(());
@@ -493,6 +398,27 @@ mod tests {
         let (again, same) = bind(Some(test_port)).unwrap();
         assert_eq!(same, test_port, "a free port is kept");
         drop(again);
+    }
+
+    #[test]
+    fn tools_turned_on_before_the_channels_are_installed_bind_nothing() {
+        let _ports = ports();
+        let directory = tempfile::tempdir().unwrap();
+        tokens::use_test_directory(Some(directory.path().join("guest-client")));
+        use_test_channels(None);
+        let store = TokenStore::current().unwrap();
+        assert_eq!(turn_on_in(&store, "c").unwrap_err(), NOT_READY);
+        assert!(store.status("c").unwrap().is_none());
+        // A computer whose tools are on keeps its record, and its port stays free for the
+        // rebind at engine start.
+        let (listener, port) = bind(None).unwrap();
+        drop(listener);
+        store.enable("on", port).unwrap();
+        let before = store.status("on").unwrap();
+        assert_eq!(turn_on_in(&store, "on").unwrap_err(), NOT_READY);
+        assert_eq!(store.status("on").unwrap(), before);
+        drop(bind_exact(port).expect("nothing bound the computer's port"));
+        reset();
     }
 
     #[test]

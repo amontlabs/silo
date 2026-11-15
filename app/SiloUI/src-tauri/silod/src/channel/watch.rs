@@ -128,8 +128,8 @@ pub(super) fn prepare(
     rebind(store, channels);
 }
 
-/// Rebinds every computer's port at engine start: the port it had when it is free, another
-/// when something else took it. A computer that moves gets no valid token, holds its new port
+/// Rebinds every computer's port at engine start: the port it had when it is free or already
+/// bound for it, another when something else took it. A computer that moves gets no valid token, holds its new port
 /// without serving it and waits for a restart: its network still names the old port, which
 /// another program has. Every held port is bound again when it is free.
 pub(super) fn rebind(store: &TokenStore, channels: &dyn guest_client::Channels) {
@@ -147,6 +147,10 @@ pub(super) fn rebind(store: &TokenStore, channels: &dyn guest_client::Channels) 
         .filter_map(|record| Some((record.computer_id.clone(), record.port?)))
         .collect();
     for (id, wanted) in ids {
+        // Turned on since the channels were installed: the port is the computer's own already.
+        if channels.bound(wanted).as_deref() == Some(id.as_str()) {
+            continue;
+        }
         let (listener, port) = match guest_client::bind(Some(wanted)) {
             Ok(bound) => bound,
             Err(error) => {

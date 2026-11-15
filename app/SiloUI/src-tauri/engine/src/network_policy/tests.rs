@@ -504,6 +504,9 @@ fn the_channel_rule_is_the_computers_own_port_in_every_mode_and_no_other_compute
     let directory = tempfile::tempdir().unwrap();
     store::use_test_path(Some(directory.path().join("network-policy.json")));
     crate::guest_client::tokens::use_test_directory(Some(directory.path().join("guest-client")));
+    crate::guest_client::use_test_channels(Some(std::sync::Arc::new(
+        crate::guest_client::fake::Fake::default(),
+    )));
     let tokens = crate::guest_client::TokenStore::current().unwrap();
     tokens.enable("a", 47311).unwrap();
     tokens.enable("b", 47312).unwrap();
@@ -551,6 +554,7 @@ fn the_channel_rule_is_the_computers_own_port_in_every_mode_and_no_other_compute
         }
     }
     crate::guest_client::tokens::use_test_directory(None);
+    crate::guest_client::use_test_channels(None);
     store::use_test_path(None);
 }
 
@@ -874,6 +878,9 @@ fn a_fork_gets_its_own_port_and_no_token_and_an_import_gets_none_until_turned_on
     let directory = tempfile::tempdir().unwrap();
     store::use_test_path(Some(directory.path().join("network-policy.json")));
     crate::guest_client::tokens::use_test_directory(Some(directory.path().join("guest-client")));
+    crate::guest_client::use_test_channels(Some(std::sync::Arc::new(
+        crate::guest_client::fake::Fake::default(),
+    )));
     let tokens = crate::guest_client::TokenStore::current().unwrap();
     crate::guest_client::turn_on("parent").unwrap();
     let parent_token = tokens.mint("parent").unwrap().token;
@@ -910,6 +917,7 @@ fn a_fork_gets_its_own_port_and_no_token_and_an_import_gets_none_until_turned_on
     crate::guest_client::computer_removed("imported");
     assert!(extra_rules("imported").is_empty());
     crate::guest_client::tokens::use_test_directory(None);
+    crate::guest_client::use_test_channels(None);
     store::use_test_path(None);
 }
 

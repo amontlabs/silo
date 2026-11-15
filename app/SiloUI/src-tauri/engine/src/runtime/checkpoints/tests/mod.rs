@@ -6084,6 +6084,9 @@ fn a_fork_has_its_own_channel_port_and_the_closed_copy_of_an_export_has_none() {
     crate::guest_client::tokens::use_test_directory(Some(
         store_directory.path().join("guest-client"),
     ));
+    crate::guest_client::use_test_channels(Some(std::sync::Arc::new(
+        crate::guest_client::fake::Fake::default(),
+    )));
     let tokens = crate::guest_client::TokenStore::current().unwrap();
     crate::guest_client::turn_on(ID).unwrap();
     let source_port = tokens.port_of(ID).unwrap();
@@ -6133,6 +6136,7 @@ fn a_fork_has_its_own_channel_port_and_the_closed_copy_of_an_export_has_none() {
     assert!(plan.rules.is_empty());
     assert!(!plan.ingress_allowed);
     crate::guest_client::tokens::use_test_directory(None);
+    crate::guest_client::use_test_channels(None);
     crate::network_policy::store::use_test_path(None);
 }
 
@@ -6178,6 +6182,9 @@ fn a_computer_with_no_saved_policy_gets_its_channel_rule_added_to_the_rules_it_w
     crate::guest_client::tokens::use_test_directory(Some(
         store_directory.path().join("guest-client"),
     ));
+    crate::guest_client::use_test_channels(Some(std::sync::Arc::new(
+        crate::guest_client::fake::Fake::default(),
+    )));
     let directory = tempfile::tempdir().unwrap();
     let paths = restore_fixture(&directory, None);
     let configuration = computer_configuration();
@@ -6230,6 +6237,7 @@ fn a_computer_with_no_saved_policy_gets_its_channel_rule_added_to_the_rules_it_w
     std::fs::write(&file, "{ not json").unwrap();
     assert!(ensure_network_rules_current(&current, &paths, &configuration).is_err());
     crate::guest_client::tokens::use_test_directory(None);
+    crate::guest_client::use_test_channels(None);
     crate::network_policy::store::use_test_path(None);
 }
 
@@ -7212,6 +7220,9 @@ fn an_import_saves_a_closed_policy_and_a_start_does_not_run_on_an_unreadable_one
     crate::network_policy::store::set(ID, &crate::network_policy::NetworkPolicy::default())
         .unwrap();
     crate::guest_client::tokens::use_test_directory(Some(directory.path().join("guest-client")));
+    crate::guest_client::use_test_channels(Some(std::sync::Arc::new(
+        crate::guest_client::fake::Fake::default(),
+    )));
     // Silo's tools left over from a computer of this id are turned off by the import.
     crate::guest_client::turn_on(ID).unwrap();
     import_pending_restore(
@@ -7248,5 +7259,6 @@ fn an_import_saves_a_closed_policy_and_a_start_does_not_run_on_an_unreadable_one
         .all(|args| args[0] != "restore" && args[0] != "remove"));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
     crate::guest_client::tokens::use_test_directory(None);
+    crate::guest_client::use_test_channels(None);
     crate::network_policy::store::use_test_path(None);
 }
