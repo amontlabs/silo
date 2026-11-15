@@ -79,13 +79,24 @@ struct Resolved {
     plan: Plan,
     grants: Grants,
     timing: NetworkPolicyTiming,
+    /// Whether the rules the runtime holds refuse incoming connections as an import's do
+    /// ([`super::held_from_recorded`]); what a computer with nothing saved keeps.
+    recorded_incoming_denied: bool,
 }
 
 /// The policy a computer runs with, its plan and when the plan is in force. The policy is the
 /// stored one, else what the runtime's recorded rules mean, and a container the engine blocked
-/// is closed whatever is stored. An unreadable store is an error, never an open computer.
+/// is closed whatever is stored. An unreadable store is an error, never an open computer, and
+/// so is a missing policy ([`store::MISSING`]).
 fn resolve(computer_id: &str, target: &Target<'_>) -> Result<Resolved, String> {
-    let stored = store::get_stored(computer_id)?;
+    resolve_with(computer_id, target, store::get_stored(computer_id)?)
+}
+
+fn resolve_with(
+    computer_id: &str,
+    target: &Target<'_>,
+    stored: Option<Stored>,
+) -> Result<Resolved, String> {
     match target {
         Target::Linux(paths) => {
             let view = crate::runtime::checkpoints::network_policy_view(paths, computer_id)?;
@@ -106,6 +117,7 @@ fn resolve(computer_id: &str, target: &Target<'_>) -> Result<Resolved, String> {
                 plan,
                 grants,
                 timing,
+                recorded_incoming_denied: false,
             })
         }
     }
@@ -149,6 +161,7 @@ fn resolve_linux(
         plan,
         grants,
         timing,
+        recorded_incoming_denied: super::held_from_recorded(recorded).1,
     }
 }
 
@@ -211,6 +224,10 @@ pub fn get(computer_id: &str, target: Target<'_>) -> Result<NetworkPolicyState, 
 ///
 /// With `expected`, the policy is saved only if the computer still has that policy; the engine
 /// gives it for a computer's agent narrowing its own network, which was judged against it.
+/// Without it (the owner's call) a computer whose saved policy is missing gets this one.
+///
+/// The refusal of incoming connections is kept: the saved one, else what the runtime's rules
+/// mean. Setting a policy never turns it off.
 pub fn set(
     computer_id: &str,
     policy: &NetworkPolicy,
@@ -220,11 +237,15 @@ pub fn set(
 ) -> Result<NetworkPolicyState, String> {
     let policy = validate(policy)?;
     // The computer must exist before anything is saved for it.
-    let before = resolve(computer_id, &target)?;
-    let incoming_denied = before
-        .stored
-        .as_ref()
-        .is_some_and(|stored| stored.incoming_denied);
+    let stored = match expected {
+        Some(_) => store::get_stored(computer_id)?,
+        None => store::get_stored_or_missing(computer_id)?,
+    };
+    let before = resolve_with(computer_id, &target, stored)?;
+    let incoming_denied = match &before.stored {
+        Some(stored) => stored.incoming_denied,
+        None => before.recorded_incoming_denied,
+    };
     let stored = if accept_presets.unwrap_or(false) {
         let mut s = Stored::approved(&policy);
         s.incoming_denied = incoming_denied;

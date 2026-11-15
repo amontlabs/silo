@@ -109,6 +109,9 @@ impl From<GateError> for Failure {
 /// Linux records live in the runtime storage generation in use; while the storage
 /// migration has not finished that storage is the pre-upgrade backup source and is left
 /// byte for byte, and its records are converted at the launch after the migration.
+///
+/// Every computer with a saved network policy is then marked as having one
+/// ([`crate::network_policy::store::mark_saved`]).
 pub fn upgrade_layouts(
     context: &dyn EngineContext,
     migration: &crate::runtime_migration::Controller,
@@ -121,6 +124,14 @@ pub fn upgrade_layouts(
     }
     if let Err(error) = macos_computers::upgrade_checkpoint_records(&context.paths().app_data) {
         failures.push(error);
+    }
+    // Policies saved before computers were marked as having one get the mark, once the Linux
+    // storage may be written. A store that cannot be read is reported where it is used; it
+    // does not stop the launch.
+    if migration.runtime_storage().is_ok() {
+        if let Err(error) = crate::network_policy::store::mark_saved() {
+            eprintln!("silo-engine: {error}");
+        }
     }
     if failures.is_empty() {
         Ok(())

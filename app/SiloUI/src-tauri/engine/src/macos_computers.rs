@@ -97,6 +97,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+pub(crate) use store::{network_policy_mark, set_network_policy_mark};
 pub use store::{Action, CreateRequest, ExpectedResources};
 
 /// Where a macOS computer's gateway appends credential-use events.
@@ -3784,7 +3785,7 @@ fn recover_archive_import_in(
         discard_import_folder(&stage, detach)?;
         // The policy is saved before the folder is published; one that is missing is closed
         // again rather than left to be read as open.
-        if crate::network_policy::store::get_stored(&id)?.is_none() {
+        if !crate::network_policy::store::has_entry(&id)? {
             crate::network_policy::store::set_stored(
                 &id,
                 crate::network_policy::store::Stored::closed_without_incoming(),
@@ -4317,19 +4318,20 @@ fn create_accepting_with(
     let job_id = allocate_job()?;
     let registry_handle = app.engine.job_registry()?;
     let job = accept_macos_job_with_id(registry_handle.clone(), job_id.clone(), gate)?;
-    let record = store::new_record(&request, engine::random_mac());
+    let mut record = store::new_record(&request, engine::random_mac());
+    // The record says it has a saved policy before the policy is saved, so a computer whose
+    // policy is lost later is never read as one from before policies existed.
+    record.network_policy_saved = network_policy.is_some();
+    if let Err(message) = store::save(&Layout::new(&data, &record.id), &record) {
+        abandon_macos_job(app.engine.as_ref(), &job, &message);
+        return Err(message);
+    }
     if let Some(policy) = network_policy {
         if let Err(message) = crate::network_policy::store::set(&record.id, policy) {
+            let _ = store::remove(&Layout::new(&data, &record.id));
             abandon_macos_job(app.engine.as_ref(), &job, &message);
             return Err(message);
         }
-    }
-    if let Err(message) = store::save(&Layout::new(&data, &record.id), &record) {
-        if network_policy.is_some() {
-            let _ = crate::network_policy::store::remove(&record.id);
-        }
-        abandon_macos_job(app.engine.as_ref(), &job, &message);
-        return Err(message);
     }
     let entry = Entry::new(record.clone(), State::Preparing, None);
     let cancel = entry.cancel.clone();
@@ -6837,12 +6839,7 @@ fn fork_checkpoint_with_workflow(
         record.computer_use_version = checkpoint.computer_use_version.clone();
         record.computer_use_approval = held.record.computer_use_approval;
         record.computer_use_desired_approval = held.record.computer_use_desired_approval;
-        // A crash before the files are copied leaves a failed computer that can be deleted.
-        store::save(&Layout::new(&data, &record.id), &record)?;
-        // The fork keeps its source's network policy unless the call gave it another.
-        crate::network_policy::store::inherit(id, &record.id, options.network_policy.as_ref())?;
-        crate::guest_client::inherit(id, &record.id)?;
-        crate::recipes::records::inherit(id, &record.id)?;
+        save_fork_record(&data, id, &record, options.network_policy.as_ref())?;
         let entry = Entry::new(record.clone(), State::Copying, None);
         let cancel = entry.cancel.clone();
         registry.entries.push(entry);
@@ -7493,6 +7490,90 @@ pub fn seed_test_computer(app_data: &std::path::Path, name: &str) -> (String, St
     (record.id, checkpoint.id)
 }
 
+/// The import publish and recovery steps, for tests outside this module.
+#[cfg(test)]
+pub(crate) mod test_access {
+    use std::path::Path;
+
+    use super::store::{self, CreateRequest, Layout};
+
+    /// The staging and final folders of an import of `id`.
+    pub(crate) fn import_folders(
+        data: &Path,
+        id: &str,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        let root = store::root(data);
+        (root.join(format!(".partial-import-{id}")), root.join(id))
+    }
+
+    pub(crate) fn publish_import_folder(data: &Path, id: &str) -> Result<(), String> {
+        let (stage, final_dir) = import_folders(data, id);
+        super::publish_import_folder(&stage, &final_dir, &store::root(data), id)
+    }
+
+    /// Writes the record of the import of `id` into its staging folder, as an import does
+    /// before it publishes the folder.
+    pub(crate) fn write_staged_record(data: &Path, id: &str, name: &str) {
+        let (stage, _) = import_folders(data, id);
+        let mut record = record(id, name);
+        record.imported = true;
+        store::save(
+            &Layout {
+                dir: stage,
+                access: None,
+            },
+            &record,
+        )
+        .unwrap();
+    }
+
+    fn record(id: &str, name: &str) -> store::Record {
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: name.into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:0b".into(),
+        );
+        record.id = id.to_owned();
+        record
+    }
+
+    /// Writes the record that marks the import of `id` as published.
+    pub(crate) fn write_published_record(data: &Path, id: &str, name: &str) {
+        store::save(&Layout::new(data, id), &record(id, name)).unwrap();
+    }
+
+    pub(crate) fn recover_archive_import(data: &Path, id: &str) -> Result<bool, String> {
+        super::recover_archive_import_in(data, id, &|_: &Path| Ok(()))
+    }
+}
+
+/// Saves a fork's record and gives it what it keeps of its source `source_id`: the network
+/// policy (`policy`, else the source's), Silo's tools and the recipe. A crash before the files
+/// are copied leaves a failed computer that can be deleted; a refusal here removes the fork's
+/// folder, so nothing is left to list.
+fn save_fork_record(
+    data: &std::path::Path,
+    source_id: &str,
+    record: &Record,
+    policy: Option<&crate::network_policy::NetworkPolicy>,
+) -> Result<(), String> {
+    let layout = Layout::new(data, &record.id);
+    store::save(&layout, record)?;
+    let inherited = (|| {
+        crate::network_policy::store::inherit(source_id, &record.id, policy, None)?;
+        crate::guest_client::inherit(source_id, &record.id)?;
+        crate::recipes::records::inherit(source_id, &record.id)
+    })();
+    if inherited.is_err() {
+        let _ = store::remove(&layout);
+    }
+    inherited
+}
+
 /// Fork assignments that record what was copied and fail for names the source lacks.
 #[cfg(test)]
 #[derive(Default)]
@@ -8023,6 +8104,28 @@ mod tests {
 
     fn import_policy_file(directory: &std::path::Path) {
         crate::network_policy::store::use_test_path(Some(directory.join("network-policy.json")));
+    }
+
+    #[test]
+    fn a_fork_whose_network_policy_is_refused_leaves_no_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        import_policy_file(directory.path());
+        std::fs::write(directory.path().join("network-policy.json"), b"{ not json").unwrap();
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "fork".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:0c".into(),
+        );
+        record.id = uuid::Uuid::new_v4().to_string();
+        let source = uuid::Uuid::new_v4().to_string();
+
+        assert!(save_fork_record(directory.path(), &source, &record, None).is_err());
+        assert!(!Layout::new(directory.path(), &record.id).dir.exists());
+        crate::network_policy::store::use_test_path(None);
     }
 
     #[test]

@@ -26,6 +26,39 @@ pub mod swap;
 #[cfg(test)]
 mod tests;
 
+/// The policy steps of a rebuild, for tests outside this module.
+#[cfg(test)]
+pub(crate) mod test_access {
+    use serde_json::Value;
+
+    use super::{engine_env, swap, Plan};
+
+    pub(crate) fn save_build_policies(plan: &Plan, recorded: Option<&Value>) -> Result<(), String> {
+        engine_env::save_build_policies(plan, recorded)
+    }
+
+    pub(crate) fn swap_with_policy(
+        plan: &Plan,
+        sandboxes: &dyn swap::Sandboxes,
+        recorded: &dyn Fn() -> Result<Option<Value>, String>,
+        published: &dyn Fn() -> Result<bool, String>,
+        publish_inventory: &dyn Fn() -> Result<(), String>,
+    ) -> Result<(), String> {
+        engine_env::swap_with_policy(plan, sandboxes, recorded, published, publish_inventory)
+    }
+
+    pub(crate) fn settle_undo_policy(
+        plan: &Plan,
+        recorded: &dyn Fn() -> Result<Option<Value>, String>,
+    ) -> Result<(), String> {
+        engine_env::settle_undo_policy(plan, recorded)
+    }
+
+    pub(crate) fn forget_build_policies(plan: &Plan) -> Result<(), String> {
+        engine_env::forget_build_policies(plan)
+    }
+}
+
 use std::time::Duration;
 
 pub use journal::{Journal, Plan, Record, Step};

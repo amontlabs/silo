@@ -1,7 +1,9 @@
 //! Each computer's network policy, keyed by the computer's id, in
 //! `<app data>/network-policy.json`, with the preset versions it was approved at. A computer
 //! without an entry is one saved before policies existed; [`super::effective`] decides what it
-//! runs with. A file that cannot be read is an error, never an empty store.
+//! runs with. A file that cannot be read is an error, never an empty store, and so is a missing
+//! entry of a computer marked as having had one ([`super::marks`]): a missing file is an empty
+//! store only for computers that never had a policy.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -122,6 +124,11 @@ pub(crate) fn use_test_path(path: Option<PathBuf>) {
     TEST_PATH.with(|test| *test.borrow_mut() = path);
 }
 
+#[cfg(test)]
+pub(crate) fn uses_test_path() -> bool {
+    TEST_PATH.with(|test| test.borrow().is_some())
+}
+
 fn path() -> Option<PathBuf> {
     #[cfg(test)]
     if let Some(path) = TEST_PATH.with(|test| test.borrow().clone()) {
@@ -185,9 +192,26 @@ fn write(path: &PathBuf, document: &Document) -> Result<(), String> {
     written.map_err(io)
 }
 
-/// Changes the stored policies and the stand-in marks. Without an installed store (no engine)
-/// nothing is kept.
-fn update_document(change: impl FnOnce(&mut Document) -> Result<(), String>) -> Result<(), String> {
+/// What the store says for a computer marked as having had a saved policy that has no entry.
+pub const MISSING: &str = "The saved network policy of this computer is missing, so it cannot start or be copied. Set its network policy again.";
+
+/// The entry of `computer_id` in `document`, or the error for one that a marked computer lost.
+fn entry<'a>(document: &'a Document, computer_id: &str) -> Result<Option<&'a Stored>, String> {
+    match document.computers.get(computer_id) {
+        Some(stored) => Ok(Some(stored)),
+        None if super::marks::is_marked(computer_id)? => Err(MISSING.to_owned()),
+        None => Ok(None),
+    }
+}
+
+/// Changes the stored policies and the stand-in marks for `target`. Without an installed store
+/// (no engine) nothing is kept. `target`, when it has an entry afterwards, and any computer
+/// that gets or changes an entry are marked before the file is written; one whose entry is
+/// removed is unmarked after.
+fn update_document(
+    target: &str,
+    change: impl FnOnce(&mut Document) -> Result<(), String>,
+) -> Result<(), String> {
     let Some(path) = path() else {
         return Ok(());
     };
@@ -197,11 +221,48 @@ fn update_document(change: impl FnOnce(&mut Document) -> Result<(), String>) -> 
     let mut document = read(&path)?;
     let before = document.clone();
     change(&mut document)?;
+    if document.computers.contains_key(target) {
+        super::marks::mark(target)?;
+    }
     if document != before {
+        for (id, stored) in &document.computers {
+            if id != target && before.computers.get(id) != Some(stored) {
+                super::marks::mark(id)?;
+            }
+        }
         document.version = VERSION;
         write(&path, &document)?;
+        for id in before.computers.keys() {
+            if !document.computers.contains_key(id) {
+                super::marks::unmark(id)?;
+            }
+        }
     }
     Ok(())
+}
+
+/// Marks every computer that has an entry, for policies saved before marks existed. Run when
+/// the engine starts; a store that cannot be read marks nothing, and a missing file has no
+/// entries.
+pub fn mark_saved() -> Result<(), String> {
+    let Some(path) = path() else {
+        return Ok(());
+    };
+    let _held = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let document = read(&path)?;
+    let mut failed = Vec::new();
+    for id in document.computers.keys() {
+        if let Err(error) = super::marks::mark_existing(id) {
+            failed.push(error);
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(failed.join(" "))
+    }
 }
 
 /// Changes the policy of `computer_id`: whatever it holds afterwards is the computer's own, so
@@ -210,7 +271,7 @@ fn update_computer(
     computer_id: &str,
     change: impl FnOnce(&mut BTreeMap<String, Stored>) -> Result<(), String>,
 ) -> Result<(), String> {
-    update_document(|document| {
+    update_document(computer_id, |document| {
         change(&mut document.computers)?;
         document.stand_in.remove(computer_id);
         Ok(())
@@ -218,8 +279,8 @@ fn update_computer(
 }
 
 /// The stored policy of `computer_id` with its approvals; `None` when it has none or no store
-/// is installed. An error when the saved policies cannot be read: callers must not treat that
-/// as "no policy".
+/// is installed. An error when the saved policies cannot be read or the computer's is missing
+/// ([`MISSING`]): callers must not treat that as "no policy".
 pub fn get_stored(computer_id: &str) -> Result<Option<Stored>, String> {
     let Some(path) = path() else {
         return Ok(None);
@@ -227,7 +288,25 @@ pub fn get_stored(computer_id: &str) -> Result<Option<Stored>, String> {
     let _held = LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let document = read(&path)?;
+    Ok(entry(&document, computer_id)?.cloned())
+}
+
+/// [`get_stored`] that reads a marked computer's missing policy as none, for the owner setting
+/// it again.
+pub(crate) fn get_stored_or_missing(computer_id: &str) -> Result<Option<Stored>, String> {
+    let Some(path) = path() else {
+        return Ok(None);
+    };
+    let _held = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     Ok(read(&path)?.computers.get(computer_id).cloned())
+}
+
+/// Whether `computer_id` has an entry, whether or not it is marked.
+pub fn has_entry(computer_id: &str) -> Result<bool, String> {
+    Ok(get_stored_or_missing(computer_id)?.is_some())
 }
 
 /// The stored policy of `computer_id`; `None` when it has none or no store is installed.
@@ -270,16 +349,32 @@ pub const CHANGED: &str =
 /// Gives `target` the policy `policy`, or `source`'s (with its approvals) when `policy` is
 /// `None`. A policy given keeps the versions `source` was approved at ([`Held::inheriting`]):
 /// handing a policy on never advances a preset or the GitHub grant, which takes an approval
-/// of its own. A source with no entry gives nothing, so the target is treated like its source.
-pub fn inherit(source: &str, target: &str, policy: Option<&NetworkPolicy>) -> Result<(), String> {
-    update_computer(target, |computers| {
+/// of its own. It keeps `source`'s refusal of incoming connections too: the saved one, else
+/// what `recorded` (the rules `source`'s runtime holds) means. A source with no entry gives
+/// nothing, so the target is treated like its source; a source whose policy is missing
+/// ([`MISSING`]) gives an error.
+pub fn inherit(
+    source: &str,
+    target: &str,
+    policy: Option<&NetworkPolicy>,
+    recorded: Option<&serde_json::Value>,
+) -> Result<(), String> {
+    update_document(target, |document| {
+        let from = entry(document, source)?.cloned();
+        let computers = &mut document.computers;
         let chosen = match policy {
-            Some(policy) => Some(Stored::preserving_pins(
-                policy,
-                computers.get(source),
-                false,
-            )),
-            None => computers.get(source).cloned(),
+            Some(policy) => {
+                let incoming_denied = match &from {
+                    Some(from) => from.incoming_denied,
+                    None => super::held_from_recorded(recorded).1,
+                };
+                Some(Stored::preserving_pins(
+                    policy,
+                    from.as_ref(),
+                    incoming_denied,
+                ))
+            }
+            None => from,
         };
         match chosen {
             Some(chosen) => {
@@ -289,6 +384,7 @@ pub fn inherit(source: &str, target: &str, policy: Option<&NetworkPolicy>) -> Re
                 computers.remove(target);
             }
         }
+        document.stand_in.remove(target);
         Ok(())
     })
 }
@@ -303,13 +399,13 @@ pub fn is_unresolved(computer_id: &str) -> Result<bool, String> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let document = read(&path)?;
-    Ok(!document.computers.contains_key(computer_id) || document.stand_in.contains(computer_id))
+    Ok(entry(&document, computer_id)?.is_none() || document.stand_in.contains(computer_id))
 }
 
 /// Saves the closed policy for `computer_id` while its real rules cannot be read, and marks it
 /// as a stand-in. A computer that already has a policy of its own keeps it.
 pub fn set_stand_in(computer_id: &str) -> Result<(), String> {
-    update_document(|document| {
+    update_document(computer_id, |document| {
         if document.computers.contains_key(computer_id) && !document.stand_in.contains(computer_id)
         {
             return Ok(());
@@ -325,7 +421,7 @@ pub fn set_stand_in(computer_id: &str) -> Result<(), String> {
 /// Saves `stored` for `computer_id` as a stand-in: a later [`resolve`] or [`resolve_from`]
 /// replaces it. A computer that already has a policy of its own keeps it.
 pub fn set_provisional(computer_id: &str, stored: Stored) -> Result<(), String> {
-    update_document(|document| {
+    update_document(computer_id, |document| {
         if document.computers.contains_key(computer_id) && !document.stand_in.contains(computer_id)
         {
             return Ok(());
@@ -341,7 +437,7 @@ pub fn set_provisional(computer_id: &str, stored: Stored) -> Result<(), String> 
 /// it holds.
 pub fn resolve(target: &str, chosen: Stored) -> Result<bool, String> {
     let mut saved = false;
-    update_document(|document| {
+    update_document(target, |document| {
         if document.computers.contains_key(target) && !document.stand_in.contains(target) {
             return Ok(());
         }
@@ -357,7 +453,7 @@ pub fn resolve(target: &str, chosen: Stored) -> Result<bool, String> {
 /// had one of its own and `target` took it; a stand-in `source` gives nothing.
 pub fn resolve_from(source: &str, target: &str) -> Result<bool, String> {
     let mut saved = false;
-    update_document(|document| {
+    update_document(target, |document| {
         if document.computers.contains_key(target) && !document.stand_in.contains(target) {
             return Ok(());
         }
@@ -374,11 +470,16 @@ pub fn resolve_from(source: &str, target: &str) -> Result<bool, String> {
     Ok(saved)
 }
 
+/// Removes the policy of `computer_id`, then its mark.
 pub fn remove(computer_id: &str) -> Result<(), String> {
     update_computer(computer_id, |computers| {
         computers.remove(computer_id);
         Ok(())
-    })
+    })?;
+    if path().is_some() {
+        super::marks::unmark(computer_id)?;
+    }
+    Ok(())
 }
 
 /// The computers that have an entry, in order.

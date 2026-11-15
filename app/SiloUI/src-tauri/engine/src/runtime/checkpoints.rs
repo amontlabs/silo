@@ -121,6 +121,11 @@ pub(super) struct Record {
     /// forks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) quiet: Option<QuietRecord>,
+    /// The computer has had a saved network policy: one missing from the policy store is
+    /// lost, not a computer from before policies existed (see `network_policy::marks`). Once
+    /// set, an ordinary save keeps it; only [`set_network_policy_mark`] clears it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    network_policy_saved: bool,
 }
 
 /// What a fork was made quiet with: the names the caller asked to stop and scrub, the
@@ -299,8 +304,12 @@ fn path(paths: &RuntimePaths, id: &str) -> PathBuf {
 }
 
 pub(super) fn load(paths: &RuntimePaths, id: &str) -> Result<Record, RuntimeError> {
+    load_in(&directory(paths), id)
+}
+
+fn load_in(directory: &Path, id: &str) -> Result<Record, RuntimeError> {
     uuid::Uuid::parse_str(id).map_err(|_| error("Silo could not identify this computer. Refresh its status and retry the checkpoint action."))?;
-    let bytes = match fs::read(path(paths, id)) {
+    let bytes = match fs::read(directory.join(format!("{id}.json"))) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Record::default()),
         Err(_) => return Err(error("Checkpoint history could not be read.")),
@@ -479,20 +488,68 @@ pub fn ensure_snapshot_group(
     Ok(group)
 }
 
+/// Serialises the writes of checkpoint records, so a network policy mark set between another
+/// writer's read and its save is kept.
+static RECORD_WRITES: Mutex<()> = Mutex::new(());
+
 pub(super) fn save(paths: &RuntimePaths, id: &str, record: &Record) -> Result<(), RuntimeError> {
-    uuid::Uuid::parse_str(id).map_err(|_| error("Silo could not identify this computer. Refresh its status and retry the checkpoint action."))?;
+    let _writing = RECORD_WRITES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let directory = directory(paths);
+    let mut record = record.clone();
+    // The mark only turns off through `set_network_policy_mark`.
+    if !record.network_policy_saved {
+        record.network_policy_saved = saved_mark(&directory, id);
+    }
+    write_record(&directory, id, record)
+}
+
+/// Whether the record on disk carries the network policy mark, read without checking the rest.
+fn saved_mark(directory: &Path, id: &str) -> bool {
+    fs::read(directory.join(format!("{id}.json")))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|record| record.get("networkPolicySaved")?.as_bool())
+        .unwrap_or(false)
+}
+
+/// Whether the computer `id`'s record in `directory` (a storage's `checkpoints` folder) says it
+/// has had a saved network policy. A missing record says no.
+pub(crate) fn network_policy_mark(directory: &Path, id: &str) -> Result<bool, String> {
+    load_in(directory, id)
+        .map(|record| record.network_policy_saved)
+        .map_err(|error| error.to_string())
+}
+
+/// Sets or clears the network policy mark of `id`'s record in `directory`. Setting it saves a
+/// record for a computer that has none yet; clearing it leaves a missing record missing.
+pub(crate) fn set_network_policy_mark(directory: &Path, id: &str, on: bool) -> Result<(), String> {
+    let _writing = RECORD_WRITES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let exists = directory.join(format!("{id}.json")).exists();
+    let mut record = load_in(directory, id).map_err(|error| error.to_string())?;
+    if record.network_policy_saved == on || (!on && !exists) {
+        return Ok(());
+    }
+    record.network_policy_saved = on;
+    write_record(directory, id, record).map_err(|error| error.to_string())
+}
+
+fn write_record(directory: &Path, id: &str, mut record: Record) -> Result<(), RuntimeError> {
+    uuid::Uuid::parse_str(id).map_err(|_| error("Silo could not identify this computer. Refresh its status and retry the checkpoint action."))?;
+    let directory = directory.to_path_buf();
     fs::create_dir_all(&directory).map_err(|_| error("Checkpoint history could not be saved."))?;
     let mut file = tempfile::NamedTempFile::new_in(&directory)
         .map_err(|_| error("Checkpoint history could not be saved."))?;
-    let mut record = record.clone();
     record.version = RECORD_VERSION;
     serde_json::to_writer(&mut file, &record)
         .map_err(|_| error("Checkpoint history could not be encoded."))?;
     file.as_file()
         .sync_all()
         .map_err(|_| error("Checkpoint history could not be synced."))?;
-    file.persist(path(paths, id))
+    file.persist(directory.join(format!("{id}.json")))
         .map_err(|_| error("Checkpoint history could not be saved."))?;
     File::open(&directory)
         .and_then(|dir| dir.sync_all())
@@ -2870,17 +2927,21 @@ fn fork_commit_with_metadata_writer(
     let mut copied_secrets = false;
     let result = (|| {
         crate::computer_use::inherit_settings(paths, source.id(), &child_id)?;
-        // The copy an export makes refuses connections in both directions.
+        // The copy an export makes refuses connections in both directions. A source whose
+        // saved policy is missing is not copied either way.
         if fork.options.network_policy.is_none() && fork.options.closed_network {
-            crate::network_policy::store::set_stored(
-                &child_id,
-                crate::network_policy::store::Stored::closed_without_incoming(),
-            )
+            crate::network_policy::store::get_stored(source.id()).and_then(|_| {
+                crate::network_policy::store::set_stored(
+                    &child_id,
+                    crate::network_policy::store::Stored::closed_without_incoming(),
+                )
+            })
         } else {
             crate::network_policy::store::inherit(
                 source.id(),
                 &child_id,
                 fork.options.network_policy.as_ref(),
+                Some(&fork.desired_policy),
             )
         }
         .map_err(RuntimeError::Unavailable)?;

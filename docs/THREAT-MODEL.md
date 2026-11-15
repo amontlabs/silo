@@ -136,9 +136,18 @@ entry that follows the GitHub preset's version; a policy saved before that entry
 first version, which is the list GitHub access has always added, so nothing changes when it loads. A fork keeps the versions of its source, whatever policy it is given, and a decision to make a fork or change a policy counts the GitHub hosts at the version each computer holds, so only an approval moves a computer to a newer list. The data file keeps the list of every earlier version of a preset for as long
 as a saved policy may name it; a version Silo does not know allows nothing. A policy is read from
 one file; when it cannot be read (damaged, or written by a newer Silo) a computer does not start,
-is not created, and its gateway gets no way out, and the file is left alone. A computer with no
-saved policy is judged and run by the rules its runtime holds (deny-all rules are closed), never
-as open by default; an import saves an explicit closed policy. The policy follows the computer: a
+is not created, and its gateway gets no way out, and the file is left alone. Each computer's own
+record (a macOS computer's `computer.json`, a Linux computer's checkpoint record) is marked once it
+has a saved policy, before the policy is written, and the mark goes only after the policy is
+removed; policies saved before the mark existed are marked when the engine starts. A marked
+computer whose policy is missing (the file deleted, or its entry gone) is treated as if the file
+were damaged: it does not start, is not forked or copied, and its gateway gets no way out, until
+you set its policy again. A missing file is an empty store only for computers that never had a
+policy. A computer with no saved policy and no mark is judged and run by the rules its runtime
+holds (deny-all rules are closed), never as open by default; an import saves an explicit closed
+policy. Refused incoming connections (an import, the copy an export makes) stay refused when a
+policy is set or handed on: setting a policy, narrowing it, or forking with a given policy keeps
+the source's refusal, saved or read from its runtime rules. The policy follows the computer: a
 checkpoint restore and a fork keep it, an export drops it, an import starts closed, and a computer from before the
 policy loads as open. A computer's agent may read its own policy and those of computers it made,
 may narrow either freely, and asks you to widen one (see [the policy page](SiloUI-POLICY.md)); a

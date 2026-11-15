@@ -63,3 +63,7 @@ keychain-status-sys = { package = "security-framework-sys", version = "2.17" }
 
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 objc2-virtualization = "0.3.2"
+
+[dev-dependencies]
+proptest = "1.12"
+proptest-state-machine = "0.9"
