@@ -1,4 +1,4 @@
-atelier = "0.2.0"
+atelier = "0.2.1"
 integration_branch = "main"
 workspaces = ["app/SiloUI"]
 promotion_wait_seconds = 300
