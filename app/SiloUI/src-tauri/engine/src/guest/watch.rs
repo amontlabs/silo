@@ -135,6 +135,58 @@ impl Drop for Slot {
 /// stops; `stop` ends it at once. Dropping the handle does not stop it.
 pub struct WatchHandle {
     stop: Arc<AtomicBool>,
+    /// Set once the helper process has been ended and reaped.
+    #[cfg(any(test, feature = "test-support"))]
+    finished: Arc<AtomicBool>,
+}
+
+/// Every watch started in this process that has not finished, for tests whose local helper
+/// would otherwise outlive the test process.
+#[cfg(any(test, feature = "test-support"))]
+static LIVE_WATCHES: Mutex<Vec<(Arc<AtomicBool>, Arc<AtomicBool>)>> = Mutex::new(Vec::new());
+
+/// Stops every watch of this process and waits until each helper is gone. Meant for the end
+/// of a test process that runs one test (nextest); it also ends watches of concurrent tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn end_all_watches() {
+    let live: Vec<_> = std::mem::take(
+        &mut *LIVE_WATCHES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    for (stop, _) in &live {
+        stop.store(true, Ordering::SeqCst);
+    }
+    for (_, finished) in &live {
+        while !finished.load(Ordering::SeqCst) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+/// Ends every watch of the process when dropped, also while a test panics.
+#[cfg(any(test, feature = "test-support"))]
+pub struct EndWatchesOnDrop;
+
+#[cfg(any(test, feature = "test-support"))]
+impl Drop for EndWatchesOnDrop {
+    fn drop(&mut self) {
+        end_all_watches();
+    }
+}
+
+/// In tests the helper is a local process that nothing else would end, so a handle that goes
+/// away (also while a test panics) stops its watch and waits until the helper is gone.
+#[cfg(test)]
+impl Drop for WatchHandle {
+    fn drop(&mut self) {
+        self.stop();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !self.finished.load(Ordering::SeqCst) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
 }
 
 impl WatchHandle {
@@ -262,7 +314,21 @@ pub fn start_watch(
         return Err(GuestError::new(ErrorCode::Internal, message));
     }
     let stop = Arc::new(AtomicBool::new(false));
-    let handle = WatchHandle { stop: stop.clone() };
+    #[cfg(any(test, feature = "test-support"))]
+    let finished = {
+        let finished = Arc::new(AtomicBool::new(false));
+        let mut live = LIVE_WATCHES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        live.retain(|(_, done)| !done.load(Ordering::SeqCst));
+        live.push((stop.clone(), finished.clone()));
+        finished
+    };
+    let handle = WatchHandle {
+        stop: stop.clone(),
+        #[cfg(any(test, feature = "test-support"))]
+        finished: finished.clone(),
+    };
     let target = target.clone();
     {
         let queue = queue.clone();
@@ -294,6 +360,8 @@ pub fn start_watch(
         let _ = streaming.child.wait();
         streaming.finish_output();
         queue.close();
+        #[cfg(any(test, feature = "test-support"))]
+        finished.store(true, Ordering::SeqCst);
     });
     Ok(handle)
 }

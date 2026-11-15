@@ -38,7 +38,10 @@ mod tests {
 
     #[test]
     fn a_child_that_handles_sigterm_exits_without_being_killed() {
-        let mut child = Command::new("sh").args(["-c", "sleep 30"]).spawn().unwrap();
+        let mut child = Command::new("sh")
+            .args(["-c", "exec sleep 30"])
+            .spawn()
+            .unwrap();
         let started = Instant::now();
         let status = terminate_child(&mut child, Duration::from_secs(5)).unwrap();
         assert!(started.elapsed() < Duration::from_secs(4));

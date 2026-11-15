@@ -1136,6 +1136,8 @@ exit 2
 
     /// An engine whose Linux runtime is a fake `msb` that runs commands on this machine.
     struct Fixture {
+        /// First, so it is dropped before `directory`: ending a watch runs the fake `msb` there.
+        _watches: silo_engine::guest::EndWatchesOnDrop,
         directory: tempfile::TempDir,
         engine: Arc<SilodContext>,
         context: HandlerContext,
@@ -1211,6 +1213,7 @@ exit 2
                 },
             );
             Self {
+                _watches: silo_engine::guest::EndWatchesOnDrop,
                 directory,
                 engine,
                 context,

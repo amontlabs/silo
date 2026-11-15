@@ -1088,7 +1088,7 @@ mod tests {
         let started = Instant::now();
         let error = exec(
             "/bin/sh",
-            &args("printf 123456; sleep 30"),
+            &args("printf 123456; exec sleep 30"),
             None,
             Duration::from_secs(20),
             &[],
