@@ -36,3 +36,4 @@ When you end your turn, atelier's stop hook sends you back while a rebase is ope
 - A user-visible change needs a changeset in `app/SiloUI/.changeset/` (`minor` for a feature, `patch` for a fix).
 - Comments describe the code, not the change. User-facing words follow docs/SiloUI-VOCABULARY.md.
 - Disk is tight: send long output to a log file and read the summary.
+- Live checks: `run <check>` blocks and exits 0 pass, 1 fail, 2 usage, 3 skipped (also when another check holds the Dev engine lock; the message names the holder, wait and rerun). For a long one, `run start <check>` prints `<state-dir> <run-id>`, then `run wait <state-dir> [<run-id>]`. A check's `cleanup()` stops the computers it started. Linux offline means "skipped: offline". The harness's tests are `live-test.sh`.

@@ -3,7 +3,7 @@
 fail-fast = false
 failure-output = "immediate-final"
 
-# tools/agent/check runs every test once; a failure is a failure.
+# atelier check runs every test once; a failure is a failure.
 [profile.check]
 fail-fast = false
 failure-output = "immediate-final"

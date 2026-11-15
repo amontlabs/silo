@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# The live-check harness moved to app/SiloUI/scripts/live/run; this keeps the old command working.
-exec "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../app/SiloUI/scripts/live" && pwd)/run" "$@"
