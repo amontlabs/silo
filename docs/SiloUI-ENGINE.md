@@ -106,10 +106,20 @@ What an instance needs and what stays shared:
   104 bytes (`prepare_runtime_home`). The harness makes `sl-XXX` right under the short base
   (`atelier tmp --short` or `LIVE_SHORT_BASE`).
 - **Guest images.** An instance gets an APFS clone (`cp -c`) of the Dev guest images; it is
-  read-only like the original, so the harness makes it writable before deleting it. Each
-  instance loads the image into its own runtime, on its own disk space, on its first create
-  (193 s in the November 2026 run of two `r7_lock` checks at once, against 15 s for the
-  next create); a long-lived Dev engine has already done this.
+  read-only like the original, so plain `rm -rf` fails on it. The check's cleanup removes the
+  HOME after making it writable; a run killed before its cleanup leaves it, and the next run
+  of the check (its cleanup) or `run sweep` removes it. Under `atelier tmp` the HOME is a
+  line in `$ATELIER_TMP/leftovers` until then, so `atelier clean` refuses instead of failing
+  on it.
+- **Image load per instance.** Each instance loads the image into its own runtime, on its own
+  disk space, on its first create (193 s in the November 2026 run of two `r7_lock` checks at
+  once, against 15 s for the next create); a long-lived Dev engine has already done this.
+  Sharing one loaded image would need product changes: the image cache is always
+  `<runtime home>/cache` (`paths.home.join("cache")` in `engine/src/guest_image.rs`), with
+  no setting to point it elsewhere, and MicroSandbox writes into it (locks, temporary import
+  files) and keeps absolute paths in its VMDK descriptors, so a copy from another cache must
+  be rewritten (`GlobalCache::rewrite_vmdk`). It would take an engine setting for a separate,
+  read-only image cache that MicroSandbox reads layers from without writing.
 - **The `silo` CLI** accepts only the Dev socket under its own `$HOME/.silo-dev`, so the
   harness runs it with the instance's `HOME` (`--allow-other-channel` would also work).
 - **Website proxy port.** `SILO_URL_PROXY_PORT=0` gives each instance an ephemeral port, so

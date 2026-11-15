@@ -5,6 +5,7 @@ usage: run <check> [--from STEP] [--host mac|linux] [--state DIR] [--engine own|
        run start <check> [args]            (background run; prints "<state-dir> <run-id>")
        run wait <state-dir> [<run-id>] [--timeout SECONDS]
        run list
+       run sweep [<state-dir>...]
 
 Runs app/SiloUI/scripts/live/live.d/<check>.sh: an ordered list STEPS=(...) of step_<name> functions.
 A finished step leaves <state>/steps/<name>.ok; a rerun skips those. --from STEP reruns STEP and all
@@ -24,7 +25,11 @@ A check that can run on its own Dev engine instance also names the lock in CHECK
 default (--engine own) such a run does not take that lock: the check starts its own silod with HOME set to a short
 per-state-dir folder (live_engine_home), so its socket, state, data, logs and computers never meet the person's
 Dev engine or another run's. --engine shared (or LIVE_ENGINE=shared) uses ~/.silo-dev under the lock, as before.
-Steps see LIVE_ENGINE=own|shared.
+Steps see LIVE_ENGINE=own|shared. The check's cleanup() removes the own HOME (live_engine_remove; its guest images
+are read-only, so plain rm -rf fails). Under ATELIER_TMP the HOME is also a line in $ATELIER_TMP/leftovers while it
+exists. A run killed before its cleanup leaves the HOME: rerun the check (its cleanup removes it), or
+`run sweep [<state-dir>...]` (default: every state dir under the default base) removes the HOME of each idle state
+dir whose engine no longer answers and that lists no computer, and prints what it kept and why (exit 1 if any).
 `run start <check> [args]` runs the same in the background and returns once the runner holds the lock and has
 written its new run id (or has already ended, e.g. a config error or a busy state dir: then it prints why and exits
 with the runner's code); it prints "<state-dir> <run-id>". `run wait <state-dir> [<run-id>]` blocks until the
@@ -111,7 +116,47 @@ cmd_list() {
   done
 }
 
-case "${1:-}" in -h|--help|"") usage; exit 0;; wait) shift; cmd_wait "$@";; start) shift; cmd_start "$@";; list) cmd_list; exit 0;; esac
+# One runner per state dir: mkdir is the atomic test-and-set. A lock whose pid is dead is replaced
+# while holding lock.takeover (also a mkdir), re-reading the owner under it, so a second starter
+# can never move a lock a first one just took.
+acquire_lock() {
+  local p
+  if mkdir "$STATE/lock" 2>/dev/null; then echo $$ >"$STATE/lock/pid"; return 0; fi
+  p=$(cat "$STATE/lock/pid" 2>/dev/null)
+  if [ -z "$p" ] || kill -0 "$p" 2>/dev/null; then echo "live: a run is already active in $STATE (pid ${p:-?})" >&2; exit 2; fi
+  if ! mkdir "$STATE/lock.takeover" 2>/dev/null; then
+    echo "live: another run is replacing a stale lock in $STATE; if none is, remove $STATE/lock.takeover" >&2; exit 2
+  fi
+  if [ "$(cat "$STATE/lock/pid" 2>/dev/null)" = "$p" ] && rm -rf "$STATE/lock" && mkdir "$STATE/lock" 2>/dev/null; then
+    echo $$ >"$STATE/lock/pid"; rmdir "$STATE/lock.takeover"; return 0
+  fi
+  rmdir "$STATE/lock.takeover"
+  echo "live: lock changed hands in $STATE" >&2; exit 2
+}
+
+# Removes the own engine HOME a killed run left in each idle state dir (see usage).
+cmd_sweep() {
+  local st h kept=0 dirs=("$@")
+  [ ${#dirs[@]} -gt 0 ] || { for st in "$(dirname "$(default_state x)")"/*; do [ -d "$st" ] && dirs+=("$st"); done; }
+  # shellcheck source=live-lib.sh
+  . "$HERE/live-lib.sh"
+  for st in "${dirs[@]}"; do
+    st=${st%/}; case "$st" in /*) ;; *) st=$PWD/$st;; esac
+    h=$(cat "$st/engine-home" 2>/dev/null); [ -n "$h" ] || continue
+    if ! ( STATE=$st; acquire_lock ) 2>/dev/null; then echo "kept $h: a run is active in $st"; kept=1; continue; fi
+    (
+      STATE=$st CHECK=$(cat "$st/check" 2>/dev/null || echo "?")
+      if [ -n "$(live_computers)" ]; then echo "kept $h: $st still lists computers (rerun the check to clean them up)"; exit 1; fi
+      if live_engine_answers "$h/.silo-dev/engine.sock"; then echo "kept $h: its engine still answers"; exit 1; fi
+      live_engine_remove && echo "removed $h"
+    ) || kept=1
+    rm -rf "$st/lock"
+  done
+  exit $kept
+}
+
+case "${1:-}" in -h|--help|"") usage; exit 0;; wait) shift; cmd_wait "$@";; start) shift; cmd_start "$@";; list) cmd_list; exit 0;;
+  sweep) shift; cmd_sweep "$@";; esac
 
 ARGS=("$@")
 CHECK=$1; shift; FROM=""; HOST=mac; STATE=""; ENGINE=${LIVE_ENGINE:-own}
@@ -146,23 +191,6 @@ if [ -n "$CHECK_LOCKS" ] && [ "${LIVE_HELD:-}" != "$CHECK_LOCKS" ]; then
     --info "pid $$, check $CHECK, host $HOST, engine $ENGINE, state $STATE, since $(date -u +%FT%TZ)" $CHECK_LOCKS -- "$HERE/run" "${ARGS[@]}"
 fi
 
-# One runner per state dir: mkdir is the atomic test-and-set. A lock whose pid is dead is replaced
-# while holding lock.takeover (also a mkdir), re-reading the owner under it, so a second starter
-# can never move a lock a first one just took.
-acquire_lock() {
-  local p
-  if mkdir "$STATE/lock" 2>/dev/null; then echo $$ >"$STATE/lock/pid"; return 0; fi
-  p=$(cat "$STATE/lock/pid" 2>/dev/null)
-  if [ -z "$p" ] || kill -0 "$p" 2>/dev/null; then echo "live: a run is already active in $STATE (pid ${p:-?})" >&2; exit 2; fi
-  if ! mkdir "$STATE/lock.takeover" 2>/dev/null; then
-    echo "live: another run is replacing a stale lock in $STATE; if none is, remove $STATE/lock.takeover" >&2; exit 2
-  fi
-  if [ "$(cat "$STATE/lock/pid" 2>/dev/null)" = "$p" ] && rm -rf "$STATE/lock" && mkdir "$STATE/lock" 2>/dev/null; then
-    echo $$ >"$STATE/lock/pid"; rmdir "$STATE/lock.takeover"; return 0
-  fi
-  rmdir "$STATE/lock.takeover"
-  echo "live: lock changed hands in $STATE" >&2; exit 2
-}
 acquire_lock
 trap 'rm -rf "$STATE/lock"' EXIT
 # First thing under the lock: this run's id replaces the old one and the old verdict goes, so `live wait`

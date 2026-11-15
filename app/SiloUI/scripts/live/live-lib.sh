@@ -71,7 +71,7 @@ live_engine_home() {
   local h; h=$(cat "$STATE/engine-home" 2>/dev/null)
   if [ -z "$h" ] || [ ! -d "$h" ]; then
     h=$(mktemp -d "$(live_short_base)/sl-XXX") || live_die "cannot make an engine home under $(live_short_base)"
-    echo "$h" >"$STATE/engine-home"; live_register_tempdir "$h"
+    echo "$h" >"$STATE/engine-home"; live_register_tempdir "$h"; live_leftover_put "$(live_engine_home_line "$h")"
   fi
   echo "$h"
 }
@@ -92,14 +92,35 @@ live_engine_prepare() {
   live_need_path "$src" "Dev guest images to clone"
   mkdir -p "$(dirname "$dst")" && cp -cR "$src" "$dst.tmp.$$" && mv "$dst.tmp.$$" "$dst" || live_die "cannot clone $src"
 }
-# live_engine_remove: deletes the own instance's HOME once its engine has stopped (call from cleanup when no computer
-# is left). The guest images in it are read-only, as silod keeps them, so they are made writable first. No-op when
-# shared.
+# live_rm_tree <dir>: removes <dir> even when parts of it are read-only (silod keeps the guest images read-only, so
+# plain rm -rf fails inside them): makes it writable first, never following links.
+live_rm_tree() {
+  [ -e "$1" ] || [ -L "$1" ] || return 0
+  [ -L "$1" ] || chmod -R u+w "$1" 2>/dev/null
+  rm -rf "$1" && [ ! -e "$1" ]
+}
+# live_engine_home_line <home>: the $ATELIER_TMP/leftovers line of an own engine home. `atelier clean` cannot remove
+# its read-only guest images, so the line stays until the harness has removed the home (cleanup or `run sweep`).
+live_engine_home_line() { echo "engine home $1 (live check state $STATE; remove with: run sweep $STATE)"; }
+# live_engine_remove: deletes the own instance's HOME (recorded in $STATE/engine-home) once its engine has stopped
+# (call from cleanup when no computer is left, or through `run sweep`). Works whatever LIVE_ENGINE is now: the
+# record alone says there is a home.
 live_engine_remove() {
-  live_engine_own || return 0
-  local h; h=$(cat "$STATE/engine-home" 2>/dev/null); [ -n "$h" ] && [ -d "$h" ] || return 0
-  case "$(live_canon "$h")" in "$(live_canon "$(live_short_base)")"/sl-*) ;; *) live_die "not an own engine home: $h";; esac
-  chmod -R u+w "$h" && rm -rf "$h" && rm -f "$STATE/engine-home"
+  local h; h=$(cat "$STATE/engine-home" 2>/dev/null); [ -n "$h" ] || return 0
+  if [ -e "$h" ]; then
+    case "$(basename "$h")" in sl-*) ;; *) live_die "not an own engine home: $h";; esac
+    case "$(live_canon "$h")" in "$(live_canon "$HOME")"|"$(live_canon "$HOME")/"*) live_die "not an own engine home (inside HOME): $h";; esac
+    [ -d "$h" ] && [ ! -L "$h" ] && [ -O "$h" ] || live_die "not an own engine home: $h"
+    live_rm_tree "$h" || live_die "cannot remove the engine home $h"
+  fi
+  live_leftover_drop "$(live_engine_home_line "$h")"; rm -f "$STATE/engine-home"
+}
+# live_engine_answers <socket>: whether an engine accepts connections on <socket>.
+live_engine_answers() {
+  python3 -I -c 'import socket,sys
+s=socket.socket(socket.AF_UNIX); s.settimeout(2)
+try: s.connect(sys.argv[1])
+except OSError: sys.exit(1)' "$1" 2>/dev/null
 }
 # A client of an own instance (the silo CLI) runs with HOME=$(live_engine_home) too: the CLI accepts only the Dev
 # socket under its HOME's .silo-dev.
@@ -172,20 +193,26 @@ live_forget_computer() {
 # contract: `atelier clean` refuses while the file is not empty), removed once the computer is gone. No-ops
 # without ATELIER_TMP.
 live_leftover_line() { echo "computer $1 (live check ${CHECK:-?}, Dev engine, state $STATE)"; }
-live_leftover_add() {
+live_leftover_add() { live_leftover_put "$(live_leftover_line "$1")"; }
+live_leftover_remove() { live_leftover_drop "$(live_leftover_line "$1")"; }
+# live_leftover_put / live_leftover_drop <line>: adds a line once / removes it.
+live_leftover_put() {
   [ -n "${ATELIER_TMP:-}" ] || return 0
-  live_leftover_remove "$1"; live_leftover_line "$1" >>"$ATELIER_TMP/leftovers"
+  live_leftover_drop "$1"; echo "$1" >>"$ATELIER_TMP/leftovers"
 }
-live_leftover_remove() {
+live_leftover_drop() {
   [ -n "${ATELIER_TMP:-}" ] && [ -f "$ATELIER_TMP/leftovers" ] || return 0
   local f=$ATELIER_TMP/leftovers
-  grep -vxF -- "$(live_leftover_line "$1")" "$f" >"$f.$$.tmp" || true
+  grep -vxF -- "$1" "$f" >"$f.$$.tmp" || true
   mv "$f.$$.tmp" "$f"
 }
-# Computers a resumed state dir still lists must be in the (possibly new) folder's leftovers file too.
+# Computers and an own engine home a resumed state dir still lists must be in the (possibly new) folder's
+# leftovers file too.
 live_sync_leftovers() {
   [ -n "${ATELIER_TMP:-}" ] || return 0
-  local c; for c in $(live_computers); do live_leftover_add "$c"; done
+  local c h; for c in $(live_computers); do live_leftover_add "$c"; done
+  h=$(cat "$STATE/engine-home" 2>/dev/null); [ -n "$h" ] && [ -e "$h" ] && live_leftover_put "$(live_engine_home_line "$h")"
+  return 0
 }
 
 # Linux machine: reachable in 3 s or the run is "skipped: offline".
