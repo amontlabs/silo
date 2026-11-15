@@ -52,6 +52,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use proptest::prelude::*;
 use proptest::test_runner::Config;
@@ -60,6 +61,7 @@ use serde_json::{json, Value};
 use silo_api::{methods::MethodName, transport::ApprovalKind};
 
 use super::*;
+use crate::guest_client::Channels as _;
 use crate::network_policy::{
     self as np, service, store as policy_store, Allowed as PolicyHost, Grants, Held, NetworkPolicy,
     NetworkPolicyMode, Preset,
@@ -1364,6 +1366,7 @@ struct Engine {
     /// The last published rebuild, for settling its undo computer: the plan and the rules.
     settled: Option<(RebuildPlan, Value)>,
     steps: usize,
+    channels: Arc<Ports>,
     _directory: tempfile::TempDir,
     _guard: crate::test_support::GlobalStateGuard,
 }
@@ -1484,6 +1487,7 @@ impl Engine {
             linux_records: Some(self.linux_records()),
         }));
         crate::guest_client::tokens::use_test_directory(Some(self.tokens.clone()));
+        crate::guest_client::use_test_channels(Some(self.channels.clone()));
         np::use_test_presets(Some(presets_at(self.model.version)));
         np::use_test_grants(Some(Grants {
             github: false,
@@ -1503,6 +1507,7 @@ impl Engine {
         policy_store::use_test_path(None);
         np::marks::use_test_roots(None);
         crate::guest_client::tokens::use_test_directory(None);
+        crate::guest_client::use_test_channels(None);
         np::use_test_presets(None);
         np::use_test_grants(None);
     }
@@ -2170,6 +2175,11 @@ fn check(engine: &Engine) {
             if let Some(other) = ports.insert(port, id.clone()) {
                 panic!("{id} and {other} share the channel port {port}");
             }
+            assert_eq!(
+                engine.channels.bound(port).as_deref(),
+                Some(id.as_str()),
+                "{id}'s channel port {port} is not bound for it"
+            );
             Some(port)
         } else {
             None
@@ -2234,6 +2244,71 @@ fn check(engine: &Engine) {
 
 use swap::Sandboxes as _;
 
+/// The channels `silod` serves, as far as ports go: each port it is given stays bound, for the
+/// computer it was given for, until it is released. Restarts keep them, as `silod` binds the
+/// stored ports again at start.
+#[derive(Default)]
+struct Ports(Mutex<BTreeMap<u16, (String, bool, std::net::TcpListener)>>);
+
+impl Ports {
+    fn insert(&self, computer_id: &str, listener: std::net::TcpListener, served: bool) {
+        let port = listener.local_addr().unwrap().port();
+        let mut ports = self.0.lock().unwrap();
+        if served {
+            for (computer, served, _) in ports.values_mut() {
+                *served &= computer != computer_id;
+            }
+        }
+        ports.insert(port, (computer_id.to_owned(), served, listener));
+    }
+}
+
+impl crate::guest_client::Channels for Ports {
+    fn serve(&self, computer_id: &str, listener: std::net::TcpListener) -> Result<(), String> {
+        self.insert(computer_id, listener, true);
+        Ok(())
+    }
+    fn hold(&self, computer_id: &str, listener: std::net::TcpListener) -> Result<(), String> {
+        self.insert(computer_id, listener, false);
+        Ok(())
+    }
+    fn serve_held(&self, computer_id: &str, port: u16) -> bool {
+        let mut ports = self.0.lock().unwrap();
+        if !ports
+            .get(&port)
+            .is_some_and(|(computer, ..)| computer == computer_id)
+        {
+            return false;
+        }
+        for (number, (computer, served, _)) in ports.iter_mut() {
+            if computer == computer_id {
+                *served = *number == port;
+            }
+        }
+        true
+    }
+    fn close(&self, computer_id: &str) {
+        for (computer, served, _) in self.0.lock().unwrap().values_mut() {
+            *served &= computer != computer_id;
+        }
+    }
+    fn end_sessions(&self, _: &str) {}
+    fn release(&self, port: u16) {
+        self.0.lock().unwrap().remove(&port);
+    }
+    fn serving(&self, computer_id: &str) -> Option<u16> {
+        let ports = self.0.lock().unwrap();
+        ports
+            .iter()
+            .find(|(_, (computer, served, _))| computer == computer_id && *served)
+            .map(|(port, _)| *port)
+    }
+    fn bound(&self, port: u16) -> Option<String> {
+        let ports = self.0.lock().unwrap();
+        ports.get(&port).map(|(computer, ..)| computer.clone())
+    }
+}
+
 struct NetworkTest;
 
 impl StateMachineTest for NetworkTest {
@@ -2258,6 +2333,7 @@ impl StateMachineTest for NetworkTest {
             published: false,
             settled: None,
             steps: 0,
+            channels: Arc::default(),
             _directory: directory,
             _guard: guard,
         };
@@ -2322,6 +2398,7 @@ prop_state_machine! {
     #![proptest_config(Config {
         cases: cases(256),
         max_shrink_iters: 4096,
+        failure_persistence: None,
         .. Config::default()
     })]
 
@@ -2330,10 +2407,72 @@ prop_state_machine! {
     fn network_access_never_widens_without_approval(sequential 1..50 => NetworkTest);
 }
 
+/// Runs `transitions` from an empty model, checking after each one as the property tests do.
+fn replay<T, const VARIANT: u8>(transitions: Vec<Transition>)
+where
+    T: StateMachineTest<SystemUnderTest = Engine, Reference = NetworkModel<VARIANT>>,
+{
+    let mut state = Model {
+        computers: Vec::new(),
+        version: 1,
+        grants: BTreeSet::new(),
+        damaged: false,
+        waiting: Vec::new(),
+        rebuild: None,
+        next: 0,
+    };
+    let mut engine = T::init_test(&state);
+    for transition in transitions {
+        assert!(NetworkModel::<VARIANT>::preconditions(&state, &transition));
+        state = NetworkModel::<VARIANT>::apply(state, &transition);
+        engine = T::apply(engine, &state, transition);
+        T::check_invariants(&engine, &state);
+    }
+}
+
+/// A fork of a computer with the tools on gets a port of its own while its source's port is
+/// still bound for the source (seed `cc d20fbe8c…`).
+#[test]
+fn a_fork_never_shares_its_sources_channel_port() {
+    let list = |hosts, tools| Spec {
+        mode: Mode::List,
+        hosts,
+        tools,
+    };
+    replay::<NetworkTest, DEFAULT>(vec![
+        Transition::Init(Root::Entry(list(0, true))),
+        Transition::Op(Op::RebuildSettle { readable: true }),
+        Transition::Op(Op::AgentFork {
+            caller: 255,
+            source: 83,
+            spec: Some(list(8, false)),
+        }),
+        Transition::Op(Op::MacImport { interrupt: 1 }),
+        Transition::Op(Op::ToolsOn { c: 135 }),
+        Transition::Op(Op::OwnerSet {
+            c: 15,
+            spec: list(7, true),
+            accept: false,
+        }),
+        Transition::Op(Op::AgentSet {
+            caller: 52,
+            target: 218,
+            spec: list(11, false),
+        }),
+        Transition::Op(Op::Repair),
+        Transition::Op(Op::AgentFork {
+            caller: 15,
+            source: 109,
+            spec: None,
+        }),
+    ]);
+}
+
 prop_state_machine! {
     #![proptest_config(Config {
         cases: cases(128),
         max_shrink_iters: 4096,
+        failure_persistence: None,
         .. Config::default()
     })]
 
@@ -2365,6 +2504,7 @@ prop_state_machine! {
     #![proptest_config(Config {
         cases: cases(128),
         max_shrink_iters: 4096,
+        failure_persistence: None,
         .. Config::default()
     })]
 
