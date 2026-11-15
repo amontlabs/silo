@@ -261,8 +261,8 @@ step_a() {
 }
 C
 printf '#!/bin/sh\necho "HOME=$HOME PORT=$SILO_URL_PROXY_PORT ARGS=$*"\n' >$W/fake-silod; chmod +x $W/fake-silod
-mkdir -p "$FH/Library/Application Support/org.silo.dev/guest-image/img"; echo base >"$FH/Library/Application Support/org.silo.dev/guest-image/img/disk"
-SB=$(mktemp -d /tmp/lt.XXXX); trap 'rm -rf "$W" "$SB"' EXIT  # engine homes must be short (LIVE_ENGINE_HOME_MAX)
+mkdir -p "$FH/Library/Application Support/org.silo.dev/guest-image/img"; echo base >"$FH/Library/Application Support/org.silo.dev/guest-image/img/disk"; chmod -R a-w "$FH/Library/Application Support/org.silo.dev/guest-image/img"
+SB=$(mktemp -d /tmp/lt.XXXX); trap 'chmod -R u+w "$W" "$SB"; rm -rf "$W" "$SB"' EXIT  # engine homes must be short (LIVE_ENGINE_HOME_MAX)
 S=$W/s50; mkdir -p $S; touch $S/hang
 $LIVE locked --state $S >/dev/null 2>&1 & P=$!
 for _ in $(seq 1 50); do [ "$(cat $S/current 2>/dev/null)" = a ] && break; sleep 0.1; done
@@ -275,7 +275,7 @@ H1=$(cat $W/o1/s/home); H2=$(cat $W/o2/s/home)
 ok "each run has its own engine HOME under the short base" $([ "$H1" != "$H2" ] && [ "${H1#$SB/sl-}" != "$H1" ] && [ "$(cat $W/o1/s/sock)" = "$H1/.silo-dev/engine.sock" ] && echo 0 || echo 1)
 ok "the engine starts with its HOME and an ephemeral proxy port" $([ "$(cat $W/o1/s/launch.out)" = "HOME=$H1 PORT=0 ARGS=--agent" ] && echo 0 || echo 1)
 G1="$H1/Library/Application Support/org.silo.dev/guest-image/img/disk"
-echo changed >"$G1"
+chmod u+w "$G1" "$(dirname "$G1")"; echo changed >"$G1"
 ok "guest images are a copy: the instance's writes never reach the original" $([ "$(cat "$FH/Library/Application Support/org.silo.dev/guest-image/img/disk")" = base ] && echo 0 || echo 1)
 ( HOME=$FH LIVE_SHORT_BASE=$SB bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/o1/s; live_assert_dev_sock \"\$(cat $W/o1/s/sock)\"" ) >/dev/null 2>&1
 ok "the own engine's socket counts as a Dev path" $?
@@ -287,6 +287,8 @@ $LIVE own --state $W/o3 --engine other >/dev/null 2>&1; ok "--engine with anothe
 kill -TERM $P; wait $P 2>/dev/null
 HOME=$FH LIVE_SHORT_BASE=$SB $LIVE own --state $W/o3 --engine shared >/dev/null 2>&1
 ok "a shared run uses the real HOME and the default socket" $([ "$(cat $W/o3/engine)" = shared ] && [ "$(cat $W/o3/home)" = "$FH" ] && [ "$(cat $W/o3/sock)" = "$FH/.silo-dev/engine.sock" ] && echo 0 || echo 1)
+( HOME=$FH LIVE_SHORT_BASE=$SB LIVE_ENGINE=own bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/o1/s; live_engine_remove" ) >/dev/null 2>&1
+ok "live_engine_remove deletes the own engine home with its read-only guest images" $([ $? = 0 ] && [ ! -e "$H1" ] && [ ! -e $W/o1/s/engine-home ] && echo 0 || echo 1)
 own_prep() { ( HOME=$1 LIVE_SHORT_BASE=$2 LIVE_ENGINE=own bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=\$1; mkdir -p \$STATE; live_engine_prepare" _ "$3" ) >/dev/null 2>&1; }
 own_prep "$FH" "$SB" $W/o4; ok "a prepared own engine home is accepted" $?
 mkdir -p "$SB/in/Library/Application Support/org.silo.dev/guest-image"

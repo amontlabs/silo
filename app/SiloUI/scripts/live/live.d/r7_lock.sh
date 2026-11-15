@@ -129,5 +129,6 @@ cleanup() {
   fi
   local pid; pid=$(our_engine)
   [ -n "$pid" ] && kill -TERM "$pid" && for _ in $(seq 1 60); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
-  [ -z "$(live_computers)" ] && [ -z "$(our_engine)" ]
+  [ -z "$(live_computers)" ] && [ -z "$(our_engine)" ] || return 1
+  live_engine_remove
 }

@@ -92,6 +92,15 @@ live_engine_prepare() {
   live_need_path "$src" "Dev guest images to clone"
   mkdir -p "$(dirname "$dst")" && cp -cR "$src" "$dst.tmp.$$" && mv "$dst.tmp.$$" "$dst" || live_die "cannot clone $src"
 }
+# live_engine_remove: deletes the own instance's HOME once its engine has stopped (call from cleanup when no computer
+# is left). The guest images in it are read-only, as silod keeps them, so they are made writable first. No-op when
+# shared.
+live_engine_remove() {
+  live_engine_own || return 0
+  local h; h=$(cat "$STATE/engine-home" 2>/dev/null); [ -n "$h" ] && [ -d "$h" ] || return 0
+  case "$(live_canon "$h")" in "$(live_canon "$(live_short_base)")"/sl-*) ;; *) live_die "not an own engine home: $h";; esac
+  chmod -R u+w "$h" && rm -rf "$h" && rm -f "$STATE/engine-home"
+}
 # A client of an own instance (the silo CLI) runs with HOME=$(live_engine_home) too: the CLI accepts only the Dev
 # socket under its HOME's .silo-dev.
 # live_engine_launch <silod> [args]: starts <silod> --agent in the background (prints nothing; the caller records
