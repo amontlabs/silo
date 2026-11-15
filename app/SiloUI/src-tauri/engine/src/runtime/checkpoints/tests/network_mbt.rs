@@ -2,11 +2,14 @@
 //!
 //! Random sequences of operations run over a few computers against the real engine code (the
 //! policy store, `network.policy.set`, the agent rules, fork, the closed copy an export makes,
-//! import, the rebuild swap, macOS import publish and recovery, Silo's tools, preset updates,
-//! restarts and a damaged policy file). A reference model keeps what the owner approved for
-//! each computer. After every step the rules each computer would be started with (the `Plan`
-//! the runtime or the macOS gateway gets, read as the runtime's JSON) are checked against the
-//! model by code written here: never wider (the safety rule) and equal (the model agrees).
+//! import, the rebuild swap and its recovery, macOS import publish and recovery, Silo's tools,
+//! secrets, GitHub access, preset updates, restarts and a damaged policy file). A reference
+//! model keeps what the owner approved for each computer. After every step the rules each
+//! computer would be started with (the `Plan` the runtime or the macOS gateway gets, read as the
+//! runtime's JSON) are checked against the model by code written here: never wider (the safety
+//! rule) and equal (the model agrees), and the GitHub hosts each computer holds are the ones
+//! approved for it. What the owner is asked to approve for a secret is checked too: it names
+//! every host a computer reaches through it and warns of shared hosting.
 //!
 //! Deep run: `PROPTEST_CASES=20000 cargo nextest run -p silo-engine network_mbt`.
 //!
@@ -15,30 +18,34 @@
 //! | Entry point | Covered |
 //! | --- | --- |
 //! | `network_policy::service::set` (`network.policy.set`, owner) | yes, Linux and macOS targets, with and without `acceptPresets` |
-//! | `policy::decide` `network.policy.set` (agent) + the engine running an allowed change with `expected` | yes |
-//! | approval allowed by the owner, then run (agent set, agent fork) | partly: the call is run as the owner would; `silod` approvals code is not |
+//! | `policy::decide` `network.policy.set` (agent) + the engine running an allowed change with `expected` | yes, also with the owner changing the policy between the decision and the run |
+//! | approval allowed by the owner, then run (agent set, fork, secret, macOS create) | partly: the call is run as `silod` would; `silod` approvals code is not |
 //! | `checkpoints::fork_commit` (owner fork, kept or given policy) | yes |
 //! | `policy::decide` `checkpoints.fork` (agent) + `fork_commit` with the rewritten policy | yes |
 //! | `fork_commit` with `closed_network` (the copy an export makes) | yes |
 //! | `checkpoints::import_pending_restore_with_environment` (import, import over an id) | yes |
-//! | `rebuild::engine_env::{save_build_policies, swap_with_policy, settle_undo_policy, forget_build_policies}` with the swap interrupted at every state, unreadable rules, failed publish, then retried | yes |
+//! | `rebuild::engine_env::{save_build_policies, swap_with_policy, forget_build_policies}` with the swap interrupted at every state, unreadable rules, failed publish, then retried, also resuming a journal of a Silo that saved no undo policy | yes |
+//! | rebuild recovery of a published swap (`EngineRebuildEnv::settle_swapped`), also for a Silo that published without an undo policy | yes, with the original's rules given (`msb inspect` is not run) |
 //! | `macos_computers::{publish_import_folder, recover_archive_import_in}` (macOS import, interrupted, recovered) | yes |
+//! | `policy::decide` `computers.create` macOS (agent) + the create saving the policy the call carries | partly: the judge is the engine's; the create is done as `silod` and `create_accepting_with` do it (policy, then record) |
 //! | `network_policy::computer_removed` (delete) | yes (the store and tools steps of a delete, not `runtime::delete`) |
 //! | `guest_client::{turn_on, turn_off, inherit, computer_removed}` (channel rule) | yes |
-//! | preset updates (a newer Silo's preset list) and `acceptPresets` | yes |
-//! | secret hosts added to an allowlist (`Grants`) | partly: one owner-assigned grant for every computer through `use_test_grants`; per-computer assignment through `secrets::save_secret` needs the vault |
+//! | preset updates (a newer Silo's preset and GitHub lists) and `acceptPresets` | yes |
+//! | secret hosts added to an allowlist (`Grants::of_computer`) | yes: `secrets::save_secret` with a test vault, per computer, with shared-hosting wildcards, too-wide ones and any destination |
+//! | `policy::decide` `secrets.save` (agent), its summary and rewritten `allowSharedHosting`, then saved as `silod` does | yes |
+//! | GitHub access and the version of the GitHub hosts each policy holds | yes: access per computer name (`use_test_github`), the agent rules see it too |
 //! | restart: the store, tokens and rebuild state reread from disk | yes |
 //! | damaged policy file (bad JSON, newer version, unknown mode) and repair | yes |
 //! | missing policy file (marked computers do not start, fork or copy; the owner sets the policy again) | yes, in `missing_policy_file_never_widens` |
 //! | `network_policy::store::mark_saved` (marks at engine start) and the marks the store sets and clears | yes: on restart, and for an entry saved before marks (`Root::UnmarkedEntry`) |
-//! | `silod` `computers.create` (`store::set` before the create job) | no: the create job needs the runtime (a VM) |
-//! | macOS create (`macos_computers` `set_stored` at create) and macOS fork (`store::inherit`) | no: need an APFS clone and a VM |
+//! | `silod` `computers.create` (Linux `store::set` before the create job; macOS passing the policy to the create) | no: `silod` is another crate and the create job needs the runtime (a VM) |
+//! | macOS fork (`store::inherit`) | no: needs an APFS clone and a VM |
 //! | `runtime::update_save` (engine update restores `desired_network_policy`) | no: needs a running computer |
 //! | `apply_network_policy_change` / start of a pending computer (`plan_for` with the recorded rules) | the plan is computed exactly as the pending start does; the restore itself needs `msb` |
+//! | recovered start (`lifecycle_recovery`, `ensure_network_rules_current`) | no: needs the runtime runner |
 //! | `changes.promote` / `changes.undo` | no: they move maker records and sandboxes, not network policies (no policy write found); a VM is needed to drive them |
 //! | `network.publish`, `sshAccess.save` (ports, SSH) | no: port mappings live in the runtime's network state |
-//! | container blocked policy (`containers::secrets`) | no: needs the container runtime |
-//! | GitHub grant hosts and their pin | no: GitHub access needs the GitHub stores |
+//! | container gateway and blocked policy (`containers::secrets::gateway_network`) | no: needs the container runtime |
 //!
 //! Variants:
 //! - `missing_policy_file_never_widens` also removes `network-policy.json` among the operations.
@@ -63,10 +70,10 @@ use silo_api::{methods::MethodName, transport::ApprovalKind};
 use super::*;
 use crate::guest_client::Channels as _;
 use crate::network_policy::{
-    self as np, service, store as policy_store, Allowed as PolicyHost, Grants, Held, NetworkPolicy,
-    NetworkPolicyMode, Preset,
+    self as np, service, store as policy_store, Allowed as PolicyHost, Held, NetworkPolicy,
+    NetworkPolicyMode, Preset, GITHUB_GRANT_PIN,
 };
-use crate::policy::{self, Access, Caller, Decision, Resources};
+use crate::policy::{self, access::GitHubAccess, Access, Caller, Decision, Resources};
 use crate::rebuild::{swap, test_access as rebuild_access, Plan as RebuildPlan};
 
 // MARK: The universe
@@ -77,8 +84,20 @@ const HOSTS: [&str; 4] = [
     "c.example.org",
     "*.example.com",
 ];
-const GRANT_HOSTS: [&str; 2] = ["c.example.org", "d.example.net"];
 const PRESET: &str = "tools";
+/// The preset whose hosts GitHub access adds.
+const GITHUB: &str = "github";
+const SECRET_NAMES: [&str; 2] = ["TOKEN_A", "TOKEN_B"];
+/// The hosts a secret may be sent to: plain names, wildcards over shared hosting, a wildcard
+/// over a whole public domain and any destination.
+const SECRET_HOSTS: [&str; 6] = [
+    "c.example.org",
+    "d.example.net",
+    "*.github.io",
+    "*.netlify.app",
+    "*.co.uk",
+    "*",
+];
 const MAX_COMPUTERS: usize = 6;
 const GROUP: &str = "dev";
 const MEMBER: &str = "c000000000000000000000000000000";
@@ -91,19 +110,61 @@ fn preset_hosts(version: u32) -> Vec<&'static str> {
     }
 }
 
+/// The hosts GitHub access adds at a version.
+fn github_hosts(version: u32) -> Vec<&'static str> {
+    match version {
+        1 => vec!["git.example.net"],
+        _ => vec!["git.example.net", "raw.example.net"],
+    }
+}
+
 fn presets_at(version: u32) -> Vec<Preset> {
     let at = |host: &str| PolicyHost {
         host: host.into(),
         port: np::HTTPS_PORT,
     };
-    let hosts = |version| preset_hosts(version).into_iter().map(at).collect();
-    vec![Preset {
-        name: PRESET.into(),
-        title: "Tools".into(),
-        version,
-        hosts: hosts(version),
-        history: (1..version).map(|old| (old, hosts(old))).collect(),
-    }]
+    let preset = |name: &str, title: &str, hosts_at: fn(u32) -> Vec<&'static str>| {
+        let hosts = |version| hosts_at(version).into_iter().map(at).collect();
+        Preset {
+            name: name.into(),
+            title: title.into(),
+            version,
+            hosts: hosts(version),
+            history: (1..version).map(|old| (old, hosts(old))).collect(),
+        }
+    };
+    vec![
+        preset(PRESET, "Tools", preset_hosts),
+        preset(GITHUB, "GitHub", github_hosts),
+    ]
+}
+
+/// What a secret host adds to an allowlist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SecretHost {
+    /// A network rule.
+    Rule,
+    /// A network rule only when the owner approved shared hosting for the secret.
+    Shared,
+    /// Nothing: too wide to be a rule.
+    None,
+}
+
+fn secret_host(host: &str) -> SecretHost {
+    match host {
+        "*.github.io" | "*.netlify.app" => SecretHost::Shared,
+        "*.co.uk" | "*" => SecretHost::None,
+        _ => SecretHost::Rule,
+    }
+}
+
+fn secret_domains(mask: u8) -> Vec<&'static str> {
+    SECRET_HOSTS
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| mask & (1 << index) != 0)
+        .map(|(_, host)| *host)
+        .collect()
 }
 
 fn open_rules() -> Value {
@@ -130,15 +191,19 @@ struct Approved {
     mode: Mode,
     hosts: BTreeSet<&'static str>,
     tools: Option<u32>,
+    /// The version of the hosts GitHub access adds that the policy was approved with.
+    github: u32,
     incoming_denied: bool,
 }
 
 impl Approved {
-    fn closed_without_incoming() -> Self {
+    /// Closed with incoming connections refused, with the GitHub hosts of `github`.
+    fn closed_without_incoming(github: u32) -> Self {
         Self {
             mode: Mode::Closed,
             hosts: BTreeSet::new(),
             tools: None,
+            github,
             incoming_denied: true,
         }
     }
@@ -179,7 +244,7 @@ impl Spec {
     }
 
     /// The policy approved now, at `version`, keeping the version `before` holds for a preset
-    /// it already lists.
+    /// it already lists and for the GitHub hosts (the first without `before`).
     fn approved(&self, version: u32, before: Option<&Approved>, incoming_denied: bool) -> Approved {
         Approved {
             mode: self.mode,
@@ -187,13 +252,17 @@ impl Spec {
             tools: self
                 .tools
                 .then(|| before.and_then(|before| before.tools).unwrap_or(version)),
+            github: before.map_or(1, |before| before.github),
             incoming_denied,
         }
     }
 
-    /// The policy as an agent asks for it: every preset at this Silo's version.
-    fn asked(&self, version: u32) -> Approved {
-        self.approved(version, None, false)
+    /// The policy with every preset and the GitHub hosts at this Silo's `version`.
+    fn latest(&self, version: u32, incoming_denied: bool) -> Approved {
+        Approved {
+            github: version,
+            ..self.approved(version, None, incoming_denied)
+        }
     }
 }
 
@@ -262,10 +331,12 @@ impl Reach {
     }
 }
 
-/// What a computer's network may let through, from what the owner approved.
+/// What a computer's network may let through, from what the owner approved: its secrets' hosts
+/// (`grants`) and, with GitHub access, the GitHub hosts at the version it was approved with.
 fn reach_of(
     approved: &Approved,
-    grants: &BTreeSet<&'static str>,
+    grants: &BTreeSet<String>,
+    github: bool,
     channel: Option<u16>,
     ingress_forced: bool,
 ) -> Reach {
@@ -284,8 +355,16 @@ fn reach_of(
             reach.dns = true;
             reach.loose = true;
             let preset = approved.tools.map(preset_hosts).unwrap_or_default();
-            for host in approved.hosts.iter().chain(&preset).chain(grants) {
+            let github = if github {
+                github_hosts(approved.github)
+            } else {
+                Vec::new()
+            };
+            for host in approved.hosts.iter().chain(&preset).chain(&github) {
                 reach.domains.insert(((*host).to_owned(), 443));
+            }
+            for host in grants {
+                reach.domains.insert((host.clone(), 443));
             }
         }
     }
@@ -294,7 +373,13 @@ fn reach_of(
 
 /// The judge's view of a policy: no grants, channel, ingress or strict.
 fn policy_reach(approved: &Approved) -> Reach {
-    let mut reach = reach_of(approved, &BTreeSet::new(), None, false);
+    judge_reach(approved, false)
+}
+
+/// The judge's view of a policy with GitHub access when `github`: no secrets, channel, ingress
+/// or strict.
+fn judge_reach(approved: &Approved, github: bool) -> Reach {
+    let mut reach = reach_of(approved, &BTreeSet::new(), github, None, false);
     reach.ingress = false;
     reach.loose = false;
     reach
@@ -390,6 +475,8 @@ struct Computer {
     /// The rules the runtime holds for it (Linux): what a start without an entry reads.
     recorded: Value,
     channel: bool,
+    /// Whether the owner gave it GitHub access.
+    github: bool,
     /// The computer whose agent made it.
     maker: Option<String>,
     parent: Option<String>,
@@ -416,7 +503,7 @@ impl Computer {
     /// What it runs with by its recorded rules alone, as a computer from before policies.
     fn legacy(&self) -> Approved {
         if self.recorded == deny_all() {
-            Approved::closed_without_incoming()
+            Approved::closed_without_incoming(1)
         } else {
             Spec {
                 mode: Mode::Open,
@@ -439,6 +526,29 @@ enum Waiting {
         source: String,
         policy: Value,
     },
+    /// A secret an agent asked to add; `params` are the ones the owner's approval runs.
+    Secret {
+        name: &'static str,
+        domains: Vec<&'static str>,
+        names: Vec<String>,
+        params: Value,
+    },
+    /// A macOS computer an agent asked to create, with the policy the request must carry and
+    /// the params the owner's approval runs.
+    CreateMac {
+        caller: String,
+        policy: Value,
+        params: Value,
+    },
+}
+
+/// A secret as the owner approved it.
+#[derive(Clone, Debug, PartialEq)]
+struct Secret {
+    domains: BTreeSet<&'static str>,
+    /// The names of the computers it is assigned to.
+    computers: BTreeSet<String>,
+    shared_hosting: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -460,7 +570,7 @@ struct Rebuild {
 struct Model {
     computers: Vec<Computer>,
     version: u32,
-    grants: BTreeSet<&'static str>,
+    secrets: BTreeMap<&'static str, Secret>,
     damaged: bool,
     waiting: Vec<Waiting>,
     rebuild: Option<Rebuild>,
@@ -487,6 +597,9 @@ enum Op {
         caller: u8,
         target: u8,
         spec: Spec,
+        /// The owner sets this policy on the target after the agent rules allowed the change
+        /// and before the engine runs it.
+        race: Option<Spec>,
     },
     OwnerAllow {
         index: u8,
@@ -516,8 +629,26 @@ enum Op {
     ToolsOff {
         c: u8,
     },
-    Grant {
-        host: u8,
+    OwnerSecret {
+        secret: u8,
+        hosts: u8,
+        computers: u8,
+        allow_shared: bool,
+    },
+    AgentSecret {
+        caller: u8,
+        secret: u8,
+        hosts: u8,
+        computers: u8,
+        shared: Option<bool>,
+        any: bool,
+    },
+    GitHubOn {
+        c: u8,
+    },
+    AgentCreateMac {
+        caller: u8,
+        spec: Option<Spec>,
     },
     PresetUpdate,
     Restart,
@@ -533,9 +664,15 @@ enum Op {
         fail_after: Option<u8>,
         readable: bool,
         publish_fails: bool,
+        /// The swap resumes a journal of a Silo that saved no policy for the undo computer.
+        older: bool,
     },
+    /// The recovery of a published swap (`settle_swapped`).
     RebuildSettle {
         readable: bool,
+        /// A journal of a Silo that published the swap without saving the undo computer's
+        /// policy.
+        older: bool,
     },
     RebuildRollback,
     MacImport {
@@ -559,6 +696,29 @@ fn pick<'a>(
         None
     } else {
         Some(candidates[selector as usize % candidates.len()])
+    }
+}
+
+/// The candidates whose bit is set in `mask`, else one of them.
+fn picks<'a>(
+    computers: &'a [Computer],
+    mask: u8,
+    filter: impl Fn(&Computer) -> bool,
+) -> Vec<&'a Computer> {
+    let candidates: Vec<&Computer> = computers.iter().filter(|c| filter(c)).collect();
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+    let chosen: Vec<&Computer> = candidates
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| mask & (1 << (index % 8)) != 0)
+        .map(|(_, c)| *c)
+        .collect();
+    if chosen.is_empty() {
+        vec![candidates[mask as usize % candidates.len()]]
+    } else {
+        chosen
     }
 }
 
@@ -616,6 +776,39 @@ impl Model {
         }
     }
 
+    /// The hosts the secrets assigned to the computer named `name` add to its allowlist.
+    fn secret_hosts(&self, name: &str) -> BTreeSet<String> {
+        let mut hosts = BTreeSet::new();
+        for secret in self.secrets.values() {
+            if !secret.computers.contains(name) {
+                continue;
+            }
+            for host in &secret.domains {
+                match secret_host(host) {
+                    SecretHost::Rule => {
+                        hosts.insert((*host).to_owned());
+                    }
+                    SecretHost::Shared if secret.shared_hosting => {
+                        hosts.insert((*host).to_owned());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        hosts
+    }
+
+    /// What the computer may reach, by what the owner approved for it and its grants.
+    fn reach(&self, computer: &Computer, channel: Option<u16>) -> Reach {
+        reach_of(
+            &computer.approved,
+            &self.secret_hosts(&computer.name),
+            computer.github,
+            channel,
+            computer.kind == Kind::Macos,
+        )
+    }
+
     /// What the agent rules decide for `caller` setting `spec` on `target`, by this model.
     fn agent_set_decision(&self, caller: &str, target: &str, spec: &Spec) -> Expect {
         if !self.tree(caller).contains(target) {
@@ -627,10 +820,17 @@ impl Model {
         if target != caller && self.get(caller).unwrap().missing() {
             return Expect::Ask;
         }
-        let asked = policy_reach(&spec.asked(self.version));
-        let current = policy_reach(&self.get(target).unwrap().approved);
-        let own = policy_reach(&self.get(caller).unwrap().approved);
-        if asked.within(&current).is_ok() && (target == caller || asked.within(&own).is_ok()) {
+        // The policy asked for is judged with the GitHub hosts the target holds, as the engine
+        // saves it, and with the target's GitHub access.
+        let target = self.get(target).unwrap();
+        let caller = self.get(caller).unwrap();
+        let mut asked = spec.latest(self.version, false);
+        asked.github = target.approved.github;
+        let asked = judge_reach(&asked, target.github);
+        let current = judge_reach(&target.approved, target.github);
+        let own = judge_reach(&caller.approved, caller.github);
+        if asked.within(&current).is_ok() && (target.id == caller.id || asked.within(&own).is_ok())
+        {
             Expect::Allow
         } else {
             Expect::Ask
@@ -677,7 +877,7 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
         Just(Model {
             computers: Vec::new(),
             version: 1,
-            grants: BTreeSet::new(),
+            secrets: BTreeMap::new(),
             damaged: false,
             waiting: Vec::new(),
             rebuild: None,
@@ -703,7 +903,8 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
         let sel = any::<u8>;
         let ops = prop_oneof![
             6 => (sel(), spec_strategy(), any::<bool>()).prop_map(|(c, spec, accept)| Op::OwnerSet { c, spec, accept }),
-            6 => (sel(), sel(), spec_strategy()).prop_map(|(caller, target, spec)| Op::AgentSet { caller, target, spec }),
+            6 => (sel(), sel(), spec_strategy(), proptest::option::weighted(0.25, spec_strategy()))
+                .prop_map(|(caller, target, spec, race)| Op::AgentSet { caller, target, spec, race }),
             3 => sel().prop_map(|index| Op::OwnerAllow { index }),
             3 => (sel(), proptest::option::of(spec_strategy())).prop_map(|(source, spec)| Op::OwnerFork { source, spec }),
             5 => (sel(), sel(), proptest::option::of(spec_strategy())).prop_map(|(caller, source, spec)| Op::AgentFork { caller, source, spec }),
@@ -713,15 +914,20 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
             2 => sel().prop_map(|c| Op::Delete { c }),
             2 => sel().prop_map(|c| Op::ToolsOn { c }),
             1 => sel().prop_map(|c| Op::ToolsOff { c }),
-            1 => (0u8..2).prop_map(|host| Op::Grant { host }),
+            1 => (0u8..2, 1u8..64, any::<u8>(), any::<bool>())
+                .prop_map(|(secret, hosts, computers, allow_shared)| Op::OwnerSecret { secret, hosts, computers, allow_shared }),
+            2 => (sel(), 0u8..2, 1u8..64, any::<u8>(), proptest::option::of(any::<bool>()), any::<bool>())
+                .prop_map(|(caller, secret, hosts, computers, shared, any)| Op::AgentSecret { caller, secret, hosts, computers, shared, any }),
+            1 => sel().prop_map(|c| Op::GitHubOn { c }),
+            2 => (sel(), proptest::option::of(spec_strategy())).prop_map(|(caller, spec)| Op::AgentCreateMac { caller, spec }),
             3 => Just(Op::PresetUpdate),
             2 => Just(Op::Restart),
             1 => (0u8..3).prop_map(|kind| Op::Damage { kind }),
             2 => Just(Op::Repair),
             3 => sel().prop_map(|c| Op::RebuildBegin { c }),
-            4 => (proptest::option::of(0u8..5), any::<bool>(), proptest::bool::weighted(0.2))
-                .prop_map(|(fail_after, readable, publish_fails)| Op::RebuildSwap { fail_after, readable, publish_fails }),
-            1 => any::<bool>().prop_map(|readable| Op::RebuildSettle { readable }),
+            4 => (proptest::option::of(0u8..5), any::<bool>(), proptest::bool::weighted(0.2), proptest::bool::weighted(0.3))
+                .prop_map(|(fail_after, readable, publish_fails, older)| Op::RebuildSwap { fail_after, readable, publish_fails, older }),
+            4 => (any::<bool>(), any::<bool>()).prop_map(|(readable, older)| Op::RebuildSettle { readable, older }),
             1 => Just(Op::RebuildRollback),
             2 => (0u8..4).prop_map(|interrupt| Op::MacImport { interrupt }),
         ];
@@ -759,7 +965,7 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
                         open_rules(),
                     ),
                     Root::LegacyImport => (
-                        Approved::closed_without_incoming(),
+                        Approved::closed_without_incoming(1),
                         false,
                         false,
                         deny_all(),
@@ -775,6 +981,7 @@ impl<const VARIANT: u8> ReferenceStateMachine for NetworkModel<VARIANT> {
                     marked,
                     recorded,
                     channel: false,
+                    github: false,
                     maker: None,
                     parent: None,
                     undo_allowed: Vec::new(),
@@ -821,7 +1028,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             let before = computer.entry.then(|| computer.approved.clone());
             let incoming = computer.refusal();
             computer.approved = if *accept {
-                spec.approved(version, None, incoming)
+                spec.latest(version, incoming)
             } else {
                 spec.approved(version, before.as_ref(), incoming)
             };
@@ -834,6 +1041,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             caller,
             target,
             spec,
+            race,
         } => {
             let Some(caller) = pick(&state.computers, *caller, not_undo).map(|c| c.id.clone())
             else {
@@ -851,6 +1059,24 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                     spec: *spec,
                 }),
                 Expect::Allow => {
+                    // The change is saved only while the target still has the policy it was
+                    // judged against: an owner's change meanwhile to another policy refuses it.
+                    let judged = state.get(&target).unwrap().clone();
+                    if let Some(race) = race {
+                        let computer = state.get_mut(&target).unwrap();
+                        let before = computer.entry.then(|| computer.approved.clone());
+                        let incoming = computer.refusal();
+                        computer.approved = race.approved(version, before.as_ref(), incoming);
+                        computer.entry = true;
+                        computer.marked = true;
+                        state.note_rebuild(&target);
+                        if *race != spec_of_approved(&judged.approved) {
+                            return Want {
+                                decision: Some(decision),
+                                ok: Some(false),
+                            };
+                        }
+                    }
                     let computer = state.get_mut(&target).unwrap();
                     let before = computer.approved.clone();
                     // A narrowing keeps the refused incoming connections: the saved ones, or
@@ -904,6 +1130,41 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                         return ok_if(false);
                     }
                     model_fork(state, &source, Some(spec_of(&policy)), Some(caller), false);
+                    ok_if(true)
+                }
+                Waiting::Secret {
+                    name,
+                    domains,
+                    names,
+                    ..
+                } => {
+                    // The owner approves a summary that warns of every shared-hosting host, so
+                    // they are approved with it.
+                    if state.secrets.contains_key(name) {
+                        return ok_if(false);
+                    }
+                    let shared_hosting = domains
+                        .iter()
+                        .any(|host| secret_host(host) == SecretHost::Shared);
+                    state.secrets.insert(
+                        name,
+                        Secret {
+                            domains: domains.into_iter().collect(),
+                            computers: names.into_iter().collect(),
+                            shared_hosting,
+                        },
+                    );
+                    ok_if(true)
+                }
+                Waiting::CreateMac { caller, policy, .. } => {
+                    if state.computers.len() >= MAX_COMPUTERS {
+                        return Want::default();
+                    }
+                    if state.damaged {
+                        return ok_if(false);
+                    }
+                    let maker = state.get(&caller).map(|c| c.id.clone());
+                    model_create_mac(state, spec_of(&policy), maker);
                     ok_if(true)
                 }
             }
@@ -966,6 +1227,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                 return ask;
             }
             let own = state.get(&caller).unwrap().approved.clone();
+            let own_reach = judge_reach(&own, state.get(&caller).unwrap().github);
             // A source whose policy is missing is judged as one with none: the policy is
             // approved now, and the fork itself fails.
             let lost = state.get(&source).unwrap().missing();
@@ -975,7 +1237,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                 (Some(spec), _) => held(*spec),
                 (None, Some(from)) => {
                     let inherited = held(spec_of_approved(from));
-                    if policy_reach(&inherited).within(&policy_reach(&own)).is_ok() {
+                    if policy_reach(&inherited).within(&own_reach).is_ok() {
                         inherited
                     } else {
                         held(spec_of_approved(&own))
@@ -984,7 +1246,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                 (None, None) => held(spec_of_approved(&own)),
             };
             let chosen_spec = spec_of_approved(&chosen);
-            if policy_reach(&chosen).within(&policy_reach(&own)).is_ok() {
+            if policy_reach(&chosen).within(&own_reach).is_ok() {
                 if !lost {
                     model_fork(state, &source, Some(chosen_spec), Some(caller), false);
                 }
@@ -1037,11 +1299,12 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                 id,
                 name,
                 kind: Kind::Linux,
-                approved: Approved::closed_without_incoming(),
+                approved: Approved::closed_without_incoming(version),
                 entry: true,
                 marked: true,
                 recorded: deny_all(),
                 channel: false,
+                github: false,
                 maker: None,
                 parent: None,
                 undo_allowed: Vec::new(),
@@ -1059,7 +1322,7 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                 return ok_if(false);
             }
             let computer = state.get_mut(&target).unwrap();
-            computer.approved = Approved::closed_without_incoming();
+            computer.approved = Approved::closed_without_incoming(version);
             computer.entry = true;
             computer.marked = true;
             computer.recorded = deny_all();
@@ -1083,11 +1346,125 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
             state.get_mut(&target).unwrap().channel = matches!(op, Op::ToolsOn { .. });
             ok_if(true)
         }
-        Op::Grant { host } => {
-            state
-                .grants
-                .insert(GRANT_HOSTS[*host as usize % GRANT_HOSTS.len()]);
+        Op::OwnerSecret {
+            secret,
+            hosts,
+            computers,
+            allow_shared,
+        } => {
+            let names: BTreeSet<String> = picks(&state.computers, *computers, not_undo)
+                .into_iter()
+                .map(|c| c.name.clone())
+                .collect();
+            if names.is_empty() {
+                return Want::default();
+            }
+            let name = SECRET_NAMES[*secret as usize % SECRET_NAMES.len()];
+            let domains: BTreeSet<&'static str> = secret_domains(*hosts).into_iter().collect();
+            // Shared hosting stays approved only for the shared-hosting hosts it was approved
+            // with.
+            let shared_hosting = *allow_shared
+                || state.secrets.get(name).is_some_and(|old| {
+                    old.shared_hosting
+                        && domains
+                            .iter()
+                            .filter(|host| secret_host(host) == SecretHost::Shared)
+                            .all(|host| old.domains.contains(host))
+                });
+            state.secrets.insert(
+                name,
+                Secret {
+                    domains,
+                    computers: names,
+                    shared_hosting,
+                },
+            );
+            ok_if(true)
+        }
+        Op::AgentSecret {
+            caller,
+            secret,
+            hosts,
+            computers,
+            any,
+            ..
+        } => {
+            let Some(caller) = pick(&state.computers, *caller, not_undo).map(|c| c.id.clone())
+            else {
+                return Want::default();
+            };
+            let targets: Vec<Computer> = picks(&state.computers, *computers, not_undo)
+                .into_iter()
+                .cloned()
+                .collect();
+            let domains = secret_domains(*hosts);
+            let tree = state.tree(&caller);
+            if targets.iter().any(|c| !tree.contains(&c.id)) || (domains.contains(&"*") && !any) {
+                return Want {
+                    decision: Some(Expect::Refuse),
+                    ok: None,
+                };
+            }
+            state.waiting.push(Waiting::Secret {
+                name: SECRET_NAMES[*secret as usize % SECRET_NAMES.len()],
+                domains,
+                names: targets.iter().map(|c| c.name.clone()).collect(),
+                params: Value::Null,
+            });
+            Want {
+                decision: Some(Expect::Ask),
+                ok: None,
+            }
+        }
+        Op::GitHubOn { c } => {
+            let Some(target) = pick(&state.computers, *c, not_undo).map(|c| c.id.clone()) else {
+                return Want::default();
+            };
+            state.get_mut(&target).unwrap().github = true;
             Want::default()
+        }
+        Op::AgentCreateMac { caller, spec } => {
+            let Some(caller) = pick(&state.computers, *caller, not_undo).cloned() else {
+                return Want::default();
+            };
+            if state.computers.len() >= MAX_COMPUTERS {
+                return Want::default();
+            }
+            let closed = Spec {
+                mode: Mode::Closed,
+                hosts: 0,
+                tools: false,
+            };
+            let ask = |state: &mut Model, policy: Spec| {
+                state.waiting.push(Waiting::CreateMac {
+                    caller: caller.id.clone(),
+                    policy: json!(policy.policy()),
+                    params: Value::Null,
+                });
+                Want {
+                    decision: Some(Expect::Ask),
+                    ok: None,
+                }
+            };
+            // A caller whose policy cannot be read asks, for the policy asked for or else a
+            // closed one.
+            if state.damaged || caller.missing() {
+                return ask(state, spec.unwrap_or(closed));
+            }
+            // A new computer is approved at this Silo's versions: the policy asked for, else the
+            // caller's own.
+            let chosen = spec.unwrap_or_else(|| spec_of_approved(&caller.approved));
+            let within = policy_reach(&chosen.latest(version, false))
+                .within(&judge_reach(&caller.approved, caller.github))
+                .is_ok();
+            if !within {
+                return ask(state, spec.unwrap_or(closed));
+            }
+            model_create_mac(state, chosen, Some(caller.id.clone()));
+            Want {
+                decision: Some(Expect::Allow),
+                ok: Some(true),
+            }
         }
         Op::PresetUpdate => {
             state.version = 2;
@@ -1176,11 +1553,12 @@ fn model_apply(state: &mut Model, op: &Op) -> Want {
                         id,
                         name,
                         kind: Kind::Macos,
-                        approved: Approved::closed_without_incoming(),
+                        approved: Approved::closed_without_incoming(version),
                         entry: true,
                         marked: true,
                         recorded: Value::Null,
                         channel: false,
+                        github: false,
                         maker: None,
                         parent: None,
                         undo_allowed: Vec::new(),
@@ -1207,6 +1585,7 @@ fn delete_from_model(state: &mut Model, target: &str) {
     state.waiting.retain(|waiting| match waiting {
         Waiting::Set { target: t, .. } => t != target,
         Waiting::Fork { caller, source, .. } => caller != target && source != target,
+        Waiting::Secret { .. } | Waiting::CreateMac { .. } => true,
     });
 }
 
@@ -1239,6 +1618,26 @@ fn spec_of(policy: &Value) -> Spec {
     }
 }
 
+/// A macOS computer created with `spec`, saved as approved now.
+fn model_create_mac(state: &mut Model, spec: Spec, maker: Option<String>) {
+    let version = state.version;
+    let (id, name) = state.fresh("mac");
+    state.computers.push(Computer {
+        id,
+        name,
+        kind: Kind::Macos,
+        approved: spec.latest(version, false),
+        entry: true,
+        marked: true,
+        recorded: Value::Null,
+        channel: false,
+        github: false,
+        maker,
+        parent: None,
+        undo_allowed: Vec::new(),
+    });
+}
+
 /// A fork of `source` as the model expects it: the policy given (approved by whoever gave it,
 /// with the source's preset versions), else the source's own; the copy an export makes is
 /// closed with incoming connections refused.
@@ -1252,7 +1651,7 @@ fn model_fork(
     let version = state.version;
     let from = state.get(source).unwrap().clone();
     let (approved, entry) = if closed_copy {
-        (Approved::closed_without_incoming(), true)
+        (Approved::closed_without_incoming(version), true)
     } else {
         match spec {
             // A fork given a policy refuses the incoming connections its source refuses.
@@ -1278,6 +1677,7 @@ fn model_fork(
             from.recorded.clone()
         },
         channel: !closed_copy && from.channel,
+        github: false,
         maker,
         parent: Some(from.id),
         undo_allowed: Vec::new(),
@@ -1363,8 +1763,15 @@ struct Engine {
     saved: Option<Option<Vec<u8>>>,
     table: Option<Table>,
     published: bool,
-    /// The last published rebuild, for settling its undo computer: the plan and the rules.
+    /// The last published rebuild, for settling its undo computer: the plan and the rules the
+    /// computer's sandbox held.
     settled: Option<(RebuildPlan, Value)>,
+    /// The rules the computer a rebuild runs on was started with when the build was made: what
+    /// its sandbox holds.
+    ran_under: Option<Value>,
+    secrets_file: PathBuf,
+    host: Arc<MbtHost>,
+    service: crate::checkpoints::Service,
     steps: usize,
     channels: Arc<Ports>,
     _directory: tempfile::TempDir,
@@ -1374,6 +1781,8 @@ struct Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         Engine::uninstall();
+        crate::secrets::use_test_vault(None);
+        crate::secrets::use_test_runtime(None);
         if std::env::var_os("SILO_MBT_STATS").is_some() {
             STATS.with(|stats| eprintln!("network_mbt: {:?}", stats.borrow()));
         }
@@ -1439,8 +1848,19 @@ impl policy::World for World<'_> {
     fn request_target(&self, _: &str) -> Option<String> {
         None
     }
-    fn access(&self, _: &str) -> Access {
-        Access::default()
+    fn access(&self, computer: &str) -> Access {
+        Access {
+            github: self
+                .model
+                .get(computer)
+                .is_some_and(|c| c.github)
+                .then(|| GitHubAccess {
+                    method: "oauth".into(),
+                    all: true,
+                    repositories: BTreeSet::new(),
+                }),
+            ..Access::default()
+        }
     }
     fn github_policies(&self) -> Option<Vec<Value>> {
         Some(Vec::new())
@@ -1489,18 +1909,16 @@ impl Engine {
         crate::guest_client::tokens::use_test_directory(Some(self.tokens.clone()));
         crate::guest_client::use_test_channels(Some(self.channels.clone()));
         np::use_test_presets(Some(presets_at(self.model.version)));
-        np::use_test_grants(Some(Grants {
-            github: false,
-            secrets: vec![(
-                "SECRET".into(),
-                self.model
-                    .grants
-                    .iter()
-                    .map(|host| (*host).to_owned())
-                    .collect(),
-            )],
-            shared_hosting: BTreeSet::new(),
-        }));
+        np::use_test_grants(None);
+        np::use_test_github(Some(
+            self.model
+                .computers
+                .iter()
+                .filter(|c| c.github)
+                .map(|c| c.name.clone())
+                .collect(),
+        ));
+        crate::secrets::use_test_store(Some(self.secrets_file.clone()));
     }
 
     fn uninstall() {
@@ -1509,7 +1927,34 @@ impl Engine {
         crate::guest_client::tokens::use_test_directory(None);
         crate::guest_client::use_test_channels(None);
         np::use_test_presets(None);
-        np::use_test_grants(None);
+        np::use_test_github(None);
+        crate::secrets::use_test_store(None);
+    }
+
+    /// The id of the secret named `name`, when it is saved.
+    fn secret_id(name: &str) -> Option<String> {
+        crate::secrets::read_secrets_state_sync()
+            .unwrap()
+            .into_iter()
+            .find(|row| row["name"] == name)
+            .map(|row| row["id"].as_str().unwrap().to_owned())
+    }
+
+    /// Creates a macOS computer as `silod` does for `computers.create`: the policy the call
+    /// carries is saved before the computer exists, and its record says whether one was.
+    fn create_mac(&self, id: &str, name: &str, policy: Option<NetworkPolicy>) -> bool {
+        if let Some(policy) = &policy {
+            if policy_store::set(id, policy).is_err() {
+                return false;
+            }
+        }
+        crate::macos_computers::test_access::write_created_record(
+            &self.data,
+            id,
+            name,
+            policy.is_some(),
+        );
+        true
     }
 
     /// Where Linux computers' checkpoint records, and so their marks, are kept.
@@ -1635,6 +2080,7 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
             caller,
             target,
             spec,
+            race,
         } => {
             let (Some(caller), Some(target)) = (
                 pick(&before.computers, *caller, not_undo),
@@ -1659,6 +2105,16 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
                 let expected: Option<NetworkPolicy> = params
                     .get("expected")
                     .map(|value| serde_json::from_value(value.clone()).unwrap());
+                if let Some(race) = race {
+                    service::set(
+                        &engine.eid(&target.id),
+                        &race.policy(),
+                        None,
+                        None,
+                        engine.target(target),
+                    )
+                    .expect("the owner's change between the decision and the run is saved");
+                }
                 let result = service::set(
                     &engine.eid(&target.id),
                     &policy,
@@ -1707,6 +2163,37 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
                                     },
                                 ));
                             }
+                        }
+                    }
+                    Waiting::Secret { names, params, .. } => {
+                        // As `silod` runs `secrets.save`: computers by name, the wildcard
+                        // acknowledgement dropped.
+                        let mut request = params["request"].clone();
+                        let object = request.as_object_mut().unwrap();
+                        object.insert("computers".into(), json!(names));
+                        object.remove("computerIds");
+                        object.remove("allowAnyDestination");
+                        let request: crate::secrets::Request =
+                            serde_json::from_value(request).unwrap();
+                        ok = Some(
+                            crate::secrets::save_secret(request, || Ok::<(), String>(())).is_ok(),
+                        );
+                    }
+                    Waiting::CreateMac { params, .. } => {
+                        if let Some(created) = new_computer(&before, &after) {
+                            let policy = params
+                                .get("networkPolicy")
+                                .map(|value| serde_json::from_value(value.clone()).unwrap());
+                            ok = Some(engine.create_mac(&created.id, &created.name, policy));
+                        } else if before.computers.len() < MAX_COMPUTERS {
+                            ok = Some(engine.create_mac(
+                                &format!("00000000-0000-4000-8000-{:012}", 100 + before.next + 1),
+                                "mac-refused",
+                                Some(NetworkPolicy {
+                                    mode: NetworkPolicyMode::Closed,
+                                    ..NetworkPolicy::default()
+                                }),
+                            ));
                         }
                     }
                 }
@@ -1861,8 +2348,161 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
                     Some(crate::guest_client::turn_off(&[engine.eid(&target.id).as_str()]).is_ok());
             }
         }
-        Op::Grant { .. } | Op::PresetUpdate => {
-            // The grants and presets are installed from the model below.
+        Op::OwnerSecret {
+            secret,
+            hosts,
+            computers,
+            allow_shared,
+        } => {
+            let names: Vec<String> = picks(&before.computers, *computers, not_undo)
+                .into_iter()
+                .map(|c| c.name.clone())
+                .collect();
+            if !names.is_empty() {
+                let name = SECRET_NAMES[*secret as usize % SECRET_NAMES.len()];
+                let id = Engine::secret_id(name);
+                let request = json!({
+                    "operation": if id.is_some() { "edit" } else { "add" },
+                    "id": id,
+                    "name": name,
+                    "value": if id.is_some() { Value::Null } else { json!("value") },
+                    "computers": names,
+                    "allowedDomains": secret_domains(*hosts),
+                    "allowSharedHosting": allow_shared,
+                });
+                let request: crate::secrets::Request = serde_json::from_value(request).unwrap();
+                ok = Some(crate::secrets::save_secret(request, || Ok::<(), String>(())).is_ok());
+            }
+        }
+        Op::AgentSecret {
+            caller,
+            secret,
+            hosts,
+            computers,
+            shared,
+            any,
+        } => {
+            let Some(caller) = pick(&before.computers, *caller, not_undo) else {
+                return finish(engine, op, want, None, None);
+            };
+            let targets: Vec<String> = picks(&before.computers, *computers, not_undo)
+                .into_iter()
+                .map(|c| engine.eid(&c.id))
+                .collect();
+            let domains = secret_domains(*hosts);
+            let mut request = json!({
+                "operation": "add",
+                "name": SECRET_NAMES[*secret as usize % SECRET_NAMES.len()],
+                "value": "value",
+                "computerIds": targets,
+                "allowedDomains": domains,
+            });
+            if *any {
+                request["allowAnyDestination"] = json!(true);
+            }
+            if let Some(shared) = shared {
+                request["allowSharedHosting"] = json!(shared);
+            }
+            let params = json!({ "request": request });
+            let world = engine.world(&before);
+            let made = policy::decide(
+                &Caller::Computer {
+                    id: engine.eid(&caller.id),
+                },
+                MethodName::SecretsSave,
+                &params,
+                &world,
+            );
+            decision = Some(decision_kind(&made));
+            if let Decision::Ask {
+                summary,
+                params: rewritten,
+                ..
+            } = &made
+            {
+                check_secret_summary(summary, &domains);
+                if let Some(Waiting::Secret { params: kept, .. }) = engine
+                    .model
+                    .waiting
+                    .last_mut()
+                    .filter(|_| after.waiting.len() > before.waiting.len())
+                {
+                    *kept = rewritten.clone().unwrap_or(params);
+                }
+            }
+        }
+        Op::GitHubOn { .. } | Op::PresetUpdate => {
+            // GitHub access and the presets are installed from the model below.
+        }
+        Op::AgentCreateMac { caller, spec } => {
+            let Some(caller) = pick(&before.computers, *caller, not_undo) else {
+                return finish(engine, op, want, None, None);
+            };
+            if before.computers.len() < MAX_COMPUTERS {
+                let mut params = json!({
+                    "kind": "macos",
+                    "request": {
+                        "name": format!("mac{}", before.next + 1),
+                        "cpus": 2,
+                        "memoryGiB": 4,
+                        "diskGiB": 64,
+                    },
+                });
+                if let Some(spec) = spec {
+                    params["networkPolicy"] = json!(spec.policy());
+                }
+                let world = engine.world(&before);
+                let made = policy::decide(
+                    &Caller::Computer {
+                        id: engine.eid(&caller.id),
+                    },
+                    MethodName::ComputersCreate,
+                    &params,
+                    &world,
+                );
+                decision = Some(decision_kind(&made));
+                let rewritten = decision_params(&made);
+                let carried = |rewritten: &Option<Value>| -> Option<NetworkPolicy> {
+                    rewritten
+                        .as_ref()
+                        .and_then(|params| params.get("networkPolicy"))
+                        .map(|value| serde_json::from_value(value.clone()).unwrap())
+                };
+                match &made {
+                    Decision::Allow(_) => {
+                        if let Some(created) = new_computer(&before, &after) {
+                            ok = Some(engine.create_mac(
+                                &created.id,
+                                &created.name,
+                                carried(&rewritten),
+                            ));
+                        }
+                    }
+                    Decision::Ask { kind, .. } => {
+                        assert_eq!(*kind, ApprovalKind::Network);
+                        if let Some(Waiting::CreateMac {
+                            policy,
+                            params: kept,
+                            ..
+                        }) = engine
+                            .model
+                            .waiting
+                            .last_mut()
+                            .filter(|_| after.waiting.len() > before.waiting.len())
+                        {
+                            let modelled: NetworkPolicy =
+                                serde_json::from_value(policy.clone()).unwrap();
+                            assert_eq!(
+                                carried(&rewritten),
+                                Some(modelled),
+                                "{op:?}: the request carries another policy than the model's; decided {made:?}"
+                            );
+                            *kept = rewritten.unwrap_or(params);
+                        }
+                    }
+                    Decision::Refuse { .. } => {}
+                }
+            }
         }
         Op::Restart => {
             // The engine stops and starts again: nothing it held in memory is left, and every
@@ -1898,6 +2538,12 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
                 if let Some(rebuild) = &after.rebuild {
                     let mut plan = rebuild.plan.clone();
                     plan.old_id = engine.eid(&plan.old_id);
+                    // What the computer's sandbox holds: the rules it was last started with.
+                    engine.ran_under = Some(
+                        np::plan_for(&plan.old_id, &plan.old_name, Some(&rebuild.recorded))
+                            .map(|plan| plan.policy_value())
+                            .unwrap_or_else(|_| rebuild.recorded.clone()),
+                    );
                     let result =
                         rebuild_access::save_build_policies(&plan, Some(&rebuild.recorded));
                     ok = Some(result.is_ok());
@@ -1932,13 +2578,18 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
             fail_after,
             readable,
             publish_fails,
+            older,
         } => {
             if let (Some(rebuild), Some(table)) = (before.rebuild.clone(), engine.table.as_ref()) {
                 let mut plan = rebuild.plan.clone();
                 plan.old_id = engine.eid(&plan.old_id);
+                if *older && !rebuild.lost {
+                    // A Silo from before the undo computer's policy was saved started the swap.
+                    let _ = policy_store::remove(&plan.undo_id);
+                }
                 *table.fail_after.borrow_mut() = *fail_after;
                 let published = RefCell::new(engine.published);
-                let recorded = rebuild.recorded.clone();
+                let recorded = engine.ran_under.clone().unwrap();
                 let result = rebuild_access::swap_with_policy(
                     &plan,
                     table,
@@ -1975,35 +2626,48 @@ fn engine_apply(engine: &mut Engine, op: &Op) {
                 if engine.published {
                     // The undo computer is a computer now; the rebuild is done.
                     let rebuild = engine.model.rebuild.take().unwrap();
+                    let ran_under = engine.ran_under.take().unwrap();
                     engine.model.computers.push(Computer {
                         id: rebuild.plan.undo_id.clone(),
                         name: rebuild.plan.undo_name.clone(),
                         kind: Kind::Undo,
-                        approved: Approved::closed_without_incoming(),
+                        approved: Approved::closed_without_incoming(1),
                         entry: true,
                         marked: true,
-                        recorded: rebuild.recorded.clone(),
+                        recorded: ran_under.clone(),
                         channel: false,
+                        github: false,
                         maker: None,
                         parent: None,
                         undo_allowed: rebuild.allowed.clone(),
                     });
-                    engine.settled = Some((plan, rebuild.recorded));
+                    engine.settled = Some((plan, ran_under));
                     engine.table = None;
                     engine.published = false;
                 }
             }
         }
-        Op::RebuildSettle { readable } => {
-            if let Some((plan, recorded)) = &engine.settled {
-                if engine.model.get(&plan.undo_id).is_some() {
-                    let _ = rebuild_access::settle_undo_policy(plan, &|| {
-                        if *readable {
-                            Ok(Some(recorded.clone()))
-                        } else {
-                            Err("the rules cannot be read".into())
-                        }
-                    });
+        Op::RebuildSettle { readable, older } => {
+            if let Some((plan, recorded)) = engine.settled.clone() {
+                let undo = engine.model.get(&plan.undo_id).cloned();
+                if undo.is_some_and(|undo| !undo.missing() && !before.damaged) {
+                    if *older {
+                        // A Silo from before the undo computer's policy was saved published the
+                        // swap; the recovery settles it.
+                        policy_store::remove(&plan.undo_id).unwrap();
+                    }
+                    let rules = if *readable {
+                        Ok(Some(recorded))
+                    } else {
+                        Err("the rules cannot be read".to_owned())
+                    };
+                    let settled = rebuild_access::settle_swapped(
+                        engine.host.clone(),
+                        engine.service.clone(),
+                        &plan,
+                        rules,
+                    );
+                    note(format!("settle older={older} ok={}", settled.is_ok()));
                 }
             }
         }
@@ -2121,14 +2785,11 @@ fn enforced(engine: &Engine, computer: &Computer) -> Result<Reach, String> {
     reach_of_runtime(&plan.policy_value(), plan.strict)
 }
 
-fn within_any(
-    actual: &Reach,
-    allowed: &[Approved],
-    grants: &BTreeSet<&'static str>,
-) -> Result<(), String> {
+/// Whether `actual` is within one of the `allowed` policies, for a computer with no grants.
+fn within_any(actual: &Reach, allowed: &[Approved]) -> Result<(), String> {
     let mut why = Vec::new();
     for approved in allowed {
-        match actual.within(&reach_of(approved, grants, None, false)) {
+        match actual.within(&reach_of(approved, &BTreeSet::new(), false, None, false)) {
             Ok(()) => return Ok(()),
             Err(wider) => why.push(wider),
         }
@@ -2163,7 +2824,7 @@ fn check(engine: &Engine) {
         let actual = actual.unwrap_or_else(|error| panic!("{id} cannot start: {error}"));
         note(format!("checked {:?}", computer.kind));
         if computer.kind == Kind::Undo {
-            if let Err(wider) = within_any(&actual, &computer.undo_allowed, &model.grants) {
+            if let Err(wider) = within_any(&actual, &computer.undo_allowed) {
                 panic!("WIDENED: undo computer {id} reaches {wider} beyond any policy its original was approved with");
             }
             continue;
@@ -2184,12 +2845,7 @@ fn check(engine: &Engine) {
         } else {
             None
         };
-        let expected = reach_of(
-            &computer.approved,
-            &model.grants,
-            port,
-            computer.kind == Kind::Macos,
-        );
+        let expected = model.reach(computer, port);
         if let Err(wider) = actual.within(&expected) {
             panic!(
                 "WIDENED: {id} ({:?}) reaches {wider}; approved {:?}, enforced {actual:?}",
@@ -2200,6 +2856,15 @@ fn check(engine: &Engine) {
             actual, expected,
             "{id}: the enforced rules are narrower than the model's; approved {:?}",
             computer.approved
+        );
+        // The GitHub hosts it holds are the ones approved for it, whether or not it has GitHub
+        // access yet: a later grant or allowlist reaches no newer list unless the owner accepts.
+        let held = service::judged(&id, engine.target(computer))
+            .unwrap_or_else(|| panic!("{id}: its policy cannot be judged"));
+        assert_eq!(
+            held.pins.get(GITHUB_GRANT_PIN).copied().unwrap_or(1),
+            computer.approved.github,
+            "{id}: it holds other GitHub hosts than the ones approved; held {held:?}"
         );
     }
     // While a rebuild runs, the build and the undo computer's sandbox hold one of the policies
@@ -2235,10 +2900,132 @@ fn check(engine: &Engine) {
             let plan = np::plan_for(id, name, recorded)
                 .unwrap_or_else(|error| panic!("{name} cannot start: {error}"));
             let actual = reach_of_runtime(&plan.policy_value(), plan.strict).unwrap();
-            if let Err(wider) = within_any(&actual, &rebuild.allowed, &model.grants) {
+            if let Err(wider) = within_any(&actual, &rebuild.allowed) {
                 panic!("WIDENED: {name} reaches {wider} during the rebuild");
             }
         }
+    }
+}
+
+/// The summary of an agent's request to add a secret names every host a computer with an
+/// allowlist reaches through it, and warns of each wildcard over shared hosting.
+fn check_secret_summary(summary: &str, domains: &[&str]) {
+    let reachable: Vec<&&str> = domains
+        .iter()
+        .filter(|host| secret_host(host) != SecretHost::None)
+        .collect();
+    if !reachable.is_empty() {
+        let reach = summary.split(" can also reach ").nth(1).unwrap_or_else(|| {
+            panic!("the approval of a secret for {domains:?} does not say what it lets a computer reach: {summary}")
+        });
+        for host in reachable {
+            assert!(
+                reach.contains(&format!("“{host}”")),
+                "the approval of a secret does not say it lets a computer reach {host}: {summary}"
+            );
+        }
+    }
+    for host in domains
+        .iter()
+        .filter(|host| secret_host(host) == SecretHost::Shared)
+    {
+        assert!(
+            summary.contains(&format!("`{host}`")) && summary.contains("anyone can publish"),
+            "the approval of a secret does not warn that {host} is shared hosting: {summary}"
+        );
+    }
+}
+
+/// The engine context the rebuild recovery runs with: the test's folders, no events.
+struct MbtContext {
+    paths: crate::context::EnginePaths,
+    identity: crate::context::EngineIdentity,
+    runtime_state: Arc<crate::context::EngineRuntimeState>,
+}
+
+impl crate::context::EngineContext for MbtContext {
+    fn paths(&self) -> &crate::context::EnginePaths {
+        &self.paths
+    }
+    fn identity(&self) -> &crate::context::EngineIdentity {
+        &self.identity
+    }
+    fn runtime_state(&self) -> Arc<crate::context::EngineRuntimeState> {
+        self.runtime_state.clone()
+    }
+    fn publish(&self, _event: crate::context::Event, _audience: crate::context::Audience) {}
+    fn main_thread(&self) -> Option<&dyn crate::context::MainThread> {
+        None
+    }
+    fn process(&self) -> &dyn crate::context::ProcessControl {
+        self
+    }
+}
+
+impl crate::context::ProcessControl for MbtContext {
+    fn exit(&self, _code: i32) {}
+    fn restart(&self) -> ! {
+        panic!("the network test never restarts the process")
+    }
+}
+
+/// A runtime host whose storage is the test's folder, so its runtime paths are the test's.
+struct MbtHost {
+    context: Arc<MbtContext>,
+    storage: PathBuf,
+}
+
+impl crate::runtime::RuntimeHost for MbtHost {
+    fn engine_context(&self) -> Arc<dyn crate::context::EngineContext> {
+        self.context.clone()
+    }
+    fn runtime_storage(&self) -> Result<PathBuf, String> {
+        Ok(self.storage.clone())
+    }
+    fn blocks_operations(&self) -> bool {
+        false
+    }
+    fn bundled_tools_directory(&self) -> Result<PathBuf, String> {
+        Ok(self.storage.join("tools"))
+    }
+    fn ensure_runtime_ready(&self) -> Result<(), String> {
+        Ok(())
+    }
+    fn runtime_package_kind(&self) -> crate::runtime::RuntimePackageKind {
+        crate::runtime::RuntimePackageKind::MacApp
+    }
+}
+
+struct NoDisplays;
+
+impl crate::macos_computers::MacosHost for NoDisplays {
+    fn show_display(
+        &self,
+        _context: &crate::macos_computers::MacosContext,
+        _id: &str,
+        _title: &str,
+        _toolbar: bool,
+    ) -> Result<(), String> {
+        Err("no display in tests".into())
+    }
+    fn close_display(&self, _id: &str) {}
+    fn linux_computer_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// The computers a secret is saved for are taken as they are; none runs.
+struct NoComputers;
+
+impl crate::secrets::RuntimeAccess for NoComputers {
+    fn apply_secrets(&self, _computer: &str) -> Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
+    fn validate_computers(&self, _computers: &[String]) -> Result<(), String> {
+        Ok(())
+    }
+    fn revoke_secret(&self, _record: &crate::secrets::PendingRevocation) -> Result<bool, String> {
+        Ok(true)
     }
 }
 
@@ -2321,17 +3108,51 @@ impl StateMachineTest for NetworkTest {
         let paths = restore_fixture(&directory, None);
         let data = directory.path().join("app-data");
         std::fs::create_dir_all(&data).unwrap();
+        let context = Arc::new(MbtContext {
+            paths: crate::context::EnginePaths {
+                app_data: data.clone(),
+                home: directory.path().join("user-home"),
+                ..crate::context::EnginePaths::default()
+            },
+            identity: crate::context::EngineIdentity {
+                channel: crate::channel::Channel::Development,
+                version: "test".into(),
+                package_kind: crate::context::PackageKind::MacApp,
+            },
+            runtime_state: Arc::new(crate::context::EngineRuntimeState::default()),
+        });
+        let host = Arc::new(MbtHost {
+            context: context.clone(),
+            storage: directory.path().to_path_buf(),
+        });
+        assert_eq!(
+            crate::runtime::runtime_paths(host.as_ref())
+                .unwrap()
+                .metadata,
+            paths.metadata
+        );
+        let service = crate::checkpoints::Service::new(
+            host.clone(),
+            crate::macos_computers::MacosContext::new(context, Arc::new(NoDisplays)),
+            Arc::new(|| Ok(1)),
+        );
+        crate::secrets::use_test_vault(Some(BTreeMap::new()));
+        crate::secrets::use_test_runtime(Some(Arc::new(NoComputers)));
         let engine = Engine {
             model: initial.clone(),
             ids: BTreeMap::new(),
             policy_file: data.join("network-policy.json"),
             tokens: data.join("guest-client"),
+            secrets_file: data.join("secrets.json"),
             data,
             paths,
             saved: None,
             table: None,
             published: false,
             settled: None,
+            ran_under: None,
+            host,
+            service,
             steps: 0,
             channels: Arc::default(),
             _directory: directory,
@@ -2415,7 +3236,7 @@ where
     let mut state = Model {
         computers: Vec::new(),
         version: 1,
-        grants: BTreeSet::new(),
+        secrets: BTreeMap::new(),
         damaged: false,
         waiting: Vec::new(),
         rebuild: None,
@@ -2441,7 +3262,10 @@ fn a_fork_never_shares_its_sources_channel_port() {
     };
     replay::<NetworkTest, DEFAULT>(vec![
         Transition::Init(Root::Entry(list(0, true))),
-        Transition::Op(Op::RebuildSettle { readable: true }),
+        Transition::Op(Op::RebuildSettle {
+            readable: true,
+            older: false,
+        }),
         Transition::Op(Op::AgentFork {
             caller: 255,
             source: 83,
@@ -2458,6 +3282,7 @@ fn a_fork_never_shares_its_sources_channel_port() {
             caller: 52,
             target: 218,
             spec: list(11, false),
+            race: None,
         }),
         Transition::Op(Op::Repair),
         Transition::Op(Op::AgentFork {

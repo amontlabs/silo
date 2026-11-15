@@ -7541,6 +7541,13 @@ pub(crate) mod test_access {
         record
     }
 
+    /// Writes the record a creation saves for `id`, which says whether a policy was saved for it.
+    pub(crate) fn write_created_record(data: &Path, id: &str, name: &str, policy_saved: bool) {
+        let mut record = record(id, name);
+        record.network_policy_saved = policy_saved;
+        store::save(&Layout::new(data, id), &record).unwrap();
+    }
+
     /// Writes the record that marks the import of `id` as published.
     pub(crate) fn write_published_record(data: &Path, id: &str, name: &str) {
         store::save(&Layout::new(data, id), &record(id, name)).unwrap();
