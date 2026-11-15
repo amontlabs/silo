@@ -86,6 +86,43 @@ used to call the engine in-process forwards to the canonical `silod` method over
   It also writes `SiloEngineCodeRequirement`, the signer requirement `silod` checks at run time, into the
   engine's `Info.plist` before signing ([engine releases](SiloUI-RELEASES.md#engine-releases)).
 
+## Separate Dev engine instances for live checks
+
+Everything a Dev `silod` owns on macOS comes from `$HOME` (`SilodPaths::for_home` in
+`app/SiloUI/src-tauri/silod/src/paths.rs`): the state directory with the socket, ownership
+lock, owner record and device identity (`$HOME/.silo-dev`), data, cache and logs
+(`$HOME/Library/{Application Support,Caches,Logs}/org.silo.dev`), and every computer's
+runtime home (`$HOME/.silo-dev/<12 hex>`). The macOS Keychain lookup follows `$HOME` too.
+So a `silod --agent` started with another `HOME` is a separate engine; no product change is
+needed. The live harness (`app/SiloUI/scripts/live/run`) uses this for checks that declare
+`CHECK_OWN_ENGINE="dev-engine"`: by default each run starts its own instance and skips the
+machine-wide `dev-engine` lock, which stays for `--engine shared` and for checks that drive
+the one Dev app window.
+
+What an instance needs and what stays shared:
+
+- **HOME length.** The engine refuses a HOME longer than 28 bytes: a computer's runtime
+  socket `<HOME>/.silo-dev/<12 hex>/run/sandboxes/<24 chars>/control.sock` must stay under
+  104 bytes (`prepare_runtime_home`). The harness makes `sl-XXX` right under the short base
+  (`atelier tmp --short` or `LIVE_SHORT_BASE`).
+- **Guest images.** An instance gets an APFS clone (`cp -c`) of the Dev guest images; it is
+  read-only like the original, so the harness makes it writable before deleting it. Each
+  instance loads the image into its own runtime, on its own disk space, on its first create
+  (193 s in the November 2026 run of two `r7_lock` checks at once, against 15 s for the
+  next create); a long-lived Dev engine has already done this.
+- **The `silo` CLI** accepts only the Dev socket under its own `$HOME/.silo-dev`, so the
+  harness runs it with the instance's `HOME` (`--allow-other-channel` would also work).
+- **Website proxy port.** `SILO_URL_PROXY_PORT=0` gives each instance an ephemeral port, so
+  it never takes 47383 from the Dev engine. Other loopback listeners (channel ports, SSH
+  access, remote network) bind port 0 or fall back when a port is taken.
+- **Keychain.** An instance finds no default keychain under its `HOME`, so credential calls
+  fail without a dialog and saved sign-ins (GitHub, secrets) are absent. A check that needs
+  them cannot run on its own instance yet.
+- **Not separated:** the instance is not registered with launchd (the harness starts and
+  stops it by PID), and the Dev app always talks to `~/.silo-dev`. macOS computers
+  (Virtualization.framework and its network) have not been run on two instances at once.
+  CPU, memory and disk are shared.
+
 ## Signing the dev silod with a stable identity
 
 `silod` is sealed ad hoc (`codesign --sign -`) by default. An ad hoc signature is different
