@@ -809,6 +809,18 @@ pub(crate) fn use_test_grants(grants: Option<Grants>) {
     TEST_GRANTS.with(|test| *test.borrow_mut() = grants);
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_GITHUB: std::cell::RefCell<Option<BTreeSet<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests on this thread see GitHub access for the computers named in `names` instead of the
+/// GitHub store; secrets still come from the secret store.
+#[cfg(test)]
+pub(crate) fn use_test_github(names: Option<BTreeSet<String>>) {
+    TEST_GITHUB.with(|test| *test.borrow_mut() = names);
+}
+
 impl Grants {
     /// Only GitHub access, for comparing the hosts it adds.
     pub fn github_only(github: bool) -> Self {
@@ -823,6 +835,14 @@ impl Grants {
         #[cfg(test)]
         if let Some(grants) = TEST_GRANTS.with(|test| test.borrow().clone()) {
             return grants;
+        }
+        #[cfg(test)]
+        if let Some(github) = TEST_GITHUB.with(|test| test.borrow().clone()) {
+            return Self {
+                github: github.contains(name),
+                secrets: crate::secrets::assigned_hosts(name).unwrap_or_default(),
+                shared_hosting: crate::secrets::shared_hosting_approved(name).unwrap_or_default(),
+            };
         }
         let access = crate::policy::access::of_computer(name);
         Self {

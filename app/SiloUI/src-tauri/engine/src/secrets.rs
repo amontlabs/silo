@@ -32,7 +32,23 @@ pub fn install_runtime(runtime: Arc<dyn RuntimeAccess>) -> Result<(), String> {
         .map_err(|_| "Secrets runtime access is already installed".to_owned())
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_RUNTIME: std::cell::Cell<Option<&'static Arc<dyn RuntimeAccess>>> = const { std::cell::Cell::new(None) };
+}
+
+/// Tests on this thread reach computers through `runtime` instead of the installed one.
+#[cfg(test)]
+pub(crate) fn use_test_runtime(runtime: Option<Arc<dyn RuntimeAccess>>) {
+    let runtime = runtime.map(|runtime| &*Box::leak(Box::new(runtime)));
+    TEST_RUNTIME.with(|test| test.set(runtime));
+}
+
 fn runtime() -> Result<&'static Arc<dyn RuntimeAccess>, String> {
+    #[cfg(test)]
+    if let Some(runtime) = TEST_RUNTIME.with(std::cell::Cell::get) {
+        return Ok(runtime);
+    }
     RUNTIME
         .get()
         .ok_or_else(|| "Computer secret access is unavailable.".to_owned())

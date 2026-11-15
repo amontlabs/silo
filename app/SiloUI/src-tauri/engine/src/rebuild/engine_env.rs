@@ -656,6 +656,23 @@ pub(super) fn forget_build_policies(plan: &Plan) -> Result<(), String> {
     store::remove(&plan.undo_id)
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_ORIGINAL_RULES: std::cell::RefCell<Option<Result<Option<Value>, String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests on this thread read `rules` as the rules of the sandbox a computer had before the
+/// swap, instead of asking the runtime.
+#[cfg(test)]
+pub(super) fn use_test_original_rules(rules: Option<Result<Option<Value>, String>>) {
+    TEST_ORIGINAL_RULES.with(|test| *test.borrow_mut() = rules);
+}
+
+#[cfg(test)]
+fn test_original_rules() -> Option<Result<Option<Value>, String>> {
+    TEST_ORIGINAL_RULES.with(|test| test.borrow().clone())
+}
+
 impl EngineRebuildEnv {
     /// The network rules held by the sandbox the computer had before the swap, wherever the
     /// swap has moved it to. `None` for a sandbox that records none.
@@ -664,6 +681,10 @@ impl EngineRebuildEnv {
         paths: &RuntimePaths,
         plan: &Plan,
     ) -> Result<Option<Value>, String> {
+        #[cfg(test)]
+        if let Some(rules) = test_original_rules() {
+            return rules;
+        }
         let unreadable = |error: String| {
             format!(
                 "The network rules of {} could not be read, so the computer it can be undone to is closed to the network until they can: {error}",

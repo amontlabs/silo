@@ -57,6 +57,21 @@ pub(crate) mod test_access {
     pub(crate) fn forget_build_policies(plan: &Plan) -> Result<(), String> {
         engine_env::forget_build_policies(plan)
     }
+
+    /// Settles a published swap as the recovery of a `Swapped` journal does, on `host`'s
+    /// runtime; `rules` stand for the rules of the sandbox the computer had before the swap.
+    pub(crate) fn settle_swapped(
+        host: std::sync::Arc<dyn crate::runtime::RuntimeHost>,
+        service: crate::checkpoints::Service,
+        plan: &Plan,
+        rules: Result<Option<Value>, String>,
+    ) -> Result<(), String> {
+        use super::RebuildEnv as _;
+        engine_env::use_test_original_rules(Some(rules));
+        let settled = super::service::env_for(host, service).settle_swapped(plan);
+        engine_env::use_test_original_rules(None);
+        settled
+    }
 }
 
 use std::time::Duration;
