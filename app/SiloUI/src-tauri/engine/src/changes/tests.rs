@@ -770,10 +770,23 @@ fn counts_saturate() {
     assert_eq!(d.code[0].dirty_delta, i64::MAX);
 }
 
+/// CPU time this thread has used, so time spent descheduled on a loaded machine is not counted.
+fn thread_cpu_seconds() -> f64 {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `now` is a valid timespec and the clock id is a constant the platform defines.
+    let status = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut now) };
+    assert_eq!(status, 0, "the thread CPU clock is unavailable");
+    now.tv_sec as f64 + now.tv_nsec as f64 * 1e-9
+}
+
 #[test]
 fn large_baselines_subtract_in_linear_time() {
-    // Four times the files must cost about four times as much, not sixteen: comparing the
-    // two sizes on the same run keeps the check independent of how fast the machine is.
+    // Four times the files must cost about four times as much, not sixteen. Each size is
+    // measured in this thread's CPU time and keeps the best of several runs, so neither
+    // waiting for a busy machine nor one slowed run changes the ratio.
     // No path here is ignored, so an empty ignore list leaves the same diff and keeps the
     // per-path pattern matching from drowning out the subtraction being timed.
     let none = IgnoreList::parse("");
@@ -784,19 +797,25 @@ fn large_baselines_subtract_in_linear_time() {
                 .collect::<String>()
         };
         let (idle, task) = (files("a"), files("b"));
-        let started = std::time::Instant::now();
-        let baseline = diff(&m(""), &m(&idle), None, &none);
-        let d = diff(&m(""), &m(&task), Some(&baseline), &none);
-        let elapsed = started.elapsed();
-        assert_eq!(d.idle_noise.len(), n);
-        elapsed.as_secs_f64()
+        let (idle, task) = (m(&idle), m(&task));
+        let empty = m("");
+        (0..5)
+            .map(|_| {
+                let started = thread_cpu_seconds();
+                let baseline = diff(&empty, &idle, None, &none);
+                let d = diff(&empty, &task, Some(&baseline), &none);
+                let elapsed = thread_cpu_seconds() - started;
+                assert_eq!(d.idle_noise.len(), n);
+                elapsed
+            })
+            .fold(f64::MAX, f64::min)
     };
     let small = time(10_000);
     let large = time(40_000);
     let ratio = large / small.max(1e-6);
     assert!(
         ratio < 9.0,
-        "4x the files took {ratio:.1}x as long ({small:.3}s -> {large:.3}s); linear is 4x, quadratic 16x"
+        "4x the files took {ratio:.1}x as much CPU ({small:.3}s -> {large:.3}s); linear is 4x, quadratic 16x"
     );
 }
 

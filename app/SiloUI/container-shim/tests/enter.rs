@@ -22,7 +22,7 @@ fn a_command_entered_into_a_holder_shares_its_network_namespace_and_not_the_host
     let mut holder = ctr()
         .args(["userns", "--net", "--", "sh", "-c"])
         .arg(format!(
-            "echo $$ > {}/outer.pid; readlink /proc/self/ns/net > {}/net; sleep 20",
+            "echo $$ > {}/outer.pid; readlink /proc/self/ns/net > {}/net; exec sleep 20",
             state.path().display(),
             state.path().display()
         ))
