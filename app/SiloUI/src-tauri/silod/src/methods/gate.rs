@@ -975,6 +975,13 @@ pub(crate) fn reserved_memory() -> u64 {
         .sum()
 }
 
+/// The memory reserved for all calls once the reservations no longer wanted are dropped, as
+/// the next call that takes memory counts it.
+#[cfg(test)]
+pub(crate) fn reserved_memory_now(engine: &dyn EngineContext) -> u64 {
+    current_reserved_memory(engine, &Residency::default())
+}
+
 /// Every computer's open jobs and kept results together that computers may hold in the job
 /// registry. The owner's jobs are never counted against it.
 const MAX_COMPUTER_JOBS: usize = 512;

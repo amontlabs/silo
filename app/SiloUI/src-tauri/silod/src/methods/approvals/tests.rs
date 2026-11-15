@@ -20,6 +20,8 @@ use silo_engine::{
     policy::{store::PolicyStore, Caller},
 };
 
+mod approvals_mbt;
+
 use super::{request_answered, result_goes_to_computer, TestRun, FOR_COMPUTER, TEST_RUN};
 use crate::{
     dispatcher::{DispatchError, RequestContext},
