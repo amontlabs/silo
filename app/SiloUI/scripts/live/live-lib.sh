@@ -92,6 +92,8 @@ live_engine_prepare() {
   live_need_path "$src" "Dev guest images to clone"
   mkdir -p "$(dirname "$dst")" && cp -cR "$src" "$dst.tmp.$$" && mv "$dst.tmp.$$" "$dst" || live_die "cannot clone $src"
 }
+# A client of an own instance (the silo CLI) runs with HOME=$(live_engine_home) too: the CLI accepts only the Dev
+# socket under its HOME's .silo-dev.
 # live_engine_launch <silod> [args]: starts <silod> --agent in the background (prints nothing; the caller records
 # $!). An own instance gets its HOME and an ephemeral website-proxy port, so it never takes the Dev engine's.
 live_engine_launch() {

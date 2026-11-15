@@ -13,8 +13,9 @@ SILO_BIN=$T/debug/silo
 BUNDLE="$T/debug/bundle/macos/Silo Dev.app"
 ENGINE_DIR="$BUNDLE/Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS"
 SILOD="$ENGINE_DIR/silod"; MSB="$ENGINE_DIR/msb"
-SOCK=$(live_dev_sock)
-silo() { "$SILO_BIN" --socket "$SOCK" "$@"; }
+SOCK=$(live_dev_sock); EHOME=$(live_engine_home)
+# The CLI runs with the engine's HOME: it only accepts the Dev socket under that HOME's .silo-dev.
+silo() { HOME=$EHOME "$SILO_BIN" --socket "$SOCK" "$@"; }
 
 our_engine() { live_our_engine "$SILOD"; }
 # Inputs that must invalidate the step stamps (read by `live`): the engine binaries and socket.
@@ -42,7 +43,7 @@ ensure_engine() { # only the engine this check started may be used
 lock_file() { find "$(live_engine_data)" -name .silo-configuration-worker.lock 2>/dev/null | head -1; }
 holders() { lsof "$(lock_file)" 2>/dev/null | awk 'NR>1{print $1"("$2")"}' | sort -u | tr '\n' ' ' || true; }
 mine() {
-  local rh; rh=$(ls -d "$(live_engine_home)"/.silo-dev/*/sandboxes 2>/dev/null | head -1 | xargs -I{} dirname {})
+  local rh; rh=$(ls -d "$EHOME"/.silo-dev/*/sandboxes 2>/dev/null | head -1 | xargs -I{} dirname {})
   MSB_HOME=$rh MSB_PATH="$MSB" "$MSB" list 2>&1 | grep -E "^(NAME|e2e-r7-)" || true
 }
 
