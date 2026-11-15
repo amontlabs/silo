@@ -147,8 +147,9 @@ fn bytes(frame: &Value) -> Vec<u8> {
 
 #[tokio::test]
 async fn the_guest_domain_works_end_to_end_over_the_engine_socket() {
-    let _watches = silo_engine::guest::EndWatchesOnDrop;
     let temporary = tempfile::tempdir().unwrap();
+    // Dropped before `temporary`: ending a watch runs the fake `msb` kept there.
+    let _watches = silo_engine::guest::EndWatchesOnDrop;
     let root = temporary.path();
     let app_data = root.join("app-data");
     use_runtime_paths(app_data.clone(), fake_runtime(root));
