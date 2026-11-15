@@ -3,6 +3,16 @@
 Native unit tests use [shared fixtures](../app/SiloUI/src-tauri/engine/src/test_support.rs)
 instead of acquiring the production operation gate to serialize unrelated tests.
 
+## Durability flushes
+
+Test builds (`cfg(test)` or silo-engine's `test-support` feature, which only dev-dependencies
+enable) skip waiting for the storage device: product code flushes through
+[`durable::DurableFile::sync_to_disk`](../app/SiloUI/src-tauri/engine/src/durable.rs), a source
+scan fails a test on any direct `sync_all` or `sync_data`, and the job registry uses SQLite
+`synchronous=NORMAL` without `fullfsync`. The writes, renames and their order are unchanged. The
+shipped build always flushes: the CI scripts fail when `silod` or `silo-cli` would build with
+`test-support`, and an optimized build with it does not compile.
+
 ## Persisted configuration compatibility
 
 The runtime metadata fixture pins the schema-1 computer and SSH field names used before

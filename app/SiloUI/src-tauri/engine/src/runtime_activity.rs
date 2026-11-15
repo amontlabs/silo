@@ -2,6 +2,7 @@ use super::{
     activity_timestamp, diagnostic_text, failure_report, read_activity, validate_name,
     RuntimeError, RuntimePaths, MAX_OUTPUT_BYTES,
 };
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -121,12 +122,12 @@ fn store(paths: &RuntimePaths, event: &Event) -> Result<(), String> {
     serde_json::to_writer(&mut file, &entries)
         .map_err(|_| "Computer activity could not be saved.")?;
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Computer activity could not be saved.")?;
     file.persist(&target)
         .map_err(|_| "Computer activity could not be saved.")?;
     File::open(parent)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| file.sync_to_disk())
         .map_err(|_| "Computer activity could not be synced.".to_string())
 }
 

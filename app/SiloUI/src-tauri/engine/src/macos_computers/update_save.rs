@@ -14,6 +14,7 @@
 //!   storage in place, restores the memory into a new machine that stays paused, and calls
 //!   `arm` before the resume. It never boots from the disk: a refused memory is an error.
 use super::*;
+use crate::durable::DurableFile;
 use crate::engine_update::{
     adapter::{OriginalState, Reconciled, RestoreError, ResumeHeldError, SaveAdapter, SaveContext},
     journal::{boot_id, CaptureRef, ComputerKind, MacCapture, RuntimeIdentity},
@@ -548,7 +549,7 @@ fn sync_artifacts(directory: &Path) -> Result<std::collections::BTreeMap<String,
     let mut sizes = std::collections::BTreeMap::new();
     for name in [checkpoints::STATE, DISK, AUXILIARY] {
         let file = fs::File::open(directory.join(name)).map_err(io)?;
-        file.sync_all().map_err(io)?;
+        file.sync_to_disk().map_err(io)?;
         sizes.insert(name.to_owned(), file.metadata().map_err(io)?.len());
     }
     store::sync_dir(directory).map_err(io)?;
@@ -621,7 +622,7 @@ fn replace_live_files(layout: &Layout, capture: &MacCapture) -> Result<(), Strin
         let _ = fs::remove_file(staged);
         templates::clone_file(source, staged).map_err(templates::CopyError::message)?;
         fs::File::open(staged)
-            .and_then(|file| file.sync_all())
+            .and_then(|file| file.sync_to_disk())
             .map_err(io)?;
     }
     for (staged, (live, _)) in staged.iter().zip(&pairs) {

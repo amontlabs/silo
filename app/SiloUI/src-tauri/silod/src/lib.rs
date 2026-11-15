@@ -131,3 +131,13 @@ mod entry_tests {
         assert!(silo_engine::remote::BRIDGE_USAGE.starts_with("usage: silod --remote-bridge"));
     }
 }
+
+#[cfg(test)]
+mod durability_tests {
+    /// silod flushes through `silo_engine::durable`, so test builds skip the device flush.
+    #[test]
+    fn silod_flushes_only_through_the_engine_helper() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        silo_engine::durable::guard::assert_no_direct_flushes(&source, std::path::Path::new(""));
+    }
+}

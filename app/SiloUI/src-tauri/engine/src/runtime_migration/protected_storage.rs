@@ -7,6 +7,7 @@
 //! can start, and the computers of this storage are Silo's own. Computers that cannot be moved
 //! are reported, never removed; the original disk files are always retained.
 use super::{copy_runtime_tree_for_backup, runtime, Disk, Flush};
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -517,13 +518,13 @@ pub(super) fn write_report(storage: &Path, report: &Report) -> Result<(), String
         .map_err(|_| "The storage upgrade result could not be encoded.")?;
     temporary
         .write_all(b"\n")
-        .and_then(|()| temporary.as_file().sync_all())
+        .and_then(|()| temporary.as_file().sync_to_disk())
         .map_err(|_| "The storage upgrade result could not be saved.")?;
     temporary
         .persist(storage.join(MARKER))
         .map_err(|_| "The storage upgrade result could not be committed.")?;
     fs::File::open(storage)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| "The storage upgrade result could not be committed.".to_string())
 }
 

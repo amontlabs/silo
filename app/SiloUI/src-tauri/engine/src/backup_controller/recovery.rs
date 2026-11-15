@@ -3,6 +3,7 @@
 //! output and reports what happened. It adopts only a verified export file or
 //! an import whose computer was saved under the identity journaled for it.
 use super::*;
+use crate::durable::DurableFile;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -220,10 +221,10 @@ fn write(history: &Path, journal: &Journal) -> Result<(), String> {
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
     serde_json::to_writer(&mut file, journal).map_err(|e| e.to_string())?;
-    file.as_file().sync_all().map_err(|e| e.to_string())?;
+    file.as_file().sync_to_disk().map_err(|e| e.to_string())?;
     file.persist(&path).map_err(|e| e.to_string())?;
     fs::File::open(parent)
-        .and_then(|dir| dir.sync_all())
+        .and_then(|dir| dir.sync_to_disk())
         .map_err(|e| e.to_string())
 }
 /// Why [`try_load`] found no journal to use. The kind decides what may be done with the
@@ -363,7 +364,7 @@ fn set_aside(app_data: &Path, detail: &str) -> Result<(PathBuf, Journal), String
         })
         .ok_or("The unreadable export or import record could not be set aside.")?;
     fs::rename(&journal, &aside)
-        .and_then(|()| fs::File::open(app_data).and_then(|directory| directory.sync_all()))
+        .and_then(|()| fs::File::open(app_data).and_then(|directory| directory.sync_to_disk()))
         .map_err(|_| "The unreadable export or import record could not be set aside.")?;
     let notice = Journal {
         version: 1,
@@ -903,7 +904,7 @@ pub(super) fn dismiss(controller: &Controller) -> Result<(), String> {
     let path = journal_path(&controller.history_path);
     match fs::remove_file(&path) {
         Ok(()) => fs::File::open(path.parent().unwrap())
-            .and_then(|dir| dir.sync_all())
+            .and_then(|dir| dir.sync_to_disk())
             .map_err(|e| e.to_string())?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {

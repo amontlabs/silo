@@ -28,6 +28,7 @@ pub mod update_save;
 /// Process-wide ordered admission for work that changes computer runtime state.
 pub static OPERATIONS: operation_gate::OperationGate = operation_gate::OperationGate::new();
 use crate::bridge_error::{BridgeError, ErrorCode};
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
@@ -4603,7 +4604,7 @@ fn persist_activity(path: &Path, events: &impl Serialize) -> Result<(), String> 
     file.write_all(&bytes)
         .map_err(|_| "Silo could not save setup activity.")?;
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Silo could not save setup activity.")?;
     file.persist(path)
         .map_err(|_| "Silo could not save setup activity.")?;
@@ -7623,7 +7624,7 @@ pub fn write_metadata(
             "Silo could not save its computer settings: {error}"
         ))
     })?;
-    temporary.as_file().sync_all().map_err(|error| {
+    temporary.as_file().sync_to_disk().map_err(|error| {
         RuntimeError::Unavailable(format!(
             "Silo could not save its computer settings: {error}"
         ))
@@ -7635,7 +7636,7 @@ pub fn write_metadata(
         ))
     })?;
     File::open(parent)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|error| {
             RuntimeError::Unavailable(format!(
                 "Silo could not finalize its computer settings: {error}"

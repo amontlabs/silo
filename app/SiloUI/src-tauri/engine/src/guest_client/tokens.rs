@@ -5,6 +5,7 @@
 //! network may still name after its tools were turned off or moved are kept in
 //! `<app data>/guest-client/held-ports.json`.
 
+use crate::durable::DurableFile;
 use std::{
     fs,
     io::Write,
@@ -309,7 +310,7 @@ impl TokenStore {
             .open(&temporary)
             .map_err(io)?;
         file.write_all(&text)
-            .and_then(|()| file.sync_all())
+            .and_then(|()| file.sync_to_disk())
             .map_err(io)?;
         fs::rename(&temporary, self.directory.join(format!("{name}.json"))).map_err(io)
     }

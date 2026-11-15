@@ -2,6 +2,7 @@
 #[path = "updates/schedule.rs"]
 mod schedule;
 
+use crate::durable::DurableFile;
 use schedule::Schedule;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -162,12 +163,12 @@ pub fn save_preferences(path: &Path, enabled: bool) -> Result<(), String> {
     std::io::Write::write_all(&mut file, &bytes)
         .map_err(|_| "Update preferences could not be saved.")?;
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Update preferences could not be saved.")?;
     file.persist(path)
         .map_err(|_| "Update preferences could not be saved.")?;
     fs::File::open(parent)
-        .and_then(|f| f.sync_all())
+        .and_then(|f| f.sync_to_disk())
         .map_err(|_| "Update preferences could not be saved.".into())
 }
 

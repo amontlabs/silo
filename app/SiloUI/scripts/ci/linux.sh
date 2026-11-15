@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # The Linux engine job: the engine, the daemon, the CLI and client crates, and
-# silo-host with and without its desktop feature, plus a check that silod does
-# not depend on GTK. Run linux-prepare.sh first.
+# silo-host with and without its desktop feature, plus checks that silod does
+# not depend on GTK and that the shipped binaries do not build with test-support.
+# Run linux-prepare.sh first.
 #
 #   linux.sh          every part
 #   linux.sh engine   the engine tests
-#   linux.sh daemon   the GTK check, then the daemon, CLI and client tests
+#   linux.sh daemon   the GTK and test-support checks, then the daemon, CLI and
+#                     client tests
 #   linux.sh host     silo-host with and without its desktop feature
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -29,6 +31,7 @@ engine() {
 daemon() {
   # The headless daemon must not need GTK: silo-host's desktop feature stays off.
   step silod-without-gtk no_gtk
+  step shipped-without-test-support no_test_support
   # One run for the daemon side, so silo-host builds without its desktop feature as in silod.
   step daemon cargo nextest run "${SILO_NEXTEST_FLAGS[@]}" -p silod -p silo-cli -p silo-client -p silo-api -p silo-container-shim
 }

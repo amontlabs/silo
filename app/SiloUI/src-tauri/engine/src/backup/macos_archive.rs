@@ -9,6 +9,7 @@ use super::{
     Cancellation, MsbRunner, PackageComputer, PackageManifest, RuntimeManifest,
     DEFAULT_MAX_ARCHIVE_BYTES, FORMAT_VERSION, FREE_SPACE_RESERVE, MAGIC, MAX_MANIFEST_BYTES,
 };
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -1165,7 +1166,7 @@ fn verify_component_frame(
     }
     if let Some(output) = output {
         output.set_len(component.logical_length)?;
-        output.sync_all()?;
+        output.sync_to_disk()?;
     }
     Ok(())
 }

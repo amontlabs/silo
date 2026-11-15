@@ -8,6 +8,7 @@
 //! computer and checks it with `cua-driver doctor`. The host drives the guest toward the mode
 //! the user chose and remembers how each attempt ended; the guest is a plain executor. See
 //! `docs/SiloUI-COMPUTER-USE-PLAN.md`.
+use crate::durable::DurableFile;
 use crate::{
     desktop,
     runtime::{self, ComputerConfiguration, RuntimeError, RuntimePaths, RuntimeRunner},
@@ -326,7 +327,7 @@ fn write_atomic<T: Serialize>(
     let bytes = serde_json::to_vec(value).map_err(|_| fail())?;
     let mut temporary = tempfile::NamedTempFile::new_in(&directory).map_err(|_| fail())?;
     std::io::Write::write_all(&mut temporary, &bytes).map_err(|_| fail())?;
-    temporary.as_file().sync_all().map_err(|_| fail())?;
+    temporary.as_file().sync_to_disk().map_err(|_| fail())?;
     temporary.persist(path).map_err(|_| fail())?;
     Ok(())
 }

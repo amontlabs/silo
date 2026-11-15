@@ -5,6 +5,7 @@
 //! entry of a computer marked as having had one ([`super::marks`]): a missing file is an empty
 //! store only for computers that never had a policy.
 
+use crate::durable::DurableFile;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
@@ -182,9 +183,9 @@ fn write(path: &PathBuf, document: &Document) -> Result<(), String> {
             .mode(0o600)
             .open(&temporary)?;
         file.write_all(&bytes)?;
-        file.sync_all()?;
+        file.sync_to_disk()?;
         fs::rename(&temporary, path)?;
-        fs::File::open(directory)?.sync_all()
+        fs::File::open(directory)?.sync_to_disk()
     })();
     if written.is_err() {
         let _ = fs::remove_file(&temporary);

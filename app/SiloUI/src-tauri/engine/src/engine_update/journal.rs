@@ -5,6 +5,7 @@
 //! atomically renamed over the journal and followed by a directory sync, so a crash leaves
 //! either the previous or the next complete journal and never a torn one. Artifacts are
 //! synced by their adapters before an entry is recorded as `saved`.
+use crate::durable::DurableFile;
 use std::{
     fs,
     io::{Read, Write},
@@ -405,7 +406,7 @@ fn flush(file: &fs::File) -> std::io::Result<()> {
     if cfg!(test) {
         return Ok(());
     }
-    file.sync_all()
+    file.sync_to_disk()
 }
 
 #[cfg(test)]

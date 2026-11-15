@@ -4,6 +4,10 @@
 
 extern crate self as silo_engine;
 
+// `test-support` skips durability flushes (`durable`), so an optimized build must not carry it.
+#[cfg(all(feature = "test-support", not(debug_assertions)))]
+compile_error!("the test-support feature skips durability flushes and is for test builds only");
+
 pub mod agent_tools;
 pub mod agents;
 pub mod approvals;
@@ -38,6 +42,7 @@ pub mod desktop_viewer_media;
 pub mod device_facts;
 pub mod device_identity;
 pub(crate) mod download;
+pub mod durable;
 pub mod editor;
 pub mod engine_update;
 pub mod events;

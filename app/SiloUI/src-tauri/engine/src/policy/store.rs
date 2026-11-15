@@ -3,6 +3,7 @@
 //! not the fork tree, is what the policy reads. One owner-only file under
 //! `<app data>/policy/`, replaced atomically.
 
+use crate::durable::DurableFile;
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -216,9 +217,9 @@ impl PolicyStore {
                 .mode(0o600)
                 .open(&temporary)?;
             file.write_all(&bytes)?;
-            file.sync_all()?;
+            file.sync_to_disk()?;
             fs::rename(&temporary, self.file())?;
-            fs::File::open(&self.directory)?.sync_all()
+            fs::File::open(&self.directory)?.sync_to_disk()
         })();
         if written.is_err() {
             let _ = fs::remove_file(&temporary);

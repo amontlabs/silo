@@ -5,6 +5,7 @@
 //! symlink at the download name, follows only HTTPS redirects and bounds how much
 //! it writes. The caller verifies the finished file by checksum.
 
+use crate::durable::DurableFile;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
@@ -237,7 +238,7 @@ impl HttpDownloader {
             written += count as u64;
             progress(written);
         }
-        file.sync_all().map_err(|_| disk())?;
+        file.sync_to_disk().map_err(|_| disk())?;
         if total == 0 || written == total {
             Ok(())
         } else {

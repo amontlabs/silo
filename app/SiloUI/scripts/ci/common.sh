@@ -38,6 +38,21 @@ finish() {
   echo "all checks passed"
 }
 
+# no_test_support: fails when the shipped binaries (silod and silo-cli, on any
+# target) build with silo-engine's test-support feature, which skips
+# durability flushes. Run from the Cargo workspace.
+no_test_support() {
+  local tree
+  tree=$(cargo tree -p silod -p silo-cli -e normal,build,features --target all --locked --prefix none) || {
+    echo "cargo tree failed for silod and silo-cli" >&2
+    return 1
+  }
+  if grep -F 'test-support' <<<"$tree"; then
+    echo "silod or silo-cli builds with the test-support feature" >&2
+    return 1
+  fi
+}
+
 die() {
   echo "error: $*" >&2
   exit 2

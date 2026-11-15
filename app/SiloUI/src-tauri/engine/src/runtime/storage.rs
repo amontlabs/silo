@@ -1,5 +1,6 @@
 //! Computer discard maintenance. Never deletes guest files or starts a computer.
 use super::*;
+use crate::durable::DurableFile;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -112,12 +113,12 @@ fn save(paths: &RuntimePaths, id: &str, record: &Record) -> Result<(), RuntimeEr
     file.write_all(&bytes)
         .map_err(|_| failure("Storage maintenance history could not be saved."))?;
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| failure("Storage maintenance history could not be synced."))?;
     file.persist(&target)
         .map_err(|_| failure("Storage maintenance history could not be saved."))?;
     File::open(directory)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| file.sync_to_disk())
         .map_err(|_| failure("Storage maintenance history could not be synced."))?;
     Ok(())
 }
@@ -507,7 +508,7 @@ fn preserve_length(disk: &File, original_length: u64, qcow2: bool) -> Result<(),
         .map_err(|_| failure("The workspace disk length could not be verified."))?
         .len();
     if length < original_length {
-        disk.set_len(original_length).and_then(|_| disk.sync_all())
+        disk.set_len(original_length).and_then(|_| disk.sync_to_disk())
             .map_err(|_| failure("The runtime shortened the workspace disk and its length could not be restored. Keep the computer stopped and repair its disk."))?;
         return Err(failure("The runtime shortened the workspace disk; its original length was restored. Update the runtime before reclaiming again."));
     }

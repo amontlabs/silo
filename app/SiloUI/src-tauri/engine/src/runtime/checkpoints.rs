@@ -1,6 +1,7 @@
 //! Silo's durable names and lifecycle intent for upstream MicroSandbox snapshots.
 //! Snapshot data and its reference graph remain owned by MicroSandbox.
 use super::*;
+use crate::durable::DurableFile;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
@@ -547,12 +548,12 @@ fn write_record(directory: &Path, id: &str, mut record: Record) -> Result<(), Ru
     serde_json::to_writer(&mut file, &record)
         .map_err(|_| error("Checkpoint history could not be encoded."))?;
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| error("Checkpoint history could not be synced."))?;
     file.persist(directory.join(format!("{id}.json")))
         .map_err(|_| error("Checkpoint history could not be saved."))?;
     File::open(&directory)
-        .and_then(|dir| dir.sync_all())
+        .and_then(|dir| dir.sync_to_disk())
         .map_err(|_| error("Checkpoint history could not be synced."))
 }
 
@@ -1164,9 +1165,9 @@ pub fn upgrade_records(storage: &Path) -> Result<usize, String> {
         serde_json::to_writer(&mut file, &value)
             .map_err(|_| "Checkpoint history could not be encoded for upgrade.".to_owned())?;
         file.as_file()
-            .sync_all()
+            .sync_to_disk()
             .and_then(|()| file.persist(&path).map(drop).map_err(|error| error.error))
-            .and_then(|()| File::open(&directory)?.sync_all())
+            .and_then(|()| File::open(&directory)?.sync_to_disk())
             .map_err(|_| "Checkpoint history could not be saved for upgrade.".to_owned())?;
         converted += 1;
     }
@@ -1601,7 +1602,7 @@ pub fn forget_removed(paths: &RuntimePaths, id: &str) -> Result<(), RuntimeError
     let target = path(paths, id);
     match fs::remove_file(target) {
         Ok(()) => File::open(directory(paths))
-            .and_then(|directory| directory.sync_all())
+            .and_then(|directory| directory.sync_to_disk())
             .map_err(|_| error("Removed checkpoint history could not be synced.")),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(_) => Err(error("Removed checkpoint history could not be cleared.")),
@@ -4538,12 +4539,12 @@ fn save_cleanup(paths: &RuntimePaths, members: &[native::Member]) -> Result<(), 
     serde_json::to_writer(&mut file, members)
         .map_err(|_| error("Checkpoint cleanup journal could not be encoded."))?;
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| error("Checkpoint cleanup journal could not be synced."))?;
     file.persist(cleanup_path(paths))
         .map_err(|_| error("Checkpoint cleanup journal could not be saved."))?;
     File::open(parent)
-        .and_then(|folder| folder.sync_all())
+        .and_then(|folder| folder.sync_to_disk())
         .map_err(|_| error("Checkpoint cleanup journal could not be synced."))
 }
 

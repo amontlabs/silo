@@ -7823,6 +7823,7 @@ mod tests {
         fn new(app_data: PathBuf) -> Self {
             Self {
                 paths: EnginePaths {
+                    app_log: app_data.join("logs"),
                     app_data,
                     ..EnginePaths::default()
                 },

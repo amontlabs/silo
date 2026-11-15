@@ -9,6 +9,7 @@
 //! counts and offsets are kept as they are. MicroSandbox's own `rebind_vmdk` (Silo's
 //! portable-image-cache patch) does this for imports inside the runtime, but Silo's
 //! crate dependency does not include that patch.
+use crate::durable::DurableFile;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -187,10 +188,10 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     file.as_file()
         .set_permissions(permissions)
         .map_err(|_| failed())?;
-    file.as_file().sync_all().map_err(|_| failed())?;
+    file.as_file().sync_to_disk().map_err(|_| failed())?;
     file.persist(path).map_err(|_| failed())?;
     fs::File::open(directory)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| failed())?;
     Ok(())
 }

@@ -1,6 +1,7 @@
 //! Stable, ID-keyed SSH aliases for macOS guests. The existing setup key and
 //! known-hosts file remain owned by `guest_access`; this module writes client config.
 use super::{files, guest_access, MacosContext};
+use crate::durable::DurableFile;
 use crate::{applications::launch, editor};
 use silo_api::methods::{
     agents::AgentId, guest::GuestSshAliasEnsureResult, terminal::CommandResult,
@@ -353,7 +354,7 @@ pub(super) fn remove(app: &MacosContext, computer_id: &str) -> Result<(), String
             fs::remove_file(&path).map_err(|_| FAILED)?;
             if let Some(parent) = path.parent() {
                 fs::File::open(parent)
-                    .and_then(|directory| directory.sync_all())
+                    .and_then(|directory| directory.sync_to_disk())
                     .map_err(|_| FAILED)?;
             }
             Ok(())

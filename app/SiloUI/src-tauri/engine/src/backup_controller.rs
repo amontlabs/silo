@@ -4,6 +4,7 @@ mod scrub;
 
 pub use scrub::leaves_logins_out;
 
+use crate::durable::DurableFile;
 use crate::runtime::RuntimeHost;
 use crate::{backup, runtime};
 use serde::{Deserialize, Serialize};
@@ -191,9 +192,9 @@ fn write_history(path: &Path, history: &BackupHistory) -> Result<(), String> {
         let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
         serde_json::to_writer_pretty(&mut temporary, history)?;
         temporary.write_all(b"\n")?;
-        temporary.as_file().sync_all()?;
+        temporary.as_file().sync_to_disk()?;
         temporary.persist(path).map_err(|error| error.error)?;
-        fs::File::open(parent)?.sync_all()?;
+        fs::File::open(parent)?.sync_to_disk()?;
         Ok(())
     };
     write().map_err(|error| format!("Silo could not save export history: {error}"))
@@ -1872,7 +1873,7 @@ fn publish_staged_export(
         TransferError::from("The export destination has no parent directory.".to_string())
     })?;
     if let Err(error) = backup::publish_package(staged, archive_path, parent, |parent| {
-        fs::File::open(parent).and_then(|directory| directory.sync_all())
+        fs::File::open(parent).and_then(|directory| directory.sync_to_disk())
     }) {
         // A file already at the chosen name stays; only the staged one goes.
         let mut error = TransferError::from(error);

@@ -1,5 +1,6 @@
 //! Local editor handoff over MicroSandbox's SSH transport. Guest paths never
 //! become host filesystem arguments. SSH keys and configuration stay on host.
+use crate::durable::DurableFile;
 use crate::{
     applications,
     runtime::{self, RuntimePaths},
@@ -285,10 +286,10 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .set_permissions(fs::Permissions::from_mode(0o600))
         .map_err(|_| FAILED)?;
     file.write_all(bytes).map_err(|_| FAILED)?;
-    file.as_file().sync_all().map_err(|_| FAILED)?;
+    file.as_file().sync_to_disk().map_err(|_| FAILED)?;
     file.persist(path).map_err(|_| FAILED)?;
     fs::File::open(parent)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| FAILED)?;
     Ok(())
 }
@@ -600,9 +601,9 @@ fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.as_file()
         .set_permissions(fs::Permissions::from_mode(mode))?;
     file.write_all(bytes)?;
-    file.as_file().sync_all()?;
+    file.as_file().sync_to_disk()?;
     file.persist(path).map_err(|error| error.error)?;
-    fs::File::open(parent)?.sync_all()?;
+    fs::File::open(parent)?.sync_to_disk()?;
     Ok(())
 }
 

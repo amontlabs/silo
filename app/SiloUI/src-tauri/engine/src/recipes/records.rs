@@ -3,6 +3,7 @@
 //! recipe as it was when the computer was built, so a later edit of the stored recipe does not
 //! change a computer that exists.
 
+use crate::durable::DurableFile;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
@@ -91,9 +92,9 @@ fn write(path: &PathBuf, document: &Document) -> Result<(), String> {
             .mode(0o600)
             .open(&temporary)?;
         file.write_all(&bytes)?;
-        file.sync_all()?;
+        file.sync_to_disk()?;
         fs::rename(&temporary, path)?;
-        fs::File::open(directory)?.sync_all()
+        fs::File::open(directory)?.sync_to_disk()
     })();
     if written.is_err() {
         let _ = fs::remove_file(&temporary);

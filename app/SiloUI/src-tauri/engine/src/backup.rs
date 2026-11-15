@@ -1,3 +1,4 @@
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -4442,7 +4443,7 @@ fn extract_scanned_payload(
             "the {label} failed its integrity check"
         )));
     }
-    output.sync_all()?;
+    output.sync_to_disk()?;
     Ok((destination, scan))
 }
 
@@ -4582,7 +4583,7 @@ fn extract_verified_payload(
         )));
     }
     if let Some((path, file)) = output {
-        file.sync_all()?;
+        file.sync_to_disk()?;
         Ok(Some(path))
     } else {
         Ok(None)
@@ -4929,7 +4930,7 @@ fn write_immutable_package_from_readers(
         .as_file_mut()
         .seek(SeekFrom::Start(manifest_offset))?;
     temporary.write_all(&final_manifest)?;
-    temporary.as_file().sync_all()?;
+    temporary.as_file().sync_to_disk()?;
     // Verify all written bytes before the atomic commit. Cancellation cannot turn
     // an already-published, verified archive into a reported cancellation.
     let verified = read_and_verify_package(
@@ -4941,7 +4942,7 @@ fn write_immutable_package_from_readers(
     let size_bytes = verified.size_bytes;
     check_cancelled(cancellation)?;
     publish_package(temporary.path(), destination, parent, |parent| {
-        File::open(parent).and_then(|directory| directory.sync_all())
+        File::open(parent).and_then(|directory| directory.sync_to_disk())
     })?;
     Ok(size_bytes)
 }

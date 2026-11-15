@@ -10,6 +10,7 @@
 //! the fork is meant to have. What needs the running system (stopping named processes and launchd labels) runs first in the
 //! fork's first boot (`fork_first_boot.rs`).
 use super::{guest_access::shell_quote, offline_setup};
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -822,7 +823,7 @@ fn remember_restored(marker: &Path, relative: &str) -> Result<(), String> {
         .open(marker)
         .map_err(|error| io("note a scheduled job put back", &error))?;
     writeln!(file, "{relative}").map_err(|error| io("note a scheduled job put back", &error))?;
-    file.sync_all()
+    file.sync_to_disk()
         .map_err(|error| io("note a scheduled job put back", &error))
 }
 

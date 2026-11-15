@@ -1,6 +1,7 @@
 //! The promote journal: one file per promoted fork, written before the first identity is
 //! swapped and kept afterwards so `silo undo` can swap back. Every write is synced.
 
+use crate::durable::DurableFile;
 use std::{fs, io::Write, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -160,10 +161,10 @@ impl Journal {
         let mut file = fs::File::create(&temp).map_err(fail)?;
         file.write_all(&serde_json::to_vec(record).unwrap_or_default())
             .map_err(fail)?;
-        file.sync_all().map_err(fail)?;
+        file.sync_to_disk().map_err(fail)?;
         fs::rename(&temp, &path).map_err(fail)?;
         if let Ok(dir) = fs::File::open(&self.dir) {
-            let _ = dir.sync_all();
+            let _ = dir.sync_to_disk();
         }
         Ok(())
     }

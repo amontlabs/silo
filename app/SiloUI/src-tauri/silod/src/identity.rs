@@ -1,3 +1,4 @@
+use silo_engine::durable::DurableFile;
 use std::{
     fs::{self, OpenOptions},
     io::{self, Read, Write},
@@ -110,7 +111,7 @@ fn create_config_with_directory_sync(
         .open(&temporary)
         .map_err(|error| error.to_string())?;
     file.write_all(&bytes).map_err(|error| error.to_string())?;
-    file.sync_all().map_err(|error| error.to_string())?;
+    file.sync_to_disk().map_err(|error| error.to_string())?;
     drop(file);
 
     match fs::hard_link(&temporary, path) {
@@ -142,7 +143,7 @@ fn create_config_with_directory_sync(
 }
 
 fn sync_directory(path: &Path) -> io::Result<()> {
-    fs::File::open(path)?.sync_all()
+    fs::File::open(path)?.sync_to_disk()
 }
 
 fn host_name() -> String {

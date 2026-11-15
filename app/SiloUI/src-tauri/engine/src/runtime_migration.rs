@@ -1,5 +1,6 @@
 //! One-time gate for the MicroSandbox storage upgrade. The converter is kept
 //! here so the normal runtime never has to read the previous storage format.
+use crate::durable::DurableFile;
 use crate::runtime;
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
@@ -66,11 +67,11 @@ fn select_generation(app_data: &Path, directory: &str) -> Result<(), String> {
     .map_err(|_| {
         "Silo could not save the computer storage selection. Relaunch Silo and retry migration."
     })?;
-    temporary.write_all(b"\n").and_then(|_| temporary.as_file().sync_all())
+    temporary.write_all(b"\n").and_then(|_| temporary.as_file().sync_to_disk())
         .map_err(|_| "Silo could not finish saving the computer storage selection. Check free space and access to Silo storage, then retry migration.")?;
     temporary.persist_noclobber(app_data.join(GENERATION))
         .map_err(|_| "Silo could not apply the computer storage selection. Relaunch Silo to refresh migration status before retrying.")?;
-    fs::File::open(app_data).and_then(|file| file.sync_all())
+    fs::File::open(app_data).and_then(|file| file.sync_to_disk())
         .map_err(|_| "Silo could not finish saving the computer storage selection. Check free space and access to Silo storage, then retry migration.")?;
     Ok(())
 }
@@ -451,13 +452,13 @@ fn write(path: &Path, state: &MigrationState) -> Result<(), String> {
         .map_err(|_| "Migration progress could not be encoded.")?;
     temporary
         .write_all(b"\n")
-        .and_then(|_| temporary.as_file().sync_all())
+        .and_then(|_| temporary.as_file().sync_to_disk())
         .map_err(|_| "Migration progress could not be saved.")?;
     temporary
         .persist(path)
         .map_err(|_| "Migration progress could not be committed.")?;
     fs::File::open(parent)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| file.sync_to_disk())
         .map_err(|_| "Migration progress could not be committed.")?;
     Ok(())
 }
@@ -642,10 +643,10 @@ fn quarantine_previous_backup_state(app_data: &Path, selected: &str) -> Result<(
         fs::rename(&source, &destination)
             .map_err(|_| "Previous backup progress could not be isolated.")?;
         fs::File::open(app_data)
-            .and_then(|file| file.sync_all())
+            .and_then(|file| file.sync_to_disk())
             .map_err(|_| "Previous backup progress could not be synced.")?;
         fs::File::open(&old)
-            .and_then(|file| file.sync_all())
+            .and_then(|file| file.sync_to_disk())
             .map_err(|_| "Previous backup progress could not be synced.")?;
     }
     Ok(())
@@ -744,11 +745,11 @@ pub(crate) struct Disk;
 
 impl Flush for Disk {
     fn file(&self, path: &Path) -> std::io::Result<()> {
-        fs::File::open(path)?.sync_all()
+        fs::File::open(path)?.sync_to_disk()
     }
 
     fn directory(&self, path: &Path) -> std::io::Result<()> {
-        fs::File::open(path)?.sync_all()
+        fs::File::open(path)?.sync_to_disk()
     }
 }
 

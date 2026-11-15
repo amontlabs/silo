@@ -7,6 +7,7 @@
 //! through this store under one lock, so an approval leaves `pending` once and an allowed
 //! call is handed to the engine once.
 
+use crate::durable::DurableFile;
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
@@ -361,9 +362,9 @@ impl Store {
                 .mode(0o600)
                 .open(&temporary)?;
             file.write_all(bytes)?;
-            file.sync_all()?;
+            file.sync_to_disk()?;
             fs::rename(&temporary, path)?;
-            fs::File::open(dir)?.sync_all()
+            fs::File::open(dir)?.sync_to_disk()
         })();
         if written.is_err() {
             let _ = fs::remove_file(&temporary);

@@ -9,6 +9,7 @@ use super::super::proxy_address::{self, ProxyAddress};
 use super::super::proxy_ca::{self, CaMaterial};
 use super::super::store::{Layout, Record};
 use super::super::MacosContext;
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -480,13 +481,13 @@ fn write_identity(layout: &Layout, identity: &BootstrapIdentity) -> Result<(), S
         .map_err(|_| "Cannot save the macOS proxy bootstrap identity.".to_owned())?;
     temporary
         .as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Cannot save the macOS proxy bootstrap identity.".to_owned())?;
     temporary
         .persist(&path)
         .map_err(|_| "Cannot save the macOS proxy bootstrap identity.".to_owned())?;
     fs::File::open(parent)
-        .and_then(|parent| parent.sync_all())
+        .and_then(|parent| parent.sync_to_disk())
         .map_err(|_| "Cannot save the macOS proxy bootstrap identity.".to_owned())
 }
 

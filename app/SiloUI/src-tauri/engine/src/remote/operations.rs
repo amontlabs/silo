@@ -8,6 +8,7 @@
 //! and receives its result instead of running it again. Results stay in memory for an
 //! hour; a small marker per change on disk keeps a restart from replaying it.
 use crate::bridge_error::BridgeError;
+use crate::durable::DurableFile;
 use crate::runtime::operation_gate::StartCondition;
 use serde_json::{json, Value};
 use std::{
@@ -361,10 +362,10 @@ fn write_marker(journal: &Path, path: &Path, method: &str, status: &str) -> Resu
     let mut file = tempfile::NamedTempFile::new_in(journal).map_err(|e| e.to_string())?;
     serde_json::to_writer(&mut file, &json!({"method": method, "status": status}))
         .map_err(|e| e.to_string())?;
-    file.as_file().sync_all().map_err(|e| e.to_string())?;
+    file.as_file().sync_to_disk().map_err(|e| e.to_string())?;
     file.persist(path).map_err(|e| e.to_string())?;
     fs::File::open(journal)
-        .and_then(|dir| dir.sync_all())
+        .and_then(|dir| dir.sync_to_disk())
         .map_err(|e| e.to_string())
 }
 

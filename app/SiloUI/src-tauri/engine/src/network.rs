@@ -1,4 +1,5 @@
 //! Local TCP services and loopback-only published ports.
+use crate::durable::DurableFile;
 use crate::runtime::{self, ProcessRunner, RuntimePaths};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -179,11 +180,11 @@ fn write_config(paths: &RuntimePaths, config: &Configuration) -> Result<(), Stri
         .write_all(&bytes)
         .map_err(|_| "Could not save ports.")?;
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Could not save ports.")?;
     file.persist(&path).map_err(|_| "Could not save ports.")?;
     fs::File::open(parent)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| "Could not save ports.")?;
     Ok(())
 }

@@ -1,3 +1,4 @@
+use crate::durable::DurableFile;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::{
@@ -250,11 +251,11 @@ fn write_document(path: &Path, document: &Map<String, Value>) -> io::Result<()> 
         ));
     }
     temporary.write_all(&bytes)?;
-    temporary.as_file().sync_all()?;
+    temporary.as_file().sync_to_disk()?;
     temporary.persist(path).map_err(|error| error.error)?;
     // Rename is atomic; syncing the directory makes its new entry durable as well.
     // The file is already in place, so a failure here is not a failed save.
-    if let Err(error) = File::open(parent).and_then(|directory| directory.sync_all()) {
+    if let Err(error) = File::open(parent).and_then(|directory| directory.sync_to_disk()) {
         eprintln!("Silo settings: the settings directory could not be synced: {error}");
     }
     Ok(())
@@ -1800,7 +1801,7 @@ mod tests {
         interrupted
             .write_all(br#"{"schemaVersion":1,"settings":{"theme":"da"#)
             .unwrap();
-        interrupted.as_file().sync_all().unwrap();
+        interrupted.as_file().sync_to_disk().unwrap();
         assert_eq!(
             SettingsStore::load(Some(path)).snapshot().settings["theme"],
             "light"

@@ -1072,9 +1072,9 @@ impl JobRegistry {
             .map_err(|_| RegistryError::storage("Job registry storage lock failed."))
     }
 
-    /// Runs `setup` with commits that are not flushed to disk, then restores full
-    /// durability. For test fixtures that create hundreds of jobs; the behaviour under
-    /// test runs after it with every commit flushed.
+    /// Runs `setup` with `PRAGMA synchronous=OFF`, then restores the registry's configured
+    /// setting. For test fixtures that create hundreds of jobs; the behaviour under test
+    /// runs after it with the registry's usual settings.
     #[cfg(any(test, feature = "test-support"))]
     pub fn without_flushing<T>(&self, setup: impl FnOnce() -> T) -> T {
         struct Restore<'a>(&'a JobRegistry);
@@ -1085,7 +1085,8 @@ impl JobRegistry {
                     .connection
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let restored = connection.execute_batch("PRAGMA synchronous=FULL;");
+                let restored = connection
+                    .execute_batch(&format!("PRAGMA synchronous={};", DURABILITY.synchronous));
                 // While the setup is already panicking, a second panic would abort the
                 // test process and hide the first message.
                 if !std::thread::panicking() {
@@ -1198,6 +1199,33 @@ fn route_matches(space: JobSpace, route: CancelRoute) -> bool {
     )
 }
 
+/// The SQLite durability settings `configure_database` applies and then verifies.
+struct Durability {
+    pragmas: &'static str,
+    /// `PRAGMA synchronous` as SQLite reports it: 1 is NORMAL, 2 is FULL.
+    synchronous: i64,
+    /// `PRAGMA fullfsync` as SQLite reports it, checked on macOS only.
+    fullfsync: i64,
+}
+
+/// Every commit waits for the storage device, with `F_FULLFSYNC` on macOS.
+#[cfg(not(any(test, feature = "test-support")))]
+const DURABILITY: Durability = Durability {
+    pragmas: "PRAGMA synchronous=FULL; PRAGMA fullfsync=ON; PRAGMA foreign_keys=ON;",
+    synchronous: 2,
+    fullfsync: 1,
+};
+
+/// Test builds skip the device flush, as `crate::durable` does: commits reach the operating
+/// system, so reopening the database still sees them, but tests do not queue on the
+/// machine-wide `F_FULLFSYNC`.
+#[cfg(any(test, feature = "test-support"))]
+const DURABILITY: Durability = Durability {
+    pragmas: "PRAGMA synchronous=NORMAL; PRAGMA fullfsync=OFF; PRAGMA foreign_keys=ON;",
+    synchronous: 1,
+    fullfsync: 0,
+};
+
 fn configure_database(connection: &Connection) -> Result<(), RegistryError> {
     connection.busy_timeout(std::time::Duration::from_secs(5))?;
     let journal_mode: String =
@@ -1205,17 +1233,16 @@ fn configure_database(connection: &Connection) -> Result<(), RegistryError> {
     if !journal_mode.eq_ignore_ascii_case("wal") {
         return Err(RegistryError::invalid("SQLite WAL mode was not enabled."));
     }
-    connection
-        .execute_batch("PRAGMA synchronous=FULL; PRAGMA fullfsync=ON; PRAGMA foreign_keys=ON;")?;
+    connection.execute_batch(DURABILITY.pragmas)?;
     let synchronous: i64 = connection.query_row("PRAGMA synchronous", [], |row| row.get(0))?;
     let foreign_keys: i64 = connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
-    if synchronous != 2 || foreign_keys != 1 {
+    if synchronous != DURABILITY.synchronous || foreign_keys != 1 {
         return Err(RegistryError::invalid(
             "SQLite durability or foreign key settings could not be verified.",
         ));
     }
     let fullfsync: i64 = connection.query_row("PRAGMA fullfsync", [], |row| row.get(0))?;
-    if cfg!(target_os = "macos") && fullfsync != 1 {
+    if cfg!(target_os = "macos") && fullfsync != DURABILITY.fullfsync {
         return Err(RegistryError::invalid(
             "SQLite fullfsync could not be enabled.",
         ));
