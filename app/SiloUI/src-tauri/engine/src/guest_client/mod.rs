@@ -407,8 +407,17 @@ mod tests {
         tokens::use_test_directory(Some(directory.path().join("guest-client")));
         use_test_channels(None);
         let store = TokenStore::current().unwrap();
-        assert!(turn_on_in(&store, "c").is_err());
+        assert_eq!(turn_on_in(&store, "c").unwrap_err(), NOT_READY);
         assert!(store.status("c").unwrap().is_none());
+        // A computer whose tools are on keeps its record, and its port stays free for the
+        // rebind at engine start.
+        let (listener, port) = bind(None).unwrap();
+        drop(listener);
+        store.enable("on", port).unwrap();
+        let before = store.status("on").unwrap();
+        assert_eq!(turn_on_in(&store, "on").unwrap_err(), NOT_READY);
+        assert_eq!(store.status("on").unwrap(), before);
+        drop(bind_exact(port).expect("nothing bound the computer's port"));
         reset();
     }
 

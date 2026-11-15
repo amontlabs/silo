@@ -601,6 +601,36 @@ fn at_start_a_free_port_is_kept_and_a_taken_one_moves_held_until_a_restart() {
 }
 
 #[test]
+fn at_start_a_port_already_bound_for_its_computer_stays_and_one_bound_for_another_moves() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = TokenStore::new(directory.path());
+    let recorded = Recorded::default();
+    // The tools of A were turned on between the channels being installed and the rebind.
+    let (listener, own_port) = silo_engine::guest_client::bind(None).unwrap();
+    recorded.serve(A, listener).unwrap();
+    store.enable(A, own_port).unwrap();
+    // B's stored port went to another computer meanwhile.
+    let (listener, other_port) = silo_engine::guest_client::bind(None).unwrap();
+    recorded.serve("computer-c", listener).unwrap();
+    store.enable(B, other_port).unwrap();
+    rebind(&store, &recorded);
+    let record = store.status(A).unwrap().unwrap();
+    assert_eq!(record.port, Some(own_port));
+    assert!(!record.restart_needed);
+    assert_eq!(recorded.serving(A), Some(own_port));
+    assert!(store
+        .locked()
+        .held()
+        .unwrap()
+        .iter()
+        .all(|entry| entry.computer_id != A));
+    assert_eq!(recorded.bound(other_port).as_deref(), Some("computer-c"));
+    let record = store.status(B).unwrap().unwrap();
+    assert_ne!(record.port, Some(other_port));
+    assert!(record.restart_needed);
+}
+
+#[test]
 fn at_start_every_token_is_dead_and_held_ports_are_bound_again() {
     let directory = tempfile::tempdir().unwrap();
     let store = TokenStore::new(directory.path());
