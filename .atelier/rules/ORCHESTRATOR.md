@@ -26,7 +26,7 @@
    - A change only to files that no build, test or check reads (top-level `docs/` and Markdown outside the app; not bundled help) may be committed straight to `main` by one agent, after checking its relative links, and only while no merge is running: a commit on `main` voids a running merge.
    - Anything else goes through `atelier merge`, however small.
 5. A test `atelier status` lists as flaky is a fix item, with its failing output, before anything else.
-6. After each merge: `atelier clean`, read the plan, then `atelier clean --yes`.
+6. Clean right after every green merge, before starting new items: `atelier clean`, read the plan, then `atelier clean --yes`.
 7. Done when everything is merged, no promotion is pending, and every platform passed on `main` or the owner waived it.
 
 Agents: pick by role from `atelier agents`. Effort: low for lookups and mechanical edits, medium for an ordinary item, high for cross-crate, concurrency, migration or security work and for reviews of risky diffs. Never name models, retries or CI in a task. Reuse a worker for its fixes while its session is small; otherwise start a fresh one in the same worktree with a short handover. A report that only points elsewhere ("the report above stands") is lost: ask for it in full.
