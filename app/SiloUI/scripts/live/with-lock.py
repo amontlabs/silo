@@ -10,6 +10,7 @@ flock(2) works the same on macOS and Linux; util-linux's flock(1) is not on macO
 import errno
 import fcntl
 import os
+import signal
 import sys
 
 DEFAULT_DIR = os.path.join(os.path.expanduser("~"), ".local", "state", "silo-live")
@@ -56,6 +57,9 @@ def main(argv):
         os.write(fd, (info + "\n").encode())
         os.set_inheritable(fd, True)
         held.append(fd)
+    # Python ignores SIGPIPE and an exec keeps ignored signals: give the command the default back, or a
+    # pipeline such as `tr </dev/urandom | head -c 6` never ends.
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     os.execvp(command[0], command)
 
 

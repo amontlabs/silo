@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # run: step-runner for live checks (checks that drive a real Dev engine or the Linux machine).
 usage() { cat <<'U'
-usage: run <check> [--from STEP] [--host mac|linux] [--state DIR]
+usage: run <check> [--from STEP] [--host mac|linux] [--state DIR] [--engine own|shared]
        run start <check> [args]            (background run; prints "<state-dir> <run-id>")
        run wait <state-dir> [<run-id>] [--timeout SECONDS]
        run list
+       run sweep [<state-dir>...]
 
 Runs app/SiloUI/scripts/live/live.d/<check>.sh: an ordered list STEPS=(...) of step_<name> functions.
 A finished step leaves <state>/steps/<name>.ok; a rerun skips those. --from STEP reruns STEP and all
@@ -13,13 +14,25 @@ after it. Logs: <state>/logs/<step>.log. Every exit writes <state>/VERDICT:
 Exit codes: 0 pass, 1 fail, 2 usage, 3 skipped (also: --host linux and the machine is offline).
 State dir default: $ATELIER_TMP/live/<check> when `atelier tmp -- run ...` set ATELIER_TMP (short sockets and
 temp homes live under it too: use `atelier tmp --short`), else ${TMPDIR}/silo-agent/[$SILO_AGENT_ITEM/]live/<check>
-(set SILO_AGENT_ITEM so `clean <item>` removes it). Throwaway computers are listed in <state>/computers and
-temporary directories in <state>/tempdirs (for `clean`); under ATELIER_TMP each computer is also one line in
+Throwaway computers are listed in <state>/computers and temporary directories in <state>/tempdirs (removed by
+the run's cleanup, or by `run sweep` after a killed run); under ATELIER_TMP each computer is also one line in
 $ATELIER_TMP/leftovers, removed once the computer is gone.
 A check that drives a shared system names it in CHECK_LOCKS="dev-engine" (one line, space-separated). The runner
 then holds an exclusive machine-wide lock per name (${LIVE_LOCK_DIR:-~/.local/state/silo-live}/<name>.lock) from
 before the state dir lock until it exits, together with everything it started; when another run holds it, the
 runner prints the holder and exits 3 (skipped) without touching the state dir.
+A check that can run on its own Dev engine instance also names the lock in CHECK_OWN_ENGINE="dev-engine". By
+default (--engine own) such a run does not take that lock: the check starts its own silod with HOME set to a short
+per-state-dir folder (live_engine_home), so its socket, state, data, logs and computers never meet the person's
+Dev engine or another run's. --engine shared (or LIVE_ENGINE=shared) uses ~/.silo-dev under the lock, as before.
+Steps see LIVE_ENGINE=own|shared. The check's cleanup() removes the own HOME (live_engine_remove; its guest images
+are read-only, so plain rm -rf fails). Under ATELIER_TMP the HOME is also a line in $ATELIER_TMP/leftovers while it
+exists. A run killed before its cleanup leaves the HOME: rerun the check (its cleanup removes it), or
+`run sweep [<state-dir>...]` (default: every ${TMPDIR}/silo-agent/[*/]live/* and $ATELIER_TMP/live/*) removes the
+HOME of each idle state dir that lists no computer and whose engine is gone (its socket does not answer, the recorded
+silod no longer runs, its engine.lock is free), and prints what it kept, why, and how to stop a live engine (exit 1
+if any). The HOME must be an sl-* folder directly under the short base (LIVE_SHORT_BASE or ATELIER_TMP, absolute).
+A state dir records its engine mode: while it lists computers or an engine HOME, a run in the other mode exits 2.
 `run start <check> [args]` runs the same in the background and returns once the runner holds the lock and has
 written its new run id (or has already ended, e.g. a config error or a busy state dir: then it prints why and exits
 with the runner's code); it prints "<state-dir> <run-id>". `run wait <state-dir> [<run-id>]` blocks until the
@@ -106,32 +119,6 @@ cmd_list() {
   done
 }
 
-case "${1:-}" in -h|--help|"") usage; exit 0;; wait) shift; cmd_wait "$@";; start) shift; cmd_start "$@";; list) cmd_list; exit 0;; esac
-
-ARGS=("$@")
-CHECK=$1; shift; FROM=""; HOST=mac; STATE=""
-while [ $# -gt 0 ]; do case "$1" in
-  --from) FROM=${2:-}; shift 2;; --host) HOST=${2:-}; shift 2;; --state) STATE=${2:-}; shift 2;;
-  -h|--help) usage; exit 0;; *) echo "live: unknown argument: $1" >&2; usage >&2; exit 2;;
-esac; done
-case "$HOST" in mac|linux) ;; *) echo "live: --host must be mac or linux" >&2; exit 2;; esac
-CHECK_FILE=$LIVE_D/$CHECK.sh
-[ -f "$CHECK_FILE" ] || { echo "live: no check '$CHECK' in $LIVE_D (try: live list)" >&2; exit 2; }
-STATE=${STATE:-$(default_state "$CHECK")}; STATE=${STATE%/}
-case "$STATE" in /*) ;; *) STATE=$PWD/$STATE;; esac
-LOGS=$STATE/logs
-mkdir -p "$STATE/steps" "$LOGS" || exit 2
-
-# Shared systems the check drives (CHECK_LOCKS="dev-engine"): this run takes an exclusive machine-wide lock on
-# each, before anything else, by re-running itself under with-lock.py, which holds it until the run and
-# everything it started have ended. Refused: exit 3 (skipped), naming the holder, state dir untouched.
-CHECK_LOCKS=$(sed -n 's/^CHECK_LOCKS="\(.*\)"$/\1/p' "$CHECK_FILE" | head -1)
-if [ -n "$CHECK_LOCKS" ] && [ "${LIVE_HELD:-}" != "$CHECK_LOCKS" ]; then
-  # shellcheck disable=SC2086
-  LIVE_HELD=$CHECK_LOCKS exec python3 -I "$HERE/with-lock.py" \
-    --info "pid $$, check $CHECK, host $HOST, state $STATE, since $(date -u +%FT%TZ)" $CHECK_LOCKS -- "$HERE/run" "${ARGS[@]}"
-fi
-
 # One runner per state dir: mkdir is the atomic test-and-set. A lock whose pid is dead is replaced
 # while holding lock.takeover (also a mkdir), re-reading the owner under it, so a second starter
 # can never move a lock a first one just took.
@@ -149,6 +136,70 @@ acquire_lock() {
   rmdir "$STATE/lock.takeover"
   echo "live: lock changed hands in $STATE" >&2; exit 2
 }
+
+# Removes the own engine HOME a killed run left in each idle state dir (see usage).
+cmd_sweep() {
+  local st h why base kept=0 dirs=() seen=" "
+  # shellcheck source=live-lib.sh
+  . "$HERE/live-lib.sh"
+  if [ $# -gt 0 ]; then dirs=("$@")
+  else
+    base=${TMPDIR:-/tmp}; base=${base%/}/silo-agent
+    for st in "$base"/live/* "$base"/*/live/*; do [ -d "$st" ] && dirs+=("$st"); done
+    if [ -n "${ATELIER_TMP:-}" ]; then for st in "${ATELIER_TMP%/}"/live/*; do [ -d "$st" ] && dirs+=("$st"); done; fi
+  fi
+  for st in "${dirs[@]}"; do
+    st=$(live_canon "$st"); case "$seen" in *" $st "*) continue;; esac; seen="$seen$st "
+    h=$(live_strip_slashes "$(cat "$st/engine-home" 2>/dev/null)"); [ -n "$h" ] || continue
+    if ! ( STATE=$st; acquire_lock ) 2>/dev/null; then echo "kept $h: a run is active in $st"; kept=1; continue; fi
+    (
+      STATE=$st CHECK=$(cat "$st/check" 2>/dev/null || echo "?")
+      if [ -n "$(live_computers)" ]; then echo "kept $h: $st still lists computers (rerun the check to clean them up)"; exit 1; fi
+      if why=$(live_engine_alive "$st" "$h"); then echo "kept $h: $why"; exit 1; fi
+      if ! why=$(live_engine_remove 2>&1); then echo "kept $h: ${why#*FATAL }"; exit 1; fi
+      echo "removed $h"
+    ) || kept=1
+    rm -rf "$st/lock"
+  done
+  exit $kept
+}
+
+case "${1:-}" in -h|--help|"") usage; exit 0;; wait) shift; cmd_wait "$@";; start) shift; cmd_start "$@";; list) cmd_list; exit 0;;
+  sweep) shift; cmd_sweep "$@";; esac
+
+ARGS=("$@")
+CHECK=$1; shift; FROM=""; HOST=mac; STATE=""; ENGINE=${LIVE_ENGINE:-own}
+while [ $# -gt 0 ]; do case "$1" in
+  --from) FROM=${2:-}; shift 2;; --host) HOST=${2:-}; shift 2;; --state) STATE=${2:-}; shift 2;;
+  --engine) ENGINE=${2:-}; shift 2;;
+  -h|--help) usage; exit 0;; *) echo "live: unknown argument: $1" >&2; usage >&2; exit 2;;
+esac; done
+case "$HOST" in mac|linux) ;; *) echo "live: --host must be mac or linux" >&2; exit 2;; esac
+case "$ENGINE" in own|shared) ;; *) echo "live: --engine must be own or shared" >&2; exit 2;; esac
+CHECK_FILE=$LIVE_D/$CHECK.sh
+[ -f "$CHECK_FILE" ] || { echo "live: no check '$CHECK' in $LIVE_D (try: live list)" >&2; exit 2; }
+STATE=${STATE:-$(default_state "$CHECK")}; STATE=${STATE%/}
+case "$STATE" in /*) ;; *) STATE=$PWD/$STATE;; esac
+LOGS=$STATE/logs
+mkdir -p "$STATE/steps" "$LOGS" || exit 2
+
+# Shared systems the check drives (CHECK_LOCKS="dev-engine"): this run takes an exclusive machine-wide lock on
+# each, before anything else, by re-running itself under with-lock.py, which holds it until the run and
+# everything it started have ended. Refused: exit 3 (skipped), naming the holder, state dir untouched.
+CHECK_LOCKS=$(sed -n 's/^CHECK_LOCKS="\(.*\)"$/\1/p' "$CHECK_FILE" | head -1)
+# A check that brings its own engine instance (CHECK_OWN_ENGINE) needs no machine-wide lock for it.
+CHECK_OWN_ENGINE=$(sed -n 's/^CHECK_OWN_ENGINE="\(.*\)"$/\1/p' "$CHECK_FILE" | head -1)
+if [ -n "$CHECK_OWN_ENGINE" ] && [ "$ENGINE" = own ]; then
+  kept=""; for l in $CHECK_LOCKS; do case " $CHECK_OWN_ENGINE " in *" $l "*) ;; *) kept="$kept${kept:+ }$l";; esac; done
+  CHECK_LOCKS=$kept
+else ENGINE=shared; fi
+export LIVE_ENGINE=$ENGINE
+if [ -n "$CHECK_LOCKS" ] && [ "${LIVE_HELD:-}" != "$CHECK_LOCKS" ]; then
+  # shellcheck disable=SC2086
+  LIVE_HELD=$CHECK_LOCKS exec python3 -I "$HERE/with-lock.py" \
+    --info "pid $$, check $CHECK, host $HOST, engine $ENGINE, state $STATE, since $(date -u +%FT%TZ)" $CHECK_LOCKS -- "$HERE/run" "${ARGS[@]}"
+fi
+
 acquire_lock
 trap 'rm -rf "$STATE/lock"' EXIT
 # First thing under the lock: this run's id replaces the old one and the old verdict goes, so `live wait`
@@ -157,17 +208,30 @@ RUN=$$-$(date +%s); echo "$RUN" >"$STATE/run.tmp"; mv "$STATE/run.tmp" "$STATE/r
 
 # shellcheck source=live-lib.sh
 . "$HERE/live-lib.sh"
+early_fail() { echo "live: $*" >&2; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; write_verdict fail - "$*"; exit 2; }
+# The engine mode (own or shared) a state dir was used with holds while it lists computers or an engine home: a run
+# in the other mode would clean up on the wrong engine. Refused before the check file is read (reading it may make
+# an engine home) and before any cleanup can run. A state dir without the record is own when it has an engine home,
+# else shared when it lists computers (checks used only the shared engine before the record existed).
+PREV_ENGINE=$(cat "$STATE/engine-mode" 2>/dev/null)
+if [ -z "$PREV_ENGINE" ]; then
+  if [ -s "$STATE/engine-home" ]; then PREV_ENGINE=own
+  elif [ -n "$(live_computers)" ]; then PREV_ENGINE=shared; fi
+fi
+if [ -n "$PREV_ENGINE" ] && [ "$PREV_ENGINE" != "$ENGINE" ] && { [ -n "$(live_computers)" ] || [ -s "$STATE/engine-home" ]; }; then
+  early_fail "$STATE was used with --engine $PREV_ENGINE and still lists computers or an engine home; rerun with --engine $PREV_ENGINE (its cleanup removes them), run sweep $STATE for a home a failed run left, or use another --state"
+fi
+echo "$ENGINE" >"$STATE/engine-mode"
 live_sync_leftovers
 STEPS=()
 # shellcheck disable=SC1090
 . "$CHECK_FILE"
-early_fail() { echo "live: $*" >&2; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; write_verdict fail - "$*"; exit 2; }
 [ ${#STEPS[@]} -gt 0 ] || early_fail "$CHECK_FILE defines no STEPS"
 for s in "${STEPS[@]}"; do declare -F "step_$s" >/dev/null || early_fail "step_$s is not defined in $CHECK_FILE"; done
 
 # Stamps count only for the same inputs: check file, runner, HEAD and tracked changes, host, engine identity.
 FP=$( { cat "$CHECK_FILE" "$HERE/run" "$HERE/live-lib.sh" | shasum; git -C "$REPO" rev-parse HEAD 2>/dev/null
-        git -C "$REPO" diff HEAD 2>/dev/null | shasum; echo "$HOST"; [ "$HOST" = linux ] && echo "$LIVE_LINUX_HOST"
+        git -C "$REPO" diff HEAD 2>/dev/null | shasum; echo "$HOST $LIVE_ENGINE"; [ "$HOST" = linux ] && echo "$LIVE_LINUX_HOST"
         declare -F fingerprint_extra >/dev/null && fingerprint_extra; } | shasum | cut -c1-40 )
 if [ "$(cat "$STATE/fingerprint" 2>/dev/null)" != "$FP" ]; then rm -f "$STATE"/steps/*.ok "$STATE/runid"; fi
 echo "$FP" >"$STATE/fingerprint"

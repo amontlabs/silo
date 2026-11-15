@@ -250,6 +250,149 @@ LIVE_LOCK_DIR=$W/locks2 $LIVE locked --state $W/s35 >/dev/null 2>&1; ok "LIVE_LO
 $LIVE locked --state $W/s36 >/dev/null 2>&1 & $LIVE locked --state $W/s37 >/dev/null 2>&1 & $LIVE locked --state $W/s38 >/dev/null 2>&1 & wait
 ok "parallel runs of a locked check all end with a verdict or a refusal" $(for d in s36 s37 s38; do [ "$(verdict $W/$d verdict 2>/dev/null)" = pass ] || [ ! -e $W/$d/run ]; done && echo 0 || echo 1)
 
+# own engine instance: a check with CHECK_OWN_ENGINE runs beside the lock holder, each run with its own HOME
+cat >"$LIVE_D/own.sh" <<'C'
+CHECK_LOCKS="dev-engine"
+CHECK_OWN_ENGINE="dev-engine"
+STEPS=(a)
+step_a() {
+  echo "$LIVE_ENGINE" >"$STATE/engine"; live_dev_sock >"$STATE/sock"; live_engine_home >"$STATE/home"; live_engine_prepare
+  live_engine_launch "$STATE/../fake-silod" >"$STATE/launch.out" 2>&1 & wait $!
+}
+C
+printf '#!/bin/sh\necho "HOME=$HOME PORT=$SILO_URL_PROXY_PORT ARGS=$*"\n' >$W/fake-silod; chmod +x $W/fake-silod
+mkdir -p "$FH/Library/Application Support/org.silo.dev/guest-image/img"; echo base >"$FH/Library/Application Support/org.silo.dev/guest-image/img/disk"; chmod -R a-w "$FH/Library/Application Support/org.silo.dev/guest-image/img"
+SB=$(mktemp -d /tmp/lt.XXXX); trap 'chmod -R u+w "$W" "$SB"; rm -rf "$W" "$SB"' EXIT  # engine homes must be short (LIVE_ENGINE_HOME_MAX)
+S=$W/s50; mkdir -p $S; touch $S/hang
+$LIVE locked --state $S >/dev/null 2>&1 & P=$!
+for _ in $(seq 1 50); do [ "$(cat $S/current 2>/dev/null)" = a ] && break; sleep 0.1; done
+for i in 1 2; do mkdir -p $W/o$i; cp $W/fake-silod $W/o$i/; done
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE own --state $W/o1/s >/dev/null 2>&1 & A=$!
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE own --state $W/o2/s >/dev/null 2>&1 & B=$!; wait $A $B
+ok "two own-engine runs pass while the dev-engine lock is held" $([ "$(verdict $W/o1/s verdict)/$(verdict $W/o2/s verdict)" = pass/pass ] && echo 0 || echo 1)
+ok "an own-engine run sees LIVE_ENGINE=own" $([ "$(cat $W/o1/s/engine)" = own ] && echo 0 || echo 1)
+H1=$(cat $W/o1/s/home); H2=$(cat $W/o2/s/home)
+ok "each run has its own engine HOME under the short base" $([ "$H1" != "$H2" ] && [ "${H1#$SB/sl-}" != "$H1" ] && [ "$(cat $W/o1/s/sock)" = "$H1/.silo-dev/engine.sock" ] && echo 0 || echo 1)
+ok "the engine starts with its HOME and an ephemeral proxy port" $([ "$(cat $W/o1/s/launch.out)" = "HOME=$H1 PORT=0 ARGS=--agent" ] && echo 0 || echo 1)
+G1="$H1/Library/Application Support/org.silo.dev/guest-image/img/disk"
+chmod u+w "$G1" "$(dirname "$G1")"; echo changed >"$G1"
+ok "guest images are a copy: the instance's writes never reach the original" $([ "$(cat "$FH/Library/Application Support/org.silo.dev/guest-image/img/disk")" = base ] && echo 0 || echo 1)
+( HOME=$FH LIVE_SHORT_BASE=$SB bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/o1/s; live_assert_dev_sock \"\$(cat $W/o1/s/sock)\"" ) >/dev/null 2>&1
+ok "the own engine's socket counts as a Dev path" $?
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE own --state $W/o3 --engine shared >$W/out 2>&1; rc=$?
+ok "--engine shared takes the lock again: exit 3 naming the holder" $([ $rc = 3 ] && grep -q "busy: dev-engine is held" $W/out && echo 0 || echo 1)
+HOME=$FH LIVE_ENGINE=shared LIVE_SHORT_BASE=$SB $LIVE own --state $W/o3 >/dev/null 2>&1
+ok "LIVE_ENGINE=shared also takes the lock" $([ $? = 3 ] && echo 0 || echo 1)
+$LIVE own --state $W/o3 --engine other >/dev/null 2>&1; ok "--engine with another value is a usage error" $([ $? = 2 ] && echo 0 || echo 1)
+kill -TERM $P; wait $P 2>/dev/null
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE own --state $W/o3 --engine shared >/dev/null 2>&1
+ok "a shared run uses the real HOME and the default socket" $([ "$(cat $W/o3/engine)" = shared ] && [ "$(cat $W/o3/home)" = "$FH" ] && [ "$(cat $W/o3/sock)" = "$FH/.silo-dev/engine.sock" ] && echo 0 || echo 1)
+( HOME=$FH LIVE_SHORT_BASE=$SB LIVE_ENGINE=own bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/o1/s; live_engine_remove" ) >/dev/null 2>&1
+ok "live_engine_remove deletes the own engine home with its read-only guest images" $([ $? = 0 ] && [ ! -e "$H1" ] && [ ! -e $W/o1/s/engine-home ] && echo 0 || echo 1)
+own_prep() { ( HOME=$1 LIVE_SHORT_BASE=$2 LIVE_ENGINE=own bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=\$1; mkdir -p \$STATE; live_engine_prepare" _ "$3" ) >/dev/null 2>&1; }
+own_prep "$FH" "$SB" $W/o4; ok "a prepared own engine home is accepted" $?
+mkdir -p "$SB/in/Library/Application Support/org.silo.dev/guest-image"
+own_prep "$SB/in" "$SB/in" $W/o5; ok "an own engine HOME inside the real HOME is refused" $([ $? != 0 ] && echo 0 || echo 1)
+own_prep "$FH" "$W/shortbase" $W/o6; ok "an own engine HOME longer than silod accepts is refused" $([ $? != 0 ] && echo 0 || echo 1)
+
+# a killed run leaves its own engine home with read-only guest images: cleanup and `run sweep` remove it
+AK=$W/atk; mkdir -p $AK
+own_left() { ( HOME=$FH LIVE_SHORT_BASE=$SB ATELIER_TMP=$AK LIVE_ENGINE=own CHECK=own bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=\$1; mkdir -p \$STATE; echo own >\$STATE/check; live_engine_prepare; live_engine_home" _ "$1" ) 2>/dev/null; }
+K1=$(own_left $W/k1)
+( rm -rf "$K1" ) 2>/dev/null; ok "a killed run's engine home resists plain rm -rf (read-only guest images)" $([ -e "$K1/Library/Application Support/org.silo.dev/guest-image/img/disk" ] && echo 0 || echo 1)
+ok "the engine home is a leftovers line while it exists" $(grep -qxF "engine home $K1 (live check state $(live_canon $W/k1); remove with: run sweep $(live_canon $W/k1))" $AK/leftovers && echo 0 || echo 1)
+cat >"$LIVE_D/ownclean.sh" <<'C'
+CHECK_OWN_ENGINE="dev-engine"
+STEPS=(a)
+step_a() { :; }
+cleanup() { live_engine_remove; }
+C
+HOME=$FH LIVE_SHORT_BASE=$SB ATELIER_TMP=$AK $LIVE ownclean --state $W/k1 >/dev/null 2>&1
+ok "the next run's cleanup removes the left engine home and its leftovers line" $([ $? = 0 ] && [ ! -e "$K1" ] && [ ! -e $W/k1/engine-home ] && ! grep -q "$K1" $AK/leftovers && echo 0 || echo 1)
+K2=$(own_left $W/k2); K3=$(own_left $W/k3); K4=$(own_left $W/k4); K5=$(own_left $W/k5)
+echo e2e-own-x-1 >$W/k3/computers
+mkdir -p $W/k4/lock; echo $$ >$W/k4/lock/pid
+mkdir -p "$K5/.silo-dev"; python3 -I -c 'import socket,sys,time
+s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(); open(sys.argv[2],"w").close(); time.sleep(30)' "$K5/.silo-dev/engine.sock" $W/k5/up & SP=$!
+for _ in $(seq 1 50); do [ -e $W/k5/up ] && break; sleep 0.1; done
+HOME=$FH LIVE_SHORT_BASE=$SB ATELIER_TMP=$AK $LIVE sweep $W/k2 $W/k3 $W/k4 $W/k5 >$W/out 2>&1; rc=$?; cp $W/out $W/out0
+kill $SP; wait $SP 2>/dev/null
+ok "sweep removes an idle state dir's read-only engine home and its leftovers line" $([ ! -e "$K2" ] && [ ! -e $W/k2/engine-home ] && ! grep -q "$K2" $AK/leftovers && grep -qxF "removed $K2" $W/out && echo 0 || echo 1)
+ok "sweep keeps a home whose state still lists computers" $([ -d "$K3" ] && grep -q "kept $K3: .* still lists computers" $W/out && echo 0 || echo 1)
+ok "sweep keeps a home whose state dir has an active run" $([ -d "$K4" ] && grep -q "kept $K4: a run is active" $W/out && [ "$(cat $W/k4/lock/pid)" = $$ ] && echo 0 || echo 1)
+ok "sweep keeps a home whose engine still answers" $([ -d "$K5" ] && grep -q "kept $K5: its engine still answers" $W/out && echo 0 || echo 1)
+ok "sweep exits 1 when it kept a home, and releases the state locks it took" $([ $rc = 1 ] && [ ! -e $W/k2/lock ] && [ ! -e $W/k5/lock ] && echo 0 || echo 1)
+rm -rf $W/k4/lock $W/k3/computers; rm -f "$K5/.silo-dev/engine.sock"
+HOME=$FH LIVE_SHORT_BASE=$SB ATELIER_TMP=$AK $LIVE sweep $W/k3 $W/k4 $W/k5 >$W/out 2>&1
+ok "sweep then removes them all; leftovers is empty" $([ $? = 0 ] && [ ! -e "$K3" ] && [ ! -e "$K4" ] && [ ! -e "$K5" ] && [ ! -s $AK/leftovers ] && echo 0 || echo 1)
+mkdir -p $AK/live; ln -s "$W/k1" $AK/live/k1; K6=$(own_left $AK/live/k6)
+HOME=$FH LIVE_SHORT_BASE=$SB ATELIER_TMP=$AK $LIVE sweep >$W/out 2>&1
+ok "sweep without arguments covers every state dir under the default base" $([ $? = 0 ] && [ ! -e "$K6" ] && echo 0 || echo 1)
+ok "sweep keeps a home whose engine answers and says how to stop it" $(grep -q "kept $K5: its engine still answers.*; stop .*then rerun: run sweep" $W/out0 && echo 0 || echo 1)
+# an engine that is alive before its socket answers keeps its home
+K7=$(own_left $W/k7); mkdir -p $W/k7bin; cp /bin/sleep $W/k7bin/silod
+bash -c 'exec -a "$0 --agent" sleep 30' $W/k7bin/silod & EP=$!; sleep 0.3; echo $EP >$W/k7/engine.pid
+K8=$(own_left $W/k8); mkdir -p "$K8/.silo-dev"
+python3 -I -c 'import fcntl,os,sys,time
+f=os.open(sys.argv[1],os.O_RDWR|os.O_CREAT,0o600); fcntl.flock(f,fcntl.LOCK_EX); open(sys.argv[2],"w").close(); time.sleep(30)' "$K8/.silo-dev/engine.lock" $W/k8/up & LP=$!
+for _ in $(seq 1 50); do [ -e $W/k8/up ] && break; sleep 0.1; done
+HOME=$FH LIVE_SHORT_BASE=$SB ATELIER_TMP=$AK $LIVE sweep $W/k7 $W/k8 >$W/out 2>&1; rc=$?
+kill $EP $LP 2>/dev/null; wait $EP $LP 2>/dev/null
+ok "sweep keeps a home whose recorded engine still runs before its socket answers, naming the stop command" $([ $rc = 1 ] && [ -d "$K7" ] && grep -q "kept $K7: .*kill -TERM $EP" $W/out && echo 0 || echo 1)
+ok "sweep keeps a home whose engine lock is held while its socket is silent" $([ -d "$K8" ] && grep -q "kept $K8: .*engine.lock" $W/out && echo 0 || echo 1)
+HOME=$FH LIVE_SHORT_BASE=$SB ATELIER_TMP=$AK $LIVE sweep $W/k7 $W/k8 >$W/out 2>&1
+ok "sweep removes them once the engine and the lock are gone" $([ $? = 0 ] && [ ! -e "$K7" ] && [ ! -e "$K8" ] && echo 0 || echo 1)
+# an engine home is removed only as itself, directly under the short base
+mkdir -p $W/victim; echo keep >$W/victim/f; ln -s $W/victim $SB/sl-evl
+mkdir -p $W/k9; echo own >$W/k9/check; echo "$SB/sl-evl/" >$W/k9/engine-home
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE sweep $W/k9 >$W/out 2>&1; rc=$?
+ok "sweep never removes through an engine home recorded as a symlink with a trailing slash" $([ $rc = 1 ] && [ -f $W/victim/f ] && [ -L $SB/sl-evl ] && echo 0 || echo 1)
+mkdir -p $W/other/sl-abc $W/k11; echo own >$W/k11/check; echo "$W/other/sl-abc" >$W/k11/engine-home
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE sweep $W/k11 >$W/out 2>&1; rc=$?
+ok "sweep refuses an engine home that is not directly under the short base" $([ $rc = 1 ] && [ -d $W/other/sl-abc ] && echo 0 || echo 1)
+mkdir -p $W/rel/rb
+( cd $W/rel && own_prep "$FH" rb $W/o7 ); rc1=$?
+( cd $W/rel && ( HOME=$FH ATELIER_TMP=rb LIVE_ENGINE=own bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=\$1; mkdir -p \$STATE; live_engine_home" _ $W/o8 ) >/dev/null 2>&1 ); rc2=$?
+ok "a relative short base (LIVE_SHORT_BASE or ATELIER_TMP) is refused" $([ $rc1 != 0 ] && [ $rc2 != 0 ] && [ -z "$(ls -A $W/rel/rb)" ] && echo 0 || echo 1)
+# the leftovers line is the same whichever path names the state dir
+K10=$(own_left $W/k10); ln -s $W/k10 $W/k10link
+HOME=$FH LIVE_SHORT_BASE=$SB ATELIER_TMP=$AK $LIVE sweep $W/k10link >$W/out 2>&1
+ok "sweep through a link to the state dir drops the home's leftovers line" $([ ! -e "$K10" ] && ! grep -q "$K10" $AK/leftovers && echo 0 || echo 1)
+# sweep without arguments: every TMPDIR layout and the ATELIER_TMP one
+TD=$W/tmpd; K12=$(own_left $TD/silo-agent/item1/live/c1); K13=$(own_left $TD/silo-agent/live/c2); K14=$(own_left $AK/live/c3)
+TMPDIR=$TD HOME=$FH LIVE_SHORT_BASE=$SB ATELIER_TMP=$AK $LIVE sweep >$W/out 2>&1
+ok "sweep without arguments covers TMPDIR/silo-agent/[*/]live/* and ATELIER_TMP/live/*" $([ $? = 0 ] && [ ! -e "$K12" ] && [ ! -e "$K13" ] && [ ! -e "$K14" ] && echo 0 || echo 1)
+
+# the engine mode a state dir was used with holds while it lists computers or an engine home
+cat >"$LIVE_D/mode.sh" <<'C'
+CHECK_LOCKS="dev-engine"
+CHECK_OWN_ENGINE="dev-engine"
+STEPS=(a)
+step_a() { live_engine_home >/dev/null; live_computer >/dev/null; }
+cleanup() { echo "$LIVE_ENGINE" >>"$STATE/cleaned"; [ -e "$STATE/keep" ] && return 1; for c in $(live_computers); do live_forget_computer "$c"; done; live_engine_remove; }
+C
+S=$W/m1; mkdir -p $S; touch $S/keep
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S --engine shared >/dev/null 2>&1
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S >$W/out 2>&1; rc=$?
+ok "an own run on a state dir a shared run left computers in is refused before its cleanup" $([ $rc = 2 ] && grep -q 'engine shared' $W/out && [ "$(cnt $S/cleaned)" = 1 ] && [ ! -e $S/engine-home ] && [ -s $S/computers ] && echo 0 || echo 1)
+rm $S/keep; HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S --engine shared >/dev/null 2>&1
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S >/dev/null 2>&1
+ok "once that run's cleanup is done, the other mode is allowed" $([ "$(verdict $S verdict)" = pass ] && [ "$(tail -1 $S/cleaned)" = own ] && echo 0 || echo 1)
+S=$W/m2; mkdir -p $S; touch $S/keep
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S >/dev/null 2>&1; MH=$(cat $S/engine-home)
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S --engine shared >$W/out 2>&1; rc=$?
+ok "a shared run on a state dir an own run left a home in is refused before its cleanup" $([ $rc = 2 ] && grep -q 'engine own' $W/out && [ "$(cnt $S/cleaned)" = 1 ] && [ -d "$MH" ] && echo 0 || echo 1)
+rm -f $S/engine-mode $S/computers
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S --engine shared >/dev/null 2>&1
+ok "a state dir from before the mode record counts as own while it has an engine home" $([ $? = 2 ] && [ -d "$MH" ] && echo 0 || echo 1)
+rm $S/keep; HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S >/dev/null 2>&1
+ok "the own run cleans up its home" $([ "$(verdict $S verdict)" = pass ] && [ ! -e "$MH" ] && echo 0 || echo 1)
+S=$W/m3; mkdir -p $S; touch $S/keep
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S --engine shared >/dev/null 2>&1; rm -f $S/engine-mode
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S >$W/out 2>&1; rc=$?
+ok "a state dir from before the mode record that lists computers counts as shared" $([ $rc = 2 ] && grep -q 'engine shared' $W/out && [ -s $S/computers ] && [ ! -e $S/engine-home ] && echo 0 || echo 1)
+rm $S/keep; HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S --engine shared >/dev/null 2>&1
+
 # under atelier tmp: state, short home and leftovers live in $ATELIER_TMP
 cat >"$LIVE_D/vm.sh" <<'C'
 STEPS=(make)

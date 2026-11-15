@@ -8,3 +8,4 @@
 - Comments describe the code, not the change. User-facing words follow docs/SiloUI-VOCABULARY.md.
 - Disk is tight: send long output to a log file and read the summary.
 - Live checks: `run <check>` blocks and exits 0 pass, 1 fail, 2 usage, 3 skipped (also when another check holds the Dev engine lock; the message names the holder, wait and rerun). For a long one, `run start <check>` prints `<state-dir> <run-id>`, then `run wait <state-dir> [<run-id>]`. A check's `cleanup()` stops the computers it started. Linux offline means "skipped: offline". The harness's tests are `live-test.sh`.
+- A check with `CHECK_OWN_ENGINE` runs on its own Dev engine instance and skips that lock (`--engine shared` takes it); run it under `atelier tmp --short`. A killed run leaves that instance's HOME: `run sweep` removes it. See docs/SiloUI-ENGINE.md#separate-dev-engine-instances-for-live-checks.
