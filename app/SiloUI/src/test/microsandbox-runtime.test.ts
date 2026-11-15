@@ -24,7 +24,9 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, execFileSync: vi.fn(actual.execFileSync), spawnSync: vi.fn(actual.spawnSync) }
 })
 
-describe("bundled MicroSandbox release staging", () => {
+// Each staging runs the fake build and its capability probes as real child processes, several
+// times per test, so the 5 s default is too tight on a loaded machine.
+describe("bundled MicroSandbox release staging", { timeout: 30_000 }, () => {
   it("pins the runtime patch and shares retention rules with stopped sandboxes", () => {
     const inputs = JSON.parse(readFileSync("runtime-inputs.json", "utf8"))
     for (const patch of inputs.patches) {
