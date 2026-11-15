@@ -101,6 +101,8 @@ pub fn turn_on(computer_id: &str) -> Result<Record, String> {
     turn_on_in(&store, computer_id)
 }
 
+const NOT_READY: &str = "Silo's tools are not ready yet. Try again in a moment.";
+
 /// [`turn_on`] with the store given. The store stays locked from reading the record to saving
 /// it, across binding and serving the port, so two calls cannot leave a record on a port nothing
 /// serves. The port the computer had (on, or held since its tools were turned off) is reused
@@ -115,11 +117,10 @@ pub fn turn_on_in(store: &TokenStore, computer_id: &str) -> Result<Record, Strin
         .iter()
         .find(|record| record.computer_id == computer_id && record.enabled())
         .cloned();
-    let channels = channels();
+    let Some(channels) = channels() else {
+        return Err(NOT_READY.into());
+    };
     if let Some(record) = &current {
-        let Some(channels) = &channels else {
-            return Ok(record.clone());
-        };
         let bound = record
             .port
             .is_some_and(|port| channels.bound(port).as_deref() == Some(computer_id));
@@ -136,17 +137,14 @@ pub fn turn_on_in(store: &TokenStore, computer_id: &str) -> Result<Record, Strin
     let open = |error: std::io::Error| {
         format!("Silo could not open a port for the computer's tools: {error}")
     };
-    let (port, restart_needed, fresh) = match &channels {
-        Some(channels)
-            if wanted.is_some_and(|port| channels.bound(port).as_deref() == Some(computer_id)) =>
-        {
+    let (port, restart_needed, fresh) =
+        if wanted.is_some_and(|port| channels.bound(port).as_deref() == Some(computer_id)) {
             let port = wanted.unwrap_or_default();
             if !channels.serve_held(computer_id, port) {
                 return Err("Silo could not serve the computer's tools.".into());
             }
             (port, false, false)
-        }
-        Some(channels) => {
+        } else {
             let (listener, port) = bind(wanted).map_err(open)?;
             let moved = wanted.is_some_and(|wanted| wanted != port);
             if moved {
@@ -155,12 +153,7 @@ pub fn turn_on_in(store: &TokenStore, computer_id: &str) -> Result<Record, Strin
                 channels.serve(computer_id, listener)?;
             }
             (port, moved, true)
-        }
-        None => {
-            let (_listener, port) = bind(wanted).map_err(open)?;
-            (port, false, false)
-        }
-    };
+        };
     let saved = set_port_in(&mut records, &mut held, computer_id, port, restart_needed).and_then(
         |record| {
             locked.save_held(&held)?;
@@ -169,11 +162,9 @@ pub fn turn_on_in(store: &TokenStore, computer_id: &str) -> Result<Record, Strin
         },
     );
     if saved.is_err() {
-        if let Some(channels) = &channels {
-            channels.close(computer_id);
-            if fresh {
-                channels.release(port);
-            }
+        channels.close(computer_id);
+        if fresh {
+            channels.release(port);
         }
     }
     saved
@@ -493,6 +484,18 @@ mod tests {
         let (again, same) = bind(Some(test_port)).unwrap();
         assert_eq!(same, test_port, "a free port is kept");
         drop(again);
+    }
+
+    #[test]
+    fn tools_turned_on_before_the_channels_are_installed_bind_nothing() {
+        let _ports = ports();
+        let directory = tempfile::tempdir().unwrap();
+        tokens::use_test_directory(Some(directory.path().join("guest-client")));
+        use_test_channels(None);
+        let store = TokenStore::current().unwrap();
+        assert!(turn_on_in(&store, "c").is_err());
+        assert!(store.status("c").unwrap().is_none());
+        reset();
     }
 
     #[test]
