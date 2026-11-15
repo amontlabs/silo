@@ -14,8 +14,8 @@ after it. Logs: <state>/logs/<step>.log. Every exit writes <state>/VERDICT:
 Exit codes: 0 pass, 1 fail, 2 usage, 3 skipped (also: --host linux and the machine is offline).
 State dir default: $ATELIER_TMP/live/<check> when `atelier tmp -- run ...` set ATELIER_TMP (short sockets and
 temp homes live under it too: use `atelier tmp --short`), else ${TMPDIR}/silo-agent/[$SILO_AGENT_ITEM/]live/<check>
-(set SILO_AGENT_ITEM so `clean <item>` removes it). Throwaway computers are listed in <state>/computers and
-temporary directories in <state>/tempdirs (for `clean`); under ATELIER_TMP each computer is also one line in
+Throwaway computers are listed in <state>/computers and temporary directories in <state>/tempdirs (removed by
+the run's cleanup, or by `run sweep` after a killed run); under ATELIER_TMP each computer is also one line in
 $ATELIER_TMP/leftovers, removed once the computer is gone.
 A check that drives a shared system names it in CHECK_LOCKS="dev-engine" (one line, space-separated). The runner
 then holds an exclusive machine-wide lock per name (${LIVE_LOCK_DIR:-~/.local/state/silo-live}/<name>.lock) from
