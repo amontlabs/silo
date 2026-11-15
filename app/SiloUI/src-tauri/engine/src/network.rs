@@ -1584,7 +1584,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        crate::test_support::write_shell_script(
+        crate::test_support::write_run_shell_script(
             &paths.executable,
             r#"
 case "$1" in
@@ -1609,9 +1609,31 @@ esac
         let socket = socket_path(&paths, "dev");
         fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server_done = done.clone();
+        // Answers every `ports_list` until the observation returns, and fails with a message
+        // instead of waiting forever if no request arrives.
         let server = std::thread::spawn(move || {
-            for _ in 0..2 {
-                let (mut stream, _) = listener.accept().unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(120);
+            let mut served = 0;
+            while !server_done.load(std::sync::atomic::Ordering::SeqCst) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the observation never finished within two minutes ({served} requests served)"
+                );
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("accept failed: {error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .unwrap();
                 let mut request = String::new();
                 BufReader::new(stream.try_clone().unwrap())
                     .read_line(&mut request)
@@ -1624,10 +1646,17 @@ esac
                     "guest_port":3000,"host_port":43000,"host_bind":"127.0.0.1"
                 }]});
                 stream.write_all(format!("{reply}\n").as_bytes()).unwrap();
+                served += 1;
             }
+            served
         });
         let state = observe(&paths, "dev", &config, &BTreeMap::new());
-        server.join().unwrap();
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        let served = server.join().unwrap();
+        assert!(
+            served >= 1,
+            "the observation never asked for the published ports"
+        );
         assert!(state.error.is_none(), "{:?}", state.error);
         assert_eq!(state.ports.len(), 1);
         let port = &state.ports[0];

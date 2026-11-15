@@ -2169,7 +2169,7 @@ mod tests {
         let git = sleeping_git(directory.path());
         fs::write(
             &git.executable,
-            "#!/bin/sh\nprintf updated >published\nexec /bin/sleep 30\n",
+            "#!/bin/sh\nprintf updated >published.tmp && mv published.tmp published\nexec /bin/sleep 30\n",
         )
         .unwrap();
         let error = git
@@ -2214,7 +2214,8 @@ mod tests {
             ("[remote rejected] (hook declined)", false),
         ] {
             let script = if summary.is_empty() {
-                "#!/bin/sh\nprintf updated >published\nexit 128\n".to_owned()
+                "#!/bin/sh\nprintf updated >published.tmp && mv published.tmp published\nexit 128\n"
+                    .to_owned()
             } else {
                 format!("#!/bin/sh\nprintf '!\\trefs/silo/push:refs/heads/main\\t%s\\n' '{summary}'\nexit 1\n")
             };
