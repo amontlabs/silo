@@ -387,6 +387,11 @@ HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S --engine shared >/dev/null 2>
 ok "a state dir from before the mode record counts as own while it has an engine home" $([ $? = 2 ] && [ -d "$MH" ] && echo 0 || echo 1)
 rm $S/keep; HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S >/dev/null 2>&1
 ok "the own run cleans up its home" $([ "$(verdict $S verdict)" = pass ] && [ ! -e "$MH" ] && echo 0 || echo 1)
+S=$W/m3; mkdir -p $S; touch $S/keep
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S --engine shared >/dev/null 2>&1; rm -f $S/engine-mode
+HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S >$W/out 2>&1; rc=$?
+ok "a state dir from before the mode record that lists computers counts as shared" $([ $rc = 2 ] && grep -q 'engine shared' $W/out && [ -s $S/computers ] && [ ! -e $S/engine-home ] && echo 0 || echo 1)
+rm $S/keep; HOME=$FH LIVE_SHORT_BASE=$SB $LIVE mode --state $S --engine shared >/dev/null 2>&1
 
 # under atelier tmp: state, short home and leftovers live in $ATELIER_TMP
 cat >"$LIVE_D/vm.sh" <<'C'

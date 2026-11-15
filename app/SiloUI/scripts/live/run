@@ -211,11 +211,15 @@ RUN=$$-$(date +%s); echo "$RUN" >"$STATE/run.tmp"; mv "$STATE/run.tmp" "$STATE/r
 early_fail() { echo "live: $*" >&2; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; write_verdict fail - "$*"; exit 2; }
 # The engine mode (own or shared) a state dir was used with holds while it lists computers or an engine home: a run
 # in the other mode would clean up on the wrong engine. Refused before the check file is read (reading it may make
-# an engine home) and before any cleanup can run. A state dir without the record that has an engine home is own.
+# an engine home) and before any cleanup can run. A state dir without the record is own when it has an engine home,
+# else shared when it lists computers (checks used only the shared engine before the record existed).
 PREV_ENGINE=$(cat "$STATE/engine-mode" 2>/dev/null)
-[ -n "$PREV_ENGINE" ] || { [ -s "$STATE/engine-home" ] && PREV_ENGINE=own; }
+if [ -z "$PREV_ENGINE" ]; then
+  if [ -s "$STATE/engine-home" ]; then PREV_ENGINE=own
+  elif [ -n "$(live_computers)" ]; then PREV_ENGINE=shared; fi
+fi
 if [ -n "$PREV_ENGINE" ] && [ "$PREV_ENGINE" != "$ENGINE" ] && { [ -n "$(live_computers)" ] || [ -s "$STATE/engine-home" ]; }; then
-  early_fail "$STATE was used with --engine $PREV_ENGINE and still lists computers or an engine home; rerun with --engine $PREV_ENGINE (its cleanup removes them) or use another --state"
+  early_fail "$STATE was used with --engine $PREV_ENGINE and still lists computers or an engine home; rerun with --engine $PREV_ENGINE (its cleanup removes them), run sweep $STATE for a home a failed run left, or use another --state"
 fi
 echo "$ENGINE" >"$STATE/engine-mode"
 live_sync_leftovers

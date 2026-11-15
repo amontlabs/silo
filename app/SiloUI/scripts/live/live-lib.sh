@@ -168,10 +168,12 @@ sys.exit(1)' "$1" 2>/dev/null
 # live_engine_alive <state> <home>: whether the own engine of <home> may still run (its socket answers, the silod
 # --agent recorded in <state>/engine.pid still runs, or its engine.lock is held). Prints why and how to stop it.
 live_engine_alive() {
-  local st=$1 h=$2 sock=$2/.silo-dev/engine.sock lock=$2/.silo-dev/engine.lock rp="" pid stop
+  local st=$1 h=$2 sock=$2/.silo-dev/engine.sock lock=$2/.silo-dev/engine.lock rp="" pid stop holders
   rp=$(cat "$st/engine.pid" 2>/dev/null)
   case "$rp" in ''|*[!0-9]*) rp="";; *) case "$(ps -o command= -p "$rp" 2>/dev/null)" in *silod" --agent"*) ;; *) rp="";; esac;; esac
-  pid=$rp; [ -n "$pid" ] || { [ -e "$lock" ] && pid=$(lsof -t -- "$lock" 2>/dev/null | sort -u | tr '\n' ' '); pid=${pid% }; }
+  # When someone holds this home's lock, the hint names that holder, not engine.pid: a reused pid may be another engine.
+  holders=""; [ -e "$lock" ] && holders=$(lsof -t -- "$lock" 2>/dev/null | sort -u | tr '\n' ' '); holders=${holders% }
+  pid=$rp; [ -z "$holders" ] || case " $holders " in *" $rp "*) ;; *) pid=$holders;; esac
   if [ -n "$pid" ]; then stop="stop it with: kill -TERM $pid, then rerun: run sweep $st"
   else stop="stop the silod --agent whose HOME is $h, then rerun: run sweep $st"; fi
   if live_engine_answers "$sock"; then echo "its engine still answers on $sock (pid ${pid:-unknown}); $stop"; return 0; fi
