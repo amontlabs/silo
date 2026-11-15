@@ -62,7 +62,19 @@ live_fileid() { python3 -I -c 'import os,sys; s=os.stat(sys.argv[1]); print(s.st
 # .silo-dev, data, cache and logs under Library/, every computer's runtime home), so two instances share none of it.
 # Otherwise: the person's Dev engine under the real HOME.
 live_engine_own() { [ "${LIVE_ENGINE:-}" = own ]; }
-live_engine_home() { if live_engine_own; then echo "$(live_short_home)/h"; else echo "$HOME"; fi; }
+# The own instance's HOME is a folder of its own right under the short base (made once per state dir, recorded in
+# $STATE/engine-home): silod refuses a HOME longer than LIVE_ENGINE_HOME_MAX bytes, because every computer's
+# runtime socket (<HOME>/.silo-dev/<12 hex>/run/sandboxes/<24 chars>/control.sock) must stay under 104 bytes.
+LIVE_ENGINE_HOME_MAX=28
+live_engine_home() {
+  live_engine_own || { echo "$HOME"; return 0; }
+  local h; h=$(cat "$STATE/engine-home" 2>/dev/null)
+  if [ -z "$h" ] || [ ! -d "$h" ]; then
+    h=$(mktemp -d "$(live_short_base)/sl-XXX") || live_die "cannot make an engine home under $(live_short_base)"
+    echo "$h" >"$STATE/engine-home"; live_register_tempdir "$h"
+  fi
+  echo "$h"
+}
 live_dev_sock() {
   if live_engine_own; then echo "$(live_engine_home)/.silo-dev/engine.sock"; else echo "${DEV_SOCK:-$HOME/.silo-dev/engine.sock}"; fi
 }
@@ -74,6 +86,7 @@ live_engine_prepare() {
   live_engine_own || return 0
   local h src dst; h=$(live_engine_home); src="$HOME/Library/Application Support/org.silo.dev/guest-image"; dst="$(live_engine_data)/guest-image"
   case "$(live_canon "$h")" in "$(live_canon "$HOME")"|"$(live_canon "$HOME")/"*) live_die "own engine home is inside HOME: $h";; esac
+  [ ${#h} -le $LIVE_ENGINE_HOME_MAX ] || live_die "engine home $h is longer than $LIVE_ENGINE_HOME_MAX bytes: use a shorter base (atelier tmp --short, LIVE_SHORT_BASE)"
   mkdir -p "$h" && chmod 700 "$h" || live_die "cannot make $h"
   [ -e "$dst" ] && return 0
   live_need_path "$src" "Dev guest images to clone"
