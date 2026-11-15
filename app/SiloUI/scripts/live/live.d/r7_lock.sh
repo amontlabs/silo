@@ -111,6 +111,8 @@ step_quit() {
 # stop that engine. Fails while any computer is left.
 cleanup() {
   [ -x "$SILO_BIN" ] || { [ -z "$(live_computers)" ]; return; }
+  # Without its own engine's HOME (refused short base or home) no engine may be started: only an empty list passes.
+  if live_engine_own && [ -z "$EHOME" ]; then [ -z "$(live_computers)" ]; return; fi
   live_assert_dev_engine "$SILO_BIN" "$SILOD"; live_assert_dev_sock "$SOCK"
   local c l round
   if [ -n "$(live_computers)" ]; then

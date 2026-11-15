@@ -28,8 +28,11 @@ Dev engine or another run's. --engine shared (or LIVE_ENGINE=shared) uses ~/.sil
 Steps see LIVE_ENGINE=own|shared. The check's cleanup() removes the own HOME (live_engine_remove; its guest images
 are read-only, so plain rm -rf fails). Under ATELIER_TMP the HOME is also a line in $ATELIER_TMP/leftovers while it
 exists. A run killed before its cleanup leaves the HOME: rerun the check (its cleanup removes it), or
-`run sweep [<state-dir>...]` (default: every state dir under the default base) removes the HOME of each idle state
-dir whose engine no longer answers and that lists no computer, and prints what it kept and why (exit 1 if any).
+`run sweep [<state-dir>...]` (default: every ${TMPDIR}/silo-agent/[*/]live/* and $ATELIER_TMP/live/*) removes the
+HOME of each idle state dir that lists no computer and whose engine is gone (its socket does not answer, the recorded
+silod no longer runs, its engine.lock is free), and prints what it kept, why, and how to stop a live engine (exit 1
+if any). The HOME must be an sl-* folder directly under the short base (LIVE_SHORT_BASE or ATELIER_TMP, absolute).
+A state dir records its engine mode: while it lists computers or an engine HOME, a run in the other mode exits 2.
 `run start <check> [args]` runs the same in the background and returns once the runner holds the lock and has
 written its new run id (or has already ended, e.g. a config error or a busy state dir: then it prints why and exits
 with the runner's code); it prints "<state-dir> <run-id>". `run wait <state-dir> [<run-id>]` blocks until the
@@ -136,19 +139,25 @@ acquire_lock() {
 
 # Removes the own engine HOME a killed run left in each idle state dir (see usage).
 cmd_sweep() {
-  local st h kept=0 dirs=("$@")
-  [ ${#dirs[@]} -gt 0 ] || { for st in "$(dirname "$(default_state x)")"/*; do [ -d "$st" ] && dirs+=("$st"); done; }
+  local st h why base kept=0 dirs=() seen=" "
   # shellcheck source=live-lib.sh
   . "$HERE/live-lib.sh"
+  if [ $# -gt 0 ]; then dirs=("$@")
+  else
+    base=${TMPDIR:-/tmp}; base=${base%/}/silo-agent
+    for st in "$base"/live/* "$base"/*/live/*; do [ -d "$st" ] && dirs+=("$st"); done
+    if [ -n "${ATELIER_TMP:-}" ]; then for st in "${ATELIER_TMP%/}"/live/*; do [ -d "$st" ] && dirs+=("$st"); done; fi
+  fi
   for st in "${dirs[@]}"; do
-    st=${st%/}; case "$st" in /*) ;; *) st=$PWD/$st;; esac
-    h=$(cat "$st/engine-home" 2>/dev/null); [ -n "$h" ] || continue
+    st=$(live_canon "$st"); case "$seen" in *" $st "*) continue;; esac; seen="$seen$st "
+    h=$(live_strip_slashes "$(cat "$st/engine-home" 2>/dev/null)"); [ -n "$h" ] || continue
     if ! ( STATE=$st; acquire_lock ) 2>/dev/null; then echo "kept $h: a run is active in $st"; kept=1; continue; fi
     (
       STATE=$st CHECK=$(cat "$st/check" 2>/dev/null || echo "?")
       if [ -n "$(live_computers)" ]; then echo "kept $h: $st still lists computers (rerun the check to clean them up)"; exit 1; fi
-      if live_engine_answers "$h/.silo-dev/engine.sock"; then echo "kept $h: its engine still answers"; exit 1; fi
-      live_engine_remove && echo "removed $h"
+      if why=$(live_engine_alive "$st" "$h"); then echo "kept $h: $why"; exit 1; fi
+      if ! why=$(live_engine_remove 2>&1); then echo "kept $h: ${why#*FATAL }"; exit 1; fi
+      echo "removed $h"
     ) || kept=1
     rm -rf "$st/lock"
   done
@@ -199,11 +208,20 @@ RUN=$$-$(date +%s); echo "$RUN" >"$STATE/run.tmp"; mv "$STATE/run.tmp" "$STATE/r
 
 # shellcheck source=live-lib.sh
 . "$HERE/live-lib.sh"
+early_fail() { echo "live: $*" >&2; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; write_verdict fail - "$*"; exit 2; }
+# The engine mode (own or shared) a state dir was used with holds while it lists computers or an engine home: a run
+# in the other mode would clean up on the wrong engine. Refused before the check file is read (reading it may make
+# an engine home) and before any cleanup can run. A state dir without the record that has an engine home is own.
+PREV_ENGINE=$(cat "$STATE/engine-mode" 2>/dev/null)
+[ -n "$PREV_ENGINE" ] || { [ -s "$STATE/engine-home" ] && PREV_ENGINE=own; }
+if [ -n "$PREV_ENGINE" ] && [ "$PREV_ENGINE" != "$ENGINE" ] && { [ -n "$(live_computers)" ] || [ -s "$STATE/engine-home" ]; }; then
+  early_fail "$STATE was used with --engine $PREV_ENGINE and still lists computers or an engine home; rerun with --engine $PREV_ENGINE (its cleanup removes them) or use another --state"
+fi
+echo "$ENGINE" >"$STATE/engine-mode"
 live_sync_leftovers
 STEPS=()
 # shellcheck disable=SC1090
 . "$CHECK_FILE"
-early_fail() { echo "live: $*" >&2; echo "$CHECK" >"$STATE/check"; echo "$HOST" >"$STATE/host"; write_verdict fail - "$*"; exit 2; }
 [ ${#STEPS[@]} -gt 0 ] || early_fail "$CHECK_FILE defines no STEPS"
 for s in "${STEPS[@]}"; do declare -F "step_$s" >/dev/null || early_fail "step_$s is not defined in $CHECK_FILE"; done
 

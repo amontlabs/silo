@@ -24,13 +24,21 @@ live_need_path() { [ -e "$1" ] || live_die "missing path: $1${2:+ ($2)}"; }
 # live_register_tempdir <dir>: tells `clean` which directories belong to this run.
 live_register_tempdir() { grep -qxF -- "$1" "$STATE/tempdirs" 2>/dev/null || echo "$1" >>"$STATE/tempdirs"; }
 
+# live_strip_slashes <path>: <path> without trailing slashes (/ stays /).
+live_strip_slashes() { local p=$1; while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p=${p%/}; done; echo "$p"; }
 # Where short per-run directories go: LIVE_SHORT_BASE, else ATELIER_TMP (`atelier tmp --short` makes it short), else /tmp.
-live_short_base() { echo "${LIVE_SHORT_BASE:-${ATELIER_TMP:-/tmp}}"; }
+# Fails (with a message) unless it is an absolute path.
+live_short_base() {
+  local b=${LIVE_SHORT_BASE:-${ATELIER_TMP:-/tmp}}
+  case "$b" in /*) ;; *) echo "live: the short base must be an absolute path (LIVE_SHORT_BASE, ATELIER_TMP): $b" >&2; return 1;; esac
+  live_strip_slashes "$b"
+}
 
 # live_short_home: a short, per-run base directory (prints it). macOS refuses Unix socket paths of
 # 104 bytes or more and $TMPDIR alone is ~50, so sockets must live under this, not under $STATE.
 live_short_home() {
-  local d; d="$(live_short_base)/sl-$(printf %s "$STATE" | cksum | cut -d' ' -f1)"
+  local b d; b=$(live_short_base) || live_die "no usable short base"
+  d="$b/sl-$(printf %s "$STATE" | cksum | cut -d' ' -f1)"
   mkdir -p "$d" && live_register_tempdir "$d" && echo "$d"
 }
 
@@ -68,9 +76,10 @@ live_engine_own() { [ "${LIVE_ENGINE:-}" = own ]; }
 LIVE_ENGINE_HOME_MAX=28
 live_engine_home() {
   live_engine_own || { echo "$HOME"; return 0; }
-  local h; h=$(cat "$STATE/engine-home" 2>/dev/null)
+  local h b; h=$(live_strip_slashes "$(cat "$STATE/engine-home" 2>/dev/null)")
   if [ -z "$h" ] || [ ! -d "$h" ]; then
-    h=$(mktemp -d "$(live_short_base)/sl-XXX") || live_die "cannot make an engine home under $(live_short_base)"
+    b=$(live_short_base) || live_die "no usable short base"
+    h=$(mktemp -d "$b/sl-XXX") || live_die "cannot make an engine home under $b"
     echo "$h" >"$STATE/engine-home"; live_register_tempdir "$h"; live_leftover_put "$(live_engine_home_line "$h")"
   fi
   echo "$h"
@@ -84,8 +93,8 @@ live_engine_data() { echo "$(live_engine_home)/Library/Application Support/org.s
 # person's copy (cp -c: no extra space, and nothing the instance writes reaches the original). No-op when shared.
 live_engine_prepare() {
   live_engine_own || return 0
-  local h src dst; h=$(live_engine_home); src="$HOME/Library/Application Support/org.silo.dev/guest-image"; dst="$(live_engine_data)/guest-image"
-  case "$(live_canon "$h")" in "$(live_canon "$HOME")"|"$(live_canon "$HOME")/"*) live_die "own engine home is inside HOME: $h";; esac
+  local h src dst why; h=$(live_engine_home) || exit 1; src="$HOME/Library/Application Support/org.silo.dev/guest-image"; dst="$(live_engine_data)/guest-image"
+  why=$(live_engine_home_check "$h") || live_die "refusing the own engine home: $why"
   [ ${#h} -le $LIVE_ENGINE_HOME_MAX ] || live_die "engine home $h is longer than $LIVE_ENGINE_HOME_MAX bytes: use a shorter base (atelier tmp --short, LIVE_SHORT_BASE)"
   mkdir -p "$h" && chmod 700 "$h" || live_die "cannot make $h"
   [ -e "$dst" ] && return 0
@@ -101,19 +110,43 @@ live_rm_tree() {
 }
 # live_engine_home_line <home>: the $ATELIER_TMP/leftovers line of an own engine home. `atelier clean` cannot remove
 # its read-only guest images, so the line stays until the harness has removed the home (cleanup or `run sweep`).
-live_engine_home_line() { echo "engine home $1 (live check state $STATE; remove with: run sweep $STATE)"; }
+# The line names the canonical state dir, so every spelling of it (a link, a trailing slash) gives the same line.
+live_engine_home_line() { local st; st=$(live_canon "$STATE"); echo "engine home $1 (live check state $st; remove with: run sweep $st)"; }
+# live_engine_home_check <home>: whether <home> is an own engine home that may be prepared or removed: a plain
+# absolute path named sl-*, directly under the short base (both resolved), not itself a link, outside HOME, and (when
+# it exists) a folder of this user. Prints why not and fails otherwise. The recorded path is kept as made (not
+# resolved): silod limits the HOME length, and resolving /tmp adds /private.
+live_engine_home_check() {
+  local b; b=$(live_short_base) || { echo "no usable short base"; return 1; }
+  python3 -I -c 'import os,stat,sys
+h,b,home=sys.argv[1:4]
+def no(m):
+    print(m); sys.exit(1)
+if not h.startswith("/") or os.path.normpath(h)!=h: no("not a plain absolute path: "+h)
+n=os.path.basename(h)
+if not n.startswith("sl-"): no("not named sl-*: "+h)
+cb=os.path.realpath(b)
+if os.path.realpath(os.path.dirname(h))!=cb: no("not directly under the short base %s: %s (sweep with LIVE_SHORT_BASE set to its folder)"%(b,h))
+ch=os.path.realpath(h)
+if ch!=os.path.join(cb,n): no("a link, not a folder: "+h)
+rh=os.path.realpath(home)
+if ch==rh or ch.startswith(rh+"/"): no("inside HOME: "+h)
+if os.path.lexists(h):
+    st=os.lstat(h)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid!=os.geteuid(): no("not a folder of this user: "+h)' "$1" "$b" "$HOME"
+}
 # live_engine_remove: deletes the own instance's HOME (recorded in $STATE/engine-home) once its engine has stopped
 # (call from cleanup when no computer is left, or through `run sweep`). Works whatever LIVE_ENGINE is now: the
 # record alone says there is a home.
 live_engine_remove() {
-  local h; h=$(cat "$STATE/engine-home" 2>/dev/null); [ -n "$h" ] || return 0
-  if [ -e "$h" ]; then
-    case "$(basename "$h")" in sl-*) ;; *) live_die "not an own engine home: $h";; esac
-    case "$(live_canon "$h")" in "$(live_canon "$HOME")"|"$(live_canon "$HOME")/"*) live_die "not an own engine home (inside HOME): $h";; esac
-    [ -d "$h" ] && [ ! -L "$h" ] && [ -O "$h" ] || live_die "not an own engine home: $h"
+  local raw h why; raw=$(cat "$STATE/engine-home" 2>/dev/null); h=$(live_strip_slashes "$raw"); [ -n "$h" ] || return 0
+  if [ -e "$h" ] || [ -L "$h" ]; then
+    why=$(live_engine_home_check "$h") || live_die "not an own engine home, left in place: $why"
+    [ -d "$h" ] && [ ! -L "$h" ] && [ -O "$h" ] || live_die "not an own engine home, left in place: $h"
     live_rm_tree "$h" || live_die "cannot remove the engine home $h"
   fi
-  live_leftover_drop "$(live_engine_home_line "$h")"; rm -f "$STATE/engine-home"
+  live_leftover_drop "$(live_engine_home_line "$h")"; [ "$raw" = "$h" ] || live_leftover_drop "$(live_engine_home_line "$raw")"
+  rm -f "$STATE/engine-home"
 }
 # live_engine_answers <socket>: whether an engine accepts connections on <socket>.
 live_engine_answers() {
@@ -121,6 +154,30 @@ live_engine_answers() {
 s=socket.socket(socket.AF_UNIX); s.settimeout(2)
 try: s.connect(sys.argv[1])
 except OSError: sys.exit(1)' "$1" 2>/dev/null
+}
+# live_lock_held <file>: whether another open file holds an flock on <file> (silod holds its .silo-dev/engine.lock
+# from start to exit, before its socket answers). Takes the lock only for an instant, never creates the file.
+live_lock_held() {
+  python3 -I -c 'import fcntl,os,sys
+try: f=os.open(sys.argv[1],os.O_RDONLY|os.O_NOFOLLOW)
+except OSError: sys.exit(1)
+try: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
+except OSError: sys.exit(0)
+sys.exit(1)' "$1" 2>/dev/null
+}
+# live_engine_alive <state> <home>: whether the own engine of <home> may still run (its socket answers, the silod
+# --agent recorded in <state>/engine.pid still runs, or its engine.lock is held). Prints why and how to stop it.
+live_engine_alive() {
+  local st=$1 h=$2 sock=$2/.silo-dev/engine.sock lock=$2/.silo-dev/engine.lock rp="" pid stop
+  rp=$(cat "$st/engine.pid" 2>/dev/null)
+  case "$rp" in ''|*[!0-9]*) rp="";; *) case "$(ps -o command= -p "$rp" 2>/dev/null)" in *silod" --agent"*) ;; *) rp="";; esac;; esac
+  pid=$rp; [ -n "$pid" ] || { [ -e "$lock" ] && pid=$(lsof -t -- "$lock" 2>/dev/null | sort -u | tr '\n' ' '); pid=${pid% }; }
+  if [ -n "$pid" ]; then stop="stop it with: kill -TERM $pid, then rerun: run sweep $st"
+  else stop="stop the silod --agent whose HOME is $h, then rerun: run sweep $st"; fi
+  if live_engine_answers "$sock"; then echo "its engine still answers on $sock (pid ${pid:-unknown}); $stop"; return 0; fi
+  if [ -n "$rp" ]; then echo "its engine (pid $rp) still runs, its socket does not answer yet; $stop"; return 0; fi
+  if live_lock_held "$lock"; then echo "an engine holds $lock (pid ${pid:-unknown}); $stop"; return 0; fi
+  return 1
 }
 # A client of an own instance (the silo CLI) runs with HOME=$(live_engine_home) too: the CLI accepts only the Dev
 # socket under its HOME's .silo-dev.
@@ -145,7 +202,8 @@ live_assert_dev_engine() {
 }
 live_assert_dev_sock() {
   live_is_production "$1" && live_die "refusing the production engine path: $1 ($(live_canon "$1"))"
-  local c h st sb; c=$(live_canon "$1"); h=$(live_canon "$HOME"); st=$(live_canon "$STATE"); sb=$(live_canon "$(live_short_base)")
+  local c h st sb; sb=$(live_short_base) || live_die "no usable short base"; sb=$(live_canon "$sb")
+  c=$(live_canon "$1"); h=$(live_canon "$HOME"); st=$(live_canon "$STATE")
   case "$c" in "$h/.silo-dev/"*|"$st/"*|"$sb/sl-"*) ;; *) live_die "not a Dev engine path: $1 ($c)" ;; esac
 }
 # live_foreign_engines <silod>: pids of `silod --agent` processes that are not <silod> (never touched).
@@ -211,7 +269,7 @@ live_leftover_drop() {
 live_sync_leftovers() {
   [ -n "${ATELIER_TMP:-}" ] || return 0
   local c h; for c in $(live_computers); do live_leftover_add "$c"; done
-  h=$(cat "$STATE/engine-home" 2>/dev/null); [ -n "$h" ] && [ -e "$h" ] && live_leftover_put "$(live_engine_home_line "$h")"
+  h=$(live_strip_slashes "$(cat "$STATE/engine-home" 2>/dev/null)"); [ -n "$h" ] && [ -e "$h" ] && live_leftover_put "$(live_engine_home_line "$h")"
   return 0
 }
 

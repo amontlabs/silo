@@ -110,7 +110,12 @@ What an instance needs and what stays shared:
   HOME after making it writable; a run killed before its cleanup leaves it, and the next run
   of the check (its cleanup) or `run sweep` removes it. Under `atelier tmp` the HOME is a
   line in `$ATELIER_TMP/leftovers` until then, so `atelier clean` refuses instead of failing
-  on it.
+  on it. `run sweep` keeps a HOME while its engine may still run (the socket answers, the
+  recorded `silod --agent` runs, or `.silo-dev/engine.lock` is held) and prints how to stop
+  it; it removes only an `sl-*` folder directly under the short base, never through a link.
+- **One mode per state dir.** A state dir records whether it ran with its own instance or the
+  shared Dev engine. While it still lists computers or an instance HOME, a run in the other
+  mode exits 2, so cleanup never acts on the wrong engine.
 - **Image load per instance.** Each instance loads the image into its own runtime, on its own
   disk space, on its first create (193 s in the November 2026 run of two `r7_lock` checks at
   once, against 15 s for the next create); a long-lived Dev engine has already done this.
