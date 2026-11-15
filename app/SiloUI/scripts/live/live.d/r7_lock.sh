@@ -1,9 +1,11 @@
 # R7 live check, ported from docs/direction/checks/r7_lock_check.sh (not yet run through `live`):
 # running computers must not keep the engine's command lock after an engine crash.
-# Dev engine only (~/.silo-dev), throwaway computers named by live_computer_named.
-#   app/SiloUI/scripts/live/run r7_lock [--from STEP]      T=<build folder> holds debug/silo and the Dev bundle
+# Dev engine only: its own instance (default) or ~/.silo-dev under the lock (--engine shared); throwaway computers
+# named by live_computer_named.
+#   app/SiloUI/scripts/live/run r7_lock [--from STEP] [--engine shared]   T=<build folder> holds debug/silo and the Dev bundle
 CHECK_DESC="engine crash must not leave computers holding the command lock (Dev engine, macOS)"
 CHECK_LOCKS="dev-engine"
+CHECK_OWN_ENGINE="dev-engine"
 STEPS=(preflight engine create crash_stop crash_create quit)
 
 T=${T:-$REPO/app/SiloUI/target}
@@ -21,7 +23,8 @@ fingerprint_extra() { echo "$(live_canon "$SILOD") $(live_fileid "$SILOD") $(liv
 # it did not start already answers. Prints seconds until the socket answers and until `silo list` succeeds.
 start_engine() {
   if silo list >/dev/null 2>&1; then echo "an engine this check did not start already answers on $SOCK"; return 1; fi
-  "$SILOD" --agent >>"$LOGS/silod-dev.log" 2>&1 &
+  live_engine_prepare
+  live_engine_launch "$SILOD" >>"$LOGS/silod-dev.log" 2>&1 &
   live_engine_record $!
   local s=$SECONDS answered="" out rc
   while [ $((SECONDS-s)) -lt "${SETTLE_LIMIT:-240}" ]; do
@@ -36,10 +39,10 @@ ensure_engine() { # only the engine this check started may be used
   if silo list >/dev/null 2>&1; then [ -n "$(our_engine)" ] || live_die "an engine this check did not start answers on $SOCK"
   else start_engine || live_die "cannot start the engine"; fi
 }
-lock_file() { find "$HOME/Library/Application Support/org.silo.dev" -name .silo-configuration-worker.lock 2>/dev/null | head -1; }
+lock_file() { find "$(live_engine_data)" -name .silo-configuration-worker.lock 2>/dev/null | head -1; }
 holders() { lsof "$(lock_file)" 2>/dev/null | awk 'NR>1{print $1"("$2")"}' | sort -u | tr '\n' ' ' || true; }
 mine() {
-  local rh; rh=$(ls -d "$HOME"/.silo-dev/*/sandboxes 2>/dev/null | head -1 | xargs -I{} dirname {})
+  local rh; rh=$(ls -d "$(live_engine_home)"/.silo-dev/*/sandboxes 2>/dev/null | head -1 | xargs -I{} dirname {})
   MSB_HOME=$rh MSB_PATH="$MSB" "$MSB" list 2>&1 | grep -E "^(NAME|e2e-r7-)" || true
 }
 
@@ -64,7 +67,8 @@ step_preflight() {
   live_need_exec "$SILOD" "Dev bundle"; live_need_exec "$MSB"
   live_assert_dev_engine "$SILO_BIN" "$SILOD" "$MSB"
   live_assert_dev_sock "$SOCK"; live_check_sock_path "$SOCK"
-  live_need_path "$HOME/Library/Application Support/org.silo.dev/guest-image" "Dev guest images"
+  live_engine_prepare; live_need_path "$(live_engine_data)/guest-image" "Dev guest images"
+  live_say "engine: $LIVE_ENGINE, HOME $(live_engine_home), socket $SOCK"
   live_say "header: commit $(git -C "$REPO" rev-parse --short HEAD); $("$SILO_BIN" --version)"
   if silo list >/dev/null 2>&1 && [ -z "$(our_engine)" ]; then live_die "an engine not started by this check answers on $SOCK"; fi
 }

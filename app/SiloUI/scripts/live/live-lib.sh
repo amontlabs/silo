@@ -22,7 +22,7 @@ live_need_exec() { [ -x "$1" ] || live_die "missing executable: $1${2:+ ($2)}"; 
 live_need_path() { [ -e "$1" ] || live_die "missing path: $1${2:+ ($2)}"; }
 
 # live_register_tempdir <dir>: tells `clean` which directories belong to this run.
-live_register_tempdir() { echo "$1" >>"$STATE/tempdirs"; }
+live_register_tempdir() { grep -qxF -- "$1" "$STATE/tempdirs" 2>/dev/null || echo "$1" >>"$STATE/tempdirs"; }
 
 # Where short per-run directories go: LIVE_SHORT_BASE, else ATELIER_TMP (`atelier tmp --short` makes it short), else /tmp.
 live_short_base() { echo "${LIVE_SHORT_BASE:-${ATELIER_TMP:-/tmp}}"; }
@@ -57,7 +57,37 @@ live_canon() { python3 -I -c 'import os,sys; print(os.path.realpath(sys.argv[1])
 live_fileid() { python3 -I -c 'import os,sys; s=os.stat(sys.argv[1]); print(s.st_size, s.st_mtime_ns)' "$1" 2>/dev/null || echo missing; }
 
 # Engine identity: only the Dev engine of the bundle under test is ever used.
-live_dev_sock() { echo "${DEV_SOCK:-$HOME/.silo-dev/engine.sock}"; }
+# LIVE_ENGINE=own (set by the runner for a check with CHECK_OWN_ENGINE): the run's own Dev engine instance, whose
+# HOME is a short per-state-dir folder; silod keeps everything it owns under that HOME (state dir and socket in
+# .silo-dev, data, cache and logs under Library/, every computer's runtime home), so two instances share none of it.
+# Otherwise: the person's Dev engine under the real HOME.
+live_engine_own() { [ "${LIVE_ENGINE:-}" = own ]; }
+live_engine_home() { if live_engine_own; then echo "$(live_short_home)/h"; else echo "$HOME"; fi; }
+live_dev_sock() {
+  if live_engine_own; then echo "$(live_engine_home)/.silo-dev/engine.sock"; else echo "${DEV_SOCK:-$HOME/.silo-dev/engine.sock}"; fi
+}
+# The Dev engine's application data folder (guest images, configuration lock, saved settings).
+live_engine_data() { echo "$(live_engine_home)/Library/Application Support/org.silo.dev"; }
+# live_engine_prepare: makes the own instance's HOME and gives it the Dev guest images as an APFS clone of the
+# person's copy (cp -c: no extra space, and nothing the instance writes reaches the original). No-op when shared.
+live_engine_prepare() {
+  live_engine_own || return 0
+  local h src dst; h=$(live_engine_home); src="$HOME/Library/Application Support/org.silo.dev/guest-image"; dst="$(live_engine_data)/guest-image"
+  case "$(live_canon "$h")" in "$(live_canon "$HOME")"|"$(live_canon "$HOME")/"*) live_die "own engine home is inside HOME: $h";; esac
+  mkdir -p "$h" && chmod 700 "$h" || live_die "cannot make $h"
+  [ -e "$dst" ] && return 0
+  live_need_path "$src" "Dev guest images to clone"
+  mkdir -p "$(dirname "$dst")" && cp -cR "$src" "$dst.tmp.$$" && mv "$dst.tmp.$$" "$dst" || live_die "cannot clone $src"
+}
+# live_engine_launch <silod> [args]: starts <silod> --agent in the background (prints nothing; the caller records
+# $!). An own instance gets its HOME and an ephemeral website-proxy port, so it never takes the Dev engine's.
+live_engine_launch() {
+  local silod=$1; shift
+  if live_engine_own; then
+    live_engine_prepare
+    HOME=$(live_engine_home) SILO_URL_PROXY_PORT=0 exec "$silod" --agent "$@"
+  else exec "$silod" --agent "$@"; fi
+}
 # Refuses anything that resolves under ~/.silo or inside a production bundle.
 live_is_production() {
   local c h; c=$(live_canon "$1"); h=$(live_canon "$HOME")

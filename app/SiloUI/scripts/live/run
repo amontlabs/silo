@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run: step-runner for live checks (checks that drive a real Dev engine or the Linux machine).
 usage() { cat <<'U'
-usage: run <check> [--from STEP] [--host mac|linux] [--state DIR]
+usage: run <check> [--from STEP] [--host mac|linux] [--state DIR] [--engine own|shared]
        run start <check> [args]            (background run; prints "<state-dir> <run-id>")
        run wait <state-dir> [<run-id>] [--timeout SECONDS]
        run list
@@ -20,6 +20,11 @@ A check that drives a shared system names it in CHECK_LOCKS="dev-engine" (one li
 then holds an exclusive machine-wide lock per name (${LIVE_LOCK_DIR:-~/.local/state/silo-live}/<name>.lock) from
 before the state dir lock until it exits, together with everything it started; when another run holds it, the
 runner prints the holder and exits 3 (skipped) without touching the state dir.
+A check that can run on its own Dev engine instance also names the lock in CHECK_OWN_ENGINE="dev-engine". By
+default (--engine own) such a run does not take that lock: the check starts its own silod with HOME set to a short
+per-state-dir folder (live_engine_home), so its socket, state, data, logs and computers never meet the person's
+Dev engine or another run's. --engine shared (or LIVE_ENGINE=shared) uses ~/.silo-dev under the lock, as before.
+Steps see LIVE_ENGINE=own|shared.
 `run start <check> [args]` runs the same in the background and returns once the runner holds the lock and has
 written its new run id (or has already ended, e.g. a config error or a busy state dir: then it prints why and exits
 with the runner's code); it prints "<state-dir> <run-id>". `run wait <state-dir> [<run-id>]` blocks until the
@@ -109,12 +114,14 @@ cmd_list() {
 case "${1:-}" in -h|--help|"") usage; exit 0;; wait) shift; cmd_wait "$@";; start) shift; cmd_start "$@";; list) cmd_list; exit 0;; esac
 
 ARGS=("$@")
-CHECK=$1; shift; FROM=""; HOST=mac; STATE=""
+CHECK=$1; shift; FROM=""; HOST=mac; STATE=""; ENGINE=${LIVE_ENGINE:-own}
 while [ $# -gt 0 ]; do case "$1" in
   --from) FROM=${2:-}; shift 2;; --host) HOST=${2:-}; shift 2;; --state) STATE=${2:-}; shift 2;;
+  --engine) ENGINE=${2:-}; shift 2;;
   -h|--help) usage; exit 0;; *) echo "live: unknown argument: $1" >&2; usage >&2; exit 2;;
 esac; done
 case "$HOST" in mac|linux) ;; *) echo "live: --host must be mac or linux" >&2; exit 2;; esac
+case "$ENGINE" in own|shared) ;; *) echo "live: --engine must be own or shared" >&2; exit 2;; esac
 CHECK_FILE=$LIVE_D/$CHECK.sh
 [ -f "$CHECK_FILE" ] || { echo "live: no check '$CHECK' in $LIVE_D (try: live list)" >&2; exit 2; }
 STATE=${STATE:-$(default_state "$CHECK")}; STATE=${STATE%/}
@@ -126,10 +133,17 @@ mkdir -p "$STATE/steps" "$LOGS" || exit 2
 # each, before anything else, by re-running itself under with-lock.py, which holds it until the run and
 # everything it started have ended. Refused: exit 3 (skipped), naming the holder, state dir untouched.
 CHECK_LOCKS=$(sed -n 's/^CHECK_LOCKS="\(.*\)"$/\1/p' "$CHECK_FILE" | head -1)
+# A check that brings its own engine instance (CHECK_OWN_ENGINE) needs no machine-wide lock for it.
+CHECK_OWN_ENGINE=$(sed -n 's/^CHECK_OWN_ENGINE="\(.*\)"$/\1/p' "$CHECK_FILE" | head -1)
+if [ -n "$CHECK_OWN_ENGINE" ] && [ "$ENGINE" = own ]; then
+  kept=""; for l in $CHECK_LOCKS; do case " $CHECK_OWN_ENGINE " in *" $l "*) ;; *) kept="$kept${kept:+ }$l";; esac; done
+  CHECK_LOCKS=$kept
+else ENGINE=shared; fi
+export LIVE_ENGINE=$ENGINE
 if [ -n "$CHECK_LOCKS" ] && [ "${LIVE_HELD:-}" != "$CHECK_LOCKS" ]; then
   # shellcheck disable=SC2086
   LIVE_HELD=$CHECK_LOCKS exec python3 -I "$HERE/with-lock.py" \
-    --info "pid $$, check $CHECK, host $HOST, state $STATE, since $(date -u +%FT%TZ)" $CHECK_LOCKS -- "$HERE/run" "${ARGS[@]}"
+    --info "pid $$, check $CHECK, host $HOST, engine $ENGINE, state $STATE, since $(date -u +%FT%TZ)" $CHECK_LOCKS -- "$HERE/run" "${ARGS[@]}"
 fi
 
 # One runner per state dir: mkdir is the atomic test-and-set. A lock whose pid is dead is replaced
@@ -167,7 +181,7 @@ for s in "${STEPS[@]}"; do declare -F "step_$s" >/dev/null || early_fail "step_$
 
 # Stamps count only for the same inputs: check file, runner, HEAD and tracked changes, host, engine identity.
 FP=$( { cat "$CHECK_FILE" "$HERE/run" "$HERE/live-lib.sh" | shasum; git -C "$REPO" rev-parse HEAD 2>/dev/null
-        git -C "$REPO" diff HEAD 2>/dev/null | shasum; echo "$HOST"; [ "$HOST" = linux ] && echo "$LIVE_LINUX_HOST"
+        git -C "$REPO" diff HEAD 2>/dev/null | shasum; echo "$HOST $LIVE_ENGINE"; [ "$HOST" = linux ] && echo "$LIVE_LINUX_HOST"
         declare -F fingerprint_extra >/dev/null && fingerprint_extra; } | shasum | cut -c1-40 )
 if [ "$(cat "$STATE/fingerprint" 2>/dev/null)" != "$FP" ]; then rm -f "$STATE"/steps/*.ok "$STATE/runid"; fi
 echo "$FP" >"$STATE/fingerprint"

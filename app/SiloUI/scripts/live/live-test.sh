@@ -250,6 +250,45 @@ LIVE_LOCK_DIR=$W/locks2 $LIVE locked --state $W/s35 >/dev/null 2>&1; ok "LIVE_LO
 $LIVE locked --state $W/s36 >/dev/null 2>&1 & $LIVE locked --state $W/s37 >/dev/null 2>&1 & $LIVE locked --state $W/s38 >/dev/null 2>&1 & wait
 ok "parallel runs of a locked check all end with a verdict or a refusal" $(for d in s36 s37 s38; do [ "$(verdict $W/$d verdict 2>/dev/null)" = pass ] || [ ! -e $W/$d/run ]; done && echo 0 || echo 1)
 
+# own engine instance: a check with CHECK_OWN_ENGINE runs beside the lock holder, each run with its own HOME
+cat >"$LIVE_D/own.sh" <<'C'
+CHECK_LOCKS="dev-engine"
+CHECK_OWN_ENGINE="dev-engine"
+STEPS=(a)
+step_a() {
+  echo "$LIVE_ENGINE" >"$STATE/engine"; live_dev_sock >"$STATE/sock"; live_engine_home >"$STATE/home"; live_engine_prepare
+  live_engine_launch "$STATE/../fake-silod" >"$STATE/launch.out" 2>&1 & wait $!
+}
+C
+printf '#!/bin/sh\necho "HOME=$HOME PORT=$SILO_URL_PROXY_PORT ARGS=$*"\n' >$W/fake-silod; chmod +x $W/fake-silod
+mkdir -p "$FH/Library/Application Support/org.silo.dev/guest-image/img"; echo base >"$FH/Library/Application Support/org.silo.dev/guest-image/img/disk"
+S=$W/s50; mkdir -p $S; touch $S/hang
+$LIVE locked --state $S >/dev/null 2>&1 & P=$!
+for _ in $(seq 1 50); do [ "$(cat $S/current 2>/dev/null)" = a ] && break; sleep 0.1; done
+for i in 1 2; do mkdir -p $W/o$i; cp $W/fake-silod $W/o$i/; done
+HOME=$FH LIVE_SHORT_BASE=$W/shortbase $LIVE own --state $W/o1/s >/dev/null 2>&1 & A=$!
+HOME=$FH LIVE_SHORT_BASE=$W/shortbase $LIVE own --state $W/o2/s >/dev/null 2>&1 & B=$!; wait $A $B
+ok "two own-engine runs pass while the dev-engine lock is held" $([ "$(verdict $W/o1/s verdict)/$(verdict $W/o2/s verdict)" = pass/pass ] && echo 0 || echo 1)
+ok "an own-engine run sees LIVE_ENGINE=own" $([ "$(cat $W/o1/s/engine)" = own ] && echo 0 || echo 1)
+H1=$(cat $W/o1/s/home); H2=$(cat $W/o2/s/home)
+ok "each run has its own engine HOME under the short base" $([ "$H1" != "$H2" ] && [ "${H1#$W/shortbase/sl-}" != "$H1" ] && [ "$(cat $W/o1/s/sock)" = "$H1/.silo-dev/engine.sock" ] && echo 0 || echo 1)
+ok "the engine starts with its HOME and an ephemeral proxy port" $([ "$(cat $W/o1/s/launch.out)" = "HOME=$H1 PORT=0 ARGS=--agent" ] && echo 0 || echo 1)
+G1="$H1/Library/Application Support/org.silo.dev/guest-image/img/disk"
+echo changed >"$G1"
+ok "guest images are a copy: the instance's writes never reach the original" $([ "$(cat "$FH/Library/Application Support/org.silo.dev/guest-image/img/disk")" = base ] && echo 0 || echo 1)
+( HOME=$FH LIVE_SHORT_BASE=$W/shortbase bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/o1/s; live_assert_dev_sock \"\$(cat $W/o1/s/sock)\"" ) >/dev/null 2>&1
+ok "the own engine's socket counts as a Dev path" $?
+HOME=$FH LIVE_SHORT_BASE=$W/shortbase $LIVE own --state $W/o3 --engine shared >$W/out 2>&1; rc=$?
+ok "--engine shared takes the lock again: exit 3 naming the holder" $([ $rc = 3 ] && grep -q "busy: dev-engine is held" $W/out && echo 0 || echo 1)
+HOME=$FH LIVE_ENGINE=shared LIVE_SHORT_BASE=$W/shortbase $LIVE own --state $W/o3 >/dev/null 2>&1
+ok "LIVE_ENGINE=shared also takes the lock" $([ $? = 3 ] && echo 0 || echo 1)
+$LIVE own --state $W/o3 --engine other >/dev/null 2>&1; ok "--engine with another value is a usage error" $([ $? = 2 ] && echo 0 || echo 1)
+kill -TERM $P; wait $P 2>/dev/null
+HOME=$FH LIVE_SHORT_BASE=$W/shortbase $LIVE own --state $W/o3 --engine shared >/dev/null 2>&1
+ok "a shared run uses the real HOME and the default socket" $([ "$(cat $W/o3/engine)" = shared ] && [ "$(cat $W/o3/home)" = "$FH" ] && [ "$(cat $W/o3/sock)" = "$FH/.silo-dev/engine.sock" ] && echo 0 || echo 1)
+( HOME=$W/shortbase/inside LIVE_SHORT_BASE=$W/shortbase LIVE_ENGINE=own bash -c ". $LIVE_LIB_DIR/live-lib.sh; STATE=$W/o4; mkdir -p \$STATE; live_engine_prepare" ) >/dev/null 2>&1
+ok "an own engine HOME inside the real HOME is refused" $([ $? != 0 ] && echo 0 || echo 1)
+
 # under atelier tmp: state, short home and leftovers live in $ATELIER_TMP
 cat >"$LIVE_D/vm.sh" <<'C'
 STEPS=(make)
