@@ -2435,7 +2435,7 @@ mod server {
                 std::os::unix::net::UnixListener::bind(directory.path().join("c")).unwrap();
             listener.set_nonblocking(true).unwrap();
             let mut command = std::process::Command::new("sh");
-            command.args(["-c", "echo 'waiting for a terminal' >&2; sleep 60"]);
+            command.args(["-c", "echo 'waiting for a terminal' >&2; exec sleep 60"]);
             let error = spawn_terminal(command, listener, std::time::Duration::from_millis(400))
                 .await
                 .unwrap_err();
