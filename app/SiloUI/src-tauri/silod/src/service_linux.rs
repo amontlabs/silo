@@ -22,6 +22,7 @@
 //! computers included. Turning lingering on needs privileges (`loginctl enable-linger`), so
 //! silod only reports it and says how.
 
+use silo_engine::durable::DurableFile;
 use std::{
     ffi::CStr,
     fs,
@@ -371,7 +372,7 @@ fn write_unit(path: &Path, contents: &str) -> Result<(), String> {
         file.write_all(contents.as_bytes())?;
         // The engine's umask is 077; the user manager only needs to read the file.
         file.set_permissions(fs::Permissions::from_mode(0o644))?;
-        file.sync_all()?;
+        file.sync_to_disk()?;
         fs::rename(&temporary, path)
     })();
     if let Err(error) = written {

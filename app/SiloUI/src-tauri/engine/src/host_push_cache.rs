@@ -2,6 +2,7 @@
 //! Each cached repository has its own lock, held for a whole push, so pushes
 //! of different repositories run concurrently. A short root lock serializes
 //! choosing, creating and evicting cache directories across processes.
+use crate::durable::DurableFile;
 use sha2::{Digest, Sha256};
 use std::{
     cell::Cell,
@@ -132,10 +133,10 @@ fn acquire_with_budget(root: &Path, key: &str, budget: u64) -> Result<Cache, Str
         .map_err(|_| FAILED)?;
     active
         .write_all(b"active\n")
-        .and_then(|_| active.sync_all())
+        .and_then(|_| active.sync_to_disk())
         .map_err(|_| FAILED)?;
     File::open(&directory)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| FAILED)?;
     Ok(Cache {
         directory,

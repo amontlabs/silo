@@ -2,6 +2,7 @@
 #[path = "github_personal_token.rs"]
 pub mod personal_token;
 
+use crate::durable::DurableFile;
 use crate::github_tokens::{Configuration, Operation};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
@@ -956,12 +957,12 @@ fn save_at(p: &std::path::Path, d: &Document) -> Result<(), String> {
     f.write_all(&encoded)
         .map_err(|_| "Cannot write GitHub configuration.")?;
     f.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Cannot sync GitHub configuration.")?;
     f.persist(p)
         .map_err(|_| "Cannot save GitHub configuration.")?;
     fs::File::open(parent)
-        .and_then(|f| f.sync_all())
+        .and_then(|f| f.sync_to_disk())
         .map_err(|_| "Cannot sync GitHub configuration directory.".to_string())?;
     Ok(())
 }

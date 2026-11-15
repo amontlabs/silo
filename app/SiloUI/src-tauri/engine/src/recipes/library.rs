@@ -1,6 +1,7 @@
 //! The stored recipes: one JSON file per name under `<app data>/recipes/saved/`, and the ones
 //! Silo ships. A saved recipe with the name of a shipped one replaces it until it is removed.
 
+use crate::durable::DurableFile;
 use std::{
     fs,
     io::Write,
@@ -270,9 +271,9 @@ impl Library {
                 .mode(0o600)
                 .open(&temporary)?;
             file.write_all(&bytes)?;
-            file.sync_all()?;
+            file.sync_to_disk()?;
             fs::rename(&temporary, &path)?;
-            fs::File::open(directory)?.sync_all()
+            fs::File::open(directory)?.sync_to_disk()
         })();
         if written.is_err() {
             let _ = fs::remove_file(&temporary);

@@ -25,6 +25,7 @@
 //! The values are plain bytes on disk, readable by this account and by root: the same trust
 //! as the engine's own state (`docs/SiloUI-SECRETS.md`).
 
+use crate::durable::DurableFile;
 use std::{
     any::Any,
     fmt,
@@ -494,7 +495,7 @@ fn write_atomically(directory: &OwnedFd, name: &str, path: &Path, bytes: &[u8]) 
         fchmod(&fd, Mode::from_bits_truncate(0o600))?;
         let mut file = File::from(fd);
         file.write_all(bytes)?;
-        file.sync_all()?;
+        file.sync_to_disk()?;
         drop(file);
         renameat(directory, staged.as_str(), directory, name)?;
         fsync(directory)?;

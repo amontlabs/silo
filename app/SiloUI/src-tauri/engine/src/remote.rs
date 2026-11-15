@@ -1,6 +1,7 @@
 //! App-lifetime Connections. SSH only transports framed requests to the running owner.
 use crate::bridge_error::{BridgeError, ErrorCode, LEGACY_INCOMPATIBLE};
 use crate::context::Event;
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -305,11 +306,11 @@ fn save_config_in(dir: &Path, config: &Config) -> Result<(), String> {
     }
     let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
     temp.write_all(&bytes).map_err(|e| e.to_string())?;
-    temp.as_file().sync_all().map_err(|e| e.to_string())?;
+    temp.as_file().sync_to_disk().map_err(|e| e.to_string())?;
     temp.persist(dir.join("config.json"))
         .map_err(|e| e.to_string())?;
     fs::File::open(dir)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1731,7 +1732,7 @@ fn rewrite_authorized_keys_file(
     let parent = path.parent().ok_or("SSH key directory is unavailable.")?;
     let Some(rewritten) = rewrite(&contents) else {
         fs::File::open(parent)
-            .and_then(|directory| directory.sync_all())
+            .and_then(|directory| directory.sync_to_disk())
             .map_err(|e| e.to_string())?;
         return Ok(false);
     };
@@ -1742,11 +1743,11 @@ fn rewrite_authorized_keys_file(
         .map_err(|e| e.to_string())?;
     temporary
         .write_all(rewritten.as_bytes())
-        .and_then(|()| temporary.as_file().sync_all())
+        .and_then(|()| temporary.as_file().sync_to_disk())
         .map_err(|e| e.to_string())?;
     temporary.persist(path).map_err(|e| e.to_string())?;
     fs::File::open(parent)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|e| e.to_string())?;
     Ok(true)
 }

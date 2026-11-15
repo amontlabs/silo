@@ -83,6 +83,7 @@
 //! a link or lies behind one stop the migration before anything is changed or the record is
 //! saved: skipping them would leave the converted code without data it expects. Silo then
 //! does not start, explains why, and converts the rest at the next launch.
+use crate::durable::DurableFile;
 use serde_json::Value;
 use std::{
     fs,
@@ -528,7 +529,7 @@ fn flush(file: &fs::File) -> io::Result<()> {
     if cfg!(test) {
         return Ok(());
     }
-    file.sync_all()
+    file.sync_to_disk()
 }
 
 /// The record `vocabulary-migration.json`: `{"version": 1}`, written after every file.

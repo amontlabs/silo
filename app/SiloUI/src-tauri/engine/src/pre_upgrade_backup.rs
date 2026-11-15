@@ -27,6 +27,7 @@
 //! directory (`runtime::runtime_home_alias`), which dangles once the folder is gone. It is
 //! removed with the folder, and later if the folder was deleted by hand, but only when it is a
 //! symlink whose link text is exactly the backup's `microsandbox` directory.
+use crate::durable::DurableFile;
 use crate::{runtime::image_cache, runtime_migration};
 use serde::{Deserialize, Serialize};
 use silo_engine::{Audience, Event};
@@ -182,11 +183,11 @@ fn save(app_data: &Path, started: OffsetDateTime, acknowledged: bool) -> Result<
     let mut file = tempfile::NamedTempFile::new_in(app_data).map_err(|_| failed())?;
     serde_json::to_writer_pretty(&mut file, &record).map_err(|_| failed())?;
     io::Write::write_all(&mut file, b"\n")
-        .and_then(|_| file.as_file().sync_all())
+        .and_then(|_| file.as_file().sync_to_disk())
         .map_err(|_| failed())?;
     file.persist(app_data.join(FILE)).map_err(|_| failed())?;
     fs::File::open(app_data)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| failed())
 }
 
@@ -275,7 +276,7 @@ pub(crate) fn install_clone(app_data: &Path, partial: &Path, backup: &Path) -> R
         Err(_) => return Err("the backup's place could not be read".into()),
     }
     fs::rename(partial, backup)
-        .and_then(|()| fs::File::open(app_data).and_then(|directory| directory.sync_all()))
+        .and_then(|()| fs::File::open(app_data).and_then(|directory| directory.sync_to_disk()))
         .map_err(|_| "the backup could not be completed".to_string())?;
     let _held = lock(&RECORD);
     forget(app_data);
@@ -501,7 +502,7 @@ fn delete_backup(app_data: &Path, user_home: Option<&Path>) -> Result<bool, Stri
             format!("Silo could not finish deleting the pre-upgrade backup: {error}. Your computers were not affected. Try again.")
         })?;
     }
-    let _ = fs::File::open(app_data).and_then(|directory| directory.sync_all());
+    let _ = fs::File::open(app_data).and_then(|directory| directory.sync_to_disk());
     remove_previous_alias(app_data, user_home);
     let _held = lock(&RECORD);
     forget(app_data);

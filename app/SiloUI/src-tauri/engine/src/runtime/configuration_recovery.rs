@@ -1,4 +1,5 @@
 use super::*;
+use crate::durable::DurableFile;
 use silo_engine::context::{Audience, Event};
 use std::os::fd::AsRawFd;
 
@@ -148,10 +149,10 @@ fn write(paths: &RuntimePaths, journal: &Journal) -> Result<(), RuntimeError> {
     fs::create_dir_all(parent).map_err(failure)?;
     let mut file = tempfile::NamedTempFile::new_in(parent).map_err(failure)?;
     serde_json::to_writer(&mut file, &journal).map_err(failure)?;
-    file.as_file().sync_all().map_err(failure)?;
+    file.as_file().sync_to_disk().map_err(failure)?;
     file.persist(path(paths)).map_err(failure)?;
     File::open(parent)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| file.sync_to_disk())
         .map_err(failure)
 }
 
@@ -193,14 +194,14 @@ pub(super) fn claim(
         .map_err(failure)?;
     marker
         .write_all(configuration.id().as_bytes())
-        .and_then(|_| marker.sync_all())
+        .and_then(|_| marker.sync_to_disk())
         .map_err(failure)?;
     File::open(stage.path())
-        .and_then(|file| file.sync_all())
+        .and_then(|file| file.sync_to_disk())
         .map_err(failure)?;
     fs::rename(stage.path(), &folder).map_err(failure)?;
     File::open(&paths.volumes)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| file.sync_to_disk())
         .map_err(failure)
 }
 
@@ -211,13 +212,13 @@ pub(super) fn finish(paths: &RuntimePaths) -> Result<(), RuntimeError> {
             if fs::read_to_string(&marker).ok().as_deref() == Some(configuration.id()) {
                 fs::remove_file(&marker).map_err(failure)?;
                 File::open(marker.parent().unwrap())
-                    .and_then(|file| file.sync_all())
+                    .and_then(|file| file.sync_to_disk())
                     .map_err(failure)?;
             }
         }
         fs::remove_file(path(paths)).map_err(failure)?;
         File::open(paths.metadata.parent().unwrap())
-            .and_then(|file| file.sync_all())
+            .and_then(|file| file.sync_to_disk())
             .map_err(failure)?;
     }
     Ok(())
@@ -337,7 +338,7 @@ fn write_record(
     let result = (|| {
         let mut file = File::create(&temporary)?;
         file.write_all(text.as_bytes())?;
-        file.sync_all()?;
+        file.sync_to_disk()?;
         fs::rename(&temporary, record)
     })();
     if result.is_err() {
@@ -870,7 +871,7 @@ pub(super) fn prepare_retry(
                 if fs::read_to_string(&marker).ok().as_deref() == Some(configuration.id()) {
                     fs::remove_file(&marker).map_err(failure)?;
                     File::open(marker.parent().unwrap())
-                        .and_then(|file| file.sync_all())
+                        .and_then(|file| file.sync_to_disk())
                         .map_err(failure)?;
                 }
             }

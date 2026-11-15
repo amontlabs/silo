@@ -4,6 +4,7 @@
 //! as untrusted text: bounded, parsed field by field, and used only to decide what to do, never
 //! to believe that something is installed.
 
+use crate::durable::DurableFile;
 use std::{
     collections::BTreeMap,
     fs,
@@ -231,7 +232,7 @@ impl Reports {
             .open(&temporary)
             .and_then(|mut file| {
                 file.write_all(text.as_bytes())
-                    .and_then(|()| file.sync_all())
+                    .and_then(|()| file.sync_to_disk())
             })
             .and_then(|()| fs::rename(&temporary, path));
         if written.is_err() {

@@ -1,4 +1,5 @@
 //! Acknowledged push jobs belong to the host, not the SSH connection observing them.
+use crate::durable::DurableFile;
 use crate::runtime::RuntimePaths;
 use crate::{
     host_push::{self, PushTarget},
@@ -87,13 +88,13 @@ fn write(path: &Path, jobs: &Journal) -> Result<(), String> {
         .map_err(|_| "Cannot save push operations.")?;
     temporary
         .as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Cannot save push operations.")?;
     temporary
         .persist(path)
         .map_err(|_| "Cannot save push operations.")?;
     fs::File::open(parent)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| "Cannot save push operations.".to_string())
 }
 fn operation(job: &Job) -> Value {

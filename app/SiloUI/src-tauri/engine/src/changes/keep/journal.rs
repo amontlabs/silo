@@ -4,6 +4,7 @@
 //! becomes undoable only once its keep succeeded, and is consumed when it is restored or
 //! its keep failed or was recovered.
 
+use crate::durable::DurableFile;
 use std::{
     fs,
     io::Write,
@@ -260,7 +261,7 @@ impl Journal {
 
 fn sync_dir(dir: &Path) {
     if let Ok(handle) = fs::File::open(dir) {
-        let _ = handle.sync_all();
+        let _ = handle.sync_to_disk();
     }
 }
 
@@ -271,7 +272,7 @@ fn write_durable(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), String> {
     let temp = path.with_extension("tmp");
     let mut file = fs::File::create(&temp).map_err(fail)?;
     file.write_all(bytes).map_err(fail)?;
-    file.sync_all().map_err(fail)?;
+    file.sync_to_disk().map_err(fail)?;
     fs::rename(&temp, path).map_err(fail)?;
     sync_dir(dir);
     Ok(())

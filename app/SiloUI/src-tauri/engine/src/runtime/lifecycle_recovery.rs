@@ -1,6 +1,7 @@
 //! Durable desired state for explicit local computer actions. Detached runtime children
 //! own MicroSandbox's transition/lifecycle guards, not Silo's command-worker lock.
 use super::*;
+use crate::durable::DurableFile;
 use silo_engine::context::{Audience, Event};
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -37,15 +38,15 @@ fn store(paths: &RuntimePaths, intent: &Intent) -> Result<(), RuntimeError> {
     serde_json::to_writer(&mut file, intent)
         .map_err(|_| error("Computer action progress could not be encoded."))?;
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| error("Computer action progress could not be synced."))?;
     file.persist(path(paths, &intent.computer_id))
         .map_err(|_| error("Computer action progress could not be saved."))?;
     File::open(&directory)
-        .and_then(|f| f.sync_all())
+        .and_then(|f| f.sync_to_disk())
         .map_err(|_| error("Computer action progress could not be synced."))?;
     File::open(directory.parent().unwrap())
-        .and_then(|f| f.sync_all())
+        .and_then(|f| f.sync_to_disk())
         .map_err(|_| error("Computer action progress could not be synced."))
 }
 fn load(file: &Path) -> Result<Option<Intent>, RuntimeError> {
@@ -273,7 +274,7 @@ fn settle(
             "The computer action completed, but its saved progress could not be cleared. Retry to verify it."
         }))?;
         File::open(directory(paths))
-            .and_then(|f| f.sync_all())
+            .and_then(|f| f.sync_to_disk())
             .map_err(|_| error("Completed computer action progress could not be synced."))?;
     }
     result
@@ -366,7 +367,7 @@ pub(super) fn dismiss_crashed_intent(
         fs::remove_file(target)
             .map_err(|_| error("The failed computer action could not be dismissed."))?;
         File::open(directory(paths))
-            .and_then(|f| f.sync_all())
+            .and_then(|f| f.sync_to_disk())
             .map_err(|_| error("The dismissed action could not be synced."))?;
     }
     Ok(())
@@ -396,7 +397,7 @@ pub(super) fn forget_removed(
         fs::remove_file(target)
             .map_err(|_| error("Removed computer action progress could not be cleared."))?;
         File::open(directory(paths))
-            .and_then(|f| f.sync_all())
+            .and_then(|f| f.sync_to_disk())
             .map_err(|_| error("Removed computer action progress could not be synced."))?;
     }
     Ok(())
@@ -436,7 +437,7 @@ pub(crate) fn retire_except(
     }
     if retired {
         File::open(directory(paths))
-            .and_then(|f| f.sync_all())
+            .and_then(|f| f.sync_to_disk())
             .map_err(|_| error("Retired computer actions could not be synced."))?;
     }
     Ok(())

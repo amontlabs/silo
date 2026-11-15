@@ -1,5 +1,6 @@
 //! Acknowledge one observed crash without editing MicroSandbox's state or disks.
 use super::*;
+use crate::durable::DurableFile;
 use serde_json::json;
 
 fn computer_configuration(
@@ -82,9 +83,9 @@ pub(super) fn dismiss(
         let mut file = tempfile::NamedTempFile::new_in(directory)?;
         use std::io::Write;
         file.write_all(value.as_bytes())?;
-        file.as_file().sync_all()?;
+        file.as_file().sync_to_disk()?;
         file.persist(&target)?;
-        File::open(directory)?.sync_all()
+        File::open(directory)?.sync_to_disk()
     };
     save().map_err(|_| {
         RuntimeError::Unavailable("The crash could not be dismissed. Retry.".into())

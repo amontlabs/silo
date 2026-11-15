@@ -15,6 +15,7 @@
 //! that looks like a checkpoint.
 use super::store::{self, Layout};
 use super::templates::{self, CopyError};
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -259,7 +260,7 @@ fn write_meta(dir: &Path, meta: &Meta) -> Result<(), String> {
         .open(dir.join(META))
         .and_then(|mut file| {
             file.write_all(&json)?;
-            file.sync_all()
+            file.sync_to_disk()
         })
         .map_err(|error| store::io_error("save the checkpoint", &error))
 }
@@ -364,7 +365,7 @@ pub(super) fn upgrade_records(layout: &Layout) -> Result<usize, String> {
         let mut file = tempfile::NamedTempFile::new_in(&dir)
             .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
         file.write_all(&serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?)
-            .and_then(|()| file.as_file().sync_all())
+            .and_then(|()| file.as_file().sync_to_disk())
             .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
         fs::set_permissions(file.path(), fs::Permissions::from_mode(0o600))
             .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
@@ -614,7 +615,7 @@ fn build<M: Machine>(
     }
     for name in files {
         fs::File::open(partial.join(name))
-            .and_then(|file| file.sync_all())
+            .and_then(|file| file.sync_to_disk())
             .map_err(|error| store::io_error("save the checkpoint", &error))?;
     }
     store::sync_dir(partial).map_err(|error| store::io_error("save the checkpoint", &error))?;
@@ -705,7 +706,7 @@ fn write_journal(
     file.write_all(&json)
         .map_err(|error| store::io_error("restore the computer's files", &error))?;
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|error| store::io_error("restore the computer's files", &error))?;
     file.persist(journal_path(layout))
         .map_err(|error| store::io_error("restore the computer's files", &error.error))?;
@@ -799,7 +800,7 @@ fn swap_files_core(
     // The staged files are on disk before the journal says that they are complete.
     let durable = staged(layout).iter().try_for_each(|(_, temporary)| {
         fs::File::open(temporary)
-            .and_then(|file| file.sync_all())
+            .and_then(|file| file.sync_to_disk())
             .map_err(|error| store::io_error("restore the computer's files", &error))
     });
     if let Err(message) = durable.and_then(|()| write_journal(layout, &journal, sync)) {

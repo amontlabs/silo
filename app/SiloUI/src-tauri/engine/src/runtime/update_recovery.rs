@@ -1,6 +1,7 @@
 //! Update installation changes the app, never computer disks. Keep the original running
 //! set durable before stopping anything, then restore only those exact identities.
 use super::*;
+use crate::durable::DurableFile;
 use std::io::Read;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -36,13 +37,13 @@ fn save(paths: &RuntimePaths, computers: &[RunningComputer]) -> Result<(), Strin
     .map_err(|_| "Update recovery could not be encoded.")?;
     temporary
         .as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Update recovery could not be synced.")?;
     temporary
         .persist(&destination)
         .map_err(|_| "Update recovery could not be saved.")?;
     File::open(parent)
-        .and_then(|f| f.sync_all())
+        .and_then(|f| f.sync_to_disk())
         .map_err(|_| "Update recovery could not be synced.".into())
 }
 fn load(paths: &RuntimePaths) -> Result<Option<Journal>, String> {
@@ -315,7 +316,7 @@ fn restore_pending(
     }
     fs::remove_file(path(paths)).map_err(|_| "Completed update recovery could not be cleared.")?;
     File::open(paths.metadata.parent().unwrap())
-        .and_then(|f| f.sync_all())
+        .and_then(|f| f.sync_to_disk())
         .map_err(|_| "Completed update recovery could not be synced.".into())
 }
 

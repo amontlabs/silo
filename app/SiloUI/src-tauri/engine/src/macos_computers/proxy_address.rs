@@ -5,6 +5,7 @@
 //! cannot choose the same link. The host's default route is intentionally ignored:
 //! it does not reserve an on-link address range.
 
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -367,13 +368,13 @@ fn write_sidecar(path: &Path, computer_id: &str, slot: u16) -> Result<(), String
         .map_err(|_| "Cannot save the macOS computer network assignment.".to_owned())?;
     temporary
         .as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Cannot save the macOS computer network assignment.".to_owned())?;
     temporary
         .persist(path)
         .map_err(|_| "Cannot save the macOS computer network assignment.".to_owned())?;
     fs::File::open(directory)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| "Cannot save the macOS computer network assignment.".to_owned())
 }
 

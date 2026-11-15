@@ -1,5 +1,6 @@
 //! Persistence and validation of macOS computers. Nothing here touches
 //! Virtualization.framework, so it runs on every platform.
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -707,7 +708,7 @@ fn write_record(
 ) -> std::io::Result<()> {
     let mut file = tempfile::NamedTempFile::new_in(&layout.dir)?;
     std::io::Write::write_all(&mut file, bytes)?;
-    file.as_file().sync_all()?;
+    file.as_file().sync_to_disk()?;
     file.persist(layout.record()).map_err(|error| error.error)?;
     sync(&layout.dir)
 }
@@ -725,7 +726,7 @@ fn remove_record(
 
 /// Makes the entries of a folder (a rename, a new or removed file) durable.
 pub(super) fn sync_dir(dir: &Path) -> std::io::Result<()> {
-    fs::File::open(dir)?.sync_all()
+    fs::File::open(dir)?.sync_to_disk()
 }
 
 /// Every readable computer, ordered by creation. Unreadable entries are skipped.

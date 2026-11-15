@@ -21,6 +21,7 @@
 //! the controller's; they are generic over the byte streams so the whole exchange runs over a
 //! pair of sockets in tests.
 
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -498,7 +499,7 @@ impl Writer {
         if written != self.bytes || actual != self.sha256 {
             return Err("The received file does not match what was sent.".into());
         }
-        file.sync_all().map_err(|error| error.to_string())?;
+        file.sync_to_disk().map_err(|error| error.to_string())?;
         drop(file);
         fs::rename(&self.part, self.area.dir.join(&self.name))
             .map_err(|error| format!("Silo could not keep the received file: {error}"))?;
@@ -669,7 +670,7 @@ pub fn pull(
     if hex(&hasher.finalize()) != expected.sha256 {
         return Err("The file that arrived does not match what the other machine exported.".into());
     }
-    file.sync_all().map_err(|error| error.to_string())
+    file.sync_to_disk().map_err(|error| error.to_string())
 }
 
 /// Sends `bytes` of `source` (whose sha256 is declared in the open params) and returns the name

@@ -38,6 +38,7 @@ pub mod desktop_viewer_media;
 pub mod device_facts;
 pub mod device_identity;
 pub(crate) mod download;
+pub mod durable;
 pub mod editor;
 pub mod engine_update;
 pub mod events;

@@ -1,4 +1,5 @@
 //! Host-only secret values. The durable document contains references and public status only.
+use crate::durable::DurableFile;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -297,12 +298,12 @@ fn save(document: &Document) -> Result<(), String> {
         return Err("Secret settings are too large. Reduce assignments or allowed domains and retry. No settings were overwritten.".into());
     }
     file.as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Secret settings could not be saved.")?;
     file.persist(&path)
         .map_err(|_| "Secret settings could not be saved.")?;
     File::open(parent)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| "Secret settings could not be saved.")?;
     Ok(())
 }

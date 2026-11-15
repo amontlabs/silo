@@ -1,4 +1,5 @@
 //! Stream retained log pages to an atomic, user-selected JSON Lines export.
+use crate::durable::DurableFile;
 use crate::runtime::runtime_logs::{Page, Query};
 use serde::Serialize;
 use std::{
@@ -64,7 +65,7 @@ fn save_atomically(
     }
     temporary
         .as_file()
-        .sync_all()
+        .sync_to_disk()
         .map_err(|_| "Could not finish the log export.")?;
     if cancelled() {
         return Ok(false);
@@ -73,7 +74,7 @@ fn save_atomically(
         .persist(destination)
         .map_err(|_| "Could not save the completed log export.")?;
     std::fs::File::open(parent)
-        .and_then(|directory| directory.sync_all())
+        .and_then(|directory| directory.sync_to_disk())
         .map_err(|_| "Could not save the completed log export.")?;
     Ok(true)
 }

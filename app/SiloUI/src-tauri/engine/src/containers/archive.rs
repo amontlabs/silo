@@ -271,6 +271,7 @@ mod linux {
         lifecycle,
         tools::Tools,
     };
+    use crate::durable::DurableFile;
     use std::fs::File;
     use std::io::{BufWriter, Seek, SeekFrom, Write};
     use std::process::{Command, Stdio};
@@ -414,7 +415,7 @@ mod linux {
             file.write_all(&(end - start).to_be_bytes()).map_err(io)?;
             file.seek(SeekFrom::Start(end)).map_err(io)?;
         }
-        file.sync_all().map_err(io)
+        file.sync_to_disk().map_err(io)
     }
 
     /// Whether a layer reached the export file, from how the copy into the file and the helper

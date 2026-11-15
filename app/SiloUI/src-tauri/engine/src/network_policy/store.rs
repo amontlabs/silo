@@ -3,6 +3,7 @@
 //! without an entry is one saved before policies existed; [`super::effective`] decides what it
 //! runs with. A file that cannot be read is an error, never an empty store.
 
+use crate::durable::DurableFile;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
@@ -175,9 +176,9 @@ fn write(path: &PathBuf, document: &Document) -> Result<(), String> {
             .mode(0o600)
             .open(&temporary)?;
         file.write_all(&bytes)?;
-        file.sync_all()?;
+        file.sync_to_disk()?;
         fs::rename(&temporary, path)?;
-        fs::File::open(directory)?.sync_all()
+        fs::File::open(directory)?.sync_to_disk()
     })();
     if written.is_err() {
         let _ = fs::remove_file(&temporary);

@@ -6,6 +6,7 @@
 //! engine directory (`install_trust`); the agent also checks the bundled runtime's hashes
 //! before its first `msb` launch.
 
+use silo_engine::durable::DurableFile;
 use std::{
     fs,
     io::{Read, Write},
@@ -311,7 +312,7 @@ fn write_store_record(path: &Path, store: CredentialStore) -> Result<(), String>
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(&staged)?;
         writeln!(file, "{}", store.name())?;
-        file.sync_all()?;
+        file.sync_to_disk()?;
         fs::rename(&staged, path)
     })();
     if written.is_err() {

@@ -1,3 +1,4 @@
+use silo_engine::durable::DurableFile;
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
@@ -199,10 +200,10 @@ fn write_owner_record(path: &Path, euid: u32, record: &EngineOwnerRecord) -> io:
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(&temporary)?;
     file.write_all(&bytes)?;
-    file.sync_all()?;
+    file.sync_to_disk()?;
     drop(file);
     fs::rename(&temporary, path)?;
-    fs::File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()?;
+    fs::File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_to_disk()?;
     Ok(())
 }
 
