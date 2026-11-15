@@ -34,6 +34,7 @@ that every platform or live VM workflow has been exercised.
 | Change review | [Reviewing a fork's changes](SiloUI-CHANGES.md): diff buckets and the `silo diff --json` shape |
 | Using the app | [Using the Silo app](SiloUI-APP.md): create a computer, open a project and development server, open the desktop, and connect another device |
 | Engine | [Engine crate extraction](SiloUI-ENGINE.md): workspace location, host context boundary, and macOS VM-window seam for `silod` |
+| Engine cycle | [Dependency-knot ratchet](SiloUI-ENGINE-CYCLE-RATCHET.md): the check that stops the engine's module cycle from growing, and why no existing tool fits |
 | Runtime | [Packaging](SiloUI-RUNTIME-PACKAGING.md), [guest images](SiloUI-GUEST-IMAGES.md) (downloaded on first use), [SSH agent TLS regression](SiloUI-ZCODE-TLS-INVESTIGATION.md), and the [current runtime pins](../app/SiloUI/runtime-inputs.json). The dated [runtime and backup decision log](SiloUI-RUNTIME-BACKUP-FINDINGS.md) was validated against MicroSandbox 0.6.17 unless a section says otherwise; its Backup page became per-sandbox Export and Import. |
 | Checkpoints | [Checkpoint implementation plan and qualification](SiloUI-CHECKPOINTS-PLAN.md), [snapshot lineage groups](research/silo-snapshot-lineage-groups-2026-09-26.md) |
 | Native tests | [Rust test support and live-test boundaries](SiloUI-RUST-TEST-SUPPORT.md), [skipped and ignored test audit, 2026-10-02](SiloUI-TEST-SKIP-AUDIT-2026-10-02.md) |
