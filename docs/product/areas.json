@@ -1,0 +1,82 @@
+[
+ {
+  "id": "engine",
+  "title": "Engine",
+  "line": "The core. Everything else talks to it."
+ },
+ {
+  "id": "computers",
+  "title": "Computers",
+  "line": "A whole virtual machine for your agent."
+ },
+ {
+  "id": "app",
+  "title": "App and command line",
+  "line": "A Mac app and one command. Neither holds logic."
+ },
+ {
+  "id": "checkpoints",
+  "title": "Checkpoints",
+  "line": "Save a computer's whole state and go back to it."
+ },
+ {
+  "id": "forks",
+  "title": "Forks",
+  "line": "A copy of a computer for each task."
+ },
+ {
+  "id": "changes",
+  "title": "Diff and merge",
+  "line": "See everything a copy changed. Merge it or drop it."
+ },
+ {
+  "id": "agents",
+  "title": "Agents inside",
+  "line": "Your agent lives inside and asks for anything wider."
+ },
+ {
+  "id": "access",
+  "title": "Access",
+  "line": "Repositories, secrets and the network, per computer."
+ },
+ {
+  "id": "setup",
+  "title": "Your setup",
+  "line": "Recipes, your editor and your tools, inside."
+ },
+ {
+  "id": "tasks",
+  "title": "Tasks from outside",
+  "line": "Work started by an event or a schedule."
+ },
+ {
+  "id": "devices",
+  "title": "Other devices",
+  "line": "Computers on a server or another Mac."
+ },
+ {
+  "id": "releases",
+  "title": "Releases",
+  "line": "Signed builds and updates."
+ },
+ {
+  "id": "trust",
+  "title": "Trust",
+  "line": "Who did what, and proof for each guarantee."
+ },
+ {
+  "id": "desktop",
+  "title": "Desktop",
+  "line": "A screen you and your agent share."
+ },
+ {
+  "id": "macos",
+  "title": "macOS computers",
+  "line": "The same loop, with macOS inside."
+ },
+ {
+  "id": "sharing",
+  "title": "Sharing",
+  "line": "Move a computer as a file."
+ }
+]

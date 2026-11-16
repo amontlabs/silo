@@ -1,14 +1,14 @@
 // Random sequences of an owner's actions and the server's answers, checked after every step against
 // a reference model: a verdict is only ever sent for the row that was open and on screen, never inside the guard,
 // never twice at once for one issue, and the page never shows as done what the server has not answered:
-// a row waiting for an answer says "Saving…", everything else and the counts line show the server's answers.
+// a row waiting for an answer says "Saving…", everything else and the "to decide" counts show the server's answers.
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App, OPEN_GUARD_MS } from './App';
 import { buildData, liveState } from './fixtures';
 import type { Verdict } from './plan';
 
-type Display = 'undecided' | 'planned' | 'later' | 'dropped' | 'saving';
+type Display = 'undecided' | 'planned' | 'later' | 'dropped' | 'saving' | 'confirm';
 type Sent = { n: number; verdict: Verdict; resolve: (status: number) => void };
 
 const ISSUE_OF: Record<string, number> = {
@@ -17,6 +17,9 @@ const ISSUE_OF: Record<string, number> = {
 };
 const FILE: Record<number, Verdict | null> = { 10: 'take', 11: 'take', 15: 'take', 17: 'drop' };
 const LIVE: Record<number, Verdict | null> = { 10: 'take', 15: 'take' };
+/** Entries in an area that wait for a verdict until one is confirmed. */
+const IN_AREAS = [12, 13, 14, 16];
+const PLACES = ['#computers', '#forks', '#devices', '#engine', '#setup', '#left', '#suggested', '#decisions', ''];
 
 function random(seed: number) {
   let a = seed;
@@ -37,17 +40,18 @@ function shown(key: string): Display | null {
   if (!item) return null;
   const word = item.querySelector('.ws-word')?.textContent;
   if (word === 'Saving…') return 'saving';
-  if (item.closest('details')) return 'dropped';
-  return word === 'planned' ? 'planned' : word === 'later' ? 'later' : 'undecided';
+  if (word === 'confirm') return 'confirm';
+  return word === 'planned' ? 'planned' : word === 'later' ? 'later' : word === 'dropped' ? 'dropped' : 'undecided';
 }
 
-async function run(seed: number) {
+async function run(seed: number): Promise<number> {
   const rand = random(seed);
   const pick = <T,>(items: T[]): T => items[Math.floor(rand() * items.length)];
   let now = 1_000_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   document.cookie = 'workshop-hint=1; path=/';
   localStorage.clear();
+  history.replaceState(null, '', '/workshop');
   const sent: Sent[] = [];
   const inFlight: Sent[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
@@ -72,71 +76,107 @@ async function run(seed: number) {
   const server: Record<number, Verdict | null> = { ...LIVE };
   const pending = new Map<number, Verdict>();
   const confirmed = (n: number): Display => display(server[n] ?? FILE[n] ?? null);
-  const expected = (n: number): Display => (pending.has(n) ? 'saving' : confirmed(n));
-  const ENTRIES = [10, 11, 12, 13, 14, 15, 16, 17];
-  const countsLine = () => {
-    const planned = ENTRIES.filter((n) => confirmed(n) === 'planned').length;
-    const undecided = ENTRIES.filter((n) => confirmed(n) === 'undecided').length;
-    return `${planned} planned · ${undecided} undecided`;
+  // A file verdict the server has not recorded yet is offered to the owner to confirm.
+  const expected = (n: number): Display => (pending.has(n) ? 'saving' : (server[n] ?? null) === null && FILE[n] != null && n !== 10 && n !== 15 ? 'confirm' : confirmed(n));
+  // Entries in areas the owner still has to decide, and the carried-over `calls` (11) to confirm.
+  const toDecide = () => IN_AREAS.filter((n) => (server[n] ?? null) === null).length + ((server[11] ?? null) === null ? 1 : 0);
+  // Several rows may be open, each with its own guard from the moment it opened. The one opened last is in the
+  // address; Enter on the page goes to it, Enter on a row to that row, and a click to the row of the button.
+  const openAt = new Map<string, number>();
+  let mostOpen = 0;
+  const current$ = () => {
+    const tail = decodeURIComponent(location.hash.slice(1)).split('/')[1];
+    return tail ? (/^(issue|decided)-/.test(tail) ? tail : `entry-${tail}`) : null;
   };
-  let open: string | null = null;
-  let openedAt = now;
   const observe = () => {
-    const current = document.querySelector('.ws-item.open')?.id ?? null;
-    if (current !== open) {
-      open = current;
-      openedAt = now;
-    }
+    const shown = new Set([...document.querySelectorAll('.ws-item.open')].map((item) => item.id));
+    for (const key of [...openAt.keys()]) if (!shown.has(key)) openAt.delete(key);
+    for (const key of shown) if (!openAt.has(key)) openAt.set(key, now);
+    mostOpen = Math.max(mostOpen, shown.size);
   };
+  /** What a verdict on this row would send, if anything. */
+  const verdictFor = (key: string | null, label = 'Take'): { n: number; verdict: Verdict } | null => {
+    const n = key ? ISSUE_OF[key] : undefined;
+    if (!key || n === undefined || !openAt.has(key) || now - (openAt.get(key) as number) < OPEN_GUARD_MS || pending.has(n)) return null;
+    const awaits = confirmed(n) === 'undecided' && (server[n] ?? null) === null;
+    const carried = (server[n] ?? null) === null && FILE[n] != null && n !== 10 && n !== 15;
+    if (!awaits && !carried) return null;
+    if (label === 'Take' || label === 'Confirm') return { n, verdict: carried ? (FILE[n] as Verdict) : 'take' };
+    return { n, verdict: label.toLowerCase() as Verdict };
+  };
+
+  // Rows whose verdict buttons are scrolled out of sight: Enter must never take them.
+  const hidden = new Set<string>();
+  const rect = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function measure(this: Element) {
+    const item = this.closest('.ws-item');
+    if (item && hidden.has(item.id) && this.closest('.ws-state')) return { top: -900, bottom: -860, left: 0, right: 800, width: 800, height: 40, x: 0, y: -900, toJSON() {} } as DOMRect;
+    return rect.call(this);
+  });
 
   render(<App data={buildData()} />);
   await act(async () => {});
   observe();
 
-  for (let step = 0; step < 30; step += 1) {
+  for (let step = 0; step < 40; step += 1) {
     const before = sent.length;
-    const openBefore = open;
-    const key = open;
-    const n = key ? ISSUE_OF[key] : undefined;
-    const elapsed = now - openedAt;
-    const item = key ? document.getElementById(key) : null;
-    const visible = item !== null && !item.closest('details:not([open]), [hidden]');
-    const awaits = n !== undefined && !pending.has(n) && confirmed(n) === 'undecided' && (server[n] ?? null) === null;
-    const carried = n !== undefined && !pending.has(n) && (server[n] ?? null) === null && FILE[n] != null && n !== 10 && n !== 15;
     let predicted: { n: number; verdict: Verdict } | null = null;
+    let reset: 'all' | 'current' | null = null;
+    const currentBefore = current$();
+    const openBefore = new Set(openAt.keys());
     const choice = rand();
+    // Now and then a row's buttons go out of sight, or come back.
+    if (rand() < 0.25) {
+      const keys = Object.keys(ISSUE_OF);
+      const key = pick(keys);
+      if (hidden.has(key)) hidden.delete(key);
+      else hidden.add(key);
+    }
 
-    if (choice < 0.2) {
+    if (choice < 0.18) {
       now += pick([100, 300, 650, 700, 1200]);
-    } else if (choice < 0.4) {
+    } else if (choice < 0.38) {
+      // Now and then the focus is first moved to the header of a closed row: its Enter only opens that row.
+      const closed = [...document.querySelectorAll<HTMLButtonElement>('.ws-list button.ws-row[aria-expanded="false"]')];
+      if (closed.length && rand() < 0.3) act(() => pick(closed).focus());
       const active = document.activeElement as HTMLElement;
-      const onRow = active === document.body || (active.classList.contains('ws-row') && active.closest('.ws-item')?.id === key);
       const repeat = rand() < 0.2;
-      if (onRow && visible && !repeat && elapsed >= OPEN_GUARD_MS && n !== undefined) {
-        if (awaits) predicted = { n, verdict: 'take' };
-        else if (carried) predicted = { n, verdict: FILE[n] as Verdict };
-      }
+      const item = active === document.body ? (current$() ? document.getElementById(current$() as string) : null)
+        : active.classList.contains('ws-row') ? active.closest('.ws-item') : null;
+      if (item && !repeat && !hidden.has(item.id) && item.querySelector('.ws-row')?.getAttribute('aria-expanded') === 'true') predicted = verdictFor(item.id);
       act(() => { fireEvent.keyDown(active, { key: 'Enter', repeat }); });
-    } else if (choice < 0.6) {
+    } else if (choice < 0.56) {
       const buttons = [...document.querySelectorAll<HTMLButtonElement>('.ws-item.open .ws-btn')]
         .filter((button) => /^(Take|Later|Drop|Confirm)/.test(button.textContent ?? ''));
-      if (buttons.length && n !== undefined) {
+      if (buttons.length) {
         const button = pick(buttons);
         const label = (button.textContent ?? '').replace(/\s*↵$/, '');
-        if (!button.disabled && !pending.has(n) && elapsed >= OPEN_GUARD_MS) {
-          predicted = { n, verdict: label === 'Confirm' ? (FILE[n] as Verdict) : (label.toLowerCase() as Verdict) };
-        }
+        if (!button.disabled) predicted = verdictFor(button.closest('.ws-item')?.id ?? null, label);
         act(() => { fireEvent.click(button); });
       }
-    } else if (choice < 0.72) {
-      const rows = [...document.querySelectorAll<HTMLButtonElement>('.ws-row')];
-      const row = pick(rows);
-      act(() => { row.focus(); fireEvent.click(row); });
+    } else if (choice < 0.7) {
+      const rows = [...document.querySelectorAll<HTMLButtonElement>('.ws-list button.ws-row')];
+      if (rows.length) {
+        const row = pick(rows);
+        act(() => { row.focus(); fireEvent.click(row); });
+      }
     } else if (choice < 0.8) {
-      // Hide or show what holds the open row: a later stage, or the other tab.
-      const controls = [...document.querySelectorAll<HTMLButtonElement>('.ws-stage-toggle, [role="tab"]')];
-      const control = pick(controls);
-      act(() => { fireEvent.click(control); });
+      // Go somewhere else: another area, the strip's lists, the decisions, the map, or the "to decide" link.
+      const where = rand();
+      // Back and Forward arrive as popstate; sent at once so the page and the model see the same address.
+      if (where < 0.5) {
+        act(() => { history.pushState(null, '', `/workshop${pick(PLACES)}`); dispatchEvent(new PopStateEvent('popstate')); });
+        reset = 'all';
+      }
+      else if (where < 0.7) act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+      else {
+        const link = [...document.querySelectorAll<HTMLAnchorElement>('.ws-loglink')].find((a) => /^\d+ to decide$/.test(a.textContent ?? ''));
+        // Opening a row from the link starts its guard again, even when it was already open.
+        if (link) {
+          act(() => { fireEvent.click(link); });
+          reset = 'current';
+        }
+      }
     } else if (inFlight.length) {
       const entry = inFlight.splice(Math.floor(rand() * inFlight.length), 1)[0];
       const accept = rand() < 0.6;
@@ -150,30 +190,42 @@ async function run(seed: number) {
     if (predicted) {
       expect(fresh.map(({ n: issue, verdict }) => ({ n: issue, verdict })), `step ${step} of seed ${seed}`).toEqual([predicted]);
       pending.set(predicted.n, predicted.verdict);
-      expect(openBefore).toBe(key);
     } else {
       expect(fresh, `step ${step} of seed ${seed}: nothing should be sent`).toEqual([]);
     }
     const flying = inFlight.map((entry) => entry.n);
     expect(new Set(flying).size, `step ${step}: two verdicts in flight for one issue`).toBe(flying.length);
+    // A move to another place opens its row afresh; the link restarts the guard of the row it opens.
+    if (reset === 'all') openAt.clear();
+    if (reset === 'current' && current$()) openAt.delete(current$() as string);
+    // A row already open that becomes the current one after a verdict starts its guard again.
+    const currentAfter = current$();
+    if (predicted && currentAfter && currentAfter !== currentBefore && openBefore.has(currentAfter)) openAt.delete(currentAfter);
     observe();
-    expect(document.querySelector('.ws-count')?.textContent, `step ${step} of seed ${seed}: counts line`).toBe(countsLine());
+    const counts = [...document.querySelectorAll('.ws-part .ws-todo')].reduce((sum, badge) => sum + Number(badge.textContent), 0);
+    expect(counts, `step ${step} of seed ${seed}: to decide on the map`).toBe(toDecide());
+    const link = [...document.querySelectorAll('.ws-loglink')].find((a) => /^\d+ to decide$/.test(a.textContent ?? ''));
+    if (link) expect(link.textContent, `step ${step} of seed ${seed}: to decide link`).toBe(`${toDecide()} to decide`);
     for (const [rowKey, issue] of Object.entries(ISSUE_OF)) {
       const seen = shown(rowKey);
-      // Rows of a closed stage are not on the page.
+      // Rows of another place are not on the page.
       if (seen !== null) expect(seen, `step ${step} of seed ${seed}: ${rowKey}`).toBe(expected(issue));
     }
   }
+  return mostOpen;
 }
 
 describe('verdicts under random actions', () => {
   it('go to the open row only, respect the guard, and match the server or the pending write', async () => {
-    for (let seed = 1; seed <= 25; seed += 1) {
-      await run(seed);
+    let mostOpen = 0;
+    for (let seed = 1; seed <= 30; seed += 1) {
+      mostOpen = Math.max(mostOpen, await run(seed));
       cleanup();
       history.replaceState(null, '', '/workshop');
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
     }
-  }, 60_000);
+    // The sequences reach several rows open at once.
+    expect(mostOpen).toBeGreaterThanOrEqual(2);
+  }, 120_000);
 });

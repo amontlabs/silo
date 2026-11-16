@@ -12,6 +12,7 @@ describe('the error boundary', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<Boundary data={buildData()}><Broken /></Boundary>);
     expect(screen.getByRole('heading', { level: 1, name: 'Workshop' })).toBeInTheDocument();
+    expect(screen.getByText('Starting with the Engine.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: 'Other devices' })).toBeInTheDocument();
     expect(screen.getByText('Create and delete a computer')).toBeInTheDocument();
     expect(screen.getByText('A Linux server')).toBeInTheDocument();
