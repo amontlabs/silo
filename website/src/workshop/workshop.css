@@ -452,3 +452,7 @@
 .ws-fold-link, .ws-loglink { display: inline-block; padding: 8px 0; margin: -8px 0; }
 @media (max-width: 640px) { .workshop-shell .site-header .ws-account-slot .button.small { font-size: 12px; } }
 .ws-account .ws-link { padding: 8px 0; margin: -8px 0; }
+/* For a visitor who would rather not sign in here: the entry's issue, right under the sign-in box. */
+.ws-gh-alt { justify-self: start; display: inline-flex; align-items: center; margin-top: -4px; padding: 4px 0; font: 12px/1.5 var(--mono); color: var(--muted); }
+.ws-gh-alt:hover { color: var(--accent-ink); }
+.ws-gh-alt .out { stroke: currentColor; }
