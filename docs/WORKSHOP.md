@@ -24,24 +24,34 @@ area needs a box in both tables.
 
 What a person sees:
 
-- At 1040 px and wider, the map of the areas (Map), or the same areas as tiles
-  in the order of `areas.json` (Order). Narrower, the tiles only.
+- At 1200 px and wider, the map of the areas (Map), or the same areas as tiles
+  in the order of `areas.json` (Order). Narrower, the tiles only; opening a
+  tile there is a view transition where the browser has them.
 - Each area's state comes from its entries (`plan.ts`, first match wins):
   being built now, done, next (the lowest-numbered planned entry among areas not
   being built), planned, not decided yet. An entry is being built when it is
   planned and its open issue has the label `workshop:building`.
 - Opening an area folds the map to a strip that stays on screen (when the
-  window is at least 760 px tall); the area's entries open in place, one at a
-  time. Opening an entry never moves it or the rows above it.
-- The strip under the map links to the suggestions and to what is not carried
-  over (entries without an area, and every dropped entry).
+  window is at least 760 px tall); the area's entries open in place, each on
+  its own. Opening or closing an entry never moves it or the rows above it. The
+  entry opened last is the one in the address and the one a verdict goes to.
+  Comments load when a pointer or focus reaches the row, and on every opening;
+  while they load, each one the count announces holds its place. An entry named
+  by the address opens once the live state is there.
+- The strip under the map links to what is left out (entries without an area,
+  and every dropped entry) and to the suggestions.
 - A person who can decide also gets "Decisions", the number of entries still to
-  decide on each part, and a link to the lowest-numbered one. After a verdict
-  the next entry waiting in the same area opens, else the lowest one anywhere.
+  decide or to confirm (a verdict carried over from the file) on each part, and
+  a link to the lowest-numbered one. After a verdict the next entry waiting in
+  the same area opens, else the lowest one anywhere. The verdict buttons look
+  dimmed until the 700 ms guard has passed. Verdicts are for entries only: the
+  server refuses them on anything else.
   Nobody else is offered the decisions; their address shows the map.
 
 Addresses: `#<area>`, `#<area>/<entry id>`, `#suggested`, `#left` and
-`#decisions`, each with an optional open row (`#suggested/issue-<n>`). The older
+`#decisions`, each with an optional open row (`#suggested/issue-<n>`). An entry
+is found by its id whatever area the address names, and the address is
+rewritten; an entry that no longer exists opens its area. The older
 `#entry-<id>`, `#issue-<n>` and `#decided-<i>` open that row where it now lives.
 Back and Forward move between places; opening a row replaces the address.
 
@@ -58,7 +68,8 @@ Back and Forward move between places; opening a row replaces the address.
 To look at a later state without the API, run `npm --prefix website run dev`
 and open `http://127.0.0.1:4173/workshop/?fixture=later` (some areas done, one
 being built, one next) or `?fixture=today`; add `&as=owner` or `&as=visitor` to
-be signed in, and `&delay=2000` to hold the live state back. This exists only in
+be signed in, `&delay=2000` to hold the live state and the sign-in answer back,
+and `&detail=700` to hold each entry's comments back. This exists only in
 development builds (`devFixture.ts`, loaded when `import.meta.env.DEV`); a
 production build has none of it.
 

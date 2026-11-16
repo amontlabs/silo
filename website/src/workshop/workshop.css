@@ -21,7 +21,7 @@
 :where(.ws) ul { list-style: none; }
 :where(.ws) button { background: none; padding: 0; text-align: left; font: inherit; color: inherit; }
 .ws-account-slot { min-width: 135px; display: flex; justify-content: flex-end; }
-@media (max-width: 480px) { .ws-account-slot { min-width: 51px; } }
+@media (max-width: 480px) { .ws-account-slot { min-width: 60px; } }
 .ws-account { display: flex; align-items: center; gap: 12px; font: 12px var(--mono); color: var(--muted); }
 .ws-link { white-space: nowrap; background: none; padding: 0; font: 12px var(--mono); color: var(--faint); }
 .ws-link:hover { color: var(--accent-ink); }
@@ -111,7 +111,7 @@
 .ws-gl { position: absolute; color: var(--g); fill: none; stroke: currentColor; stroke-width: 1; overflow: visible; transition: opacity .2s, color .3s; }
 .ws-gl text { font: 9.5px var(--mono); fill: currentColor; stroke: none; }
 .ws-gl .solid { fill: currentColor; stroke: none; }
-.ws-todo { position: absolute; top: -10px; right: 8px; min-width: 22px; height: 18px; padding: 0 5px; border: 1px solid var(--accent-ink); border-radius: 8px; background: var(--paper); font: 500 12px/16px var(--mono); color: var(--accent-ink); text-align: center; transition: opacity .2s; }
+.ws-todo { position: absolute; top: -12px; right: 8px; min-width: 22px; height: 18px; padding: 0 5px; border: 1px solid var(--accent-ink); border-radius: 8px; background: var(--paper); font: 500 12px/16px var(--mono); color: var(--accent-ink); text-align: center; transition: opacity .2s; }
 
 .ws-part.s-open .ws-p-st { visibility: hidden; }
 .ws .ws-part.s-planned, .ws .ws-part.s-next { --g: var(--muted); border-style: solid; border-color: var(--ink); color: var(--ink); }
@@ -215,8 +215,8 @@
   .ws-swap-map, .ws .ws-seg, .ws .ws-under .ws-suggest, .lbl-map { display: none; }
 }
 /* Map and Order swap with everything under them, so nothing below jumps on its own. */
-.ws.swap-out :is(.ws-swap, .ws-under, .ws-detail) { opacity: 0; transition: opacity .13s; }
-.ws.swap-in :is(.ws-swap, .ws-under, .ws-detail) { animation: ws-swap-in .26s var(--ease) both; }
+.ws.swap-out :is(.ws-swap, .ws-under, .ws-detail), .workshop-shell:has(.ws.swap-out) .ws-foot { opacity: 0; transition: opacity .13s; }
+.ws.swap-in :is(.ws-swap, .ws-under, .ws-detail), .workshop-shell:has(.ws.swap-in) .ws-foot { animation: ws-swap-in .26s var(--ease) both; }
 
 .ws-under { display: flex; align-items: flex-start; gap: 20px; padding: 14px 24px 44px; }
 .ws-under-left { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 22px; padding-top: 8px; }
@@ -323,7 +323,7 @@
 
 @keyframes ws-rise { from { opacity: .2; transform: translateY(8px); } }
 @keyframes ws-appear { from { opacity: 0; } }
-@keyframes ws-swap-in { from { opacity: .2; transform: translateY(8px); } }
+@keyframes ws-swap-in { from { opacity: 0; transform: translateY(8px); } }
 
 /* Off the map, the tile that was tapped travels to its place in the strip, and back. */
 ::view-transition-group(*) { animation-duration: .34s; animation-timing-function: cubic-bezier(.3, .7, .2, 1); }
@@ -442,3 +442,5 @@
 .ws .ws-vote { padding: 8px 5px; margin: -8px -5px; }
 .ws .ws-back { padding: 12px 0; margin: -8px 0; }
 .ws-fold-link, .ws-loglink { display: inline-block; padding: 8px 0; margin: -8px 0; }
+@media (max-width: 640px) { .workshop-shell .site-header .ws-account-slot .button.small { font-size: 12px; } }
+.ws-account .ws-link { padding: 8px 0; margin: -8px 0; }

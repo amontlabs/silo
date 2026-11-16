@@ -210,10 +210,13 @@ export function App({ data, accountSlot }: AppProps) {
     openRow(next?.key ?? null, { focus: true, push: false, closing: row.key });
     // The next Take comes under the pointer when the page can scroll that far.
     if (next && take !== undefined && samePlace(placeFrom(next, shown, plan), shown)) {
-      later(() => {
+      // Measured once the rows have finished opening and closing, then once more after the comments came in.
+      const follow = () => {
         const now = document.getElementById(next.key)?.querySelector('.ws-btn.go')?.getBoundingClientRect().top;
         if (now !== undefined && Math.abs(now - take) > 1) scrollBy({ top: now - take, behavior: still() ? 'instant' : 'smooth' });
-      }, ROW_MS);
+      };
+      later(follow, ROW_MS);
+      later(follow, ROW_MS + 420);
     }
   };
   nav.current.reopen = (row: Row) => openRow(row.key, { focus: true, push: false });
