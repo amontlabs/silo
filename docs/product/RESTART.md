@@ -35,9 +35,19 @@ decided entry by entry.
    [stages.json](stages.json)), and the Stack view on the dashboard.
 3. Now: the owner goes down the Stack and gives verdicts. The first 41 entries (four stages) are
    the starter.
-4. Next: the Workshop, the public version of the dashboard on silo.amontlabs.com. Its design is being
-   settled with the owner (prototypes on the owner's Mac in `~/.local/state/silo-dashboard/design/`);
-   nothing of it is built. It needs a GitHub App for the bot and for sign-in, which only the owner can create.
+4. Now, alongside the owner's verdicts: building the Workshop, the public version of the dashboard at
+   silo.amontlabs.com/workshop (the owner approved the second prototype on 2026-11-16: one list in
+   build order, rows that open in place). Three branches started that day: `workshop/page` (the page
+   and the trimmed home page, in `website/`), `workshop/server` (GitHub App sign-in and the API, as
+   Vercel functions; writes `docs/WORKSHOP.md`) and `workshop/tool` (`tools/workshop`: `setup`, `sync`,
+   `pull`, posting as the bot). Their shared contract and task texts are on the owner's Mac in
+   `~/.local/state/silo-dashboard/design/workshop-build/`. Each needs review before merge; the server
+   is the security boundary and gets two independent reviews. After the merge:
+   - run the page against `website/scripts/workshop-dev.mjs --fake` and fix what does not fit;
+   - the owner runs `tools/workshop/bin/workshop setup` (two clicks on GitHub), installs the App on
+     the repository and pastes the values of `~/.local/state/silo-workshop/vercel.env` into the Vercel
+     project (nobody else can do these);
+   - `workshop sync` creates the issues; check the live page; then the local dashboard can be retired.
 5. Then: start `main` again as the new tree, carrying the website, the Workshop, this folder and the
    rules. Wait for the owner to confirm the proposals above first.
 6. Then: design the shell's records, calls and events, and show it on the dashboard for approval
