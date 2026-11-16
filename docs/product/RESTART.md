@@ -31,35 +31,41 @@ decided entry by entry.
 ## Where the work stands
 
 1. Done: the old tree is frozen (tag `legacy-2026-11-16`, branch `legacy`, both on GitHub).
-2. Done: the feature list, 119 entries in 13 stages ([features.jsonl](features.jsonl),
-   [stages.json](stages.json)), and the Stack view on the dashboard.
+2. Done: the feature list, 119 entries in 13 stages and 16 areas ([features.jsonl](features.jsonl),
+   [stages.json](stages.json), [areas.json](areas.json)), and the Stack view on the dashboard.
 3. Now: the owner goes down the Stack and gives verdicts. The first 41 entries (four stages) are
    the starter.
-4. Now: taking the Workshop live. It is built and merged on `main` (2026-11-16): the page and the
-   trimmed home page in `website/`, the server in `website/server` and `website/api` (described in
-   [docs/WORKSHOP.md](../WORKSHOP.md)), and `tools/workshop` (`setup`, `store`, `doctor`, `sync`,
-   `pull`, `ask`, `comment`, `built`). It was run end to end only against the stand-in for GitHub
-   (`node website/scripts/workshop-dev.mjs --fake`). Nothing has met the real GitHub or a real
-   deployment yet. What is left, in order:
-   - `main` is NOT pushed since the Workshop merge: a push to `main` deploys the public site. The
-     merged work is on the remote branch `workshop-preview`, which Vercel builds as a preview (only
-     the owner can open it).
+4. Now: taking the Workshop live. It is built and merged on local `main` (2026-11-16, merge
+   1808ac06c): the home page ("Computers your agents can fork."), the Workshop as a map of the
+   product's 16 areas (tiles under 1200 px), the server, and `tools/workshop` (`setup`, `store`,
+   `doctor`, `sync`, `pull`, `ask`, `comment`, `building`, `built`), all described in
+   [docs/WORKSHOP.md](../WORKSHOP.md). The areas are in [areas.json](areas.json) and each entry's
+   `area` in [features.jsonl](features.jsonl). It was run end to end only against the stand-in for
+   GitHub (`node website/scripts/workshop-dev.mjs --fake`, with `--progress` for a later state).
+   Nothing has met the real GitHub or a real deployment yet. What is left, in order:
+   - `main` is NOT pushed since the first Workshop merge: a push to `main` deploys the public site.
+     The remote branch `workshop-preview` holds an older state.
    - The owner runs `tools/workshop/bin/workshop setup` (creates the public GitHub App "Silo
      Workshop", two clicks), installs it on this repository only, and checks that expiring user
      tokens are on.
    - The owner sets the Vercel project: the seven variables from
      `~/.local/state/silo-workshop/vercel.env`, the build command
      `npm --prefix website run build:vercel`, the install command `npm --prefix website ci`.
-   - On the owner's word: push `main`, run `tools/workshop/bin/workshop sync` (creates the issues
-     and writes their numbers into `features.jsonl` and `DECISIONS.md`), then check on the live
-     site everything listed under "Not verified until deployed" in docs/WORKSHOP.md.
-   - Then retire the local dashboard (`tools/dashboard`), and read the owner's verdicts with
-     `workshop pull`.
-5. Then: start `main` again as the new tree, carrying the website, the Workshop, this folder and the
+   - Go-live then follows [PLAN.md](PLAN.md), section 12, not the old `sync` then `pull` routine.
+5. Now: the plan as data. The owner asked (2026-11-16) for one source of truth for the plan, with
+   one place to edit and everything else generated. The design is [PLAN.md](PLAN.md): what a
+   feature is lives in `plan/` (one file per feature), what happened to it lives on its GitHub
+   issue, everything shown is computed by one shared module, and agents use one `plan` command.
+   It was reviewed twice; [PLAN-RESEARCH.md](PLAN-RESEARCH.md) records the existing tools examined
+   and why none is adopted. Nothing of it is built. Next: its build items 0 to 10 (section 14), in
+   order, through the merge gate. Five points in it wait for the owner (listed at its top); it
+   proceeds on the recommended answers until the owner says otherwise. Until its cutover (item 9) the
+   files in this folder stay the plan, and the routine below still applies.
+6. Then: start `main` again as the new tree, carrying the website, the Workshop, this folder and the
    rules. Wait for the owner to confirm the proposals above first.
-6. Then: design the shell's records, calls and events, and show it on the dashboard for approval
+7. Then: design the shell's records, calls and events, and show it on the dashboard for approval
    before any code.
-7. Then: build the taken entries in list order, one at a time, each proven from the command line
+8. Then: build the taken entries in list order, one at a time, each proven from the command line
    before it gets a screen.
 
 ## When a session starts
