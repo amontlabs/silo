@@ -81,9 +81,10 @@ sequenceDiagram
   settings are shown; databases are not driven yet.
 - [partial] Merging asks you in the Silo app, with the diff. The request is held and listed on the
   Mac; the app's Pending page is not driven yet.
-- [untested] Merge when main has not changed: every change is applied and main keeps running.
+- [built] Merge when main has not changed: every change is applied and main keeps running.
 - [untested] Merge when main has changed: item by item, and you choose on conflicts.
-- [untested] Undo a merge, drop a fork, replace main.
+- [partial] Undo a merge, drop a fork, replace main. Undo and drop work; a running fork must be
+  stopped before it can be dropped. Replace main is not driven yet.
 - [untested] You do each of these yourself, from the app or with `silo`.
 - [untested] Several task computers run at once without colliding.
 
