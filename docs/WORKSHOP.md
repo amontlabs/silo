@@ -79,7 +79,8 @@ snapshot holds the newest Workshop issues (at most 2,000) with the fields
 (the latest 100 per issue, each cut to 5,000 characters, at most 5,000 in
 all). Nothing GitHub sends is kept raw: from each list page only its ETag and
 the reduced fields of Workshop issues remain, and from comment pages only the
-cut comments of Workshop issues. A number that is not in the snapshot is a
+cut comments of Workshop issues; every kept text is a fresh copy of its cut,
+never a slice that would keep GitHub's whole text alive. A number that is not in the snapshot is a
 404. Both reads are sent with
 `Cache-Control: public, s-maxage=10, stale-while-revalidate=60`, no
 `Vary: Cookie`, and read no cookie.
@@ -99,13 +100,18 @@ instances.
   has. Any request that changed something on GitHub (a comment, a vote, a
   suggestion, a verdict, a decision, even one that failed halfway) starts one
   straight away; when it succeeded, it waits for that refresh up to 2 seconds
-  (the page already shows the write as pending). Refreshes are coalesced: at
+  (the page already shows the write as pending), but only when the refresh is
+  running or will start within those 2 seconds; otherwise it answers at once
+  and the refresh comes when the floor allows. Refreshes are coalesced: at
   most one runs and one waits; a write that lands while one is running makes
   exactly one more start when it ends, so the write is always included; a
   refresh asked for by a write starts at most once every 5 seconds per
-  instance. No refresh starts while GitHub has asked us to wait. A refresh
-  that has not finished after 15 seconds is treated as lost, without the
-  60-second wait, and the next request starts a new one. Only an instance with
+  instance. No refresh starts while GitHub has asked us to wait. Each refresh
+  has its own 12-second limit and an abort signal: past the limit, or when it
+  is declared lost (unfinished after 15 seconds), its calls are aborted and it
+  stops spending, so two never spend at once; the next request starts a new
+  one. A failure that arrives more than 15 seconds after its refresh started
+  (an instance that was frozen) does not set the 60-second wait. Only an instance with
   no snapshot yet makes its first requests wait for the refresh, at most until
   their 12-second deadline. A refresh builds a new snapshot and swaps it in
   only when it completed, so a refresh that fails halfway leaves the previous
@@ -117,9 +123,11 @@ instances.
   ([@vercel/functions API reference](https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package),
   read 2026-11-16). Correctness does not depend on it: the lost-refresh rule
   and the waits above cover a platform that stops the work.
-- **Issues.** A refresh lists the repository's issues (all states, newest
-  first, 100 a page, at most 20 pages), skipping pull requests and issues
-  without exactly one Workshop label, so past the cap the oldest drop out.
+- **Issues.** A refresh reads one list per Workshop label: entries, then
+  decisions, then suggestions (`labels=workshop:…`, all states, newest first,
+  100 a page, at most 20 pages for the three together), so nothing else in the
+  repository is fetched or counted against the cap, and issues without exactly
+  one Workshop label or that are pull requests are skipped.
   Each page is sent with `If-None-Match` and the ETag GitHub gave for it last
   time; a `304 Not Modified` means the page is unchanged and the held copy is
   reused. Vote counts come from each issue's reaction summary in that list.
@@ -178,19 +186,21 @@ Worst case per instance per hour: (40 + 12 + 4 + 4 + 20) × 60 = 80 × 60 =
 4,800 calls, below the installation's 5,000. The largest refresh is 20 issue
 pages + 15 comment pages = 35 calls, which fits in a minute's 40, and 80 calls
 a minute is far below GitHub's secondary limit of 900 points a minute for
-`GET` requests. Calls to GitHub's token endpoint (sign-in and token refresh)
-are not installation calls; they have their own ceiling of 30 a minute.
+`GET` requests. Calls to GitHub's token endpoint are not installation calls;
+new sign-ins have a ceiling of 30 a minute and token refreshes of existing
+sessions a separate one of 60, so made-up sign-ins cannot stop sessions from
+refreshing.
 
-With today's issue list on 2 pages, a refresh is 3 calls (2 issue pages, which
-are `304` and free when unchanged, and 1 `since` comment call, which always
-counts against GitHub's limit):
+With each of the three lists on one page, a refresh is 4 calls (3 list pages,
+which are `304` and free when unchanged, and 1 `since` comment call, which
+always counts against GitHub's limit):
 
-- **No writes:** one refresh every 30 seconds, 120 an hour: 120 × 3 = 360
+- **No writes:** one refresh every 30 seconds, 120 an hour: 120 × 4 = 480
   calls in our ceiling, of which about 120 count at GitHub, plus 6 full
   comment reloads whose unchanged pages are free: about 130 calls an hour.
 - **Writes without pause:** write-started refreshes are at most one every 5
-  seconds, 12 a minute: 12 × 3 = 36 calls a minute, 2,160 an hour, inside the
-  refresh ceiling of 40 a minute (2,400 an hour). A refresh stopped by our own
+  seconds, 12 a minute: 12 × 4 = 48 calls a minute, which the refresh ceiling
+  holds to 40 a minute (2,400 an hour). A refresh stopped by our own
   ceiling is started again when the ceiling resets, without the 60-second
   wait used when GitHub fails.
 
@@ -213,9 +223,12 @@ snapshots catch up when the hour resets.
   hour).
 - Each signed-in person may make 20 writes a minute per instance; people known
   to be able to decide have their own allowance of 120. Sign-out counts as a
-  write. A person may make 3 suggestions a minute and 10 an hour.
+  write. A person may make 3 suggestions a minute and 10 an hour; an attempt
+  counts only when the issue was created.
 - Each session may make 60 GitHub calls a minute for reads (`GET vote` and the
-  reads before a write); more answer 429.
+  reads before a write), or 300 for a person known to be able to decide; more
+  answer 429. A verdict and its note are admitted together: the reads the
+  whole action needs are checked before its first call.
 - A session GitHub has rejected (a 401, an invalid refresh token, a revoked
   grant) is remembered by a hash of its token for a day (at most 10,000) and
   answered 401 without calling GitHub; a request without a valid session calls
@@ -273,8 +286,9 @@ All of them run with the website's `npm test`.
 
 The server uses Node's standard library (`crypto`, `fetch`, `http`) and one
 package, `@vercel/functions` (Apache-2.0, pinned to 3.10.5), for `waitUntil`.
-`prepare-vercel.mjs` copies it and its production dependencies into the
-function.
+`prepare-vercel.mjs` ships only the files of it that load (found by loading it
+in a separate process) and its `package.json`: 16 files, and the whole
+function is about 180 KB.
 
 ## The GitHub App
 
@@ -458,12 +472,15 @@ carries its number.
 **Deciding.** `canDecide` is GitHub's answer: the person's permission on the
 repository (`write`, `maintain` or `admin`), read with the installation token
 and cached five minutes by GitHub account id, for yes and for no; that one
-cache serves `me`, `verdict` and `decide`. The answer must be about the same
-account id as the session, so a renamed login cannot inherit another account's
-permission. Writes are not preceded by a re-read: they use the person's own
-token, and GitHub itself refuses a label change or a close by someone without
-access; such a refusal (403) drops that person's cached yes. Accounts known to
-be able to decide re-read on an allowance nobody else's requests can spend.
+cache serves `me`, `verdict` and `decide`. The permission is read for the
+account's current login, asked of GitHub with the person's own token at that
+moment, never the login in the cookie, and the answer must be about the same
+account id as the session. Writes are not preceded by a re-read: they use the
+person's own token, and GitHub itself refuses a label change or a close by
+someone without access; such a refusal (403) drops that person's cached yes,
+and only a yes. Accounts known to be able to decide re-read on an allowance
+nobody else's requests can spend; a read that says no removes the account
+from them.
 Reading the permission with the person's own token (`GET /repos/{owner}/{repo}`
 and its `permissions` object) was considered: GitHub's reference for that
 endpoint lists `permissions` in the response schema but does not say which

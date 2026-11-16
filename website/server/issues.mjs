@@ -17,11 +17,16 @@ export function clean(text, { oneLine = false } = {}) {
   return oneLine ? value.replace(LINE_BREAKS, ' ') : value;
 }
 
-// Cuts text to `limit` UTF-16 units without splitting a surrogate pair.
+// A copy of `text` that shares no memory with it: a slice of a long string keeps the whole string alive.
+export function fresh(text) {
+  return Buffer.from(text, 'utf8').toString('utf8');
+}
+
+// Cuts text to `limit` UTF-16 units without splitting a surrogate pair; a cut text is a fresh copy.
 export function cut(text, limit) {
   if (text.length <= limit) return text;
   const end = /[\uD800-\uDBFF]/.test(text[limit - 1]) ? limit - 1 : limit;
-  return text.slice(0, end);
+  return fresh(text.slice(0, end));
 }
 
 function markerId(line) {
@@ -43,7 +48,7 @@ export function readBody(raw) {
     if (id === null) kept.push(line);
     else if (id && entry === null) entry = id;
   }
-  return { entry, text: clean(kept.join('\n').trimEnd()) };
+  return { entry, text: fresh(clean(kept.join('\n').trimEnd())) };
 }
 
 export function labelNames(issue) {
@@ -70,10 +75,10 @@ export function reasonOf(issue) {
 // A comment as `issue` returns it.
 export function commentOf(comment) {
   const full = comment.body || '';
-  const text = clean(cut(full, CUTS.comment));
+  const text = fresh(clean(cut(full, CUTS.comment)));
   return {
     id: comment.id,
-    author: clean(comment.user?.login ?? 'ghost', { oneLine: true }),
+    author: fresh(clean(comment.user?.login ?? 'ghost', { oneLine: true })),
     avatar: comment.user?.avatar_url ?? null,
     bot: comment.user?.type === 'Bot',
     createdAt: comment.created_at,

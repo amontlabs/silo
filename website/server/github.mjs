@@ -30,7 +30,8 @@ const MAX_PAGES = 50;
 // each call's limit is the shorter of `timeoutMs` and the time left.
 export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now, timeoutMs = DEFAULT_TIMEOUT, deadline = () => undefined }) {
   // With `etag`, the request is conditional (If-None-Match) and a 304 answers { status: 304, data: null }.
-  async function request(method, path, { token, auth = 'Bearer', body, accept = 'application/vnd.github+json', as = null, etag = null } = {}) {
+  // With `signal`, the caller can also abort the call.
+  async function request(method, path, { token, auth = 'Bearer', body, accept = 'application/vnd.github+json', as = null, etag = null, signal: abort = null } = {}) {
     const url = path.startsWith('http') ? path : apiBase + path;
     const headers = {
       'Accept': accept,
@@ -42,8 +43,8 @@ export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now
     if (etag) headers['If-None-Match'] = etag;
     const end = deadline();
     const left = end === undefined ? timeoutMs : Math.min(timeoutMs, end - Date.now());
-    if (left <= 0) throw new GitHubError(0, { network: true, timeout: true, as });
-    const signal = AbortSignal.timeout(left);
+    if (left <= 0 || abort?.aborted) throw new GitHubError(0, { network: true, timeout: true, as });
+    const signal = abort ? AbortSignal.any([AbortSignal.timeout(left), abort]) : AbortSignal.timeout(left);
     try {
       const response = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal });
       if (response.status === 304 && etag) {

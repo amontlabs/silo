@@ -1,5 +1,6 @@
-import { cp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { cp, mkdir, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Packages the built site and the Workshop API with Vercel's Build Output API v3:
@@ -8,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // routes that serve the Workshop page at /workshop and /workshop/.
 export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'vote', 'suggest', 'verdict', 'decide'];
 export const RUNTIME = 'nodejs24.x';
-// Packages the function imports at run time; they ship inside it with their production dependencies.
+// Packages the function imports at run time; only their files that load ship inside it.
 export const FUNCTION_DEPENDENCIES = ['@vercel/functions'];
 
 const website = fileURLToPath(new URL('..', import.meta.url));
@@ -19,28 +20,27 @@ async function exists(path) {
   return stat(path).then(() => true, () => false);
 }
 
-// Copies `names` and everything they depend on (dependencies, not devDependencies) from the site's
-// node_modules into `target`/node_modules, resolving each package from the one that needs it.
-async function copyDependencies(siteDir, names, target) {
-  const copied = new Set();
-  async function locate(name, from) {
-    for (let dir = from; ; dir = join(dir, '..')) {
-      const candidate = join(dir, 'node_modules', name);
-      if (await exists(join(candidate, 'package.json'))) return candidate;
-      if (dir === siteDir || dir === join(dir, '..')) break;
-    }
-    throw new Error(`The function needs ${name}; run npm ci first.`);
+// Copies into `target` only the files of `names` that load: the module files Node loads when the
+// packages are required in a separate process, and each of their packages' package.json (needed to
+// resolve the import). Nothing that is never loaded ships.
+async function copyLoadedFiles(siteDir, names, target) {
+  const script = 'for (const name of JSON.parse(process.argv[1])) require(name); process.stdout.write(JSON.stringify(Object.keys(require.cache)));';
+  const loaded = JSON.parse(execFileSync(process.execPath, ['-e', script, JSON.stringify(names)], { cwd: siteDir, encoding: 'utf8' }));
+  const modules = join(siteDir, 'node_modules') + sep;
+  const files = new Set();
+  for (const file of loaded) {
+    if (!file.startsWith(modules)) throw new Error(`The function would load ${file}, outside node_modules.`);
+    files.add(file);
+    const parts = file.slice(modules.length).split(sep);
+    const root = join(modules, ...parts.slice(0, parts[0].startsWith('@') ? 2 : 1));
+    files.add(join(root, 'package.json'));
   }
-  async function visit(name, from) {
-    const source = await locate(name, from);
-    if (copied.has(source)) return;
-    copied.add(source);
-    const relative = source.slice(siteDir.length + 1);
-    await cp(source, join(target, relative), { recursive: true });
-    const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'));
-    for (const dependency of Object.keys(manifest.dependencies || {})) await visit(dependency, source);
+  for (const file of files) {
+    const destination = join(target, file.slice(siteDir.length + 1));
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(file, destination);
   }
-  for (const name of names) await visit(name, siteDir);
+  return [...files].map((file) => file.slice(siteDir.length + 1)).sort();
 }
 
 // Response headers for every path, static pages included: no page of the site may be framed.
@@ -66,7 +66,7 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
   for (const name of await readdir(join(siteDir, 'server'))) {
     if (name.endsWith('.mjs') && !name.endsWith('.test.mjs')) await cp(join(siteDir, 'server', name), join(main, 'server', name));
   }
-  await copyDependencies(resolve(siteDir), FUNCTION_DEPENDENCIES, main);
+  const dependencies = await copyLoadedFiles(resolve(siteDir), FUNCTION_DEPENDENCIES, main);
   await writeFile(join(main, '.vc-config.json'), JSON.stringify({
     runtime: RUNTIME,
     handler: 'api/workshop.cjs',
@@ -85,7 +85,7 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
     ],
   };
   await writeFile(join(outputDir, 'config.json'), JSON.stringify(config, null, 2) + '\n');
-  return { outputDir, page, config };
+  return { outputDir, page, config, dependencies };
 }
 
 // `--out <dir>` writes the output elsewhere.

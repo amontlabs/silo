@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey, createPrivateKey, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, readlink, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rm, writeFile } from 'node:fs/promises';
 import { connect as netConnect, createServer } from 'node:net';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -664,6 +664,16 @@ test('the Node adapter accepts bodies up to 64 KB and refuses larger ones', asyn
   } finally { await t.close(); }
 });
 
+async function listFiles(dir, prefix = '') {
+  const found = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) found.push(...await listFiles(join(dir, entry.name), name));
+    else found.push(name);
+  }
+  return found;
+}
+
 function fakeResponse() {
   return {
     headers: {},
@@ -711,9 +721,29 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     const vc = JSON.parse(await readFile(join(main, '.vc-config.json'), 'utf8'));
     assert.deepEqual(vc, { runtime: RUNTIME, handler: 'api/workshop.cjs', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 15 });
     assert.match(vc.runtime, /^nodejs(22|24|26)\.x$/);
-    const modules = (await readdir(join(main, 'node_modules', '@vercel'))).sort();
-    assert.ok(modules.includes('functions') && modules.includes('oidc'), modules.join(','));
-    assert.equal(await lstat(join(main, 'node_modules', 'react')).then(() => true, () => false), false, 'only what the function needs');
+    assert.deepEqual(await readdir(join(main, 'node_modules')), ['@vercel']);
+    assert.deepEqual(await readdir(join(main, 'node_modules', '@vercel')), ['functions'], 'only the package that loads');
+    const shipped = await listFiles(join(main, 'node_modules'));
+    assert.ok(shipped.length <= 20, `${shipped.length} files`);
+    assert.ok(shipped.includes('@vercel/functions/wait-until.js') && shipped.includes('@vercel/functions/package.json'));
+
+    // The packaged function runs on its own, from a clean folder with nothing above it to resolve from.
+    const clean = await mkdtemp(join(tmpdir(), 'workshop-func-'));
+    try {
+      await cp(main, join(clean, 'state.func'), { recursive: true });
+      const saved = Object.fromEntries(Object.keys(process.env).filter((k) => k.startsWith('WORKSHOP_')).map((k) => [k, process.env[k]]));
+      for (const key of Object.keys(saved)) delete process.env[key];
+      try {
+        const entry = createRequire(import.meta.url)(join(clean, 'state.func', 'api', 'workshop.cjs'));
+        const req = Object.assign(Readable.from([]), { method: 'GET', url: '/api/workshop/state', headers: {} });
+        const res = fakeResponse();
+        await entry(req, res);
+        assert.equal(res.statusCode, 503);
+        assert.equal(JSON.parse(res.body).error, 'not_configured');
+      } finally {
+        Object.assign(process.env, saved);
+      }
+    } finally { await rm(clean, { recursive: true, force: true }); }
     const serverFiles = (await readdir(join(main, 'server'))).sort();
     assert.deepEqual(serverFiles, ['app-auth.mjs', 'config.mjs', 'github.mjs', 'issues.mjs', 'node.mjs', 'session.mjs', 'snapshot.mjs', 'workshop.mjs']);
 
@@ -805,7 +835,7 @@ test('me calls GitHub only for the permission check, cached, and never refreshes
     const before = t.fake.state.requests.length;
     assert.equal((await c.call('GET', 'me')).status, 200);
     assert.equal((await c.call('GET', 'me')).status, 200);
-    assert.deepEqual(t.fake.state.requests.slice(before).filter((r) => r.kind !== 'app').map((r) => r.path), ['/repos/amontlabs/silo/collaborators/visitor-fake/permission'], 'besides minting an installation token');
+    assert.deepEqual(t.fake.state.requests.slice(before).filter((r) => r.kind !== 'app').map((r) => r.path), ['/user', '/repos/amontlabs/silo/collaborators/visitor-fake/permission'], 'the current login, then the permission, besides minting an installation token');
   } finally { await t.close(); }
 });
 

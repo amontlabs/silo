@@ -4,7 +4,8 @@ import { SNAPSHOT } from '../server/snapshot.mjs';
 import { setup } from './workshop-test-support.mjs';
 
 const LIST = /^\/repos\/amontlabs\/silo\/issues$/;
-const lists = (t) => t.fake.state.requests.filter((r) => r.method === 'GET' && LIST.test(r.path) && r.kind === 'installation');
+// One per refresh: the first page of the entries list, which every refresh reads first.
+const lists = (t) => t.fake.state.requests.filter((r) => r.method === 'GET' && LIST.test(r.path) && r.kind === 'installation' && r.query.includes('workshop%3Aentry') && /[?&]page=1$/.test(r.query));
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withGap(ms, run) {

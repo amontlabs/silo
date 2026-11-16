@@ -7,7 +7,9 @@ import { count, setup, withBudget } from './workshop-test-support.mjs';
 
 const LIST = /^\/repos\/amontlabs\/silo\/issues$/;
 const COMMENTS = /^\/repos\/amontlabs\/silo\/issues\/comments$/;
-const lists = (t) => t.fake.state.requests.filter((r) => r.method === 'GET' && LIST.test(r.path));
+// Every issue list page, and one per refresh (the first page of the entries list, read first).
+const allLists = (t) => t.fake.state.requests.filter((r) => r.method === 'GET' && LIST.test(r.path));
+const lists = (t) => allLists(t).filter((r) => r.query.includes('workshop%3Aentry') && /[?&]page=1$/.test(r.query));
 const github = (t) => t.fake.state.requests.length;
 
 async function withSnapshot(values, run) {
@@ -46,7 +48,7 @@ test('1,000 anonymous reads of state and issues cause no GitHub call beyond the 
     assert.ok(refreshes <= Math.floor(elapsed / SNAPSHOT.maxAge), `${refreshes} refreshes in ${elapsed} ms`);
     const calls = t.fake.state.requests.slice(afterCold).filter((r) => r.kind !== 'app');
     assert.ok(calls.every((r) => LIST.test(r.path) || COMMENTS.test(r.path)), 'only refresh calls');
-    assert.equal(calls.length, refreshes * 2, 'one issue page and one comment call per refresh');
+    assert.equal(calls.length, refreshes * 4, 'one page of each of the three lists and one comment call per refresh');
   } finally { await t.close(); }
 });
 
@@ -55,11 +57,11 @@ test('a refresh with nothing changed sends conditional requests and gets 304s', 
   try {
     t.fake.state.perPage = 3;
     await t.client().call('GET', 'state');
-    const cold = lists(t);
-    assert.ok(cold.length >= 3 && cold.every((r) => r.status === 200));
+    const cold = allLists(t);
+    assert.ok(cold.length >= 4 && cold.every((r) => r.status === 200), 'pages of all three lists');
     t.clock.t += 61_000;
     await settle(t);
-    const again = lists(t).slice(cold.length);
+    const again = allLists(t).slice(cold.length);
     assert.equal(again.length, cold.length);
     assert.ok(again.every((r) => r.status === 304), 'every unchanged page is a 304');
     t.clock.t += SNAPSHOT.fullReloadEvery;
@@ -252,12 +254,12 @@ test('bounds: issues, comments per issue, the full reload, and the cuts', async 
     const s = await setup();
     try {
       s.fake.state.commentsPerPage = 3;
-      for (let i = 0; i < 3; i += 1) s.fake.addComment(6, 'visitor-fake', `late ${i}`);
+      for (let i = 0; i < 3; i += 1) s.fake.addComment(3, 'visitor-fake', `late ${i}`);
       const state = (await s.client().call('GET', 'state')).json;
-      assert.deepEqual(Object.keys(state.issues), ['4', '5', '6'], 'at most SNAPSHOT.issues, newest first, so the cap drops the oldest');
-      const held = (await s.client().call('GET', 'issue?n=6')).json;
+      assert.deepEqual(Object.keys(state.issues), ['1', '2', '3'], 'at most SNAPSHOT.issues Workshop issues: entries are listed first');
+      const held = (await s.client().call('GET', 'issue?n=3')).json;
       assert.equal(held.more, true, 'comments beyond the bounds are not held');
-      const all = [4, 5, 6].map(async (n) => (await s.client().call('GET', `issue?n=${n}`)).json.comments.length);
+      const all = [1, 2, 3].map(async (n) => (await s.client().call('GET', `issue?n=${n}`)).json.comments.length);
       assert.ok((await Promise.all(all)).reduce((a, b) => a + b, 0) <= 2, 'the total comment bound');
     } finally { await s.close(); }
   });

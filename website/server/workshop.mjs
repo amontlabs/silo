@@ -20,7 +20,8 @@ const DIRECTION_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
 const TITLE_FORBIDDEN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/;
 export const LIMITS = { text: 5000, title: 120 };
 // Ceilings per instance. The installation token has one per use, kept apart so that no use can
-// starve another; `exchange` covers calls to GitHub's token endpoint (sign-in and token refresh).
+// starve another. `exchange` covers new sign-ins at GitHub's token endpoint and `renew` the token
+// refreshes of existing sessions, so that made-up sign-ins cannot stop sessions from refreshing.
 // The rest are per person (writes, suggestions) and per session (GitHub reads).
 export const BUDGET = {
   refreshCallsPerMinute: 40,
@@ -29,11 +30,13 @@ export const BUDGET = {
   signinLookupsPerMinute: 4,
   labelCallsPerMinute: 20,
   tokenExchangesPerMinute: 30,
+  tokenRenewalsPerMinute: 60,
   writesPerMinute: 20,
   deciderWritesPerMinute: 120,
   suggestionsPerMinute: 3,
   suggestionsPerHour: 10,
   sessionReadsPerMinute: 60,
+  deciderSessionReadsPerMinute: 300,
 };
 const CEILINGS = {
   refresh: ['refreshCallsPerMinute', true],
@@ -42,6 +45,7 @@ const CEILINGS = {
   signin: ['signinLookupsPerMinute', true],
   label: ['labelCallsPerMinute', true],
   exchange: ['tokenExchangesPerMinute', false],
+  renew: ['tokenRenewalsPerMinute', false],
 };
 export const DEADLINE = 12_000;
 const RECENT_POST = 5 * 60_000;
@@ -80,8 +84,14 @@ const hash = (value) => createHash('sha256').update(String(value)).digest('hex')
 function counter(windowMs) {
   const windows = new Map();
   return {
-    // Takes one from `key`'s allowance of `limit`, or answers the seconds until it resets.
-    take(key, limit, at) {
+    // Takes `cost` from `key`'s allowance of `limit`, all or nothing, or answers the seconds until it resets.
+    take(key, limit, at, cost = 1) {
+      const wait = this.peek(key, limit, at, cost);
+      if (!wait) windows.get(key).count += cost;
+      return wait;
+    },
+    // Whether `cost` would fit, without taking it: 0, or the seconds until the allowance resets.
+    peek(key, limit, at, cost = 1) {
       let entry = windows.get(key);
       if (!entry || at - entry.start >= windowMs) {
         entry = { start: at, count: 0 };
@@ -89,9 +99,7 @@ function counter(windowMs) {
         windows.set(key, entry);
         if (windows.size > REMEMBERED) windows.delete(windows.keys().next().value);
       }
-      if (entry.count >= limit) return (entry.start + windowMs - at) / 1000;
-      entry.count += 1;
-      return 0;
+      return entry.count + cost > limit ? Math.max(1, (entry.start + windowMs - at) / 1000) : 0;
     },
   };
 }
@@ -197,8 +205,8 @@ export function createWorkshop({
       if (error.status === 401) return json(502, { error: 'github_failed', message: 'GitHub did not answer. Try again later.' });
       if (error.status === 404 || error.status === 410) return json(404, { error: 'not_found', message: 'This is not a Workshop issue.' });
       if (error.status === 403) {
-        // GitHub refused the person: whatever this instance believed about their permission is dropped.
-        if (error.as === 'user' && ctx.session) permissions.delete(ctx.session.id);
+        // GitHub refused the person: a cached "can decide" is dropped (a cached "cannot" stays).
+        if (error.as === 'user' && ctx.session && permissions.get(ctx.session.id)?.value === true) permissions.delete(ctx.session.id);
         return json(403, { error: 'forbidden', message: 'GitHub did not allow this.' });
       }
       if (error.status === 422) return json(400, { error: 'rejected', message: 'GitHub did not accept this.' });
@@ -288,12 +296,30 @@ export function createWorkshop({
 
   const installationRequest = (method, path, options = {}) => asInstallation((token) => github.request(method, path, { ...options, token, as: 'installation' }));
 
-  // A call with the person's token. Reads count in the session's own ceiling; a change marks the request
-  // as having changed GitHub, so a refresh follows.
+  // The reads a session may make a minute: more for a person known to be able to decide.
+  function readLimit(session) {
+    return cachedPermission(session.id)?.value === true ? BUDGET.deciderSessionReadsPerMinute : BUDGET.sessionReadsPerMinute;
+  }
+
+  // Admits an action that will make `reads` GitHub reads with the person's token, all or nothing.
+  function admitReads(session, reads) {
+    const wait = sessionReads.take(hash(session.t), readLimit(session), now(), reads);
+    if (wait) tooMany(wait);
+    const store = requests.getStore();
+    if (store) store.prepaid = (store.prepaid || 0) + reads;
+  }
+
+  // A call with the person's token. Reads count in the session's own ceiling (unless the action paid for
+  // them up front); a change marks the request as having changed GitHub, so a refresh follows.
   async function userRequest(session, method, path, options = {}) {
     if (method === 'GET') {
-      const wait = sessionReads.take(hash(session.t), BUDGET.sessionReadsPerMinute, now());
-      if (wait) tooMany(wait);
+      const store = requests.getStore();
+      if (store?.prepaid > 0) {
+        store.prepaid -= 1;
+      } else {
+        const wait = sessionReads.take(hash(session.t), readLimit(session), now());
+        if (wait) tooMany(wait);
+      }
     }
     const answer = await github.request(method, path, { ...options, token: session.t, as: 'user' });
     if (method !== 'GET') {
@@ -322,7 +348,12 @@ export function createWorkshop({
     detach,
     keepAlive,
     afterRefresh: () => { if (unlabelled.size) retryLabels().catch(() => {}); },
-    request: (method, path, options) => { spendOrRefuse('refresh'); return installationRequest(method, path, options); },
+    request: (method, path, options) => {
+      // A refresh that was aborted (lost or past its limit) stops spending.
+      if (options?.signal?.aborted) throw new GitHubError(0, { network: true, timeout: true, as: 'installation' });
+      spendOrRefuse('refresh');
+      return installationRequest(method, path, options);
+    },
   }) : null;
 
   // Shares one in-flight call per key between concurrent requests.
@@ -378,11 +409,14 @@ export function createWorkshop({
     if (cached) return cached.value;
     return shared(permissionPending, session.id, async () => {
       spendOrRefuse(deciders.has(session.id) ? 'decider' : 'permission');
-      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(session.login)}/permission`).catch((error) => {
+      // The account's current login, from GitHub with the person's own token, never the cookie's.
+      const { data: user } = await userRequest(session, 'GET', '/user');
+      if (user?.id !== session.id) throw new GitHubError(401, { as: 'user' });
+      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(user.login)}/permission`).catch((error) => {
         if (error instanceof GitHubError && error.status === 404) return { data: null };
         throw error;
       });
-      // The login is the cookie's; the answer must be about the same account.
+      // The answer must be about the same account.
       const sameAccount = data?.user?.id === undefined || data.user.id === session.id;
       const value = sameAccount && (['admin', 'maintain', 'write'].includes(data?.role_name) || ['admin', 'write'].includes(data?.permission));
       permissions.delete(session.id);
@@ -391,6 +425,8 @@ export function createWorkshop({
       if (value) {
         deciders.add(session.id);
         if (deciders.size > 1000) deciders.delete(deciders.values().next().value);
+      } else {
+        deciders.delete(session.id);
       }
       return value;
     });
@@ -455,9 +491,9 @@ export function createWorkshop({
     ctx.cookies.push(clearCookie(names.session, { secure }), clearCookie(HINT_COOKIE, { secure, httpOnly: false }));
   }
 
-  // GitHub's token endpoint, within the exchange ceiling: { data } on success, { invalid } when GitHub refused.
-  async function oauthToken(params) {
-    spendOrRefuse('exchange');
+  // GitHub's token endpoint, within `ceiling`: { data } on success, { invalid } when GitHub refused.
+  async function oauthToken(params, ceiling) {
+    spendOrRefuse(ceiling);
     const { data } = await github.request('POST', `${config.webBase}/login/oauth/access_token`, {
       accept: 'application/json',
       as: 'client',
@@ -483,7 +519,7 @@ export function createWorkshop({
     const key = hash(session.r);
     let pending = refreshing.get(key);
     if (!pending) {
-      pending = detach(() => oauthToken({ grant_type: 'refresh_token', refresh_token: session.r }))
+      pending = detach(() => oauthToken({ grant_type: 'refresh_token', refresh_token: session.r }, 'renew'))
         .then((result) => {
           if (result.data) {
             const fields = tokenFields(result.data);
@@ -651,7 +687,7 @@ export function createWorkshop({
         spendOrRefuse('signin');
         return (await installationRequest('GET', `/repos/${repo}`)).data.id;
       });
-      const result = await oauthToken({ code, redirect_uri: callbackUrl(), code_verifier: saved.v, repository_id: String(repositoryId) });
+      const result = await oauthToken({ code, redirect_uri: callbackUrl(), code_verifier: saved.v, repository_id: String(repositoryId) }, 'exchange');
       if (!result.data) refuse(400, 'bad_code', 'Sign-in did not finish. Try again.');
       const fields = tokenFields(result.data);
       if (!fields) {
@@ -717,12 +753,15 @@ export function createWorkshop({
       const input = readJson(ctx);
       const title = text(input.title, { limit: LIMITS.title, what: 'The title', oneLine: true });
       const body = text(input.text, { required: false, what: 'The description' });
-      const minute = suggestionsMinute.take(session.id, BUDGET.suggestionsPerMinute, now());
+      const minute = suggestionsMinute.peek(session.id, BUDGET.suggestionsPerMinute, now());
       if (minute) tooMany(minute, 'Too many suggestions. Try again shortly.');
-      const hour = suggestionsHour.take(session.id, BUDGET.suggestionsPerHour, now());
+      const hour = suggestionsHour.peek(session.id, BUDGET.suggestionsPerHour, now());
       if (hour) tooMany(hour, 'Too many suggestions this hour.');
       if (!hasRoom('label')) spendOrRefuse('label');
       const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues`, { body: { title, body } });
+      // An attempt counts only once the issue exists.
+      suggestionsMinute.take(session.id, BUDGET.suggestionsPerMinute, now());
+      suggestionsHour.take(session.id, BUDGET.suggestionsPerHour, now());
       const number = data.number;
       try {
         await labelSuggestion(number).catch(() => labelSuggestion(number));
@@ -749,6 +788,8 @@ export function createWorkshop({
       if (verdict !== null && !VERDICTS.includes(verdict)) refuse(400, 'bad_input', 'That verdict is not known.');
       const note = text(input.note, { required: verdict === 'refine', what: 'The note' });
       await requireDecider(session);
+      // The verdict and its note are admitted together: the issue read, and the duplicate check for the note.
+      admitReads(session, note ? 2 : 1);
       const { issue, kind } = await workshopIssue(session, n);
       if (kind !== 'entry') refuse(404, 'not_found', 'This is not a Workshop entry.');
       const target = verdict ? `verdict:${verdict}` : null;

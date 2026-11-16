@@ -7,7 +7,8 @@ import { BUDGET, createWorkshop } from '../server/workshop.mjs';
 import { count, decisionNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, withBudget } from './workshop-test-support.mjs';
 
 const LIST = /^\/repos\/amontlabs\/silo\/issues$/;
-const lists = (t) => t.fake.state.requests.filter((r) => r.method === 'GET' && LIST.test(r.path) && r.kind === 'installation').length;
+// One per refresh: the first page of the entries list, which every refresh reads first.
+const lists = (t) => t.fake.state.requests.filter((r) => r.method === 'GET' && LIST.test(r.path) && r.kind === 'installation' && r.query.includes('workshop%3Aentry') && /[?&]page=1$/.test(r.query)).length;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withSnapshot(values, run) {
@@ -307,4 +308,187 @@ test('a request that changed GitHub and then failed still starts the refresh', a
     await t.workshop.idle();
     assert.equal(lists(t), before + 1, 'the posted comment was refreshed');
   } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('a GitHub 403 drops only a cached yes; a "no" read removes the account from the deciders', async () => {
+  const t = await setup();
+  try {
+    const visitor = t.client();
+    await visitor.signIn('visitor-fake');
+    assert.equal((await visitor.call('GET', 'me')).json.canDecide, false);
+    issueOf(t.fake, 3).locked = true;
+    for (let i = 0; i < 15; i += 1) assert.equal((await visitor.call('POST', 'comment', { body: { n: 3, text: `locked ${i}` } })).status, 403);
+    await visitor.call('GET', 'me');
+    assert.equal(count(t.fake, 'GET', /visitor-fake\/permission$/), 1, 'the cached "no" survives the 403s');
+
+    const owner = t.client();
+    await owner.signIn('owner-fake');
+    assert.equal((await owner.call('GET', 'me')).json.canDecide, true);
+    t.fake.state.users.get('owner-fake').permission = 'read';
+    t.clock.t += 6 * 60_000;
+    assert.equal((await owner.call('GET', 'me')).json.canDecide, false);
+    t.clock.t += 6 * 60_000;
+    const reads = count(t.fake, 'GET', /owner-fake\/permission$/);
+    await withBudget({ deciderChecksPerMinute: 0 }, async () => {
+      await owner.call('GET', 'me');
+    });
+    assert.equal(count(t.fake, 'GET', /owner-fake\/permission$/), reads + 1, 'read on the general allowance, no longer a decider');
+  } finally { await t.close(); }
+});
+
+test('made-up sign-ins cannot stop existing sessions from refreshing their token', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    await c.signIn('visitor-fake');
+    for (let i = 0; i < BUDGET.tokenExchangesPerMinute + 10; i += 1) {
+      const d = t.client();
+      const s = new URL((await d.call('GET', 'login')).headers.Location).searchParams.get('state');
+      await d.call('GET', `callback?code=made-up&state=${s}`);
+    }
+    t.clock.t += 7 * 3600_000 + 58 * 60_000;
+    const tokens = count(t.fake, 'POST', /^\/login\/oauth\/access_token$/);
+    assert.equal((await c.call('GET', 'vote?n=1')).status, 200);
+    assert.equal(count(t.fake, 'POST', /^\/login\/oauth\/access_token$/), tokens + 1, 'the refresh had its own allowance');
+  } finally { await t.close(); }
+});
+
+test('large bodies and comments on Workshop issues keep only their cuts: 1,000 comments add under 10 MB', async () => {
+  setFlagsFromString('--expose_gc');
+  const gc = runInNewContext('gc');
+  const t = await setup();
+  try {
+    for (let i = 0; i < 10; i += 1) {
+      const issue = t.fake.addIssue({ title: `Big ${i}`, body: Buffer.alloc(60_000, 'b').toString(), labels: ['workshop:suggestion'], author: 'visitor-fake' });
+      for (let j = 0; j < 100; j += 1) t.fake.addComment(issue.number, 'visitor-fake', Buffer.alloc(60_000, 'c').toString());
+    }
+    gc(); gc();
+    const before = process.memoryUsage().heapUsed;
+    const state = (await t.client().call('GET', 'state')).json;
+    await t.workshop.idle();
+    gc(); gc();
+    const added = process.memoryUsage().heapUsed - before;
+    assert.equal(Object.keys(state.issues).length, 16);
+    const one = (await t.client().call('GET', 'issue?n=9')).json;
+    assert.equal(one.comments.length, 100);
+    assert.ok(added < 10 * 1024 * 1024, `${(added / 1024 / 1024).toFixed(1)} MB`);
+  } finally { await t.close(); }
+});
+
+test('a write answers at once when its refresh cannot start within the wait', async () => {
+  await withSnapshot({ writeGap: 1500, writeWait: 600 }, async () => {
+    const t = await setup();
+    try {
+      const c = t.client();
+      await c.signIn('visitor-fake');
+      await t.client().call('GET', 'state');
+      await c.call('POST', 'comment', { body: { n: 1, text: 'first' } });
+      const started = Date.now();
+      assert.equal((await c.call('POST', 'comment', { body: { n: 1, text: 'second' } })).status, 200);
+      assert.ok(Date.now() - started < 400, `${Date.now() - started} ms`);
+      await t.workshop.idle();
+      assert.equal((await t.client().call('GET', 'issue?n=1')).json.comments.at(-1).text, 'second', 'the refresh came when the floor allowed');
+    } finally { await t.close(); }
+  });
+});
+
+test('a lost refresh is aborted and stops spending; a late failure does not set the 60-second wait', async () => {
+  const t = await setup();
+  const ENTRIES = (r) => LIST.test(r.path) && r.query.includes('workshop%3Aentry');
+  try {
+    await t.client().call('GET', 'state');
+    await withSnapshot({ lostAfter: 200, refreshLimit: 10_000 }, async () => {
+      t.clock.t += 31_000;
+      t.fake.state.hook = (r) => (ENTRIES(r) ? { delay: 700 } : null);
+      const before = t.fake.state.requests.length;
+      await t.client().call('GET', 'state');
+      await wait(300);
+      t.fake.state.hook = null;
+      t.clock.t += 31_000;
+      await t.client().call('GET', 'state');
+      await t.workshop.idle();
+      await wait(600);
+      const calls = t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation' && r.method === 'GET');
+      assert.equal(calls.length, 1 + 4, 'the lost refresh made no call after its first; the new one made its four');
+    });
+    await withSnapshot({ lostAfter: 200, refreshLimit: 400 }, async () => {
+      t.clock.t += 31_000;
+      t.fake.state.hook = (r) => (ENTRIES(r) ? { delay: 900 } : null);
+      await t.client().call('GET', 'state');
+      await wait(700);
+      await t.workshop.idle();
+      t.fake.state.hook = null;
+      t.clock.t += 31_000;
+      const before = lists(t);
+      await t.client().call('GET', 'state');
+      await t.workshop.idle();
+      assert.equal(lists(t), before + 1, 'no 60-second wait after a failure that came late');
+    });
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('only Workshop issues are listed: foreign issues are neither fetched nor counted against the cap', async () => {
+  const t = await setup();
+  try {
+    for (let i = 0; i < 2500; i += 1) t.fake.addIssue({ title: `Foreign ${i}`, author: 'visitor-fake' });
+    const state = (await t.client().call('GET', 'state')).json;
+    assert.equal(Object.keys(state.issues).length, 6);
+    const pages = t.fake.state.requests.filter((r) => LIST.test(r.path));
+    assert.equal(pages.length, 3, 'one page of each of the three lists');
+    assert.ok(pages.every((r) => /labels=workshop%3A(entry|decision|suggestion)/.test(r.query)));
+  } finally { await t.close(); }
+});
+
+test('a decider\'s session has 300 reads a minute; a verdict and its note are admitted together or not at all', async () => {
+  assert.equal(BUDGET.deciderSessionReadsPerMinute, 300);
+  const t = await setup();
+  try {
+    const owner = t.client();
+    await owner.signIn('owner-fake');
+    for (let i = 0; i < 60; i += 1) {
+      const response = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'refine', note: `note ${i}` } });
+      assert.equal(response.status, 200, `verdict ${i}: ${response.body}`);
+    }
+    t.clock.t += 61_000;
+    await withBudget({ deciderSessionReadsPerMinute: 3 }, async () => {
+      assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'refine', note: 'fits' } })).status, 200);
+      const before = t.fake.state.requests.length;
+      const labels = [...issueOf(t.fake, entryNumber).labels];
+      const refused = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'later', note: 'does not fit' } });
+      assert.equal(refused.status, 429);
+      assert.equal(t.fake.state.requests.length, before, 'refused before its first call');
+      assert.deepEqual(issueOf(t.fake, entryNumber).labels, labels);
+    });
+  } finally { await t.close(); }
+});
+
+test('a suggestion attempt counts only when the issue was created', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    await c.signIn('visitor-fake');
+    t.fake.state.hook = (r) => (r.method === 'POST' && r.path === '/repos/amontlabs/silo/issues' ? { status: 500 } : null);
+    for (let i = 0; i < 5; i += 1) assert.equal((await c.call('POST', 'suggest', { body: { title: `Fails ${i}`, text: 'x' } })).status, 502);
+    t.fake.state.hook = null;
+    const statuses = [];
+    for (let i = 0; i < 4; i += 1) statuses.push((await c.call('POST', 'suggest', { body: { title: `Works ${i}`, text: 'x' } })).status);
+    assert.deepEqual(statuses, [200, 200, 200, 429]);
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('the permission is read for the account\'s current login, never the cookie\'s', async () => {
+  const t = await setup();
+  try {
+    const owner = t.client();
+    await owner.signIn('owner-fake');
+    const user = t.fake.state.users.get('owner-fake');
+    t.fake.state.users.delete('owner-fake');
+    user.login = 'owner-renamed';
+    t.fake.state.users.set('owner-renamed', user);
+    for (const entry of t.fake.state.tokens.values()) if (entry.login === 'owner-fake') entry.login = 'owner-renamed';
+    t.fake.addUser('owner-fake', { permission: 'read' });
+    assert.equal((await owner.call('GET', 'me')).json.canDecide, true);
+    assert.equal(count(t.fake, 'GET', /owner-renamed\/permission$/), 1);
+    assert.equal(count(t.fake, 'GET', /collaborators\/owner-fake\/permission$/), 0);
+  } finally { await t.close(); }
 });

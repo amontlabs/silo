@@ -9,12 +9,15 @@
 // is always included. A refresh asked for by a write starts at most once every
 // 5 seconds. None starts while GitHub has asked us to wait. A refresh that has
 // not finished after 15 seconds is treated as lost, and the next request
-// starts a new one. Work that outlives a response is handed to `keepAlive`
+// starts a new one; every refresh stops (its calls are aborted) after 12
+// seconds or when declared lost, so two never spend at once. Work that outlives a response is handed to `keepAlive`
 // (Vercel's `waitUntil`), but nothing depends on it for correctness.
 //
 // A refresh reads, with the installation token:
-// - the repository's issue list (all states, newest first, 100 a page), each
-//   page sent with the ETag from the last refresh, so an unchanged page is a 304;
+// - one issue list per Workshop label (entries, then decisions, then
+//   suggestions; all states, newest first, 100 a page), each page sent with the
+//   ETag from the last refresh, so an unchanged page is a 304; nothing else in
+//   the repository is fetched or counted;
 // - the repository-wide comment list: the newest comments in full on the first
 //   refresh and every 10 minutes (so deleted comments disappear), and otherwise
 //   only comments updated since the previous refresh, less a minute of overlap.
@@ -25,12 +28,13 @@
 // refresh swaps in, the patches made since that refresh began are applied
 // again, and older ones are dropped, since GitHub's answer already holds them.
 import { GitHubError, nextLink } from './github.mjs';
-import { clean, commentIssue, commentOf, kindOf, readBody, reasonOf, verdictOf } from './issues.mjs';
+import { clean, commentIssue, commentOf, kindOf, LABELS, readBody, reasonOf, verdictOf } from './issues.mjs';
 
 export const SNAPSHOT = {
   maxAge: 30_000,
   writeGap: 5000,
   lostAfter: 15_000,
+  refreshLimit: 12_000,
   ageWait: 1500,
   writeWait: 2000,
   staleAfter: 10 * 60_000,
@@ -90,6 +94,7 @@ export function createSnapshot({
   let swapped = 0;
   let again = false;
   let timer = null;
+  let timerAt = 0;
   let lastStart = -Infinity;
   let retryAt = 0;
   let lastError = null;
@@ -111,15 +116,16 @@ export function createSnapshot({
   }
 
   // Pages of one listing, each conditional on its last ETag. Each page keeps only its ETag and the
-  // items `reduce` returns (null drops an item).
-  async function pages(path, limit, cache, reduce) {
+  // items `reduce` returns (null drops an item). `fresh` collects the pages for the next refresh.
+  async function pages(path, limit, cache, reduce, signal, fresh = new Map()) {
     const items = [];
-    const fresh = new Map();
     let complete = false;
+    let used = 0;
     for (let page = 1; page <= limit; page += 1) {
       const url = `${path}&per_page=100&page=${page}`;
       const known = cache?.get(url);
-      const answer = await request('GET', url, { etag: known?.etag });
+      used += 1;
+      const answer = await request('GET', url, { etag: known?.etag, signal });
       let entry;
       if (answer.status === 304 && known) {
         entry = known;
@@ -134,7 +140,7 @@ export function createSnapshot({
         break;
       }
     }
-    return { items, cache: fresh, complete };
+    return { items, cache: fresh, complete, used };
   }
 
   function trim(issues) {
@@ -152,9 +158,21 @@ export function createSnapshot({
     for (const [entry, comment] of all.slice(0, total - SNAPSHOT.comments)) entry.comments.delete(comment.id);
   }
 
-  async function build() {
+  async function build(signal) {
     const started = now();
-    const listing = await pages(`/repos/${repo}/issues?state=all&sort=created&direction=desc`, SNAPSHOT.issuePages, issuePages, reduceIssue);
+    // One conditional list per kind label, sharing one page budget.
+    const listing = { items: [], cache: new Map(), complete: true };
+    let budget = SNAPSHOT.issuePages;
+    for (const label of Object.values(LABELS)) {
+      if (budget <= 0) {
+        listing.complete = false;
+        break;
+      }
+      const part = await pages(`/repos/${repo}/issues?labels=${encodeURIComponent(label)}&state=all&sort=created&direction=desc`, budget, issuePages, reduceIssue, signal, listing.cache);
+      budget -= part.used;
+      listing.items.push(...part.items);
+      if (!part.complete) listing.complete = false;
+    }
     if (!listing.complete) log({ snapshot: 'issue_pages_limit' });
 
     const full = fullDue || !current || started - lastFull >= SNAPSHOT.fullReloadEvery;
@@ -172,10 +190,10 @@ export function createSnapshot({
     let comments;
     let incompleteSince = false;
     if (full) {
-      comments = await pages(`/repos/${repo}/issues/comments?sort=created&direction=desc`, SNAPSHOT.fullCommentPages, commentPages, reduceComment);
+      comments = await pages(`/repos/${repo}/issues/comments?sort=created&direction=desc`, SNAPSHOT.fullCommentPages, commentPages, reduceComment, signal);
     } else {
       const since = new Date(current.startedAt - SNAPSHOT.overlap).toISOString().replace(/\.\d{3}Z$/, 'Z');
-      comments = await pages(`/repos/${repo}/issues/comments?sort=updated&direction=asc&since=${since}`, SNAPSHOT.sinceCommentPages, null, reduceComment);
+      comments = await pages(`/repos/${repo}/issues/comments?sort=updated&direction=asc&since=${since}`, SNAPSHOT.sinceCommentPages, null, reduceComment, signal);
       incompleteSince = !comments.complete;
     }
     for (const { number, comment } of comments.items) issues.get(number)?.comments.set(comment.id, comment);
@@ -207,6 +225,7 @@ export function createSnapshot({
   function forgetLost() {
     if (run && wall() - run.startedWall > SNAPSHOT.lostAfter) {
       log({ snapshot: 'refresh_lost' });
+      run.controller.abort();
       run = null;
     }
   }
@@ -221,7 +240,10 @@ export function createSnapshot({
     const startedWall = wall();
     lastStart = startedWall;
     let localRetry = 0;
-    const promise = detach(() => build())
+    const controller = new AbortController();
+    const limit = setTimeout(() => controller.abort(), SNAPSHOT.refreshLimit);
+    limit.unref?.();
+    const promise = detach(() => build(controller.signal))
       .then((snapshot) => {
         if (gen > swapped) {
           swapped = gen;
@@ -241,6 +263,8 @@ export function createSnapshot({
           if (error instanceof GitHubError && error.local && current) {
             // Our own ceiling ran out: try again when it resets, without the wait meant for GitHub.
             localRetry = wait;
+          } else if (wall() - startedWall > SNAPSHOT.lostAfter) {
+            // A failure this late comes from an instance that was frozen, not from GitHub.
           } else {
             retryAt = now() + Math.max(SNAPSHOT.retryAfter, wait);
           }
@@ -250,6 +274,7 @@ export function createSnapshot({
         throw error;
       })
       .finally(() => {
+        clearTimeout(limit);
         settleWaiters(startedWall);
         if (run?.gen !== gen) return;
         run = null;
@@ -258,7 +283,7 @@ export function createSnapshot({
         if (localRetry) schedule({ delay: localRetry });
         else if (followUp && !blocked()) schedule({ write: true });
       });
-    run = { gen, startedWall, promise };
+    run = { gen, startedWall, promise, controller };
     keepAlive(promise.catch(() => {}));
     return promise;
   }
@@ -280,6 +305,7 @@ export function createSnapshot({
     }
     let done;
     keepAlive(new Promise((resolve) => { done = resolve; }));
+    timerAt = wall() + wait;
     timer = setTimeout(() => {
       timer = null;
       if (blocked()) return done();
@@ -323,10 +349,16 @@ export function createSnapshot({
   // After a change on GitHub: refresh at once (coalesced, at most one every SNAPSHOT.writeGap),
   // unless GitHub asked us to wait. Answers a promise that settles when a refresh that includes the
   // change has ended, or after SNAPSHOT.writeWait.
+  // The write waits only when the refresh that will include it is running or starts within the wait.
   function refreshSoon() {
     const since = wall();
     if (blocked()) return Promise.resolve();
     schedule({ write: true });
+    let startsAt = Infinity;
+    if (run && run.startedWall >= since) startsAt = run.startedWall;
+    else if (timer) startsAt = timerAt;
+    else if (run) startsAt = Math.max(wall(), lastStart + SNAPSHOT.writeGap);
+    if (startsAt - wall() > SNAPSHOT.writeWait) return Promise.resolve();
     return waitFor(since, SNAPSHOT.writeWait);
   }
 
