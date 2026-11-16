@@ -9,7 +9,8 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "test": "node --test scripts/*.test.mjs && vitest run",
     "typecheck": "tsc --noEmit",
-    "build:vercel": "npm run build && node scripts/prepare-vercel.mjs"
+    "build:vercel": "npm run build && node scripts/prepare-vercel.mjs",
+    "workshop:dev": "node scripts/workshop-dev.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
