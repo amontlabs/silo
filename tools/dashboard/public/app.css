@@ -79,8 +79,8 @@ html.js[data-view="decisions"] #decisions, html.js[data-view="private"] #private
 /* For you */
 .inbox { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 40px; align-items: start; }
 .queue-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-.queue-tools { display: flex; align-items: center; gap: 14px; }
-.dots { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.queue-tools { display: flex; align-items: center; gap: 14px; flex: none; white-space: nowrap; }
+.dots { display: flex; gap: 6px; justify-content: flex-end; }
 .dot { width: 22px; height: 5px; border-radius: 3px; background: var(--line-strong); border: 0; padding: 0; transition: .2s; }
 .dot.done { background: var(--built); opacity: .55; }
 .dot.on { background: var(--text); width: 34px; }

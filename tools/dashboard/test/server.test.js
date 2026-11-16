@@ -296,3 +296,32 @@ test('static files and mermaid are served', async () => {
   assert.equal(mermaid.status, 200);
   assert.match(mermaid.headers['content-type'], /javascript/);
 });
+
+test('without JavaScript every view is in the page, in order, and the stylesheet hides views only when scripts run', async () => {
+  const home = tempDir();
+  fs.mkdirSync(path.join(home, 'private'));
+  fs.writeFileSync(path.join(home, 'private', 'plan.md'), '# Plan\n\nFirst.\n\n## Part\n\nMore.');
+  const running = await start({ home });
+  try {
+    running.store.createItem({ kind: 'decide', title: 'One', options: [{ label: 'A' }, { label: 'B' }] });
+    running.store.createItem({ kind: 'look', title: 'Two', defaultText: 'd' });
+    const html = await page(running.port);
+    const views = [...html.matchAll(/<section class="view" id="([a-z-]+)" data-region/g)].map((match) => match[1]);
+    assert.deepEqual(views, ['for-you', 'product', 'journeys', 'decisions', 'private']);
+    assert.match(html, /<html lang="en">/, 'no js class until a script adds it');
+    assert.equal(html.match(/<article class="card" id="item-\d+"/g).length, 2, 'every waiting card is in the page');
+    assert.match(html, /<article class="reader" id="note-plan-md">[\s\S]*<section id="note-plan-md--part">/);
+    // Scripts are files; nothing inline.
+    assert.deepEqual([...html.matchAll(/<script\b[^>]*>/g)].map((match) => match[0]), ['<script src="/boot.js">', '<script type="module" src="/app.js">']);
+    assert.doesNotMatch(html, /<script>|\son[a-z]+=/i);
+    const css = (await request(running.port, { url: '/app.css' })).body.toString();
+    for (const rule of css.match(/[^}]*\{[^}]*display:\s*none[^}]*\}/g)) {
+      if (/(^|[\s,}])\.view\b/.test(rule.split('{')[0])) assert.match(rule.split('{')[0], /html\.js/, rule);
+    }
+    const boot = await request(running.port, { url: '/boot.js' });
+    assert.equal(boot.status, 200);
+    assert.match(boot.headers['content-type'], /javascript/);
+  } finally {
+    await stop(running);
+  }
+});

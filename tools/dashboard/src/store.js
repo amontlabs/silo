@@ -199,9 +199,13 @@ export class Store {
       throw new StoreVersionError(found, SCHEMA_VERSION);
     }
     this.db.exec('PRAGMA journal_mode = WAL');
-    // Foreign keys stay off while migrating: rebuilding the items table drops
-    // the old one, which must not cascade to replies and attachments.
-    if (found < SCHEMA_VERSION) this.migrate();
+    // Foreign keys are off while migrating: rebuilding the items table drops
+    // the old one, which must not cascade to replies and attachments. node:sqlite
+    // turns them on by default, so this is explicit.
+    if (found < SCHEMA_VERSION) {
+      this.db.exec('PRAGMA foreign_keys = OFF');
+      this.migrate();
+    }
     this.db.exec('PRAGMA foreign_keys = ON');
     this.restrictAccess();
   }
