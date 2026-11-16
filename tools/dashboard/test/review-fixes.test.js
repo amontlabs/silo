@@ -116,17 +116,17 @@ test('a heading whose 200th character is a space: the page and the server agree'
   }
 });
 
-test('ids: one shape for section keys and entries; long headings are cut; the real PRODUCT.md gives anchors the server accepts', () => {
+test('ids: one shape for section keys and entries; long headings are cut; any PRODUCT.md gives anchors the server accepts', () => {
   const longHeading = `${'Very long heading '.repeat(8)}`;
   assert.ok(splitSections(`## ${longHeading}`).sections[0].key.length <= 80);
   const keys = splitSections(`## ${longHeading}\n\n## ${longHeading}\n`).sections.map((section) => section.key);
   assert.ok(keys[1].length <= 80 && keys[1].endsWith('-2'));
   const targets = noteTargets({ product: `## ${longHeading}\n\nx\n` });
   for (const anchor of targets.keys()) assert.doesNotThrow(() => parseAnchor(anchor), anchor);
-  const docs = path.resolve(HERE, '../../../docs/product');
-  const real = noteTargets({ product: fs.readFileSync(path.join(docs, 'PRODUCT.md'), 'utf8') });
-  assert.ok(real.size > 3);
-  for (const [anchor, target] of real) {
+  const product = `# Silo\n\n## In one sentence\n\nHero.\n\n## Who it is *for*\n\nx\n\n## Rules — that hold \`everywhere\`\n\nx\n\n## Ünïcödé & ümlauts!\n\nx\n\n## ${'Long '.repeat(60)}\n\nx\n\n## Who it is for\n\nx\n`;
+  const all = noteTargets({ product });
+  assert.equal(all.size, 5);
+  for (const [anchor, target] of all) {
     assert.doesNotThrow(() => parseAnchor(anchor), anchor);
     assert.ok(target.text && target.text.length <= 200, anchor);
   }

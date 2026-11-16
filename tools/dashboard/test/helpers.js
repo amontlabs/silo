@@ -86,7 +86,8 @@ export function writeDoc(repo, name, text) {
 export function runCli(args, { home, input, env = {} } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [BIN, ...args], {
-      env: { ...process.env, SILO_DASHBOARD_HOME: home, ...env },
+      // Never the real checkout: a CLI run reads docs/product from a fixture unless the test names one.
+      env: { ...process.env, SILO_DASHBOARD_REPO: tempDir('dash-norepo-'), SILO_DASHBOARD_HOME: home, ...env },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';

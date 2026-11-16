@@ -163,7 +163,7 @@ test('a store with a newer schema is refused with exit 1', async () => {
 });
 
 function serve(args, home, env = {}) {
-  const child = spawn(process.execPath, [BIN, 'serve', ...args], { env: { ...process.env, SILO_DASHBOARD_HOME: home, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [BIN, 'serve', ...args], { env: { ...process.env, SILO_DASHBOARD_REPO: tempDir('dash-norepo-'), SILO_DASHBOARD_HOME: home, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => (stdout += chunk));

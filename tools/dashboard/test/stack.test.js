@@ -83,14 +83,6 @@ test('readFeatures: a missing file is null; a missing stages.json falls back to 
   assert.deepEqual(list.stages.map((stage) => stage.title), ['shell', 'loop', 'living', 'extras']);
 });
 
-test('the real feature list parses with nothing skipped', () => {
-  const list = readFeatures(path.resolve(import.meta.dirname, '../../..'));
-  if (list === null) return;
-  assert.equal(list.skipped, 0);
-  assert.equal(list.stages[0].id, 'shell');
-  assert.deepEqual(list.features.map((entry) => entry.n), list.features.map((_, index) => index + 1));
-});
-
 // ---- verdicts, totals, schematic ----
 
 const parsed = () => parseFeatures(FEATURES.map(line).join('\n')).features;
