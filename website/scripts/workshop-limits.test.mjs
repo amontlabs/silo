@@ -108,7 +108,7 @@ test('every handler has one deadline for all its GitHub calls, and answers 502 w
     await owner.signIn('owner-fake');
     const quick = variant(t, { deadlineMs: 400 });
     const cookie = [...owner.jar].map(([k, v]) => `${k}=${v}`).join('; ');
-    t.fake.state.hook = (r) => (r.kind === 'user' ? { delay: 150 } : null);
+    t.fake.state.hook = (r) => (r.kind === 'user' ? { delay: 250 } : null);
     const started = Date.now();
     const response = await quick.handle({
       method: 'POST', url: '/api/workshop/verdict', headers: { origin: ORIGIN, 'x-workshop': '1', cookie }, body: JSON.stringify({ n: entryNumber, verdict: 'take' }),

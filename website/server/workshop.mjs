@@ -9,7 +9,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAppAuth } from './app-auth.mjs';
-import { createGitHub, DEFAULT_TIMEOUT, GitHubError } from './github.mjs';
+import { createGitHub, DEFAULT_TIMEOUT, GitHubError, nextLink } from './github.mjs';
 import { kindOf, LABELS, labelNames, reasonOf, VERDICTS } from './issues.mjs';
 import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCookie, SESSION_MAX_AGE, STATE_MAX_AGE, unseal } from './session.mjs';
 import { createSnapshot } from './snapshot.mjs';
@@ -19,16 +19,39 @@ export { LABELS, VERDICTS };
 const DIRECTION_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
 const TITLE_FORBIDDEN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/;
 export const LIMITS = { text: 5000, title: 120 };
-// Ceilings per instance and minute: one for each use of the installation token, kept
-// apart so that no use can starve another, and the writes each person may make.
-export const BUDGET = { refreshCallsPerMinute: 60, permissionChecksPerMinute: 12, signinLookupsPerMinute: 4, labelCallsPerMinute: 6, writesPerMinute: 30 };
-const CEILINGS = { refresh: 'refreshCallsPerMinute', permission: 'permissionChecksPerMinute', signin: 'signinLookupsPerMinute', label: 'labelCallsPerMinute' };
+// Ceilings per instance. The installation token has one per use, kept apart so that no use can
+// starve another; `exchange` covers calls to GitHub's token endpoint (sign-in and token refresh).
+// The rest are per person (writes, suggestions) and per session (GitHub reads).
+export const BUDGET = {
+  refreshCallsPerMinute: 40,
+  permissionChecksPerMinute: 12,
+  deciderChecksPerMinute: 4,
+  signinLookupsPerMinute: 4,
+  labelCallsPerMinute: 20,
+  tokenExchangesPerMinute: 30,
+  writesPerMinute: 20,
+  deciderWritesPerMinute: 120,
+  suggestionsPerMinute: 3,
+  suggestionsPerHour: 10,
+  sessionReadsPerMinute: 60,
+};
+const CEILINGS = {
+  refresh: ['refreshCallsPerMinute', true],
+  permission: ['permissionChecksPerMinute', true],
+  decider: ['deciderChecksPerMinute', true],
+  signin: ['signinLookupsPerMinute', true],
+  label: ['labelCallsPerMinute', true],
+  exchange: ['tokenExchangesPerMinute', false],
+};
 export const DEADLINE = 12_000;
-const RECENT_DECISION = 5 * 60_000;
+const RECENT_POST = 5 * 60_000;
 const PERMISSION_TTL = 5 * 60_000;
 const REFRESH_MARGIN = 5 * 60_000;
 const MAX_BLOCK = 60 * 60_000;
 const UNLABELLED_LIMIT = 100;
+const LABEL_ATTEMPTS = 5;
+const REJECTED_FOR = 24 * 3600_000;
+const REMEMBERED = 10_000;
 const SIGNIN_FAILED = '/workshop?signin=failed';
 
 const PUBLIC_READ = 'public, s-maxage=10, stale-while-revalidate=60';
@@ -50,9 +73,53 @@ class Refusal extends Error {
 }
 
 const refuse = (status, code, message, extra, headers) => { throw new Refusal(status, code, message, extra, headers); };
+const tooMany = (seconds, message = 'Too many requests. Try again shortly.') => refuse(429, 'rate_limited', message, {}, { 'Retry-After': String(Math.max(1, Math.ceil(seconds))) });
+const hash = (value) => createHash('sha256').update(String(value)).digest('hex');
 
-export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.now, log = defaultLog, timeoutMs = DEFAULT_TIMEOUT, deadlineMs = DEADLINE }) {
-  // Every handler's GitHub calls share one deadline; background work runs outside it.
+// Fixed-window counters by key, bounded in size.
+function counter(windowMs) {
+  const windows = new Map();
+  return {
+    // Takes one from `key`'s allowance of `limit`, or answers the seconds until it resets.
+    take(key, limit, at) {
+      let entry = windows.get(key);
+      if (!entry || at - entry.start >= windowMs) {
+        entry = { start: at, count: 0 };
+        windows.delete(key);
+        windows.set(key, entry);
+        if (windows.size > REMEMBERED) windows.delete(windows.keys().next().value);
+      }
+      if (entry.count >= limit) return (entry.start + windowMs - at) / 1000;
+      entry.count += 1;
+      return 0;
+    },
+  };
+}
+
+// A set of keys remembered for a while, bounded in size.
+function memory(forMs) {
+  const entries = new Map();
+  return {
+    has(key, at) {
+      const until = entries.get(key);
+      if (until === undefined) return false;
+      if (until > at) return true;
+      entries.delete(key);
+      return false;
+    },
+    add(key, at) {
+      entries.delete(key);
+      entries.set(key, at + forMs);
+      if (entries.size > REMEMBERED) entries.delete(entries.keys().next().value);
+    },
+  };
+}
+
+export function createWorkshop({
+  config, fetch = globalThis.fetch, now = Date.now, log = defaultLog,
+  timeoutMs = DEFAULT_TIMEOUT, deadlineMs = DEADLINE, keepAlive = () => {},
+}) {
+  // Every handler's GitHub calls, and every wait it does, share one deadline; background work runs outside it.
   const requests = new AsyncLocalStorage();
   const detach = (fn) => requests.exit(fn);
   const github = createGitHub({ apiBase: config.apiBase, fetch, now, timeoutMs, deadline: () => requests.getStore()?.deadline });
@@ -64,14 +131,21 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
 
   let blockedUntil = 0;
   const ceilings = Object.fromEntries(Object.keys(CEILINGS).map((name) => [name, { start: 0, used: 0 }]));
-  const permissionCache = new Map();
+  const permissions = new Map();
   const permissionPending = new Map();
+  const deciders = new Set();
   const refreshing = new Map();
-  const writes = new Map();
-  const unlabelled = new Set();
+  const writes = counter(60_000);
+  const suggestionsMinute = counter(60_000);
+  const suggestionsHour = counter(3600_000);
+  const sessionReads = counter(60_000);
+  const usedSignins = memory(STATE_MAX_AGE * 1000);
+  const rejected = memory(REJECTED_FOR);
+  const unlabelled = new Map();
 
   async function handle(request) {
     const ctx = { request, endpoint: null, cookies: [], headers: {} };
+    const store = { deadline: Date.now() + deadlineMs, changed: false };
     let response;
     try {
       let url;
@@ -92,10 +166,15 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       if (!config.configured) refuse(503, 'not_configured', 'Live comments are not set up on this server.');
       if (request.method === 'POST') checkSameSite(request);
       const route = routes.get(`${request.method} ${endpoint}`);
-      response = await requests.run({ deadline: Date.now() + deadlineMs }, () => route(ctx));
+      response = await requests.run(store, () => route(ctx));
     } catch (error) {
       response = errorResponse(ctx, error);
       if ((ctx.endpoint === 'login' || ctx.endpoint === 'callback') && response.status !== 405) response = redirect(SIGNIN_FAILED);
+    }
+    // Any request that changed something on GitHub starts a refresh; a successful one waits for it briefly.
+    if (store.changed && snapshots) {
+      const included = snapshots.refreshSoon();
+      if (response.status === 200) await requests.run(store, () => bounded(included).catch(() => {}));
     }
     response.headers = { 'Cache-Control': PRIVATE, ...ctx.headers, ...response.headers, 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
     response.cookies = [...ctx.cookies, ...(response.cookies || [])];
@@ -111,12 +190,17 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       if (error.notInstalled) return json(503, { error: 'not_configured', message: 'Live comments are not set up on this server.' });
       if (error.rateLimited) return rateLimited(error.retryAfter);
       if (error.status === 401 && error.as === 'user') {
+        if (ctx.session) rejected.add(hash(ctx.session.t), now());
         clearSession(ctx);
         return json(401, { error: 'signed_out', message: 'Sign in again.' });
       }
       if (error.status === 401) return json(502, { error: 'github_failed', message: 'GitHub did not answer. Try again later.' });
       if (error.status === 404 || error.status === 410) return json(404, { error: 'not_found', message: 'This is not a Workshop issue.' });
-      if (error.status === 403) return json(403, { error: 'forbidden', message: 'GitHub did not allow this.' });
+      if (error.status === 403) {
+        // GitHub refused the person: whatever this instance believed about their permission is dropped.
+        if (error.as === 'user' && ctx.session) permissions.delete(ctx.session.id);
+        return json(403, { error: 'forbidden', message: 'GitHub did not allow this.' });
+      }
       if (error.status === 422) return json(400, { error: 'rejected', message: 'GitHub did not accept this.' });
       return json(502, { error: 'github_failed', message: 'GitHub did not answer. Try again later.' });
     }
@@ -133,50 +217,69 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     if (request.headers['x-workshop'] !== '1') refuse(403, 'bad_request_header', 'This request did not come from the Workshop.');
   }
 
-  // The installation token: budget, blocking and calls
+  // Waits for `promise`, but never past the current request's deadline (outside a request, without limit).
+  function bounded(promise) {
+    const deadline = requests.getStore()?.deadline;
+    if (deadline === undefined) return promise;
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new GitHubError(0, { timeout: true })), Math.max(0, deadline - Date.now()));
+        timer.unref?.();
+      }),
+    ]).finally(() => clearTimeout(timer));
+  }
+
+  // Ceilings
 
   function blockFor(seconds) {
     blockedUntil = Math.max(blockedUntil, now() + Math.min((seconds || 60) * 1000, MAX_BLOCK));
   }
 
-  function blockedError() {
-    return new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil((blockedUntil - now()) / 1000), as: 'installation' });
-  }
-
   function noteInstallationError(error) {
     if (!(error instanceof GitHubError)) return;
-    if (error.rateLimited) blockFor(error.retryAfter);
+    if (error.rateLimited && !error.local) blockFor(error.retryAfter);
     if (error.status === 401) app.dropToken();
   }
 
-  // Takes `cost` calls from this minute's ceiling `name`, or answers false when it is spent or GitHub asked us to wait.
-  function spend(name, cost = 1) {
-    const at = now();
-    if (at < blockedUntil) return false;
+  function ceilingOf(name) {
     const ceiling = ceilings[name];
+    const at = now();
     if (at - ceiling.start >= 60_000) {
       ceiling.start = at;
       ceiling.used = 0;
     }
-    if (ceiling.used + cost > BUDGET[CEILINGS[name]]) return false;
-    ceiling.used += cost;
+    return ceiling;
+  }
+
+  // Whether ceiling `name` has `cost` calls left this minute (and, for the installation, GitHub is not making us wait).
+  function hasRoom(name, cost = 1) {
+    const [key, installation] = CEILINGS[name];
+    if (installation && now() < blockedUntil) return false;
+    return ceilingOf(name).used + cost <= BUDGET[key];
+  }
+
+  function spend(name, cost = 1) {
+    if (!hasRoom(name, cost)) return false;
+    ceilingOf(name).used += cost;
     return true;
   }
 
   function spendOrRefuse(name, cost = 1) {
     if (spend(name, cost)) return;
     const at = now();
-    const blocked = at < blockedUntil;
-    const wait = Math.max(blockedUntil - at, ceilings[name].start + 60_000 - at, 1000);
+    const blocked = CEILINGS[name][1] && at < blockedUntil;
+    const wait = Math.max(blocked ? blockedUntil - at : 0, ceilings[name].start + 60_000 - at, 1000);
     // `local`: our own ceiling, not GitHub, said no.
     throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil(wait / 1000), as: 'installation', local: !blocked });
   }
 
   // Every installation-token call goes through here: nothing reaches GitHub while it has asked us to wait.
   async function asInstallation(call) {
-    if (now() < blockedUntil) throw blockedError();
+    if (now() < blockedUntil) throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil((blockedUntil - now()) / 1000), as: 'installation' });
     try {
-      return await call(await app.installationToken());
+      return await call(await bounded(app.installationToken()));
     } catch (error) {
       noteInstallationError(error);
       throw error;
@@ -184,25 +287,52 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
   }
 
   const installationRequest = (method, path, options = {}) => asInstallation((token) => github.request(method, path, { ...options, token, as: 'installation' }));
+
+  // A call with the person's token. Reads count in the session's own ceiling; a change marks the request
+  // as having changed GitHub, so a refresh follows.
+  async function userRequest(session, method, path, options = {}) {
+    if (method === 'GET') {
+      const wait = sessionReads.take(hash(session.t), BUDGET.sessionReadsPerMinute, now());
+      if (wait) tooMany(wait);
+    }
+    const answer = await github.request(method, path, { ...options, token: session.t, as: 'user' });
+    if (method !== 'GET') {
+      const store = requests.getStore();
+      if (store) store.changed = true;
+    }
+    return answer;
+  }
+
+  async function userPages(session, path) {
+    const items = [];
+    let next = path + (path.includes('?') ? '&' : '?') + 'per_page=100';
+    for (let page = 0; next && page < 50; page += 1) {
+      const { data, headers } = await userRequest(session, 'GET', next);
+      items.push(...(Array.isArray(data) ? data : []));
+      next = nextLink(headers.get('link'));
+      if (next && !next.startsWith(config.apiBase + '/')) throw new GitHubError(502, { as: 'user' });
+    }
+    return items;
+  }
+
   const snapshots = config.configured ? createSnapshot({
     repo,
     now,
     log,
     detach,
+    keepAlive,
     afterRefresh: () => { if (unlabelled.size) retryLabels().catch(() => {}); },
     request: (method, path, options) => { spendOrRefuse('refresh'); return installationRequest(method, path, options); },
   }) : null;
-  const userRequest = (session, method, path, options = {}) => github.request(method, path, { ...options, token: session.t, as: 'user' });
-  const userPages = (session, path) => github.paginate(path, { token: session.t, as: 'user' });
 
   // Shares one in-flight call per key between concurrent requests.
   function shared(map, key, start) {
     let pending = map.get(key);
     if (!pending) {
-      pending = start().finally(() => map.delete(key));
+      pending = detach(start).finally(() => map.delete(key));
       map.set(key, pending);
     }
-    return pending;
+    return bounded(pending);
   }
 
   // GitHub data
@@ -215,71 +345,87 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return { issue, kind };
   }
 
+  // Whether `session`'s person posted exactly `body` on issue `n` in the last five minutes, so that a
+  // request retried after a cut does not post it twice.
+  async function alreadyPosted(session, n, body) {
+    const since = new Date(now() - RECENT_POST).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const { data } = await userRequest(session, 'GET', `/repos/${repo}/issues/${n}/comments?since=${since}&per_page=100`);
+    return (Array.isArray(data) ? data : []).find((comment) => comment.user?.id === session.id && (comment.body || '').trim() === body) ?? null;
+  }
+
   // The snapshot for an anonymous read. A cold instance waits for its first refresh, at most until the
   // request's deadline (the refresh goes on in the background); with none, 502, or 503 when the App
   // is not installed on the repository.
   async function readSnapshot(ctx) {
-    const left = requests.getStore().deadline - Date.now();
-    let timer;
     try {
-      return await Promise.race([
-        snapshots.read(),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new GitHubError(0, { timeout: true })), Math.max(0, left)); }),
-      ]);
+      return await bounded(snapshots.read());
     } catch (error) {
       if (error instanceof GitHubError) ctx.githubStatus = error.status;
       if (error instanceof GitHubError && error.notInstalled) refuse(503, 'not_configured', 'Live comments are not set up on this server.');
       refuse(502, 'github_failed', 'GitHub did not answer. Try again later.');
-    } finally {
-      clearTimeout(timer);
     }
   }
 
-  function cachedPermission(login) {
-    const cached = permissionCache.get(login);
+  // The person's permission, by GitHub account id: yes and no are both cached five minutes, for `me`,
+  // `verdict` and `decide` alike. People known to be able to decide re-read on their own allowance.
+  function cachedPermission(id) {
+    const cached = permissions.get(id);
     return cached && now() - cached.at < PERMISSION_TTL ? cached : null;
   }
 
-  function readPermission(login) {
-    return shared(permissionPending, login, async () => {
-      spendOrRefuse('permission');
-      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`).catch((error) => {
+  async function canDecide(session) {
+    const cached = cachedPermission(session.id);
+    if (cached) return cached.value;
+    return shared(permissionPending, session.id, async () => {
+      spendOrRefuse(deciders.has(session.id) ? 'decider' : 'permission');
+      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(session.login)}/permission`).catch((error) => {
         if (error instanceof GitHubError && error.status === 404) return { data: null };
         throw error;
       });
-      const value = ['admin', 'maintain', 'write'].includes(data?.role_name) || ['admin', 'write'].includes(data?.permission);
-      permissionCache.delete(login);
-      permissionCache.set(login, { value, at: now() });
-      if (permissionCache.size > 1000) permissionCache.delete(permissionCache.keys().next().value);
+      // The login is the cookie's; the answer must be about the same account.
+      const sameAccount = data?.user?.id === undefined || data.user.id === session.id;
+      const value = sameAccount && (['admin', 'maintain', 'write'].includes(data?.role_name) || ['admin', 'write'].includes(data?.permission));
+      permissions.delete(session.id);
+      permissions.set(session.id, { value, at: now() });
+      if (permissions.size > REMEMBERED) permissions.delete(permissions.keys().next().value);
+      if (value) {
+        deciders.add(session.id);
+        if (deciders.size > 1000) deciders.delete(deciders.values().next().value);
+      }
       return value;
     });
   }
 
-  async function canDecide(login) {
-    return cachedPermission(login)?.value ?? readPermission(login);
+  async function requireDecider(session) {
+    if (!(await canDecide(session))) refuse(403, 'cannot_decide', 'Only the owner can decide.');
   }
 
   async function labelSuggestion(number) {
+    spendOrRefuse('label');
     await installationRequest('POST', `/repos/${repo}/issues/${number}/labels`, { body: { labels: [LABELS.suggestion] } });
   }
 
   // Suggestions created but not labelled. Retried, outside any request, after a successful suggestion
   // and after each snapshot refresh: an issue is labelled only if it is still open and has no label
-  // at all; anything else leaves the list, and a failing number does not hold up the others.
+  // at all; anything else leaves the list, a failing number does not hold up the others, and a number
+  // that failed five times is dropped.
   let retrying = null;
   function retryLabels() {
     retrying ??= detach(async () => {
-      for (const number of [...unlabelled]) {
-        if (!spend('label', 2)) break;
+      for (const [number, failures] of [...unlabelled]) {
+        if (!hasRoom('label', 2)) break;
         try {
+          spendOrRefuse('label');
           const { data: issue } = await installationRequest('GET', `/repos/${repo}/issues/${number}`);
           if (issue.state === 'open' && !issue.pull_request && labelNames(issue).length === 0) await labelSuggestion(number);
           unlabelled.delete(number);
         } catch (error) {
-          if (error instanceof GitHubError && [404, 410, 422].includes(error.status)) unlabelled.delete(number);
+          if ((error instanceof GitHubError && [404, 410, 422].includes(error.status)) || failures + 1 >= LABEL_ATTEMPTS) unlabelled.delete(number);
+          else unlabelled.set(number, failures + 1);
         }
       }
     }).finally(() => { retrying = null; });
+    keepAlive(retrying.catch(() => {}));
     return retrying;
   }
 
@@ -289,7 +435,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     const raw = parseCookies(ctx.request.headers.cookie)[names.session];
     if (raw === undefined) return null;
     const session = unseal(config.sessionSecret, 'session', raw);
-    if (!session || session.v !== 1 || typeof session.login !== 'string' || !(session.exp > now())) {
+    if (!session || session.v !== 1 || typeof session.login !== 'string' || !(session.exp > now()) || rejected.has(hash(session.t), now())) {
       clearSession(ctx);
       return null;
     }
@@ -309,8 +455,9 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     ctx.cookies.push(clearCookie(names.session, { secure }), clearCookie(HINT_COOKIE, { secure, httpOnly: false }));
   }
 
-  // GitHub's token endpoint: { data } on success, { invalid } when GitHub refused the grant.
+  // GitHub's token endpoint, within the exchange ceiling: { data } on success, { invalid } when GitHub refused.
   async function oauthToken(params) {
+    spendOrRefuse('exchange');
     const { data } = await github.request('POST', `${config.webBase}/login/oauth/access_token`, {
       accept: 'application/json',
       as: 'client',
@@ -333,10 +480,10 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
 
   // { fields } after a refresh, { invalid } when GitHub says the refresh token is no good, { failed } otherwise.
   function refresh(session) {
-    const key = createHash('sha256').update(session.r).digest('hex');
+    const key = hash(session.r);
     let pending = refreshing.get(key);
     if (!pending) {
-      pending = oauthToken({ grant_type: 'refresh_token', refresh_token: session.r })
+      pending = detach(() => oauthToken({ grant_type: 'refresh_token', refresh_token: session.r }))
         .then((result) => {
           if (result.data) {
             const fields = tokenFields(result.data);
@@ -351,7 +498,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
         else refreshing.delete(key);
       });
     }
-    return pending;
+    return bounded(pending);
   }
 
   // The signed-in person, or null. With `refresh`, the user token is valid for at least five more minutes.
@@ -364,6 +511,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
         session = { ...session, ...result.fields };
         writeSession(ctx, session);
       } else if (result.invalid) {
+        rejected.add(hash(session.t), now());
         clearSession(ctx);
         session = null;
       } else {
@@ -380,34 +528,17 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return session;
   }
 
+  // Writes per person a minute; people known to be able to decide have their own, larger allowance.
   function countWrite(session) {
-    const at = now();
-    let entry = writes.get(session.id);
-    if (!entry || at - entry.start >= 60_000) {
-      entry = { start: at, count: 0 };
-      writes.delete(session.id);
-      writes.set(session.id, entry);
-      if (writes.size > 10_000) writes.delete(writes.keys().next().value);
-    }
-    if (entry.count >= BUDGET.writesPerMinute) {
-      refuse(429, 'rate_limited', 'Too many changes in a minute. Try again shortly.', {}, { 'Retry-After': String(Math.ceil((entry.start + 60_000 - at) / 1000)) });
-    }
-    entry.count += 1;
+    const decides = cachedPermission(session.id)?.value === true;
+    const wait = writes.take(`${decides ? 'decider' : 'person'}:${session.id}`, decides ? BUDGET.deciderWritesPerMinute : BUDGET.writesPerMinute, now());
+    if (wait) tooMany(wait, 'Too many changes in a minute. Try again shortly.');
   }
 
   async function writer(ctx) {
     const session = await requireUser(ctx);
     countWrite(session);
     return session;
-  }
-
-  // Confirms the account behind the token and reads its permission again.
-  // A cached "cannot decide" refuses without calling GitHub.
-  async function requireDecider(session) {
-    if (cachedPermission(session.login)?.value === false) refuse(403, 'cannot_decide', 'Only the owner can decide.');
-    const { data: user } = await userRequest(session, 'GET', '/user');
-    if (user?.id !== session.id) throw new GitHubError(401, { as: 'user' });
-    if (!(await readPermission(user.login))) refuse(403, 'cannot_decide', 'Only the owner can decide.');
   }
 
   // Input
@@ -463,7 +594,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       }
       let decides = false;
       try {
-        decides = await canDecide(session.login);
+        decides = await canDecide(session);
       } catch (error) {
         if (error instanceof GitHubError) ctx.githubStatus = error.status;
       }
@@ -503,12 +634,15 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       return redirect(target.toString());
     },
 
+    // A sign-in cookie is good for one callback on this instance.
     async 'GET callback'(ctx) {
       const raw = parseCookies(ctx.request.headers.cookie)[names.state];
       ctx.cookies.push(clearCookie(names.state, { secure }));
       const saved = raw === undefined ? null : unseal(config.sessionSecret, 'signin', raw);
       const state = ctx.url.searchParams.get('state') || '';
       if (!saved || !(saved.exp > now()) || !sameText(saved.s, state)) refuse(400, 'bad_state', 'Sign-in expired. Try again.');
+      if (usedSignins.has(saved.s, now())) refuse(400, 'bad_state', 'Sign-in expired. Try again.');
+      usedSignins.add(saved.s, now());
       const back = returnPath(saved.r);
       if (ctx.url.searchParams.get('error')) return redirect(back);
       const code = ctx.url.searchParams.get('code') || '';
@@ -541,6 +675,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       const basic = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
       const revoked = await github.request('DELETE', `/applications/${encodeURIComponent(config.clientId)}/grant`, { token: basic, auth: 'Basic', as: 'client', body: { access_token: session.t } })
         .then(() => true, () => false);
+      if (revoked) rejected.add(hash(session.t), now());
       return json(200, { ok: true, revoked });
     },
 
@@ -550,9 +685,9 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       const n = issueNumber(input.n);
       const body = text(input.text, { what: 'The comment' });
       await workshopIssue(session, n);
-      const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } });
-      if (data) snapshots.patch.comment(n, data);
-      snapshots.refreshSoon();
+      const existing = await alreadyPosted(session, n, body);
+      const data = existing ?? (await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } })).data;
+      if (data && !existing) snapshots.patch.comment(n, data);
       return json(200, { ok: true, id: data?.id ?? null });
     },
 
@@ -572,33 +707,39 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
           snapshots.patch.up(n, -1);
         }
       }
-      snapshots.refreshSoon();
       return json(200, { ok: true });
     },
 
+    // At most 3 suggestions a minute and 10 an hour per person; nothing is created when the label
+    // ceiling has no room left, and the label is charged when its call is made.
     async 'POST suggest'(ctx) {
       const session = await writer(ctx);
       const input = readJson(ctx);
       const title = text(input.title, { limit: LIMITS.title, what: 'The title', oneLine: true });
       const body = text(input.text, { required: false, what: 'The description' });
-      spendOrRefuse('label', 2);
+      const minute = suggestionsMinute.take(session.id, BUDGET.suggestionsPerMinute, now());
+      if (minute) tooMany(minute, 'Too many suggestions. Try again shortly.');
+      const hour = suggestionsHour.take(session.id, BUDGET.suggestionsPerHour, now());
+      if (hour) tooMany(hour, 'Too many suggestions this hour.');
+      if (!hasRoom('label')) spendOrRefuse('label');
       const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues`, { body: { title, body } });
       const number = data.number;
       try {
         await labelSuggestion(number).catch(() => labelSuggestion(number));
       } catch (error) {
         if (error instanceof GitHubError) ctx.githubStatus = error.status;
-        unlabelled.add(number);
-        if (unlabelled.size > UNLABELLED_LIMIT) unlabelled.delete(unlabelled.values().next().value);
+        unlabelled.set(number, 0);
+        if (unlabelled.size > UNLABELLED_LIMIT) unlabelled.delete(unlabelled.keys().next().value);
         refuse(502, 'github', 'The suggestion was posted on GitHub but could not be added to the Workshop.', { number });
       }
       snapshots.patch.issue(data, 'suggestion');
-      snapshots.refreshSoon();
       if (unlabelled.size) retryLabels().catch(() => {});
       return json(200, { number });
     },
 
-    // Labels and state change first; the note is posted after they succeeded, so a retry never posts it twice.
+    // Labels and state change first; the note is posted last, after the change it explains succeeded,
+    // and not again when the same person posted the same text in the last five minutes. GitHub itself
+    // refuses the changes to someone without access.
     async 'POST verdict'(ctx) {
       const session = await writer(ctx);
       const input = readJson(ctx);
@@ -629,15 +770,15 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
         state = { state: 'open', reason: null };
       }
       snapshots.patch.fields(n, { verdict, ...state, ...(state.state === 'open' ? { closedAt: null } : {}) });
-      // The note comes last, after the change it explains succeeded, so a retry never posts it twice.
-      if (note) {
+      if (note && !(await alreadyPosted(session, n, note))) {
         const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body: note } });
         if (data) snapshots.patch.comment(n, data);
       }
-      snapshots.refreshSoon();
       return json(200, { ok: true });
     },
 
+    // Comment, then close. A retry after a cut between the two finds the same comment from the same
+    // person in the last five minutes and does not post it again.
     async 'POST decide'(ctx) {
       const session = await writer(ctx);
       const input = readJson(ctx);
@@ -646,16 +787,11 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       await requireDecider(session);
       const { issue, kind } = await workshopIssue(session, n);
       if (kind !== 'decision' || issue.state !== 'open') refuse(404, 'not_found', 'This is not an open Workshop decision.');
-      // Comment, then close. A retry after a cut between the two finds the same comment from the same
-      // person in the last five minutes and does not post it again.
-      const since = new Date(now() - RECENT_DECISION).toISOString().replace(/\.\d{3}Z$/, 'Z');
-      const { data: recent } = await userRequest(session, 'GET', `/repos/${repo}/issues/${n}/comments?since=${since}&per_page=100`);
-      const already = (Array.isArray(recent) ? recent : []).some((comment) => comment.user?.id === session.id && (comment.body || '').trim() === body);
-      const data = already ? null : (await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } })).data;
-      await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'closed', state_reason: 'completed' } });
+      const existing = await alreadyPosted(session, n, body);
+      const data = existing ? null : (await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } })).data;
       if (data) snapshots.patch.comment(n, data);
+      await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'closed', state_reason: 'completed' } });
       snapshots.patch.fields(n, { state: 'closed', reason: 'completed', closedAt: new Date(now()).toISOString() });
-      snapshots.refreshSoon();
       return json(200, { ok: true });
     },
   }));

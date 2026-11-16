@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -8,6 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // routes that serve the Workshop page at /workshop and /workshop/.
 export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'vote', 'suggest', 'verdict', 'decide'];
 export const RUNTIME = 'nodejs24.x';
+// Packages the function imports at run time; they ship inside it with their production dependencies.
+export const FUNCTION_DEPENDENCIES = ['@vercel/functions'];
 
 const website = fileURLToPath(new URL('..', import.meta.url));
 // Vercel's Git build reads .vercel/output in the project's root directory, the repository root.
@@ -15,6 +17,30 @@ export const DEFAULT_OUTPUT = join(website, '..', '.vercel', 'output');
 
 async function exists(path) {
   return stat(path).then(() => true, () => false);
+}
+
+// Copies `names` and everything they depend on (dependencies, not devDependencies) from the site's
+// node_modules into `target`/node_modules, resolving each package from the one that needs it.
+async function copyDependencies(siteDir, names, target) {
+  const copied = new Set();
+  async function locate(name, from) {
+    for (let dir = from; ; dir = join(dir, '..')) {
+      const candidate = join(dir, 'node_modules', name);
+      if (await exists(join(candidate, 'package.json'))) return candidate;
+      if (dir === siteDir || dir === join(dir, '..')) break;
+    }
+    throw new Error(`The function needs ${name}; run npm ci first.`);
+  }
+  async function visit(name, from) {
+    const source = await locate(name, from);
+    if (copied.has(source)) return;
+    copied.add(source);
+    const relative = source.slice(siteDir.length + 1);
+    await cp(source, join(target, relative), { recursive: true });
+    const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'));
+    for (const dependency of Object.keys(manifest.dependencies || {})) await visit(dependency, source);
+  }
+  for (const name of names) await visit(name, siteDir);
 }
 
 // Response headers for every path, static pages included: no page of the site may be framed.
@@ -40,6 +66,7 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
   for (const name of await readdir(join(siteDir, 'server'))) {
     if (name.endsWith('.mjs') && !name.endsWith('.test.mjs')) await cp(join(siteDir, 'server', name), join(main, 'server', name));
   }
+  await copyDependencies(resolve(siteDir), FUNCTION_DEPENDENCIES, main);
   await writeFile(join(main, '.vc-config.json'), JSON.stringify({
     runtime: RUNTIME,
     handler: 'api/workshop.cjs',

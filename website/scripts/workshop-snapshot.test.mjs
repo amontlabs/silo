@@ -252,18 +252,19 @@ test('bounds: issues, comments per issue, the full reload, and the cuts', async 
     const s = await setup();
     try {
       s.fake.state.commentsPerPage = 3;
+      for (let i = 0; i < 3; i += 1) s.fake.addComment(6, 'visitor-fake', `late ${i}`);
       const state = (await s.client().call('GET', 'state')).json;
-      assert.deepEqual(Object.keys(state.issues), ['1', '2', '3'], 'at most SNAPSHOT.issues, oldest first');
-      const held = (await s.client().call('GET', 'issue?n=1')).json;
-      assert.equal(held.more, true, 'comments beyond the full reload are not held');
-      const all = [1, 2, 3].map(async (n) => (await s.client().call('GET', `issue?n=${n}`)).json.comments.length);
+      assert.deepEqual(Object.keys(state.issues), ['4', '5', '6'], 'at most SNAPSHOT.issues, newest first, so the cap drops the oldest');
+      const held = (await s.client().call('GET', 'issue?n=6')).json;
+      assert.equal(held.more, true, 'comments beyond the bounds are not held');
+      const all = [4, 5, 6].map(async (n) => (await s.client().call('GET', `issue?n=${n}`)).json.comments.length);
       assert.ok((await Promise.all(all)).reduce((a, b) => a + b, 0) <= 2, 'the total comment bound');
     } finally { await s.close(); }
   });
 });
 
 test('the refresh counts against the installation backstop', async () => {
-  assert.equal(BUDGET.refreshCallsPerMinute, 60);
+  assert.equal(BUDGET.refreshCallsPerMinute, 40);
   const t = await setup();
   try {
     await withBudget({ refreshCallsPerMinute: 1 }, async () => {

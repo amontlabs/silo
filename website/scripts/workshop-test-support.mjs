@@ -6,9 +6,11 @@ import { BUDGET, createWorkshop } from '../server/workshop.mjs';
 import { SNAPSHOT } from '../server/snapshot.mjs';
 import { createFakeGitHub, seedDemo } from './fake-github.mjs';
 
-// Tests run with a short floor between refresh starts so they do not wait on the real clock;
-// the floor's own test sets it explicitly.
-SNAPSHOT.minGap = 50;
+// Tests run with a short floor between write-started refreshes and short waits so they do not wait
+// on the real clock; the tests of those numbers set them explicitly.
+SNAPSHOT.writeGap = 50;
+SNAPSHOT.writeWait = 200;
+SNAPSHOT.ageWait = 200;
 
 export const ORIGIN = 'https://silo.test';
 export const START = Date.parse('2026-11-16T12:00:00Z');

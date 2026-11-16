@@ -211,10 +211,9 @@ test('a signed-in person spends the installation token only on the permission ch
     const installation = t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation' && !(r.method === 'GET' && refreshes.test(r.path)));
     assert.deepEqual(installation.map((r) => r.path.replace(/\/\d+\//, '/N/')).sort(), [
       '/repos/amontlabs/silo/collaborators/owner-fake/permission',
-      '/repos/amontlabs/silo/collaborators/owner-fake/permission',
       '/repos/amontlabs/silo/collaborators/visitor-fake/permission',
       '/repos/amontlabs/silo/issues/N/labels',
-    ].sort(), 'a cached "cannot decide" refuses without another permission read');
+    ].sort(), 'each person\'s permission is read once and cached, yes or no');
   } finally { await t.close(); }
 });
 
@@ -234,7 +233,7 @@ test('at most 30 writes a minute per person', async () => {
       t.clock.t += 60_000;
       assert.equal((await c.call('POST', 'comment', { body: { n: 1, text: 'later' } })).status, 200);
     });
-    assert.equal(BUDGET.writesPerMinute, 30);
+    assert.equal(BUDGET.writesPerMinute, 20);
   } finally { await t.close(); }
 });
 
@@ -712,6 +711,9 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     const vc = JSON.parse(await readFile(join(main, '.vc-config.json'), 'utf8'));
     assert.deepEqual(vc, { runtime: RUNTIME, handler: 'api/workshop.cjs', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 15 });
     assert.match(vc.runtime, /^nodejs(22|24|26)\.x$/);
+    const modules = (await readdir(join(main, 'node_modules', '@vercel'))).sort();
+    assert.ok(modules.includes('functions') && modules.includes('oidc'), modules.join(','));
+    assert.equal(await lstat(join(main, 'node_modules', 'react')).then(() => true, () => false), false, 'only what the function needs');
     const serverFiles = (await readdir(join(main, 'server'))).sort();
     assert.deepEqual(serverFiles, ['app-auth.mjs', 'config.mjs', 'github.mjs', 'issues.mjs', 'node.mjs', 'session.mjs', 'snapshot.mjs', 'workshop.mjs']);
 
@@ -831,7 +833,7 @@ test('suggest refuses before creating anything when the budget is spent', async 
   try {
     const c = t.client();
     await c.signIn('visitor-fake');
-    await withBudget({ labelCallsPerMinute: 1 }, async () => {
+    await withBudget({ labelCallsPerMinute: 0 }, async () => {
       const issues = t.fake.state.issues.size;
       const response = await c.call('POST', 'suggest', { body: { title: 'Spent', text: 'x' } });
       assert.equal(response.status, 429);

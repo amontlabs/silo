@@ -8,12 +8,12 @@ const lists = (t) => t.fake.state.requests.filter((r) => r.method === 'GET' && L
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withGap(ms, run) {
-  const saved = SNAPSHOT.minGap;
-  SNAPSHOT.minGap = ms;
+  const saved = SNAPSHOT.writeGap;
+  SNAPSHOT.writeGap = ms;
   try {
     await run();
   } finally {
-    SNAPSHOT.minGap = saved;
+    SNAPSHOT.writeGap = saved;
   }
 }
 
@@ -23,7 +23,7 @@ test('a write starts a refresh from GitHub at once, without waiting for the snap
     const c = t.client();
     await c.signIn('visitor-fake');
     await t.client().call('GET', 'state');
-    await wait(SNAPSHOT.minGap + 10);
+    await wait(SNAPSHOT.writeGap + 10);
     const before = lists(t).length;
     t.fake.addComment(3, 'owner-fake', 'Written on GitHub directly.');
     assert.equal((await c.call('POST', 'vote', { body: { n: 1, on: true } })).status, 200);
@@ -43,9 +43,8 @@ test('ten writes in a burst start at most one running and one waiting refresh, a
       await t.client().call('GET', 'state');
       await wait(310);
       const before = lists(t).length;
-      for (let i = 0; i < 10; i += 1) {
-        assert.equal((await c.call('POST', 'comment', { body: { n: 1, text: `burst ${i}` } })).status, 200);
-      }
+      const answers = await Promise.all(Array.from({ length: 10 }, (_, i) => c.call('POST', 'comment', { body: { n: 1, text: `burst ${i}` } })));
+      assert.ok(answers.every((answer) => answer.status === 200));
       const lastWrite = t.fake.state.requests.findLast((r) => r.method === 'POST' && r.path.endsWith('/issues/1/comments'));
       await t.workshop.idle();
       const started = lists(t).slice(before);
@@ -53,14 +52,14 @@ test('ten writes in a burst start at most one running and one waiting refresh, a
       assert.ok(started.at(-1).wall >= lastWrite.wall, 'the final refresh began after the last write');
       t.clock.t += 1;
       const texts = (await t.client().call('GET', 'issue?n=1')).json.comments.map((x) => x.text);
-      assert.equal(texts.at(-1), 'burst 9');
+      assert.equal(texts.filter((x) => x.startsWith('burst ')).length, 10);
       assert.equal((await t.client().call('GET', 'state')).json.issues[1].comments, 12);
     } finally { await t.close(); }
   });
 });
 
-test('two refresh starts are never closer than the floor, 2 seconds by default', async () => {
-  assert.equal(SNAPSHOT.minGap, 50, 'the tests\' own floor');
+test('two refresh starts asked for by writes are never closer than the floor, 5 seconds by default', async () => {
+  assert.equal(SNAPSHOT.writeGap, 50, 'the tests\' own floor');
   await withGap(400, async () => {
     const t = await setup();
     try {
@@ -78,7 +77,8 @@ test('two refresh starts are never closer than the floor, 2 seconds by default',
     } finally { await t.close(); }
   });
   const { SNAPSHOT: fresh } = await import(`../server/snapshot.mjs?default=${Date.now()}`);
-  assert.equal(fresh.minGap, 2000);
+  assert.equal(fresh.writeGap, 5000);
+  assert.deepEqual([fresh.ageWait, fresh.writeWait, fresh.lostAfter], [1500, 2000, 15_000]);
 });
 
 test('with no write, an instance refreshes once its snapshot is over 30 seconds old', async () => {
@@ -92,7 +92,7 @@ test('with no write, an instance refreshes once its snapshot is over 30 seconds 
     await t.workshop.idle();
     assert.equal(lists(t).length, cold);
     t.clock.t += 2_000;
-    await wait(SNAPSHOT.minGap + 10);
+    await wait(SNAPSHOT.writeGap + 10);
     await t.client().call('GET', 'state');
     await t.workshop.idle();
     assert.equal(lists(t).length, cold + 1);

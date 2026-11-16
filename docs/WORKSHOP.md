@@ -44,8 +44,8 @@ briefly here:
 | `POST comment {n, text}` | signed in | Comments as that person. |
 | `POST vote {n, on}` | signed in | Adds or removes that person's 👍. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
-| `POST verdict {n, verdict, note?}` | can decide | Sets (`take`, `refine`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required. `refine` needs a note; a note is posted first as the person's comment. |
-| `POST decide {n, text}` | can decide | Comments on an open decision, then closes it as completed. |
+| `POST verdict {n, verdict, note?}` | can decide | Sets (`take`, `refine`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required. `refine` needs a note; the labels and the state change first, and the note is posted last, as the person's comment. |
+| `POST decide {n, text}` | can decide | Comments on an open decision, then closes it as completed. A comment, a note or a decision text that the same person posted on that issue in the last five minutes is not posted again. |
 
 Errors are `{ "error": code, "message": plain words }` with 400 (bad input),
 401 (not signed in, or the session is gone), 403 (not allowed, or a request
@@ -74,65 +74,77 @@ text.
 
 `GET state` and `GET issue` are answered from one in-memory snapshot per
 function instance (`website/server/snapshot.mjs`) and nothing else. The
-snapshot holds every Workshop issue (at most 2,000, oldest first) with the
-fields `state` returns, its body (cut to 20,000 characters) and its comments
-(the latest 100 per issue, each cut to 5,000 characters, at most 5,000 in all).
-A number that is not in the snapshot is a 404. Both reads are sent with
+snapshot holds the newest Workshop issues (at most 2,000) with the fields
+`state` returns, their bodies (cut to 20,000 characters) and their comments
+(the latest 100 per issue, each cut to 5,000 characters, at most 5,000 in
+all). Nothing GitHub sends is kept raw: from each list page only its ETag and
+the reduced fields of Workshop issues remain, and from comment pages only the
+cut comments of Workshop issues. A number that is not in the snapshot is a
+404. Both reads are sent with
 `Cache-Control: public, s-maxage=10, stale-while-revalidate=60`, no
-`Vary: Cookie`, and read no cookie; they cost nothing to answer, so the CDN
-holds them only briefly.
+`Vary: Cookie`, and read no cookie.
+
+**What a read costs.** Nothing: no `state` or `issue` request calls GitHub.
+A read may start a refresh, which runs on its own ceiling.
 
 **How soon a change is seen.** The person who wrote sees their change at once:
 the page shows it itself. Others on the same instance see it within a second
-or two, from the patch and then the refresh the write starts. Everyone else
-sees it within about 40 seconds: up to 10 seconds of CDN cache plus the
-30-second refresh of the other instances.
+or two, from the patch and then the refresh the write starts. Everyone else,
+including a new suggestion on other instances, sees it within about 40
+seconds: up to 10 seconds of CDN cache plus the 30-second refresh of the other
+instances.
 
-- **Refresh.** When a request finds the snapshot over 30 seconds old, it
-  answers at once from the current snapshot and starts one refresh in the
-  background. Every successful write (comment, vote, suggestion, verdict,
-  decision) starts one straight away, without waiting for that age. Refreshes
-  are coalesced: at most one runs and one waits; a write that lands while one
-  is running makes exactly one more start when it ends, so the write is always
-  included; and two starts are never closer than 2 seconds on one instance.
-  Only an instance with no snapshot yet makes its first requests wait for the
-  refresh.
-  A refresh builds a new snapshot and swaps it in only when it completed, so a
-  refresh that fails halfway leaves the previous one intact.
-- **Issues.** A refresh lists the repository's issues (all states, oldest
-  first, 100 a page, at most 30 pages), skipping pull requests and issues
-  without exactly one Workshop label. Each page is sent with `If-None-Match`
-  and the ETag GitHub gave for it last time; a `304 Not Modified` means the
-  page is unchanged and the held copy is reused. Vote counts come from each
-  issue's reaction summary in that list.
+- **Refresh.** A request that finds the snapshot over 30 seconds old starts a
+  refresh and waits for it up to 1.5 seconds before answering from what it
+  has. Any request that changed something on GitHub (a comment, a vote, a
+  suggestion, a verdict, a decision, even one that failed halfway) starts one
+  straight away; when it succeeded, it waits for that refresh up to 2 seconds
+  (the page already shows the write as pending). Refreshes are coalesced: at
+  most one runs and one waits; a write that lands while one is running makes
+  exactly one more start when it ends, so the write is always included; a
+  refresh asked for by a write starts at most once every 5 seconds per
+  instance. No refresh starts while GitHub has asked us to wait. A refresh
+  that has not finished after 15 seconds is treated as lost, without the
+  60-second wait, and the next request starts a new one. Only an instance with
+  no snapshot yet makes its first requests wait for the refresh, at most until
+  their 12-second deadline. A refresh builds a new snapshot and swaps it in
+  only when it completed, so a refresh that fails halfway leaves the previous
+  one intact.
+- **Staying alive.** Work that outlives the response (refreshes and the label
+  retries) is handed to Vercel's `waitUntil()` from `@vercel/functions`, which
+  "extends the lifetime of the request handler for the lifetime of the given
+  Promise"; such promises "have the same timeout as the function itself"
+  ([@vercel/functions API reference](https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package),
+  read 2026-11-16). Correctness does not depend on it: the lost-refresh rule
+  and the waits above cover a platform that stops the work.
+- **Issues.** A refresh lists the repository's issues (all states, newest
+  first, 100 a page, at most 20 pages), skipping pull requests and issues
+  without exactly one Workshop label, so past the cap the oldest drop out.
+  Each page is sent with `If-None-Match` and the ETag GitHub gave for it last
+  time; a `304 Not Modified` means the page is unchanged and the held copy is
+  reused. Vote counts come from each issue's reaction summary in that list.
 - **Comments.** The first refresh, and one every 10 minutes, reloads the
   newest comments of the whole repository (`/issues/comments`, newest first,
-  at most 25 pages, also conditional), so deleted comments disappear within
-  10 minutes; comments older than those 2,500 are not held, and `more` is true
+  at most 15 pages, also conditional), so deleted comments disappear within
+  10 minutes; comments older than those 1,500 are not held, and `more` is true
   for their issues. The refreshes in between ask only for comments updated
   since the previous refresh, less a minute of overlap (`since`, oldest update
   first, at most 10 pages; more than that schedules a full reload), and merge
-  them by id, so new and edited comments appear at the next refresh.
+  them by id.
 - **Writes.** After a signed-in person's write succeeds, the snapshot is
   patched in place: the new comment, the comment and 👍 counts, the verdict,
-  open or closed (a drop sets `closedAt`), a new suggestion. Everyone on that
-  instance sees it at once. Each patch is kept with its time. When a refresh
-  completes, GitHub's data replaces the snapshot and the patches made after
-  that refresh began are applied again; older patches are dropped, since
-  GitHub's answer already holds them. A count moves only from the value it had
-  when the write happened, so a write GitHub already shows is not counted
-  twice. Other instances see a write, including a new suggestion, at their
-  next refresh.
-- **What a read costs.** Nothing: no `state` or `issue` request calls GitHub.
-  The refresh it may start runs in the background on its own ceiling.
+  open or closed (a drop sets `closedAt`), a new suggestion. Each patch is kept
+  with its time. When a refresh completes, GitHub's data replaces the snapshot
+  and the patches made after that refresh began are applied again; older
+  patches are dropped, since GitHub's answer already holds them. A count moves
+  only from the value it had when the write happened, so a write GitHub
+  already shows is not counted twice.
 - **When GitHub fails**, times out or asks us to wait, the snapshot keeps
   answering whatever its age, with `"stale": true` once it is over 10 minutes
-  old, and no refresh is tried before the time GitHub gave, or 60 seconds.
-  With no snapshot at all, both reads answer 502 and the page falls back to the
-  plan built into it; a cold request waits for the first refresh only until
-  its 12-second deadline, and the refresh goes on in the background. When the
-  App is not installed on the repository, both reads answer 503
-  `not_configured`.
+  old, and no refresh starts before the time GitHub gave, or 60 seconds. With
+  no snapshot at all, both reads answer 502 and the page falls back to the
+  plan built into it. When the App is not installed on the repository, `state`
+  and `issue` answer 503 `not_configured`.
 - **Output.** Titles, bodies, comments and logins in `state` and `issue` are
   cleaned on the way out: no direction-override or control characters, and no
   line breaks in titles and logins.
@@ -156,16 +168,18 @@ a visitor does without signing in can make `verdict`, `decide`, `suggest`,
 
 | Use | Calls a minute |
 | --- | --- |
-| Snapshot refresh | 60 |
-| Permission check (cached five minutes per person) | 12 |
+| Snapshot refresh | 40 |
+| Permission check for accounts not known to decide | 12 |
+| Permission re-read for accounts known to decide (nobody else can spend it) | 4 |
 | Repository lookup at sign-in (once per instance, then remembered) | 4 |
-| Labelling a suggestion, and the label retries | 6 |
+| Labelling a suggestion, and the label retries (charged per call) | 20 |
 
-Worst case per instance per hour: (60 + 12 + 4 + 6) × 60 = 82 × 60 = 4,920
-calls, below the installation's 5,000. The largest refresh is 30 issue pages +
-25 comment pages = 55 calls, which fits in a minute's 60, and 82 calls a minute
-is far below GitHub's secondary limit of 900 points a minute for `GET`
-requests.
+Worst case per instance per hour: (40 + 12 + 4 + 4 + 20) × 60 = 80 × 60 =
+4,800 calls, below the installation's 5,000. The largest refresh is 20 issue
+pages + 15 comment pages = 35 calls, which fits in a minute's 40, and 80 calls
+a minute is far below GitHub's secondary limit of 900 points a minute for
+`GET` requests. Calls to GitHub's token endpoint (sign-in and token refresh)
+are not installation calls; they have their own ceiling of 30 a minute.
 
 With today's issue list on 2 pages, a refresh is 3 calls (2 issue pages, which
 are `304` and free when unchanged, and 1 `since` comment call, which always
@@ -173,15 +187,21 @@ counts against GitHub's limit):
 
 - **No writes:** one refresh every 30 seconds, 120 an hour: 120 × 3 = 360
   calls in our ceiling, of which about 120 count at GitHub, plus 6 full
-  comment reloads whose unchanged pages are free.
-- **Writes without pause:** starts are at most one every 2 seconds, 30 a
-  minute, which would be 30 × 3 = 90 calls a minute; the refresh ceiling holds
-  them to 60 a minute (a refresh about every 3 seconds), so at most 60 × 60 =
-  3,600 refresh calls an hour. A refresh stopped by our own ceiling is started
-  again when the ceiling resets, without the 60-second wait used when GitHub
-  fails.
+  comment reloads whose unchanged pages are free: about 130 calls an hour.
+- **Writes without pause:** write-started refreshes are at most one every 5
+  seconds, 12 a minute: 12 × 3 = 36 calls a minute, 2,160 an hour, inside the
+  refresh ceiling of 40 a minute (2,400 an hour). A refresh stopped by our own
+  ceiling is started again when the ceiling resets, without the 60-second
+  wait used when GitHub fails.
 
-Several instances each have their own ceilings.
+**The limit is shared by every instance.** The 5,000 calls an hour belong to
+the installation, and every warm instance spends from them. At about 130 calls
+an hour each, about 38 warm instances that are all idle use up the hour;
+two instances spending at their ceilings (4,800 an hour each) use it up in
+about half an hour. Nothing in this code can prevent that: instances do not
+know about each other. When it happens, GitHub answers with a rate limit, every
+instance keeps serving its snapshot (stale after 10 minutes), and the
+snapshots catch up when the hour resets.
 
 ### Other limits
 
@@ -191,20 +211,29 @@ Several instances each have their own ceilings.
   with `retry-after`, or whose message mentions a rate limit), nothing calls
   GitHub with the installation token until the time GitHub gave (at most an
   hour).
-- Each signed-in person may make 30 writes a minute per instance; more answer
-  429.
+- Each signed-in person may make 20 writes a minute per instance; people known
+  to be able to decide have their own allowance of 120. Sign-out counts as a
+  write. A person may make 3 suggestions a minute and 10 an hour.
+- Each session may make 60 GitHub calls a minute for reads (`GET vote` and the
+  reads before a write); more answer 429.
+- A session GitHub has rejected (a 401, an invalid refresh token, a revoked
+  grant) is remembered by a hash of its token for a day (at most 10,000) and
+  answered 401 without calling GitHub; a request without a valid session calls
+  nothing.
+- A sign-in cookie works for one callback per instance (its id is remembered
+  for its 10-minute life, at most 10,000).
 - Every GitHub call has an 8-second limit, and every handler has a 12-second
-  deadline for all its GitHub calls together (the platform stops a function at
-  15 seconds); past it, the answer is 502. Steps are ordered so that a cut is
-  safe to retry: `verdict` changes labels and state, then posts the note;
-  `decide` posts the comment, then closes, and skips the comment when the same
-  person posted the identical text on that issue in the last five minutes.
+  deadline for all its GitHub calls and every wait together, including waits
+  on shared work such as an installation token another request is fetching
+  (the platform stops a function at 15 seconds); past it, the answer is 502.
+  Steps are ordered so that a cut is safe to retry: `verdict` changes labels
+  and state, then posts the note; `decide` posts the comment, then closes;
+  `comment`, the note and `decide` skip posting when the same person posted
+  the identical text on that issue in the last five minutes.
 - Concurrent permission checks for the same person share one call.
 - `me` reads the cookie and calls GitHub only for the permission check (cached
   five minutes); it never refreshes the user token, and a failed permission
   read answers `canDecide: false` rather than an error.
-- Sign-out counts as a write for the per-person limit; a request without a
-  valid session calls nothing.
 - `suggest` refuses with 429 before creating anything when the installation
   is blocked or the label ceiling is reached. If labelling a new suggestion
   still fails twice, the answer is 502 with its `number`, and the number is
@@ -212,7 +241,8 @@ Several instances each have their own ceilings.
   after a successful `suggest` and after each snapshot refresh, never on other
   requests and never before an answer. Each number is read again first and
   labelled only when the issue is still open and has no label at all; anything
-  else leaves the list, and a failing number does not hold up the others.
+  else leaves the list, a failing number does not hold up the others, and a
+  number that failed five times is dropped.
 - Every answer, API and pages alike, carries
   `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 
@@ -232,9 +262,19 @@ Several instances each have their own ceilings.
 | `website/scripts/prepare-vercel.mjs` | Writes the Build Output (static site, function, routes). |
 | `website/scripts/workshop-dev.mjs` | Local server for the site and the API. |
 | `website/scripts/fake-github.mjs` | Fake GitHub used by the tests and by `--fake`. |
-| `website/scripts/workshop-server.test.mjs` | The server's tests, run by the website's `npm test`. |
+| `website/scripts/workshop-test-support.mjs` | Shared test setup: the fake GitHub on a controllable clock and a client with a cookie jar. |
+| `website/scripts/workshop-server.test.mjs` | Endpoints, sign-in, sessions, refusals, configuration, packaging and the local server. |
+| `website/scripts/workshop-snapshot.test.mjs` | The snapshot: reads without GitHub calls, conditional refreshes, changes, patches, bounds. |
+| `website/scripts/workshop-limits.test.mjs` | Ceilings, `me`, sign-out, deadlines, patch timing, cleaned output, the App not installed. |
+| `website/scripts/workshop-refresh.test.mjs` | Refreshes started by writes, coalescing, the floor and the idle refresh. |
+| `website/scripts/workshop-abuse.test.mjs` | What a visitor or a replayed cookie can make the server do, memory, waits and retries. |
 
-The server uses only Node's standard library (`crypto`, `fetch`, `http`).
+All of them run with the website's `npm test`.
+
+The server uses Node's standard library (`crypto`, `fetch`, `http`) and one
+package, `@vercel/functions` (Apache-2.0, pinned to 3.10.5), for `waitUntil`.
+`prepare-vercel.mjs` copies it and its production dependencies into the
+function.
 
 ## The GitHub App
 
@@ -417,15 +457,19 @@ carries its number.
 
 **Deciding.** `canDecide` is GitHub's answer: the person's permission on the
 repository (`write`, `maintain` or `admin`), read with the installation token
-on its own ceiling and cached five minutes. Reading it with the person's own
-token (`GET /repos/{owner}/{repo}` and its `permissions` object) was
-considered: GitHub's reference for that endpoint lists `permissions` in the
-response schema but does not say which kinds of token receive it
+and cached five minutes by GitHub account id, for yes and for no; that one
+cache serves `me`, `verdict` and `decide`. The answer must be about the same
+account id as the session, so a renamed login cannot inherit another account's
+permission. Writes are not preceded by a re-read: they use the person's own
+token, and GitHub itself refuses a label change or a close by someone without
+access; such a refusal (403) drops that person's cached yes. Accounts known to
+be able to decide re-read on an allowance nobody else's requests can spend.
+Reading the permission with the person's own token (`GET /repos/{owner}/{repo}`
+and its `permissions` object) was considered: GitHub's reference for that
+endpoint lists `permissions` in the response schema but does not say which
+kinds of token receive it
 ([Get a repository](https://docs.github.com/en/rest/repos/repos#get-a-repository),
-read 2026-11-16), so the documented collaborator permission endpoint is used. `verdict` and `decide` confirm with the person's token
-that the GitHub account id matches the session, then read the permission again
-without the cache, so a renamed login cannot inherit another account's
-permission. A cached "cannot decide" refuses at once without calling GitHub.
+read 2026-11-16), so the documented collaborator permission endpoint is used.
 
 **Secrets in output.** Logs are one JSON line per request with the endpoint,
 the status and GitHub's status only. Errors sent to the browser are fixed
@@ -450,6 +494,9 @@ GitHub or Vercel. These depend on the real services:
 - that Vercel follows the symlinked functions, and loads the `.cjs` handler
   with `req.url` as the original path;
 - that Vercel's Git build uses `.vercel/output` at the repository root;
+- that `waitUntil()` from the copied `@vercel/functions` keeps a Build Output
+  Node.js function alive after the response, as documented for Vercel
+  Functions (the code does not depend on it);
 - that GitHub answers `304` to the conditional issue and comment list pages as
   documented, and that the reaction summary in the issue list moves the page's
   ETag when a vote changes.
