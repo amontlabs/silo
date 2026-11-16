@@ -430,7 +430,10 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
 
 // A small Workshop: entries from features.jsonl (when given), two decisions, a
 // suggestion, comments and votes, an unrelated issue and a pull request.
-export function seedDemo(fake, features = []) {
+//
+// With `progress`, the entries carry the verdicts of the file, and a later state is shown: see
+// `progressOf`. Answers `{ progress }`, the plan that was applied (null without `progress`).
+export function seedDemo(fake, features = [], { progress = false } = {}) {
   fake.addUser('owner-fake', { permission: 'admin' });
   fake.addUser('visitor-fake', { permission: 'read' });
   const list = features.length ? features : [
@@ -438,11 +441,15 @@ export function seedDemo(fake, features = []) {
     { id: 'calls-and-events', name: 'Every call and event defined once', what: 'Each thing the engine can be asked is written down once.' },
     { id: 'vm-runtime', name: 'The VM runtime, packaged', what: 'Silo ships the program that runs each computer.' },
   ];
+  const plan = progress ? progressOf(list) : null;
   for (const [index, feature] of list.entries()) {
     const labels = ['workshop:entry'];
-    if (index === 0) labels.push('verdict:take');
-    if (index === 2) labels.push('verdict:later');
-    fake.addIssue({ title: feature.name, body: `${feature.what}\n<!-- silo-entry: ${feature.id} -->`, labels });
+    let verdict = index === 0 ? 'take' : index === 2 ? 'later' : null;
+    if (plan) verdict = VERDICT_NAMES.includes(feature.verdict) ? feature.verdict : null;
+    if (verdict) labels.push(`verdict:${verdict}`);
+    if (plan?.building.has(feature.id)) labels.push('workshop:building');
+    const closed = plan?.built.has(feature.id) ? 'completed' : verdict === 'drop' && plan ? 'not_planned' : null;
+    fake.addIssue({ title: feature.name, body: `${feature.what}\n<!-- silo-entry: ${feature.id} -->`, labels, ...(closed ? { state: 'closed', reason: closed } : {}) });
   }
   fake.addComment(1, 'visitor-fake', 'Looking forward to this.\nSee https://example.com for `context`.');
   fake.addComment(1, null, 'Posted by an agent.');
@@ -456,4 +463,29 @@ export function seedDemo(fake, features = []) {
   fake.react(suggestion.number, 'visitor-fake');
   fake.addIssue({ title: 'An ordinary bug report', body: 'Not part of the Workshop.', author: 'visitor-fake' });
   fake.addIssue({ title: 'A pull request with a Workshop label', labels: ['workshop:entry'], pull: true });
+  return { progress: plan };
+}
+
+const VERDICT_NAMES = ['take', 'refine', 'later', 'drop'];
+const PROGRESS = { built: ['engine', 'computers', 'app'], building: 'agents', buildingCount: 2 };
+
+// A later state of the plan, by area: every taken entry of the areas engine, computers and app
+// built, the first two taken entries of agents being built. When no entry has an area, by stage in
+// the order the file lists them: the first three stages built, two taken entries of the next being
+// built. Answers the ids of each, and which grouping was used.
+export function progressOf(features) {
+  const ordered = [...features].sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
+  const byArea = ordered.some((feature) => feature.area);
+  const groupOf = (feature) => (byArea ? feature.area : feature.stage);
+  let builtGroups = PROGRESS.built;
+  let buildingGroup = PROGRESS.building;
+  if (!byArea) {
+    const stages = [...new Set(ordered.map((feature) => feature.stage).filter(Boolean))];
+    builtGroups = stages.slice(0, 3);
+    buildingGroup = stages[3] ?? null;
+  }
+  const taken = ordered.filter((feature) => feature.verdict === 'take');
+  const built = new Set(taken.filter((feature) => builtGroups.includes(groupOf(feature))).map((feature) => feature.id));
+  const building = new Set(taken.filter((feature) => groupOf(feature) === buildingGroup).slice(0, PROGRESS.buildingCount).map((feature) => feature.id));
+  return { by: byArea ? 'area' : 'stage', builtGroups, buildingGroup, built, building };
 }

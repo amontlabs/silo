@@ -28,7 +28,7 @@
 // refresh swaps in, the patches made since that refresh began are applied
 // again, and older ones are dropped, since GitHub's answer already holds them.
 import { GitHubError, nextLink } from './github.mjs';
-import { clean, commentIssue, commentOf, kindOf, LABELS, readBody, reasonOf, verdictOf } from './issues.mjs';
+import { BUILDING_LABEL, clean, commentIssue, commentOf, kindOf, labelNames, LABELS, readBody, reasonOf, verdictOf } from './issues.mjs';
 
 export const SNAPSHOT = {
   maxAge: 30_000,
@@ -75,8 +75,15 @@ function reduceIssue(issue) {
     },
     body: text,
     url: issue.html_url,
+    building: kind === 'entry' && labelNames(issue).includes(BUILDING_LABEL),
   };
 }
+
+// An entry is being built while its issue is open, taken and carries the building label. This is
+// read when the answer is made, so a patch that closes the issue or changes the verdict hides it at once.
+const summaryOf = (entry) => (entry.building && entry.summary.kind === 'entry' && entry.summary.state === 'open' && entry.summary.verdict === 'take'
+  ? { ...entry.summary, building: true }
+  : entry.summary);
 
 // `request(method, path, options)` calls GitHub with the installation token and
 // throws a GitHubError when GitHub fails or the installation must wait.
@@ -111,6 +118,7 @@ export function createSnapshot({
       summary: { ...reduced.summary },
       body: reduced.body,
       url: reduced.url,
+      building: reduced.building,
       comments: previous ? new Map(previous.comments) : new Map(),
     };
   }
@@ -365,7 +373,7 @@ export function createSnapshot({
   function stateAnswer(snapshot) {
     if (!snapshot.stateAnswer || snapshot.stateAnswer.version !== snapshot.version) {
       const issues = {};
-      for (const [number, entry] of snapshot.issues) issues[number] = entry.summary;
+      for (const [number, entry] of snapshot.issues) issues[number] = summaryOf(entry);
       snapshot.stateAnswer = { version: snapshot.version, body: { repo, fetchedAt: new Date(snapshot.at).toISOString(), issues } };
     }
     return snapshot.stateAnswer.body;
@@ -424,6 +432,9 @@ export function createSnapshot({
     },
     up(number, delta) {
       count(number, 'up', delta);
+    },
+    building(number, on) {
+      record(onEntry(number, (entry) => { entry.building = on; }));
     },
     fields(number, fields) {
       record(onEntry(number, (entry) => Object.assign(entry.summary, fields)));

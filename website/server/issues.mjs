@@ -3,6 +3,7 @@
 
 export const LABELS = { entry: 'workshop:entry', decision: 'workshop:decision', suggestion: 'workshop:suggestion' };
 export const VERDICTS = ['take', 'refine', 'later', 'drop'];
+export const BUILDING_LABEL = 'workshop:building';
 export const CUTS = { body: 20_000, comment: 5000 };
 const KIND_BY_LABEL = new Map(Object.entries(LABELS).map(([kind, label]) => [label, kind]));
 const ENTRY_ID = /^[A-Za-z0-9_.-]{1,100}$/;

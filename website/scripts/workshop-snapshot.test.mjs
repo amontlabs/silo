@@ -274,3 +274,98 @@ test('the refresh counts against the installation backstop', async () => {
     });
   } finally { await t.close(); }
 });
+
+const BUILDING = /\/labels\/workshop%3Abuilding$/;
+const unlabels = (t) => t.fake.state.requests.filter((r) => r.method === 'DELETE' && BUILDING.test(r.path));
+const building = (state, n) => Object.hasOwn(state[n] ?? {}, 'building');
+
+test('state carries building only on open taken entries with the label, from the same lists and calls', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    await c.call('GET', 'state');
+    const issues = t.fake.state.issues;
+    issues.get(2).labels.push('verdict:refine');
+    for (const n of [1, 2, 3, 5, 6, 7]) issues.get(n).labels.push('workshop:building');
+    const closed = t.fake.addIssue({ title: 'Built', labels: ['workshop:entry', 'verdict:take', 'workshop:building'], state: 'closed', reason: 'completed' });
+    const before = github(t);
+    t.clock.t += 61_000;
+    const state = (await settle(t)).json.issues;
+    const calls = t.fake.state.requests.slice(before).filter((r) => r.kind !== 'app');
+    assert.equal(calls.length, 4, 'one page of each of the three lists and one comment call');
+    assert.equal(state[1].building, true, 'open, taken, labelled');
+    for (const n of [2, 3, 4, 5, 6, 7, closed.number]) assert.equal(building(state, n), false, `#${n}`);
+
+    const unchanged = t.fake.state.requests.length;
+    t.clock.t += 61_000;
+    assert.equal((await settle(t)).json.issues[1].building, true);
+    assert.ok(t.fake.state.requests.slice(unchanged).filter((r) => LIST.test(r.path)).every((r) => r.status === 304), 'unchanged lists still answer 304');
+
+    issues.get(1).labels = issues.get(1).labels.filter((name) => name !== 'workshop:building');
+    t.clock.t += 61_000;
+    assert.equal(building((await settle(t)).json.issues, 1), false, 'a removed label shows at the next refresh');
+  } finally { await t.close(); }
+});
+
+test('a verdict other than take removes the building label in the same write, and only when it is there', async () => {
+  const t = await setup();
+  try {
+    const owner = t.client();
+    await owner.signIn('owner-fake');
+    const c = t.client();
+    const issues = t.fake.state.issues;
+    issues.get(1).labels.push('workshop:building');
+    await c.call('GET', 'state');
+    const verdict = (n, value, extra = {}) => owner.call('POST', 'verdict', { body: { n, verdict: value, ...extra } });
+    const labelled = (n) => issues.get(n).labels.includes('workshop:building');
+
+    // Taking it again keeps the label; dropping takes it off, and a retaken entry is not being built.
+    assert.equal((await verdict(1, 'take')).status, 200);
+    assert.equal(unlabels(t).length, 0);
+    assert.equal((await c.call('GET', 'state')).json.issues[1].building, true);
+    assert.equal((await verdict(1, 'drop')).status, 200);
+    assert.equal(labelled(1), false);
+    assert.equal(unlabels(t).length, 1);
+    assert.equal((await verdict(1, 'take')).status, 200);
+    assert.equal(issues.get(1).state, 'open');
+    assert.equal(building((await c.call('GET', 'state')).json.issues, 1), false, 'retaken, not being built');
+    await t.workshop.idle();
+    t.clock.t += 61_000;
+    assert.equal(building((await settle(t)).json.issues, 1), false, 'nor after a refresh');
+
+    // later, refine and cleared each take it off; with no label there is no call.
+    for (const [value, extra] of [['later'], ['refine', { note: 'Smaller.' }], [null]]) {
+      issues.get(1).labels.push('workshop:building');
+      if (!issues.get(1).labels.includes('verdict:take')) issues.get(1).labels.push('verdict:take');
+      const calls = unlabels(t).length;
+      assert.equal((await verdict(1, value, extra)).status, 200, String(value));
+      assert.equal(labelled(1), false, String(value));
+      assert.equal(unlabels(t).length, calls + 1, String(value));
+      const again = unlabels(t).length;
+      assert.equal((await verdict(1, value, extra)).status, 200);
+      assert.equal(unlabels(t).length, again, `${value}: no call without the label`);
+    }
+    assert.equal((await verdict(2, 'later')).status, 200);
+    assert.equal(unlabels(t).length, 4, 'an entry never labelled costs no call');
+  } finally { await t.close(); }
+});
+
+test('a failed removal of the building label leaves the verdict standing and shows no building', async () => {
+  const t = await setup();
+  try {
+    const owner = t.client();
+    await owner.signIn('owner-fake');
+    const c = t.client();
+    t.fake.state.issues.get(1).labels.push('workshop:building');
+    await c.call('GET', 'state');
+    t.fake.state.hook = (r) => (r.method === 'DELETE' && BUILDING.test(r.path) ? { status: 500 } : null);
+    const answer = await owner.call('POST', 'verdict', { body: { n: 1, verdict: 'later' } });
+    assert.deepEqual([answer.status, answer.json], [200, { ok: true }]);
+    const issue = t.fake.state.issues.get(1);
+    assert.ok(issue.labels.includes('verdict:later') && issue.labels.includes('workshop:building'));
+    const state = (await c.call('GET', 'state')).json.issues;
+    assert.equal(state[1].verdict, 'later');
+    assert.equal(building(state, 1), false);
+    assert.ok(t.logs.some((line) => line.includes('"building_label":"not_removed"')));
+  } finally { await t.close(); }
+});

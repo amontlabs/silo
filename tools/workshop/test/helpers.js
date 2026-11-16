@@ -3,12 +3,15 @@
 import assert from 'node:assert/strict';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { main } from '../src/cli.js';
 import { appKeys } from './fake-github.js';
 
-const REAL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
+// The fixture each plan file is copied from. DECISIONS.md is kept as a .txt so the repository's
+// Markdown link check does not read its relative links, which point into a docs/product folder.
+export const FIXTURE_FILES = { 'features.jsonl': 'features.jsonl', 'DECISIONS.md': 'decisions.txt' };
 
 export function fakeKeychain(initial = {}) {
   const store = new Map(Object.entries(initial));
@@ -20,7 +23,7 @@ export function fakeKeychain(initial = {}) {
   };
 }
 
-/** A temp directory holding `home/` and `repo/docs/product/` (copies of the real files, or the given texts). */
+/** A temp directory holding `home/` and `repo/docs/product/` (copies of the files in `fixtures/`, or the given texts). */
 export function sandbox(t, { features, decisions } = {}) {
   const base = mkdtempSync(join(process.env.ATELIER_TMP || tmpdir(), 'workshop-test-'));
   t.after(() => rmSync(base, { recursive: true, force: true }));
@@ -30,7 +33,7 @@ export function sandbox(t, { features, decisions } = {}) {
   mkdirSync(home, { recursive: true });
   mkdirSync(product, { recursive: true });
   const write = (name, text) => {
-    if (text === undefined) copyFileSync(join(REAL_ROOT, 'docs', 'product', name), join(product, name));
+    if (text === undefined) copyFileSync(join(FIXTURES, FIXTURE_FILES[name]), join(product, name));
     else writeFileSync(join(product, name), text);
   };
   write('features.jsonl', features);

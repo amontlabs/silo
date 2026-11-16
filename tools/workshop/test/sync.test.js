@@ -1,18 +1,16 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { listItems } from '../src/decisions.js';
 import { withoutRelativeLinks } from '../src/match.js';
 import { startFake } from './fake-github.js';
-import { run, sandbox } from './helpers.js';
+import { FIXTURES, run, sandbox } from './helpers.js';
 
-const REAL = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'docs', 'product');
 const entryIssues = (fake) => [...fake.issues.values()].filter((i) => i.labels.includes('workshop:entry'));
 const decisionIssues = (fake) => [...fake.issues.values()].filter((i) => i.labels.includes('workshop:decision'));
 
-test('sync on the real files creates every issue, writes numbers back and keeps every other byte', async (t) => {
+test('sync on the plan files creates every issue, writes numbers back and keeps every other byte', async (t) => {
   const fake = await startFake();
   t.after(fake.stop);
   fake.pageSize = 25;
@@ -24,10 +22,10 @@ test('sync on the real files creates every issue, writes numbers back and keeps 
 
   const first = await run(['sync'], { fake, box });
   assert.equal(first.code, 0, first.stderr);
-  assert.equal(first.stdout.trim(), `created ${lineCount + itemCount}, updated 0, unchanged 0, labels 7`);
+  assert.equal(first.stdout.trim(), `created ${lineCount + itemCount}, updated 0, unchanged 0, labels 8`);
   assert.equal(entryIssues(fake).length, lineCount);
   assert.equal(decisionIssues(fake).length, itemCount);
-  assert.equal(fake.labels.length, 7);
+  assert.equal(fake.labels.length, 8);
 
   // features.jsonl: each line gains only `, "issue": N` before its closing brace.
   const before = featuresBefore.split('\n');
@@ -73,7 +71,36 @@ test('sync on the real files creates every issue, writes numbers back and keeps 
   assert.equal(fake.writes, writes);
   assert.equal(box.features(), after.join('\n'));
   assert.equal(box.decisions(), decisions);
-  assert.equal(readFileSync(join(REAL, 'features.jsonl'), 'utf8'), featuresBefore, 'the real file is untouched');
+  assert.equal(readFileSync(join(FIXTURES, 'features.jsonl'), 'utf8'), featuresBefore, 'the fixture it was copied from is untouched');
+  assert.equal(readFileSync(join(FIXTURES, 'decisions.txt'), 'utf8'), decisionsBefore);
+
+  // The same files, already numbered, synced from another checkout: nothing is created or changed.
+  const numbered = sandbox(t, { features: box.features(), decisions: decisions });
+  const third = await run(['sync'], { fake, box: numbered });
+  assert.equal(third.code, 0, third.stderr);
+  assert.equal(third.stdout.trim(), `created 0, updated 0, unchanged ${lineCount}`);
+  assert.equal(fake.writes, writes);
+  assert.equal(numbered.features(), box.features());
+  assert.equal(numbered.decisions(), decisions);
+});
+
+test('sync on files that already carry issue numbers and references creates nothing and writes nothing', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const entry = fake.addIssue({ title: 'A', body: 'Does a.\n\n<!-- silo-entry: a -->', labels: ['workshop:entry'], user: { login: 'silo-workshop[bot]', type: 'Bot' } });
+  const decision = fake.addIssue({ title: 'One.', body: 'One.', labels: ['workshop:decision'], user: { login: 'silo-workshop[bot]', type: 'Bot' } });
+  fake.close(decision.number, 'completed', 'silo-workshop[bot]');
+  fake.labels.push(...(await import('../src/names.js')).LABELS.map(({ name, color, description }) => ({ name, color, description })));
+  const features = `{"n": 1, "id": "a", "name": "A", "what": "Does a.", "issue": ${entry.number}}\n`;
+  const decisions = `# D\n\n- 2026-11-16 · owner · One. (#${decision.number})\n`;
+  const box = sandbox(t, { features, decisions });
+  const result = await run(['sync'], { fake, box });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'created 0, updated 0, unchanged 1');
+  assert.equal(fake.writes, 0);
+  assert.equal(fake.issues.size, 2);
+  assert.equal(box.features(), features);
+  assert.equal(box.decisions(), decisions);
 });
 
 test('--dry-run writes nothing on GitHub or on disk', async (t) => {
@@ -86,7 +113,7 @@ test('--dry-run writes nothing on GitHub or on disk', async (t) => {
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /would create label workshop:entry/);
   assert.match(result.stdout, /would create the issue for engine-service/);
-  assert.match(result.stdout.trim().split('\n').at(-1), /^would create \d+, would update 0, unchanged 0, labels 7$/);
+  assert.match(result.stdout.trim().split('\n').at(-1), /^would create \d+, would update 0, unchanged 0, labels 8$/);
   assert.equal(fake.log.filter((r) => r.method !== 'GET' && !r.path.includes('access_tokens')).length, 0);
   assert.equal(fake.issues.size, 0);
   assert.equal(box.features(), features);
@@ -101,14 +128,16 @@ test('sync stops cleanly on a rate limit and a rerun finishes without duplicates
   t.after(fake.stop);
   const box = sandbox(t);
   const lineCount = box.features().split('\n').filter((l) => l.trim()).length;
-  fake.limitAfterWrites = 40;
+  // Stopped first among the entries, then among the decisions (eight labels come first).
+  fake.limitAfterWrites = 8 + Math.floor(lineCount / 2);
   const stopped = await run(['sync'], { fake, box });
   assert.equal(stopped.code, 1);
   assert.match(stopped.stdout, /stopped by GitHub's rate limit, run again after/);
   const numbered = box.features().split('\n').filter((l) => l.includes('"issue"')).length;
   assert.equal(numbered, entryIssues(fake).length, 'every created issue is already written back');
 
-  fake.limitAfterWrites = fake.writes + 50;
+  assert.ok(numbered > 0 && numbered < lineCount, 'stopped among the entries');
+  fake.limitAfterWrites = fake.writes + lineCount;
   assert.equal((await run(['sync'], { fake, box })).code, 1);
   fake.limitAfterWrites = null;
   const done = await run(['sync'], { fake, box });
@@ -181,7 +210,7 @@ test('a decision issue left open by a stopped run is closed by the next one, not
   const fake = await startFake();
   t.after(fake.stop);
   const box = sandbox(t, { features: '', decisions: '# D\n\n- 2026-11-16 · owner · One.\n' });
-  fake.limitAfterWrites = 8; // seven labels, the issue, then the close is refused
+  fake.limitAfterWrites = 9; // eight labels, the issue, then the close is refused
   const stopped = await run(['sync'], { fake, box });
   assert.equal(stopped.code, 1);
   const n = Number(box.decisions().match(/\(#(\d+)\)/)[1]);

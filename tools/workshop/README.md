@@ -44,7 +44,7 @@ Reads `vercel.env` (it must be mode 0600) and stores the App id, client id, clie
 tools/workshop/bin/workshop doctor
 ```
 
-Shows where each credential was found (environment, Keychain, file or missing), never a value. It also shows whether the App is public (read the way an outsider sees it, with an unauthenticated `GET /apps/<slug>`; a private App is a problem, because sign-in will not work for anyone outside its organization), whether it is installed on the repository, the installation's permissions, and whether the three kind labels and four verdict labels exist. It exits 1 when something is wrong.
+Shows where each credential was found (environment, Keychain, file or missing), never a value. It also shows whether the App is public (read the way an outsider sees it, with an unauthenticated `GET /apps/<slug>`; a private App is a problem, because sign-in will not work for anyone outside its organization), whether it is installed on the repository, the installation's permissions, and whether the three kind labels, the four verdict labels and `workshop:building` exist. It exits 1 when something is wrong.
 
 ### `sync`: make GitHub match the files
 
@@ -53,7 +53,7 @@ tools/workshop/bin/workshop sync --dry-run   # prints what it would do, writes n
 tools/workshop/bin/workshop sync             # created 3, updated 1, unchanged 115
 ```
 
-- Creates the seven labels if they are missing.
+- Creates the eight labels if they are missing (the kind and verdict labels, and `workshop:building`).
 - `docs/product/features.jsonl`: for each line, `sync` finds the `workshop:entry` issue by the line's `issue` number, or by the `<!-- silo-entry: <id> -->` marker, and creates the issue when there is none. An entry's issue is always one the bot created whose body's last line is the marker. When two such issues carry one marker, the oldest is used and the other is reported as a duplicate. The title is the entry's `name`; the body is its `what` followed by the marker. A changed title or body is updated. `sync` writes `"issue": N` into the line, either replacing the value in place or appending the field before the closing brace, so the file's field order and every other byte stay as they were. It never adds or removes a verdict label and never closes or reopens an entry.
 - When a line's `issue` names an issue the bot created that was edited on GitHub (text after the marker, or the entry label removed), `sync` restores its title, body and entry label and goes on. A line naming an issue the bot did not create, a decision or suggestion, an issue carrying another entry's marker, or the same issue as another line stops the run.
 - Before each write to a file, `sync` reads the file again and changes only the line with that id (or the item with that text) as it is now, so edits made while it runs are kept. A line that has gone in the meantime is skipped and reported.
@@ -76,17 +76,20 @@ The report lists:
 
 `--write` records a verdict in the line's `verdict` field only when the person who set it has write, maintain or admin permission on the repository. A verdict set by anyone else (or by a bot), or an issue that carries two verdict labels, is reported as not recorded. A verdict cleared on GitHub is never cleared from the file, because a verdict in the file without a label is "carried over". Each verdict is applied to the line with that id as the file is at that moment, and only if its `verdict` still holds the value read at the start of the run. A line that is gone, or whose verdict changed in the meantime, is skipped and reported. `pull` never edits DECISIONS.md: the orchestrator writes a decided line itself, ending it with ` (#N)`.
 
-### `ask`, `comment`, `built`: post as the bot
+### `ask`, `comment`, `built`, `building`: post as the bot
 
 ```sh
 tools/workshop/bin/workshop ask --title "Which sandbox first?" --body @question.md --entry vm-runtime
 echo "Built in abc1234." | tools/workshop/bin/workshop comment 42 --text -
+tools/workshop/bin/workshop building 42          # Marked #42 as being built.
+tools/workshop/bin/workshop building 42 --stop
 tools/workshop/bin/workshop built 42
 ```
 
 - `ask` opens an open `workshop:decision` issue. Its title can be at most 120 characters. `--entry ID` adds a line naming that entry's issue.
 - `comment` comments only on an issue that carries a `workshop:` kind label; it refuses any other issue and any pull request.
-- `built` closes a `workshop:entry` issue as completed and leaves its labels alone. It refuses an entry closed as not planned (dropped).
+- `built` closes a `workshop:entry` issue as completed, then removes its `workshop:building` label; it leaves every other label alone. On an entry already closed as built it only removes a building label left on it. It refuses an entry closed as not planned (dropped).
+- `building` adds `workshop:building` to an open `workshop:entry` issue that carries `verdict:take`. When the repository lacks the label, it creates it first with its colour and description, the way `sync` does (GitHub would otherwise create it bare). The owner's verdict other than take removes the label on the Workshop's side. It refuses any other issue, a closed entry, and an entry without `verdict:take` ("#N is not planned: the owner has not taken it"). `--stop` removes the label from any entry, open or closed, so a label left on a dropped entry can be cleared. Both report `changed: false` and write nothing when there is nothing to change.
 
 `--body` and `--text` take the text itself, `@file`, or `-` for stdin.
 

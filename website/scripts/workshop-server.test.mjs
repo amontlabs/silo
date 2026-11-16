@@ -15,9 +15,9 @@ import { seal, unseal } from '../server/session.mjs';
 import { BUDGET, createWorkshop, LABELS } from '../server/workshop.mjs';
 import { CUTS, cut, readBody } from '../server/issues.mjs';
 import { SNAPSHOT } from '../server/snapshot.mjs';
-import { createFakeGitHub, FAKE_APP, seedDemo } from './fake-github.mjs';
+import { createFakeGitHub, FAKE_APP, progressOf, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
-import { startDev } from './workshop-dev.mjs';
+import { progressLine, startDev } from './workshop-dev.mjs';
 
 import { count, decisionNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
 
@@ -682,11 +682,20 @@ function fakeResponse() {
   };
 }
 
+// The plan a local server's fake GitHub is seeded from in these tests.
+const FIXTURE_FEATURES = [
+  { n: 1, id: 'engine-service', name: 'The engine runs on its own', what: 'A background engine owns every computer.' },
+  { n: 2, id: 'calls-and-events', name: 'Every call and event defined once', what: 'Each call is written down once.' },
+  { n: 3, id: 'vm-runtime', name: 'The VM runtime, packaged', what: 'Silo ships the program that runs each computer.' },
+  { n: 4, id: 'fixture-only', name: 'Only in the fixture', what: 'Proves the fixture is read.' },
+].map((line) => JSON.stringify(line)).join('\n') + '\n';
+
 async function fixtureSite(page = 'workshop/index.html') {
   const dir = await mkdtemp(join(tmpdir(), 'workshop-site-'));
   await mkdir(join(dir, 'dist', 'workshop'), { recursive: true });
   await writeFile(join(dir, 'dist', 'index.html'), '<!doctype html><title>Silo</title>');
   if (page) await writeFile(join(dir, 'dist', page), '<!doctype html><title>Workshop</title>');
+  await writeFile(join(dir, 'features.jsonl'), FIXTURE_FEATURES);
   return dir;
 }
 
@@ -784,7 +793,7 @@ async function freePort() {
 
 test('workshop-dev --fake serves the site and the API on one port, with sign-in through the fake GitHub', async () => {
   const site = await fixtureSite();
-  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), log: () => {} });
+  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), featuresFile: join(site, 'features.jsonl'), log: () => {} });
   try {
     for (const path of ['/workshop', '/workshop/']) {
       const page = await fetch(dev.origin + path);
@@ -796,7 +805,7 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
     const state = await (await fetch(dev.origin + '/api/workshop/state')).json();
     const entries = Object.values(state.issues).filter((i) => i.kind === 'entry');
     assert.ok(entries.length >= 3);
-    assert.ok(entries.some((i) => i.entry === 'engine-service'));
+    assert.deepEqual(entries.map((i) => i.entry).sort(), ['calls-and-events', 'engine-service', 'fixture-only', 'vm-runtime']);
     assert.ok(Object.values(state.issues).some((i) => i.kind === 'decision' && i.state === 'open'));
 
     const start = await fetch(dev.origin + '/api/workshop/login?return=/workshop', { redirect: 'manual' });
@@ -1005,7 +1014,7 @@ test('API answers forbid framing; route names are own properties only', async ()
 
 test('the local server survives //, an aborted POST body and /api/workshop/constructor, and forbids framing', async () => {
   const site = await fixtureSite();
-  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), log: () => {} });
+  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), featuresFile: join(site, 'features.jsonl'), log: () => {} });
   const { port } = new URL(dev.origin);
   const raw = (text) => new Promise((resolve) => {
     const socket = netConnect(Number(port), '127.0.0.1', () => socket.write(text));
@@ -1029,4 +1038,49 @@ test('the local server survives //, an aborted POST body and /api/workshop/const
     await dev.close();
     await rm(site, { recursive: true, force: true });
   }
+});
+
+const PLAN = [
+  ['e1', 'engine', 'shell', 'take'], ['e2', 'engine', 'shell', null], ['c1', 'computers', 'shell', 'take'],
+  ['p1', 'app', 'loop', 'take'], ['a1', 'agents', 'agent', 'take'], ['a2', 'agents', 'agent', 'later'],
+  ['a3', 'agents', 'agent', 'take'], ['a4', 'agents', 'living', 'take'], ['x1', 'changes', 'loop2', 'take'],
+  ['g1', undefined, 'gone', 'drop'],
+].map(([id, area, stage, verdict], index) => ({ n: index + 1, id, area, stage, verdict, name: id, what: id }));
+
+test('progress: taken entries of engine, computers and app built, two taken agents entries being built', async () => {
+  const plan = progressOf(PLAN);
+  assert.equal(plan.by, 'area');
+  assert.deepEqual([...plan.built], ['e1', 'c1', 'p1']);
+  assert.deepEqual([...plan.building], ['a1', 'a3']);
+  assert.match(progressLine(plan), /^built: the taken entries of the areas engine, computers, app \(3\); being built: 2 of agents\.$/);
+
+  const t = await setup({ seed: false });
+  try {
+    seedDemo(t.fake, PLAN, { progress: true });
+    const issues = Object.values((await t.client().call('GET', 'state')).json.issues).filter((i) => i.kind === 'entry');
+    const by = Object.fromEntries(issues.map((i) => [i.entry, i]));
+    for (const id of ['e1', 'c1', 'p1']) assert.deepEqual([by[id].state, by[id].reason], ['closed', 'completed'], id);
+    assert.deepEqual(issues.filter((i) => i.building).map((i) => i.entry).sort(), ['a1', 'a3']);
+    assert.deepEqual([by.a2.verdict, by.a2.state, by.e2.verdict, by.x1.state], ['later', 'open', null, 'open']);
+    assert.deepEqual([by.g1.verdict, by.g1.reason], ['drop', 'not_planned']);
+  } finally { await t.close(); }
+});
+
+test('progress without areas goes by stage: the first three built, two taken of the fourth being built', () => {
+  const plan = progressOf(PLAN.map(({ area, ...rest }) => rest));
+  assert.equal(plan.by, 'stage');
+  assert.deepEqual(plan.builtGroups, ['shell', 'loop', 'agent']);
+  assert.deepEqual([...plan.built], ['e1', 'c1', 'p1', 'a1', 'a3']);
+  assert.deepEqual([...plan.building], ['a4']);
+  assert.match(progressLine(plan), /^No entry has an area, so progress goes by stage: .*stages shell, loop, agent/);
+});
+
+test('without progress the demo seed keeps its own verdicts and no entry is being built', async () => {
+  const t = await setup({ seed: false });
+  try {
+    assert.equal(seedDemo(t.fake, PLAN).progress, null);
+    const issues = Object.values((await t.client().call('GET', 'state')).json.issues);
+    assert.equal(issues.some((i) => Object.hasOwn(i, 'building')), false);
+    assert.equal(issues.filter((i) => i.kind === 'entry' && i.state === 'closed').length, 0);
+  } finally { await t.close(); }
 });

@@ -37,9 +37,11 @@ export async function sync({ gh, root, dryRun, log }) {
   return { dryRun, ...counts, stopped, skipped, duplicates, actions };
 }
 
-async function ensureLabels({ gh, dryRun, act, counts }) {
+// Creates each of `labels` that the repository lacks, with its colour and description. A label that
+// exists under the same name, in any case, is left as it is.
+export async function ensureLabels({ gh, dryRun = false, act = () => {}, counts = { labels: 0 }, labels = LABELS }) {
   const existing = new Set((await gh.paginate(gh.repoPath('/labels'))).map((label) => label.name.toLowerCase()));
-  for (const label of LABELS) {
+  for (const label of labels) {
     if (existing.has(label.name.toLowerCase())) continue;
     act(`create label ${label.name}`);
     counts.labels += 1;

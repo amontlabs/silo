@@ -76,7 +76,7 @@ test('built closes an entry as completed, once; it refuses other issues and drop
 
   const done = await run(['built', String(entry.number), '--json'], { fake, box });
   assert.equal(done.code, 0, done.stderr);
-  assert.deepEqual(JSON.parse(done.stdout), { number: entry.number, entry: 'a', changed: true });
+  assert.deepEqual(JSON.parse(done.stdout), { number: entry.number, entry: 'a', changed: true, closed: true, unlabeled: false });
   assert.deepEqual([entry.state, entry.state_reason], ['closed', 'completed']);
   assert.deepEqual(entry.labels, ['workshop:entry', 'verdict:take']);
   assert.match((await run(['built', String(entry.number)], { fake, box })).stdout, /already closed/);
@@ -86,6 +86,90 @@ test('built closes an entry as completed, once; it refuses other issues and drop
   const refused = await run(['built', String(dropped.number)], { fake, box });
   assert.equal(refused.code, 1);
   assert.equal(dropped.state_reason, 'not_planned');
+});
+
+test('building marks an open taken entry, once; --stop removes the mark; built removes it too', async (t) => {
+  const { fake, box } = await world(t);
+  const taken = fake.addIssue({ title: 'E', body: 'x\n\n<!-- silo-entry: a -->', labels: ['workshop:entry', 'verdict:take'] });
+  const writes = () => fake.log.filter((r) => r.method !== 'GET' && !r.path.includes('access_tokens')).length;
+
+  const start = await run(['building', String(taken.number), '--json'], { fake, box });
+  assert.equal(start.code, 0, start.stderr);
+  assert.deepEqual(fake.labels, [{ name: 'workshop:building', color: '8250df', description: 'Being built now' }], 'the label is made first, as sync makes it');
+  const order = fake.log.filter((r) => r.method === 'POST' && r.path.endsWith('/labels')).map((r) => r.path.replace(/^\/repos\/[^/]+\/[^/]+/, ''));
+  assert.deepEqual(order, ['/labels', `/issues/${taken.number}/labels`]);
+  assert.deepEqual(JSON.parse(start.stdout), { number: taken.number, entry: 'a', building: true, changed: true });
+  assert.deepEqual(taken.labels, ['workshop:entry', 'verdict:take', 'workshop:building']);
+  const before = writes();
+  const again = await run(['building', String(taken.number), '--json'], { fake, box });
+  assert.equal(JSON.parse(again.stdout).changed, false);
+  assert.match((await run(['building', String(taken.number)], { fake, box })).stdout, /already marked as being built/);
+  assert.equal(writes(), before, 'a second run writes nothing');
+
+  taken.labels.pop();
+  await run(['building', String(taken.number)], { fake, box });
+  assert.equal(fake.labels.length, 1, 'an existing label is not made again');
+  assert.equal(fake.log.filter((r) => r.method === 'POST' && r.path.endsWith('/repos/amontlabs/silo/labels')).length, 1);
+  const stop = await run(['building', String(taken.number), '--stop', '--json'], { fake, box });
+  assert.deepEqual(JSON.parse(stop.stdout), { number: taken.number, entry: 'a', building: false, changed: true });
+  assert.deepEqual(taken.labels, ['workshop:entry', 'verdict:take']);
+  const stopped = writes();
+  assert.match((await run(['building', String(taken.number), '--stop'], { fake, box })).stdout, /was not marked as being built/);
+  assert.equal(writes(), stopped);
+
+  await run(['building', String(taken.number)], { fake, box });
+  const done = await run(['built', String(taken.number), '--json'], { fake, box });
+  assert.deepEqual(JSON.parse(done.stdout), { number: taken.number, entry: 'a', changed: true, closed: true, unlabeled: true });
+  assert.deepEqual([taken.state, taken.state_reason, taken.labels], ['closed', 'completed', ['workshop:entry', 'verdict:take']]);
+
+  // A label left on an entry already built (added on GitHub, or a run cut after the close) goes on the next `built`.
+  taken.labels.push('workshop:building');
+  const cleared = await run(['built', String(taken.number)], { fake, box });
+  assert.match(cleared.stdout, /already closed as built\. Removed its building label\./);
+  assert.deepEqual(taken.labels, ['workshop:entry', 'verdict:take']);
+  assert.deepEqual(JSON.parse((await run(['built', String(taken.number), '--json'], { fake, box })).stdout).changed, false);
+});
+
+test('building refuses what the owner has not taken, closed entries and other issues; --stop clears a dropped entry', async (t) => {
+  const { fake, box } = await world(t);
+  const undecided = fake.addIssue({ title: 'U', labels: ['workshop:entry'] });
+  const later = fake.addIssue({ title: 'L', labels: ['workshop:entry', 'verdict:later'] });
+  const built = fake.addIssue({ title: 'B', labels: ['workshop:entry', 'verdict:take'] });
+  fake.close(built.number, 'completed');
+  const decision = fake.addIssue({ title: 'D', labels: ['workshop:decision', 'verdict:take'] });
+  const other = fake.addIssue({ title: 'Bug', labels: ['bug', 'verdict:take'] });
+  const dropped = fake.addIssue({ title: 'X', labels: ['workshop:entry', 'verdict:drop', 'workshop:building'] });
+  fake.close(dropped.number, 'not_planned');
+
+  for (const issue of [undecided, later]) {
+    const refused = await run(['building', String(issue.number)], { fake, box });
+    assert.equal(refused.code, 1);
+    assert.equal(refused.stderr.trim(), `workshop: #${issue.number} is not planned: the owner has not taken it`);
+  }
+  assert.match((await run(['building', String(built.number)], { fake, box })).stderr, /is not an open Workshop entry/);
+  assert.match((await run(['building', String(decision.number)], { fake, box })).stderr, /is not a Workshop entry/);
+  assert.match((await run(['building', String(other.number)], { fake, box })).stderr, /is not a Workshop issue/);
+  assert.equal((await run(['building', '999'], { fake, box })).code, 1);
+  assert.equal(fake.log.filter((r) => r.method === 'POST' && r.path.endsWith('/labels')).length, 0, 'nothing was labelled');
+
+  const cleared = await run(['building', String(dropped.number), '--stop', '--json'], { fake, box });
+  assert.equal(cleared.code, 0, cleared.stderr);
+  assert.equal(JSON.parse(cleared.stdout).changed, true);
+  assert.deepEqual([dropped.labels, dropped.state_reason], [['workshop:entry', 'verdict:drop'], 'not_planned']);
+  for (const argv of [['building'], ['building', 'x'], ['building', '1', '--stop=yes'], ['building', '1', '2']]) {
+    assert.equal((await run(argv, { fake, box })).code, 2, argv.join(' '));
+  }
+});
+
+test('sync creates the building label with the others, and doctor lists it', async (t) => {
+  const { fake, box } = await world(t);
+  assert.equal((await run(['sync'], { fake, box })).code, 0);
+  assert.deepEqual(fake.labels.find((label) => label.name === 'workshop:building'), { name: 'workshop:building', color: '8250df', description: 'Being built now' });
+  assert.match((await run(['doctor'], { fake, box, env: { WORKSHOP_APP_ID: fake.appId } })).stdout, /^Label workshop:building: yes$/m);
+  fake.labels = fake.labels.filter((label) => label.name !== 'workshop:building');
+  const missing = await run(['doctor'], { fake, box, env: { WORKSHOP_APP_ID: fake.appId } });
+  assert.equal(missing.code, 1);
+  assert.match(missing.stdout, /^Problem: labels missing \(sync creates them\): workshop:building$/m);
 });
 
 test('doctor reports credentials by source, the installation, permissions and labels, without values', async (t) => {

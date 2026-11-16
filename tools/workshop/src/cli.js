@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ask, built, comment, doctor } from './commands.js';
+import { ask, building, built, comment, doctor } from './commands.js';
 import { appCredentials } from './credentials.js';
 import { GitHub } from './github.js';
 import { macKeychain } from './keychain.js';
@@ -26,6 +26,7 @@ const USAGE = `usage: workshop <command> [--json]
   ask --title T --body TEXT|@file|- [--entry ID]
   comment N --text TEXT|@file|-
   built N
+  building N [--stop]
 
 See tools/workshop/README.md.`;
 
@@ -38,6 +39,7 @@ const COMMANDS = {
   ask: { flags: [], options: ['title', 'body', 'entry'], positional: 0 },
   comment: { flags: [], options: ['text'], positional: 1 },
   built: { flags: [], options: [], positional: 1 },
+  building: { flags: ['stop'], options: [], positional: 1 },
 };
 
 export function defaultDeps() {
@@ -193,7 +195,18 @@ export async function main(argv, overrides = {}) {
       case 'built': {
         const gh = await connected(deps);
         const result = await built({ gh, number: Number(args.positional[0]) });
-        emit(result, result.changed ? `Closed #${result.number} as built.` : `#${result.number} was already closed as built.`);
+        const closed = result.closed ? `Closed #${result.number} as built.` : `#${result.number} was already closed as built.`;
+        emit(result, result.unlabeled ? `${closed} Removed its building label.` : closed);
+        return 0;
+      }
+      case 'building': {
+        const gh = await connected(deps);
+        const stop = Boolean(args.flags.stop);
+        const result = await building({ gh, number: Number(args.positional[0]), stop });
+        const text = stop
+          ? (result.changed ? `#${result.number} is no longer marked as being built.` : `#${result.number} was not marked as being built.`)
+          : (result.changed ? `Marked #${result.number} as being built.` : `#${result.number} was already marked as being built.`);
+        emit(result, text);
         return 0;
       }
     }

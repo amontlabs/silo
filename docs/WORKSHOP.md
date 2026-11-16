@@ -26,6 +26,15 @@ or `verdict:later`. A dropped entry has `verdict:drop` and is closed as "not
 planned". A built entry is closed as "completed". Votes are 👍 reactions,
 comments are issue comments, and history is GitHub's.
 
+An entry being built now also carries `workshop:building` ("Being built now").
+The bot sets it with `workshop building <issue>`, only on an open entry with
+`verdict:take`, and removes it with `workshop building <issue> --stop` or when
+`workshop built` closes the entry (see `tools/workshop/README.md`). A verdict
+other than take (`later`, `refine`, `drop`, or cleared) removes it in the same
+write, so an entry taken again is not shown as being built. The server counts
+the label only on an open entry that also carries `verdict:take`, so a removal
+that failed, or a label left on an issue reopened by hand, shows nothing.
+
 ## The API
 
 All endpoints are under `/api/workshop/` on the site's own origin and answer
@@ -34,7 +43,7 @@ briefly here:
 
 | Endpoint | Who | What |
 | --- | --- | --- |
-| `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. |
+| `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. An open entry carrying both `workshop:building` and `verdict:take` also has `"building": true`; the field is absent on every other issue (other verdicts, closed entries, decisions, suggestions). |
 | `GET me` | signed in | `{ login, avatar, canDecide }`; `canDecide` is false when the permission could not be read (the next `me` tries again). 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
 | `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
@@ -44,7 +53,7 @@ briefly here:
 | `POST comment {n, text}` | signed in | Comments as that person. |
 | `POST vote {n, on}` | signed in | Adds or removes that person's 👍. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
-| `POST verdict {n, verdict, note?}` | can decide | Sets (`take`, `refine`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required. `refine` needs a note; the labels and the state change first, and the note is posted last, as the person's comment. |
+| `POST verdict {n, verdict, note?}` | can decide | Sets (`take`, `refine`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required. `refine` needs a note; the labels and the state change first, and the note is posted last, as the person's comment. Any verdict but `take` also removes `workshop:building` when the issue carries it (no call otherwise); if that removal fails, the verdict still stands. |
 | `POST decide {n, text}` | can decide | Comments on an open decision, then closes it as completed. A comment, a note or a decision text that the same person posted on that issue in the last five minutes is not posted again. |
 
 Errors are `{ "error": code, "message": plain words }` with 400 (bad input),
@@ -128,6 +137,8 @@ instances.
   100 a page, at most 20 pages for the three together), so nothing else in the
   repository is fetched or counted against the cap, and issues without exactly
   one Workshop label or that are pull requests are skipped.
+  `building` is read from the labels of the same lists, so it costs no call of
+  its own, and a label added or removed on GitHub shows at the next refresh.
   Each page is sent with `If-None-Match` and the ETag GitHub gave for it last
   time; a `304 Not Modified` means the page is unchanged and the held copy is
   reused. Vote counts come from each issue's reaction summary in that list.
@@ -315,9 +326,10 @@ That gives them nothing: the server only ever uses the installation on
 `WORKSHOP_REPO`, and it requests user tokens for that repository only.
 
 Then generate a private key and a client secret, and install the App on
-`amontlabs/silo` only ("Only select repositories"). Create the seven labels in
-the repository: `workshop:entry`, `workshop:decision`, `workshop:suggestion`,
-`verdict:take`, `verdict:refine`, `verdict:later`, `verdict:drop`.
+`amontlabs/silo` only ("Only select repositories"). Create the eight labels in
+the repository (`workshop sync` does): `workshop:entry`, `workshop:decision`,
+`workshop:suggestion`, `verdict:take`, `verdict:refine`, `verdict:later`,
+`verdict:drop`, `workshop:building`.
 
 For local work against the real GitHub, create a second App the same way with
 the callback `http://127.0.0.1:4174/api/workshop/callback`, installed on a test
@@ -393,6 +405,14 @@ Sign-in goes through the fake's page, which offers two people: `owner-fake`
 (admin, can decide) and `visitor-fake` (read only). Everything lives in memory
 and resets on restart.
 
+`--fake --progress` seeds a later state instead, to look at the page with
+progress in it: the entries carry the verdicts of `features.jsonl`, every taken
+entry of the areas `engine`, `computers` and `app` is closed as built, and the
+first two taken entries of `agents` are being built. When no line has an
+`area`, it goes by stage: the taken entries of the first three stages built and
+the first two taken entries of the fourth being built. The runner prints which
+one it used.
+
 Without `--fake`, the server uses GitHub with the `WORKSHOP_*` variables of the
 environment (a development App, see above); its origin is always
 `http://127.0.0.1:<port>`, so cookies are not `Secure` and have no `__Host-`
@@ -459,8 +479,9 @@ GitHub's own permissions apply (a locked issue refuses a visitor's comment)
 and GitHub records the person as the author. Every write first reads the issue
 and refuses with 404 unless it carries a Workshop label and is not a pull
 request; `verdict` works only on entries and `decide` only on open decisions.
-A verdict adds and removes only `verdict:*` labels, one at a time, so labels
-changed by someone else are kept. It changes the labels and the state first
+A verdict adds and removes only `verdict:*` labels, one at a time, and, for any
+verdict but take, `workshop:building`, so other labels changed by someone else
+are kept. It changes the labels and the state first
 and posts the note only after they succeeded, so a retry never posts the note
 twice. Clearing a verdict reopens only a dropped entry, never one closed as
 completed. A 401 on the installation token is a 502 and
