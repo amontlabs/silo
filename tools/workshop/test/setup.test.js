@@ -161,49 +161,101 @@ test('a locked Keychain stops setup and the other commands; it never reads as "n
   assert.equal(fake.manifests.length, 0);
 });
 
-test('a Keychain failure after the App is made keeps its credentials in vercel.env; store finishes and no second App is made', async (t) => {
+/** A Keychain that fails every store after the first `okStores`, until `heal()`. */
+function flakyKeychain(okStores) {
+  const keychain = fakeKeychain();
+  let left = okStores;
+  return {
+    keychain,
+    heal: () => (left = Infinity),
+    available: () => true,
+    get: (name) => keychain.get(name),
+    set: (name, value) => {
+      if (left <= 0) throw new Failure(`the Keychain is locked or unavailable: could not store ${name}`);
+      left -= 1;
+      keychain.set(name, value);
+    },
+  };
+}
+
+for (const okStores of [0, 2]) {
+  test(`a Keychain failure after ${okStores} of the four values keeps everything in vercel.env; store finishes and no second App is made`, async (t) => {
+    const fake = await startFake();
+    t.after(fake.stop);
+    const box = sandbox(t, { features: '', decisions: '' });
+    const flaky = flakyKeychain(okStores);
+    const first = await driveSetup({ fake, box, keychain: flaky });
+    assert.equal(first.result.code, 1);
+    assert.match(first.result.stderr, /the App silo-workshop exists on GitHub and its credentials are in .*vercel\.env.*run `workshop store`/);
+    assert.equal(flaky.keychain.store.size, okStores);
+    const envPath = vercelEnvPath(box.home);
+    assert.equal(statSync(envPath).mode & 0o777, 0o600);
+    assert.match(readFileSync(envPath, 'utf8'), /WORKSHOP_PRIVATE_KEY=/);
+    assertNoSecrets(first.result.stderr + first.page, [...secretsOf(fake)]);
+
+    flaky.heal();
+    for (const args of [[], ['--replace']]) {
+      const retry = await driveSetup({ fake, box, keychain: flaky, args });
+      assert.equal(retry.result.code, 1);
+      assert.match(retry.result.stderr, /run `workshop store` to finish/);
+    }
+    assert.equal(fake.manifests.length, 1, 'never a second App');
+
+    const stored = await run(['store', '--json'], { fake, box, keychain: flaky });
+    assert.equal(stored.code, 0, stored.stderr);
+    assert.equal(JSON.parse(stored.stdout).stored.length, 4 - okStores);
+    assert.equal(flaky.keychain.store.get('WORKSHOP_PRIVATE_KEY'), fake.createdApp.pem);
+    assert.equal(flaky.keychain.store.get('WORKSHOP_CLIENT_SECRET'), fake.createdApp.client_secret);
+    assert.ok(!flaky.keychain.store.has('WORKSHOP_SESSION_SECRET'));
+    const again = await run(['store'], { fake, box, keychain: flaky });
+    assert.equal(again.code, 0);
+    assert.match(again.stdout, /already holds/);
+
+    // Now complete and matching: setup refuses without --replace and registers a new App with it.
+    const plain = await driveSetup({ fake, box, keychain: flaky });
+    assert.match(plain.result.stderr, /already exist in the Keychain; pass --replace/);
+    const replaced = await driveSetup({ fake, box, keychain: flaky, args: ['--replace'] });
+    assert.equal(replaced.result.code, 0, replaced.result.stderr);
+    assert.equal(fake.manifests.length, 2);
+  });
+}
+
+test('a Keychain holding another App than vercel.env: setup --replace refuses and says what to do; store needs --replace', async (t) => {
   const fake = await startFake();
   t.after(fake.stop);
   const box = sandbox(t, { features: '', decisions: '' });
   const keychain = fakeKeychain();
-  let failing = true;
-  const flaky = {
-    available: () => true,
-    get: (name) => keychain.get(name),
-    set: (name, value) => {
-      if (failing) throw new Failure('the Keychain is locked or unavailable: could not store ' + name);
-      keychain.set(name, value);
-    },
-  };
-  const first = await driveSetup({ fake, box, keychain: flaky });
-  assert.equal(first.result.code, 1);
-  assert.match(first.result.stderr, /the App silo-workshop exists on GitHub and its credentials are in .*vercel\.env.*run `workshop store`/);
-  assert.equal(keychain.store.size, 0);
-  const envPath = vercelEnvPath(box.home);
-  assert.equal(statSync(envPath).mode & 0o777, 0o600);
-  assert.match(readFileSync(envPath, 'utf8'), /WORKSHOP_PRIVATE_KEY=/);
-  assertNoSecrets(first.result.stderr + first.page, [...secretsOf(fake)]);
+  assert.equal((await driveSetup({ fake, box, keychain })).result.code, 0);
+  const other = { WORKSHOP_APP_ID: '999', WORKSHOP_CLIENT_ID: 'c', WORKSHOP_CLIENT_SECRET: 's', WORKSHOP_PRIVATE_KEY: 'k' };
+  for (const [name, value] of Object.entries(other)) keychain.set(name, value);
+  const refused = await driveSetup({ fake, box, keychain, args: ['--replace'] });
+  assert.equal(refused.result.code, 1);
+  assert.match(refused.result.stderr, /holds App 4242 but the Keychain holds App 999: run `workshop store --replace` .* or delete .*vercel\.env/);
+  assert.equal(fake.manifests.length, 1);
+  const storeRefused = await run(['store'], { fake, box, keychain });
+  assert.equal(storeRefused.code, 1);
+  assert.match(storeRefused.stderr, /App 999.*pass --replace/);
+  assert.equal((await run(['store', '--replace'], { fake, box, keychain })).code, 0);
+  assert.equal(keychain.get('WORKSHOP_APP_ID'), fake.appId);
 
-  failing = false;
-  for (const args of [[], ['--replace']]) {
-    const retry = await driveSetup({ fake, box, keychain: flaky, args });
-    assert.equal(retry.result.code, 1);
-    assert.match(retry.result.stderr, /run `workshop store`/);
-  }
-  assert.equal(fake.manifests.length, 1, 'never a second App');
+  // A partial set of another App (its id among them) is overwritten without --replace.
+  keychain.store.clear();
+  keychain.set('WORKSHOP_APP_ID', '999');
+  const partial = await driveSetup({ fake, box, keychain, args: ['--replace'] });
+  assert.match(partial.result.stderr, /run `workshop store` to finish/);
+  assert.equal((await run(['store'], { fake, box, keychain })).code, 0);
+  assert.equal(keychain.get('WORKSHOP_APP_ID'), fake.appId);
+  assert.equal(keychain.store.size, 4);
+});
 
-  const stored = await run(['store'], { fake, box, keychain: flaky });
-  assert.equal(stored.code, 0, stored.stderr);
-  assert.equal(keychain.store.get('WORKSHOP_PRIVATE_KEY'), fake.createdApp.pem);
-  assert.equal(keychain.store.get('WORKSHOP_CLIENT_SECRET'), fake.createdApp.client_secret);
-  assert.ok(!keychain.store.has('WORKSHOP_SESSION_SECRET'));
-  const again = await run(['store'], { fake, box, keychain: flaky });
-  assert.equal(again.code, 1);
-  assert.match(again.stderr, /already exist.*--replace/);
-  assert.equal((await run(['store', '--replace'], { fake, box, keychain: flaky })).code, 0);
-
-  chmodSync(envPath, 0o644);
-  const loose = await run(['store', '--replace'], { fake, box, keychain: flaky });
+test('store refuses a vercel.env readable by others', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const box = sandbox(t, { features: '', decisions: '' });
+  const keychain = fakeKeychain();
+  assert.equal((await driveSetup({ fake, box, keychain })).result.code, 0);
+  chmodSync(vercelEnvPath(box.home), 0o644);
+  const loose = await run(['store', '--replace'], { fake, box, keychain });
   assert.equal(loose.code, 1);
   assert.match(loose.stderr, /chmod 600/);
 });

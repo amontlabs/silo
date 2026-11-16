@@ -160,7 +160,7 @@ test('only the bot’s issues match: a marker not on the last line, a person’s
   const named = sandbox(t, { features: `{"id": "b", "name": "B", "what": "y", "issue": ${person.number}}\n`, decisions: '' });
   const refused = await run(['sync'], { fake, box: named });
   assert.equal(refused.code, 1);
-  assert.match(refused.stderr, /not a Workshop entry made by the bot/);
+  assert.match(refused.stderr, /which the bot did not create as a Workshop entry/);
 });
 
 test('two bot issues with one marker: the oldest is the entry’s and the duplicate is reported', async (t) => {
@@ -264,7 +264,7 @@ test('a line naming an issue that is not its Workshop entry stops sync', async (
   const box = sandbox(t, { features: `{"id": "a", "name": "A", "what": "x", "issue": ${other.number}}\n`, decisions: '' });
   const result = await run(['sync'], { fake, box });
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /not a Workshop entry/);
+  assert.match(result.stderr, /which the bot did not create as a Workshop entry/);
   assert.equal(other.title, 'Unrelated');
 });
 
@@ -283,4 +283,87 @@ test('a secondary rate limit (403 with a rate-limit message) also stops sync cle
   assert.equal(result.code, 1);
   assert.match(result.stdout, /stopped by GitHub's rate limit/);
   assert.equal(box.features(), '{"id": "a", "name": "A", "what": "x"}\n');
+});
+
+test('an entry issue of the bot edited on GitHub is restored (title, body, label) and sync goes on', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const box = sandbox(t, { features: '{"id": "a", "name": "A", "what": "x"}\n{"id": "b", "name": "B", "what": "y"}\n', decisions: '' });
+  assert.equal((await run(['sync'], { fake, box })).code, 0);
+  const [a, b] = box.features().split('\n').filter(Boolean).map((l) => JSON.parse(l).issue);
+  fake.issues.get(a).body += '\n\nAdded on GitHub after the marker.';
+  fake.issues.get(a).title = 'Renamed on GitHub';
+  fake.issues.get(b).labels = ['verdict:take'];
+  fake.close(b, 'completed');
+  const features = box.features();
+
+  const dry = await run(['sync', '--dry-run'], { fake, box });
+  assert.match(dry.stdout, new RegExp(`would restore #${a} \\(a\\)`));
+  assert.match(dry.stdout, new RegExp(`would restore #${b} \\(b\\)`));
+  assert.equal(fake.issues.get(a).title, 'Renamed on GitHub');
+
+  const pulled = JSON.parse((await run(['pull', '--json'], { fake, box })).stdout);
+  assert.deepEqual(pulled.unmatched.map((u) => [u.id, u.issue]), [['a', a], ['b', b]]);
+  assert.match(pulled.unmatched[0].reason, /edited on GitHub.*sync` restores it/);
+
+  const result = await run(['sync'], { fake, box });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /created 0, updated 2, unchanged 0/);
+  assert.deepEqual([fake.issues.get(a).title, fake.issues.get(a).body], ['A', 'x\n\n<!-- silo-entry: a -->']);
+  assert.deepEqual(fake.issues.get(b).labels, ['verdict:take', 'workshop:entry']);
+  assert.equal(fake.issues.get(b).state, 'closed', 'restoring never changes the state');
+  assert.equal(box.features(), features);
+  assert.equal(fake.issues.size, 2, 'no new issue');
+  assert.match((await run(['sync'], { fake, box })).stdout, /created 0, updated 0, unchanged 2/);
+  assert.deepEqual(JSON.parse((await run(['pull', '--json'], { fake, box })).stdout).unmatched, []);
+});
+
+test('a line naming the bot’s decision issue, another entry’s issue or the same issue as another line stops sync', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const bot = { login: 'silo-workshop[bot]', type: 'Bot' };
+  const decision = fake.addIssue({ title: 'D', body: 'text', labels: ['workshop:decision'], user: bot });
+  const marked = fake.addIssue({ title: 'B', body: 'y\n\n<!-- silo-entry: b -->\nedited', labels: ['workshop:entry'], user: bot });
+  for (const [features, message] of [
+    [`{"id": "a", "name": "A", "what": "x", "issue": ${decision.number}}\n`, /did not create as a Workshop entry/],
+    [`{"id": "a", "name": "A", "what": "x", "issue": ${marked.number}}\n`, /carries the marker of b/],
+    [`{"id": "a", "name": "A", "what": "x", "issue": 7}\n{"id": "b", "name": "B", "what": "y", "issue": 7}\n`, /names issue #7 on two lines/],
+  ]) {
+    const box = sandbox(t, { features, decisions: '' });
+    const result = await run(['sync'], { fake, box });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, message);
+  }
+  assert.equal(decision.title, 'D');
+  assert.equal(marked.title, 'B');
+});
+
+test('a decision issue someone reopened is not closed again', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const box = sandbox(t, { features: '', decisions: '# D\n\n- 2026-11-16 · owner · One.\n' });
+  assert.equal((await run(['sync'], { fake, box })).code, 0);
+  const n = Number(box.decisions().match(/\(#(\d+)\)/)[1]);
+  fake.reopen(n);
+  const result = await run(['sync'], { fake, box });
+  assert.equal(result.code, 0);
+  assert.equal(fake.issues.get(n).state, 'open');
+  assert.equal(fake.log.filter((r) => r.method === 'PATCH').length, 1, 'only the first close');
+});
+
+test('two closed bot decision issues with one body are reported as a duplicate; the oldest is used', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const bot = { login: 'silo-workshop[bot]', type: 'Bot' };
+  const text = '2026-11-16 · owner · One.';
+  const first = fake.addIssue({ title: text, body: text, labels: ['workshop:decision'], user: bot, state: 'closed', state_reason: 'completed' });
+  const second = fake.addIssue({ title: text, body: text, labels: ['workshop:decision'], user: bot, state: 'closed', state_reason: 'completed' });
+  const box = sandbox(t, { features: '', decisions: `# D\n\n- ${text}\n` });
+  const result = await run(['sync'], { fake, box });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`duplicate: #${second.number} has the same text as decision #${first.number}`));
+  assert.equal(box.decisions(), `# D\n\n- ${text} (#${first.number})\n`);
+  const pulled = JSON.parse((await run(['pull', '--json'], { fake, box })).stdout);
+  assert.deepEqual(pulled.duplicates, [{ decision: text, kept: first.number, duplicate: second.number }]);
+  assert.deepEqual(pulled.closedWithoutOutcome, [], 'the duplicate is not listed as a closed decision');
 });

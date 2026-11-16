@@ -34,20 +34,40 @@ export function entryIndex(issues, gh) {
   return { byNumber, byMarker, duplicates };
 }
 
+/**
+ * Closed decision issues the bot made, by exact body. When two carry one
+ * body, the oldest is used and the other is reported.
+ */
+export function decisionIndex(issues, gh, title = (body) => body) {
+  const byBody = new Map();
+  const duplicates = [];
+  for (const issue of issues.slice().sort((a, b) => a.number - b.number)) {
+    if (issue.state !== 'closed' || !gh.isOwnBot(issue.user)) continue;
+    if (byBody.has(issue.body)) duplicates.push({ decision: title(issue.body), kept: byBody.get(issue.body).number, duplicate: issue.number });
+    else byBody.set(issue.body, issue);
+  }
+  return { byBody, duplicates };
+}
+
 /** Markdown links with a relative target reduced to their text; absolute (scheme:) links kept. */
 export function withoutRelativeLinks(text) {
   return text.replace(/\[([^\]]+)\]\((?![A-Za-z][A-Za-z0-9+.-]*:)[^)\s]*\)/g, '$1');
 }
 
-/** Sets one field on the line whose id is `id`, as the file is now. False when that line is gone. */
-export function updateFeature(root, id, key, value) {
+/**
+ * Sets one field on the line whose id is `id`, as the file is now: 'missing'
+ * when that line is gone, 'changed' when `expect` rejects the line as it is
+ * now, else 'ok'.
+ */
+export function updateFeature(root, id, key, value, expect = () => true) {
   const path = featuresPath(root);
   const lines = parseFeatures(readText(path));
   const line = lines.find((l) => l.entry?.id === id);
-  if (!line) return false;
+  if (!line) return 'missing';
+  if (!expect(line.entry)) return 'changed';
   line.raw = setField(line.raw, key, value);
   writeText(path, joinFeatures(lines));
-  return true;
+  return 'ok';
 }
 
 /** Appends " (#N)" to the first unreferenced item with this text, as the file is now. False when there is none. */

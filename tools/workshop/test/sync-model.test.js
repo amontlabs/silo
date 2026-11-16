@@ -39,6 +39,7 @@ test('sync keeps the files and the owner’s labels and states right under rando
       entries: [1, 2, 3].map((i) => ({ id: `e${i}`, name: `Entry ${i}`, what: `What ${i}.`, verdict: i === 1 ? 'take' : null })),
       decisions: ['2026-11-16 · owner · First decision.', `2026-11-15 · owner · ${'A long decision line '.repeat(8)}end.`],
       owner: new Map(), // issue number -> { verdict, state, reason } as the owner left it
+      reopened: new Set(), // decision issues a person reopened: they stay open
     };
     const box = sandbox(t, { features: '', decisions: '' });
     const fileNumbers = () => new Map(box.features().split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.issue).map((e) => [e.id, e.issue]));
@@ -66,7 +67,7 @@ test('sync keeps the files and the owner’s labels and states right under rando
       const markers = [...fake.issues.values()].filter((i) => i.labels.includes('workshop:entry')).map((i) => i.body.match(/silo-entry: (\S+) -->/)[1]);
       assert.equal(new Set(markers).size, markers.length, `${step}: one issue per entry`);
       for (const e of entries.filter((x) => x.issue)) {
-        assert.ok(fake.issues.get(e.issue).body.endsWith(`<!-- silo-entry: ${e.id} -->`), `${step}: number points at its entry`);
+        assert.ok(fake.issues.get(e.issue).body.includes(`<!-- silo-entry: ${e.id} -->`), `${step}: number points at its entry`);
       }
       for (const [number, owned] of model.owner) {
         const issue = fake.issues.get(number);
@@ -86,15 +87,17 @@ test('sync keeps the files and the owner’s labels and states right under rando
         assert.ok(issue, `${step}: ${e.id} has an issue`);
         assert.equal(issue.title, e.name, `${step}: title`);
         assert.equal(issue.body, `${e.what}\n\n<!-- silo-entry: ${e.id} -->`, `${step}: body`);
+        assert.ok(issue.labels.includes('workshop:entry'), `${step}: entry label`);
       }
       for (const item of listItems(box.decisions().split('\n'))) {
         const issue = fake.issues.get(item.issue);
-        assert.ok(issue && issue.body === item.text && issue.state === 'closed' && issue.user.login === 'silo-workshop[bot]', `${step}: decision issue`);
+        assert.ok(issue && issue.body === item.text && issue.user.login === 'silo-workshop[bot]', `${step}: decision issue`);
+        assert.equal(issue.state, model.reopened.has(item.issue) ? 'open' : 'closed', `${step}: decision state`);
       }
     };
 
     for (let stepIndex = 0; stepIndex < 14; stepIndex += 1) {
-      const op = pick(['sync', 'sync', 'limited', 'concurrent', 'dry', 'verdict', 'state', 'edit', 'add', 'decide']);
+      const op = pick(['sync', 'sync', 'limited', 'concurrent', 'dry', 'verdict', 'state', 'edit', 'add', 'decide', 'tamper', 'reopen']);
       const step = `seed ${seed} step ${stepIndex} ${op}`;
       const numbered = [...fileNumbers().values()];
       if (op === 'sync') {
@@ -145,6 +148,18 @@ test('sync keeps the files and the owner’s labels and states right under rando
         else Object.assign(issue, { state: 'open', state_reason: 'reopened', closed_at: null });
         const verdict = issue.labels.find((l) => l.startsWith('verdict:'))?.slice(8) ?? null;
         model.owner.set(number, { verdict, state: issue.state, reason: issue.state_reason });
+      } else if (op === 'tamper' && numbered.length) {
+        // Someone edits the bot's entry issue on GitHub: text after the marker, or the entry label removed.
+        const issue = fake.issues.get(pick(numbered));
+        if (random() < 0.5) issue.body += '\n\nAdded on GitHub.';
+        else issue.labels = issue.labels.filter((l) => l !== 'workshop:entry');
+      } else if (op === 'reopen') {
+        const closed = listItems(box.decisions().split('\n')).map((i) => i.issue).filter((n) => n && fake.issues.get(n)?.state === 'closed');
+        if (closed.length) {
+          const number = pick(closed);
+          fake.reopen(number);
+          model.reopened.add(number);
+        }
       } else if (op === 'edit') {
         const entry = pick(model.entries);
         if (random() < 0.5) entry.name = `${entry.name}!`;

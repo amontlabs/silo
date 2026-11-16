@@ -6,8 +6,8 @@
 import { decisionTitle, listItems } from './decisions.js';
 import { decisionsPath, featuresPath, readText } from './files.js';
 import { parseFeatures } from './jsonl.js';
-import { entryIndex, referenceDecision, updateFeature, withoutRelativeLinks } from './match.js';
-import { Failure, KIND_LABELS, LABELS, RateLimited, entryMarker } from './names.js';
+import { decisionIndex, entryIndex, referenceDecision, updateFeature, withoutRelativeLinks } from './match.js';
+import { ENTRY_MARKER, Failure, KIND_LABELS, LABELS, RateLimited, entryMarker } from './names.js';
 
 export const entryBody = (entry) => `${entry.what ?? ''}\n\n${entryMarker(entry.id)}`;
 export const decisionBody = (text) => withoutRelativeLinks(text);
@@ -29,7 +29,7 @@ export async function sync({ gh, root, dryRun, log }) {
   try {
     await ensureLabels({ gh, dryRun, act, counts });
     await syncEntries({ gh, root, dryRun, act, counts, skipped, duplicates });
-    await syncDecisions({ gh, root, dryRun, act, counts, skipped });
+    await syncDecisions({ gh, root, dryRun, act, counts, skipped, duplicates });
   } catch (error) {
     if (!(error instanceof RateLimited)) throw error;
     stopped = error.resetAt ? error.resetAt.toISOString() : 'unknown';
@@ -52,6 +52,7 @@ async function syncEntries({ gh, root, dryRun, act, counts, skipped, duplicates 
   const index = entryIndex(await gh.issuesWithLabel(KIND_LABELS.entry), gh);
   duplicates.push(...index.duplicates);
   const seen = new Set();
+  const numbers = new Set();
   for (const { entry } of lines) {
     if (!entry) continue;
     if (typeof entry.id !== 'string' || !/^[A-Za-z0-9._-]+$/.test(entry.id)) {
@@ -59,21 +60,37 @@ async function syncEntries({ gh, root, dryRun, act, counts, skipped, duplicates 
     }
     if (seen.has(entry.id)) throw new Failure(`features.jsonl has the id ${entry.id} twice`);
     seen.add(entry.id);
+    if (entry.issue != null && numbers.has(entry.issue)) throw new Failure(`features.jsonl names issue #${entry.issue} on two lines`);
+    numbers.add(entry.issue);
   }
   for (const { entry } of lines) {
     if (!entry) continue;
     const title = entry.name;
     const body = entryBody(entry);
     let issue = null;
+    let restore = false;
     if (entry.issue != null) {
       const found = index.byNumber.get(entry.issue);
-      if (!found) throw new Failure(`${entry.id} names issue #${entry.issue}, which is not a Workshop entry made by the bot`);
-      if (found.id !== entry.id) throw new Failure(`${entry.id} names issue #${entry.issue}, which belongs to ${found.id}`);
-      issue = found.issue;
+      if (found && found.id !== entry.id) throw new Failure(`${entry.id} names issue #${entry.issue}, which belongs to ${found.id}`);
+      if (found) issue = found.issue;
+      else {
+        // Edited on GitHub (text after the marker, or the entry label removed): the bot's own issue is restored.
+        issue = await ownEntryIssue(gh, entry);
+        restore = true;
+      }
     } else {
       issue = index.byMarker.get(entry.id) ?? null;
     }
-    if (!issue) {
+    if (restore) {
+      act(`restore #${issue.number} (${entry.id}) as it was edited on GitHub`);
+      counts.updated += 1;
+      if (!dryRun) {
+        await gh.request('PATCH', gh.repoPath(`/issues/${issue.number}`), { body: { title, body } });
+        if (!labelNames(issue).includes(KIND_LABELS.entry)) {
+          await gh.request('POST', gh.repoPath(`/issues/${issue.number}/labels`), { body: { labels: [KIND_LABELS.entry] } });
+        }
+      }
+    } else if (!issue) {
       act(`create the issue for ${entry.id}`);
       counts.created += 1;
       if (dryRun) continue;
@@ -91,25 +108,26 @@ async function syncEntries({ gh, root, dryRun, act, counts, skipped, duplicates 
     }
     if (entry.issue !== issue.number) {
       act(`write issue #${issue.number} into ${entry.id}`);
-      if (!dryRun && !updateFeature(root, entry.id, 'issue', issue.number)) {
+      if (!dryRun && updateFeature(root, entry.id, 'issue', issue.number) !== 'ok') {
         skipped.push(`${entry.id}: its line left features.jsonl during the run; #${issue.number} is its issue`);
       }
     }
   }
 }
 
-async function syncDecisions({ gh, root, dryRun, act, counts, skipped }) {
+async function syncDecisions({ gh, root, dryRun, act, counts, skipped, duplicates }) {
   const items = listItems(readText(decisionsPath(root)).split('\n'));
   const issues = await gh.issuesWithLabel(KIND_LABELS.decision);
   const byNumber = new Map(issues.map((issue) => [issue.number, issue]));
-  const made = new Map();
-  for (const issue of issues.slice().sort((a, b) => a.number - b.number)) {
-    if (issue.state === 'closed' && gh.isOwnBot(issue.user) && !made.has(issue.body)) made.set(issue.body, issue);
-  }
-  // A referenced issue sync made but could not close yet (stopped in between) is closed now.
+  const { byBody: made, duplicates: twice } = decisionIndex(issues, gh, (body) => decisionTitle(body, 60));
+  duplicates.push(...twice);
+  // A referenced issue sync made but could not close yet (stopped in between) is closed now;
+  // one that was ever closed and then reopened is left as the person who reopened it wants.
   for (const item of items.filter((i) => i.issue != null)) {
     const issue = byNumber.get(item.issue);
     if (!issue || issue.state !== 'open' || !gh.isOwnBot(issue.user) || issue.body !== decisionBody(item.text)) continue;
+    const events = await gh.paginate(gh.repoPath(`/issues/${issue.number}/events`));
+    if (events.some((e) => e.event === 'closed')) continue;
     act(`close #${issue.number} as completed`);
     counts.updated += 1;
     if (!dryRun) await closeCompleted(gh, issue.number);
@@ -136,6 +154,21 @@ async function syncDecisions({ gh, root, dryRun, act, counts, skipped }) {
     }
     await closeCompleted(gh, issue.number);
   }
+}
+
+const labelNames = (issue) => (issue.labels ?? []).map((label) => (typeof label === 'string' ? label : label.name));
+
+/** The issue a line names when it is not in the entry index: only the bot's own entry issue, never another. */
+async function ownEntryIssue(gh, entry) {
+  const found = await gh.request('GET', gh.repoPath(`/issues/${entry.issue}`), { allow: [404, 410] });
+  const issue = found.data;
+  const otherKind = issue && labelNames(issue).some((name) => name === KIND_LABELS.decision || name === KIND_LABELS.suggestion);
+  if (!issue || issue.pull_request || !gh.isOwnBot(issue.user) || otherKind) {
+    throw new Failure(`${entry.id} names issue #${entry.issue}, which the bot did not create as a Workshop entry`);
+  }
+  const other = [...(issue.body ?? '').matchAll(new RegExp(ENTRY_MARKER.source, 'g'))].map((m) => m[1]).find((id) => id !== entry.id);
+  if (other) throw new Failure(`${entry.id} names issue #${entry.issue}, which carries the marker of ${other}`);
+  return issue;
 }
 
 function closeCompleted(gh, number) {

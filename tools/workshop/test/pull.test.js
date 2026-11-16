@@ -164,3 +164,24 @@ test('pull reads entries only from the bot’s issues and reports a duplicate ma
   assert.deepEqual(report.duplicates, [{ id: 'a', kept: n('a'), duplicate: dup.number }]);
   assert.ok(!report.verdicts.some((v) => v.issue === dup.number));
 });
+
+test('pull --write leaves a verdict that changed in the file during the run', async (t) => {
+  const { fake, box, n } = await world(t);
+  fake.setVerdictLabel(n('a'), 'refine', 'owner');
+  fake.setVerdictLabel(n('b'), 'later', 'owner');
+  const { writeFileSync } = await import('node:fs');
+  let edited = false;
+  const fetch = async (url, init) => {
+    if (!edited && String(url).includes('/collaborators/')) {
+      edited = true; // the orchestrator sets a's verdict by hand meanwhile
+      writeFileSync(box.featuresPath, box.features().replace(/("id": "a",[^\n]*"verdict": )null/, '$1"take"'));
+    }
+    return globalThis.fetch(url, init);
+  };
+  const report = JSON.parse((await run(['pull', '--write', '--json'], { fake, box, overrides: { fetch } })).stdout);
+  assert.equal(report.written, 1);
+  assert.deepEqual(report.skipped, ['a: its verdict changed in features.jsonl during the run; left as it is']);
+  const verdictOf = (id) => JSON.parse(box.features().split('\n').find((l) => l.includes(`"id": "${id}"`))).verdict;
+  assert.equal(verdictOf('a'), 'take');
+  assert.equal(verdictOf('b'), 'later');
+});

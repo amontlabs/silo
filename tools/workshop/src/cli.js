@@ -133,7 +133,7 @@ export async function main(argv, overrides = {}) {
       }
       case 'store': {
         const result = store({ replace: Boolean(args.flags.replace), deps });
-        emit(result, `Stored the App credentials from ${result.from} in the Keychain.`);
+        emit(result, result.already ? `The Keychain already holds the App credentials of ${result.from}.` : `Stored ${result.stored.join(', ')} from ${result.from} in the Keychain.`);
         return 0;
       }
       case 'doctor': {
@@ -157,7 +157,7 @@ export async function main(argv, overrides = {}) {
         const verb = dryRun ? 'would create' : 'created';
         const summary = `${verb} ${result.created}, ${dryRun ? 'would update' : 'updated'} ${result.updated}, unchanged ${result.unchanged}${result.labels ? `, labels ${result.labels}` : ''}`;
         if (!args.json) {
-          for (const d of result.duplicates) out(`duplicate: #${d.duplicate} also carries ${d.id}'s marker; #${d.kept} is used`);
+          for (const d of result.duplicates) out(`duplicate: ${duplicateText(d)}`);
           for (const skip of result.skipped) out(`skipped: ${skip}`);
         }
         if (args.json) emit(result, '');
@@ -216,6 +216,12 @@ export async function main(argv, overrides = {}) {
   return 1;
 }
 
+function duplicateText(d) {
+  return d.id
+    ? `#${d.duplicate} also carries ${d.id}'s marker; #${d.kept} is used`
+    : `#${d.duplicate} has the same text as decision #${d.kept} ("${d.decision}"); #${d.kept} is used`;
+}
+
 function formatPull(result) {
   const lines = [];
   lines.push(`Verdicts (${result.verdicts.length}):`);
@@ -234,7 +240,8 @@ function formatPull(result) {
   }
   lines.push(`Closed without an owner's outcome (${result.closedWithoutOutcome.length}):`);
   for (const d of result.closedWithoutOutcome) lines.push(`  #${d.issue} ${d.title} (closed by ${d.closedBy ?? 'unknown'})`);
-  for (const d of result.duplicates) lines.push(`Duplicate: #${d.duplicate} also carries ${d.id}'s marker; #${d.kept} is used`);
+  for (const d of result.duplicates) lines.push(`Duplicate: ${duplicateText(d)}`);
+  for (const u of result.unmatched) lines.push(`Not read: #${u.issue} (${u.id}): ${u.reason}`);
   lines.push(`Suggestions (${result.suggestions.length}):`);
   for (const s of result.suggestions) lines.push(`  #${s.issue} ${s.title} (${s.up} 👍, by ${s.author})`);
   lines.push(`Comments${result.since ? ` since ${result.since}` : ''} (${result.comments.length}):`);

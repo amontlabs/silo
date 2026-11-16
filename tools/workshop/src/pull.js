@@ -9,7 +9,8 @@ import { stateDir } from './credentials.js';
 import { referencedIssues } from './decisions.js';
 import { decisionsPath, featuresPath, readText, writeText } from './files.js';
 import { parseFeatures } from './jsonl.js';
-import { entryIndex, updateFeature } from './match.js';
+import { decisionTitle } from './decisions.js';
+import { decisionIndex, entryIndex, updateFeature } from './match.js';
 import { KIND_LABELS, VERDICTS, verdictLabel } from './names.js';
 
 const DECIDERS = new Set(['admin', 'write', 'maintain']);
@@ -60,10 +61,15 @@ export async function pull({ gh, root, home, write, now = new Date() }) {
   const lines = parseFeatures(readText(featuresPath(root)));
   const index = entryIndex(entries, gh);
   const verdicts = [];
+  const unmatched = [];
   for (const { entry } of lines) {
     if (!entry) continue;
     const numbered = entry.issue != null ? index.byNumber.get(entry.issue) : null;
-    const issue = numbered ? (numbered.id === entry.id ? numbered.issue : null) : entry.issue == null ? index.byMarker.get(entry.id) : null;
+    if (entry.issue != null && numbered?.id !== entry.id) {
+      unmatched.push({ id: entry.id, issue: entry.issue, reason: await whyUnmatched(gh, entry, numbered) });
+      continue;
+    }
+    const issue = numbered ? numbered.issue : index.byMarker.get(entry.id);
     if (!issue) continue;
     const { verdict, conflict } = githubVerdict(issue);
     const file = entry.verdict ?? null;
@@ -91,8 +97,11 @@ export async function pull({ gh, root, home, write, now = new Date() }) {
   const referenced = referencedIssues(readText(decisionsPath(root)));
   const decided = [];
   const closedWithoutOutcome = [];
+  const decisionDuplicates = decisionIndex(decisions, gh, (body) => decisionTitle(body, 60)).duplicates;
+  const duplicateDecisions = new Set(decisionDuplicates.map((d) => d.duplicate));
   for (const issue of decisions) {
     if (issue.state !== 'closed' || issue.state_reason !== 'completed' || referenced.has(issue.number)) continue;
+    if (duplicateDecisions.has(issue.number)) continue;
     const events = await gh.paginate(gh.repoPath(`/issues/${issue.number}/events`));
     const closer = events.filter((e) => e.event === 'closed').at(-1)?.actor ?? null;
     const row = { issue: issue.number, title: issue.title, closedAt: issue.closed_at, closedBy: closer?.login ?? null };
@@ -128,8 +137,11 @@ export async function pull({ gh, root, home, write, now = new Date() }) {
   if (write) {
     for (const v of verdicts) {
       if (!v.confirmed || v.github == null) continue;
-      if (updateFeature(root, v.id, 'verdict', v.github)) written += 1;
-      else skipped.push(`${v.id}: its line left features.jsonl during the run`);
+      // Written only over the verdict read at the start: a verdict changed meanwhile is left.
+      const outcome = updateFeature(root, v.id, 'verdict', v.github, (now) => (now.verdict ?? null) === v.file);
+      if (outcome === 'ok') written += 1;
+      else if (outcome === 'missing') skipped.push(`${v.id}: its line left features.jsonl during the run`);
+      else skipped.push(`${v.id}: its verdict changed in features.jsonl during the run; left as it is`);
     }
     mkdirSync(stateDir(home), { recursive: true, mode: 0o700 });
     writeText(lastPullPath(home), `${now.toISOString()}\n`, 0o600);
@@ -137,7 +149,8 @@ export async function pull({ gh, root, home, write, now = new Date() }) {
   return {
     since,
     verdicts,
-    duplicates: index.duplicates,
+    duplicates: [...index.duplicates, ...decisionDuplicates],
+    unmatched,
     decisions: decided.sort((a, b) => a.issue - b.issue),
     closedWithoutOutcome: closedWithoutOutcome.sort((a, b) => a.issue - b.issue),
     suggestions: suggested,
@@ -145,6 +158,16 @@ export async function pull({ gh, root, home, write, now = new Date() }) {
     written: write ? written : null,
     skipped,
   };
+}
+
+/** Why a line's issue is not one of the bot's entry issues, in plain words. */
+async function whyUnmatched(gh, entry, numbered) {
+  if (numbered) return `it belongs to ${numbered.id}`;
+  const found = await gh.request('GET', gh.repoPath(`/issues/${entry.issue}`), { allow: [404, 410] });
+  const issue = found.data;
+  if (!issue || issue.pull_request) return 'no such issue';
+  if (!gh.isOwnBot(issue.user)) return 'the bot did not create it';
+  return 'edited on GitHub (text after the marker, or the entry label removed); `workshop sync` restores it';
 }
 
 /** The latest labeled or unlabeled event of any verdict label. */

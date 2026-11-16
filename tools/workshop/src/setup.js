@@ -39,17 +39,48 @@ function page(title, inner) {
 <body>${inner}</body></html>`;
 }
 
-function existing(deps) {
-  const found = CREDENTIAL_NAMES.filter((name) => deps.keychain.get(name));
-  if (!found.length && existsSync(vercelEnvPath(deps.home))) {
-    // A setup that made the App but could not reach the Keychain: finishing it never needs a second App.
-    throw new Failure(
-      `${vercelEnvPath(deps.home)} holds the credentials of an App already created; run \`workshop store\` to put them in the Keychain (delete that file only to register a new App)`,
-    );
+/**
+ * What the Keychain holds compared with vercel.env:
+ * - env: the four App values from vercel.env, or null when the file does not exist;
+ * - held: the names the Keychain has; complete: all four;
+ * - matches: every value the Keychain has equals vercel.env's (vacuously true without the file);
+ * - appIds: { env, keychain } for messages.
+ */
+export function credentialState(deps) {
+  const path = vercelEnvPath(deps.home);
+  const env = existsSync(path) ? readVercelEnv(path) : null;
+  if (env) {
+    const missing = CREDENTIAL_NAMES.filter((name) => !env[name]);
+    if (missing.length) throw new Failure(`${path} has no ${missing.join(', ')}`);
   }
-  if (found.length) return 'the Keychain';
-  if (existsSync(credentialsFile(deps.home))) return credentialsFile(deps.home);
-  if (existsSync(vercelEnvPath(deps.home))) return vercelEnvPath(deps.home);
+  const keychain = Object.fromEntries(CREDENTIAL_NAMES.map((name) => [name, deps.keychain.get(name)]).filter(([, value]) => value));
+  const held = Object.keys(keychain);
+  return {
+    path,
+    env,
+    keychain,
+    held,
+    complete: held.length === CREDENTIAL_NAMES.length,
+    matches: !env || held.every((name) => keychain[name] === env[name]),
+    appIds: { env: env?.WORKSHOP_APP_ID ?? null, keychain: keychain.WORKSHOP_APP_ID ?? null },
+  };
+}
+
+/** Why setup must not register an App now, or null. */
+function setupRefusal(state, replace, deps) {
+  if (state.env) {
+    if (state.complete && state.matches) {
+      return replace ? null : `Workshop credentials already exist in the Keychain; pass --replace to register a new App`;
+    }
+    if (state.complete) {
+      return `${state.path} holds App ${state.appIds.env} but the Keychain holds App ${state.appIds.keychain}: run \`workshop store --replace\` to put the App of ${state.path} in the Keychain, or delete ${state.path} to keep the Keychain's, then run setup again`;
+    }
+    // A setup that made the App but did not finish storing it: finishing never needs a second App.
+    return `${state.path} holds the credentials of App ${state.appIds.env}, which the Keychain does not fully hold: run \`workshop store\` to finish storing them`;
+  }
+  if (replace) return null;
+  if (state.held.length) return `Workshop credentials already exist in the Keychain; pass --replace to register a new App`;
+  if (existsSync(credentialsFile(deps.home))) return `Workshop credentials already exist in ${credentialsFile(deps.home)}; pass --replace to register a new App`;
   return null;
 }
 
@@ -64,8 +95,8 @@ export async function setup({ org, site, replace, deps }) {
     throw new UsageError(`--site ${site} is not an https address`);
   }
   if (!deps.keychain.available()) throw new Failure('the macOS Keychain is not available; setup stores the App credentials there');
-  const already = existing(deps);
-  if (already && !replace) throw new Failure(`Workshop credentials already exist in ${already}; pass --replace to register a new App`);
+  const refusal = setupRefusal(credentialState(deps), replace, deps);
+  if (refusal) throw new Failure(refusal);
 
   const state = randomBytes(16).toString('hex');
   const web = deps.web.replace(/\/$/, '');
@@ -206,16 +237,14 @@ export function readVercelEnv(path) {
 /** `workshop store`: puts the four App credentials from vercel.env into the Keychain. */
 export function store({ replace, deps }) {
   if (!deps.keychain.available()) throw new Failure('the Keychain is locked or unavailable');
-  const already = CREDENTIAL_NAMES.some((name) => deps.keychain.get(name))
-    ? 'the Keychain'
-    : existsSync(credentialsFile(deps.home))
-      ? credentialsFile(deps.home)
-      : null;
-  if (already && !replace) throw new Failure(`Workshop credentials already exist in ${already}; pass --replace to overwrite them`);
-  const path = vercelEnvPath(deps.home);
-  const values = readVercelEnv(path);
-  const missing = CREDENTIAL_NAMES.filter((name) => !values[name]);
-  if (missing.length) throw new Failure(`${path} has no ${missing.join(', ')}`);
-  storeAll(Object.fromEntries(CREDENTIAL_NAMES.map((name) => [name, values[name]])), deps.keychain);
-  return { stored: CREDENTIAL_NAMES, from: path };
+  const state = credentialState(deps);
+  if (!state.env) throw new Failure(`${state.path} does not exist: run \`workshop setup\` first`);
+  if (state.complete && state.matches) return { stored: [], from: state.path, already: true };
+  if (state.complete && !replace) {
+    throw new Failure(`the Keychain holds a complete set for App ${state.appIds.keychain}, not the App ${state.appIds.env} of ${state.path}; pass --replace to overwrite it`);
+  }
+  // A partial set (a store or setup cut short) is completed or overwritten without --replace.
+  const stored = CREDENTIAL_NAMES.filter((name) => state.keychain[name] !== state.env[name]);
+  storeAll(Object.fromEntries(stored.map((name) => [name, state.env[name]])), deps.keychain);
+  return { stored, from: state.path, already: false };
 }

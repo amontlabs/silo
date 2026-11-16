@@ -101,6 +101,11 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
     issue.closed_at = tick();
     fake.events.push({ issue: number, event: 'closed', actor: { login, type: 'User' }, created_at: issue.closed_at });
   };
+  fake.reopen = (number, login = 'owner') => {
+    const issue = fake.issues.get(number);
+    Object.assign(issue, { state: 'open', state_reason: 'reopened', closed_at: null });
+    fake.events.push({ issue: number, event: 'reopened', actor: { login, type: 'User' }, created_at: tick() });
+  };
   fake.snapshot = () => [...fake.issues.values()].map((i) => ({ number: i.number, labels: [...i.labels].sort(), state: i.state, state_reason: i.state_reason }));
 
   const page = (res, items, url) => {
@@ -225,7 +230,7 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
         .map((c) => ({ id: c.id, user: c.user, body: c.body, created_at: c.created_at, updated_at: c.updated_at, issue_url: `${fake.url}${issuePath}/issues/${c.issue}` }));
       return page(res, items, url);
     }
-    const one = rest.match(/^\/issues\/(\d+)(\/comments|\/events)?$/);
+    const one = rest.match(/^\/issues\/(\d+)(\/comments|\/events|\/labels)?$/);
     if (one) {
       const issue = fake.issues.get(Number(one[1]));
       if (!issue) return json(res, 404, { message: 'Not Found' });
@@ -252,6 +257,10 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
       if (one[2] === '/comments' && req.method === 'POST') {
         const c = fake.addComment(issue.number, bot.login, body.body, { type: 'Bot' });
         return json(res, 201, { id: c.id, html_url: `${fake.url}/${repo}/issues/${issue.number}#issuecomment-${c.id}` });
+      }
+      if (one[2] === '/labels' && req.method === 'POST') {
+        for (const name of body.labels) if (!issue.labels.includes(name)) issue.labels.push(name);
+        return json(res, 200, issue.labels.map((name) => ({ name })));
       }
       if (one[2] === '/events' && req.method === 'GET') return page(res, fake.events.filter((e) => e.issue === issue.number), url);
     }
