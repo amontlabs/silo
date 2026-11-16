@@ -246,7 +246,7 @@ This is a supported upstream failure state: the pinned [MicroSandbox executor](h
 
 ### R-14. Website behavioral drift is invisible to CI
 
-**Location:** [read-only-demo.test.tsx](../../website/src/demo/read-only-demo.test.tsx), lines 40–53; [ci.yml](../../.github/workflows/ci.yml), lines 52–61.
+**Location:** read-only-demo.test.tsx, lines 40–53; [ci.yml](../../.github/workflows/ci.yml), lines 52–61.
 
 **Observed:** the existing website test fails at line 46 because it cannot find a button named `SSH controls for dev`. The shared production UI moved that interaction. The workflow installs and typechecks website/demo but does not run their test scripts.
 

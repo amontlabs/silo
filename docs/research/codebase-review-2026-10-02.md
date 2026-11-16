@@ -243,7 +243,7 @@ The file fixture ran the actual preservation function with the GPG verification 
 
 ### R-14. Website behavior tests are broken and absent from CI
 
-**High confidence; existing suite failed.** [Website test](../../website/src/demo/read-only-demo.test.tsx), lines 40–53, expects overview buttons named `SSH controls for dev/personal`. The current production UI moved these interactions, so `npm --prefix website test -- --maxWorkers=2` fails at line 46 with:
+**High confidence; existing suite failed.** Website test, lines 40–53, expects overview buttons named `SSH controls for dev/personal`. The current production UI moved these interactions, so `npm --prefix website test -- --maxWorkers=2` fails at line 46 with:
 
 ```text
 Unable to find an accessible element with the role "button" and name "SSH controls for dev"
