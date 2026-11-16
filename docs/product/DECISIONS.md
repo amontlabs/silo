@@ -5,6 +5,7 @@ before asking; a question answered here is not asked again. A decision that repl
 one says so. Decisions made before 2026-11-15 are in [the direction page](../DIRECTION.md) until
 they are carried over.
 
+- 2026-11-16 · orchestrator, at the owner's word ("go as you think is cleanest") · Merging a task into main changes main only. It does not write the merged packages and files into the saved recipe; a recipe changes when the owner says so. Not built yet: today a merge still updates the recipe.
 - 2026-11-16 · owner · The owner dashboard is a folder in this repository, not its own project.
 - 2026-11-16 · owner · T3 Code runs on the Mac and connects into the computer; it does not run inside.
 - 2026-11-16 · owner · A recipe sets up a whole working computer (agent, editor access, atelier, GUI automation), and making a recipe must be convenient.
