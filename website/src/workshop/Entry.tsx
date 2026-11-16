@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { RichText, safeHref } from './RichText';
-import { awaitsVerdict, isDecided, relativeTime, shortDate } from './plan';
+import { awaitsConfirm, awaitsVerdict, isDecided, relativeTime, shortDate } from './plan';
 import type { Row } from './plan';
 import type { Workshop } from './useWorkshop';
 
@@ -15,11 +15,14 @@ export interface EntryContext {
   signIn: string;
   onToggle: (row: Row) => void;
   mainAction: (row: Row) => void;
-  /** The row that closes at once, without animating. */
-  snap?: string | null;
+  /** The rows open now. */
+  open: ReadonlySet<string>;
+  /** Whether this row's verdict buttons act now: it was opened last and its guard has passed. */
+  armed: (row: Row) => boolean;
+  makeCurrent: (row: Row) => void;
 }
 
-const WORDS: Partial<Record<Row['status'], string>> = { planned: 'planned', later: 'later', building: 'now', built: 'built', dropped: 'dropped' };
+const WORDS: Partial<Record<Row['status'], string>> = { planned: 'planned', later: 'later', building: 'building', built: 'built', dropped: 'dropped' };
 
 export function pipClass(row: Row): string {
   if (row.kind === 'decision') return 'ws-pip undecided';
@@ -49,10 +52,9 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   // The body stays mounted while it closes, so the close animates too.
   const [closing, setClosing] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
-  const snap = ctx.snap === row.key;
   if (wasOpen !== open) {
     setWasOpen(open);
-    setClosing(!open && !snap);
+    setClosing(!open);
   }
   useEffect(() => {
     if (!closing) return;
@@ -61,16 +63,18 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   }, [closing]);
 
   const isSaving = row.issue !== null && w.saving[row.issue] === true;
-  const owed = w.canDecide && awaitsVerdict(row) && row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
+  const live = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
+  const owed = w.canDecide && live && awaitsVerdict(row);
+  const confirm = w.canDecide && live && awaitsConfirm(row);
   const word = row.kind === 'entry' || row.kind === 'suggestion'
-    ? (isSaving ? 'Saving…' : owed ? 'to decide' : WORDS[row.status])
+    ? (isSaving ? 'Saving…' : owed ? 'to decide' : confirm ? 'confirm' : WORDS[row.status])
     : undefined;
   const quiet = (row.kind === 'entry' || row.kind === 'suggestion') && !isDecided(row);
-  const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : '', owed ? 'owed' : '', snap ? 'snap' : ''].filter(Boolean).join(' ');
+  const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : '', owed || confirm ? 'owed' : ''].filter(Boolean).join(' ');
   return (
     <li className={classes} id={row.key}>
       <div className="ws-line">
-        <button type="button" className="ws-row" aria-expanded={open} aria-controls={`${row.key}-more`} onClick={() => ctx.onToggle(row)}>
+        <button type="button" className="ws-row" aria-expanded={open} aria-controls={`${row.key}-more`} onClick={() => ctx.onToggle(row)} onPointerEnter={() => w.prefetch(row)} onFocus={() => w.prefetch(row)}>
           <i className={pipClass(row)} aria-hidden="true" />
           <span className="ws-name">{row.name}</span>
           <b className={isSaving ? 'ws-word ws-pending' : 'ws-word'}>{word ?? ''}</b>
@@ -89,7 +93,7 @@ function Vote({ row, ctx }: { row: Row; ctx: EntryContext }) {
   if (!w.liveOk || row.up === null || (row.kind !== 'entry' && row.kind !== 'suggestion')) return null;
   const on = row.issue !== null && w.votes[row.issue] === true;
   const busy = row.issue !== null && w.votePending.has(row.issue);
-  if (!w.me) return <a className="ws-vote" href={ctx.signIn} aria-label={`${row.up} votes, sign in to vote`}>👍 {row.up}</a>;
+  if (!w.me) return <a className="ws-vote" href={ctx.signIn} title="Sign in to vote" aria-label={`${row.up} votes, sign in to vote`}>👍 {row.up}</a>;
   return (
     <button type="button" className={`ws-vote${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${row.up} votes`} onClick={() => void w.toggleVote(row)} disabled={busy || (row.issue ?? 0) <= 0}>
       👍 {row.up}
@@ -129,12 +133,23 @@ function NoteBox({ row, busy, ctx }: { row: Row; busy: boolean; ctx: EntryContex
 function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
   const busy = row.issue !== null && w.pending.has(row.issue);
+  // Until the guard has passed, the buttons look as inert as they are; on a row that was not opened last,
+  // a press makes it the one the verdict goes to.
+  const armed = ctx.armed(row);
+  const cls = (name: string) => `${name}${armed ? '' : ' ws-unarmed'}`;
+  const act = (fn: () => void) => () => {
+    if (!ctx.armed(row)) {
+      ctx.makeCurrent(row);
+      return;
+    }
+    fn();
+  };
   if (row.carried && row.fileVerdict) {
     return (
       <>
         <div className="ws-state">
           <span>{stateText(row).replace(/\.$/, '')} · carried over</span>
-          <button type="button" className="ws-btn go" disabled={busy} onClick={() => ctx.mainAction(row)}>Confirm <kbd>↵</kbd></button>
+          <button type="button" className={cls('ws-btn go')} disabled={busy} onClick={act(() => ctx.mainAction(row))}>Confirm <kbd>↵</kbd></button>
         </div>
         <NoteBox row={row} busy={busy} ctx={ctx} />
       </>
@@ -144,10 +159,10 @@ function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
     <>
       {row.status === 'refine' ? <div className="ws-state"><span className="ws-muted">Being refined.</span></div> : null}
       <div className="ws-state">
-        <button type="button" className="ws-btn go" disabled={busy} onClick={() => ctx.mainAction(row)}>Take <kbd>↵</kbd></button>
-        <button type="button" className="ws-btn" disabled={busy} onClick={() => void w.sendVerdict(row, 'later')}>Later</button>
-        <button type="button" className="ws-btn" disabled={busy} onClick={() => void w.sendVerdict(row, 'drop')}>Drop</button>
-        <button type="button" className="ws-btn" disabled={busy} aria-expanded={w.refining === row.key} onClick={() => w.setRefining(w.refining === row.key ? null : row.key)}>Refine…</button>
+        <button type="button" className={cls('ws-btn go')} disabled={busy} onClick={act(() => ctx.mainAction(row))}>Take <kbd>↵</kbd></button>
+        <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'later'))}>Later</button>
+        <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'drop'))}>Drop</button>
+        <button type="button" className={cls('ws-btn')} disabled={busy} aria-expanded={w.refining === row.key} onClick={() => { ctx.makeCurrent(row); w.setRefining(w.refining === row.key ? null : row.key); }}>Refine…</button>
       </div>
       <NoteBox row={row} busy={busy} ctx={ctx} />
       {row.suggest ? <p className="ws-hint">Suggested: {row.suggest}.{row.why ? ` ${row.why}` : ''}</p> : null}
@@ -181,7 +196,7 @@ function StateLine({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const tone = row.status === 'building' ? 'ws-now' : isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
   return (
     <div className="ws-state">
-      <span className={tone}>{row.carried ? `${text.replace(/\.$/, '')} · carried over` : text}</span>
+      <span className={tone}>{row.carried && w.canDecide ? `${text.replace(/\.$/, '')} · carried over` : text}</span>
     </div>
   );
 }
@@ -198,7 +213,7 @@ function Talk({ row, ctx }: { row: Row; ctx: EntryContext }) {
   if (w.me) {
     box = (
       <form className="ws-box" onSubmit={(event) => void w.sendComment(row, event)}>
-        <textarea aria-label="Comment" placeholder="Reply…" maxLength={5000} rows={1} value={w.drafts[row.key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
+        <textarea aria-label="Comment" placeholder={w.canDecide ? 'Reply…' : 'Add a comment'} maxLength={5000} rows={1} value={w.drafts[row.key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
         <button type="submit" className="ws-btn" disabled={!(w.drafts[row.key] ?? '').trim()}>Comment</button>
         {github}
       </form>
@@ -208,7 +223,8 @@ function Talk({ row, ctx }: { row: Row; ctx: EntryContext }) {
   }
   return (
     <div className="ws-talk">
-      {detail === 'loading' ? <p className="ws-quiet" aria-live="polite">Loading…</p> : null}
+      {/* While the comments load, each one the count announces holds its place. */}
+      {(detail === undefined || detail === 'loading') && row.comments ? Array.from({ length: Math.min(row.comments, 20) }, (_, i) => <div className="ws-c-ghost" key={i} aria-hidden="true" />) : null}
       {detail === 'error' ? <p className="ws-quiet">Comments could not load.</p> : null}
       {typeof detail === 'object' && detail.more && url ? <a className="ws-gh ws-earlier" href={url} target="_blank" rel="noopener noreferrer">Earlier comments on GitHub ↗</a> : null}
       {typeof detail === 'object'

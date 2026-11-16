@@ -56,7 +56,7 @@ export function Tiles({ groups, current, toDecide, suggested, onOpen, onSuggest 
           <button type="button" className="ws-tile-hit" aria-current={on ? 'true' : undefined} onClick={onSuggest}>
             <span className="ws-tile-top"><span className="ws-num">+</span></span>
             <span className="ws-title">Suggest a feature</span>
-            <span className="ws-tline">{suggested ? `${suggested} from people so far.` : 'Something Silo should do.'}</span>
+            <span className="ws-tline">{suggested ? `${suggested} from people.` : 'Something Silo should do.'}</span>
           </button>
         </div>
       </div>

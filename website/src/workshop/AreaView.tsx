@@ -36,8 +36,8 @@ export function Block({ num, title, line, onBack, children, list, notes }: Block
   );
 }
 
-export function Rows({ rows, openKey, ctx }: { rows: Row[]; openKey: string | null; ctx: EntryContext }) {
-  return <ul className="ws-rows">{rows.map((row) => <Entry key={row.key} row={row} open={openKey === row.key} ctx={ctx} />)}</ul>;
+export function Rows({ rows, ctx }: { rows: Row[]; ctx: EntryContext }) {
+  return <ul className="ws-rows">{rows.map((row) => <Entry key={row.key} row={row} open={ctx.open.has(row.key)} ctx={ctx} />)}</ul>;
 }
 
 function tally(counts: Counts, toDecide: number): ReactNode[] {
@@ -55,11 +55,11 @@ function tally(counts: Counts, toDecide: number): ReactNode[] {
   return parts.flatMap((part, index) => (index ? ['\u00a0· ', part] : [part]));
 }
 
-export function AreaPlace({ group, toDecide, openKey, ctx, onBack, notes }: { group: AreaGroup; toDecide: number; openKey: string | null; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
+export function AreaPlace({ group, toDecide, ctx, onBack, notes }: { group: AreaGroup; toDecide: number; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   return (
     <Block
       num={String(group.number).padStart(2, '0')} title={group.area.title} line={group.area.line} onBack={onBack} notes={notes}
-      list={<Rows rows={group.rows} openKey={openKey} ctx={ctx} />}
+      list={<Rows rows={group.rows} ctx={ctx} />}
     >
       <div className="ws-pips" aria-hidden="true">
         {group.rows.filter((row) => row.status !== 'dropped').map((row) => <i className={pipClass(row)} key={row.key} />)}
@@ -69,11 +69,11 @@ export function AreaPlace({ group, toDecide, openKey, ctx, onBack, notes }: { gr
   );
 }
 
-export function LeftPlace({ rows, openKey, ctx, onBack, notes }: { rows: Row[]; openKey: string | null; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
+export function LeftPlace({ rows, ctx, onBack, notes }: { rows: Row[]; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   return (
     <Block
-      title="Not carried over" line="Left out of the rebuild, or dropped." onBack={onBack} notes={notes}
-      list={<Rows rows={rows} openKey={openKey} ctx={ctx} />}
+      title="Left out" onBack={onBack} notes={notes}
+      list={<Rows rows={rows} ctx={ctx} />}
     >
       <p className="ws-tally">{tally(countRows(rows), 0)}</p>
     </Block>

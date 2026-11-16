@@ -43,8 +43,11 @@ export function installFixture(data: BuildData, params: URLSearchParams): void {
   const state = fixtureState(data, when);
   const delay = Number(params.get('delay') ?? 0);
   api.state = () => new Promise((resolve) => setTimeout(() => resolve(state), delay));
-  api.me = async () => (as === 'owner' ? { login: 'owner-fake', avatar: '', canDecide: true } : as === 'visitor' ? { login: 'visitor-fake', avatar: '', canDecide: false } : null);
-  api.issue = async (n: number) => ({
+  const wait = <T,>(ms: number, value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
+  // `me` waits as long as `delay`; `detail=<ms>` holds back each issue's comments.
+  const detail = Number(params.get('detail') ?? 0);
+  api.me = async () => wait(delay, as === 'owner' ? { login: 'owner-fake', avatar: '', canDecide: true } : as === 'visitor' ? { login: 'visitor-fake', avatar: '', canDecide: false } : null);
+  api.issue = async (n: number) => wait(detail, {
     number: n, title: state.issues[n]?.title ?? '', body: '', url: `https://github.com/amontlabs/silo/issues/${n}`, up: state.issues[n]?.up ?? 0,
     comments: (state.issues[n]?.comments ?? 0) > 0 ? [
       { id: `${n}-1`, author: 'lin-qi', avatar: '', bot: false, createdAt: '2026-11-14T10:00:00Z', text: 'Does this also cover a database the merge migrated?' },

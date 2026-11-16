@@ -20,7 +20,8 @@
 :where(.ws) :is(h1, h2, h3, p, ul) { margin: 0; padding: 0; font-weight: 400; }
 :where(.ws) ul { list-style: none; }
 :where(.ws) button { background: none; padding: 0; text-align: left; font: inherit; color: inherit; }
-.ws-account-slot:empty { display: none; }
+.ws-account-slot { min-width: 135px; display: flex; justify-content: flex-end; }
+@media (max-width: 480px) { .ws-account-slot { min-width: 51px; } }
 .ws-account { display: flex; align-items: center; gap: 12px; font: 12px var(--mono); color: var(--muted); }
 .ws-link { white-space: nowrap; background: none; padding: 0; font: 12px var(--mono); color: var(--faint); }
 .ws-link:hover { color: var(--accent-ink); }
@@ -31,6 +32,7 @@
 .ws-top h1 { font: italic 40px/1.1 var(--serif); letter-spacing: -1.4px; color: var(--accent-ink); }
 .ws-status { color: var(--muted); margin-top: 8px; min-height: 22px; }
 .ws-top-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.ws-top { position: relative; }
 .ws-tools { display: flex; align-items: center; gap: 16px; min-height: 28px; }
 .ws-loglink { font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
 .ws-loglink b { font-weight: 400; color: var(--accent-ink); }
@@ -47,7 +49,7 @@
 
 /* ---- pips: one per entry ---- */
 .ws-pip { flex: none; width: 14px; height: 16px; display: grid; place-items: center; font-style: normal; }
-.ws-pip::before { content: ""; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid transparent; box-sizing: border-box; transition: background-color .2s, border-color .2s, box-shadow .2s; }
+.ws-pip::before { content: ""; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid transparent; transition: background-color .2s, border-color .2s, box-shadow .2s; }
 .ws-pip.built::before { background: var(--ink); border-color: var(--ink); }
 .ws-pip.building::before { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--accent) 30%, transparent); }
 .ws-pip.next::before { border-color: var(--accent); }
@@ -55,7 +57,7 @@
 .ws-pip.undecided::before { border-color: color-mix(in srgb, var(--faint) 70%, transparent); }
 .ws-pip.later::before { width: 5px; height: 5px; border: 0; background: color-mix(in srgb, var(--faint) 80%, transparent); }
 .ws-pip.dropped::before { width: 9px; height: 1.5px; border: 0; border-radius: 0; background: var(--faint); }
-.ws-item.owed .ws-pip.undecided::before { border-color: var(--accent-ink); }
+.ws-owner .ws-pip.undecided::before { border-color: var(--accent-ink); }
 
 /* ---- the map: each box carries its full and its folded place ---- */
 .ws-mapsec { position: relative; container-type: inline-size; border-bottom: 1px solid var(--line); background: var(--paper); }
@@ -109,7 +111,7 @@
 .ws-gl { position: absolute; color: var(--g); fill: none; stroke: currentColor; stroke-width: 1; overflow: visible; transition: opacity .2s, color .3s; }
 .ws-gl text { font: 9.5px var(--mono); fill: currentColor; stroke: none; }
 .ws-gl .solid { fill: currentColor; stroke: none; }
-.ws-todo { position: absolute; top: -9px; right: 8px; min-width: 22px; height: 18px; padding: 0 5px; border: 1px solid var(--accent-ink); border-radius: 8px; background: var(--paper); font: 500 12px/16px var(--mono); color: var(--accent-ink); text-align: center; transition: opacity .2s; }
+.ws-todo { position: absolute; top: -10px; right: 8px; min-width: 22px; height: 18px; padding: 0 5px; border: 1px solid var(--accent-ink); border-radius: 8px; background: var(--paper); font: 500 12px/16px var(--mono); color: var(--accent-ink); text-align: center; transition: opacity .2s; }
 
 .ws-part.s-open .ws-p-st { visibility: hidden; }
 .ws .ws-part.s-planned, .ws .ws-part.s-next { --g: var(--muted); border-style: solid; border-color: var(--ink); color: var(--ink); }
@@ -128,10 +130,12 @@
 .ws .ws-part.s-now:hover { background: var(--accent-wash); }
 .ws .ws-part.on { border-style: solid; border-color: var(--accent-ink); box-shadow: 0 0 0 1.5px var(--accent-ink); color: var(--ink); }
 
-.ws-stage.fold .ws-p-ttl { left: calc(10 * var(--u)); top: 50%; transform: translateY(-50%); font-size: max(12px, calc(12.5 * var(--u))); }
+.ws-stage.fold .ws-p-ttl { left: calc(10 * var(--u)); top: calc((var(--ch) * var(--u) - 2px - 1.3em) / 2); transform: none; font-size: max(12px, calc(12.5 * var(--u))); }
 .ws-stage.fold .ws-part.inner .ws-p-ttl { left: calc(8 * var(--u)); font-size: max(12px, calc(12 * var(--u))); }
 .ws-stage.fold .ws-part.tall .ws-p-ttl { top: calc(8 * var(--u)); transform: none; }
-.ws-stage.fold .ws-p-st, .ws-stage.fold .ws-gl, .ws-stage.fold .ws-todo { opacity: 0; }
+.ws-stage.fold .ws-p-st, .ws-stage.fold .ws-gl, .ws-stage.fold .ws-todo { opacity: 0; transition: opacity .1s; }
+/* Unfolding, the words come back once their boxes have grown. */
+.ws-stage:not(.fold) :is(.ws-p-st, .ws-gl, .ws-todo) { transition: opacity .18s .24s, color .3s; }
 .ws-tip { position: fixed; z-index: 30; left: 0; top: 0; max-width: 270px; padding: 5px 9px 6px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-hover); box-shadow: 0 6px 18px #0000001a, 0 1px 3px #0000000f; font-size: 12.5px; line-height: 1.35; pointer-events: none; animation: ws-appear .12s both; }
 
 /* ---- the sheet: tiles in build order ---- */
@@ -201,17 +205,18 @@
 .is-open .ws-tile.on { background-color: var(--surface-hover); box-shadow: inset 0 -2px 0 var(--accent), 0 1px 0 var(--line); }
 
 /* which arrangement shows */
-@media (min-width: 1040px) {
+@media (min-width: 1200px) {
   .v-map .ws-swap-order { display: none; }
   .v-order .ws-swap-map { display: none; }
   .ws.v-order .ws-under .ws-suggest { display: none; }
   .v-order .lbl-map, .v-map .lbl-order { display: none; }
 }
-@media (max-width: 1039.98px) {
+@media (max-width: 1199.98px) {
   .ws-swap-map, .ws .ws-seg, .ws .ws-under .ws-suggest, .lbl-map { display: none; }
 }
-.ws.swap-out .ws-swap { opacity: 0; transition: opacity .13s; }
-.ws.swap-in .ws-swap { animation: ws-rise .26s var(--ease) both; }
+/* Map and Order swap with everything under them, so nothing below jumps on its own. */
+.ws.swap-out :is(.ws-swap, .ws-under, .ws-detail) { opacity: 0; transition: opacity .13s; }
+.ws.swap-in :is(.ws-swap, .ws-under, .ws-detail) { animation: ws-swap-in .26s var(--ease) both; }
 
 .ws-under { display: flex; align-items: flex-start; gap: 20px; padding: 14px 24px 44px; }
 .ws-under-left { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 22px; padding-top: 8px; }
@@ -220,7 +225,7 @@
 .ws-note { flex-basis: 100%; }
 
 /* ---- an opened place ---- */
-.ws-detail { display: grid; grid-template-columns: 304px minmax(0, 1fr); min-height: 58vh; animation: ws-rise .24s var(--ease-out) both; }
+.ws-detail { display: grid; grid-template-columns: 304px minmax(0, 1fr); min-height: calc(100vh - 65px - var(--ws-foldh, 180px)); animation: ws-rise .24s var(--ease-out) both; view-transition-name: detail; }
 .ws.leaving .ws-detail { opacity: 0; transition: opacity .13s; pointer-events: none; }
 .ws-block { position: sticky; top: 65px; align-self: start; padding: 20px 24px 28px; min-width: 0; }
 .ws .ws-back { font: 12px var(--mono); color: var(--muted); padding: 4px 0; }
@@ -246,7 +251,6 @@
 .ws-item { position: relative; }
 .ws-item::before { content: ""; position: absolute; inset: -1px 0 0; background: var(--surface); box-shadow: inset 0 1px 0 var(--line), inset 0 -1px 0 var(--line), inset 2px 0 0 var(--accent); opacity: 0; transition: opacity .2s var(--ease-out); pointer-events: none; }
 .ws-item.open::before { opacity: 1; }
-.ws-item.snap::before, .ws-item.snap .ws-more, .ws-item.snap .ws-more-in { transition: none; }
 .ws-line { position: relative; display: flex; align-items: center; gap: 14px; padding-right: 24px; transition: background-color .12s; }
 .ws-item:not(.open) .ws-line:hover { background: var(--surface-hover); }
 .ws .ws-row { flex: 1; min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 0 9px 20px; cursor: pointer; }
@@ -285,7 +289,7 @@
 .ws-talk { margin-top: 16px; display: grid; gap: 11px; border-top: 1px solid var(--line); padding-top: 14px; max-width: 720px; }
 .ws-earlier { justify-self: start; }
 .ws-c { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; font-size: 14px; }
-.ws-c i { width: 24px; height: 24px; border-radius: 50%; background: var(--line); font: 10px/24px var(--mono); text-align: center; font-style: normal; color: var(--muted); }
+.ws-c i { width: 24px; height: 24px; border-radius: 50%; background: var(--line); font: 12px/24px var(--mono); text-align: center; font-style: normal; color: var(--muted); }
 .ws-c b { font-weight: 500; }
 .ws-c b small { font: 12px var(--mono); color: var(--faint); font-weight: 400; margin-left: 6px; }
 .ws-c p { color: var(--muted); overflow-wrap: anywhere; }
@@ -306,7 +310,7 @@
 .ws .ws-btn.go:hover:not(:disabled) { background: var(--accent-hover); border-color: #d68200; }
 .ws .ws-btn:focus-visible { outline-offset: 2px; }
 .ws .ws-btn:disabled { opacity: .5; }
-.ws-btn kbd { font: 11px var(--mono); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; opacity: .6; }
+.ws-btn kbd { font: 12px/1.2 var(--mono); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; opacity: .6; }
 .ws-row-notice { margin: 12px 0 0; max-width: 60ch; padding: 8px 12px; border: 1px solid var(--no); border-radius: 3px; color: var(--no); font-size: 13.5px; }
 .ws-notice { position: fixed; z-index: 30; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); padding: 9px 14px; border: 1px solid var(--no); border-radius: 3px; background: var(--paper); box-shadow: 0 6px 18px #0000001f; color: var(--no); font-size: 13.5px; animation: ws-appear .2s var(--ease-out) both; }
 .ws-pending { opacity: .55; }
@@ -319,13 +323,28 @@
 
 @keyframes ws-rise { from { opacity: .2; transform: translateY(8px); } }
 @keyframes ws-appear { from { opacity: 0; } }
+@keyframes ws-swap-in { from { opacity: .2; transform: translateY(8px); } }
+
+/* Off the map, the tile that was tapped travels to its place in the strip, and back. */
+::view-transition-group(*) { animation-duration: .34s; animation-timing-function: cubic-bezier(.3, .7, .2, 1); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .22s; }
+::view-transition-group(hero) { background: var(--surface-hover); outline: 1px solid var(--line); }
+::view-transition-old(hero), ::view-transition-new(hero) { width: 100%; height: 100%; object-fit: none; object-position: 0 0; }
+::view-transition-old(hero) { animation: ws-fall .12s ease both; }
+::view-transition-new(hero) { animation: ws-appear .18s ease .14s both; }
+::view-transition-new(detail) { animation: ws-rise .32s cubic-bezier(.3, .7, .2, 1) .08s both; }
+::view-transition-old(detail) { animation: ws-fall .14s ease both; }
+@keyframes ws-fall { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
 
 /* ---- narrower ---- */
-@media (min-width: 1040px) and (min-height: 760px) {
+@media (min-width: 1200px) and (min-height: 760px) {
   .ws.is-open.v-map .ws-swap-map { position: sticky; top: 65px; z-index: 6; }
   .ws.is-open.v-map .ws-block { top: calc(66px + var(--ws-foldh, 180px)); }
 }
-@media (max-width: 1039.98px) {
+@media (max-width: 1199.98px) {
   .is-sheet .ws-band-after .ws-tline { display: none; }
   .is-sheet .ws-band-after .ws-tile-hit { min-height: 84px; }
   .ws-detail { grid-template-columns: 250px minmax(0, 1fr); }
@@ -333,16 +352,18 @@
 @media (max-width: 900px) {
   .is-sheet .ws-tline { font-size: 12.5px; }
 }
-@media (max-width: 1039.98px) {
+@media (max-width: 1199.98px) {
   .ws-top { flex-wrap: wrap; gap: 14px; }
   .ws-top-side { margin-left: 0; width: 100%; align-items: flex-start; gap: 8px; }
-  .ws-tools { min-height: 0; }
+  .ws-tools { min-height: 0; position: absolute; top: 30px; right: 24px; }
   .ws-tools:not(:has(.ws-loglink)) { display: none; }
+  .is-sheet .ws-tile .ws-pips { margin-right: 0; }
   .ws-key { justify-content: flex-start; }
 }
 @media (max-width: 760px) {
   .ws-top { padding: 26px 16px 16px; }
   .ws-top h1 { font-size: 34px; }
+  .ws-tools { top: 26px; right: 16px; flex-direction: column; align-items: flex-end; gap: 0; }
   .ws-key { min-height: 36px; align-content: flex-start; }
   .is-sheet .ws-band-first, .is-sheet .ws-band-after { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .is-sheet .ws-band > .ws-tile.ws-tile:last-child { grid-column: auto; }
@@ -385,7 +406,6 @@
 }
 @media (max-width: 420px) {
   .ws-account { gap: 8px; }
-  .ws-login { max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
   .workshop-shell .site-header { gap: 12px; }
   .workshop-shell .site-header nav { gap: 12px; }
   .workshop-shell .site-header .button.small { padding: 6px 8px; }
@@ -400,7 +420,25 @@
 @media (max-width: 480px) { .ws-wide { display: none; } }
 /* Room kept for what the live state fills in, so nothing below moves when it arrives. */
 .ws-under { min-height: 92px; }
-@media (max-width: 1039.98px) { .ws-under { min-height: 0; } }
+@media (max-width: 1199.98px) { .ws-under { min-height: 0; } }
 @media (max-width: 760px) { .ws-block .ws-tally { min-height: calc(2 * 1.7em); } }
-/* On a small drawing the box's own border says the state; the mark would push the words out. */
-@container (max-width: 1000px) { .ws-part .ws-mk { display: none; } }
+
+/* Followed up after the design review. */
+.ws-status { text-wrap: balance; }
+.ws-login { white-space: nowrap; }
+@media (max-width: 480px) { .ws-login { display: none; } }
+@media (max-width: 380px) { .ws-pip { width: 11px; } }
+.ws-c-ghost { height: 42px; border-radius: 3px; background: color-mix(in srgb, var(--line) 40%, transparent); }
+.ws .ws-btn.ws-unarmed { opacity: .45; }
+.ws .ws-btn { transition: background-color .16s, border-color .16s, opacity .2s; }
+.ws-what { overflow-wrap: anywhere; }
+.ws-by { display: inline-block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.ws-more-pad .ws-box { max-width: 720px; }
+.ws-signin { line-height: 1.4; }
+.ws-recording { width: 100%; aspect-ratio: 16 / 10; }
+/* Faint text is for numbers and drawing labels; what a person reads or presses is muted. */
+.ws-side, .ws .ws-vote, .ws-signin, .ws-gh, .ws-hint, .ws-link { color: var(--muted); }
+/* Small controls get a taller target than they look. */
+.ws .ws-vote { padding: 8px 5px; margin: -8px -5px; }
+.ws .ws-back { padding: 12px 0; margin: -8px 0; }
+.ws-fold-link, .ws-loglink { display: inline-block; padding: 8px 0; margin: -8px 0; }

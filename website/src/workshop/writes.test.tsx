@@ -138,7 +138,7 @@ describe('the decisions', () => {
   it('open for the owner from the link, with open decisions then the decided log', async () => {
     mockApi({ me: owner });
     await renderApp();
-    await userEvent.click(screen.getByRole('link', { name: 'Decisions 2 to decide' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Decisions · 2 open' }));
     expect(location.hash).toBe('#decisions');
     const open = screen.getByRole('region', { name: 'Open' });
     expect(within(open).getAllByRole('button').map((b) => b.textContent)).toEqual(['After a task ends, what happens to its computer?', 'Which Zig version to pin']);
@@ -175,15 +175,22 @@ describe('the owner deciding entries', () => {
     mockApi({ me: owner });
     await renderApp();
     expect(part('computers').querySelector('.ws-todo')).toHaveTextContent('2');
-    expect(part('engine').querySelector('.ws-todo')).toBeNull();
+    // The carried-over verdict on `calls` waits for the owner's confirmation.
+    expect(part('engine').querySelector('.ws-todo')).toHaveTextContent('1');
+    expect(part('setup').querySelector('.ws-todo')).toBeNull();
     expect(tile('computers')).toHaveTextContent('2 to decide');
     expect(part('computers')).toHaveAccessibleName(/, 2 to decide\./);
-    await userEvent.click(screen.getByRole('link', { name: '4 to decide' }));
+    // The lowest-numbered entry waiting for the owner is the carried-over one, to confirm.
+    await userEvent.click(screen.getByRole('link', { name: '5 to decide' }));
+    await ownerOn('Every call defined once');
+    expect(location.hash).toBe('#engine/calls');
+    expect(within(itemOf('Every call defined once')).getByText('confirm')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Confirm/ })).toBeInTheDocument();
+    expect(document.activeElement).toBe(rowButton('Every call defined once'));
+    act(() => { location.hash = '#computers/computers'; });
     await ownerOn('Create and delete a computer');
-    expect(location.hash).toBe('#computers/computers');
     for (const name of [/^Take/, /^Later$/, /^Drop$/, /^Refine…$/]) expect(screen.getByRole('button', { name })).toBeInTheDocument();
     expect(screen.getByText('Suggested: take. Key records by id.')).toBeInTheDocument();
-    expect(document.activeElement).toBe(rowButton('Create and delete a computer'));
   });
 
   it('takes with Enter after the guard, then the next in the area, then the lowest anywhere', async () => {
@@ -200,7 +207,7 @@ describe('the owner deciding entries', () => {
     fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
     expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'false');
-    expect(within(itemOf('Create and delete a computer')).getByText('Saving…')).toBeInTheDocument();
+    expect(itemOf('Create and delete a computer').querySelector('.ws-word')).toHaveTextContent('Saving…');
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
     expect(await within(itemOf('Create and delete a computer')).findByText('planned')).toBeInTheDocument();
     expect(location.hash).toBe('#computers/exec');
@@ -211,9 +218,9 @@ describe('the owner deciding entries', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Later' }));
     expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }, { n: 13, verdict: 'later' }]);
     // Computers has none left: the lowest one anywhere opens, its area unfolds.
-    await ownerOn('Fork a computer');
-    expect(screen.getByRole('heading', { level: 2, name: 'Forks' })).toBeInTheDocument();
-    expect(location.hash).toBe('#forks/fork');
+    await ownerOn('Every call defined once');
+    expect(screen.getByRole('heading', { level: 2, name: 'Engine' })).toBeInTheDocument();
+    expect(location.hash).toBe('#engine/calls');
     // The guard holds across the area change.
     fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
     expect(posts(calls, 'verdict')).toHaveLength(2);
@@ -253,7 +260,7 @@ describe('the owner deciding entries', () => {
     await ownerOn('Create and delete a computer');
     time.advance(OPEN_GUARD_MS);
     await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
-    expect(within(itemOf('Create and delete a computer')).getByText('Saving…')).toBeInTheDocument();
+    expect(itemOf('Create and delete a computer').querySelector('.ws-word')).toHaveTextContent('Saving…');
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
     await act(async () => release(refused(403, 'Not allowed.')));
     expect(await screen.findByRole('alert')).toHaveTextContent('Create and delete a computer: not saved. Not allowed.');
@@ -338,7 +345,7 @@ describe('the owner deciding entries', () => {
     expect(posts(calls, 'verdict')[0].body).toEqual({ n: 12, verdict: 'take' });
   });
 
-  it('never acts on a suggestion before it has its issue', async () => {
+  it('offers no verdict on a suggestion, which the server only records on entries', async () => {
     let release: (value: { status: number; body: unknown }) => void = () => {};
     const time = clock();
     const calls = mockApi({ me: owner, routes: { 'POST suggest': () => new Promise((resolve) => { release = resolve; }) } });
@@ -347,15 +354,14 @@ describe('the owner deciding entries', () => {
     await userEvent.type(screen.getByRole('textbox', { name: 'Title' }), 'Pause a computer');
     await userEvent.click(screen.getByRole('button', { name: 'Suggest' }));
     await userEvent.click(rowButton('Share a base computer'));
-    for (let i = 0; i < 4; i += 1) {
-      time.advance(OPEN_GUARD_MS);
-      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
-      await act(async () => {});
-    }
-    // The suggestions first, then the lowest entries anywhere; never the one still being sent.
-    expect(posts(calls, 'verdict').map((call) => call.body?.n)).toEqual([31, 30, 12, 13]);
+    expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
+    expect(within(itemOf('Share a base computer')).queryByText('to decide')).not.toBeInTheDocument();
+    time.advance(OPEN_GUARD_MS);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
+    await act(async () => {});
+    expect(posts(calls, 'verdict')).toEqual([]);
+    expect(screen.getByRole('link', { name: '5 to decide' })).toBeInTheDocument();
     await act(async () => release(ok({ number: 80 })));
-    act(() => { location.hash = '#suggested'; });
     await waitFor(() => expect(rowButton('Pause a computer').closest('.ws-item')).toHaveAttribute('id', 'issue-80'));
   });
 });
@@ -428,7 +434,7 @@ describe('writes the server has not confirmed', () => {
     await ownerOn('Create and delete a computer');
     time.advance(OPEN_GUARD_MS);
     fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-    expect(within(itemOf('Create and delete a computer')).getByText('Saving…')).toBeInTheDocument();
+    expect(itemOf('Create and delete a computer').querySelector('.ws-word')).toHaveTextContent('Saving…');
     expect(part('computers').querySelector('.ws-todo')).toHaveTextContent('2');
     expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('2 to decide');
     expect(announced()).toBe('Create and delete a computer: saving. Run a command, open');
@@ -503,6 +509,6 @@ describe('writes the server has not confirmed', () => {
     await renderApp();
     await screen.findByText('Sign in to comment');
     expect(screen.getByRole('link', { name: 'GitHub #13 ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
-    expect(screen.getByRole('link', { name: 'Earlier comments on GitHub ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
+    expect(await screen.findByRole('link', { name: 'Earlier comments on GitHub ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
   });
 });

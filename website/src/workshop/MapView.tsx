@@ -1,6 +1,6 @@
 // The drawing of Silo, part by part. Every part is a button; opening one folds the drawing to a strip that
 // stays on screen. Each box carries both of its places, so the fold is a CSS transition of the same elements.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { arrowPath, crossPath, FOLD_HEIGHT, GHOSTS, LAYOUT, MAP_HEIGHT, MAP_WIDTH, OUTSIDE, placeStyle, WIRES_FOLD, WIRES_FULL, ZONES } from './map';
 import type { Wire } from './map';
@@ -77,6 +77,15 @@ export function MapView({ groups, folded, current, toDecide, onOpen }: MapViewPr
   const byId = new Map(groups.map((group) => [group.area.id, group]));
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const tipRef = useRef<HTMLDivElement>(null);
+  // Centred on its part, and kept 8 px inside the window.
+  useLayoutEffect(() => {
+    const node = tipRef.current;
+    if (!node || !tip) return;
+    const width = node.offsetWidth;
+    const left = Math.max(8, Math.min(innerWidth - width - 8, tip.x - width / 2));
+    node.style.transform = `translate(${Math.round(left)}px, ${Math.round(tip.y)}px)`;
+  }, [tip]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const showTip = (target: HTMLElement, group: AreaGroup) => {
@@ -85,7 +94,7 @@ export function MapView({ groups, folded, current, toDecide, onOpen }: MapViewPr
       const box = target.getBoundingClientRect();
       const text = folded ? `${group.area.title}. ${group.area.line}` : group.area.line;
       const below = box.height < 200 && box.bottom + 40 < innerHeight;
-      setTip({ text, x: Math.max(8, Math.min(innerWidth - 280, box.left + box.width / 2 - 135)), y: below ? box.bottom + 8 : box.top - 34 });
+      setTip({ text, x: box.left + box.width / 2, y: below ? box.bottom + 8 : box.top - 34 });
     }, 240);
   };
   const hideTip = () => {
@@ -138,7 +147,7 @@ export function MapView({ groups, folded, current, toDecide, onOpen }: MapViewPr
           );
         })}
       </div>
-      {tip ? <div className="ws-tip" aria-hidden="true" style={{ transform: `translate(${Math.round(tip.x)}px, ${Math.round(tip.y)}px)` }}>{tip.text}</div> : null}
+      {tip ? <div className="ws-tip" ref={tipRef} aria-hidden="true" style={{ transform: `translate(${Math.round(tip.x)}px, ${Math.round(tip.y)}px) translateX(-50%)` }}>{tip.text}</div> : null}
     </section>
   );
 }

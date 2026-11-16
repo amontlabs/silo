@@ -8,7 +8,7 @@ import { App, OPEN_GUARD_MS } from './App';
 import { buildData, liveState } from './fixtures';
 import type { Verdict } from './plan';
 
-type Display = 'undecided' | 'planned' | 'later' | 'dropped' | 'saving';
+type Display = 'undecided' | 'planned' | 'later' | 'dropped' | 'saving' | 'confirm';
 type Sent = { n: number; verdict: Verdict; resolve: (status: number) => void };
 
 const ISSUE_OF: Record<string, number> = {
@@ -40,6 +40,7 @@ function shown(key: string): Display | null {
   if (!item) return null;
   const word = item.querySelector('.ws-word')?.textContent;
   if (word === 'Saving…') return 'saving';
+  if (word === 'confirm') return 'confirm';
   return word === 'planned' ? 'planned' : word === 'later' ? 'later' : word === 'dropped' ? 'dropped' : 'undecided';
 }
 
@@ -75,12 +76,19 @@ async function run(seed: number) {
   const server: Record<number, Verdict | null> = { ...LIVE };
   const pending = new Map<number, Verdict>();
   const confirmed = (n: number): Display => display(server[n] ?? FILE[n] ?? null);
-  const expected = (n: number): Display => (pending.has(n) ? 'saving' : confirmed(n));
-  const toDecide = () => IN_AREAS.filter((n) => (server[n] ?? null) === null).length;
+  // A file verdict the server has not recorded yet is offered to the owner to confirm.
+  const expected = (n: number): Display => (pending.has(n) ? 'saving' : (server[n] ?? null) === null && FILE[n] != null && n !== 10 && n !== 15 ? 'confirm' : confirmed(n));
+  // Entries in areas the owner still has to decide, and the carried-over `calls` (11) to confirm.
+  const toDecide = () => IN_AREAS.filter((n) => (server[n] ?? null) === null).length + ((server[11] ?? null) === null ? 1 : 0);
   let open: string | null = null;
   let openedAt = now;
+  // Several rows may be open; the one opened last is in the address, and only it takes a verdict.
+  const current$ = () => {
+    const tail = decodeURIComponent(location.hash.slice(1)).split('/')[1];
+    return tail ? (/^(issue|decided)-/.test(tail) ? tail : `entry-${tail}`) : null;
+  };
   const observe = () => {
-    const current = document.querySelector('.ws-item.open')?.id ?? null;
+    const current = current$();
     if (current !== open) {
       open = current;
       openedAt = now;
@@ -117,10 +125,11 @@ async function run(seed: number) {
     } else if (choice < 0.56) {
       const buttons = [...document.querySelectorAll<HTMLButtonElement>('.ws-item.open .ws-btn')]
         .filter((button) => /^(Take|Later|Drop|Confirm)/.test(button.textContent ?? ''));
-      if (buttons.length && n !== undefined) {
+      if (buttons.length) {
         const button = pick(buttons);
         const label = (button.textContent ?? '').replace(/\s*↵$/, '');
-        if (!button.disabled && !pending.has(n) && elapsed >= OPEN_GUARD_MS) {
+        const onCurrent = button.closest('.ws-item')?.id === key;
+        if (onCurrent && n !== undefined && !button.disabled && !pending.has(n) && elapsed >= OPEN_GUARD_MS) {
           predicted = { n, verdict: label === 'Confirm' ? (FILE[n] as Verdict) : (label.toLowerCase() as Verdict) };
         }
         act(() => { fireEvent.click(button); });
@@ -134,7 +143,8 @@ async function run(seed: number) {
     } else if (choice < 0.8) {
       // Go somewhere else: another area, the strip's lists, the decisions, the map, or the "to decide" link.
       const where = rand();
-      if (where < 0.5) act(() => { location.hash = pick(PLACES); });
+      // Back and Forward arrive as popstate; sent at once so the page and the model see the same address.
+      if (where < 0.5) act(() => { history.pushState(null, '', `/workshop${pick(PLACES)}`); dispatchEvent(new PopStateEvent('popstate')); });
       else if (where < 0.7) act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
       else {
         const link = [...document.querySelectorAll<HTMLAnchorElement>('.ws-loglink')].find((a) => /^\d+ to decide$/.test(a.textContent ?? ''));

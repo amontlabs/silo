@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -55,24 +55,28 @@ describe('reading the product files', () => {
 
   it('reads the four files from a repository folder and checks the map', () => {
     const root = mkdtempSync(join(tmpdir(), 'workshop-data-'));
-    mkdirSync(join(root, 'docs/product'), { recursive: true });
-    writeFileSync(join(root, 'docs/product/features.jsonl'), featuresText);
-    writeFileSync(join(root, 'docs/product/stages.json'), stagesText);
-    writeFileSync(join(root, 'docs/product/areas.json'), areasText);
-    writeFileSync(join(root, 'docs/product/DECISIONS.md'), decisionsText);
-    mkdirSync(join(root, 'recordings'));
-    expect(() => readBuildData(root, join(root, 'recordings'))).toThrow('recording create.mp4 is not in');
-    writeFileSync(join(root, 'recordings/create.mp4'), '');
-    const data = readBuildData(root, join(root, 'recordings'));
-    expect(data.features).toHaveLength(20);
-    expect(data.areas).toHaveLength(16);
-    expect(data.decided).toHaveLength(3);
-    // An area the map does not place stops the build with a plain message.
-    const more = JSON.parse(areasText);
-    writeFileSync(join(root, 'docs/product/areas.json'), JSON.stringify([...more, { id: 'billing', title: 'Billing', line: 'L' }]));
-    writeFileSync(join(root, 'docs/product/features.jsonl'), `${featuresText}\n${entry({ n: 30, id: 'pay', area: 'billing' })}`);
-    expect(() => readBuildData(root, join(root, 'recordings'))).toThrow('The map has no place for the area "billing" of docs/product/areas.json. Add it to website/src/workshop/map.ts.');
-    expect(() => readBuildData(join(root, 'missing'), root)).toThrow('docs/product/stages.json: cannot be read');
+    try {
+      mkdirSync(join(root, 'docs/product'), { recursive: true });
+      writeFileSync(join(root, 'docs/product/features.jsonl'), featuresText);
+      writeFileSync(join(root, 'docs/product/stages.json'), stagesText);
+      writeFileSync(join(root, 'docs/product/areas.json'), areasText);
+      writeFileSync(join(root, 'docs/product/DECISIONS.md'), decisionsText);
+      mkdirSync(join(root, 'recordings'));
+      expect(() => readBuildData(root, join(root, 'recordings'))).toThrow('recording create.mp4 is not in');
+      writeFileSync(join(root, 'recordings/create.mp4'), '');
+      const data = readBuildData(root, join(root, 'recordings'));
+      expect(data.features).toHaveLength(20);
+      expect(data.areas).toHaveLength(16);
+      expect(data.decided).toHaveLength(3);
+      // An area the map does not place stops the build with a plain message.
+      const more = JSON.parse(areasText);
+      writeFileSync(join(root, 'docs/product/areas.json'), JSON.stringify([...more, { id: 'billing', title: 'Billing', line: 'L' }]));
+      writeFileSync(join(root, 'docs/product/features.jsonl'), `${featuresText}\n${entry({ n: 30, id: 'pay', area: 'billing' })}`);
+      expect(() => readBuildData(root, join(root, 'recordings'))).toThrow('The map has no place for the area "billing" of docs/product/areas.json. Add it to website/src/workshop/map.ts.');
+      expect(() => readBuildData(join(root, 'missing'), root)).toThrow('docs/product/stages.json: cannot be read');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

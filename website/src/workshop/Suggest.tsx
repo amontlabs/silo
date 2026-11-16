@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Block, Rows } from './AreaView';
 import type { EntryContext } from './Entry';
 
-export function SuggestPlace({ openKey, ctx, onBack, notes }: { openKey: string | null; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
+export function SuggestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   const { w } = ctx;
   const { suggestDraft, setSuggestDraft } = w;
   let form: ReactNode = null;
@@ -27,8 +27,8 @@ export function SuggestPlace({ openKey, ctx, onBack, notes }: { openKey: string 
           {form}
           <section aria-label="Suggested by people">
             <h3 className="ws-grp">Suggested by people</h3>
-            {people ? null : <p className="ws-empty">{w.liveOk ? 'Nothing yet.' : 'Suggestions show here when the live state is available.'}</p>}
-            <Rows rows={w.plan.suggestions} openKey={openKey} ctx={ctx} />
+            {people ? null : <p className="ws-empty">{w.liveOk ? 'Nothing yet.' : 'Suggestions are offline.'}</p>}
+            <Rows rows={w.plan.suggestions} ctx={ctx} />
             {w.suggestionsSending.length ? (
               <ul className="ws-rows">
                 {w.suggestionsSending.map((sending) => (

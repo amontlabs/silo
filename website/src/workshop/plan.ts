@@ -338,9 +338,19 @@ export function allRows(plan: Plan): Row[] {
   ];
 }
 
-/** A row the owner still has to decide: undecided or being refined, with a real issue to record the verdict on. */
+/** An entry the owner still has to decide: undecided or being refined, with a real issue to record the verdict on. */
 export function awaitsVerdict(row: Row): boolean {
-  return (row.kind === 'entry' || row.kind === 'suggestion') && !isDecided(row) && !row.carried && row.issue !== null && row.issue > 0;
+  return row.kind === 'entry' && !isDecided(row) && !row.carried && row.issue !== null && row.issue > 0;
+}
+
+/** A verdict from the file that the owner has not confirmed on GitHub yet. */
+export function awaitsConfirm(row: Row): boolean {
+  return row.kind === 'entry' && row.carried && row.fileVerdict !== null && row.status !== 'built' && row.issue !== null && row.issue > 0;
+}
+
+/** An entry the owner still has to act on: to decide, or to confirm. The server records verdicts on entries only. */
+export function needsOwner(row: Row): boolean {
+  return awaitsVerdict(row) || awaitsConfirm(row);
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

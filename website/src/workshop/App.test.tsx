@@ -64,11 +64,12 @@ describe('the map', () => {
     expect(location.search).toBe('');
   });
 
-  it('links to the suggestions and to what is not carried over', async () => {
+  it('links to what is left out and to the suggestions, in that order', async () => {
     mockApi();
     await renderApp();
     expect(screen.getByRole('link', { name: '2 suggested' })).toHaveAttribute('href', '#suggested');
-    expect(screen.getByRole('link', { name: 'Not carried over · 2' })).toHaveAttribute('href', '#left');
+    expect(screen.getByRole('link', { name: 'Left out · 2' })).toHaveAttribute('href', '#left');
+    expect([...document.querySelectorAll('.ws-fold-link')].map((a) => a.textContent)).toEqual(['Left out · 2', '2 suggested']);
   });
 });
 
@@ -151,9 +152,15 @@ describe('an entry', () => {
     expect(document.querySelector('video')).toHaveAttribute('src', '/workshop/recordings/create.mp4');
     expect(screen.getByText('Create and delete a computer, open')).toBeInTheDocument();
 
+    // A second entry opens beside the first; each row closes only itself.
     await userEvent.click(rowButton('Run a command'));
+    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
+    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
+    expect(location.hash).toBe('#computers/exec');
+    await userEvent.click(rowButton('Create and delete a computer'));
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'false');
     await waitFor(() => expect(screen.queryByText('Make a Linux computer.')).not.toBeInTheDocument());
+    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
     expect(location.hash).toBe('#computers/exec');
     await userEvent.click(rowButton('Run a command'));
     expect(location.hash).toBe('#computers');
@@ -164,16 +171,17 @@ describe('an entry', () => {
     history.replaceState(null, '', '/workshop#computers/exec');
     await renderApp();
     expect(screen.getByText('Being built now.')).toBeInTheDocument();
-    expect(within(itemOf('Run a command')).getByText('now')).toBeInTheDocument();
+    expect(within(itemOf('Run a command')).getByText('building')).toBeInTheDocument();
     act(() => { location.hash = '#setup/shells'; });
     await waitFor(() => expect(screen.getByText('Planned.')).toBeInTheDocument());
   });
 
-  it('shows a carried-over verdict as planned to a visitor, never as a click', async () => {
+  it('shows a carried-over verdict to a visitor as planned, without saying it was carried over', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#engine/calls');
     await renderApp();
-    expect(screen.getByText('Planned · carried over')).toBeInTheDocument();
+    expect(await screen.findByText('Planned.')).toBeInTheDocument();
+    expect(screen.queryByText(/carried over/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Confirm/ })).not.toBeInTheDocument();
   });
 });
@@ -183,12 +191,12 @@ describe('addresses', () => {
     history.replaceState(null, '', '/workshop#entry-exec');
     mockApi();
     await renderApp();
-    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
+    await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
     expect(location.hash).toBe('#computers/exec');
     act(() => { location.hash = '#entry-reviewer'; });
     await waitFor(() => expect(rowButton('A hosted reviewer')).toHaveAttribute('aria-expanded', 'true'));
     expect(location.hash).toBe('#left/reviewer');
-    expect(screen.getByRole('heading', { level: 2, name: 'Not carried over' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Left out' })).toBeInTheDocument();
   });
 
   it('open a suggestion once the live state arrives', async () => {
@@ -215,10 +223,10 @@ describe('addresses', () => {
 });
 
 describe('the bottom strip', () => {
-  it('lists what is not carried over with each one\'s real state', async () => {
+  it('lists what is left out with each one\'s real state', async () => {
     mockApi();
     await renderApp();
-    await userEvent.click(screen.getByRole('link', { name: 'Not carried over · 2' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Left out · 2' }));
     expect(location.hash).toBe('#left');
     expect(within(itemOf('A hosted reviewer')).getByText('dropped')).toBeInTheDocument();
     expect(itemOf('An earlier desktop stack')).toHaveClass('st-undecided');
@@ -265,7 +273,7 @@ describe('when the API is missing or slow', () => {
     it(`shows the whole plan without live parts when ${label}`, async () => {
       mockApi({ state, me: owner });
       await renderApp();
-      expect(screen.getAllByText('Live comments are unavailable.').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Votes and comments are offline.').length).toBeGreaterThan(0);
       expect(part('engine')).toHaveClass('s-next');
       expect(screen.queryByText(/Sign in/)).not.toBeInTheDocument();
       expect(screen.queryByText('polarzero')).not.toBeInTheDocument();

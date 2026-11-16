@@ -11,6 +11,8 @@ import type { BuildData, LiveIssue, LiveState, Row, Verdict } from './plan';
 /** A row that just opened refuses its main action for this long. */
 export const OPEN_GUARD_MS = 700;
 const NOTICE_MS = 8000;
+/** A fetch of an issue's comments this recent serves an opening. */
+const FRESH_MS = 4000;
 
 export type Live = { status: 'loading' | 'ok' | 'unavailable'; state: LiveState | null };
 export type Detail = IssueDetail | 'loading' | 'error';
@@ -40,7 +42,7 @@ function verdictPatch(verdict: Verdict | null): Partial<LiveIssue> {
     : { verdict, state: 'open', reason: null, closedAt: null };
 }
 
-export function useWorkshop(data: BuildData, openKey: string | null, nav: MutableRefObject<Nav>) {
+export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, nav: MutableRefObject<Nav>) {
   const [live, setLive] = useState<Live>({ status: 'loading', state: null });
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [details, setDetails] = useState<Record<number, Detail>>({});
@@ -61,6 +63,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, nav: Mutabl
   const pendingRef = useRef(new Set<number>());
 
   const liveOk = live.status === 'ok';
+  const liveRefOk = useRef(liveOk);
+  liveRefOk.current = liveOk;
   const canDecide = liveOk && me?.canDecide === true;
   const plan = useMemo(() => buildPlan(data, live.state), [data, live.state]);
   const rows = useMemo(() => allRows(plan), [plan]);
@@ -95,20 +99,35 @@ export function useWorkshop(data: BuildData, openKey: string | null, nav: Mutabl
     });
   }, []);
 
+  // An issue's comments: fetched on every opening, in the background when some are already shown; a pointer
+  // over the row or focus on it starts the fetch early, and a fetch younger than FRESH_MS counts as that opening's.
+  const fetched = useRef(new Map<number, number>());
+  const fetching = useRef(new Set<number>());
   const loadDetail = useCallback((n: number, force = false) => {
-    if (n <= 0) return;
-    setDetails((current) => (current[n] && current[n] !== 'error' && !force ? current : { ...current, [n]: current[n] && current[n] !== 'error' ? current[n] : 'loading' }));
+    if (n <= 0 || fetching.current.has(n)) return;
+    const at = fetched.current.get(n);
+    if (!force && at !== undefined && Date.now() - at < FRESH_MS) return;
+    fetching.current.add(n);
+    setDetails((current) => (typeof current[n] === 'object' ? current : { ...current, [n]: 'loading' }));
     api.issue(n).then(
-      (detail) => setDetails((current) => ({ ...current, [n]: { ...detail, comments: keptComments(n, detail.comments ?? [], Date.now()) } })),
+      (detail) => {
+        fetched.current.set(n, Date.now());
+        setDetails((current) => ({ ...current, [n]: { ...detail, comments: keptComments(n, detail.comments ?? [], Date.now()) } }));
+      },
       () => setDetails((current) => (typeof current[n] === 'object' ? current : { ...current, [n]: 'error' })),
-    );
+    ).finally(() => fetching.current.delete(n));
   }, []);
+  /** Early fetch for a row the person is about to open. */
+  const prefetch = useCallback((row: Row) => {
+    if (liveRefOk.current && row.issue !== null && row.issue > 0 && !openKeys.has(row.key)) loadDetail(row.issue);
+  }, [loadDetail, openKeys]);
 
-  // Details of the open row load once the live state arrives.
+  // Each opening loads the row's comments once the live state is there.
   useEffect(() => {
     const row = openKey ? rowByKey.get(openKey) : undefined;
-    if (liveOk && row?.issue != null && details[row.issue] === undefined) loadDetail(row.issue);
-  }, [liveOk, openKey, rowByKey, details, loadDetail]);
+    if (liveOk && row?.issue != null) loadDetail(row.issue);
+    // The plan changing under the same open row does not load again.
+  }, [liveOk, openKey, openings, loadDetail]);
   // One check of the person's own vote per opening of a row, never retried: a failure leaves 👍 off.
   const signedInAs = me?.login ?? null;
   useEffect(() => {
@@ -122,7 +141,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, nav: Mutabl
       },
     );
     // Re-rendering, or the plan changing under the same open row, does not ask again.
-  }, [openKey, liveOk, signedInAs]);
+  }, [openKey, openings, liveOk, signedInAs]);
 
   const setBusy = (n: number, busy: boolean) => {
     if (busy) pendingRef.current.add(n);
@@ -331,12 +350,13 @@ export function useWorkshop(data: BuildData, openKey: string | null, nav: Mutabl
       setMe(null);
       setVotes({});
     } catch (error) {
-      failed('Sign out', error);
+      if (error instanceof ApiError && error.status === 401) signedOut();
+      else setNotice('Could not sign out.');
     }
   };
 
   return {
-    live, liveOk, me, canDecide, plan, rowByKey, details, loadDetail, pending, pendingRef, saving, sending, votePending,
+    live, liveOk, me, canDecide, plan, rowByKey, details, prefetch, pending, pendingRef, saving, sending, votePending,
     votes, suggestionsSending, notice, rowNotice, setRowNotice, drafts, setDrafts, refining, setRefining, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, verdictReady, sendVerdict, sendComment, sendDecide, toggleVote,
     sendSuggestion, signOut,

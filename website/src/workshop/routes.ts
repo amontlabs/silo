@@ -22,6 +22,11 @@ export function placeOf(row: Row): Place {
   return row.area ? { kind: 'area', area: row.area } : { kind: 'left' };
 }
 
+/** Where a row opens from a place: in that place when it is shown there (a dropped entry also sits in the left-out list), else where it lives. */
+export function placeFrom(row: Row, place: Place, plan: Plan): Place {
+  return rowsOf(plan, place).some((item) => item.key === row.key) ? place : placeOf(row);
+}
+
 /** The rows a place shows, in order. */
 export function rowsOf(plan: Plan, place: Place): Row[] {
   switch (place.kind) {
@@ -65,16 +70,18 @@ export function resolveHash(hash: string, plan: Plan, rows: Map<string, Row>): {
   if (raw === null) return null;
   const [head, ...rest] = raw.split('/');
   const tail = rest.join('/');
+  // An entry is found by its id whatever place the address names; the address is then rewritten to where it is.
   const named = (place: Place) => {
     if (!tail) return { place, key: null };
     const row = rows.get(rowKey(tail));
-    return row ? { place: placeOf(row), key: row.key } : null;
+    if (row) return { place: placeFrom(row, place, plan), key: row.key };
+    // Entries come from the plan file: one that is not there no longer exists, and its area opens.
+    // Issues may only appear with the live state, so those wait.
+    return place.kind === 'area' && !/^(issue|decided)-/.test(tail) ? { place, key: null } : null;
   };
   if (head === 'suggested' || head === 'left' || head === 'decisions') return named({ kind: head });
   if (plan.areas.some((group) => group.area.id === head)) return named({ kind: 'area', area: head });
-  if (!tail && /^(entry|issue|decided)-/.test(head)) {
-    const row = rows.get(head);
-    return row ? { place: placeOf(row), key: row.key } : null;
-  }
+  const loose = rows.get(tail ? rowKey(tail) : head);
+  if (loose && (tail || /^(entry|issue|decided)-/.test(head))) return { place: placeOf(loose), key: loose.key };
   return null;
 }
