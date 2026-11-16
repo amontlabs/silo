@@ -12,8 +12,8 @@ Format, for agents: a journey is a `## ` heading with an `<!-- id: … -->` line
 is a list item that starts with its status. A change that alters what a user does or sees
 updates the step in the same merge. The owner's dashboard reads this file.
 
-Status: first draft of 2026-11-16, written from the docs. Every status here is `[untested]` or
-`[missing]` until the audit drives each step on the Dev build.
+Status: the audit of 2026-11-16 drove the command-line steps on the Dev build. The app window,
+editors, GitHub access, secrets and other devices are not driven yet.
 
 ## 1. You live in a computer
 <!-- id: live -->
@@ -38,15 +38,18 @@ flowchart LR
   term --> main
 ```
 
-- [untested] Install Silo; the first run makes main.
-- [untested] Pick Claude Code or Codex; Silo installs it in main and opens it.
+- [partial] Install Silo; the first run makes main. `silo up` makes main in under a minute. A
+  rebuilt Dev app can open on "Silo could not load" when an older engine left its record behind.
+  The app's own first run is not driven yet.
+- [partial] Pick Claude Code or Codex; Silo installs it in main and opens it. `silo agents install`
+  works and Silo's tools are connected in the agent. Opening it from the app is not driven yet.
 - [missing] T3 Code on the Mac connects to the agent inside main.
 - [untested] Your editor (VS Code, Zed) opens a folder in main.
-- [untested] A terminal opens in main.
+- [built] A terminal opens in main (`ssh main.silo-dev`).
 - [untested] Your repositories are reachable from main with GitHub access per repository.
 - [untested] Secrets work inside main without being readable there.
 - [untested] GUI automation runs inside main (desktop and computer use).
-- [missing] atelier runs inside main.
+- [missing] atelier runs inside main. The default recipe has no Node, so most tools need setup first.
 - [missing] One recipe sets all of the above up, so a new main is ready to use.
 - [partial] Making a recipe: a YAML file added with `silo recipe add`. There is no guided way to
   create one.
@@ -69,11 +72,15 @@ sequenceDiagram
   Agent->>Fork: merge into main, or drop
 ```
 
-- [untested] The agent in main forks main without asking you.
-- [untested] The agent makes a disposable computer from a recipe.
-- [untested] The agent runs commands in the fork and reads its logs and screen.
-- [untested] The diff shows code, packages, settings, files and databases.
-- [untested] Merging asks you in the Silo app, with the diff.
+- [built] The agent in main forks main without asking you.
+- [untested] The agent makes a disposable computer from a recipe. It works from the Mac; not
+  driven from inside main.
+- [partial] The agent runs commands in the fork and reads its logs and screen. Commands work;
+  logs and screen are not driven yet.
+- [partial] The diff shows code, packages, settings, files and databases. Code, packages and
+  settings are shown; databases are not driven yet.
+- [partial] Merging asks you in the Silo app, with the diff. The request is held and listed on the
+  Mac; the app's Pending page is not driven yet.
 - [untested] Merge when main has not changed: every change is applied and main keeps running.
 - [untested] Merge when main has changed: item by item, and you choose on conflicts.
 - [untested] Undo a merge, drop a fork, replace main.
@@ -99,12 +106,14 @@ flowchart LR
   task -.->|merge| main["main"]
 ```
 
-- [untested] A recipe is built once and later computers fork from its checkpoint.
-- [untested] A computer starts from a checkpoint you chose.
+- [built] A recipe is built once and later computers fork from its checkpoint.
+- [built] A computer starts from a checkpoint you chose, and can run a command as it starts.
 - [missing] One call starts a task: which recipe or checkpoint, what to run, where the result
-  goes. Today a caller chains several `silo` commands itself.
+  goes. Today a caller chains several `silo` commands itself, a recipe and a command cannot go in
+  one call, and the computer stays running afterwards.
 - [untested] The same call works on another device (`--device`, a Linux host).
-- [missing] The caller gets the result back: exit status, a report, files.
+- [partial] The caller gets the result back: exit status, a report, files. The exit status comes
+  back; a report or files need a second command.
 - [missing] The task's work is merged into main.
 - [untested] GitHub Actions jobs run in fresh computers (`silo-runner`). This is the one trigger
   that exists, and it is specific to GitHub jobs.
