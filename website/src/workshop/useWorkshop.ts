@@ -19,8 +19,10 @@ export type Detail = IssueDetail | 'loading' | 'error';
 
 /** What the writes need from navigation. */
 export interface Nav {
+  /** The row opened last: the address follows it. */
   openKey: string | null;
-  openedAt: number;
+  /** Every open row and when it opened: each has its own guard. */
+  openedAt: Map<string, number>;
   /** After a verdict on the open row: open the next one waiting, or close. */
   advanceFrom: (row: Row) => void;
   /** Back to a row whose write was refused. */
@@ -121,6 +123,10 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const prefetch = useCallback((row: Row) => {
     if (liveRefOk.current && row.issue !== null && row.issue > 0 && !openKeys.has(row.key)) loadDetail(row.issue);
   }, [loadDetail, openKeys]);
+  /** The fetch of a row being opened, asked for in the same event so the row never shows a stale error first. */
+  const fetchNow = useCallback((row: Row) => {
+    if (liveRefOk.current && row.issue !== null && row.issue > 0) loadDetail(row.issue);
+  }, [loadDetail]);
 
   // Each opening loads the row's comments once the live state is there.
   useEffect(() => {
@@ -195,7 +201,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const verdictReady = (row: Row): boolean => {
     const n = row.issue;
     return canDecide && n !== null && n > 0 && Boolean(live.state?.issues[n]) && !pendingRef.current.has(n)
-      && nav.current.openKey === row.key && Date.now() - nav.current.openedAt >= OPEN_GUARD_MS;
+      && nav.current.openedAt.has(row.key) && Date.now() - (nav.current.openedAt.get(row.key) as number) >= OPEN_GUARD_MS;
   };
 
   const sendVerdict = async (row: Row, verdict: Verdict | null, note?: string) => {
@@ -212,7 +218,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setNotice(null);
     setRowNotice(null);
     // The queue moves on at once; the row shows "Saving…" until the server answers.
-    if (nav.current.openKey === row.key) {
+    if (nav.current.openedAt.has(row.key)) {
       setAnnounce('');
       nav.current.advanceFrom(row);
       setAnnounce((next) => (next ? `${row.name}: saving. ${next}` : `${row.name}: saving`));
@@ -356,7 +362,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   };
 
   return {
-    live, liveOk, me, canDecide, plan, rowByKey, details, prefetch, pending, pendingRef, saving, sending, votePending,
+    live, liveOk, me, canDecide, plan, rowByKey, details, prefetch, fetchNow, pending, pendingRef, saving, sending, votePending,
     votes, suggestionsSending, notice, rowNotice, setRowNotice, drafts, setDrafts, refining, setRefining, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, verdictReady, sendVerdict, sendComment, sendDecide, toggleVote,
     sendSuggestion, signOut,

@@ -4,7 +4,14 @@
     <script src="/theme.js"></script>
     <script>
       // A readable marker beside the session cookie: the header keeps the signed-in width from first paint.
-      if (/(?:^|;\s*)workshop-hint=1(?:;|$)/.test(document.cookie)) document.documentElement.classList.add('ws-session');
+      // The width it took last time on this browser, when there was one.
+      if (/(?:^|;\s*)workshop-hint=1(?:;|$)/.test(document.cookie)) {
+        document.documentElement.classList.add('ws-session');
+        try {
+          const width = Number(localStorage.getItem('silo-workshop-account-width'));
+          if (width >= 60 && width <= 200) document.documentElement.style.setProperty('--ws-account-w', `${width}px`);
+        } catch { /* Storage is optional. */ }
+      }
     </script>
     <script>
       // The page shows once its fonts are in, so nothing is laid out in a fallback face and then changes

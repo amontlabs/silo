@@ -45,8 +45,10 @@ What a person sees:
 - A person who can decide also gets "Decisions", the number of entries still to
   decide or to confirm (a verdict carried over from the file) on each part, and
   a link to the lowest-numbered one. After a verdict the next entry waiting in
-  the same area opens, else the lowest one anywhere. The verdict buttons look
-  dimmed until the 700 ms guard has passed. Verdicts are for entries only: the
+  the same area opens, else the lowest one anywhere. Each open row has its own
+  700 ms guard, and its verdict buttons look dimmed until it has passed. Enter
+  goes to the open row that holds the focus; with the focus on the page, to the
+  row opened last when it is in view. Verdicts are for entries only: the
   server refuses them on anything else.
   Nobody else is offered the decisions; their address shows the map.
 - The header's account slot has a fixed width from first paint: signed in when

@@ -1,6 +1,6 @@
 // One row of a list, and what it shows once open: the sentence, its state, recordings, comments and the box.
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { RichText, safeHref } from './RichText';
 import { awaitsConfirm, awaitsVerdict, isDecided, relativeTime, shortDate } from './plan';
@@ -11,6 +11,8 @@ import type { Workshop } from './useWorkshop';
 const CLOSE_MS = 240;
 /** How long an opening panel waits for its comments, so it opens at its final size. */
 export const HOLD_MS = 180;
+/** How long a panel takes to open, and to follow its comments. */
+const GROW_MS = 220;
 
 export interface EntryContext {
   w: Workshop;
@@ -21,7 +23,6 @@ export interface EntryContext {
   open: ReadonlySet<string>;
   /** Whether this row's verdict buttons act now: it was opened last and its guard has passed. */
   armed: (row: Row) => boolean;
-  makeCurrent: (row: Row) => void;
 }
 
 const WORDS: Partial<Record<Row['status'], string>> = { planned: 'planned', later: 'later', building: 'building', built: 'built', dropped: 'dropped' };
@@ -76,6 +77,56 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   }, [held]);
   const grown = open && !held;
 
+  // When the comments arrive in a panel already open, it grows from its old height to the new one instead
+  // of jumping; this also covers rows that appear open (from another place, Back and Forward).
+  const inner = useRef<HTMLDivElement>(null);
+  const lastHeight = useRef(0);
+  const lastDetail = useRef(detail);
+  const grownAt = useRef(0);
+  const firstGrown = useRef(true);
+  const settling = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    if (firstGrown.current) {
+      firstGrown.current = false;
+      return;
+    }
+    if (grown) grownAt.current = Date.now();
+  }, [grown]);
+  // The panel's height as last laid out, kept current while it animates open (no render happens then).
+  const animating = useRef(false);
+  useEffect(() => {
+    const node = inner.current;
+    if (!node || typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(() => { if (!animating.current) lastHeight.current = node.getBoundingClientRect().height; });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  useLayoutEffect(() => {
+    const node = inner.current;
+    if (!node) return;
+    const height = node.getBoundingClientRect().height;
+    const before = lastHeight.current;
+    const changed = lastDetail.current !== detail;
+    if (!animating.current) lastHeight.current = height;
+    lastDetail.current = detail;
+    const still = typeof matchMedia !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!changed || !grown || still || before <= 0 || Math.abs(height - before) < 1 || Date.now() - grownAt.current < GROW_MS) return;
+    animating.current = true;
+    node.style.height = `${before}px`;
+    node.getBoundingClientRect();
+    node.style.transition = 'height .2s cubic-bezier(.45, 0, .25, 1), opacity .18s';
+    node.style.height = `${height}px`;
+    const done = () => {
+      node.style.height = '';
+      node.style.transition = '';
+      animating.current = false;
+      lastHeight.current = node.getBoundingClientRect().height;
+    };
+    clearTimeout(settling.current);
+    settling.current = setTimeout(done, GROW_MS + 40);
+  });
+  useEffect(() => () => clearTimeout(settling.current), []);
+
   const isSaving = row.issue !== null && w.saving[row.issue] === true;
   const live = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
   const owed = w.canDecide && live && awaitsVerdict(row);
@@ -96,7 +147,7 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
         <Side row={row} ctx={ctx} />
       </div>
       <div className={grown ? 'ws-more open' : 'ws-more'} id={`${row.key}-more`} aria-hidden={open ? undefined : true} inert={!open}>
-        <div className="ws-more-in">{open || closing ? <Body row={row} ctx={ctx} /> : null}</div>
+        <div className="ws-more-in" ref={inner}>{open || closing ? <Body row={row} ctx={ctx} /> : null}</div>
       </div>
     </li>
   );
@@ -139,7 +190,7 @@ function NoteBox({ row, busy, ctx }: { row: Row; busy: boolean; ctx: EntryContex
       if (note) void w.sendVerdict(row, 'refine', note);
     }}>
       <textarea aria-label="Note" placeholder="Note…" maxLength={5000} rows={2} autoFocus value={w.drafts[key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [key]: event.target.value }))} />
-      <button type="submit" className="ws-btn" disabled={busy || !(w.drafts[key] ?? '').trim()}>Refine</button>
+      <button type="submit" className={ctx.armed(row) ? 'ws-btn' : 'ws-btn ws-unarmed'} disabled={busy || !(w.drafts[key] ?? '').trim()}>Refine</button>
     </form>
   );
 }
@@ -147,15 +198,11 @@ function NoteBox({ row, busy, ctx }: { row: Row; busy: boolean; ctx: EntryContex
 function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
   const busy = row.issue !== null && w.pending.has(row.issue);
-  // Until the guard has passed, the buttons look as inert as they are; on a row that was not opened last,
-  // a press makes it the one the verdict goes to.
+  // Each open row has its own guard: until it has passed, the buttons look as inert as they are.
   const armed = ctx.armed(row);
   const cls = (name: string) => `${name}${armed ? '' : ' ws-unarmed'}`;
   const act = (fn: () => void) => () => {
-    if (!ctx.armed(row)) {
-      ctx.makeCurrent(row);
-      return;
-    }
+    if (!ctx.armed(row)) return;
     fn();
   };
   if (row.carried && row.fileVerdict) {
@@ -176,7 +223,7 @@ function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
         <button type="button" className={cls('ws-btn go')} disabled={busy} onClick={act(() => ctx.mainAction(row))}>Take <kbd>↵</kbd></button>
         <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'later'))}>Later</button>
         <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'drop'))}>Drop</button>
-        <button type="button" className={cls('ws-btn')} disabled={busy} aria-expanded={w.refining === row.key} onClick={() => { ctx.makeCurrent(row); w.setRefining(w.refining === row.key ? null : row.key); }}>Refine…</button>
+        <button type="button" className={cls('ws-btn')} disabled={busy} aria-expanded={w.refining === row.key} onClick={() => w.setRefining(w.refining === row.key ? null : row.key)}>Refine…</button>
       </div>
       <NoteBox row={row} busy={busy} ctx={ctx} />
       {row.suggest ? <p className="ws-hint">Suggested: {row.suggest}.{row.why ? ` ${row.why}` : ''}</p> : null}

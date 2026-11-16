@@ -23,9 +23,9 @@
 /* The account slot has one fixed width, chosen before anyone knows who is signed in: signed in when the
    session marker is there, signed out otherwise. Only a stale marker changes it, once, when `me` answers. */
 .ws-account-slot { flex: none; width: 136px; display: flex; justify-content: flex-end; }
-.ws-session .ws-account-slot { width: 200px; }
+.ws-session .ws-account-slot { width: var(--ws-account-w, 200px); }
 #workshop-account[data-account="out"] { width: 136px; }
-#workshop-account[data-account="in"] { width: 200px; }
+#workshop-account[data-account="in"] { width: var(--ws-account-w, 200px); }
 @media (max-width: 480px) { .ws-account-slot, .ws-session .ws-account-slot, #workshop-account[data-account] { width: 60px; } }
 .ws-account { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; max-width: 100%; font: 12px var(--mono); color: var(--muted); }
 .ws-account .ws-link { flex: none; }
@@ -347,7 +347,7 @@
 
 /* ---- narrower ---- */
 @media (min-width: 1200px) and (min-height: 760px) {
-  .ws.is-open.v-map .ws-swap-map { position: sticky; top: 65px; z-index: 6; }
+  .ws.is-open.v-map:not(.ws-lifting) .ws-swap-map { position: sticky; top: 65px; z-index: 6; }
   .ws.is-open.v-map .ws-block { top: calc(66px + var(--ws-foldh, 180px)); }
 }
 @media (max-width: 1199.98px) {

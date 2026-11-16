@@ -8,7 +8,7 @@ import { DecisionsPlace } from './Decisions';
 import type { EntryContext } from './Entry';
 import { MapView } from './MapView';
 import { FOLD_HEIGHT, MAP_WIDTH } from './map';
-import { awaitsVerdict, needsOwner, statusLine } from './plan';
+import { awaitsConfirm, awaitsVerdict, needsOwner, statusLine } from './plan';
 import type { AreaState, BuildData, Row } from './plan';
 import { formatHash, HOME, placeFrom, placeOf, resolveHash, rowsOf, samePlace } from './routes';
 import type { Place } from './routes';
@@ -26,9 +26,10 @@ export interface AppProps {
 }
 
 type View = 'map' | 'order';
-type Focus = { kind: 'title' } | { kind: 'area'; area: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string } | { kind: 'reveal'; key: string };
+type Focus = { kind: 'title' } | { kind: 'area'; area: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string };
 
 const LEAVE_MS = 140;
+const ACCOUNT_WIDTH = 'silo-workshop-account-width';
 const SWAP_MS = 130;
 /** How long the map takes to fold, and an entry to open. */
 const FOLD_MS = 440;
@@ -56,6 +57,13 @@ function selectorOf(node: Element | null): string | null {
   return null;
 }
 
+/** At least partly in the window; an element without layout (no rendering engine) counts as in view. */
+function inView(node: Element): boolean {
+  const box = node.getBoundingClientRect();
+  if (box.width === 0 && box.height === 0) return true;
+  return box.bottom > 0 && box.top < innerHeight;
+}
+
 function isField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
@@ -73,10 +81,12 @@ export function App({ data, accountSlot }: AppProps) {
   const [view, setViewState] = useState<View>(initialView);
   const [leaving, setLeaving] = useState(false);
   const [swap, setSwap] = useState<'out' | 'in' | null>(null);
-  const [, setArmed] = useState(0);
+  const [armedTick, setArmed] = useState(0);
+  // While the fold drives the scroll, the folded map is not pinned yet: pinned, it would jump down first.
+  const [lifting, setLifting] = useState(false);
   // The first frames take the state as it is, without animating into it.
   const [boot, setBoot] = useState(true);
-  const nav = useRef<Nav>({ openKey: null, openedAt: 0, advanceFrom: () => {}, reopen: () => {} });
+  const nav = useRef<Nav>({ openKey: null, openedAt: new Map(), advanceFrom: () => {}, reopen: () => {} });
   const w = useWorkshop(data, openKey, openKeys, openings, nav);
   const { plan, rowByKey, live, canDecide } = w;
   const focusNext = useRef<Focus | null>(null);
@@ -86,17 +96,71 @@ export function App({ data, accountSlot }: AppProps) {
   /** The control that opened the suggestions, the left-out list or the decisions, to return focus to. */
   const opener = useRef<string | null>(null);
   const foldedAt = useRef(0);
-  const lifting = useRef(false);
+  /** The scroll driven by the fold, from a scrolled full map. */
+  const lift = useRef<{ frame: number; from: number; full: number } | null>(null);
+  /** The view transition running, and a count of navigations so a stale one never applies. */
+  const transition = useRef<{ skipTransition: () => void } | null>(null);
+  const navigations = useRef(0);
+  /** Clears the page's held height after the map unfolds; only the next going back or unmounting cancels it. */
+  const heldHeight = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Once `me` has answered, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
     if (w.me === undefined) accountSlot.removeAttribute('data-account');
     else accountSlot.setAttribute('data-account', w.me ? 'in' : 'out');
+    // The width this person's login and "Sign out" take, kept for their next visit (a convenience only).
+    if (!w.me || !media('(min-width: 481px)', false)) return;
+    const login = accountSlot.querySelector<HTMLElement>('.ws-login');
+    const out = accountSlot.querySelector<HTMLElement>('.ws-link');
+    if (!login || !out) return;
+    const width = Math.min(200, Math.ceil(login.scrollWidth + 12 + out.offsetWidth));
+    try {
+      localStorage.setItem(ACCOUNT_WIDTH, String(width));
+    } catch {
+      // Without storage the slot keeps its default width.
+    }
   }, [accountSlot, w.me]);
+
+  // A tap during a view transition lands on the transition's picture; it ends the transition at once and
+  // reaches the control under the finger.
+  useEffect(() => {
+    let tap: { x: number; y: number; ended: Promise<unknown> } | null = null;
+    const down = (event: PointerEvent) => {
+      const running = transition.current as { skipTransition: () => void; finished?: Promise<void> } | null;
+      if (!running) return;
+      running.skipTransition();
+      if (event.target === document.documentElement) tap = { x: event.clientX, y: event.clientY, ended: (running.finished ?? Promise.resolve()).catch(() => {}) };
+    };
+    const up = (event: PointerEvent) => {
+      if (!tap) return;
+      const at = tap;
+      tap = null;
+      // The press landed on the transition's picture and the release on the page, so the browser sends the
+      // click to <html>: the control under the release gets it here.
+      if (event.target instanceof Element && event.target !== document.documentElement) {
+        event.target.closest<HTMLElement>('button, a')?.click();
+        return;
+      }
+      // Released on the picture still: once it is gone, the control under the point is the one tapped.
+      void at.ended.then(() => requestAnimationFrame(() => {
+        document.elementFromPoint(at.x, at.y)?.closest<HTMLElement>('button, a')?.click();
+      }));
+    };
+    addEventListener('pointerdown', down, true);
+    addEventListener('pointerup', up, true);
+    return () => {
+      removeEventListener('pointerdown', down, true);
+      removeEventListener('pointerup', up, true);
+    };
+  }, []);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const swapTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const mainRef = useRef<HTMLDivElement>(null);
-  useEffect(() => () => [...timers.current, ...swapTimers.current].forEach(clearTimeout), []);
+  useEffect(() => () => {
+    [...timers.current, ...swapTimers.current].forEach(clearTimeout);
+    clearTimeout(heldHeight.current);
+    if (lift.current) cancelAnimationFrame(lift.current.frame);
+  }, []);
   useEffect(() => {
     let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => setBoot(false)); });
     return () => cancelAnimationFrame(frame);
@@ -110,16 +174,23 @@ export function App({ data, accountSlot }: AppProps) {
 
   const waiting = useCallback((row: Row) => needsOwner(row) && row.issue !== null && Boolean(live.state?.issues[row.issue]), [live.state]);
   const toDecide = useMemo(() => new Map(canDecide ? plan.areas.map((group) => [group.area.id, group.rows.filter(waiting).length]) : []), [canDecide, plan, waiting]);
+  const toConfirm = useMemo(() => new Map(canDecide ? plan.areas.map((group) => [group.area.id, group.rows.filter((row) => waiting(row) && awaitsConfirm(row)).length]) : []), [canDecide, plan, waiting]);
   const totalToDecide = [...toDecide.values()].reduce((sum, n) => sum + n, 0);
   const byBuildOrder = useMemo(() => plan.areas.flatMap((group) => group.rows).sort((a, b) => (a.n ?? 0) - (b.n ?? 0)), [plan]);
   const free = (row: Row) => waiting(row) && !w.pendingRef.current.has(row.issue as number);
 
-  // The guard's buttons look armed once it has passed.
+  // Each open row's buttons look armed once its own guard has passed.
   useEffect(() => {
-    if (!openKey) return;
-    const timer = setTimeout(() => setArmed((n) => n + 1), Math.max(0, nav.current.openedAt + OPEN_GUARD_MS - Date.now()) + 10);
+    const now = Date.now();
+    const waits = [...nav.current.openedAt.values()].map((at) => at + OPEN_GUARD_MS - now).filter((ms) => ms > 0);
+    if (!waits.length) return;
+    const timer = setTimeout(() => setArmed((n) => n + 1), Math.min(...waits) + 10);
     return () => clearTimeout(timer);
-  }, [openKey, openings]);
+  }, [openKeys, openings, armedTick]);
+  const armed = (key: string) => {
+    const at = nav.current.openedAt.get(key);
+    return at !== undefined && Date.now() - at >= OPEN_GUARD_MS;
+  };
 
   /** Moves to a place, with at most the one row open. */
   function settle(next: Place, key: string | null) {
@@ -132,7 +203,8 @@ export function App({ data, accountSlot }: AppProps) {
     setOpenKeys(key ? new Set([key]) : new Set());
     if (key) setOpenings((n) => n + 1);
     nav.current.openKey = key;
-    nav.current.openedAt = Date.now();
+    nav.current.openedAt = new Map(key ? [[key, Date.now()]] : []);
+    navigations.current += 1;
   }
 
   function address$(next: Place, key: string | null, push = false) {
@@ -161,11 +233,19 @@ export function App({ data, accountSlot }: AppProps) {
     }
     const tile = hero ? document.querySelector<HTMLElement>(`.ws-tile[data-area="${hero}"]`) : null;
     if (tile) tile.style.viewTransitionName = 'hero';
-    start(() => flushSync(update)).finished.finally(() => { if (tile) tile.style.viewTransitionName = ''; });
+    // The update waits for the old view's picture; a navigation made meanwhile wins over it.
+    const mine = ++navigations.current;
+    const vt = start(() => { if (navigations.current === mine) flushSync(update); }) as { finished: Promise<void>; ready?: Promise<void>; skipTransition: () => void };
+    transition.current = vt;
+    vt.ready?.catch(() => {});
+    vt.finished.catch(() => {}).finally(() => {
+      if (tile) tile.style.viewTransitionName = '';
+      if (transition.current === vt) transition.current = null;
+    });
   }
 
   /** Opens a row: next to the open ones in this place, or alone where it lives. */
-  function openRow(key: string | null, options: { focus?: boolean; push?: boolean; closing?: string } = {}) {
+  function openRow(key: string | null, options: { focus?: boolean; reveal?: boolean; push?: boolean; closing?: string } = {}) {
     const row = key ? rowByKey.get(key) : undefined;
     if (!row) {
       if (options.closing) closeRow(options.closing);
@@ -173,9 +253,12 @@ export function App({ data, accountSlot }: AppProps) {
     }
     const target = placeFrom(row, shown, plan);
     if (!samePlace(target, shown)) {
-      go(target, row.key, { push: options.push !== false, announce: `${row.name}, open`, focus: options.focus ? { kind: 'row', key: row.key } : null });
+      w.fetchNow(row);
+      go(target, row.key, { push: options.push !== false, announce: `${row.name}, open`, focus: options.focus ? { kind: 'row', key: row.key, reveal: options.reveal !== false } : null });
       return;
     }
+    // Asked for in the same event as the opening, so a failed early fetch shows as loading, not as an error.
+    w.fetchNow(row);
     address$(target, row.key);
     setOpenKeys((current) => {
       const next = new Set(current);
@@ -186,11 +269,12 @@ export function App({ data, accountSlot }: AppProps) {
     setOpenKey(row.key);
     setOpenings((n) => n + 1);
     nav.current.openKey = row.key;
-    nav.current.openedAt = Date.now();
+    if (options.closing) nav.current.openedAt.delete(options.closing);
+    nav.current.openedAt.set(row.key, Date.now());
     w.setRefining(null);
     w.setRowNotice((current) => (current?.key === row.key ? current : null));
     w.setAnnounce(`${row.name}, open`);
-    focusNext.current = options.focus ? { kind: 'row', key: row.key } : null;
+    focusNext.current = options.focus ? { kind: 'row', key: row.key, reveal: options.reveal !== false } : null;
   }
 
   /** Closes one row and leaves the others as they are. */
@@ -200,6 +284,7 @@ export function App({ data, accountSlot }: AppProps) {
       next.delete(key);
       return next;
     });
+    nav.current.openedAt.delete(key);
     if (openKey === key || nav.current.openKey === key) {
       address$(shown, null);
       setOpenKey(null);
@@ -211,12 +296,24 @@ export function App({ data, accountSlot }: AppProps) {
     const group = rowsOf(plan, placeFrom(row, shown, plan));
     const at = group.findIndex((item) => item.key === row.key);
     const ordered = at === -1 ? group : [...group.slice(at + 1), ...group.slice(0, at)];
-    const fresh = (item: Row) => item.key !== row.key && free(item);
+    // Another open entry here still waiting: it becomes the current one, with its own guard as it was.
+    const waitingOpen = ordered.find((item) => item.key !== row.key && openKeys.has(item.key) && free(item));
+    if (waitingOpen) {
+      closeRow(row.key);
+      address$(shown, waitingOpen.key);
+      setOpenKey(waitingOpen.key);
+      nav.current.openKey = waitingOpen.key;
+      focusNext.current = { kind: 'row', key: waitingOpen.key, reveal: media('(pointer: coarse)', false) };
+      w.setAnnounce(`${waitingOpen.name}, open`);
+      return;
+    }
+    const fresh = (item: Row) => item.key !== row.key && free(item) && !openKeys.has(item.key);
     const next = ordered.find(fresh) ?? byBuildOrder.find(fresh);
     const take = document.getElementById(row.key)?.querySelector('.ws-btn.go')?.getBoundingClientRect().top;
-    openRow(next?.key ?? null, { focus: true, push: false, closing: row.key });
-    // The next Take comes under the pointer when the page can scroll that far.
-    if (next && take !== undefined && samePlace(placeFrom(next, shown, plan), shown)) {
+    // With a mouse, the next Take comes under the pointer; on a touch screen, the row is only brought into view.
+    const coarse = media('(pointer: coarse)', false);
+    openRow(next?.key ?? null, { focus: true, reveal: coarse, push: false, closing: row.key });
+    if (!coarse && next && take !== undefined && samePlace(placeFrom(next, shown, plan), shown)) {
       // Measured once the rows have finished opening and closing, then once more after the comments came in.
       const follow = () => {
         const now = document.getElementById(next.key)?.querySelector('.ws-btn.go')?.getBoundingClientRect().top;
@@ -244,8 +341,9 @@ export function App({ data, accountSlot }: AppProps) {
     // The page keeps its height while the map unfolds, then scrolls to the top.
     const main = mainRef.current;
     if (main) {
+      clearTimeout(heldHeight.current);
       main.style.minHeight = `${main.offsetHeight}px`;
-      later(() => { main.style.minHeight = ''; }, LEAVE_MS + 420);
+      heldHeight.current = setTimeout(() => { main.style.minHeight = ''; }, LEAVE_MS + 420);
     }
     if (scrollY > 0) scrollTo({ top: 0, behavior: 'smooth' });
     setLeaving(true);
@@ -257,30 +355,39 @@ export function App({ data, accountSlot }: AppProps) {
       back();
       return;
     }
-    // From a scrolled full map, the page first goes back to the top, then the map folds: the two at once
-    // would move every part up and then down.
-    if (isHome && onMap() && scrollY > 0 && !still()) {
-      if (lifting.current) return;
-      lifting.current = true;
-      const from = scrollY;
-      const length = Math.min(260, 120 + from / 4);
-      const start = performance.now();
-      const step = (now: number) => {
-        const t = Math.min(1, (now - start) / length);
-        scrollTo({ top: from * (1 - (1 - (1 - t) ** 3)), behavior: 'instant' });
-        if (t < 1) requestAnimationFrame(step);
-        else {
-          lifting.current = false;
-          openPlace(next);
-        }
-      };
-      requestAnimationFrame(step);
-      return;
-    }
+    // From a scrolled full map, the fold drives the scroll back to the top: each frame the page is scrolled in
+    // proportion to how far the map has folded, so every box travels one way during the fold.
+    if (isHome && onMap() && scrollY > 0 && !still()) startLift();
     if (next.kind !== 'area') opener.current = selectorOf(document.activeElement);
     const title = next.kind === 'area' ? plan.areas.find((group) => group.area.id === next.area)?.area.title : null;
     const hero = next.kind === 'area' ? next.area : next.kind === 'suggested' ? 'suggested' : null;
     travel(() => go(next, null, { push: true, focus: { kind: 'title' }, announce: title ? `${title}, open` : '' }), hero);
+  }
+
+  function startLift() {
+    const stage = document.querySelector<HTMLElement>('.ws-stage');
+    if (!stage || lift.current) return;
+    const full = stage.getBoundingClientRect().height;
+    const folded = (stage.getBoundingClientRect().width * FOLD_HEIGHT) / MAP_WIDTH;
+    const state = { frame: 0, from: scrollY, full };
+    lift.current = state;
+    setLifting(true);
+    const started = Date.now();
+    const step = () => {
+      const node = document.querySelector<HTMLElement>('.ws-stage');
+      const height = node?.getBoundingClientRect().height ?? folded;
+      const progress = Math.min(1, Math.max(0, (state.full - height) / Math.max(1, state.full - folded)));
+      scrollTo({ top: state.from * (1 - progress), behavior: 'instant' });
+      // Done once folded, when the map unfolds again, or after twice the fold's time at most.
+      if (progress >= 1 || !node?.classList.contains('fold') || Date.now() - started > 2 * FOLD_MS) {
+        if (progress >= 1) scrollTo({ top: 0, behavior: 'instant' });
+        lift.current = null;
+        setLifting(false);
+        return;
+      }
+      state.frame = requestAnimationFrame(step);
+    };
+    state.frame = requestAnimationFrame(step);
   }
 
   // Addresses: on load, on Back and Forward, and once rows that did not exist yet arrive.
@@ -328,11 +435,13 @@ export function App({ data, accountSlot }: AppProps) {
     if (live.status === 'loading' || !key) return;
     heldOpen.current = null;
     if (!rowByKey.has(key)) return;
-    setOpenKey(key);
+    nav.current.openedAt.set(key, Date.now());
     setOpenKeys((current) => new Set([...current, key]));
+    // When the person opened another row meanwhile, that row stays the current one and keeps the address.
+    if (nav.current.openKey !== null) return;
+    setOpenKey(key);
     setOpenings((n) => n + 1);
     nav.current.openKey = key;
-    nav.current.openedAt = Date.now();
     focusNext.current = { kind: 'reveal', key };
   }, [live.status, rowByKey]);
   // Once it is known that this person cannot decide, the decisions address is dropped.
@@ -354,6 +463,7 @@ export function App({ data, accountSlot }: AppProps) {
       // While the map folds, the page under it moves: the row is brought into view once the fold is done.
       const wait = Math.max(0, foldedAt.current + FOLD_MS - Date.now());
       const reveal = () => document.getElementById(target.key)?.scrollIntoView?.({ block: 'nearest', behavior: still() ? 'instant' : 'smooth' });
+      if (target.kind === 'row' && target.reveal === false) return;
       if (wait) later(reveal, wait);
       else reveal();
     } else if (target.kind === 'title') {
@@ -361,7 +471,7 @@ export function App({ data, accountSlot }: AppProps) {
       const header = document.querySelector<HTMLElement>('.site-header');
       if (top && mainRef.current) {
         const stop = (onMap() ? top.offsetTop + top.offsetHeight : mainRef.current.offsetTop + top.offsetHeight) - (header?.offsetHeight ?? 0);
-        if (scrollY > stop) scrollTo({ top: stop, behavior: still() ? 'instant' : 'smooth' });
+        if (scrollY > stop && !lift.current) scrollTo({ top: stop, behavior: still() ? 'instant' : 'smooth' });
       }
       document.getElementById('ws-area-title')?.focus({ preventScroll: true });
     } else {
@@ -430,16 +540,21 @@ export function App({ data, accountSlot }: AppProps) {
       return;
     }
     if (event.key !== 'Enter' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (!canDecide || !openKey || isField(event.target)) return;
-    const row = rowByKey.get(openKey);
-    if (!row || !needsOwner(row) || !openKeys.has(row.key) || !shownRows.includes(row)) return;
+    if (!canDecide || isField(event.target)) return;
+    // Enter acts on the open row that holds the focus; with the focus on the page, on the row opened last
+    // when it is at least partly in view. Other buttons and links in a row keep their own Enter.
     const target = event.target as HTMLElement | null;
-    const item = document.getElementById(openKey);
-    // Other buttons and links in the row keep their own Enter.
-    const control = target?.closest('button, a, summary');
-    const onRow = target === document.body || target === document.documentElement
-      || (item !== null && target !== null && item.contains(target) && (!control || control.classList.contains('ws-row')));
-    if (!onRow) return;
+    let item: HTMLElement | null = null;
+    if (!target || target === document.body || target === document.documentElement) {
+      item = openKey ? document.getElementById(openKey) : null;
+      if (!item || !inView(item)) return;
+    } else {
+      item = target.closest<HTMLElement>('.ws-item');
+      const control = target.closest('button, a, summary');
+      if (!item || (control && !control.classList.contains('ws-row'))) return;
+    }
+    const row = rowByKey.get(item.id);
+    if (!row || !needsOwner(row) || !openKeys.has(row.key) || !shownRows.includes(row)) return;
     event.preventDefault();
     if (event.repeat) return;
     mainAction(row);
@@ -454,9 +569,7 @@ export function App({ data, accountSlot }: AppProps) {
   const ctx: EntryContext = {
     w, signIn, mainAction, open: openKeys,
     onToggle: (row) => (openKeys.has(row.key) ? closeRow(row.key) : openRow(row.key)),
-    armed: (row) => row.key === openKey && Date.now() - nav.current.openedAt >= OPEN_GUARD_MS,
-    // A verdict button of an open row that is not the last opened makes it the last opened, and arms after the guard.
-    makeCurrent: (row) => { if (row.key !== openKey) openRow(row.key, { push: false }); },
+    armed: (row) => armed(row.key),
   };
   const account = !w.liveOk || w.me === undefined ? null : w.me ? (
     <span className="ws-account">
@@ -485,12 +598,12 @@ export function App({ data, accountSlot }: AppProps) {
   let detail = null;
   if (shown.kind === 'area') {
     const group = plan.areas.find((item) => item.area.id === shown.area);
-    if (group) detail = <AreaPlace group={group} toDecide={toDecide.get(group.area.id) ?? 0} ctx={ctx} onBack={back} notes={notes} />;
+    if (group) detail = <AreaPlace group={group} toDecide={toDecide.get(group.area.id) ?? 0} toConfirm={toConfirm.get(group.area.id) ?? 0} ctx={ctx} onBack={back} notes={notes} />;
   } else if (shown.kind === 'suggested') detail = <SuggestPlace ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'left') detail = <LeftPlace rows={plan.left} ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'decisions') detail = <DecisionsPlace ctx={ctx} onBack={back} notes={notes} />;
 
-  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', canDecide ? 'ws-owner' : ''].filter(Boolean).join(' ');
+  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', canDecide ? 'ws-owner' : '', lifting ? 'ws-lifting' : ''].filter(Boolean).join(' ');
   return (
     <>
       {accountSlot ? createPortal(account, accountSlot) : <div className="ws-account-inline">{account}</div>}

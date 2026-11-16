@@ -83,27 +83,48 @@ describe('the first answers', () => {
 });
 
 describe('the owner\'s verdict buttons', () => {
-  it('look unarmed until the guard has passed, and arm a row opened earlier on a press', async () => {
+  it('each have their own guard: an earlier open row stays armed when another opens', async () => {
     const time = clock();
     const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#computers/computers');
     await renderApp();
     await ownerOn('Create and delete a computer');
-    const take = () => within(itemOf('Create and delete a computer')).getByRole('button', { name: /^Take/ });
-    expect(take()).toHaveClass('ws-unarmed');
+    const take = (name: string) => within(itemOf(name)).getByRole('button', { name: /^Take/ });
+    expect(take('Create and delete a computer')).toHaveClass('ws-unarmed');
     await act(async () => { time.advance(OPEN_GUARD_MS); await new Promise((resolve) => setTimeout(resolve, OPEN_GUARD_MS + 20)); });
-    expect(take()).not.toHaveClass('ws-unarmed');
-    // Opening a second row moves the verdict there; the first row's buttons wait again.
+    expect(take('Create and delete a computer')).not.toHaveClass('ws-unarmed');
+    // Opening a second row starts that row's guard only.
     await userEvent.click(rowButton('Run a command'));
-    expect(take()).toHaveClass('ws-unarmed');
-    time.advance(OPEN_GUARD_MS);
-    await userEvent.click(take());
+    expect(take('Run a command')).toHaveClass('ws-unarmed');
+    expect(take('Create and delete a computer')).not.toHaveClass('ws-unarmed');
+    await userEvent.click(take('Run a command'));
     expect(posts(calls, 'verdict')).toHaveLength(0);
-    expect(location.hash).toBe('#computers/computers');
-    time.advance(OPEN_GUARD_MS);
-    await userEvent.click(take());
+    await userEvent.click(take('Create and delete a computer'));
     expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
   });
+
+  it('take Enter on the open row that holds the focus, else on the one opened last', async () => {
+    const time = clock();
+    const calls = mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#computers/computers');
+    await renderApp();
+    await ownerOn('Create and delete a computer');
+    await userEvent.click(rowButton('Run a command'));
+    time.advance(OPEN_GUARD_MS);
+    // The focus is on the earlier row: Enter is its verdict, and it does not close it.
+    act(() => rowButton('Create and delete a computer').focus());
+    fireEvent.keyDown(rowButton('Create and delete a computer'), { key: 'Enter' });
+    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
+    // With the focus on the page, the row opened last; a held key does nothing.
+    act(() => (document.activeElement as HTMLElement).blur());
+    fireEvent.keyDown(document.body, { key: 'Enter', repeat: true });
+    expect(posts(calls, 'verdict')).toHaveLength(1);
+    await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
+    act(() => (document.activeElement as HTMLElement).blur());
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict').map((call) => call.body?.n)).toEqual([12, 13]);
+  });
+
 });
 
 describe('addresses', () => {

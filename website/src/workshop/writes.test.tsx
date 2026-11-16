@@ -297,6 +297,8 @@ describe('the owner deciding entries', () => {
     const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#engine/calls');
     const first = await renderApp();
+    // The row named by the address opens once the live state is there.
+    await ownerOn('Every call defined once');
     expect(screen.getByText('Planned · carried over')).toBeInTheDocument();
     time.advance(OPEN_GUARD_MS);
     await userEvent.click(screen.getByRole('button', { name: /^Confirm/ }));
