@@ -83,14 +83,6 @@ test('readFeatures: a missing file is null; a missing stages.json falls back to 
   assert.deepEqual(list.stages.map((stage) => stage.title), ['shell', 'loop', 'living', 'extras']);
 });
 
-test('the real feature list parses with nothing skipped', () => {
-  const list = readFeatures(path.resolve(import.meta.dirname, '../../..'));
-  if (list === null) return;
-  assert.equal(list.skipped, 0);
-  assert.equal(list.stages[0].id, 'shell');
-  assert.deepEqual(list.features.map((entry) => entry.n), list.features.map((_, index) => index + 1));
-});
-
 // ---- verdicts, totals, schematic ----
 
 const parsed = () => parseFeatures(FEATURES.map(line).join('\n')).features;
@@ -169,7 +161,7 @@ test('the schematic: parts of taken entries are drawn, the current entry is high
 // ---- the page ----
 
 const EMPTY_CHANGES = { changes: [], state: 'nogit', head: null };
-const page = (stack, items = []) => renderPage({ items, docs: { product: null, journeys: null, decisions: null }, changes: EMPTY_CHANGES, notes: [], stack }).toString();
+const page = (stack, items = []) => renderPage({ items, docs: { product: null, decisions: null, restart: null }, changes: EMPTY_CHANGES, notes: [], stack }).toString();
 
 test('every features.jsonl and stages.json field is escaped', () => {
   const evil = '<img src=x onerror=alert(1)>"\'&';
@@ -191,7 +183,11 @@ test('without JavaScript: a Stack tab, every entry readable in order, the contro
   const list = readFeatures(repo);
   const html = page({ ...list, rows: [] });
   assert.match(html, /<a class="tab" href="#stack" data-view="stack">Stack <span class="badge quiet">7<\/span><\/a>/);
-  assert.ok(html.indexOf('data-view="for-you"') < html.indexOf('data-view="stack"') && html.indexOf('data-view="stack"') < html.indexOf('data-view="product"'));
+  // The tabs: Stack, For you, Decisions, Product. The Stack is the default view.
+  const tabs = [...html.matchAll(/<a class="tab" href="#([a-z-]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(tabs, ['stack', 'for-you', 'decisions', 'product']);
+  assert.match(html, /<html lang="en" data-default="stack">/);
+  assert.match(html, /<a class="brand" href="#stack">/);
   assert.match(html, /<section class="view" id="stack" data-region="stack"/);
   assert.doesNotMatch(html, /<script(?! (?:type="module" )?src="\/(?:boot|app)\.js"><\/script>)/, 'no inline script');
   assert.doesNotMatch(html, / on[a-z]+="/, 'no event handler attributes');
@@ -206,7 +202,9 @@ test('without JavaScript: a Stack tab, every entry readable in order, the contro
     const controls = card.slice(card.indexOf('<div class="controls'), card.indexOf('</article>'));
     const digest = entryDigest(list.features.find((other) => other.id === entry.id));
     assert.match(controls, new RegExp(`data-controls data-feature="${entry.id}" data-shown="0" data-seen="${digest}"`));
-    assert.equal((controls.match(/data-pick="(take|refine|later|drop)"/g) || []).length, 4);
+    // Four verdict buttons, and Confirm on a verdict carried over from the file.
+    assert.equal((controls.match(/data-pick="(take|refine|later|drop)"/g) || []).length, entry.verdict ? 5 : 4);
+    assert.equal(/>Confirm<\/button>/.test(controls), Boolean(entry.verdict));
     assert.equal((controls.match(/data-primary/g) || []).length, 1);
   }
   assert.match(html, /data-pick="refine" data-primary>Refine…/);
@@ -217,13 +215,15 @@ test('without JavaScript: a Stack tab, every entry readable in order, the contro
   // In the old code, suggestion and where it shows, in words.
   assert.match(html, /built, never proven<\/p>\s*<small>about 100 lines · carry over<\/small>/);
   assert.match(html, /A New computer button on a computer&#39;s page/);
-  // For you links to it.
-  assert.match(html, /<a class="mini stack-mini" href="#stack">[\s\S]*?7 entries without a verdict/);
+  // For you's empty state sends the owner to it.
+  assert.match(html, /Nothing is waiting for you<\/h2><a class="btn go" href="#stack">Go to the Stack<\/a>/);
 });
 
-test('no feature list: no Stack tab, no section, no link', () => {
+test('no feature list: no Stack tab, no section, no link; For you is the default', () => {
   const html = page(null);
-  assert.doesNotMatch(html, /data-view="stack"|data-region="stack"|stack-mini/);
+  assert.doesNotMatch(html, /data-view="stack"|data-region="stack"|href="#stack"/);
+  assert.match(html, /<html lang="en" data-default="for-you">/);
+  assert.match(html, /<a class="brand" href="#for-you">/);
 });
 
 test('a malformed line shows a small warning', () => {

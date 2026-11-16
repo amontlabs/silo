@@ -53,53 +53,41 @@ test('a choice records the option index and its label; only the owner, only on d
     store.addReply(id, { author: 'owner', text: 'Actually, ask me again' });
   }));
 
-test('anchors: three shapes, nothing else', () => {
-  assert.deepEqual(parseAnchor('journeys#live/t3-code-connects'), { kind: 'step', journey: 'live', step: 't3-code-connects' });
-  assert.deepEqual(parseAnchor(`journeys#${'a'.repeat(80)}/${'b'.repeat(80)}`).step, 'b'.repeat(80));
-  assert.deepEqual(parseAnchor('journeys#a-computer-per-task'), { kind: 'journey', journey: 'a-computer-per-task' });
-  assert.deepEqual(parseAnchor('product#the-problem'), { kind: 'section', section: 'the-problem' });
-  for (const bad of ['', 'journeys#', 'journeys#Live', 'journeys#live/', 'journeys#live/X', 'journeys#live/a_b', `journeys#live/${'a'.repeat(81)}`, `journeys#${'a'.repeat(81)}`, `product#${'a'.repeat(81)}`, 'journeys#live/3/4', 'journeys#../x', 'product#', 'product#a b', 'product#A', 'decisions#x', 'journeys#live/3 ', null, 42]) {
-    assert.throws(() => parseAnchor(bad), /anchor must be/, String(bad));
+test('anchors: product sections only', () => {
+  assert.deepEqual(parseAnchor('product#the-problem'), { section: 'the-problem' });
+  assert.deepEqual(parseAnchor(`product#${'a'.repeat(80)}`), { section: 'a'.repeat(80) });
+  for (const bad of ['', 'journeys#live/t3-code-connects', 'journeys#a-computer-per-task', `product#${'a'.repeat(81)}`, 'product#', 'product#a b', 'product#A', 'product#../x', 'decisions#x', 'restart#x', null, 42]) {
+    assert.throws(() => parseAnchor(bad), /anchor must be product#<section key>/, String(bad));
   }
 });
 
-test('notes: one open item per anchor; reactions replace and clear; text and reaction rules', () =>
+test('notes: one open item per anchor, text required; an agent reply makes it wait; a closed note starts a new item', () =>
   withStore((store) => {
-    const step = { anchor: 'journeys#live/3', anchorText: 'T3 Code connects', journey: 'live' };
-    assert.throws(() => store.addNote({ ...step }), /send text or a reaction/);
-    assert.throws(() => store.addNote({ ...step, reaction: 'love' }), /reaction must be one of/);
-    assert.throws(() => store.addNote({ ...step, reaction: null }), /no reaction to clear/);
-    assert.throws(() => store.addNote({ ...step, journey: 'task', text: 'x' }), /does not match/);
-    assert.throws(() => store.addNote({ anchor: 'product#the-problem', anchorText: 'P', reaction: 'nice' }), /only a journey step takes a reaction/);
-    assert.throws(() => store.addNote({ anchor: 'product#the-problem', anchorText: 'P', journey: 'live', text: 'x' }), /no journey/);
-    assert.throws(() => store.addNote({ ...step, anchorText: '', text: 'x' }), /anchorText is required/);
-    const first = store.addNote({ ...step, reaction: 'essential' });
-    const second = store.addNote({ ...step, reaction: 'nice' });
-    const third = store.addNote({ ...step, text: 'Need it first' });
+    const section = { anchor: 'product#the-problem', anchorText: 'The problem' };
+    assert.throws(() => store.addNote({ ...section }), /text is required/);
+    assert.throws(() => store.addNote({ ...section, text: '   ' }), /text is required/);
+    assert.throws(() => store.addNote({ ...section, anchorText: '', text: 'x' }), /anchorText is required/);
+    assert.throws(() => store.addNote({ anchor: 'journeys#live/3', anchorText: 'T3 Code connects', text: 'x' }), /anchor must be product#/);
+    const first = store.addNote({ ...section, text: 'Say it shorter' });
+    const second = store.addNote({ ...section, text: 'And plainer' });
     assert.equal(second.item, first.item);
-    assert.equal(third.item, first.item);
     const item = store.getItem(first.item);
-    assert.deepEqual([item.kind, item.journey, item.anchor, item.anchor_text], ['note', 'live', 'journeys#live/3', 'T3 Code connects']);
-    assert.throws(() => store.addNote({ ...step, reaction: null, text: 'x' }), /carries no text/);
-    store.addNote({ ...step, reaction: null });
-    assert.throws(() => store.addNote({ ...step, reaction: null }), /no reaction to clear/);
+    assert.deepEqual([item.kind, item.journey, item.anchor, item.anchor_text], ['note', null, 'product#the-problem', 'The problem']);
     assert.deepEqual(store.ownerReplies().map((r) => [r.reaction, r.text, r.anchor_text]), [
-      ['essential', '', 'T3 Code connects'],
-      ['nice', '', 'T3 Code connects'],
-      [null, 'Need it first', 'T3 Code connects'],
-      [null, '', 'T3 Code connects'],
+      [null, 'Say it shorter', 'The problem'],
+      [null, 'And plainer', 'The problem'],
     ]);
     // An owner note never waits; an agent reply brings it to For you; Got it puts it away.
     const state = () => store.itemsWithState().find((entry) => entry.id === first.item).state;
     assert.equal(state(), 'answered');
     const agent = store.addReply(first.item, { author: 'agent', text: 'Noted' });
     assert.equal(state(), 'waiting');
-    assert.throws(() => store.addNote({ ...step, text: 'stale', after: agent - 1 }), (error) => error.status === 409);
+    assert.throws(() => store.addNote({ ...section, text: 'stale', after: agent - 1 }), (error) => error.status === 409);
     store.markShippedSeen(first.item, { after: agent });
     assert.equal(state(), 'answered');
     // After an agent closes it, a new note opens a new item.
     store.closeItem(first.item);
-    const fresh = store.addNote({ ...step, text: 'Again' });
+    const fresh = store.addNote({ ...section, text: 'Again' });
     assert.notEqual(fresh.item, first.item);
   }));
 
@@ -134,44 +122,46 @@ test('API: a choice is an option number without text or verdict', async () => {
   store.closeItem(id);
 });
 
-test('API: /api/notes checks Host, Origin, the anchor and what the page showed', async () => {
+test('API: /api/notes checks Host, Origin, the anchor and what the page showed; only product sections take notes', async () => {
   const origin = { Origin: `http://127.0.0.1:${port}` };
-  const note = (body, headers = origin) => postJson(port, '/api/notes', { after: 0, anchorText: 'Install the app', ...body }, headers);
-  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', reaction: 'essential' }, { Origin: 'http://evil.example' })).status, 403);
-  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', reaction: 'essential' }, { Host: 'evil.example', ...origin })).status, 403);
-  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', reaction: 'essential' }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
+  const note = (body, headers = origin) => postJson(port, '/api/notes', { after: 0, anchor: 'product#why-it-exists', anchorText: 'Why it exists', ...body }, headers);
+  assert.equal((await note({ text: 'x' }, { Origin: 'http://evil.example' })).status, 403);
+  assert.equal((await note({ text: 'x' }, { Host: 'evil.example', ...origin })).status, 403);
+  assert.equal((await note({ text: 'x' }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
   const form = await request(port, { method: 'POST', url: '/api/notes', headers: { ...origin, 'Content-Type': 'text/plain' }, body: '{}' });
   assert.equal(form.status, 400);
-  for (const body of [{ anchor: 'journeys#first-run/X', text: 'x' }, { anchor: 'elsewhere', text: 'x' }, { anchor: 'journeys#first-run/install-the-app' }, { anchor: 'journeys#first-run/install-the-app', text: 5 }, { anchor: 'journeys#first-run/install-the-app', text: 'x', after: undefined }, { anchor: 'journeys#first-run/install-the-app', text: 'x', anchorText: undefined }]) {
+  for (const body of [
+    { anchor: 'journeys#first-run/install-the-app', anchorText: 'Install the app', text: 'x' },
+    { anchor: 'journeys#first-run', anchorText: 'First run', text: 'x' },
+    { anchor: 'elsewhere', text: 'x' },
+    { anchor: 'product#Why', text: 'x' },
+    {},
+    { text: 5 },
+    { reaction: 'essential' },
+    { text: 'x', after: undefined },
+    { text: 'x', anchorText: undefined },
+  ]) {
     assert.equal((await note(body)).status, 400, JSON.stringify(body));
   }
+  // A section PRODUCT.md does not have is a stale page.
+  assert.equal((await note({ anchor: 'product#gone', anchorText: 'Gone', text: 'x' })).status, 409);
   assert.equal(store.ownerReplies({ all: true }).filter((r) => r.kind === 'note').length, 0);
 
-  const created = await note({ anchor: 'journeys#first-run/install-the-app', journey: 'first-run', reaction: 'essential' });
+  const created = await note({ text: 'Say it shorter' });
   assert.equal(created.status, 201);
   const { item } = JSON.parse(created.body);
   let html = (await request(port)).body.toString();
-  assert.match(html, /id="journey-first-run-step-install-the-app"[\s\S]*?<span class="mine essential">essential<\/span>/);
-  assert.match(html, /data-anchor="journeys#first-run\/install-the-app" data-anchor-text="Install the app" data-journey="first-run" data-after="\d+"/);
-  assert.match(html, /<button class="pill on" type="button" data-reaction="essential" aria-pressed="true">/);
+  assert.match(html, /id="product-why-it-exists"[\s\S]*?1 note from you[\s\S]*?Say it shorter/);
+  assert.match(html, /data-anchor="product#why-it-exists" data-anchor-text="Why it exists" data-after="\d+"/);
+  assert.doesNotMatch(html, /data-reaction|data-journey/);
   assert.doesNotMatch(html, new RegExp(`<article class="card" id="item-${item}"`), 'an owner note is not in For you');
 
-  // An agent replies: the step's next note needs the page to have shown that reply.
-  const agent = store.addReply(item, { author: 'agent', text: 'Noted, it goes first.' });
-  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', text: 'More' })).status, 409);
+  // An agent replies: the section's next note needs the page to have shown that reply.
+  const agent = store.addReply(item, { author: 'agent', text: 'Noted, done.' });
+  assert.equal((await note({ text: 'More' })).status, 409);
   html = (await request(port)).body.toString();
-  assert.match(html, new RegExp(`<article class="card" id="item-${item}"[\\s\\S]*?An agent replied to your note[\\s\\S]*?href="#journey-first-run-step-install-the-app"`));
-  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', text: 'More', after: agent })).status, 201);
-  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', reaction: null, after: agent + 1 })).status, 201);
-  html = (await request(port)).body.toString();
-  const row = /id="journey-first-run-step-install-the-app" data-step="1">\s*<summary>[\s\S]*?<\/summary>/.exec(html)[0];
-  assert.doesNotMatch(row, /class="mine/, 'a cleared reaction leaves the row');
-  assert.match(row, /<span class="has-notes"/);
-
-  assert.equal((await note({ anchor: 'product#why-it-exists', anchorText: 'Why it exists', text: 'Say it shorter' })).status, 201);
-  assert.equal((await note({ anchor: 'journeys#first-run', anchorText: 'First run', text: 'Good order' })).status, 201);
-  html = (await request(port)).body.toString();
-  assert.match(html, /id="product-why-it-exists"[\s\S]*?1 note from you[\s\S]*?Say it shorter/);
+  assert.match(html, new RegExp(`<article class="card" id="item-${item}"[\\s\\S]*?An agent replied to your note[\\s\\S]*?href="#product-why-it-exists"`));
+  assert.equal((await note({ text: 'More', after: agent })).status, 201);
 });
 
 test('CLI: options and recommend; answers and show print choices, reactions and notes', async () => {
@@ -202,23 +192,22 @@ test('CLI: options and recommend; answers and show print choices, reactions and 
 
   const local = new Store(home);
   local.addReply(id, { author: 'owner', choice: 2 });
-  local.addNote({ anchor: 'journeys#live/3', anchorText: 'T3 Code connects', reaction: 'essential' });
-  local.addNote({ anchor: 'journeys#live/3', anchorText: 'T3 Code connects', text: 'First, please' });
-  local.addNote({ anchor: 'journeys#live/3', anchorText: 'T3 Code connects', reaction: null });
+  local.addNote({ anchor: 'product#the-problem', anchorText: 'The problem', text: 'First, please' });
+  // A journey note with a reaction, as an earlier version stored them.
+  const legacy = local.db.prepare("INSERT INTO items (kind, journey, title, anchor, anchor_text, created_at) VALUES ('note', 'live', 'T3 Code connects', 'journeys#live/3', 'T3 Code connects', ?)").run(local.now());
+  local.db.prepare("INSERT INTO replies (item_id, author, text, reaction, created_at) VALUES (?, 'owner', '', 'essential', ?)").run(legacy.lastInsertRowid, local.now());
   local.close();
 
   const answers = json(await runCli(['answers', '--json'], { home }));
   assert.deepEqual(answers.map((a) => [a.kind, a.choice, a.choice_label, a.anchor, a.anchor_text, a.reaction, a.text]), [
     ['decide', 2, 'Leave it', null, null, null, 'Leave it'],
+    ['note', null, null, 'product#the-problem', 'The problem', null, 'First, please'],
     ['note', null, null, 'journeys#live/3', 'T3 Code connects', 'essential', ''],
-    ['note', null, null, 'journeys#live/3', 'T3 Code connects', null, 'First, please'],
-    ['note', null, null, 'journeys#live/3', 'T3 Code connects', null, ''],
   ]);
   const plain = (await runCli(['answers'], { home })).stdout;
   assert.match(plain, /item 1 \(decide\) "After a task" · chose 3 "Leave it"\n/);
-  assert.match(plain, /note on journeys#live\/3 "T3 Code connects" · reaction essential\n/);
-  assert.match(plain, /note on journeys#live\/3 "T3 Code connects"\n {2}First, please/);
-  assert.match(plain, /note on journeys#live\/3 "T3 Code connects" · reaction cleared/);
+  assert.match(plain, /note on product#the-problem "The problem"\n {2}First, please/);
+  assert.match(plain, /note on journeys#live\/3 "T3 Code connects" · reaction essential/);
   const shown = (await runCli(['show', String(id)], { home })).stdout;
   assert.match(shown, /Options:\n {2}1\. Remove it \(recommended\) — Nothing piles up\n {2}2\. Keep it\n {2}3\. Leave it — As today::really/);
   assert.match(shown, /· owner · chose 3 "Leave it"/);

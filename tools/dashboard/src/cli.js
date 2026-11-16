@@ -9,7 +9,7 @@ export const USAGE = `Usage: dashboard <command> [options]
 
 Commands:
   serve [--port N]                       start the dashboard page on 127.0.0.1 (default port 4517)
-  post --kind look|decide|shipped --title T [--journey ID] [--body TEXT|@file|-]
+  post --kind look|decide|shipped --title T [--entry ID] [--body TEXT|@file|-]
        [--default TEXT] [--source TEXT] [--attach FILE[:caption]]...
        [--option "Label::Detail"]... [--recommend N]
                                          add an item for the owner; prints its id
@@ -26,6 +26,8 @@ Commands:
   show ID                                show one item with its thread
 
 Every command takes --json for machine output. A look item needs --default.
+--entry names the feature list entry the item is about (its id in
+docs/product/features.jsonl); the card links to it in the Stack.
 A decide item may offer 2 to ${MAX_OPTIONS} options: --option "Label::Detail" (the detail is
 optional; label up to 80 characters, detail up to 300), --recommend N marks
 option N (from 1) as recommended. The owner picks one or answers in words.
@@ -101,7 +103,7 @@ function indent(text) {
     .join('\n');
 }
 
-// " · disagree", " · chose 2 "Label"", " · reaction essential", ...
+// " · disagree", " · chose 2 "Label"", and the reactions older stores hold.
 function replyMarks(reply) {
   let out = '';
   if (reply.verdict) out += ` · ${reply.verdict}`;
@@ -113,7 +115,7 @@ function replyMarks(reply) {
 
 function showItem(item) {
   const lines = [
-    `#${item.id} ${item.kind} ${item.status}${item.state ? ` (${item.state})` : ''}${item.journey ? ` · journey ${item.journey}` : ''}`,
+    `#${item.id} ${item.kind} ${item.status}${item.state ? ` (${item.state})` : ''}${item.journey ? ` · entry ${item.journey}` : ''}`,
     item.title,
     `posted ${item.created_at}${item.source ? ` by ${item.source}` : ''}`,
   ];
@@ -167,6 +169,7 @@ const commands = {
     const { values } = parse(argv, {
       kind: { type: 'string' },
       title: { type: 'string' },
+      entry: { type: 'string' },
       journey: { type: 'string' },
       body: { type: 'string' },
       default: { type: 'string' },
@@ -177,6 +180,9 @@ const commands = {
     });
     if (!POST_KINDS.includes(values.kind)) throw new UsageError(`--kind must be one of ${POST_KINDS.join(', ')}`);
     if (!values.title) throw new UsageError('--title is required');
+    // --journey is the earlier name of --entry.
+    if (values.entry !== undefined && values.journey !== undefined) throw new UsageError('use --entry, not both --entry and --journey');
+    const entry = values.entry ?? values.journey ?? null;
     const options = (values.option || []).map(parseOption);
     if (options.length && values.kind !== 'decide') throw new UsageError('--option is for --kind decide');
     if (values.recommend !== undefined) {
@@ -190,7 +196,7 @@ const commands = {
     const defaultText = readText(values.default, 'default', io.stdin);
     const body = readText(values.body, 'body', io.stdin);
     const id = io.store().post(
-      { kind: values.kind, journey: values.journey ?? null, title: values.title, body: body ?? '', defaultText: defaultText ?? null, source: values.source ?? null, options: options.length ? options : null },
+      { kind: values.kind, entry, title: values.title, body: body ?? '', defaultText: defaultText ?? null, source: values.source ?? null, options: options.length ? options : null },
       attachments,
     );
     io.out(values.json ? JSON.stringify({ id }) : String(id));

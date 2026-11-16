@@ -2,55 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { docChanges, DOC_FILES, lineDiff, parseDecisionLine, parseDecisions, parseJourneys, productLayout, readDoc, splitSections } from '../src/docs.js';
+import { docChanges, DOC_FILES, firstSentence, lineDiff, parseDecisionLine, parseDecisions, parseRestart, productLayout, readDoc, splitSections } from '../src/docs.js';
 import { noteSummary, readPrivateNotes } from '../src/private.js';
 import { commitAll, git, makeRepo, PRODUCT, tempDir, writeDoc } from './helpers.js';
 
 const docsOf = (repo) => Object.fromEntries(Object.entries(DOC_FILES).map(([name, file]) => [name, readDoc(repo, file)]));
-
-test('journeys: ids from the comment line or the heading, four step statuses, other [words] stay text', () => {
-  const { preamble, journeys } = parseJourneys(`# Journeys
-
-Intro text.
-
-## First run
-<!-- id: first-run -->
-
-- [built] Install
-- [partial] Start a computer
-- [missing] Guided tour
-- [untested] Restore from backup
-- [Untested] Second untested step
-- [later] Not a status
-- [built]Glued text is not a step
-- plain item
-
-\`\`\`
-- [built] inside a fence
-\`\`\`
-
-## Share a Workspace!
-
-- [missing] Revoke
-
-## Share a Workspace!
-
-- [built] Duplicate heading
-`);
-  assert.match(preamble, /Intro text/);
-  assert.deepEqual(journeys.map((j) => j.id), ['first-run', 'share-a-workspace', 'share-a-workspace-2']);
-  assert.deepEqual(journeys[0].counts, { built: 1, partial: 1, missing: 1, untested: 2 });
-  assert.deepEqual(journeys[0].steps.map((step) => step.status), ['built', 'partial', 'missing', 'untested', 'untested']);
-  assert.doesNotMatch(journeys[0].body, /<!-- id/);
-  assert.deepEqual(journeys[1].counts, { built: 0, partial: 0, missing: 1, untested: 0 });
-  assert.equal(journeys[1].title, 'Share a Workspace!');
-
-});
-
-test('journeys: an empty or missing file has none', () => {
-  assert.deepEqual(parseJourneys('').journeys, []);
-  assert.deepEqual(parseJourneys(null).journeys, []);
-});
 
 test('sections split at ## outside code fences', () => {
   const { preamble, sections } = splitSections('# T\n\nintro\n\n## A\n\n```\n## not a heading\n```\n\n## B\ntext');
@@ -59,9 +15,12 @@ test('sections split at ## outside code fences', () => {
   assert.match(sections[0].text, /## not a heading/);
 });
 
-test('readDoc reads only the three known files and never leaves docs/product', () => {
+test('readDoc reads only the known files and never leaves docs/product', () => {
   const repo = makeRepo();
   assert.match(readDoc(repo, 'PRODUCT.md'), /Silo gives/);
+  assert.match(readDoc(repo, 'RESTART.md'), /Where the work stands/);
+  writeDoc(repo, 'JOURNEYS.md', '# Journeys\n');
+  assert.equal(readDoc(repo, 'JOURNEYS.md'), null);
   assert.equal(readDoc(repo, '../../etc/passwd'), null);
   assert.equal(readDoc(repo, 'OTHER.md'), null);
   const outside = path.join(tempDir(), 'secret.md');
@@ -70,24 +29,40 @@ test('readDoc reads only the three known files and never leaves docs/product', (
   fs.symlinkSync(outside, path.join(repo, 'docs/product/PRODUCT.md'));
   assert.equal(readDoc(repo, 'PRODUCT.md'), null);
   fs.rmSync(path.join(repo, 'docs'), { recursive: true });
-  assert.equal(readDoc(repo, 'JOURNEYS.md'), null);
+  assert.equal(readDoc(repo, 'DECISIONS.md'), null);
 });
 
-test('changes: no recorded commit shows every section as new', () => {
+test('changes: no recorded commit marks nothing as new', () => {
   const repo = makeRepo();
   const result = docChanges(repo, null, docsOf(repo));
   assert.equal(result.state, 'never');
-  assert.ok(result.changes.length > 0);
-  assert.ok(result.changes.every((change) => change.status === 'new'));
+  assert.deepEqual(result.changes, []);
+  assert.match(result.head, /^[0-9a-f]{40}$/);
 });
 
-test('changes: an unknown commit shows every section as new, without an error', () => {
+test('changes: an unknown commit marks nothing as new, without an error', () => {
   const repo = makeRepo();
   for (const commit of ['0123456789abcdef0123456789abcdef01234567', 'not-a-commit; rm -rf /', '--help']) {
     const result = docChanges(repo, commit, docsOf(repo));
     assert.equal(result.state, 'unknown');
-    assert.ok(result.changes.every((change) => change.status === 'new'));
+    assert.deepEqual(result.changes, []);
   }
+});
+
+test('changes cover PRODUCT.md, DECISIONS.md and RESTART.md, and nothing else', () => {
+  const repo = makeRepo();
+  const seen = git(repo, 'rev-parse', 'HEAD').trim();
+  writeDoc(repo, 'PRODUCT.md', `${PRODUCT}\n## Added\n\nNew.\n`);
+  writeDoc(repo, 'DECISIONS.md', '# Decisions\n\n## Product\n\n- Silo is a Mac app first.\n');
+  writeDoc(repo, 'RESTART.md', '# Restart\n\n## Where the work stands\n\n1. Now: something else.\n');
+  writeDoc(repo, 'JOURNEYS.md', '# Journeys\n\n## Old\n\nx\n');
+  const result = docChanges(repo, seen, docsOf(repo));
+  assert.deepEqual(result.changes.map((change) => [change.file, change.key, change.status]), [
+    ['PRODUCT.md', 'added', 'new'],
+    ['DECISIONS.md', 'product', 'changed'],
+    ['DECISIONS.md', 'pricing', 'removed'],
+    ['RESTART.md', 'where-the-work-stands', 'changed'],
+  ]);
 });
 
 test('changes across a commit: changed, new and removed sections, then uncommitted edits', () => {
@@ -130,7 +105,7 @@ test('changes: a file added after the seen commit counts as new', () => {
 
 test('changes: a folder that is not a git checkout reports nogit', () => {
   const folder = tempDir();
-  assert.equal(docChanges(folder, null, { product: null, journeys: null, decisions: null }).state, 'nogit');
+  assert.equal(docChanges(folder, null, { product: null, decisions: null, restart: null }).state, 'nogit');
 });
 
 test('line diff', () => {
@@ -188,49 +163,51 @@ test('private notes: a missing or empty folder gives none; links that leave the 
   assert.deepEqual(readPrivateNotes(home)[0].notes.map((note) => note.path), ['alias.md', 'real.md']);
 });
 
-test('journey format: number from the heading, promise, step title and detail, prose', () => {
-  const { journeys } = parseJourneys(`# Journeys
+test('where the work stands: the ordered list under its heading, each step with its state word', () => {
+  const steps = parseRestart(`# Restart
 
-## 1. You live in a computer
-<!-- id: live -->
+## Decided
 
-Your setup is inside main,
-and your tools open into it.
+1. Now: not this list.
 
-\`\`\`mermaid
-graph TD; A-->B;
+## Where the Work Stands
+
+1. Done: the old tree is frozen (tag \`legacy\`).
+2. DONE: the list,
+   on two lines.
+3. now: go down the Stack. The first 41 are the starter.
+4. Next: start \`main\` again. Wait first.
+5. Then: design the shell.
+6. Later: something else entirely.
+7. No word here: kept whole.
+8. Then:glued
+- a bullet, not a step
+
+\`\`\`
+9. Done: inside a fence
 \`\`\`
 
-- [partial] Install Silo; the first run makes main. \`silo up\` makes main in under a minute. A
-  rebuilt app can fail.
-  - nested detail line
-- [built] A terminal opens in main (\`ssh main.silo-dev\`).
-- [missing] Keep \`a. b\` together. Rest here.
-- [untested] Making a recipe: a YAML file added with \`silo recipe add\`. There is no guided way to
-  create one.
-- plain list item
+## When a session starts
 
-A closing paragraph.
-
-## Outside
-
-- [untested] macOS computers
+1. Done: another list.
 `);
-  const [live, outside] = journeys;
-  assert.deepEqual([live.id, live.number, live.title, live.heading], ['live', 1, 'You live in a computer', '1. You live in a computer']);
-  assert.equal(live.promise, 'Your setup is inside main, and your tools open into it.');
-  assert.deepEqual(
-    live.steps.map((step) => [step.n, step.status, step.title, step.detail]),
-    [
-      [1, 'partial', 'Install Silo; the first run makes main', '`silo up` makes main in under a minute. A rebuilt app can fail.\n\n- nested detail line'],
-      [2, 'built', 'A terminal opens in main (`ssh main.silo-dev`)', ''],
-      [3, 'missing', 'Keep `a. b` together', 'Rest here.'],
-      [4, 'untested', 'Making a recipe: a YAML file added with `silo recipe add`', 'There is no guided way to create one.'],
-    ],
-  );
-  assert.match(live.prose, /^```mermaid[\s\S]*```\n\n- plain list item\n\nA closing paragraph\.$/);
-  assert.doesNotMatch(live.prose, /Install Silo|Your setup/);
-  assert.deepEqual([outside.number, outside.title, outside.promise, outside.steps[0].title], [2, 'Outside', '', 'macOS computers']);
+  assert.deepEqual(steps, [
+    { state: 'done', text: 'the old tree is frozen (tag `legacy`).' },
+    { state: 'done', text: 'the list, on two lines.' },
+    { state: 'now', text: 'go down the Stack. The first 41 are the starter.' },
+    { state: 'next', text: 'start `main` again. Wait first.' },
+    { state: 'then', text: 'design the shell.' },
+    { state: 'other', text: 'Later: something else entirely.' },
+    { state: 'other', text: 'No word here: kept whole.' },
+    { state: 'then', text: 'glued' },
+  ]);
+  assert.equal(firstSentence('start `main` again. Wait first.'), 'start `main` again.');
+  assert.equal(firstSentence('keep `a. b` together. Rest.'), 'keep `a. b` together.');
+  assert.equal(firstSentence('one sentence only'), 'one sentence only');
+  // No file, no heading, no list: nothing.
+  assert.equal(parseRestart(null), null);
+  assert.equal(parseRestart('# Restart\n\n## Decided\n\n1. Done: x\n'), null);
+  assert.equal(parseRestart('## Where the work stands\n\nNo list yet.\n'), null);
 });
 
 test('decisions: date · who · text, grouped by date newest first; anything else goes to Other', () => {

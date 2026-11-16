@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConflictError, DashboardError, NotFoundError, StoreVersionError, ValidationError } from './errors.js';
-import { currentReaction, itemState, seenValue } from './state.js';
+import { itemState, seenValue } from './state.js';
 import { ID_SHAPE } from './docs.js';
 import { FEATURE_ID, FEATURE_VERDICTS } from './features.js';
 
@@ -13,7 +13,6 @@ export const KINDS = ['look', 'decide', 'shipped', 'note'];
 // Kinds an agent posts. A note is created by the owner, from the page.
 export const POST_KINDS = ['look', 'decide', 'shipped'];
 export const VERDICTS = ['agree', 'disagree'];
-export const REACTIONS = ['essential', 'nice', 'unneeded'];
 export const MAX_OPTIONS = 6;
 const MAX_OPTION_LABEL = 80;
 const MAX_OPTION_DETAIL = 300;
@@ -22,17 +21,12 @@ const REPOSITORY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const MAX_TITLE = 200;
 const MAX_TEXT = 200_000;
 
-// Where an owner note points: a journey step, a journey, or a product section.
-// Returns { kind, journey, step, section } or throws.
+// Where an owner note points: a section of PRODUCT.md. Returns { section }
+// or throws. Note items an earlier version stored on other anchors keep them.
 export function parseAnchor(anchor) {
-  const text = typeof anchor === 'string' ? anchor : '';
-  let match = /^journeys#([^/]+)\/([^/]+)$/.exec(text);
-  if (match && ID_SHAPE.test(match[1]) && ID_SHAPE.test(match[2])) return { kind: 'step', journey: match[1], step: match[2] };
-  match = /^journeys#([^/]+)$/.exec(text);
-  if (match && ID_SHAPE.test(match[1])) return { kind: 'journey', journey: match[1] };
-  match = /^product#(.+)$/.exec(text);
-  if (match && ID_SHAPE.test(match[1])) return { kind: 'section', section: match[1] };
-  throw new ValidationError('anchor must be journeys#<journey id>/<step key>, journeys#<journey id> or product#<section key>');
+  const match = /^product#(.+)$/.exec(typeof anchor === 'string' ? anchor : '');
+  if (match && ID_SHAPE.test(match[1])) return { section: match[1] };
+  throw new ValidationError('anchor must be product#<section key>');
 }
 
 const ITEMS_COLUMNS = `  kind TEXT NOT NULL CHECK (kind IN ('look', 'decide', 'shipped', 'note')),
@@ -49,6 +43,7 @@ const ITEMS_COLUMNS = `  kind TEXT NOT NULL CHECK (kind IN ('look', 'decide', 's
   anchor TEXT,
   anchor_text TEXT`;
 const CHOICE_COLUMN = 'choice INTEGER';
+// Reactions came from journey steps, which are gone; older stores keep theirs.
 const REACTION_COLUMN = "reaction TEXT CHECK (reaction IS NULL OR reaction IN ('essential', 'nice', 'unneeded'))";
 
 // Version 3: the owner's verdicts on the feature list. Every row is kept as
@@ -319,19 +314,21 @@ export class Store {
     return new Date().toISOString();
   }
 
-  createItem({ kind, journey = null, title, body = '', defaultText = null, source = null, options = null }) {
+  // `entry` is the id of the feature list entry the item is about, kept in
+  // the journey column.
+  createItem({ kind, entry = null, title, body = '', defaultText = null, source = null, options = null }) {
     if (!POST_KINDS.includes(kind)) throw new ValidationError(`kind must be one of ${POST_KINDS.join(', ')}`);
     const cleanTitle = singleLine(title, 'title', MAX_TITLE);
     const cleanOptions = cleanOptionList(options, kind);
-    if (journey != null && !ID_SHAPE.test(journey)) {
-      throw new ValidationError('journey must be a journey id: lowercase letters, digits and hyphens');
+    if (entry != null && !ID_SHAPE.test(entry)) {
+      throw new ValidationError('entry must be a list entry id: lowercase letters, digits and hyphens');
     }
     const cleanDefault = defaultText == null ? null : longText(defaultText, 'default');
     if (kind === 'look' && !cleanDefault) throw new ValidationError('a look item needs a default (what stands if the owner says nothing)');
     const cleanSource = source == null ? null : singleLine(source, 'source', MAX_TITLE);
     const info = this.db
       .prepare('INSERT INTO items (kind, journey, title, body, default_text, source, options, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(kind, journey, cleanTitle, longText(body, 'body'), cleanDefault, cleanSource, cleanOptions && JSON.stringify(cleanOptions), this.now());
+      .run(kind, entry, cleanTitle, longText(body, 'body'), cleanDefault, cleanSource, cleanOptions && JSON.stringify(cleanOptions), this.now());
     return Number(info.lastInsertRowid);
   }
 
@@ -424,45 +421,29 @@ export class Store {
     });
   }
 
-  // An owner note on a journey step, a journey or a product section. One open
-  // note item per anchor: a later note or reaction adds a reply to it.
-  // `reaction` undefined leaves the reaction as it is; null clears it.
-  // `after` is the newest reply id of the anchor's open note the page showed
-  // (0 when it showed none). Returns { item, reply }.
-  addNote({ anchor, anchorText, journey = null, text = '', reaction, after = null }) {
-    const where = parseAnchor(anchor);
-    const cleanText = longText(text, 'text');
+  // An owner note on a product section. One open note item per anchor: a
+  // later note adds a reply to it. `after` is the newest reply id of the
+  // anchor's open note the page showed (0 when it showed none).
+  // Returns { item, reply }.
+  addNote({ anchor, anchorText, text = '', after = null }) {
+    parseAnchor(anchor);
+    const cleanText = longText(text, 'text', { required: true });
     const cleanAnchorText = singleLine(anchorText, 'anchorText', MAX_TITLE);
-    if (where.journey && journey != null && journey !== where.journey) throw new ValidationError('journey does not match the anchor');
-    const noteJourney = where.journey ?? null;
-    if (journey != null && !where.journey) throw new ValidationError('a product note has no journey');
-    if (reaction !== undefined && reaction !== null && !REACTIONS.includes(reaction)) {
-      throw new ValidationError(`reaction must be one of ${REACTIONS.join(', ')}, or null to clear it`);
-    }
-    if (reaction !== undefined && where.kind !== 'step') throw new ValidationError('only a journey step takes a reaction');
-    if (reaction === undefined && !cleanText) throw new ValidationError('send text or a reaction');
-    if (reaction === null && cleanText) throw new ValidationError('clearing a reaction carries no text');
     return this.tx(() => {
       let item = this.db.prepare("SELECT * FROM items WHERE kind = 'note' AND anchor = ? AND status = 'open' ORDER BY id DESC LIMIT 1").get(anchor);
       if (after != null) {
         const newest = item ? (this.db.prepare('SELECT max(id) AS id FROM replies WHERE item_id = ?').get(item.id).id ?? 0) : 0;
         if (newest > after) throw new ConflictError(`the note on ${anchor} has a newer reply than the one shown; read it again`);
       }
-      if (reaction === null) {
-        const replies = this.db
-          .prepare("SELECT replies.* FROM replies JOIN items ON items.id = replies.item_id WHERE items.kind = 'note' AND items.anchor = ? ORDER BY replies.id")
-          .all(anchor);
-        if (!currentReaction(replies)) throw new ValidationError('there is no reaction to clear');
-      }
       if (!item) {
         const info = this.db
-          .prepare("INSERT INTO items (kind, journey, title, anchor, anchor_text, created_at) VALUES ('note', ?, ?, ?, ?, ?)")
-          .run(noteJourney, cleanAnchorText, anchor, cleanAnchorText, this.now());
+          .prepare("INSERT INTO items (kind, title, anchor, anchor_text, created_at) VALUES ('note', ?, ?, ?, ?)")
+          .run(cleanAnchorText, anchor, cleanAnchorText, this.now());
         item = this.requireItem(Number(info.lastInsertRowid));
       }
       const info = this.db
-        .prepare("INSERT INTO replies (item_id, author, text, reaction, created_at) VALUES (?, 'owner', ?, ?, ?)")
-        .run(item.id, cleanText, reaction ?? null, this.now());
+        .prepare("INSERT INTO replies (item_id, author, text, created_at) VALUES (?, 'owner', ?, ?)")
+        .run(item.id, cleanText, this.now());
       return { item: item.id, reply: Number(info.lastInsertRowid) };
     });
   }
@@ -589,6 +570,11 @@ export class Store {
     return this.db
       .prepare('SELECT verdicts.* FROM verdicts JOIN (SELECT feature_id, max(id) AS id FROM verdicts GROUP BY feature_id) AS newest USING (id) ORDER BY verdicts.feature_id')
       .all();
+  }
+
+  // Every verdict row, oldest first: the history of the owner's verdicts.
+  allVerdictRows() {
+    return this.db.prepare('SELECT * FROM verdicts ORDER BY id').all();
   }
 
   // Current verdicts an agent has not acknowledged yet (all current ones

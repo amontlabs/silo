@@ -54,16 +54,3 @@ export function lastActivity(item) {
 export function forYouOrder(a, b) {
   return KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.id - a.id;
 }
-
-// The reaction an anchor carries after these owner replies, oldest first: a
-// reply with a reaction sets it, a reply with neither text nor reaction clears
-// it, a text-only reply leaves it.
-export function currentReaction(replies) {
-  let reaction = null;
-  for (const reply of replies) {
-    if (reply.author !== 'owner') continue;
-    if (reply.reaction) reaction = reply.reaction;
-    else if (!reply.text) reaction = null;
-  }
-  return reaction;
-}

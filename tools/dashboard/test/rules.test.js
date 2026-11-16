@@ -75,12 +75,12 @@ test('the guard: a new card starts the wait, the same card again does not, no ca
   assert.equal(guard.acceptsKey({ repeat: false }), true);
 });
 
-test('a refused note or reaction is always told, with the text when there is one', () => {
+test('a refused note is always told, with the text when there is one', () => {
   assert.deepEqual(noteRefusal({ text: 'About atelier' }), {
     message: 'This part of the document changed; your note was not recorded. Your text:',
     text: 'About atelier',
   });
-  assert.deepEqual(noteRefusal({}), { message: 'This part of the document changed; your reaction was not recorded.', text: null });
+  assert.deepEqual(noteRefusal({}), { message: 'This part of the document changed; your note was not recorded.', text: null });
   assert.equal(noteRefusal({ text: '  ' }).text, null);
   assert.equal(replyLost('x').text, 'x');
 });

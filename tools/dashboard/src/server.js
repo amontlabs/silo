@@ -170,19 +170,17 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
     return docs;
   };
 
-  const stackData = () => {
-    const list = readFeatures(repoRoot);
-    return list && { ...list, rows: store.currentVerdictRows() };
-  };
-
   const pageView = () => {
     const docs = readDocs();
+    const list = readFeatures(repoRoot);
+    const rows = store.currentVerdictRows();
     return {
       items: store.itemsWithState(),
       docs,
       changes: docChanges(repoRoot, store.getSeen('docs_commit'), docs),
       notes: readPrivateNotes(store.home),
-      stack: stackData(),
+      stack: list && { ...list, rows },
+      verdictHistory: store.allVerdictRows(),
     };
   };
 
@@ -269,13 +267,12 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
         return sendJson(res, 200, { ok: true });
       }
       if (pathname === '/api/notes') {
-        // A note or a reaction on a journey step, a journey or a product section.
+        // A note on a section of PRODUCT.md.
         const body = await jsonBody(req);
         if (typeof body.anchorText !== 'string' || body.anchorText.length > MAX_ANCHOR_TEXT) {
           throw new ValidationError(`send the anchorText the page showed (at most ${MAX_ANCHOR_TEXT} characters)`);
         }
-        if (body.text !== undefined && typeof body.text !== 'string') throw new ValidationError('text must be a string');
-        if (body.journey !== undefined && body.journey !== null && typeof body.journey !== 'string') throw new ValidationError('journey must be a string');
+        if (typeof body.text !== 'string') throw new ValidationError('text must be a string');
         // The note must point at what the documents say now, and the page must
         // have shown its current title: otherwise it changed under the owner.
         parseAnchor(body.anchor);
@@ -285,14 +282,7 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
         // The page sends anchorText() of the title; compared as sent.
         const shown = body.anchorText;
         if (shown !== target.text) throw new ConflictError(`${body.anchor} changed since the page showed it; read it again`);
-        const result = store.addNote({
-          anchor: body.anchor,
-          anchorText: shown,
-          journey: body.journey ?? null,
-          text: body.text ?? '',
-          reaction: Object.hasOwn(body, 'reaction') ? body.reaction : undefined,
-          after,
-        });
+        const result = store.addNote({ anchor: body.anchor, anchorText: shown, text: body.text, after });
         return sendJson(res, 201, result);
       }
       match = /^\/api\/features\/([^/]+)\/verdict$/.exec(pathname);

@@ -8,28 +8,22 @@
 // read. Markdown never adds elements of its own: raw HTML is escaped.
 import { h, raw } from './html.js';
 import { renderInline, renderMarkdown } from './markdown.js';
-import { DOC_FILES, STEP_STATUSES, anchorText, lineDiff, noteTargets, parseDecisions, parseJourneys, productLayout, slugify, splitSections, uniqueId } from './docs.js';
+import { DOC_FILES, anchorText, lineDiff, noteTargets, parseDecisions, parseRestart, productLayout, slugify, splitSections, uniqueId } from './docs.js';
 import { noteSummary } from './private.js';
-import { currentReaction, forYouOrder, lastActivity, lastReplyId } from './state.js';
-import { prepareStack, stackLink, stackView } from './stack-view.js';
+import { forYouOrder, lastActivity, lastReplyId } from './state.js';
+import { VERDICT_CHIP, prepareStack, stackView } from './stack-view.js';
 
 export const KIND_PILL = { decide: 'Needs your call', look: 'An agent chose', shipped: 'Shipped', note: 'An agent replied to your note' };
 const KIND_SHORT = { decide: 'Decide', look: 'Look', shipped: 'Shipped', note: 'Note' };
 const STATE_LABEL = { waiting: 'waiting for you', answered: 'answered', closed: 'closed' };
-const STATUS_WORD = { built: 'works', partial: 'gaps', missing: 'missing', untested: 'not driven' };
-const LEGEND = { built: 'works, driven as a user', partial: 'works with gaps', missing: 'does not exist', untested: 'exists, nobody drove it' };
+// Reactions on journey steps, which older stores still hold.
 const REACTION_WORD = { essential: 'essential', nice: 'nice to have', unneeded: 'not needed' };
-const FILE_LABEL = { [DOC_FILES.product]: 'Product', [DOC_FILES.journeys]: 'Journeys', [DOC_FILES.decisions]: 'Decisions' };
+const FILE_LABEL = { [DOC_FILES.product]: 'Product', [DOC_FILES.decisions]: 'Decisions', [DOC_FILES.restart]: 'Restart' };
 const CHANGED_WORD = { changed: 'Changed', new: 'New', removed: 'Removed' };
+const ROW_KIND = { decision: 'Decision', verdict: 'Verdict', answer: 'Answer', list: 'From the list' };
 
-// Line icons for the journeys the product names; any other id gets the neutral one.
-const ICONS = {
-  live: '<rect x="4" y="6" width="22" height="15" rx="3"/><path d="M11 25h8M15 21v4"/><circle cx="15" cy="13.5" r="2.5"/>',
-  task: '<rect x="3" y="9" width="12" height="9" rx="2"/><rect x="17" y="4" width="10" height="8" rx="2"/><rect x="17" y="16" width="10" height="8" rx="2"/><path d="M15 12l2-3M15 15l2 4"/>',
-  outside: '<path d="M4 15h9M10 11l4 4-4 4"/><rect x="16" y="8" width="11" height="14" rx="3"/>',
-};
-const DEFAULT_ICON = '<rect x="5" y="5" width="20" height="20" rx="5"/><path d="M10 12h10M10 17h6"/>';
-
+// Documents of the checkout: only absolute links (see markdown.js).
+const REPO = { repo: true };
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 export const minutesFor = (count) => Math.max(1, Math.round(0.6 * count));
 
@@ -41,28 +35,29 @@ function time(iso) {
   return h`<time datetime="${iso}" title="${iso}">${text}</time>`;
 }
 
+// The local calendar day of a timestamp, as YYYY-MM-DD.
+export function localDay(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 // ---- anchors of owner notes ----
 
-// A step's anchor uses its key (from its title), never its position.
-const stepAnchor = (journey, key) => `journeys#${journey}/${key}`;
-const journeyAnchor = (journey) => `journeys#${journey}`;
 const sectionAnchor = (key) => `product#${key}`;
 const orphanId = (anchor) => `orphan-${slugify(anchor)}`;
 
-// Where a note's anchor is on the page: its element while the documents still
-// have it, else its entry under "Notes on things that changed".
+// Where a note's anchor is on the page: its product section while PRODUCT.md
+// still has it, else its entry under "Notes on things that changed". Anchors
+// of other kinds (journey notes from an earlier version) have no place.
 function anchorHref(anchor, ctx) {
-  if (!ctx.targets.has(anchor)) return `#${orphanId(anchor)}`;
-  let match = /^journeys#([^/]+)\/(.+)$/.exec(anchor);
-  if (match) return `#journey-${match[1]}-step-${match[2]}`;
-  match = /^journeys#(.+)$/.exec(anchor);
-  if (match) return `#journey-${match[1]}`;
-  match = /^product#(.+)$/.exec(anchor);
-  return match ? `#product-${match[1]}` : null;
+  const match = /^product#(.+)$/.exec(anchor ?? '');
+  if (!match) return null;
+  return ctx.targets.has(anchor) ? `#product-${match[1]}` : `#${orphanId(anchor)}`;
 }
 
-// anchor -> { replies (every note item's replies, oldest first), reaction,
-// notes (owner texts), after, anchorText (as last recorded), open (the open note item) }
+// anchor -> { replies (every note item's replies, oldest first), notes (owner
+// texts), after, anchorText (as last recorded), open (the open note item) }
 function noteIndex(items) {
   const index = new Map();
   for (const item of items) {
@@ -78,13 +73,12 @@ function noteIndex(items) {
   }
   for (const entry of index.values()) {
     entry.replies.sort((a, b) => a.id - b.id);
-    entry.reaction = currentReaction(entry.replies);
     entry.notes = entry.replies.filter((reply) => reply.author === 'owner' && reply.text).length;
   }
   return index;
 }
 
-const EMPTY_NOTES = { replies: [], reaction: null, notes: 0, after: 0 };
+const EMPTY_NOTES = { replies: [], notes: 0, after: 0 };
 
 // ---- replies and attachments ----
 
@@ -175,15 +169,10 @@ function commentControls(item) {
   </div>`;
 }
 
-// Reactions and "＋ note" for one anchor. Reactions only on journey steps.
-function noteControls({ anchor, anchorText, journey = null, info = EMPTY_NOTES, reactions = false, label = '＋ note' }) {
-  const pills = reactions
-    ? h`<span class="react-label">For you this is</span>${Object.entries(REACTION_WORD).map(
-        ([value, word]) => h`<button class="pill ${info.reaction === value ? 'on' : ''}" type="button" data-reaction="${value}" aria-pressed="${info.reaction === value ? 'true' : 'false'}">${word}</button>`,
-      )}`
-    : '';
-  return h`<div class="note-controls" data-controls data-anchor="${anchor}" data-anchor-text="${anchorText}" ${journey ? h`data-journey="${journey}"` : ''} data-after="${info.after}">
-    <div class="react">${pills}<button class="pill" type="button" data-say aria-expanded="false">${label}</button></div>
+// "＋ note" for one product section.
+function noteControls({ anchor, anchorText, info = EMPTY_NOTES }) {
+  return h`<div class="note-controls" data-controls data-anchor="${anchor}" data-anchor-text="${anchorText}" data-after="${info.after}">
+    <div class="react"><button class="pill" type="button" data-say aria-expanded="false">＋ note</button></div>
     ${sayForm({ note: true, draft: `note-${anchor}`, placeholder: 'Your note, in any form' })}
     <p class="form-error" role="alert"></p>
   </div>`;
@@ -191,6 +180,8 @@ function noteControls({ anchor, anchorText, journey = null, info = EMPTY_NOTES, 
 
 // ---- For you ----
 
+// What a card is about: a note's product section, or the list entry the item
+// names (a link to it in the Stack while it is on the list).
 function whereLink(item, ctx) {
   if (item.kind === 'note') {
     const href = anchorHref(item.anchor, ctx);
@@ -198,8 +189,8 @@ function whereLink(item, ctx) {
     return href ? h`<a href="${href}"><b>${label}</b></a>` : h`<b>${label}</b>`;
   }
   if (!item.journey) return '';
-  const journey = ctx.journeyById.get(item.journey);
-  return journey ? h`<a href="#journey-${journey.id}"><b>${journey.title}</b></a>` : h`<b>${item.journey}</b>`;
+  const entry = ctx.entryById.get(item.journey);
+  return entry ? h`<a href="#feature-${entry.id}"><b>${entry.name}</b></a>` : h`<b>${item.journey}</b>`;
 }
 
 function cardContent(item, ctx) {
@@ -229,21 +220,26 @@ function answeredRow(item, ctx) {
   </details>`;
 }
 
-function ring(journey) {
-  const total = journey.steps.length;
-  const built = total ? Math.round((journey.counts.built / total) * 100) : 0;
-  const partial = total ? Math.round((journey.counts.partial / total) * 100) : 0;
-  return h`<span class="ring" style="--p:${built};--q:${partial}" data-n="${journey.counts.built}/${total}" aria-hidden="true"></span>`;
+function forYouView(ctx) {
+  const { waiting, done } = ctx;
+  const count = waiting.length;
+  const lede = count ? h`${plural(count, 'thing')} <em>· about ${plural(minutesFor(count), 'minute')}</em>` : 'All clear';
+  const empty = h`<div class="card empty"><div class="tick" aria-hidden="true">✓</div><h2>Nothing is waiting for you</h2>${ctx.stack ? h`<a class="btn go" href="#stack">Go to the Stack</a>` : ''}</div>`;
+  return h`<section class="view" id="for-you" data-region="for-you" aria-label="For you">
+  <div class="queue" data-queue>
+    <div class="queue-head">
+      <div><p class="eyebrow">For you</p><p class="lede">${lede}</p></div>
+      <div class="queue-tools">${count > 1 ? h`<button class="btn ghost small" type="button" data-see-all aria-pressed="false">See all</button>` : ''}<div class="dots" data-dots></div></div>
+    </div>
+    <div class="stage" aria-live="polite">${count ? waiting.map((item) => queueCard(item, ctx)) : empty}</div>
+    ${count > 1 ? h`<ol class="rows">${waiting.map((item) => h`<li><button class="row" type="button" data-focus="${item.id}"><span class="kind ${item.kind} small">${KIND_SHORT[item.kind]}</span><span class="row-title">${item.title}</span></button></li>`)}</ol>` : ''}
+    ${count ? h`<div class="hints" aria-hidden="true"><span><kbd>↵</kbd> accept</span><span><kbd>→</kbd> later</span><span><kbd>←</kbd> back</span><span><kbd>⇥</kbd> say something else</span></div>` : ''}
+    ${done.length ? h`<details class="earlier" id="earlier-items"><summary>Earlier items (${done.length})</summary><div class="answered-list">${done.map((item) => answeredRow(item, ctx))}</div></details>` : ''}
+  </div>
+</section>`;
 }
 
-function countsLine(counts) {
-  const parts = [];
-  if (counts.built) parts.push(`${counts.built} ${counts.built === 1 ? 'works' : 'work'}`);
-  if (counts.partial) parts.push(`${counts.partial} partly`);
-  if (counts.missing) parts.push(`${counts.missing} missing`);
-  if (counts.untested) parts.push(`${counts.untested} not driven`);
-  return parts.join(' · ') || 'no steps yet';
-}
+// ---- Product ----
 
 function diffView(change) {
   const rows = lineDiff(change.before, change.after);
@@ -269,78 +265,46 @@ function diffView(change) {
 
 const changeKey = (change) => `${slugify(change.file)}-${change.key || 'intro'}`;
 
-function changedBox(ctx) {
+const markSeen = (head, label) =>
+  h`<div class="mark-seen" data-controls><button class="btn small" type="button" data-post="/api/docs/seen" data-body="${JSON.stringify({ commit: head })}">${label}</button><p class="form-error" role="alert"></p></div>`;
+
+// "Changed since you last looked", over PRODUCT.md, DECISIONS.md and
+// RESTART.md. Before the owner first marks them read (or when that commit is
+// gone) there is nothing to compare with: one line and the button.
+function changedStrip(ctx) {
   const { changes, state, head } = ctx.changes;
-  if (state === 'nogit' || !changes.length) return '';
-  const note =
-    state === 'never'
-      ? 'You have not marked the product documents as seen yet, so every section counts as new.'
-      : state === 'unknown'
-        ? 'The commit you last marked is no longer in this checkout, so every section counts as new.'
-        : '';
-  return h`<div class="changed-box" id="changed">
+  if (state === 'nogit' || !head) return '';
+  if (state === 'never' || state === 'unknown') {
+    return h`<div class="changed-strip" id="changed"><p>Mark as read to see what changes from now on</p>${markSeen(head, 'Mark as read')}</div>`;
+  }
+  if (!changes.length) return '';
+  return h`<div class="changed-strip" id="changed">
     <b>Changed since you last looked</b>
-    ${note ? h`<p class="changed-note">${note}</p>` : ''}
     <ul>${changes.map((change) => h`<li><details class="change" id="change-${changeKey(change)}">
       <summary><span>${FILE_LABEL[change.file] || change.file} · ${change.heading || 'Introduction'}</span><span class="tag ${change.status}">${CHANGED_WORD[change.status]}</span></summary>
       ${diffView(change)}
     </details></li>`)}</ul>
-    ${head ? h`<div class="mark-seen" data-controls><button class="btn small" type="button" data-post="/api/docs/seen" data-body="${JSON.stringify({ commit: head })}">Mark all as seen</button><p class="form-error" role="alert"></p></div>` : ''}
+    ${markSeen(head, 'Mark all as seen')}
   </div>`;
 }
 
-function forYouView(ctx) {
-  const { waiting, done } = ctx;
-  const count = waiting.length;
-  const lede = count ? h`${plural(count, 'thing')} <em>· about ${plural(minutesFor(count), 'minute')}</em>` : 'All clear';
-  const empty = h`<div class="card empty"><div class="tick" aria-hidden="true">✓</div><h2>Nothing is waiting for you</h2><p class="body">Agents carry on with the defaults you accepted.</p></div>`;
-  return h`<section class="view" id="for-you" data-region="for-you" aria-label="For you">
-  <div class="inbox">
-    <div class="queue" data-queue>
-      <div class="queue-head">
-        <div><p class="eyebrow">For you</p><p class="lede">${lede}</p></div>
-        <div class="queue-tools">${count > 1 ? h`<button class="btn ghost small" type="button" data-see-all aria-pressed="false">See all</button>` : ''}<div class="dots" data-dots></div></div>
-      </div>
-      <div class="stage" aria-live="polite">${count ? waiting.map((item) => queueCard(item, ctx)) : empty}</div>
-      ${count > 1 ? h`<ol class="rows">${waiting.map((item) => h`<li><button class="row" type="button" data-focus="${item.id}"><span class="kind ${item.kind} small">${KIND_SHORT[item.kind]}</span><span class="row-title">${item.title}</span></button></li>`)}</ol>` : ''}
-      ${count ? h`<div class="hints" aria-hidden="true"><span><kbd>↵</kbd> accept</span><span><kbd>→</kbd> later</span><span><kbd>←</kbd> back</span><span><kbd>⇥</kbd> say something else</span></div>` : ''}
-      ${done.length ? h`<div class="answered-list"><p class="eyebrow">Answered</p>${done.map((item) => answeredRow(item, ctx))}</div>` : ''}
-    </div>
-    <aside class="side" aria-label="Where the product is">
-      ${ctx.journeys.length ? h`<p class="eyebrow">Where the product is</p>` : ''}
-      ${ctx.journeys.map((journey) => h`<a class="mini" href="#journey-${journey.id}">${ring(journey)}<span><b>${journey.title}</b><small>${countsLine(journey.counts)}</small></span></a>`)}
-      ${stackLink(ctx.stack)}
-      ${changedBox(ctx)}
-    </aside>
-  </div>
-</section>`;
-}
-
-// Notes whose anchor the documents no longer have: kept, with their thread and
+// Notes whose section PRODUCT.md no longer has: kept, with their thread and
 // a box to reply on the open note item.
-function orphanNotes(ctx, prefix) {
-  const gone = [...ctx.notes.entries()].filter(([anchor]) => anchor.startsWith(prefix) && !ctx.targets.has(anchor));
+function orphanNotes(ctx) {
+  const gone = [...ctx.notes.entries()].filter(([anchor]) => anchor.startsWith('product#') && !ctx.targets.has(anchor));
   if (!gone.length) return '';
   return h`<div class="orphans"><p class="eyebrow">Notes on things that changed</p>${gone.map(
     ([anchor, info]) => h`<div class="orphan" id="${orphanId(anchor)}">
-      <div class="orphan-head"><b>${info.anchorText}</b>${info.reaction ? h`<span class="mine ${info.reaction}">${REACTION_WORD[info.reaction]}</span>` : ''}</div>
+      <div class="orphan-head"><b>${info.anchorText}</b></div>
       ${thread(info.replies)}
       ${info.open ? commentControls(info.open) : ''}
     </div>`,
   )}</div>`;
 }
 
-// ---- Product ----
-
 function changeMark(change) {
   if (!change) return '';
   return h`<details class="change-mark" id="mark-${changeKey(change)}"><summary><span class="mark ${change.status}">${CHANGED_WORD[change.status]}</span></summary>${diffView(change)}</details>`;
-}
-
-function removedNotes(ctx, file) {
-  const gone = ctx.changes.changes.filter((change) => change.file === file && change.status === 'removed');
-  if (!gone.length) return '';
-  return h`<div class="removed">${gone.map((change) => h`<details class="change" id="removed-${changeKey(change)}"><summary><span>Removed: ${change.heading || 'Introduction'}</span></summary>${diffView(change)}</details>`)}</div>`;
 }
 
 // The loop: part of the page, not of the document.
@@ -390,14 +354,15 @@ const LOOP = raw(`<svg viewBox="0 0 820 300" role="img" aria-label="The loop: ma
 function productView(ctx) {
   const text = ctx.docs.product;
   if (text === null) {
-    return h`<section class="view" id="product" data-region="product" aria-label="Product"><p class="eyebrow">The product</p><p class="empty-note">No product description yet (docs/product/PRODUCT.md is missing).</p></section>`;
+    return h`<section class="view" id="product" data-region="product" aria-label="Product">${changedStrip(ctx)}<p class="eyebrow">The product</p><p class="empty-note">No product description yet (docs/product/PRODUCT.md is missing).</p></section>`;
   }
   const layout = productLayout(text);
   const change = (key) => ctx.changeIndex.get(`${DOC_FILES.product}#${key}`);
   return h`<section class="view" id="product" data-region="product" aria-label="Product">
+  ${changedStrip(ctx)}
   <div class="hero" ${layout.hero.key ? h`id="product-${layout.hero.key}"` : ''}>
     <p class="eyebrow">The product</p>
-    <div class="hero-text">${raw(renderMarkdown(layout.hero.text))}</div>
+    <div class="hero-text">${raw(renderMarkdown(layout.hero.text, REPO))}</div>
     ${layout.hero.key ? changeMark(change(layout.hero.key)) : ''}
   </div>
   <div class="loop">${LOOP}</div>
@@ -406,74 +371,121 @@ function productView(ctx) {
     const info = ctx.notes.get(anchor) || EMPTY_NOTES;
     return h`<article class="tile ${tile.wide ? 'wide' : ''}" id="product-${tile.key}">
       <div class="tile-head"><h3>${tile.heading}</h3>${changeMark(change(tile.key))}</div>
-      <div class="prose">${raw(renderMarkdown(tile.text))}</div>
+      <div class="prose">${raw(renderMarkdown(tile.text, REPO))}</div>
       ${info.replies.length ? h`<details class="notes-of" id="notes-product-${tile.key}"><summary>${plural(info.notes, 'note')} from you</summary>${thread(info.replies)}</details>` : ''}
       ${noteControls({ anchor, anchorText: anchorText(tile.heading), info })}
     </article>`;
   })}</div>
-  ${orphanNotes(ctx, 'product#')}
-  ${removedNotes(ctx, DOC_FILES.product)}
+  ${orphanNotes(ctx)}
 </section>`;
 }
 
-// ---- Journeys ----
+// ---- Decisions: one timeline of what was decided ----
 
-function stepView(journey, step, ctx) {
-  const anchor = stepAnchor(journey.id, step.key);
-  const info = ctx.notes.get(anchor) || EMPTY_NOTES;
-  const notesLabel = plural(info.notes, 'note') + ' from you';
-  return h`<details class="step is-${step.status}" id="journey-${journey.id}-step-${step.key}" data-step="${step.n}">
-    <summary><span class="n">${String(step.n).padStart(2, '0')}</span><span class="t"><span class="pip ${step.status}" aria-hidden="true"></span><span>${raw(renderInline(step.title))}</span></span><span class="tag">${info.reaction ? h`<span class="mine ${info.reaction}">${REACTION_WORD[info.reaction]}</span>` : ''}${info.notes ? h`<span class="has-notes" title="${notesLabel}" role="img" aria-label="${notesLabel}"></span>` : ''}<span class="status-word">${STATUS_WORD[step.status]}</span></span></summary>
-    <div class="more">
-      ${step.detail ? h`<div class="prose">${raw(renderMarkdown(step.detail))}</div>` : h`<p class="no-detail">No detail yet.</p>`}
-      ${thread(info.replies)}
-      ${noteControls({ anchor, anchorText: anchorText(step.title), journey: journey.id, info, reactions: true })}
-    </div>
-  </details>`;
+const VERDICT_ORDER = ['take', 'refine', 'later', 'drop'];
+const VERDICT_PHRASE = {
+  take: (n) => `took ${plural(n, 'entry', 'entries')}`,
+  refine: (n) => `asked to refine ${n}`,
+  later: (n) => `kept ${n} for later`,
+  drop: (n) => `dropped ${n}`,
+};
+
+const CARRIED_PHRASE = {
+  take: (n) => `${plural(n, 'entry', 'entries')} taken`,
+  refine: (n) => `${n} to refine`,
+  later: (n) => `${n} for later`,
+  drop: (n) => `${n} dropped`,
+};
+
+function countVerdicts(entries) {
+  const counts = new Map();
+  for (const entry of entries) counts.set(entry.verdict, (counts.get(entry.verdict) ?? 0) + 1);
+  return counts;
 }
 
-function journeyItems(journey, ctx) {
-  const items = ctx.items.filter((item) => item.journey === journey.id && item.kind !== 'note' && item.status === 'open');
-  if (!items.length) return '';
-  const waiting = items.filter((item) => item.state === 'waiting').sort(forYouOrder);
-  const rest = items.filter((item) => item.state !== 'waiting').sort((a, b) => (lastActivity(a) < lastActivity(b) ? 1 : -1));
-  return h`<ul class="j-items">${[...waiting, ...rest].map((item) => h`<li><a href="#item-${item.id}"><span class="kind ${item.kind} small">${KIND_SHORT[item.kind]}</span><span class="row-title">${item.title}</span><span class="state state-${item.state}">${STATE_LABEL[item.state]}</span></a></li>`)}</ul>`;
+// What the owner did on one day, one count per verdict row: "You took 6
+// entries, kept 1 for later, dropped 2, cleared 1".
+export function verdictSummary(entries) {
+  const counts = countVerdicts(entries);
+  const parts = VERDICT_ORDER.filter((verdict) => counts.get(verdict)).map((verdict) => VERDICT_PHRASE[verdict](counts.get(verdict)));
+  if (counts.get(null)) parts.push(`cleared ${counts.get(null)}`);
+  return parts.length ? `You ${parts.join(', ')}` : '';
 }
 
-function journeyCard(journey, ctx) {
-  const total = journey.steps.length;
-  const anchor = journeyAnchor(journey.id);
-  const info = ctx.notes.get(anchor) || EMPTY_NOTES;
-  return h`<article class="journey" id="journey-${journey.id}" data-gaps="${total - journey.counts.built}">
-    <div class="j-head">
-      <div class="j-num"><svg viewBox="0 0 30 30" aria-hidden="true">${raw(ICONS[journey.id] || DEFAULT_ICON)}</svg></div>
-      <div><h3>${journey.number}. ${journey.title}</h3>${journey.promise ? h`<p>${raw(renderInline(journey.promise))}</p>` : ''}</div>
-      <div class="j-score"><b>${journey.counts.built}<span>/${total}</span></b>steps work</div>
-    </div>
-    ${changeMark(ctx.changeIndex.get(`${DOC_FILES.journeys}#${journey.key}`))}
-    ${total ? h`<div class="track" aria-hidden="true">${journey.steps.map((step) => h`<i class="${step.status}"></i>`)}</div>` : ''}
-    ${total ? h`<div class="steps">${journey.steps.map((step) => stepView(journey, step, ctx))}</div>` : ''}
-    ${journey.prose ? h`<details class="j-more" id="journey-${journey.id}-more"><summary>More</summary><div class="prose">${raw(renderMarkdown(journey.prose))}</div></details>` : ''}
-    ${journeyItems(journey, ctx)}
-    <div class="j-note">${thread(info.replies)}${noteControls({ anchor, anchorText: anchorText(journey.title), journey: journey.id, info, label: '＋ note on this journey' })}</div>
-  </article>`;
+// Verdicts written in features.jsonl before the Stack existed; never "you":
+// "13 entries taken, 3 dropped, from decisions made before the Stack".
+export function carriedSummary(entries) {
+  const counts = countVerdicts(entries);
+  const parts = VERDICT_ORDER.filter((verdict) => counts.get(verdict)).map((verdict) => CARRIED_PHRASE[verdict](counts.get(verdict)));
+  return parts.length ? `${parts.join(', ')}, from decisions made before the Stack` : '';
 }
 
-function journeysView(ctx) {
-  return h`<section class="view" id="journeys" data-region="journeys" aria-label="Journeys">
-  <p class="eyebrow">Journeys</p>
-  <p class="lede">How Silo is used, and what works today</p>
-  <div class="legend">${STEP_STATUSES.map((status) => h`<span class="s ${status}">${LEGEND[status]}</span>`)}
-    <span class="filters"><button class="pill on" type="button" data-filter="all" aria-pressed="true">All</button><button class="pill" type="button" data-filter="gaps" aria-pressed="false">Only gaps</button></span>
-  </div>
-  ${ctx.docs.journeys === null ? h`<p class="empty-note">No journeys yet (docs/product/JOURNEYS.md is missing).</p>` : ''}
-  ${ctx.journeys.map((journey) => journeyCard(journey, ctx))}
-  ${orphanNotes(ctx, 'journeys#')}
-  ${removedNotes(ctx, DOC_FILES.journeys)}
-</section>`;
+// What the owner answered in one reply, in words.
+function answerWords(item, reply) {
+  if (reply.verdict === 'agree') return reply.text ? `Agreed: ${reply.text}` : 'Agreed';
+  if (reply.verdict === 'disagree') return `Disagreed: ${reply.text}`;
+  if (reply.choice != null) return `Chose “${reply.choice_label ?? reply.text}”`;
+  if (reply.reaction) return `Marked ${REACTION_WORD[reply.reaction] ?? reply.reaction}`;
+  if (!reply.text) return item.kind === 'note' ? 'Cleared the reaction' : '';
+  return item.kind === 'note' ? `Note: ${reply.text}` : reply.text;
 }
 
-// ---- Decisions ----
+const oneLine = (text, max = 240) => {
+  const line = String(text).replace(/\s+/g, ' ').trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+};
+
+/**
+ * Everything decided, as one timeline: { days: [{ date, decisions, verdicts,
+ * answers }] newest first, other (DECISIONS.md items that are not
+ * `date · who · text`), carried (verdicts that come only from
+ * features.jsonl), total (DECISIONS.md items) }.
+ * - decisions: the lines of DECISIONS.md for that day, in file order.
+ * - verdicts: every verdict row the owner gave that day, in the order given,
+ *   as history: [{ row, id, name, verdict (null: cleared), previous (the
+ *   verdict it replaced: the entry's row before, else the file's, else
+ *   null), previousFrom ('store' | 'file' | null), note, onList }].
+ * - answers: the owner's replies on items from that day, newest first:
+ *   [{ item, reply }].
+ * carried: entries whose verdict comes only from features.jsonl (no row at
+ * all), with their `why`. `verdictRows` is every row of the store's verdicts
+ * table; `features` the current list (or null).
+ */
+export function decisionTimeline({ decisionsText, features, verdictRows, items }) {
+  const decisions = parseDecisions(decisionsText);
+  const days = new Map();
+  const day = (date) => {
+    if (!days.has(date)) days.set(date, { date, decisions: [], verdicts: [], answers: [] });
+    return days.get(date);
+  };
+  for (const { date, items: lines } of decisions.days) day(date).decisions.push(...lines);
+  const byId = new Map((features ?? []).map((feature) => [feature.id, feature]));
+  const before = new Map();
+  for (const row of [...(verdictRows ?? [])].sort((a, b) => a.id - b.id)) {
+    const feature = byId.get(row.feature_id);
+    const prior = before.get(row.feature_id);
+    const previous = prior ? prior.verdict : (feature?.verdict ?? null);
+    const previousFrom = prior ? 'store' : feature?.verdict ? 'file' : null;
+    before.set(row.feature_id, row);
+    const date = localDay(row.created_at);
+    if (!date) continue;
+    day(date).verdicts.push({ row: row.id, id: row.feature_id, name: feature?.name ?? row.name ?? row.feature_id, verdict: row.verdict, previous, previousFrom, note: row.note || '', onList: Boolean(feature) });
+  }
+  const carried = (features ?? [])
+    .filter((feature) => feature.verdict && !before.has(feature.id))
+    .map((feature) => ({ id: feature.id, name: feature.name, verdict: feature.verdict, why: feature.why, onList: true }));
+  for (const item of items) {
+    for (const reply of item.replies) {
+      const date = reply.author === 'owner' && localDay(reply.created_at);
+      if (date) day(date).answers.push({ item, reply });
+    }
+  }
+  for (const entry of days.values()) {
+    entry.answers.sort((a, b) => b.reply.id - a.reply.id);
+  }
+  const sorted = [...days.values()].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return { days: sorted, other: decisions.other, carried, total: decisions.total };
+}
 
 function dayLabel(date) {
   const [year, month, day] = date.split('-').map(Number);
@@ -485,28 +497,87 @@ function dayLabel(date) {
   return { label, relative: days === 0 ? 'today' : days === 1 ? 'yesterday' : '' };
 }
 
+const kindLabel = (kind) => h`<span class="rkind ${kind}">${ROW_KIND[kind]}</span>`;
+const who = (name) => h`<span class="who ${name === 'owner' ? 'you' : ''}">${name === 'owner' ? 'you' : name}</span>`;
+
+const chip = (verdict) => h`<span class="vchip small v-${verdict}">${VERDICT_CHIP[verdict]}</span>`;
+
+// One verdict row as history: the verdict given, what it changed, or a clear.
+function verdictLine(entry) {
+  const name = entry.onList ? h`<a href="#feature-${entry.id}">${entry.name}</a>` : h`<span>${entry.name}</span>`;
+  const was = entry.previous ? h`<s class="v-was">${chip(entry.previous)}</s>` : '';
+  let what;
+  if (entry.verdict === null) what = h`${was}<span class="v-change">cleared its verdict</span>`;
+  else if (entry.previous && entry.previous !== entry.verdict) what = h`${was}<span class="v-change">changed to ${VERDICT_CHIP[entry.verdict].toLowerCase()}</span>${chip(entry.verdict)}`;
+  else if (entry.previous && entry.previousFrom === 'file') what = h`${chip(entry.verdict)}<span class="v-change">confirmed</span>`;
+  else what = chip(entry.verdict);
+  return h`<li>${name}${what}${entry.note ? h`<span class="fold-note">${oneLine(entry.note)}</span>` : ''}</li>`;
+}
+
+function verdictFold(entries, id) {
+  return h`<details class="dec fold" data-kind="verdict" id="${id}">
+    <summary>${kindLabel('verdict')}${who('owner')}<span class="what">${verdictSummary(entries)}</span></summary>
+    <ul class="fold-list">${entries.map(verdictLine)}</ul>
+  </details>`;
+}
+
+// Verdicts from features.jsonl alone: marked as carried over, never as the
+// owner's, each with the `why` that says when and how it was decided.
+function carriedFold(entries) {
+  return h`<details class="dec fold" data-kind="verdict" id="verdicts-carried">
+    <summary>${kindLabel('list')}<span class="who carried">carried over</span><span class="what">${carriedSummary(entries)}</span></summary>
+    <ul class="fold-list">${entries.map(
+      (entry) => h`<li><a href="#feature-${entry.id}">${entry.name}</a>${chip(entry.verdict)}${entry.why ? h`<span class="fold-note">${raw(renderInline(entry.why, REPO))}</span>` : ''}</li>`,
+    )}</ul>
+  </details>`;
+}
+
+// Where an answer's item is on the page: its card in For you (or its row
+// under "Earlier items"), or a note's product section.
+function itemHref(item, ctx) {
+  if (item.state === 'waiting' || item.kind !== 'note') return `#item-${item.id}`;
+  return anchorHref(item.anchor, ctx);
+}
+
+function answerRow({ item, reply }, ctx) {
+  const title = item.kind === 'note' ? item.anchor_text || item.title : item.title;
+  const href = itemHref(item, ctx);
+  const words = answerWords(item, reply);
+  return h`<div class="dec" data-kind="answer">${kindLabel('answer')}${who('owner')}<span class="what">${href ? h`<a href="${href}">${title}</a>` : h`<b>${title}</b>`}${words ? h` · ${oneLine(words)}` : ''}</span></div>`;
+}
+
 function decisionsView(ctx) {
-  if (ctx.docs.decisions === null) {
-    return h`<section class="view" id="decisions" data-region="decisions" aria-label="Decisions"><p class="eyebrow">Decisions</p><p class="empty-note">No decisions recorded yet (docs/product/DECISIONS.md is missing).</p></section>`;
-  }
-  const { days, other, total } = ctx.decisions;
+  const { days, other, carried, total } = ctx.timeline;
+  const empty = !days.length && !other.length && !carried.length;
+  const filters = [
+    ['all', 'All'],
+    ['decision', 'Decisions'],
+    ['verdict', 'Verdicts'],
+    ['answer', 'Answers'],
+  ];
   return h`<section class="view" id="decisions" data-region="decisions" aria-label="Decisions">
   <p class="eyebrow">Decisions</p>
-  <p class="lede">What was decided <em>· agents read this before asking</em></p>
+  <p class="lede">Everything decided <em>· agents read this before asking</em></p>
   <div class="filter-row">
-    <input class="search" type="search" id="decision-filter" placeholder="Search decisions" aria-label="Search decisions" autocomplete="off">
+    <input class="search" type="search" id="decision-filter" placeholder="Search everything decided" aria-label="Search everything decided" autocomplete="off">
     <span class="count" id="decision-count" data-total="${total}">${plural(total, 'decision')}</span>
   </div>
+  <div class="kind-filters" role="group" aria-label="Show">${filters.map(
+    ([value, label]) => h`<button class="pill ${value === 'all' ? 'on' : ''}" type="button" data-decision-kind="${value}" aria-pressed="${value === 'all' ? 'true' : 'false'}">${label}</button>`,
+  )}</div>
+  ${empty ? h`<p class="empty-note">Nothing decided yet.</p>` : ''}
   <div id="decision-list">
     ${days.map((day) => {
       const { label, relative } = dayLabel(day.date);
-      return h`<div class="day"><time datetime="${day.date}">${label}${relative ? h`<small>${relative}</small>` : ''}</time><div>${day.items.map(
-        (item) => h`<div class="dec"><span class="who ${item.who === 'owner' ? 'you' : ''}">${item.who === 'owner' ? 'you' : item.who}</span><span class="what">${raw(renderInline(item.text))}</span></div>`,
-      )}</div></div>`;
+      return h`<div class="day"><time datetime="${day.date}">${label}${relative ? h`<small>${relative}</small>` : ''}</time><div>
+        ${day.decisions.map((item) => h`<div class="dec" data-kind="decision">${kindLabel('decision')}${who(item.who)}<span class="what">${raw(renderInline(item.text, REPO))}</span></div>`)}
+        ${day.verdicts.length ? verdictFold(day.verdicts, `verdicts-${day.date}`) : ''}
+        ${day.answers.map((answer) => answerRow(answer, ctx))}
+      </div></div>`;
     })}
-    ${other.length ? h`<div class="day"><time>Other</time><div>${other.map((entry) => h`<div class="dec other"><span></span><div class="what prose">${raw(renderMarkdown(entry))}</div></div>`)}</div></div>` : ''}
+    ${other.length ? h`<div class="day"><time>Other</time><div>${other.map((entry) => h`<div class="dec other" data-kind="decision">${kindLabel('decision')}<span></span><div class="what prose">${raw(renderMarkdown(entry, REPO))}</div></div>`)}</div></div>` : ''}
+    ${carried.length ? h`<div class="day carried"><time>Carried over from earlier decisions</time><div>${carriedFold(carried)}</div></div>` : ''}
   </div>
-  ${removedNotes(ctx, DOC_FILES.decisions)}
 </section>`;
 }
 
@@ -553,41 +624,42 @@ function privateView(groups) {
 
 function topBar(ctx) {
   const head = ctx.changes.head;
-  const tab = (view, label, badge = null, quiet = true) =>
-    h`<a class="tab" href="#${view}" data-view="${view}">${label}${badge === null ? '' : h` <span class="badge ${quiet ? 'quiet' : ''}">${badge}</span>`}</a>`;
+  const tab = (view, label, badge = null) => h`<a class="tab" href="#${view}" data-view="${view}">${label}${badge === null ? '' : h` <span class="badge quiet">${badge}</span>`}</a>`;
+  const waiting = ctx.waiting.length;
   return h`<header class="bar" data-region="nav"><div class="bar-in">
-  <a class="brand" href="#for-you"><i aria-hidden="true"></i>Silo</a>
-  <nav class="tabs" aria-label="Views">${tab('for-you', 'For you', ctx.waiting.length, ctx.waiting.length === 0)}${ctx.stack ? tab('stack', 'Stack', ctx.stack.totals.all.undecided) : ''}${tab('product', 'Product')}${tab('journeys', 'Journeys')}${tab('decisions', 'Decisions', ctx.docs.decisions === null ? null : ctx.decisions.total)}${ctx.noteCount ? tab('private', 'Private') : ''}</nav>
+  <a class="brand" href="#${ctx.defaultView}"><i aria-hidden="true"></i>Silo</a>
+  <nav class="tabs" aria-label="Views">${ctx.stack ? tab('stack', 'Stack', ctx.stack.totals.all.undecided) : ''}<a class="tab" href="#for-you" data-view="for-you">For you${waiting ? h` <span class="badge">${waiting}</span>` : ''}</a>${tab('decisions', 'Decisions', ctx.docs.decisions === null ? null : ctx.timeline.total)}${tab('product', 'Product')}${ctx.noteCount ? tab('private', 'Private') : ''}</nav>
   <span class="spacer"></span>
   ${head ? h`<span class="fresh" title="The product documents as of ${head}">docs at ${head.slice(0, 7)}</span>` : h`<span class="fresh off">docs outside git</span>`}
 </div></header>`;
 }
 
 /**
- * view = { items (with state), docs: {product, journeys, decisions} (text or null), changes: docChanges result,
- *   notes: readPrivateNotes result (optional), stack: { features, stages, skipped, rows } or null (optional) }
+ * view = { items (with state), docs: {product, decisions, restart} (text or null), changes: docChanges result,
+ *   notes: readPrivateNotes result (optional), stack: { features, stages, skipped, rows } or null (optional),
+ *   verdictHistory: every verdict row of the store, oldest first (optional; defaults to stack.rows) }
  */
 export function renderPage(view) {
-  const journeys = parseJourneys(view.docs.journeys ?? '').journeys;
   const items = view.items;
   const waiting = items.filter((item) => item.state === 'waiting').sort(forYouOrder);
   const done = items.filter((item) => item.state !== 'waiting' && item.kind !== 'note').sort((a, b) => (lastActivity(a) < lastActivity(b) ? 1 : -1));
   const groups = view.notes ?? [];
+  const stack = prepareStack(view.stack ?? null);
   const ctx = {
     ...view,
-    journeys,
-    journeyById: new Map(journeys.map((journey) => [journey.id, journey])),
     waiting,
     done,
     notes: noteIndex(items),
     targets: noteTargets(view.docs),
     changeIndex: new Map(view.changes.changes.map((change) => [`${change.file}#${change.key}`, change])),
-    decisions: parseDecisions(view.docs.decisions),
+    timeline: decisionTimeline({ decisionsText: view.docs.decisions, features: stack?.features ?? null, verdictRows: view.verdictHistory ?? view.stack?.rows ?? [], items }),
     noteCount: groups.reduce((sum, group) => sum + group.notes.length, 0),
-    stack: prepareStack(view.stack ?? null),
+    stack,
+    entryById: new Map((stack?.features ?? []).map((feature) => [feature.id, feature])),
+    defaultView: stack ? 'stack' : 'for-you',
   };
   return h`<!doctype html>
-<html lang="en">
+<html lang="en" data-default="${ctx.defaultView}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -602,11 +674,10 @@ export function renderPage(view) {
 ${topBar(ctx)}
 <main>
 <div class="lost" id="lost" aria-live="polite"></div>
+${stackView(stack, parseRestart(view.docs.restart))}
 ${forYouView(ctx)}
-${stackView(ctx.stack)}
-${productView(ctx)}
-${journeysView(ctx)}
 ${decisionsView(ctx)}
+${productView(ctx)}
 ${privateView(groups)}
 </main>
 </body>

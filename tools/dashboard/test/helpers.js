@@ -28,31 +28,15 @@ Agents need a place to work that cannot hurt the owner's machine.
 Developers who run agents all day.
 `;
 
-export const JOURNEYS = `# Journeys
+export const RESTART = `# Restart
 
-How a person meets Silo.
+## Where the work stands
 
-## First run
-<!-- id: first-run -->
-
-The owner installs the app and starts a computer.
-
-- [built] Install the app
-- [partial] Start a first computer
-- [missing] See a guided tour
-- [untested] Restore a computer
-- [later] Not a status, plain text
-
-## Share a workspace
-
-Handing a workspace to a teammate.
-
-- [built] Invite by link
-- [missing] Revoke access
-
-\`\`\`mermaid
-graph TD; A-->B;
-\`\`\`
+1. Done: the old tree is frozen.
+2. Done: the feature list.
+3. Now: the owner goes down the **Stack**. The first entries are the starter.
+4. Next: start \`main\` again. Wait for the owner first.
+5. Then: design the shell. Show it first.
 `;
 
 export const DECISIONS = `# Decisions
@@ -72,7 +56,7 @@ export function git(repo, ...args) {
 }
 
 // A throwaway git checkout holding docs/product, with one commit.
-export function makeRepo({ product = PRODUCT, journeys = JOURNEYS, decisions = DECISIONS, commit = true } = {}) {
+export function makeRepo({ product = PRODUCT, decisions = DECISIONS, restart = RESTART, commit = true } = {}) {
   const repo = tempDir('dash-repo-');
   git(repo, 'init', '-q', '-b', 'main');
   git(repo, 'config', 'user.email', 'test@example.com');
@@ -81,8 +65,8 @@ export function makeRepo({ product = PRODUCT, journeys = JOURNEYS, decisions = D
   const folder = path.join(repo, 'docs', 'product');
   fs.mkdirSync(folder, { recursive: true });
   if (product !== null) fs.writeFileSync(path.join(folder, 'PRODUCT.md'), product);
-  if (journeys !== null) fs.writeFileSync(path.join(folder, 'JOURNEYS.md'), journeys);
   if (decisions !== null) fs.writeFileSync(path.join(folder, 'DECISIONS.md'), decisions);
+  if (restart !== null) fs.writeFileSync(path.join(folder, 'RESTART.md'), restart);
   if (commit) commitAll(repo, 'docs');
   return repo;
 }
@@ -102,7 +86,8 @@ export function writeDoc(repo, name, text) {
 export function runCli(args, { home, input, env = {} } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [BIN, ...args], {
-      env: { ...process.env, SILO_DASHBOARD_HOME: home, ...env },
+      // Never the real checkout: a CLI run reads docs/product from a fixture unless the test names one.
+      env: { ...process.env, SILO_DASHBOARD_REPO: tempDir('dash-norepo-'), SILO_DASHBOARD_HOME: home, ...env },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
