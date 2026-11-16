@@ -43,7 +43,7 @@ or infer demand from visitors, stars, or interest.
 - [Documentation index](../README.md): opens with source layout and an
   implementation/operations table. It does not provide a task-based user-guide
   entry point.
-- [Tour transcript](../../website/public/media/tour-transcript.txt) and
+- Tour transcript and
   [website README](../../website/README.md): agent sessions and external apps
   are illustrations; the interactive demo uses read-only sample data.
 - The website specifies supported OS/architectures and KVM, but omits the

@@ -7,12 +7,12 @@
     <meta name="theme-color" content="#f7f7f4" />
     <meta
       name="description"
-      content="Give each AI agent its own Linux or macOS virtual machine, with only the repositories and credentials you pick. An open-source, embeddable engine for Apple Silicon Macs."
+      content="Give each agent its own Linux or macOS computer, with only the repositories and keys you pick."
     />
     <meta property="og:title" content="Silo — Computers for your agents" />
     <meta
       property="og:description"
-      content="Give each AI agent its own Linux or macOS virtual machine, with only the repositories and credentials you pick. An open-source, embeddable engine for Apple Silicon Macs."
+      content="Give each agent its own Linux or macOS computer, with only the repositories and keys you pick."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://silo.amontlabs.com/" />
@@ -36,8 +36,8 @@
       }
     </style>
     <link rel="stylesheet" href="/fonts/fonts.css" />
+    <link rel="stylesheet" href="/src/site.css" />
     <link rel="stylesheet" href="/src/style.css" />
-    <script type="module" src="/src/main.js"></script>
   </head>
   <body>
     <svg class="symbols" width="0" height="0" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -58,44 +58,11 @@
             />
           </g>
         </symbol>
-        <symbol id="download-icon" viewBox="0 0 24 24">
-          <path d="M12 3v12m-5-5 5 5 5-5M4 15v5h16v-5" />
-        </symbol>
-        <symbol id="arrow" viewBox="0 0 24 24">
-          <path d="M4 12h15m-6-6 6 6-6 6" />
-        </symbol>
-        <symbol id="play" viewBox="0 0 24 24">
-          <path d="m8 4 12 8-12 8Z" />
-        </symbol>
         <symbol id="github-icon" viewBox="0 0 24 24">
           <path
             d="M9 19c-4 1-4-2-6-2m14 5v-4a3.5 3.5 0 0 0-1-3c3-.3 6-1.5 6-6a4.5 4.5 0 0 0-1.2-3.2A4 4 0 0 0 20.7 2S19.5 1.7 17 3a12 12 0 0 0-6 0C8.5 1.7 7.3 2 7.3 2a4 4 0 0 0-.1 3.8A4.5 4.5 0 0 0 6 9c0 4.5 3 5.7 6 6a3.5 3.5 0 0 0-1 3v4"
             transform="translate(-2)"
           />
-        </symbol>
-        <symbol id="terminal" viewBox="0 0 24 24">
-          <path d="m4 5 6 6-6 6m9 0h7" />
-        </symbol>
-        <symbol id="monitor" viewBox="0 0 24 24">
-          <rect x="3" y="3" width="18" height="13" rx="2" />
-          <path d="M8 21h8m-4-5v5" />
-        </symbol>
-        <symbol id="network" viewBox="0 0 24 24">
-          <rect x="9" y="2" width="6" height="6" rx="1" />
-          <rect x="2" y="16" width="6" height="6" rx="1" />
-          <rect x="16" y="16" width="6" height="6" rx="1" />
-          <path d="M12 8v4M5 16v-4h14v4" />
-        </symbol>
-        <symbol id="key" viewBox="0 0 24 24">
-          <circle cx="16" cy="8" r="5" />
-          <path d="m12.5 11.5-9 9H2v-4l8.5-8M6 16l2 2" />
-        </symbol>
-        <symbol id="archive" viewBox="0 0 24 24">
-          <path d="M4 9v12h16V9M9 13h6" />
-          <rect x="2" y="3" width="20" height="6" rx="1" />
-        </symbol>
-        <symbol id="close" viewBox="0 0 24 24">
-          <path d="m6 6 12 12M6 18 18 6" />
         </symbol>
       </defs>
     </svg>
@@ -107,11 +74,8 @@
           ><span>Silo</span></a
         >
         <nav aria-label="Main navigation">
-          <a href="#features">Features</a>
           <a href="#why">Why Silo</a>
-          <a href="https://github.com/amontlabs/silo#silo-app"
-            >How to use <span aria-hidden="true">↗</span></a
-          >
+          <a href="/workshop">Workshop</a>
           <a class="source-nav" href="https://github.com/amontlabs/silo"
             >GitHub <span aria-hidden="true">↗</span></a
           >
@@ -127,11 +91,6 @@
               <button type="button" role="menuitemradio" aria-checked="false" data-theme-option="dark" tabindex="-1"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z" /></svg><span>Dark</span><span class="theme-check" aria-hidden="true">✓</span></button>
             </div>
           </div>
-        <a class="button primary small" href="#download"
-          >Download
-          <svg class="icon" aria-hidden="true">
-            <use href="#download-icon" /></svg
-        ></a>
         </div>
       </header>
       <main id="main">
@@ -162,18 +121,14 @@
             with only the repositories and keys you pick.
           </p>
           <div class="hero-actions">
-            <a class="button primary" href="#download"
-              ><svg class="icon" aria-hidden="true">
-                <use href="#download-icon" /></svg
-              >Download Silo</a
-            >
+            <a class="button primary" href="/workshop">Follow the build</a>
             <a class="button" href="https://github.com/amontlabs/silo"
               ><svg class="icon" aria-hidden="true">
                 <use href="#github-icon" /></svg
               >View source</a
             >
           </div>
-          <p class="platform-note">For Apple Silicon Macs · Linux host in progress</p>
+          <p class="platform-note">Being rebuilt in the open</p>
         </section>
         <div class="principles joint">
           <div>
@@ -198,332 +153,14 @@
             </p>
           </div>
         </div>
-        <section id="demo" class="product-showcase joint" aria-label="See Silo in action">
-          <div class="showcase-wallpaper" aria-hidden="true">
-            <span class="showcase-ribbon"></span>
-            <span class="showcase-orbit"></span>
-            <span class="showcase-orbit secondary"></span>
-          </div>
-          <div class="showcase-heading">
-            <span
-              ><span class="status-dot"></span> Explore the app</span
-            ><button class="text-button" data-tour="0">
-              <svg class="icon" aria-hidden="true"><use href="#play" /></svg
-              >Watch the tour <span class="muted">0:59</span>
-            </button>
-          </div>
-          <iframe
-            class="interactive-demo"
-            src="/demo.html"
-            title="Explore Silo with read-only sample data"
-            loading="lazy"
-            sandbox="allow-scripts allow-same-origin"
-          ></iframe>
-          <noscript
-            ><p>
-              <a href="/media/silo-tour.mp4">Watch the Silo tour</a> ·
-              <a href="/media/tour-transcript.txt">Read the transcript</a>
-            </p></noscript
-          >
-          <div class="showcase-caption">
-            <span>Try the sidebar to explore Silo.</span
-            ><span>Read-only · Sample data</span>
-          </div>
-        </section>
-        <section
-          class="workflows section joint"
-          id="features"
-          aria-labelledby="features-title"
-        >
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">A WORKFLOW THAT FEELS LIKE YOURS</p>
-              <h2 id="features-title">Less setup. More building.</h2>
-            </div>
-            <p>
-              Create a computer, connect your tools,<br class="desktop-break" />
-              and pick up where you left off.
-            </p>
-          </div>
-          <div class="workflow-layout">
-            <div
-              class="workflow-tabs"
-              role="tablist"
-              aria-label="Explore Silo workflows"
-              aria-orientation="vertical"
-            >
-              <button
-                role="tab"
-                id="tab-computers"
-                aria-controls="panel-computers"
-                aria-selected="true"
-                tabindex="0"
-                data-workflow="computers"
-              >
-                <span class="tab-heading"
-                  ><svg class="icon" aria-hidden="true">
-                    <use href="#network" /></svg
-                  >All your devices<span class="tab-arrow" aria-hidden="true"
-                    >↗</span
-                  ></span
-                ><span class="tab-description"
-                  >Connect another device over SSH. Its computers appear
-                  alongside your local ones.</span
-                >
-              </button>
-              <button
-                role="tab"
-                id="tab-tools"
-                aria-controls="panel-tools"
-                aria-selected="false"
-                tabindex="-1"
-                data-workflow="tools"
-              >
-                <span class="tab-heading"
-                  ><svg class="icon" aria-hidden="true">
-                    <use href="#terminal" /></svg
-                  >Your tools, already at home<span
-                    class="tab-arrow"
-                    aria-hidden="true"
-                    >↗</span
-                  ></span
-                ><span class="tab-description"
-                  >Open a terminal in your computer, or connect an SSH-capable
-                  editor or coding agent.</span
-                >
-              </button>
-              <button
-                role="tab"
-                id="tab-network"
-                aria-controls="panel-network"
-                aria-selected="false"
-                tabindex="-1"
-                data-workflow="network"
-              >
-                <span class="tab-heading"
-                  ><svg class="icon" aria-hidden="true">
-                    <use href="#monitor" /></svg
-                  >From server to browser<span
-                    class="tab-arrow"
-                    aria-hidden="true"
-                    >↗</span
-                  ></span
-                ><span class="tab-description"
-                  >Find your development server, connect its port, and open it
-                  in your browser.</span
-                >
-              </button>
-            </div>
-            <div class="workflow-panels">
-              <div
-                role="tabpanel"
-                id="panel-computers"
-                aria-labelledby="tab-computers"
-                tabindex="0"
-              >
-                <button
-                  class="feature-media"
-                  data-tour="11"
-                  aria-label="Watch the remote computer demonstration"
-                >
-                  <picture><source data-dark-source media="(prefers-color-scheme: dark)" srcset="/media/overview-dark.png" /><img
-                    src="/media/overview.png"
-                    alt="Local computers and a remote computer on Office Mac in Silo’s overview."
-                    width="1280"
-                    height="720"
-                    loading="lazy"
-                  /></picture><span class="media-play"
-                    ><svg class="icon" aria-hidden="true">
-                      <use href="#play" /></svg
-                    >Watch workflow</span
-                  >
-                </button>
-                <p>Start it here. Run it there. Keep track of both.</p>
-              </div>
-              <div
-                role="tabpanel"
-                id="panel-tools"
-                aria-labelledby="tab-tools"
-                tabindex="0"
-                hidden
-              >
-                <button
-                  class="feature-media"
-                  data-tour="21"
-                  aria-label="Watch the editor and agent SSH demonstration"
-                >
-                  <picture><source data-dark-source media="(prefers-color-scheme: dark)" srcset="/media/tools-dark.png" /><img
-                    src="/media/tools.png"
-                    alt="SSH addresses for connecting tools to a computer on Office Mac."
-                    width="1280"
-                    height="720"
-                    loading="lazy"
-                  /></picture><span class="media-play"
-                    ><svg class="icon" aria-hidden="true">
-                      <use href="#play" /></svg
-                    >Watch workflow</span
-                  >
-                </button>
-                <p>The tools you know, with room to work elsewhere.</p>
-              </div>
-              <div
-                role="tabpanel"
-                id="panel-network"
-                aria-labelledby="tab-network"
-                tabindex="0"
-                hidden
-              >
-                <button
-                  class="feature-media"
-                  data-tour="47"
-                  aria-label="Watch the development server demonstration"
-                >
-                  <picture><source data-dark-source media="(prefers-color-scheme: dark)" srcset="/media/network-dark.png" /><img
-                    src="/media/network.png"
-                    alt="Silo’s Network page shows a reachable development server on port 3000 and two waiting ports."
-                    width="1280"
-                    height="720"
-                    loading="lazy"
-                  /></picture><span class="media-play"
-                    ><svg class="icon" aria-hidden="true">
-                      <use href="#play" /></svg
-                    >Watch workflow</span
-                  >
-                </button>
-                <p>A server in your computer. A preview in your browser.</p>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section class="access section joint" aria-labelledby="access-title">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">THE DETAILS, TAKEN CARE OF</p>
-              <h2 id="access-title">Give each computer what it needs.</h2>
-            </div>
-            <p>
-              Repositories, credentials, and export files.<br
-                class="desktop-break"
-              />
-              Managed in the same place.
-            </p>
-          </div>
-          <div class="feature-grid">
-            <article>
-              <button
-                class="detail-media"
-                data-tour="32"
-                aria-label="Watch the GitHub access demonstration"
-              >
-                <picture><source data-dark-source media="(prefers-color-scheme: dark)" srcset="/media/github-dark.png" /><img
-                  src="/media/github.png"
-                  alt="GitHub repository permissions for a computer in Silo."
-                  width="1280"
-                  height="800"
-                  loading="lazy"
-                /></picture><span class="mini-play"
-                  ><svg class="icon" aria-hidden="true">
-                    <use href="#play" /></svg
-                ></span>
-              </button>
-              <div class="feature-copy">
-                <h3>
-                  <svg class="icon" aria-hidden="true">
-                    <use href="#github-icon" /></svg
-                  >GitHub, with boundaries
-                </h3>
-                <p>
-                  Choose repositories for each computer. Access starts read-only;
-                  allow changes when you need them.
-                </p>
-                <a
-                  href="https://github.com/amontlabs/silo#what-it-does"
-                  >About GitHub access <span aria-hidden="true">→</span></a
-                >
-              </div>
-            </article>
-            <article>
-              <button
-                class="detail-media"
-                data-tour="37"
-                aria-label="Watch the secrets demonstration"
-              >
-                <picture><source data-dark-source media="(prefers-color-scheme: dark)" srcset="/media/secrets-dark.png" /><img
-                  src="/media/secrets.png"
-                  alt="An API secret assigned to a computer and allowed HTTPS domain in Silo."
-                  width="1280"
-                  height="800"
-                  loading="lazy"
-                /></picture><span class="mini-play"
-                  ><svg class="icon" aria-hidden="true">
-                    <use href="#play" /></svg
-                ></span>
-              </button>
-              <div class="feature-copy">
-                <h3>
-                  <svg class="icon" aria-hidden="true"><use href="#key" /></svg
-                  >Secrets, scoped to the job
-                </h3>
-                <p>
-                  Keep credentials in your device’s credential store. Choose
-                  the computers and HTTPS domains that can use them.
-                </p>
-                <a
-                  href="https://github.com/amontlabs/silo/blob/main/docs/SiloUI-SECRETS.md"
-                  >How secrets work <span aria-hidden="true">→</span></a
-                >
-              </div>
-            </article>
-            <article>
-              <button
-                class="detail-media"
-                data-tour="42"
-                aria-label="Watch the computer export and import demonstration"
-              >
-                <picture><source data-dark-source media="(prefers-color-scheme: dark)" srcset="/media/backup-dark.png" /><img
-                  src="/media/backup.png"
-                  alt="Computer export and import controls in Silo."
-                  width="1280"
-                  height="800"
-                  loading="lazy"
-                /></picture><span class="mini-play"
-                  ><svg class="icon" aria-hidden="true">
-                    <use href="#play" /></svg
-                ></span>
-              </button>
-              <div class="feature-copy">
-                <h3>
-                  <svg class="icon" aria-hidden="true">
-                    <use href="#archive" /></svg
-                  >A way back
-                </h3>
-                <p>
-                  Export a local computer to an export file. Import it as a new
-                  computer, ready to start again.
-                </p>
-                <a
-                  href="https://github.com/amontlabs/silo/blob/main/docs/SiloUI-RUNTIME-BACKUP-FINDINGS.md#backup-and-restore"
-                  >About export and import <span aria-hidden="true">→</span></a
-                >
-              </div>
-            </article>
-          </div>
-        </section>
         <section class="why section joint" id="why" aria-labelledby="why-title">
-          <div class="section-heading">
+          <div class="why-layout">
             <div>
               <p class="eyebrow">WHY SILO</p>
               <h2 id="why-title">Assume the agent is compromised.</h2>
+              <p class="why-line">Limit what it can reach and what it is allowed to do.</p>
             </div>
-            <p>
-              Limit what it can reach and what it is<br class="desktop-break" />
-              allowed to do. Say plainly what that misses.
-            </p>
-          </div>
-          <div class="why-grid">
-            <article>
-              <h3>The problem</h3>
-              <p>
+            <p class="why-text">
                 Agents are prompt-injected through what they read. In
                 <a href="https://oddguan.com/blog/comment-and-control-prompt-injection-credential-theft-claude-code-gemini-cli-github-copilot/">Comment and Control</a>,
                 pull request titles and issue comments made coding agents in
@@ -534,188 +171,6 @@
                 found frontier models reliably escape common container
                 misconfigurations.
               </p>
-            </article>
-            <article>
-              <h3>What Silo does</h3>
-              <ul>
-                <li>A virtual machine per computer, with its own kernel and disk.</li>
-                <li>Credentials as placeholders, swapped in on the Mac only for allowed HTTPS hosts.</li>
-                <li>GitHub tokens minted on the Mac for the repositories you pick, read-only by default.</li>
-                <li>Public internet only: no route to your Mac, your network, or other computers (macOS computers once their setup completes).</li>
-                <li>Checkpoints to roll back to.</li>
-              </ul>
-            </article>
-            <article>
-              <h3>What it does not protect</h3>
-              <ul>
-                <li>Data the agent can read can leave: there is no egress allowlist yet.</li>
-                <li>Scoped credentials can still be used, and hosts that echo headers reveal them.</li>
-                <li>Write access to a repository includes its GitHub Actions workflows.</li>
-                <li>Personal access tokens are not scoped.</li>
-                <li>Any process running as you can drive the engine.</li>
-                <li>During setup and Recovery, macOS computers use Apple’s NAT and can reach your Mac and local network.</li>
-                <li>The agent is root inside its own computer.</li>
-              </ul>
-            </article>
-          </div>
-          <div class="compare">
-            <div class="compare-scroll" tabindex="0" role="region" aria-labelledby="compare-title">
-              <table>
-                <caption id="compare-title">How it compares</caption>
-                <thead>
-                  <tr>
-                    <th scope="col"></th>
-                    <th scope="col">Isolation</th>
-                    <th scope="col">Credentials in the sandbox</th>
-                    <th scope="col">Outbound network</th>
-                    <th scope="col">macOS guests</th>
-                    <th scope="col">License</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr><th scope="row">Silo</th><td>VM per computer</td><td>Placeholders; per-repository GitHub tokens</td><td>Public addresses only; no allowlist yet</td><td>Yes</td><td>MIT</td></tr>
-                  <tr><th scope="row">Docker Sandboxes</th><td>microVM</td><td>Sentinel, swapped by a host proxy</td><td>Deny by default, allowlist</td><td>No</td><td>Proprietary, free locally</td></tr>
-                  <tr><th scope="row">Cua</th><td>VMs or microVMs; gVisor or runc containers</td><td>No proxy injection documented</td><td>IP allow and deny lists (Linux runtimes)</td><td>Yes</td><td>MIT core</td></tr>
-                  <tr><th scope="row">srt</th><td>OS sandbox, shared kernel</td><td>Deny, or sentinel swapped on egress</td><td>Deny by default, allowlist</td><td>N/A</td><td>Apache-2.0</td></tr>
-                  <tr><th scope="row">microsandbox</th><td>microVM</td><td>Secrets bound to allowed hosts</td><td>Public by default; opt-in allowlist</td><td>No</td><td>Apache-2.0</td></tr>
-                  <tr><th scope="row">E2B</th><td>Firecracker microVM, hosted</td><td>Reference, swapped by an egress proxy</td><td>Open by default; allow and deny lists</td><td>Not documented</td><td>Apache-2.0 core</td></tr>
-                  <tr><th scope="row">Daytona</th><td>Container or VM, hosted</td><td>Placeholder, swapped by a proxy</td><td>Firewall and allowlists</td><td>Yes, on request</td><td>Proprietary service</td></tr>
-                  <tr><th scope="row">Apple container</th><td>VM per container</td><td>Not documented</td><td>No filter documented</td><td>No</td><td>Apache-2.0</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <p class="compare-note">
-              Silo builds on microsandbox and has no single feature nobody else
-              has; several tools above already filter egress. Researched
-              2026-11-03 from each project’s documentation.
-              <a href="https://github.com/amontlabs/silo#how-it-compares">Sources and full table <span aria-hidden="true">→</span></a>
-              <a href="https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md">Threat model <span aria-hidden="true">→</span></a>
-              <a href="https://github.com/amontlabs/silo/blob/main/docs/evals/README.md">Isolation evals <span aria-hidden="true">→</span></a>
-            </p>
-          </div>
-        </section>
-        <section
-          class="download-section section joint"
-          id="download"
-          aria-labelledby="download-title"
-        >
-          <div class="download-heading">
-            <svg class="download-brand" aria-hidden="true">
-              <use href="#silo" />
-            </svg>
-            <h2 id="download-title">Make room for your next idea.</h2>
-            <p>
-              Get Silo. The runtime and Git tools come with it; the Linux image
-              downloads once before your first computer.
-            </p>
-            <a
-              class="release-link"
-              href="https://github.com/amontlabs/silo/releases/latest"
-              >Release notes <span aria-hidden="true">↗</span></a
-            >
-          </div>
-          <div class="download-options">
-            <article class="download-card">
-              <div class="os-heading">
-                <h3>macOS</h3>
-                <span class="os-tag">Apple Silicon</span>
-              </div>
-              <p class="requirements">macOS 15 or later · M-series Macs</p>
-              <a
-                class="button primary download-link"
-                href="https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg"
-                ><svg class="icon" aria-hidden="true">
-                  <use href="#download-icon" /></svg
-                >Download for macOS<span class="file-type">.dmg</span></a
-              >
-              <p class="install-note">
-                Open the disk image and drag Silo to Applications.
-              </p>
-              <details>
-                <summary>
-                  First launch on macOS<span aria-hidden="true">+</span>
-                </summary>
-                <p>
-                  Silo is not notarized. If macOS blocks the first launch, open
-                  System Settings → Privacy &amp; Security and choose Open
-                  Anyway.
-                </p>
-              </details>
-            </article>
-            <article class="download-card">
-              <div class="os-heading">
-                <h3>Linux</h3>
-                <span class="os-tag">In progress</span>
-              </div>
-              <p class="requirements">
-                Engine builds and passes its tests in CI · daemon next
-              </p>
-              <p class="install-note">
-                Linux guests run on Apple Silicon Macs with macOS 15 or later today. A Linux host needs the
-                Linux engine daemon, which is the next milestone. Older Linux
-                app packages are frozen at v0.11.1 and get no updates.
-              </p>
-              <div class="linux-alternatives">
-                <a href="https://github.com/amontlabs/silo#platforms"
-                  >Platform status <span aria-hidden="true">↗</span></a
-                ><a href="https://github.com/amontlabs/silo/releases/tag/v0.11.1"
-                  >v0.11.1 packages <span aria-hidden="true">↗</span></a
-                >
-              </div>
-            </article>
-          </div>
-        </section>
-        <section class="faq section joint" aria-labelledby="faq-title">
-          <h2 id="faq-title">A few things to know.</h2>
-          <div class="faq-list">
-            <details>
-              <summary>
-                Do I need to change my editor?<span aria-hidden="true">+</span>
-              </summary>
-              <p>
-                No. Choose your preferred editor and terminal in Silo. Open a
-                project from Files, or use SSH access with a compatible editor
-                or coding agent.
-              </p>
-            </details>
-            <details>
-              <summary>
-                How do remote computers work?<span aria-hidden="true">+</span>
-              </summary>
-              <p>
-                Install Silo on both devices. Enable SSH access and Allow connections
-                from other devices on the owning device, then connect from your device. Keep
-                Silo running on the owning device. Manage its GitHub account, secrets,
-                exports, and imports there.
-              </p>
-              <a
-                href="https://github.com/amontlabs/silo/blob/main/docs/SiloUI-CONNECTIONS.md"
-                >Remote setup guide →</a
-              >
-            </details>
-            <details>
-              <summary>
-                What happens when I stop a computer?<span aria-hidden="true"
-                  >+</span
-                >
-              </summary>
-              <p>
-                Your files survive stops, restarts, and app updates. Silo's engine
-                runs in the background, so closing or quitting the app doesn't stop
-                your computers: with computers running, Quit asks whether to keep
-                them running or stop them and quit. Computers on other devices keep
-                running.
-              </p>
-            </details>
-            <details>
-              <summary>
-                Do I need to connect GitHub?<span aria-hidden="true">+</span>
-              </summary>
-              <p>
-                No. GitHub is optional. You can create a computer and work in its
-                terminal without connecting an account.
-              </p>
-            </details>
           </div>
         </section>
       </main>
@@ -728,63 +183,14 @@
           <p>A space for your work.</p>
         </div>
         <nav aria-label="Footer navigation">
-          <a href="https://github.com/amontlabs/silo#silo-app"
-            >How to use ↗</a
-          ><a href="https://github.com/amontlabs/silo/releases">Releases ↗</a
-          ><a href="https://github.com/amontlabs/silo/issues"
+          <a href="https://github.com/amontlabs/silo/issues"
             >Report an issue ↗</a
           ><a href="https://github.com/amontlabs/silo">Source code ↗</a>
         </nav>
         <div class="footer-note">
-          <span>Built with MicroSandbox.</span>
 <a href="#main">Back to top ↑</a>
         </div>
       </footer>
     </div>
-    <dialog id="tour-dialog" aria-labelledby="tour-title">
-      <div class="dialog-heading">
-        <h2 id="tour-title">Silo, in action</h2>
-        <button class="close-button" aria-label="Close product tour">
-          <svg class="icon" aria-hidden="true"><use href="#close" /></svg>
-        </button>
-      </div>
-      <video
-        id="tour-video"
-        controls
-        playsinline
-        preload="none"
-        poster="/media/silo-tour.png"
-      >
-        <source src="/media/silo-tour.mp4" type="video/mp4" />
-        <track
-          kind="captions"
-          src="/media/tour.vtt"
-          srclang="en"
-          label="English descriptions"
-          default
-        />
-      </video>
-      <div class="video-chapters" aria-label="Video chapters">
-        <button data-chapter="3">Agent desktop</button
-        ><button data-chapter="11">Computers</button
-        ><button data-chapter="16">Editor &amp; terminal</button
-        ><button data-chapter="21">SSH &amp; agents</button
-        ><button data-chapter="32">GitHub</button
-        ><button data-chapter="37">Secrets</button
-        ><button data-chapter="42">Export and Import</button
-        ><button data-chapter="47">Networking</button>
-      </div>
-      <p class="video-note">
-        Silent film using production Silo components with sample data. Agent
-        sessions, guest desktop, editor, terminal, and browser content are
-        illustrations.
-        <a href="/media/tour-transcript.txt">Read the transcript</a>
-      </p>
-      <p id="video-error" role="status" hidden>
-        The video could not play.
-        <a href="/media/silo-tour.mp4">Open the video directly</a> or
-        <a href="/media/tour-transcript.txt">read the transcript</a>.
-      </p>
-    </dialog>
   </body>
 </html>
