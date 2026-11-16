@@ -347,7 +347,14 @@ describe('a person who can decide', () => {
     expect(screen.getByText('1 dropped')).toBeInTheDocument();
     expect(within(itemOf('Create and delete a computer')).queryByText('planned')).not.toBeInTheDocument();
     expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'drop' }]);
-    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
+    // The page returns to the refused row and says so there.
+    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
+    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById('entry-computers')).toContainElement(screen.getByRole('alert'));
+    expect(location.hash).toBe('#entry-computers');
+    // The row that came back is guarded again.
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
+    expect(posts(calls, 'verdict')).toHaveLength(1);
   });
 
   it('needs a note to refine', async () => {
@@ -573,11 +580,11 @@ describe('review fixes', () => {
     await userEvent.type(screen.getByRole('textbox', { name: 'Note' }), 'Split it.');
     await userEvent.click(screen.getByRole('button', { name: 'Refine' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Run a command: not saved. GitHub failed.');
-    // The queue moved on; reopening the row finds the note where it was.
-    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'false');
-    await userEvent.click(rowButton('Run a command'));
-    await userEvent.click(screen.getByRole('button', { name: 'Refine…' }));
+    // The page is back on the row with the note box open and its text in it.
+    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('textbox', { name: 'Note' })).toHaveValue('Split it.');
+    expect(document.getElementById('entry-exec')).toContainElement(screen.getByRole('alert'));
+    expect(screen.queryByText('Split it.', { selector: '.ws-c p' })).not.toBeInTheDocument();
   });
 
   it('never opens or acts on a suggestion before it has its issue', async () => {
@@ -722,3 +729,55 @@ describe('contract changes', () => {
 function cleanupAll() {
   cleanup();
 }
+
+describe('third review round', () => {
+  it('checks the person’s vote once per opening, and never retries a failure', async () => {
+    const calls = mockApi({ me: visitor, routes: { 'GET vote': () => refused(502, 'GitHub failed.') } });
+    await renderApp();
+    await userEvent.click(rowButton('Run a command'));
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Several keystrokes');
+    const checks = () => calls.filter((call) => call.method === 'GET' && call.path === 'vote').length;
+    expect(checks()).toBe(1);
+    expect(within(itemOf('Run a command')).getByRole('button', { name: /4 votes/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await userEvent.click(rowButton('Run a command'));
+    await userEvent.click(rowButton('Run a command'));
+    await waitFor(() => expect(checks()).toBe(2));
+  });
+
+  it('remembers the decider’s own text after Decide for six minutes', async () => {
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#issue-42');
+    const first = await renderApp();
+    await ownerOn('After a task ends');
+    await userEvent.type(screen.getByRole('textbox', { name: 'Decision' }), 'It is deleted.');
+    await userEvent.click(screen.getByRole('button', { name: 'Decide' }));
+    expect(await screen.findByText('It is deleted.', { selector: '.ws-c p' })).toBeInTheDocument();
+    await act(async () => {});
+    first.unmount();
+    history.replaceState(null, '', '/workshop#issue-42');
+    await renderApp();
+    expect(await screen.findByText('It is deleted.', { selector: '.ws-c p' })).toBeInTheDocument();
+    expect(within(itemOf('After a task ends')).getByText('💬 6')).toBeInTheDocument();
+  });
+
+  it('remembers the note of a verdict as the decider’s comment', async () => {
+    const time = clock();
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#entry-exec');
+    const first = await renderApp();
+    await ownerOn('Run a command');
+    time.advance(OPEN_GUARD_MS);
+    await userEvent.click(screen.getByRole('button', { name: 'Refine…' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Note' }), 'Split it.');
+    await userEvent.click(screen.getByRole('button', { name: 'Refine' }));
+    await act(async () => {});
+    first.unmount();
+    history.replaceState(null, '', '/workshop#entry-exec');
+    await renderApp();
+    await ownerOn('Run a command');
+    expect(await screen.findByText('Split it.', { selector: '.ws-c p' })).toBeInTheDocument();
+    expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
+    expect(screen.getByText('Being refined.')).toBeInTheDocument();
+  });
+});

@@ -87,6 +87,7 @@ export function App({ data, accountSlot }: AppProps) {
   const [droppedOpen, setDroppedOpen] = useState(false);
   const [pending, setPending] = useState<ReadonlySet<number>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
+  const [rowNotice, setRowNotice] = useState<{ key: string; text: string } | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [refining, setRefining] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
@@ -155,6 +156,7 @@ export function App({ data, accountSlot }: AppProps) {
     setOpenKey(key);
     openKeyRef.current = key;
     setRefining(null);
+    setRowNotice((current) => (current?.key === key ? current : null));
     openedAt.current = Date.now();
     setHash(key);
     if (!key) return;
@@ -176,20 +178,20 @@ export function App({ data, accountSlot }: AppProps) {
     const row = openKey ? rowByKey.get(openKey) : undefined;
     if (liveOk && row?.issue != null && details[row.issue] === undefined) loadDetail(row.issue);
   }, [liveOk, openKey, rowByKey, details, loadDetail]);
-  const askedVotes = useRef(new Set<number>());
+  // One check of the person's own vote per opening of a row, never retried: a failure leaves 👍 off.
+  const signedInAs = me?.login ?? null;
   useEffect(() => {
     const row = openKey ? rowByKey.get(openKey) : undefined;
     const n = row?.issue;
-    if (!liveOk || !me || n == null || n <= 0 || (row?.kind !== 'entry' && row?.kind !== 'suggestion') || askedVotes.current.has(n)) return;
-    askedVotes.current.add(n);
+    if (!liveOk || !signedInAs || n == null || n <= 0 || (row?.kind !== 'entry' && row?.kind !== 'suggestion')) return;
     api.myVote(n).then(
       (on) => setVotes((current) => (n in current ? current : { ...current, [n]: on })),
       (error) => {
-        askedVotes.current.delete(n);
         if (error instanceof ApiError && error.status === 401) signedOut();
       },
     );
-  });
+    // Re-rendering, or the plan changing under the same open row, does not ask again.
+  }, [openKey, liveOk, signedInAs]);
 
   // Deep links: `#entry-<id>`, `#issue-<n>` or `#decided-<i>` opens that row, now or once it exists.
   const openRowRef = useRef(openRow);
@@ -269,6 +271,24 @@ export function App({ data, accountSlot }: AppProps) {
     setNotice('Sign in again.');
   }
 
+  const addOwnComment = (n: number, text: string): Comment | null => {
+    if (!me) return null;
+    const comment: Comment = { id: `pending-${Date.now()}`, author: me.login, avatar: me.avatar, bot: false, createdAt: new Date().toISOString(), text };
+    setDetails((current) => {
+      const detail = current[n];
+      return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: [...detail.comments, comment] } } : current;
+    });
+    return comment;
+  };
+
+  const removeOwnComment = (n: number, comment: Comment | null) => {
+    if (!comment) return;
+    setDetails((current) => {
+      const detail = current[n];
+      return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: detail.comments.filter((c) => c.id !== comment.id) } } : current;
+    });
+  };
+
   const failed = (what: string, error: unknown) => {
     if (error instanceof ApiError && error.status === 401) {
       signedOut();
@@ -316,21 +336,37 @@ export function App({ data, accountSlot }: AppProps) {
     const change = verdictPatch(verdict);
     setBusy(n, true);
     setNotice(null);
-    patchIssue(n, () => change);
+    setRowNotice(null);
+    patchIssue(n, (issue) => (note === undefined ? change : { ...change, comments: issue.comments + 1 }));
+    const own = note === undefined ? null : addOwnComment(n, note);
     if (openKey === row.key) advanceFrom(row);
     try {
       await api.verdict(n, verdict, note);
-      remember(n, ['verdict', 'state', 'reason', 'closedAt']);
-      if (note !== undefined) loadDetail(n, true);
+      if (note === undefined) remember(n, ['verdict', 'state', 'reason', 'closedAt']);
+      else {
+        remember(n, ['verdict', 'state', 'reason', 'closedAt', 'comments'], own ?? undefined);
+        loadDetail(n, true);
+      }
     } catch (error) {
-      patchIssue(n, (issue) => (issue.verdict === change.verdict && issue.state === change.state
-        ? { verdict: before.verdict, state: before.state, reason: before.reason, closedAt: before.closedAt }
-        : null));
+      patchIssue(n, (issue) => ({
+        ...(issue.verdict === change.verdict && issue.state === change.state
+          ? { verdict: before.verdict, state: before.state, reason: before.reason, closedAt: before.closedAt }
+          : {}),
+        ...(note === undefined ? {} : { comments: Math.max(0, issue.comments - 1) }),
+      }));
+      removeOwnComment(n, own);
+      if (error instanceof ApiError && error.status === 401) {
+        signedOut();
+        return;
+      }
+      // Back to the row that was refused, with what was open there.
+      openRow(row.key, { focus: true });
       if (note !== undefined) {
         setDrafts((current) => ({ ...current, [`note-${row.key}`]: current[`note-${row.key}`] || note }));
-        if (openKeyRef.current === row.key) setRefining(row.key);
+        setRefining(row.key);
       }
-      failed(row.name, error);
+      const message = error instanceof ApiError ? error.message : 'Something went wrong.';
+      setRowNotice({ key: row.key, text: `${row.name}: not saved. ${message}` });
     } finally {
       setBusy(n, false);
     }
@@ -401,12 +437,14 @@ export function App({ data, accountSlot }: AppProps) {
     setBusy(n, true);
     setDrafts((current) => ({ ...current, [row.key]: '' }));
     patchIssue(n, (issue) => ({ state: 'closed', reason: 'completed', closedAt: new Date().toISOString(), comments: issue.comments + 1 }));
+    const own = addOwnComment(n, text);
     try {
       await api.decide(n, text);
-      remember(n, ['state', 'reason', 'closedAt', 'comments']);
+      remember(n, ['state', 'reason', 'closedAt', 'comments'], own ?? undefined);
       loadDetail(n, true);
     } catch (error) {
       patchIssue(n, (issue) => ({ state: before.state, reason: before.reason, closedAt: before.closedAt, comments: Math.max(0, issue.comments - 1) }));
+      removeOwnComment(n, own);
       setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
       failed(row.name, error);
     } finally {
@@ -645,6 +683,7 @@ export function App({ data, accountSlot }: AppProps) {
         {row.recordings.map((file) => (
           <video className="ws-recording" key={file} controls preload="metadata" src={`/workshop/recordings/${encodeURIComponent(file)}`} />
         ))}
+        {rowNotice?.key === row.key ? <p className="ws-notice ws-row-notice" role="alert">{rowNotice.text}</p> : null}
         {stateLine(row)}
         {talk(row)}
       </div>

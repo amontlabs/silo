@@ -530,3 +530,7 @@
     padding: 6px 8px;
   }
 }
+.ws-row-notice {
+  margin: 12px 0 0;
+  max-width: 60ch;
+}
