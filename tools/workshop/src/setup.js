@@ -6,7 +6,7 @@
 // variables Vercel needs go to ~/.local/state/silo-workshop/vercel.env (0600).
 // https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { credentialsFile, stateDir } from './credentials.js';
@@ -41,6 +41,12 @@ function page(title, inner) {
 
 function existing(deps) {
   const found = CREDENTIAL_NAMES.filter((name) => deps.keychain.get(name));
+  if (!found.length && existsSync(vercelEnvPath(deps.home))) {
+    // A setup that made the App but could not reach the Keychain: finishing it never needs a second App.
+    throw new Failure(
+      `${vercelEnvPath(deps.home)} holds the credentials of an App already created; run \`workshop store\` to put them in the Keychain (delete that file only to register a new App)`,
+    );
+  }
   if (found.length) return 'the Keychain';
   if (existsSync(credentialsFile(deps.home))) return credentialsFile(deps.home);
   if (existsSync(vercelEnvPath(deps.home))) return vercelEnvPath(deps.home);
@@ -78,8 +84,11 @@ export async function setup({ org, site, replace, deps }) {
       res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
       res.end(html);
     };
+    const { port } = server.address();
+    if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`) {
+      return send(421, page('Wrong address', '<p>Open this page at 127.0.0.1.</p>'));
+    }
     if (req.method === 'GET' && url.pathname === '/') {
-      const { port } = server.address();
       const json = JSON.stringify(manifest({ site: origin, redirectUrl: `http://127.0.0.1:${port}/callback` }));
       const action = `${web}/organizations/${encodeURIComponent(org)}/settings/apps/new?state=${state}`;
       return send(
@@ -139,13 +148,14 @@ async function exchange({ gh, code, origin, deps, web }) {
     WORKSHOP_PRIVATE_KEY: data?.pem ?? '',
   };
   if (Object.values(values).some((value) => !value)) throw new Failure('GitHub did not return the App credentials');
-  for (const [name, value] of Object.entries(values)) deps.keychain.set(name, value);
   const env = {
     ...values,
     WORKSHOP_SESSION_SECRET: randomBytes(32).toString('base64'),
     WORKSHOP_REPO: deps.repo,
     WORKSHOP_SITE_ORIGIN: origin,
   };
+  // The file first: once GitHub has made the App, its credentials exist nowhere
+  // else, so a Keychain failure must not lose them.
   const dir = stateDir(deps.home);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = vercelEnvPath(deps.home);
@@ -153,5 +163,59 @@ async function exchange({ gh, code, origin, deps, web }) {
   chmodSync(path, 0o600);
   const slug = data.slug;
   const installUrl = `${(data.html_url ?? `${web}/apps/${slug}`).replace(/\/$/, '')}/installations/new`;
+  try {
+    storeAll(values, deps.keychain);
+  } catch (error) {
+    throw new Failure(
+      `the App ${slug} exists on GitHub and its credentials are in ${path}, but the Keychain failed (${error.message}); ` +
+        `run \`workshop store\` to finish, then install it: ${installUrl}`,
+    );
+  }
   return { app: slug, installUrl, envFile: path };
+}
+
+function storeAll(values, keychain) {
+  for (const [name, value] of Object.entries(values)) keychain.set(name, value);
+}
+
+/** Reads vercel.env as setup wrote it: NAME="json string" per line. */
+export function readVercelEnv(path) {
+  let stat;
+  try {
+    stat = statSync(path);
+  } catch {
+    throw new Failure(`${path} does not exist: run \`workshop setup\` first`);
+  }
+  if ((stat.mode & 0o077) !== 0) throw new Failure(`${path} must be readable only by you (chmod 600); refusing to read it`);
+  const values = {};
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    const match = line.match(/^([A-Z_]+)=(".*")$/);
+    let value;
+    try {
+      value = match && JSON.parse(match[2]);
+    } catch {
+      value = null;
+    }
+    if (typeof value !== 'string') throw new Failure(`${path} has a line that is not NAME="value"`);
+    values[match[1]] = value;
+  }
+  return values;
+}
+
+/** `workshop store`: puts the four App credentials from vercel.env into the Keychain. */
+export function store({ replace, deps }) {
+  if (!deps.keychain.available()) throw new Failure('the Keychain is locked or unavailable');
+  const already = CREDENTIAL_NAMES.some((name) => deps.keychain.get(name))
+    ? 'the Keychain'
+    : existsSync(credentialsFile(deps.home))
+      ? credentialsFile(deps.home)
+      : null;
+  if (already && !replace) throw new Failure(`Workshop credentials already exist in ${already}; pass --replace to overwrite them`);
+  const path = vercelEnvPath(deps.home);
+  const values = readVercelEnv(path);
+  const missing = CREDENTIAL_NAMES.filter((name) => !values[name]);
+  if (missing.length) throw new Failure(`${path} has no ${missing.join(', ')}`);
+  storeAll(Object.fromEntries(CREDENTIAL_NAMES.map((name) => [name, values[name]])), deps.keychain);
+  return { stored: CREDENTIAL_NAMES, from: path };
 }

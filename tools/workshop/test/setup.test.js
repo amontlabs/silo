@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync, statSync } from 'node:fs';
+import { chmodSync, readFileSync, statSync } from 'node:fs';
+import { request } from 'node:http';
 import { dirname } from 'node:path';
 import { test } from 'node:test';
+import { Failure } from '../src/names.js';
 import { vercelEnvPath } from '../src/setup.js';
 import { startFake } from './fake-github.js';
 import { assertNoSecrets, fakeKeychain, run, sandbox, secretsOf } from './helpers.js';
@@ -132,4 +134,104 @@ test('setup rejects a site that is not https', async (t) => {
   const box = sandbox(t, { features: '', decisions: '' });
   const result = await run(['setup', '--site', 'http://example.com'], { fake, box, keychain: fakeKeychain() });
   assert.equal(result.code, 2);
+});
+
+function lockedKeychain() {
+  return {
+    available: () => true,
+    get: () => {
+      throw new Failure('the Keychain is locked or unavailable');
+    },
+    set: () => {
+      throw new Failure('the Keychain is locked or unavailable');
+    },
+  };
+}
+
+test('a locked Keychain stops setup and the other commands; it never reads as "no credentials"', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const box = sandbox(t, { features: '', decisions: '' });
+  for (const argv of [['setup'], ['setup', '--replace'], ['sync'], ['store']]) {
+    const result = await run(argv, { fake, box, keychain: lockedKeychain() });
+    assert.equal(result.code, 1, argv.join(' '));
+    assert.match(result.stderr, /the Keychain is locked or unavailable/);
+    assert.doesNotMatch(result.stderr, /missing/);
+  }
+  assert.equal(fake.manifests.length, 0);
+});
+
+test('a Keychain failure after the App is made keeps its credentials in vercel.env; store finishes and no second App is made', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const box = sandbox(t, { features: '', decisions: '' });
+  const keychain = fakeKeychain();
+  let failing = true;
+  const flaky = {
+    available: () => true,
+    get: (name) => keychain.get(name),
+    set: (name, value) => {
+      if (failing) throw new Failure('the Keychain is locked or unavailable: could not store ' + name);
+      keychain.set(name, value);
+    },
+  };
+  const first = await driveSetup({ fake, box, keychain: flaky });
+  assert.equal(first.result.code, 1);
+  assert.match(first.result.stderr, /the App silo-workshop exists on GitHub and its credentials are in .*vercel\.env.*run `workshop store`/);
+  assert.equal(keychain.store.size, 0);
+  const envPath = vercelEnvPath(box.home);
+  assert.equal(statSync(envPath).mode & 0o777, 0o600);
+  assert.match(readFileSync(envPath, 'utf8'), /WORKSHOP_PRIVATE_KEY=/);
+  assertNoSecrets(first.result.stderr + first.page, [...secretsOf(fake)]);
+
+  failing = false;
+  for (const args of [[], ['--replace']]) {
+    const retry = await driveSetup({ fake, box, keychain: flaky, args });
+    assert.equal(retry.result.code, 1);
+    assert.match(retry.result.stderr, /run `workshop store`/);
+  }
+  assert.equal(fake.manifests.length, 1, 'never a second App');
+
+  const stored = await run(['store'], { fake, box, keychain: flaky });
+  assert.equal(stored.code, 0, stored.stderr);
+  assert.equal(keychain.store.get('WORKSHOP_PRIVATE_KEY'), fake.createdApp.pem);
+  assert.equal(keychain.store.get('WORKSHOP_CLIENT_SECRET'), fake.createdApp.client_secret);
+  assert.ok(!keychain.store.has('WORKSHOP_SESSION_SECRET'));
+  const again = await run(['store'], { fake, box, keychain: flaky });
+  assert.equal(again.code, 1);
+  assert.match(again.stderr, /already exist.*--replace/);
+  assert.equal((await run(['store', '--replace'], { fake, box, keychain: flaky })).code, 0);
+
+  chmodSync(envPath, 0o644);
+  const loose = await run(['store', '--replace'], { fake, box, keychain: flaky });
+  assert.equal(loose.code, 1);
+  assert.match(loose.stderr, /chmod 600/);
+});
+
+test('the setup server refuses any Host but 127.0.0.1 or localhost on its port', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const box = sandbox(t, { features: '', decisions: '' });
+  let opened;
+  const opening = new Promise((resolve) => (opened = resolve));
+  const running = run(['setup'], { fake, box, keychain: fakeKeychain(), overrides: { openBrowser: (url) => opened(url), setupTimeoutMs: 2000 } });
+  const local = new URL(await opening);
+  const ask = (host, path = '/') =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: local.port, path, headers: { host } }, (res) => {
+        res.resume();
+        resolve(res.statusCode);
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  assert.equal(await ask(`evil.example:${local.port}`), 421);
+  assert.equal(await ask(`127.0.0.1:${Number(local.port) + 1}`), 421);
+  assert.equal(await ask('127.0.0.1'), 421);
+  assert.equal(await ask(`evil.example:${local.port}`, '/callback?code=x&state=y'), 421);
+  assert.equal(await ask(`localhost:${local.port}`), 200);
+  assert.equal(await ask(`127.0.0.1:${local.port}`), 200);
+  const result = await running;
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /timed out/);
 });

@@ -102,6 +102,11 @@ export class GitHub {
     return { app, installation };
   }
 
+  /** True for this App's own bot account. */
+  isOwnBot(user) {
+    return Boolean(user) && user.login === this.botLogin;
+  }
+
   isBot(user) {
     return !user || user.type === 'Bot' || user.login === this.botLogin;
   }

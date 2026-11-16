@@ -8,8 +8,9 @@ import { join } from 'node:path';
 import { stateDir } from './credentials.js';
 import { referencedIssues } from './decisions.js';
 import { decisionsPath, featuresPath, readText, writeText } from './files.js';
-import { joinFeatures, parseFeatures, setField } from './jsonl.js';
-import { ENTRY_MARKER, KIND_LABELS, VERDICTS, verdictLabel } from './names.js';
+import { parseFeatures } from './jsonl.js';
+import { entryIndex, updateFeature } from './match.js';
+import { KIND_LABELS, VERDICTS, verdictLabel } from './names.js';
 
 const DECIDERS = new Set(['admin', 'write', 'maintain']);
 
@@ -56,48 +57,53 @@ export async function pull({ gh, root, home, write, now = new Date() }) {
   };
 
   // Entries whose verdict on GitHub differs from the file.
-  const path = featuresPath(root);
-  const lines = parseFeatures(readText(path));
-  const byNumber = new Map(entries.map((issue) => [issue.number, issue]));
-  const byMarker = new Map();
-  for (const issue of entries) {
-    const marker = (issue.body ?? '').match(ENTRY_MARKER);
-    if (marker && !byMarker.has(marker[1])) byMarker.set(marker[1], issue);
-  }
+  const lines = parseFeatures(readText(featuresPath(root)));
+  const index = entryIndex(entries, gh);
   const verdicts = [];
-  for (const line of lines) {
-    const entry = line.entry;
+  for (const { entry } of lines) {
     if (!entry) continue;
-    const issue = entry.issue != null ? byNumber.get(entry.issue) : byMarker.get(entry.id);
+    const numbered = entry.issue != null ? index.byNumber.get(entry.issue) : null;
+    const issue = numbered ? (numbered.id === entry.id ? numbered.issue : null) : entry.issue == null ? index.byMarker.get(entry.id) : null;
     if (!issue) continue;
     const { verdict, conflict } = githubVerdict(issue);
+    const file = entry.verdict ?? null;
     const built = issue.state === 'closed' && issue.state_reason === 'completed';
     if (conflict) {
-      verdicts.push({ id: entry.id, issue: issue.number, file: entry.verdict ?? null, github: null, conflict, confirmed: false });
+      verdicts.push({ id: entry.id, issue: issue.number, file, github: null, conflict, confirmed: false });
       continue;
     }
-    if (verdict == null || verdict === (entry.verdict ?? null)) continue;
+    if (verdict == null) {
+      // A verdict label removed on GitHub is reported, never written: the file keeps its carried-over verdict.
+      if (file != null && (await lastVerdictEvent(gh, issue))?.event === 'unlabeled') {
+        verdicts.push({ id: entry.id, issue: issue.number, file, github: null, cleared: true, confirmed: false });
+      }
+      continue;
+    }
+    if (verdict === file) continue;
     const by = await verdictAuthor(gh, issue, verdict);
     const confirmed = Boolean(by) && (await canDecide(by));
-    verdicts.push({ id: entry.id, issue: issue.number, file: entry.verdict ?? null, github: verdict, built, by: by?.login ?? null, confirmed, line });
+    verdicts.push({ id: entry.id, issue: issue.number, file, github: verdict, built, by: by?.login ?? null, confirmed });
   }
 
-  // Decisions closed on GitHub that DECISIONS.md does not reference yet.
+  // Decisions closed on GitHub that DECISIONS.md does not reference yet. One
+  // counts as decided only when the person who closed it can decide; the
+  // outcome is that person's last comment up to 60 seconds after the close.
   const referenced = referencedIssues(readText(decisionsPath(root)));
   const decided = [];
+  const closedWithoutOutcome = [];
   for (const issue of decisions) {
     if (issue.state !== 'closed' || issue.state_reason !== 'completed' || referenced.has(issue.number)) continue;
-    const comments = await gh.paginate(gh.repoPath(`/issues/${issue.number}/comments`));
-    const closedAt = Date.parse(issue.closed_at ?? '') || Infinity;
-    const closing = comments
-      .filter((c) => !gh.isBot(c.user) && Date.parse(c.created_at) <= closedAt + 60_000)
-      .at(-1);
-    decided.push({
-      issue: issue.number,
-      title: issue.title,
-      closedAt: issue.closed_at,
-      outcome: closing ? { author: closing.user.login, text: closing.body } : null,
-    });
+    const events = await gh.paginate(gh.repoPath(`/issues/${issue.number}/events`));
+    const closer = events.filter((e) => e.event === 'closed').at(-1)?.actor ?? null;
+    const row = { issue: issue.number, title: issue.title, closedAt: issue.closed_at, closedBy: closer?.login ?? null };
+    let closing = null;
+    if (closer && (await canDecide(closer))) {
+      const comments = await gh.paginate(gh.repoPath(`/issues/${issue.number}/comments`));
+      const closedAt = Date.parse(issue.closed_at ?? '') || Infinity;
+      closing = comments.filter((c) => c.user?.login === closer.login && Date.parse(c.created_at) <= closedAt + 60_000).at(-1) ?? null;
+    }
+    if (closing) decided.push({ ...row, outcome: { author: closing.user.login, text: closing.body } });
+    else closedWithoutOutcome.push(row);
   }
 
   const suggested = suggestions
@@ -118,25 +124,33 @@ export async function pull({ gh, root, home, write, now = new Date() }) {
     .map(({ c, issue }) => ({ issue, title: workshop.get(issue).title, author: c.user.login, createdAt: c.created_at, text: c.body }));
 
   let written = 0;
+  const skipped = [];
   if (write) {
     for (const v of verdicts) {
-      if (!v.confirmed) continue;
-      v.line.raw = setField(v.line.raw, 'verdict', v.github);
-      v.line.entry = JSON.parse(v.line.raw);
-      written += 1;
+      if (!v.confirmed || v.github == null) continue;
+      if (updateFeature(root, v.id, 'verdict', v.github)) written += 1;
+      else skipped.push(`${v.id}: its line left features.jsonl during the run`);
     }
-    if (written) writeText(path, joinFeatures(lines));
     mkdirSync(stateDir(home), { recursive: true, mode: 0o700 });
     writeText(lastPullPath(home), `${now.toISOString()}\n`, 0o600);
   }
   return {
     since,
-    verdicts: verdicts.map(({ line, ...rest }) => rest),
-    decisions: decided,
+    verdicts,
+    duplicates: index.duplicates,
+    decisions: decided.sort((a, b) => a.issue - b.issue),
+    closedWithoutOutcome: closedWithoutOutcome.sort((a, b) => a.issue - b.issue),
     suggestions: suggested,
     comments,
     written: write ? written : null,
+    skipped,
   };
+}
+
+/** The latest labeled or unlabeled event of any verdict label. */
+async function lastVerdictEvent(gh, issue) {
+  const events = await gh.paginate(gh.repoPath(`/issues/${issue.number}/events`));
+  return events.filter((e) => (e.event === 'labeled' || e.event === 'unlabeled') && /^verdict:/.test(e.label?.name ?? '')).at(-1) ?? null;
 }
 
 /** Who last set the verdict: the latest "labeled" event for its label, or for a drop without a label, the latest "closed" event. */

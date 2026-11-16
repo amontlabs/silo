@@ -89,12 +89,12 @@ test('sync keeps the files and the owner’s labels and states right under rando
       }
       for (const item of listItems(box.decisions().split('\n'))) {
         const issue = fake.issues.get(item.issue);
-        assert.ok(issue && issue.body === item.text && issue.state === 'closed', `${step}: decision issue`);
+        assert.ok(issue && issue.body === item.text && issue.state === 'closed' && issue.user.login === 'silo-workshop[bot]', `${step}: decision issue`);
       }
     };
 
     for (let stepIndex = 0; stepIndex < 14; stepIndex += 1) {
-      const op = pick(['sync', 'sync', 'limited', 'dry', 'verdict', 'state', 'edit', 'add', 'decide']);
+      const op = pick(['sync', 'sync', 'limited', 'concurrent', 'dry', 'verdict', 'state', 'edit', 'add', 'decide']);
       const step = `seed ${seed} step ${stepIndex} ${op}`;
       const numbered = [...fileNumbers().values()];
       if (op === 'sync') {
@@ -110,7 +110,23 @@ test('sync keeps the files and the owner’s labels and states right under rando
         fake.limitAfterWrites = null;
         assert.ok(result.code === 0 || result.code === 1, step);
         checkAlways(step);
-      } else if (op === 'dry') {
+      } else if (op === 'concurrent') {
+        // The files are edited while sync is writing to GitHub; the edits must survive.
+        const at = 1 + Math.floor(random() * 4);
+        let writes = 0;
+        const fetch = async (url, init) => {
+          const response = await globalThis.fetch(url, init);
+          if (init.method !== 'GET' && (writes += 1) === at) {
+            const entry = pick(model.entries);
+            entry.what = `${entry.what} Edited meanwhile.`;
+            writeFeatures();
+            writeDecision(`2026-11-18 · owner · Added during step ${stepIndex} of seed ${seed}.`);
+          }
+          return response;
+        };
+        const result = await run(['sync'], { fake, box, overrides: { fetch } });
+        assert.equal(result.code, 0, `${step}: ${result.stderr}`);
+        checkAlways(step);
         const before = JSON.stringify([...fake.issues.values()]);
         const files = box.features() + box.decisions();
         assert.equal((await run(['sync', '--dry-run'], { fake, box })).code, 0, step);

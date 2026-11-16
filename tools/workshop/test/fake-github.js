@@ -84,6 +84,10 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
   };
   fake.setVerdictLabel = (number, verdict, login = 'owner') => {
     const issue = fake.issues.get(number);
+    const actor = { login, type: login.endsWith('[bot]') ? 'Bot' : 'User' };
+    for (const name of issue.labels.filter((n) => n.startsWith('verdict:') && n !== `verdict:${verdict}`)) {
+      fake.events.push({ issue: number, event: 'unlabeled', label: { name }, actor, created_at: tick() });
+    }
     issue.labels = issue.labels.filter((name) => !name.startsWith('verdict:'));
     if (verdict) {
       issue.labels.push(`verdict:${verdict}`);
@@ -217,6 +221,7 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
       const since = url.searchParams.get('since');
       const items = fake.comments
         .filter((c) => !since || Date.parse(c.updated_at) >= Date.parse(since))
+        .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
         .map((c) => ({ id: c.id, user: c.user, body: c.body, created_at: c.created_at, updated_at: c.updated_at, issue_url: `${fake.url}${issuePath}/issues/${c.issue}` }));
       return page(res, items, url);
     }

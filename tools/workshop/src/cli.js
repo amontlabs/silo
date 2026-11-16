@@ -13,12 +13,13 @@ import { GitHub } from './github.js';
 import { macKeychain } from './keychain.js';
 import { DEFAULT_API, DEFAULT_ORG, DEFAULT_REPO, DEFAULT_SITE, DEFAULT_WEB, Failure, RateLimited, UsageError } from './names.js';
 import { pull } from './pull.js';
-import { setup } from './setup.js';
+import { setup, store } from './setup.js';
 import { sync } from './sync.js';
 
 const USAGE = `usage: workshop <command> [--json]
 
   setup [--org amontlabs] [--site https://silo.amontlabs.com] [--replace]
+  store [--replace]
   doctor
   sync [--dry-run]
   pull [--write]
@@ -30,6 +31,7 @@ See tools/workshop/README.md.`;
 
 const COMMANDS = {
   setup: { flags: ['replace'], options: ['org', 'site'], positional: 0 },
+  store: { flags: ['replace'], options: [], positional: 0 },
   doctor: { flags: [], options: [], positional: 0 },
   sync: { flags: ['dry-run'], options: [], positional: 0 },
   pull: { flags: ['write'], options: [], positional: 0 },
@@ -129,6 +131,11 @@ export async function main(argv, overrides = {}) {
         emit(result, `Created the App ${result.app}. Credentials are in the Keychain; Vercel's variables are in ${result.envFile}.\nInstall it on ${deps.repo}: ${result.installUrl}`);
         return 0;
       }
+      case 'store': {
+        const result = store({ replace: Boolean(args.flags.replace), deps });
+        emit(result, `Stored the App credentials from ${result.from} in the Keychain.`);
+        return 0;
+      }
       case 'doctor': {
         const gh = new GitHub({ api: deps.api, repo: deps.repo, fetch: deps.fetch, writeDelayMs: 0 });
         const report = await doctor({ deps, gh, credentials: () => appCredentials(deps) });
@@ -149,6 +156,10 @@ export async function main(argv, overrides = {}) {
         const result = await sync({ gh, root: deps.root, dryRun, log: args.json ? () => {} : out });
         const verb = dryRun ? 'would create' : 'created';
         const summary = `${verb} ${result.created}, ${dryRun ? 'would update' : 'updated'} ${result.updated}, unchanged ${result.unchanged}${result.labels ? `, labels ${result.labels}` : ''}`;
+        if (!args.json) {
+          for (const d of result.duplicates) out(`duplicate: #${d.duplicate} also carries ${d.id}'s marker; #${d.kept} is used`);
+          for (const skip of result.skipped) out(`skipped: ${skip}`);
+        }
         if (args.json) emit(result, '');
         else out(result.stopped ? `${summary}; stopped by GitHub's rate limit, run again ${when(result.stopped)}` : summary);
         if (result.stopped) {
@@ -211,18 +222,24 @@ function formatPull(result) {
   for (const v of result.verdicts) {
     const status = v.conflict
       ? `several verdict labels (${v.conflict.join(', ')}), not recorded`
+      : v.cleared
+        ? `${v.file}, cleared on GitHub (the file is not changed)`
       : `${v.file ?? 'none'} -> ${v.github}${v.confirmed ? ` by ${v.by}` : ' (not confirmed as the owner’s, not recorded)'}`;
     lines.push(`  #${v.issue} ${v.id}: ${status}`);
   }
   lines.push(`Decided on GitHub, not in DECISIONS.md (${result.decisions.length}):`);
   for (const d of result.decisions) {
     lines.push(`  #${d.issue} ${d.title}`);
-    lines.push(d.outcome ? `    ${d.outcome.author}: ${d.outcome.text.replace(/\s+/g, ' ').trim()}` : '    (no closing comment)');
+    lines.push(`    ${d.outcome.author}: ${d.outcome.text.replace(/\s+/g, ' ').trim()}`);
   }
+  lines.push(`Closed without an owner's outcome (${result.closedWithoutOutcome.length}):`);
+  for (const d of result.closedWithoutOutcome) lines.push(`  #${d.issue} ${d.title} (closed by ${d.closedBy ?? 'unknown'})`);
+  for (const d of result.duplicates) lines.push(`Duplicate: #${d.duplicate} also carries ${d.id}'s marker; #${d.kept} is used`);
   lines.push(`Suggestions (${result.suggestions.length}):`);
   for (const s of result.suggestions) lines.push(`  #${s.issue} ${s.title} (${s.up} 👍, by ${s.author})`);
   lines.push(`Comments${result.since ? ` since ${result.since}` : ''} (${result.comments.length}):`);
   for (const c of result.comments) lines.push(`  #${c.issue} ${c.author}, ${c.createdAt}: ${c.text.replace(/\s+/g, ' ').trim()}`);
+  for (const skip of result.skipped) lines.push(`Skipped: ${skip}`);
   if (result.written !== null) lines.push(`Recorded ${result.written} verdict${result.written === 1 ? '' : 's'} in features.jsonl.`);
   return lines.join('\n');
 }
