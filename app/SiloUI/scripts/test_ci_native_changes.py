@@ -46,6 +46,7 @@ class ClassificationTests(unittest.TestCase):
         for paths in (['README.md'], ['website/package.json', 'website/package-lock.json'],
                       ['demo/src/film.ts', 'docs/SiloUI-APP.md', 'assets/silo-logo.svg', 'SECURITY.md'],
                       ['artifacts/silo-logo-system.html'], ['app/SiloUI/src/App.tsx', 'README.md'],
+                      ['tools/dashboard/src/server.js', 'tools/dashboard/package-lock.json', 'docs/OWNER-DASHBOARD.md'],
                       ['app/SiloUI/src/features/x/view.tsx'],
                       ['app/SiloUI/runner/main.go', 'app/SiloUI/runner/go.mod', 'app/SiloUI/runner/README.md']):
             with self.subTest(paths=paths):
@@ -58,7 +59,8 @@ class ClassificationTests(unittest.TestCase):
                       ['app/SiloUI/src/features/application/model/reserved-secret-names.json'],
                       ['app/SiloUI/src/features/computers/model/container-unavailable.json'],
                       ['app/SiloUI/runner/recipes/silo-linux.yaml'], ['app/SiloUI/runnerx/a.go'],
-                      ['app/SiloUI/srcx/a.ts'], ['docsy/file.md'], ['websites/x']):
+                      ['app/SiloUI/srcx/a.ts'], ['docsy/file.md'], ['websites/x'],
+                      ['tools/other/x.js'], ['tools/dashboardx/a.js'], ['tools/dashboard']):
             with self.subTest(paths=paths):
                 self.assertTrue(changes.needs_native(paths))
 
