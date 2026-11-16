@@ -1,6 +1,13 @@
 // The picture of the loop on the home page. CSS lays out the boxes; this draws the wires between
 // them, redraws them when the layout changes, and plays the drawing once.
 
+declare global {
+  interface Window {
+    /** The head script's timer that shows the finished picture if this script has not started in time. */
+    siloLoopFallback?: number;
+  }
+}
+
 interface Box {
   l: number;
   t: number;
@@ -54,7 +61,8 @@ export function drawWires(loop: HTMLElement): void {
     const y1 = px(c1.cy);
     const y2 = px(c2.cy);
     const rise = px(e1.l + 14);
-    wire('w-main', `M${m.r} ${yM}H${W - 1}M${W - 8} ${yM - 4}L${W - 1} ${yM}L${W - 8} ${yM + 4}`);
+    wire('w-main', `M${m.r} ${yM}H${W - 1}`);
+    wire('w-arrow', `M${W - 8} ${yM - 4}L${W - 1} ${yM}L${W - 8} ${yM + 4}`);
     wire('w-f1', `M${tx} ${m.b}V${y1 - R}Q${tx} ${y1} ${tx + R} ${y1}H${c1.l}`);
     wire('w-f2', `M${tx} ${m.b}V${y2 - R}Q${tx} ${y2} ${tx + R} ${y2}H${c2.l}`);
     wire('w-d1', `M${c1.r} ${y1}H${d1.l}`);
@@ -78,7 +86,8 @@ export function drawWires(loop: HTMLElement): void {
     const ym = px(e1.cy);
     const yd = px(e2.cy);
     const end = H - 1;
-    wire('w-main', `M${tx} ${m.b}V${end}M${tx - 4} ${end - 7}L${tx} ${end}L${tx + 4} ${end - 7}`);
+    wire('w-main', `M${tx} ${m.b}V${end}`);
+    wire('w-arrow', `M${tx - 4} ${end - 7}L${tx} ${end}L${tx + 4} ${end - 7}`);
     wire('w-f1', `M${tx} ${y1 - R}Q${tx} ${y1} ${tx + R} ${y1}H${c1.l}`);
     wire('w-f2', `M${tx} ${y2 - R}Q${tx} ${y2} ${tx + R} ${y2}H${c2.l}`);
     wire('w-d1', `M${sx} ${c1.b}V${d1.t}`);
@@ -102,25 +111,49 @@ function start(): void {
   const root = document.documentElement;
   const loop = document.getElementById('loop');
   const replay = document.getElementById('replay');
+  clearTimeout(window.siloLoopFallback);
+  // The head script's fallback already showed the finished picture: it stays finished.
+  const shownFinished = !root.classList.contains('loop-pending');
   if (!loop || !replay) {
     root.classList.remove('loop-pending');
     return;
   }
-  const draw = () => drawWires(loop);
+
+  // Rebuilding the wires mid-drawing would jump each one to its end, so a layout change while
+  // the picture draws is applied once the drawing is over.
+  let drawing = false;
+  let stale = false;
+  const draw = () => {
+    if (drawing) stale = true;
+    else drawWires(loop);
+  };
   draw();
   new ResizeObserver(draw).observe(loop);
   void document.fonts?.ready.then(draw);
 
+  const steps = STEPS.map(([name]) => name);
   let timers: number[] = [];
+  function finish(): void {
+    loop!.classList.remove('anim', ...steps);
+    drawing = false;
+    if (stale) {
+      stale = false;
+      drawWires(loop!);
+    }
+  }
   function play(): void {
     timers.forEach(clearTimeout);
-    loop!.classList.remove(...STEPS.map(([name]) => name));
+    drawing = false;
+    stale = false;
+    drawWires(loop!);
+    drawing = true;
+    loop!.classList.remove(...steps);
     loop!.classList.add('anim', 'reset');
     void loop!.offsetWidth;
     loop!.classList.remove('reset');
     root.classList.remove('loop-pending');
     timers = STEPS.map(([name, delay]) => window.setTimeout(() => loop!.classList.add(name), delay));
-    timers.push(window.setTimeout(() => loop!.classList.remove('anim', ...STEPS.map(([name]) => name)), DONE_AT));
+    timers.push(window.setTimeout(finish, DONE_AT));
   }
 
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -129,7 +162,26 @@ function start(): void {
   }
   replay.hidden = false;
   replay.addEventListener('click', play);
-  play();
+  if (shownFinished) return;
+  // Draws once, when about a third of the picture is in view (so it is not over before anyone sees
+  // it), and only once the fonts are in, since the page stays hidden until then.
+  const begin = () => {
+    if (!('IntersectionObserver' in window)) {
+      play();
+      return;
+    }
+    const seen = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        seen.disconnect();
+        play();
+      },
+      { threshold: 0.33 },
+    );
+    seen.observe(loop);
+  };
+  if (document.fonts) void document.fonts.ready.then(begin, begin);
+  else begin();
 }
 
 start();

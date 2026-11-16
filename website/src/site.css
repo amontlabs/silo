@@ -8,7 +8,7 @@
   --ink: #282a2f;
   --muted: #666a73;
   --line: #dfe1df;
-  --wire: #9b9fa4;
+  --wire: #888c92;
   --accent: #ff9f0a;
   --accent-ink: #995700;
   --accent-hover: #f09300;
@@ -189,6 +189,8 @@ svg {
 .page-shell {
   max-width: 1136px;
   min-height: 100vh;
+  /* Room under the last row, so its diamonds never touch the window's edge. */
+  padding-bottom: 32px;
   margin: 0 auto;
   border-left: 1px solid var(--line);
   border-right: 1px solid var(--line);
@@ -247,6 +249,12 @@ svg {
   background: color-mix(in srgb, var(--paper) 96%, transparent);
   backdrop-filter: blur(12px);
   z-index: 10;
+  /* Over the frame's lines and a little beyond, so a row's diamonds scrolling under it never show half. */
+  box-shadow:
+    -1px 0 0 var(--line),
+    1px 0 0 var(--line),
+    -6px 0 0 var(--paper),
+    6px 0 0 var(--paper);
 }
 .brand {
   display: inline-flex;
@@ -343,6 +351,11 @@ svg {
   background: transparent;
   color: var(--muted);
 }
+/* The last control in the header: its icon, not its hit area, ends at the gutter. */
+.header-actions > .theme-switch:last-child .theme-trigger {
+  width: 33px;
+  margin-right: -8px;
+}
 .theme-trigger:hover,
 .theme-trigger[aria-expanded="true"] {
   color: var(--ink);
@@ -376,10 +389,13 @@ svg {
   height: 15px;
   color: var(--muted);
 }
-.theme-menu button:hover,
+.theme-menu button:hover {
+  background: color-mix(in srgb, var(--ink) 7%, var(--paper));
+}
 .theme-menu button:focus-visible {
-  background: var(--surface-hover);
-  outline: none;
+  background: color-mix(in srgb, var(--ink) 7%, var(--paper));
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -2px;
 }
 .theme-menu button[aria-checked="true"] {
   color: var(--accent-ink);

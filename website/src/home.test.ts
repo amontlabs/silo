@@ -61,14 +61,11 @@ describe('the home page', () => {
     expect(doc.querySelector('.door a')?.getAttribute('href')).toBe('/workshop');
   });
 
-  it('has the navigation, with Why Silo leading to the picture', () => {
-    expect(text('.site-header nav a')).toEqual(['Why Silo', 'Workshop', 'GitHub']);
-    expect([...doc.querySelectorAll('.site-header nav a')].map((link) => link.getAttribute('href'))).toEqual([
-      '#why',
-      '/workshop',
-      'https://github.com/amontlabs/silo',
-    ]);
-    expect(doc.getElementById('why')?.querySelector('h2')?.textContent).toBe('Git for computers.');
+  it('has the navigation, with GitHub kept on phones', () => {
+    const links = [...doc.querySelectorAll('.site-header nav a')];
+    expect(links.map((link) => link.textContent?.trim())).toEqual(['Workshop', 'GitHub']);
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/workshop', 'https://github.com/amontlabs/silo']);
+    expect(links.some((link) => link.classList.contains('source-nav'))).toBe(false);
     expect(text('.site-footer nav a')).toEqual(['Workshop', 'GitHub', 'Report an issue']);
   });
 
@@ -84,13 +81,25 @@ describe('the home page', () => {
       'Try a new parser',
       'drop',
     ]);
-    expect(text('.points p')).toHaveLength(3);
+    expect(text('.points p')[2]).toBe('Silo runs on machines you own, starting with your Mac. Nothing is hosted.');
+    expect(text('.loop figcaption')).toEqual(['Main is forked into two copies: one is merged back into main, the other is dropped.']);
   });
 
   it('fills the two plan lines from the plan files', () => {
     const filled = parse(fillHomePlan(html, fixtureRepository({ stages: STAGES, features: FEATURES })));
-    expect(text('.hero-note', filled)).toEqual(['First up: a fixture stage with a line.']);
-    expect(text('.door-line', filled)).toEqual(['3 of 4 features are planned. Have a say in the rest.']);
+    expect(text('.hero-note', filled)).toEqual(['Not out yet. First up: a fixture stage with a line.']);
+    expect(text('.door-line', filled)).toEqual(['2 of 4 features are planned. Have a say in the rest.']);
+    expect(text('.door-line span', filled)).toEqual(['2 of 4 features are planned.', 'Have a say in the rest.']);
+  });
+
+  it('writes a plan line with $ or markup in it as text', () => {
+    const line = 'Costs $& and $` and $\' and $$ <b>bold</b>.';
+    const stages = JSON.stringify([{ id: 'first', title: 'First', line }]);
+    const filled = fillHomePlan(html, fixtureRepository({ stages, features: feature(1, 'first', 'take') }));
+    const page = parse(filled);
+    expect(text('.hero-note', page)).toEqual(['Not out yet. First up: costs $& and $` and $\' and $$ <b>bold</b>.']);
+    expect(page.querySelector('.hero-note b')).toBeNull();
+    expect(filled.length).toBeLessThan(html.length + 200);
   });
 
   it('stops the build when a plan file is missing or malformed', () => {

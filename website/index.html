@@ -3,11 +3,26 @@
   <head>
     <script src="/theme.js"></script>
     <script>
+      // The page shows once its fonts are in, so nothing is laid out in a fallback face and then
+      // changes width. After 3 s (the fonts' block period) it shows regardless.
+      (() => {
+        const root = document.documentElement;
+        const show = () => root.classList.remove('fonts-pending');
+        root.classList.add('fonts-pending');
+        setTimeout(show, 3000);
+        document.addEventListener('DOMContentLoaded', () => {
+          const faces = ['italic 48px "IBM Plex Serif"', '17px "IBM Plex Serif"', '14px "IBM Plex Sans"', '12px "IBM Plex Mono"'];
+          Promise.all(faces.map((face) => document.fonts.load(face))).then(show, show);
+        });
+      })();
+    </script>
+    <script>
       // The picture of the loop draws itself once; until its script starts, it stays hidden so the
-      // finished picture never flashes first. With reduced motion it is simply there.
+      // finished picture never flashes first. If the script has not started after 3 s, the finished
+      // picture shows and stays. With reduced motion it is simply there.
       if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
         document.documentElement.classList.add('loop-pending');
-        setTimeout(() => document.documentElement.classList.remove('loop-pending'), 3000);
+        window.siloLoopFallback = setTimeout(() => document.documentElement.classList.remove('loop-pending'), 3000);
       }
     </script>
     <meta charset="UTF-8" />
@@ -25,6 +40,7 @@
     <style>
       html { background: #f7f7f4; }
       html[data-theme="dark"] { background: #171a1b; }
+      .fonts-pending body { visibility: hidden; }
       body { margin: 0; }
       .symbols { position: absolute; width: 0; height: 0; overflow: hidden; }
       .brand { display: inline-flex; align-items: center; gap: 7px; font-size: 20px; font-weight: 500; }
@@ -40,6 +56,8 @@
       }
     </style>
     <link rel="preload" href="/fonts/ibm-plex-serif-400-italic.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/ibm-plex-sans-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/ibm-plex-mono-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/fonts/fonts.css" />
     <link rel="stylesheet" href="/src/site.css" />
     <link rel="stylesheet" href="/src/style.css" />
@@ -83,9 +101,8 @@
           ><span>Silo</span></a
         >
         <nav aria-label="Main navigation">
-          <a href="#why">Why Silo</a>
           <a href="/workshop">Workshop</a>
-          <a class="source-nav" href="https://github.com/amontlabs/silo">GitHub<svg class="out" aria-hidden="true"><use href="#out" /></svg></a>
+          <a href="https://github.com/amontlabs/silo">GitHub<svg class="out" aria-hidden="true"><use href="#out" /></svg></a>
         </nav>
         <div class="header-actions">
           <div class="theme-switch" data-theme-picker>
@@ -113,7 +130,7 @@
               ><svg class="icon" aria-hidden="true"><use href="#github-icon" /></svg>View source</a
             >
           </div>
-          <p class="hero-note"><i class="mark" aria-hidden="true"></i>First up: <!-- plan:first-up --></p>
+          <p class="hero-note"><i class="mark" aria-hidden="true"></i>Not out yet. First up: <!-- plan:first-up --></p>
         </section>
         <section class="plate joint" id="why" aria-labelledby="plate-title">
           <div class="plate-inner">
@@ -123,7 +140,8 @@
                 <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M10.2 6a4.2 4.2 0 1 1-1.4-3.1M10.3 1.2v2.4H7.9" /></svg>Replay
               </button>
             </div>
-            <figure class="loop" id="loop" aria-labelledby="plate-title">
+            <figure class="loop" id="loop" aria-labelledby="plate-title" aria-describedby="loop-caption">
+              <figcaption class="sr-only" id="loop-caption">Main is forked into two copies: one is merged back into main, the other is dropped.</figcaption>
               <svg class="wires" aria-hidden="true" focusable="false"></svg>
               <div class="pc main">
                 <p class="pc-name"><svg aria-hidden="true"><use href="#computer" /></svg>main</p>
@@ -163,7 +181,7 @@
         <div class="points joint">
           <p>The agent gets root and the network. Your files and keys stay out of its reach.</p>
           <p>Every copy is a whole machine, so two tasks never share a port or a database.</p>
-          <p>It runs on machines you own, starting with your Mac. Nothing is hosted.</p>
+          <p>Silo runs on machines you own, starting with your Mac. Nothing is hosted.</p>
         </div>
         <section class="door joint" aria-labelledby="door-title">
           <div>

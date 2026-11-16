@@ -4,8 +4,9 @@ The public site at [silo.amontlabs.com](https://silo.amontlabs.com), built with
 Vite. It has two pages:
 
 - **Home** (`index.html`, `src/style.css`, `src/loop.ts`): the pitch, the
-  picture of the loop (drawn by `src/loop.ts`, once, unless the visitor prefers
-  reduced motion), and the way into the Workshop. Its "First up" line and its
+  picture of the loop (drawn by `src/loop.ts`, once, when it comes into view,
+  unless the visitor prefers reduced motion), and the way into the Workshop. The
+  page shows once its fonts are in (at most 3 s), so nothing changes width. Its "First up" line and its
   count of planned features are written in at build time from
   `docs/product/stages.json` and `docs/product/features.jsonl`
   (`src/home-plan.ts`, the `homePlan` plugin in `vite.config.ts`); a missing or
