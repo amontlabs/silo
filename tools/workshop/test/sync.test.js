@@ -72,7 +72,7 @@ test('sync on the plan files creates every issue, writes numbers back and keeps 
   assert.equal(box.features(), after.join('\n'));
   assert.equal(box.decisions(), decisions);
   assert.equal(readFileSync(join(FIXTURES, 'features.jsonl'), 'utf8'), featuresBefore, 'the fixture it was copied from is untouched');
-  assert.equal(readFileSync(join(FIXTURES, 'DECISIONS.md'), 'utf8'), decisionsBefore);
+  assert.equal(readFileSync(join(FIXTURES, 'decisions.txt'), 'utf8'), decisionsBefore);
 
   // The same files, already numbered, synced from another checkout: nothing is created or changed.
   const numbered = sandbox(t, { features: box.features(), decisions: decisions });
