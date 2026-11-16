@@ -3,7 +3,7 @@
 // call; never the response body or the token.
 
 export class GitHubError extends Error {
-  constructor(status, { rateLimited = false, retryAfter = 0, network = false, timeout = false, as = null } = {}) {
+  constructor(status, { rateLimited = false, retryAfter = 0, network = false, timeout = false, as = null, notInstalled = false } = {}) {
     super(timeout ? 'GitHub did not answer in time' : network ? 'GitHub could not be reached' : `GitHub answered ${status}`);
     this.name = 'GitHubError';
     this.status = status;
@@ -12,6 +12,7 @@ export class GitHubError extends Error {
     this.network = network || timeout;
     this.timeout = timeout;
     this.as = as;
+    this.notInstalled = notInstalled;
   }
 
   // A failure that a cached copy may stand in for.
@@ -24,7 +25,9 @@ export const DEFAULT_TIMEOUT = 8000;
 const MAX_PAGES = 50;
 
 // `as` names the identity a call is made with: 'user', 'installation', 'app' or 'client'.
-export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now, timeoutMs = DEFAULT_TIMEOUT }) {
+// `deadline()` answers the wall-clock time (ms) by which the current request must be done, if any;
+// each call's limit is the shorter of `timeoutMs` and the time left.
+export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now, timeoutMs = DEFAULT_TIMEOUT, deadline = () => undefined }) {
   // With `etag`, the request is conditional (If-None-Match) and a 304 answers { status: 304, data: null }.
   async function request(method, path, { token, auth = 'Bearer', body, accept = 'application/vnd.github+json', as = null, etag = null } = {}) {
     const url = path.startsWith('http') ? path : apiBase + path;
@@ -36,7 +39,10 @@ export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now
     if (token) headers.Authorization = `${auth} ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (etag) headers['If-None-Match'] = etag;
-    const signal = AbortSignal.timeout(timeoutMs);
+    const end = deadline();
+    const left = end === undefined ? timeoutMs : Math.min(timeoutMs, end - Date.now());
+    if (left <= 0) throw new GitHubError(0, { network: true, timeout: true, as });
+    const signal = AbortSignal.timeout(left);
     try {
       const response = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal });
       if (response.status === 304 && etag) {

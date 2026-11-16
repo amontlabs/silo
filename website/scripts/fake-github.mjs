@@ -353,15 +353,9 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       return json(res, 200, issue.labels.map((name) => ({ name })));
     }
     if (rest === '/comments' && req.method === 'GET') {
-      const perPage = Number(url.searchParams.get('per_page') || 30);
-      const page = Number(url.searchParams.get('page') || 1);
-      const headers = {};
-      if (page * perPage < issue.comments.length) {
-        const next = new URL(baseUrl + url.pathname + url.search);
-        next.searchParams.set('page', String(page + 1));
-        headers.Link = `<${next}>; rel="next"`;
-      }
-      return json(res, 200, issue.comments.slice((page - 1) * perPage, page * perPage).map((c) => ({ id: c.id, body: c.body, created_at: c.created_at, user: publicUser(c.user) })), headers);
+      const since = url.searchParams.get('since');
+      const items = issue.comments.map((c) => commentJson(issue.number, c)).filter((c) => !since || c.updated_at > since);
+      return listPage(req, res, url, items, record);
     }
     if (rest === '/comments' && req.method === 'POST') {
       if (issue.locked && !canWrite(who)) return json(res, 403, { message: 'Issue is locked' });

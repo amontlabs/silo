@@ -35,12 +35,12 @@ briefly here:
 | Endpoint | Who | What |
 | --- | --- | --- |
 | `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. |
-| `GET me` | signed in | `{ login, avatar, canDecide }`, or 401. |
+| `GET me` | signed in | `{ login, avatar, canDecide }`; `canDecide` is false when the permission could not be read (the next `me` tries again). 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
 | `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
-| `POST logout` | anyone | Revokes the person's whole grant for the App (all their sessions), then clears the cookies. |
+| `POST logout` | anyone | Revokes the person's whole grant for the App (all their sessions), then clears the cookies whatever happened. Answers `{ "ok": true, "revoked": true\|false }`. |
 | `POST comment {n, text}` | signed in | Comments as that person. |
 | `POST vote {n, on}` | signed in | Adds or removes that person's 👍. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
@@ -88,30 +88,42 @@ A number that is not in the snapshot is a 404. Both reads are sent with
   A refresh builds a new snapshot and swaps it in only when it completed, so a
   refresh that fails halfway leaves the previous one intact.
 - **Issues.** A refresh lists the repository's issues (all states, oldest
-  first, 100 a page, at most 40 pages), skipping pull requests and issues
+  first, 100 a page, at most 30 pages), skipping pull requests and issues
   without exactly one Workshop label. Each page is sent with `If-None-Match`
   and the ETag GitHub gave for it last time; a `304 Not Modified` means the
   page is unchanged and the held copy is reused. Vote counts come from each
   issue's reaction summary in that list.
 - **Comments.** The first refresh, and one every 10 minutes, reloads the
   newest comments of the whole repository (`/issues/comments`, newest first,
-  at most 30 pages, also conditional), so deleted comments disappear within
-  10 minutes; comments older than those 3,000 are not held, and `more` is true
+  at most 25 pages, also conditional), so deleted comments disappear within
+  10 minutes; comments older than those 2,500 are not held, and `more` is true
   for their issues. The refreshes in between ask only for comments updated
   since the previous refresh, less a minute of overlap (`since`, oldest update
   first, at most 10 pages; more than that schedules a full reload), and merge
   them by id, so new and edited comments appear within a minute.
 - **Writes.** After a signed-in person's write succeeds, the snapshot is
   patched in place: the new comment, the comment and 👍 counts, the verdict,
-  open or closed, a new suggestion. Everyone on that instance sees it at once;
-  the next refresh puts GitHub's version back. *Limit:* a refresh that started
-  before the write may briefly put the earlier version back, until the
-  following refresh.
+  open or closed (a drop sets `closedAt`), a new suggestion. Everyone on that
+  instance sees it at once. Each patch is kept with its time. When a refresh
+  completes, GitHub's data replaces the snapshot and the patches made after
+  that refresh began are applied again; older patches are dropped, since
+  GitHub's answer already holds them. A count moves only from the value it had
+  when the write happened, so a write GitHub already shows is not counted
+  twice. Other instances see a write, including a new suggestion, at their
+  next refresh.
+- **What a read costs.** Nothing: no `state` or `issue` request calls GitHub.
+  The refresh it may start runs in the background on its own ceiling.
 - **When GitHub fails**, times out or asks us to wait, the snapshot keeps
   answering whatever its age, with `"stale": true` once it is over 10 minutes
   old, and no refresh is tried before the time GitHub gave, or 60 seconds.
   With no snapshot at all, both reads answer 502 and the page falls back to the
-  plan built into it.
+  plan built into it; a cold request waits for the first refresh only until
+  its 12-second deadline, and the refresh goes on in the background. When the
+  App is not installed on the repository, both reads answer 503
+  `not_configured`.
+- **Output.** Titles, bodies, comments and logins in `state` and `issue` are
+  cleaned on the way out: no direction-override or control characters, and no
+  line breaks in titles and logins.
 
 GitHub documents that a `304` answer to an authorized conditional request
 "does not count against your primary rate limit"
@@ -122,18 +134,28 @@ installation's 5,000 requests an hour
 It still counts in our own ceiling below. The `since` comment call has a new
 URL each time and always counts.
 
-### The installation token and its ceiling
+### The installation token and its ceilings
 
 The installation token is spent only on the snapshot refresh, the permission
-check (cached five minutes per person) and labelling a suggestion. One ceiling
-covers all three: at most 80 calls a minute per instance. Worst case per
-instance per hour: 80 × 60 = 4,800 calls, below the installation's 5,000. The
-largest refresh is 40 issue pages + 30 comment pages = 70 calls, which fits in
-a minute's 80, and 80 calls a minute is far below GitHub's secondary limit of
-900 points a minute for `GET` requests. In the usual case, with the issue list
-on 2 pages and nothing changed, an hour costs about 60 `since` calls plus 6
-full comment reloads whose unchanged pages are free. Several instances each
-have their own ceiling.
+check, the repository lookup at sign-in and labelling a suggestion. Each has
+its own ceiling per instance, so that no use can starve another, and nothing
+a visitor does without signing in can make `verdict`, `decide`, `suggest`,
+`comment`, `vote` or `me` answer 429:
+
+| Use | Calls a minute |
+| --- | --- |
+| Snapshot refresh | 60 |
+| Permission check (cached five minutes per person) | 12 |
+| Repository lookup at sign-in (once per instance, then remembered) | 4 |
+| Labelling a suggestion, and the label retries | 6 |
+
+Worst case per instance per hour: (60 + 12 + 4 + 6) × 60 = 82 × 60 = 4,920
+calls, below the installation's 5,000. The largest refresh is 30 issue pages +
+25 comment pages = 55 calls, which fits in a minute's 60, and 82 calls a minute
+is far below GitHub's secondary limit of 900 points a minute for `GET`
+requests. In the usual case, with the issue list on 2 pages and nothing
+changed, an hour costs about 60 `since` calls plus 6 full comment reloads whose
+unchanged pages are free. Several instances each have their own ceilings.
 
 ### Other limits
 
@@ -145,15 +167,26 @@ have their own ceiling.
   hour).
 - Each signed-in person may make 30 writes a minute per instance; more answer
   429.
-- Every GitHub call has an 8-second limit.
+- Every GitHub call has an 8-second limit, and every handler has a 12-second
+  deadline for all its GitHub calls together (the platform stops a function at
+  15 seconds); past it, the answer is 502. Steps are ordered so that a cut is
+  safe to retry: `verdict` changes labels and state, then posts the note;
+  `decide` posts the comment, then closes, and skips the comment when the same
+  person posted the identical text on that issue in the last five minutes.
 - Concurrent permission checks for the same person share one call.
 - `me` reads the cookie and calls GitHub only for the permission check (cached
-  five minutes); it never refreshes the user token.
+  five minutes); it never refreshes the user token, and a failed permission
+  read answers `canDecide: false` rather than an error.
+- Sign-out counts as a write for the per-person limit; a request without a
+  valid session calls nothing.
 - `suggest` refuses with 429 before creating anything when the installation
-  is blocked or the ceiling is reached. If labelling a new suggestion still
-  fails twice, the answer is 502 with its `number`, and the number is
-  remembered (in memory, up to 100) so that the next successful write by
-  anyone retries the label.
+  is blocked or the label ceiling is reached. If labelling a new suggestion
+  still fails twice, the answer is 502 with its `number`, and the number is
+  remembered (in memory, up to 100). The list is retried in the background
+  after a successful `suggest` and after each snapshot refresh, never on other
+  requests and never before an answer. Each number is read again first and
+  labelled only when the issue is still open and has no label at all; anything
+  else leaves the list, and a failing number does not hold up the others.
 - Every answer, API and pages alike, carries
   `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 
@@ -314,7 +347,11 @@ the person's token is refused (401, and the session is cleared). A stolen
 cookie works until it expires, the person signs out, or the secret is changed.
 
 **Sign-out.** Sign-out revokes the person's whole grant for the App (all their
-sessions), then clears the cookies.
+sessions), then clears the cookies. It uses the token the cookie holds and
+never waits on a refresh. The answer's `revoked` says whether GitHub confirmed
+the revocation. When it is false, the grant may still be active on GitHub; a
+person revokes it by hand on GitHub under Settings → Applications → Authorized
+GitHub Apps → Silo Workshop → Revoke. The cookies are cleared in every case.
 
 **Sign-in.** `login` sets a 10-minute sealed `__Host-workshop-signin` cookie
 holding a random `state`, a PKCE verifier (S256) and the return path.
@@ -348,13 +385,18 @@ and posts the note only after they succeeded, so a retry never posts the note
 twice. Clearing a verdict reopens only a dropped entry, never one closed as
 completed. A 401 on the installation token is a 502 and
 drops the cached token; it never signs anyone out. *Limit:* if labelling a
-suggestion fails twice, the new issue stays outside the Workshop until a later
-write retries the label (in memory, on that instance only), and the answer
+suggestion fails twice, the new issue stays outside the Workshop until a
+background retry labels it (in memory, on that instance only), and the answer
 carries its number.
 
 **Deciding.** `canDecide` is GitHub's answer: the person's permission on the
 repository (`write`, `maintain` or `admin`), read with the installation token
-and cached five minutes. `verdict` and `decide` confirm with the person's token
+on its own ceiling and cached five minutes. Reading it with the person's own
+token (`GET /repos/{owner}/{repo}` and its `permissions` object) was
+considered: GitHub's reference for that endpoint lists `permissions` in the
+response schema but does not say which kinds of token receive it
+([Get a repository](https://docs.github.com/en/rest/repos/repos#get-a-repository),
+read 2026-11-16), so the documented collaborator permission endpoint is used. `verdict` and `decide` confirm with the person's token
 that the GitHub account id matches the session, then read the permission again
 without the cache, so a renamed login cannot inherit another account's
 permission. A cached "cannot decide" refuses at once without calling GitHub.

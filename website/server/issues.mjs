@@ -7,6 +7,16 @@ export const CUTS = { body: 20_000, comment: 5000 };
 const KIND_BY_LABEL = new Map(Object.entries(LABELS).map(([kind, label]) => [label, kind]));
 const ENTRY_ID = /^[A-Za-z0-9_.-]{1,100}$/;
 
+const DIRECTION_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
+const CONTROLS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
+const LINE_BREAKS = /[\n\r\t\u2028\u2029]/g;
+
+// Text on its way out: no direction overrides or control characters; with `oneLine`, no line breaks either.
+export function clean(text, { oneLine = false } = {}) {
+  const value = String(text ?? '').replace(DIRECTION_CONTROLS, '').replace(CONTROLS, '');
+  return oneLine ? value.replace(LINE_BREAKS, ' ') : value;
+}
+
 // Cuts text to `limit` UTF-16 units without splitting a surrogate pair.
 export function cut(text, limit) {
   if (text.length <= limit) return text;
@@ -33,7 +43,7 @@ export function readBody(raw) {
     if (id === null) kept.push(line);
     else if (id && entry === null) entry = id;
   }
-  return { entry, text: kept.join('\n').trimEnd() };
+  return { entry, text: clean(kept.join('\n').trimEnd()) };
 }
 
 export function labelNames(issue) {
@@ -60,15 +70,15 @@ export function reasonOf(issue) {
 // A comment as `issue` returns it.
 export function commentOf(comment) {
   const full = comment.body || '';
-  const text = cut(full, CUTS.comment);
+  const text = clean(cut(full, CUTS.comment));
   return {
     id: comment.id,
-    author: comment.user?.login ?? 'ghost',
+    author: clean(comment.user?.login ?? 'ghost', { oneLine: true }),
     avatar: comment.user?.avatar_url ?? null,
     bot: comment.user?.type === 'Bot',
     createdAt: comment.created_at,
     text,
-    ...(text.length < full.length ? { cut: true } : {}),
+    ...(full.length > CUTS.comment ? { cut: true } : {}),
   };
 }
 

@@ -56,12 +56,11 @@ test('secondary rate limits (retry-after, or only the message) are rate limits a
       await visitor.signIn('visitor-fake');
       t.fake.state.secondaryLimited = kind;
       const limited = await visitor.call('GET', 'me');
-      assert.equal(limited.status, 429, kind);
-      assert.ok(Number(limited.headers['Retry-After']) > 0);
+      assert.deepEqual([limited.status, limited.json.canDecide], [200, false], kind);
       assert.equal((await c.call('GET', 'state')).status, 502, 'a cold snapshot read while blocked');
       const calls = t.fake.state.requests.length;
       t.fake.state.secondaryLimited = false;
-      assert.equal((await visitor.call('GET', 'me')).status, 429);
+      assert.deepEqual((await visitor.call('GET', 'me')).json.canDecide, false);
       assert.equal((await c.call('GET', 'state')).status, 502);
       assert.equal(t.fake.state.requests.length, calls, `blocked after a ${kind} secondary limit`);
     } finally { await t.close(); }
@@ -136,11 +135,12 @@ test('a 401 on the installation token is a 502 and drops the token; a 401 on the
     const tokens = count(t.fake, 'POST', /access_tokens$/);
     t.fake.state.hook = (r) => (r.kind === 'installation' && r.path.endsWith('/permission') ? { status: 401 } : null);
     const me = await c.call('GET', 'me');
-    assert.equal(me.status, 502);
+    assert.deepEqual([me.status, me.json.canDecide], [200, false], 'me answers even when the permission cannot be read');
     assert.ok(c.jar.has(SESSION), 'still signed in');
     t.fake.state.hook = null;
     assert.equal((await c.call('GET', 'me')).status, 200);
     assert.equal(count(t.fake, 'POST', /access_tokens$/), tokens + 1, 'a new installation token');
+    assert.equal(count(t.fake, 'GET', /permission$/), 2, 'a failed read is not cached');
 
     t.fake.state.hook = (r) => (r.kind === 'user' && r.method === 'POST' ? { status: 401 } : null);
     const comment = await c.call('POST', 'comment', { body: { n: 1, text: 'x' } });
@@ -815,7 +815,7 @@ test('while GitHub has told the installation to wait, nothing calls GitHub with 
     t.fake.state.rateLimited = false;
     const before = t.fake.state.requests.length;
     const issues = t.fake.state.issues.size;
-    assert.equal((await c.call('GET', 'me')).status, 429);
+    assert.deepEqual((await c.call('GET', 'me')).json.canDecide, false);
     assert.equal((await t.client().call('GET', 'issue?n=1')).status, 502);
     const suggest = await c.call('POST', 'suggest', { body: { title: 'Blocked', text: 'x' } });
     assert.equal(suggest.status, 429);
@@ -829,7 +829,7 @@ test('suggest refuses before creating anything when the budget is spent', async 
   try {
     const c = t.client();
     await c.signIn('visitor-fake');
-    await withBudget({ installationCallsPerMinute: 1 }, async () => {
+    await withBudget({ labelCallsPerMinute: 1 }, async () => {
       const issues = t.fake.state.issues.size;
       const response = await c.call('POST', 'suggest', { body: { title: 'Spent', text: 'x' } });
       assert.equal(response.status, 429);
@@ -838,26 +838,47 @@ test('suggest refuses before creating anything when the budget is spent', async 
   } finally { await t.close(); }
 });
 
-test('an unlabelled suggestion is labelled after the next successful write by anyone', async () => {
+test('unlabelled suggestions are retried after a successful suggestion or a refresh, never on other requests', async () => {
   const t = await setup();
+  const saved = BUDGET.labelCallsPerMinute;
+  BUDGET.labelCallsPerMinute = 40;
   try {
     const visitor = t.client();
     await visitor.signIn('visitor-fake');
     const owner = t.client();
     await owner.signIn('owner-fake');
+    await t.client().call('GET', 'state');
     t.fake.state.hook = (r) => (r.kind === 'installation' && r.path.endsWith('/labels') ? { status: 500 } : null);
-    const failed = await visitor.call('POST', 'suggest', { body: { title: 'Later', text: 'x' } });
-    assert.equal(failed.status, 502);
-    assert.deepEqual(issueOf(t.fake, failed.json.number).labels, []);
-    assert.equal((await owner.call('POST', 'comment', { body: { n: 1, text: 'still failing' } })).status, 200);
-    assert.deepEqual(issueOf(t.fake, failed.json.number).labels, []);
+    const first = await visitor.call('POST', 'suggest', { body: { title: 'First', text: 'x' } });
+    const second = await visitor.call('POST', 'suggest', { body: { title: 'Second', text: 'x' } });
+    const third = await visitor.call('POST', 'suggest', { body: { title: 'Third', text: 'x' } });
+    assert.deepEqual([first.status, second.status, third.status], [502, 502, 502]);
+    await t.workshop.idle();
     t.fake.state.hook = null;
-    assert.equal((await owner.call('POST', 'comment', { body: { n: 1, text: 'now' } })).status, 200);
-    assert.deepEqual(issueOf(t.fake, failed.json.number).labels, [LABELS.suggestion]);
+    const before = t.fake.state.requests.length;
+    assert.equal((await owner.call('POST', 'comment', { body: { n: 1, text: 'no retry here' } })).status, 200);
+    await t.workshop.idle();
+    assert.equal(t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation').length, 0, 'other requests never retry');
+    Object.assign(issueOf(t.fake, second.json.number), { state: 'closed', state_reason: 'not_planned' });
+    issueOf(t.fake, third.json.number).labels.push('spam');
+    t.fake.state.hook = (r) => (r.kind === 'installation' && r.method === 'GET' && r.path.endsWith(`/issues/${first.json.number}`) ? { status: 500 } : null);
+    t.clock.t += 61_000;
+    await t.client().call('GET', 'state');
+    await t.workshop.idle();
+    assert.deepEqual(issueOf(t.fake, second.json.number).labels, [], 'a closed suggestion is not labelled');
+    assert.deepEqual(issueOf(t.fake, third.json.number).labels, ['spam'], 'an issue with any label is left alone');
+    assert.deepEqual(issueOf(t.fake, first.json.number).labels, [], 'failing this time');
+    t.fake.state.hook = null;
+    const fourth = await visitor.call('POST', 'suggest', { body: { title: 'Fourth', text: 'x' } });
+    assert.equal(fourth.status, 200);
+    await t.workshop.idle();
+    assert.deepEqual(issueOf(t.fake, first.json.number).labels, [LABELS.suggestion], 'retried after a successful suggestion');
     const labels = count(t.fake, 'POST', /\/labels$/, 'installation');
-    await owner.call('POST', 'comment', { body: { n: 1, text: 'again' } });
-    assert.equal(count(t.fake, 'POST', /\/labels$/, 'installation'), labels, 'retried once only');
-  } finally { t.fake.state.hook = null; await t.close(); }
+    t.clock.t += 61_000;
+    await t.client().call('GET', 'state');
+    await t.workshop.idle();
+    assert.equal(count(t.fake, 'POST', /\/labels$/, 'installation'), labels, 'the list is empty now');
+  } finally { BUDGET.labelCallsPerMinute = saved; t.fake.state.hook = null; await t.close(); }
 });
 
 test('verdict: the note is posted only after labels and state succeeded; clearing never reopens a completed entry', async () => {

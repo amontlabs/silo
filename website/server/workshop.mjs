@@ -6,6 +6,7 @@
 // (snapshot.mjs), which alone reads GitHub for them, with the installation
 // token. Everything done for a signed-in person uses that person's token,
 // except the permission check and labelling a suggestion.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAppAuth } from './app-auth.mjs';
 import { createGitHub, DEFAULT_TIMEOUT, GitHubError } from './github.mjs';
@@ -18,8 +19,12 @@ export { LABELS, VERDICTS };
 const DIRECTION_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
 const TITLE_FORBIDDEN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/;
 export const LIMITS = { text: 5000, title: 120 };
-// The backstop on installation-token calls (refresh, permission check, labels) per instance.
-export const BUDGET = { installationCallsPerMinute: 80, writesPerMinute: 30 };
+// Ceilings per instance and minute: one for each use of the installation token, kept
+// apart so that no use can starve another, and the writes each person may make.
+export const BUDGET = { refreshCallsPerMinute: 60, permissionChecksPerMinute: 12, signinLookupsPerMinute: 4, labelCallsPerMinute: 6, writesPerMinute: 30 };
+const CEILINGS = { refresh: 'refreshCallsPerMinute', permission: 'permissionChecksPerMinute', signin: 'signinLookupsPerMinute', label: 'labelCallsPerMinute' };
+export const DEADLINE = 12_000;
+const RECENT_DECISION = 5 * 60_000;
 const PERMISSION_TTL = 5 * 60_000;
 const REFRESH_MARGIN = 5 * 60_000;
 const MAX_BLOCK = 60 * 60_000;
@@ -46,8 +51,11 @@ class Refusal extends Error {
 
 const refuse = (status, code, message, extra, headers) => { throw new Refusal(status, code, message, extra, headers); };
 
-export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.now, log = defaultLog, timeoutMs = DEFAULT_TIMEOUT }) {
-  const github = createGitHub({ apiBase: config.apiBase, fetch, now, timeoutMs });
+export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.now, log = defaultLog, timeoutMs = DEFAULT_TIMEOUT, deadlineMs = DEADLINE }) {
+  // Every handler's GitHub calls share one deadline; background work runs outside it.
+  const requests = new AsyncLocalStorage();
+  const detach = (fn) => requests.exit(fn);
+  const github = createGitHub({ apiBase: config.apiBase, fetch, now, timeoutMs, deadline: () => requests.getStore()?.deadline });
   const app = config.configured ? createAppAuth({ config, github, now }) : null;
   const names = cookieNames(config.secureCookies);
   const repo = config.repo;
@@ -55,7 +63,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
   if (config.problem) log({ config: 'invalid', variable: config.problem });
 
   let blockedUntil = 0;
-  const budget = { start: 0, used: 0 };
+  const ceilings = Object.fromEntries(Object.keys(CEILINGS).map((name) => [name, { start: 0, used: 0 }]));
   const permissionCache = new Map();
   const permissionPending = new Map();
   const refreshing = new Map();
@@ -83,8 +91,8 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       }
       if (!config.configured) refuse(503, 'not_configured', 'Live comments are not set up on this server.');
       if (request.method === 'POST') checkSameSite(request);
-      response = await routes.get(`${request.method} ${endpoint}`)(ctx);
-      if (request.method === 'POST' && response.status === 200) await retryLabels();
+      const route = routes.get(`${request.method} ${endpoint}`);
+      response = await requests.run({ deadline: Date.now() + deadlineMs }, () => route(ctx));
     } catch (error) {
       response = errorResponse(ctx, error);
       if ((ctx.endpoint === 'login' || ctx.endpoint === 'callback') && response.status !== 405) response = redirect(SIGNIN_FAILED);
@@ -100,6 +108,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     if (error instanceof Refusal) return json(error.status, { error: error.code, message: error.message, ...error.extra }, error.headers);
     if (error instanceof GitHubError) {
       ctx.githubStatus = error.status;
+      if (error.notInstalled) return json(503, { error: 'not_configured', message: 'Live comments are not set up on this server.' });
       if (error.rateLimited) return rateLimited(error.retryAfter);
       if (error.status === 401 && error.as === 'user') {
         clearSession(ctx);
@@ -140,26 +149,25 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     if (error.status === 401) app.dropToken();
   }
 
-  // Takes `cost` calls from this minute's budget, or answers false when it is spent or GitHub asked us to wait.
-  function spend(cost) {
+  // Takes `cost` calls from this minute's ceiling `name`, or answers false when it is spent or GitHub asked us to wait.
+  function spend(name, cost = 1) {
     const at = now();
     if (at < blockedUntil) return false;
-    if (at - budget.start >= 60_000) {
-      budget.start = at;
-      budget.used = 0;
+    const ceiling = ceilings[name];
+    if (at - ceiling.start >= 60_000) {
+      ceiling.start = at;
+      ceiling.used = 0;
     }
-    if (budget.used + cost > BUDGET.installationCallsPerMinute) return false;
-    budget.used += cost;
+    if (ceiling.used + cost > BUDGET[CEILINGS[name]]) return false;
+    ceiling.used += cost;
     return true;
   }
 
-  function waitSeconds() {
+  function spendOrRefuse(name, cost = 1) {
+    if (spend(name, cost)) return;
     const at = now();
-    return Math.ceil(Math.max(blockedUntil - at, budget.start + 60_000 - at, 1000) / 1000);
-  }
-
-  function spendOrRefuse(cost) {
-    if (!spend(cost)) throw new GitHubError(429, { rateLimited: true, retryAfter: waitSeconds(), as: 'installation' });
+    const wait = Math.max(blockedUntil - at, ceilings[name].start + 60_000 - at, 1000);
+    throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil(wait / 1000), as: 'installation' });
   }
 
   // Every installation-token call goes through here: nothing reaches GitHub while it has asked us to wait.
@@ -178,7 +186,9 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     repo,
     now,
     log,
-    request: (method, path, options) => { spendOrRefuse(1); return installationRequest(method, path, options); },
+    detach,
+    afterRefresh: () => { if (unlabelled.size) retryLabels().catch(() => {}); },
+    request: (method, path, options) => { spendOrRefuse('refresh'); return installationRequest(method, path, options); },
   }) : null;
   const userRequest = (session, method, path, options = {}) => github.request(method, path, { ...options, token: session.t, as: 'user' });
   const userPages = (session, path) => github.paginate(path, { token: session.t, as: 'user' });
@@ -203,13 +213,23 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return { issue, kind };
   }
 
-  // The snapshot for an anonymous read, or a 502 when this instance has none yet and GitHub failed.
+  // The snapshot for an anonymous read. A cold instance waits for its first refresh, at most until the
+  // request's deadline (the refresh goes on in the background); with none, 502, or 503 when the App
+  // is not installed on the repository.
   async function readSnapshot(ctx) {
+    const left = requests.getStore().deadline - Date.now();
+    let timer;
     try {
-      return await snapshots.read();
+      return await Promise.race([
+        snapshots.read(),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new GitHubError(0, { timeout: true })), Math.max(0, left)); }),
+      ]);
     } catch (error) {
       if (error instanceof GitHubError) ctx.githubStatus = error.status;
+      if (error instanceof GitHubError && error.notInstalled) refuse(503, 'not_configured', 'Live comments are not set up on this server.');
       refuse(502, 'github_failed', 'GitHub did not answer. Try again later.');
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -220,7 +240,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
 
   function readPermission(login) {
     return shared(permissionPending, login, async () => {
-      spendOrRefuse(1);
+      spendOrRefuse('permission');
       const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`).catch((error) => {
         if (error instanceof GitHubError && error.status === 404) return { data: null };
         throw error;
@@ -237,22 +257,28 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return cachedPermission(login)?.value ?? readPermission(login);
   }
 
-  // Suggestions created but not labelled, retried after the next successful write.
   async function labelSuggestion(number) {
     await installationRequest('POST', `/repos/${repo}/issues/${number}/labels`, { body: { labels: [LABELS.suggestion] } });
   }
 
-  async function retryLabels() {
-    for (const number of [...unlabelled]) {
-      if (!spend(1)) return;
-      try {
-        await labelSuggestion(number);
-        unlabelled.delete(number);
-      } catch (error) {
-        if (error instanceof GitHubError && [404, 410, 422].includes(error.status)) unlabelled.delete(number);
-        else return;
+  // Suggestions created but not labelled. Retried, outside any request, after a successful suggestion
+  // and after each snapshot refresh: an issue is labelled only if it is still open and has no label
+  // at all; anything else leaves the list, and a failing number does not hold up the others.
+  let retrying = null;
+  function retryLabels() {
+    retrying ??= detach(async () => {
+      for (const number of [...unlabelled]) {
+        if (!spend('label', 2)) break;
+        try {
+          const { data: issue } = await installationRequest('GET', `/repos/${repo}/issues/${number}`);
+          if (issue.state === 'open' && !issue.pull_request && labelNames(issue).length === 0) await labelSuggestion(number);
+          unlabelled.delete(number);
+        } catch (error) {
+          if (error instanceof GitHubError && [404, 410, 422].includes(error.status)) unlabelled.delete(number);
+        }
       }
-    }
+    }).finally(() => { retrying = null; });
+    return retrying;
   }
 
   // Sessions
@@ -425,10 +451,21 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       return json(200, stale ? { ...body, stale: true } : body, { 'Cache-Control': PUBLIC_READ });
     },
 
-    // Reads only the cookie; the permission check is the one GitHub call, cached five minutes.
+    // Reads only the cookie; the permission check is the one GitHub call, cached five minutes. When it
+    // cannot be read, the answer says the person cannot decide, and the next `me` tries again.
     async 'GET me'(ctx) {
-      const session = await requireUser(ctx, { refresh: false });
-      return json(200, { login: session.login, avatar: session.avatar, canDecide: await canDecide(session.login) });
+      const session = await currentUser(ctx, { refresh: false });
+      if (!session) {
+        clearSession(ctx);
+        refuse(401, 'signed_out', 'Sign in with GitHub first.');
+      }
+      let decides = false;
+      try {
+        decides = await canDecide(session.login);
+      } catch (error) {
+        if (error instanceof GitHubError) ctx.githubStatus = error.status;
+      }
+      return json(200, { login: session.login, avatar: session.avatar, canDecide: decides });
     },
 
     async 'GET issue'(ctx) {
@@ -475,7 +512,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       const code = ctx.url.searchParams.get('code') || '';
       if (!code || code.length > 512) refuse(400, 'bad_input', 'Sign-in did not finish. Try again.');
       const repositoryId = await app.repoId(async () => {
-        spendOrRefuse(1);
+        spendOrRefuse('signin');
         return (await installationRequest('GET', `/repos/${repo}`)).data.id;
       });
       const result = await oauthToken({ code, redirect_uri: callbackUrl(), code_verifier: saved.v, repository_id: String(repositoryId) });
@@ -491,17 +528,18 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       return redirect(back);
     },
 
-    // Revokes the person's whole grant for the App (every session), then clears the cookies.
+    // Revokes the person's whole grant for the App (every session) with the token the cookie holds,
+    // never waiting on a refresh, then clears the cookies whatever happened. `revoked` says whether
+    // GitHub confirmed the revocation.
     async 'POST logout'(ctx) {
       const session = readSession(ctx);
       clearSession(ctx);
-      if (session) {
-        let token = session.t;
-        if (session.te - now() < REFRESH_MARGIN && session.re > now()) token = (await refresh(session)).fields?.t ?? token;
-        const basic = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
-        await github.request('DELETE', `/applications/${encodeURIComponent(config.clientId)}/grant`, { token: basic, auth: 'Basic', as: 'client', body: { access_token: token } }).catch(() => {});
-      }
-      return json(200, { ok: true });
+      if (!session) return json(200, { ok: true, revoked: false });
+      countWrite(session);
+      const basic = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
+      const revoked = await github.request('DELETE', `/applications/${encodeURIComponent(config.clientId)}/grant`, { token: basic, auth: 'Basic', as: 'client', body: { access_token: session.t } })
+        .then(() => true, () => false);
+      return json(200, { ok: true, revoked });
     },
 
     async 'POST comment'(ctx) {
@@ -539,7 +577,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       const input = readJson(ctx);
       const title = text(input.title, { limit: LIMITS.title, what: 'The title', oneLine: true });
       const body = text(input.text, { required: false, what: 'The description' });
-      spendOrRefuse(2);
+      spendOrRefuse('label', 2);
       const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues`, { body: { title, body } });
       const number = data.number;
       try {
@@ -551,6 +589,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
         refuse(502, 'github', 'The suggestion was posted on GitHub but could not be added to the Workshop.', { number });
       }
       snapshots.patch.issue(data, 'suggestion');
+      if (unlabelled.size) retryLabels().catch(() => {});
       return json(200, { number });
     },
 
@@ -579,12 +618,13 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       let state = { state: issue.state === 'closed' ? 'closed' : 'open', reason: reasonOf(issue) };
       if (verdict === 'drop' && !dropped) {
         await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'closed', state_reason: 'not_planned' } });
-        state = { state: 'closed', reason: 'not_planned' };
+        state = { state: 'closed', reason: 'not_planned', closedAt: new Date(now()).toISOString() };
       } else if (verdict !== 'drop' && dropped) {
         await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'open', state_reason: 'reopened' } });
         state = { state: 'open', reason: null };
       }
       snapshots.patch.fields(n, { verdict, ...state, ...(state.state === 'open' ? { closedAt: null } : {}) });
+      // The note comes last, after the change it explains succeeded, so a retry never posts it twice.
       if (note) {
         const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body: note } });
         if (data) snapshots.patch.comment(n, data);
@@ -600,7 +640,12 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       await requireDecider(session);
       const { issue, kind } = await workshopIssue(session, n);
       if (kind !== 'decision' || issue.state !== 'open') refuse(404, 'not_found', 'This is not an open Workshop decision.');
-      const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } });
+      // Comment, then close. A retry after a cut between the two finds the same comment from the same
+      // person in the last five minutes and does not post it again.
+      const since = new Date(now() - RECENT_DECISION).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const { data: recent } = await userRequest(session, 'GET', `/repos/${repo}/issues/${n}/comments?since=${since}&per_page=100`);
+      const already = (Array.isArray(recent) ? recent : []).some((comment) => comment.user?.id === session.id && (comment.body || '').trim() === body);
+      const data = already ? null : (await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } })).data;
       await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'closed', state_reason: 'completed' } });
       if (data) snapshots.patch.comment(n, data);
       snapshots.patch.fields(n, { state: 'closed', reason: 'completed', closedAt: new Date(now()).toISOString() });
@@ -612,7 +657,13 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return `${config.origin}/api/workshop/callback`;
   }
 
-  return { handle, idle: () => snapshots?.idle() ?? Promise.resolve() };
+  // Settles once no background work (snapshot refresh, label retry) is running.
+  async function idle() {
+    await snapshots?.idle();
+    await retrying?.catch(() => {});
+  }
+
+  return { handle, idle };
 }
 
 // A path on this site under /workshop, or a refusal.

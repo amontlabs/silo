@@ -1,6 +1,7 @@
 // The GitHub App's own identity: an RS256 JWT signed with the App's private
 // key, exchanged for an installation token limited to the Workshop repository.
 import { createPrivateKey, sign } from 'node:crypto';
+import { GitHubError } from './github.mjs';
 
 const TOKEN_MARGIN_MS = 5 * 60 * 1000;
 
@@ -28,7 +29,11 @@ export function createAppAuth({ config, github, now = Date.now }) {
 
   async function fetchToken() {
     const jwt = appJwt();
-    const { data: installation } = await github.request('GET', `/repos/${config.repo}/installation`, { token: jwt, as: 'app' });
+    const { data: installation } = await github.request('GET', `/repos/${config.repo}/installation`, { token: jwt, as: 'app' }).catch((error) => {
+      // The App is not installed on the repository: a configuration problem, not a GitHub failure.
+      if (error instanceof GitHubError && error.status === 404) throw new GitHubError(404, { as: 'app', notInstalled: true });
+      throw error;
+    });
     const name = config.repo.split('/')[1];
     const { data } = await github.request('POST', `/app/installations/${installation.id}/access_tokens`, {
       token: jwt,

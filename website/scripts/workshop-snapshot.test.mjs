@@ -261,10 +261,10 @@ test('bounds: issues, comments per issue, the full reload, and the cuts', async 
 });
 
 test('the refresh counts against the installation backstop', async () => {
-  assert.equal(BUDGET.installationCallsPerMinute, 80);
+  assert.equal(BUDGET.refreshCallsPerMinute, 60);
   const t = await setup();
   try {
-    await withBudget({ installationCallsPerMinute: 1 }, async () => {
+    await withBudget({ refreshCallsPerMinute: 1 }, async () => {
       assert.equal((await t.client().call('GET', 'state')).status, 502);
     });
   } finally { await t.close(); }

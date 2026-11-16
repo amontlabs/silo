@@ -10,8 +10,12 @@
 //   refresh and every 10 minutes (so deleted comments disappear), and otherwise
 //   only comments updated since the previous refresh, less a minute of overlap.
 // A refresh builds a new snapshot and swaps it in only when it completed.
+//
+// Writes patch the snapshot at once. Each patch is kept with its time: after a
+// refresh swaps in, the patches made since that refresh began are applied
+// again, and older ones are dropped, since GitHub's answer already holds them.
 import { GitHubError, nextLink } from './github.mjs';
-import { commentIssue, commentOf, kindOf, readBody, reasonOf, verdictOf } from './issues.mjs';
+import { clean, commentIssue, commentOf, kindOf, readBody, reasonOf, verdictOf } from './issues.mjs';
 
 export const SNAPSHOT = {
   maxAge: 60_000,
@@ -20,25 +24,30 @@ export const SNAPSHOT = {
   overlap: 60_000,
   retryAfter: 60_000,
   issues: 2000,
-  issuePages: 40,
-  fullCommentPages: 30,
+  issuePages: 30,
+  fullCommentPages: 25,
   sinceCommentPages: 10,
   commentsPerIssue: 100,
   comments: 5000,
+  patches: 500,
 };
 
 const byAge = (a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id - b.id);
 
 // `request(method, path, options)` calls GitHub with the installation token and
 // throws a GitHubError when GitHub fails or the installation must wait.
-export function createSnapshot({ repo, request, now = Date.now, log = () => {} }) {
+// `detach(fn)` runs fn outside the current request (no request deadline).
+// `afterRefresh()` runs, detached, after each successful refresh.
+export function createSnapshot({ repo, request, now = Date.now, log = () => {}, detach = (fn) => fn(), afterRefresh = () => {} }) {
   let current = null;
   let pending = null;
   let retryAt = 0;
+  let lastError = null;
   let lastFull = 0;
   let fullDue = true;
   let issuePages = new Map();
   let commentPages = new Map();
+  let patches = [];
 
   function item(issue, kind, previous) {
     const { entry, text } = readBody(issue.body);
@@ -47,13 +56,13 @@ export function createSnapshot({ repo, request, now = Date.now, log = () => {} }
       summary: {
         kind,
         entry: kind === 'entry' ? entry : null,
-        title: issue.title,
+        title: clean(issue.title, { oneLine: true }),
         state: issue.state === 'closed' ? 'closed' : 'open',
         reason: reasonOf(issue),
         verdict: verdictOf(issue),
         up: issue.reactions?.['+1'] ?? 0,
         comments: issue.comments ?? 0,
-        author: issue.user?.login ?? 'ghost',
+        author: clean(issue.user?.login ?? 'ghost', { oneLine: true }),
         bot: issue.user?.type === 'Bot',
         createdAt: issue.created_at,
         closedAt: issue.closed_at ?? null,
@@ -139,15 +148,28 @@ export function createSnapshot({ repo, request, now = Date.now, log = () => {} }
     return { startedAt: started, at: now(), issues, version: 0, stateAnswer: null };
   }
 
+  function swapIn(snapshot) {
+    patches = patches.filter((patch) => patch.at >= snapshot.startedAt);
+    for (const patch of patches) patch.apply(snapshot);
+    current = snapshot;
+  }
+
   function refresh() {
-    pending ??= build()
+    pending ??= detach(() => build())
       .then((snapshot) => {
-        current = snapshot;
+        swapIn(snapshot);
         retryAt = 0;
+        lastError = null;
+        try {
+          detach(afterRefresh);
+        } catch {
+          // The follow-up work is best effort and never fails the refresh.
+        }
         return snapshot;
       }, (error) => {
         const wait = error instanceof GitHubError && error.retryAfter ? error.retryAfter * 1000 : 0;
         retryAt = now() + Math.max(SNAPSHOT.retryAfter, wait);
+        lastError = error;
         log({ snapshot: 'refresh_failed', ...(error instanceof GitHubError ? { github: error.status } : { failure: error?.name || 'Error' }) });
         throw error;
       })
@@ -159,7 +181,7 @@ export function createSnapshot({ repo, request, now = Date.now, log = () => {} }
   async function read() {
     const at = now();
     if (!current) {
-      if (at < retryAt) throw new GitHubError(502);
+      if (at < retryAt) throw lastError instanceof GitHubError ? lastError : new GitHubError(502);
       await refresh();
     } else if (at - current.startedAt >= SNAPSHOT.maxAge && at >= retryAt && !pending) {
       refresh().catch(() => {});
@@ -191,32 +213,54 @@ export function createSnapshot({ repo, request, now = Date.now, log = () => {} }
     };
   }
 
-  // Patches after a signed-in person's write, so this instance shows it at once.
-  function patched(number, change) {
+  // Records a patch and applies it to the current snapshot. `apply(snapshot)` must be safe to run
+  // again on a newer snapshot: counts move only from the value they had when the write happened.
+  function record(apply) {
+    patches.push({ at: now(), apply });
+    if (patches.length > SNAPSHOT.patches) patches.shift();
+    if (current) apply(current);
+  }
+
+  function onEntry(number, change) {
+    return (snapshot) => {
+      const entry = snapshot.issues.get(number);
+      if (!entry) return;
+      change(entry);
+      snapshot.version += 1;
+    };
+  }
+
+  // A count moves from `from` to `to` only when the snapshot still shows `from`.
+  function count(number, field, delta) {
     const entry = current?.issues.get(number);
     if (!entry) return;
-    change(entry);
-    current.version += 1;
+    const from = entry.summary[field];
+    const to = Math.max(0, from + delta);
+    record(onEntry(number, (target) => { if (target.summary[field] === from) target.summary[field] = to; }));
   }
 
   const patch = {
     comment(number, comment) {
-      patched(number, (entry) => {
-        entry.comments.set(comment.id, commentOf(comment));
-        entry.summary.comments += 1;
+      const shown = commentOf(comment);
+      count(number, 'comments', 1);
+      record(onEntry(number, (entry) => {
+        if (entry.comments.has(shown.id)) return;
+        entry.comments.set(shown.id, shown);
         trim(new Map([[number, entry]]));
-      });
+      }));
     },
     up(number, delta) {
-      patched(number, (entry) => { entry.summary.up = Math.max(0, entry.summary.up + delta); });
+      count(number, 'up', delta);
     },
     fields(number, fields) {
-      patched(number, (entry) => Object.assign(entry.summary, fields));
+      record(onEntry(number, (entry) => Object.assign(entry.summary, fields)));
     },
     issue(issue, kind) {
-      if (!current || current.issues.has(issue.number) || current.issues.size >= SNAPSHOT.issues) return;
-      current.issues.set(issue.number, item(issue, kind, null));
-      current.version += 1;
+      record((snapshot) => {
+        if (snapshot.issues.has(issue.number) || snapshot.issues.size >= SNAPSHOT.issues) return;
+        snapshot.issues.set(issue.number, item(issue, kind, null));
+        snapshot.version += 1;
+      });
     },
   };
 
@@ -225,4 +269,3 @@ export function createSnapshot({ repo, request, now = Date.now, log = () => {} }
 
   return { read, stateAnswer, issueAnswer, patch, idle };
 }
-
