@@ -3,14 +3,21 @@
 The public site at [silo.amontlabs.com](https://silo.amontlabs.com), built with
 Vite. It has two pages:
 
-- **Home** (`index.html`, `src/site.css`, `src/style.css`): what Silo is, with
-  links to the Workshop and the source code.
+- **Home** (`index.html`, `src/style.css`, `src/loop.ts`): the pitch, the
+  picture of the loop (drawn by `src/loop.ts`, once, unless the visitor prefers
+  reduced motion), and the way into the Workshop. Its "First up" line and its
+  count of planned features are written in at build time from
+  `docs/product/stages.json` and `docs/product/features.jsonl`
+  (`src/home-plan.ts`, the `homePlan` plugin in `vite.config.ts`); a missing or
+  malformed file stops the build.
 - **Workshop** (`workshop/index.html`, `src/workshop/`): Silo's plan, every
   feature in build order, with votes, comments, suggestions and the owner's
   verdicts. Its API lives under `/api/workshop/` (`server/`, `api/`); see
   [the Workshop](../docs/WORKSHOP.md).
 
-Shared files: `public/theme.js` (first-paint light, dark or System theme,
+Shared files: `src/site.css` (tokens, the gutter, the frame and its diamonds,
+the header, buttons, the theme switch and the drawn arrow and check icons),
+`public/theme.js` (first-paint light, dark or System theme,
 remembered in local storage), `public/fonts/` (self-hosted IBM Plex under the
 included SIL Open Font License) and `public/favicon.svg`.
 
