@@ -4,3 +4,4 @@
 - A test that fails and then passes is a fix item, not a retry.
 - Product: `docs/product/PRODUCT.md` says what Silo is and what comes first, `JOURNEYS.md` how it is used and what works today, `DECISIONS.md` what was decided. Read them before building. A change to what a user does or sees updates its step in `JOURNEYS.md` in the same merge.
 - Business material (prices, customers, funding) never goes in this repository: it is public.
+- Silo is being restarted from an empty tree. Read `docs/product/RESTART.md` before anything else: it says what is decided, where the work stands and what to do when a session starts. Add nothing to the current tree except the dashboard and `docs/product/`.
