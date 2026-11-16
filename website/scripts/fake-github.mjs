@@ -69,9 +69,49 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
 
   function addComment(number, author, body) {
     const issue = state.issues.get(number);
-    const comment = { id: state.nextId++, user: author ? state.users.get(author) : bot, body, created_at: iso() };
+    const comment = { id: state.nextId++, user: author ? state.users.get(author) : bot, body, created_at: iso(), updated_at: iso() };
     issue.comments.push(comment);
     return comment;
+  }
+
+  function editComment(number, id, body) {
+    const comment = state.issues.get(number).comments.find((c) => c.id === id);
+    Object.assign(comment, { body, updated_at: iso() });
+  }
+
+  function deleteComment(number, id) {
+    const issue = state.issues.get(number);
+    issue.comments = issue.comments.filter((c) => c.id !== id);
+  }
+
+  function commentJson(number, comment) {
+    return {
+      id: comment.id, body: comment.body, created_at: comment.created_at, updated_at: comment.updated_at,
+      user: publicUser(comment.user), issue_url: `${baseUrl}/repos/${repo}/issues/${number}`,
+    };
+  }
+
+  // One page of a listing, with Link and ETag headers; a matching If-None-Match answers 304.
+  function listPage(req, res, url, items, record, perPageOverride) {
+    const perPage = perPageOverride || Number(url.searchParams.get('per_page') || 30);
+    const page = Number(url.searchParams.get('page') || 1);
+    const slice = items.slice((page - 1) * perPage, page * perPage);
+    const headers = {};
+    if (page * perPage < items.length) {
+      const next = new URL(baseUrl + url.pathname + url.search);
+      next.searchParams.set('page', String(page + 1));
+      headers.Link = `<${next}>; rel="next"`;
+    }
+    const body = JSON.stringify(slice);
+    headers.ETag = `W/"${createHash('sha256').update(body + (headers.Link || '')).digest('hex').slice(0, 32)}"`;
+    if (req.headers['if-none-match'] === headers.ETag) {
+      record.status = 304;
+      res.writeHead(304, { ETag: headers.ETag });
+      return res.end();
+    }
+    record.status = 200;
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
+    return res.end(body);
   }
 
   function react(number, login) {
@@ -151,7 +191,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     const url = new URL(req.url, 'http://fake');
     const path = url.pathname;
     const who = caller(req);
-    const record = { method: req.method, path, kind: who?.kind ?? 'anonymous', login: who?.user?.login ?? null };
+    const record = { method: req.method, path, query: url.search, kind: who?.kind ?? 'anonymous', login: who?.user?.login ?? null };
     state.requests.push(record);
     // A test's hook may delay or replace any answer.
     const hooked = state.hook?.(record);
@@ -251,20 +291,22 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (path === `/repos/${repo}/issues` && req.method === 'GET') {
       const labels = (url.searchParams.get('labels') || '').split(',').filter(Boolean);
       const wanted = url.searchParams.get('state') || 'open';
+      const ascending = url.searchParams.get('direction') === 'asc';
       const all = [...state.issues.values()]
         .filter((i) => labels.every((l) => i.labels.includes(l)))
         .filter((i) => wanted === 'all' || i.state === wanted)
-        .sort((a, b) => b.number - a.number);
-      const perPage = state.perPage || Number(url.searchParams.get('per_page') || 30);
-      const page = Number(url.searchParams.get('page') || 1);
-      const slice = all.slice((page - 1) * perPage, page * perPage);
-      const headers = {};
-      if (page * perPage < all.length) {
-        const next = new URL(baseUrl + url.pathname + url.search);
-        next.searchParams.set('page', String(page + 1));
-        headers.Link = `<${next}>; rel="next"`;
-      }
-      return json(res, 200, slice.map(issueJson), headers);
+        .sort((a, b) => (ascending ? a.number - b.number : b.number - a.number));
+      return listPage(req, res, url, all.map(issueJson), record, state.perPage);
+    }
+    if (path === `/repos/${repo}/issues/comments` && req.method === 'GET') {
+      const sort = url.searchParams.get('sort');
+      const since = url.searchParams.get('since');
+      const key = sort === 'updated' ? 'updated_at' : 'created_at';
+      const descending = sort && url.searchParams.get('direction') === 'desc';
+      const all = [...state.issues.values()].flatMap((i) => i.comments.map((c) => commentJson(i.number, c)))
+        .filter((c) => !since || c.updated_at > since)
+        .sort((a, b) => (sort ? (a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : a.id - b.id) : a.id - b.id) * (descending ? -1 : 1));
+      return listPage(req, res, url, all, record, state.commentsPerPage);
     }
     if (path === `/repos/${repo}/issues` && req.method === 'POST') {
       const body = await readBody(req);
@@ -324,9 +366,9 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (rest === '/comments' && req.method === 'POST') {
       if (issue.locked && !canWrite(who)) return json(res, 403, { message: 'Issue is locked' });
       const body = await readBody(req);
-      const comment = { id: state.nextId++, user: who.user, body: body.body, created_at: iso() };
+      const comment = { id: state.nextId++, user: who.user, body: body.body, created_at: iso(), updated_at: iso() };
       issue.comments.push(comment);
-      return json(res, 201, { id: comment.id, body: comment.body, user: publicUser(comment.user) });
+      return json(res, 201, commentJson(issue.number, comment));
     }
     if (rest === '/reactions' && req.method === 'GET') {
       const content = url.searchParams.get('content');
@@ -364,6 +406,8 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     addUser,
     addIssue,
     addComment,
+    editComment,
+    deleteComment,
     react,
     get url() { return baseUrl; },
     async listen(port = 0, host = '127.0.0.1') {

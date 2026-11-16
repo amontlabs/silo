@@ -36,7 +36,7 @@ briefly here:
 | --- | --- | --- |
 | `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. |
 | `GET me` | signed in | `{ login, avatar, canDecide }`, or 401. |
-| `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest comments, oldest first, as plain text; `more: true` when there are earlier ones. The same public answer for everyone. |
+| `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
@@ -57,12 +57,10 @@ suggestion whose issue was created but could not be labelled answers 502 with
 answer JSON: any failure redirects to `/workshop?signin=failed`; cancelling on
 GitHub returns to the page.
 
-`issue` fetches one page of comments: the page size between 50 and 100 that
-makes the last page longest, so it shows the latest 50 to 100 comments. Each
-comment is cut to 5,000 characters and then carries `"cut": true`. Bodies and
-comments are cut before any processing, and the entry marker and trailing
-blank lines are removed with linear string code, so a hostile body cannot make
-a read slow.
+Each comment is cut to 5,000 characters and then carries `"cut": true`.
+Bodies and comments are cut before any processing, and the entry marker and
+trailing blank lines are removed with linear string code, so a hostile body
+cannot make a read slow.
 
 An issue is a Workshop issue when it carries exactly one of the three kind
 labels and is not a pull request.
@@ -72,44 +70,90 @@ characters on one line (no control characters or line breaks). Unicode
 direction controls (U+202A–U+202E, U+2066–U+2069) are removed from titles and
 text.
 
-### Caching and GitHub's limits
+### The snapshot: a visitor never causes a call to GitHub
 
-- `state` is cached in memory for 60 seconds and sent with
-  `Cache-Control: public, s-maxage=60, stale-while-revalidate=300`.
-- `issue` is the same for everyone: cached in memory for 30 seconds and sent
-  with `public, s-maxage=30, stale-while-revalidate=300`. It answers only for
-  numbers in the cached `state`, so other numbers cost no GitHub call.
-- Everything else, and every response that sets a cookie, is
-  `private, no-store`.
-- Calls with the installation token outside the `state` refresh are limited to
-  60 a minute per function instance. Reading an issue takes three. When the
-  budget is spent, or while GitHub has asked us to wait, `issue` answers from
-  its cached copy (marked `"stale": true`) if it is under 10 minutes old,
-  otherwise 429.
+`GET state` and `GET issue` are answered from one in-memory snapshot per
+function instance (`website/server/snapshot.mjs`) and nothing else. The
+snapshot holds every Workshop issue (at most 2,000, oldest first) with the
+fields `state` returns, its body (cut to 20,000 characters) and its comments
+(the latest 100 per issue, each cut to 5,000 characters, at most 5,000 in all).
+A number that is not in the snapshot is a 404. Both reads are sent with
+`Cache-Control: public, s-maxage=30, stale-while-revalidate=300`, no
+`Vary: Cookie`, and read no cookie.
+
+- **Refresh.** When a request finds the snapshot over 60 seconds old, it
+  answers at once from the current snapshot and starts one refresh in the
+  background; concurrent requests share it and two never run at once. Only an
+  instance with no snapshot yet makes its first requests wait for the refresh.
+  A refresh builds a new snapshot and swaps it in only when it completed, so a
+  refresh that fails halfway leaves the previous one intact.
+- **Issues.** A refresh lists the repository's issues (all states, oldest
+  first, 100 a page, at most 40 pages), skipping pull requests and issues
+  without exactly one Workshop label. Each page is sent with `If-None-Match`
+  and the ETag GitHub gave for it last time; a `304 Not Modified` means the
+  page is unchanged and the held copy is reused. Vote counts come from each
+  issue's reaction summary in that list.
+- **Comments.** The first refresh, and one every 10 minutes, reloads the
+  newest comments of the whole repository (`/issues/comments`, newest first,
+  at most 30 pages, also conditional), so deleted comments disappear within
+  10 minutes; comments older than those 3,000 are not held, and `more` is true
+  for their issues. The refreshes in between ask only for comments updated
+  since the previous refresh, less a minute of overlap (`since`, oldest update
+  first, at most 10 pages; more than that schedules a full reload), and merge
+  them by id, so new and edited comments appear within a minute.
+- **Writes.** After a signed-in person's write succeeds, the snapshot is
+  patched in place: the new comment, the comment and 👍 counts, the verdict,
+  open or closed, a new suggestion. Everyone on that instance sees it at once;
+  the next refresh puts GitHub's version back. *Limit:* a refresh that started
+  before the write may briefly put the earlier version back, until the
+  following refresh.
+- **When GitHub fails**, times out or asks us to wait, the snapshot keeps
+  answering whatever its age, with `"stale": true` once it is over 10 minutes
+  old, and no refresh is tried before the time GitHub gave, or 60 seconds.
+  With no snapshot at all, both reads answer 502 and the page falls back to the
+  plan built into it.
+
+GitHub documents that a `304` answer to an authorized conditional request
+"does not count against your primary rate limit"
+([best practices for using the REST API](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api),
+read 2026-11-16). An unchanged issue page therefore costs nothing against the
+installation's 5,000 requests an hour
+([rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)).
+It still counts in our own ceiling below. The `since` comment call has a new
+URL each time and always counts.
+
+### The installation token and its ceiling
+
+The installation token is spent only on the snapshot refresh, the permission
+check (cached five minutes per person) and labelling a suggestion. One ceiling
+covers all three: at most 80 calls a minute per instance. Worst case per
+instance per hour: 80 × 60 = 4,800 calls, below the installation's 5,000. The
+largest refresh is 40 issue pages + 30 comment pages = 70 calls, which fits in
+a minute's 80, and 80 calls a minute is far below GitHub's secondary limit of
+900 points a minute for `GET` requests. In the usual case, with the issue list
+on 2 pages and nothing changed, an hour costs about 60 `since` calls plus 6
+full comment reloads whose unchanged pages are free. Several instances each
+have their own ceiling.
+
+### Other limits
+
+- Everything other than `state` and `issue`, and every response that sets a
+  cookie, is `private, no-store`.
 - When GitHub rate-limits the App (including a secondary limit: a 403 or 429
-  with `retry-after`, or whose message mentions a rate limit), the server stops
-  calling GitHub with the installation token until the time GitHub gave (at
-  most an hour). `state` serves its last good copy, marked `"stale": true`, for
-  up to 10 minutes after it was fetched, then answers 429. The same stale rule
-  covers GitHub server errors and timeouts.
+  with `retry-after`, or whose message mentions a rate limit), nothing calls
+  GitHub with the installation token until the time GitHub gave (at most an
+  hour).
 - Each signed-in person may make 30 writes a minute per instance; more answer
   429.
 - Every GitHub call has an 8-second limit.
-- Concurrent requests for the same thing (`state`, an `issue`, a permission)
-  share one call to GitHub.
-- A write never drops a cached `state` or `issue`. Plain fields and counts
-  (comment and 👍 counts, verdict, open or closed) are patched in place; the
-  rest expires on its own. The stale fallback therefore survives a write.
+- Concurrent permission checks for the same person share one call.
 - `me` reads the cookie and calls GitHub only for the permission check (cached
   five minutes); it never refreshes the user token.
-- While GitHub has told the installation to wait, nothing calls GitHub with
-  the installation token: not `state`, `issue`, the permission check nor a
-  label.
 - `suggest` refuses with 429 before creating anything when the installation
-  is blocked or the budget is spent. If labelling a new suggestion still fails
-  twice, the answer is 502 with its `number`, and the number is remembered (in
-  memory, up to 100) so that the next successful write by anyone retries the
-  label.
+  is blocked or the ceiling is reached. If labelling a new suggestion still
+  fails twice, the answer is 502 with its `number`, and the number is
+  remembered (in memory, up to 100) so that the next successful write by
+  anyone retries the label.
 - Every answer, API and pages alike, carries
   `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 
@@ -121,6 +165,8 @@ text.
 | `website/server/github.mjs` | GitHub REST client with pagination and an 8-second limit per call; errors carry a status and the identity used, never a body. |
 | `website/server/app-auth.mjs` | App JWT (RS256, Node's `crypto`) and the cached installation token. |
 | `website/server/session.mjs` | Sealed cookies (AES-256-GCM). |
+| `website/server/issues.mjs` | Kinds, verdicts, the entry marker and the cuts. |
+| `website/server/snapshot.mjs` | The in-memory snapshot that answers every anonymous read, and its refresh. |
 | `website/server/workshop.mjs` | Every endpoint, independent of the HTTP server. |
 | `website/server/node.mjs` | Adapter for Node's `req`/`res`, used by Vercel and the local server. |
 | `website/api/workshop.cjs` | Vercel's entry point. |
@@ -242,7 +288,9 @@ prefix. Without the variables, the API answers 503.
 The tests run with the website's tests: `npm --prefix website test`. The fake
 GitHub answers like GitHub where it matters to the server: expiring user tokens
 with PKCE, a single-use refresh token, grant revocation, the permission
-endpoint answering 200 with `none` for a non-collaborator, primary and
+endpoint answering 200 with `none` for a non-collaborator, ETags and `304` on
+listings, the repository-wide comment list with `sort`, `direction` and
+`since`, comment edits and deletions, primary and
 secondary rate limits, locked issues, and a hook that delays or fails any call.
 
 ## Security properties and their limits
@@ -286,8 +334,8 @@ origin differs.
 
 **Identities and scope.** The App can only read and write issues of the one
 repository, and the installation token is requested for that repository with
-those two permissions. The installation token serves only the anonymous cached
-reads (`state`, `issue`), the permission check and labelling a suggestion
+those two permissions. The installation token serves only the snapshot refresh,
+the permission check and labelling a suggestion
 (which a visitor cannot do). Everything else done for a signed-in person,
 including reading the issue before a write, uses that person's token, so
 GitHub's own permissions apply (a locked issue refuses a visitor's comment)
@@ -317,8 +365,9 @@ sentences; nothing from a GitHub response body is passed on. No token, code,
 cookie, client secret or private key is logged or returned; a test asserts
 this on every response and log line of a session that includes failures.
 
-**Rate limits.** The budgets and caches are per function instance, in memory;
-several instances together can make more calls than one.
+**Rate limits.** The snapshot, the ceilings and the caches are per function
+instance, in memory; several instances together can make more calls than one,
+and two instances can briefly show different versions.
 
 ## Not verified until deployed
 
@@ -332,7 +381,10 @@ GitHub or Vercel. These depend on the real services:
 - the collaborator permission endpoint with only the Metadata read permission;
 - that Vercel follows the symlinked functions, and loads the `.cjs` handler
   with `req.url` as the original path;
-- that Vercel's Git build uses `.vercel/output` at the repository root.
+- that Vercel's Git build uses `.vercel/output` at the repository root;
+- that GitHub answers `304` to the conditional issue and comment list pages as
+  documented, and that the reaction summary in the issue list moves the page's
+  ETag when a vote changes.
 
 ## Why built this way
 

@@ -25,7 +25,8 @@ const MAX_PAGES = 50;
 
 // `as` names the identity a call is made with: 'user', 'installation', 'app' or 'client'.
 export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now, timeoutMs = DEFAULT_TIMEOUT }) {
-  async function request(method, path, { token, auth = 'Bearer', body, accept = 'application/vnd.github+json', as = null } = {}) {
+  // With `etag`, the request is conditional (If-None-Match) and a 304 answers { status: 304, data: null }.
+  async function request(method, path, { token, auth = 'Bearer', body, accept = 'application/vnd.github+json', as = null, etag = null } = {}) {
     const url = path.startsWith('http') ? path : apiBase + path;
     const headers = {
       'Accept': accept,
@@ -34,9 +35,14 @@ export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now
     };
     if (token) headers.Authorization = `${auth} ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (etag) headers['If-None-Match'] = etag;
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const response = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal });
+      if (response.status === 304 && etag) {
+        await response.body?.cancel().catch(() => {});
+        return { data: null, status: 304, headers: response.headers };
+      }
       if (!response.ok) throw await errorFor(response, now(), as);
       if (response.status === 204) {
         await response.body?.cancel().catch(() => {});

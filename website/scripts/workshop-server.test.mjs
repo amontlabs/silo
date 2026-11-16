@@ -12,83 +12,14 @@ import { readConfig } from '../server/config.mjs';
 import { DEFAULT_TIMEOUT } from '../server/github.mjs';
 import { createNodeHandler, MAX_BODY, readRequest } from '../server/node.mjs';
 import { seal, unseal } from '../server/session.mjs';
-import { BUDGET, createWorkshop, cut, LABELS, LIMITS, readBody } from '../server/workshop.mjs';
+import { BUDGET, createWorkshop, LABELS } from '../server/workshop.mjs';
+import { CUTS, cut, readBody } from '../server/issues.mjs';
+import { SNAPSHOT } from '../server/snapshot.mjs';
 import { createFakeGitHub, FAKE_APP, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
 import { startDev } from './workshop-dev.mjs';
 
-const ORIGIN = 'https://silo.test';
-const START = Date.parse('2026-11-16T12:00:00Z');
-const SESSION = '__Host-workshop-session';
-const FAILED = '/workshop?signin=failed';
-
-async function setup({ configured = true, seed = true, timeoutMs } = {}) {
-  const clock = { t: START };
-  const now = () => clock.t;
-  const fake = createFakeGitHub({ now });
-  await fake.listen();
-  if (seed) seedDemo(fake);
-  const logs = [];
-  const outputs = [];
-  const env = configured ? fake.workshopEnv(ORIGIN) : { WORKSHOP_SITE_ORIGIN: ORIGIN };
-  const config = readConfig(env, { apiBase: fake.url, webBase: fake.url });
-  const workshop = createWorkshop({ config, now, log: (entry) => logs.push(JSON.stringify(entry)), ...(timeoutMs ? { timeoutMs } : {}) });
-  const secrets = () => [...fake.issuedTokens, fake.clientSecret, env.WORKSHOP_SESSION_SECRET, ...[...fake.state.codes.keys()]].filter(Boolean);
-
-  function client() {
-    const jar = new Map();
-    async function call(method, path, { body, headers = {} } = {}) {
-      const h = {};
-      if (method === 'POST') Object.assign(h, { origin: ORIGIN, 'x-workshop': '1', 'content-type': 'application/json' });
-      if (jar.size) h.cookie = [...jar].map(([name, value]) => `${name}=${value}`).join('; ');
-      for (const [name, value] of Object.entries(headers)) {
-        if (value === undefined) delete h[name];
-        else h[name] = value;
-      }
-      const response = await workshop.handle({ method, url: `/api/workshop/${path}`, headers: h, body: body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body) });
-      outputs.push(JSON.stringify(response));
-      for (const cookie of response.cookies) {
-        const [pair, ...attributes] = cookie.split('; ');
-        const index = pair.indexOf('=');
-        if (attributes.includes('Max-Age=0')) jar.delete(pair.slice(0, index));
-        else jar.set(pair.slice(0, index), pair.slice(index + 1));
-      }
-      return { ...response, json: response.body ? JSON.parse(response.body) : null };
-    }
-    async function signIn(login) {
-      const start = await call('GET', 'login?return=/workshop?open=3');
-      assert.equal(start.status, 302);
-      const authorize = new URL(start.headers.Location);
-      const approve = new URL('/login/oauth/fake-approve', fake.url);
-      for (const key of ['redirect_uri', 'state', 'code_challenge']) approve.searchParams.set(key, authorize.searchParams.get(key));
-      approve.searchParams.set('login', login);
-      const back = new URL((await fetch(approve, { redirect: 'manual' })).headers.get('location'));
-      assert.equal(back.origin + back.pathname, `${ORIGIN}/api/workshop/callback`);
-      const done = await call('GET', `callback${back.search}`);
-      assert.equal(done.status, 302, done.body);
-      assert.equal(done.headers.Location, '/workshop?open=3');
-      return done;
-    }
-    return { call, signIn, jar };
-  }
-
-  return { fake, workshop, config, clock, logs, outputs, secrets, client, close: () => fake.close() };
-}
-
-const count = (fake, method, pattern, kind) => fake.state.requests.filter((r) => r.method === method && pattern.test(r.path) && (!kind || r.kind === kind)).length;
-const issueOf = (fake, n) => fake.state.issues.get(n);
-const entryNumber = 2;
-const decisionNumber = 4;
-
-async function withBudget(values, run) {
-  const saved = { ...BUDGET };
-  Object.assign(BUDGET, values);
-  try {
-    await run();
-  } finally {
-    Object.assign(BUDGET, saved);
-  }
-}
+import { count, decisionNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
 
 test('App JWT is RS256 with the App ID, and the installation token is cached until shortly before it expires', async () => {
   const t = await setup();
@@ -103,75 +34,16 @@ test('App JWT is RS256 with the App ID, and the installation token is cached unt
     assert.ok(verify('sha256', Buffer.from(`${header}.${payload}`), publicKey, Buffer.from(signature, 'base64url')));
 
     const c = t.client();
-    await c.call('GET', 'state');
+    const read = async () => { await c.call('GET', 'state'); await t.workshop.idle(); };
+    await read();
     t.clock.t += 61_000;
-    await c.call('GET', 'state');
+    await read();
     t.clock.t += 50 * 60_000;
-    await c.call('GET', 'state');
+    await read();
     assert.equal(count(t.fake, 'POST', /access_tokens$/), 1);
     t.clock.t += 6 * 60_000;
-    await c.call('GET', 'state');
+    await read();
     assert.equal(count(t.fake, 'POST', /access_tokens$/), 2);
-  } finally { await t.close(); }
-});
-
-test('state lists every Workshop issue with counts, paginated, publicly cacheable, and cached for 60 seconds', async () => {
-  const t = await setup();
-  try {
-    t.fake.state.perPage = 2;
-    const c = t.client();
-    const first = await c.call('GET', 'state');
-    assert.equal(first.status, 200);
-    assert.equal(first.headers['Cache-Control'], 'public, s-maxage=60, stale-while-revalidate=300');
-    assert.deepEqual(first.cookies, []);
-    const issues = first.json.issues;
-    assert.equal(first.json.repo, 'amontlabs/silo');
-    assert.deepEqual(Object.keys(issues).map(Number).sort((a, b) => a - b), [1, 2, 3, 4, 5, 6]);
-    assert.deepEqual(issues[1], {
-      kind: 'entry', entry: 'engine-service', title: 'The engine runs on its own', state: 'open', reason: null, verdict: 'take',
-      up: 1, comments: 2, author: 'silo-workshop[bot]', bot: true, createdAt: issues[1].createdAt, closedAt: null,
-    });
-    assert.equal(issues[3].verdict, 'later');
-    assert.equal(issues[5].kind, 'decision');
-    assert.equal(issues[5].reason, 'completed');
-    assert.equal(issues[6].kind, 'suggestion');
-    assert.equal(issues[6].author, 'visitor-fake');
-    assert.equal(issues[6].bot, false);
-    const lists = count(t.fake, 'GET', /\/issues$/);
-    assert.ok(lists > 3, 'pagination followed');
-    t.clock.t += 59_000;
-    await c.call('GET', 'state');
-    assert.equal(count(t.fake, 'GET', /\/issues$/), lists);
-    t.clock.t += 2_000;
-    await c.call('GET', 'state');
-    assert.ok(count(t.fake, 'GET', /\/issues$/) > lists);
-  } finally { await t.close(); }
-});
-
-test('on a rate limit, state serves the last good answer marked stale for up to 10 minutes, then 429, without calling GitHub while blocked', async () => {
-  const t = await setup();
-  try {
-    const c = t.client();
-    assert.equal((await c.call('GET', 'state')).status, 200);
-    t.fake.state.rateLimited = true;
-    t.clock.t += 61_000;
-    const stale = await c.call('GET', 'state');
-    assert.equal(stale.status, 200);
-    assert.equal(stale.json.stale, true);
-    assert.equal(Object.keys(stale.json.issues).length, 6);
-    const calls = t.fake.state.requests.length;
-    t.clock.t += 30_000;
-    assert.equal((await c.call('GET', 'state')).json.stale, true);
-    assert.equal((await c.call('GET', 'issue?n=1')).status, 429, 'issue has no copy and GitHub asked us to wait');
-    assert.equal(t.fake.state.requests.length, calls, 'no GitHub call while blocked');
-    t.clock.t += 10 * 60_000;
-    const limited = await c.call('GET', 'state');
-    assert.equal(limited.status, 429);
-    assert.equal(limited.json.error, 'rate_limited');
-    assert.equal(limited.headers['Cache-Control'], 'private, no-store');
-    t.fake.state.rateLimited = false;
-    t.clock.t += 5 * 60_000;
-    assert.equal((await c.call('GET', 'state')).json.stale, undefined);
   } finally { await t.close(); }
 });
 
@@ -179,14 +51,18 @@ test('secondary rate limits (retry-after, or only the message) are rate limits a
   for (const kind of ['retry-after', 'message']) {
     const t = await setup();
     try {
-      t.fake.state.secondaryLimited = kind;
       const c = t.client();
-      const limited = await c.call('GET', 'state');
+      const visitor = t.client();
+      await visitor.signIn('visitor-fake');
+      t.fake.state.secondaryLimited = kind;
+      const limited = await visitor.call('GET', 'me');
       assert.equal(limited.status, 429, kind);
       assert.ok(Number(limited.headers['Retry-After']) > 0);
+      assert.equal((await c.call('GET', 'state')).status, 502, 'a cold snapshot read while blocked');
       const calls = t.fake.state.requests.length;
       t.fake.state.secondaryLimited = false;
-      assert.equal((await c.call('GET', 'state')).status, 429);
+      assert.equal((await visitor.call('GET', 'me')).status, 429);
+      assert.equal((await c.call('GET', 'state')).status, 502);
       assert.equal(t.fake.state.requests.length, calls, `blocked after a ${kind} secondary limit`);
     } finally { await t.close(); }
   }
@@ -211,27 +87,6 @@ test('GitHub failing answers 502 when nothing is cached, and an unconfigured ser
     assert.equal(login.status, 302);
     assert.equal(login.headers.Location, FAILED);
   } finally { await u.close(); }
-});
-
-test('every GitHub call has a time limit: a timeout is a 502 and counts as a failure for the stale rule', async () => {
-  assert.equal(DEFAULT_TIMEOUT, 8000);
-  const t = await setup({ timeoutMs: 100 });
-  try {
-    const c = t.client();
-    t.fake.state.hook = (r) => (r.path.endsWith('/issues') ? { delay: 400 } : null);
-    const started = Date.now();
-    const slow = await c.call('GET', 'state');
-    assert.equal(slow.status, 502);
-    assert.equal(slow.json.error, 'github_failed');
-    assert.ok(Date.now() - started < 2000);
-    t.fake.state.hook = null;
-    assert.equal((await c.call('GET', 'state')).status, 200);
-    t.clock.t += 61_000;
-    t.fake.state.hook = (r) => (r.path.endsWith('/issues') ? { delay: 400 } : null);
-    const stale = await c.call('GET', 'state');
-    assert.equal(stale.status, 200);
-    assert.equal(stale.json.stale, true);
-  } finally { t.fake.state.hook = null; await t.close(); }
 });
 
 test('a hung or failing token refresh answers 502 and keeps the session; only an invalid refresh token signs out', async () => {
@@ -319,48 +174,6 @@ test('me needs a session and reports canDecide from the repository permission', 
   } finally { await t.close(); }
 });
 
-test('issue is public and cacheable for everyone, with the latest 100 comments oldest first', async () => {
-  const t = await setup();
-  try {
-    const anonymous = await t.client().call('GET', 'issue?n=1');
-    assert.equal(anonymous.status, 200);
-    assert.equal(anonymous.headers['Cache-Control'], 'public, s-maxage=30, stale-while-revalidate=300');
-    assert.equal(anonymous.headers.Vary, undefined);
-    assert.equal(anonymous.json.body, 'A background engine owns every computer.');
-    assert.equal(anonymous.json.up, 1);
-    assert.equal(anonymous.json.more, false);
-    assert.equal('viewerUp' in anonymous.json, false);
-    assert.equal(anonymous.json.url, 'https://github.com/amontlabs/silo/issues/1');
-    assert.deepEqual(anonymous.json.comments.map((c) => [c.author, c.bot, c.text]), [
-      ['visitor-fake', false, 'Looking forward to this.\nSee https://example.com for `context`.'],
-      ['silo-workshop[bot]', true, 'Posted by an agent.'],
-    ]);
-    const reads = count(t.fake, 'GET', /\/issues\/1$/);
-    t.clock.t += 29_000;
-    const visitor = t.client();
-    await visitor.signIn('visitor-fake');
-    const signed = await visitor.call('GET', 'issue?n=1');
-    assert.equal(count(t.fake, 'GET', /\/issues\/1$/), reads, 'cached for 30 seconds, signed in or not');
-    assert.equal(signed.headers['Cache-Control'], 'public, s-maxage=30, stale-while-revalidate=300');
-    assert.equal(count(t.fake, 'GET', /\/issues\/1/, 'user'), 0, 'never the person\'s token');
-
-    for (const n of [7, 8, 99]) assert.equal((await t.client().call('GET', `issue?n=${n}`)).status, 404);
-    assert.equal(count(t.fake, 'GET', /\/issues\/(7|8|99)$/), 0, 'numbers outside the state cost no GitHub call');
-    assert.equal((await t.client().call('GET', 'issue?n=1x')).status, 400);
-
-    for (let i = 0; i < 248; i += 1) t.fake.addComment(2, 'visitor-fake', `comment ${i}`);
-    t.clock.t += 61_000;
-    const before = count(t.fake, 'GET', /\/issues\/2\/comments$/);
-    const long = await t.client().call('GET', 'issue?n=2');
-    assert.equal(count(t.fake, 'GET', /\/issues\/2\/comments$/), before + 1, 'one page of comments');
-    const shown = long.json.comments.map((c) => c.text);
-    assert.ok(shown.length >= 50 && shown.length <= 100, String(shown.length));
-    assert.equal(long.json.more, true);
-    assert.equal(shown.at(-1), 'comment 247');
-    assert.deepEqual(shown, Array.from({ length: shown.length }, (_, i) => `comment ${248 - shown.length + i}`), 'the latest, oldest first');
-  } finally { await t.close(); }
-});
-
 test('GET vote reads the person\'s own reaction with their token, privately', async () => {
   const t = await setup();
   try {
@@ -373,29 +186,6 @@ test('GET vote reads the person\'s own reaction with their token, privately', as
     assert.deepEqual((await c.call('GET', 'vote?n=2')).json, { on: false });
     assert.equal((await c.call('GET', 'vote?n=7')).status, 404);
     assert.equal(count(t.fake, 'GET', /reactions$/, 'installation'), 0);
-  } finally { await t.close(); }
-});
-
-test('the installation budget: at most 60 calls a minute outside the state refresh; issue then answers from its cache or 429', async () => {
-  const t = await setup();
-  try {
-    await withBudget({ installationCallsPerMinute: 4 }, async () => {
-      const c = t.client();
-      assert.equal((await c.call('GET', 'issue?n=1')).status, 200);
-      assert.equal((await c.call('GET', 'issue?n=2')).status, 200);
-      const spent = await c.call('GET', 'issue?n=3');
-      assert.equal(spent.status, 429);
-      assert.ok(Number(spent.headers['Retry-After']) > 0);
-      t.clock.t += 31_000;
-      const stale = await c.call('GET', 'issue?n=1');
-      assert.equal(stale.status, 200);
-      assert.equal(stale.json.stale, true);
-      t.clock.t += 30_000;
-      const fresh = await c.call('GET', 'issue?n=3');
-      assert.equal(fresh.status, 200);
-      assert.equal(fresh.json.stale, undefined);
-    });
-    assert.equal(BUDGET.installationCallsPerMinute, 60);
   } finally { await t.close(); }
 });
 
@@ -784,7 +574,7 @@ test('no response and no log line carries a token, a code, the client secret or 
     for (const secret of secrets) assert.equal(everything.includes(secret), false, 'a secret leaked');
     for (const fragment of ['ghu_', 'ghr_', 'ghs_', 'BEGIN RSA', 'Bearer']) assert.equal(everything.includes(fragment), false, fragment);
     assert.ok(t.logs.length > 10);
-    for (const line of t.logs) assert.deepEqual(Object.keys(JSON.parse(line)).filter((k) => !['endpoint', 'status', 'github', 'failure'].includes(k)), []);
+    for (const line of t.logs) assert.deepEqual(Object.keys(JSON.parse(line)).filter((k) => !['endpoint', 'status', 'github', 'failure', 'snapshot'].includes(k)), []);
   } finally { await t.close(); }
 });
 
@@ -921,7 +711,7 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     assert.deepEqual(vc, { runtime: RUNTIME, handler: 'api/workshop.cjs', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 15 });
     assert.match(vc.runtime, /^nodejs(22|24|26)\.x$/);
     const serverFiles = (await readdir(join(main, 'server'))).sort();
-    assert.deepEqual(serverFiles, ['app-auth.mjs', 'config.mjs', 'github.mjs', 'node.mjs', 'session.mjs', 'workshop.mjs']);
+    assert.deepEqual(serverFiles, ['app-auth.mjs', 'config.mjs', 'github.mjs', 'issues.mjs', 'node.mjs', 'session.mjs', 'snapshot.mjs', 'workshop.mjs']);
 
     // The packaged entry point loads and answers on its own.
     const saved = Object.fromEntries(Object.keys(process.env).filter((k) => k.startsWith('WORKSHOP_')).map((k) => [k, process.env[k]]));
@@ -1002,52 +792,6 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
   }
 });
 
-test('concurrent reads of one issue share one GitHub call', async () => {
-  const t = await setup();
-  try {
-    await t.client().call('GET', 'state');
-    const before = count(t.fake, 'GET', /\/issues\/1$/);
-    const answers = await Promise.all(Array.from({ length: 200 }, () => t.client().call('GET', 'issue?n=1')));
-    assert.ok(answers.every((a) => a.status === 200));
-    assert.equal(count(t.fake, 'GET', /\/issues\/1$/) - before, 1);
-    assert.equal(count(t.fake, 'GET', /\/issues\/1\/comments/), 1);
-  } finally { await t.close(); }
-});
-
-test('writes patch the cached state and issue in place instead of dropping them, so the stale copy survives', async () => {
-  const t = await setup();
-  try {
-    const visitor = t.client();
-    await visitor.signIn('visitor-fake');
-    const owner = t.client();
-    await owner.signIn('owner-fake');
-    await visitor.call('GET', 'state');
-    await visitor.call('GET', 'issue?n=2');
-    const lists = count(t.fake, 'GET', /\/issues$/);
-    const reads = count(t.fake, 'GET', /\/issues\/2$/, 'installation');
-    await visitor.call('POST', 'comment', { body: { n: 2, text: 'x' } });
-    await visitor.call('POST', 'vote', { body: { n: 2, on: true } });
-    await visitor.call('POST', 'vote', { body: { n: 2, on: true } });
-    await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'drop', note: 'no' } });
-    await owner.call('POST', 'decide', { body: { n: 4, text: 'yes' } });
-    const state = await visitor.call('GET', 'state');
-    assert.equal(count(t.fake, 'GET', /\/issues$/), lists, 'state was not fetched again');
-    assert.deepEqual(
-      [state.json.issues[2].comments, state.json.issues[2].up, state.json.issues[2].verdict, state.json.issues[2].state, state.json.issues[2].reason],
-      [2, 2, 'drop', 'closed', 'not_planned'],
-    );
-    assert.deepEqual([state.json.issues[4].state, state.json.issues[4].reason, state.json.issues[4].comments], ['closed', 'completed', 2]);
-    const issue = await visitor.call('GET', 'issue?n=2');
-    assert.equal(issue.json.up, 2, 'the cached issue count is patched');
-    assert.equal(count(t.fake, 'GET', /\/issues\/2$/, 'installation'), reads);
-    t.fake.state.rateLimited = true;
-    t.clock.t += 61_000;
-    const stale = await visitor.call('GET', 'state');
-    assert.equal(stale.json.stale, true);
-    assert.equal(stale.json.issues[2].verdict, 'drop');
-  } finally { await t.close(); }
-});
-
 test('me calls GitHub only for the permission check, cached, and never refreshes the token', async () => {
   const t = await setup();
   try {
@@ -1067,12 +811,12 @@ test('while GitHub has told the installation to wait, nothing calls GitHub with 
     const c = t.client();
     await c.signIn('visitor-fake');
     t.fake.state.rateLimited = true;
-    assert.equal((await t.client().call('GET', 'state')).status, 429);
+    assert.equal((await t.client().call('GET', 'state')).status, 502, 'cold start with GitHub refusing');
     t.fake.state.rateLimited = false;
     const before = t.fake.state.requests.length;
     const issues = t.fake.state.issues.size;
     assert.equal((await c.call('GET', 'me')).status, 429);
-    assert.equal((await t.client().call('GET', 'issue?n=1')).status, 429);
+    assert.equal((await t.client().call('GET', 'issue?n=1')).status, 502);
     const suggest = await c.call('POST', 'suggest', { body: { title: 'Blocked', text: 'x' } });
     assert.equal(suggest.status, 429);
     assert.equal(t.fake.state.issues.size, issues, 'no issue created');
@@ -1150,32 +894,6 @@ test('an issue with more than one Workshop kind label is not a Workshop issue', 
     assert.equal((await c.call('GET', 'state')).json.issues[both.number], undefined);
     assert.equal((await c.call('POST', 'comment', { body: { n: both.number, text: 'x' } })).status, 404);
     assert.equal((await c.call('GET', `vote?n=${both.number}`)).status, 404);
-  } finally { await t.close(); }
-});
-
-test('bodies and comments are cut before processing, in linear time, and an issue answer is bounded', async () => {
-  const newlines = '\n'.repeat(65_000);
-  let started = performance.now();
-  const parsed = readBody(`text${newlines}<!-- silo-entry: x -->${newlines}`);
-  assert.ok(performance.now() - started < 50, `${performance.now() - started} ms`);
-  assert.equal(parsed.text, 'text');
-  assert.equal(readBody('What it is.\n  <!--  silo-entry: engine-service -->  \n').entry, 'engine-service');
-  assert.equal(readBody('a\n<!-- silo-entry: bad id! -->').entry, null);
-  assert.equal(readBody('x'.repeat(30_000)).text.length, LIMITS.body);
-  assert.equal(cut('a😀', 2), 'a', 'never half a surrogate pair');
-
-  const t = await setup();
-  try {
-    const issue = t.fake.addIssue({ title: 'Huge', labels: ['workshop:suggestion'], body: `${'line\n'.repeat(13_000)}${newlines}` });
-    for (let i = 0; i < 80; i += 1) t.fake.addComment(issue.number, 'visitor-fake', 'y'.repeat(65_000));
-    const c = t.client();
-    started = performance.now();
-    const response = await c.call('GET', `issue?n=${issue.number}`);
-    assert.equal(response.status, 200);
-    assert.ok(response.json.body.length <= LIMITS.body);
-    assert.ok(response.json.comments.every((comment) => comment.text.length === LIMITS.commentShown && comment.cut === true));
-    assert.ok(response.body.length < 600_000, `${response.body.length} bytes`);
-    assert.ok(performance.now() - started < 1000);
   } finally { await t.close(); }
 });
 
