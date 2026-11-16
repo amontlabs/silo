@@ -11,9 +11,9 @@ Vite. It has two pages:
   `docs/product/stages.json` and `docs/product/features.jsonl`
   (`src/home-plan.ts`, the `homePlan` plugin in `vite.config.ts`); a missing or
   malformed file stops the build.
-- **Workshop** (`workshop/index.html`, `src/workshop/`): Silo's plan, every
-  feature in build order, with votes, comments, suggestions and the owner's
-  verdicts. Its API lives under `/api/workshop/` (`server/`, `api/`); see
+- **Workshop** (`workshop/index.html`, `src/workshop/`): Silo's plan, the
+  product's areas drawn as a map (tiles on narrow screens), each with its
+  entries, votes, comments, suggestions and the owner's verdicts. Its API lives under `/api/workshop/` (`server/`, `api/`); see
   [the Workshop](../docs/WORKSHOP.md).
 
 Shared files: `src/site.css` (tokens, the gutter, the frame and its diamonds,

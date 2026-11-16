@@ -510,7 +510,7 @@ describe('writes the server has not confirmed', () => {
     history.replaceState(null, '', '/workshop#computers/exec');
     await renderApp();
     await screen.findByText('Sign in to comment');
-    expect(screen.getByRole('link', { name: 'GitHub #13 ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
+    expect(screen.getByRole('link', { name: 'or comment on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
     expect(await screen.findByRole('link', { name: 'Earlier comments on GitHub ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
   });
 });

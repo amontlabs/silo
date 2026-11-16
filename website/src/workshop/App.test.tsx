@@ -146,7 +146,7 @@ describe('an entry', () => {
     expect(screen.getByText('Make a Linux computer.')).toBeInTheDocument();
     expect(screen.getByText('Not decided yet.')).toBeInTheDocument();
     expect(await screen.findByText('Keep stop separate from pause.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'GitHub #12 ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/12');
+    expect(screen.getByRole('link', { name: 'or comment on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/12');
     expect(calls.some((call) => call.path === 'issue' && call.method === 'GET')).toBe(true);
     expect(location.hash).toBe('#computers/computers');
     expect(document.querySelector('video')).toHaveAttribute('src', '/workshop/recordings/create.mp4');

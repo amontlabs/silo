@@ -40,6 +40,12 @@ What a person sees:
   are in or after 180 ms, and while they still load each one the count announces
   holds its place. An entry named
   by the address opens once the live state is there.
+- An open entry, suggestion or decision shows its comments and a box to add
+  one. A visitor who is not signed in gets "Sign in to comment" and, under it,
+  "or comment on GitHub", the one link to that row's issue; a signed-in person
+  gets the box and "GitHub #N". Until `me` answers, the panel keeps the room of
+  the shape the `workshop-hint` cookie predicts, so it moves only when that
+  cookie was stale.
 - The strip under the map links to what is left out (entries without an area,
   and every dropped entry) and to the suggestions.
 - A person who can decide also gets "Decisions", the number of entries still to

@@ -2,6 +2,7 @@
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { hasSessionHint } from './api';
 import { RichText, safeHref } from './RichText';
 import { awaitsConfirm, awaitsVerdict, isDecided, relativeTime, shortDate } from './plan';
 import type { Row } from './plan';
@@ -284,16 +285,29 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   const github = url ? <a className="ws-gh" href={url} target="_blank" rel="noopener noreferrer">GitHub #{n} ↗</a> : null;
   if (!w.liveOk) return <div className="ws-talk"><div className="ws-box">{github}</div></div>;
   let box: ReactNode = <div className="ws-box">{github}</div>;
-  if (w.me) {
+  // Until `me` answers, the session marker says which of the two shapes to keep the room of; without it the
+  // visitor is signed out, so the panel opens at its final size.
+  const signedOut = w.me === null || (w.me === undefined && !hasSessionHint());
+  if (w.me || (w.me === undefined && !signedOut)) {
     box = (
       <form className="ws-box" onSubmit={(event) => void w.sendComment(row, event)}>
-        <textarea aria-label="Comment" placeholder={w.canDecide ? 'Reply…' : 'Add a comment'} maxLength={5000} rows={1} value={w.drafts[row.key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
+        <textarea aria-label="Comment" disabled={!w.me} placeholder={w.canDecide ? 'Reply…' : 'Add a comment'} maxLength={5000} rows={1} value={w.drafts[row.key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
         <button type="submit" className="ws-btn" disabled={!(w.drafts[row.key] ?? '').trim()}>Comment</button>
         {github}
       </form>
     );
-  } else if (w.me === null) {
-    box = <div className="ws-box"><a className="ws-signin" href={ctx.signIn}>Sign in to comment</a>{github}</div>;
+  } else if (signedOut) {
+    // One link to the issue for someone who would rather not sign in here: the line under the box.
+    box = (
+      <>
+        <div className="ws-box"><a className="ws-signin" href={ctx.signIn}>Sign in to comment</a></div>
+        {url ? (
+          <a className="ws-gh-alt" href={url} target="_blank" rel="noopener noreferrer" title={`GitHub #${n}`}>
+            or comment on GitHub<svg className="out" aria-hidden="true"><use href="#out" /></svg>
+          </a>
+        ) : null}
+      </>
+    );
   }
   return (
     <div className="ws-talk">
