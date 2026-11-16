@@ -2,9 +2,10 @@
 // HTTP server that runs it. A request is { method, url, headers, body } and a
 // response is { status, headers, cookies, body }.
 //
-// Identities: anonymous reads use the App's installation token, cached and
-// within a per-instance budget. Everything done for a signed-in person uses
-// that person's token, except the permission check and labelling a suggestion.
+// Identities: anonymous reads use the App's installation token, cached, shared
+// between concurrent requests and within a per-instance budget. Everything done
+// for a signed-in person uses that person's token, except the permission check
+// and labelling a suggestion.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAppAuth } from './app-auth.mjs';
 import { createGitHub, DEFAULT_TIMEOUT, GitHubError } from './github.mjs';
@@ -13,22 +14,22 @@ import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCoo
 export const LABELS = { entry: 'workshop:entry', decision: 'workshop:decision', suggestion: 'workshop:suggestion' };
 export const VERDICTS = ['take', 'refine', 'later', 'drop'];
 const KIND_BY_LABEL = new Map(Object.entries(LABELS).map(([kind, label]) => [label, kind]));
-const ENTRY_MARKER = /^\s*<!--\s*silo-entry:\s*([A-Za-z0-9_.-]+)\s*-->\s*$/m;
-const ENTRY_MARKER_LINES = /^\s*<!--\s*silo-entry:[^\n]*-->[ \t]*(\r?\n|$)/gm;
 const DIRECTION_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
 const TITLE_FORBIDDEN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/;
+const ENTRY_ID = /^[A-Za-z0-9_.-]{1,100}$/;
 
-export const LIMITS = { text: 5000, title: 120 };
+export const LIMITS = { text: 5000, title: 120, body: 20_000, commentShown: 5000 };
 export const BUDGET = { installationCallsPerMinute: 60, writesPerMinute: 30 };
 const STATE_TTL = 60_000;
 const STALE_LIMIT = 10 * 60_000;
 const ISSUE_TTL = 30_000;
 const ISSUE_CACHE_SIZE = 200;
-const ISSUE_COST = 3;
+const ISSUE_COST = 2;
 const COMMENTS_SHOWN = 100;
 const PERMISSION_TTL = 5 * 60_000;
 const REFRESH_MARGIN = 5 * 60_000;
 const MAX_BLOCK = 60 * 60_000;
+const UNLABELLED_LIMIT = 100;
 const SIGNIN_FAILED = '/workshop?signin=failed';
 
 const PUBLIC_STATE = 'public, s-maxage=60, stale-while-revalidate=300';
@@ -36,10 +37,10 @@ const PUBLIC_STALE = 'public, s-maxage=15, stale-while-revalidate=60';
 const PUBLIC_ISSUE = 'public, s-maxage=30, stale-while-revalidate=300';
 const PRIVATE = 'private, no-store';
 
-const ENDPOINTS = {
+const ENDPOINTS = new Map(Object.entries({
   state: ['GET'], me: ['GET'], issue: ['GET'], login: ['GET'], callback: ['GET'], vote: ['GET', 'POST'],
   logout: ['POST'], comment: ['POST'], suggest: ['POST'], verdict: ['POST'], decide: ['POST'],
-};
+}));
 
 class Refusal extends Error {
   constructor(status, code, message, extra = {}, headers = {}) {
@@ -52,6 +53,35 @@ class Refusal extends Error {
 }
 
 const refuse = (status, code, message, extra, headers) => { throw new Refusal(status, code, message, extra, headers); };
+
+// Cuts text to `limit` UTF-16 units without splitting a surrogate pair.
+export function cut(text, limit) {
+  if (text.length <= limit) return text;
+  const end = /[\uD800-\uDBFF]/.test(text[limit - 1]) ? limit - 1 : limit;
+  return text.slice(0, end);
+}
+
+function markerId(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('<!--') || !trimmed.endsWith('-->') || trimmed.length < 7) return null;
+  const inner = trimmed.slice(4, -3).trim();
+  if (!inner.startsWith('silo-entry:')) return null;
+  const id = inner.slice('silo-entry:'.length).trim();
+  return ENTRY_ID.test(id) ? id : '';
+}
+
+// The entry id of an issue body, and the body without its marker line(s), in linear time.
+export function readBody(raw) {
+  const body = cut(raw || '', LIMITS.body);
+  let entry = null;
+  const kept = [];
+  for (const line of body.split('\n')) {
+    const id = markerId(line);
+    if (id === null) kept.push(line);
+    else if (id && entry === null) entry = id;
+  }
+  return { entry, text: kept.join('\n').trimEnd() };
+}
 
 export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.now, log = defaultLog, timeoutMs = DEFAULT_TIMEOUT }) {
   const github = createGitHub({ apiBase: config.apiBase, fetch, now, timeoutMs });
@@ -66,32 +96,44 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
   let blockedUntil = 0;
   const budget = { start: 0, used: 0 };
   const issueCache = new Map();
+  const issuePending = new Map();
   const permissionCache = new Map();
+  const permissionPending = new Map();
   const refreshing = new Map();
   const writes = new Map();
+  const unlabelled = new Set();
 
   async function handle(request) {
-    const url = new URL(request.url, 'http://workshop.invalid');
-    const endpoint = url.pathname.match(/^\/api\/workshop\/([a-z]+)$/)?.[1];
-    const ctx = { request, url, endpoint, cookies: [], headers: {} };
+    const ctx = { request, endpoint: null, cookies: [], headers: {} };
     let response;
     try {
-      if (!endpoint || !(endpoint in ENDPOINTS)) refuse(404, 'not_found', 'There is nothing here.');
-      if (!ENDPOINTS[endpoint].includes(request.method)) {
-        ctx.headers.Allow = ENDPOINTS[endpoint].join(', ');
+      let url;
+      try {
+        url = new URL(request.url, 'http://workshop.invalid');
+      } catch {
+        refuse(404, 'not_found', 'There is nothing here.');
+      }
+      ctx.url = url;
+      const endpoint = url.pathname.match(/^\/api\/workshop\/([a-z]+)$/)?.[1];
+      if (!endpoint || !ENDPOINTS.has(endpoint)) refuse(404, 'not_found', 'There is nothing here.');
+      ctx.endpoint = endpoint;
+      const methods = ENDPOINTS.get(endpoint);
+      if (!methods.includes(request.method)) {
+        ctx.headers.Allow = methods.join(', ');
         refuse(405, 'method_not_allowed', 'This address does not accept that method.');
       }
       if (!config.configured) refuse(503, 'not_configured', 'Live comments are not set up on this server.');
       if (request.method === 'POST') checkSameSite(request);
-      response = await routes[`${request.method} ${endpoint}`](ctx);
+      response = await routes.get(`${request.method} ${endpoint}`)(ctx);
+      if (request.method === 'POST' && response.status === 200) await retryLabels();
     } catch (error) {
       response = errorResponse(ctx, error);
-      if ((endpoint === 'login' || endpoint === 'callback') && response.status !== 405) response = redirect(SIGNIN_FAILED);
+      if ((ctx.endpoint === 'login' || ctx.endpoint === 'callback') && response.status !== 405) response = redirect(SIGNIN_FAILED);
     }
-    response.headers = { 'Cache-Control': PRIVATE, ...ctx.headers, ...response.headers };
+    response.headers = { 'Cache-Control': PRIVATE, ...ctx.headers, ...response.headers, 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
     response.cookies = [...ctx.cookies, ...(response.cookies || [])];
     if (response.cookies.length) response.headers['Cache-Control'] = PRIVATE;
-    log({ endpoint: endpoint || 'unknown', status: response.status, ...(ctx.githubStatus !== undefined ? { github: ctx.githubStatus } : {}) });
+    log({ endpoint: ctx.endpoint || 'unknown', status: response.status, ...(ctx.githubStatus !== undefined ? { github: ctx.githubStatus } : {}) });
     return response;
   }
 
@@ -129,6 +171,10 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     blockedUntil = Math.max(blockedUntil, now() + Math.min((seconds || 60) * 1000, MAX_BLOCK));
   }
 
+  function blockedError() {
+    return new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil((blockedUntil - now()) / 1000), as: 'installation' });
+  }
+
   function noteInstallationError(error) {
     if (!(error instanceof GitHubError)) return;
     if (error.rateLimited) blockFor(error.retryAfter);
@@ -157,7 +203,9 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     if (!spend(cost)) throw new GitHubError(429, { rateLimited: true, retryAfter: waitSeconds(), as: 'installation' });
   }
 
+  // Every installation-token call goes through here: nothing reaches GitHub while it has asked us to wait.
   async function asInstallation(call) {
+    if (now() < blockedUntil) throw blockedError();
     try {
       return await call(await app.installationToken());
     } catch (error) {
@@ -171,19 +219,27 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
   const userRequest = (session, method, path, options = {}) => github.request(method, path, { ...options, token: session.t, as: 'user' });
   const userPages = (session, path) => github.paginate(path, { token: session.t, as: 'user' });
 
+  // Shares one in-flight call per key between concurrent requests.
+  function shared(map, key, start) {
+    let pending = map.get(key);
+    if (!pending) {
+      pending = start().finally(() => map.delete(key));
+      map.set(key, pending);
+    }
+    return pending;
+  }
+
   // GitHub data
 
   function labelNames(issue) {
     return (issue.labels || []).map((label) => (typeof label === 'string' ? label : label.name));
   }
 
+  // The issue's kind when it carries exactly one Workshop label and is not a pull request.
   function kindOf(issue) {
     if (issue.pull_request) return null;
-    for (const name of labelNames(issue)) {
-      const kind = KIND_BY_LABEL.get(name);
-      if (kind) return kind;
-    }
-    return null;
+    const kinds = labelNames(issue).map((name) => KIND_BY_LABEL.get(name)).filter(Boolean);
+    return kinds.length === 1 ? kinds[0] : null;
   }
 
   function verdictOf(issue) {
@@ -192,14 +248,17 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return null;
   }
 
+  function reasonOf(issue) {
+    return issue.state === 'closed' && (issue.state_reason === 'completed' || issue.state_reason === 'not_planned') ? issue.state_reason : null;
+  }
+
   function summary(issue, kind) {
-    const reason = issue.state === 'closed' && (issue.state_reason === 'completed' || issue.state_reason === 'not_planned') ? issue.state_reason : null;
     return {
       kind,
-      entry: kind === 'entry' ? (issue.body || '').match(ENTRY_MARKER)?.[1] ?? null : null,
+      entry: kind === 'entry' ? readBody(issue.body).entry : null,
       title: issue.title,
       state: issue.state === 'closed' ? 'closed' : 'open',
-      reason,
+      reason: reasonOf(issue),
       verdict: verdictOf(issue),
       up: issue.reactions?.['+1'] ?? 0,
       comments: issue.comments ?? 0,
@@ -227,7 +286,6 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     const at = now();
     if (stateCache && at - stateCache.at < STATE_TTL) return { data: stateCache.data, stale: false };
     try {
-      if (at < blockedUntil) throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil((blockedUntil - at) / 1000), as: 'installation' });
       statePending ??= fetchState().then((data) => { stateCache = { data, at: now() }; return data; }).finally(() => { statePending = null; });
       return { data: await statePending, stale: false };
     } catch (error) {
@@ -247,35 +305,48 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return { issue, kind };
   }
 
+  // One page of the latest comments: the page size between 50 and 100 that makes the last page longest.
+  function lastCommentsPage(total) {
+    let best = { perPage: COMMENTS_SHOWN, page: Math.max(1, Math.ceil(total / COMMENTS_SHOWN)), size: 0 };
+    if (total <= COMMENTS_SHOWN) return { perPage: COMMENTS_SHOWN, page: 1 };
+    for (let perPage = COMMENTS_SHOWN; perPage >= COMMENTS_SHOWN / 2; perPage -= 1) {
+      const page = Math.ceil(total / perPage);
+      const size = total - (page - 1) * perPage;
+      if (size > best.size) best = { perPage, page, size };
+    }
+    return best;
+  }
+
   async function fetchIssue(n) {
     const { data: issue } = await installationRequest('GET', `/repos/${repo}/issues/${n}`);
     if (!kindOf(issue)) refuse(404, 'not_found', 'This is not a Workshop issue.');
     const total = issue.comments ?? 0;
     let comments = [];
     if (total > 0) {
-      const last = Math.max(1, Math.ceil(total / COMMENTS_SHOWN));
-      const pages = last > 1 ? [last - 1, last] : [1];
-      for (const page of pages) {
-        const { data } = await installationRequest('GET', `/repos/${repo}/issues/${n}/comments?per_page=${COMMENTS_SHOWN}&page=${page}`);
-        comments.push(...(data || []));
-      }
-      comments = comments.slice(-COMMENTS_SHOWN);
+      const { perPage, page } = lastCommentsPage(total);
+      const { data } = await installationRequest('GET', `/repos/${repo}/issues/${n}/comments?per_page=${perPage}&page=${page}`);
+      comments = (Array.isArray(data) ? data : []).slice(-COMMENTS_SHOWN);
     }
     return {
       number: issue.number,
       title: issue.title,
-      body: (issue.body || '').replace(ENTRY_MARKER_LINES, '').replace(/\s+$/, ''),
+      body: readBody(issue.body).text,
       url: issue.html_url,
       up: issue.reactions?.['+1'] ?? 0,
       more: total > comments.length,
-      comments: comments.map((comment) => ({
-        id: comment.id,
-        author: comment.user?.login ?? 'ghost',
-        avatar: comment.user?.avatar_url ?? null,
-        bot: comment.user?.type === 'Bot',
-        createdAt: comment.created_at,
-        text: comment.body || '',
-      })),
+      comments: comments.map((comment) => {
+        const full = comment.body || '';
+        const text = cut(full, LIMITS.commentShown);
+        return {
+          id: comment.id,
+          author: comment.user?.login ?? 'ghost',
+          avatar: comment.user?.avatar_url ?? null,
+          bot: comment.user?.type === 'Bot',
+          createdAt: comment.created_at,
+          text,
+          ...(text.length < full.length ? { cut: true } : {}),
+        };
+      }),
     };
   }
 
@@ -285,9 +356,16 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     while (issueCache.size > ISSUE_CACHE_SIZE) issueCache.delete(issueCache.keys().next().value);
   }
 
-  function forget(n) {
-    stateCache = null;
-    if (n !== undefined) issueCache.delete(n);
+  // Cached copies are patched where that is a plain field or count, and otherwise left to expire.
+  function patch(n, change) {
+    const summary = stateCache?.data.issues[n];
+    if (summary) change(summary);
+  }
+
+  function addUp(n, delta) {
+    for (const item of [stateCache?.data.issues[n], issueCache.get(n)?.data]) {
+      if (item) item.up = Math.max(0, item.up + delta);
+    }
   }
 
   function cachedPermission(login) {
@@ -295,21 +373,41 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return cached && now() - cached.at < PERMISSION_TTL ? cached : null;
   }
 
-  async function readPermission(login) {
-    spendOrRefuse(1);
-    const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`).catch((error) => {
-      if (error instanceof GitHubError && error.status === 404) return { data: null };
-      throw error;
+  function readPermission(login) {
+    return shared(permissionPending, login, async () => {
+      spendOrRefuse(1);
+      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`).catch((error) => {
+        if (error instanceof GitHubError && error.status === 404) return { data: null };
+        throw error;
+      });
+      const value = ['admin', 'maintain', 'write'].includes(data?.role_name) || ['admin', 'write'].includes(data?.permission);
+      permissionCache.delete(login);
+      permissionCache.set(login, { value, at: now() });
+      if (permissionCache.size > 1000) permissionCache.delete(permissionCache.keys().next().value);
+      return value;
     });
-    const value = ['admin', 'maintain', 'write'].includes(data?.role_name) || ['admin', 'write'].includes(data?.permission);
-    permissionCache.delete(login);
-    permissionCache.set(login, { value, at: now() });
-    if (permissionCache.size > 1000) permissionCache.delete(permissionCache.keys().next().value);
-    return value;
   }
 
   async function canDecide(login) {
     return cachedPermission(login)?.value ?? readPermission(login);
+  }
+
+  // Suggestions created but not labelled, retried after the next successful write.
+  async function labelSuggestion(number) {
+    await installationRequest('POST', `/repos/${repo}/issues/${number}/labels`, { body: { labels: [LABELS.suggestion] } });
+  }
+
+  async function retryLabels() {
+    for (const number of [...unlabelled]) {
+      if (!spend(1)) return;
+      try {
+        await labelSuggestion(number);
+        unlabelled.delete(number);
+      } catch (error) {
+        if (error instanceof GitHubError && [404, 410, 422].includes(error.status)) unlabelled.delete(number);
+        else return;
+      }
+    }
   }
 
   // Sessions
@@ -383,11 +481,11 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return pending;
   }
 
-  // The signed-in person with a user token valid for at least five minutes, or null.
-  async function currentUser(ctx) {
+  // The signed-in person, or null. With `refresh`, the user token is valid for at least five more minutes.
+  async function currentUser(ctx, { refresh: renew = true } = {}) {
     if (ctx.session !== undefined) return ctx.session;
     let session = readSession(ctx);
-    if (session && session.te - now() < REFRESH_MARGIN) {
+    if (renew && session && session.te - now() < REFRESH_MARGIN) {
       const result = session.re > now() ? await refresh(session) : { invalid: true };
       if (result.fields) {
         session = { ...session, ...result.fields };
@@ -403,8 +501,8 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
     return session;
   }
 
-  async function requireUser(ctx) {
-    const session = await currentUser(ctx);
+  async function requireUser(ctx, options) {
+    const session = await currentUser(ctx, options);
     if (!session) refuse(401, 'signed_out', 'Sign in with GitHub first.');
     return session;
   }
@@ -475,14 +573,15 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
 
   // Routes
 
-  const routes = {
+  const routes = new Map(Object.entries({
     async 'GET state'(ctx) {
       const { data, stale } = await loadState(ctx);
       return json(200, stale ? { ...data, stale: true } : data, { 'Cache-Control': stale ? PUBLIC_STALE : PUBLIC_STATE });
     },
 
+    // Reads only the cookie; the permission check is the one GitHub call, cached five minutes.
     async 'GET me'(ctx) {
-      const session = await requireUser(ctx);
+      const session = await requireUser(ctx, { refresh: false });
       return json(200, { login: session.login, avatar: session.avatar, canDecide: await canDecide(session.login) });
     },
 
@@ -505,9 +604,12 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       }
       if (!state.issues[n]) refuse(404, 'not_found', 'This is not a Workshop issue.');
       try {
-        spendOrRefuse(ISSUE_COST);
-        const data = await fetchIssue(n);
-        rememberIssue(n, data);
+        const data = await shared(issuePending, n, async () => {
+          spendOrRefuse(ISSUE_COST);
+          const fresh = await fetchIssue(n);
+          rememberIssue(n, fresh);
+          return fresh;
+        });
         return json(200, data, { 'Cache-Control': PUBLIC_ISSUE });
       } catch (error) {
         return staleCopy(error);
@@ -586,7 +688,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       const body = text(input.text, { what: 'The comment' });
       await workshopIssue(session, n);
       const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } });
-      forget(n);
+      patch(n, (item) => { item.comments += 1; });
       return json(200, { ok: true, id: data?.id ?? null });
     },
 
@@ -597,12 +699,15 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       if (typeof input.on !== 'boolean') refuse(400, 'bad_input', 'The request was not understood.');
       await workshopIssue(session, n);
       if (input.on) {
-        await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/reactions`, { body: { content: '+1' } });
+        const { status } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/reactions`, { body: { content: '+1' } });
+        if (status === 201) addUp(n, 1);
       } else {
         const mine = (await userPages(session, `/repos/${repo}/issues/${n}/reactions?content=%2B1`)).filter((reaction) => reaction.user?.id === session.id);
-        for (const reaction of mine) await userRequest(session, 'DELETE', `/repos/${repo}/issues/${n}/reactions/${reaction.id}`);
+        for (const reaction of mine) {
+          await userRequest(session, 'DELETE', `/repos/${repo}/issues/${n}/reactions/${reaction.id}`);
+          addUp(n, -1);
+        }
       }
-      forget(n);
       return json(200, { ok: true });
     },
 
@@ -614,29 +719,35 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       spendOrRefuse(2);
       const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues`, { body: { title, body } });
       const number = data.number;
-      const label = () => installationRequest('POST', `/repos/${repo}/issues/${number}/labels`, { body: { labels: [LABELS.suggestion] } });
       try {
-        await label().catch(label);
+        await labelSuggestion(number).catch(() => labelSuggestion(number));
       } catch (error) {
         if (error instanceof GitHubError) ctx.githubStatus = error.status;
+        unlabelled.add(number);
+        if (unlabelled.size > UNLABELLED_LIMIT) unlabelled.delete(unlabelled.values().next().value);
         refuse(502, 'github', 'The suggestion was posted on GitHub but could not be added to the Workshop.', { number });
       }
-      forget(number);
+      if (stateCache && !(number in stateCache.data.issues)) {
+        stateCache.data.issues[number] = {
+          kind: 'suggestion', entry: null, title, state: 'open', reason: null, verdict: null, up: 0, comments: 0,
+          author: session.login, bot: false, createdAt: data.created_at ?? new Date(now()).toISOString(), closedAt: null,
+        };
+      }
       return json(200, { number });
     },
 
+    // Labels and state change first; the note is posted after they succeeded, so a retry never posts it twice.
     async 'POST verdict'(ctx) {
       const session = await writer(ctx);
       const input = readJson(ctx);
       const n = issueNumber(input.n);
-      if (!('verdict' in input)) refuse(400, 'bad_input', 'The verdict is missing.');
+      if (!Object.hasOwn(input, 'verdict')) refuse(400, 'bad_input', 'The verdict is missing.');
       const verdict = input.verdict;
       if (verdict !== null && !VERDICTS.includes(verdict)) refuse(400, 'bad_input', 'That verdict is not known.');
       const note = text(input.note, { required: verdict === 'refine', what: 'The note' });
       await requireDecider(session);
       const { issue, kind } = await workshopIssue(session, n);
       if (kind !== 'entry') refuse(404, 'not_found', 'This is not a Workshop entry.');
-      if (note) await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body: note } });
       const target = verdict ? `verdict:${verdict}` : null;
       const current = labelNames(issue).filter((name) => name.startsWith('verdict:'));
       for (const name of current) {
@@ -646,12 +757,20 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
         });
       }
       if (target && !current.includes(target)) await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/labels`, { body: { labels: [target] } });
-      if (verdict === 'drop' && !(issue.state === 'closed' && issue.state_reason === 'not_planned')) {
+      const dropped = issue.state === 'closed' && issue.state_reason === 'not_planned';
+      let state = { state: issue.state === 'closed' ? 'closed' : 'open', reason: reasonOf(issue) };
+      if (verdict === 'drop' && !dropped) {
         await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'closed', state_reason: 'not_planned' } });
-      } else if (verdict !== 'drop' && issue.state === 'closed' && issue.state_reason === 'not_planned') {
+        state = { state: 'closed', reason: 'not_planned' };
+      } else if (verdict !== 'drop' && dropped) {
         await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'open', state_reason: 'reopened' } });
+        state = { state: 'open', reason: null };
       }
-      forget(n);
+      patch(n, (item) => Object.assign(item, { verdict }, state));
+      if (note) {
+        await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body: note } });
+        patch(n, (item) => { item.comments += 1; });
+      }
       return json(200, { ok: true });
     },
 
@@ -665,10 +784,10 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       if (kind !== 'decision' || issue.state !== 'open') refuse(404, 'not_found', 'This is not an open Workshop decision.');
       await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } });
       await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'closed', state_reason: 'completed' } });
-      forget(n);
+      patch(n, (item) => Object.assign(item, { comments: item.comments + 1, state: 'closed', reason: 'completed', closedAt: new Date(now()).toISOString() }));
       return json(200, { ok: true });
     },
-  };
+  }));
 
   function callbackUrl() {
     return `${config.origin}/api/workshop/callback`;

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey, createPrivateKey, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readlink, readdir, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
+import { connect as netConnect, createServer } from 'node:net';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,7 +12,7 @@ import { readConfig } from '../server/config.mjs';
 import { DEFAULT_TIMEOUT } from '../server/github.mjs';
 import { createNodeHandler, MAX_BODY, readRequest } from '../server/node.mjs';
 import { seal, unseal } from '../server/session.mjs';
-import { BUDGET, createWorkshop, LABELS } from '../server/workshop.mjs';
+import { BUDGET, createWorkshop, cut, LABELS, LIMITS, readBody } from '../server/workshop.mjs';
 import { createFakeGitHub, FAKE_APP, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
 import { startDev } from './workshop-dev.mjs';
@@ -243,7 +243,7 @@ test('a hung or failing token refresh answers 502 and keeps the session; only an
     t.clock.t += 7 * 3600_000 + 56 * 60_000;
     t.fake.state.hook = (r) => (r.path === '/login/oauth/access_token' ? { delay: 600 } : null);
     let settled = false;
-    const pending = c.call('GET', 'me').then((response) => { settled = true; return response; });
+    const pending = c.call('GET', 'vote?n=1').then((response) => { settled = true; return response; });
     const other = await t.client().call('GET', 'state');
     assert.equal(other.status, 200);
     assert.equal(settled, false, 'other requests are not held by the refresh');
@@ -254,19 +254,19 @@ test('a hung or failing token refresh answers 502 and keeps the session; only an
 
     t.fake.state.hook = (r) => (r.path === '/login/oauth/access_token' ? { status: 503 } : null);
     t.clock.t += 31_000;
-    assert.equal((await c.call('GET', 'me')).status, 502);
+    assert.equal((await c.call('GET', 'vote?n=1')).status, 502);
     assert.equal(c.jar.get(SESSION), cookie);
 
     t.fake.state.hook = null;
     t.clock.t += 31_000;
-    const refreshed = await c.call('GET', 'me');
+    const refreshed = await c.call('GET', 'vote?n=1');
     assert.equal(refreshed.status, 200);
     assert.notEqual(c.jar.get(SESSION), cookie);
     assert.equal((await c.call('POST', 'comment', { body: { n: 1, text: 'After refresh.' } })).status, 200);
 
     t.fake.state.refresh.clear();
     t.clock.t += 8 * 3600_000;
-    const invalid = await c.call('GET', 'me');
+    const invalid = await c.call('GET', 'vote?n=1');
     assert.equal(invalid.status, 401);
     assert.equal(c.jar.has(SESSION), false);
     assert.equal(c.jar.has('workshop-hint'), false);
@@ -350,11 +350,14 @@ test('issue is public and cacheable for everyone, with the latest 100 comments o
 
     for (let i = 0; i < 248; i += 1) t.fake.addComment(2, 'visitor-fake', `comment ${i}`);
     t.clock.t += 61_000;
+    const before = count(t.fake, 'GET', /\/issues\/2\/comments$/);
     const long = await t.client().call('GET', 'issue?n=2');
-    assert.equal(long.json.comments.length, 100);
+    assert.equal(count(t.fake, 'GET', /\/issues\/2\/comments$/), before + 1, 'one page of comments');
+    const shown = long.json.comments.map((c) => c.text);
+    assert.ok(shown.length >= 50 && shown.length <= 100, String(shown.length));
     assert.equal(long.json.more, true);
-    assert.equal(long.json.comments[0].text, 'comment 148');
-    assert.equal(long.json.comments.at(-1).text, 'comment 247');
+    assert.equal(shown.at(-1), 'comment 247');
+    assert.deepEqual(shown, Array.from({ length: shown.length }, (_, i) => `comment ${248 - shown.length + i}`), 'the latest, oldest first');
   } finally { await t.close(); }
 });
 
@@ -376,7 +379,7 @@ test('GET vote reads the person\'s own reaction with their token, privately', as
 test('the installation budget: at most 60 calls a minute outside the state refresh; issue then answers from its cache or 429', async () => {
   const t = await setup();
   try {
-    await withBudget({ installationCallsPerMinute: 6 }, async () => {
+    await withBudget({ installationCallsPerMinute: 4 }, async () => {
       const c = t.client();
       assert.equal((await c.call('GET', 'issue?n=1')).status, 200);
       assert.equal((await c.call('GET', 'issue?n=2')).status, 200);
@@ -720,7 +723,7 @@ test('configuration: a weak secret or any invalid value answers 503 not_configur
     ['WORKSHOP_SESSION_SECRET', 'c2hvcnQ='],
     ['WORKSHOP_SESSION_SECRET', randomBytes(32).toString('hex')],
     ['WORKSHOP_SESSION_SECRET', randomBytes(33).toString('base64')],
-    ['WORKSHOP_SESSION_SECRET', randomBytes(32).toString('base64url') + '='],
+    ['WORKSHOP_SESSION_SECRET', Buffer.alloc(32, 0xfb).toString('base64url') + '='],
     ['WORKSHOP_REPO', 'not a repo'],
     ['WORKSHOP_REPO', 'a/b/c'],
     ['WORKSHOP_SITE_ORIGIN', 'not a url'],
@@ -888,15 +891,20 @@ async function fixtureSite(page = 'workshop/index.html') {
 
 test('Build Output layout: static site, one Node.js function at every endpoint, and the Workshop routes', async () => {
   const site = await fixtureSite();
-  const outputDir = join(site, 'output');
+  const outputDir = join(site, '.vercel', 'output');
   try {
     const website = new URL('..', import.meta.url).pathname;
     assert.equal(DEFAULT_OUTPUT, join(website, '..', '.vercel', 'output'), 'the repository root, where a Git build with the repository as root directory reads it');
     await prepareVercel({ siteDir: website, distDir: join(site, 'dist'), outputDir });
     const config = JSON.parse(await readFile(join(outputDir, 'config.json'), 'utf8'));
-    assert.deepEqual(config, { version: 3, routes: [{ src: '^/workshop/?$', dest: '/workshop/index.html' }, { handle: 'filesystem' }] });
-    for (const path of ['/workshop', '/workshop/']) assert.match(path, new RegExp(config.routes[0].src));
-    for (const path of ['/workshops', '/workshop/x', '/api/workshop/state']) assert.doesNotMatch(path, new RegExp(config.routes[0].src));
+    assert.deepEqual(config, { version: 3, routes: [
+      { src: '^/(.*)$', headers: { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' }, continue: true },
+      { src: '^/workshop/?$', dest: '/workshop/index.html' },
+      { handle: 'filesystem' },
+    ] });
+    for (const path of ['/', '/workshop', '/assets/x.js', '/api/workshop/state']) assert.match(path, new RegExp(config.routes[0].src));
+    for (const path of ['/workshop', '/workshop/']) assert.match(path, new RegExp(config.routes[1].src));
+    for (const path of ['/workshops', '/workshop/x', '/api/workshop/state']) assert.doesNotMatch(path, new RegExp(config.routes[1].src));
     assert.equal(await readFile(join(outputDir, 'static', 'workshop', 'index.html'), 'utf8'), '<!doctype html><title>Workshop</title>');
     assert.ok((await lstat(join(outputDir, 'static', 'index.html'))).isFile());
 
@@ -932,12 +940,12 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
 
     const flat = await fixtureSite('workshop.html');
     try {
-      const result = await prepareVercel({ siteDir: website, distDir: join(flat, 'dist'), outputDir: join(flat, 'output') });
-      assert.equal(result.config.routes[0].dest, '/workshop.html');
+      const result = await prepareVercel({ siteDir: website, distDir: join(flat, 'dist'), outputDir: join(flat, '.vercel', 'output') });
+      assert.equal(result.config.routes[1].dest, '/workshop.html');
     } finally { await rm(flat, { recursive: true, force: true }); }
     const none = await fixtureSite(null);
     try {
-      await assert.rejects(prepareVercel({ siteDir: website, distDir: join(none, 'dist'), outputDir: join(none, 'output') }), /no Workshop page/);
+      await assert.rejects(prepareVercel({ siteDir: website, distDir: join(none, 'dist'), outputDir: join(none, '.vercel', 'output') }), /no Workshop page/);
     } finally { await rm(none, { recursive: true, force: true }); }
   } finally { await rm(site, { recursive: true, force: true }); }
 });
@@ -988,6 +996,261 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
       body: JSON.stringify({ n: 1, text: 'From the dev server.' }),
     });
     assert.equal(comment.status, 200);
+  } finally {
+    await dev.close();
+    await rm(site, { recursive: true, force: true });
+  }
+});
+
+test('concurrent reads of one issue share one GitHub call', async () => {
+  const t = await setup();
+  try {
+    await t.client().call('GET', 'state');
+    const before = count(t.fake, 'GET', /\/issues\/1$/);
+    const answers = await Promise.all(Array.from({ length: 200 }, () => t.client().call('GET', 'issue?n=1')));
+    assert.ok(answers.every((a) => a.status === 200));
+    assert.equal(count(t.fake, 'GET', /\/issues\/1$/) - before, 1);
+    assert.equal(count(t.fake, 'GET', /\/issues\/1\/comments/), 1);
+  } finally { await t.close(); }
+});
+
+test('writes patch the cached state and issue in place instead of dropping them, so the stale copy survives', async () => {
+  const t = await setup();
+  try {
+    const visitor = t.client();
+    await visitor.signIn('visitor-fake');
+    const owner = t.client();
+    await owner.signIn('owner-fake');
+    await visitor.call('GET', 'state');
+    await visitor.call('GET', 'issue?n=2');
+    const lists = count(t.fake, 'GET', /\/issues$/);
+    const reads = count(t.fake, 'GET', /\/issues\/2$/, 'installation');
+    await visitor.call('POST', 'comment', { body: { n: 2, text: 'x' } });
+    await visitor.call('POST', 'vote', { body: { n: 2, on: true } });
+    await visitor.call('POST', 'vote', { body: { n: 2, on: true } });
+    await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'drop', note: 'no' } });
+    await owner.call('POST', 'decide', { body: { n: 4, text: 'yes' } });
+    const state = await visitor.call('GET', 'state');
+    assert.equal(count(t.fake, 'GET', /\/issues$/), lists, 'state was not fetched again');
+    assert.deepEqual(
+      [state.json.issues[2].comments, state.json.issues[2].up, state.json.issues[2].verdict, state.json.issues[2].state, state.json.issues[2].reason],
+      [2, 2, 'drop', 'closed', 'not_planned'],
+    );
+    assert.deepEqual([state.json.issues[4].state, state.json.issues[4].reason, state.json.issues[4].comments], ['closed', 'completed', 2]);
+    const issue = await visitor.call('GET', 'issue?n=2');
+    assert.equal(issue.json.up, 2, 'the cached issue count is patched');
+    assert.equal(count(t.fake, 'GET', /\/issues\/2$/, 'installation'), reads);
+    t.fake.state.rateLimited = true;
+    t.clock.t += 61_000;
+    const stale = await visitor.call('GET', 'state');
+    assert.equal(stale.json.stale, true);
+    assert.equal(stale.json.issues[2].verdict, 'drop');
+  } finally { await t.close(); }
+});
+
+test('me calls GitHub only for the permission check, cached, and never refreshes the token', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    await c.signIn('visitor-fake');
+    t.clock.t += 7 * 3600_000 + 58 * 60_000;
+    const before = t.fake.state.requests.length;
+    assert.equal((await c.call('GET', 'me')).status, 200);
+    assert.equal((await c.call('GET', 'me')).status, 200);
+    assert.deepEqual(t.fake.state.requests.slice(before).filter((r) => r.kind !== 'app').map((r) => r.path), ['/repos/amontlabs/silo/collaborators/visitor-fake/permission'], 'besides minting an installation token');
+  } finally { await t.close(); }
+});
+
+test('while GitHub has told the installation to wait, nothing calls GitHub with it, and suggest creates nothing', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    await c.signIn('visitor-fake');
+    t.fake.state.rateLimited = true;
+    assert.equal((await t.client().call('GET', 'state')).status, 429);
+    t.fake.state.rateLimited = false;
+    const before = t.fake.state.requests.length;
+    const issues = t.fake.state.issues.size;
+    assert.equal((await c.call('GET', 'me')).status, 429);
+    assert.equal((await t.client().call('GET', 'issue?n=1')).status, 429);
+    const suggest = await c.call('POST', 'suggest', { body: { title: 'Blocked', text: 'x' } });
+    assert.equal(suggest.status, 429);
+    assert.equal(t.fake.state.issues.size, issues, 'no issue created');
+    assert.equal(t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation' || r.kind === 'app').length, 0);
+  } finally { await t.close(); }
+});
+
+test('suggest refuses before creating anything when the budget is spent', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    await c.signIn('visitor-fake');
+    await withBudget({ installationCallsPerMinute: 1 }, async () => {
+      const issues = t.fake.state.issues.size;
+      const response = await c.call('POST', 'suggest', { body: { title: 'Spent', text: 'x' } });
+      assert.equal(response.status, 429);
+      assert.equal(t.fake.state.issues.size, issues);
+    });
+  } finally { await t.close(); }
+});
+
+test('an unlabelled suggestion is labelled after the next successful write by anyone', async () => {
+  const t = await setup();
+  try {
+    const visitor = t.client();
+    await visitor.signIn('visitor-fake');
+    const owner = t.client();
+    await owner.signIn('owner-fake');
+    t.fake.state.hook = (r) => (r.kind === 'installation' && r.path.endsWith('/labels') ? { status: 500 } : null);
+    const failed = await visitor.call('POST', 'suggest', { body: { title: 'Later', text: 'x' } });
+    assert.equal(failed.status, 502);
+    assert.deepEqual(issueOf(t.fake, failed.json.number).labels, []);
+    assert.equal((await owner.call('POST', 'comment', { body: { n: 1, text: 'still failing' } })).status, 200);
+    assert.deepEqual(issueOf(t.fake, failed.json.number).labels, []);
+    t.fake.state.hook = null;
+    assert.equal((await owner.call('POST', 'comment', { body: { n: 1, text: 'now' } })).status, 200);
+    assert.deepEqual(issueOf(t.fake, failed.json.number).labels, [LABELS.suggestion]);
+    const labels = count(t.fake, 'POST', /\/labels$/, 'installation');
+    await owner.call('POST', 'comment', { body: { n: 1, text: 'again' } });
+    assert.equal(count(t.fake, 'POST', /\/labels$/, 'installation'), labels, 'retried once only');
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('verdict: the note is posted only after labels and state succeeded; clearing never reopens a completed entry', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    await c.signIn('owner-fake');
+    const issue = issueOf(t.fake, entryNumber);
+    const comments = issue.comments.length;
+    t.fake.state.hook = (r) => (r.method === 'PATCH' ? { status: 500 } : null);
+    const failed = await c.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop', note: 'Not now.' } });
+    assert.equal(failed.status, 502);
+    assert.equal(issue.comments.length, comments, 'no note after a failed change');
+    t.fake.state.hook = null;
+    assert.equal((await c.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop', note: 'Not now.' } })).status, 200);
+    assert.equal(issue.comments.length, comments + 1);
+    assert.equal(issue.comments.at(-1).body, 'Not now.');
+
+    const built = issueOf(t.fake, 3);
+    Object.assign(built, { state: 'closed', state_reason: 'completed' });
+    for (const verdict of [null, 'take']) {
+      assert.equal((await c.call('POST', 'verdict', { body: { n: 3, verdict } })).status, 200);
+      assert.deepEqual([built.state, built.state_reason], ['closed', 'completed']);
+    }
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('an issue with more than one Workshop kind label is not a Workshop issue', async () => {
+  const t = await setup();
+  try {
+    const both = t.fake.addIssue({ title: 'Both', labels: ['workshop:entry', 'workshop:decision'] });
+    const c = t.client();
+    await c.signIn('visitor-fake');
+    assert.equal((await c.call('GET', 'state')).json.issues[both.number], undefined);
+    assert.equal((await c.call('POST', 'comment', { body: { n: both.number, text: 'x' } })).status, 404);
+    assert.equal((await c.call('GET', `vote?n=${both.number}`)).status, 404);
+  } finally { await t.close(); }
+});
+
+test('bodies and comments are cut before processing, in linear time, and an issue answer is bounded', async () => {
+  const newlines = '\n'.repeat(65_000);
+  let started = performance.now();
+  const parsed = readBody(`text${newlines}<!-- silo-entry: x -->${newlines}`);
+  assert.ok(performance.now() - started < 50, `${performance.now() - started} ms`);
+  assert.equal(parsed.text, 'text');
+  assert.equal(readBody('What it is.\n  <!--  silo-entry: engine-service -->  \n').entry, 'engine-service');
+  assert.equal(readBody('a\n<!-- silo-entry: bad id! -->').entry, null);
+  assert.equal(readBody('x'.repeat(30_000)).text.length, LIMITS.body);
+  assert.equal(cut('a😀', 2), 'a', 'never half a surrogate pair');
+
+  const t = await setup();
+  try {
+    const issue = t.fake.addIssue({ title: 'Huge', labels: ['workshop:suggestion'], body: `${'line\n'.repeat(13_000)}${newlines}` });
+    for (let i = 0; i < 80; i += 1) t.fake.addComment(issue.number, 'visitor-fake', 'y'.repeat(65_000));
+    const c = t.client();
+    started = performance.now();
+    const response = await c.call('GET', `issue?n=${issue.number}`);
+    assert.equal(response.status, 200);
+    assert.ok(response.json.body.length <= LIMITS.body);
+    assert.ok(response.json.comments.every((comment) => comment.text.length === LIMITS.commentShown && comment.cut === true));
+    assert.ok(response.body.length < 600_000, `${response.body.length} bytes`);
+    assert.ok(performance.now() - started < 1000);
+  } finally { await t.close(); }
+});
+
+test('configuration: a non-canonical secret or a bad key is not_configured at the first request, login included', async () => {
+  const fake = createFakeGitHub();
+  const base = fake.workshopEnv(ORIGIN);
+  const canonical = base.WORKSHOP_SESSION_SECRET;
+  const last = canonical.at(-2);
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const loose = canonical.slice(0, -2) + alphabet[(alphabet.indexOf(last) & ~3) | 1] + '=';
+  assert.equal(Buffer.from(loose, 'base64').length, 32, 'decodes, but is not the canonical encoding');
+  for (const [name, value] of [['WORKSHOP_SESSION_SECRET', loose], ['WORKSHOP_PRIVATE_KEY', 'not a key']]) {
+    const logs = [];
+    const workshop = createWorkshop({ config: readConfig({ ...base, [name]: value }), log: (entry) => logs.push(JSON.stringify(entry)) });
+    assert.equal((await workshop.handle({ method: 'GET', url: '/api/workshop/state', headers: {}, body: '' })).status, 503);
+    const login = await workshop.handle({ method: 'GET', url: '/api/workshop/login', headers: {}, body: '' });
+    assert.equal(login.status, 302);
+    assert.equal(login.headers.Location, FAILED);
+    assert.deepEqual(login.cookies, []);
+    assert.ok(logs.some((line) => line.includes(name)));
+  }
+});
+
+test('packaging refuses an output directory that does not end in .vercel/output, and deletes nothing', async () => {
+  const site = await fixtureSite();
+  try {
+    const website = new URL('..', import.meta.url).pathname;
+    const precious = join(site, 'precious');
+    await mkdir(precious);
+    await writeFile(join(precious, 'keep.txt'), 'keep');
+    for (const outputDir of [precious, join(site, 'output'), join(site, '.vercel'), join(site, 'x.vercel', 'output'), '/']) {
+      await assert.rejects(prepareVercel({ siteDir: website, distDir: join(site, 'dist'), outputDir }), /must end in \.vercel\/output/);
+    }
+    assert.equal(await readFile(join(precious, 'keep.txt'), 'utf8'), 'keep');
+  } finally { await rm(site, { recursive: true, force: true }); }
+});
+
+test('API answers forbid framing; route names are own properties only', async () => {
+  const t = await setup();
+  try {
+    const state = await t.client().call('GET', 'state');
+    assert.equal(state.headers['Content-Security-Policy'], "frame-ancestors 'none'");
+    assert.equal(state.headers['X-Frame-Options'], 'DENY');
+    for (const name of ['constructor', 'hasownproperty', 'valueof']) {
+      const response = await t.client().call('GET', name);
+      assert.equal(response.status, 404, name);
+      assert.ok(Object.values(response.headers).every((value) => typeof value === 'string'), name);
+    }
+    const odd = await t.workshop.handle({ method: 'GET', url: '//', headers: {}, body: '' });
+    assert.equal(odd.status, 404);
+  } finally { await t.close(); }
+});
+
+test('the local server survives //, an aborted POST body and /api/workshop/constructor, and forbids framing', async () => {
+  const site = await fixtureSite();
+  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), log: () => {} });
+  const { port } = new URL(dev.origin);
+  const raw = (text) => new Promise((resolve) => {
+    const socket = netConnect(Number(port), '127.0.0.1', () => socket.write(text));
+    let data = '';
+    socket.on('data', (chunk) => { data += chunk; });
+    socket.on('close', () => resolve(data));
+    socket.on('error', () => resolve(data));
+    setTimeout(() => socket.destroy(), 500);
+  });
+  try {
+    assert.match(await raw('GET // HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'), /^HTTP\/1\.1 (400|404)/);
+    await raw(`POST /api/workshop/comment HTTP/1.1\r\nHost: x\r\nContent-Length: 5000\r\nOrigin: ${dev.origin}\r\nX-Workshop: 1\r\n\r\n{"n":1,`);
+    const constructor = await fetch(dev.origin + '/api/workshop/constructor');
+    assert.equal(constructor.status, 404);
+    for (const [, value] of constructor.headers) assert.doesNotMatch(value, /function|native code/);
+    const page = await fetch(dev.origin + '/workshop');
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get('content-security-policy'), "frame-ancestors 'none'");
+    assert.equal((await fetch(dev.origin + '/api/workshop/state')).headers.get('x-frame-options'), 'DENY');
   } finally {
     await dev.close();
     await rm(site, { recursive: true, force: true });

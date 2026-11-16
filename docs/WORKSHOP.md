@@ -36,7 +36,7 @@ briefly here:
 | --- | --- | --- |
 | `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. |
 | `GET me` | signed in | `{ login, avatar, canDecide }`, or 401. |
-| `GET issue?n=` | anyone | Body text, 👍 count, and the latest 100 comments, oldest first, as plain text; `more: true` when there are earlier ones. The same public answer for everyone. |
+| `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest comments, oldest first, as plain text; `more: true` when there are earlier ones. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
@@ -56,6 +56,16 @@ suggestion whose issue was created but could not be labelled answers 502 with
 `"error": "github"` and the issue's `number`. `login` and `callback` never
 answer JSON: any failure redirects to `/workshop?signin=failed`; cancelling on
 GitHub returns to the page.
+
+`issue` fetches one page of comments: the page size between 50 and 100 that
+makes the last page longest, so it shows the latest 50 to 100 comments. Each
+comment is cut to 5,000 characters and then carries `"cut": true`. Bodies and
+comments are cut before any processing, and the entry marker and trailing
+blank lines are removed with linear string code, so a hostile body cannot make
+a read slow.
+
+An issue is a Workshop issue when it carries exactly one of the three kind
+labels and is not a pull request.
 
 Comments, notes and decisions are limited to 5,000 characters, titles to 120
 characters on one line (no control characters or line breaks). Unicode
@@ -85,6 +95,23 @@ text.
 - Each signed-in person may make 30 writes a minute per instance; more answer
   429.
 - Every GitHub call has an 8-second limit.
+- Concurrent requests for the same thing (`state`, an `issue`, a permission)
+  share one call to GitHub.
+- A write never drops a cached `state` or `issue`. Plain fields and counts
+  (comment and 👍 counts, verdict, open or closed) are patched in place; the
+  rest expires on its own. The stale fallback therefore survives a write.
+- `me` reads the cookie and calls GitHub only for the permission check (cached
+  five minutes); it never refreshes the user token.
+- While GitHub has told the installation to wait, nothing calls GitHub with
+  the installation token: not `state`, `issue`, the permission check nor a
+  label.
+- `suggest` refuses with 429 before creating anything when the installation
+  is blocked or the budget is spent. If labelling a new suggestion still fails
+  twice, the answer is 502 with its `number`, and the number is remembered (in
+  memory, up to 100) so that the next successful write by anyone retries the
+  label.
+- Every answer, API and pages alike, carries
+  `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 
 ## Code
 
@@ -120,7 +147,13 @@ GitHub Apps → New GitHub App):
 | Webhook | Inactive |
 | Repository permissions | Issues: Read and write. Metadata: Read-only. Nothing else. |
 | Organization and account permissions | None |
-| Where can this GitHub App be installed | Only on this account |
+| Where can this GitHub App be installed | Any account (public) |
+
+The App must be public: GitHub lets only members of the owning organization
+authorize a private App, so a private one would stop every visitor from signing
+in. Being public means anyone may install the App on their own repositories.
+That gives them nothing: the server only ever uses the installation on
+`WORKSHOP_REPO`, and it requests user tokens for that repository only.
 
 Then generate a private key and a client secret, and install the App on
 `amontlabs/silo` only ("Only select repositories"). Create the seven labels in
@@ -166,13 +199,17 @@ following Vercel's
   Vercel creates one function served at every `/api/workshop/<endpoint>` path,
   as the [primitives reference](https://vercel.com/docs/build-output-api/primitives#functions)
   allows. An unknown endpoint is Vercel's 404.
-- `config.json`: `version: 3` and two routes. The first,
+- `config.json`: `version: 3` and three routes. The first adds
+  `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`
+  to every path and continues. The second,
   `{ "src": "^/workshop/?$", "dest": "/workshop/index.html" }`, serves the
-  Workshop page at both `/workshop` and `/workshop/`; the second hands every
+  Workshop page at both `/workshop` and `/workshop/`. The third hands every
   other path to the filesystem.
 
 The script fails when the build has no Workshop page (`workshop/index.html`, or
-`workshop.html`). `--out <dir>` writes the output elsewhere. Both
+`workshop.html`). `--out <dir>` writes the output elsewhere; the script refuses
+any directory whose path does not end in `.vercel/output`, so it never deletes
+anything outside such a directory. Both
 `/.vercel` and `website/.vercel` are ignored by Git.
 
 The Vercel project's root directory is the repository root, where Vercel reads
@@ -258,10 +295,14 @@ and GitHub records the person as the author. Every write first reads the issue
 and refuses with 404 unless it carries a Workshop label and is not a pull
 request; `verdict` works only on entries and `decide` only on open decisions.
 A verdict adds and removes only `verdict:*` labels, one at a time, so labels
-changed by someone else are kept. A 401 on the installation token is a 502 and
+changed by someone else are kept. It changes the labels and the state first
+and posts the note only after they succeeded, so a retry never posts the note
+twice. Clearing a verdict reopens only a dropped entry, never one closed as
+completed. A 401 on the installation token is a 502 and
 drops the cached token; it never signs anyone out. *Limit:* if labelling a
-suggestion fails twice, the new issue stays on GitHub outside the Workshop, and
-the answer carries its number.
+suggestion fails twice, the new issue stays outside the Workshop until a later
+write retries the label (in memory, on that instance only), and the answer
+carries its number.
 
 **Deciding.** `canDecide` is GitHub's answer: the person's permission on the
 repository (`write`, `maintain` or `admin`), read with the installation token

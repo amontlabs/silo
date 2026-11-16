@@ -22,8 +22,10 @@ export function readConfig(env = process.env, overrides = {}) {
   let privateKey = null;
   if (env.WORKSHOP_APP_ID && !/^\d{1,12}$/.test(env.WORKSHOP_APP_ID)) fail('WORKSHOP_APP_ID');
   if (env.WORKSHOP_SESSION_SECRET) {
-    sessionSecret = SECRET_PATTERN.test(env.WORKSHOP_SESSION_SECRET) ? Buffer.from(env.WORKSHOP_SESSION_SECRET, 'base64') : null;
-    if (sessionSecret?.length !== 32) sessionSecret = fail('WORKSHOP_SESSION_SECRET');
+    // Strict base64: exactly 32 bytes whose canonical encoding is the value itself.
+    const raw = env.WORKSHOP_SESSION_SECRET;
+    sessionSecret = SECRET_PATTERN.test(raw) ? Buffer.from(raw, 'base64') : null;
+    if (sessionSecret?.length !== 32 || sessionSecret.toString('base64') !== raw) sessionSecret = fail('WORKSHOP_SESSION_SECRET');
   }
   if (env.WORKSHOP_PRIVATE_KEY) {
     try {

@@ -9,7 +9,7 @@ import { createServer } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readConfig } from '../server/config.mjs';
-import { createNodeHandler } from '../server/node.mjs';
+import { createNodeHandler, FRAME_HEADERS } from '../server/node.mjs';
 import { createWorkshop } from '../server/workshop.mjs';
 import { createFakeGitHub, seedDemo } from './fake-github.mjs';
 
@@ -63,8 +63,18 @@ export async function startDev({ fake = false, port = 4174, host = '127.0.0.1', 
   }
   const api = createNodeHandler(createWorkshop({ config, ...(log ? { log } : {}) }));
   const server = createServer(async (req, res) => {
-    const { pathname } = new URL(req.url, origin);
-    if (pathname.startsWith('/api/workshop/')) return api(req, res);
+    let pathname;
+    try {
+      pathname = new URL(req.url, 'http://local.invalid').pathname;
+    } catch {
+      pathname = null;
+    }
+    if (pathname?.startsWith('/api/workshop/')) return api(req, res);
+    for (const [name, value] of Object.entries(FRAME_HEADERS)) res.setHeader(name, value);
+    if (pathname === null) {
+      res.writeHead(400);
+      return res.end();
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405);
       return res.end();
@@ -76,7 +86,7 @@ export async function startDev({ fake = false, port = 4174, host = '127.0.0.1', 
     }
     res.writeHead(200, { 'Content-Type': TYPES[extname(path)] || 'application/octet-stream' });
     if (req.method === 'HEAD') return res.end();
-    createReadStream(path).pipe(res);
+    createReadStream(path).on('error', () => res.destroy()).pipe(res);
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);

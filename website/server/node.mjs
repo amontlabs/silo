@@ -22,8 +22,11 @@ export async function readRequest(req) {
   return { method: req.method, url: req.url, headers, body };
 }
 
+export const FRAME_HEADERS = { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
+
 export function writeResponse(res, response) {
   res.statusCode = response.status;
+  for (const [name, value] of Object.entries(FRAME_HEADERS)) res.setHeader(name, value);
   for (const [name, value] of Object.entries(response.headers)) res.setHeader(name, value);
   if (response.cookies?.length) res.setHeader('Set-Cookie', response.cookies);
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -32,13 +35,22 @@ export function writeResponse(res, response) {
 }
 
 export function createNodeHandler(workshop) {
+  const plain = (status, error, message) => ({ status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' }, body: JSON.stringify({ error, message }) });
   return async function handler(req, res) {
-    const request = await readRequest(req);
-    if (request.tooLarge) {
-      writeResponse(res, { status: 413, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' }, body: JSON.stringify({ error: 'too_long', message: 'The request is too large.' }) });
-      return;
+    let response;
+    try {
+      const request = await readRequest(req);
+      response = request.tooLarge ? plain(413, 'too_long', 'The request is too large.') : await workshop.handle(request);
+    } catch {
+      // An aborted or unreadable request: answer if the connection is still open.
+      response = plain(400, 'bad_input', 'The request was not understood.');
     }
-    writeResponse(res, await workshop.handle(request));
+    if (res.headersSent || res.writableEnded || res.destroyed) return;
+    try {
+      writeResponse(res, response);
+    } catch {
+      res.destroy?.();
+    }
   };
 }
 

@@ -1,5 +1,5 @@
 import { cp, mkdir, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Packages the built site and the Workshop API with Vercel's Build Output API v3:
@@ -17,7 +17,12 @@ async function exists(path) {
   return stat(path).then(() => true, () => false);
 }
 
+// Response headers for every path, static pages included: no page of the site may be framed.
+export const FRAME_HEADERS = { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
+
 export async function prepareVercel({ siteDir = website, distDir = join(siteDir, 'dist'), outputDir = DEFAULT_OUTPUT } = {}) {
+  outputDir = resolve(outputDir);
+  if (!outputDir.endsWith(`${sep}.vercel${sep}output`)) throw new Error('The output directory must end in .vercel/output; nothing was written.');
   const page = (await exists(join(distDir, 'workshop', 'index.html'))) ? '/workshop/index.html'
     : (await exists(join(distDir, 'workshop.html'))) ? '/workshop.html' : null;
   if (!page) throw new Error('The build has no Workshop page (workshop/index.html or workshop.html).');
@@ -47,6 +52,7 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
   const config = {
     version: 3,
     routes: [
+      { src: '^/(.*)$', headers: FRAME_HEADERS, continue: true },
       { src: '^/workshop/?$', dest: page },
       { handle: 'filesystem' },
     ],

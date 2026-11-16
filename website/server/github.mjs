@@ -40,10 +40,10 @@ export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now
       if (!response.ok) throw await errorFor(response, now(), as);
       if (response.status === 204) {
         await response.body?.cancel().catch(() => {});
-        return { data: null, headers: response.headers };
+        return { data: null, status: response.status, headers: response.headers };
       }
       const text = await response.text();
-      return { data: text ? JSON.parse(text) : null, headers: response.headers };
+      return { data: text ? JSON.parse(text) : null, status: response.status, headers: response.headers };
     } catch (error) {
       if (error instanceof GitHubError) throw error;
       const timeout = signal.aborted || error?.name === 'TimeoutError' || error?.name === 'AbortError';
