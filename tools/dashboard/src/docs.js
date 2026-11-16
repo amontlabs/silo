@@ -126,13 +126,6 @@ export function parseJourneys(text) {
   return { preamble, journeys };
 }
 
-// Replaces the status markers of step lines with chip markup (documents render as-is, so raw HTML is fine).
-export function chipSteps(markdown) {
-  return eachLine(markdown, (line, inFence) =>
-    inFence ? line : line.replace(STEP, (_, lead, status) => `${lead}<span class="chip step-${status.toLowerCase()}">${status.toLowerCase()}</span> `),
-  ).join('\n');
-}
-
 // Top-level list entries of a Markdown body: one decision each.
 export function countListItems(tokens) {
   return tokens.filter((token) => token.type === 'list').reduce((total, list) => total + list.items.length, 0);
@@ -164,7 +157,7 @@ export function headCommit(repoRoot) {
   return commit && HEX.test(commit) ? commit : null;
 }
 
-function hasCommit(repoRoot, commit) {
+export function hasCommit(repoRoot, commit) {
   return HEX.test(commit) && git(repoRoot, ['cat-file', '-e', `${commit}^{commit}`]) !== null;
 }
 

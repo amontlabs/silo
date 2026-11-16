@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { chipSteps, docChanges, DOC_FILES, lineDiff, parseJourneys, readDoc, splitSections } from '../src/docs.js';
+import { docChanges, DOC_FILES, lineDiff, parseJourneys, readDoc, splitSections } from '../src/docs.js';
 import { readPrivateNotes } from '../src/private.js';
 import { commitAll, git, makeRepo, PRODUCT, tempDir, writeDoc } from './helpers.js';
 
@@ -45,11 +45,6 @@ Intro text.
   assert.deepEqual(journeys[1].counts, { built: 0, partial: 0, missing: 1, untested: 0 });
   assert.equal(journeys[1].title, 'Share a Workspace!');
 
-  const chipped = chipSteps(journeys[0].body);
-  assert.match(chipped, /<span class="chip step-untested">untested<\/span> Restore from backup/);
-  assert.match(chipped, /- \[later\] Not a status/);
-  assert.match(chipped, /- \[built\]Glued text/);
-  assert.match(chipped, /^- \[built\] inside a fence$/m);
 });
 
 test('journeys: an empty or missing file has none', () => {

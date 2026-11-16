@@ -25,7 +25,9 @@ read another checkout. Stop it with Ctrl-C.
 ## Where data lives
 
 `$SILO_DASHBOARD_HOME`, default `~/.local/state/silo-dashboard/`, never inside
-the repository:
+the repository. Each open sets the folder and attachment folders to 0700 and
+the database files and attachments to 0600, also when they existed with wider
+modes:
 
 - `dashboard.db`: SQLite (WAL) with items, replies, attachments and what the
   owner has seen. The CLI and the server open it directly, so the CLI works
@@ -138,15 +140,25 @@ dashboard show 2
 
 ## Security
 
-Local only, no authentication:
+Local only, no authentication and no access token. The dashboard keeps other
+users of the Mac and web pages out; other processes running as the owner's own
+account are out of scope (they can read the store directly anyway).
 
 - The server listens on 127.0.0.1 and answers only requests whose `Host` is
   its own `127.0.0.1:<port>` or `localhost:<port>`. A write (any non-GET
   request) must be JSON and is refused when its `Origin` is another origin or
   the browser marks it cross-site.
-- Item bodies, defaults and replies are Markdown from agents and the owner:
-  raw HTML in them is escaped and links keep to `http`, `https`, `mailto` and
-  relative targets. Product docs and private notes render as written.
+- Every Markdown source (product docs, private notes, item bodies, defaults
+  and replies) goes through one renderer that escapes raw HTML, so a document
+  cannot add controls, styles or page regions. Links and images keep to
+  `http`, `https`, `mailto` and relative targets, checked after entities are
+  decoded; anything else renders as plain text. The page's script acts only on
+  controls the server renders for items and for Mark all as seen.
+- Each owner action sends what the page showed: the newest reply id of the
+  item, or the docs commit for Mark all as seen. An item with a newer reply
+  answers 409 and the page shows it again with a note to read it first; Mark
+  all as seen records the commit the page was rendered from. The CLI does not
+  send these.
 - Attachments are served only when the database records them, with the
   recorded media type and range support. Images, video and audio display
   inline; anything else downloads.

@@ -121,6 +121,7 @@ export class Store {
     fs.mkdirSync(this.home, { recursive: true, mode: 0o700 });
     this.attachmentsDir = path.join(this.home, 'attachments');
     this.db = new DatabaseSync(path.join(this.home, 'dashboard.db'));
+    this.restrictAccess();
     this.db.exec('PRAGMA busy_timeout = 10000');
     const found = this.db.prepare('PRAGMA user_version').get().user_version;
     if (found > SCHEMA_VERSION) {
@@ -130,6 +131,39 @@ export class Store {
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA foreign_keys = ON');
     if (found < SCHEMA_VERSION) this.migrate(found);
+    this.restrictAccess();
+  }
+
+  // Only the owner's account reads the store: the home folder and attachment
+  // folders 0700, the database files and attachments 0600, including what an
+  // earlier version or another umask left behind. SQLite gives its -wal and
+  // -shm files the database file's mode.
+  restrictAccess() {
+    const chmod = (file, mode) => {
+      try {
+        fs.chmodSync(file, mode);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    };
+    chmod(this.home, 0o700);
+    for (const name of ['dashboard.db', 'dashboard.db-wal', 'dashboard.db-shm']) chmod(path.join(this.home, name), 0o600);
+    let folders = [];
+    try {
+      chmod(this.attachmentsDir, 0o700);
+      folders = fs.readdirSync(this.attachmentsDir, { withFileTypes: true });
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    for (const folder of folders) {
+      const dir = path.join(this.attachmentsDir, folder.name);
+      if (!folder.isDirectory()) {
+        if (folder.isFile()) chmod(dir, 0o600);
+        continue;
+      }
+      chmod(dir, 0o700);
+      for (const file of fs.readdirSync(dir, { withFileTypes: true })) if (file.isFile()) chmod(path.join(dir, file.name), 0o600);
+    }
   }
 
   migrate(from) {
@@ -177,9 +211,11 @@ export class Store {
     return Number(info.lastInsertRowid);
   }
 
-  // Copies a file into the item's folder and records it. Returns the attachment row.
+  // Copies a file into the item's folder and records it. Returns the attachment
+  // row. Everything is checked before the copy; a failed insert removes it.
   addAttachment(itemId, sourcePath, caption = null) {
     const item = this.requireItem(itemId);
+    const cleanCaption = caption ? singleLine(caption, 'caption', MAX_TITLE) : null;
     let stat;
     try {
       stat = fs.statSync(sourcePath);
@@ -188,6 +224,7 @@ export class Store {
     }
     if (!stat.isFile()) throw new ValidationError(`not a regular file: ${sourcePath}`);
     const folder = path.join(this.attachmentsDir, String(item.id));
+    fs.mkdirSync(this.attachmentsDir, { recursive: true, mode: 0o700 });
     fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
     const clean = sanitizeFileName(sourcePath);
     const ext = path.extname(clean);
@@ -205,11 +242,17 @@ export class Store {
       }
       stored = `${stem}-${n + 1}${ext}`;
     }
-    const cleanCaption = caption ? singleLine(caption, 'caption', MAX_TITLE) : null;
-    const info = this.db
-      .prepare('INSERT INTO attachments (item_id, file, media_type, caption, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(item.id, stored, mediaTypeFor(stored), cleanCaption, this.now());
-    return { id: Number(info.lastInsertRowid), item_id: item.id, file: stored, media_type: mediaTypeFor(stored), caption: cleanCaption };
+    const copy = path.join(folder, stored);
+    try {
+      fs.chmodSync(copy, 0o600);
+      const info = this.db
+        .prepare('INSERT INTO attachments (item_id, file, media_type, caption, created_at) VALUES (?, ?, ?, ?, ?)')
+        .run(item.id, stored, mediaTypeFor(stored), cleanCaption, this.now());
+      return { id: Number(info.lastInsertRowid), item_id: item.id, file: stored, media_type: mediaTypeFor(stored), caption: cleanCaption };
+    } catch (error) {
+      fs.rmSync(copy, { force: true });
+      throw error;
+    }
   }
 
   attachmentPath(attachment) {
@@ -223,28 +266,39 @@ export class Store {
     return this.db.prepare('SELECT * FROM attachments WHERE id = ?').get(id) || null;
   }
 
-  addReply(itemId, { author, text = '', verdict = null }) {
-    const item = this.requireItem(itemId);
-    if (item.status === 'closed') throw new ConflictError(`item ${item.id} is closed`);
+  // `after`, when given, is the newest reply id the caller has seen: a newer
+  // reply on the item refuses the action (ConflictError).
+  addReply(itemId, { author, text = '', verdict = null, after = null }) {
     if (!['owner', 'agent'].includes(author)) throw new ValidationError('author must be owner or agent');
-    if (verdict != null && (author !== 'owner' || !VERDICTS.includes(verdict))) {
-      throw new ValidationError('a verdict is agree or disagree, and only the owner gives one');
-    }
-    if (verdict === 'agree' && item.kind !== 'look') throw new ValidationError('only a look item can be agreed with');
-    if (verdict === 'disagree' && item.kind !== 'look') throw new ValidationError('only a look item can be disagreed with');
-    const clean = longText(text, 'text', { required: verdict !== 'agree' });
-    const info = this.db
-      .prepare('INSERT INTO replies (item_id, author, verdict, text, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(item.id, author, verdict, clean, this.now());
-    return Number(info.lastInsertRowid);
+    return this.tx(() => {
+      const item = this.requireItem(itemId);
+      if (item.status === 'closed') throw new ConflictError(`item ${item.id} is closed`);
+      this.requireUnchanged(item.id, after);
+      if (verdict != null && (author !== 'owner' || !VERDICTS.includes(verdict))) {
+        throw new ValidationError('a verdict is agree or disagree, and only the owner gives one');
+      }
+      if (verdict != null && item.kind !== 'look') throw new ValidationError(`only a look item can be ${verdict === 'agree' ? 'agreed' : 'disagreed'} with`);
+      const clean = longText(text, 'text', { required: verdict !== 'agree' });
+      const info = this.db
+        .prepare('INSERT INTO replies (item_id, author, verdict, text, created_at) VALUES (?, ?, ?, ?, ?)')
+        .run(item.id, author, verdict, clean, this.now());
+      return Number(info.lastInsertRowid);
+    });
   }
 
-  markShippedSeen(itemId) {
+  requireUnchanged(itemId, after) {
+    if (after == null) return;
+    const newest = this.db.prepare('SELECT max(id) AS id FROM replies WHERE item_id = ?').get(itemId).id ?? 0;
+    if (newest > after) throw new ConflictError(`item ${itemId} has a newer reply than the one shown; read it again`);
+  }
+
+  markShippedSeen(itemId, { after = null } = {}) {
     return this.tx(() => {
       const item = this.getItem(itemId);
       if (!item) throw new NotFoundError(`no item ${itemId}`);
       if (item.kind !== 'shipped') throw new ValidationError('only a shipped item is marked seen');
       if (item.status === 'closed') throw new ConflictError(`item ${item.id} is closed`);
+      this.requireUnchanged(item.id, after);
       this.setSeen(`item:${item.id}`, seenValue(item, this.now()));
     });
   }

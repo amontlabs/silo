@@ -51,29 +51,54 @@ async function send(url, body) {
     } catch {
       /* keep the generic message */
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 }
 
+const CHANGED_NOTE = 'This changed while you were reading. Read it again, then answer.';
+
 function showError(origin, message) {
-  const holder = origin.closest('form, .actions') || origin.parentElement;
-  const slot = holder.querySelector('.form-error');
+  const holder = origin.closest('form') || origin.closest('[data-controls]');
+  const slot = holder?.querySelector('.form-error');
   if (slot) slot.textContent = message;
   else window.alert(message);
 }
 
+// Sends one owner action from a control inside a [data-controls] wrapper. The
+// wrapper's data-after (the newest reply the page showed) goes with it; when
+// the item changed since, the server answers 409 and the page shows it fresh.
+async function act(origin, url, body, regions) {
+  const controls = origin.closest('[data-controls]');
+  const item = controls.dataset.item;
+  if (controls.dataset.after !== undefined) body.after = Number(controls.dataset.after);
+  try {
+    await send(url, body);
+    return true;
+  } catch (error) {
+    if (error.status !== 409 || !item) throw error;
+    await refresh(regions);
+    document.querySelectorAll(`[data-controls][data-item="${item}"] > .form-error`).forEach((slot) => {
+      slot.textContent = CHANGED_NOTE;
+    });
+    return false;
+  }
+}
+
 document.addEventListener('submit', async (event) => {
   const form = event.target.closest('form[data-api]');
-  if (!form) return;
+  if (!form || !form.closest('[data-controls]')) return;
   event.preventDefault();
   const button = form.querySelector('button[type="submit"]');
   button.disabled = true;
   try {
     const body = { text: form.querySelector('textarea').value };
     if (form.dataset.verdict) body.verdict = form.dataset.verdict;
-    await send(form.dataset.api, body);
-    form.querySelector('textarea').value = '';
-    await refresh(REGIONS_AFTER_REPLY);
+    if (await act(form, form.dataset.api, body, REGIONS_AFTER_REPLY)) {
+      form.querySelector('textarea').value = '';
+      await refresh(REGIONS_AFTER_REPLY);
+    }
   } catch (error) {
     showError(form, error.message);
     button.disabled = false;
@@ -82,11 +107,11 @@ document.addEventListener('submit', async (event) => {
 
 document.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-post]');
-  if (!button) return;
+  if (!button || !button.closest('[data-controls]')) return;
   button.disabled = true;
+  const regions = button.dataset.refresh === 'all' ? ALL_REGIONS : REGIONS_AFTER_REPLY;
   try {
-    await send(button.dataset.post, JSON.parse(button.dataset.body || '{}'));
-    await refresh(button.dataset.refresh === 'all' ? ALL_REGIONS : REGIONS_AFTER_REPLY);
+    if (await act(button, button.dataset.post, JSON.parse(button.dataset.body || '{}'), regions)) await refresh(regions);
   } catch (error) {
     showError(button, error.message);
     button.disabled = false;

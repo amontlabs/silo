@@ -130,6 +130,74 @@ test('ack is all or nothing and only takes owner replies', () =>
     assert.equal(store.ownerReplies({ all: true }).length, 1);
   }));
 
+test('a caption that fails leaves no file behind and does not shift later names', () =>
+  withStore((store) => {
+    const id = store.createItem({ kind: 'shipped', title: 'Build' });
+    const source = tempDir();
+    fs.writeFileSync(path.join(source, 'clip.mp4'), 'mp4');
+    assert.throws(() => store.addAttachment(id, path.join(source, 'clip.mp4'), 'two\nlines'), /single line/);
+    const folder = path.join(store.home, 'attachments', String(id));
+    assert.deepEqual(fs.existsSync(folder) ? fs.readdirSync(folder) : [], []);
+    assert.equal(store.addAttachment(id, path.join(source, 'clip.mp4')).file, 'clip.mp4');
+    // A failed insert removes its copy.
+    store.db.exec('CREATE TRIGGER refuse BEFORE INSERT ON attachments BEGIN SELECT RAISE(ABORT, \'refused\'); END');
+    assert.throws(() => store.addAttachment(id, path.join(source, 'clip.mp4')), /refused/);
+    assert.deepEqual(fs.readdirSync(folder), ['clip.mp4']);
+  }));
+
+test('replies and Seen are refused when the item has a newer reply than the caller saw', () => {
+  const home = tempDir();
+  const page = new Store(home);
+  const agent = new Store(home);
+  try {
+    const look = page.createItem({ kind: 'look', title: 'L', defaultText: 'd' });
+    const shipped = page.createItem({ kind: 'shipped', title: 'S' });
+    const newer = agent.addReply(look, { author: 'agent', text: 'update' });
+    assert.throws(() => page.addReply(look, { author: 'owner', verdict: 'agree', after: 0 }), (error) => error.status === 409 && /newer reply/.test(error.message));
+    assert.equal(page.getItem(look).replies.length, 1);
+    page.addReply(look, { author: 'owner', verdict: 'agree', after: newer });
+    const update = agent.addReply(shipped, { author: 'agent', text: 'more' });
+    assert.throws(() => page.markShippedSeen(shipped, { after: 0 }), /newer reply/);
+    page.markShippedSeen(shipped, { after: update });
+    // Another handle closed the item: the reply is refused inside the same transaction.
+    agent.closeItem(look);
+    assert.throws(() => page.addReply(look, { author: 'owner', text: 'late', after: 99 }), /closed/);
+  } finally {
+    page.close();
+    agent.close();
+  }
+});
+
+test('the store is readable only by its owner, also when it existed with wider modes', () => {
+  const home = tempDir();
+  fs.chmodSync(home, 0o755);
+  new Store(home).close();
+  const folder = path.join(home, 'attachments', '1');
+  fs.mkdirSync(folder, { recursive: true, mode: 0o755 });
+  fs.writeFileSync(path.join(folder, 'old.png'), 'x', { mode: 0o644 });
+  fs.chmodSync(path.join(home, 'dashboard.db'), 0o644);
+  fs.chmodSync(path.join(home, 'attachments'), 0o755);
+  const store = new Store(home);
+  try {
+    const mode = (file) => fs.statSync(file).mode & 0o777;
+    assert.equal(mode(home), 0o700);
+    assert.equal(mode(path.join(home, 'attachments')), 0o700);
+    assert.equal(mode(folder), 0o700);
+    assert.equal(mode(path.join(folder, 'old.png')), 0o600);
+    for (const name of ['dashboard.db', 'dashboard.db-wal', 'dashboard.db-shm']) {
+      if (fs.existsSync(path.join(home, name))) assert.equal(mode(path.join(home, name)), 0o600, name);
+    }
+    const id = store.createItem({ kind: 'shipped', title: 'S' });
+    const source = path.join(tempDir(), 'new.png');
+    fs.writeFileSync(source, 'y', { mode: 0o644 });
+    const stored = store.addAttachment(id, source);
+    assert.equal(mode(store.attachmentPath(stored)), 0o600);
+    assert.equal(mode(path.join(home, 'dashboard.db-wal')), 0o600);
+  } finally {
+    store.close();
+  }
+});
+
 // ---- "For you" membership, checked against a reference model ----
 
 function rng(seed) {
@@ -155,11 +223,11 @@ test('model: an item is in "For you" until the owner answers, marks it seen or i
     withStore((store) => {
       const random = rng(seed);
       const pick = (list) => list[Math.floor(random() * list.length)];
-      // model: id -> { kind, waiting, closed }
+      // model: id -> { kind, waiting, closed, last (newest reply id) }
       const model = new Map();
       for (let step = 0; step < 120; step += 1) {
         const ids = [...model.keys()];
-        const op = ids.length === 0 ? 'post' : pick(['post', 'agent', 'agent', 'owner', 'owner', 'agree', 'disagree', 'seen', 'close']);
+        const op = ids.length === 0 ? 'post' : pick(['post', 'agent', 'agent', 'owner', 'owner', 'agree', 'disagree', 'seen', 'close', 'shown']);
         const id = ids.length ? pick(ids) : null;
         const entry = id === null ? null : model.get(id);
         const attempt = (fn, ok) => {
@@ -173,14 +241,34 @@ test('model: an item is in "For you" until the owner answers, marks it seen or i
         if (op === 'post') {
           const kind = pick(['look', 'decide', 'shipped']);
           const newId = store.createItem({ kind, title: `item ${step}`, defaultText: kind === 'look' ? 'default' : null });
-          model.set(newId, { kind, waiting: true, closed: false });
+          model.set(newId, { kind, waiting: true, closed: false, last: 0 });
         } else if (op === 'agent') {
-          if (attempt(() => store.addReply(id, { author: 'agent', text: 'update' }), !entry.closed)) entry.waiting = true;
+          let reply;
+          if (attempt(() => (reply = store.addReply(id, { author: 'agent', text: 'update' })), !entry.closed)) {
+            entry.waiting = true;
+            entry.last = reply;
+          }
         } else if (op === 'owner') {
-          if (attempt(() => store.addReply(id, { author: 'owner', text: 'my answer' }), !entry.closed)) entry.waiting = false;
+          let reply;
+          if (attempt(() => (reply = store.addReply(id, { author: 'owner', text: 'my answer' })), !entry.closed)) {
+            entry.waiting = false;
+            entry.last = reply;
+          }
         } else if (op === 'agree' || op === 'disagree') {
           const ok = !entry.closed && entry.kind === 'look';
-          if (attempt(() => store.addReply(id, { author: 'owner', verdict: op, text: op === 'disagree' ? 'no' : '' }), ok)) entry.waiting = false;
+          let reply;
+          if (attempt(() => (reply = store.addReply(id, { author: 'owner', verdict: op, text: op === 'disagree' ? 'no' : '' })), ok)) {
+            entry.waiting = false;
+            entry.last = reply;
+          }
+        } else if (op === 'shown') {
+          // An owner answer sent from a page that showed an older or the current reply.
+          const after = entry.last > 0 && random() < 0.5 ? entry.last - 1 : entry.last;
+          let reply;
+          if (attempt(() => (reply = store.addReply(id, { author: 'owner', text: 'from the page', after })), !entry.closed && after >= entry.last)) {
+            entry.waiting = false;
+            entry.last = reply;
+          }
         } else if (op === 'seen') {
           if (attempt(() => store.markShippedSeen(id), !entry.closed && entry.kind === 'shipped')) entry.waiting = false;
         } else if (op === 'close') {

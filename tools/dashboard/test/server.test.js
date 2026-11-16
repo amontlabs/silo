@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createServer } from '../src/server.js';
 import { Store } from '../src/store.js';
-import { git, makeRepo, postJson, request, tempDir } from './helpers.js';
+import { commitAll, DECISIONS, git, makeRepo, postJson, request, tempDir, writeDoc } from './helpers.js';
 
 let store;
 let server;
@@ -88,7 +88,7 @@ test('private notes render grouped by folder; links out of the folder are not sh
     const region = /<section id="private"[\s\S]*?<\/section>/.exec(html)[0];
     assert.ok(region.indexOf('Ay note') < region.indexOf('Bee note'));
     assert.ok(region.indexOf('Bee note') < region.indexOf('pricing/</h3>'));
-    assert.match(region, /<em>raw html stays<\/em>/);
+    assert.match(region, /&lt;em&gt;raw html stays&lt;\/em&gt;/);
     assert.match(region, /Plan <strong>one<\/strong>/);
     assert.match(region, /id="note-pricing-plans-md"/);
     assert.doesNotMatch(html, /OUTSIDE SECRET/);
@@ -112,15 +112,15 @@ test('Host and Origin: other names and other origins are refused', async () => {
   const id = store.createItem({ kind: 'decide', title: 'Origin check' });
   const url = `/api/items/${id}/replies`;
   for (const origin of ['http://evil.example', `http://127.0.0.1:${port + 1}`, 'null', `https://127.0.0.1:${port}`]) {
-    assert.equal((await postJson(port, url, { text: 'x' }, { Origin: origin })).status, 403, origin);
+    assert.equal((await postJson(port, url, { text: 'x', after: 0 }, { Origin: origin })).status, 403, origin);
   }
-  assert.equal((await postJson(port, url, { text: 'x' }, { Host: 'evil.example', Origin: 'http://evil.example' })).status, 403);
-  assert.equal((await postJson(port, url, { text: 'x' }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
+  assert.equal((await postJson(port, url, { text: 'x', after: 0 }, { Host: 'evil.example', Origin: 'http://evil.example' })).status, 403);
+  assert.equal((await postJson(port, url, { text: 'x', after: 0 }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
   // A form post (not JSON) is refused even from the page's own origin.
-  const form = await request(port, { method: 'POST', url, headers: { Origin: `http://127.0.0.1:${port}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'text=x' });
+  const form = await request(port, { method: 'POST', url, headers: { Origin: `http://127.0.0.1:${port}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'text=x&after=0' });
   assert.equal(form.status, 400);
   assert.equal(store.getItem(id).replies.length, 0);
-  assert.equal((await postJson(port, url, { text: 'fine' }, { Origin: `http://localhost:${port}` })).status, 201);
+  assert.equal((await postJson(port, url, { text: 'fine', after: 0 }, { Origin: `http://localhost:${port}` })).status, 201);
   assert.equal(store.getItem(id).replies.length, 1);
   assert.equal((await request(port, { method: 'DELETE', url })).status, 405);
   store.closeItem(id);
@@ -131,22 +131,71 @@ test('owner actions: agree, disagree needs text, decide needs words, seen for sh
   const look = store.createItem({ kind: 'look', title: 'Look', defaultText: 'd' });
   const decide = store.createItem({ kind: 'decide', title: 'Decide' });
   const shipped = store.createItem({ kind: 'shipped', title: 'Shipped' });
-  assert.equal((await postJson(port, `/api/items/${look}/replies`, { verdict: 'disagree', text: ' ' }, origin)).status, 400);
-  assert.equal((await postJson(port, `/api/items/${look}/replies`, { verdict: 'agree' }, origin)).status, 201);
-  assert.equal((await postJson(port, `/api/items/${decide}/replies`, { verdict: 'agree' }, origin)).status, 400);
-  assert.equal((await postJson(port, `/api/items/${decide}/replies`, { text: '' }, origin)).status, 400);
-  assert.equal((await postJson(port, `/api/items/${decide}/replies`, { text: 'Use zsh' }, origin)).status, 201);
-  assert.equal((await postJson(port, `/api/items/${look}/seen`, {}, origin)).status, 400);
-  assert.equal((await postJson(port, `/api/items/${shipped}/seen`, {}, origin)).status, 200);
-  assert.equal((await postJson(port, '/api/items/9999/replies', { text: 'x' }, origin)).status, 404);
+  const reply = (id, body) => postJson(port, `/api/items/${id}/replies`, { after: 0, ...body }, origin);
+  assert.equal((await reply(look, { verdict: 'disagree', text: ' ' })).status, 400);
+  assert.equal((await reply(look, { verdict: 'agree' })).status, 201);
+  assert.equal((await reply(decide, { verdict: 'agree' })).status, 400);
+  assert.equal((await reply(decide, { text: '' })).status, 400);
+  assert.equal((await reply(decide, { text: 'Use zsh' })).status, 201);
+  assert.equal((await postJson(port, `/api/items/${look}/seen`, { after: 1e9 }, origin)).status, 400);
+  assert.equal((await postJson(port, `/api/items/${shipped}/seen`, { after: 0 }, origin)).status, 200);
+  assert.equal((await reply(9999, { text: 'x' })).status, 404);
   const states = Object.fromEntries(store.itemsWithState().map((item) => [item.id, item.state]));
   assert.deepEqual([states[look], states[decide], states[shipped]], ['answered', 'answered', 'answered']);
-
-  const seen = await postJson(port, '/api/docs/seen', {}, origin);
-  assert.equal(seen.status, 200);
-  assert.equal(JSON.parse(seen.body).commit, git(repo, 'rev-parse', 'HEAD').trim());
-  assert.match(await page(), /No changes in the product documents since you last looked/);
   for (const id of [look, decide, shipped]) store.closeItem(id);
+});
+
+test('owner actions carry the newest reply the page showed; a newer one gives 409 and changes nothing', async () => {
+  const origin = { Origin: `http://127.0.0.1:${port}` };
+  const look = store.createItem({ kind: 'look', title: 'Stale look', defaultText: 'd' });
+  const shipped = store.createItem({ kind: 'shipped', title: 'Stale shipped' });
+
+  const html = await page();
+  assert.match(html, new RegExp(`data-controls data-item="${look}" data-after="0"`));
+  const agentReply = store.addReply(look, { author: 'agent', text: 'Changed my mind: now it is blue.' });
+  store.addReply(shipped, { author: 'agent', text: 'One more fix landed.' });
+
+  // Missing or malformed: refused.
+  for (const after of [undefined, -1, 'x', 1.5]) {
+    assert.equal((await postJson(port, `/api/items/${look}/replies`, { verdict: 'agree', after }, origin)).status, 400, String(after));
+  }
+  // Stale: 409 for agree, disagree, an answer, a comment and Seen.
+  for (const body of [{ verdict: 'agree' }, { verdict: 'disagree', text: 'no' }, { text: 'comment' }]) {
+    const response = await postJson(port, `/api/items/${look}/replies`, { ...body, after: 0 }, origin);
+    assert.equal(response.status, 409);
+    assert.match(JSON.parse(response.body).error, /newer reply/);
+  }
+  assert.equal((await postJson(port, `/api/items/${shipped}/seen`, { after: 0 }, origin)).status, 409);
+  assert.equal(store.getItem(look).replies.length, 1);
+  assert.equal(store.itemsWithState().find((item) => item.id === shipped).state, 'waiting');
+
+  // With what the page shows now, both go through.
+  assert.match(await page(), new RegExp(`data-item="${look}" data-after="${agentReply}"`));
+  assert.equal((await postJson(port, `/api/items/${look}/replies`, { verdict: 'agree', after: agentReply }, origin)).status, 201);
+  const shippedAfter = store.getItem(shipped).replies.at(-1).id;
+  assert.equal((await postJson(port, `/api/items/${shipped}/seen`, { after: shippedAfter }, origin)).status, 200);
+  store.closeItem(look);
+  store.closeItem(shipped);
+});
+
+test('Mark all as seen records the commit the page showed, not the current one', async () => {
+  const origin = { Origin: `http://127.0.0.1:${port}` };
+  const shown = git(repo, 'rev-parse', 'HEAD').trim();
+  assert.match(await page(), new RegExp(`data-post="/api/docs/seen" data-body="\\{&quot;commit&quot;:&quot;${shown}&quot;\\}"`));
+  // A commit lands between rendering and the click.
+  writeDoc(repo, 'DECISIONS.md', `${DECISIONS}\n## Later\n\n- Landed after the page was rendered.\n`);
+  const later = commitAll(repo, 'later decision');
+  for (const commit of [undefined, 'abc', shown.slice(0, 12), `${shown}; rm -rf /`, 'f'.repeat(40)]) {
+    assert.equal((await postJson(port, '/api/docs/seen', { commit }, origin)).status, 400, String(commit));
+  }
+  const response = await postJson(port, '/api/docs/seen', { commit: shown }, origin);
+  assert.equal(response.status, 200);
+  assert.equal(store.getSeen('docs_commit'), shown);
+  const html = await page();
+  assert.match(html, /1 section of the product documents changed since you last looked/);
+  assert.match(html, /Landed after the page was rendered/);
+  assert.equal((await postJson(port, '/api/docs/seen', { commit: later }, origin)).status, 200);
+  assert.match(await page(), /No changes in the product documents since you last looked/);
 });
 
 test('item bodies, replies, titles and defaults are escaped', async () => {
@@ -163,7 +212,8 @@ test('item bodies, replies, titles and defaults are escaped', async () => {
   assert.doesNotMatch(card, /<script|<iframe|<img src=x|<b onclick|<style>|javascript:|<source>/);
   assert.match(card, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(card, /&lt;img src=x onerror=alert\(1\)&gt;/);
-  assert.match(card, /<a href="#">click<\/a>/);
+  assert.match(card, /<p>Hello [^<]*<\/p>/);
+  assert.doesNotMatch(card, /<a [^>]*>click/);
   store.closeItem(id);
 });
 

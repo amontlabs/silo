@@ -2,8 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DashboardError, ConflictError, NotFoundError, ValidationError } from './errors.js';
-import { DOC_FILES, docChanges, headCommit, readDoc } from './docs.js';
+import { DashboardError, NotFoundError, ValidationError } from './errors.js';
+import { DOC_FILES, docChanges, hasCommit, readDoc } from './docs.js';
 import { readPrivateNotes } from './private.js';
 import { renderPage } from './views.js';
 
@@ -20,6 +20,9 @@ const SECURITY_HEADERS = {
   'Cross-Origin-Resource-Policy': 'same-origin',
 };
 
+// style-src keeps 'unsafe-inline' because mermaid writes a <style> element and
+// style attributes into the diagrams it draws. Markdown never adds styles of its
+// own: raw HTML in every source is escaped.
 const PAGE_CSP = [
   "default-src 'self'",
   "script-src 'self'",
@@ -136,6 +139,12 @@ function attachmentHeaders(attachment) {
   };
 }
 
+// The newest reply id the page showed for an item (0 when it showed none).
+function shownReply(body) {
+  if (!Number.isSafeInteger(body.after) || body.after < 0) throw new ValidationError('send the newest reply id the page showed (after)');
+  return body.after;
+}
+
 function ownOrigins(port) {
   return { hosts: new Set([`127.0.0.1:${port}`, `localhost:${port}`]), origins: new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]) };
 }
@@ -231,22 +240,25 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
         const text = typeof body.text === 'string' ? body.text : '';
         if (verdict === 'disagree' && !text.trim()) throw new ValidationError('say why you disagree');
         if (item.kind === 'decide' && verdict) throw new ValidationError('a decision is answered in words');
-        const id = store.addReply(item.id, { author: 'owner', text, verdict });
+        const id = store.addReply(item.id, { author: 'owner', text, verdict, after: shownReply(body) });
         return sendJson(res, 201, { id });
       }
       match = /^\/api\/items\/(\d+)\/seen$/.exec(pathname);
       if (match) {
-        await jsonBody(req);
-        store.markShippedSeen(Number(match[1]));
+        const body = await jsonBody(req);
+        store.markShippedSeen(Number(match[1]), { after: shownReply(body) });
         return sendJson(res, 200, { ok: true });
       }
       if (pathname === '/api/docs/seen') {
-        await jsonBody(req);
-        const head = headCommit(repoRoot);
-        if (!head) throw new ConflictError('this checkout has no commit to mark as seen');
-        store.setSeen('docs_commit', head);
+        // The commit the page was rendered from, so changes made since stay unseen.
+        const { commit } = await jsonBody(req);
+        if (typeof commit !== 'string' || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(commit)) {
+          throw new ValidationError('send the commit the page showed, as a full hex id');
+        }
+        if (!hasCommit(repoRoot, commit)) throw new ValidationError(`this checkout has no commit ${commit}`);
+        store.setSeen('docs_commit', commit);
         store.setSeen('docs_seen_at', store.now());
-        return sendJson(res, 200, { commit: head });
+        return sendJson(res, 200, { commit });
       }
       throw new NotFoundError('no such endpoint');
     }

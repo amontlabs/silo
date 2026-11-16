@@ -1,9 +1,9 @@
 // The page: pure functions from data to HTML. Section regions carry
 // data-region so the browser can refresh one at a time.
 import { h, raw, join, esc } from './html.js';
-import { renderDoc, renderUntrusted, lexDoc } from './markdown.js';
-import { chipSteps, countListItems, DOC_FILES, STEP_STATUSES, lineDiff, parseJourneys, slugify, splitSections } from './docs.js';
-import { forYouOrder, lastActivity } from './state.js';
+import { lexMarkdown, renderMarkdown } from './markdown.js';
+import { countListItems, DOC_FILES, STEP_STATUSES, lineDiff, parseJourneys, slugify, splitSections } from './docs.js';
+import { forYouOrder, lastActivity, lastReplyId } from './state.js';
 
 const KIND_LABEL = { decide: 'Decide', look: 'Look', shipped: 'Shipped' };
 const KIND_HINT = {
@@ -52,7 +52,7 @@ function replyView(reply) {
       ${time(reply.created_at)}
       ${mine && reply.acked_at ? h`<span class="muted">· read by an agent</span>` : ''}
     </div>
-    ${reply.text ? h`<div class="prose">${raw(renderUntrusted(reply.text))}</div>` : ''}
+    ${reply.text ? h`<div class="prose">${raw(renderMarkdown(reply.text))}</div>` : ''}
   </li>`;
 }
 
@@ -63,27 +63,27 @@ function replyForm(item, { verdict = null, label, placeholder, required = true, 
   </form>`;
 }
 
+// Every owner control sits in a [data-controls] wrapper that carries the item
+// and the newest reply the page showed; the server refuses an action when the
+// item has a newer reply, so the owner never answers something unread.
 function actionsView(item) {
   if (item.state === 'closed') return '';
-  const waiting = item.state === 'waiting';
+  const wrap = (content, extra = '') =>
+    h`<div class="actions ${extra}" data-controls data-item="${item.id}" data-after="${lastReplyId(item)}">${content}<span class="form-error" role="alert"></span></div>`;
   const comment = h`<details class="reply-box"><summary class="btn">Comment</summary>${replyForm(item, { label: 'Send comment', placeholder: 'Your comment' })}</details>`;
-  if (!waiting) return h`<div class="actions">${comment}</div>`;
+  if (item.state !== 'waiting') return wrap(comment);
   if (item.kind === 'decide') {
-    return h`<div class="actions actions-form"><label class="field-label">Your answer</label>${replyForm(item, { label: 'Send answer', placeholder: 'Your answer', primary: true, rows: 4 })}</div>`;
+    return wrap(h`<label class="field-label">Your answer</label>${replyForm(item, { label: 'Send answer', placeholder: 'Your answer', primary: true, rows: 4 })}`, 'actions-form');
   }
   if (item.kind === 'look') {
-    return h`<div class="actions">
+    return wrap(h`
       <button class="btn primary" type="button" data-post="/api/items/${item.id}/replies" data-body='{"verdict":"agree"}'>Agree</button>
       <details class="reply-box"><summary class="btn">Disagree</summary>${replyForm(item, { verdict: 'disagree', label: 'Send disagreement', placeholder: 'What should happen instead?' })}</details>
-      ${comment}
-      <span class="form-error" role="alert"></span>
-    </div>`;
+      ${comment}`);
   }
-  return h`<div class="actions">
+  return wrap(h`
     <button class="btn primary" type="button" data-post="/api/items/${item.id}/seen" data-body="{}">Seen</button>
-    ${comment}
-    <span class="form-error" role="alert"></span>
-  </div>`;
+    ${comment}`);
 }
 
 function itemHeader(item, journeys) {
@@ -99,8 +99,8 @@ function itemHeader(item, journeys) {
 
 function itemBody(item, { actions }) {
   return h`
-    ${item.body ? h`<div class="prose item-text">${raw(renderUntrusted(item.body))}</div>` : ''}
-    ${item.default_text ? h`<div class="callout"><strong>Stands unless you say otherwise</strong><div class="prose">${raw(renderUntrusted(item.default_text))}</div></div>` : ''}
+    ${item.body ? h`<div class="prose item-text">${raw(renderMarkdown(item.body))}</div>` : ''}
+    ${item.default_text ? h`<div class="callout"><strong>Stands unless you say otherwise</strong><div class="prose">${raw(renderMarkdown(item.default_text))}</div></div>` : ''}
     ${item.attachments.length ? h`<div class="attachments">${item.attachments.map(attachmentView)}</div>` : ''}
     ${item.replies.length ? h`<ol class="thread">${item.replies.map(replyView)}</ol>` : ''}
     ${item.status === 'closed' ? h`<p class="muted closed-note">Closed ${time(item.closed_at)}${item.close_note ? h`: ${item.close_note}` : ''}</p>` : ''}
@@ -197,7 +197,11 @@ function forYouSection(waiting, view) {
       ${list(live)}
     </details>`;
   }
-  const markSeen = state === 'nogit' ? '' : h`<button class="btn" type="button" data-post="/api/docs/seen" data-body="{}" data-refresh="all">Mark all as seen</button>`;
+  const head = view.changes.head;
+  const markSeen =
+    state === 'nogit' || !head
+      ? ''
+      : h`<span class="actions" data-controls><button class="btn" type="button" data-post="/api/docs/seen" data-body="${JSON.stringify({ commit: head })}" data-refresh="all">Mark all as seen</button><span class="form-error" role="alert"></span></span>`;
   return h`<section id="for-you" class="panel" data-region="for-you">
     <div class="section-head"><h2>For you</h2>${markSeen}</div>
     ${docs}
@@ -215,7 +219,7 @@ function anchorFor(change, view) {
 function docSections(text, file, prefix, changes, extra = {}) {
   const { preamble, sections } = splitSections(text);
   const index = changeIndex(changes);
-  const render = extra.render || renderDoc;
+  const render = extra.render || renderMarkdown;
   const intro = preamble.trim()
     ? h`<article class="doc-section" ${raw(`id="${prefix}-intro"`)}>${changeMeta(index.get(`${file}#`), `${prefix}-intro`)}<div class="prose">${raw(render(preamble))}</div></article>`
     : '';
@@ -269,7 +273,7 @@ function journeyCard({ id, title, body, counts, key }, items, view) {
     </header>
     ${changeMeta(change, `journey-${id}`)}
     ${progressView(counts)}
-    ${body ? h`<div class="prose">${raw(renderDoc(chipSteps(body)))}</div>` : ''}
+    ${body ? h`<div class="prose">${raw(renderMarkdown(body, { steps: true }))}</div>` : ''}
     ${journeyItems(items, view)}
   </article>`;
 }
@@ -290,7 +294,7 @@ function journeysSection(view) {
   return h`<section id="journeys" class="panel" data-region="journeys">
     <div class="section-head"><h2>Journeys</h2><span class="muted">docs/product/${DOC_FILES.journeys}</span></div>
     ${view.docs.journeys === null ? emptyState('No journeys yet (docs/product/JOURNEYS.md is missing).') : ''}
-    ${intro.trim() ? h`<div class="prose journeys-intro">${raw(renderDoc(intro))}</div>` : ''}
+    ${intro.trim() ? h`<div class="prose journeys-intro">${raw(renderMarkdown(intro))}</div>` : ''}
     <div class="journey-grid">${journeys.map((journey) => journeyCard(journey, byJourney.get(journey.id) || [], view))}</div>
     ${other.length ? h`<article class="journey-card" id="journey-other"><header><h3>Other</h3><span class="muted">items without a known journey</span></header>${journeyItems(other, view)}</article>` : ''}
     ${removedNotes(view.changes.changes, DOC_FILES.journeys)}
@@ -299,7 +303,7 @@ function journeysSection(view) {
 
 function decisionsSection(view) {
   const text = view.docs.decisions;
-  const total = text === null ? 0 : countListItems(lexDoc(text));
+  const total = text === null ? 0 : countListItems(lexMarkdown(text));
   return h`<section id="decisions" class="panel" data-region="decisions">
     <div class="section-head"><h2>Decisions</h2><span class="muted">docs/product/${DOC_FILES.decisions}</span></div>
     ${text === null ? emptyState('No decisions recorded yet (docs/product/DECISIONS.md is missing).') : h`
@@ -320,7 +324,7 @@ function privateSection(groups) {
       ${group.folder ? h`<h3 class="note-folder">${group.folder}/</h3>` : ''}
       ${group.notes.map((note) => h`<article class="doc-section note" id="note-${slugify(note.path) || 'note'}">
         <div class="doc-meta"><code class="note-path">${note.path}</code></div>
-        <div class="prose">${raw(renderDoc(note.text))}</div>
+        <div class="prose">${raw(renderMarkdown(note.text))}</div>
       </article>`)}
     </div>`)}
   </section>`;
@@ -348,7 +352,7 @@ export function renderPage(view) {
   const full = { ...view, journeys, journeyTitles };
   const waiting = view.items.filter((item) => item.state === 'waiting').sort(forYouOrder);
   const done = view.items.filter((item) => item.state !== 'waiting').sort((a, b) => (lastActivity(a) < lastActivity(b) ? 1 : -1));
-  const decisionCount = view.docs.decisions === null ? 0 : countListItems(lexDoc(view.docs.decisions));
+  const decisionCount = view.docs.decisions === null ? 0 : countListItems(lexMarkdown(view.docs.decisions));
   const notes = view.notes ?? [];
   const noteCount = notes.reduce((sum, group) => sum + group.notes.length, 0);
   const counts = { forYou: waiting.length, journeys: journeys.journeys.length, decisions: decisionCount, notes: noteCount, history: done.length };
