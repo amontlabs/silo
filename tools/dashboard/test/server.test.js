@@ -42,18 +42,21 @@ test('the page renders every section against the fixture', async () => {
   assert.match(response.headers['content-type'], /text\/html/);
   assert.match(response.headers['content-security-policy'], /script-src 'self'/);
   const html = response.body.toString();
-  for (const region of ['nav', 'for-you', 'product', 'journeys', 'decisions', 'history']) assert.match(html, new RegExp(`data-region="${region}"`));
+  for (const region of ['nav', 'for-you', 'product', 'journeys', 'decisions']) assert.match(html, new RegExp(`data-region="${region}"`));
   assert.doesNotMatch(html, /data-region="private"/, 'no private notes: section hidden');
-  assert.match(html, /Silo gives every agent its own computer/);
+  assert.doesNotMatch(html, /href="#private"/, 'no private notes: no tab');
+  assert.match(html, /<div class="hero-text"><p>Silo gives every agent its own computer\.<\/p>/);
   assert.match(html, /id="journey-first-run"/);
   assert.match(html, /id="journey-share-a-workspace"/);
-  assert.match(html, /<span class="chip step-built">built<\/span> Install the app/);
-  assert.match(html, /<span class="chip step-untested">untested<\/span> Restore a computer/);
-  assert.match(html, /aria-label="1 built, 1 partial, 1 missing, 1 untested"/);
+  assert.match(html, /<details class="step is-built" id="journey-first-run-step-install-the-app" data-step="1">[\s\S]*?<span>Install the app<\/span>[\s\S]*?<span class="status-word">works<\/span>/);
+  assert.match(html, /id="journey-first-run-step-restore-a-computer"[\s\S]*?<span>Restore a computer<\/span>[\s\S]*?not driven/);
+  assert.match(html, /<div class="track" aria-hidden="true"><i class="built"><\/i><i class="partial"><\/i><i class="missing"><\/i><i class="untested"><\/i><\/div>/);
+  assert.match(html, /data-n="1\/4"/);
   assert.match(html, /<pre class="mermaid">/);
   assert.match(html, /data-total="3">3 decisions/);
-  assert.match(html, new RegExp(`id="item-${id}"`));
+  assert.match(html, new RegExp(`<article class="card" id="item-${id}"`));
   assert.match(html, /Changed since you last looked/);
+  assert.match(html, /1 thing <em>· about 1 minute<\/em>/);
   store.closeItem(id);
 });
 
@@ -84,10 +87,11 @@ test('private notes render grouped by folder; links out of the folder are not sh
   try {
     let html = await page(running.port);
     assert.match(html, /data-region="private"/);
-    assert.match(html, /href="#private">Private<span class="count-badge ">3<\/span>/);
-    const region = /<section id="private"[\s\S]*?<\/section>/.exec(html)[0];
-    assert.ok(region.indexOf('Ay note') < region.indexOf('Bee note'));
-    assert.ok(region.indexOf('Bee note') < region.indexOf('pricing/</h3>'));
+    assert.match(html, /<a class="tab" href="#private" data-view="private">Private<\/a>/);
+    const region = /<section class="view" id="private"[\s\S]*?<\/section>/.exec(html)[0];
+    assert.ok(region.indexOf('<p class="big">Ay note</p>') < region.indexOf('<p class="big">Bee note</p>'));
+    assert.ok(region.indexOf('<p class="big">Bee note</p>') < region.indexOf('<h3>pricing</h3>'));
+    assert.match(region, /<a class="tile note-tile" href="#note-pricing-plans-md"><h3>pricing<\/h3><p class="big">plans<\/p>/);
     assert.match(region, /&lt;em&gt;raw html stays&lt;\/em&gt;/);
     assert.match(region, /Plan <strong>one<\/strong>/);
     assert.match(region, /id="note-pricing-plans-md"/);
@@ -192,10 +196,12 @@ test('Mark all as seen records the commit the page showed, not the current one',
   assert.equal(response.status, 200);
   assert.equal(store.getSeen('docs_commit'), shown);
   const html = await page();
-  assert.match(html, /1 section of the product documents changed since you last looked/);
-  assert.match(html, /Landed after the page was rendered/);
+  const box = /<div class="changed-box"[\s\S]*?<\/aside>/.exec(html)[0];
+  assert.equal(box.match(/<details class="change"/g).length, 1);
+  assert.match(box, /Decisions · Later/);
+  assert.match(box, /Landed after the page was rendered/);
   assert.equal((await postJson(port, '/api/docs/seen', { commit: later }, origin)).status, 200);
-  assert.match(await page(), /No changes in the product documents since you last looked/);
+  assert.doesNotMatch(await page(), /class="changed-box"/);
 });
 
 test('item bodies, replies, titles and defaults are escaped', async () => {
@@ -208,7 +214,7 @@ test('item bodies, replies, titles and defaults are escaped', async () => {
   });
   store.addReply(id, { author: 'agent', text: '<style>body{display:none}</style>' });
   const html = await page();
-  const card = new RegExp(`<article class="item[^"]*" id="item-${id}">[\\s\\S]*?</article>`).exec(html)[0];
+  const card = new RegExp(`<article class="card" id="item-${id}"[\\s\\S]*?</article>`).exec(html)[0];
   assert.doesNotMatch(card, /<script|<iframe|<img src=x|<b onclick|<style>|javascript:|<source>/);
   assert.match(card, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(card, /&lt;img src=x onerror=alert\(1\)&gt;/);
@@ -289,4 +295,33 @@ test('static files and mermaid are served', async () => {
   const mermaid = await request(port, { url: '/vendor/mermaid/mermaid.esm.min.mjs', method: 'HEAD' });
   assert.equal(mermaid.status, 200);
   assert.match(mermaid.headers['content-type'], /javascript/);
+});
+
+test('without JavaScript every view is in the page, in order, and the stylesheet hides views only when scripts run', async () => {
+  const home = tempDir();
+  fs.mkdirSync(path.join(home, 'private'));
+  fs.writeFileSync(path.join(home, 'private', 'plan.md'), '# Plan\n\nFirst.\n\n## Part\n\nMore.');
+  const running = await start({ home });
+  try {
+    running.store.createItem({ kind: 'decide', title: 'One', options: [{ label: 'A' }, { label: 'B' }] });
+    running.store.createItem({ kind: 'look', title: 'Two', defaultText: 'd' });
+    const html = await page(running.port);
+    const views = [...html.matchAll(/<section class="view" id="([a-z-]+)" data-region/g)].map((match) => match[1]);
+    assert.deepEqual(views, ['for-you', 'product', 'journeys', 'decisions', 'private']);
+    assert.match(html, /<html lang="en">/, 'no js class until a script adds it');
+    assert.equal(html.match(/<article class="card" id="item-\d+"/g).length, 2, 'every waiting card is in the page');
+    assert.match(html, /<article class="reader" id="note-plan-md">[\s\S]*<section id="note-plan-md--part">/);
+    // Scripts are files; nothing inline.
+    assert.deepEqual([...html.matchAll(/<script\b[^>]*>/g)].map((match) => match[0]), ['<script src="/boot.js">', '<script type="module" src="/app.js">']);
+    assert.doesNotMatch(html, /<script>|\son[a-z]+=/i);
+    const css = (await request(running.port, { url: '/app.css' })).body.toString();
+    for (const rule of css.match(/[^}]*\{[^}]*display:\s*none[^}]*\}/g)) {
+      if (/(^|[\s,}])\.view\b/.test(rule.split('{')[0])) assert.match(rule.split('{')[0], /html\.js/, rule);
+    }
+    const boot = await request(running.port, { url: '/boot.js' });
+    assert.equal(boot.status, 200);
+    assert.match(boot.headers['content-type'], /javascript/);
+  } finally {
+    await stop(running);
+  }
 });

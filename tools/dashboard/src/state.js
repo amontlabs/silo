@@ -1,7 +1,7 @@
 // What an item is, from its replies alone. The page, the CLI and the tests all
 // ask these functions, so "For you" has one definition.
 
-export const KIND_ORDER = { decide: 0, look: 1, shipped: 2 };
+export const KIND_ORDER = { decide: 0, look: 1, shipped: 2, note: 3 };
 
 function lastAgentReplyId(item) {
   let last = 0;
@@ -15,8 +15,9 @@ export function lastReplyId(item) {
   return last;
 }
 
-// The value stored for a shipped item the owner marked seen: the newest reply
-// of the item at that moment, so a later agent reply makes it wait again.
+// The value stored for a shipped item or a note the owner marked seen: the
+// newest reply of the item at that moment, so a later agent reply makes it
+// wait again.
 export function seenValue(item, now) {
   return JSON.stringify({ at: now, after: lastReplyId(item) });
 }
@@ -31,12 +32,13 @@ function parseSeen(value) {
   }
 }
 
-// 'closed' | 'waiting' | 'answered'
+// 'closed' | 'waiting' | 'answered'. A note starts with the owner's reply, so
+// it waits only after an agent replies to it.
 export function itemState(item, seen) {
   if (item.status === 'closed') return 'closed';
   const agent = lastAgentReplyId(item);
   if (item.replies.some((reply) => reply.author === 'owner' && reply.id > agent)) return 'answered';
-  if (item.kind === 'shipped') {
+  if (item.kind === 'shipped' || item.kind === 'note') {
     const mark = parseSeen(seen);
     if (mark && mark.after >= agent) return 'answered';
   }
@@ -51,4 +53,17 @@ export function lastActivity(item) {
 
 export function forYouOrder(a, b) {
   return KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.id - a.id;
+}
+
+// The reaction an anchor carries after these owner replies, oldest first: a
+// reply with a reaction sets it, a reply with neither text nor reaction clears
+// it, a text-only reply leaves it.
+export function currentReaction(replies) {
+  let reaction = null;
+  for (const reply of replies) {
+    if (reply.author !== 'owner') continue;
+    if (reply.reaction) reaction = reply.reaction;
+    else if (!reply.text) reaction = null;
+  }
+  return reaction;
 }

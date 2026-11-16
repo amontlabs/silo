@@ -79,3 +79,43 @@ export function readPrivateNotes(home) {
     .sort(([a], [b]) => byName(a, b))
     .map(([folder, notes]) => ({ folder, notes: notes.sort((a, b) => byName(a.name, b.name)) }));
 }
+
+const plainText = (markdown) =>
+  markdown
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[`*_~]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * What a note's tile shows: { title, summary }. The title is the note's first
+ * `# ` heading, else its file name without .md; the summary is its first
+ * paragraph as plain text, cut at `max` characters.
+ */
+export function noteSummary(note, max = 140) {
+  const lines = note.text.split('\n');
+  let title = null;
+  let summary = '';
+  let fence = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s{0,3}(```|~~~)/.test(line)) {
+      fence = !fence;
+      continue;
+    }
+    if (fence) continue;
+    const heading = /^# +(.+?)\s*#*\s*$/.exec(line);
+    if (heading && title === null) {
+      title = plainText(heading[1]);
+      continue;
+    }
+    if (!summary && line.trim() && !/^\s{0,3}(#|[-*+]\s|\d+[.)]\s|>|\||<!--)/.test(line)) {
+      const out = [];
+      for (let k = i; k < lines.length && lines[k].trim() && !/^\s{0,3}#/.test(lines[k]); k += 1) out.push(lines[k]);
+      summary = plainText(out.join(' '));
+      if (title !== null) break;
+    }
+  }
+  if (summary.length > max) summary = `${summary.slice(0, max - 1).trimEnd()}…`;
+  return { title: title || note.name.replace(/\.md$/i, ''), summary };
+}

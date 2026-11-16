@@ -25,6 +25,28 @@ export function slugify(text) {
     .replace(/^-+|-+$/g, '');
 }
 
+// The one definition of an id or key the dashboard accepts: journey ids, step
+// keys and section keys, in anchors and in --journey.
+export const ID_SHAPE = /^[a-z0-9-]{1,80}$/;
+export const MAX_ID = 80;
+export const MAX_ANCHOR_TEXT = 200;
+
+// `base` cut to fit ID_SHAPE, made unique among `used` with -2, -3, ...
+// (in the order asked), and added to `used`.
+export function uniqueId(base, used, fallback) {
+  const clean = (text) => text.slice(0, MAX_ID).replace(/-+$/, '');
+  const root = clean(base) || fallback;
+  let id = root;
+  for (let n = 2; used.has(id); n += 1) id = `${clean(root.slice(0, MAX_ID - String(n).length - 1))}-${n}`;
+  used.add(id);
+  return id;
+}
+
+// The text the page shows for an anchor and the server compares as sent:
+// plain, trimmed first, then cut to MAX_ANCHOR_TEXT characters (so a cut may
+// end on a space). The one definition both sides use.
+export const anchorText = (text) => String(text).replace(/[`*_]/g, '').trim().slice(0, MAX_ANCHOR_TEXT);
+
 // Reads one of the three known documents. A missing file, a missing folder, or
 // a path that resolves outside docs/product gives null.
 export function readDoc(repoRoot, fileName) {
@@ -74,56 +96,280 @@ export function splitSections(text) {
       preamble.push(line);
     }
   });
-  const seen = new Map();
+  const used = new Set();
   return {
     preamble: preamble.join('\n').replace(/\s+$/, ''),
-    sections: sections.map((section) => {
-      const base = slugify(section.heading) || 'section';
-      const count = (seen.get(base) ?? 0) + 1;
-      seen.set(base, count);
-      return {
-        heading: section.heading,
-        key: count === 1 ? base : `${base}-${count}`,
-        text: section.lines.join('\n').replace(/\s+$/, ''),
-      };
-    }),
+    sections: sections.map((section) => ({
+      heading: section.heading,
+      key: uniqueId(slugify(section.heading), used, 'section'),
+      text: section.lines.join('\n').replace(/\s+$/, ''),
+    })),
   };
 }
 
-// Journeys: each `## ` heading is one. An `<!-- id: slug -->` line right under
-// the heading gives its id; otherwise the id is the slugified heading. Steps
-// are list items that start with [built], [partial], [missing] or [untested]
-// (exists in the docs or code, not yet driven as a user). Any other [word]
-// stays plain text.
+const LIST_ITEM = /^(\s*)(?:[-*+]|\d{1,9}[.)])\s+/;
+const BLOCK_START = /^\s{0,3}(?:#{1,6}\s|```|~~~|>|<!--)/;
+const indentOf = (line) => /^\s*/.exec(line)[0].replace(/\t/g, '    ').length;
+const blank = (line) => line.trim() === '';
+
+function dedent(lines) {
+  const widths = lines.filter((line) => !blank(line)).map(indentOf);
+  const cut = widths.length ? Math.min(...widths) : 0;
+  return lines.map((line) => line.replace(/\t/g, '    ').slice(Math.min(cut, indentOf(line)))).join('\n');
+}
+
+// The index of the first ". " outside code spans, or -1.
+function sentenceEnd(text) {
+  let inCode = false;
+  for (let i = 0; i < text.length - 1; i += 1) {
+    if (text[i] === '`') inCode = !inCode;
+    else if (!inCode && text[i] === '.' && text[i + 1] === ' ') return i;
+  }
+  return -1;
+}
+
+/**
+ * A list item that starts at lines[start], as { paragraph, nested, end }:
+ * the item's first paragraph (its first line and the lines that continue it)
+ * joined with spaces, the indented content under it, dedented, and the index
+ * after its last line.
+ */
+function listItemAt(lines, start, firstText) {
+  const indent = indentOf(lines[start]);
+  const paragraph = [firstText.trim()];
+  let j = start + 1;
+  while (j < lines.length && !blank(lines[j]) && !LIST_ITEM.test(lines[j]) && !BLOCK_START.test(lines[j])) {
+    paragraph.push(lines[j].trim());
+    j += 1;
+  }
+  const nested = [];
+  while (j < lines.length) {
+    if (blank(lines[j])) {
+      let k = j;
+      while (k < lines.length && blank(lines[k])) k += 1;
+      if (k < lines.length && indentOf(lines[k]) > indent) {
+        nested.push(...lines.slice(j, k));
+        j = k;
+        continue;
+      }
+      break;
+    }
+    if (indentOf(lines[j]) <= indent) break;
+    nested.push(lines[j]);
+    j += 1;
+  }
+  return { paragraph: paragraph.join(' '), nested: dedent(nested).trim(), end: j };
+}
+
+/**
+ * A step is `- [status] Title. Detail…`: the title is the text up to the
+ * first ". " (or the whole first paragraph, without a final period); the
+ * detail is the rest of that paragraph and anything nested under the item.
+ */
+export function splitStep(paragraph, nested = '') {
+  const text = paragraph.trim();
+  const end = sentenceEnd(text);
+  const title = end === -1 ? text.replace(/\.$/, '') : text.slice(0, end);
+  const rest = end === -1 ? '' : text.slice(end + 2).trim();
+  return { title, detail: [rest, nested].filter(Boolean).join('\n\n') };
+}
+
+/**
+ * Journeys: each `## ` heading is one. An `<!-- id: slug -->` line right under
+ * the heading gives its id; otherwise the id is the slugified heading. A
+ * leading "N. " in the heading is the journey's number (else its position).
+ * The first paragraph under the heading is its promise. Steps are list items
+ * that start with [built], [partial], [missing] or [untested] (exists in the
+ * docs or code, not yet driven as a user); any other [word] stays plain text.
+ * Everything else under the journey is its prose.
+ */
 export function parseJourneys(text) {
   const { preamble, sections } = splitSections(text);
   const used = new Set();
-  const journeys = sections.map((section) => {
+  const journeys = sections.map((section, position) => {
     const lines = section.text.split('\n').slice(1);
     let id = null;
     const first = lines.findIndex((line) => line.trim() !== '');
     if (first !== -1) {
-      const match = /^<!--\s*id:\s*([A-Za-z0-9][A-Za-z0-9_-]*)\s*-->\s*$/.exec(lines[first]);
+      // An id that does not fit ID_SHAPE is ignored: the heading gives the id.
+      const match = /^<!--\s*id:\s*(\S*)\s*-->\s*$/.exec(lines[first]);
       if (match) {
-        id = match[1].toLowerCase();
+        if (ID_SHAPE.test(match[1])) id = match[1];
         lines.splice(first, 1);
       }
     }
-    const base = id || slugify(section.heading) || 'journey';
-    let unique = base;
-    for (let n = 2; used.has(unique); n += 1) unique = `${base}-${n}`;
-    used.add(unique);
+    const unique = uniqueId(id || slugify(section.heading), used, 'journey');
+    const stepKeys = new Set();
     const body = lines.join('\n').replace(/^\s*\n/, '').replace(/\s+$/, '');
+    const numbered = /^(\d{1,3})\.\s+(\S.*)$/.exec(section.heading);
+
+    const bodyLines = body.split('\n');
+    const taken = new Array(bodyLines.length).fill(false);
+    let promise = '';
+    const opening = bodyLines.findIndex((line) => !blank(line));
+    if (opening !== -1 && !LIST_ITEM.test(bodyLines[opening]) && !BLOCK_START.test(bodyLines[opening]) && indentOf(bodyLines[opening]) < 4) {
+      let end = opening;
+      while (end < bodyLines.length && !blank(bodyLines[end]) && !(end > opening && (LIST_ITEM.test(bodyLines[end]) || BLOCK_START.test(bodyLines[end])))) end += 1;
+      promise = bodyLines.slice(opening, end).map((line) => line.trim()).join(' ');
+      for (let k = opening; k < end; k += 1) taken[k] = true;
+    }
     const steps = [];
-    eachLine(body, (line, inFence) => {
-      const match = !inFence && STEP.exec(line);
-      if (match) steps.push({ status: match[2].toLowerCase(), text: line.slice(match[0].length).trim() });
-    });
+    let fence = null;
+    for (let i = 0; i < bodyLines.length; i += 1) {
+      const line = bodyLines[i];
+      const marker = FENCE.exec(line);
+      if (marker) {
+        if (fence === null) fence = marker[1];
+        else if (marker[1] === fence) fence = null;
+        continue;
+      }
+      if (fence !== null || taken[i]) continue;
+      const match = STEP.exec(line);
+      if (!match) continue;
+      const item = listItemAt(bodyLines, i, line.slice(match[0].length));
+      const n = steps.length + 1;
+      const step = splitStep(item.paragraph, item.nested);
+      if (!step.title) step.title = `Step ${n}`;
+      // A step's key comes from its title, so a note stays with its step when
+      // steps are added or moved.
+      steps.push({ n, key: uniqueId(slugify(step.title), stepKeys, `step-${n}`), status: match[2].toLowerCase(), ...step });
+      for (let k = i; k < item.end; k += 1) taken[k] = true;
+      i = item.end - 1;
+    }
+    const prose = bodyLines
+      .filter((_, index) => !taken[index])
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
     const counts = Object.fromEntries(STEP_STATUSES.map((status) => [status, 0]));
     for (const step of steps) counts[step.status] += 1;
-    return { id: unique, title: section.heading, key: section.key, body, steps, counts };
+    return {
+      id: unique,
+      number: numbered ? Number(numbered[1]) : position + 1,
+      title: numbered ? numbered[2] : section.heading,
+      heading: section.heading,
+      key: section.key,
+      promise,
+      body,
+      steps,
+      prose,
+      counts,
+    };
   });
   return { preamble, journeys };
+}
+
+/**
+ * Every place an owner note can point to in the current documents:
+ * anchor -> { text (what the page shows and the server compares), journey }.
+ */
+export function noteTargets(docs) {
+  const targets = new Map();
+  for (const journey of parseJourneys(docs.journeys ?? '').journeys) {
+    targets.set(`journeys#${journey.id}`, { text: anchorText(journey.title), journey: journey.id });
+    for (const step of journey.steps) targets.set(`journeys#${journey.id}/${step.key}`, { text: anchorText(step.title), journey: journey.id });
+  }
+  if (docs.product != null) {
+    for (const tile of productLayout(docs.product).tiles) targets.set(`product#${tile.key}`, { text: anchorText(tile.heading), journey: null });
+  }
+  return targets;
+}
+
+// ---- decisions ----
+
+const DECISION_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function validDate(text) {
+  const match = DECISION_DATE.exec(text);
+  if (!match) return false;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return date.getUTCFullYear() === Number(match[1]) && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]);
+}
+
+// A decision line `date · who · text`, split on the first two " · ", or null.
+export function parseDecisionLine(text) {
+  const one = text.indexOf(' · ');
+  const two = one === -1 ? -1 : text.indexOf(' · ', one + 3);
+  if (two === -1) return null;
+  const date = text.slice(0, one).trim();
+  const who = text.slice(one + 3, two).trim();
+  const what = text.slice(two + 3).trim();
+  if (!validDate(date) || !who || !what) return null;
+  return { date, who, text: what };
+}
+
+/**
+ * Every top-level list item of DECISIONS.md, outside code fences:
+ * { days: [{ date, items: [{ who, text }] }] newest first, other: [text], total }.
+ * Items that are not `date · who · text` go to other, in file order.
+ */
+export function parseDecisions(text) {
+  const lines = (text ?? '').split('\n');
+  const byDate = new Map();
+  const other = [];
+  let total = 0;
+  let fence = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const marker = FENCE.exec(lines[i]);
+    if (marker) {
+      if (fence === null) fence = marker[1];
+      else if (marker[1] === fence) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+    const match = LIST_ITEM.exec(lines[i]);
+    if (!match || indentOf(lines[i]) > 3) continue;
+    const item = listItemAt(lines, i, lines[i].slice(match[0].length));
+    i = item.end - 1;
+    total += 1;
+    const parsed = parseDecisionLine(item.paragraph);
+    if (!parsed) {
+      other.push([item.paragraph, item.nested].filter(Boolean).join('\n\n'));
+      continue;
+    }
+    if (!byDate.has(parsed.date)) byDate.set(parsed.date, []);
+    byDate.get(parsed.date).push({ who: parsed.who, text: parsed.text });
+  }
+  const days = [...byDate.entries()].sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0)).map(([date, items]) => ({ date, items }));
+  return { days, other, total };
+}
+
+// ---- product ----
+
+export const WIDE_SECTIONS = Object.freeze(['who-it-is-for', 'the-problem', 'rules-that-hold-everywhere', 'the-loop']);
+
+function firstParagraph(text) {
+  const lines = (text ?? '').split('\n');
+  let fence = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const marker = FENCE.exec(lines[i]);
+    if (marker) {
+      fence = fence === null ? marker[1] : marker[1] === fence ? null : fence;
+      continue;
+    }
+    if (fence !== null || blank(lines[i]) || BLOCK_START.test(lines[i]) || LIST_ITEM.test(lines[i]) || indentOf(lines[i]) >= 4) continue;
+    const out = [];
+    for (let k = i; k < lines.length && !blank(lines[k]) && !BLOCK_START.test(lines[k]); k += 1) out.push(lines[k].trim());
+    return out.join('\n');
+  }
+  return '';
+}
+
+/**
+ * PRODUCT.md as the page lays it out: the hero is the section headed "In one
+ * sentence" (else the file's first paragraph); every other `## ` section is a
+ * tile, wide for the sections in WIDE_SECTIONS.
+ */
+export function productLayout(text) {
+  const { sections } = splitSections(text ?? '');
+  const heroSection = sections.find((section) => section.key === 'in-one-sentence');
+  const bodyOf = (section) => section.text.split('\n').slice(1).join('\n').trim();
+  return {
+    hero: heroSection ? { key: heroSection.key, text: bodyOf(heroSection) } : { key: null, text: firstParagraph(text) },
+    tiles: sections
+      .filter((section) => section !== heroSection)
+      .map((section) => ({ key: section.key, heading: section.heading, text: bodyOf(section), wide: WIDE_SECTIONS.includes(section.key) })),
+  };
 }
 
 // Top-level list entries of a Markdown body: one decision each.

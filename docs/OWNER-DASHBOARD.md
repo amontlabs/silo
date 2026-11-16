@@ -3,7 +3,8 @@
 The owner's single page for the Silo product: it shows the product documents in
 `docs/product/` and the items agents post for the owner, and takes
 the owner's answers. It runs locally from [`tools/dashboard/`](../tools/dashboard/README.md);
-the README there has the commands, the `JOURNEYS.md` format and where data lives.
+the README there has the commands, the `JOURNEYS.md` and `DECISIONS.md`
+formats, and where data lives.
 
 It is a development tool, not part of the Silo app. It has no changeset, does
 not follow the app's vocabulary rules, and never touches a Silo engine or app.
@@ -27,15 +28,34 @@ and never conflicts with a merge.
    `docs/product/JOURNEYS.md` when one fits:
    - `look`: a reversible choice an agent made. `--default` says what stands
      if the owner says nothing; work goes on with the default.
-   - `decide`: agents could not pick. Work that depends on it waits.
+   - `decide`: agents could not pick. Work that depends on it waits. When
+     the answer is one of a few choices, offer them: `--option
+     "Label::Detail"` for each (2 to 6) and `--recommend N` for the one you
+     would pick. The owner answers with one click; free text stays possible.
    - `shipped`: what a build delivered, with screenshots or a recording
      (`--attach`). Information only.
 2. **Read answers** with `dashboard answers`. Each line names the reply, the
-   item, the owner's verdict (agree or disagree, for a look item) and text.
+   item, the owner's verdict (agree or disagree, for a look item), the option
+   picked (`chose N "Label"`; `choice` is 0-based and `choice_label` is its
+   label in `--json`) and text.
+   The same command returns the owner's own notes: items of kind `note`,
+   which the owner creates from the page on a journey step, a journey or a
+   product section. Each carries `anchor` (`journeys#<id>/<step key>`, the
+   step key being its title slugified; `journeys#<id>` or
+   `product#<section key>`), `anchor_text` (what the
+   owner saw), and either text or a `reaction` on a step: `essential`,
+   `nice` (nice to have) or `unneeded` (not needed). A reply with neither
+   clears the step's reaction. Treat a note like any answer: act on it, ack
+   it, and reply or close it when there is something to say; a reply puts
+   it in the owner's For you list.
 3. **Act on them**, then `dashboard ack REPLY_ID...` so the answer is not
    picked up twice. Reply with `dashboard reply ID --text ...` when the owner
    needs to know more; the item returns to the owner's For you list.
 4. **Close** an item once it is settled: `dashboard close ID --note ...`.
+
+The page is built to take the owner's input with little reading and few
+clicks: one card at a time, options to pick, reactions on journey steps. Keep
+titles short, put what stands in `--default`, and offer options when you can.
 
 The product documents are written by the orchestrator. The dashboard reads
 them live and shows which sections changed since the owner last marked them

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { DashboardError, ValidationError } from './errors.js';
-import { Store, KINDS } from './store.js';
+import { MAX_OPTIONS, POST_KINDS, Store } from './store.js';
 import { createServer } from './server.js';
 
 export const USAGE = `Usage: dashboard <command> [options]
@@ -10,16 +10,21 @@ Commands:
   serve [--port N]                       start the dashboard page on 127.0.0.1 (default port 4517)
   post --kind look|decide|shipped --title T [--journey ID] [--body TEXT|@file|-]
        [--default TEXT] [--source TEXT] [--attach FILE[:caption]]...
+       [--option "Label::Detail"]... [--recommend N]
                                          add an item for the owner; prints its id
   attach ID FILE [--caption TEXT]        add a file to an item
   reply ID --text TEXT|@file|-           add an agent reply to an item
-  answers [--all]                        owner replies not yet acknowledged
+  answers [--all]                        owner replies not yet acknowledged (answers,
+                                         picked options, and the owner's notes)
   ack REPLY_ID...                        mark owner replies acknowledged
   close ID [--note TEXT]                 close an item
   list [--open|--all]                    list items (default: open)
   show ID                                show one item with its thread
 
 Every command takes --json for machine output. A look item needs --default.
+A decide item may offer 2 to ${MAX_OPTIONS} options: --option "Label::Detail" (the detail is
+optional; label up to 80 characters, detail up to 300), --recommend N marks
+option N (from 1) as recommended. The owner picks one or answers in words.
 Data lives in $SILO_DASHBOARD_HOME (default ~/.local/state/silo-dashboard).`;
 
 class UsageError extends ValidationError {}
@@ -74,6 +79,12 @@ function parseAttach(spec) {
   throw new DashboardError(`file not found: ${spec.includes(':') ? spec.slice(0, spec.indexOf(':')) : spec}`);
 }
 
+// "Label::Detail" or "Label".
+function parseOption(spec) {
+  const at = spec.indexOf('::');
+  return at === -1 ? { label: spec, detail: null } : { label: spec.slice(0, at), detail: spec.slice(at + 2) || null };
+}
+
 function shortLine(text, max = 90) {
   const line = String(text).replace(/\s+/g, ' ').trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
@@ -86,6 +97,16 @@ function indent(text) {
     .join('\n');
 }
 
+// " · disagree", " · chose 2 "Label"", " · reaction essential", ...
+function replyMarks(reply) {
+  let out = '';
+  if (reply.verdict) out += ` · ${reply.verdict}`;
+  if (reply.choice != null) out += ` · chose ${reply.choice + 1} "${reply.choice_label ?? '?'}"`;
+  if (reply.reaction) out += ` · reaction ${reply.reaction}`;
+  else if (reply.author === 'owner' && !reply.text && !reply.verdict && reply.choice == null) out += ' · reaction cleared';
+  return out;
+}
+
 function showItem(item) {
   const lines = [
     `#${item.id} ${item.kind} ${item.status}${item.state ? ` (${item.state})` : ''}${item.journey ? ` · journey ${item.journey}` : ''}`,
@@ -93,11 +114,16 @@ function showItem(item) {
     `posted ${item.created_at}${item.source ? ` by ${item.source}` : ''}`,
   ];
   if (item.body) lines.push('', item.body);
+  if (item.anchor) lines.push(`note on ${item.anchor} ("${item.anchor_text}")`);
   if (item.default_text) lines.push('', `Stands unless the owner says otherwise: ${item.default_text}`);
+  if (item.options) {
+    lines.push('', 'Options:');
+    item.options.forEach((option, index) => lines.push(`  ${index + 1}. ${option.label}${option.recommended ? ' (recommended)' : ''}${option.detail ? ` — ${option.detail}` : ''}`));
+  }
   for (const file of item.attachments) lines.push(`attachment ${file.id}: ${file.file} (${file.media_type})${file.caption ? ` — ${file.caption}` : ''}`);
   for (const reply of item.replies) {
-    lines.push('', `reply ${reply.id} · ${reply.author}${reply.verdict ? ` · ${reply.verdict}` : ''} · ${reply.created_at}${reply.acked_at ? ' · acknowledged' : ''}`);
-    if (reply.text) lines.push(indent(reply.text));
+    lines.push('', `reply ${reply.id} · ${reply.author}${replyMarks(reply)} · ${reply.created_at}${reply.acked_at ? ' · acknowledged' : ''}`);
+    if (reply.text && reply.choice == null) lines.push(indent(reply.text));
   }
   if (item.status === 'closed') lines.push('', `closed ${item.closed_at}${item.close_note ? `: ${item.close_note}` : ''}`);
   return lines.join('\n');
@@ -142,14 +168,25 @@ const commands = {
       default: { type: 'string' },
       source: { type: 'string' },
       attach: { type: 'string', multiple: true },
+      option: { type: 'string', multiple: true },
+      recommend: { type: 'string' },
     });
-    if (!KINDS.includes(values.kind)) throw new UsageError(`--kind must be one of ${KINDS.join(', ')}`);
+    if (!POST_KINDS.includes(values.kind)) throw new UsageError(`--kind must be one of ${POST_KINDS.join(', ')}`);
     if (!values.title) throw new UsageError('--title is required');
+    const options = (values.option || []).map(parseOption);
+    if (options.length && values.kind !== 'decide') throw new UsageError('--option is for --kind decide');
+    if (values.recommend !== undefined) {
+      if (!options.length) throw new UsageError('--recommend needs --option');
+      if (!/^\d+$/.test(values.recommend) || Number(values.recommend) < 1 || Number(values.recommend) > options.length) {
+        throw new UsageError(`--recommend must be an option number from 1 to ${options.length}`);
+      }
+      options[Number(values.recommend) - 1].recommended = true;
+    }
     const attachments = (values.attach || []).map(parseAttach);
     const defaultText = readText(values.default, 'default', io.stdin);
     const body = readText(values.body, 'body', io.stdin);
     const id = io.store().post(
-      { kind: values.kind, journey: values.journey ?? null, title: values.title, body: body ?? '', defaultText: defaultText ?? null, source: values.source ?? null },
+      { kind: values.kind, journey: values.journey ?? null, title: values.title, body: body ?? '', defaultText: defaultText ?? null, source: values.source ?? null, options: options.length ? options : null },
       attachments,
     );
     io.out(values.json ? JSON.stringify({ id }) : String(id));
@@ -177,7 +214,11 @@ const commands = {
     if (!rows.length) return io.out(values.all ? 'No owner replies.' : 'No new owner replies.');
     return io.out(
       rows
-        .map((row) => `reply ${row.reply_id} · item ${row.item_id} (${row.kind}${row.journey ? `, ${row.journey}` : ''}) "${shortLine(row.title)}"${row.verdict ? ` · ${row.verdict}` : ''}${row.acked_at ? ' · acknowledged' : ''}${row.text ? `\n${indent(row.text)}` : ''}`)
+        .map((row) => {
+          const what = row.kind === 'note' ? `note on ${row.anchor} "${shortLine(row.anchor_text ?? row.title)}"` : `(${row.kind}${row.journey ? `, ${row.journey}` : ''}) "${shortLine(row.title)}"`;
+          const text = row.text && row.choice == null ? `\n${indent(row.text)}` : '';
+          return `reply ${row.reply_id} · item ${row.item_id} ${what}${replyMarks({ ...row, author: 'owner' })}${row.acked_at ? ' · acknowledged' : ''}${text}`;
+        })
         .join('\n\n'),
     );
   },
