@@ -33,7 +33,7 @@ test('a store with a newer schema is refused and left as it was', () => {
   const raw = new DatabaseSync(path.join(home, 'dashboard.db'));
   raw.exec(`CREATE TABLE future (x); PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
   raw.close();
-  assert.throws(() => new Store(home), (error) => error instanceof StoreVersionError && /schema version 2.*only knows version 1/.test(error.message));
+  assert.throws(() => new Store(home), (error) => error instanceof StoreVersionError && new RegExp(`schema version ${SCHEMA_VERSION + 1}.*only knows version ${SCHEMA_VERSION}`).test(error.message));
   const again = new DatabaseSync(path.join(home, 'dashboard.db'));
   assert.equal(again.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION + 1);
   assert.equal(again.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'items'").get().n, 0);
@@ -211,14 +211,15 @@ function rng(seed) {
   };
 }
 
-const KIND_RANK = { decide: 0, look: 1, shipped: 2 };
+const KIND_RANK = { decide: 0, look: 1, shipped: 2, note: 3 };
+const ANCHORS = ['journeys#first-run/1', 'journeys#first-run', 'product#why-it-exists'];
 
 function forYouIds(html) {
-  const region = /<section id="for-you"[\s\S]*?<\/section>/.exec(html)[0];
-  return [...region.matchAll(/<article class="item [^"]*" id="item-(\d+)"/g)].map((match) => Number(match[1]));
+  const region = /<section class="view" id="for-you"[\s\S]*?<\/section>/.exec(html)[0];
+  return [...region.matchAll(/<article class="card" id="item-(\d+)"/g)].map((match) => Number(match[1]));
 }
 
-test('model: an item is in "For you" until the owner answers, marks it seen or it closes; an agent reply brings it back', () => {
+test('model: an item is in "For you" until the owner answers, marks it seen or it closes; an agent reply brings it back; an owner note waits only after an agent replies', () => {
   for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
     withStore((store) => {
       const random = rng(seed);
@@ -227,7 +228,7 @@ test('model: an item is in "For you" until the owner answers, marks it seen or i
       const model = new Map();
       for (let step = 0; step < 120; step += 1) {
         const ids = [...model.keys()];
-        const op = ids.length === 0 ? 'post' : pick(['post', 'agent', 'agent', 'owner', 'owner', 'agree', 'disagree', 'seen', 'close', 'shown']);
+        const op = ids.length === 0 ? pick(['post', 'note']) : pick(['post', 'note', 'agent', 'agent', 'owner', 'owner', 'agree', 'disagree', 'seen', 'close', 'shown']);
         const id = ids.length ? pick(ids) : null;
         const entry = id === null ? null : model.get(id);
         const attempt = (fn, ok) => {
@@ -242,6 +243,16 @@ test('model: an item is in "For you" until the owner answers, marks it seen or i
           const kind = pick(['look', 'decide', 'shipped']);
           const newId = store.createItem({ kind, title: `item ${step}`, defaultText: kind === 'look' ? 'default' : null });
           model.set(newId, { kind, waiting: true, closed: false, last: 0 });
+        } else if (op === 'note') {
+          // The owner's own note: one open note item per anchor; it never waits by itself.
+          const anchor = pick(ANCHORS);
+          const open = [...model.entries()].find(([, value]) => value.kind === 'note' && value.anchor === anchor && !value.closed);
+          const result = store.addNote({ anchor, anchorText: 'Shown text', text: `note ${step}`, after: open ? open[1].last : 0 });
+          if (open) {
+            assert.equal(result.item, open[0], `seed ${seed} step ${step}: a note goes to the open note item`);
+            open[1].waiting = false;
+            open[1].last = result.reply;
+          } else model.set(result.item, { kind: 'note', anchor, waiting: false, closed: false, last: result.reply });
         } else if (op === 'agent') {
           let reply;
           if (attempt(() => (reply = store.addReply(id, { author: 'agent', text: 'update' })), !entry.closed)) {
@@ -270,7 +281,7 @@ test('model: an item is in "For you" until the owner answers, marks it seen or i
             entry.last = reply;
           }
         } else if (op === 'seen') {
-          if (attempt(() => store.markShippedSeen(id), !entry.closed && entry.kind === 'shipped')) entry.waiting = false;
+          if (attempt(() => store.markShippedSeen(id), !entry.closed && (entry.kind === 'shipped' || entry.kind === 'note'))) entry.waiting = false;
         } else if (op === 'close') {
           if (attempt(() => store.closeItem(id), !entry.closed)) {
             entry.closed = true;

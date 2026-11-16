@@ -89,4 +89,9 @@ export function renderMarkdown(markdown, { steps = false } = {}) {
   return (steps ? withSteps : plain).parse(markdown ?? '');
 }
 
+/** One line of Markdown to inline HTML (no paragraph), with the same escaping and link rules. */
+export function renderInline(markdown) {
+  return plain.parseInline(String(markdown ?? '').replace(/\s*\n\s*/g, ' '));
+}
+
 export const lexMarkdown = (markdown) => plain.lexer(markdown ?? '');

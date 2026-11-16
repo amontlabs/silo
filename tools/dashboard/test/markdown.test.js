@@ -39,14 +39,25 @@ test('documents and private notes cannot add controls, regions, refreshes or sty
   try {
     const html = (await request(server.address().port)).body.toString();
     for (const region of ['product', 'journeys', 'decisions', 'private']) {
-      const section = new RegExp(`<section id="${region}"[\\s\\S]*?</section>`).exec(html)[0];
-      assert.doesNotMatch(section, RAW_TAG, region);
-      assert.doesNotMatch(section, /data-controls|data-post="|data-api="/, region);
+      const section = new RegExp(`<section class="view" id="${region}"[\\s\\S]*?</section>`).exec(html)[0];
+      // Each injection shows as text, never as markup.
+      // Product shows only the hero paragraph of a file without sections, and
+      // Decisions only list items, so the full injection text shows in the others.
+      if (region !== 'decisions') assert.match(section, /&lt;button class=&quot;btn primary&quot; data-post=/, region);
+      if (region === 'journeys' || region === 'private') assert.match(section, /&lt;form data-api=/, region);
+      assert.doesNotMatch(section, /<div data-region|<meta|<style|<textarea>x/, region);
+      assert.doesNotMatch(section, /data-post="|data-api="/, region);
+      // Every button, form and textarea left is one the server renders.
+      for (const tag of section.match(/<button\b[^>]*>/g) || []) assert.match(tag, /^<button class="[^"]*" type="(?:button|submit)"/, region);
+      for (const tag of section.match(/<form\b[^>]*>/g) || []) assert.match(tag, /^<form class="say\s*"\s+data-note data-draft="note-/, region);
+      for (const tag of section.match(/<textarea\b[^>]*>/g) || []) assert.match(tag, /^<textarea name="text" rows="3" placeholder="Your note/, region);
+      // The only controls here are the server's own note wrappers.
+      for (const tag of section.match(/<[^>]*data-controls[^>]*>/g) || []) assert.match(tag, /^<div class="note-controls" data-controls data-anchor="(?:journeys|product)#/, region);
     }
     assert.doesNotMatch(html, /<meta http-equiv/);
     assert.doesNotMatch(html, /<style/);
     assert.equal(html.match(/data-region="for-you"/g).length, 1);
-    // The only control on this page is the server's own Mark all as seen.
+    // The only posting control on this page is the server's own Mark all as seen.
     assert.equal(html.match(/data-post="/g).length, 1);
   } finally {
     server.closeAllConnections();

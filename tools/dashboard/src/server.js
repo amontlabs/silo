@@ -40,6 +40,7 @@ const PAGE_CSP = [
 const STATIC_FILES = {
   '/app.css': ['app.css', 'text/css; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/boot.js': ['boot.js', 'text/javascript; charset=utf-8'],
 };
 
 function send(res, status, body, headers = {}) {
@@ -237,10 +238,14 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
         const body = await jsonBody(req);
         const item = store.requireItem(Number(match[1]));
         const verdict = body.verdict ?? null;
+        const choice = body.choice ?? null;
         const text = typeof body.text === 'string' ? body.text : '';
+        if (choice !== null && (!Number.isSafeInteger(choice) || text.trim() || verdict !== null)) {
+          throw new ValidationError('a choice is an option number, sent without text or a verdict');
+        }
         if (verdict === 'disagree' && !text.trim()) throw new ValidationError('say why you disagree');
-        if (item.kind === 'decide' && verdict) throw new ValidationError('a decision is answered in words');
-        const id = store.addReply(item.id, { author: 'owner', text, verdict, after: shownReply(body) });
+        if (item.kind === 'decide' && verdict) throw new ValidationError('a decision is answered in words or with an option');
+        const id = store.addReply(item.id, { author: 'owner', text, verdict, choice, after: shownReply(body) });
         return sendJson(res, 201, { id });
       }
       match = /^\/api\/items\/(\d+)\/seen$/.exec(pathname);
@@ -248,6 +253,22 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
         const body = await jsonBody(req);
         store.markShippedSeen(Number(match[1]), { after: shownReply(body) });
         return sendJson(res, 200, { ok: true });
+      }
+      if (pathname === '/api/notes') {
+        // A note or a reaction on a journey step, a journey or a product section.
+        const body = await jsonBody(req);
+        if (typeof body.anchorText !== 'string') throw new ValidationError('send the anchorText the page showed');
+        if (body.text !== undefined && typeof body.text !== 'string') throw new ValidationError('text must be a string');
+        if (body.journey !== undefined && body.journey !== null && typeof body.journey !== 'string') throw new ValidationError('journey must be a string');
+        const result = store.addNote({
+          anchor: body.anchor,
+          anchorText: body.anchorText,
+          journey: body.journey ?? null,
+          text: body.text ?? '',
+          reaction: Object.hasOwn(body, 'reaction') ? body.reaction : undefined,
+          after: shownReply(body),
+        });
+        return sendJson(res, 201, result);
       }
       if (pathname === '/api/docs/seen') {
         // The commit the page was rendered from, so changes made since stay unseen.
