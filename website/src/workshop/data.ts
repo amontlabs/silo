@@ -1,11 +1,15 @@
-// The plan as the repository holds it: docs/product/features.jsonl, stages.json and DECISIONS.md.
+// The plan as the repository holds it: docs/product/features.jsonl, areas.json, stages.json and DECISIONS.md.
 // Read and checked at build time; a malformed line stops the build with its file and line.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BuildData, DecidedLine, Feature, Stage, Verdict } from './plan.ts';
+import { checkLayout, LayoutError } from './map.ts';
+import type { Area, BuildData, DecidedLine, Feature, Stage, Verdict } from './plan.ts';
 
 export const FEATURES_FILE = 'docs/product/features.jsonl';
 export const STAGES_FILE = 'docs/product/stages.json';
+export const AREAS_FILE = 'docs/product/areas.json';
+/** Old things not carried over: the only entries without an area. */
+export const GONE_STAGE = 'gone';
 export const DECISIONS_FILE = 'docs/product/DECISIONS.md';
 
 const VERDICTS = new Set(['take', 'refine', 'later', 'drop']);
@@ -44,13 +48,49 @@ export function parseStages(source: string, file = STAGES_FILE): Stage[] {
   });
 }
 
+/** The line of `"id": "<id>"` in a JSON file, the `nth` time it appears; null when it cannot be found. */
+function lineOfId(source: string, id: string, nth = 1): number | null {
+  const pattern = new RegExp(`"id"\\s*:\\s*${JSON.stringify(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g');
+  let seen = 0;
+  for (const match of source.matchAll(pattern)) {
+    seen += 1;
+    if (seen === nth) return source.slice(0, match.index).split('\n').length;
+  }
+  return null;
+}
+
+export function parseAreas(source: string, file = AREAS_FILE): Area[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(source);
+  } catch (error) {
+    fail(file, null, `not valid JSON (${(error as Error).message})`);
+  }
+  if (!Array.isArray(raw)) fail(file, null, 'expected a list of areas');
+  const seen = new Set<string>();
+  return raw.map((item: unknown, index) => {
+    const area = item as Record<string, unknown> | null;
+    const where = `area ${index + 1}`;
+    if (!area || typeof area !== 'object') fail(file, null, `${where} is not an object`);
+    if (!text(area.id)) fail(file, null, `${where} has no id`);
+    const line = lineOfId(source, area.id, seen.has(area.id) ? 2 : 1);
+    if (seen.has(area.id)) fail(file, line, `repeats the area id ${area.id}`);
+    if (!text(area.title)) fail(file, line, `area ${area.id} has no title`);
+    if (!text(area.line)) fail(file, line, `area ${area.id} has no line`);
+    seen.add(area.id);
+    return { id: area.id, title: area.title, line: area.line };
+  });
+}
+
 export function parseFeatures(
   source: string,
   stages: Stage[],
+  areas: Area[],
   recordingExists: (name: string) => boolean = () => true,
   file = FEATURES_FILE,
 ): Feature[] {
   const stageIds = new Set(stages.map((stage) => stage.id));
+  const areaIds = new Set(areas.map((area) => area.id));
   const ids = new Set<string>();
   const features: Feature[] = [];
   source.split('\n').forEach((raw, index) => {
@@ -70,6 +110,10 @@ export function parseFeatures(
     if (ids.has(id)) fail(file, line, `repeats the id ${id}`);
     ids.add(id);
     if (!stageIds.has(entry.stage as string)) fail(file, line, `unknown stage "${entry.stage}"`);
+    if (entry.area !== undefined && entry.area !== null && !text(entry.area)) fail(file, line, '"area" is not text');
+    const area = text(entry.area) ? entry.area : null;
+    if (area !== null && !areaIds.has(area)) fail(file, line, `unknown area "${area}"`);
+    if (area === null && entry.stage !== GONE_STAGE) fail(file, line, `missing "area" (only entries of the stage "${GONE_STAGE}" have none)`);
     if (typeof entry.what !== 'string') fail(file, line, 'missing "what"');
     if (entry.verdict !== null && entry.verdict !== undefined && !(typeof entry.verdict === 'string' && VERDICTS.has(entry.verdict))) {
       fail(file, line, `unknown verdict ${JSON.stringify(entry.verdict)}`);
@@ -93,6 +137,7 @@ export function parseFeatures(
       n: entry.n as number,
       id,
       stage: entry.stage as string,
+      area,
       name: entry.name as string,
       what: entry.what,
       suggest: text(entry.suggest) ? entry.suggest : null,
@@ -131,7 +176,15 @@ export function parseDecisions(markdown: string, file = DECISIONS_FILE): Decided
   return lines.sort((a, b) => (a.date === b.date ? a.index - b.index : a.date < b.date ? 1 : -1));
 }
 
-/** Reads the three files under `repository` and returns the parsed plan, or throws with file and line. */
+/** Every area holds at least one entry. */
+export function checkAreasUsed(areas: Area[], features: Feature[], source = '', file = AREAS_FILE): void {
+  const used = new Set(features.map((feature) => feature.area));
+  for (const area of areas) {
+    if (!used.has(area.id)) fail(file, lineOfId(source, area.id), `area ${area.id} has no entry in ${FEATURES_FILE}`);
+  }
+}
+
+/** Reads the four files under `repository` and returns the parsed plan, or throws with file and line. */
 export function readBuildData(repository: string, recordingsDir: string): BuildData {
   const read = (file: string) => {
     try {
@@ -141,9 +194,15 @@ export function readBuildData(repository: string, recordingsDir: string): BuildD
     }
   };
   const stages = parseStages(read(STAGES_FILE));
-  return {
-    stages,
-    features: parseFeatures(read(FEATURES_FILE), stages, (name) => existsSync(join(recordingsDir, name))),
-    decided: parseDecisions(read(DECISIONS_FILE)),
-  };
+  const areasSource = read(AREAS_FILE);
+  const areas = parseAreas(areasSource);
+  const features = parseFeatures(read(FEATURES_FILE), stages, areas, (name) => existsSync(join(recordingsDir, name)));
+  checkAreasUsed(areas, features, areasSource);
+  try {
+    checkLayout(areas.map((area) => area.id));
+  } catch (error) {
+    if (error instanceof LayoutError) throw new PlanFileError(error.message);
+    throw error;
+  }
+  return { stages, areas, features, decided: parseDecisions(read(DECISIONS_FILE)) };
 }

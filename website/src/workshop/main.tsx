@@ -5,8 +5,9 @@ import { App } from './App';
 import { Boundary } from './Boundary';
 import './workshop.css';
 
-const root = document.getElementById('workshop-root');
-if (root) {
+function mount() {
+  const root = document.getElementById('workshop-root');
+  if (!root) return;
   createRoot(root).render(
     <StrictMode>
       <Boundary data={data}>
@@ -15,3 +16,11 @@ if (root) {
     </StrictMode>,
   );
 }
+
+const params = new URLSearchParams(location.search);
+if (import.meta.env.DEV && params.has('fixture')) {
+  void import('./devFixture').then(({ installFixture }) => {
+    installFixture(data, params);
+    mount();
+  });
+} else mount();

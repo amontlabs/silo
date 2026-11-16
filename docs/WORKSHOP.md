@@ -2,13 +2,65 @@
 
 The Workshop is the public page of the website at
 [silo.amontlabs.com/workshop](https://silo.amontlabs.com/workshop). It shows
-Silo's plan: every feature in build order. Anyone signed in with GitHub can
-vote, comment and suggest a feature, and the owner decides each entry there.
+Silo's plan, part by part: a map of the product's areas, each with its entries.
+Anyone signed in with GitHub can vote, comment and suggest a feature, and the
+owner decides each entry there.
 
-This document covers the server side: the API under `/api/workshop/`, the
-GitHub App it signs in with, how it is deployed and run locally, and its
-security properties. The page itself is built separately against the same
-contract.
+This document covers the page, then the server side: the API under
+`/api/workshop/`, the GitHub App it signs in with, how it is deployed and run
+locally, and its security properties.
+
+## The page
+
+`website/workshop/index.html` and `website/src/workshop/`, React and
+TypeScript. At build time the `workshopData` plugin of `website/vite.config.ts`
+reads `docs/product/features.jsonl`, `areas.json`, `stages.json` and
+`DECISIONS.md` (`data.ts`). A malformed line, an unknown area, an entry without
+an area outside the stage `gone`, a repeated id or an area with no entry stops
+the build with the file and line. `map.ts` holds the drawing: where each area
+sits on the full map and on the folded one, and the wires. The build also stops
+when an area has no place there or the drawing places an unknown area; a new
+area needs a box in both tables.
+
+What a person sees:
+
+- At 1040 px and wider, the map of the areas (Map), or the same areas as tiles
+  in the order of `areas.json` (Order). Narrower, the tiles only.
+- Each area's state comes from its entries (`plan.ts`, first match wins):
+  being built now, done, next (the lowest-numbered planned entry among areas not
+  being built), planned, not decided yet. An entry is being built when it is
+  planned and its open issue has the label `workshop:building`.
+- Opening an area folds the map to a strip that stays on screen (when the
+  window is at least 760 px tall); the area's entries open in place, one at a
+  time. Opening an entry never moves it or the rows above it.
+- The strip under the map links to the suggestions and to what is not carried
+  over (entries without an area, and every dropped entry).
+- A person who can decide also gets "Decisions", the number of entries still to
+  decide on each part, and a link to the lowest-numbered one. After a verdict
+  the next entry waiting in the same area opens, else the lowest one anywhere.
+  Nobody else is offered the decisions; their address shows the map.
+
+Addresses: `#<area>`, `#<area>/<entry id>`, `#suggested`, `#left` and
+`#decisions`, each with an optional open row (`#suggested/issue-<n>`). The older
+`#entry-<id>`, `#issue-<n>` and `#decided-<i>` open that row where it now lives.
+Back and Forward move between places; opening a row replaces the address.
+
+| File | What |
+| --- | --- |
+| `App.tsx` | Places, addresses, focus, keyboard, the layout. |
+| `useWorkshop.ts` | Live state and every write: pending writes, the verdict guard. |
+| `MapView.tsx`, `Tiles.tsx` | The map and the tiles. |
+| `AreaView.tsx`, `Suggest.tsx`, `Decisions.tsx` | An opened area, the suggestions and what is not carried over, the decisions. |
+| `Entry.tsx` | One row and what it shows open. |
+| `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses, the model, the drawing, the build-time reader. |
+| `api.ts`, `writes.ts`, `RichText.tsx`, `Boundary.tsx` | The API client, the six-minute memory of the page's own writes, text from GitHub, the fallback list. |
+
+To look at a later state without the API, run `npm --prefix website run dev`
+and open `http://127.0.0.1:4173/workshop/?fixture=later` (some areas done, one
+being built, one next) or `?fixture=today`; add `&as=owner` or `&as=visitor` to
+be signed in, and `&delay=2000` to hold the live state back. This exists only in
+development builds (`devFixture.ts`, loaded when `import.meta.env.DEV`); a
+production build has none of it.
 
 ## Storage
 

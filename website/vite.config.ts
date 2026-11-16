@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
-import { DECISIONS_FILE, FEATURES_FILE, readBuildData, STAGES_FILE } from './src/workshop/data.ts';
+import { AREAS_FILE, DECISIONS_FILE, FEATURES_FILE, readBuildData, STAGES_FILE } from './src/workshop/data.ts';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
 const recordings = fileURLToPath(new URL('./public/workshop/recordings', import.meta.url));
@@ -15,7 +15,7 @@ function workshopData(): Plugin {
     resolveId: (source) => (source === id ? `\0${id}` : null),
     load(source) {
       if (source !== `\0${id}`) return null;
-      for (const file of [FEATURES_FILE, STAGES_FILE, DECISIONS_FILE]) this.addWatchFile(`${repository}${file}`);
+      for (const file of [FEATURES_FILE, AREAS_FILE, STAGES_FILE, DECISIONS_FILE]) this.addWatchFile(`${repository}${file}`);
       return `export default ${JSON.stringify(readBuildData(repository, recordings))};`;
     },
   };
