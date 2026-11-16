@@ -40,10 +40,18 @@ export function Rows({ rows, ctx }: { rows: Row[]; ctx: EntryContext }) {
   return <ul className="ws-rows">{rows.map((row) => <Entry key={row.key} row={row} open={ctx.open.has(row.key)} ctx={ctx} />)}</ul>;
 }
 
-/** The counts under an area. An entry is counted once: one to confirm counts as to decide, not as planned. */
-function tally(counts: Counts, toDecide: number, toConfirm = 0): ReactNode[] {
-  const { built, building, undecided, later, dropped } = counts;
-  const planned = counts.planned - toConfirm;
+/**
+ * The counts under an area. An entry is counted once: one the owner has to confirm counts as to decide and
+ * comes off the count of its own status (being refined counts as not decided). No count goes below zero.
+ */
+function tally(counts: Counts, toDecide: number, toConfirm: Row[] = []): ReactNode[] {
+  const left = { ...counts };
+  for (const row of toConfirm) {
+    const status = row.status === 'refine' ? 'undecided' : row.status;
+    if (status in left) left[status as keyof Counts] = Math.max(0, left[status as keyof Counts] - 1);
+  }
+  const { built, building, planned, later, dropped } = left;
+  const undecided = Math.max(0, left.undecided - (toDecide - toConfirm.length));
   const parts: ReactNode[] = [];
   // Each count stays on one line; lines break after a separator.
   const one = (n: number, words: string) => `${n} ${words}`.replace(/ /g, '\u00a0');
@@ -51,13 +59,13 @@ function tally(counts: Counts, toDecide: number, toConfirm = 0): ReactNode[] {
   if (building) parts.push(<i key="b">{one(building, 'being built')}</i>);
   if (planned) parts.push(one(planned, 'planned'));
   if (toDecide) parts.push(<i key="d">{one(toDecide, 'to decide')}</i>);
-  if (undecided - (toDecide - toConfirm) > 0) parts.push(one(undecided - (toDecide - toConfirm), 'not decided'));
+  if (undecided) parts.push(one(undecided, 'not decided'));
   if (later) parts.push(one(later, 'later'));
   if (dropped) parts.push(one(dropped, 'dropped'));
   return parts.flatMap((part, index) => (index ? ['\u00a0· ', part] : [part]));
 }
 
-export function AreaPlace({ group, toDecide, toConfirm = 0, ctx, onBack, notes }: { group: AreaGroup; toDecide: number; toConfirm?: number; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
+export function AreaPlace({ group, toDecide, toConfirm = [], ctx, onBack, notes }: { group: AreaGroup; toDecide: number; toConfirm?: Row[]; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   return (
     <Block
       num={String(group.number).padStart(2, '0')} title={group.area.title} line={group.area.line} onBack={onBack} notes={notes}

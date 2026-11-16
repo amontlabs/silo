@@ -421,7 +421,9 @@
   .ws *, .ws *::before, .ws *::after, .ws-detail, .ws.swap-in .ws-swap { animation: none !important; transition: none !important; }
 }
 .ws.ws-boot *, .ws.ws-boot *::before, .ws.ws-boot *::after { transition: none !important; animation: none !important; }
-.ws-foot { display: flex; gap: 24px; justify-content: space-between; padding: 16px 24px 56px; border-top: 1px solid var(--line); font: 12px var(--mono); color: var(--muted); }
+/* Going back to the full map, the footer is hidden at once, waits while the page keeps its height, then fades in. */
+.workshop-shell:has(.ws.leaving) .ws-foot, .workshop-shell:has(.ws.ws-held) .ws-foot { opacity: 0; transition: none; }
+.ws-foot { transition: opacity .2s; display: flex; gap: 24px; justify-content: space-between; padding: 16px 24px 56px; border-top: 1px solid var(--line); font: 12px var(--mono); color: var(--muted); }
 @media (max-width: 760px) { .ws-foot { padding: 16px 16px 48px; } }
 @media (max-width: 480px) { .ws-wide { display: none; } }
 /* Room kept for what the live state fills in, so nothing below moves when it arrives. */

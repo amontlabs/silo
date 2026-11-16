@@ -120,7 +120,11 @@ describe('the owner\'s verdict buttons', () => {
     fireEvent.keyDown(document.body, { key: 'Enter', repeat: true });
     expect(posts(calls, 'verdict')).toHaveLength(1);
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
+    // The row that became current is armed again, like a freshly opened one.
     act(() => (document.activeElement as HTMLElement).blur());
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict')).toHaveLength(1);
+    time.advance(OPEN_GUARD_MS);
     fireEvent.keyDown(document.body, { key: 'Enter' });
     expect(posts(calls, 'verdict').map((call) => call.body?.n)).toEqual([12, 13]);
   });

@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { RichText, safeHref } from './RichText';
 import { awaitsConfirm, awaitsVerdict, isDecided, relativeTime, shortDate } from './plan';
 import type { Row } from './plan';
-import type { Workshop } from './useWorkshop';
+import type { Detail, Workshop } from './useWorkshop';
 
 /** How long the closing body stays in place for its animation. */
 const CLOSE_MS = 240;
@@ -77,21 +77,27 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   }, [held]);
   const grown = open && !held;
 
+  // Comments that arrive while the panel is opening wait, on their placeholders, until the opening has ended.
+  const [wasGrown, setWasGrown] = useState(grown);
+  const [opening, setOpening] = useState<{ detail: typeof detail } | null>(null);
+  if (wasGrown !== grown) {
+    setWasGrown(grown);
+    // Only a panel that opens on placeholders waits; one that opens on its comments shows every change at once.
+    setOpening(grown && typeof detail !== 'object' ? { detail } : null);
+  }
+  useEffect(() => {
+    if (!opening) return;
+    const timer = setTimeout(() => setOpening(null), GROW_MS);
+    return () => clearTimeout(timer);
+  }, [opening]);
+  const shown = opening ? opening.detail : detail;
+
   // When the comments arrive in a panel already open, it grows from its old height to the new one instead
   // of jumping; this also covers rows that appear open (from another place, Back and Forward).
   const inner = useRef<HTMLDivElement>(null);
   const lastHeight = useRef(0);
-  const lastDetail = useRef(detail);
-  const grownAt = useRef(0);
-  const firstGrown = useRef(true);
+  const lastShown = useRef(shown);
   const settling = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => {
-    if (firstGrown.current) {
-      firstGrown.current = false;
-      return;
-    }
-    if (grown) grownAt.current = Date.now();
-  }, [grown]);
   // The panel's height as last laid out, kept current while it animates open (no render happens then).
   const animating = useRef(false);
   useEffect(() => {
@@ -104,18 +110,26 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   useLayoutEffect(() => {
     const node = inner.current;
     if (!node) return;
-    const height = node.getBoundingClientRect().height;
-    const before = lastHeight.current;
-    const changed = lastDetail.current !== detail;
-    if (!animating.current) lastHeight.current = height;
-    lastDetail.current = detail;
+    const changed = lastShown.current !== shown;
+    lastShown.current = shown;
+    if (animating.current && !changed) return;
     const still = typeof matchMedia !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!changed || !grown || still || before <= 0 || Math.abs(height - before) < 1 || Date.now() - grownAt.current < GROW_MS) return;
+    // From the height on screen (mid-change, if one runs) to the panel's natural height, measured without it.
+    const from = animating.current ? node.getBoundingClientRect().height : lastHeight.current;
+    node.style.transition = 'none';
+    node.style.height = '';
+    const to = node.getBoundingClientRect().height;
+    if (!animating.current) lastHeight.current = to;
+    if (!changed || !grown || still || from <= 0 || Math.abs(to - from) < 1) {
+      node.style.transition = '';
+      animating.current = false;
+      return;
+    }
     animating.current = true;
-    node.style.height = `${before}px`;
+    node.style.height = `${from}px`;
     node.getBoundingClientRect();
     node.style.transition = 'height .2s cubic-bezier(.45, 0, .25, 1), opacity .18s';
-    node.style.height = `${height}px`;
+    node.style.height = `${to}px`;
     const done = () => {
       node.style.height = '';
       node.style.transition = '';
@@ -147,7 +161,7 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
         <Side row={row} ctx={ctx} />
       </div>
       <div className={grown ? 'ws-more open' : 'ws-more'} id={`${row.key}-more`} aria-hidden={open ? undefined : true} inert={!open}>
-        <div className="ws-more-in" ref={inner}>{open || closing ? <Body row={row} ctx={ctx} /> : null}</div>
+        <div className="ws-more-in" ref={inner}>{open || closing ? <Body row={row} ctx={ctx} detail={shown} /> : null}</div>
       </div>
     </li>
   );
@@ -262,11 +276,10 @@ function StateLine({ row, ctx }: { row: Row; ctx: EntryContext }) {
   );
 }
 
-function Talk({ row, ctx }: { row: Row; ctx: EntryContext }) {
+function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
   const { w } = ctx;
   if (row.issue === null || row.issue <= 0) return null;
   const n = row.issue;
-  const detail = w.details[n];
   const url = (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`https://github.com/${w.live.state?.repo ?? 'amontlabs/silo'}/issues/${n}`);
   const github = url ? <a className="ws-gh" href={url} target="_blank" rel="noopener noreferrer">GitHub #{n} ↗</a> : null;
   if (!w.liveOk) return <div className="ws-talk"><div className="ws-box">{github}</div></div>;
@@ -313,9 +326,8 @@ function Talk({ row, ctx }: { row: Row; ctx: EntryContext }) {
   );
 }
 
-function Body({ row, ctx }: { row: Row; ctx: EntryContext }) {
+function Body({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
   const { w } = ctx;
-  const detail = row.issue === null ? undefined : w.details[row.issue];
   const what = row.kind === 'entry' || row.kind === 'decided' ? row.what : typeof detail === 'object' ? detail.body : null;
   return (
     <div className="ws-more-pad">
@@ -325,7 +337,7 @@ function Body({ row, ctx }: { row: Row; ctx: EntryContext }) {
       ))}
       {w.rowNotice?.key === row.key ? <p className="ws-row-notice" role="alert">{w.rowNotice.text}</p> : null}
       <StateLine row={row} ctx={ctx} />
-      <Talk row={row} ctx={ctx} />
+      <Talk row={row} ctx={ctx} detail={detail} />
     </div>
   );
 }
