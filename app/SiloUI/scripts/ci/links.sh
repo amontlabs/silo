@@ -29,6 +29,7 @@ patterns=(
   'website/*.md'
   'demo/*.md'
   'reviewer-service/*.md'
+  'tools/dashboard/*.md'
 )
 
 cd "$ROOT" || exit 2
