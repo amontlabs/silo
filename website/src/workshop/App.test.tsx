@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App, OPEN_GUARD_MS } from './App';
+import { apiConfig } from './api';
 import type { IssueDetail, Me } from './api';
 import { buildData, issue, liveState } from './fixtures';
 import type { LiveState } from './plan';
@@ -39,7 +40,9 @@ function mockApi(options: { state?: Route; me?: Me | null; routes?: Record<strin
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
     calls.push({ method, path, body, headers: (init?.headers ?? {}) as Record<string, string> });
     const route = routes[`${method} ${path}`];
-    const reply = route ? await route(url, body) : refused(404, 'Not found.');
+    const signal = init?.signal;
+    const aborted = new Promise<never>((_, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
+    const reply = route ? await Promise.race([Promise.resolve(route(url, body)), aborted]) : refused(404, 'Not found.');
     return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { 'Content-Type': 'application/json' } });
   }));
   return calls;
@@ -306,8 +309,12 @@ describe('a person who can decide', () => {
     fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
     expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'false');
-    expect(within(itemOf('Create and delete a computer')).getByText('planned')).toBeInTheDocument();
+    // Not shown as done until the server answers.
+    expect(within(itemOf('Create and delete a computer')).getByText('Saving…')).toBeInTheDocument();
+    expect(screen.getByText('3 planned · 4 undecided')).toBeInTheDocument();
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
+    expect(await within(itemOf('Create and delete a computer')).findByText('planned')).toBeInTheDocument();
+    expect(screen.getByText('4 planned · 3 undecided')).toBeInTheDocument();
     expect(location.hash).toBe('#entry-exec');
     // A second fast Enter lands on the row that just opened and is refused.
     fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
@@ -317,7 +324,7 @@ describe('a person who can decide', () => {
     expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }, { n: 13, verdict: 'later' }]);
     // The next undecided entry sits in a closed stage, which opens.
     expect(rowButton('Fork a computer')).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('4 planned · 2 undecided')).toBeInTheDocument();
+    expect(await screen.findByText('4 planned · 2 undecided')).toBeInTheDocument();
   });
 
   it('ignores Enter in a field and on other buttons', async () => {
@@ -339,8 +346,9 @@ describe('a person who can decide', () => {
     await waitFor(() => expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true'));
     time.advance(OPEN_GUARD_MS);
     await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
-    // The row closed and moved to the fold while the request is in flight.
-    expect(screen.getByText('2 dropped')).toBeInTheDocument();
+    // While the request is in flight the row stays where it was, marked as saving.
+    expect(screen.getByText('1 dropped')).toBeInTheDocument();
+    expect(within(itemOf('Create and delete a computer')).getByText('Saving…')).toBeInTheDocument();
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
     await act(async () => release(refused(403, 'Not allowed.')));
     expect(await screen.findByRole('alert')).toHaveTextContent('Create and delete a computer: not saved. Not allowed.');
@@ -602,14 +610,16 @@ describe('review fixes', () => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
     }
     expect(posts(calls, "verdict").map((call) => call.body?.n)).toEqual([12, 13, 14, 16, 31, 30]);
-    expect(rowButton('Pause a computer')).toHaveAttribute('aria-expanded', 'false');
-    await userEvent.click(rowButton('Pause a computer'));
-    time.advance(OPEN_GUARD_MS);
-    expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: 'Comment' })).not.toBeInTheDocument();
-    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
-    expect(posts(calls, 'verdict')).toHaveLength(6);
+    // The suggestion being sent is shown dimmed, with nothing to press.
+    const sendingRow = screen.getByText('Pause a computer').closest('.ws-item') as HTMLElement;
+    expect(sendingRow).toHaveClass('ws-pending');
+    expect(sendingRow).toHaveAttribute('aria-busy', 'true');
+    expect(within(sendingRow).getByText('Sending…')).toBeInTheDocument();
+    expect(within(sendingRow).queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Pause a computer/ })).not.toBeInTheDocument();
     await act(async () => release(ok({ number: 80 })));
+    expect(rowButton('Pause a computer').closest('.ws-item')).toHaveAttribute('id', 'issue-80');
+    expect(screen.queryByText('Sending…')).not.toBeInTheDocument();
   });
 
   it('keeps a stage that is open by rule open, whatever was chosen before', async () => {
@@ -628,6 +638,7 @@ describe('review fixes', () => {
     for (let i = 0; i < 2; i += 1) {
       time.advance(OPEN_GUARD_MS);
       fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
+      await act(async () => {});
     }
     // Shell is decided, so The loop is now open by rule: rows shown, no toggle.
     expect(rowButton('A Linux server')).toHaveAttribute('aria-expanded', 'true');
@@ -779,5 +790,116 @@ describe('third review round', () => {
     expect(await screen.findByText('Split it.', { selector: '.ws-c p' })).toBeInTheDocument();
     expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
     expect(screen.getByText('Being refined.')).toBeInTheDocument();
+  });
+});
+
+describe('nothing shown as done before the server confirms it', () => {
+  function deferred() {
+    let release: (value: { status: number; body: unknown }) => void = () => {};
+    const route: Route = () => new Promise((resolve) => { release = resolve; });
+    return { route, release: (value: { status: number; body: unknown }) => release(value) };
+  }
+  const announced = () => document.querySelector('.sr-only[aria-live="polite"]')?.textContent;
+
+  it('shows a comment being sent as pending, then as an ordinary comment', async () => {
+    const answer = deferred();
+    mockApi({ me: visitor, routes: { 'POST comment': answer.route } });
+    await renderApp();
+    await userEvent.click(rowButton('Run a command'));
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'On its way.');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    const pending = screen.getByText('On its way.').closest('.ws-c') as HTMLElement;
+    expect(pending).toHaveClass('ws-pending');
+    expect(pending).toHaveAttribute('aria-busy', 'true');
+    expect(within(pending).getByText('Sending…')).toBeInTheDocument();
+    expect(within(itemOf('Run a command')).queryByText(/💬/)).not.toBeInTheDocument();
+    expect(announced()).toBe('Sending comment');
+    // Nothing kept for a reload while unconfirmed.
+    expect(localStorage.getItem('silo-workshop-writes')).toBeNull();
+    await act(async () => answer.release(ok()));
+    const done = screen.getByText('On its way.').closest('.ws-c') as HTMLElement;
+    expect(done).not.toHaveClass('ws-pending');
+    expect(within(done).queryByText('Sending…')).not.toBeInTheDocument();
+    expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
+    expect(localStorage.getItem('silo-workshop-writes')).toContain('On its way.');
+  });
+
+  it('takes back a comment that times out', async () => {
+    apiConfig.writeTimeoutMs = 30;
+    try {
+      mockApi({ me: visitor, routes: { 'POST comment': () => new Promise(() => {}) } });
+      await renderApp();
+      await userEvent.click(rowButton('Run a command'));
+      await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Lost.');
+      await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+      expect(screen.getByText('Sending…')).toBeInTheDocument();
+      expect(await screen.findByRole('alert')).toHaveTextContent('Comment: not saved. No answer.');
+      expect(screen.queryByText('Lost.', { selector: '.ws-c p' })).not.toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'Comment' })).toHaveValue('Lost.');
+      expect(localStorage.getItem('silo-workshop-writes')).toBeNull();
+    } finally {
+      apiConfig.writeTimeoutMs = 20_000;
+    }
+  });
+
+  it('shows a vote being sent as pending with the count unchanged', async () => {
+    const answer = deferred();
+    const calls = mockApi({ me: visitor, routes: { 'POST vote': answer.route } });
+    await renderApp();
+    await userEvent.click(rowButton('Run a command'));
+    await waitFor(() => expect(calls.some((call) => call.path === 'vote' && call.method === 'GET')).toBe(true));
+    await userEvent.click(within(itemOf('Run a command')).getByRole('button', { name: /4 votes/ }));
+    await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
+    const button = within(itemOf('Run a command')).getByRole('button', { name: /4 votes/ });
+    expect(button).toBeDisabled();
+    expect(button).toHaveClass('ws-pending');
+    expect(button).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(button);
+    expect(posts(calls, 'vote')).toHaveLength(1);
+    await act(async () => answer.release(ok()));
+    const after = within(itemOf('Run a command')).getByRole('button', { name: /5 votes/ });
+    expect(after).toHaveAttribute('aria-pressed', 'true');
+    expect(after).toBeEnabled();
+  });
+
+  it('shows a decision being sent dimmed until it is confirmed', async () => {
+    const answer = deferred();
+    mockApi({ me: owner, routes: { 'POST decide': answer.route } });
+    history.replaceState(null, '', '/workshop#issue-42');
+    await renderApp();
+    await ownerOn('After a task ends');
+    await userEvent.type(screen.getByRole('textbox', { name: 'Decision' }), 'It is deleted.');
+    await userEvent.click(screen.getByRole('button', { name: 'Decide' }));
+    const pending = screen.getByText('It is deleted.').closest('.ws-c') as HTMLElement;
+    expect(pending).toHaveClass('ws-pending');
+    expect(within(pending).getByText('Sending…')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Decision' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Open' })).getByRole('button', { name: /^After a task ends/ })).toBeInTheDocument();
+    await act(async () => answer.release(ok()));
+    expect(within(screen.getByRole('region', { name: 'Decided' })).getByRole('button', { name: /^After a task ends/ })).toBeInTheDocument();
+    expect(screen.getByText('It is deleted.').closest('.ws-c')).not.toHaveClass('ws-pending');
+  });
+
+  it('keeps a verdict as saving, with the counts unchanged, until the server answers', async () => {
+    const time = clock();
+    const answer = deferred();
+    mockApi({ me: owner, routes: { 'POST verdict': answer.route } });
+    await renderApp();
+    await ownerOn('Create and delete a computer');
+    time.advance(OPEN_GUARD_MS);
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
+    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
+    expect(within(itemOf('Create and delete a computer')).getByText('Saving…')).toBeInTheDocument();
+    expect(screen.getByText('3 planned · 4 undecided')).toBeInTheDocument();
+    expect(announced()).toBe('Create and delete a computer: saving. Run a command, open');
+    // Opening it while it saves offers nothing to press.
+    await userEvent.click(rowButton('Create and delete a computer'));
+    time.advance(OPEN_GUARD_MS);
+    expect(within(itemOf('Create and delete a computer')).queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
+    expect(localStorage.getItem('silo-workshop-writes')).toBeNull();
+    await act(async () => answer.release(ok()));
+    expect(within(itemOf('Create and delete a computer')).getByText('planned')).toBeInTheDocument();
+    expect(screen.getByText('4 planned · 3 undecided')).toBeInTheDocument();
+    expect(localStorage.getItem('silo-workshop-writes')).toContain('take');
   });
 });

@@ -45,12 +45,21 @@ const FALLBACK: Record<number, string> = {
   503: 'Not available.',
 };
 
+/** A write the server has not answered after this long counts as not saved. */
+export const apiConfig = { writeTimeoutMs: 20_000 };
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
+  const write = init?.method === 'POST';
+  const controller = write ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), apiConfig.writeTimeoutMs) : undefined;
   try {
-    response = await fetch(`${API}/${path}`, { credentials: 'same-origin', ...init });
+    response = await fetch(`${API}/${path}`, { credentials: 'same-origin', ...init, ...(controller ? { signal: controller.signal } : {}) });
   } catch {
+    if (controller?.signal.aborted) throw new ApiError(0, 'timeout', 'No answer.');
     throw new ApiError(0, 'network', 'No connection.');
+  } finally {
+    clearTimeout(timer);
   }
   if (!response.ok) {
     let code = 'error';

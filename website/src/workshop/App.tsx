@@ -88,6 +88,11 @@ export function App({ data, accountSlot }: AppProps) {
   const [pending, setPending] = useState<ReadonlySet<number>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
   const [rowNotice, setRowNotice] = useState<{ key: string; text: string } | null>(null);
+  // Writes the server has not answered yet. Nothing here counts as done.
+  const [saving, setSaving] = useState<Record<number, true>>({});
+  const [sending, setSending] = useState<Record<number, Comment[]>>({});
+  const [votePending, setVotePending] = useState<ReadonlySet<number>>(new Set());
+  const [suggestionsSending, setSuggestionsSending] = useState<{ id: number; title: string; author: string }[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [refining, setRefining] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
@@ -258,10 +263,10 @@ export function App({ data, accountSlot }: AppProps) {
 
   const liveRef = useRef(live);
   liveRef.current = live;
-  const remember = (n: number, fields: (keyof LiveIssue)[], comment?: Comment) => {
-    const issue = liveRef.current.state?.issues[n];
-    if (!issue || n <= 0) return;
-    keep(n, Object.fromEntries(fields.map((field) => [field, issue[field]])) as Partial<LiveIssue>, Date.now(), comment);
+  /** The issue as confirmed so far, for computing what a confirmed write changes. */
+  const confirmedIssue = (n: number) => liveRef.current.state?.issues[n];
+  const remember = (n: number, fields: Partial<LiveIssue>, comment?: Comment) => {
+    if (n > 0) keep(n, fields, Date.now(), comment);
   };
 
   function signedOut() {
@@ -271,21 +276,21 @@ export function App({ data, accountSlot }: AppProps) {
     setNotice('Sign in again.');
   }
 
-  const addOwnComment = (n: number, text: string): Comment | null => {
-    if (!me) return null;
-    const comment: Comment = { id: `pending-${Date.now()}`, author: me.login, avatar: me.avatar, bot: false, createdAt: new Date().toISOString(), text };
-    setDetails((current) => {
-      const detail = current[n];
-      return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: [...detail.comments, comment] } } : current;
-    });
-    return comment;
+  const ownComment = (text: string): Comment | null => (me
+    ? { id: `own-${Date.now()}-${Math.random().toString(36).slice(2)}`, author: me.login, avatar: me.avatar, bot: false, createdAt: new Date().toISOString(), text }
+    : null);
+  const startSending = (n: number, comment: Comment | null) => {
+    if (comment) setSending((current) => ({ ...current, [n]: [...(current[n] ?? []), comment] }));
   };
-
-  const removeOwnComment = (n: number, comment: Comment | null) => {
+  const stopSending = (n: number, comment: Comment | null) => {
+    if (comment) setSending((current) => ({ ...current, [n]: (current[n] ?? []).filter((c) => c.id !== comment.id) }));
+  };
+  /** A comment the server confirmed joins the thread as an ordinary one. */
+  const confirmComment = (n: number, comment: Comment | null) => {
     if (!comment) return;
     setDetails((current) => {
       const detail = current[n];
-      return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: detail.comments.filter((c) => c.id !== comment.id) } } : current;
+      return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: [...detail.comments, { ...comment, createdAt: new Date().toISOString() }] } } : current;
     });
   };
 
@@ -327,34 +332,31 @@ export function App({ data, accountSlot }: AppProps) {
 
   const sendVerdict = async (row: Row, verdict: Verdict | null, note?: string) => {
     const n = row.issue;
-    const before = n === null ? undefined : live.state?.issues[n];
-    if (n === null || !before || !verdictReady(row)) return;
+    if (n === null || !live.state?.issues[n] || !verdictReady(row)) return;
     if (note !== undefined) {
       setDrafts((current) => ({ ...current, [`note-${row.key}`]: '' }));
       setRefining(null);
     }
-    const change = verdictPatch(verdict);
+    const own = note === undefined ? null : ownComment(note);
     setBusy(n, true);
+    setSaving((current) => ({ ...current, [n]: true }));
+    startSending(n, own);
     setNotice(null);
     setRowNotice(null);
-    patchIssue(n, (issue) => (note === undefined ? change : { ...change, comments: issue.comments + 1 }));
-    const own = note === undefined ? null : addOwnComment(n, note);
-    if (openKey === row.key) advanceFrom(row);
+    // The queue moves on at once; the row shows "Saving…" until the server answers.
+    if (openKeyRef.current === row.key) {
+      setAnnounce('');
+      advanceFrom(row);
+      setAnnounce((next) => (next ? `${row.name}: saving. ${next}` : `${row.name}: saving`));
+    } else setAnnounce(`${row.name}: saving`);
     try {
       await api.verdict(n, verdict, note);
-      if (note === undefined) remember(n, ['verdict', 'state', 'reason', 'closedAt']);
-      else {
-        remember(n, ['verdict', 'state', 'reason', 'closedAt', 'comments'], own ?? undefined);
-        loadDetail(n, true);
-      }
+      const confirmed: Partial<LiveIssue> = { ...verdictPatch(verdict), ...(own ? { comments: (confirmedIssue(n)?.comments ?? 0) + 1 } : {}) };
+      patchIssue(n, () => confirmed);
+      confirmComment(n, own);
+      remember(n, confirmed, own ?? undefined);
+      if (own) loadDetail(n, true);
     } catch (error) {
-      patchIssue(n, (issue) => ({
-        ...(issue.verdict === change.verdict && issue.state === change.state
-          ? { verdict: before.verdict, state: before.state, reason: before.reason, closedAt: before.closedAt }
-          : {}),
-        ...(note === undefined ? {} : { comments: Math.max(0, issue.comments - 1) }),
-      }));
-      removeOwnComment(n, own);
       if (error instanceof ApiError && error.status === 401) {
         signedOut();
         return;
@@ -369,6 +371,12 @@ export function App({ data, accountSlot }: AppProps) {
       setRowNotice({ key: row.key, text: `${row.name}: not saved. ${message}` });
     } finally {
       setBusy(n, false);
+      setSaving((current) => {
+        const next = { ...current };
+        delete next[n];
+        return next;
+      });
+      stopSending(n, own);
     }
   };
 
@@ -406,25 +414,22 @@ export function App({ data, accountSlot }: AppProps) {
     event.preventDefault();
     const n = row.issue;
     const text = (drafts[row.key] ?? '').trim();
-    if (n === null || !text || !me) return;
-    const temp: Comment = { id: `pending-${Date.now()}`, author: me.login, avatar: me.avatar, bot: false, createdAt: new Date().toISOString(), text };
+    const own = ownComment(text);
+    if (n === null || n <= 0 || !text || !own) return;
     setDrafts((current) => ({ ...current, [row.key]: '' }));
-    setDetails((current) => {
-      const detail = current[n];
-      return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: [...detail.comments, temp] } } : current;
-    });
-    patchIssue(n, (issue) => ({ comments: issue.comments + 1 }));
+    startSending(n, own);
+    setAnnounce('Sending comment');
     try {
       await api.comment(n, text);
-      remember(n, ['comments'], temp);
+      const comments = (confirmedIssue(n)?.comments ?? 0) + 1;
+      patchIssue(n, () => ({ comments }));
+      confirmComment(n, own);
+      remember(n, { comments }, own);
     } catch (error) {
-      setDetails((current) => {
-        const detail = current[n];
-        return typeof detail === 'object' ? { ...current, [n]: { ...detail, comments: detail.comments.filter((c) => c.id !== temp.id) } } : current;
-      });
-      patchIssue(n, (issue) => ({ comments: Math.max(0, issue.comments - 1) }));
       setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
       failed('Comment', error);
+    } finally {
+      stopSending(n, own);
     }
   };
 
@@ -432,49 +437,48 @@ export function App({ data, accountSlot }: AppProps) {
     event.preventDefault();
     const n = row.issue;
     const text = (drafts[row.key] ?? '').trim();
-    const before = n === null ? undefined : live.state?.issues[n];
-    if (n === null || !text || !before || pendingRef.current.has(n)) return;
+    const own = ownComment(text);
+    if (n === null || n <= 0 || !text || !own || !live.state?.issues[n] || pendingRef.current.has(n)) return;
     setBusy(n, true);
     setDrafts((current) => ({ ...current, [row.key]: '' }));
-    patchIssue(n, (issue) => ({ state: 'closed', reason: 'completed', closedAt: new Date().toISOString(), comments: issue.comments + 1 }));
-    const own = addOwnComment(n, text);
+    startSending(n, own);
+    setAnnounce(`${row.name}: sending`);
     try {
       await api.decide(n, text);
-      remember(n, ['state', 'reason', 'closedAt', 'comments'], own ?? undefined);
+      const confirmed: Partial<LiveIssue> = { state: 'closed', reason: 'completed', closedAt: new Date().toISOString(), comments: (confirmedIssue(n)?.comments ?? 0) + 1 };
+      patchIssue(n, () => confirmed);
+      confirmComment(n, own);
+      remember(n, confirmed, own);
       loadDetail(n, true);
     } catch (error) {
-      patchIssue(n, (issue) => ({ state: before.state, reason: before.reason, closedAt: before.closedAt, comments: Math.max(0, issue.comments - 1) }));
-      removeOwnComment(n, own);
       setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
       failed(row.name, error);
     } finally {
       setBusy(n, false);
+      stopSending(n, own);
     }
   };
 
-  const voting = useRef(new Set<number>());
+  const votingRef = useRef(new Set<number>());
   const toggleVote = async (row: Row) => {
     const n = row.issue;
-    if (n === null || n <= 0 || !me || voting.current.has(n)) return;
-    voting.current.add(n);
+    if (n === null || n <= 0 || !me || votingRef.current.has(n)) return;
+    votingRef.current.add(n);
+    setVotePending(new Set(votingRef.current));
+    setAnnounce('Sending vote');
     try {
       const was = n in votes ? votes[n] : await api.myVote(n);
       const on = !was;
-      const step = on ? 1 : -1;
+      await api.vote(n, on);
+      const up = Math.max(0, (confirmedIssue(n)?.up ?? 0) + (on ? 1 : -1));
       setVotes((current) => ({ ...current, [n]: on }));
-      patchIssue(n, (issue) => ({ up: Math.max(0, issue.up + step) }));
-      try {
-        await api.vote(n, on);
-        remember(n, ['up']);
-      } catch (error) {
-        setVotes((current) => ({ ...current, [n]: was }));
-        patchIssue(n, (issue) => ({ up: Math.max(0, issue.up - step) }));
-        failed('Vote', error);
-      }
+      patchIssue(n, () => ({ up }));
+      remember(n, { up });
     } catch (error) {
       failed('Vote', error);
     } finally {
-      voting.current.delete(n);
+      votingRef.current.delete(n);
+      setVotePending(new Set(votingRef.current));
     }
   };
 
@@ -483,46 +487,25 @@ export function App({ data, accountSlot }: AppProps) {
     const title = suggestDraft.title.trim();
     const text = suggestDraft.text.trim();
     if (!title || !me || !live.state) return;
-    const temp = -Date.now();
-    const now = new Date().toISOString();
-    const issue: LiveIssue = { kind: 'suggestion', entry: null, title, state: 'open', reason: null, verdict: null, up: 0, comments: 0, author: me.login, bot: false, createdAt: now, closedAt: null };
-    setLive((current) => (current.state ? { ...current, state: { ...current.state, issues: { ...current.state.issues, [temp]: issue } } } : current));
-    setDetails((current) => ({ ...current, [temp]: { number: temp, title, body: text, url: '', up: 0, comments: [] } }));
+    const id = Date.now() + Math.random();
+    const author = me.login;
+    setSuggestionsSending((current) => [...current, { id, title, author }]);
     setSuggesting(false);
     setSuggestDraft({ title: '', text: '' });
     setTab('plan');
-    const move = (to: number | null) => {
-      setLive((current) => {
-        if (!current.state) return current;
-        const issues = { ...current.state.issues };
-        const moved = issues[temp];
-        delete issues[temp];
-        if (to !== null && moved) issues[to] = moved;
-        return { ...current, state: { ...current.state, issues } };
-      });
-      setDetails((current) => {
-        const next = { ...current };
-        const moved = next[temp];
-        delete next[temp];
-        if (to !== null && typeof moved === 'object') next[to] = { ...moved, number: to };
-        return next;
-      });
-      if (openKeyRef.current === `issue-${temp}`) {
-        const key = to === null ? null : `issue-${to}`;
-        openKeyRef.current = key;
-        setOpenKey(key);
-        setHash(key);
-      }
-    };
+    setAnnounce('Sending suggestion');
     try {
       const { number } = await api.suggest(title, text);
-      move(number);
+      const issue: LiveIssue = { kind: 'suggestion', entry: null, title, state: 'open', reason: null, verdict: null, up: 0, comments: 0, author, bot: false, createdAt: new Date().toISOString(), closedAt: null };
+      setLive((current) => (current.state ? { ...current, state: { ...current.state, issues: { ...current.state.issues, [number]: issue } } } : current));
+      setDetails((current) => ({ ...current, [number]: { number, title, body: text, url: '', up: 0, comments: [] } }));
       keep(number, issue, Date.now());
     } catch (error) {
-      move(null);
       setSuggestDraft({ title, text });
       setSuggesting(true);
       failed('Suggestion', error);
+    } finally {
+      setSuggestionsSending((current) => current.filter((item) => item.id !== id));
     }
   };
 
@@ -551,9 +534,10 @@ export function App({ data, accountSlot }: AppProps) {
   const vote = (row: Row): ReactNode => {
     if (!liveOk || row.up === null || (row.kind !== 'entry' && row.kind !== 'suggestion')) return null;
     const on = row.issue !== null && votes[row.issue] === true;
+    const busy = row.issue !== null && votePending.has(row.issue);
     if (!me) return <a className="ws-vote" href={signIn} aria-label={`${row.up} votes, sign in to vote`}>👍 {row.up}</a>;
     return (
-      <button type="button" className={on ? 'ws-vote on' : 'ws-vote'} aria-pressed={on} aria-label={`${row.up} votes`} onClick={() => void toggleVote(row)} disabled={(row.issue ?? 0) <= 0}>
+      <button type="button" className={`ws-vote${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${row.up} votes`} onClick={() => void toggleVote(row)} disabled={busy || (row.issue ?? 0) <= 0}>
         👍 {row.up}
       </button>
     );
@@ -618,6 +602,7 @@ export function App({ data, accountSlot }: AppProps) {
     if (row.kind === 'decision') {
       const decided = row.status === 'planned';
       if (decided) return <div className="ws-state"><span className="ws-muted">Decided{row.date ? `, ${shortDate(row.date)}` : ''}.</span></div>;
+      if (canDecide && hasIssue && pending.has(row.issue as number)) return null;
       if (canDecide && hasIssue) {
         const busy = pending.has(row.issue as number);
         return (
@@ -629,6 +614,7 @@ export function App({ data, accountSlot }: AppProps) {
       }
       return <div className="ws-state"><span className="ws-muted">Not decided yet.</span></div>;
     }
+    if (row.issue !== null && saving[row.issue]) return <div className="ws-state"><span className="ws-muted">Saving…</span></div>;
     if (canDecide && hasIssue && (row.issue as number) > 0 && (awaitsVerdict(row) || (row.carried && row.fileVerdict && row.status !== 'built'))) return verdictButtons(row);
     const text = stateText(row);
     return (
@@ -661,6 +647,15 @@ export function App({ data, accountSlot }: AppProps) {
             </div>
           ))
           : null}
+        {(sending[n] ?? []).map((comment) => (
+          <div className="ws-c ws-pending" key={comment.id} aria-busy="true">
+            <i aria-hidden="true">{initials(comment.author)}</i>
+            <div>
+              <b>{comment.author} <small>Sending…</small></b>
+              <RichText text={comment.text} />
+            </div>
+          </div>
+        ))}
         {me ? (
           <form className="ws-box" onSubmit={(event) => void sendComment(row, event)}>
             <textarea aria-label="Comment" placeholder="Reply…" maxLength={5000} rows={1} value={drafts[row.key] ?? ''} onChange={(event) => setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
@@ -693,14 +688,15 @@ export function App({ data, accountSlot }: AppProps) {
   const item = (row: Row): ReactNode => {
     const open = openKey === row.key;
     const quiet = (row.kind === 'entry' || row.kind === 'suggestion') && !isDecided(row);
-    const word = row.kind === 'entry' || row.kind === 'suggestion' ? WORDS[row.status] : undefined;
+    const isSaving = row.issue !== null && saving[row.issue] === true;
+    const word = row.kind === 'entry' || row.kind === 'suggestion' ? (isSaving ? 'Saving…' : WORDS[row.status]) : undefined;
     return (
       <div className={open ? 'ws-item open' : 'ws-item'} id={row.key} key={row.key}>
         <div className="ws-line">
           <button type="button" className={quiet ? 'ws-row undecided' : 'ws-row'} aria-expanded={open} aria-controls={open ? `${row.key}-more` : undefined} onClick={() => toggleRow(row)}>
             <span className={dotClass(row)} aria-hidden="true" />
             <span className="ws-name">{row.name}</span>
-            {word ? <b className="ws-word">{word}</b> : null}
+            {word ? <b className={isSaving ? 'ws-word ws-pending' : 'ws-word'}>{word}</b> : null}
           </button>
           {side(row)}
         </div>
@@ -733,10 +729,21 @@ export function App({ data, accountSlot }: AppProps) {
           </section>
         );
       })}
-      {liveOk && plan.suggestions.length ? (
+      {liveOk && (plan.suggestions.length || suggestionsSending.length) ? (
         <section aria-label="Suggested by people">
           <div className="ws-stage ws-suggested"><span className="ws-num">+</span><h2>Suggested by people</h2><span className="ws-mono">sorted by votes</span></div>
           {plan.suggestions.map(item)}
+          {suggestionsSending.map((pendingSuggestion) => (
+            <div className="ws-item ws-pending" key={pendingSuggestion.id} aria-busy="true">
+              <div className="ws-line">
+                <div className="ws-row undecided">
+                  <span className="ws-dot" aria-hidden="true" />
+                  <span className="ws-name">{pendingSuggestion.title}</span>
+                </div>
+                <span className="ws-side"><span>{pendingSuggestion.author}</span><span>Sending…</span></span>
+              </div>
+            </div>
+          ))}
         </section>
       ) : null}
       {plan.dropped.length ? (

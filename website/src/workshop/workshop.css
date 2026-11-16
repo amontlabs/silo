@@ -534,3 +534,12 @@
   margin: 12px 0 0;
   max-width: 60ch;
 }
+.ws-pending {
+  opacity: 0.55;
+}
+.ws-item.ws-pending .ws-line:hover {
+  background: none;
+}
+.ws-vote.ws-pending {
+  cursor: default;
+}

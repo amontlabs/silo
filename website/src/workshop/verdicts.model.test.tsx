@@ -1,13 +1,14 @@
 // Random sequences of an owner's actions and the server's answers, checked after every step against
 // a reference model: a verdict is only ever sent for the row that was open and on screen, never inside the guard,
-// never twice at once for one issue, and what the page shows is the server's answer or the pending one.
+// never twice at once for one issue, and the page never shows as done what the server has not answered:
+// a row waiting for an answer says "Saving…", everything else and the counts line show the server's answers.
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App, OPEN_GUARD_MS } from './App';
 import { buildData, liveState } from './fixtures';
 import type { Verdict } from './plan';
 
-type Display = 'undecided' | 'planned' | 'later' | 'dropped';
+type Display = 'undecided' | 'planned' | 'later' | 'dropped' | 'saving';
 type Sent = { n: number; verdict: Verdict; resolve: (status: number) => void };
 
 const ISSUE_OF: Record<string, number> = {
@@ -34,8 +35,9 @@ function display(verdict: Verdict | null): Display {
 function shown(key: string): Display | null {
   const item = document.getElementById(key);
   if (!item) return null;
-  if (item.closest('details')) return 'dropped';
   const word = item.querySelector('.ws-word')?.textContent;
+  if (word === 'Saving…') return 'saving';
+  if (item.closest('details')) return 'dropped';
   return word === 'planned' ? 'planned' : word === 'later' ? 'later' : 'undecided';
 }
 
@@ -69,9 +71,13 @@ async function run(seed: number) {
   // The reference model: what the server holds, and what is pending.
   const server: Record<number, Verdict | null> = { ...LIVE };
   const pending = new Map<number, Verdict>();
-  const expected = (n: number): Display => {
-    const live = pending.has(n) ? pending.get(n) ?? null : server[n] ?? null;
-    return display(live ?? FILE[n] ?? null);
+  const confirmed = (n: number): Display => display(server[n] ?? FILE[n] ?? null);
+  const expected = (n: number): Display => (pending.has(n) ? 'saving' : confirmed(n));
+  const ENTRIES = [10, 11, 12, 13, 14, 15, 16, 17];
+  const countsLine = () => {
+    const planned = ENTRIES.filter((n) => confirmed(n) === 'planned').length;
+    const undecided = ENTRIES.filter((n) => confirmed(n) === 'undecided').length;
+    return `${planned} planned · ${undecided} undecided`;
   };
   let open: string | null = null;
   let openedAt = now;
@@ -95,7 +101,7 @@ async function run(seed: number) {
     const elapsed = now - openedAt;
     const item = key ? document.getElementById(key) : null;
     const visible = item !== null && !item.closest('details:not([open]), [hidden]');
-    const awaits = n !== undefined && !pending.has(n) && expected(n) === 'undecided' && (server[n] ?? null) === null;
+    const awaits = n !== undefined && !pending.has(n) && confirmed(n) === 'undecided' && (server[n] ?? null) === null;
     const carried = n !== undefined && !pending.has(n) && (server[n] ?? null) === null && FILE[n] != null && n !== 10 && n !== 15;
     let predicted: { n: number; verdict: Verdict } | null = null;
     const choice = rand();
@@ -151,6 +157,7 @@ async function run(seed: number) {
     const flying = inFlight.map((entry) => entry.n);
     expect(new Set(flying).size, `step ${step}: two verdicts in flight for one issue`).toBe(flying.length);
     observe();
+    expect(document.querySelector('.ws-count')?.textContent, `step ${step} of seed ${seed}: counts line`).toBe(countsLine());
     for (const [rowKey, issue] of Object.entries(ISSUE_OF)) {
       const seen = shown(rowKey);
       // Rows of a closed stage are not on the page.
