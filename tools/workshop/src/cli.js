@@ -142,6 +142,7 @@ export async function main(argv, overrides = {}) {
         const lines = [
           ...Object.entries(report.credentials).map(([name, source]) => `${name}: ${source}`),
           `App: ${report.app ?? 'unknown'}`,
+          `Public: ${report.public === true ? 'yes' : report.public === false ? 'no (sign-in will not work for anyone outside its organization)' : 'unknown'}`,
           `Installed on ${deps.repo}: ${report.installed ? 'yes' : 'no'}`,
           `Permissions: ${report.permissions ? Object.entries(report.permissions).map(([k, v]) => `${k} ${v}`).join(', ') || 'none' : 'unknown'}`,
           ...(report.labels ? Object.entries(report.labels).map(([name, ok]) => `Label ${name}: ${ok ? 'yes' : 'missing'}`) : ['Labels: unknown']),

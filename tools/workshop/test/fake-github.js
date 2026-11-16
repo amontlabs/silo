@@ -33,6 +33,7 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
     publicKey,
     pageSize: 100,
     installed: true,
+    public: true,
     installationPermissions: { issues: 'write', metadata: 'read' },
     labels: [],
     issues: new Map(),
@@ -170,6 +171,12 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
         owner: { login: 'amontlabs' },
         permissions: manifest.default_permissions,
       });
+    }
+
+    // Reading an App without authentication: a public App answers, a private one is not found.
+    const appBySlug = p.match(/^\/apps\/([^/]+)$/);
+    if (appBySlug && req.method === 'GET' && !auth) {
+      return fake.public && appBySlug[1] === slug ? json(res, 200, { id: Number(appId), slug, name: 'Silo Workshop' }) : json(res, 404, { message: 'Not Found' });
     }
 
     // App authentication.

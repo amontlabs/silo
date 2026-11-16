@@ -50,7 +50,7 @@ test('setup registers the App from a manifest, stores the credentials and writes
     description: manifest.description,
     redirect_url: `${new URL(local).origin}/callback`,
     callback_urls: ['https://silo.amontlabs.com/api/workshop/callback'],
-    public: false,
+    public: true,
     default_permissions: { issues: 'write', metadata: 'read' },
     default_events: [],
     request_oauth_on_install: false,

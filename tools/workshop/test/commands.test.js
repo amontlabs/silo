@@ -97,6 +97,7 @@ test('doctor reports credentials by source, the installation, permissions and la
   const report = JSON.parse(first.stdout);
   assert.deepEqual(report.credentials, { WORKSHOP_APP_ID: 'environment', WORKSHOP_CLIENT_ID: 'missing', WORKSHOP_CLIENT_SECRET: 'keychain', WORKSHOP_PRIVATE_KEY: 'keychain' });
   assert.equal(report.installed, true);
+  assert.equal(report.public, true);
   assert.deepEqual(report.permissions, { issues: 'write', metadata: 'read' });
   assert.equal(Object.values(report.labels).filter(Boolean).length, 0);
   assert.ok(!first.stdout.includes('cs-secret-value'));
@@ -105,11 +106,22 @@ test('doctor reports credentials by source, the installation, permissions and la
   const healthy = await run(['doctor'], { fake, box, keychain, env });
   assert.equal(healthy.code, 0, healthy.stdout);
   assert.match(healthy.stdout, /Label verdict:drop: yes/);
+  assert.match(healthy.stdout, /^Public: yes$/m);
+  assert.ok(fake.log.some((r) => r.path === '/apps/silo-workshop' && r.auth === null), 'asked as an outsider');
+
+  fake.public = false;
+  const privateApp = await run(['doctor'], { fake, box, keychain, env });
+  assert.equal(privateApp.code, 1);
+  assert.match(privateApp.stdout, /^Public: no \(sign-in will not work for anyone outside its organization\)$/m);
+  assert.match(privateApp.stdout, /Problem: the App is private: .*sign-in will not work for anyone else/);
+  fake.public = true;
 
   fake.installed = false;
   const missing = await run(['doctor', '--json'], { fake, box, keychain, env });
   assert.equal(missing.code, 1);
-  assert.match(JSON.parse(missing.stdout).problems[0], /not installed.*installations\/new/);
+  const notInstalled = JSON.parse(missing.stdout);
+  assert.match(notInstalled.problems[0], /not installed.*installations\/new/);
+  assert.equal(notInstalled.public, true, 'checked even before the App is installed');
 });
 
 test('commands that need GitHub fail plainly when credentials are missing or the App is not installed', async (t) => {

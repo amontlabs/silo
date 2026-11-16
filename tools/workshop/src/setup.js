@@ -26,7 +26,7 @@ export function manifest({ site, redirectUrl }) {
     description: 'Votes, comments and the owner’s decisions on the Silo plan, stored as issues of amontlabs/silo.',
     redirect_url: redirectUrl,
     callback_urls: [`${site}/api/workshop/callback`],
-    public: false,
+    public: true,
     default_permissions: { issues: 'write', metadata: 'read' },
     default_events: [],
     request_oauth_on_install: false,

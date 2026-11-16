@@ -12,6 +12,7 @@ export async function doctor({ deps, gh, credentials }) {
   const report = {
     credentials: Object.fromEntries(CREDENTIAL_NAMES.map((name) => [name, sources[name] ?? 'missing'])),
     app: null,
+    public: null,
     installed: false,
     permissions: null,
     labels: null,
@@ -26,9 +27,11 @@ export async function doctor({ deps, gh, credentials }) {
   } catch (error) {
     report.app = gh.app?.slug ?? null;
     report.problems.push(error.message);
+    if (report.app) await checkPublic(gh, report);
     return report;
   }
   report.app = gh.app.slug;
+  await checkPublic(gh, report);
   report.installed = true;
   report.permissions = gh.installation.permissions ?? {};
   if (report.permissions.issues !== 'write') report.problems.push('the App cannot write issues');
@@ -37,6 +40,27 @@ export async function doctor({ deps, gh, credentials }) {
   const missing = LABELS.filter((label) => !report.labels[label.name]).map((label) => label.name);
   if (missing.length) report.problems.push(`labels missing (sync creates them): ${missing.join(', ')}`);
   return report;
+}
+
+/**
+ * Whether the App is public, read the way an outsider sees it: an
+ * unauthenticated GET /apps/{slug} answers a public App and not a private one.
+ * Only members of the owning organization can authorize a private App, so
+ * nobody else could sign in to the Workshop.
+ */
+async function checkPublic(gh, report) {
+  let status;
+  try {
+    status = (await gh.request('GET', `/apps/${encodeURIComponent(report.app)}`, { auth: null, allow: [404] })).status;
+  } catch {
+    status = null;
+  }
+  report.public = status === 200 ? true : status === 404 ? false : null;
+  if (report.public === false) {
+    report.problems.push(
+      'the App is private: only members of its organization can sign in to the Workshop, so sign-in will not work for anyone else. Make it public in the App settings (Advanced, Make public)',
+    );
+  }
 }
 
 async function workshopIssue(gh, number) {
