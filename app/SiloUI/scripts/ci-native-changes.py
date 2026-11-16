@@ -8,8 +8,10 @@ an empty or unreadable list, keeps the native jobs running.
 import sys
 
 # Top-level trees that only the website, demo films, documentation and the
-# owner dashboard (a Node tool that scripts/ci/scripts.sh tests) use.
-SKIPPABLE_PREFIXES = ('website/', 'demo/', 'docs/', 'artifacts/', 'assets/', 'tools/dashboard/')
+# owner dashboard and the Workshop tool (Node tools that scripts/ci/scripts.sh
+# tests) use.
+SKIPPABLE_PREFIXES = ('website/', 'demo/', 'docs/', 'artifacts/', 'assets/', 'tools/dashboard/',
+                      'tools/workshop/')
 
 # The Go runner helper has its own CI job. A Rust test parses its recipes with the CLI's parser.
 RUNNER_PREFIX = 'app/SiloUI/runner/'

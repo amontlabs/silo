@@ -1,0 +1,11 @@
+{
+  "name": "silo-workshop-tool",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The command for the GitHub side of the Workshop: App setup, plan sync, verdicts and comments, posts as the bot.",
+  "type": "module",
+  "engines": { "node": ">=26" },
+  "scripts": {
+    "test": "node --test test/"
+  }
+}
