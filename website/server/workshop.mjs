@@ -31,7 +31,7 @@ const MAX_BLOCK = 60 * 60_000;
 const UNLABELLED_LIMIT = 100;
 const SIGNIN_FAILED = '/workshop?signin=failed';
 
-const PUBLIC_READ = 'public, s-maxage=30, stale-while-revalidate=300';
+const PUBLIC_READ = 'public, s-maxage=10, stale-while-revalidate=60';
 const PRIVATE = 'private, no-store';
 
 const ENDPOINTS = new Map(Object.entries({
@@ -166,8 +166,10 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
   function spendOrRefuse(name, cost = 1) {
     if (spend(name, cost)) return;
     const at = now();
+    const blocked = at < blockedUntil;
     const wait = Math.max(blockedUntil - at, ceilings[name].start + 60_000 - at, 1000);
-    throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil(wait / 1000), as: 'installation' });
+    // `local`: our own ceiling, not GitHub, said no.
+    throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil(wait / 1000), as: 'installation', local: !blocked });
   }
 
   // Every installation-token call goes through here: nothing reaches GitHub while it has asked us to wait.
@@ -550,6 +552,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       await workshopIssue(session, n);
       const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } });
       if (data) snapshots.patch.comment(n, data);
+      snapshots.refreshSoon();
       return json(200, { ok: true, id: data?.id ?? null });
     },
 
@@ -569,6 +572,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
           snapshots.patch.up(n, -1);
         }
       }
+      snapshots.refreshSoon();
       return json(200, { ok: true });
     },
 
@@ -589,6 +593,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
         refuse(502, 'github', 'The suggestion was posted on GitHub but could not be added to the Workshop.', { number });
       }
       snapshots.patch.issue(data, 'suggestion');
+      snapshots.refreshSoon();
       if (unlabelled.size) retryLabels().catch(() => {});
       return json(200, { number });
     },
@@ -629,6 +634,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
         const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body: note } });
         if (data) snapshots.patch.comment(n, data);
       }
+      snapshots.refreshSoon();
       return json(200, { ok: true });
     },
 
@@ -649,6 +655,7 @@ export function createWorkshop({ config, fetch = globalThis.fetch, now = Date.no
       await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'closed', state_reason: 'completed' } });
       if (data) snapshots.patch.comment(n, data);
       snapshots.patch.fields(n, { state: 'closed', reason: 'completed', closedAt: new Date(now()).toISOString() });
+      snapshots.refreshSoon();
       return json(200, { ok: true });
     },
   }));

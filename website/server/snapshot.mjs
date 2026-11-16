@@ -1,7 +1,11 @@
 // The one in-memory snapshot that answers every anonymous read. A visitor's
 // request never calls GitHub: it reads the snapshot, and when the snapshot is
-// over a minute old it starts one background refresh. Only a cold instance
-// waits for its first refresh.
+// over 30 seconds old it starts one background refresh. A successful write
+// starts one at once. Only a cold instance waits for its first refresh.
+//
+// Refreshes are coalesced: at most one runs and one waits. A request for a
+// refresh while one runs makes exactly one more start when it ends, so a write
+// is always included, and two starts are never closer than 2 seconds.
 //
 // A refresh reads, with the installation token:
 // - the repository's issue list (all states, oldest first, 100 a page), each
@@ -18,7 +22,8 @@ import { GitHubError, nextLink } from './github.mjs';
 import { clean, commentIssue, commentOf, kindOf, readBody, reasonOf, verdictOf } from './issues.mjs';
 
 export const SNAPSHOT = {
-  maxAge: 60_000,
+  maxAge: 30_000,
+  minGap: 2000,
   staleAfter: 10 * 60_000,
   fullReloadEvery: 10 * 60_000,
   overlap: 60_000,
@@ -38,9 +43,13 @@ const byAge = (a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.create
 // throws a GitHubError when GitHub fails or the installation must wait.
 // `detach(fn)` runs fn outside the current request (no request deadline).
 // `afterRefresh()` runs, detached, after each successful refresh.
-export function createSnapshot({ repo, request, now = Date.now, log = () => {}, detach = (fn) => fn(), afterRefresh = () => {} }) {
+// `wall()` is the real clock the 2-second floor between starts is measured on.
+export function createSnapshot({ repo, request, now = Date.now, wall = Date.now, log = () => {}, detach = (fn) => fn(), afterRefresh = () => {} }) {
   let current = null;
   let pending = null;
+  let again = false;
+  let timer = null;
+  let lastStart = -Infinity;
   let retryAt = 0;
   let lastError = null;
   let lastFull = 0;
@@ -154,8 +163,11 @@ export function createSnapshot({ repo, request, now = Date.now, log = () => {}, 
     current = snapshot;
   }
 
-  function refresh() {
-    pending ??= detach(() => build())
+  // Starts a refresh now; when it ends, a refresh asked for meanwhile is scheduled.
+  function start() {
+    lastStart = wall();
+    let localRetry = 0;
+    pending = detach(() => build())
       .then((snapshot) => {
         swapIn(snapshot);
         retryAt = 0;
@@ -168,13 +180,53 @@ export function createSnapshot({ repo, request, now = Date.now, log = () => {}, 
         return snapshot;
       }, (error) => {
         const wait = error instanceof GitHubError && error.retryAfter ? error.retryAfter * 1000 : 0;
-        retryAt = now() + Math.max(SNAPSHOT.retryAfter, wait);
+        if (error instanceof GitHubError && error.local && current) {
+          // Our own ceiling ran out: try again when it resets, without the backoff meant for GitHub.
+          localRetry = wait;
+        } else {
+          retryAt = now() + Math.max(SNAPSHOT.retryAfter, wait);
+        }
         lastError = error;
         log({ snapshot: 'refresh_failed', ...(error instanceof GitHubError ? { github: error.status } : { failure: error?.name || 'Error' }) });
         throw error;
       })
-      .finally(() => { pending = null; });
+      .finally(() => {
+        pending = null;
+        const followUp = again;
+        again = false;
+        if (followUp || localRetry) schedule(localRetry);
+      });
     return pending;
+  }
+
+  // Asks for a refresh as soon as allowed: after the running one, and 2 seconds after the last start.
+  function schedule(delay = 0) {
+    if (pending) {
+      again = true;
+      return;
+    }
+    if (timer) return;
+    const wait = Math.max(delay, lastStart + SNAPSHOT.minGap - wall());
+    if (wait <= 0) {
+      start().catch(() => {});
+      return;
+    }
+    timer = setTimeout(() => {
+      timer = null;
+      if (pending) again = true;
+      else start().catch(() => {});
+    }, wait);
+    timer.unref?.();
+  }
+
+  function refresh() {
+    return pending ?? start();
+  }
+
+  // After a successful write: refresh from GitHub straight away (coalesced), unless GitHub asked us to wait.
+  function refreshSoon() {
+    if (now() < retryAt) return;
+    schedule();
   }
 
   // The snapshot to answer from and whether it is stale; throws when there is none.
@@ -183,8 +235,8 @@ export function createSnapshot({ repo, request, now = Date.now, log = () => {}, 
     if (!current) {
       if (at < retryAt) throw lastError instanceof GitHubError ? lastError : new GitHubError(502);
       await refresh();
-    } else if (at - current.startedAt >= SNAPSHOT.maxAge && at >= retryAt && !pending) {
-      refresh().catch(() => {});
+    } else if (at - current.startedAt >= SNAPSHOT.maxAge && at >= retryAt && !pending && !timer) {
+      schedule();
     }
     return { snapshot: current, stale: now() - current.at > SNAPSHOT.staleAfter };
   }
@@ -264,8 +316,14 @@ export function createSnapshot({ repo, request, now = Date.now, log = () => {}, 
     },
   };
 
-  // Settles once no refresh is running (for tests and graceful shutdown).
-  const idle = () => (pending ? pending.then(() => {}, () => {}) : Promise.resolve());
+  // Settles once no refresh is running or waiting (for tests and graceful shutdown).
+  async function idle() {
+    for (;;) {
+      if (pending) await pending.then(() => {}, () => {});
+      else if (timer) await new Promise((resolve) => setTimeout(resolve, Math.max(5, lastStart + SNAPSHOT.minGap - wall() + 5)));
+      else return;
+    }
+  }
 
-  return { read, stateAnswer, issueAnswer, patch, idle };
+  return { read, stateAnswer, issueAnswer, patch, idle, refreshSoon };
 }

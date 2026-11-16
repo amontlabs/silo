@@ -206,7 +206,9 @@ test('a signed-in person spends the installation token only on the permission ch
     await visitor.call('POST', 'suggest', { body: { title: 'T', text: 'x' } });
     await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'later' } });
     await owner.call('POST', 'decide', { body: { n: 4, text: 'd' } });
-    const installation = t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation');
+    await t.workshop.idle();
+    const refreshes = /^\/repos\/amontlabs\/silo\/issues(\/comments)?$/;
+    const installation = t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation' && !(r.method === 'GET' && refreshes.test(r.path)));
     assert.deepEqual(installation.map((r) => r.path.replace(/\/\d+\//, '/N/')).sort(), [
       '/repos/amontlabs/silo/collaborators/owner-fake/permission',
       '/repos/amontlabs/silo/collaborators/owner-fake/permission',
@@ -856,9 +858,10 @@ test('unlabelled suggestions are retried after a successful suggestion or a refr
     await t.workshop.idle();
     t.fake.state.hook = null;
     const before = t.fake.state.requests.length;
-    assert.equal((await owner.call('POST', 'comment', { body: { n: 1, text: 'no retry here' } })).status, 200);
+    assert.equal((await owner.call('GET', 'vote?n=1')).status, 200);
+    assert.equal((await owner.call('GET', 'me')).status, 200);
     await t.workshop.idle();
-    assert.equal(t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation').length, 0, 'other requests never retry');
+    assert.equal(t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation' && !r.path.endsWith('/permission')).length, 0, 'other requests never retry');
     Object.assign(issueOf(t.fake, second.json.number), { state: 'closed', state_reason: 'not_planned' });
     issueOf(t.fake, third.json.number).labels.push('spam');
     t.fake.state.hook = (r) => (r.kind === 'installation' && r.method === 'GET' && r.path.endsWith(`/issues/${first.json.number}`) ? { status: 500 } : null);

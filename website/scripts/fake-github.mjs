@@ -191,7 +191,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     const url = new URL(req.url, 'http://fake');
     const path = url.pathname;
     const who = caller(req);
-    const record = { method: req.method, path, query: url.search, kind: who?.kind ?? 'anonymous', login: who?.user?.login ?? null };
+    const record = { method: req.method, path, query: url.search, wall: Date.now(), kind: who?.kind ?? 'anonymous', login: who?.user?.login ?? null };
     state.requests.push(record);
     // A test's hook may delay or replace any answer.
     const hooked = state.hook?.(record);

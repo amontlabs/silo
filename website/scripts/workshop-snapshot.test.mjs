@@ -101,7 +101,7 @@ test('changes on GitHub show up after the next refresh; a deleted comment within
   } finally { await t.close(); }
 });
 
-test('each kind of write patches the snapshot at once, without a GitHub read', async () => {
+test('each kind of write patches the snapshot at once, even when the refresh it starts fails', async () => {
   const t = await setup();
   try {
     const visitor = t.client();
@@ -110,7 +110,7 @@ test('each kind of write patches the snapshot at once, without a GitHub read', a
     await owner.signIn('owner-fake');
     const reader = t.client();
     await reader.call('GET', 'state');
-    const listed = lists(t).length;
+    t.fake.state.hook = (r) => (r.kind === 'installation' && r.method === 'GET' && (LIST.test(r.path) || COMMENTS.test(r.path)) ? { status: 500 } : null);
     await visitor.call('POST', 'comment', { body: { n: 2, text: 'Patched in.' } });
     await visitor.call('POST', 'vote', { body: { n: 2, on: true } });
     await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'drop', note: 'Not now.' } });
@@ -126,7 +126,9 @@ test('each kind of write patches the snapshot at once, without a GitHub read', a
     assert.deepEqual(issue.comments.slice(-2).map((x) => [x.author, x.text]), [['visitor-fake', 'Patched in.'], ['owner-fake', 'Not now.']]);
     assert.equal((await reader.call('GET', 'issue?n=4')).json.comments.at(-1).text, 'Debian.');
     assert.equal((await reader.call('GET', `issue?n=${suggestion.json.number}`)).json.body, 'x');
-    assert.equal(lists(t).length, listed, 'no refresh was needed');
+    await t.workshop.idle();
+    assert.equal((await reader.call('GET', 'state')).json.issues[2].verdict, 'drop', 'the patch holds through the failed refresh');
+    t.fake.state.hook = null;
     t.clock.t += 61_000;
     const truth = (await settle(t)).json.issues;
     assert.deepEqual([truth[2].comments, truth[2].up, truth[2].verdict], [2, 2, 'drop'], 'GitHub agrees after the refresh');
@@ -217,7 +219,7 @@ test('anonymous reads are public for everyone, read no cookie and set none', asy
     for (const path of ['state', 'issue?n=1']) {
       for (const who of [t.client(), signed]) {
         const response = await who.call('GET', path);
-        assert.equal(response.headers['Cache-Control'], 'public, s-maxage=30, stale-while-revalidate=300');
+        assert.equal(response.headers['Cache-Control'], 'public, s-maxage=10, stale-while-revalidate=60');
         assert.equal(response.headers.Vary, undefined);
         assert.deepEqual(response.cookies, []);
       }

@@ -3,7 +3,7 @@
 // call; never the response body or the token.
 
 export class GitHubError extends Error {
-  constructor(status, { rateLimited = false, retryAfter = 0, network = false, timeout = false, as = null, notInstalled = false } = {}) {
+  constructor(status, { rateLimited = false, retryAfter = 0, network = false, timeout = false, as = null, notInstalled = false, local = false } = {}) {
     super(timeout ? 'GitHub did not answer in time' : network ? 'GitHub could not be reached' : `GitHub answered ${status}`);
     this.name = 'GitHubError';
     this.status = status;
@@ -13,6 +13,7 @@ export class GitHubError extends Error {
     this.timeout = timeout;
     this.as = as;
     this.notInstalled = notInstalled;
+    this.local = local;
   }
 
   // A failure that a cached copy may stand in for.

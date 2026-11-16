@@ -78,13 +78,25 @@ snapshot holds every Workshop issue (at most 2,000, oldest first) with the
 fields `state` returns, its body (cut to 20,000 characters) and its comments
 (the latest 100 per issue, each cut to 5,000 characters, at most 5,000 in all).
 A number that is not in the snapshot is a 404. Both reads are sent with
-`Cache-Control: public, s-maxage=30, stale-while-revalidate=300`, no
-`Vary: Cookie`, and read no cookie.
+`Cache-Control: public, s-maxage=10, stale-while-revalidate=60`, no
+`Vary: Cookie`, and read no cookie; they cost nothing to answer, so the CDN
+holds them only briefly.
 
-- **Refresh.** When a request finds the snapshot over 60 seconds old, it
+**How soon a change is seen.** The person who wrote sees their change at once:
+the page shows it itself. Others on the same instance see it within a second
+or two, from the patch and then the refresh the write starts. Everyone else
+sees it within about 40 seconds: up to 10 seconds of CDN cache plus the
+30-second refresh of the other instances.
+
+- **Refresh.** When a request finds the snapshot over 30 seconds old, it
   answers at once from the current snapshot and starts one refresh in the
-  background; concurrent requests share it and two never run at once. Only an
-  instance with no snapshot yet makes its first requests wait for the refresh.
+  background. Every successful write (comment, vote, suggestion, verdict,
+  decision) starts one straight away, without waiting for that age. Refreshes
+  are coalesced: at most one runs and one waits; a write that lands while one
+  is running makes exactly one more start when it ends, so the write is always
+  included; and two starts are never closer than 2 seconds on one instance.
+  Only an instance with no snapshot yet makes its first requests wait for the
+  refresh.
   A refresh builds a new snapshot and swaps it in only when it completed, so a
   refresh that fails halfway leaves the previous one intact.
 - **Issues.** A refresh lists the repository's issues (all states, oldest
@@ -100,7 +112,7 @@ A number that is not in the snapshot is a 404. Both reads are sent with
   for their issues. The refreshes in between ask only for comments updated
   since the previous refresh, less a minute of overlap (`since`, oldest update
   first, at most 10 pages; more than that schedules a full reload), and merge
-  them by id, so new and edited comments appear within a minute.
+  them by id, so new and edited comments appear at the next refresh.
 - **Writes.** After a signed-in person's write succeeds, the snapshot is
   patched in place: the new comment, the comment and 👍 counts, the verdict,
   open or closed (a drop sets `closedAt`), a new suggestion. Everyone on that
@@ -153,9 +165,23 @@ Worst case per instance per hour: (60 + 12 + 4 + 6) × 60 = 82 × 60 = 4,920
 calls, below the installation's 5,000. The largest refresh is 30 issue pages +
 25 comment pages = 55 calls, which fits in a minute's 60, and 82 calls a minute
 is far below GitHub's secondary limit of 900 points a minute for `GET`
-requests. In the usual case, with the issue list on 2 pages and nothing
-changed, an hour costs about 60 `since` calls plus 6 full comment reloads whose
-unchanged pages are free. Several instances each have their own ceilings.
+requests.
+
+With today's issue list on 2 pages, a refresh is 3 calls (2 issue pages, which
+are `304` and free when unchanged, and 1 `since` comment call, which always
+counts against GitHub's limit):
+
+- **No writes:** one refresh every 30 seconds, 120 an hour: 120 × 3 = 360
+  calls in our ceiling, of which about 120 count at GitHub, plus 6 full
+  comment reloads whose unchanged pages are free.
+- **Writes without pause:** starts are at most one every 2 seconds, 30 a
+  minute, which would be 30 × 3 = 90 calls a minute; the refresh ceiling holds
+  them to 60 a minute (a refresh about every 3 seconds), so at most 60 × 60 =
+  3,600 refresh calls an hour. A refresh stopped by our own ceiling is started
+  again when the ceiling resets, without the 60-second wait used when GitHub
+  fails.
+
+Several instances each have their own ceilings.
 
 ### Other limits
 
