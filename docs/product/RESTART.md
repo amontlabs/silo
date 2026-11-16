@@ -35,11 +35,14 @@ decided entry by entry.
    [stages.json](stages.json)), and the Stack view on the dashboard.
 3. Now: the owner goes down the Stack and gives verdicts. The first 41 entries (four stages) are
    the starter.
-4. Next: start `main` again as the new tree, carrying the dashboard, this folder and the rules.
-   Wait for the owner to confirm the proposals above first.
-5. Then: design the shell's records, calls and events, and show it on the dashboard for approval
+4. Next: the Workshop, the public version of the dashboard on silo.amontlabs.com. Its design is being
+   settled with the owner (prototypes on the owner's Mac in `~/.local/state/silo-dashboard/design/`);
+   nothing of it is built. It needs a GitHub App for the bot and for sign-in, which only the owner can create.
+5. Then: start `main` again as the new tree, carrying the website, the Workshop, this folder and the
+   rules. Wait for the owner to confirm the proposals above first.
+6. Then: design the shell's records, calls and events, and show it on the dashboard for approval
    before any code.
-6. Then: build the taken entries in list order, one at a time, each proven from the command line
+7. Then: build the taken entries in list order, one at a time, each proven from the command line
    before it gets a screen.
 
 ## When a session starts
