@@ -276,6 +276,8 @@ function journeyCard({ id, title, body, counts, key }, items, view) {
 
 function journeysSection(view) {
   const { preamble, journeys } = view.journeys;
+  // The section has its own heading, so the file's leading `# ` title is not repeated.
+  const intro = preamble.replace(/^\s*# [^\n]*\n?/, '');
   const known = new Set(journeys.map((journey) => journey.id));
   const byJourney = new Map();
   const other = [];
@@ -288,7 +290,7 @@ function journeysSection(view) {
   return h`<section id="journeys" class="panel" data-region="journeys">
     <div class="section-head"><h2>Journeys</h2><span class="muted">docs/product/${DOC_FILES.journeys}</span></div>
     ${view.docs.journeys === null ? emptyState('No journeys yet (docs/product/JOURNEYS.md is missing).') : ''}
-    ${preamble.trim() ? h`<div class="prose journeys-intro">${raw(renderDoc(preamble))}</div>` : ''}
+    ${intro.trim() ? h`<div class="prose journeys-intro">${raw(renderDoc(intro))}</div>` : ''}
     <div class="journey-grid">${journeys.map((journey) => journeyCard(journey, byJourney.get(journey.id) || [], view))}</div>
     ${other.length ? h`<article class="journey-card" id="journey-other"><header><h3>Other</h3><span class="muted">items without a known journey</span></header>${journeyItems(other, view)}</article>` : ''}
     ${removedNotes(view.changes.changes, DOC_FILES.journeys)}
