@@ -2,9 +2,17 @@
 
 One line per product decision: the date, who decided, and what. Newest first. Agents read this
 before asking; a question answered here is not asked again. A decision that replaces an earlier
-one says so. Decisions made before 2026-11-15 are in [the direction page](../DIRECTION.md) until
-they are carried over.
+one says so. Decisions made before 2026-11-15 are in [the direction page](../DIRECTION.md); the ones the owner
+confirmed are carried on the feature list as verdicts.
 
+- 2026-11-16 · owner · Silo restarts from an empty tree and is rebuilt piece by piece, carefully, one accepted entry of the feature list at a time. The old tree is frozen at tag `legacy-2026-11-16` (branch `legacy`). The restart and its state are in [RESTART.md](RESTART.md).
+- 2026-11-16 · owner · The engine is written in Zig. It is the core piece: performant, secure, easy to reason about. The app, the command line and every tool only talk to it. Its design is data first, with events.
+- 2026-11-16 · owner · The Mac app is written in Swift, comes first, and holds no logic. macOS computers are driven from Swift directly, never through Rust bindings.
+- 2026-11-16 · owner · The engine also runs on Linux, to use a Linux machine as a host.
+- 2026-11-16 · owner · Properties are stated and checked as we build: state properties, formal verification, whatever shows what always holds.
+- 2026-11-16 · owner · The old code stays outside the new tree. It is read only when needed, through a fresh agent dedicated to that lookup, which brings back only what is relevant. Parts may be moved across, reviewed and cleaned up.
+- 2026-11-16 · owner · Same GitHub repository: the old history stays on `legacy`, `main` starts fresh. Agents may push to this repository's remote.
+- 2026-11-16 · owner · The feature list ([features.jsonl](features.jsonl)) is sorted so the most certain and most useful entries come first and every cut from the top is a product. The owner decides entry by entry on the dashboard's Stack; nothing is built without an accepted entry.
 - 2026-11-16 · orchestrator, at the owner's word ("go as you think is cleanest") · Merging a task into main changes main only. It does not write the merged packages and files into the saved recipe; a recipe changes when the owner says so. Not built yet: today a merge still updates the recipe.
 - 2026-11-16 · owner · The owner dashboard is a folder in this repository, not its own project.
 - 2026-11-16 · owner · T3 Code runs on the Mac and connects into the computer; it does not run inside.
