@@ -35,19 +35,26 @@ decided entry by entry.
    [stages.json](stages.json)), and the Stack view on the dashboard.
 3. Now: the owner goes down the Stack and gives verdicts. The first 41 entries (four stages) are
    the starter.
-4. Now, alongside the owner's verdicts: building the Workshop, the public version of the dashboard at
-   silo.amontlabs.com/workshop (the owner approved the second prototype on 2026-11-16: one list in
-   build order, rows that open in place). Three branches started that day: `workshop/page` (the page
-   and the trimmed home page, in `website/`), `workshop/server` (GitHub App sign-in and the API, as
-   Vercel functions; writes `docs/WORKSHOP.md`) and `workshop/tool` (`tools/workshop`: `setup`, `sync`,
-   `pull`, posting as the bot). Their shared contract and task texts are on the owner's Mac in
-   `~/.local/state/silo-dashboard/design/workshop-build/`. Each needs review before merge; the server
-   is the security boundary and gets two independent reviews. After the merge:
-   - run the page against `website/scripts/workshop-dev.mjs --fake` and fix what does not fit;
-   - the owner runs `tools/workshop/bin/workshop setup` (two clicks on GitHub), installs the App on
-     the repository and pastes the values of `~/.local/state/silo-workshop/vercel.env` into the Vercel
-     project (nobody else can do these);
-   - `workshop sync` creates the issues; check the live page; then the local dashboard can be retired.
+4. Now: taking the Workshop live. It is built and merged on `main` (2026-11-16): the page and the
+   trimmed home page in `website/`, the server in `website/server` and `website/api` (described in
+   [docs/WORKSHOP.md](../WORKSHOP.md)), and `tools/workshop` (`setup`, `store`, `doctor`, `sync`,
+   `pull`, `ask`, `comment`, `built`). It was run end to end only against the stand-in for GitHub
+   (`node website/scripts/workshop-dev.mjs --fake`). Nothing has met the real GitHub or a real
+   deployment yet. What is left, in order:
+   - `main` is NOT pushed since the Workshop merge: a push to `main` deploys the public site. The
+     merged work is on the remote branch `workshop-preview`, which Vercel builds as a preview (only
+     the owner can open it).
+   - The owner runs `tools/workshop/bin/workshop setup` (creates the public GitHub App "Silo
+     Workshop", two clicks), installs it on this repository only, and checks that expiring user
+     tokens are on.
+   - The owner sets the Vercel project: the seven variables from
+     `~/.local/state/silo-workshop/vercel.env`, the build command
+     `npm --prefix website run build:vercel`, the install command `npm --prefix website ci`.
+   - On the owner's word: push `main`, run `tools/workshop/bin/workshop sync` (creates the issues
+     and writes their numbers into `features.jsonl` and `DECISIONS.md`), then check on the live
+     site everything listed under "Not verified until deployed" in docs/WORKSHOP.md.
+   - Then retire the local dashboard (`tools/dashboard`), and read the owner's verdicts with
+     `workshop pull`.
 5. Then: start `main` again as the new tree, carrying the website, the Workshop, this folder and the
    rules. Wait for the owner to confirm the proposals above first.
 6. Then: design the shell's records, calls and events, and show it on the dashboard for approval
