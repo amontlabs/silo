@@ -1,140 +1,84 @@
 # Journeys
 
-How Silo is used, step by step. Each step carries what is true today:
+How Silo is used, step by step, and what works today.
 
 - `[built]`: someone drove it as a user and it works.
-- `[partial]`: it works with gaps, named on the line.
+- `[partial]`: it works with gaps, named in the step.
 - `[missing]`: it does not exist.
-- `[untested]`: the code and its docs say it exists; nobody has driven it as a user since it was
-  written.
+- `[untested]`: the code and its docs say it exists; nobody has driven it as a user since.
 
-Format, for agents: a journey is a `## ` heading with an `<!-- id: … -->` line under it. A step
-is a list item that starts with its status. A change that alters what a user does or sees
-updates the step in the same merge. The owner's dashboard reads this file.
+Format, for agents: a journey is a `## ` heading with an `<!-- id: … -->` line under it, then
+one paragraph that says what the user gets. A step is `- [status] Title. Detail`: a short title,
+then what is true today. A change to what a user does or sees updates its step in the same merge.
+The owner reads this file through [the dashboard](../OWNER-DASHBOARD.md).
 
-Status: the audit of 2026-11-16 drove the command-line steps on the Dev build. The app window,
-editors, GitHub access, secrets and other devices are not driven yet.
+Last driven: 2026-11-16, on the Dev build, from the command line. The app window, editors, GitHub
+access, secrets and other devices are not driven yet.
 
 ## 1. You live in a computer
 <!-- id: live -->
 
-Your setup is inside main, and your tools open into it as easily as they open a local folder.
-You stop working on your own machine.
+Your setup is inside main. Your tools open into it like a local folder.
 
-```mermaid
-flowchart LR
-  subgraph device["Your Mac"]
-    t3["T3 Code"]
-    editor["Editor"]
-    term["Terminal"]
-  end
-  subgraph main["main computer"]
-    agent["Claude Code, Codex"]
-    repo["Your repositories"]
-    tools["atelier, GUI automation"]
-  end
-  t3 --> agent
-  editor --> repo
-  term --> main
-```
-
-- [partial] Install Silo; the first run makes main. `silo up` makes main in under a minute. A
-  rebuilt Dev app can open on "Silo could not load" when an older engine left its record behind.
-  The app's own first run is not driven yet.
-- [partial] Pick Claude Code or Codex; Silo installs it in main and opens it. `silo agents install`
-  works and Silo's tools are connected in the agent. Opening it from the app is not driven yet.
-- [missing] T3 Code on the Mac connects to the agent inside main.
-- [untested] Your editor (VS Code, Zed) opens a folder in main.
-- [built] A terminal opens in main (`ssh main.silo-dev`).
-- [untested] Your repositories are reachable from main with GitHub access per repository.
-- [untested] Secrets work inside main without being readable there.
-- [untested] GUI automation runs inside main (desktop and computer use).
-- [missing] atelier runs inside main. The default recipe has no Node, so most tools need setup first.
-- [missing] One recipe sets all of the above up, so a new main is ready to use.
-- [partial] Making a recipe: a YAML file added with `silo recipe add`. There is no guided way to
-  create one.
+- [partial] First run makes main. `silo up` makes main in 58 s. A rebuilt Dev app can open on "Silo could not load" when an older engine left its record behind. The app's own first run is not driven.
+- [partial] Your agent is installed and opened. `silo agents install` puts Claude Code in main in 14 s, with Silo's tools connected. Opening it from the app is not driven.
+- [missing] T3 Code connects in from the Mac. T3 Code stays on the Mac and works with the agent inside main.
+- [untested] Your editor opens a folder in main. VS Code and Zed.
+- [built] A terminal opens in main. `ssh main.silo-dev`.
+- [untested] Your repositories are there. With GitHub access per repository.
+- [untested] Secrets work without being readable.
+- [untested] GUI automation runs inside. Desktop and computer use.
+- [missing] atelier runs inside. The default recipe has no Node, so most tools need setup first.
+- [missing] One recipe sets all of this up. A new main is ready to use.
+- [partial] Making a recipe is convenient. A YAML file added with `silo recipe add`. There is no guided way.
 
 ## 2. A computer per task
 <!-- id: task -->
 
 You or your agent make another computer for a task, work there, and bring the result back.
 
-```mermaid
-sequenceDiagram
-  participant You
-  participant Agent as Agent in main
-  participant Fork as Task computer
-  Agent->>Fork: fork main
-  Agent->>Fork: work
-  Fork-->>Agent: diff
-  Agent->>You: asks to merge, with the diff
-  You-->>Agent: allow or deny
-  Agent->>Fork: merge into main, or drop
-```
-
-- [built] The agent in main forks main without asking you.
-- [untested] The agent makes a disposable computer from a recipe. It works from the Mac; not
-  driven from inside main.
-- [partial] The agent runs commands in the fork and reads its logs and screen. Commands work;
-  logs and screen are not driven yet.
-- [partial] The diff shows code, packages, settings, files and databases. Code, packages and
-  settings are shown; databases are not driven yet.
-- [partial] Merging asks you in the Silo app, with the diff. The request is held and listed on the
-  Mac; the app's Pending page is not driven yet.
-- [built] Merge when main has not changed: every change is applied and main keeps running.
-- [untested] Merge when main has changed: item by item, and you choose on conflicts.
-- [partial] Undo a merge, drop a fork, replace main. Undo and drop work; a running fork must be
-  stopped before it can be dropped. Replace main is not driven yet.
-- [untested] You do each of these yourself, from the app or with `silo`.
-- [untested] Several task computers run at once without colliding.
+- [built] The agent forks main without asking. 21 s, from inside main.
+- [untested] The agent makes a disposable computer from a recipe. It works from the Mac; not driven from inside main.
+- [partial] The agent works in the fork. Commands work. Reading its logs and screen is not driven.
+- [partial] The diff shows everything that changed. Code, packages and settings are shown. Databases are not driven.
+- [partial] Merging asks you, with the diff. The request is held and listed on the Mac. The app's Pending page was used once, by the owner.
+- [built] Merge when main has not changed. Every change is applied and main keeps running.
+- [untested] Merge when main has changed. Item by item, and you choose on conflicts.
+- [partial] Undo, drop, replace main. Undo takes 19 s. A running fork must be stopped before it can be dropped. Replace main is not driven.
+- [untested] You do each of these yourself. From the app or with `silo`.
+- [untested] Several task computers run at once. Without colliding.
 
 ## 3. A task started from outside
 <!-- id: outside -->
 
-Something outside Silo starts a task in a fresh computer and gets the result. The computer starts
-from a recipe or a checkpoint, so there is no setup to wait for.
+A GitHub event, a schedule or a program starts a task in a fresh computer and gets the result. It starts from a recipe or a checkpoint, so there is no setup to wait for.
+
+- [built] A recipe is built once, then forked. 12 s per new computer.
+- [built] A computer starts from a checkpoint you chose. 13 s, and it can run a command as it starts.
+- [missing] One call starts a task. Which recipe or checkpoint, what to run, where the result goes. Today a caller chains several `silo` commands, a recipe and a command cannot go in one call, and the computer stays running afterwards.
+- [untested] The same call works on another device. `--device`, a Linux host.
+- [partial] The caller gets the result back. The exit status comes back. A report or files need a second command.
+- [missing] The task's work is merged into main.
+- [untested] GitHub Actions jobs run in fresh computers. `silo-runner`: the one trigger that exists, specific to GitHub jobs.
+- [missing] Fjord starts a task from a GitHub event.
 
 Example: someone opens a pull request. A computer starts from a checkpoint that already has the
-repository installed, pulls the pull request, tries it, writes a report and sends it to you. Its
-work can also be merged into main.
-
-```mermaid
-flowchart LR
-  trigger["A GitHub event,<br/>a schedule, a program"] -->|start a task| silo["Silo"]
-  ready["recipe or checkpoint"] --> silo
-  silo --> task["fresh computer<br/>here or on another device"]
-  task -->|result| trigger
-  task -.->|merge| main["main"]
-```
-
-- [built] A recipe is built once and later computers fork from its checkpoint.
-- [built] A computer starts from a checkpoint you chose, and can run a command as it starts.
-- [missing] One call starts a task: which recipe or checkpoint, what to run, where the result
-  goes. Today a caller chains several `silo` commands itself, a recipe and a command cannot go in
-  one call, and the computer stays running afterwards.
-- [untested] The same call works on another device (`--device`, a Linux host).
-- [partial] The caller gets the result back: exit status, a report, files. The exit status comes
-  back; a report or files need a second command.
-- [missing] The task's work is merged into main.
-- [untested] GitHub Actions jobs run in fresh computers (`silo-runner`). This is the one trigger
-  that exists, and it is specific to GitHub jobs.
-- [missing] Fjord starts a task from a GitHub event.
+repository installed, pulls the pull request, tries it, writes a report and sends it to you.
 
 ## Outside the three journeys
 <!-- id: other -->
 
-Features that exist and are not part of a journey above. Each is reviewed in turn; see
-[the product page](PRODUCT.md#everything-else). The audit completes this list.
+Features that exist and are not part of a journey above. Each is reviewed in turn: does it make the three journeys better?
 
 - [untested] macOS computers.
-- [untested] Container computers on Linux hosts.
-- [untested] Computers on another device (Connections) and hosting computers for other devices.
+- [untested] Container computers. On Linux hosts.
+- [untested] Computers on another device. Connections, and hosting computers for other devices.
 - [untested] The desktop viewer.
-- [untested] Sharing a computer as a file (export and import).
+- [untested] Sharing a computer as a file. Export and import.
 - [untested] Published websites and ports.
 - [untested] Folder forks.
 - [untested] Review requests and pull requests from a fork.
 - [untested] The hosted reviewer service.
 - [untested] Personal GitHub tokens.
 - [untested] Network policy per computer.
-- [untested] The audit log (Activity) and notifications.
+- [untested] The audit log and notifications.

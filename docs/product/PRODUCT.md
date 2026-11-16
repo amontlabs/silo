@@ -30,15 +30,6 @@ company fits the same description. Team features come later, on the same journey
 
 ## The loop
 
-```mermaid
-flowchart LR
-  main["main computer<br/>your setup, your agent"] -->|fork| task["task computer<br/>a full copy"]
-  recipe["recipe or checkpoint<br/>a ready starting point"] -->|start| task
-  task -->|diff| you{"you see everything<br/>that changed"}
-  you -->|merge| main
-  you -->|drop| gone["nothing left behind"]
-```
-
 1. **A computer.** Your setup and your agent live in one computer, called main. It is a virtual
    machine on your device. Nothing from your device is shared into it.
 2. **A copy per task.** The agent, or you, forks main, or starts a fresh computer from a recipe
