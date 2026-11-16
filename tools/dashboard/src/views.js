@@ -20,8 +20,10 @@ const STATE_LABEL = { waiting: 'waiting for you', answered: 'answered', closed: 
 const REACTION_WORD = { essential: 'essential', nice: 'nice to have', unneeded: 'not needed' };
 const FILE_LABEL = { [DOC_FILES.product]: 'Product', [DOC_FILES.decisions]: 'Decisions', [DOC_FILES.restart]: 'Restart' };
 const CHANGED_WORD = { changed: 'Changed', new: 'New', removed: 'Removed' };
-const ROW_KIND = { decision: 'Decision', verdict: 'Verdict', answer: 'Answer' };
+const ROW_KIND = { decision: 'Decision', verdict: 'Verdict', answer: 'Answer', list: 'From the list' };
 
+// Documents of the checkout: only absolute links (see markdown.js).
+const REPO = { repo: true };
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 export const minutesFor = (count) => Math.max(1, Math.round(0.6 * count));
 
@@ -360,7 +362,7 @@ function productView(ctx) {
   ${changedStrip(ctx)}
   <div class="hero" ${layout.hero.key ? h`id="product-${layout.hero.key}"` : ''}>
     <p class="eyebrow">The product</p>
-    <div class="hero-text">${raw(renderMarkdown(layout.hero.text))}</div>
+    <div class="hero-text">${raw(renderMarkdown(layout.hero.text, REPO))}</div>
     ${layout.hero.key ? changeMark(change(layout.hero.key)) : ''}
   </div>
   <div class="loop">${LOOP}</div>
@@ -369,7 +371,7 @@ function productView(ctx) {
     const info = ctx.notes.get(anchor) || EMPTY_NOTES;
     return h`<article class="tile ${tile.wide ? 'wide' : ''}" id="product-${tile.key}">
       <div class="tile-head"><h3>${tile.heading}</h3>${changeMark(change(tile.key))}</div>
-      <div class="prose">${raw(renderMarkdown(tile.text))}</div>
+      <div class="prose">${raw(renderMarkdown(tile.text, REPO))}</div>
       ${info.replies.length ? h`<details class="notes-of" id="notes-product-${tile.key}"><summary>${plural(info.notes, 'note')} from you</summary>${thread(info.replies)}</details>` : ''}
       ${noteControls({ anchor, anchorText: anchorText(tile.heading), info })}
     </article>`;
@@ -388,12 +390,34 @@ const VERDICT_PHRASE = {
   drop: (n) => `dropped ${n}`,
 };
 
-// "You took 6 entries, kept 1 for later, dropped 2".
-export function verdictSummary(entries) {
+const CARRIED_PHRASE = {
+  take: (n) => `${plural(n, 'entry', 'entries')} taken`,
+  refine: (n) => `${n} to refine`,
+  later: (n) => `${n} for later`,
+  drop: (n) => `${n} dropped`,
+};
+
+function countVerdicts(entries) {
   const counts = new Map();
   for (const entry of entries) counts.set(entry.verdict, (counts.get(entry.verdict) ?? 0) + 1);
+  return counts;
+}
+
+// What the owner did on one day, one count per verdict row: "You took 6
+// entries, kept 1 for later, dropped 2, cleared 1".
+export function verdictSummary(entries) {
+  const counts = countVerdicts(entries);
   const parts = VERDICT_ORDER.filter((verdict) => counts.get(verdict)).map((verdict) => VERDICT_PHRASE[verdict](counts.get(verdict)));
+  if (counts.get(null)) parts.push(`cleared ${counts.get(null)}`);
   return parts.length ? `You ${parts.join(', ')}` : '';
+}
+
+// Verdicts written in features.jsonl before the Stack existed; never "you":
+// "13 entries taken, 3 dropped, from decisions made before the Stack".
+export function carriedSummary(entries) {
+  const counts = countVerdicts(entries);
+  const parts = VERDICT_ORDER.filter((verdict) => counts.get(verdict)).map((verdict) => CARRIED_PHRASE[verdict](counts.get(verdict)));
+  return parts.length ? `${parts.join(', ')}, from decisions made before the Stack` : '';
 }
 
 // What the owner answered in one reply, in words.
@@ -417,12 +441,15 @@ const oneLine = (text, max = 240) => {
  * `date · who · text`), carried (verdicts that come only from
  * features.jsonl), total (DECISIONS.md items) }.
  * - decisions: the lines of DECISIONS.md for that day, in file order.
- * - verdicts: the current verdict of each entry whose newest store row is
- *   from that day: [{ id, name, verdict, note, onList }].
+ * - verdicts: every verdict row the owner gave that day, in the order given,
+ *   as history: [{ row, id, name, verdict (null: cleared), previous (the
+ *   verdict it replaced: the entry's row before, else the file's, else
+ *   null), previousFrom ('store' | 'file' | null), note, onList }].
  * - answers: the owner's replies on items from that day, newest first:
  *   [{ item, reply }].
- * `verdictRows` is the store's newest verdict row per entry; `features` the
- * current list (or null).
+ * carried: entries whose verdict comes only from features.jsonl (no row at
+ * all), with their `why`. `verdictRows` is every row of the store's verdicts
+ * table; `features` the current list (or null).
  */
 export function decisionTimeline({ decisionsText, features, verdictRows, items }) {
   const decisions = parseDecisions(decisionsText);
@@ -433,17 +460,20 @@ export function decisionTimeline({ decisionsText, features, verdictRows, items }
   };
   for (const { date, items: lines } of decisions.days) day(date).decisions.push(...lines);
   const byId = new Map((features ?? []).map((feature) => [feature.id, feature]));
-  const hasRow = new Set();
-  for (const row of verdictRows ?? []) {
-    hasRow.add(row.feature_id);
-    const date = localDay(row.created_at);
-    if (!row.verdict || !date) continue;
+  const before = new Map();
+  for (const row of [...(verdictRows ?? [])].sort((a, b) => a.id - b.id)) {
     const feature = byId.get(row.feature_id);
-    day(date).verdicts.push({ id: row.feature_id, name: feature?.name ?? row.name ?? row.feature_id, verdict: row.verdict, note: row.note || '', onList: Boolean(feature), n: feature?.n ?? Infinity });
+    const prior = before.get(row.feature_id);
+    const previous = prior ? prior.verdict : (feature?.verdict ?? null);
+    const previousFrom = prior ? 'store' : feature?.verdict ? 'file' : null;
+    before.set(row.feature_id, row);
+    const date = localDay(row.created_at);
+    if (!date) continue;
+    day(date).verdicts.push({ row: row.id, id: row.feature_id, name: feature?.name ?? row.name ?? row.feature_id, verdict: row.verdict, previous, previousFrom, note: row.note || '', onList: Boolean(feature) });
   }
   const carried = (features ?? [])
-    .filter((feature) => feature.verdict && !hasRow.has(feature.id))
-    .map((feature) => ({ id: feature.id, name: feature.name, verdict: feature.verdict, note: '', onList: true, n: feature.n }));
+    .filter((feature) => feature.verdict && !before.has(feature.id))
+    .map((feature) => ({ id: feature.id, name: feature.name, verdict: feature.verdict, why: feature.why, onList: true }));
   for (const item of items) {
     for (const reply of item.replies) {
       const date = reply.author === 'owner' && localDay(reply.created_at);
@@ -451,7 +481,6 @@ export function decisionTimeline({ decisionsText, features, verdictRows, items }
     }
   }
   for (const entry of days.values()) {
-    entry.verdicts.sort((a, b) => a.n - b.n);
     entry.answers.sort((a, b) => b.reply.id - a.reply.id);
   }
   const sorted = [...days.values()].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -471,11 +500,34 @@ function dayLabel(date) {
 const kindLabel = (kind) => h`<span class="rkind ${kind}">${ROW_KIND[kind]}</span>`;
 const who = (name) => h`<span class="who ${name === 'owner' ? 'you' : ''}">${name === 'owner' ? 'you' : name}</span>`;
 
+const chip = (verdict) => h`<span class="vchip small v-${verdict}">${VERDICT_CHIP[verdict]}</span>`;
+
+// One verdict row as history: the verdict given, what it changed, or a clear.
+function verdictLine(entry) {
+  const name = entry.onList ? h`<a href="#feature-${entry.id}">${entry.name}</a>` : h`<span>${entry.name}</span>`;
+  const was = entry.previous ? h`<s class="v-was">${chip(entry.previous)}</s>` : '';
+  let what;
+  if (entry.verdict === null) what = h`${was}<span class="v-change">cleared its verdict</span>`;
+  else if (entry.previous && entry.previous !== entry.verdict) what = h`${was}<span class="v-change">changed to ${VERDICT_CHIP[entry.verdict].toLowerCase()}</span>${chip(entry.verdict)}`;
+  else if (entry.previous && entry.previousFrom === 'file') what = h`${chip(entry.verdict)}<span class="v-change">confirmed</span>`;
+  else what = chip(entry.verdict);
+  return h`<li>${name}${what}${entry.note ? h`<span class="fold-note">${oneLine(entry.note)}</span>` : ''}</li>`;
+}
+
 function verdictFold(entries, id) {
   return h`<details class="dec fold" data-kind="verdict" id="${id}">
     <summary>${kindLabel('verdict')}${who('owner')}<span class="what">${verdictSummary(entries)}</span></summary>
+    <ul class="fold-list">${entries.map(verdictLine)}</ul>
+  </details>`;
+}
+
+// Verdicts from features.jsonl alone: marked as carried over, never as the
+// owner's, each with the `why` that says when and how it was decided.
+function carriedFold(entries) {
+  return h`<details class="dec fold" data-kind="verdict" id="verdicts-carried">
+    <summary>${kindLabel('list')}<span class="who carried">carried over</span><span class="what">${carriedSummary(entries)}</span></summary>
     <ul class="fold-list">${entries.map(
-      (entry) => h`<li>${entry.onList ? h`<a href="#feature-${entry.id}">${entry.name}</a>` : h`<span>${entry.name}</span>`}<span class="vchip small v-${entry.verdict}">${VERDICT_CHIP[entry.verdict]}</span>${entry.note ? h`<span class="fold-note">${oneLine(entry.note)}</span>` : ''}</li>`,
+      (entry) => h`<li><a href="#feature-${entry.id}">${entry.name}</a>${chip(entry.verdict)}${entry.why ? h`<span class="fold-note">${raw(renderInline(entry.why, REPO))}</span>` : ''}</li>`,
     )}</ul>
   </details>`;
 }
@@ -518,13 +570,13 @@ function decisionsView(ctx) {
     ${days.map((day) => {
       const { label, relative } = dayLabel(day.date);
       return h`<div class="day"><time datetime="${day.date}">${label}${relative ? h`<small>${relative}</small>` : ''}</time><div>
-        ${day.decisions.map((item) => h`<div class="dec" data-kind="decision">${kindLabel('decision')}${who(item.who)}<span class="what">${raw(renderInline(item.text))}</span></div>`)}
+        ${day.decisions.map((item) => h`<div class="dec" data-kind="decision">${kindLabel('decision')}${who(item.who)}<span class="what">${raw(renderInline(item.text, REPO))}</span></div>`)}
         ${day.verdicts.length ? verdictFold(day.verdicts, `verdicts-${day.date}`) : ''}
         ${day.answers.map((answer) => answerRow(answer, ctx))}
       </div></div>`;
     })}
-    ${other.length ? h`<div class="day"><time>Other</time><div>${other.map((entry) => h`<div class="dec other" data-kind="decision">${kindLabel('decision')}<span></span><div class="what prose">${raw(renderMarkdown(entry))}</div></div>`)}</div></div>` : ''}
-    ${carried.length ? h`<div class="day carried"><time>Carried over from earlier decisions</time><div>${verdictFold(carried, 'verdicts-carried')}</div></div>` : ''}
+    ${other.length ? h`<div class="day"><time>Other</time><div>${other.map((entry) => h`<div class="dec other" data-kind="decision">${kindLabel('decision')}<span></span><div class="what prose">${raw(renderMarkdown(entry, REPO))}</div></div>`)}</div></div>` : ''}
+    ${carried.length ? h`<div class="day carried"><time>Carried over from earlier decisions</time><div>${carriedFold(carried)}</div></div>` : ''}
   </div>
 </section>`;
 }
@@ -585,7 +637,7 @@ function topBar(ctx) {
 /**
  * view = { items (with state), docs: {product, decisions, restart} (text or null), changes: docChanges result,
  *   notes: readPrivateNotes result (optional), stack: { features, stages, skipped, rows } or null (optional),
- *   verdictRows: the store's newest verdict row per entry (optional; defaults to stack.rows) }
+ *   verdictHistory: every verdict row of the store, oldest first (optional; defaults to stack.rows) }
  */
 export function renderPage(view) {
   const items = view.items;
@@ -600,7 +652,7 @@ export function renderPage(view) {
     notes: noteIndex(items),
     targets: noteTargets(view.docs),
     changeIndex: new Map(view.changes.changes.map((change) => [`${change.file}#${change.key}`, change])),
-    timeline: decisionTimeline({ decisionsText: view.docs.decisions, features: stack?.features ?? null, verdictRows: view.verdictRows ?? view.stack?.rows ?? [], items }),
+    timeline: decisionTimeline({ decisionsText: view.docs.decisions, features: stack?.features ?? null, verdictRows: view.verdictHistory ?? view.stack?.rows ?? [], items }),
     noteCount: groups.reduce((sum, group) => sum + group.notes.length, 0),
     stack,
     entryById: new Map((stack?.features ?? []).map((feature) => [feature.id, feature])),

@@ -7,6 +7,7 @@
   const PREFIXES = [
     ['product-', 'product'],
     ['orphan-product-', 'product'],
+    ['changed', 'product'],
     ['change-', 'product'],
     ['mark-', 'product'],
     ['item-', 'for-you'],

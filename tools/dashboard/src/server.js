@@ -180,7 +180,7 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
       changes: docChanges(repoRoot, store.getSeen('docs_commit'), docs),
       notes: readPrivateNotes(store.home),
       stack: list && { ...list, rows },
-      verdictRows: rows,
+      verdictHistory: store.allVerdictRows(),
     };
   };
 

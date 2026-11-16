@@ -202,7 +202,9 @@ test('without JavaScript: a Stack tab, every entry readable in order, the contro
     const controls = card.slice(card.indexOf('<div class="controls'), card.indexOf('</article>'));
     const digest = entryDigest(list.features.find((other) => other.id === entry.id));
     assert.match(controls, new RegExp(`data-controls data-feature="${entry.id}" data-shown="0" data-seen="${digest}"`));
-    assert.equal((controls.match(/data-pick="(take|refine|later|drop)"/g) || []).length, 4);
+    // Four verdict buttons, and Confirm on a verdict carried over from the file.
+    assert.equal((controls.match(/data-pick="(take|refine|later|drop)"/g) || []).length, entry.verdict ? 5 : 4);
+    assert.equal(/>Confirm<\/button>/.test(controls), Boolean(entry.verdict));
     assert.equal((controls.match(/data-primary/g) || []).length, 1);
   }
   assert.match(html, /data-pick="refine" data-primary>Refine…/);

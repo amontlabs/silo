@@ -151,7 +151,10 @@ opens, Cmd+Enter sends Refine. Plain Enter in a box is a new line; Escape
 closes it. → skips to the next entry without a verdict, ← goes back one entry.
 After a verdict the card leaves and the next entry without one enters. An entry
 with a verdict shows it as a chip with its note, **Change** (the buttons again)
-and **Clear**, which clears the verdict and keeps any text typed in the box.
+and **Clear**, which clears the verdict and keeps any text typed in the box. A
+verdict that comes only from `features.jsonl` is marked "carried over", not as
+the owner's, with **Confirm**, which records the same verdict as the owner's
+own.
 
 The same safeguards as For you, in both queues: a card waits 0.7 s from the
 moment the owner can see it (its view is on screen and it is the current card:
@@ -235,12 +238,18 @@ kind label:
   on the first two ` · `. `owner` shows as "you"; any other value shows as
   written. The text is inline Markdown. An item without that shape shows in a
   group, Other. Text outside list items is not shown.
-- **Verdict**: the owner's current verdict on each list entry, on the day of
-  its newest row in the store. A day's verdicts fold into one row, "You took
-  6 entries, kept 1 for later, dropped 2", which opens to the entries (name,
-  verdict, note), each linking to its card in the Stack. A cleared verdict is
-  not shown. Entries whose verdict comes only from `features.jsonl` (no row in
-  the store) form the last group, "Carried over from earlier decisions".
+- **Verdict**: every verdict the owner gave on the Stack, as history: each
+  row of the store on its own day. A day's verdicts fold into one row that
+  counts what was done that day, "You took 6 entries, kept 1 for later,
+  dropped 2, cleared 1", and opens to the entries (name, verdict, note), each
+  linking to its card in the Stack. A change names the verdict it replaced,
+  struck ("~~Taken~~ changed to dropped"); a clear reads "cleared its
+  verdict"; the same verdict as the file's reads "confirmed".
+- **From the list**: entries whose verdict comes only from `features.jsonl`
+  (no row in the store at all) form the last group, "Carried over from
+  earlier decisions". It never says "you": its pill reads "carried over" and
+  its text "13 entries taken, 3 dropped, from decisions made before the
+  Stack"; each entry shows its `why`.
 - **Answer**: each owner reply on an item (agreed, disagreed, a chosen option,
   free text, a note on a product section): the item's title and what was
   answered, linking to the item.
@@ -330,7 +339,11 @@ account are out of scope (they can read the store directly anyway).
   and replies) goes through one renderer that escapes raw HTML, so a document
   cannot add controls, styles or page regions. Links and images keep to
   `http`, `https`, `mailto` and relative targets, checked after entities are
-  decoded; anything else renders as plain text. The page's script acts only on
+  decoded; anything else renders as plain text. In documents of the checkout
+  (`PRODUCT.md`, `DECISIONS.md`, `RESTART.md`, `what` and `why` in
+  `features.jsonl`) only absolute `http`, `https` and `mailto` links stay: a
+  relative link names a file the dashboard does not serve, so it shows as its
+  text. The page's script acts only on
   controls inside the wrappers the server renders for items, notes and Mark
   as read. Scripts are files (`/boot.js`, `/app.js`); the page has no
   inline script or event handler attributes.

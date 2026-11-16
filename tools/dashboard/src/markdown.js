@@ -38,33 +38,48 @@ export function safeHref(href) {
 
 const titleAttr = (title) => (title ? ` title="${esc(title)}"` : '');
 
-const renderer = {
-  html({ text }) {
-    return esc(text);
-  },
-  code({ text, lang }) {
-    if ((lang || '').trim().split(/\s+/)[0] === 'mermaid') return `<pre class="mermaid">${esc(text)}</pre>\n`;
-    return false;
-  },
-  link({ href, title, tokens }) {
-    const inner = this.parser.parseInline(tokens);
-    const url = safeHref(href);
-    return url === null ? inner : `<a href="${esc(url)}"${titleAttr(title)}>${inner}</a>`;
-  },
-  image({ href, title, text }) {
-    const url = safeHref(href);
-    return url === null ? esc(text) : `<img src="${esc(url)}" alt="${esc(text)}"${titleAttr(title)}>`;
-  },
-};
+// The href a link or image in a repository document may carry: only an
+// absolute http, https or mailto target. A relative path names a file in the
+// checkout, which the dashboard does not serve, so it renders as text.
+export function repoHref(href) {
+  const url = safeHref(href);
+  return url !== null && /^(?:https?|mailto):/i.test(url) ? url : null;
+}
 
-const plain = new Marked({ gfm: true, renderer });
+function rendererWith(checkHref) {
+  return {
+    html({ text }) {
+      return esc(text);
+    },
+    code({ text, lang }) {
+      if ((lang || '').trim().split(/\s+/)[0] === 'mermaid') return `<pre class="mermaid">${esc(text)}</pre>\n`;
+      return false;
+    },
+    link({ href, title, tokens }) {
+      const inner = this.parser.parseInline(tokens);
+      const url = checkHref(href);
+      return url === null ? inner : `<a href="${esc(url)}"${titleAttr(title)}>${inner}</a>`;
+    },
+    image({ href, title, text }) {
+      const url = checkHref(href);
+      return url === null ? esc(text) : `<img src="${esc(url)}" alt="${esc(text)}"${titleAttr(title)}>`;
+    },
+  };
+}
 
-/** Markdown to HTML. */
-export function renderMarkdown(markdown) {
-  return plain.parse(markdown ?? '');
+const plain = new Marked({ gfm: true, renderer: rendererWith(safeHref) });
+const repo = new Marked({ gfm: true, renderer: rendererWith(repoHref) });
+const pick = (options) => (options?.repo ? repo : plain);
+
+/**
+ * Markdown to HTML. `repo: true` is for documents of the checkout
+ * (docs/product, features.jsonl): links and images keep only absolute targets.
+ */
+export function renderMarkdown(markdown, options) {
+  return pick(options).parse(markdown ?? '');
 }
 
 /** One line of Markdown to inline HTML (no paragraph), with the same escaping and link rules. */
-export function renderInline(markdown) {
-  return plain.parseInline(String(markdown ?? '').replace(/\s*\n\s*/g, ' '));
+export function renderInline(markdown, options) {
+  return pick(options).parseInline(String(markdown ?? '').replace(/\s*\n\s*/g, ' '));
 }

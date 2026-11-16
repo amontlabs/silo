@@ -284,6 +284,10 @@ html:not(.js) .kind-filters { display: none; }
 .fold-list { list-style: none; margin: 6px 0 4px 80px; padding: 0; display: grid; gap: 4px; font-size: 14px; }
 .fold-list li { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .fold-note { color: var(--faint); font-size: 13px; }
+.fold-list .v-was { opacity: .55; }
+.v-change { color: var(--soft); font-size: 13px; }
+.rkind.list { color: var(--faint); }
+.who.carried { background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--faint); font-style: italic; }
 .day.carried time { color: var(--soft); font-weight: 560; font-size: 13.5px; }
 .who { font-size: 11.5px; font-weight: 650; padding: 1px 8px; border-radius: 99px; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--soft); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .who.you { background: var(--accent-soft); color: var(--accent); }

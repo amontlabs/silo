@@ -162,6 +162,8 @@ test('boot.js: any address gives a view; an empty, unknown or malformed one give
   assert.deepEqual(run('', 'other'), ['for-you', true], 'only the Stack can be the other default');
   assert.deepEqual(run('#orphan-product-the-problem', 'stack'), ['product', true]);
   assert.deepEqual(run('#change-product-md-intro', 'stack'), ['product', true]);
+  assert.deepEqual(run('#changed', 'stack'), ['product', true]);
+  assert.deepEqual(run('#changed', 'for-you'), ['product', true]);
   assert.deepEqual(run('#item-3', 'stack'), ['for-you', true]);
   assert.deepEqual(run('#earlier-items', 'stack'), ['for-you', true]);
   assert.deepEqual(run('#feature-engine-service', 'for-you'), ['stack', true]);

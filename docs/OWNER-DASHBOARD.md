@@ -27,8 +27,10 @@ One obvious starting point and three things to look at:
 - **For you**: a plain queue of the items agents posted, one card at a time;
   earlier items behind one disclosure.
 - **Decisions**: the one place for everything decided: the lines of
-  `DECISIONS.md`, the owner's verdicts on the list, and the owner's answers
-  on items, in one timeline.
+  `DECISIONS.md`, the owner's verdicts on the list (every change and clear
+  kept as history; verdicts that come only from `features.jsonl` are marked
+  "carried over", never as the owner's), and the owner's answers on items, in
+  one timeline.
 
 **Product** shows `PRODUCT.md`, takes notes on its sections, and says what
 changed in `PRODUCT.md`, `DECISIONS.md` and `RESTART.md` since the owner last

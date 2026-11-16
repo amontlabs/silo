@@ -8,6 +8,8 @@
 // escapes raw HTML.
 import { h, raw } from './html.js';
 import { renderInline } from './markdown.js';
+
+const REPO = { repo: true };
 import { STARTER_LAST_STAGE, appWords, currentVerdicts, entryDigest, nextUndecided, schematicParts, stackTotals } from './features.js';
 import { firstSentence } from './docs.js';
 
@@ -99,7 +101,7 @@ function oldCell(feature) {
 function suggestCell(feature) {
   return h`<div class="fact"><span class="fact-label">Suggested</span>
     <p class="sugg ${vClass(feature.suggest)}">${feature.suggest ? SUGGEST_WORD[feature.suggest] : 'No suggestion'}</p>
-    ${feature.why ? h`<small>${raw(renderInline(feature.why))}</small>` : ''}
+    ${feature.why ? h`<small>${raw(renderInline(feature.why, REPO))}</small>` : ''}
   </div>`;
 }
 
@@ -120,10 +122,13 @@ function entryControls(prep, feature, digest) {
     ([value, label]) =>
       h`<button class="btn ${value === primary ? 'go' : ''}" type="button" data-pick="${value}" ${value === primary ? h`data-primary` : ''}>${label}${value === primary ? h` <kbd>↵</kbd>` : ''}</button>`,
   );
+  // A verdict written in the file before the Stack is carried over, not the
+  // owner's: Confirm records the same verdict as the owner's own.
+  const carried = verdict && current.source === 'file';
   const now = verdict
-    ? h`<div class="verdict-now"><span class="vchip ${vClass(verdict)}">${VERDICT_CHIP[verdict]}</span>${current.source === 'file' ? h`<span class="v-from">from the list</span>` : ''}
+    ? h`<div class="verdict-now ${carried ? 'carried' : ''}"><span class="vchip ${vClass(verdict)}">${VERDICT_CHIP[verdict]}</span>${carried ? h`<span class="v-from">carried over</span>` : ''}
         ${current.note ? h`<p class="v-note">${current.note}</p>` : ''}
-        <span class="v-acts"><button class="btn small" type="button" data-change aria-expanded="false">Change</button><button class="btn ghost small" type="button" data-pick="clear">Clear</button></span></div>`
+        <span class="v-acts">${carried ? h`<button class="btn small go" type="button" data-pick="${verdict}">Confirm</button>` : ''}<button class="btn small" type="button" data-change aria-expanded="false">Change</button><button class="btn ghost small" type="button" data-pick="clear">Clear</button></span></div>`
     : '';
   return h`<div class="controls ${verdict ? 'decided' : ''}" data-controls data-feature="${feature.id}" data-shown="${current?.shown ?? 0}" data-seen="${digest}">
     ${now}
@@ -143,7 +148,7 @@ function entryCard(prep, feature) {
   return h`<article class="card entry" data-entry="${feature.id}" data-digest="${digest}" data-stage="${feature.stage}" data-decided="${verdict ?? ''}" ${feature.id === prep.start ? h`data-start` : ''} tabindex="-1" aria-label="${feature.n} of ${total}: ${feature.name}">
     <div class="card-top"><span class="kind stage-pill">${prep.stageTitle.get(feature.stage) ?? feature.stage}</span><span class="where">${feature.n} of ${total}</span></div>
     <h2>${feature.name}</h2>
-    ${feature.what ? h`<p class="body">${raw(renderInline(feature.what))}</p>` : ''}
+    ${feature.what ? h`<p class="body">${raw(renderInline(feature.what, REPO))}</p>` : ''}
     <div class="facts">${oldCell(feature)}${suggestCell(feature)}</div>
     ${showsUp(feature)}
     ${entryControls(prep, feature, digest)}
@@ -236,11 +241,11 @@ export function whereWeAre(steps) {
   const done = steps.filter((step) => step.state === 'done');
   const rest = steps.filter((step) => step.state !== 'done');
   return h`<nav class="where-we-are" id="where-we-are" aria-label="Where we are">
-    ${done.length ? h`<details class="ww-done" id="where-done"><summary>${done.length} done</summary><ol>${done.map((step) => h`<li>${raw(renderInline(step.text))}</li>`)}</ol></details>` : ''}
+    ${done.length ? h`<details class="ww-done" id="where-done"><summary>${done.length} done</summary><ol>${done.map((step) => h`<li>${raw(renderInline(step.text, REPO))}</li>`)}</ol></details>` : ''}
     ${rest.map((step) =>
       step.state === 'now'
-        ? h`<div class="ww-step ww-now"><span class="ww-word">Now</span><span>${raw(renderInline(step.text))}</span></div>`
-        : h`<div class="ww-step ww-later">${STEP_WORD[step.state] ? h`<span class="ww-word">${STEP_WORD[step.state]}</span>` : ''}<span>${raw(renderInline(firstSentence(step.text)))}</span></div>`,
+        ? h`<div class="ww-step ww-now"><span class="ww-word">Now</span><span>${raw(renderInline(step.text, REPO))}</span></div>`
+        : h`<div class="ww-step ww-later">${STEP_WORD[step.state] ? h`<span class="ww-word">${STEP_WORD[step.state]}</span>` : ''}<span>${raw(renderInline(firstSentence(step.text), REPO))}</span></div>`,
     )}
   </nav>`;
 }

@@ -572,6 +572,11 @@ export class Store {
       .all();
   }
 
+  // Every verdict row, oldest first: the history of the owner's verdicts.
+  allVerdictRows() {
+    return this.db.prepare('SELECT * FROM verdicts ORDER BY id').all();
+  }
+
   // Current verdicts an agent has not acknowledged yet (all current ones
   // with `all`), oldest first.
   verdictsToRead({ all = false } = {}) {
