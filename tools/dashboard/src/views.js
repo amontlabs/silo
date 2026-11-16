@@ -2,7 +2,7 @@
 // data-region so the browser can refresh one at a time.
 import { h, raw, join, esc } from './html.js';
 import { renderDoc, renderUntrusted, lexDoc } from './markdown.js';
-import { chipSteps, countListItems, DOC_FILES, lineDiff, parseJourneys, splitSections } from './docs.js';
+import { chipSteps, countListItems, DOC_FILES, STEP_STATUSES, lineDiff, parseJourneys, slugify, splitSections } from './docs.js';
 import { forYouOrder, lastActivity } from './state.js';
 
 const KIND_LABEL = { decide: 'Decide', look: 'Look', shipped: 'Shipped' };
@@ -242,11 +242,12 @@ function productSection(view) {
 }
 
 function progressView(counts) {
-  const total = counts.built + counts.partial + counts.missing;
+  const total = STEP_STATUSES.reduce((sum, name) => sum + counts[name], 0);
   if (!total) return h`<span class="muted">No steps</span>`;
   const seg = (name) => (counts[name] ? h`<span class="seg seg-${name}" style="flex:${counts[name]}" title="${counts[name]} ${name}"></span>` : '');
-  return h`<div class="progress" role="img" aria-label="${counts.built} built, ${counts.partial} partial, ${counts.missing} missing">${seg('built')}${seg('partial')}${seg('missing')}</div>
-    <div class="counts">${['built', 'partial', 'missing'].map((name) => h`<span class="count"><span class="chip step-${name}">${name}</span> ${counts[name]}</span>`)}</div>`;
+  const label = STEP_STATUSES.map((name) => `${counts[name]} ${name}`).join(', ');
+  return h`<div class="progress" role="img" aria-label="${label}">${STEP_STATUSES.map(seg)}</div>
+    <div class="counts">${STEP_STATUSES.map((name) => h`<span class="count"><span class="chip step-${name}">${name}</span> ${counts[name]}</span>`)}</div>`;
 }
 
 function journeyItems(items, view) {
@@ -309,6 +310,20 @@ function decisionsSection(view) {
   </section>`;
 }
 
+function privateSection(groups) {
+  if (!groups.length) return '';
+  return h`<section id="private" class="panel" data-region="private">
+    <div class="section-head"><h2>Private notes</h2><span class="muted">$SILO_DASHBOARD_HOME/private, not in the repository</span></div>
+    ${groups.map((group) => h`<div class="note-group">
+      ${group.folder ? h`<h3 class="note-folder">${group.folder}/</h3>` : ''}
+      ${group.notes.map((note) => h`<article class="doc-section note" id="note-${slugify(note.path) || 'note'}">
+        <div class="doc-meta"><code class="note-path">${note.path}</code></div>
+        <div class="prose">${raw(renderDoc(note.text))}</div>
+      </article>`)}
+    </div>`)}
+  </section>`;
+}
+
 function historySection(items, view) {
   return h`<section id="history" class="panel" data-region="history">
     <div class="section-head"><h2>History</h2><span class="muted">answered and closed items</span></div>
@@ -318,11 +333,12 @@ function historySection(items, view) {
 
 function navView(counts) {
   const link = (href, label, count, hot) => h`<a href="${href}">${label}${count === null ? '' : h`<span class="count-badge ${hot && count ? 'hot' : ''}">${count}</span>`}</a>`;
-  return h`<nav id="nav" data-region="nav" aria-label="Sections">${link('#for-you', 'For you', counts.forYou, true)}${link('#product', 'Product', null)}${link('#journeys', 'Journeys', counts.journeys)}${link('#decisions', 'Decisions', counts.decisions)}${link('#history', 'History', counts.history)}</nav>`;
+  return h`<nav id="nav" data-region="nav" aria-label="Sections">${link('#for-you', 'For you', counts.forYou, true)}${link('#product', 'Product', null)}${link('#journeys', 'Journeys', counts.journeys)}${link('#decisions', 'Decisions', counts.decisions)}${counts.notes ? link('#private', 'Private', counts.notes) : ''}${link('#history', 'History', counts.history)}</nav>`;
 }
 
 /**
- * view = { items (with state), docs: {product, journeys, decisions} (text or null), changes: docChanges result }
+ * view = { items (with state), docs: {product, journeys, decisions} (text or null), changes: docChanges result,
+ *   notes: readPrivateNotes result (optional) }
  */
 export function renderPage(view) {
   const journeys = parseJourneys(view.docs.journeys ?? '');
@@ -331,7 +347,9 @@ export function renderPage(view) {
   const waiting = view.items.filter((item) => item.state === 'waiting').sort(forYouOrder);
   const done = view.items.filter((item) => item.state !== 'waiting').sort((a, b) => (lastActivity(a) < lastActivity(b) ? 1 : -1));
   const decisionCount = view.docs.decisions === null ? 0 : countListItems(lexDoc(view.docs.decisions));
-  const counts = { forYou: waiting.length, journeys: journeys.journeys.length, decisions: decisionCount, history: done.length };
+  const notes = view.notes ?? [];
+  const noteCount = notes.reduce((sum, group) => sum + group.notes.length, 0);
+  const counts = { forYou: waiting.length, journeys: journeys.journeys.length, decisions: decisionCount, notes: noteCount, history: done.length };
   return h`<!doctype html>
 <html lang="en">
 <head>
@@ -350,6 +368,7 @@ ${forYouSection(waiting, full)}
 ${productSection(full)}
 ${journeysSection(full)}
 ${decisionsSection(full)}
+${privateSection(notes)}
 ${historySection(done, full)}
 </main>
 </body>

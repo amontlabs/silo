@@ -7,8 +7,12 @@ import { fileURLToPath } from 'node:url';
 
 export const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../bin/dashboard');
 
+// Every temporary folder of a test process lives under one base, removed on exit.
+const BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'silo-dashboard-test-'));
+process.on('exit', () => fs.rmSync(BASE, { recursive: true, force: true }));
+
 export function tempDir(prefix = 'dash-') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return fs.mkdtempSync(path.join(BASE, prefix));
 }
 
 export const PRODUCT = `# Silo

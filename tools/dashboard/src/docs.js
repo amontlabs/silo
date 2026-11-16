@@ -12,7 +12,8 @@ export const DOC_FILES = Object.freeze({
   decisions: 'DECISIONS.md',
 });
 
-const STEP = /^(\s*[-*+]\s+)\[(built|partial|missing)\]\s*/i;
+export const STEP_STATUSES = Object.freeze(['built', 'partial', 'missing', 'untested']);
+const STEP = /^(\s*[-*+]\s+)\[(built|partial|missing|untested)\](?=\s|$)\s*/i;
 const FENCE = /^\s{0,3}(```|~~~)/;
 
 export function slugify(text) {
@@ -91,7 +92,9 @@ export function splitSections(text) {
 
 // Journeys: each `## ` heading is one. An `<!-- id: slug -->` line right under
 // the heading gives its id; otherwise the id is the slugified heading. Steps
-// are list items that start with [built], [partial] or [missing].
+// are list items that start with [built], [partial], [missing] or [untested]
+// (exists in the docs or code, not yet driven as a user). Any other [word]
+// stays plain text.
 export function parseJourneys(text) {
   const { preamble, sections } = splitSections(text);
   const used = new Set();
@@ -116,7 +119,7 @@ export function parseJourneys(text) {
       const match = !inFence && STEP.exec(line);
       if (match) steps.push({ status: match[2].toLowerCase(), text: line.slice(match[0].length).trim() });
     });
-    const counts = { built: 0, partial: 0, missing: 0 };
+    const counts = Object.fromEntries(STEP_STATUSES.map((status) => [status, 0]));
     for (const step of steps) counts[step.status] += 1;
     return { id: unique, title: section.heading, key: section.key, body, steps, counts };
   });

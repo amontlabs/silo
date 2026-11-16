@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DashboardError, ConflictError, NotFoundError, ValidationError } from './errors.js';
 import { DOC_FILES, docChanges, headCommit, readDoc } from './docs.js';
+import { readPrivateNotes } from './private.js';
 import { renderPage } from './views.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -153,7 +154,12 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
   const pageView = () => {
     const docs = {};
     for (const [name, file] of Object.entries(DOC_FILES)) docs[name] = readDoc(repoRoot, file);
-    return { items: store.itemsWithState(), docs, changes: docChanges(repoRoot, store.getSeen('docs_commit'), docs) };
+    return {
+      items: store.itemsWithState(),
+      docs,
+      changes: docChanges(repoRoot, store.getSeen('docs_commit'), docs),
+      notes: readPrivateNotes(store.home),
+    };
   };
 
   async function handle(req, res) {

@@ -2,7 +2,7 @@
 // with the server's fresh HTML. Everything else is plain server-rendered HTML.
 
 const REGIONS_AFTER_REPLY = ['nav', 'for-you', 'journeys', 'history'];
-const ALL_REGIONS = ['nav', 'for-you', 'product', 'journeys', 'decisions', 'history'];
+const ALL_REGIONS = ['nav', 'for-you', 'product', 'journeys', 'decisions', 'private', 'history'];
 
 function openDetailIds() {
   return [...document.querySelectorAll('details[id][open]')].map((el) => el.id);

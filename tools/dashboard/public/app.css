@@ -22,6 +22,8 @@
   --warn-soft: #fff4d1;
   --bad: #b42318;
   --bad-soft: #fde8e6;
+  --untested: #7a3fc4;
+  --untested-soft: #f1e9fc;
   --add-bg: #e6f6ea;
   --del-bg: #fdebe9;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 6%);
@@ -54,6 +56,8 @@
     --warn-soft: #382d0d;
     --bad: #ff8d83;
     --bad-soft: #3d1a17;
+    --untested: #c4a2f5;
+    --untested-soft: #2c1f42;
     --add-bg: #14301d;
     --del-bg: #3a1a18;
     --shadow: 0 1px 2px rgb(0 0 0 / 40%);
@@ -263,6 +267,11 @@ main {
 .chip.change-removed {
   background: var(--bad-soft);
   color: var(--bad);
+}
+
+.chip.step-untested {
+  background: var(--untested-soft);
+  color: var(--untested);
 }
 
 .chip.journey {
@@ -669,6 +678,10 @@ details.item[open] > summary::before {
   background: var(--warn);
 }
 
+.seg-untested {
+  background: var(--untested);
+}
+
 .seg-missing {
   background: var(--border-strong);
 }
@@ -795,6 +808,21 @@ details.item[open] > summary::before {
 }
 
 /* ---- rendered Markdown ---- */
+
+.note-group + .note-group {
+  margin-top: 24px;
+}
+
+.note-folder {
+  margin: 0 0 10px;
+  font: 600 13px/1.4 var(--mono);
+  color: var(--muted);
+}
+
+.note-path {
+  font: 12px/1.4 var(--mono);
+  color: var(--muted);
+}
 
 .prose {
   overflow-wrap: anywhere;
