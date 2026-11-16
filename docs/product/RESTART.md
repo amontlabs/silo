@@ -61,7 +61,6 @@ decided entry by entry.
   a fresh agent for that one lookup, give it the entry's line in
   [old-code-map.jsonl](old-code-map.jsonl) (the files, calls and lessons worth reading), and take
   back only what is relevant.
-- [JOURNEYS.md](JOURNEYS.md) and [PRODUCT.md](PRODUCT.md) describe the old app and the three
-  journeys. The list replaces the journeys; the product page is rewritten with the new tree.
+- The journeys document of the old app is gone: the list replaces it.
 - The raw material behind the list (six sweeps, 427 entries, the script that merged them) is on the
   owner's Mac in `~/.local/state/silo-dashboard/sweep/`.

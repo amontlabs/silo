@@ -2,11 +2,9 @@
 
 This page says what Silo is, who it is for and what comes first. It is the source of truth for
 product questions: agents read it before they build, and the owner changes it by deciding
-something (see [decisions](DECISIONS.md)). How people use Silo, step by step and with what works
-today, is in [journeys](JOURNEYS.md). The other pages in `docs/` describe how the code works.
-
-Status: first draft of 2026-11-16, written from the owner's answers. Not yet checked against the
-running app.
+something (see [decisions](DECISIONS.md)). Silo is being rebuilt from an empty tree: the features,
+in the order they are built, are [the list](features.jsonl), and the state of that work is in
+[RESTART.md](RESTART.md).
 
 ## In one sentence
 
@@ -17,7 +15,7 @@ everything the copy changed, and lets you merge it or drop it.
 
 A developer who runs several coding agents and wants them to work with full access, without
 giving them their own machine. The first user is the owner, on a Mac. A developer inside a
-company fits the same description. Team features come later, on the same journeys.
+company fits the same description. Team features come later, on top of the same product.
 
 ## The problem
 
@@ -44,22 +42,20 @@ running. Other tools have those parts; none has the loop for a whole machine.
 
 ## What comes first
 
-Three journeys, in this order. They are described in [journeys](JOURNEYS.md).
+Four stages of [the list](features.jsonl), in this order. Together they are the starter: a product
+the owner uses daily.
 
-1. **You live in a computer.** Your tools open into main as easily as they open a local folder.
-2. **A computer per task.** You or your agent make another computer for a task and bring the
-   result back.
-3. **A task started from outside.** Something outside Silo (a GitHub event, a schedule, another
-   program) starts a task in a fresh computer, on your device or another one, and gets the
-   result.
+1. **Shell.** One computer you can open from the app and the command line.
+2. **The loop.** Checkpoint, fork, see what changed, merge or drop.
+3. **Agent inside.** Your agent lives in the computer and asks you for anything wider.
+4. **Living in it.** Your setup, tools and access are inside main.
 
-The aim is the simplest version of these three that is solid and pleasant, then more.
+After the starter come tasks started from outside, other devices, and the rest of the list.
 
 ## Everything else
 
-Silo has many features that are not part of these three journeys. They stay in the product. Each
-is reviewed in turn against one question: does it make the three journeys better? The verdict is
-recorded in [decisions](DECISIONS.md). Until a feature is reviewed, nobody extends it.
+Every feature Silo had, wanted or considered is on the list. The owner decides each one: take,
+refine, later or drop. Nothing is built without an accepted entry.
 
 ## Rules that hold everywhere
 
@@ -70,7 +66,7 @@ recorded in [decisions](DECISIONS.md). Until a feature is reviewed, nobody exten
 - **Git words.** Checkpoint, fork, diff, restore, merge, undo. One word per idea
   ([vocabulary](../SiloUI-VOCABULARY.md)).
 - **Security is built properly, and is not the current focus.** A change is made safely; security
-  work for its own sake waits until the journeys are good.
+  work for its own sake waits until the starter is good.
 
 ## What Silo is not
 
