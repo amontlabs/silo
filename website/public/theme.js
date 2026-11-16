@@ -1,4 +1,4 @@
-// Shared by the landing page and its same-origin demo, before first paint.
+// Shared by the home page and the Workshop, before first paint.
 (() => {
   const key = 'silo-website-theme';
   const system = matchMedia('(prefers-color-scheme: dark)');
@@ -13,19 +13,10 @@
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#171a1b' : '#f7f7f4');
     document.querySelectorAll('[data-theme-trigger]').forEach(trigger => { trigger.title = `Color theme: ${preference[0].toUpperCase()}${preference.slice(1)}`; });
     document.querySelectorAll('[data-theme-option]').forEach(option => { option.setAttribute('aria-checked', String(option.dataset.themeOption === preference)); });
-    document.querySelectorAll('[data-dark-source]').forEach(source => { source.media = dark ? 'all' : 'not all'; });
-    document.querySelectorAll('iframe.interactive-demo').forEach(frame => {
-      frame.contentWindow?.postMessage({ type: 'silo-theme', preference }, location.origin);
-    });
   }
   system.addEventListener('change', apply);
   addEventListener('storage', event => {
     if (event.key === key || event.key === null) { preference = valid(event.newValue); apply(); }
-  });
-  addEventListener('message', event => {
-    if (window.parent !== window && event.source === window.parent && event.origin === location.origin && event.data?.type === 'silo-theme') {
-      preference = valid(event.data.preference); apply();
-    }
   });
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('[data-theme-picker]').forEach(picker => {
@@ -62,7 +53,6 @@
         close(true);
       }));
     });
-    document.querySelectorAll('iframe.interactive-demo').forEach(frame => frame.addEventListener('load', apply));
     apply();
   });
   apply();

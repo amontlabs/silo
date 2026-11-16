@@ -7,12 +7,12 @@
     <meta name="theme-color" content="#f7f7f4" />
     <meta
       name="description"
-      content="Give each AI agent its own Linux or macOS virtual machine, with only the repositories and credentials you pick. An open-source, embeddable engine for Apple Silicon Macs."
+      content="Give each agent its own Linux or macOS computer, with only the repositories and keys you pick."
     />
     <meta property="og:title" content="Silo — Computers for your agents" />
     <meta
       property="og:description"
-      content="Give each AI agent its own Linux or macOS virtual machine, with only the repositories and credentials you pick. An open-source, embeddable engine for Apple Silicon Macs."
+      content="Give each agent its own Linux or macOS computer, with only the repositories and keys you pick."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://silo.amontlabs.com/" />
@@ -154,20 +154,13 @@
           </div>
         </div>
         <section class="why section joint" id="why" aria-labelledby="why-title">
-          <div class="section-heading">
+          <div class="why-layout">
             <div>
               <p class="eyebrow">WHY SILO</p>
               <h2 id="why-title">Assume the agent is compromised.</h2>
+              <p class="why-line">Limit what it can reach and what it is allowed to do.</p>
             </div>
-            <p>
-              Limit what it can reach and what it is<br class="desktop-break" />
-              allowed to do. Say plainly what that misses.
-            </p>
-          </div>
-          <div class="why-grid">
-            <article>
-              <h3>The problem</h3>
-              <p>
+            <p class="why-text">
                 Agents are prompt-injected through what they read. In
                 <a href="https://oddguan.com/blog/comment-and-control-prompt-injection-credential-theft-claude-code-gemini-cli-github-copilot/">Comment and Control</a>,
                 pull request titles and issue comments made coding agents in
@@ -178,7 +171,6 @@
                 found frontier models reliably escape common container
                 misconfigurations.
               </p>
-            </article>
           </div>
         </section>
       </main>

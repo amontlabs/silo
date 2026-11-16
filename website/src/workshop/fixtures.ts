@@ -1,5 +1,5 @@
 // Small stand-ins for docs/product: tests never read the real files.
-import { parseDecisions, parseFeatures, parseStages } from './plan';
+import { parseDecisions, parseFeatures, parseStages } from './data';
 import type { BuildData, LiveIssue, LiveState } from './plan';
 
 const line = (fields: Record<string, unknown>) => JSON.stringify({ old: 'built', old_lines: 0, reuse: 'reuse', app: null, cli: null, why: null, suggest: 'take', verdict: null, ...fields });
@@ -7,7 +7,7 @@ const line = (fields: Record<string, unknown>) => JSON.stringify({ old: 'built',
 export const featuresText = [
   line({ n: 1, id: 'engine', stage: 'shell', name: 'The engine runs on its own', what: 'A background engine owns every computer.', verdict: 'take', why: 'The core piece.' }),
   line({ n: 2, id: 'calls', stage: 'shell', name: 'Every call defined once', what: 'Each call is written down once.', verdict: 'take' }),
-  line({ n: 3, id: 'computers', stage: 'shell', name: 'Create and delete a computer', what: 'Make a Linux computer.', why: 'Key records by id.', recordings: ['create.mp4', '../evil.mp4'] }),
+  line({ n: 3, id: 'computers', stage: 'shell', name: 'Create and delete a computer', what: 'Make a Linux computer.', why: 'Key records by id.', recordings: ['create.mp4'] }),
   line({ n: 4, id: 'exec', stage: 'shell', name: 'Run a command', what: 'Run a command inside.' }),
   line({ n: 5, id: 'fork', stage: 'loop', name: 'Fork a computer', what: 'Copy a computer.' }),
   line({ n: 6, id: 'shells', stage: 'living', name: 'Your shell inside', what: 'Your dotfiles.', verdict: 'take' }),
@@ -33,7 +33,8 @@ Intro paragraph.
 `;
 
 export function buildData(): BuildData {
-  return { features: parseFeatures(featuresText), stages: parseStages(stagesText), decided: parseDecisions(decisionsText) };
+  const stages = parseStages(stagesText);
+  return { features: parseFeatures(featuresText, stages), stages, decided: parseDecisions(decisionsText) };
 }
 
 const day = '2026-11-14T10:00:00Z';

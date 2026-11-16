@@ -3,7 +3,8 @@ import type { FormEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api, ApiError, loginUrl } from './api';
 import type { Comment, IssueDetail, Me } from './api';
-import { RichText } from './RichText';
+import { RichText, safeHref } from './RichText';
+import { applyKept, keep, keptComments } from './writes';
 import {
   allRows, awaitsVerdict, buildPlan, isDecided, relativeTime, shortDate, stagePhrase,
 } from './plan';
@@ -12,6 +13,23 @@ import type { BuildData, LiveIssue, LiveState, Row, Verdict } from './plan';
 /** A row that just opened refuses its main action for this long. */
 export const OPEN_GUARD_MS = 700;
 const NOTICE_MS = 8000;
+
+function decodeHash(hash: string): string | null {
+  try {
+    return decodeURIComponent(hash.replace(/^#/, '')) || null;
+  } catch {
+    return null;
+  }
+}
+
+function takeSigninFailure(): boolean {
+  const params = new URLSearchParams(location.search);
+  if (params.get('signin') !== 'failed') return false;
+  params.delete('signin');
+  const search = params.toString();
+  history.replaceState(null, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash}`);
+  return true;
+}
 
 type Live = { status: 'loading' | 'ok' | 'unavailable'; state: LiveState | null };
 type Detail = IssueDetail | 'loading' | 'error';
@@ -75,6 +93,8 @@ export function App({ data, accountSlot }: AppProps) {
   const [suggestDraft, setSuggestDraft] = useState({ title: '', text: '' });
   const [announce, setAnnounce] = useState('');
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [votes, setVotes] = useState<Record<number, boolean>>({});
+  const [signinFailed] = useState(takeSigninFailure);
   const openedAt = useRef(0);
   const openKeyRef = useRef<string | null>(null);
   const pendingRef = useRef(new Set<number>());
@@ -91,7 +111,7 @@ export function App({ data, accountSlot }: AppProps) {
   useEffect(() => {
     let cancelled = false;
     api.state().then(
-      (state) => { if (!cancelled) setLive({ status: 'ok', state: { ...state, issues: state.issues ?? {} } }); },
+      (state) => { if (!cancelled) setLive({ status: 'ok', state: applyKept({ ...state, issues: state.issues ?? {} }, Date.now()) }); },
       () => { if (!cancelled) setLive({ status: 'unavailable', state: null }); },
     );
     api.me().then(
@@ -121,7 +141,7 @@ export function App({ data, accountSlot }: AppProps) {
     if (n <= 0) return;
     setDetails((current) => (current[n] && current[n] !== 'error' && !force ? current : { ...current, [n]: current[n] && current[n] !== 'error' ? current[n] : 'loading' }));
     api.issue(n).then(
-      (detail) => setDetails((current) => ({ ...current, [n]: detail })),
+      (detail) => setDetails((current) => ({ ...current, [n]: { ...detail, comments: keptComments(n, detail.comments ?? [], Date.now()) } })),
       () => setDetails((current) => (typeof current[n] === 'object' ? current : { ...current, [n]: 'error' })),
     );
   }, []);
@@ -151,11 +171,25 @@ export function App({ data, accountSlot }: AppProps) {
 
   const toggleRow = (row: Row) => openRow(openKey === row.key ? null : row.key);
 
-  // Details of the open row load once the live state arrives.
+  // Details of the open row load once the live state arrives; a signed-in person's own vote with them.
   useEffect(() => {
     const row = openKey ? rowByKey.get(openKey) : undefined;
     if (liveOk && row?.issue != null && details[row.issue] === undefined) loadDetail(row.issue);
   }, [liveOk, openKey, rowByKey, details, loadDetail]);
+  const askedVotes = useRef(new Set<number>());
+  useEffect(() => {
+    const row = openKey ? rowByKey.get(openKey) : undefined;
+    const n = row?.issue;
+    if (!liveOk || !me || n == null || n <= 0 || (row?.kind !== 'entry' && row?.kind !== 'suggestion') || askedVotes.current.has(n)) return;
+    askedVotes.current.add(n);
+    api.myVote(n).then(
+      (on) => setVotes((current) => (n in current ? current : { ...current, [n]: on })),
+      (error) => {
+        askedVotes.current.delete(n);
+        if (error instanceof ApiError && error.status === 401) signedOut();
+      },
+    );
+  });
 
   // Deep links: `#entry-<id>`, `#issue-<n>` or `#decided-<i>` opens that row, now or once it exists.
   const openRowRef = useRef(openRow);
@@ -164,8 +198,11 @@ export function App({ data, accountSlot }: AppProps) {
   rowByKeyRef.current = rowByKey;
   useEffect(() => {
     const follow = () => {
-      const key = decodeURIComponent(location.hash.slice(1));
-      if (!key) return;
+      const key = decodeHash(location.hash);
+      if (!key) {
+        wantedHash.current = null;
+        return;
+      }
       if (rowByKeyRef.current.has(key)) {
         wantedHash.current = null;
         openRowRef.current(key, { focus: true });
@@ -182,14 +219,25 @@ export function App({ data, accountSlot }: AppProps) {
     openRow(key, { focus: true });
   }, [rowByKey, openRow]);
 
+  // A link to a row that does not exist falls back to the normal start once the live state is known.
+  useEffect(() => {
+    if (live.status === 'loading' || !wantedHash.current || rowByKey.has(wantedHash.current)) return;
+    wantedHash.current = null;
+    setHash(null);
+  }, [live.status, rowByKey]);
+
   // A person who can decide starts on the first undecided entry.
   useEffect(() => {
     if (!canDecide || autoOpened.current) return;
     autoOpened.current = true;
+    if (wantedHash.current && !rowByKey.has(wantedHash.current)) {
+      wantedHash.current = null;
+      setHash(null);
+    }
     if (openKeyRef.current || wantedHash.current) return;
     const first = queue.find((row) => awaitsVerdict(row) && live.state?.issues[row.issue as number]);
     if (first) openRow(first.key, { focus: true });
-  }, [canDecide, queue, openRow, live.state]);
+  }, [canDecide, queue, openRow, live.state, rowByKey]);
 
   useEffect(() => {
     if (!focusKey) return;
@@ -206,9 +254,47 @@ export function App({ data, accountSlot }: AppProps) {
     setPending(new Set(pendingRef.current));
   };
 
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const remember = (n: number, fields: (keyof LiveIssue)[], comment?: Comment) => {
+    const issue = liveRef.current.state?.issues[n];
+    if (!issue || n <= 0) return;
+    keep(n, Object.fromEntries(fields.map((field) => [field, issue[field]])) as Partial<LiveIssue>, Date.now(), comment);
+  };
+
+  function signedOut() {
+    setMe(null);
+    setVotes({});
+    setRefining(null);
+    setNotice('Sign in again.');
+  }
+
   const failed = (what: string, error: unknown) => {
+    if (error instanceof ApiError && error.status === 401) {
+      signedOut();
+      return;
+    }
     const message = error instanceof ApiError ? error.message : 'Something went wrong.';
     setNotice(`${what}: not saved. ${message}`);
+  };
+
+  const rowShown = (row: Row): boolean => {
+    const onDecisions = row.kind === 'decision' || row.kind === 'decided';
+    if ((tab === 'decisions') !== onDecisions) return false;
+    if (row.status === 'dropped' && (row.kind === 'entry' || row.kind === 'suggestion')) return droppedOpen;
+    if (row.kind === 'suggestion') return liveOk;
+    if (row.kind === 'entry') {
+      const index = plan.stages.findIndex((group) => group.stage.id === row.stage);
+      return index !== -1 && (index <= plan.lastOpenStage || stageOpen[row.stage as string] === true);
+    }
+    return true;
+  };
+
+  /** The one guard every verdict passes, by key or by click. */
+  const verdictReady = (row: Row): boolean => {
+    const n = row.issue;
+    return canDecide && n !== null && n > 0 && Boolean(live.state?.issues[n]) && !pendingRef.current.has(n)
+      && openKeyRef.current === row.key && Date.now() - openedAt.current >= OPEN_GUARD_MS;
   };
 
   const advanceFrom = (row: Row) => {
@@ -222,7 +308,11 @@ export function App({ data, accountSlot }: AppProps) {
   const sendVerdict = async (row: Row, verdict: Verdict | null, note?: string) => {
     const n = row.issue;
     const before = n === null ? undefined : live.state?.issues[n];
-    if (n === null || !before || pendingRef.current.has(n)) return;
+    if (n === null || !before || !verdictReady(row)) return;
+    if (note !== undefined) {
+      setDrafts((current) => ({ ...current, [`note-${row.key}`]: '' }));
+      setRefining(null);
+    }
     const change = verdictPatch(verdict);
     setBusy(n, true);
     setNotice(null);
@@ -230,11 +320,16 @@ export function App({ data, accountSlot }: AppProps) {
     if (openKey === row.key) advanceFrom(row);
     try {
       await api.verdict(n, verdict, note);
+      remember(n, ['verdict', 'state', 'reason', 'closedAt']);
       if (note !== undefined) loadDetail(n, true);
     } catch (error) {
       patchIssue(n, (issue) => (issue.verdict === change.verdict && issue.state === change.state
         ? { verdict: before.verdict, state: before.state, reason: before.reason, closedAt: before.closedAt }
         : null));
+      if (note !== undefined) {
+        setDrafts((current) => ({ ...current, [`note-${row.key}`]: current[`note-${row.key}`] || note }));
+        if (openKeyRef.current === row.key) setRefining(row.key);
+      }
       failed(row.name, error);
     } finally {
       setBusy(n, false);
@@ -242,9 +337,9 @@ export function App({ data, accountSlot }: AppProps) {
   };
 
   const mainAction = (row: Row) => {
-    if (!canDecide || Date.now() - openedAt.current < OPEN_GUARD_MS) return;
-    if (row.issue === null || !live.state?.issues[row.issue] || pendingRef.current.has(row.issue)) return;
+    if (!verdictReady(row)) return;
     if (awaitsVerdict(row)) void sendVerdict(row, 'take');
+    else if (row.carried && row.fileVerdict === 'refine') setRefining(row.key);
     else if (row.carried && row.fileVerdict) void sendVerdict(row, row.fileVerdict);
   };
 
@@ -253,10 +348,13 @@ export function App({ data, accountSlot }: AppProps) {
     if (event.key !== 'Enter' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (!canDecide || !openKey || isField(event.target)) return;
     const row = rowByKey.get(openKey);
-    if (!row || !(awaitsVerdict(row) || row.carried)) return;
+    if (!row || !(awaitsVerdict(row) || row.carried) || !rowShown(row)) return;
     const target = event.target as HTMLElement | null;
+    const item = document.getElementById(openKey);
+    // Other buttons and links in the row keep their own Enter.
+    const control = target?.closest('button, a, summary');
     const onRow = target === document.body || target === document.documentElement
-      || (target?.classList.contains('ws-row') && target.closest('.ws-item')?.id === openKey);
+      || (item !== null && target !== null && item.contains(target) && (!control || control.classList.contains('ws-row')));
     if (!onRow) return;
     event.preventDefault();
     if (event.repeat) return;
@@ -282,6 +380,7 @@ export function App({ data, accountSlot }: AppProps) {
     patchIssue(n, (issue) => ({ comments: issue.comments + 1 }));
     try {
       await api.comment(n, text);
+      remember(n, ['comments'], temp);
     } catch (error) {
       setDetails((current) => {
         const detail = current[n];
@@ -304,6 +403,7 @@ export function App({ data, accountSlot }: AppProps) {
     patchIssue(n, (issue) => ({ state: 'closed', reason: 'completed', closedAt: new Date().toISOString(), comments: issue.comments + 1 }));
     try {
       await api.decide(n, text);
+      remember(n, ['state', 'reason', 'closedAt', 'comments']);
       loadDetail(n, true);
     } catch (error) {
       patchIssue(n, (issue) => ({ state: before.state, reason: before.reason, closedAt: before.closedAt, comments: Math.max(0, issue.comments - 1) }));
@@ -320,24 +420,16 @@ export function App({ data, accountSlot }: AppProps) {
     if (n === null || n <= 0 || !me || voting.current.has(n)) return;
     voting.current.add(n);
     try {
-      let detail = details[n];
-      if (typeof detail !== 'object') {
-        detail = await api.issue(n);
-        const fetched = detail;
-        setDetails((current) => ({ ...current, [n]: fetched }));
-      }
-      const on = !detail.viewerUp;
+      const was = n in votes ? votes[n] : await api.myVote(n);
+      const on = !was;
       const step = on ? 1 : -1;
-      const flip = (value: boolean, delta: number) => setDetails((current) => {
-        const d = current[n];
-        return typeof d === 'object' ? { ...current, [n]: { ...d, viewerUp: value, up: Math.max(0, d.up + delta) } } : current;
-      });
-      flip(on, step);
+      setVotes((current) => ({ ...current, [n]: on }));
       patchIssue(n, (issue) => ({ up: Math.max(0, issue.up + step) }));
       try {
         await api.vote(n, on);
+        remember(n, ['up']);
       } catch (error) {
-        flip(!on, -step);
+        setVotes((current) => ({ ...current, [n]: was }));
         patchIssue(n, (issue) => ({ up: Math.max(0, issue.up - step) }));
         failed('Vote', error);
       }
@@ -357,7 +449,7 @@ export function App({ data, accountSlot }: AppProps) {
     const now = new Date().toISOString();
     const issue: LiveIssue = { kind: 'suggestion', entry: null, title, state: 'open', reason: null, verdict: null, up: 0, comments: 0, author: me.login, bot: false, createdAt: now, closedAt: null };
     setLive((current) => (current.state ? { ...current, state: { ...current.state, issues: { ...current.state.issues, [temp]: issue } } } : current));
-    setDetails((current) => ({ ...current, [temp]: { number: temp, title, body: text, url: '', up: 0, viewerUp: false, comments: [] } }));
+    setDetails((current) => ({ ...current, [temp]: { number: temp, title, body: text, url: '', up: 0, comments: [] } }));
     setSuggesting(false);
     setSuggestDraft({ title: '', text: '' });
     setTab('plan');
@@ -387,6 +479,7 @@ export function App({ data, accountSlot }: AppProps) {
     try {
       const { number } = await api.suggest(title, text);
       move(number);
+      keep(number, issue, Date.now());
     } catch (error) {
       move(null);
       setSuggestDraft({ title, text });
@@ -399,6 +492,7 @@ export function App({ data, accountSlot }: AppProps) {
     try {
       await api.logout();
       setMe(null);
+      setVotes({});
     } catch (error) {
       failed('Sign out', error);
     }
@@ -418,8 +512,7 @@ export function App({ data, accountSlot }: AppProps) {
 
   const vote = (row: Row): ReactNode => {
     if (!liveOk || row.up === null || (row.kind !== 'entry' && row.kind !== 'suggestion')) return null;
-    const detail = row.issue === null ? undefined : details[row.issue];
-    const on = typeof detail === 'object' && detail.viewerUp;
+    const on = row.issue !== null && votes[row.issue] === true;
     if (!me) return <a className="ws-vote" href={signIn} aria-label={`${row.up} votes, sign in to vote`}>👍 {row.up}</a>;
     return (
       <button type="button" className={on ? 'ws-vote on' : 'ws-vote'} aria-pressed={on} aria-label={`${row.up} votes`} onClick={() => void toggleVote(row)} disabled={(row.issue ?? 0) <= 0}>
@@ -440,37 +533,40 @@ export function App({ data, accountSlot }: AppProps) {
     );
   };
 
+  const noteBox = (row: Row, busy: boolean): ReactNode => (refining === row.key ? (
+    <form className="ws-box" onSubmit={(event) => {
+      event.preventDefault();
+      const note = (drafts[`note-${row.key}`] ?? '').trim();
+      if (note) void sendVerdict(row, 'refine', note);
+    }}>
+      <textarea aria-label="Note" placeholder="Note…" maxLength={5000} rows={2} autoFocus value={drafts[`note-${row.key}`] ?? ''} onChange={(event) => setDrafts((current) => ({ ...current, [`note-${row.key}`]: event.target.value }))} />
+      <button type="submit" className="ws-btn" disabled={busy || !(drafts[`note-${row.key}`] ?? '').trim()}>Refine</button>
+    </form>
+  ) : null);
+
   const verdictButtons = (row: Row): ReactNode => {
     const busy = row.issue !== null && pending.has(row.issue);
     if (row.carried && row.fileVerdict) {
       return (
-        <div className="ws-state">
-          <span>{stateText(row).replace(/\.$/, '')} · carried over</span>
-          <button type="button" className="ws-btn go" disabled={busy} onClick={() => mainAction(row)}>Confirm <kbd>↵</kbd></button>
-        </div>
+        <>
+          <div className="ws-state">
+            <span>{stateText(row).replace(/\.$/, '')} · carried over</span>
+            <button type="button" className="ws-btn go" disabled={busy} onClick={() => mainAction(row)}>Confirm <kbd>↵</kbd></button>
+          </div>
+          {noteBox(row, busy)}
+        </>
       );
     }
     return (
       <>
+        {row.status === 'refine' ? <div className="ws-state"><span className="ws-muted">Being refined.</span></div> : null}
         <div className="ws-state">
           <button type="button" className="ws-btn go" disabled={busy} onClick={() => mainAction(row)}>Take <kbd>↵</kbd></button>
           <button type="button" className="ws-btn" disabled={busy} onClick={() => void sendVerdict(row, 'later')}>Later</button>
           <button type="button" className="ws-btn" disabled={busy} onClick={() => void sendVerdict(row, 'drop')}>Drop</button>
           <button type="button" className="ws-btn" disabled={busy} aria-expanded={refining === row.key} onClick={() => setRefining(refining === row.key ? null : row.key)}>Refine…</button>
         </div>
-        {refining === row.key ? (
-          <form className="ws-box" onSubmit={(event) => {
-            event.preventDefault();
-            const note = (drafts[`note-${row.key}`] ?? '').trim();
-            if (!note) return;
-            setDrafts((current) => ({ ...current, [`note-${row.key}`]: '' }));
-            setRefining(null);
-            void sendVerdict(row, 'refine', note);
-          }}>
-            <textarea aria-label="Note" placeholder="Note…" maxLength={5000} rows={2} autoFocus value={drafts[`note-${row.key}`] ?? ''} onChange={(event) => setDrafts((current) => ({ ...current, [`note-${row.key}`]: event.target.value }))} />
-            <button type="submit" className="ws-btn" disabled={busy || !(drafts[`note-${row.key}`] ?? '').trim()}>Refine</button>
-          </form>
-        ) : null}
+        {noteBox(row, busy)}
         {row.suggest ? <p className="ws-hint">Suggested: {row.suggest}.{row.why ? ` ${row.why}` : ''}</p> : null}
       </>
     );
@@ -495,7 +591,7 @@ export function App({ data, accountSlot }: AppProps) {
       }
       return <div className="ws-state"><span className="ws-muted">Not decided yet.</span></div>;
     }
-    if (canDecide && hasIssue && (awaitsVerdict(row) || (row.carried && row.fileVerdict && row.status !== 'built'))) return verdictButtons(row);
+    if (canDecide && hasIssue && (row.issue as number) > 0 && (awaitsVerdict(row) || (row.carried && row.fileVerdict && row.status !== 'built'))) return verdictButtons(row);
     const text = stateText(row);
     return (
       <div className="ws-state">
@@ -505,16 +601,17 @@ export function App({ data, accountSlot }: AppProps) {
   };
 
   const talk = (row: Row): ReactNode => {
-    if (row.issue === null) return null;
+    if (row.issue === null || row.issue <= 0) return null;
     const n = row.issue;
     const detail = details[n];
-    const url = typeof detail === 'object' && detail.url ? detail.url : `https://github.com/${live.state?.repo ?? 'amontlabs/silo'}/issues/${n}`;
-    const github = n > 0 ? <a className="ws-mono" href={url} target="_blank" rel="noopener noreferrer">GitHub #{n} ↗</a> : null;
+    const url = (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`https://github.com/${live.state?.repo ?? 'amontlabs/silo'}/issues/${n}`);
+    const github = url ? <a className="ws-mono" href={url} target="_blank" rel="noopener noreferrer">GitHub #{n} ↗</a> : null;
     if (!liveOk) return <div className="ws-talk"><div className="ws-box">{github}</div></div>;
     return (
       <div className="ws-talk">
         {detail === 'loading' ? <p className="ws-quiet" aria-live="polite">Loading…</p> : null}
         {detail === 'error' ? <p className="ws-quiet">Comments could not load.</p> : null}
+        {typeof detail === 'object' && detail.more && url ? <a className="ws-mono ws-earlier" href={url} target="_blank" rel="noopener noreferrer">Earlier comments on GitHub ↗</a> : null}
         {typeof detail === 'object'
           ? detail.comments.map((comment) => (
             <div className="ws-c" key={comment.id}>
@@ -529,7 +626,7 @@ export function App({ data, accountSlot }: AppProps) {
         {me ? (
           <form className="ws-box" onSubmit={(event) => void sendComment(row, event)}>
             <textarea aria-label="Comment" placeholder="Reply…" maxLength={5000} rows={1} value={drafts[row.key] ?? ''} onChange={(event) => setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
-            <button type="submit" className="ws-btn" disabled={n <= 0 || !(drafts[row.key] ?? '').trim()}>Comment</button>
+            <button type="submit" className="ws-btn" disabled={!(drafts[row.key] ?? '').trim()}>Comment</button>
             {github}
           </form>
         ) : me === null ? (
@@ -577,20 +674,21 @@ export function App({ data, accountSlot }: AppProps) {
     <>
       {plan.stages.map((group, index) => {
         const auto = index <= plan.lastOpenStage;
-        const shown = stageOpen[group.stage.id] ?? auto;
+        // A stage open by rule stays open; only later stages have a toggle.
+        const shown = auto || stageOpen[group.stage.id] === true;
         const phrase = stagePhrase(group.stage.line);
-        const heading = (
-          <>
-            <span className="ws-num">{group.number}</span>
-            <h2>{group.stage.title}{phrase ? <span>{phrase}</span> : null}</h2>
-            <span className="ws-mono">{group.decided} of {group.rows.length}</span>
-          </>
-        );
+        const title = <>{group.stage.title}{phrase ? <span>{phrase}</span> : null}</>;
         return (
           <section key={group.stage.id} aria-label={group.stage.title}>
-            {auto ? <div className="ws-stage">{heading}</div> : (
-              <button type="button" className="ws-stage ws-stage-toggle" aria-expanded={shown} onClick={() => setStageOpen((current) => ({ ...current, [group.stage.id]: !shown }))}>{heading}</button>
-            )}
+            <div className="ws-stage">
+              <span className="ws-num">{group.number}</span>
+              <h2>
+                {auto ? title : (
+                  <button type="button" className="ws-stage-toggle" aria-expanded={shown} onClick={() => setStageOpen((current) => ({ ...current, [group.stage.id]: !shown }))}>{title}</button>
+                )}
+              </h2>
+              <span className="ws-mono">{group.decided} of {group.rows.length}</span>
+            </div>
             {shown ? group.rows.map(item) : null}
             {group.stage.id === 'living' ? <div className="ws-cut" role="separator">USABLE EVERY DAY FROM HERE</div> : null}
           </section>
@@ -661,6 +759,7 @@ export function App({ data, accountSlot }: AppProps) {
         <span className="ws-mono ws-count">{plan.planned} planned · {plan.undecided} undecided</span>
       </div>
       {live.status === 'unavailable' ? <p className="ws-quiet ws-unavailable">Live comments are unavailable.</p> : null}
+      {signinFailed ? <p className="ws-quiet ws-unavailable">Sign-in did not complete.</p> : null}
       {notice ? <p className="ws-notice" role="alert">{notice}</p> : null}
       <p className="sr-only" aria-live="polite">{announce}</p>
       <div role="tabpanel" id="ws-plan" aria-labelledby="ws-tab-plan" hidden={tab !== 'plan'}>{planView}</div>

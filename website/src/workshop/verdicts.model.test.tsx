@@ -1,5 +1,5 @@
 // Random sequences of an owner's actions and the server's answers, checked after every step against
-// a reference model: a verdict is only ever sent for the row that was open, never inside the guard,
+// a reference model: a verdict is only ever sent for the row that was open and on screen, never inside the guard,
 // never twice at once for one issue, and what the page shows is the server's answer or the pending one.
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -44,6 +44,8 @@ async function run(seed: number) {
   const pick = <T,>(items: T[]): T => items[Math.floor(rand() * items.length)];
   let now = 1_000_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
+  document.cookie = 'workshop-hint=1; path=/';
+  localStorage.clear();
   const sent: Sent[] = [];
   const inFlight: Sent[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
@@ -51,7 +53,8 @@ async function run(seed: number) {
     const reply = (status: number, body: unknown = {}) => new Response(JSON.stringify(body), { status });
     if (path === 'state') return reply(200, liveState());
     if (path === 'me') return reply(200, { login: 'owner', avatar: '', canDecide: true });
-    if (path === 'issue') return reply(200, { number: 1, title: '', body: '', url: '', up: 0, viewerUp: false, comments: [] });
+    if (path === 'issue') return reply(200, { number: 1, title: '', body: '', url: '', up: 0, comments: [] });
+    if (path === 'vote') return reply(200, { on: false });
     if (path === 'verdict' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { n: number; verdict: Verdict };
       return new Promise<Response>((resolve) => {
@@ -90,6 +93,8 @@ async function run(seed: number) {
     const key = open;
     const n = key ? ISSUE_OF[key] : undefined;
     const elapsed = now - openedAt;
+    const item = key ? document.getElementById(key) : null;
+    const visible = item !== null && !item.closest('details:not([open]), [hidden]');
     const awaits = n !== undefined && !pending.has(n) && expected(n) === 'undecided' && (server[n] ?? null) === null;
     const carried = n !== undefined && !pending.has(n) && (server[n] ?? null) === null && FILE[n] != null && n !== 10 && n !== 15;
     let predicted: { n: number; verdict: Verdict } | null = null;
@@ -101,7 +106,7 @@ async function run(seed: number) {
       const active = document.activeElement as HTMLElement;
       const onRow = active === document.body || (active.classList.contains('ws-row') && active.closest('.ws-item')?.id === key);
       const repeat = rand() < 0.2;
-      if (onRow && !repeat && elapsed >= OPEN_GUARD_MS && n !== undefined) {
+      if (onRow && visible && !repeat && elapsed >= OPEN_GUARD_MS && n !== undefined) {
         if (awaits) predicted = { n, verdict: 'take' };
         else if (carried) predicted = { n, verdict: FILE[n] as Verdict };
       }
@@ -112,16 +117,20 @@ async function run(seed: number) {
       if (buttons.length && n !== undefined) {
         const button = pick(buttons);
         const label = (button.textContent ?? '').replace(/\s*↵$/, '');
-        const guarded = label === 'Take' || label === 'Confirm';
-        if (!button.disabled && !pending.has(n) && (!guarded || elapsed >= OPEN_GUARD_MS)) {
+        if (!button.disabled && !pending.has(n) && elapsed >= OPEN_GUARD_MS) {
           predicted = { n, verdict: label === 'Confirm' ? (FILE[n] as Verdict) : (label.toLowerCase() as Verdict) };
         }
         act(() => { fireEvent.click(button); });
       }
-    } else if (choice < 0.8) {
+    } else if (choice < 0.72) {
       const rows = [...document.querySelectorAll<HTMLButtonElement>('.ws-row')];
       const row = pick(rows);
       act(() => { row.focus(); fireEvent.click(row); });
+    } else if (choice < 0.8) {
+      // Hide or show what holds the open row: a later stage, or the other tab.
+      const controls = [...document.querySelectorAll<HTMLButtonElement>('.ws-stage-toggle, [role="tab"]')];
+      const control = pick(controls);
+      act(() => { fireEvent.click(control); });
     } else if (inFlight.length) {
       const entry = inFlight.splice(Math.floor(rand() * inFlight.length), 1)[0];
       const accept = rand() < 0.6;

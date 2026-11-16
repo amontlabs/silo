@@ -1,40 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { buildData, issue, liveState } from './fixtures';
-import { awaitsVerdict, buildPlan, decisionTitle, parseDecisions, parseFeatures, stagePhrase } from './plan';
+import { awaitsVerdict, buildPlan, decisionTitle, stagePhrase } from './plan';
 
 const names = (rows: { name: string }[]) => rows.map((row) => row.name);
 
-describe('parsing the repository files', () => {
-  it('reads decided lines newest first, with their issue and without Markdown links', () => {
-    const lines = buildData().decided;
-    expect(lines.map((line) => [line.date, line.issue])).toEqual([
-      ['2026-11-16', 40],
-      ['2026-11-16', null],
-      ['2026-11-15', null],
-    ]);
-    expect(lines[0].text).toBe('The engine is written in Zig. It is the core piece');
-    expect(lines[1].who).toBe("orchestrator, at the owner's word");
-    expect(lines[1].text).toBe('Merging changes main only. See the list.');
-  });
-
-  it('keeps only plain recording file names', () => {
-    const computers = buildData().features.find((feature) => feature.id === 'computers');
-    expect(computers?.recordings).toEqual(['create.mp4']);
-  });
-
-  it('ignores unknown verdicts and skips lines without an id', () => {
-    const features = parseFeatures('{"n":1,"id":"a","stage":"s","name":"A","verdict":"maybe"}\n{"n":2,"stage":"s","name":"B"}\n');
-    expect(features).toHaveLength(1);
-    expect(features[0].verdict).toBeNull();
-  });
-
+describe('phrases', () => {
   it('shortens stage lines and decided lines to a phrase', () => {
     expect(stagePhrase('One computer you can open from the app and the command line.')).toBe('one computer you can open from the app and the command line');
     expect(stagePhrase('Updates, releases, logs and disk: what someone else needs.')).toBe('updates, releases, logs and disk');
     expect(stagePhrase('A graphical desktop in a computer.')).toBe('a graphical desktop in a computer');
     expect(stagePhrase('macOS guests.')).toBe('macOS guests');
     expect(decisionTitle('GitHub is the storage: issues. Agents post as a bot.')).toBe('GitHub is the storage');
-    expect(parseDecisions('- 2026-11-16 · owner · Text (#7)\n- not a line')).toHaveLength(1);
   });
 });
 
@@ -113,5 +89,10 @@ describe('the plan', () => {
     expect(rows.map(awaitsVerdict)).toEqual([false, false, true, true]);
     const offline = buildPlan(buildData(), null).stages[0].rows;
     expect(offline.map(awaitsVerdict)).toEqual([false, false, false, false]);
+    const refining = buildPlan(buildData(), liveState({ 12: issue({ entry: 'computers', verdict: 'refine' }) })).stages[0].rows;
+    expect(refining.map(awaitsVerdict)).toEqual([false, false, true, true]);
+    const temporary = buildPlan(buildData(), liveState({ [-5]: issue({ kind: 'suggestion', title: 'New' }) })).suggestions;
+    expect(temporary.find((row) => row.name === 'New')?.issue).toBe(-5);
+    expect(awaitsVerdict(temporary.find((row) => row.name === 'New')!)).toBe(false);
   });
 });

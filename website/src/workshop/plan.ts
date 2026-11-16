@@ -81,77 +81,6 @@ export interface Row {
   closedAt: string | null;
 }
 
-const VERDICTS = new Set(['take', 'refine', 'later', 'drop']);
-const RECORDING = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(mp4|webm|mov|m4v)$/;
-
-function str(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value : null;
-}
-
-export function parseFeatures(text: string): Feature[] {
-  const features: Feature[] = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    const raw = JSON.parse(line) as Record<string, unknown>;
-    const id = str(raw.id);
-    const name = str(raw.name);
-    const stage = str(raw.stage);
-    if (!id || !name || !stage) continue;
-    const verdict = typeof raw.verdict === 'string' && VERDICTS.has(raw.verdict) ? (raw.verdict as Verdict) : null;
-    const recordings = Array.isArray(raw.recordings)
-      ? raw.recordings.filter((file): file is string => typeof file === 'string' && RECORDING.test(file))
-      : [];
-    features.push({
-      n: typeof raw.n === 'number' ? raw.n : features.length + 1,
-      id,
-      stage,
-      name,
-      what: str(raw.what) ?? '',
-      suggest: str(raw.suggest),
-      why: str(raw.why),
-      verdict,
-      issue: Number.isInteger(raw.issue) && (raw.issue as number) > 0 ? (raw.issue as number) : null,
-      recordings,
-    });
-  }
-  return features.sort((a, b) => a.n - b.n);
-}
-
-export function parseStages(text: string): Stage[] {
-  const raw = JSON.parse(text) as unknown;
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((item: Record<string, unknown>) => {
-    const id = str(item?.id);
-    const title = str(item?.title);
-    return id && title ? [{ id, title, line: str(item.line) ?? '' }] : [];
-  });
-}
-
-const DECISION_LINE = /^- (\d{4}-\d{2}-\d{2}) · (.+?) · (.+)$/;
-
-/** Markdown links in the repository's own files keep only their label. */
-function stripLinks(text: string): string {
-  return text.replace(/\[([^\]]+)\]\([^)\s]*\)/g, '$1');
-}
-
-export function parseDecisions(markdown: string): DecidedLine[] {
-  const lines: DecidedLine[] = [];
-  for (const line of markdown.split('\n')) {
-    const match = DECISION_LINE.exec(line.trimEnd());
-    if (!match) continue;
-    let text = match[3];
-    let issue: number | null = null;
-    const ref = / \(#(\d+)\)$/.exec(text);
-    if (ref) {
-      issue = Number(ref[1]);
-      text = text.slice(0, ref.index);
-    }
-    lines.push({ index: lines.length, date: match[1], who: match[2], text: stripLinks(text), issue });
-  }
-  // Newest first; lines of the same day keep the file's order.
-  return lines.sort((a, b) => (a.date === b.date ? a.index - b.index : a.date < b.date ? 1 : -1));
-}
-
 /** The short phrase beside a stage title: the first clause of its line. */
 export function stagePhrase(line: string): string {
   const clause = line.split(/(?<=[.:])\s/)[0].replace(/[.:]$/, '').trim();
@@ -323,9 +252,9 @@ export function allRows(plan: Plan): Row[] {
   ];
 }
 
-/** A row the owner still has to decide: undecided, with an issue to record the verdict on. */
+/** A row the owner still has to decide: undecided or being refined, with a real issue to record the verdict on. */
 export function awaitsVerdict(row: Row): boolean {
-  return (row.kind === 'entry' || row.kind === 'suggestion') && row.status === 'undecided' && !row.carried && row.issue !== null;
+  return (row.kind === 'entry' || row.kind === 'suggestion') && !isDecided(row) && !row.carried && row.issue !== null && row.issue > 0;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

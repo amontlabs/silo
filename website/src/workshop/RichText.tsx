@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 
 const TOKEN = /(`[^`\n]+`)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
 
-function safeHref(url: string): string | null {
+export function safeHref(url: string): string | null {
   try {
     const parsed = new URL(url);
     return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null;

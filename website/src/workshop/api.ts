@@ -24,8 +24,9 @@ export interface IssueDetail {
   body: string;
   url: string;
   up: number;
-  viewerUp: boolean;
   comments: Comment[];
+  /** True when GitHub holds earlier comments than these. */
+  more?: boolean;
 }
 
 export class ApiError extends Error {
@@ -77,6 +78,7 @@ function post<T>(path: string, body: unknown): Promise<T> {
 export const api = {
   state: () => request<LiveState>('state'),
   me: async (): Promise<Me | null> => {
+    if (!hasSessionHint()) return null;
     try {
       return await request<Me>('me', { cache: 'no-store' });
     } catch (error) {
@@ -85,6 +87,7 @@ export const api = {
     }
   },
   issue: (n: number) => request<IssueDetail>(`issue?n=${n}`),
+  myVote: async (n: number) => (await request<{ on: boolean }>(`vote?n=${n}`, { cache: 'no-store' })).on === true,
   comment: (n: number, text: string) => post<unknown>('comment', { n, text }),
   vote: (n: number, on: boolean) => post<unknown>('vote', { n, on }),
   suggest: (title: string, text: string) => post<{ number: number }>('suggest', { title, text }),
@@ -96,4 +99,9 @@ export const api = {
 
 export function loginUrl(hash: string): string {
   return `${API}/login?return=${encodeURIComponent(`/workshop${hash}`)}`;
+}
+
+/** The server sets this readable marker beside the session cookie; without it there is no session to ask about. */
+export function hasSessionHint(): boolean {
+  return /(?:^|;\s*)workshop-hint=1(?:;|$)/.test(document.cookie);
 }

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App, OPEN_GUARD_MS } from './App';
@@ -14,15 +14,17 @@ const ok = (body: unknown = {}) => ({ status: 200, body });
 const refused = (status: number, message: string) => ({ status, body: { error: 'refused', message } });
 
 function detail(n: number, fields: Partial<IssueDetail> = {}): IssueDetail {
-  return { number: n, title: `Issue ${n}`, body: `Body of ${n}.`, url: `https://github.com/amontlabs/silo/issues/${n}`, up: 0, viewerUp: false, comments: [], ...fields };
+  return { number: n, title: `Issue ${n}`, body: `Body of ${n}.`, url: `https://github.com/amontlabs/silo/issues/${n}`, up: 0, comments: [], ...fields };
 }
 
 function mockApi(options: { state?: Route; me?: Me | null; routes?: Record<string, Route> } = {}) {
   const calls: Call[] = [];
+  if (options.me) document.cookie = 'workshop-hint=1; path=/';
   const routes: Record<string, Route> = {
     'GET state': options.state ?? (() => ok(liveState())),
     'GET me': () => (options.me ? ok(options.me) : refused(401, 'Not signed in.')),
     'GET issue': (url) => ok(detail(Number(url.searchParams.get('n')))),
+    'GET vote': () => ok({ on: false }),
     'POST verdict': () => ok(),
     'POST comment': () => ok(),
     'POST vote': () => ok(),
@@ -459,3 +461,264 @@ describe('live verdicts', () => {
     expect(screen.getByText('2 planned · 4 undecided')).toBeInTheDocument();
   });
 });
+
+async function ownerOn(name: string) {
+  await waitFor(() => expect(rowButton(name)).toHaveAttribute('aria-expanded', 'true'));
+}
+
+describe('review fixes', () => {
+  it('Enter does nothing when the open row is not on screen', async () => {
+    const time = clock();
+    const calls = mockApi({ me: owner });
+    await renderApp();
+    await ownerOn('Create and delete a computer');
+    time.advance(OPEN_GUARD_MS);
+    await userEvent.click(screen.getByRole('tab', { name: 'Decisions' }));
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict')).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Plan' }));
+    act(() => { location.hash = '#entry-devices'; });
+    await ownerOn('A Linux server');
+    time.advance(OPEN_GUARD_MS);
+    await userEvent.click(screen.getByRole('button', { name: /Other devices/ }));
+    expect(screen.queryByRole('button', { name: /^A Linux server/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict')).toHaveLength(0);
+
+    act(() => { location.hash = '#entry-reviewer'; });
+    await ownerOn('A hosted reviewer');
+    time.advance(OPEN_GUARD_MS);
+    const fold = screen.getByText('1 dropped').closest('details') as HTMLDetailsElement;
+    act(() => { fold.open = false; fold.dispatchEvent(new Event('toggle')); });
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict')).toHaveLength(0);
+    act(() => { fold.open = true; fold.dispatchEvent(new Event('toggle')); });
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 17, verdict: 'drop' }]);
+  });
+
+  it('guards Later, Drop and Refine like Take', async () => {
+    const time = clock();
+    const calls = mockApi({ me: owner });
+    await renderApp();
+    await ownerOn('Create and delete a computer');
+    await userEvent.click(screen.getByRole('button', { name: 'Later' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Refine…' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Note' }), 'x');
+    await userEvent.click(screen.getByRole('button', { name: 'Refine' }));
+    expect(posts(calls, 'verdict')).toHaveLength(0);
+    time.advance(OPEN_GUARD_MS);
+    await userEvent.click(screen.getByRole('button', { name: 'Refine' }));
+    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'refine', note: 'x' }]);
+  });
+
+  it('ignores a hash that cannot be decoded', async () => {
+    history.replaceState(null, '', '/workshop#entry-%E0%A4%A');
+    mockApi();
+    await renderApp();
+    expect(screen.getByRole('heading', { level: 1, name: 'Workshop' })).toBeInTheDocument();
+    expect(document.querySelector('.ws-item.open')).toBeNull();
+  });
+
+  it('falls back to the normal start when a hash names no row', async () => {
+    history.replaceState(null, '', '/workshop#entry-nothing');
+    mockApi({ me: owner });
+    await renderApp();
+    await ownerOn('Create and delete a computer');
+    expect(location.hash).toBe('#entry-computers');
+  });
+
+  it('lets a decider decide a row being refined', async () => {
+    const time = clock();
+    const calls = mockApi({ me: owner, state: () => ok(liveState({ 12: issue({ entry: 'computers', verdict: 'refine' }) })) });
+    await renderApp();
+    await ownerOn('Create and delete a computer');
+    expect(screen.getByText('Being refined.')).toBeInTheDocument();
+    for (const name of [/^Take/, /^Later$/, /^Drop$/, /^Refine…$/]) expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    expect(screen.getByText('3 planned · 4 undecided')).toBeInTheDocument();
+    time.advance(OPEN_GUARD_MS);
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
+    expect(posts(calls, 'verdict')[0].body).toEqual({ n: 12, verdict: 'take' });
+  });
+
+  it('confirms a carried-over refine with a note', async () => {
+    const time = clock();
+    const calls = mockApi({ me: owner });
+    const data = buildData();
+    data.features = data.features.map((feature) => (feature.id === 'exec' ? { ...feature, verdict: 'refine' as const } : feature));
+    history.replaceState(null, '', '/workshop#entry-exec');
+    render(<App data={data} />);
+    await ownerOn('Run a command');
+    expect(screen.getByText('Being refined · carried over')).toBeInTheDocument();
+    time.advance(OPEN_GUARD_MS);
+    await userEvent.click(screen.getByRole('button', { name: /^Confirm/ }));
+    expect(posts(calls, 'verdict')).toHaveLength(0);
+    const submit = screen.getByRole('button', { name: 'Refine' });
+    expect(submit).toBeDisabled();
+    await userEvent.type(screen.getByRole('textbox', { name: 'Note' }), 'Still to split.');
+    await userEvent.click(submit);
+    expect(posts(calls, 'verdict')[0].body).toEqual({ n: 13, verdict: 'refine', note: 'Still to split.' });
+  });
+
+  it('gives a refused note back', async () => {
+    const time = clock();
+    mockApi({ me: owner, routes: { 'POST verdict': () => refused(502, 'GitHub failed.') } });
+    history.replaceState(null, '', '/workshop#entry-exec');
+    await renderApp();
+    await ownerOn('Run a command');
+    time.advance(OPEN_GUARD_MS);
+    await userEvent.click(screen.getByRole('button', { name: 'Refine…' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Note' }), 'Split it.');
+    await userEvent.click(screen.getByRole('button', { name: 'Refine' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Run a command: not saved. GitHub failed.');
+    // The queue moved on; reopening the row finds the note where it was.
+    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(rowButton('Run a command'));
+    await userEvent.click(screen.getByRole('button', { name: 'Refine…' }));
+    expect(screen.getByRole('textbox', { name: 'Note' })).toHaveValue('Split it.');
+  });
+
+  it('never opens or acts on a suggestion before it has its issue', async () => {
+    let release: (value: { status: number; body: unknown }) => void = () => {};
+    const time = clock();
+    const calls = mockApi({ me: owner, routes: { 'POST suggest': () => new Promise((resolve) => { release = resolve; }) } });
+    await renderApp();
+    await ownerOn('Create and delete a computer');
+    await userEvent.click(screen.getByRole('button', { name: 'Suggest a feature' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Title' }), 'Pause a computer');
+    await userEvent.click(screen.getByRole('button', { name: 'Suggest' }));
+    // Decide every other undecided row: the queue must never open the new one.
+    for (let i = 0; i < 6; i += 1) {
+      time.advance(OPEN_GUARD_MS);
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
+    }
+    expect(posts(calls, "verdict").map((call) => call.body?.n)).toEqual([12, 13, 14, 16, 31, 30]);
+    expect(rowButton('Pause a computer')).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(rowButton('Pause a computer'));
+    time.advance(OPEN_GUARD_MS);
+    expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Comment' })).not.toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict')).toHaveLength(6);
+    await act(async () => release(ok({ number: 80 })));
+  });
+
+  it('keeps a stage that is open by rule open, whatever was chosen before', async () => {
+    const time = clock();
+    // The loop is already decided, so deciding Shell moves the queue on to Other devices, not into The loop.
+    mockApi({ me: owner, state: () => ok(liveState({ 14: issue({ entry: 'fork', verdict: 'take' }) })) });
+    await renderApp();
+    await ownerOn('Create and delete a computer');
+    const loop = screen.getByRole('button', { name: /The loop/ });
+    expect(loop.parentElement?.tagName).toBe('H2');
+    expect(within(screen.getByRole('region', { name: 'Shell' })).queryByRole('button', { name: /Shell/ })).toBeNull();
+    await userEvent.click(loop);
+    await userEvent.click(loop);
+    expect(screen.queryByRole('button', { name: /^Fork a computer/ })).not.toBeInTheDocument();
+    loop.blur();
+    for (let i = 0; i < 2; i += 1) {
+      time.advance(OPEN_GUARD_MS);
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
+    }
+    // Shell is decided, so The loop is now open by rule: rows shown, no toggle.
+    expect(rowButton('A Linux server')).toHaveAttribute('aria-expanded', 'true');
+    expect(rowButton('Fork a computer')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /The loop/ })).not.toBeInTheDocument();
+  });
+
+  it('drops to signed out when a write answers 401', async () => {
+    mockApi({ me: visitor, routes: { 'POST comment': () => refused(401, 'Not signed in.') } });
+    await renderApp();
+    await userEvent.click(rowButton('Run a command'));
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Hello');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/^Sign in again\.$/);
+    expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Sign in to comment' })).toBeInTheDocument();
+  });
+
+  it('checks the GitHub link like any other link', async () => {
+    mockApi({ routes: { 'GET issue': (url) => ok(detail(Number(url.searchParams.get('n')), { url: 'javascript:alert(1)' })) } });
+    await renderApp();
+    await userEvent.click(rowButton('Run a command'));
+    await screen.findByText('Sign in to comment');
+    expect(screen.getByRole('link', { name: 'GitHub #13 ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
+  });
+
+  it('links to earlier comments when GitHub holds more', async () => {
+    mockApi({ routes: { 'GET issue': (url) => ok(detail(Number(url.searchParams.get('n')), { more: true })) } });
+    await renderApp();
+    await userEvent.click(rowButton('Run a command'));
+    expect(await screen.findByRole('link', { name: 'Earlier comments on GitHub ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
+  });
+});
+
+describe('contract changes', () => {
+  it('asks for the person’s own vote when a row opens, and toggles from it', async () => {
+    const calls = mockApi({ me: visitor, routes: { 'GET vote': () => ok({ on: true }) } });
+    await renderApp();
+    await userEvent.click(rowButton('Run a command'));
+    await waitFor(() => expect(within(itemOf('Run a command')).getByRole('button', { name: /4 votes/ })).toHaveAttribute('aria-pressed', 'true'));
+    expect(calls.filter((call) => call.path === 'vote' && call.method === 'GET')).toHaveLength(1);
+    await userEvent.click(within(itemOf('Run a command')).getByRole('button', { name: /votes/ }));
+    await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
+    expect(posts(calls, 'vote')[0].body).toEqual({ n: 13, on: false });
+    expect(within(itemOf('Run a command')).getByRole('button', { name: /3 votes/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('asks `me` only when the marker cookie is present', async () => {
+    const calls = mockApi();
+    await renderApp();
+    expect(calls.some((call) => call.path === 'me')).toBe(false);
+    expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
+  });
+
+  it('says once that sign-in did not complete and cleans the address', async () => {
+    history.replaceState(null, '', '/workshop?signin=failed#entry-exec');
+    mockApi();
+    await renderApp();
+    expect(screen.getByText('Sign-in did not complete.')).toBeInTheDocument();
+    expect(location.search).toBe('');
+    expect(location.hash).toBe('#entry-exec');
+  });
+
+  it('keeps its own writes for six minutes over an older state', async () => {
+    const time = clock();
+    const calls = mockApi({ me: owner });
+    const first = await renderApp();
+    await ownerOn('Create and delete a computer');
+    time.advance(OPEN_GUARD_MS);
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
+    await waitFor(() => expect(posts(calls, 'verdict')).toHaveLength(1));
+    await act(async () => {});
+    first.unmount();
+
+    // A reload gets the same cached state, without the verdict.
+    await renderApp();
+    expect(within(itemOf('Create and delete a computer')).getByText('planned')).toBeInTheDocument();
+    cleanupAll();
+    time.advance(6 * 60_000);
+    await renderApp();
+    expect(within(itemOf('Create and delete a computer')).queryByText('planned')).not.toBeInTheDocument();
+  });
+
+  it('keeps its own comment over an older answer', async () => {
+    mockApi({ me: visitor });
+    const first = await renderApp();
+    await userEvent.click(rowButton('Run a command'));
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Mine.');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await act(async () => {});
+    first.unmount();
+    history.replaceState(null, '', '/workshop#entry-exec');
+    await renderApp();
+    expect(await screen.findByText('Mine.')).toBeInTheDocument();
+    expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
+  });
+});
+
+function cleanupAll() {
+  cleanup();
+}

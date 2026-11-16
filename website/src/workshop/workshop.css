@@ -133,8 +133,25 @@
   background: none;
   text-align: left;
 }
-.ws-stage-toggle:hover h2 {
+.ws-stage-toggle {
+  padding: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+.ws-stage-toggle:hover {
   color: var(--accent-ink);
+}
+.ws-earlier {
+  justify-self: start;
+}
+.ws-plain ul {
+  margin: 0;
+  padding: 0 24px 0 62px;
+  list-style: none;
+}
+.ws-plain-row {
+  padding: 8px 0;
 }
 .ws-num {
   font: 12px var(--mono);
