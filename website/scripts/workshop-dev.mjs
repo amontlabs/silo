@@ -41,16 +41,19 @@ export async function staticFile(distDir, pathname) {
   return (await file(target)) || file(join(target, 'index.html'));
 }
 
-async function loadFeatures() {
+const FEATURES = join(website, '..', 'docs', 'product', 'features.jsonl');
+
+async function loadFeatures(path) {
   try {
-    const text = await readFile(join(website, '..', 'docs', 'product', 'features.jsonl'), 'utf8');
+    const text = await readFile(path, 'utf8');
     return text.split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line));
   } catch {
     return [];
   }
 }
 
-export async function startDev({ fake = false, progress = false, port = 4174, host = '127.0.0.1', distDir = join(website, 'dist'), env = process.env, log } = {}) {
+// `featuresFile` is the plan the fake GitHub is seeded from.
+export async function startDev({ fake = false, progress = false, featuresFile = FEATURES, port = 4174, host = '127.0.0.1', distDir = join(website, 'dist'), env = process.env, log } = {}) {
   const origin = `http://${host}:${port}`;
   let fakeGitHub = null;
   let plan = null;
@@ -58,7 +61,7 @@ export async function startDev({ fake = false, progress = false, port = 4174, ho
   if (fake) {
     fakeGitHub = createFakeGitHub({ repo: 'amontlabs/silo' });
     await fakeGitHub.listen();
-    plan = seedDemo(fakeGitHub, await loadFeatures(), { progress }).progress;
+    plan = seedDemo(fakeGitHub, await loadFeatures(featuresFile), { progress }).progress;
     config = readConfig(fakeGitHub.workshopEnv(origin), { apiBase: fakeGitHub.url, webBase: fakeGitHub.url });
   } else {
     config = readConfig({ ...env, WORKSHOP_SITE_ORIGIN: origin });

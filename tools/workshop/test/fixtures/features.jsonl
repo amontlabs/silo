@@ -1,0 +1,12 @@
+{"n": 1, "id": "engine-service", "stage": "shell", "area": "engine", "name": "The engine runs on its own", "what": "A background engine owns every computer.", "verdict": "take"}
+{"n": 2, "id": "calls-and-events", "stage": "shell", "area": "engine", "name": "Every call and event defined once", "what": "Each call and each event is written down once.", "verdict": "take"}
+{"n": 3, "id": "vm-runtime", "stage": "shell", "area": "engine", "name": "The VM runtime, packaged", "what": "Silo ships the program that runs each computer.", "verdict": null}
+{"n": 4, "id": "computers", "stage": "shell", "area": "computers", "name": "Create, start, stop and delete a computer", "what": "Make a Linux computer of a chosen size, start it, stop it, delete it.", "verdict": null}
+{"n": 5, "id": "x", "stage": "shell", "name": "X", "what": "A short one without an area."}
+{"n": 6, "id": "checkpoints", "stage": "loop", "area": "checkpoints", "name": "Checkpoints", "what": "Save the whole computer and go back to it.", "verdict": "later"}
+{"n": 7, "id": "fork", "stage": "loop", "area": "forks", "name": "Fork a computer into a copy that starts exactly where the original stood, with its files, its processes and its setup", "what": "A copy to try something in, without touching the original.", "verdict": null}
+{"n": 8, "id": "changes", "stage": "loop", "name": "See what changed", "what": "Every file a computer changed since a checkpoint.", "verdict": "refine"}
+{"n": 9, "id": "agent-inside", "stage": "agent", "area": "agents", "name": "Your agent lives in the computer", "what": "The agent runs inside main with all its tools.", "verdict": "take"}
+{"n": 10, "id": "approvals", "stage": "agent", "area": "agents", "name": "Approvals", "what": "The agent asks you for anything wider.", "verdict": null}
+{"n": 11, "id": "old-tray", "stage": "gone", "name": "The menu bar tray", "what": "Not carried over.", "verdict": "drop"}
+{"n": 12, "id": "old-linux-app", "stage": "gone", "name": "The Linux app", "what": "Not carried over."}

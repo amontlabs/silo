@@ -682,11 +682,20 @@ function fakeResponse() {
   };
 }
 
+// The plan a local server's fake GitHub is seeded from in these tests.
+const FIXTURE_FEATURES = [
+  { n: 1, id: 'engine-service', name: 'The engine runs on its own', what: 'A background engine owns every computer.' },
+  { n: 2, id: 'calls-and-events', name: 'Every call and event defined once', what: 'Each call is written down once.' },
+  { n: 3, id: 'vm-runtime', name: 'The VM runtime, packaged', what: 'Silo ships the program that runs each computer.' },
+  { n: 4, id: 'fixture-only', name: 'Only in the fixture', what: 'Proves the fixture is read.' },
+].map((line) => JSON.stringify(line)).join('\n') + '\n';
+
 async function fixtureSite(page = 'workshop/index.html') {
   const dir = await mkdtemp(join(tmpdir(), 'workshop-site-'));
   await mkdir(join(dir, 'dist', 'workshop'), { recursive: true });
   await writeFile(join(dir, 'dist', 'index.html'), '<!doctype html><title>Silo</title>');
   if (page) await writeFile(join(dir, 'dist', page), '<!doctype html><title>Workshop</title>');
+  await writeFile(join(dir, 'features.jsonl'), FIXTURE_FEATURES);
   return dir;
 }
 
@@ -784,7 +793,7 @@ async function freePort() {
 
 test('workshop-dev --fake serves the site and the API on one port, with sign-in through the fake GitHub', async () => {
   const site = await fixtureSite();
-  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), log: () => {} });
+  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), featuresFile: join(site, 'features.jsonl'), log: () => {} });
   try {
     for (const path of ['/workshop', '/workshop/']) {
       const page = await fetch(dev.origin + path);
@@ -796,7 +805,7 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
     const state = await (await fetch(dev.origin + '/api/workshop/state')).json();
     const entries = Object.values(state.issues).filter((i) => i.kind === 'entry');
     assert.ok(entries.length >= 3);
-    assert.ok(entries.some((i) => i.entry === 'engine-service'));
+    assert.deepEqual(entries.map((i) => i.entry).sort(), ['calls-and-events', 'engine-service', 'fixture-only', 'vm-runtime']);
     assert.ok(Object.values(state.issues).some((i) => i.kind === 'decision' && i.state === 'open'));
 
     const start = await fetch(dev.origin + '/api/workshop/login?return=/workshop', { redirect: 'manual' });
@@ -1005,7 +1014,7 @@ test('API answers forbid framing; route names are own properties only', async ()
 
 test('the local server survives //, an aborted POST body and /api/workshop/constructor, and forbids framing', async () => {
   const site = await fixtureSite();
-  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), log: () => {} });
+  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), featuresFile: join(site, 'features.jsonl'), log: () => {} });
   const { port } = new URL(dev.origin);
   const raw = (text) => new Promise((resolve) => {
     const socket = netConnect(Number(port), '127.0.0.1', () => socket.write(text));
