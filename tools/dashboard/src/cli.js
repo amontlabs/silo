@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { DashboardError, ValidationError } from './errors.js';
 import { MAX_OPTIONS, POST_KINDS, Store } from './store.js';
-import { createServer } from './server.js';
+import { DEFAULT_REPO, createServer } from './server.js';
+import { FEATURE_ID, readFeatures } from './features.js';
 
 export const USAGE = `Usage: dashboard <command> [options]
 
@@ -17,6 +18,9 @@ Commands:
   answers [--all]                        owner replies not yet acknowledged (answers,
                                          picked options, and the owner's notes)
   ack REPLY_ID...                        mark owner replies acknowledged
+  verdicts [--all]                       the owner's verdicts on the feature list not yet
+                                         acknowledged (--all: every current verdict)
+  verdicts ack FEATURE_ID@ID...          acknowledge them, up to the verdict id listed
   close ID [--note TEXT]                 close an item
   list [--open|--all]                    list items (default: open)
   show ID                                show one item with its thread
@@ -230,6 +234,51 @@ const commands = {
     io.out(values.json ? JSON.stringify({ acknowledged: ids }) : `acknowledged ${ids.join(', ')}`);
   },
 
+  verdicts(argv, io) {
+    const { values, args } = parse(argv, { all: { type: 'boolean' } }, { positionals: 0, variadic: true });
+    if (args.length) {
+      if (args[0] !== 'ack') throw new UsageError(`unknown verdicts command "${args[0]}"`);
+      if (values.all) throw new UsageError('--all is for listing verdicts');
+      if (args.length < 2) throw new UsageError('verdicts ack needs at least one feature id');
+      const requests = args.slice(1).map((arg) => {
+        const match = /^([^@]+)@(\d+)$/.exec(arg);
+        if (!match || !FEATURE_ID.test(match[1])) {
+          throw new UsageError(`"${arg}" is not FEATURE_ID@ID: acknowledge each verdict as 'dashboard verdicts' lists it (for example engine-service@12)`);
+        }
+        return { feature: match[1], upTo: Number(match[2]) };
+      });
+      const done = io.store().ackVerdicts(requests);
+      return io.out(values.json ? JSON.stringify({ acknowledged: done }) : `acknowledged ${done.join(', ')}`);
+    }
+    const names = new Map((readFeatures(io.repo())?.features ?? []).map((feature) => [feature.id, feature.name]));
+    const rows = io
+      .store()
+      .verdictsToRead({ all: values.all })
+      .map((row) => ({
+        id: row.id,
+        ack: `${row.feature_id}@${row.id}`,
+        feature_id: row.feature_id,
+        name: row.name ?? names.get(row.feature_id) ?? null,
+        in_list: names.has(row.feature_id),
+        verdict: row.verdict,
+        note: row.note,
+        created_at: row.created_at,
+        acked_at: row.acked_at,
+      }));
+    if (values.json) return io.out(JSON.stringify(rows));
+    if (!rows.length) return io.out(values.all ? 'No verdicts.' : 'No new verdicts.');
+    return io.out(
+      rows
+        .map((row) => {
+          const name = row.name ? ` "${shortLine(row.name)}"` : '';
+          const gone = row.in_list ? '' : ' (no longer in the feature list)';
+          const head = `${row.ack} · ${row.verdict ?? 'cleared'}${name}${gone} · ${row.created_at}${row.acked_at ? ' · acknowledged' : ''}`;
+          return row.note ? `${head}\n${indent(row.note)}` : head;
+        })
+        .join('\n\n'),
+    );
+  },
+
   close(argv, io) {
     const { values, args } = parse(argv, { note: { type: 'string' } }, { positionals: 1 });
     const id = itemId(args[0]);
@@ -268,6 +317,7 @@ export async function main(argv, overrides = {}) {
     ...overrides,
   };
   io.store = () => (store ||= new Store());
+  io.repo ??= () => process.env.SILO_DASHBOARD_REPO || DEFAULT_REPO;
   const [name, ...rest] = argv;
   try {
     if (!name) {

@@ -10,8 +10,10 @@
     ['item-', 'for-you'],
     ['change-', 'for-you'],
     ['note-', 'private'],
+    ['feature-', 'stack'],
+    ['stack-', 'stack'],
   ];
-  const VIEWS = ['for-you', 'product', 'journeys', 'decisions', 'private'];
+  const VIEWS = ['for-you', 'stack', 'product', 'journeys', 'decisions', 'private'];
   function viewFor(hash) {
     let id;
     try {

@@ -53,6 +53,27 @@ and never conflicts with a merge.
    needs to know more; the item returns to the owner's For you list.
 4. **Close** an item once it is settled: `dashboard close ID --note ...`.
 
+### The feature list and its verdicts
+
+`docs/product/features.jsonl` is the ordered list of every feature Silo had,
+wants or considered, one JSON object per line, with `stages.json` naming the
+stages; the README lists the fields. The orchestrator writes both. The
+dashboard's Stack view shows the list one entry at a time and the owner gives
+each a verdict: take, refine (with a note saying what to change), later or
+drop, any of them with a note. Verdicts are kept in the dashboard store, never
+in the repository.
+
+1. `dashboard verdicts` lists the current verdicts no agent has acknowledged:
+   `FEATURE_ID@ID` to acknowledge, verdict (cleared when the owner cleared
+   one), the name the owner judged, when and the note (`--json` for machine
+   output, `--all` for every current verdict).
+2. The orchestrator writes each into `features.jsonl` (`verdict`) and records
+   it in `DECISIONS.md`, by hand, in one commit.
+3. Then `dashboard verdicts ack FEATURE_ID@ID...`, exactly as listed, so it is
+   not picked up twice. A bare feature id is refused: it could acknowledge a
+   verdict the owner gave after you read the list. A later change by the owner
+   shows up again.
+
 The page is built to take the owner's input with little reading and few
 clicks: one card at a time, options to pick, reactions on journey steps. Keep
 titles short, put what stands in `--default`, and offer options when you can.

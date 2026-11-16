@@ -11,6 +11,7 @@ import { renderInline, renderMarkdown } from './markdown.js';
 import { DOC_FILES, STEP_STATUSES, anchorText, lineDiff, noteTargets, parseDecisions, parseJourneys, productLayout, slugify, splitSections, uniqueId } from './docs.js';
 import { noteSummary } from './private.js';
 import { currentReaction, forYouOrder, lastActivity, lastReplyId } from './state.js';
+import { prepareStack, stackLink, stackView } from './stack-view.js';
 
 export const KIND_PILL = { decide: 'Needs your call', look: 'An agent chose', shipped: 'Shipped', note: 'An agent replied to your note' };
 const KIND_SHORT = { decide: 'Decide', look: 'Look', shipped: 'Shipped', note: 'Note' };
@@ -308,6 +309,7 @@ function forYouView(ctx) {
     <aside class="side" aria-label="Where the product is">
       ${ctx.journeys.length ? h`<p class="eyebrow">Where the product is</p>` : ''}
       ${ctx.journeys.map((journey) => h`<a class="mini" href="#journey-${journey.id}">${ring(journey)}<span><b>${journey.title}</b><small>${countsLine(journey.counts)}</small></span></a>`)}
+      ${stackLink(ctx.stack)}
       ${changedBox(ctx)}
     </aside>
   </div>
@@ -555,7 +557,7 @@ function topBar(ctx) {
     h`<a class="tab" href="#${view}" data-view="${view}">${label}${badge === null ? '' : h` <span class="badge ${quiet ? 'quiet' : ''}">${badge}</span>`}</a>`;
   return h`<header class="bar" data-region="nav"><div class="bar-in">
   <a class="brand" href="#for-you"><i aria-hidden="true"></i>Silo</a>
-  <nav class="tabs" aria-label="Views">${tab('for-you', 'For you', ctx.waiting.length, ctx.waiting.length === 0)}${tab('product', 'Product')}${tab('journeys', 'Journeys')}${tab('decisions', 'Decisions', ctx.docs.decisions === null ? null : ctx.decisions.total)}${ctx.noteCount ? tab('private', 'Private') : ''}</nav>
+  <nav class="tabs" aria-label="Views">${tab('for-you', 'For you', ctx.waiting.length, ctx.waiting.length === 0)}${ctx.stack ? tab('stack', 'Stack', ctx.stack.totals.all.undecided) : ''}${tab('product', 'Product')}${tab('journeys', 'Journeys')}${tab('decisions', 'Decisions', ctx.docs.decisions === null ? null : ctx.decisions.total)}${ctx.noteCount ? tab('private', 'Private') : ''}</nav>
   <span class="spacer"></span>
   ${head ? h`<span class="fresh" title="The product documents as of ${head}">docs at ${head.slice(0, 7)}</span>` : h`<span class="fresh off">docs outside git</span>`}
 </div></header>`;
@@ -563,7 +565,7 @@ function topBar(ctx) {
 
 /**
  * view = { items (with state), docs: {product, journeys, decisions} (text or null), changes: docChanges result,
- *   notes: readPrivateNotes result (optional) }
+ *   notes: readPrivateNotes result (optional), stack: { features, stages, skipped, rows } or null (optional) }
  */
 export function renderPage(view) {
   const journeys = parseJourneys(view.docs.journeys ?? '').journeys;
@@ -582,6 +584,7 @@ export function renderPage(view) {
     changeIndex: new Map(view.changes.changes.map((change) => [`${change.file}#${change.key}`, change])),
     decisions: parseDecisions(view.docs.decisions),
     noteCount: groups.reduce((sum, group) => sum + group.notes.length, 0),
+    stack: prepareStack(view.stack ?? null),
   };
   return h`<!doctype html>
 <html lang="en">
@@ -600,6 +603,7 @@ ${topBar(ctx)}
 <main>
 <div class="lost" id="lost" aria-live="polite"></div>
 ${forYouView(ctx)}
+${stackView(ctx.stack)}
 ${productView(ctx)}
 ${journeysView(ctx)}
 ${decisionsView(ctx)}
