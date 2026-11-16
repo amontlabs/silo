@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Release-tooling and script tests: the Node script suites, the release
 # version and command manifest checks, the engine dependency-knot ratchet, every scripts/test_*.py module, the
+# owner dashboard's tests (tools/dashboard, its own npm install), the
 # isolation eval self-tests (Linux only: they read /proc/self/mountinfo) and
 # the hosted reviewer service tests. uv supplies pinned packages: PyYAML for
 # test_ci_scripts.py and reviewer-service/requirements-dev.txt for the
@@ -15,6 +16,8 @@ step release-version python3 scripts/validate-release-version.py
 step command-manifest python3 scripts/check-command-manifest.py
 step engine-cycle python3 scripts/engine_cycle_ratchet.py
 step script-tests python3 scripts/run-script-tests.py
+step dashboard-install npm --prefix "$ROOT/tools/dashboard" ci --no-audit --no-fund
+step dashboard-tests npm --prefix "$ROOT/tools/dashboard" test
 if [ "$(uname -s)" = Linux ]; then
   step evals python3 -m unittest discover -s ../../docs/evals -p 'test_*.py'
 else
