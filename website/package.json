@@ -9,10 +9,10 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "test": "node --test scripts/*.test.mjs && vitest run",
     "typecheck": "tsc --noEmit",
-    "build:vercel": "npm run build && node scripts/prepare-vercel.mjs"
+    "build:vercel": "npm run build && node scripts/prepare-vercel.mjs",
+    "workshop:dev": "node scripts/workshop-dev.mjs"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.8",
@@ -26,6 +26,7 @@
     "vitest": "^5.0.5"
   },
   "dependencies": {
+    "@vercel/functions": "3.10.5",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   }
