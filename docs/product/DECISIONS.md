@@ -5,6 +5,9 @@ before asking; a question answered here is not asked again. A decision that repl
 one says so. Decisions made before 2026-11-15 are in [the direction page](../DIRECTION.md); the ones the owner
 confirmed are carried on the feature list as verdicts.
 
+- 2026-11-16 · owner · The plan gets one source of truth as data: each fact is edited in one place, everything else is generated from it, and nothing can drift. Agents get one entry point to read a feature with all its context and to change it. The design is [PLAN.md](PLAN.md); five points in it still wait for the owner.
+- 2026-11-16 · owner · The Workshop shows the plan as a map of the product's parts, with tiles on narrow screens; opening a part lists its entries. Visitors see the plan only; the decisions are shown to the owner. This replaces the single list in build order.
+- 2026-11-16 · owner · A visitor who does not want to sign in on the Workshop is offered a link to comment on GitHub instead.
 - 2026-11-16 · owner · The dashboard goes public as the Workshop: a page of silo.amontlabs.com, in the site's style, public from the start. The owner decides there; anyone signed in with GitHub can comment, vote and suggest features.
 - 2026-11-16 · owner · GitHub is the Workshop's storage: issues and discussions of this repository, no database of ours and no separate backups. Agents post as a bot, not under the owner's name.
 - 2026-11-16 · owner · Recordings are committed to the repository as files and played on the site.
