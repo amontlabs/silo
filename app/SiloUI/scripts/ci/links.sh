@@ -30,6 +30,7 @@ patterns=(
   'demo/*.md'
   'reviewer-service/*.md'
   'tools/dashboard/*.md'
+  'tools/workshop/*.md'
 )
 
 cd "$ROOT" || exit 2

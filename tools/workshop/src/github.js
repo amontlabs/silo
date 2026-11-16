@@ -54,6 +54,9 @@ export class GitHub {
     if (limited) throw limited;
     if (allow.includes(response.status)) return { status: response.status, data: null, headers: response.headers };
     if (!response.ok) {
+      if (response.status === 403 && /rate limit/i.test(await response.text())) {
+        throw new RateLimited(new Date(Date.now() + 60_000));
+      }
       throw new Failure(`GitHub answered ${response.status} to ${method} ${new URL(url).pathname}`);
     }
     const text = await response.text();

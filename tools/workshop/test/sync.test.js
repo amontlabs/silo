@@ -179,3 +179,20 @@ test('a line naming an issue that is not its Workshop entry stops sync', async (
   assert.match(result.stderr, /not a Workshop entry/);
   assert.equal(other.title, 'Unrelated');
 });
+
+test('a secondary rate limit (403 with a rate-limit message) also stops sync cleanly', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const box = sandbox(t, { features: '{"id": "a", "name": "A", "what": "x"}\n', decisions: '' });
+  const original = globalThis.fetch;
+  const fetch = async (url, init) => {
+    if (init.method === 'POST' && String(url).endsWith('/issues')) {
+      return new Response(JSON.stringify({ message: 'You have exceeded a secondary rate limit.' }), { status: 403 });
+    }
+    return original(url, init);
+  };
+  const result = await run(['sync'], { fake, box, overrides: { fetch } });
+  assert.equal(result.code, 1);
+  assert.match(result.stdout, /stopped by GitHub's rate limit/);
+  assert.equal(box.features(), '{"id": "a", "name": "A", "what": "x"}\n');
+});
