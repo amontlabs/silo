@@ -1,0 +1,16 @@
+{
+  "name": "silo-owner-dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The owner's local page for the Silo product: product docs, items agents post, the owner's answers.",
+  "type": "module",
+  "engines": { "node": ">=26" },
+  "scripts": {
+    "test": "node --test test/",
+    "start": "node bin/dashboard serve"
+  },
+  "dependencies": {
+    "marked": "18.1.3",
+    "mermaid": "12.3.0"
+  }
+}

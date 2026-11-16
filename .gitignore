@@ -31,3 +31,6 @@ registry.sqlite3-wal
 
 # Job registry files that engine tests create under their working directory
 app/SiloUI/src-tauri/engine/engine/
+
+# Owner dashboard dependencies
+tools/dashboard/node_modules/
