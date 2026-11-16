@@ -14,7 +14,10 @@ const CHANGED_NOTE = 'This changed while you were reading. Read it again, then a
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, reducedMotion.matches ? 0 : ms));
 
-const state = { at: null, done: 0, all: false, gaps: false, busy: false };
+const state = { at: null, done: 0, all: false, gaps: false, busy: false, shown: null, readyAt: 0 };
+// A card that just became current takes no primary action for this long, so a
+// held or repeated Enter cannot answer a card the owner has not read.
+const READY_DELAY = 700;
 
 // ---- views ----
 
@@ -26,8 +29,25 @@ function hashId() {
   }
 }
 
-function route({ scroll = true } = {}) {
-  let view = viewFor(location.hash);
+// Shows the view the address names. `queue: false` keeps the queue on its
+// current card (after an action, the card acted on stays in charge). Whatever
+// fails, one view stays visible.
+function route(options = {}) {
+  try {
+    showRoute(options);
+  } catch (error) {
+    root.dataset.view = document.getElementById(root.dataset.view || '') ? root.dataset.view : 'for-you';
+    console.error('route failed', error);
+  }
+}
+
+function showRoute({ scroll = true, queue = true } = {}) {
+  let view;
+  try {
+    view = viewFor(location.hash);
+  } catch {
+    view = 'for-you';
+  }
   if (!document.getElementById(view)) view = 'for-you';
   root.dataset.view = view;
   document.querySelectorAll('.tab[data-view]').forEach((tab) => {
@@ -40,7 +60,7 @@ function route({ scroll = true } = {}) {
   document.querySelectorAll('.reader').forEach((article) => article.classList.toggle('on', article === reader));
   document.getElementById('private')?.classList.toggle('reading', Boolean(reader));
 
-  const card = /^item-\d+$/.test(id) ? document.querySelector(`.stage [data-card="${id.slice(5)}"]`) : null;
+  const card = queue && /^item-\d+$/.test(id) ? document.querySelector(`.stage [data-card="${id.slice(5)}"]`) : null;
   if (card) {
     state.at = Number(card.dataset.card);
     state.all = false;
@@ -78,6 +98,16 @@ function showQueue({ focus = false, back = false } = {}) {
     entry.classList.remove('out');
   });
   queue.querySelector('.stage')?.classList.add('picked');
+  if (card && Number(card.dataset.card) !== state.shown) {
+    state.shown = Number(card.dataset.card);
+    holdPrimary(card);
+  }
+  if (!card) state.shown = null;
+  // The address always names the card on screen.
+  if (root.dataset.view === 'for-you') {
+    const hash = card && !state.all ? `#item-${card.dataset.card}` : '#for-you';
+    if (location.hash !== hash) history.replaceState(null, '', hash);
+  }
   queue.classList.toggle('all', state.all && list.length > 1);
   queue.querySelector('[data-see-all]')?.setAttribute('aria-pressed', String(state.all));
   const dots = queue.querySelector('[data-dots]');
@@ -102,6 +132,20 @@ function showQueue({ focus = false, back = false } = {}) {
   }
   if (focus && card && !state.all) card.focus({ preventScroll: true });
 }
+
+function holdPrimary(card) {
+  state.readyAt = Date.now() + READY_DELAY;
+  const primary = card.querySelector('[data-primary]');
+  if (!primary) return;
+  primary.classList.add('not-ready');
+  primary.setAttribute('aria-disabled', 'true');
+  setTimeout(() => {
+    primary.classList.remove('not-ready');
+    primary.removeAttribute('aria-disabled');
+  }, READY_DELAY);
+}
+
+const primaryReady = () => Date.now() >= state.readyAt;
 
 async function move(step) {
   const list = cards();
@@ -169,8 +213,18 @@ async function refresh() {
   applyDecisionFilter();
   applyGaps();
   document.querySelectorAll('.journey').forEach(markHot);
-  route({ scroll: false });
+  const shown = state.shown;
+  route({ scroll: false, queue: false });
   showQueue();
+  // A refreshed card that stays current keeps whatever wait it had left.
+  if (state.shown === shown && shown !== null) {
+    const card = currentCard();
+    const primary = card?.querySelector('[data-primary]');
+    if (primary && !primaryReady()) {
+      primary.classList.add('not-ready');
+      setTimeout(() => primary.classList.remove('not-ready'), state.readyAt - Date.now());
+    }
+  }
 }
 
 // ---- sending ----
@@ -299,6 +353,7 @@ document.addEventListener('click', (event) => {
     applyGaps();
     return;
   }
+  if (button.matches('[data-primary]') && !primaryReady()) return;
   if (button.matches('[data-skip]')) {
     move(1);
     return;
@@ -331,10 +386,16 @@ document.addEventListener('submit', (event) => {
     return;
   }
   const text = area.value;
+  const draft = form.dataset.draft;
+  const isNote = form.hasAttribute('data-note');
   run(form, async () => {
-    let ok;
-    if (form.hasAttribute('data-note')) ok = await act(form, '/api/notes', noteBody(controls, { text }));
-    else ok = await act(form, form.dataset.api, form.dataset.verdict ? { text, verdict: form.dataset.verdict } : { text });
+    let ok = false;
+    try {
+      if (isNote) ok = await act(form, '/api/notes', noteBody(controls, { text }));
+      else ok = await act(form, form.dataset.api, form.dataset.verdict ? { text, verdict: form.dataset.verdict } : { text });
+    } finally {
+      if (!ok) keepText(form, draft, text, isNote);
+    }
     if (ok) {
       area.value = '';
       if (controls.querySelector('[data-say]')) setSay(form, false);
@@ -343,7 +404,60 @@ document.addEventListener('submit', (event) => {
   });
 });
 
+// A send that did not go through never loses what the owner typed: it stays
+// in its box, or, when the box is gone (the item was closed or answered, or
+// the part of the document changed), it shows at the top of For you.
+function keepText(form, draft, text, isNote) {
+  const box = form.isConnected ? form : [...document.querySelectorAll('form[data-draft]')].find((other) => other.dataset.draft === draft);
+  if (box) {
+    const area = box.querySelector('textarea');
+    if (!area.value.trim()) area.value = text;
+    setSay(box, true);
+    return;
+  }
+  const holder = document.getElementById('lost');
+  if (!holder) return;
+  const notice = document.createElement('div');
+  notice.className = 'lost-note';
+  notice.setAttribute('role', 'status');
+  const message = document.createElement('p');
+  message.textContent = isNote
+    ? 'The part of the document you wrote about changed meanwhile, so your note was not sent. Your text:'
+    : 'This item was closed or answered meanwhile, so your text was not sent. Your text:';
+  const copy = document.createElement('textarea');
+  copy.readOnly = true;
+  copy.rows = 3;
+  copy.value = text;
+  copy.setAttribute('aria-label', 'Your text that was not sent');
+  const row = document.createElement('div');
+  row.className = 'row';
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'btn small';
+  copyButton.textContent = 'Copy';
+  copyButton.addEventListener('click', async () => {
+    copy.select();
+    try {
+      await navigator.clipboard.writeText(text);
+      copyButton.textContent = 'Copied';
+    } catch {
+      copyButton.textContent = 'Selected: press ⌘C';
+    }
+  });
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'btn ghost small';
+  dismiss.textContent = 'Dismiss';
+  dismiss.addEventListener('click', () => notice.remove());
+  row.append(copyButton, dismiss);
+  notice.append(message, copy, row);
+  holder.append(notice);
+  if (root.dataset.view !== 'for-you') location.hash = '#for-you';
+  window.scrollTo(0, 0);
+}
+
 document.addEventListener('keydown', (event) => {
+  if (event.repeat && !event.target.closest?.('textarea, input')) return;
   const field = event.target.closest?.('textarea, input, select, [contenteditable]');
   if (field) {
     const form = field.closest('form.say');

@@ -97,11 +97,27 @@ so agents read them with `dashboard answers`. A note shows in For you only
 after an agent replies to it ("An agent replied to your note"). A step shows
 its reaction and a mark when it has notes; the open step shows the thread.
 
-Anchors: `journeys#<journey id>/<step number>`, `journeys#<journey id>`,
-`product#<section key>` (the section heading, lowercased, with runs of other
-characters turned into `-`). The item also keeps `anchor_text`, the step or
-section title as the page showed it, so a note still reads after the document
-changes.
+Anchors: `journeys#<journey id>/<step key>`, `journeys#<journey id>`,
+`product#<section key>`. A step key is its title, lowercased with runs of
+other characters turned into `-` (a second step with the same title gets
+`-2`); a section key is made the same way from its heading. Ids and keys are
+lowercase letters, digits and hyphens, at most 80 characters: a longer one is
+cut, and an `<!-- id: -->` that does not fit is ignored (the heading gives the
+id). A step without a title is "Step N". Because a step's key comes from its
+title, a note stays with its step when steps are added or moved. The item
+also keeps `anchor_text`, the title as the page showed it (at most 200
+characters). A note is refused (409, and the page shows it again) when its
+anchor is no longer in the documents or its title changed since the page
+showed it. A note whose step or section was renamed or removed is kept:
+Journeys and Product end with "Notes on things that changed", with its
+thread and a box to reply.
+
+Two safeguards on the queue: a card that has just appeared takes no Enter
+or primary click for 0.7 s (its primary button shows it), and a held key does
+not repeat. The address always names the card on screen (`#item-N`). Text
+whose send did not go through is never dropped: it stays in its box, or,
+when the box is gone because the item was closed or answered meanwhile,
+it shows at the top of For you to copy or dismiss.
 
 "Changed since you last looked" compares each `## ` section of the three
 product files with its text at the commit the owner marked as seen. Uncommitted

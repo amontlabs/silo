@@ -48,8 +48,8 @@ test('the page renders every section against the fixture', async () => {
   assert.match(html, /<div class="hero-text"><p>Silo gives every agent its own computer\.<\/p>/);
   assert.match(html, /id="journey-first-run"/);
   assert.match(html, /id="journey-share-a-workspace"/);
-  assert.match(html, /<details class="step is-built" id="journey-first-run-step-1" data-step="1">[\s\S]*?<span>Install the app<\/span>[\s\S]*?<span class="status-word">works<\/span>/);
-  assert.match(html, /id="journey-first-run-step-4"[\s\S]*?<span>Restore a computer<\/span>[\s\S]*?not driven/);
+  assert.match(html, /<details class="step is-built" id="journey-first-run-step-install-the-app" data-step="1">[\s\S]*?<span>Install the app<\/span>[\s\S]*?<span class="status-word">works<\/span>/);
+  assert.match(html, /id="journey-first-run-step-restore-a-computer"[\s\S]*?<span>Restore a computer<\/span>[\s\S]*?not driven/);
   assert.match(html, /<div class="track" aria-hidden="true"><i class="built"><\/i><i class="partial"><\/i><i class="missing"><\/i><i class="untested"><\/i><\/div>/);
   assert.match(html, /data-n="1\/4"/);
   assert.match(html, /<pre class="mermaid">/);

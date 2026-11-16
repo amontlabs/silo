@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConflictError, DashboardError, NotFoundError, StoreVersionError, ValidationError } from './errors.js';
 import { currentReaction, itemState, seenValue } from './state.js';
+import { ID_SHAPE } from './docs.js';
 
 export const SCHEMA_VERSION = 2;
 export const KINDS = ['look', 'decide', 'shipped', 'note'];
@@ -19,20 +20,18 @@ const MAX_OPTION_DETAIL = 300;
 const REPOSITORY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const MAX_TITLE = 200;
 const MAX_TEXT = 200_000;
-const JOURNEY_ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
-const SECTION_KEY = /^[a-z0-9][a-z0-9-]{0,119}$/;
 
 // Where an owner note points: a journey step, a journey, or a product section.
 // Returns { kind, journey, step, section } or throws.
 export function parseAnchor(anchor) {
   const text = typeof anchor === 'string' ? anchor : '';
-  let match = /^journeys#([^/]+)\/([1-9][0-9]{0,3})$/.exec(text);
-  if (match && JOURNEY_ID.test(match[1])) return { kind: 'step', journey: match[1], step: Number(match[2]) };
+  let match = /^journeys#([^/]+)\/([^/]+)$/.exec(text);
+  if (match && ID_SHAPE.test(match[1]) && ID_SHAPE.test(match[2])) return { kind: 'step', journey: match[1], step: match[2] };
   match = /^journeys#([^/]+)$/.exec(text);
-  if (match && JOURNEY_ID.test(match[1])) return { kind: 'journey', journey: match[1] };
+  if (match && ID_SHAPE.test(match[1])) return { kind: 'journey', journey: match[1] };
   match = /^product#(.+)$/.exec(text);
-  if (match && SECTION_KEY.test(match[1])) return { kind: 'section', section: match[1] };
-  throw new ValidationError('anchor must be journeys#<journey id>/<step number>, journeys#<journey id> or product#<section key>');
+  if (match && ID_SHAPE.test(match[1])) return { kind: 'section', section: match[1] };
+  throw new ValidationError('anchor must be journeys#<journey id>/<step key>, journeys#<journey id> or product#<section key>');
 }
 
 const ITEMS_COLUMNS = `  kind TEXT NOT NULL CHECK (kind IN ('look', 'decide', 'shipped', 'note')),
@@ -306,7 +305,7 @@ export class Store {
     if (!POST_KINDS.includes(kind)) throw new ValidationError(`kind must be one of ${POST_KINDS.join(', ')}`);
     const cleanTitle = singleLine(title, 'title', MAX_TITLE);
     const cleanOptions = cleanOptionList(options, kind);
-    if (journey != null && !JOURNEY_ID.test(journey)) {
+    if (journey != null && !ID_SHAPE.test(journey)) {
       throw new ValidationError('journey must be a journey id: lowercase letters, digits and hyphens');
     }
     const cleanDefault = defaultText == null ? null : longText(defaultText, 'default');

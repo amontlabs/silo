@@ -8,7 +8,7 @@
 // read. Markdown never adds elements of its own: raw HTML is escaped.
 import { h, raw } from './html.js';
 import { renderInline, renderMarkdown } from './markdown.js';
-import { DOC_FILES, STEP_STATUSES, lineDiff, parseDecisions, parseJourneys, productLayout, slugify, splitSections } from './docs.js';
+import { DOC_FILES, STEP_STATUSES, anchorText, lineDiff, noteTargets, parseDecisions, parseJourneys, productLayout, slugify, splitSections, uniqueId } from './docs.js';
 import { noteSummary } from './private.js';
 import { currentReaction, forYouOrder, lastActivity, lastReplyId } from './state.js';
 
@@ -42,29 +42,38 @@ function time(iso) {
 
 // ---- anchors of owner notes ----
 
-const stepAnchor = (journey, n) => `journeys#${journey}/${n}`;
+// A step's anchor uses its key (from its title), never its position.
+const stepAnchor = (journey, key) => `journeys#${journey}/${key}`;
 const journeyAnchor = (journey) => `journeys#${journey}`;
 const sectionAnchor = (key) => `product#${key}`;
+const orphanId = (anchor) => `orphan-${slugify(anchor)}`;
 
-function anchorHref(anchor) {
-  let match = /^journeys#([^/]+)\/(\d+)$/.exec(anchor || '');
+// Where a note's anchor is on the page: its element while the documents still
+// have it, else its entry under "Notes on things that changed".
+function anchorHref(anchor, ctx) {
+  if (!ctx.targets.has(anchor)) return `#${orphanId(anchor)}`;
+  let match = /^journeys#([^/]+)\/(.+)$/.exec(anchor);
   if (match) return `#journey-${match[1]}-step-${match[2]}`;
-  match = /^journeys#(.+)$/.exec(anchor || '');
+  match = /^journeys#(.+)$/.exec(anchor);
   if (match) return `#journey-${match[1]}`;
-  match = /^product#(.+)$/.exec(anchor || '');
-  if (match) return `#product-${match[1]}`;
-  return null;
+  match = /^product#(.+)$/.exec(anchor);
+  return match ? `#product-${match[1]}` : null;
 }
 
-// anchor -> { replies (every note item's replies, oldest first), reaction, notes (owner texts), after }
+// anchor -> { replies (every note item's replies, oldest first), reaction,
+// notes (owner texts), after, anchorText (as last recorded), open (the open note item) }
 function noteIndex(items) {
   const index = new Map();
   for (const item of items) {
     if (item.kind !== 'note' || !item.anchor) continue;
-    if (!index.has(item.anchor)) index.set(item.anchor, { replies: [], after: 0 });
+    if (!index.has(item.anchor)) index.set(item.anchor, { replies: [], after: 0, open: null });
     const entry = index.get(item.anchor);
     entry.replies.push(...item.replies);
-    if (item.status === 'open') entry.after = Math.max(entry.after, lastReplyId(item));
+    entry.anchorText = item.anchor_text || item.title;
+    if (item.status === 'open') {
+      entry.after = Math.max(entry.after, lastReplyId(item));
+      entry.open = item;
+    }
   }
   for (const entry of index.values()) {
     entry.replies.sort((a, b) => a.id - b.id);
@@ -183,7 +192,7 @@ function noteControls({ anchor, anchorText, journey = null, info = EMPTY_NOTES, 
 
 function whereLink(item, ctx) {
   if (item.kind === 'note') {
-    const href = anchorHref(item.anchor);
+    const href = anchorHref(item.anchor, ctx);
     const label = item.anchor_text || item.title;
     return href ? h`<a href="${href}"><b>${label}</b></a>` : h`<b>${label}</b>`;
   }
@@ -305,6 +314,20 @@ function forYouView(ctx) {
 </section>`;
 }
 
+// Notes whose anchor the documents no longer have: kept, with their thread and
+// a box to reply on the open note item.
+function orphanNotes(ctx, prefix) {
+  const gone = [...ctx.notes.entries()].filter(([anchor]) => anchor.startsWith(prefix) && !ctx.targets.has(anchor));
+  if (!gone.length) return '';
+  return h`<div class="orphans"><p class="eyebrow">Notes on things that changed</p>${gone.map(
+    ([anchor, info]) => h`<div class="orphan" id="${orphanId(anchor)}">
+      <div class="orphan-head"><b>${info.anchorText}</b>${info.reaction ? h`<span class="mine ${info.reaction}">${REACTION_WORD[info.reaction]}</span>` : ''}</div>
+      ${thread(info.replies)}
+      ${info.open ? commentControls(info.open) : ''}
+    </div>`,
+  )}</div>`;
+}
+
 // ---- Product ----
 
 function changeMark(change) {
@@ -383,9 +406,10 @@ function productView(ctx) {
       <div class="tile-head"><h3>${tile.heading}</h3>${changeMark(change(tile.key))}</div>
       <div class="prose">${raw(renderMarkdown(tile.text))}</div>
       ${info.replies.length ? h`<details class="notes-of" id="notes-product-${tile.key}"><summary>${plural(info.notes, 'note')} from you</summary>${thread(info.replies)}</details>` : ''}
-      ${noteControls({ anchor, anchorText: tile.heading, info })}
+      ${noteControls({ anchor, anchorText: anchorText(tile.heading), info })}
     </article>`;
   })}</div>
+  ${orphanNotes(ctx, 'product#')}
   ${removedNotes(ctx, DOC_FILES.product)}
 </section>`;
 }
@@ -393,16 +417,15 @@ function productView(ctx) {
 // ---- Journeys ----
 
 function stepView(journey, step, ctx) {
-  const anchor = stepAnchor(journey.id, step.n);
+  const anchor = stepAnchor(journey.id, step.key);
   const info = ctx.notes.get(anchor) || EMPTY_NOTES;
-  const plainTitle = step.title.replace(/[`*_]/g, '').slice(0, 200);
   const notesLabel = plural(info.notes, 'note') + ' from you';
-  return h`<details class="step is-${step.status}" id="journey-${journey.id}-step-${step.n}" data-step="${step.n}">
+  return h`<details class="step is-${step.status}" id="journey-${journey.id}-step-${step.key}" data-step="${step.n}">
     <summary><span class="n">${String(step.n).padStart(2, '0')}</span><span class="t"><span class="pip ${step.status}" aria-hidden="true"></span><span>${raw(renderInline(step.title))}</span></span><span class="tag">${info.reaction ? h`<span class="mine ${info.reaction}">${REACTION_WORD[info.reaction]}</span>` : ''}${info.notes ? h`<span class="has-notes" title="${notesLabel}" role="img" aria-label="${notesLabel}"></span>` : ''}<span class="status-word">${STATUS_WORD[step.status]}</span></span></summary>
     <div class="more">
       ${step.detail ? h`<div class="prose">${raw(renderMarkdown(step.detail))}</div>` : h`<p class="no-detail">No detail yet.</p>`}
       ${thread(info.replies)}
-      ${noteControls({ anchor, anchorText: plainTitle, journey: journey.id, info, reactions: true })}
+      ${noteControls({ anchor, anchorText: anchorText(step.title), journey: journey.id, info, reactions: true })}
     </div>
   </details>`;
 }
@@ -430,7 +453,7 @@ function journeyCard(journey, ctx) {
     ${total ? h`<div class="steps">${journey.steps.map((step) => stepView(journey, step, ctx))}</div>` : ''}
     ${journey.prose ? h`<details class="j-more" id="journey-${journey.id}-more"><summary>More</summary><div class="prose">${raw(renderMarkdown(journey.prose))}</div></details>` : ''}
     ${journeyItems(journey, ctx)}
-    <div class="j-note">${thread(info.replies)}${noteControls({ anchor, anchorText: journey.title, journey: journey.id, info, label: '＋ note on this journey' })}</div>
+    <div class="j-note">${thread(info.replies)}${noteControls({ anchor, anchorText: anchorText(journey.title), journey: journey.id, info, label: '＋ note on this journey' })}</div>
   </article>`;
 }
 
@@ -443,6 +466,7 @@ function journeysView(ctx) {
   </div>
   ${ctx.docs.journeys === null ? h`<p class="empty-note">No journeys yet (docs/product/JOURNEYS.md is missing).</p>` : ''}
   ${ctx.journeys.map((journey) => journeyCard(journey, ctx))}
+  ${orphanNotes(ctx, 'journeys#')}
   ${removedNotes(ctx, DOC_FILES.journeys)}
 </section>`;
 }
@@ -486,10 +510,14 @@ function decisionsView(ctx) {
 
 // ---- Private ----
 
-export const noteId = (note) => `note-${slugify(note.path) || 'note'}`;
+// Unique note ids, in listing order: two paths that slugify alike get -2, -3.
+function withNoteIds(notes) {
+  const used = new Set();
+  return notes.map((note) => ({ ...note, id: `note-${uniqueId(slugify(note.path), used, 'note')}` }));
+}
 
 function readerView(note) {
-  const id = noteId(note);
+  const { id } = note;
   const { preamble, sections } = splitSections(note.text);
   return h`<article class="reader" id="${id}">
     <a class="back" href="#private">← All notes</a>
@@ -504,7 +532,7 @@ function readerView(note) {
 }
 
 function privateView(groups) {
-  const notes = groups.flatMap((group) => group.notes.map((note) => ({ ...note, folder: group.folder })));
+  const notes = withNoteIds(groups.flatMap((group) => group.notes.map((note) => ({ ...note, folder: group.folder }))));
   if (!notes.length) return '';
   return h`<section class="view" id="private" data-region="private" aria-label="Private">
   <div class="notes-index">
@@ -512,7 +540,7 @@ function privateView(groups) {
     <p class="lede">Kept on this Mac <em>· not in the repository</em></p>
     <div class="grid">${notes.map((note) => {
       const { title, summary } = noteSummary(note);
-      return h`<a class="tile note-tile" href="#${noteId(note)}"><h3>${note.folder || 'private'}</h3><p class="big">${title}</p>${summary ? h`<p>${summary}</p>` : ''}</a>`;
+      return h`<a class="tile note-tile" href="#${note.id}"><h3>${note.folder || 'private'}</h3><p class="big">${title}</p>${summary ? h`<p>${summary}</p>` : ''}</a>`;
     })}</div>
   </div>
   ${notes.map(readerView)}
@@ -550,6 +578,7 @@ export function renderPage(view) {
     waiting,
     done,
     notes: noteIndex(items),
+    targets: noteTargets(view.docs),
     changeIndex: new Map(view.changes.changes.map((change) => [`${change.file}#${change.key}`, change])),
     decisions: parseDecisions(view.docs.decisions),
     noteCount: groups.reduce((sum, group) => sum + group.notes.length, 0),
@@ -569,6 +598,7 @@ export function renderPage(view) {
 <body>
 ${topBar(ctx)}
 <main>
+<div class="lost" id="lost" aria-live="polite"></div>
 ${forYouView(ctx)}
 ${productView(ctx)}
 ${journeysView(ctx)}

@@ -25,6 +25,27 @@ export function slugify(text) {
     .replace(/^-+|-+$/g, '');
 }
 
+// The one definition of an id or key the dashboard accepts: journey ids, step
+// keys and section keys, in anchors and in --journey.
+export const ID_SHAPE = /^[a-z0-9-]{1,80}$/;
+export const MAX_ID = 80;
+export const MAX_ANCHOR_TEXT = 200;
+
+// `base` cut to fit ID_SHAPE, made unique among `used` with -2, -3, ...
+// (in the order asked), and added to `used`.
+export function uniqueId(base, used, fallback) {
+  const clean = (text) => text.slice(0, MAX_ID).replace(/-+$/, '');
+  const root = clean(base) || fallback;
+  let id = root;
+  for (let n = 2; used.has(id); n += 1) id = `${clean(root.slice(0, MAX_ID - String(n).length - 1))}-${n}`;
+  used.add(id);
+  return id;
+}
+
+// The text the page shows for an anchor and the server compares: plain, at
+// most MAX_ANCHOR_TEXT characters.
+export const anchorText = (text) => String(text).replace(/[`*_]/g, '').trim().slice(0, MAX_ANCHOR_TEXT);
+
 // Reads one of the three known documents. A missing file, a missing folder, or
 // a path that resolves outside docs/product gives null.
 export function readDoc(repoRoot, fileName) {
@@ -74,19 +95,14 @@ export function splitSections(text) {
       preamble.push(line);
     }
   });
-  const seen = new Map();
+  const used = new Set();
   return {
     preamble: preamble.join('\n').replace(/\s+$/, ''),
-    sections: sections.map((section) => {
-      const base = slugify(section.heading) || 'section';
-      const count = (seen.get(base) ?? 0) + 1;
-      seen.set(base, count);
-      return {
-        heading: section.heading,
-        key: count === 1 ? base : `${base}-${count}`,
-        text: section.lines.join('\n').replace(/\s+$/, ''),
-      };
-    }),
+    sections: sections.map((section) => ({
+      heading: section.heading,
+      key: uniqueId(slugify(section.heading), used, 'section'),
+      text: section.lines.join('\n').replace(/\s+$/, ''),
+    })),
   };
 }
 
@@ -174,16 +190,15 @@ export function parseJourneys(text) {
     let id = null;
     const first = lines.findIndex((line) => line.trim() !== '');
     if (first !== -1) {
-      const match = /^<!--\s*id:\s*([A-Za-z0-9][A-Za-z0-9_-]*)\s*-->\s*$/.exec(lines[first]);
+      // An id that does not fit ID_SHAPE is ignored: the heading gives the id.
+      const match = /^<!--\s*id:\s*(\S*)\s*-->\s*$/.exec(lines[first]);
       if (match) {
-        id = match[1].toLowerCase();
+        if (ID_SHAPE.test(match[1])) id = match[1];
         lines.splice(first, 1);
       }
     }
-    const base = id || slugify(section.heading) || 'journey';
-    let unique = base;
-    for (let n = 2; used.has(unique); n += 1) unique = `${base}-${n}`;
-    used.add(unique);
+    const unique = uniqueId(id || slugify(section.heading), used, 'journey');
+    const stepKeys = new Set();
     const body = lines.join('\n').replace(/^\s*\n/, '').replace(/\s+$/, '');
     const numbered = /^(\d{1,3})\.\s+(\S.*)$/.exec(section.heading);
 
@@ -211,7 +226,12 @@ export function parseJourneys(text) {
       const match = STEP.exec(line);
       if (!match) continue;
       const item = listItemAt(bodyLines, i, line.slice(match[0].length));
-      steps.push({ n: steps.length + 1, status: match[2].toLowerCase(), ...splitStep(item.paragraph, item.nested) });
+      const n = steps.length + 1;
+      const step = splitStep(item.paragraph, item.nested);
+      if (!step.title) step.title = `Step ${n}`;
+      // A step's key comes from its title, so a note stays with its step when
+      // steps are added or moved.
+      steps.push({ n, key: uniqueId(slugify(step.title), stepKeys, `step-${n}`), status: match[2].toLowerCase(), ...step });
       for (let k = i; k < item.end; k += 1) taken[k] = true;
       i = item.end - 1;
     }
@@ -236,6 +256,22 @@ export function parseJourneys(text) {
     };
   });
   return { preamble, journeys };
+}
+
+/**
+ * Every place an owner note can point to in the current documents:
+ * anchor -> { text (what the page shows and the server compares), journey }.
+ */
+export function noteTargets(docs) {
+  const targets = new Map();
+  for (const journey of parseJourneys(docs.journeys ?? '').journeys) {
+    targets.set(`journeys#${journey.id}`, { text: anchorText(journey.title), journey: journey.id });
+    for (const step of journey.steps) targets.set(`journeys#${journey.id}/${step.key}`, { text: anchorText(step.title), journey: journey.id });
+  }
+  if (docs.product != null) {
+    for (const tile of productLayout(docs.product).tiles) targets.set(`product#${tile.key}`, { text: anchorText(tile.heading), journey: null });
+  }
+  return targets;
 }
 
 // ---- decisions ----

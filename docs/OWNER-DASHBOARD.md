@@ -40,8 +40,9 @@ and never conflicts with a merge.
    label in `--json`) and text.
    The same command returns the owner's own notes: items of kind `note`,
    which the owner creates from the page on a journey step, a journey or a
-   product section. Each carries `anchor` (`journeys#<id>/<step>`,
-   `journeys#<id>` or `product#<section key>`), `anchor_text` (what the
+   product section. Each carries `anchor` (`journeys#<id>/<step key>`, the
+   step key being its title slugified; `journeys#<id>` or
+   `product#<section key>`), `anchor_text` (what the
    owner saw), and either text or a `reaction` on a step: `essential`,
    `nice` (nice to have) or `unneeded` (not needed). A reply with neither
    clears the step's reaction. Treat a note like any answer: act on it, ack

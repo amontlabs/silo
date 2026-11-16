@@ -2,8 +2,9 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DashboardError, NotFoundError, ValidationError } from './errors.js';
-import { DOC_FILES, docChanges, hasCommit, readDoc } from './docs.js';
+import { ConflictError, DashboardError, NotFoundError, ValidationError } from './errors.js';
+import { DOC_FILES, anchorText, docChanges, hasCommit, noteTargets, readDoc } from './docs.js';
+import { parseAnchor } from './store.js';
 import { readPrivateNotes } from './private.js';
 import { renderPage } from './views.js';
 
@@ -161,9 +162,14 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
     }
   });
 
-  const pageView = () => {
+  const readDocs = () => {
     const docs = {};
     for (const [name, file] of Object.entries(DOC_FILES)) docs[name] = readDoc(repoRoot, file);
+    return docs;
+  };
+
+  const pageView = () => {
+    const docs = readDocs();
     return {
       items: store.itemsWithState(),
       docs,
@@ -260,13 +266,21 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
         if (typeof body.anchorText !== 'string') throw new ValidationError('send the anchorText the page showed');
         if (body.text !== undefined && typeof body.text !== 'string') throw new ValidationError('text must be a string');
         if (body.journey !== undefined && body.journey !== null && typeof body.journey !== 'string') throw new ValidationError('journey must be a string');
+        // The note must point at what the documents say now, and the page must
+        // have shown its current title: otherwise it changed under the owner.
+        parseAnchor(body.anchor);
+        const after = shownReply(body);
+        const target = noteTargets(readDocs()).get(body.anchor);
+        if (!target) throw new ConflictError(`${body.anchor} is no longer in the product documents; read the page again`);
+        const shown = anchorText(body.anchorText);
+        if (shown !== target.text) throw new ConflictError(`${body.anchor} changed since the page showed it; read it again`);
         const result = store.addNote({
           anchor: body.anchor,
-          anchorText: body.anchorText,
+          anchorText: shown,
           journey: body.journey ?? null,
           text: body.text ?? '',
           reaction: Object.hasOwn(body, 'reaction') ? body.reaction : undefined,
-          after: shownReply(body),
+          after,
         });
         return sendJson(res, 201, result);
       }

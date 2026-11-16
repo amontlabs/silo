@@ -54,10 +54,11 @@ test('a choice records the option index and its label; only the owner, only on d
   }));
 
 test('anchors: three shapes, nothing else', () => {
-  assert.deepEqual(parseAnchor('journeys#live/3'), { kind: 'step', journey: 'live', step: 3 });
+  assert.deepEqual(parseAnchor('journeys#live/t3-code-connects'), { kind: 'step', journey: 'live', step: 't3-code-connects' });
+  assert.deepEqual(parseAnchor(`journeys#${'a'.repeat(80)}/${'b'.repeat(80)}`).step, 'b'.repeat(80));
   assert.deepEqual(parseAnchor('journeys#a-computer-per-task'), { kind: 'journey', journey: 'a-computer-per-task' });
   assert.deepEqual(parseAnchor('product#the-problem'), { kind: 'section', section: 'the-problem' });
-  for (const bad of ['', 'journeys#', 'journeys#Live', 'journeys#live/0', 'journeys#live/01', 'journeys#live/x', 'journeys#live/3/4', 'journeys#../x', 'product#', 'product#a b', 'product#A', 'decisions#x', 'journeys#live/3 ', null, 42]) {
+  for (const bad of ['', 'journeys#', 'journeys#Live', 'journeys#live/', 'journeys#live/X', 'journeys#live/a_b', `journeys#live/${'a'.repeat(81)}`, `journeys#${'a'.repeat(81)}`, `product#${'a'.repeat(81)}`, 'journeys#live/3/4', 'journeys#../x', 'product#', 'product#a b', 'product#A', 'decisions#x', 'journeys#live/3 ', null, 42]) {
     assert.throws(() => parseAnchor(bad), /anchor must be/, String(bad));
   }
 });
@@ -136,34 +137,34 @@ test('API: a choice is an option number without text or verdict', async () => {
 test('API: /api/notes checks Host, Origin, the anchor and what the page showed', async () => {
   const origin = { Origin: `http://127.0.0.1:${port}` };
   const note = (body, headers = origin) => postJson(port, '/api/notes', { after: 0, anchorText: 'Install the app', ...body }, headers);
-  assert.equal((await note({ anchor: 'journeys#first-run/1', reaction: 'essential' }, { Origin: 'http://evil.example' })).status, 403);
-  assert.equal((await note({ anchor: 'journeys#first-run/1', reaction: 'essential' }, { Host: 'evil.example', ...origin })).status, 403);
-  assert.equal((await note({ anchor: 'journeys#first-run/1', reaction: 'essential' }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
+  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', reaction: 'essential' }, { Origin: 'http://evil.example' })).status, 403);
+  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', reaction: 'essential' }, { Host: 'evil.example', ...origin })).status, 403);
+  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', reaction: 'essential' }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
   const form = await request(port, { method: 'POST', url: '/api/notes', headers: { ...origin, 'Content-Type': 'text/plain' }, body: '{}' });
   assert.equal(form.status, 400);
-  for (const body of [{ anchor: 'journeys#first-run/x', text: 'x' }, { anchor: 'elsewhere', text: 'x' }, { anchor: 'journeys#first-run/1' }, { anchor: 'journeys#first-run/1', text: 5 }, { anchor: 'journeys#first-run/1', text: 'x', after: undefined }, { anchor: 'journeys#first-run/1', text: 'x', anchorText: undefined }]) {
+  for (const body of [{ anchor: 'journeys#first-run/X', text: 'x' }, { anchor: 'elsewhere', text: 'x' }, { anchor: 'journeys#first-run/install-the-app' }, { anchor: 'journeys#first-run/install-the-app', text: 5 }, { anchor: 'journeys#first-run/install-the-app', text: 'x', after: undefined }, { anchor: 'journeys#first-run/install-the-app', text: 'x', anchorText: undefined }]) {
     assert.equal((await note(body)).status, 400, JSON.stringify(body));
   }
   assert.equal(store.ownerReplies({ all: true }).filter((r) => r.kind === 'note').length, 0);
 
-  const created = await note({ anchor: 'journeys#first-run/1', journey: 'first-run', reaction: 'essential' });
+  const created = await note({ anchor: 'journeys#first-run/install-the-app', journey: 'first-run', reaction: 'essential' });
   assert.equal(created.status, 201);
   const { item } = JSON.parse(created.body);
   let html = (await request(port)).body.toString();
-  assert.match(html, /id="journey-first-run-step-1"[\s\S]*?<span class="mine essential">essential<\/span>/);
-  assert.match(html, /data-anchor="journeys#first-run\/1" data-anchor-text="Install the app" data-journey="first-run" data-after="\d+"/);
+  assert.match(html, /id="journey-first-run-step-install-the-app"[\s\S]*?<span class="mine essential">essential<\/span>/);
+  assert.match(html, /data-anchor="journeys#first-run\/install-the-app" data-anchor-text="Install the app" data-journey="first-run" data-after="\d+"/);
   assert.match(html, /<button class="pill on" type="button" data-reaction="essential" aria-pressed="true">/);
   assert.doesNotMatch(html, new RegExp(`<article class="card" id="item-${item}"`), 'an owner note is not in For you');
 
   // An agent replies: the step's next note needs the page to have shown that reply.
   const agent = store.addReply(item, { author: 'agent', text: 'Noted, it goes first.' });
-  assert.equal((await note({ anchor: 'journeys#first-run/1', text: 'More' })).status, 409);
+  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', text: 'More' })).status, 409);
   html = (await request(port)).body.toString();
-  assert.match(html, new RegExp(`<article class="card" id="item-${item}"[\\s\\S]*?An agent replied to your note[\\s\\S]*?href="#journey-first-run-step-1"`));
-  assert.equal((await note({ anchor: 'journeys#first-run/1', text: 'More', after: agent })).status, 201);
-  assert.equal((await note({ anchor: 'journeys#first-run/1', reaction: null, after: agent + 1 })).status, 201);
+  assert.match(html, new RegExp(`<article class="card" id="item-${item}"[\\s\\S]*?An agent replied to your note[\\s\\S]*?href="#journey-first-run-step-install-the-app"`));
+  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', text: 'More', after: agent })).status, 201);
+  assert.equal((await note({ anchor: 'journeys#first-run/install-the-app', reaction: null, after: agent + 1 })).status, 201);
   html = (await request(port)).body.toString();
-  const row = /id="journey-first-run-step-1" data-step="1">\s*<summary>[\s\S]*?<\/summary>/.exec(html)[0];
+  const row = /id="journey-first-run-step-install-the-app" data-step="1">\s*<summary>[\s\S]*?<\/summary>/.exec(html)[0];
   assert.doesNotMatch(row, /class="mine/, 'a cleared reaction leaves the row');
   assert.match(row, /<span class="has-notes"/);
 
