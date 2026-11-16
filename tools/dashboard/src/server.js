@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConflictError, DashboardError, NotFoundError, ValidationError } from './errors.js';
 import { DOC_FILES, MAX_ANCHOR_TEXT, docChanges, hasCommit, noteTargets, readDoc } from './docs.js';
-import { FEATURE_VERDICTS, readFeatures } from './features.js';
+import { FEATURE_VERDICTS, entryDigest, readFeatures } from './features.js';
 import { parseAnchor } from './store.js';
 import { readPrivateNotes } from './private.js';
 import { renderPage } from './views.js';
@@ -298,17 +298,21 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
       match = /^\/api\/features\/([^/]+)\/verdict$/.exec(pathname);
       if (match) {
         // A verdict on an entry of the feature list the checkout has now. The
-        // page sends the newest verdict row it showed for that entry.
+        // page sends the digest of the entry's text it showed (seen) and the
+        // newest verdict row it showed (shown); an entry that changed or left
+        // the list answers 409.
         const body = await jsonBody(req);
+        if (typeof body.seen !== 'string' || !/^[0-9a-f]{16}$/.test(body.seen)) throw new ValidationError('send the digest of the entry the page showed (seen)');
         const list = readFeatures(repoRoot);
         const feature = list?.features.find((entry) => entry.id === match[1]);
-        if (!feature) throw new NotFoundError(`no feature ${match[1]} in docs/product/features.jsonl`);
+        if (!feature) throw new ConflictError(`${match[1]} is no longer in docs/product/features.jsonl; read the page again`);
+        if (entryDigest(feature) !== body.seen) throw new ConflictError(`${feature.id} changed since the page showed it; read it again`);
         if (!Object.hasOwn(body, 'verdict') || (body.verdict !== null && !FEATURE_VERDICTS.includes(body.verdict))) {
           throw new ValidationError(`verdict must be one of ${FEATURE_VERDICTS.join(', ')}, or null to clear it`);
         }
         if (body.note !== undefined && typeof body.note !== 'string') throw new ValidationError('note must be a string');
         if (!Number.isSafeInteger(body.shown) || body.shown < 0) throw new ValidationError('send the newest verdict id the page showed (shown)');
-        const id = store.addVerdict(feature.id, { verdict: body.verdict, note: body.note ?? '', shown: body.shown, hasFileVerdict: feature.verdict !== null });
+        const id = store.addVerdict(feature.id, { verdict: body.verdict, note: body.note ?? '', shown: body.shown, hasFileVerdict: feature.verdict !== null, name: feature.name });
         return sendJson(res, 201, { id });
       }
       if (pathname === '/api/docs/seen') {

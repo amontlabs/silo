@@ -64,13 +64,15 @@ drop, any of them with a note. Verdicts are kept in the dashboard store, never
 in the repository.
 
 1. `dashboard verdicts` lists the current verdicts no agent has acknowledged:
-   feature id, name, verdict (null when the owner cleared one), note and when
-   (`--json` for machine output, `--all` for every current verdict).
+   `FEATURE_ID@ID` to acknowledge, verdict (cleared when the owner cleared
+   one), the name the owner judged, when and the note (`--json` for machine
+   output, `--all` for every current verdict).
 2. The orchestrator writes each into `features.jsonl` (`verdict`) and records
    it in `DECISIONS.md`, by hand, in one commit.
-3. Then `dashboard verdicts ack FEATURE_ID...` (or `FEATURE_ID@ID`, to
-   acknowledge only up to the verdict row listed) so it is not picked up twice.
-   A later change by the owner shows up again.
+3. Then `dashboard verdicts ack FEATURE_ID@ID...`, exactly as listed, so it is
+   not picked up twice. A bare feature id is refused: it could acknowledge a
+   verdict the owner gave after you read the list. A later change by the owner
+   shows up again.
 
 The page is built to take the owner's input with little reading and few
 clicks: one card at a time, options to pick, reactions on journey steps. Keep

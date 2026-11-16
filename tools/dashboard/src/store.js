@@ -58,6 +58,7 @@ const VERDICTS_SCHEMA = `
 CREATE TABLE verdicts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   feature_id TEXT NOT NULL,
+  name TEXT,
   verdict TEXT CHECK (verdict IS NULL OR verdict IN ('take', 'refine', 'later', 'drop')),
   note TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
@@ -564,8 +565,9 @@ export class Store {
   // as history. `verdict` null clears the current one. `shown` is the id of
   // the newest row the caller showed for this feature (0 when none): a newer
   // row refuses the action (ConflictError). Whether the feature exists in the
-  // list is the caller's check. Returns the new row id.
-  addVerdict(featureId, { verdict, note = '', shown = null, hasFileVerdict = false }) {
+  // list is the caller's check; `name` is the entry's name as the owner saw
+  // it. Returns the new row id.
+  addVerdict(featureId, { verdict, note = '', shown = null, hasFileVerdict = false, name = null }) {
     if (typeof featureId !== 'string' || !FEATURE_ID.test(featureId)) throw new ValidationError('feature id must be lowercase letters, digits and hyphens');
     if (verdict !== null && !FEATURE_VERDICTS.includes(verdict)) throw new ValidationError(`verdict must be one of ${FEATURE_VERDICTS.join(', ')}, or null to clear it`);
     const cleanNote = longText(note, 'note');
@@ -575,7 +577,9 @@ export class Store {
       const newest = this.db.prepare('SELECT * FROM verdicts WHERE feature_id = ? ORDER BY id DESC LIMIT 1').get(featureId) ?? null;
       if (shown != null && (newest?.id ?? 0) > shown) throw new ConflictError(`${featureId} has a newer verdict than the one shown; read it again`);
       if (verdict === null && (newest ? newest.verdict === null : !hasFileVerdict)) throw new ValidationError('there is no verdict to clear');
-      const info = this.db.prepare('INSERT INTO verdicts (feature_id, verdict, note, created_at) VALUES (?, ?, ?, ?)').run(featureId, verdict, cleanNote, this.now());
+      const info = this.db
+        .prepare('INSERT INTO verdicts (feature_id, name, verdict, note, created_at) VALUES (?, ?, ?, ?, ?)')
+        .run(featureId, name == null ? null : String(name), verdict, cleanNote, this.now());
       return Number(info.lastInsertRowid);
     });
   }
@@ -595,20 +599,19 @@ export class Store {
       .sort((a, b) => a.id - b.id);
   }
 
-  // Acknowledges the verdict rows of these features: every row, or with
-  // `upTo` a row id per feature, only the rows up to it, so a verdict the
-  // owner gave after the agent read the list stays unread. All or nothing: a
-  // feature without rows changes nothing.
+  // Acknowledges the verdict rows of these features up to the row id the
+  // agent read ({ feature, upTo }), so a verdict the owner gave after the
+  // agent listed them stays unread. All or nothing: a feature without a row
+  // up to that id changes nothing.
   ackVerdicts(requests) {
     return this.tx(() => {
-      for (const { feature } of requests) {
-        if (!this.db.prepare('SELECT 1 FROM verdicts WHERE feature_id = ?').get(feature)) throw new NotFoundError(`no verdict on ${feature}`);
+      for (const { feature, upTo } of requests) {
+        if (!Number.isSafeInteger(upTo) || upTo < 1) throw new ValidationError(`acknowledge ${feature} up to the verdict row you read`);
+        if (!this.db.prepare('SELECT 1 FROM verdicts WHERE feature_id = ? AND id = ?').get(feature, upTo)) throw new NotFoundError(`no verdict ${upTo} on ${feature}`);
       }
       const when = this.now();
-      for (const { feature, upTo = null } of requests) {
-        this.db
-          .prepare(`UPDATE verdicts SET acked_at = ? WHERE feature_id = ? AND acked_at IS NULL ${upTo === null ? '' : 'AND id <= ?'}`)
-          .run(...[when, feature, ...(upTo === null ? [] : [upTo])]);
+      for (const { feature, upTo } of requests) {
+        this.db.prepare('UPDATE verdicts SET acked_at = ? WHERE feature_id = ? AND acked_at IS NULL AND id <= ?').run(when, feature, upTo);
       }
       return requests.map((request) => request.feature);
     });

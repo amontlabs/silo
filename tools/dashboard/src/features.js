@@ -2,6 +2,7 @@
 // from the checkout, one JSON object per line, in list order. The owner's
 // verdicts live in the store; this file only reads. Every function but
 // readFeatures is pure, so the page, the CLI and the tests share them.
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DOC_FOLDER } from './docs.js';
@@ -119,6 +120,15 @@ export function readFeatures(repoRoot) {
   if (source === null) return null;
   const { features, skipped } = parseFeatures(source);
   return { features, stages: parseStages(readFolderFile(repoRoot, STAGES_FILE), features), skipped };
+}
+
+// What the owner judges an entry by: a digest of what its card shows (name,
+// what, old, suggest, why, in that order), SHA-256, first 16 hex characters.
+// The page sends it back with a verdict; the server refuses the verdict when
+// the entry's text changed since.
+export function entryDigest(feature) {
+  const shown = [feature.name, feature.what, feature.old, feature.suggest, feature.why];
+  return createHash('sha256').update(JSON.stringify(shown)).digest('hex').slice(0, 16);
 }
 
 // feature id -> { verdict, note, source: 'store'|'file', shown, at }.

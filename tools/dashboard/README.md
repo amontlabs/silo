@@ -34,7 +34,9 @@ modes:
   version 3). The CLI and the server open it directly, so the CLI works
   when the server is not running. A database from a newer version of the
   dashboard is refused, not changed; one from an older version is upgraded
-  in place, in one transaction, keeping every id.
+  in place, in one transaction, keeping every id. Every checkout that opens
+  the same store must therefore run the same dashboard version: once a newer
+  one has upgraded it, an older copy refuses to open it.
 - `attachments/<item-id>/<file>`: copies of attached files.
 - `private/`: the owner's private Markdown notes, kept out of the public
   repository. Every `.md` file under it (folders included, dot files skipped)
@@ -139,13 +141,27 @@ section shows as new.
 The owner goes down the feature list from the top and gives each entry a
 verdict in one click: **Take**, **Refine…** (a note saying what to change is
 required), **Later** or **Drop**. The button matching the entry's suggestion
-is the filled one and Enter presses it; the same 0.7 s wait and held-key rule
-as For you apply. **Add a note** (or Tab) lets any verdict carry a note; in the
-box Cmd+Enter sends (Refine, or the suggestion) and Escape closes it. → skips
-to the next entry without a verdict, ← goes back one entry. After a verdict the
-card leaves and the next entry without one enters. An entry with a verdict
-shows it as a chip with its note, **Change** (the buttons again) and
-**Clear**.
+is the filled one and Enter presses it. **Add a note** (or Tab) lets any
+verdict carry a note: the box never sends by itself, and Cmd+Enter there only
+moves to the verdict buttons ("Now pick a verdict"). In the box **Refine…**
+opens, Cmd+Enter sends Refine. Plain Enter in a box is a new line; Escape
+closes it. → skips to the next entry without a verdict, ← goes back one entry.
+After a verdict the card leaves and the next entry without one enters. An entry
+with a verdict shows it as a chip with its note, **Change** (the buttons again)
+and **Clear**, which clears the verdict and keeps any text typed in the box.
+
+The same safeguards as For you, in both queues: a card waits 0.7 s from the
+moment the owner can see it (its view is on screen and it is the current card:
+opening the tab, a stage jump and a See all click start the wait again, and so
+does new text on the same entry), a held key does not repeat, and from the
+moment a move or an answer starts until the next card is current every action
+key and button is refused. These rules live in `public/rules.js`.
+
+Each card carries a digest of what it shows (name, what, old, suggest, why;
+SHA-256, first 16 hex characters). A verdict sent for text that has changed
+since, or for an entry no longer in the list, is refused: the Stack reloads and
+says "This entry changed or was removed; your verdict was not recorded", with
+the note when there was one.
 
 Around the card: the stages drawn as a stack, the first at the bottom, each
 with "decided/total" and one segment per entry coloured by verdict (a cut line
@@ -278,16 +294,18 @@ dashboard answers --all --json
 # Mark owner replies acknowledged once acted on.
 dashboard ack 7 8
 
-# The owner's verdicts on the feature list not yet acknowledged: verdict row
-# id, feature id, name, verdict (null when cleared), note, when. --all lists
-# every current verdict.
+# The owner's verdicts on the feature list not yet acknowledged, one line each
+# starting with what to acknowledge (FEATURE_ID@ID), then the verdict ("cleared"
+# when the owner cleared one), the entry's name as the owner judged it, when,
+# and the note. --json gives id, ack, feature_id, name, in_list, verdict, note,
+# created_at, acked_at. --all lists every current verdict.
 dashboard verdicts
 dashboard verdicts --all --json
 
-# Acknowledge them once written into features.jsonl and DECISIONS.md.
-# FEATURE_ID@ID acknowledges only rows up to verdict row ID, so a verdict the
-# owner changed after you listed stays unread.
-dashboard verdicts ack engine-service vm-runtime@12
+# Acknowledge them once written into features.jsonl and DECISIONS.md, exactly
+# as listed: FEATURE_ID@ID acknowledges that row and older ones, so a verdict
+# the owner gave after you listed stays unread. A bare FEATURE_ID is refused.
+dashboard verdicts ack engine-service@3 vm-runtime@12
 
 # Close an item, list items, show one.
 dashboard close 1 --note "Done in feat/sidebar"
@@ -314,11 +332,13 @@ account are out of scope (they can read the store directly anyway).
   controls inside the wrappers the server renders for items, notes and Mark
   all as seen. Scripts are files (`/boot.js`, `/app.js`); the page has no
   inline script or event handler attributes.
-- `POST /api/features/<id>/verdict` takes `{verdict, note?, shown}`:
+- `POST /api/features/<id>/verdict` takes `{verdict, note?, shown, seen}`:
   `verdict` is `take`, `refine`, `later`, `drop` or null (clears it), `shown`
   is the id of the newest verdict row the page showed for that entry (0 for
-  none). The id must be in the current `features.jsonl` (404); a newer row
-  answers 409 and the page shows the entry again; Refine needs a note. Every
+  none) and `seen` the digest of the entry's text it showed. An entry no
+  longer in `features.jsonl`, other text, or a newer row answers 409 and the
+  page shows the Stack again; Refine needs a note. Each row also keeps the
+  entry's name as it was judged. Every
   text from `features.jsonl` and `stages.json` is escaped; `what` and `why`
   go through the same inline Markdown renderer as the documents.
 - `POST /api/notes` takes `{anchor, anchorText, journey?, text?, reaction?,

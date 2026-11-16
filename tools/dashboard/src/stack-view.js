@@ -2,12 +2,13 @@
 // stack, and the product drawn as it grows. Pure functions from data to HTML,
 // like views.js. Every text from features.jsonl goes through h`` (escaped);
 // the verdict buttons exist only inside the [data-controls] wrapper of their
-// own entry, which carries the newest verdict row the page showed. `what`
+// own entry, which carries the newest verdict row the page showed and the
+// digest of the text it showed. `what`
 // and `why` are inline Markdown through the page's one renderer, which
 // escapes raw HTML.
 import { h, raw } from './html.js';
 import { renderInline } from './markdown.js';
-import { STARTER_LAST_STAGE, appWords, currentVerdicts, nextUndecided, schematicParts, stackTotals } from './features.js';
+import { STARTER_LAST_STAGE, appWords, currentVerdicts, entryDigest, nextUndecided, schematicParts, stackTotals } from './features.js';
 
 export const VERDICT_CHIP = { take: 'Taken', refine: 'Refine', later: 'Later', drop: 'Dropped' };
 const VERDICT_BUTTON = { take: 'Take', refine: 'Refine…', later: 'Later', drop: 'Drop' };
@@ -110,7 +111,7 @@ function showsUp(feature) {
   </div>`;
 }
 
-function entryControls(prep, feature) {
+function entryControls(prep, feature, digest) {
   const current = prep.verdicts.get(feature.id);
   const verdict = current?.verdict ?? null;
   const primary = feature.suggest ?? 'take';
@@ -123,12 +124,12 @@ function entryControls(prep, feature) {
         ${current.note ? h`<p class="v-note">${current.note}</p>` : ''}
         <span class="v-acts"><button class="btn small" type="button" data-change aria-expanded="false">Change</button><button class="btn ghost small" type="button" data-pick="clear">Clear</button></span></div>`
     : '';
-  return h`<div class="controls ${verdict ? 'decided' : ''}" data-controls data-feature="${feature.id}" data-shown="${current?.shown ?? 0}">
+  return h`<div class="controls ${verdict ? 'decided' : ''}" data-controls data-feature="${feature.id}" data-shown="${current?.shown ?? 0}" data-seen="${digest}">
     ${now}
     <div class="acts verdict-acts">${buttons}<button class="btn ghost small" type="button" data-say aria-expanded="false">Add a note</button><button class="btn ghost skip" type="button" data-stack-skip>Skip <kbd>→</kbd></button></div>
     <form class="say" data-feature-note data-mode="note" data-draft="feature-${feature.id}-note">
       <textarea name="text" rows="3" placeholder="A note for this entry" aria-label="A note for this entry"></textarea>
-      <div class="row"><span class="note-hint">The note goes with the verdict you pick.</span><span class="refine-hint">Refine needs a note: what to change.</span><button class="btn go" type="submit">Send as Refine <kbd>⌘↵</kbd></button></div>
+      <div class="row"><span class="note-hint">Now pick a verdict <kbd>⌘↵</kbd></span><span class="refine-hint">Refine needs a note: what to change.</span><button class="btn go" type="submit">Send as Refine <kbd>⌘↵</kbd></button></div>
     </form>
     <p class="form-error" role="alert"></p>
   </div>`;
@@ -137,13 +138,14 @@ function entryControls(prep, feature) {
 function entryCard(prep, feature) {
   const verdict = verdictOf(prep, feature);
   const total = prep.features.length;
-  return h`<article class="card entry" data-entry="${feature.id}" data-stage="${feature.stage}" data-decided="${verdict ?? ''}" ${feature.id === prep.start ? h`data-start` : ''} tabindex="-1" aria-label="${feature.n} of ${total}: ${feature.name}">
+  const digest = entryDigest(feature);
+  return h`<article class="card entry" data-entry="${feature.id}" data-digest="${digest}" data-stage="${feature.stage}" data-decided="${verdict ?? ''}" ${feature.id === prep.start ? h`data-start` : ''} tabindex="-1" aria-label="${feature.n} of ${total}: ${feature.name}">
     <div class="card-top"><span class="kind stage-pill">${prep.stageTitle.get(feature.stage) ?? feature.stage}</span><span class="where">${feature.n} of ${total}</span></div>
     <h2>${feature.name}</h2>
     ${feature.what ? h`<p class="body">${raw(renderInline(feature.what))}</p>` : ''}
     <div class="facts">${oldCell(feature)}${suggestCell(feature)}</div>
     ${showsUp(feature)}
-    ${entryControls(prep, feature)}
+    ${entryControls(prep, feature, digest)}
   </article>`;
 }
 

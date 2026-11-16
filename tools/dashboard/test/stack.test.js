@@ -7,6 +7,7 @@ import { Store } from '../src/store.js';
 import {
   appWords,
   currentVerdicts,
+  entryDigest,
   nextUndecided,
   parseFeatures,
   parseStages,
@@ -197,13 +198,14 @@ test('without JavaScript: a Stack tab, every entry readable in order, the contro
   const names = [...html.matchAll(/<h2>(Name [a-z-]+)<\/h2>/g)].map((match) => match[1]);
   assert.deepEqual(names, FEATURES.map((entry) => `Name ${entry.id}`));
   // The start is the first undecided entry; terminal is decided in the file.
-  assert.match(html, /data-entry="engine" data-stage="shell" data-decided="" data-start/);
-  assert.match(html, /data-entry="terminal" data-stage="shell" data-decided="take"/);
+  assert.match(html, /data-entry="engine" data-digest="[0-9a-f]{16}" data-stage="shell" data-decided="" data-start/);
+  assert.match(html, /data-entry="terminal" data-digest="[0-9a-f]{16}" data-stage="shell" data-decided="take"/);
   // Each verdict button sits in the wrapper of its own entry, with what the page showed.
   for (const entry of FEATURES) {
     const card = html.slice(html.indexOf(`data-entry="${entry.id}"`));
     const controls = card.slice(card.indexOf('<div class="controls'), card.indexOf('</article>'));
-    assert.match(controls, new RegExp(`data-controls data-feature="${entry.id}" data-shown="0"`));
+    const digest = entryDigest(list.features.find((other) => other.id === entry.id));
+    assert.match(controls, new RegExp(`data-controls data-feature="${entry.id}" data-shown="0" data-seen="${digest}"`));
     assert.equal((controls.match(/data-pick="(take|refine|later|drop)"/g) || []).length, 4);
     assert.equal((controls.match(/data-primary/g) || []).length, 1);
   }
@@ -251,8 +253,20 @@ after(async () => {
   store.close();
 });
 
-const verdict = (id, body, headers) => postJson(port, `/api/features/${id}/verdict`, body, headers);
+// What the page sends as `seen` for an entry of the fixture list.
+const SEEN = new Map(parsed().map((entry) => [entry.id, entryDigest(entry)]));
+const verdict = (id, body, headers) => postJson(port, `/api/features/${id}/verdict`, { seen: SEEN.get(id) ?? '0000000000000000', ...body }, headers);
 const error = (response) => JSON.parse(response.body.toString()).error;
+
+test('the entry digest covers what the card shows: name, what, old, suggest, why', () => {
+  const [base] = parsed();
+  const digest = entryDigest(base);
+  assert.match(digest, /^[0-9a-f]{16}$/);
+  for (const [field, value] of [['name', 'Other'], ['what', 'Other'], ['old', 'idea'], ['suggest', 'drop'], ['why', 'Other']]) {
+    assert.notEqual(entryDigest({ ...base, [field]: value }), digest, field);
+  }
+  assert.equal(entryDigest({ ...base, cli: 'other', app: 'menubar', verdict: 'drop', n: 40 }), digest, 'other fields do not count');
+});
 
 test('verdict API: validation, unknown id, refine needs a note, 409 on a newer row, clear', async () => {
   assert.equal((await verdict('engine', { verdict: 'yes', shown: 0 })).status, 400);
@@ -260,10 +274,15 @@ test('verdict API: validation, unknown id, refine needs a note, 409 on a newer r
   assert.equal((await verdict('engine', { verdict: 'take' })).status, 400, 'shown is required');
   assert.equal((await verdict('engine', { verdict: 'take', shown: -1 })).status, 400);
   assert.equal((await verdict('engine', { verdict: 'take', shown: 0, note: 7 })).status, 400);
+  assert.equal((await verdict('engine', { verdict: 'take', shown: 0, seen: undefined })).status, 400, 'seen is required');
+  assert.equal((await verdict('engine', { verdict: 'take', shown: 0, seen: 'xyz' })).status, 400);
   const unknown = await verdict('no-such-entry', { verdict: 'take', shown: 0 });
-  assert.equal(unknown.status, 404);
-  assert.match(error(unknown), /no feature no-such-entry/);
-  assert.equal((await verdict('..%2F..', { verdict: 'take', shown: 0 })).status, 404);
+  assert.equal(unknown.status, 409);
+  assert.match(error(unknown), /no-such-entry is no longer in/);
+  assert.equal((await verdict('..%2F..', { verdict: 'take', shown: 0 })).status, 409);
+  const otherText = await verdict('engine', { verdict: 'take', shown: 0, seen: SEEN.get('create') });
+  assert.equal(otherText.status, 409, 'a digest of other text');
+  assert.match(error(otherText), /engine changed since the page showed it/);
   const refine = await verdict('engine', { verdict: 'refine', note: '  ', shown: 0 });
   assert.equal(refine.status, 400);
   assert.match(error(refine), /refine needs a note/);
@@ -283,37 +302,49 @@ test('verdict API: validation, unknown id, refine needs a note, 409 on a newer r
   assert.equal((await verdict('terminal', { verdict: null, shown: 0 })).status, 201);
 
   const html = (await request(port)).body.toString();
-  assert.match(html, /data-entry="engine" data-stage="shell" data-decided=""/);
-  assert.match(html, /data-entry="terminal" data-stage="shell" data-decided=""/);
-  const rows = store.db.prepare("SELECT verdict, note FROM verdicts WHERE feature_id = 'engine' ORDER BY id").all();
-  assert.deepEqual(rows.map((row) => [row.verdict, row.note]), [['take', ''], ['refine', 'Only the service part'], [null, '']]);
+  assert.match(html, /data-entry="engine" data-digest="[0-9a-f]{16}" data-stage="shell" data-decided=""/);
+  assert.match(html, /data-entry="terminal" data-digest="[0-9a-f]{16}" data-stage="shell" data-decided=""/);
+  const rows = store.db.prepare("SELECT name, verdict, note FROM verdicts WHERE feature_id = 'engine' ORDER BY id").all();
+  assert.deepEqual(rows.map((row) => [row.name, row.verdict, row.note]), [['Name engine', 'take', ''], ['Name engine', 'refine', 'Only the service part'], ['Name engine', null, '']]);
 });
 
 test('verdict API keeps the page rules: Host, Origin, cross-site, JSON only', async () => {
   assert.equal((await verdict('create', { verdict: 'take', shown: 0 }, { Origin: 'http://evil.example' })).status, 403);
   assert.equal((await verdict('create', { verdict: 'take', shown: 0 }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
   assert.equal((await verdict('create', { verdict: 'take', shown: 0 }, { Host: 'evil.example' })).status, 403);
-  const form = await request(port, { method: 'POST', url: '/api/features/create/verdict', headers: { 'Content-Type': 'text/plain' }, body: '{"verdict":"take","shown":0}' });
+  const form = await request(port, { method: 'POST', url: '/api/features/create/verdict', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ verdict: 'take', shown: 0, seen: SEEN.get('create') }) });
   assert.equal(form.status, 400);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM verdicts WHERE feature_id = 'create'").get().n, 0);
 });
 
-test('a verdict on an entry the list no longer has is refused; the history stays', async () => {
+test('a verdict on text the owner never saw, or on an entry the list no longer has, is refused; the history stays', async () => {
   const local = stackRepo();
   const s = new Store(tempDir());
   const srv = createServer({ store: s, repoRoot: local });
   await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
   const p = srv.address().port;
-  assert.equal((await postJson(p, '/api/features/fork/verdict', { verdict: 'later', shown: 0 })).status, 201);
-  writeDoc(local, 'features.jsonl', FEATURES.filter((entry) => entry.id !== 'fork').map(line).join('\n'));
-  assert.equal((await postJson(p, '/api/features/fork/verdict', { verdict: 'take', shown: 1 })).status, 404);
-  assert.equal(s.currentVerdictRows().length, 1);
-  fs.rmSync(path.join(local, 'docs/product/features.jsonl'));
-  const html = (await request(p)).body.toString();
-  assert.doesNotMatch(html, /data-region="stack"/);
-  srv.closeAllConnections();
-  await new Promise((resolve) => srv.close(resolve));
-  s.close();
+  try {
+    const send = (id, body) => postJson(p, `/api/features/${id}/verdict`, { seen: SEEN.get(id), ...body });
+    assert.equal((await send('fork', { verdict: 'later', shown: 0 })).status, 201);
+    // The orchestrator rewrites the entry's reason: the page's digest is stale.
+    writeDoc(local, 'features.jsonl', FEATURES.map((entry) => (entry.id === 'create' ? { ...entry, why: 'A new reason' } : entry)).map(line).join('\n'));
+    assert.equal((await send('create', { verdict: 'take', shown: 0 })).status, 409);
+    const fresh = entryDigest(readFeatures(local).features.find((entry) => entry.id === 'create'));
+    assert.match((await request(p)).body.toString(), new RegExp(`data-feature="create" data-shown="0" data-seen="${fresh}"`));
+    assert.equal((await postJson(p, '/api/features/create/verdict', { seen: fresh, verdict: 'take', shown: 0 })).status, 201);
+    // A change outside what the card shows (here, cli) keeps the digest.
+    writeDoc(local, 'features.jsonl', FEATURES.map((entry) => (entry.id === 'fork' ? { ...entry, cli: 'silo fork --from' } : entry)).map(line).join('\n'));
+    assert.equal((await send('fork', { verdict: 'take', shown: 1 })).status, 201);
+    writeDoc(local, 'features.jsonl', FEATURES.filter((entry) => entry.id !== 'fork').map(line).join('\n'));
+    assert.equal((await send('fork', { verdict: 'drop', shown: 3 })).status, 409);
+    assert.equal(s.currentVerdictRows().length, 2);
+    fs.rmSync(path.join(local, 'docs/product/features.jsonl'));
+    assert.doesNotMatch((await request(p)).body.toString(), /data-region="stack"/);
+  } finally {
+    srv.closeAllConnections();
+    await new Promise((resolve) => srv.close(resolve));
+    s.close();
+  }
 });
 
 // ---- the rule on every path: a reference model ----
@@ -361,9 +392,11 @@ test('model: verdicts, clears, stale sends and acks keep the current-verdict rul
       const withRows = ids.filter((entry) => newest(entry));
       if (!withRows.length) continue;
       const target = withRows[random(withRows.length)];
-      const upTo = random(2) ? null : newest(target).id - random(2);
+      // The row the agent read: mostly the newest, sometimes an older one.
+      const rows = model.rows.filter((row) => row.feature === target);
+      const upTo = rows[Math.max(0, rows.length - 1 - random(3))].id;
       s.ackVerdicts([{ feature: target, upTo }]);
-      for (const row of model.rows) if (row.feature === target && (upTo === null || row.id <= upTo)) row.acked = true;
+      for (const row of rows) if (row.id <= upTo) row.acked = true;
     }
     const current = currentVerdicts(features, s.currentVerdictRows());
     for (const entry of ids) {
@@ -382,50 +415,64 @@ test('model: verdicts, clears, stale sends and acks keep the current-verdict rul
 
 test('dashboard verdicts and verdicts ack', async () => {
   const home = tempDir();
-  const env = { SILO_DASHBOARD_REPO: stackRepo() };
+  const repo = stackRepo();
+  const env = { SILO_DASHBOARD_REPO: repo };
   const s = new Store(home);
-  s.addVerdict('engine', { verdict: 'take', shown: 0 });
-  s.addVerdict('fork', { verdict: 'refine', note: 'Fork from a checkpoint only\nnot from a running one', shown: 0 });
-  s.addVerdict('gone-entry', { verdict: 'drop', shown: 0 });
+  s.addVerdict('engine', { verdict: 'take', shown: 0, name: 'Name engine' });
+  s.addVerdict('fork', { verdict: 'refine', note: 'Fork from a checkpoint only\nnot from a running one', shown: 0, name: 'Name fork' });
+  s.addVerdict('gone-entry', { verdict: 'drop', shown: 0, name: 'An entry since removed' });
   s.close();
+  // The list renames fork after the owner judged it: the verdict keeps the name judged.
+  writeDoc(repo, 'features.jsonl', FEATURES.map((entry) => (entry.id === 'fork' ? { ...entry, name: 'Fork, renamed' } : entry)).map(line).join('\n'));
 
   const listed = await runCli(['verdicts', '--json'], { home, env });
   assert.equal(listed.code, 0, listed.stderr);
   const rows = JSON.parse(listed.stdout);
-  assert.deepEqual(rows.map((row) => [row.id, row.feature_id, row.name, row.verdict, row.acked_at]), [
-    [1, 'engine', 'Name engine', 'take', null],
-    [2, 'fork', 'Name fork', 'refine', null],
-    [3, 'gone-entry', null, 'drop', null],
+  assert.deepEqual(rows.map((row) => [row.id, row.ack, row.feature_id, row.name, row.in_list, row.verdict, row.acked_at]), [
+    [1, 'engine@1', 'engine', 'Name engine', true, 'take', null],
+    [2, 'fork@2', 'fork', 'Name fork', true, 'refine', null],
+    [3, 'gone-entry@3', 'gone-entry', 'An entry since removed', false, 'drop', null],
   ]);
   assert.match(rows[1].note, /checkpoint only\nnot from/);
   const text = await runCli(['verdicts'], { home, env });
-  assert.match(text.stdout, /verdict 2 · fork "Name fork" · refine · \S+\n {2}Fork from a checkpoint only\n {2}not from a running one/);
-  assert.match(text.stdout, /gone-entry \(not in the feature list\) · drop/);
+  assert.match(text.stdout, /^engine@1 · take "Name engine" · \S+$/m);
+  assert.match(text.stdout, /fork@2 · refine "Name fork" · \S+\n {2}Fork from a checkpoint only\n {2}not from a running one/);
+  assert.match(text.stdout, /gone-entry@3 · drop "An entry since removed" \(no longer in the feature list\)/);
 
   assert.equal((await runCli(['verdicts', 'ack'], { home, env })).code, 2);
   assert.equal((await runCli(['verdicts', 'frob'], { home, env })).code, 2);
-  assert.equal((await runCli(['verdicts', 'ack', 'Bad Id'], { home, env })).code, 2);
-  assert.equal((await runCli(['verdicts', 'ack', '--all', 'engine'], { home, env })).code, 2);
-  const missing = await runCli(['verdicts', 'ack', 'engine', 'never-decided'], { home, env });
+  assert.equal((await runCli(['verdicts', 'ack', 'Bad Id@1'], { home, env })).code, 2);
+  assert.equal((await runCli(['verdicts', 'ack', '--all', 'engine@1'], { home, env })).code, 2);
+  const bare = await runCli(['verdicts', 'ack', 'engine'], { home, env });
+  assert.equal(bare.code, 2, 'a bare feature id is a usage error');
+  assert.match(bare.stderr, /"engine" is not FEATURE_ID@ID: acknowledge each verdict as 'dashboard verdicts' lists it/);
+  const missing = await runCli(['verdicts', 'ack', 'engine@1', 'never-decided@9'], { home, env });
   assert.equal(missing.code, 1);
-  assert.match(missing.stderr, /no verdict on never-decided/);
+  assert.match(missing.stderr, /no verdict 9 on never-decided/);
+  const wrongRow = await runCli(['verdicts', 'ack', 'fork@1'], { home, env });
+  assert.equal(wrongRow.code, 1, "row 1 is engine's, not fork's");
   assert.equal(JSON.parse((await runCli(['verdicts', '--json'], { home, env })).stdout).length, 3, 'all or nothing');
 
-  const acked = await runCli(['verdicts', 'ack', 'engine', 'fork@1', '--json'], { home, env });
+  const acked = await runCli(['verdicts', 'ack', 'engine@1', 'fork@2', '--json'], { home, env });
   assert.equal(acked.code, 0, acked.stderr);
   assert.deepEqual(JSON.parse(acked.stdout), { acknowledged: ['engine', 'fork'] });
-  // fork@1 covers no fork row (fork's row is 2): it stays unread.
-  assert.deepEqual(JSON.parse((await runCli(['verdicts', '--json'], { home, env })).stdout).map((row) => row.feature_id), ['fork', 'gone-entry']);
-  assert.equal((await runCli(['verdicts', 'ack', 'fork@2', 'gone-entry'], { home, env })).stdout.trim(), 'acknowledged fork, gone-entry');
+  assert.deepEqual(JSON.parse((await runCli(['verdicts', '--json'], { home, env })).stdout).map((row) => row.ack), ['gone-entry@3']);
+  // The owner changes fork after the agent listed it: acknowledging what was read leaves the change unread.
+  const later = new Store(home);
+  later.addVerdict('fork', { verdict: 'take', shown: 2, name: 'Fork, renamed' });
+  later.close();
+  assert.equal((await runCli(['verdicts', 'ack', 'fork@2', 'gone-entry@3'], { home, env })).stdout.trim(), 'acknowledged fork, gone-entry');
+  assert.deepEqual(JSON.parse((await runCli(['verdicts', '--json'], { home, env })).stdout).map((row) => [row.ack, row.name, row.verdict]), [['fork@4', 'Fork, renamed', 'take']]);
+  assert.equal((await runCli(['verdicts', 'ack', 'fork@4'], { home, env })).code, 0);
   assert.equal((await runCli(['verdicts'], { home, env })).stdout.trim(), 'No new verdicts.');
   const all = JSON.parse((await runCli(['verdicts', '--all', '--json'], { home, env })).stdout);
   assert.equal(all.length, 3);
   assert.ok(all.every((row) => row.acked_at));
-  // A newer verdict on an acknowledged entry is unread again.
+  // A cleared verdict is listed as cleared.
   const again = new Store(home);
-  again.addVerdict('engine', { verdict: null, shown: 1 });
+  again.addVerdict('engine', { verdict: null, shown: 1, name: 'Name engine' });
   again.close();
-  assert.deepEqual(JSON.parse((await runCli(['verdicts', '--json'], { home, env })).stdout).map((row) => [row.feature_id, row.verdict]), [['engine', null]]);
-  assert.match((await runCli(['verdicts'], { home, env })).stdout, /engine "Name engine" · cleared/);
-  assert.match((await runCli(['--help'], { home })).stdout, /verdicts ack FEATURE_ID/);
+  assert.match((await runCli(['verdicts'], { home, env })).stdout, /^engine@5 · cleared "Name engine"/);
+  assert.match((await runCli(['--help'], { home })).stdout, /verdicts ack FEATURE_ID@ID/);
+
 });
