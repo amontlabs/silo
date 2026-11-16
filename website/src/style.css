@@ -1,300 +1,514 @@
+/* The home page. Type sizes: 12 (mono labels), 14 (interface), 17 (reading), 22 (section titles), 48 (headline), plus the wordmark. */
+.title {
+  font: italic 22px/1.3 var(--serif);
+  letter-spacing: -0.4px;
+}
+
+/* Hero: headline, pitch, the two ways in */
 .hero {
-  min-height: 444px;
+  padding: 60px var(--gutter) 44px;
+  text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 76px 24px 72px;
-  overflow: hidden;
-}
-.hero:before,
-.hero:after {
-  display: none;
-}
-.hero-drawing {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #b87923;
-  opacity: 0.09;
-  pointer-events: none;
-  mask-image: radial-gradient(ellipse, #0004, #000 48%, transparent 75%);
-}
-.hero-drawing svg {
-  height: 100%;
-  width: 700px;
-  max-width: none;
-  stroke-width: 0.7;
-}
-.hero:after {
-  display: block;
-  inset: 0;
-  width: auto;
-  height: auto;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23000' filter='url(%23n)' opacity='.2' d='M0 0h180v180H0z'/%3E%3C/svg%3E");
-  opacity: 0.08;
-  border: 0;
-  transform: none;
-  pointer-events: none;
-  z-index: 0;
-}
-.hero > *:not(.hero-drawing) {
-  position: relative;
-  z-index: 1;
 }
 .hero h1 {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 48px;
-  line-height: 1.2;
-  letter-spacing: -1.9px;
+  font: italic 48px/1.14 var(--serif);
+  letter-spacing: -0.022em;
   color: var(--accent-ink);
+  max-width: 15em;
+  text-wrap: balance;
 }
-.hero-description {
-  font-size: 17px;
-  line-height: 1.65;
+.pitch {
   margin-top: 20px;
+  font-size: 17px;
+  line-height: 1.6;
   color: var(--muted);
-  letter-spacing: 0.08px;
+  max-width: 36em;
+  text-wrap: balance;
+}
+.pitch span {
+  display: block;
 }
 .hero-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 10px;
-  margin-top: 31px;
+  margin-top: 30px;
 }
-.platform-note {
-  font-family: var(--mono);
-  font-size: 11px;
+.hero-note {
+  margin-top: 18px;
+  font: 12px/1.6 var(--mono);
   color: var(--muted);
-  margin-top: 17px;
-  letter-spacing: 0.05px;
+  max-width: 60em;
+  text-wrap: balance;
 }
-.principles {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+.mark {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 10px;
+  transform: translateY(-1px) rotate(45deg);
+  border: 1px solid var(--accent);
 }
-.principles > div {
-  padding: 19px 24px 21px;
-  border-right: 1px solid var(--line);
+
+/* The picture of the loop */
+.plate {
+  padding: 22px var(--gutter) 40px;
 }
-.principles > div:last-child {
-  border-right: 0;
+.plate-inner {
+  max-width: 940px;
+  margin: 0 auto;
 }
-.principles h2 {
-  font-family: var(--serif);
-  font-size: 16px;
-  margin-bottom: 7px;
-}
-.principles p {
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.75;
-  color: var(--muted);
-}
-.section {
-  padding: 62px 25px;
-}
-.eyebrow {
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 1.2px;
-  color: var(--muted);
-  margin-bottom: 12px;
-}
-.site-footer {
-  padding: 35px 25px 20px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 32px;
-}
-.site-footer .brand {
-  font-size: 20px;
-}
-.site-footer .brand svg {
-  width: 22px;
-  height: 22px;
-}
-.site-footer p {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 10px;
-}
-.site-footer nav {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 17px;
-  font-size: 12px;
-}
-.footer-note {
-  grid-column: 1/-1;
-  border-top: 1px solid var(--line);
-  padding-top: 18px;
+.plate-head {
   display: flex;
   justify-content: space-between;
-  font-family: var(--mono);
-  font-size: 9px;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.replay {
+  font: 12px/1.4 var(--mono);
+  color: var(--muted);
+  background: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.replay:hover {
+  color: var(--accent-ink);
+}
+.replay svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.loop {
+  --mode: stack;
+  position: relative;
+  margin: 0;
+  padding-bottom: 26px;
+}
+.wires {
+  position: absolute;
+  left: 0;
+  top: 0;
+  /* Above the boxes, so each diamond on a box edge is whole. */
+  z-index: 1;
+  overflow: visible;
+  pointer-events: none;
+}
+.wires .w {
+  fill: none;
+  stroke: var(--wire);
+  stroke-width: 1;
+}
+.wires .w-merge {
+  stroke: var(--accent);
+  stroke-width: 1.4;
+}
+.wires .n {
+  fill: var(--paper);
+  stroke: var(--wire);
+  stroke-width: 1;
+}
+.wires .n-merge {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+.wires .x {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+.pc {
+  position: relative;
+  border: 1px solid var(--wire);
+  background: var(--surface);
+  padding: 9px 13px 11px;
+}
+.pc-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 12px/1.5 var(--mono);
   color: var(--muted);
 }
-@media (min-width: 1200px) {
-  .hero {
-    background:
-      repeating-linear-gradient(180deg, transparent 0 8px, #91969c14 8px 9px)
-        left/9px 100% no-repeat,
-      repeating-linear-gradient(180deg, transparent 0 8px, #91969c14 8px 9px)
-        right/9px 100% no-repeat;
-  }
+.pc-name svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
 }
-@media (max-width: 900px) {
-  .hero h1 {
-    font-size: 42px;
-  }
-  .hero-description {
-    font-size: 15px;
-  }
-  .principles > div {
-    padding: 18px;
-  }
-  .principles p {
-    font-size: 10px;
-  }
-  .desktop-break {
-    display: none;
-  }
+.main .pc-name {
+  color: var(--ink);
 }
-@media (max-width: 640px) {
-  :root {
-    scroll-padding-top: 75px;
-  }
-  .hero {
-    min-height: 386px;
-    padding: 58px 20px;
-  }
-  .hero h1 {
-    font-size: 38px;
-    max-width: 330px;
-    letter-spacing: -1.3px;
-  }
-  .hero-description {
-    font-size: 14px;
-    line-height: 1.7;
-    max-width: 340px;
-    margin-top: 20px;
-  }
-  .hero-actions {
-    margin-top: 24px;
-    gap: 9px;
-  }
-  .hero-actions .button {
-    font-size: 12px;
-    padding: 10px 11px;
-  }
-  .platform-note {
-    font-size: 9px;
-    margin-top: 16px;
-  }
-  .principles {
-    grid-template-columns: 1fr;
-  }
-  .principles > div {
-    display: grid;
-    grid-template-columns: 85px 1fr;
-    gap: 10px;
-    padding: 15px 19px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .principles > div:last-child {
-    border-bottom: 0;
-  }
-  .principles h2 {
-    font-size: 14px;
-    margin: 0;
-  }
-  .principles p {
-    font-size: 11px;
-    line-height: 1.7;
-  }
-  .section {
-    padding: 39px 18px;
-  }
-  .eyebrow {
-    font-size: 8px;
-    letter-spacing: 0.8px;
-  }
-  .site-footer {
-    padding: 28px 18px 20px;
-    gap: 25px;
-    grid-template-columns: 1fr;
-  }
-  .site-footer nav {
-    font-size: 11px;
-    gap: 20px;
-  }
-  .footer-note {
-    font-size: 8px;
-    gap: 16px;
-  }
+.pc-what {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.45;
 }
-@media (max-width: 370px) {
-  .hero h1 {
-    font-size: 34px;
-  }
-  .hero {
-    padding-left: 14px;
-    padding-right: 14px;
-  }
-  .hero-description {
-    font-size: 13px;
-  }
+.agent {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
 }
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    scroll-behavior: auto;
-  }
-  *,
-  *:before,
-  *:after {
-    animation: none !important;
-    transition: none !important;
+.diff {
+  position: relative;
+  border: 1px solid var(--wire);
+  padding: 8px 13px 10px;
+  font: 12px/1.75 var(--mono);
+}
+.diff-title {
+  color: var(--muted);
+  margin: 0 0 2px;
+}
+.diff dl,
+.diff dd {
+  margin: 0;
+}
+.diff dl > div {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+}
+.diff dt {
+  color: var(--muted);
+}
+.diff dd {
+  white-space: nowrap;
+}
+.end {
+  margin: 0;
+  font: 12px/1.4 var(--mono);
+  color: var(--muted);
+}
+.e1 {
+  color: var(--accent-ink);
+}
+.tail,
+.verb {
+  position: absolute;
+  font: 12px/1.4 var(--mono);
+  color: var(--muted);
+}
+.tail {
+  left: 28px;
+  bottom: 0;
+}
+/* The fork label sits on a wire, so it shows only once the script has drawn the wires and placed it. */
+.verb:not([style]) {
+  display: none;
+}
+/* "main" labels the end of a line: without the wires there is none. */
+.wires:empty ~ .tail {
+  display: none;
+}
+.c2,
+.d2 {
+  border-style: dashed;
+  color: var(--muted);
+}
+.c2 .agent {
+  background: none;
+  border: 1px solid var(--muted);
+}
+
+/* Narrow: reads down, like a log. Main runs down the left edge. */
+.copy {
+  margin: 34px 0 0 34px;
+}
+.c2 {
+  margin-top: 20px;
+}
+.diff {
+  margin: 16px 0 0 34px;
+}
+.end {
+  margin-left: 34px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  padding-left: 38px;
+}
+@media (max-width: 759px) {
+  .plate-inner {
+    max-width: 372px;
   }
 }
 
-.footer-note { align-items: center; }
-.why-layout {
+/* Wide: reads across. Main runs along the top. */
+@media (min-width: 760px) {
+  .loop {
+    --mode: wide;
+    display: grid;
+    grid-template-columns: minmax(250px, 304px) minmax(236px, 292px) minmax(96px, 1fr);
+    column-gap: clamp(28px, 5vw, 66px);
+    row-gap: 20px;
+    align-items: center;
+    padding-bottom: 0;
+  }
+  .main {
+    grid-column: 1;
+    grid-row: 1;
+    width: 250px;
+  }
+  .copy {
+    grid-column: 1;
+    margin: 0 0 0 44px;
+  }
+  .diff {
+    grid-column: 2;
+    margin: 0;
+  }
+  .end {
+    grid-column: 3;
+    margin: 0;
+    height: auto;
+    padding-left: 36px;
+  }
+  .c2 {
+    margin-top: 0;
+  }
+  .c1,
+  .d1,
+  .e1 {
+    grid-row: 2;
+  }
+  .c2,
+  .d2,
+  .e2 {
+    grid-row: 3;
+  }
+  .tail {
+    left: auto;
+    bottom: auto;
+    right: 12px;
+    top: 3px;
+  }
+}
+
+/*
+ * The picture draws itself once. `loop-pending` (set in the head when motion is allowed) hides it
+ * until the script starts drawing, so the finished picture never flashes first. Without script or
+ * with reduced motion it is simply there. Only opacity and stroke offsets change: nothing moves.
+ */
+.loop-pending .loop :is(.pc, .diff, .end, .tail, .verb, .wires) {
+  opacity: 0;
+}
+.loop.anim .w {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.loop.anim :is(.pc, .diff, .end, .tail, .verb, .n, .x) {
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.loop.anim .diff dl > div {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.loop.anim.s1 :is(.main, .n-main) {
+  opacity: 1;
+}
+.loop.anim.s1 .w-main {
+  stroke-dashoffset: 0;
+  transition-duration: 1.1s;
+}
+/* The arrowhead is drawn when its line gets there. */
+.loop.anim.s1 .w-arrow {
+  stroke-dashoffset: 0;
+  transition-duration: 0.2s;
+  transition-delay: 0.95s;
+}
+.loop.anim.s1 .tail {
+  opacity: 1;
+  transition-delay: 0.9s;
+}
+.loop.anim.s2 :is(.w-f1, .w-f2) {
+  stroke-dashoffset: 0;
+}
+.loop.anim.s2 :is(.copy, .n-fork, .verb) {
+  opacity: 1;
+  transition-delay: 0.35s;
+}
+.loop.anim.s3 :is(.w-d1, .w-d2) {
+  stroke-dashoffset: 0;
+  transition-duration: 0.3s;
+}
+.loop.anim.s3 :is(.diff, .n-diff) {
+  opacity: 1;
+  transition-delay: 0.2s;
+}
+.loop.anim.s3 .diff dl > div {
+  opacity: 1;
+}
+.loop.anim.s3 .diff dl > div:nth-child(1) {
+  transition-delay: 0.35s;
+}
+.loop.anim.s3 .diff dl > div:nth-child(2) {
+  transition-delay: 0.47s;
+}
+.loop.anim.s3 .diff dl > div:nth-child(3) {
+  transition-delay: 0.59s;
+}
+.loop.anim.s3 .diff dl > div:nth-child(4) {
+  transition-delay: 0.71s;
+}
+.loop.anim.s4 :is(.w-merge, .w-drop) {
+  stroke-dashoffset: 0;
+  transition-duration: 0.65s;
+}
+.loop.anim.s4 :is(.end, .n-merge, .x) {
+  opacity: 1;
+  transition-delay: 0.5s;
+}
+.loop.anim:not(.s4) :is(.c2, .d2) {
+  border-style: solid;
+  color: inherit;
+}
+.loop.anim:not(.s4) .c2 .agent {
+  background: var(--accent);
+  border: 0;
+}
+.loop.reset,
+.loop.reset * {
+  transition: none !important;
+}
+
+/* Three sentences */
+.points {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
-  gap: 48px;
-  align-items: start;
+  grid-template-columns: repeat(3, 1fr);
 }
-.why-layout h2 {
-  font-family: var(--serif);
-  font-size: 28px;
-  line-height: 1.3;
-  letter-spacing: -0.8px;
+.points p {
+  padding: 24px var(--gutter) 26px;
+  font: 17px/1.5 var(--serif);
+  border-right: 1px solid var(--line);
+  text-wrap: balance;
 }
-.why-line {
-  margin-top: 14px;
-  font-size: 13px;
-  line-height: 1.7;
+.points p:last-child {
+  border-right: 0;
+}
+
+/* The way into the Workshop */
+.door {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px 32px;
+  flex-wrap: wrap;
+  padding: 26px var(--gutter) 30px;
+}
+.door-line {
+  margin-top: 6px;
+  font-size: 17px;
+  line-height: 1.5;
   color: var(--muted);
+  text-wrap: balance;
 }
-.why-text {
+/* One span per sentence: a narrow screen breaks between them, never inside the first. */
+.door-line span {
+  display: inline-block;
+}
+
+/* Footer: one row */
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 32px;
+  flex-wrap: wrap;
+  padding: 24px var(--gutter);
+}
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 26px;
   font-size: 14px;
-  line-height: 1.8;
-  color: var(--muted);
 }
-.why-text a {
-  color: var(--accent-ink);
+.site-footer nav a {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .hero {
+    padding-top: 52px;
+  }
+  .hero h1 {
+    font-size: 42px;
+  }
+  .points {
+    grid-template-columns: 1fr;
+  }
+  .points p {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 18px var(--gutter) 19px;
+  }
+  .points p:last-child {
+    border-bottom: 0;
+  }
 }
 @media (max-width: 640px) {
-  .why-layout {
-    grid-template-columns: 1fr;
-    gap: 22px;
+  .hero {
+    padding: 46px var(--gutter) 40px;
   }
-  .why-layout h2 {
-    font-size: 25px;
+  .hero h1 {
+    font-size: 36px;
+    letter-spacing: -0.018em;
+  }
+  .pitch span {
+    display: inline;
+  }
+  .hero-actions {
+    margin-top: 26px;
+  }
+  .plate {
+    padding-bottom: 30px;
+  }
+  .door > div,
+  .door .button {
+    width: 100%;
+  }
+}
+@media (max-width: 335px) {
+  .hero-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .copy,
+  .diff,
+  .end {
+    margin-left: 26px;
+  }
+  .diff {
+    padding-left: 11px;
+    padding-right: 11px;
+  }
+  .diff dl > div {
+    grid-template-columns: 68px 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loop *,
+  .button,
+  .go {
+    transition: none !important;
   }
 }
