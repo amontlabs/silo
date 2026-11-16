@@ -42,7 +42,7 @@ test('post: every option, body from a file and from stdin, attachments with capt
   fs.writeFileSync(path.join(files, 'log:1.txt'), 'colon in name');
 
   const look = await runCli(
-    ['post', '--kind', 'look', '--title', 'Sidebar order', '--journey', 'first-run', '--body', `@${path.join(files, 'body.md')}`, '--default', 'Alphabetical', '--source', 'feat/sidebar', '--attach', `${path.join(files, 'shot.png')}:The sidebar`, '--attach', path.join(files, 'log:1.txt')],
+    ['post', '--kind', 'look', '--title', 'Sidebar order', '--entry', 'first-run', '--body', `@${path.join(files, 'body.md')}`, '--default', 'Alphabetical', '--source', 'feat/sidebar', '--attach', `${path.join(files, 'shot.png')}:The sidebar`, '--attach', path.join(files, 'log:1.txt')],
     { home },
   );
   assert.equal(look.code, 0, look.stderr);
@@ -59,8 +59,23 @@ test('post: every option, body from a file and from stdin, attachments with capt
   assert.deepEqual(item.attachments.map((a) => [a.file, a.caption]), [['shot.png', 'The sidebar'], ['log_1.txt', null]]);
   assert.equal(json(await runCli(['show', '2', '--json'], { home })).body, 'From stdin');
   const text = await runCli(['show', '1'], { home });
-  assert.match(text.stdout, /#1 look open \(waiting\) · journey first-run\nSidebar order/);
+  assert.match(text.stdout, /#1 look open \(waiting\) · entry first-run\nSidebar order/);
   assert.match(text.stdout, /Stands unless the owner says otherwise: Alphabetical/);
+});
+
+test('post --entry: --journey is its earlier name, not in the help; both at once is a usage error', async () => {
+  const home = tempDir();
+  const alias = json(await runCli(['post', '--kind', 'decide', '--title', 'Old flag', '--journey', 'engine-service', '--json'], { home }));
+  assert.equal(json(await runCli(['show', String(alias.id), '--json'], { home })).journey, 'engine-service');
+  const both = await runCli(['post', '--kind', 'decide', '--title', 'x', '--entry', 'a', '--journey', 'b'], { home });
+  assert.equal(both.code, 2);
+  assert.match(both.stderr, /not both --entry and --journey/);
+  const bad = await runCli(['post', '--kind', 'decide', '--title', 'x', '--entry', 'Not An Id'], { home });
+  assert.equal(bad.code, 2);
+  assert.match(bad.stderr, /entry must be a list entry id/);
+  const help = (await runCli(['--help'], { home })).stdout;
+  assert.match(help, /--entry ID/);
+  assert.doesNotMatch(help, /--journey|journey/i);
 });
 
 test('post errors: look without a default and bad kinds exit 2; a missing attachment exits 1 and posts nothing', async () => {

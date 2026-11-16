@@ -94,7 +94,7 @@ test('a version 1 store with data migrates in place: ids, replies, attachments a
     const next = store.createItem({ kind: 'decide', title: 'New', options: [{ label: 'A' }, { label: 'B' }] });
     assert.equal(next, 5);
     assert.equal(store.addReply(next, { author: 'owner', choice: 1 }) > 3, true);
-    const note = store.addNote({ anchor: 'journeys#live/2', anchorText: 'Step', reaction: 'essential' });
+    const note = store.addNote({ anchor: 'product#the-problem', anchorText: 'The problem', text: 'Shorter' });
     assert.equal(store.getItem(note.item).kind, 'note');
     // Cascades still hold after the rebuild.
     store.db.prepare('DELETE FROM items WHERE id = 1').run();
@@ -146,7 +146,9 @@ function versionTwoStore() {
   const store = new Store(home);
   const item = store.createItem({ kind: 'decide', title: 'Pick', options: [{ label: 'A' }, { label: 'B' }] });
   store.addReply(item, { author: 'owner', choice: 1 });
-  store.addNote({ anchor: 'journeys#live/start', anchorText: 'Start', reaction: 'nice' });
+  // A journey note with a reaction, as the earlier version wrote them.
+  const note = store.db.prepare("INSERT INTO items (kind, journey, title, anchor, anchor_text, created_at) VALUES ('note', 'live', 'Start', 'journeys#live/start', 'Start', ?)").run(store.now());
+  store.db.prepare("INSERT INTO replies (item_id, author, text, reaction, created_at) VALUES (?, 'owner', '', 'nice', ?)").run(note.lastInsertRowid, store.now());
   store.setSeen('docs_commit', 'abc');
   store.db.exec('DROP TABLE verdicts; PRAGMA user_version = 2;');
   store.close();
@@ -172,6 +174,11 @@ test('a version 2 store with data migrates to version 3 in place, and opening ag
   const again = new Store(home);
   assert.equal(again.currentVerdictRows().length, 1);
   assert.equal(again.allItems().length, 2);
+  // The journey note and its reaction are kept and still listed for agents.
+  assert.deepEqual(again.ownerReplies().map((reply) => [reply.kind, reply.anchor, reply.reaction]), [
+    ['decide', null, null],
+    ['note', 'journeys#live/start', 'nice'],
+  ]);
   again.close();
 });
 

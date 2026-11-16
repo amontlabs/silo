@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createServer } from '../src/server.js';
 import { Store } from '../src/store.js';
-import { commitAll, DECISIONS, git, makeRepo, postJson, request, tempDir, writeDoc } from './helpers.js';
+import { commitAll, DECISIONS, git, makeRepo, postJson, request, RESTART, tempDir, writeDoc } from './helpers.js';
 
 let store;
 let server;
@@ -36,26 +36,26 @@ after(() => stop({ store, server }));
 const page = async (p = port) => (await request(p)).body.toString();
 
 test('the page renders every section against the fixture', async () => {
-  const id = store.createItem({ kind: 'decide', title: 'Pick a default shell', journey: 'first-run' });
+  const id = store.createItem({ kind: 'decide', title: 'Pick a default shell', entry: 'first-run' });
   const response = await request(port);
   assert.equal(response.status, 200);
   assert.match(response.headers['content-type'], /text\/html/);
   assert.match(response.headers['content-security-policy'], /script-src 'self'/);
   const html = response.body.toString();
-  for (const region of ['nav', 'for-you', 'product', 'journeys', 'decisions']) assert.match(html, new RegExp(`data-region="${region}"`));
+  for (const region of ['nav', 'for-you', 'product', 'decisions']) assert.match(html, new RegExp(`data-region="${region}"`));
+  assert.doesNotMatch(html, /data-region="stack"|href="#stack"/, 'no feature list: no Stack');
+  assert.doesNotMatch(html, /journey/i);
   assert.doesNotMatch(html, /data-region="private"/, 'no private notes: section hidden');
   assert.doesNotMatch(html, /href="#private"/, 'no private notes: no tab');
   assert.match(html, /<div class="hero-text"><p>Silo gives every agent its own computer\.<\/p>/);
-  assert.match(html, /id="journey-first-run"/);
-  assert.match(html, /id="journey-share-a-workspace"/);
-  assert.match(html, /<details class="step is-built" id="journey-first-run-step-install-the-app" data-step="1">[\s\S]*?<span>Install the app<\/span>[\s\S]*?<span class="status-word">works<\/span>/);
-  assert.match(html, /id="journey-first-run-step-restore-a-computer"[\s\S]*?<span>Restore a computer<\/span>[\s\S]*?not driven/);
-  assert.match(html, /<div class="track" aria-hidden="true"><i class="built"><\/i><i class="partial"><\/i><i class="missing"><\/i><i class="untested"><\/i><\/div>/);
-  assert.match(html, /data-n="1\/4"/);
-  assert.match(html, /<pre class="mermaid">/);
   assert.match(html, /data-total="3">3 decisions/);
-  assert.match(html, new RegExp(`<article class="card" id="item-${id}"`));
-  assert.match(html, /Changed since you last looked/);
+  assert.match(html, /data-view="decisions">Decisions <span class="badge quiet">3<\/span>/);
+  assert.match(html, new RegExp(`<article class="card" id="item-${id}"[\\s\\S]*?<span class="where">on <b>first-run</b></span>`), 'an entry not on the list is plain text');
+  assert.match(html, /data-view="for-you">For you <span class="badge">1<\/span>/);
+  // Never marked: one line and the button, no list of every section as new.
+  const product = /<section class="view" id="product"[\s\S]*?<\/section>/.exec(html)[0];
+  assert.match(product, /<div class="changed-strip" id="changed"><p>Mark as read to see what changes from now on<\/p>/);
+  assert.doesNotMatch(html, /Changed since you last looked|class="mark new"|class="tag new"/);
   assert.match(html, /1 thing <em>· about 1 minute<\/em>/);
   store.closeItem(id);
 });
@@ -67,8 +67,9 @@ test('missing product docs render empty states', async () => {
   try {
     const html = await page(running.port);
     assert.match(html, /PRODUCT\.md is missing/);
-    assert.match(html, /JOURNEYS\.md is missing/);
-    assert.match(html, /DECISIONS\.md is missing/);
+    assert.match(html, /Nothing decided yet\./);
+    assert.match(html, /data-view="decisions">Decisions<\/a>/, 'no DECISIONS.md: no count');
+    assert.doesNotMatch(html, /class="where-we-are"|data-region="stack"/);
   } finally {
     await stop(running);
   }
@@ -196,12 +197,18 @@ test('Mark all as seen records the commit the page showed, not the current one',
   assert.equal(response.status, 200);
   assert.equal(store.getSeen('docs_commit'), shown);
   const html = await page();
-  const box = /<div class="changed-box"[\s\S]*?<\/aside>/.exec(html)[0];
+  const box = /<section class="view" id="product"[\s\S]*?<div class="changed-strip" id="changed">([\s\S]*?)<div class="hero"/.exec(html)[1];
+  assert.match(box, /<b>Changed since you last looked<\/b>/);
   assert.equal(box.match(/<details class="change"/g).length, 1);
   assert.match(box, /Decisions · Later/);
   assert.match(box, /Landed after the page was rendered/);
+  assert.match(box, />Mark all as seen<\/button>/);
+  // A change to RESTART.md shows there too.
+  writeDoc(repo, 'RESTART.md', '# Restart\n\n## Where the work stands\n\n1. Now: something new.\n');
+  assert.match(await page(), /Restart · Where the work stands/);
+  writeDoc(repo, 'RESTART.md', RESTART);
   assert.equal((await postJson(port, '/api/docs/seen', { commit: later }, origin)).status, 200);
-  assert.doesNotMatch(await page(), /class="changed-box"/);
+  assert.doesNotMatch(await page(), /class="changed-strip"/, 'nothing changed: no strip');
 });
 
 test('item bodies, replies, titles and defaults are escaped', async () => {
@@ -307,8 +314,8 @@ test('without JavaScript every view is in the page, in order, and the stylesheet
     running.store.createItem({ kind: 'look', title: 'Two', defaultText: 'd' });
     const html = await page(running.port);
     const views = [...html.matchAll(/<section class="view" id="([a-z-]+)" data-region/g)].map((match) => match[1]);
-    assert.deepEqual(views, ['for-you', 'product', 'journeys', 'decisions', 'private']);
-    assert.match(html, /<html lang="en">/, 'no js class until a script adds it');
+    assert.deepEqual(views, ['for-you', 'decisions', 'product', 'private']);
+    assert.match(html, /<html lang="en" data-default="for-you">/, 'no js class until a script adds it');
     assert.equal(html.match(/<article class="card" id="item-\d+"/g).length, 2, 'every waiting card is in the page');
     assert.match(html, /<article class="reader" id="note-plan-md">[\s\S]*<section id="note-plan-md--part">/);
     // Scripts are files; nothing inline.

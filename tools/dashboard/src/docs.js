@@ -1,6 +1,6 @@
 // The product documents (docs/product/*.md): read live from the checkout,
-// split into sections, parsed for journeys, and compared with the commit the
-// owner last marked as seen. Nothing here writes to the checkout.
+// split into sections, and compared with the commit the owner last marked as
+// seen. Nothing here writes to the checkout.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,12 +8,10 @@ import path from 'node:path';
 export const DOC_FOLDER = 'docs/product';
 export const DOC_FILES = Object.freeze({
   product: 'PRODUCT.md',
-  journeys: 'JOURNEYS.md',
   decisions: 'DECISIONS.md',
+  restart: 'RESTART.md',
 });
 
-export const STEP_STATUSES = Object.freeze(['built', 'partial', 'missing', 'untested']);
-const STEP = /^(\s*[-*+]\s+)\[(built|partial|missing|untested)\](?=\s|$)\s*/i;
 const FENCE = /^\s{0,3}(```|~~~)/;
 
 export function slugify(text) {
@@ -25,8 +23,8 @@ export function slugify(text) {
     .replace(/^-+|-+$/g, '');
 }
 
-// The one definition of an id or key the dashboard accepts: journey ids, step
-// keys and section keys, in anchors and in --journey.
+// The one definition of an id or key the dashboard accepts: section keys in
+// anchors, and the list entry an item names (--entry).
 export const ID_SHAPE = /^[a-z0-9-]{1,80}$/;
 export const MAX_ID = 80;
 export const MAX_ANCHOR_TEXT = 200;
@@ -47,7 +45,7 @@ export function uniqueId(base, used, fallback) {
 // end on a space). The one definition both sides use.
 export const anchorText = (text) => String(text).replace(/[`*_]/g, '').trim().slice(0, MAX_ANCHOR_TEXT);
 
-// Reads one of the three known documents. A missing file, a missing folder, or
+// Reads one of the known documents. A missing file, a missing folder, or
 // a path that resolves outside docs/product gives null.
 export function readDoc(repoRoot, fileName) {
   if (!Object.values(DOC_FILES).includes(fileName)) return null;
@@ -162,117 +160,62 @@ function listItemAt(lines, start, firstText) {
 }
 
 /**
- * A step is `- [status] Title. Detail…`: the title is the text up to the
- * first ". " (or the whole first paragraph, without a final period); the
- * detail is the rest of that paragraph and anything nested under the item.
- */
-export function splitStep(paragraph, nested = '') {
-  const text = paragraph.trim();
-  const end = sentenceEnd(text);
-  const title = end === -1 ? text.replace(/\.$/, '') : text.slice(0, end);
-  const rest = end === -1 ? '' : text.slice(end + 2).trim();
-  return { title, detail: [rest, nested].filter(Boolean).join('\n\n') };
-}
-
-/**
- * Journeys: each `## ` heading is one. An `<!-- id: slug -->` line right under
- * the heading gives its id; otherwise the id is the slugified heading. A
- * leading "N. " in the heading is the journey's number (else its position).
- * The first paragraph under the heading is its promise. Steps are list items
- * that start with [built], [partial], [missing] or [untested] (exists in the
- * docs or code, not yet driven as a user); any other [word] stays plain text.
- * Everything else under the journey is its prose.
- */
-export function parseJourneys(text) {
-  const { preamble, sections } = splitSections(text);
-  const used = new Set();
-  const journeys = sections.map((section, position) => {
-    const lines = section.text.split('\n').slice(1);
-    let id = null;
-    const first = lines.findIndex((line) => line.trim() !== '');
-    if (first !== -1) {
-      // An id that does not fit ID_SHAPE is ignored: the heading gives the id.
-      const match = /^<!--\s*id:\s*(\S*)\s*-->\s*$/.exec(lines[first]);
-      if (match) {
-        if (ID_SHAPE.test(match[1])) id = match[1];
-        lines.splice(first, 1);
-      }
-    }
-    const unique = uniqueId(id || slugify(section.heading), used, 'journey');
-    const stepKeys = new Set();
-    const body = lines.join('\n').replace(/^\s*\n/, '').replace(/\s+$/, '');
-    const numbered = /^(\d{1,3})\.\s+(\S.*)$/.exec(section.heading);
-
-    const bodyLines = body.split('\n');
-    const taken = new Array(bodyLines.length).fill(false);
-    let promise = '';
-    const opening = bodyLines.findIndex((line) => !blank(line));
-    if (opening !== -1 && !LIST_ITEM.test(bodyLines[opening]) && !BLOCK_START.test(bodyLines[opening]) && indentOf(bodyLines[opening]) < 4) {
-      let end = opening;
-      while (end < bodyLines.length && !blank(bodyLines[end]) && !(end > opening && (LIST_ITEM.test(bodyLines[end]) || BLOCK_START.test(bodyLines[end])))) end += 1;
-      promise = bodyLines.slice(opening, end).map((line) => line.trim()).join(' ');
-      for (let k = opening; k < end; k += 1) taken[k] = true;
-    }
-    const steps = [];
-    let fence = null;
-    for (let i = 0; i < bodyLines.length; i += 1) {
-      const line = bodyLines[i];
-      const marker = FENCE.exec(line);
-      if (marker) {
-        if (fence === null) fence = marker[1];
-        else if (marker[1] === fence) fence = null;
-        continue;
-      }
-      if (fence !== null || taken[i]) continue;
-      const match = STEP.exec(line);
-      if (!match) continue;
-      const item = listItemAt(bodyLines, i, line.slice(match[0].length));
-      const n = steps.length + 1;
-      const step = splitStep(item.paragraph, item.nested);
-      if (!step.title) step.title = `Step ${n}`;
-      // A step's key comes from its title, so a note stays with its step when
-      // steps are added or moved.
-      steps.push({ n, key: uniqueId(slugify(step.title), stepKeys, `step-${n}`), status: match[2].toLowerCase(), ...step });
-      for (let k = i; k < item.end; k += 1) taken[k] = true;
-      i = item.end - 1;
-    }
-    const prose = bodyLines
-      .filter((_, index) => !taken[index])
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-    const counts = Object.fromEntries(STEP_STATUSES.map((status) => [status, 0]));
-    for (const step of steps) counts[step.status] += 1;
-    return {
-      id: unique,
-      number: numbered ? Number(numbered[1]) : position + 1,
-      title: numbered ? numbered[2] : section.heading,
-      heading: section.heading,
-      key: section.key,
-      promise,
-      body,
-      steps,
-      prose,
-      counts,
-    };
-  });
-  return { preamble, journeys };
-}
-
-/**
- * Every place an owner note can point to in the current documents:
- * anchor -> { text (what the page shows and the server compares), journey }.
+ * Every place an owner note can point to in the current documents: the
+ * sections of PRODUCT.md, as anchor -> { text (what the page shows and the
+ * server compares) }.
  */
 export function noteTargets(docs) {
   const targets = new Map();
-  for (const journey of parseJourneys(docs.journeys ?? '').journeys) {
-    targets.set(`journeys#${journey.id}`, { text: anchorText(journey.title), journey: journey.id });
-    for (const step of journey.steps) targets.set(`journeys#${journey.id}/${step.key}`, { text: anchorText(step.title), journey: journey.id });
-  }
   if (docs.product != null) {
-    for (const tile of productLayout(docs.product).tiles) targets.set(`product#${tile.key}`, { text: anchorText(tile.heading), journey: null });
+    for (const tile of productLayout(docs.product).tiles) targets.set(`product#${tile.key}`, { text: anchorText(tile.heading) });
   }
   return targets;
+}
+
+// ---- where the work stands (RESTART.md) ----
+
+export const RESTART_HEADING = 'where the work stands';
+export const STEP_STATES = Object.freeze(['done', 'now', 'next', 'then']);
+
+/**
+ * The ordered list under the RESTART.md heading "Where the work stands", as
+ * [{ state, text }] in file order. Each item starts with a state word and a
+ * colon (Done, Now, Next or Then, any case); `state` is that word in lower
+ * case and `text` the rest. An item with another first word has state
+ * 'other' and keeps its whole text. Null when the file, the heading or the
+ * list is missing.
+ */
+export function parseRestart(text) {
+  if (text == null) return null;
+  const section = splitSections(text).sections.find((entry) => entry.heading.trim().toLowerCase() === RESTART_HEADING);
+  if (!section) return null;
+  const lines = section.text.split('\n').slice(1);
+  const steps = [];
+  let fence = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const marker = FENCE.exec(lines[i]);
+    if (marker) {
+      if (fence === null) fence = marker[1];
+      else if (marker[1] === fence) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+    const match = /^(\s*)\d{1,9}[.)]\s+/.exec(lines[i]);
+    if (!match || indentOf(lines[i]) > 3) continue;
+    const item = listItemAt(lines, i, lines[i].slice(match[0].length));
+    i = item.end - 1;
+    const word = /^([A-Za-z]+):\s*/.exec(item.paragraph);
+    const state = word && STEP_STATES.includes(word[1].toLowerCase()) ? word[1].toLowerCase() : 'other';
+    steps.push({ state, text: state === 'other' ? item.paragraph : item.paragraph.slice(word[0].length) });
+  }
+  return steps.length ? steps : null;
+}
+
+// The first sentence of a Markdown line (up to the first ". " outside code
+// spans, the period kept), or the whole line.
+export function firstSentence(text) {
+  const end = sentenceEnd(text);
+  return end === -1 ? text : text.slice(0, end + 1);
 }
 
 // ---- decisions ----
@@ -372,11 +315,6 @@ export function productLayout(text) {
   };
 }
 
-// Top-level list entries of a Markdown body: one decision each.
-export function countListItems(tokens) {
-  return tokens.filter((token) => token.type === 'list').reduce((total, list) => total + list.items.length, 0);
-}
-
 // ---- git ----
 
 const HEX = /^[0-9a-f]{7,64}$/;
@@ -461,7 +399,9 @@ function sectionMap(text) {
 /**
  * Compares each product document with its text at `seenCommit`.
  * state: 'nogit' (no readable commit in the checkout), 'never' (no commit
- * recorded), 'unknown' (the recorded commit is gone), 'tracked'.
+ * recorded), 'unknown' (the recorded commit is gone), 'tracked'. Only
+ * 'tracked' has changes: without a commit to compare with, nothing is
+ * marked as new.
  * changes: [{ file, key, heading, status: 'changed' | 'new' | 'removed', before, after }]
  * Uncommitted edits count as changed because the comparison uses the working file.
  */
@@ -472,10 +412,10 @@ export function docChanges(repoRoot, seenCommit, docs) {
   else if (!seenCommit) state = 'never';
   else if (!hasCommit(repoRoot, seenCommit)) state = 'unknown';
   const changes = [];
-  if (state === 'nogit') return { state, head, changes };
+  if (state !== 'tracked') return { state, head, changes };
   for (const [name, file] of Object.entries(DOC_FILES)) {
     const now = sectionMap(docs[name]);
-    const old = state === 'tracked' ? sectionMap(fileAtCommit(repoRoot, seenCommit, file)) : new Map();
+    const old = sectionMap(fileAtCommit(repoRoot, seenCommit, file));
     for (const [key, section] of now) {
       const before = old.get(key);
       if (!before) changes.push({ file, key, heading: section.heading, status: 'new', before: '', after: section.text });

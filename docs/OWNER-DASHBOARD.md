@@ -3,20 +3,37 @@
 The owner's single page for the Silo product: it shows the product documents in
 `docs/product/` and the items agents post for the owner, and takes
 the owner's answers. It runs locally from [`tools/dashboard/`](../tools/dashboard/README.md);
-the README there has the commands, the `JOURNEYS.md` and `DECISIONS.md`
-formats, and where data lives.
+the README there has the commands, the `RESTART.md`, `DECISIONS.md` and
+`features.jsonl` formats, and where data lives.
 
 It is a development tool, not part of the Silo app. It has no changeset, does
 not follow the app's vocabulary rules, and never touches a Silo engine or app.
 
 ## What it is for
 
-Agents build most of Silo. Some of what they do needs the owner: a choice the
-owner may want to reverse, a question agents cannot settle, a build worth
-seeing. Before the dashboard these reached the owner as lines in long reports.
-The dashboard puts them on one page next to the product description, the user
-journeys and the recorded decisions, so each answer is given with the product
+Silo is being restarted from an empty tree ([RESTART.md](product/RESTART.md)),
+and the dashboard is about that restart only. Agents build most of Silo. Some
+of what they do needs the owner: a verdict on an entry of the feature list, a
+choice the owner may want to reverse, a question agents cannot settle, a build
+worth seeing. The dashboard puts them on one page next to the product
+description and everything decided, so each answer is given with the product
 in view, and agents read the answers back from the command line.
+
+One obvious starting point and three things to look at:
+
+- **Stack** (the home): "Where we are", read from the "Where the work stands"
+  list of `RESTART.md`, then the feature list one entry at a time for the
+  owner's verdicts.
+- **For you**: a plain queue of the items agents posted, one card at a time;
+  earlier items behind one disclosure.
+- **Decisions**: the one place for everything decided: the lines of
+  `DECISIONS.md`, the owner's verdicts on the list, and the owner's answers
+  on items, in one timeline.
+
+**Product** shows `PRODUCT.md`, takes notes on its sections, and says what
+changed in `PRODUCT.md`, `DECISIONS.md` and `RESTART.md` since the owner last
+marked them read. **Private** shows the owner's private notes when there are
+some.
 
 ## How agents use it
 
@@ -24,8 +41,9 @@ Agents call `tools/dashboard/bin/dashboard` (add `--json` for machine output).
 The store lives outside the repository, so posting never changes the checkout
 and never conflicts with a merge.
 
-1. **Post** what needs the owner, tagged with a journey id from
-   `docs/product/JOURNEYS.md` when one fits:
+1. **Post** what needs the owner, tagged with the list entry it is about when
+   one fits (`--entry FEATURE_ID`, an `id` from `docs/product/features.jsonl`;
+   the card links to the entry in the Stack):
    - `look`: a reversible choice an agent made. `--default` says what stands
      if the owner says nothing; work goes on with the default.
    - `decide`: agents could not pick. Work that depends on it waits. When
@@ -39,15 +57,13 @@ and never conflicts with a merge.
    picked (`chose N "Label"`; `choice` is 0-based and `choice_label` is its
    label in `--json`) and text.
    The same command returns the owner's own notes: items of kind `note`,
-   which the owner creates from the page on a journey step, a journey or a
-   product section. Each carries `anchor` (`journeys#<id>/<step key>`, the
-   step key being its title slugified; `journeys#<id>` or
-   `product#<section key>`), `anchor_text` (what the
-   owner saw), and either text or a `reaction` on a step: `essential`,
-   `nice` (nice to have) or `unneeded` (not needed). A reply with neither
-   clears the step's reaction. Treat a note like any answer: act on it, ack
-   it, and reply or close it when there is something to say; a reply puts
-   it in the owner's For you list.
+   which the owner creates from the page on a section of `PRODUCT.md`. Each
+   carries `anchor` (`product#<section key>`, the heading slugified),
+   `anchor_text` (what the owner saw) and the text. Notes an earlier version
+   stored on journey steps keep their `journeys#…` anchor and may carry a
+   `reaction`. Treat a note like any answer: act on it, ack it, and reply or
+   close it when there is something to say; a reply puts it in the owner's
+   For you list.
 3. **Act on them**, then `dashboard ack REPLY_ID...` so the answer is not
    picked up twice. Reply with `dashboard reply ID --text ...` when the owner
    needs to know more; the item returns to the owner's For you list.
@@ -75,12 +91,14 @@ in the repository.
    shows up again.
 
 The page is built to take the owner's input with little reading and few
-clicks: one card at a time, options to pick, reactions on journey steps. Keep
+clicks: one card at a time, options to pick, one click per verdict. Keep
 titles short, put what stands in `--default`, and offer options when you can.
 
 The product documents are written by the orchestrator. The dashboard reads
 them live and shows which sections changed since the owner last marked them
-seen; it never writes to them. Owner documents that must stay out of this
+read; it never writes to them. Keep the "Where the work stands" list of
+`RESTART.md` current: each item starts with `Done:`, `Now:`, `Next:` or
+`Then:`, and the Stack's strip shows it. Owner documents that must stay out of this
 public repository go in `$SILO_DASHBOARD_HOME/private/`, which the dashboard
 shows as Private notes.
 
@@ -91,7 +109,7 @@ their public descriptions, not trialled.
 
 - **Agent inboxes (Placet, Pinrail)**: they collect agent requests and the
   human's answers, but have no product view: the answers would live apart
-  from the product description, journeys and decisions they are about.
+  from the product description, feature list and decisions they are about.
 - **Backlog.md**: keeps tasks and answers as Markdown files committed to the
   repository. An owner answer would be a commit on `main`, which voids a
   running atelier merge and races the agents committing to the same checkout.

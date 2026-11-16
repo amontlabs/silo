@@ -51,14 +51,14 @@ export function createGuard({ delay = READY_DELAY, now = () => Date.now() } = {}
 }
 
 /**
- * What the owner is told when a note or reaction is refused (409): always a
- * notice, whether or not its box is still on the page, with the text when
- * there is one.
+ * What the owner is told when a note is refused (409): always a notice,
+ * whether or not its box is still on the page, with the text when there is
+ * one.
  */
 export function noteRefusal({ text = '' } = {}) {
   return text.trim()
     ? { message: 'This part of the document changed; your note was not recorded. Your text:', text }
-    : { message: 'This part of the document changed; your reaction was not recorded.', text: null };
+    : { message: 'This part of the document changed; your note was not recorded.', text: null };
 }
 
 /**

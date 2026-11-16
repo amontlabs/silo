@@ -5,7 +5,7 @@ import path from 'node:path';
 import { renderMarkdown, safeHref } from '../src/markdown.js';
 import { createServer } from '../src/server.js';
 import { Store } from '../src/store.js';
-import { JOURNEYS, makeRepo, request, tempDir } from './helpers.js';
+import { makeRepo, request, tempDir, writeDoc } from './helpers.js';
 
 // The five ways a document could fake owner controls or change the page.
 const INJECTIONS = {
@@ -29,7 +29,13 @@ test('raw HTML is escaped in every Markdown source', () => {
 
 test('documents and private notes cannot add controls, regions, refreshes or styles to the page', async () => {
   const all = Object.values(INJECTIONS).join('\n\n');
-  const repo = makeRepo({ product: `# Silo\n\n${all}\n`, decisions: `# Decisions\n\n- One.\n\n${all}\n`, journeys: `${JOURNEYS}\n${all}\n` });
+  const inline = Object.values(INJECTIONS).join(' ');
+  const repo = makeRepo({
+    product: `# Silo\n\n${all}\n`,
+    decisions: `# Decisions\n\n- One.\n\n${all}\n`,
+    restart: `# Restart\n\n## Where the work stands\n\n1. Done: ${inline}\n2. Now: ${inline}\n3. Next: ${inline}\n4. ${inline}\n`,
+  });
+  writeDoc(repo, 'features.jsonl', `${JSON.stringify({ n: 1, id: 'one', stage: 'shell', name: 'One' })}\n`);
   const home = tempDir();
   fs.mkdirSync(path.join(home, 'private'));
   fs.writeFileSync(path.join(home, 'private', 'note.md'), `# Note\n\n${all}\n`);
@@ -38,13 +44,18 @@ test('documents and private notes cannot add controls, regions, refreshes or sty
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
     const html = (await request(server.address().port)).body.toString();
-    for (const region of ['product', 'journeys', 'decisions', 'private']) {
-      const section = new RegExp(`<section class="view" id="${region}"[\\s\\S]*?</section>`).exec(html)[0];
+    // The strip of RESTART.md shows every step as text.
+    const strip = /<nav class="where-we-are"[\s\S]*?<\/nav>/.exec(html)[0];
+    assert.equal(strip.match(/&lt;button class=&quot;btn primary&quot; data-post=/g).length, 4);
+    assert.doesNotMatch(strip, /<div data-region|<meta|<style|<textarea|<button|<form|data-post="|data-api="/);
+    for (const region of ['product', 'decisions', 'private']) {
+      // Product's own "Mark as read" control is checked on its own below.
+      const section = new RegExp(`<section class="view" id="${region}"[\\s\\S]*?</section>`).exec(html)[0].replace(/<div class="changed-strip"[\s\S]*?<\/div><\/div>/, '');
       // Each injection shows as text, never as markup.
       // Product shows only the hero paragraph of a file without sections, and
       // Decisions only list items, so the full injection text shows in the others.
       if (region !== 'decisions') assert.match(section, /&lt;button class=&quot;btn primary&quot; data-post=/, region);
-      if (region === 'journeys' || region === 'private') assert.match(section, /&lt;form data-api=/, region);
+      if (region === 'private') assert.match(section, /&lt;form data-api=/, region);
       assert.doesNotMatch(section, /<div data-region|<meta|<style|<textarea>x/, region);
       assert.doesNotMatch(section, /data-post="|data-api="/, region);
       // Every button, form and textarea left is one the server renders.
@@ -52,13 +63,14 @@ test('documents and private notes cannot add controls, regions, refreshes or sty
       for (const tag of section.match(/<form\b[^>]*>/g) || []) assert.match(tag, /^<form class="say\s*"\s+data-note data-draft="note-/, region);
       for (const tag of section.match(/<textarea\b[^>]*>/g) || []) assert.match(tag, /^<textarea name="text" rows="3" placeholder="Your note/, region);
       // The only controls here are the server's own note wrappers.
-      for (const tag of section.match(/<[^>]*data-controls[^>]*>/g) || []) assert.match(tag, /^<div class="note-controls" data-controls data-anchor="(?:journeys|product)#/, region);
+      for (const tag of section.match(/<[^>]*data-controls[^>]*>/g) || []) assert.match(tag, /^<div class="note-controls" data-controls data-anchor="product#/, region);
     }
     assert.doesNotMatch(html, /<meta http-equiv/);
     assert.doesNotMatch(html, /<style/);
     assert.equal(html.match(/data-region="for-you"/g).length, 1);
-    // The only posting control on this page is the server's own Mark all as seen.
+    // The only posting control on this page is the server's own Mark as read.
     assert.equal(html.match(/data-post="/g).length, 1);
+    assert.match(html, /<div class="mark-seen" data-controls><button class="btn small" type="button" data-post="\/api\/docs\/seen" data-body="\{&quot;commit&quot;:&quot;[0-9a-f]{40}&quot;\}">Mark as read<\/button>/);
   } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
@@ -101,37 +113,7 @@ test('links and images: http, https, mailto, relative and anchors are kept', () 
   assert.equal(safeHref('foo:bar'), null);
 });
 
-test('journey steps: the renderer makes the chips', () => {
-  const out = renderMarkdown(
-    [
-      '- [built] Install',
-      '- [Partial] Start',
-      '- [missing] Tour',
-      '- [untested] Restore **now**',
-      '- [later] Not a status',
-      '- [built]Glued',
-      '',
-      '1. [built] Ordered stays text',
-      '',
-      '```',
-      '- [built] in a fence',
-      '```',
-      '',
-      '- loose',
-      '',
-      '- [missing] Loose step',
-    ].join('\n'),
-    { steps: true },
-  );
-  assert.match(out, /<li><span class="chip step-built">built<\/span> Install<\/li>/);
-  assert.match(out, /<span class="chip step-partial">partial<\/span> Start/);
-  assert.match(out, /<span class="chip step-missing">missing<\/span> Tour/);
-  assert.match(out, /<span class="chip step-untested">untested<\/span> Restore <strong>now<\/strong>/);
-  assert.match(out, /<li>\[later\] Not a status<\/li>/);
-  assert.match(out, /<li>\[built\]Glued<\/li>/);
-  assert.match(out, /<li>\[built\] Ordered stays text<\/li>/);
-  assert.match(out, /<code>- \[built\] in a fence\n<\/code>/);
-  assert.match(out, /<span class="chip step-missing">missing<\/span> Loose step/);
-  assert.doesNotMatch(renderMarkdown('- [built] Install'), /chip/, 'chips only where asked');
+test('mermaid blocks keep their text escaped', () => {
   assert.match(renderMarkdown('```mermaid\ngraph TD; A-->B<script>\n```'), /<pre class="mermaid">graph TD; A--&gt;B&lt;script&gt;<\/pre>/);
+  assert.match(renderMarkdown('- [built] Install'), /<li>\[built\] Install<\/li>/);
 });

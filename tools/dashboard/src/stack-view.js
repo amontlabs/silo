@@ -9,6 +9,7 @@
 import { h, raw } from './html.js';
 import { renderInline } from './markdown.js';
 import { STARTER_LAST_STAGE, appWords, currentVerdicts, entryDigest, nextUndecided, schematicParts, stackTotals } from './features.js';
+import { firstSentence } from './docs.js';
 
 export const VERDICT_CHIP = { take: 'Taken', refine: 'Refine', later: 'Later', drop: 'Dropped' };
 const VERDICT_BUTTON = { take: 'Take', refine: 'Refine…', later: 'Later', drop: 'Drop' };
@@ -220,15 +221,41 @@ function soFar(prep) {
   </aside>`;
 }
 
+// ---- where we are ----
+
+const STEP_WORD = { now: 'Now', next: 'Next', then: 'Then' };
+
+/**
+ * The "Where we are" strip: the steps of RESTART.md's "Where the work
+ * stands" (parseRestart), in one row. The Done steps fold into one chip that
+ * opens to show them; a Now step shows in full; Next, Then and any other
+ * step show muted, first sentence only, in order. No steps: no strip.
+ */
+export function whereWeAre(steps) {
+  if (!steps?.length) return '';
+  const done = steps.filter((step) => step.state === 'done');
+  const rest = steps.filter((step) => step.state !== 'done');
+  return h`<nav class="where-we-are" id="where-we-are" aria-label="Where we are">
+    ${done.length ? h`<details class="ww-done" id="where-done"><summary>${done.length} done</summary><ol>${done.map((step) => h`<li>${raw(renderInline(step.text))}</li>`)}</ol></details>` : ''}
+    ${rest.map((step) =>
+      step.state === 'now'
+        ? h`<div class="ww-step ww-now"><span class="ww-word">Now</span><span>${raw(renderInline(step.text))}</span></div>`
+        : h`<div class="ww-step ww-later">${STEP_WORD[step.state] ? h`<span class="ww-word">${STEP_WORD[step.state]}</span>` : ''}<span>${raw(renderInline(firstSentence(step.text)))}</span></div>`,
+    )}
+  </nav>`;
+}
+
 // ---- the view ----
 
-export function stackView(prep) {
+// `steps`: where the work stands (parseRestart), shown above the lede.
+export function stackView(prep, steps = null) {
   if (!prep) return '';
   const { all } = prep.totals;
   const warning = prep.skipped
     ? h`<p class="stack-warn" role="note">${plural(prep.skipped, 'line')} of features.jsonl could not be read and ${prep.skipped === 1 ? 'is' : 'are'} not shown.</p>`
     : '';
   return h`<section class="view" id="stack" data-region="stack" aria-label="Stack">
+  ${whereWeAre(steps)}
   <div class="stack-head">
     <p class="eyebrow">The stack</p>
     <p class="lede">Every feature, starter first</p>
@@ -247,11 +274,4 @@ export function stackView(prep) {
     ${soFar(prep)}
   </div>
 </section>`;
-}
-
-// The line in For you's side column.
-export function stackLink(prep) {
-  if (!prep) return '';
-  const left = prep.totals.all.undecided;
-  return h`<a class="mini stack-mini" href="#stack"><span class="mini-stack" aria-hidden="true"><i></i><i></i><i></i></span><span><b>The stack</b><small>${left ? `${plural(left, 'entry', 'entries')} without a verdict` : 'every entry has a verdict'}</small></span></a>`;
 }

@@ -2,13 +2,10 @@
 // private notes, item bodies and replies. Raw HTML is always escaped, so a
 // document cannot add elements, attributes or styles of its own. Links and
 // images keep to http, https, mailto and relative targets, checked on the
-// href the browser will see. Journey step chips and mermaid blocks are
-// produced here, by the renderer.
+// href the browser will see. Mermaid blocks are produced here, by the
+// renderer.
 import { Marked } from 'marked';
-import { STEP_STATUSES } from './docs.js';
 import { esc } from './html.js';
-
-const STEP_PREFIX = new RegExp(`^\\[(${STEP_STATUSES.join('|')})\\](?=\\s|$)\\s*`, 'i');
 
 const NAMED_ENTITIES = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", colon: ':', tab: '\t', newline: '\n', sol: '/',
@@ -60,38 +57,14 @@ const renderer = {
   },
 };
 
-const stepChip = {
-  name: 'stepChip',
-  renderer: ({ status }) => `<span class="chip step-${status}">${status}</span> `,
-};
+const plain = new Marked({ gfm: true, renderer });
 
-// Turns the leading [status] of an unordered list item into a stepChip token.
-function markSteps(token) {
-  if (token.type !== 'list' || token.ordered) return;
-  for (const item of token.items) {
-    const block = item.tokens[0];
-    if (!block || (block.type !== 'text' && block.type !== 'paragraph') || !block.tokens?.length) continue;
-    const first = block.tokens[0];
-    if (first.type !== 'text') continue;
-    const match = STEP_PREFIX.exec(first.text);
-    if (!match) continue;
-    first.text = first.text.slice(match[0].length);
-    first.raw = first.raw.slice(Math.min(match[0].length, first.raw.length));
-    block.tokens.unshift({ type: 'stepChip', raw: '', status: match[1].toLowerCase() });
-  }
-}
-
-const plain = new Marked({ gfm: true, renderer, extensions: [stepChip] });
-const withSteps = new Marked({ gfm: true, renderer, extensions: [stepChip], walkTokens: markSteps });
-
-/** Markdown to HTML. `steps: true` renders journey step markers as chips. */
-export function renderMarkdown(markdown, { steps = false } = {}) {
-  return (steps ? withSteps : plain).parse(markdown ?? '');
+/** Markdown to HTML. */
+export function renderMarkdown(markdown) {
+  return plain.parse(markdown ?? '');
 }
 
 /** One line of Markdown to inline HTML (no paragraph), with the same escaping and link rules. */
 export function renderInline(markdown) {
   return plain.parseInline(String(markdown ?? '').replace(/\s*\n\s*/g, ' '));
 }
-
-export const lexMarkdown = (markdown) => plain.lexer(markdown ?? '');

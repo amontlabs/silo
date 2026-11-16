@@ -68,9 +68,12 @@ test('item validation', () =>
     assert.throws(() => store.createItem({ kind: 'later', title: 'x' }), /kind must be/);
     assert.throws(() => store.createItem({ kind: 'decide', title: '' }), /title is required/);
     assert.throws(() => store.createItem({ kind: 'decide', title: 'a\nb' }), /single line/);
-    assert.throws(() => store.createItem({ kind: 'decide', title: 'x', journey: '../etc' }), /journey must be/);
-    const id = store.createItem({ kind: 'look', title: 'Ok', defaultText: 'Keep it', journey: 'unknown-journey' });
-    assert.equal(store.getItem(id).journey, 'unknown-journey');
+    assert.throws(() => store.createItem({ kind: 'decide', title: 'x', entry: '../etc' }), /entry must be a list entry id/);
+    assert.throws(() => store.createItem({ kind: 'decide', title: 'x', entry: 'a'.repeat(81) }), /entry must be/);
+    assert.ok(store.createItem({ kind: 'decide', title: 'x', entry: 'a'.repeat(80) }));
+    // An entry the list does not have is kept as given, in the journey column.
+    const id = store.createItem({ kind: 'look', title: 'Ok', defaultText: 'Keep it', entry: 'unknown-entry' });
+    assert.equal(store.getItem(id).journey, 'unknown-entry');
   }));
 
 test('replies: verdicts are for look items, from the owner; closed items take none', () =>
@@ -212,7 +215,7 @@ function rng(seed) {
 }
 
 const KIND_RANK = { decide: 0, look: 1, shipped: 2, note: 3 };
-const ANCHORS = ['journeys#first-run/1', 'journeys#first-run', 'product#why-it-exists'];
+const ANCHORS = ['product#who-it-is-for', 'product#why-it-exists'];
 
 function forYouIds(html) {
   const region = /<section class="view" id="for-you"[\s\S]*?<\/section>/.exec(html)[0];
@@ -297,7 +300,7 @@ test('model: an item is in "For you" until the owner answers, marks it seen or i
         const actual = states.filter((item) => item.state === 'waiting').map((item) => item.id);
         assert.deepEqual([...actual].sort((a, b) => a - b), [...expected].sort((a, b) => a - b), `seed ${seed} step ${step} (${op})`);
         for (const item of states) assert.equal(item.state === 'closed', model.get(item.id).closed);
-        const html = renderPage({ items: states, docs: { product: null, journeys: null, decisions: null }, changes: { state: 'nogit', changes: [] } }).toString();
+        const html = renderPage({ items: states, docs: { product: null, decisions: null, restart: null }, changes: { state: 'nogit', changes: [] } }).toString();
         assert.deepEqual(forYouIds(html), expected, `page order, seed ${seed} step ${step}`);
       }
     });

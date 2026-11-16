@@ -11,12 +11,13 @@
 import { createGuard, noteRefusal, replyLost, verdictRefusal } from '/rules.js';
 
 const root = document.documentElement;
-const viewFor = window.siloViewFor || (() => 'for-you');
+const defaultView = window.siloDefaultView || 'for-you';
+const viewFor = window.siloViewFor || (() => defaultView);
 const CHANGED_NOTE = 'This changed while you were reading. Read it again, then answer.';
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, reducedMotion.matches ? 0 : ms));
 
-const state = { at: null, done: 0, all: false, gaps: false, busy: false };
+const state = { at: null, done: 0, all: false, busy: false, kind: 'all' };
 const guard = createGuard();
 // The Stack's queue has its own card and its own guard.
 const stack = { at: null, all: false, filter: 'all' };
@@ -40,7 +41,7 @@ function route(options = {}) {
   try {
     showRoute(options);
   } catch (error) {
-    root.dataset.view = document.getElementById(root.dataset.view || '') ? root.dataset.view : 'for-you';
+    root.dataset.view = document.getElementById(root.dataset.view || '') ? root.dataset.view : defaultView;
     console.error('route failed', error);
   }
 }
@@ -50,9 +51,9 @@ function showRoute({ scroll = true, queue = true } = {}) {
   try {
     view = viewFor(location.hash);
   } catch {
-    view = 'for-you';
+    view = defaultView;
   }
-  if (!document.getElementById(view)) view = 'for-you';
+  if (!document.getElementById(view)) view = document.getElementById(defaultView) ? defaultView : 'for-you';
   root.dataset.view = view;
   document.querySelectorAll('.tab[data-view]').forEach((tab) => {
     if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
@@ -80,7 +81,9 @@ function showRoute({ scroll = true, queue = true } = {}) {
   // Each queue's reading wait starts when its card is on screen.
   if (!card) showQueue();
   showStack({ focus: view === 'stack' && queue });
-  if (target && target.tagName === 'DETAILS') target.open = true;
+  // A target inside closed disclosures (an earlier item, a folded day of
+  // verdicts) opens them.
+  for (let open = target; open; open = open.parentElement?.closest('details')) if (open.tagName === 'DETAILS') open.open = true;
   if (scroll) {
     if (target && !card && !entry && target.id !== view && !target.classList.contains('reader')) {
       requestAnimationFrame(() => target.scrollIntoView({ block: 'start' }));
@@ -226,8 +229,6 @@ async function refresh() {
   const input = document.getElementById('decision-filter');
   if (input) input.value = filter;
   applyDecisionFilter();
-  applyGaps();
-  document.querySelectorAll('.journey').forEach(markHot);
   const shown = guard.shown;
   const stackShown = stackGuard.shown;
   route({ scroll: false, queue: false });
@@ -283,7 +284,7 @@ async function act(origin, url, body) {
       stack.at = list[Math.min(Math.max(place, 0), list.length - 1)]?.dataset.entry ?? null;
       showStack({ focus: true });
     }
-    // A refused note or reaction is always told, also when its box is gone.
+    // A refused note is always told, also when its box is gone.
     if (controls.dataset.anchor !== undefined) showNotice(noteRefusal({ text: body.text ?? '' }));
     const refused = feature ? verdictRefusal({ text: body.note ?? '' }) : null;
     if (refused) showNotice(refused);
@@ -335,12 +336,7 @@ async function run(origin, action) {
   }
 }
 
-const noteBody = (controls, extra) => ({
-  anchor: controls.dataset.anchor,
-  anchorText: controls.dataset.anchorText,
-  ...(controls.dataset.journey ? { journey: controls.dataset.journey } : {}),
-  ...extra,
-});
+const noteBody = (controls, extra) => ({ anchor: controls.dataset.anchor, anchorText: controls.dataset.anchorText, ...extra });
 
 // ---- the "say something" boxes ----
 
@@ -387,9 +383,9 @@ document.addEventListener('click', (event) => {
     showQueue({ focus: true, restart: true });
     return;
   }
-  if (button.matches('[data-filter]')) {
-    state.gaps = button.dataset.filter === 'gaps';
-    applyGaps();
+  if (button.matches('[data-decision-kind]')) {
+    state.kind = button.dataset.decisionKind;
+    applyDecisionFilter();
     return;
   }
   if (button.matches('[data-stack-all]')) {
@@ -446,9 +442,6 @@ document.addEventListener('click', (event) => {
     controls.querySelector('form.say')?.requestSubmit();
   } else if (button.matches('[data-post]')) {
     run(button, () => act(button, button.dataset.post, JSON.parse(button.dataset.body || '{}')));
-  } else if (button.matches('[data-reaction]')) {
-    const pressed = button.getAttribute('aria-pressed') === 'true';
-    run(button, () => act(button, '/api/notes', noteBody(controls, { reaction: pressed ? null : button.dataset.reaction })));
   }
 });
 
@@ -809,45 +802,32 @@ function stackKey(event) {
   }
 }
 
-// ---- journeys ----
-
-function applyGaps() {
-  document.getElementById('journeys')?.classList.toggle('gaps-only', state.gaps);
-  document.querySelectorAll('[data-filter]').forEach((pill) => {
-    const on = (pill.dataset.filter === 'gaps') === state.gaps;
-    pill.classList.toggle('on', on);
-    pill.setAttribute('aria-pressed', String(on));
-  });
-}
-
-// The open step's segment of the track grows.
-function markHot(journey) {
-  const segments = journey.querySelectorAll('.track i');
-  journey.querySelectorAll('.step').forEach((step, index) => segments[index]?.classList.toggle('hot', step.open));
-}
-
 document.addEventListener(
   'toggle',
   (event) => {
-    const element = event.target;
-    if (element.matches?.('.step')) markHot(element.closest('.journey'));
-    if (element.open) renderMermaid();
+    if (event.target.open) renderMermaid();
   },
   true,
 );
 
 // ---- decisions ----
 
+// The search box and the kind chips together pick the rows of the timeline.
 function applyDecisionFilter() {
   const input = document.getElementById('decision-filter');
   const counter = document.getElementById('decision-count');
   if (!input || !counter) return;
   const needle = input.value.trim().toLowerCase();
+  document.querySelectorAll('[data-decision-kind]').forEach((pill) => {
+    const on = pill.dataset.decisionKind === state.kind;
+    pill.classList.toggle('on', on);
+    pill.setAttribute('aria-pressed', String(on));
+  });
   let shown = 0;
   document.querySelectorAll('#decision-list .day').forEach((day) => {
     let any = false;
     day.querySelectorAll('.dec').forEach((row) => {
-      const match = !needle || row.textContent.toLowerCase().includes(needle);
+      const match = (state.kind === 'all' || row.dataset.kind === state.kind) && (!needle || row.textContent.toLowerCase().includes(needle));
       row.hidden = !match;
       if (match) {
         shown += 1;
@@ -857,7 +837,7 @@ function applyDecisionFilter() {
     day.hidden = !any;
   });
   const total = Number(counter.dataset.total);
-  counter.textContent = needle ? `${shown} of ${total}` : `${total} decision${total === 1 ? '' : 's'}`;
+  counter.textContent = needle || state.kind !== 'all' ? `${shown} shown` : `${total} decision${total === 1 ? '' : 's'}`;
 }
 
 document.addEventListener('input', (event) => {
@@ -889,5 +869,3 @@ route({ scroll: Boolean(location.hash) });
 showQueue();
 showStack();
 applyDecisionFilter();
-applyGaps();
-document.querySelectorAll('.journey').forEach(markHot);
