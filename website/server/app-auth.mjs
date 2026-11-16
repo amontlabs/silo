@@ -18,22 +18,21 @@ export function createAppJwt({ appId, privateKey, nowMs }) {
 }
 
 export function createAppAuth({ config, github, now = Date.now }) {
-  let key = null;
   let cached = null;
   let pending = null;
   let repositoryId = null;
 
   function appJwt() {
-    key ??= createPrivateKey(config.privateKey);
-    return createAppJwt({ appId: config.appId, privateKey: key, nowMs: now() });
+    return createAppJwt({ appId: config.appId, privateKey: config.privateKey, nowMs: now() });
   }
 
   async function fetchToken() {
     const jwt = appJwt();
-    const { data: installation } = await github.request('GET', `/repos/${config.repo}/installation`, { token: jwt });
+    const { data: installation } = await github.request('GET', `/repos/${config.repo}/installation`, { token: jwt, as: 'app' });
     const name = config.repo.split('/')[1];
     const { data } = await github.request('POST', `/app/installations/${installation.id}/access_tokens`, {
       token: jwt,
+      as: 'app',
       body: { repositories: [name], permissions: { issues: 'write', metadata: 'read' } },
     });
     return { token: data.token, expiresAt: Date.parse(data.expires_at) };
@@ -45,12 +44,16 @@ export function createAppAuth({ config, github, now = Date.now }) {
     return (await pending).token;
   }
 
-  async function repoId() {
-    if (repositoryId) return repositoryId;
-    const { data } = await github.request('GET', `/repos/${config.repo}`, { token: await installationToken() });
-    repositoryId = data.id;
+  // Forgets the installation token after GitHub refused it.
+  function dropToken() {
+    cached = null;
+  }
+
+  // The repository's numeric id, read once; `read` makes the call when it is not known yet.
+  async function repoId(read) {
+    repositoryId ??= await read();
     return repositoryId;
   }
 
-  return { installationToken, repoId, appJwt };
+  return { installationToken, dropToken, repoId, appJwt };
 }

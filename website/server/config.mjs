@@ -1,35 +1,65 @@
-// Reads the Workshop's settings from the environment. Nothing here is logged.
+// Reads the Workshop's settings from the environment. An invalid value leaves
+// the server unconfigured; `problem` names the variable, never its value.
+import { createPrivateKey } from 'node:crypto';
 
 export const DEFAULT_REPO = 'amontlabs/silo';
 export const DEFAULT_ORIGIN = 'https://silo.amontlabs.com';
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const SECRET_PATTERN = /^[A-Za-z0-9+/]{43}=$/;
+const REQUIRED = ['WORKSHOP_APP_ID', 'WORKSHOP_CLIENT_ID', 'WORKSHOP_CLIENT_SECRET', 'WORKSHOP_PRIVATE_KEY', 'WORKSHOP_SESSION_SECRET'];
 
 export function readConfig(env = process.env, overrides = {}) {
+  let problem = null;
+  const fail = (name) => { problem ??= name; return null; };
+
   const repo = env.WORKSHOP_REPO || DEFAULT_REPO;
-  if (!REPO_PATTERN.test(repo)) throw new Error('WORKSHOP_REPO must be owner/name');
-  const origin = normalizeOrigin(env.WORKSHOP_SITE_ORIGIN || DEFAULT_ORIGIN);
-  const secret = env.WORKSHOP_SESSION_SECRET ? Buffer.from(env.WORKSHOP_SESSION_SECRET, 'base64') : null;
-  const privateKey = env.WORKSHOP_PRIVATE_KEY ? env.WORKSHOP_PRIVATE_KEY.replace(/\\n/g, '\n') : null;
+  if (!REPO_PATTERN.test(repo)) fail('WORKSHOP_REPO');
+  const origin = parseOrigin(env.WORKSHOP_SITE_ORIGIN || DEFAULT_ORIGIN) ?? fail('WORKSHOP_SITE_ORIGIN');
+
+  const missing = REQUIRED.filter((name) => !env[name]);
+  let sessionSecret = null;
+  let privateKey = null;
+  if (env.WORKSHOP_APP_ID && !/^\d{1,12}$/.test(env.WORKSHOP_APP_ID)) fail('WORKSHOP_APP_ID');
+  if (env.WORKSHOP_SESSION_SECRET) {
+    sessionSecret = SECRET_PATTERN.test(env.WORKSHOP_SESSION_SECRET) ? Buffer.from(env.WORKSHOP_SESSION_SECRET, 'base64') : null;
+    if (sessionSecret?.length !== 32) sessionSecret = fail('WORKSHOP_SESSION_SECRET');
+  }
+  if (env.WORKSHOP_PRIVATE_KEY) {
+    try {
+      privateKey = createPrivateKey(env.WORKSHOP_PRIVATE_KEY.replace(/\\n/g, '\n'));
+      if (privateKey.asymmetricKeyType !== 'rsa') privateKey = fail('WORKSHOP_PRIVATE_KEY');
+    } catch {
+      privateKey = fail('WORKSHOP_PRIVATE_KEY');
+    }
+  }
+
   const config = {
     appId: env.WORKSHOP_APP_ID || null,
     clientId: env.WORKSHOP_CLIENT_ID || null,
     clientSecret: env.WORKSHOP_CLIENT_SECRET || null,
     privateKey,
-    sessionSecret: secret && secret.length >= 32 ? secret : null,
-    repo,
-    origin,
+    sessionSecret,
+    repo: REPO_PATTERN.test(repo) ? repo : DEFAULT_REPO,
+    origin: origin || DEFAULT_ORIGIN,
     apiBase: 'https://api.github.com',
     webBase: 'https://github.com',
-    secureCookies: origin.startsWith('https://'),
     ...overrides,
   };
-  config.configured = Boolean(config.appId && config.clientId && config.clientSecret && config.privateKey && config.sessionSecret);
+  config.secureCookies ??= config.origin.startsWith('https://');
+  config.problem = problem;
+  config.missing = missing;
+  config.configured = !problem && missing.length === 0;
   return config;
 }
 
-export function normalizeOrigin(value) {
-  const url = new URL(value);
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('WORKSHOP_SITE_ORIGIN must be an http(s) origin');
-  return url.origin;
+function parseOrigin(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (url.username || url.password || (url.pathname !== '/' && url.pathname !== '') || url.search || url.hash) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
 }

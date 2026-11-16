@@ -3,7 +3,7 @@
 import { readConfig } from './config.mjs';
 import { createWorkshop } from './workshop.mjs';
 
-export const MAX_BODY = 16 * 1024;
+export const MAX_BODY = 64 * 1024;
 
 export async function readRequest(req) {
   const headers = {};

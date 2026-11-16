@@ -1,21 +1,31 @@
-// A small GitHub REST client. Errors carry the HTTP status and whether GitHub's
-// rate limit was hit, never the response body or the token.
+// A small GitHub REST client. Every call has a time limit. Errors carry the
+// HTTP status, whether GitHub asked us to wait, and which identity made the
+// call; never the response body or the token.
 
 export class GitHubError extends Error {
-  constructor(status, { rateLimited = false, retryAfter = 0, network = false } = {}) {
-    super(network ? 'GitHub could not be reached' : `GitHub answered ${status}`);
+  constructor(status, { rateLimited = false, retryAfter = 0, network = false, timeout = false, as = null } = {}) {
+    super(timeout ? 'GitHub did not answer in time' : network ? 'GitHub could not be reached' : `GitHub answered ${status}`);
     this.name = 'GitHubError';
     this.status = status;
     this.rateLimited = rateLimited;
     this.retryAfter = retryAfter;
-    this.network = network;
+    this.network = network || timeout;
+    this.timeout = timeout;
+    this.as = as;
+  }
+
+  // A failure that a cached copy may stand in for.
+  get transient() {
+    return this.rateLimited || this.network || this.status >= 500;
   }
 }
 
+export const DEFAULT_TIMEOUT = 8000;
 const MAX_PAGES = 50;
 
-export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now }) {
-  async function request(method, path, { token, auth = 'Bearer', body, accept = 'application/vnd.github+json' } = {}) {
+// `as` names the identity a call is made with: 'user', 'installation', 'app' or 'client'.
+export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now, timeoutMs = DEFAULT_TIMEOUT }) {
+  async function request(method, path, { token, auth = 'Bearer', body, accept = 'application/vnd.github+json', as = null } = {}) {
     const url = path.startsWith('http') ? path : apiBase + path;
     const headers = {
       'Accept': accept,
@@ -24,29 +34,32 @@ export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now
     };
     if (token) headers.Authorization = `${auth} ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    let response;
+    const signal = AbortSignal.timeout(timeoutMs);
     try {
-      response = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error' });
-    } catch {
-      throw new GitHubError(0, { network: true });
+      const response = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal });
+      if (!response.ok) throw await errorFor(response, now(), as);
+      if (response.status === 204) {
+        await response.body?.cancel().catch(() => {});
+        return { data: null, headers: response.headers };
+      }
+      const text = await response.text();
+      return { data: text ? JSON.parse(text) : null, headers: response.headers };
+    } catch (error) {
+      if (error instanceof GitHubError) throw error;
+      const timeout = signal.aborted || error?.name === 'TimeoutError' || error?.name === 'AbortError';
+      throw new GitHubError(0, { network: true, timeout, as });
     }
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => {});
-      throw errorFor(response, now());
-    }
-    if (response.status === 204) return { data: null, headers: response.headers };
-    const text = await response.text();
-    return { data: text ? JSON.parse(text) : null, headers: response.headers };
   }
 
+  // Every page, following GitHub's Link header, never leaving apiBase.
   async function paginate(path, options) {
     const items = [];
-    let next = path + (path.includes('?') ? '&' : '?') + 'per_page=100';
+    let next = withPerPage(path);
     for (let page = 0; next && page < MAX_PAGES; page += 1) {
       const { data, headers } = await request('GET', next, options);
       items.push(...data);
       next = nextLink(headers.get('link'));
-      if (next && !next.startsWith(apiBase + '/')) throw new GitHubError(502);
+      if (next && !next.startsWith(apiBase + '/')) throw new GitHubError(502, { as: options?.as });
     }
     return items;
   }
@@ -54,19 +67,30 @@ export function createGitHub({ apiBase, fetch = globalThis.fetch, now = Date.now
   return { request, paginate };
 }
 
-function errorFor(response, nowMs) {
+function withPerPage(path) {
+  return /[?&]per_page=/.test(path) ? path : path + (path.includes('?') ? '&' : '?') + 'per_page=100';
+}
+
+async function errorFor(response, nowMs, as) {
   const status = response.status;
+  let message = '';
+  if (status === 403 || status === 429) {
+    message = (await response.text().catch(() => '')).slice(0, 2000);
+  } else {
+    await response.body?.cancel().catch(() => {});
+  }
   const remaining = response.headers.get('x-ratelimit-remaining');
   const retryAfterHeader = Number(response.headers.get('retry-after'));
   const reset = Number(response.headers.get('x-ratelimit-reset'));
-  const rateLimited = status === 429 || (status === 403 && (remaining === '0' || retryAfterHeader > 0));
+  const rateLimited = (status === 403 || status === 429)
+    && (status === 429 || remaining === '0' || retryAfterHeader > 0 || /rate limit/i.test(message));
   let retryAfter = 0;
   if (rateLimited) {
     if (retryAfterHeader > 0) retryAfter = retryAfterHeader;
-    else if (reset > 0) retryAfter = Math.max(1, Math.ceil(reset - nowMs / 1000));
+    else if (remaining === '0' && reset > 0) retryAfter = Math.max(1, Math.ceil(reset - nowMs / 1000));
     else retryAfter = 60;
   }
-  return new GitHubError(status, { rateLimited, retryAfter });
+  return new GitHubError(status, { rateLimited, retryAfter, as });
 }
 
 export function nextLink(header) {

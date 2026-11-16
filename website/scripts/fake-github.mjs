@@ -25,7 +25,9 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     nextIssue: 1,
     nextId: 1000,
     rateLimited: false,
+    secondaryLimited: false,
     failNext: 0,
+    hook: null,
     perPage: null,
     requests: [],
   };
@@ -96,6 +98,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       created_at: issue.created_at,
       closed_at: issue.closed_at,
       comments: issue.comments.length,
+      locked: Boolean(issue.locked),
       reactions: { '+1': issue.reactions.filter((r) => r.content === '+1').length },
       ...(issue.pull_request ? { pull_request: { url: 'x' } } : {}),
     };
@@ -148,7 +151,12 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     const url = new URL(req.url, 'http://fake');
     const path = url.pathname;
     const who = caller(req);
-    state.requests.push({ method: req.method, path, kind: who?.kind ?? 'anonymous', login: who?.user?.login ?? null });
+    const record = { method: req.method, path, kind: who?.kind ?? 'anonymous', login: who?.user?.login ?? null };
+    state.requests.push(record);
+    // A test's hook may delay or replace any answer.
+    const hooked = state.hook?.(record);
+    if (hooked?.delay) await new Promise((resolve) => setTimeout(resolve, hooked.delay));
+    if (hooked?.status) return json(res, hooked.status, hooked.body ?? { message: 'hooked' }, hooked.headers);
 
     // User authorization (github.com)
     if (path === '/login/oauth/authorize') {
@@ -192,6 +200,10 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (state.rateLimited) {
       return json(res, 403, { message: 'API rate limit exceeded' }, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Math.floor(now() / 1000) + 120) });
     }
+    if (state.secondaryLimited) {
+      const headers = state.secondaryLimited === 'retry-after' ? { 'retry-after': '30' } : {};
+      return json(res, 403, { message: 'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' }, headers);
+    }
     if (state.failNext > 0) {
       state.failNext -= 1;
       return json(res, 500, { message: 'fake failure' });
@@ -203,6 +215,16 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       if (who.kind !== 'client') return json(res, 401, { message: 'Bad credentials' });
       const body = await readBody(req);
       state.tokens.delete(body.access_token);
+      return json(res, 204);
+    }
+    const appGrant = path.match(/^\/applications\/([^/]+)\/grant$/);
+    if (appGrant && req.method === 'DELETE') {
+      if (who.kind !== 'client') return json(res, 401, { message: 'Bad credentials' });
+      const body = await readBody(req);
+      const entry = state.tokens.get(body.access_token);
+      if (!entry || entry.kind !== 'user' || entry.expiresAt <= now()) return json(res, 404, { message: 'Not Found' });
+      for (const [value, other] of state.tokens) if (other.login === entry.login) state.tokens.delete(value);
+      for (const [value, other] of state.refresh) if (other.login === entry.login) state.refresh.delete(value);
       return json(res, 204);
     }
     if (path === `/repos/${repo}/installation` && who.kind === 'app') return json(res, 200, { id: FAKE_APP.installationId });
@@ -221,9 +243,9 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (permission) {
       if (who.kind !== 'installation') return json(res, 403, { message: 'Forbidden' });
       const user = state.users.get(decodeURIComponent(permission[1]));
-      if (!user) return json(res, 404, { message: 'Not Found' });
-      const role = user.permission;
-      return json(res, 200, { permission: role === 'maintain' ? 'write' : role, role_name: role, user: publicUser(user) });
+      // GitHub answers 200 for any account: `read` on a public repository, or `none`.
+      const role = user?.permission ?? 'none';
+      return json(res, 200, { permission: role === 'maintain' ? 'write' : role, role_name: role, user: user ? publicUser(user) : null });
     }
 
     if (path === `/repos/${repo}/issues` && req.method === 'GET') {
@@ -274,6 +296,14 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       }
       return json(res, 200, issueJson(issue));
     }
+    const labelDelete = rest.match(/^\/labels\/([^/]+)$/);
+    if (labelDelete && req.method === 'DELETE') {
+      if (!canWrite(who)) return json(res, 403, { message: 'Forbidden' });
+      const name = decodeURIComponent(labelDelete[1]);
+      if (!issue.labels.includes(name)) return json(res, 404, { message: 'Label does not exist' });
+      issue.labels = issue.labels.filter((l) => l !== name);
+      return json(res, 200, issue.labels.map((l) => ({ name: l })));
+    }
     if (rest === '/labels' && req.method === 'POST') {
       if (!canWrite(who)) return json(res, 403, { message: 'Forbidden' });
       const body = await readBody(req);
@@ -281,7 +311,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       return json(res, 200, issue.labels.map((name) => ({ name })));
     }
     if (rest === '/comments' && req.method === 'GET') {
-      const perPage = state.perPage || Number(url.searchParams.get('per_page') || 30);
+      const perPage = Number(url.searchParams.get('per_page') || 30);
       const page = Number(url.searchParams.get('page') || 1);
       const headers = {};
       if (page * perPage < issue.comments.length) {
@@ -292,6 +322,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       return json(res, 200, issue.comments.slice((page - 1) * perPage, page * perPage).map((c) => ({ id: c.id, body: c.body, created_at: c.created_at, user: publicUser(c.user) })), headers);
     }
     if (rest === '/comments' && req.method === 'POST') {
+      if (issue.locked && !canWrite(who)) return json(res, 403, { message: 'Issue is locked' });
       const body = await readBody(req);
       const comment = { id: state.nextId++, user: who.user, body: body.body, created_at: iso() };
       issue.comments.push(comment);
@@ -302,7 +333,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       return json(res, 200, issue.reactions.filter((r) => !content || r.content === content).map((r) => ({ id: r.id, content: r.content, user: publicUser(r.user) })));
     }
     if (rest === '/reactions' && req.method === 'POST') {
-      if (who.kind !== 'user') return json(res, 403, { message: 'Forbidden' });
+      if (who.kind !== 'user' || (issue.locked && !canWrite(who))) return json(res, 403, { message: 'Forbidden' });
       const body = await readBody(req);
       const existing = issue.reactions.find((r) => r.user.id === who.user.id && r.content === body.content);
       if (existing) return json(res, 200, { id: existing.id, content: existing.content });

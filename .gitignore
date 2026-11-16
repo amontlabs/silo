@@ -34,3 +34,6 @@ app/SiloUI/src-tauri/engine/engine/
 
 # Owner dashboard dependencies
 tools/dashboard/node_modules/
+
+# Vercel Build Output written by `npm --prefix website run build:vercel`
+/.vercel

@@ -4,7 +4,7 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:cr
 
 export const SESSION_MAX_AGE = 30 * 24 * 60 * 60;
 export const STATE_MAX_AGE = 10 * 60;
-export const COOKIE_PATH = '/api/workshop';
+export const HINT_COOKIE = 'workshop-hint';
 
 function keyFor(secret, purpose) {
   return Buffer.from(hkdfSync('sha256', secret, Buffer.alloc(0), `silo-workshop ${purpose} v1`, 32));
@@ -34,9 +34,10 @@ export function unseal(secret, purpose, text) {
   }
 }
 
+// `__Host-` cookies are bound to this host and path /; a plain-http local origin drops the prefix.
 export function cookieNames(secure) {
   return secure
-    ? { session: '__Secure-workshop-session', state: '__Secure-workshop-signin' }
+    ? { session: '__Host-workshop-session', state: '__Host-workshop-signin' }
     : { session: 'workshop-session', state: 'workshop-signin' };
 }
 
@@ -52,12 +53,14 @@ export function parseCookies(header) {
   return cookies;
 }
 
-export function serializeCookie(name, value, { maxAge, secure }) {
-  const parts = [`${name}=${value}`, `Path=${COOKIE_PATH}`, `Max-Age=${maxAge}`, 'HttpOnly', 'SameSite=Lax'];
+export function serializeCookie(name, value, { maxAge, secure, httpOnly = true }) {
+  const parts = [`${name}=${value}`, 'Path=/', `Max-Age=${maxAge}`];
+  if (httpOnly) parts.push('HttpOnly');
+  parts.push('SameSite=Lax');
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
 
-export function clearCookie(name, { secure }) {
-  return serializeCookie(name, '', { maxAge: 0, secure });
+export function clearCookie(name, { secure, httpOnly = true }) {
+  return serializeCookie(name, '', { maxAge: 0, secure, httpOnly });
 }

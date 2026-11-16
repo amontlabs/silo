@@ -16,13 +16,12 @@ function setup({ stored, dark = false, blocked = false } = {}) {
   const trigger = w.document.querySelector('[data-theme-trigger]');
   return { w, media, choose(value) { trigger.click(); w.document.querySelector(`[data-theme-option="${value}"]`).click(); }, theme() { return w.document.documentElement.dataset.theme; }, close() { w.close(); } };
 }
-test('System is default and tracks system changes, including screenshot sources', () => {
+test('System is default and tracks system changes', () => {
   const t = setup();
   assert.equal(t.theme(), 'light');
   assert.equal(t.w.document.querySelector('[data-theme-option][aria-checked="true"]').dataset.themeOption, 'system');
   t.media.matches = true; t.media.dispatchEvent(new t.w.Event('change'));
   assert.equal(t.theme(), 'dark');
-  assert.equal(t.w.document.querySelector('source').media, 'all');
   assert.equal(t.w.document.documentElement.classList.contains('dark'), true);
   t.close();
 });
@@ -32,7 +31,6 @@ test('Explicit selection persists, ignores system changes, and can return to Sys
   t.media.dispatchEvent(new t.w.Event('change'));
   assert.equal(t.theme(), 'light');
   assert.equal(t.w.localStorage.getItem('silo-website-theme'), 'light');
-  assert.equal(t.w.document.querySelector('source').media, 'not all');
   t.choose('system'); assert.equal(t.theme(), 'dark'); t.close();
   const saved = setup({ stored: 'dark' }); assert.equal(saved.theme(), 'dark'); saved.close();
 });

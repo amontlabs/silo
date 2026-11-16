@@ -29,42 +29,69 @@ comments are issue comments, and history is GitHub's.
 ## The API
 
 All endpoints are under `/api/workshop/` on the site's own origin and answer
-JSON. The shared contract is restated briefly here:
+JSON. The shared contract (SHARED.md with its review changes) is restated
+briefly here:
 
 | Endpoint | Who | What |
 | --- | --- | --- |
 | `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. |
 | `GET me` | signed in | `{ login, avatar, canDecide }`, or 401. |
-| `GET issue?n=` | anyone | Body text, 👍 count, `viewerUp`, comments as plain text. |
+| `GET issue?n=` | anyone | Body text, 👍 count, and the latest 100 comments, oldest first, as plain text; `more: true` when there are earlier ones. The same public answer for everyone. |
+| `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
-| `POST logout` | anyone | Clears the session and revokes the user token. |
+| `POST logout` | anyone | Revokes the person's whole grant for the App (all their sessions), then clears the cookies. |
 | `POST comment {n, text}` | signed in | Comments as that person. |
 | `POST vote {n, on}` | signed in | Adds or removes that person's 👍. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
-| `POST verdict {n, verdict, note?}` | can decide | Sets or clears the verdict of an entry. `refine` needs a note; a note is posted first as the person's comment. |
+| `POST verdict {n, verdict, note?}` | can decide | Sets (`take`, `refine`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required. `refine` needs a note; a note is posted first as the person's comment. |
 | `POST decide {n, text}` | can decide | Comments on an open decision, then closes it as completed. |
 
 Errors are `{ "error": code, "message": plain words }` with 400 (bad input),
-401 (not signed in), 403 (not allowed, or a request from another site), 404
-(not a Workshop issue), 405, 413 (body over 16 KB), 429 (GitHub's rate limit),
-502 (GitHub failed) and 503 `not_configured` (no App credentials).
+401 (not signed in, or the session is gone), 403 (not allowed, or a request
+from another site), 404 (not a Workshop issue), 405, 413 (body over 64 KB),
+429 (GitHub's rate limit or one of ours), 502 (GitHub failed or took over 8
+seconds) and 503 `not_configured` (missing or invalid App settings). A
+suggestion whose issue was created but could not be labelled answers 502 with
+`"error": "github"` and the issue's `number`. `login` and `callback` never
+answer JSON: any failure redirects to `/workshop?signin=failed`; cancelling on
+GitHub returns to the page.
 
-`state` is cached in memory for 60 seconds and sent with
-`Cache-Control: public, s-maxage=60, stale-while-revalidate=300`. An anonymous
-`issue` read is cached for 30 seconds and sent with `s-maxage=30`. A signed-in
-`issue` read, `me`, every write and every response that sets a cookie are
-`private, no-store`. When GitHub rate-limits the App, the server stops calling
-GitHub until the limit resets and keeps serving the last good `state` (and
-anonymous `issue`) for up to 10 minutes with `"stale": true`, then answers 429.
-It does the same when GitHub fails with a server error.
+Comments, notes and decisions are limited to 5,000 characters, titles to 120
+characters on one line (no control characters or line breaks). Unicode
+direction controls (U+202A–U+202E, U+2066–U+2069) are removed from titles and
+text.
+
+### Caching and GitHub's limits
+
+- `state` is cached in memory for 60 seconds and sent with
+  `Cache-Control: public, s-maxage=60, stale-while-revalidate=300`.
+- `issue` is the same for everyone: cached in memory for 30 seconds and sent
+  with `public, s-maxage=30, stale-while-revalidate=300`. It answers only for
+  numbers in the cached `state`, so other numbers cost no GitHub call.
+- Everything else, and every response that sets a cookie, is
+  `private, no-store`.
+- Calls with the installation token outside the `state` refresh are limited to
+  60 a minute per function instance. Reading an issue takes three. When the
+  budget is spent, or while GitHub has asked us to wait, `issue` answers from
+  its cached copy (marked `"stale": true`) if it is under 10 minutes old,
+  otherwise 429.
+- When GitHub rate-limits the App (including a secondary limit: a 403 or 429
+  with `retry-after`, or whose message mentions a rate limit), the server stops
+  calling GitHub with the installation token until the time GitHub gave (at
+  most an hour). `state` serves its last good copy, marked `"stale": true`, for
+  up to 10 minutes after it was fetched, then answers 429. The same stale rule
+  covers GitHub server errors and timeouts.
+- Each signed-in person may make 30 writes a minute per instance; more answer
+  429.
+- Every GitHub call has an 8-second limit.
 
 ## Code
 
 | Path | What |
 | --- | --- |
 | `website/server/config.mjs` | Settings from the environment. |
-| `website/server/github.mjs` | GitHub REST client with pagination; errors carry a status, never a body. |
+| `website/server/github.mjs` | GitHub REST client with pagination and an 8-second limit per call; errors carry a status and the identity used, never a body. |
 | `website/server/app-auth.mjs` | App JWT (RS256, Node's `crypto`) and the cached installation token. |
 | `website/server/session.mjs` | Sealed cookies (AES-256-GCM). |
 | `website/server/workshop.mjs` | Every endpoint, independent of the HTTP server. |
@@ -117,38 +144,42 @@ the API answers 503 and the page shows the plan without live data.
 | `WORKSHOP_CLIENT_ID` | The App's client ID. |
 | `WORKSHOP_CLIENT_SECRET` | A client secret of the App. |
 | `WORKSHOP_PRIVATE_KEY` | The App's private key, PEM. Newlines may be written as `\n`. |
-| `WORKSHOP_SESSION_SECRET` | 32 random bytes, base64: `openssl rand -base64 32`. Changing it signs everyone out. |
+| `WORKSHOP_SESSION_SECRET` | Exactly 32 random bytes in standard base64: `openssl rand -base64 32`. Changing it signs everyone out. |
 | `WORKSHOP_REPO` | Optional, default `amontlabs/silo`. |
-| `WORKSHOP_SITE_ORIGIN` | Optional, default `https://silo.amontlabs.com`. Writes are accepted only from this origin, and cookies are `Secure` only when it is `https`. |
+| `WORKSHOP_SITE_ORIGIN` | Optional, default `https://silo.amontlabs.com`: a bare origin, no path. Writes are accepted only from this origin, and cookies are `__Host-` and `Secure` only when it is `https`. |
+
+A missing or invalid value (a secret that is not 32 bytes of base64, a key that is not an RSA private key, a malformed repository or origin) leaves the API answering 503 `not_configured`. The response never says which value is wrong; the server log names the variable, never its value.
+
 
 ## Deployment
 
 `npm --prefix website run build:vercel` builds the site and runs
-`prepare-vercel.mjs`, which writes `website/.vercel/output/` following
-Vercel's [Build Output API v3](https://vercel.com/docs/build-output-api/configuration):
+`prepare-vercel.mjs`, which writes `.vercel/output/` at the repository root
+following Vercel's
+[Build Output API v3](https://vercel.com/docs/build-output-api/configuration):
 
 - `static/`: the built site.
 - `functions/api/workshop/state.func/`: one Node.js function
   (`.vc-config.json`: runtime `nodejs24.x`, handler `api/workshop.cjs`,
   launcher `Nodejs`), holding the entry point and `server/`. The other
-  endpoints (`me.func`, `issue.func`, …) are symlinks to it, so Vercel creates
-  one function served at every `/api/workshop/<endpoint>` path, as the
-  [primitives reference](https://vercel.com/docs/build-output-api/primitives#functions)
+  endpoints (`me.func`, `issue.func`, `vote.func`, …) are symlinks to it, so
+  Vercel creates one function served at every `/api/workshop/<endpoint>` path,
+  as the [primitives reference](https://vercel.com/docs/build-output-api/primitives#functions)
   allows. An unknown endpoint is Vercel's 404.
-- `config.json`: `version: 3` and the routes that serve the Workshop page at
-  `/workshop` and `/workshop/`, before the filesystem.
+- `config.json`: `version: 3` and two routes. The first,
+  `{ "src": "^/workshop/?$", "dest": "/workshop/index.html" }`, serves the
+  Workshop page at both `/workshop` and `/workshop/`; the second hands every
+  other path to the filesystem.
 
-The script fails when the build has no Workshop page (`workshop/index.html` or
-`workshop.html`). `--out <dir>` writes the output elsewhere.
+The script fails when the build has no Workshop page (`workshop/index.html`, or
+`workshop.html`). `--out <dir>` writes the output elsewhere. Both
+`/.vercel` and `website/.vercel` are ignored by Git.
 
-The manual prebuilt deployment in [the website README](../website/README.md#vercel-publication)
-publishes this output with the functions. The Git-integration build currently
-builds the static site only (`npm --prefix website run build`, output
-`website/dist`). To ship the API with Git deployments, the project's build
-command has to produce the Build Output, for example
-`npm --prefix website run build:vercel -- --out ../.vercel/output` with the
-repository root as the project's root directory. This change of the Vercel
-project's settings has not been made or tried.
+The Vercel project's root directory is the repository root, where Vercel reads
+`.vercel/output` after the build. The one project setting this needs is the
+build command: `npm --prefix website run build:vercel` (it was
+`npm --prefix website run build`, which produces only the static site in
+`website/dist`).
 
 ## Running locally
 
@@ -158,35 +189,49 @@ npm --prefix website run workshop:dev -- --fake
 ```
 
 This serves `website/dist` and the API at `http://127.0.0.1:4174`
-(`--port` to change it), with the Workshop page at `/workshop`. `--fake`
-starts a fake GitHub on another local port, seeded with an entry for every
-line of `docs/product/features.jsonl`, two decisions (one open), a suggestion,
-comments, 👍 votes, an ordinary issue and a pull request. Sign-in goes through
-the fake's page, which offers two people: `owner-fake` (admin, can decide) and
-`visitor-fake` (read only). Everything lives in memory and resets on restart.
+(`--port` to change it), with the Workshop page at `/workshop` and
+`/workshop/`. `--fake` starts a fake GitHub on another local port, seeded with
+an entry for every line of `docs/product/features.jsonl`, two decisions (one
+open), a suggestion, comments, 👍 votes, an ordinary issue and a pull request.
+Sign-in goes through the fake's page, which offers two people: `owner-fake`
+(admin, can decide) and `visitor-fake` (read only). Everything lives in memory
+and resets on restart.
 
 Without `--fake`, the server uses GitHub with the `WORKSHOP_*` variables of the
 environment (a development App, see above); its origin is always
-`http://127.0.0.1:<port>`, so cookies are not `Secure` and have no `__Secure-`
+`http://127.0.0.1:<port>`, so cookies are not `Secure` and have no `__Host-`
 prefix. Without the variables, the API answers 503.
 
-The tests run with the website's tests: `npm --prefix website test`.
+The tests run with the website's tests: `npm --prefix website test`. The fake
+GitHub answers like GitHub where it matters to the server: expiring user tokens
+with PKCE, a single-use refresh token, grant revocation, the permission
+endpoint answering 200 with `none` for a non-collaborator, primary and
+secondary rate limits, locked issues, and a hook that delays or fails any call.
 
 ## Security properties and their limits
 
-**Session.** One cookie, `__Secure-workshop-session`, `HttpOnly`, `Secure`,
-`SameSite=Lax`, `Path=/api/workshop`, 30 days. It holds the person's GitHub id,
-login, avatar, user token, refresh token and their expiries, sealed with
+**Session.** One cookie, `__Host-workshop-session` (`Path=/`, no `Domain`,
+`HttpOnly`, `Secure`, `SameSite=Lax`, 30 days). It holds the person's GitHub
+id, login, avatar, user token, refresh token and their expiries, sealed with
 AES-256-GCM under a key derived (HKDF-SHA256) from `WORKSHOP_SESSION_SECRET`
 for this purpose only. A changed byte, another key or a value sealed for the
 sign-in cookie does not open. The session ends 30 days after sign-in. The user
-token is refreshed when under five minutes remain; a failed refresh clears the
-session. *Limits:* there is no server-side session list, so a stolen cookie
-works until it expires, the person signs out (which revokes the user token at
-GitHub), or the secret is changed. Two instances refreshing the same session
-at the same moment can sign the person out, since a refresh token is used once.
+token is refreshed when under five minutes remain. The session is cleared only
+when GitHub says the refresh token is invalid, or when a call with the person's
+token answers 401; any other failure answers 502 and keeps the cookie. A
+readable marker cookie, `workshop-hint=1` (no secret, same lifetime, not
+`HttpOnly`), tells the page to ask `me`; it is set at sign-in and cleared with
+the session.
 
-**Sign-in.** `login` sets a 10-minute sealed `__Secure-workshop-signin` cookie
+*Limits:* there is no server-side session list. `me` reads only the cookie, so
+after a sign-out elsewhere it keeps answering until the next call made with
+the person's token is refused (401, and the session is cleared). A stolen
+cookie works until it expires, the person signs out, or the secret is changed.
+
+**Sign-out.** Sign-out revokes the person's whole grant for the App (all their
+sessions), then clears the cookies.
+
+**Sign-in.** `login` sets a 10-minute sealed `__Host-workshop-signin` cookie
 holding a random `state`, a PKCE verifier (S256) and the return path.
 `callback` clears it, compares `state` in constant time, and exchanges the code
 with the verifier and `repository_id`, so the user token works only on the
@@ -202,31 +247,28 @@ no CORS headers). The cookies are `SameSite=Lax`, so cross-site subrequests do
 not carry them. Writes from preview deployments are refused because their
 origin differs.
 
-**Scope.** The App can only read and write issues of the one repository, and
-the installation token is requested for that repository with those two
-permissions. Every write first reads the issue with the installation token and
-refuses with 404 unless it carries a Workshop label and is not a pull request;
-`verdict` works only on entries and `decide` only on open decisions. Anonymous
-`issue` reads are answered only for numbers in the cached `state`, so arbitrary
-numbers cost no GitHub call. Writes use the person's own token, so GitHub
-records them as the author, and GitHub's own permissions apply. Only adding
-the suggestion label uses the installation token, because a visitor cannot
-label. *Limit:* if labelling fails twice, the new issue stays unlabelled and
-outside the Workshop, and the person gets a 502.
+**Identities and scope.** The App can only read and write issues of the one
+repository, and the installation token is requested for that repository with
+those two permissions. The installation token serves only the anonymous cached
+reads (`state`, `issue`), the permission check and labelling a suggestion
+(which a visitor cannot do). Everything else done for a signed-in person,
+including reading the issue before a write, uses that person's token, so
+GitHub's own permissions apply (a locked issue refuses a visitor's comment)
+and GitHub records the person as the author. Every write first reads the issue
+and refuses with 404 unless it carries a Workshop label and is not a pull
+request; `verdict` works only on entries and `decide` only on open decisions.
+A verdict adds and removes only `verdict:*` labels, one at a time, so labels
+changed by someone else are kept. A 401 on the installation token is a 502 and
+drops the cached token; it never signs anyone out. *Limit:* if labelling a
+suggestion fails twice, the new issue stays on GitHub outside the Workshop, and
+the answer carries its number.
 
 **Deciding.** `canDecide` is GitHub's answer: the person's permission on the
 repository (`write`, `maintain` or `admin`), read with the installation token
-and cached five minutes for `me`. `verdict` and `decide` check again on every
-call without the cache, after confirming with the person's token that the
-GitHub account id matches the session, so a renamed login cannot inherit
-another account's permission.
-
-**Caches.** Only `state` and anonymous `issue` responses are public. Any
-response that sets a cookie, any signed-in read and every write is
-`private, no-store`, and `issue` sends `Vary: Cookie`. *Limit:* whether
-Vercel's CDN keys its cache on `Vary: Cookie` is unverified; if not, a
-signed-in person can be served the anonymous copy of an `issue` (public data,
-with `viewerUp` false) for up to 30 seconds.
+and cached five minutes. `verdict` and `decide` confirm with the person's token
+that the GitHub account id matches the session, then read the permission again
+without the cache, so a renamed login cannot inherit another account's
+permission. A cached "cannot decide" refuses at once without calling GitHub.
 
 **Secrets in output.** Logs are one JSON line per request with the endpoint,
 the status and GitHub's status only. Errors sent to the browser are fixed
@@ -234,10 +276,22 @@ sentences; nothing from a GitHub response body is passed on. No token, code,
 cookie, client secret or private key is logged or returned; a test asserts
 this on every response and log line of a session that includes failures.
 
-**Rate limits.** In-memory caches are per function instance. When GitHub
-rate-limits the App, that instance stops calling GitHub until the reset time
-(at most an hour) and serves stale data for up to 10 minutes. *Limit:* there is
-no per-person rate limit on writes beyond GitHub's own.
+**Rate limits.** The budgets and caches are per function instance, in memory;
+several instances together can make more calls than one.
+
+## Not verified until deployed
+
+Everything above was run against the fake GitHub and in Node, not against
+GitHub or Vercel. These depend on the real services:
+
+- the token exchange body format: the server sends JSON with
+  `Accept: application/json`, including `code_verifier` and `repository_id`;
+- whether a refreshed user token stays limited to the repository;
+- a visitor removing their own 👍 with their user token;
+- the collaborator permission endpoint with only the Metadata read permission;
+- that Vercel follows the symlinked functions, and loads the `.cjs` handler
+  with `req.url` as the original path;
+- that Vercel's Git build uses `.vercel/output` at the repository root.
 
 ## Why built this way
 

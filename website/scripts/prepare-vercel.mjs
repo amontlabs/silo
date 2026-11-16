@@ -10,12 +10,14 @@ export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout',
 export const RUNTIME = 'nodejs24.x';
 
 const website = fileURLToPath(new URL('..', import.meta.url));
+// Vercel's Git build reads .vercel/output in the project's root directory, the repository root.
+export const DEFAULT_OUTPUT = join(website, '..', '.vercel', 'output');
 
 async function exists(path) {
   return stat(path).then(() => true, () => false);
 }
 
-export async function prepareVercel({ siteDir = website, distDir = join(siteDir, 'dist'), outputDir = join(siteDir, '.vercel', 'output') } = {}) {
+export async function prepareVercel({ siteDir = website, distDir = join(siteDir, 'dist'), outputDir = DEFAULT_OUTPUT } = {}) {
   const page = (await exists(join(distDir, 'workshop', 'index.html'))) ? '/workshop/index.html'
     : (await exists(join(distDir, 'workshop.html'))) ? '/workshop.html' : null;
   if (!page) throw new Error('The build has no Workshop page (workshop/index.html or workshop.html).');
@@ -53,8 +55,7 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
   return { outputDir, page, config };
 }
 
-// `--out <dir>` writes the output elsewhere, such as the repository root's
-// .vercel/output for a Vercel Git build whose root directory is the repository.
+// `--out <dir>` writes the output elsewhere.
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const index = process.argv.indexOf('--out');
   await prepareVercel(index > 0 ? { outputDir: resolve(process.argv[index + 1]) } : {});
