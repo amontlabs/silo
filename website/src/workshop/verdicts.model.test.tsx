@@ -136,6 +136,9 @@ async function run(seed: number): Promise<number> {
     if (choice < 0.18) {
       now += pick([100, 300, 650, 700, 1200]);
     } else if (choice < 0.38) {
+      // Now and then the focus is first moved to the header of a closed row: its Enter only opens that row.
+      const closed = [...document.querySelectorAll<HTMLButtonElement>('.ws-list button.ws-row[aria-expanded="false"]')];
+      if (closed.length && rand() < 0.3) act(() => pick(closed).focus());
       const active = document.activeElement as HTMLElement;
       const repeat = rand() < 0.2;
       const item = active === document.body ? (current$() ? document.getElementById(current$() as string) : null)

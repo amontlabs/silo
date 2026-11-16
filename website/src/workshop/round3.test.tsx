@@ -47,6 +47,25 @@ describe('Enter', () => {
   });
 });
 
+describe('Enter on the header of a closed row', () => {
+  it('sends no verdict for the open row and leaves the header to open its own row', async () => {
+    const calls = mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#computers');
+    await renderApp();
+    await userEvent.click(rowButton('Create and delete a computer'));
+    await wait(OPEN_GUARD_MS + 50);
+    const b = rowButton('Run a command');
+    act(() => b.focus());
+    // The keyboard path of a button: keydown, then the browser's click unless the keydown was prevented.
+    const event = fireEvent.keyDown(b, { key: 'Enter' });
+    expect(event).toBe(true);
+    if (event) await userEvent.click(b);
+    expect(posts(calls, 'verdict')).toHaveLength(0);
+    expect(b).toHaveAttribute('aria-expanded', 'true');
+    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
+  });
+});
+
 describe('a tap during a view transition', () => {
   function narrow() {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));

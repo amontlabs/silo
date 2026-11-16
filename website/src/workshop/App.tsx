@@ -540,7 +540,11 @@ export function App({ data, accountSlot }: AppProps) {
     const target = event.target instanceof HTMLElement ? event.target : null;
     const control = target?.closest('button, a, summary');
     if (control && !control.classList.contains('ws-row')) return;
-    const item = target?.closest<HTMLElement>('.ws-item.open') ?? (openKey ? document.getElementById(openKey) : null);
+    // On a row's own header, that row is the only target: a closed one keeps the button's Enter, which opens it.
+    // Only with the focus on no control at all does Enter go to the row opened last.
+    const own = control ? control.closest<HTMLElement>('.ws-item') : null;
+    if (control && !own?.classList.contains('open')) return;
+    const item = own ?? target?.closest<HTMLElement>('.ws-item.open') ?? (openKey ? document.getElementById(openKey) : null);
     const row = item ? rowByKey.get(item.id) : undefined;
     const buttons = verdictButtons(item);
     if (!row || !needsOwner(row) || !openKeys.has(row.key) || !shownRows.includes(row) || !armed(row.key) || !buttons || !seen(buttons)) return;
