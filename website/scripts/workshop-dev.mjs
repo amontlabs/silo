@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Serves the built site (dist/) and the Workshop API on one port.
 //   node scripts/workshop-dev.mjs --fake [--port 4174]   against a built-in fake GitHub
+//   node scripts/workshop-dev.mjs --fake --progress      the same, in a later state with entries built and being built
 //   node scripts/workshop-dev.mjs [--port 4174]          against GitHub, from WORKSHOP_* variables
 // Run `npm run build` first. The site's origin is http://127.0.0.1:<port>.
 import { createReadStream } from 'node:fs';
@@ -49,14 +50,15 @@ async function loadFeatures() {
   }
 }
 
-export async function startDev({ fake = false, port = 4174, host = '127.0.0.1', distDir = join(website, 'dist'), env = process.env, log } = {}) {
+export async function startDev({ fake = false, progress = false, port = 4174, host = '127.0.0.1', distDir = join(website, 'dist'), env = process.env, log } = {}) {
   const origin = `http://${host}:${port}`;
   let fakeGitHub = null;
+  let plan = null;
   let config;
   if (fake) {
     fakeGitHub = createFakeGitHub({ repo: 'amontlabs/silo' });
     await fakeGitHub.listen();
-    seedDemo(fakeGitHub, await loadFeatures());
+    plan = seedDemo(fakeGitHub, await loadFeatures(), { progress }).progress;
     config = readConfig(fakeGitHub.workshopEnv(origin), { apiBase: fakeGitHub.url, webBase: fakeGitHub.url });
   } else {
     config = readConfig({ ...env, WORKSHOP_SITE_ORIGIN: origin });
@@ -96,6 +98,7 @@ export async function startDev({ fake = false, port = 4174, host = '127.0.0.1', 
     origin,
     config,
     fakeGitHub,
+    progress: plan,
     async close() {
       server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
@@ -104,20 +107,33 @@ export async function startDev({ fake = false, port = 4174, host = '127.0.0.1', 
   };
 }
 
+// What the --progress state shows, in one line.
+export function progressLine(plan) {
+  const groups = plan.by === 'area' ? 'areas' : 'stages';
+  const fallback = plan.by === 'area' ? '' : 'No entry has an area, so progress goes by stage: ';
+  return `${fallback}built: the taken entries of the ${groups} ${plan.builtGroups.join(', ') || 'none'} (${plan.built.size}); being built: ${plan.building.size} of ${plan.buildingGroup ?? 'none'}.`;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const args = process.argv.slice(2);
   const portIndex = args.indexOf('--port');
   const port = portIndex >= 0 ? Number(args[portIndex + 1]) : 4174;
   const fake = args.includes('--fake');
+  const progress = args.includes('--progress');
+  if (progress && !fake) {
+    console.error('--progress needs --fake.');
+    process.exit(2);
+  }
   const distDir = join(website, 'dist');
   if (!(await file(join(distDir, 'index.html')))) {
     console.error('No built site in dist/. Run `npm run build` first.');
     process.exit(1);
   }
-  const dev = await startDev({ fake, port, distDir });
+  const dev = await startDev({ fake, progress, port, distDir });
   if (!fake && !dev.config.configured) console.log('WORKSHOP_* variables are not set: the API answers 503 not_configured. Use --fake for a fake GitHub.');
   console.log(`Workshop: ${dev.origin}/workshop${fake ? ` (fake GitHub at ${dev.fakeGitHub.url}; users owner-fake can decide, visitor-fake cannot)` : ''}`);
   const stop = () => dev.close().then(() => process.exit(0));
+  if (dev.progress) console.log(progressLine(dev.progress));
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }

@@ -237,6 +237,14 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
         .map((c) => ({ id: c.id, user: c.user, body: c.body, created_at: c.created_at, updated_at: c.updated_at, issue_url: `${fake.url}${issuePath}/issues/${c.issue}` }));
       return page(res, items, url);
     }
+    const unlabel = rest.match(/^\/issues\/(\d+)\/labels\/([^/]+)$/);
+    if (unlabel && req.method === 'DELETE') {
+      const issue = fake.issues.get(Number(unlabel[1]));
+      const name = decodeURIComponent(unlabel[2]);
+      if (!issue || !issue.labels.includes(name)) return json(res, 404, { message: 'Label does not exist' });
+      issue.labels = issue.labels.filter((n) => n !== name);
+      return json(res, 200, issue.labels.map((n) => ({ name: n })));
+    }
     const one = rest.match(/^\/issues\/(\d+)(\/comments|\/events|\/labels)?$/);
     if (one) {
       const issue = fake.issues.get(Number(one[1]));

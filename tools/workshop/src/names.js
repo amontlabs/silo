@@ -8,6 +8,7 @@ export const KIND_LABELS = {
 
 export const VERDICTS = ['take', 'refine', 'later', 'drop'];
 export const verdictLabel = (verdict) => `verdict:${verdict}`;
+export const BUILDING_LABEL = 'workshop:building';
 
 export const LABELS = [
   { name: KIND_LABELS.entry, color: '0e8a16', description: 'Workshop: an entry of the feature list' },
@@ -17,6 +18,7 @@ export const LABELS = [
   { name: verdictLabel('refine'), color: 'bf8700', description: "The owner's verdict: refine" },
   { name: verdictLabel('later'), color: '8c959f', description: "The owner's verdict: later" },
   { name: verdictLabel('drop'), color: 'cf222e', description: "The owner's verdict: drop" },
+  { name: BUILDING_LABEL, color: '8250df', description: 'Being built now' },
 ];
 
 export const CREDENTIAL_NAMES = [

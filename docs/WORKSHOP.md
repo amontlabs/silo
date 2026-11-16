@@ -26,6 +26,14 @@ or `verdict:later`. A dropped entry has `verdict:drop` and is closed as "not
 planned". A built entry is closed as "completed". Votes are 👍 reactions,
 comments are issue comments, and history is GitHub's.
 
+An entry being built now also carries `workshop:building` ("Being built now").
+Only the bot sets and removes it, with `workshop building <issue>` and
+`workshop building <issue> --stop` (see `tools/workshop/README.md`), and only
+on an open entry with `verdict:take`; `workshop built` removes it when it closes
+the entry. The verdict endpoints never touch it, so an entry dropped while it was
+being built keeps the label until `built` or `building --stop` runs on it; the
+server ignores it on a closed issue.
+
 ## The API
 
 All endpoints are under `/api/workshop/` on the site's own origin and answer
@@ -34,7 +42,7 @@ briefly here:
 
 | Endpoint | Who | What |
 | --- | --- | --- |
-| `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. |
+| `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. An open entry carrying `workshop:building` also has `"building": true`; the field is absent on every other issue (closed entries, decisions, suggestions). |
 | `GET me` | signed in | `{ login, avatar, canDecide }`; `canDecide` is false when the permission could not be read (the next `me` tries again). 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
 | `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
@@ -128,6 +136,8 @@ instances.
   100 a page, at most 20 pages for the three together), so nothing else in the
   repository is fetched or counted against the cap, and issues without exactly
   one Workshop label or that are pull requests are skipped.
+  `building` is read from the labels of the same lists, so it costs no call of
+  its own, and a label added or removed on GitHub shows at the next refresh.
   Each page is sent with `If-None-Match` and the ETag GitHub gave for it last
   time; a `304 Not Modified` means the page is unchanged and the held copy is
   reused. Vote counts come from each issue's reaction summary in that list.
@@ -315,9 +325,10 @@ That gives them nothing: the server only ever uses the installation on
 `WORKSHOP_REPO`, and it requests user tokens for that repository only.
 
 Then generate a private key and a client secret, and install the App on
-`amontlabs/silo` only ("Only select repositories"). Create the seven labels in
-the repository: `workshop:entry`, `workshop:decision`, `workshop:suggestion`,
-`verdict:take`, `verdict:refine`, `verdict:later`, `verdict:drop`.
+`amontlabs/silo` only ("Only select repositories"). Create the eight labels in
+the repository (`workshop sync` does): `workshop:entry`, `workshop:decision`,
+`workshop:suggestion`, `verdict:take`, `verdict:refine`, `verdict:later`,
+`verdict:drop`, `workshop:building`.
 
 For local work against the real GitHub, create a second App the same way with
 the callback `http://127.0.0.1:4174/api/workshop/callback`, installed on a test
@@ -392,6 +403,14 @@ open), a suggestion, comments, 👍 votes, an ordinary issue and a pull request.
 Sign-in goes through the fake's page, which offers two people: `owner-fake`
 (admin, can decide) and `visitor-fake` (read only). Everything lives in memory
 and resets on restart.
+
+`--fake --progress` seeds a later state instead, to look at the page with
+progress in it: the entries carry the verdicts of `features.jsonl`, every taken
+entry of the areas `engine`, `computers` and `app` is closed as built, and the
+first two taken entries of `agents` are being built. When no line has an
+`area`, it goes by stage: the taken entries of the first three stages built and
+the first two taken entries of the fourth being built. The runner prints which
+one it used.
 
 Without `--fake`, the server uses GitHub with the `WORKSHOP_*` variables of the
 environment (a development App, see above); its origin is always

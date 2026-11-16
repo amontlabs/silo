@@ -24,10 +24,10 @@ test('sync on the real files creates every issue, writes numbers back and keeps 
 
   const first = await run(['sync'], { fake, box });
   assert.equal(first.code, 0, first.stderr);
-  assert.equal(first.stdout.trim(), `created ${lineCount + itemCount}, updated 0, unchanged 0, labels 7`);
+  assert.equal(first.stdout.trim(), `created ${lineCount + itemCount}, updated 0, unchanged 0, labels 8`);
   assert.equal(entryIssues(fake).length, lineCount);
   assert.equal(decisionIssues(fake).length, itemCount);
-  assert.equal(fake.labels.length, 7);
+  assert.equal(fake.labels.length, 8);
 
   // features.jsonl: each line gains only `, "issue": N` before its closing brace.
   const before = featuresBefore.split('\n');
@@ -86,7 +86,7 @@ test('--dry-run writes nothing on GitHub or on disk', async (t) => {
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /would create label workshop:entry/);
   assert.match(result.stdout, /would create the issue for engine-service/);
-  assert.match(result.stdout.trim().split('\n').at(-1), /^would create \d+, would update 0, unchanged 0, labels 7$/);
+  assert.match(result.stdout.trim().split('\n').at(-1), /^would create \d+, would update 0, unchanged 0, labels 8$/);
   assert.equal(fake.log.filter((r) => r.method !== 'GET' && !r.path.includes('access_tokens')).length, 0);
   assert.equal(fake.issues.size, 0);
   assert.equal(box.features(), features);
@@ -181,7 +181,7 @@ test('a decision issue left open by a stopped run is closed by the next one, not
   const fake = await startFake();
   t.after(fake.stop);
   const box = sandbox(t, { features: '', decisions: '# D\n\n- 2026-11-16 · owner · One.\n' });
-  fake.limitAfterWrites = 8; // seven labels, the issue, then the close is refused
+  fake.limitAfterWrites = 9; // eight labels, the issue, then the close is refused
   const stopped = await run(['sync'], { fake, box });
   assert.equal(stopped.code, 1);
   const n = Number(box.decisions().match(/\(#(\d+)\)/)[1]);

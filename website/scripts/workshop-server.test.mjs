@@ -15,9 +15,9 @@ import { seal, unseal } from '../server/session.mjs';
 import { BUDGET, createWorkshop, LABELS } from '../server/workshop.mjs';
 import { CUTS, cut, readBody } from '../server/issues.mjs';
 import { SNAPSHOT } from '../server/snapshot.mjs';
-import { createFakeGitHub, FAKE_APP, seedDemo } from './fake-github.mjs';
+import { createFakeGitHub, FAKE_APP, progressOf, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
-import { startDev } from './workshop-dev.mjs';
+import { progressLine, startDev } from './workshop-dev.mjs';
 
 import { count, decisionNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
 
@@ -1029,4 +1029,49 @@ test('the local server survives //, an aborted POST body and /api/workshop/const
     await dev.close();
     await rm(site, { recursive: true, force: true });
   }
+});
+
+const PLAN = [
+  ['e1', 'engine', 'shell', 'take'], ['e2', 'engine', 'shell', null], ['c1', 'computers', 'shell', 'take'],
+  ['p1', 'app', 'loop', 'take'], ['a1', 'agents', 'agent', 'take'], ['a2', 'agents', 'agent', 'later'],
+  ['a3', 'agents', 'agent', 'take'], ['a4', 'agents', 'living', 'take'], ['x1', 'changes', 'loop2', 'take'],
+  ['g1', undefined, 'gone', 'drop'],
+].map(([id, area, stage, verdict], index) => ({ n: index + 1, id, area, stage, verdict, name: id, what: id }));
+
+test('progress: taken entries of engine, computers and app built, two taken agents entries being built', async () => {
+  const plan = progressOf(PLAN);
+  assert.equal(plan.by, 'area');
+  assert.deepEqual([...plan.built], ['e1', 'c1', 'p1']);
+  assert.deepEqual([...plan.building], ['a1', 'a3']);
+  assert.match(progressLine(plan), /^built: the taken entries of the areas engine, computers, app \(3\); being built: 2 of agents\.$/);
+
+  const t = await setup({ seed: false });
+  try {
+    seedDemo(t.fake, PLAN, { progress: true });
+    const issues = Object.values((await t.client().call('GET', 'state')).json.issues).filter((i) => i.kind === 'entry');
+    const by = Object.fromEntries(issues.map((i) => [i.entry, i]));
+    for (const id of ['e1', 'c1', 'p1']) assert.deepEqual([by[id].state, by[id].reason], ['closed', 'completed'], id);
+    assert.deepEqual(issues.filter((i) => i.building).map((i) => i.entry).sort(), ['a1', 'a3']);
+    assert.deepEqual([by.a2.verdict, by.a2.state, by.e2.verdict, by.x1.state], ['later', 'open', null, 'open']);
+    assert.deepEqual([by.g1.verdict, by.g1.reason], ['drop', 'not_planned']);
+  } finally { await t.close(); }
+});
+
+test('progress without areas goes by stage: the first three built, two taken of the fourth being built', () => {
+  const plan = progressOf(PLAN.map(({ area, ...rest }) => rest));
+  assert.equal(plan.by, 'stage');
+  assert.deepEqual(plan.builtGroups, ['shell', 'loop', 'agent']);
+  assert.deepEqual([...plan.built], ['e1', 'c1', 'p1', 'a1', 'a3']);
+  assert.deepEqual([...plan.building], ['a4']);
+  assert.match(progressLine(plan), /^No entry has an area, so progress goes by stage: .*stages shell, loop, agent/);
+});
+
+test('without progress the demo seed keeps its own verdicts and no entry is being built', async () => {
+  const t = await setup({ seed: false });
+  try {
+    assert.equal(seedDemo(t.fake, PLAN).progress, null);
+    const issues = Object.values((await t.client().call('GET', 'state')).json.issues);
+    assert.equal(issues.some((i) => Object.hasOwn(i, 'building')), false);
+    assert.equal(issues.filter((i) => i.kind === 'entry' && i.state === 'closed').length, 0);
+  } finally { await t.close(); }
 });

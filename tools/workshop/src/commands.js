@@ -1,8 +1,8 @@
-// `doctor`, `ask`, `comment` and `built`.
+// `doctor`, `ask`, `comment`, `built` and `building`.
 import { lookup } from './credentials.js';
 import { featuresPath, readText } from './files.js';
 import { parseFeatures } from './jsonl.js';
-import { CREDENTIAL_NAMES, ENTRY_MARKER, Failure, KIND_LABELS, LABELS, UsageError } from './names.js';
+import { BUILDING_LABEL, CREDENTIAL_NAMES, ENTRY_MARKER, Failure, KIND_LABELS, LABELS, UsageError, verdictLabel } from './names.js';
 
 const KINDS = new Set(Object.values(KIND_LABELS));
 const labelNames = (issue) => (issue.labels ?? []).map((label) => (typeof label === 'string' ? label : label.name));
@@ -95,12 +95,41 @@ export async function comment({ gh, number, text }) {
   return { number, comment: data.id, url: data.html_url };
 }
 
-export async function built({ gh, number }) {
+async function workshopEntry(gh, number) {
   const issue = await workshopIssue(gh, number);
   if (!labelNames(issue).includes(KIND_LABELS.entry)) throw new Failure(`#${number} is not a Workshop entry`);
+  return issue;
+}
+
+async function removeBuilding(gh, number, issue) {
+  if (!labelNames(issue).includes(BUILDING_LABEL)) return false;
+  await gh.request('DELETE', gh.repoPath(`/issues/${number}/labels/${encodeURIComponent(BUILDING_LABEL)}`), { allow: [404] });
+  return true;
+}
+
+// Closes the entry as completed, then removes its building label, so a run cut between the two
+// finishes on the next run.
+export async function built({ gh, number }) {
+  const issue = await workshopEntry(gh, number);
   const marker = (issue.body ?? '').match(ENTRY_MARKER);
-  if (issue.state === 'closed' && issue.state_reason === 'completed') return { number, entry: marker?.[1] ?? null, changed: false };
-  if (issue.state === 'closed') throw new Failure(`#${number} is closed as not planned (dropped); reopen it on GitHub first`);
-  await gh.request('PATCH', gh.repoPath(`/issues/${number}`), { body: { state: 'closed', state_reason: 'completed' } });
-  return { number, entry: marker?.[1] ?? null, changed: true };
+  const entry = marker?.[1] ?? null;
+  const done = issue.state === 'closed' && issue.state_reason === 'completed';
+  if (issue.state === 'closed' && !done) throw new Failure(`#${number} is closed as not planned (dropped); reopen it on GitHub first`);
+  if (!done) await gh.request('PATCH', gh.repoPath(`/issues/${number}`), { body: { state: 'closed', state_reason: 'completed' } });
+  const unlabeled = await removeBuilding(gh, number, issue);
+  return { number, entry, changed: !done || unlabeled, closed: !done, unlabeled };
+}
+
+// Marks an open entry the owner has taken as being built now; `stop` removes the mark from any
+// entry, open or closed, so a stale label on a dropped entry can be cleared.
+export async function building({ gh, number, stop }) {
+  const issue = await workshopEntry(gh, number);
+  const marker = (issue.body ?? '').match(ENTRY_MARKER);
+  const entry = marker?.[1] ?? null;
+  if (stop) return { number, entry, building: false, changed: await removeBuilding(gh, number, issue) };
+  if (issue.state !== 'open') throw new Failure(`#${number} is not an open Workshop entry`);
+  if (!labelNames(issue).includes(verdictLabel('take'))) throw new Failure(`#${number} is not planned: the owner has not taken it`);
+  if (labelNames(issue).includes(BUILDING_LABEL)) return { number, entry, building: true, changed: false };
+  await gh.request('POST', gh.repoPath(`/issues/${number}/labels`), { body: { labels: [BUILDING_LABEL] } });
+  return { number, entry, building: true, changed: true };
 }

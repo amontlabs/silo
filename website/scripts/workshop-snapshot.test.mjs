@@ -274,3 +274,38 @@ test('the refresh counts against the installation backstop', async () => {
     });
   } finally { await t.close(); }
 });
+
+test('state carries building only on open entries with the label, from the same lists and calls', async () => {
+  const t = await setup();
+  try {
+    const owner = t.client();
+    await owner.signIn('owner-fake');
+    const c = t.client();
+    await c.call('GET', 'state');
+    const issues = t.fake.state.issues;
+    for (const n of [1, 2, 3, 6]) issues.get(n).labels.push('workshop:building');
+    issues.get(5).labels.push('workshop:building');
+    Object.assign(issues.get(3), { state: 'closed', state_reason: 'completed', closed_at: new Date(t.clock.t).toISOString() });
+    const before = github(t);
+    t.clock.t += 61_000;
+    const state = (await settle(t)).json.issues;
+    const calls = t.fake.state.requests.slice(before).filter((r) => r.kind !== 'app');
+    assert.equal(calls.length, 4, 'one page of each of the three lists and one comment call');
+    assert.equal(state[1].building, true);
+    assert.equal(state[2].building, true);
+    for (const n of [3, 4, 5, 6, 7]) assert.equal(Object.hasOwn(state[n] ?? {}, 'building'), false, `#${n}`);
+
+    const unchanged = t.fake.state.requests.length;
+    t.clock.t += 61_000;
+    assert.equal((await settle(t)).json.issues[1].building, true);
+    assert.ok(t.fake.state.requests.slice(unchanged).filter((r) => LIST.test(r.path)).every((r) => r.status === 304), 'unchanged lists still answer 304');
+
+    assert.equal((await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'drop' } })).status, 200);
+    assert.equal(Object.hasOwn((await c.call('GET', 'state')).json.issues[2], 'building'), false, 'a dropped entry is closed at once');
+    assert.ok(issues.get(2).labels.includes('workshop:building'), 'the verdict leaves the label alone');
+
+    issues.get(1).labels = issues.get(1).labels.filter((name) => name !== 'workshop:building');
+    t.clock.t += 61_000;
+    assert.equal(Object.hasOwn((await settle(t)).json.issues[1], 'building'), false, 'a removed label shows at the next refresh');
+  } finally { await t.close(); }
+});
