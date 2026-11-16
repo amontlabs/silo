@@ -8,16 +8,16 @@
 // showed) goes with the action; when the item changed since, the server
 // answers 409 and the page shows it again with a note.
 
+import { createGuard, noteRefusal, replyLost } from '/rules.js';
+
 const root = document.documentElement;
 const viewFor = window.siloViewFor || (() => 'for-you');
 const CHANGED_NOTE = 'This changed while you were reading. Read it again, then answer.';
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, reducedMotion.matches ? 0 : ms));
 
-const state = { at: null, done: 0, all: false, gaps: false, busy: false, shown: null, readyAt: 0 };
-// A card that just became current takes no primary action for this long, so a
-// held or repeated Enter cannot answer a card the owner has not read.
-const READY_DELAY = 700;
+const state = { at: null, done: 0, all: false, gaps: false, busy: false };
+const guard = createGuard();
 
 // ---- views ----
 
@@ -98,11 +98,7 @@ function showQueue({ focus = false, back = false } = {}) {
     entry.classList.remove('out');
   });
   queue.querySelector('.stage')?.classList.add('picked');
-  if (card && Number(card.dataset.card) !== state.shown) {
-    state.shown = Number(card.dataset.card);
-    holdPrimary(card);
-  }
-  if (!card) state.shown = null;
+  if (guard.show(card ? Number(card.dataset.card) : null)) markNotReady(card);
   // The address always names the card on screen.
   if (root.dataset.view === 'for-you') {
     const hash = card && !state.all ? `#item-${card.dataset.card}` : '#for-you';
@@ -133,19 +129,18 @@ function showQueue({ focus = false, back = false } = {}) {
   if (focus && card && !state.all) card.focus({ preventScroll: true });
 }
 
-function holdPrimary(card) {
-  state.readyAt = Date.now() + READY_DELAY;
-  const primary = card.querySelector('[data-primary]');
-  if (!primary) return;
+// Shows the card's primary button as not ready for the rest of the guard's wait.
+function markNotReady(card) {
+  const primary = card?.querySelector('[data-primary]');
+  const wait = guard.remaining();
+  if (!primary || !wait) return;
   primary.classList.add('not-ready');
   primary.setAttribute('aria-disabled', 'true');
   setTimeout(() => {
     primary.classList.remove('not-ready');
     primary.removeAttribute('aria-disabled');
-  }, READY_DELAY);
+  }, wait);
 }
-
-const primaryReady = () => Date.now() >= state.readyAt;
 
 async function move(step) {
   const list = cards();
@@ -213,18 +208,11 @@ async function refresh() {
   applyDecisionFilter();
   applyGaps();
   document.querySelectorAll('.journey').forEach(markHot);
-  const shown = state.shown;
+  const shown = guard.shown;
   route({ scroll: false, queue: false });
   showQueue();
   // A refreshed card that stays current keeps whatever wait it had left.
-  if (state.shown === shown && shown !== null) {
-    const card = currentCard();
-    const primary = card?.querySelector('[data-primary]');
-    if (primary && !primaryReady()) {
-      primary.classList.add('not-ready');
-      setTimeout(() => primary.classList.remove('not-ready'), state.readyAt - Date.now());
-    }
-  }
+  if (shown !== null && guard.shown === shown) markNotReady(currentCard());
 }
 
 // ---- sending ----
@@ -259,6 +247,8 @@ async function act(origin, url, body) {
     if (error.status !== 409 || (controls.dataset.item === undefined && controls.dataset.anchor === undefined)) throw error;
     if (controls.dataset.item !== undefined) state.at = Number(controls.dataset.item);
     await refresh();
+    // A refused note or reaction is always told, also when its box is gone.
+    if (controls.dataset.anchor !== undefined) showNotice(noteRefusal({ text: body.text ?? '' }));
     document.querySelectorAll('[data-controls]').forEach((other) => {
       if (sameControls(other, controls)) {
         const slot = other.querySelector(':scope > .form-error');
@@ -353,7 +343,7 @@ document.addEventListener('click', (event) => {
     applyGaps();
     return;
   }
-  if (button.matches('[data-primary]') && !primaryReady()) return;
+  if (button.matches('[data-primary]') && !guard.acceptsPrimary()) return;
   if (button.matches('[data-skip]')) {
     move(1);
     return;
@@ -405,8 +395,8 @@ document.addEventListener('submit', (event) => {
 });
 
 // A send that did not go through never loses what the owner typed: it stays
-// in its box, or, when the box is gone (the item was closed or answered, or
-// the part of the document changed), it shows at the top of For you.
+// in its box, or, when the box is gone, it shows in a notice. A refused note
+// already has its notice (act()).
 function keepText(form, draft, text, isNote) {
   const box = form.isConnected ? form : [...document.querySelectorAll('form[data-draft]')].find((other) => other.dataset.draft === draft);
   if (box) {
@@ -415,22 +405,38 @@ function keepText(form, draft, text, isNote) {
     setSay(box, true);
     return;
   }
+  if (!isNote) showNotice(replyLost(text));
+}
+
+// A notice at the top of the view on screen, with the text to copy when there
+// is one. Built with text nodes only.
+function showNotice({ message: words, text }) {
   const holder = document.getElementById('lost');
   if (!holder) return;
   const notice = document.createElement('div');
   notice.className = 'lost-note';
   notice.setAttribute('role', 'status');
   const message = document.createElement('p');
-  message.textContent = isNote
-    ? 'The part of the document you wrote about changed meanwhile, so your note was not sent. Your text:'
-    : 'This item was closed or answered meanwhile, so your text was not sent. Your text:';
+  message.textContent = words;
+  const row = document.createElement('div');
+  row.className = 'notice-actions';
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'btn ghost small';
+  dismiss.textContent = 'Dismiss';
+  dismiss.addEventListener('click', () => notice.remove());
+  if (text === null) {
+    row.append(dismiss);
+    notice.append(message, row);
+    holder.append(notice);
+    window.scrollTo(0, 0);
+    return;
+  }
   const copy = document.createElement('textarea');
   copy.readOnly = true;
   copy.rows = 3;
   copy.value = text;
   copy.setAttribute('aria-label', 'Your text that was not sent');
-  const row = document.createElement('div');
-  row.className = 'row';
   const copyButton = document.createElement('button');
   copyButton.type = 'button';
   copyButton.className = 'btn small';
@@ -444,20 +450,14 @@ function keepText(form, draft, text, isNote) {
       copyButton.textContent = 'Selected: press ⌘C';
     }
   });
-  const dismiss = document.createElement('button');
-  dismiss.type = 'button';
-  dismiss.className = 'btn ghost small';
-  dismiss.textContent = 'Dismiss';
-  dismiss.addEventListener('click', () => notice.remove());
   row.append(copyButton, dismiss);
   notice.append(message, copy, row);
   holder.append(notice);
-  if (root.dataset.view !== 'for-you') location.hash = '#for-you';
   window.scrollTo(0, 0);
 }
 
 document.addEventListener('keydown', (event) => {
-  if (event.repeat && !event.target.closest?.('textarea, input')) return;
+  if (!guard.acceptsKey(event) && !event.target.closest?.('textarea, input')) return;
   const field = event.target.closest?.('textarea, input, select, [contenteditable]');
   if (field) {
     const form = field.closest('form.say');

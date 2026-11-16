@@ -42,8 +42,9 @@ export function uniqueId(base, used, fallback) {
   return id;
 }
 
-// The text the page shows for an anchor and the server compares: plain, at
-// most MAX_ANCHOR_TEXT characters.
+// The text the page shows for an anchor and the server compares as sent:
+// plain, trimmed first, then cut to MAX_ANCHOR_TEXT characters (so a cut may
+// end on a space). The one definition both sides use.
 export const anchorText = (text) => String(text).replace(/[`*_]/g, '').trim().slice(0, MAX_ANCHOR_TEXT);
 
 // Reads one of the three known documents. A missing file, a missing folder, or

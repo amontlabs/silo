@@ -131,6 +131,23 @@ test('a stale page: anchorText that differs from the current title is refused an
   }
 });
 
+test('a title whose 200th character is a space: the page and the server agree', async () => {
+  const title = `${'a'.repeat(199)} tail words`;
+  const repo = makeRepo({ journeys: JOURNEYS.replace('Restore a computer', title) });
+  const running = await serve(repo);
+  try {
+    const shown = `${'a'.repeat(199)} `;
+    const html = await running.page();
+    const key = /data-anchor="journeys#first-run\/(a{60,}[a-z-]*)"/.exec(html)[1];
+    assert.match(html, new RegExp(`data-anchor="journeys#first-run/${key}" data-anchor-text="${shown}"`));
+    assert.equal((await running.note({ anchor: `journeys#first-run/${key}`, anchorText: shown, reaction: 'essential' })).status, 201);
+    assert.equal((await running.note({ anchor: `journeys#first-run/${key}`, anchorText: shown.trim(), text: 'x', after: 99 })).status, 409, 'compared as sent');
+    assert.equal((await running.note({ anchor: `journeys#first-run/${key}`, anchorText: `${shown}x`, text: 'x' })).status, 400, 'longer than 200');
+  } finally {
+    await running.stop();
+  }
+});
+
 test('ids: one shape for journeys, steps and sections; bad id comments are ignored; long ones are cut; empty steps get a title', () => {
   const longHeading = `${'Very long heading '.repeat(8)}`;
   const { journeys } = parseJourneys(`# J

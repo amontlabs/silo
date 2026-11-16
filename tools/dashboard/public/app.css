@@ -395,12 +395,11 @@ pre.mermaid-failed { text-align: left; }
 
 /* text that could not be sent */
 .lost:empty { display: none; }
-html.js:not([data-view="for-you"]) .lost { display: none; }
 .lost { display: grid; gap: 10px; margin-bottom: 22px; }
 .lost-note { background: var(--partial-soft); border: 1px solid color-mix(in srgb, var(--partial) 40%, transparent); border-radius: 14px; padding: 14px 16px; }
 .lost-note p { font-size: 13.5px; margin-bottom: 8px; }
 .lost-note textarea { width: 100%; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; padding: 9px 11px; resize: vertical; }
-.lost-note .row { display: flex; gap: 8px; margin-top: 8px; }
+.lost-note .notice-actions { display: flex; gap: 8px; margin-top: 8px; }
 
 /* notes whose anchor the documents no longer have */
 .orphans { margin-top: 26px; display: grid; gap: 10px; }

@@ -114,10 +114,14 @@ thread and a box to reply.
 
 Two safeguards on the queue: a card that has just appeared takes no Enter
 or primary click for 0.7 s (its primary button shows it), and a held key does
-not repeat. The address always names the card on screen (`#item-N`). Text
-whose send did not go through is never dropped: it stays in its box, or,
-when the box is gone because the item was closed or answered meanwhile,
-it shows at the top of For you to copy or dismiss.
+not repeat. These rules live in `public/rules.js`, which `npm test` runs
+without a browser. The address always names the card on screen (`#item-N`).
+Text whose send did not go through is never dropped: it stays in its box, or,
+when the box is gone because the item was closed or answered meanwhile, it
+shows in a notice at the top of the view on screen, to copy or dismiss. A
+refused note or reaction always shows that notice ("your note/reaction was
+not recorded", with the text when there is one), whether or not its box is
+still on the page.
 
 "Changed since you last looked" compares each `## ` section of the three
 product files with its text at the commit the owner marked as seen. Uncommitted
