@@ -95,6 +95,9 @@ test('building marks an open taken entry, once; --stop removes the mark; built r
 
   const start = await run(['building', String(taken.number), '--json'], { fake, box });
   assert.equal(start.code, 0, start.stderr);
+  assert.deepEqual(fake.labels, [{ name: 'workshop:building', color: '8250df', description: 'Being built now' }], 'the label is made first, as sync makes it');
+  const order = fake.log.filter((r) => r.method === 'POST' && r.path.endsWith('/labels')).map((r) => r.path.replace(/^\/repos\/[^/]+\/[^/]+/, ''));
+  assert.deepEqual(order, ['/labels', `/issues/${taken.number}/labels`]);
   assert.deepEqual(JSON.parse(start.stdout), { number: taken.number, entry: 'a', building: true, changed: true });
   assert.deepEqual(taken.labels, ['workshop:entry', 'verdict:take', 'workshop:building']);
   const before = writes();
@@ -103,6 +106,10 @@ test('building marks an open taken entry, once; --stop removes the mark; built r
   assert.match((await run(['building', String(taken.number)], { fake, box })).stdout, /already marked as being built/);
   assert.equal(writes(), before, 'a second run writes nothing');
 
+  taken.labels.pop();
+  await run(['building', String(taken.number)], { fake, box });
+  assert.equal(fake.labels.length, 1, 'an existing label is not made again');
+  assert.equal(fake.log.filter((r) => r.method === 'POST' && r.path.endsWith('/repos/amontlabs/silo/labels')).length, 1);
   const stop = await run(['building', String(taken.number), '--stop', '--json'], { fake, box });
   assert.deepEqual(JSON.parse(stop.stdout), { number: taken.number, entry: 'a', building: false, changed: true });
   assert.deepEqual(taken.labels, ['workshop:entry', 'verdict:take']);

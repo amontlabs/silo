@@ -2,6 +2,7 @@
 import { lookup } from './credentials.js';
 import { featuresPath, readText } from './files.js';
 import { parseFeatures } from './jsonl.js';
+import { ensureLabels } from './sync.js';
 import { BUILDING_LABEL, CREDENTIAL_NAMES, ENTRY_MARKER, Failure, KIND_LABELS, LABELS, UsageError, verdictLabel } from './names.js';
 
 const KINDS = new Set(Object.values(KIND_LABELS));
@@ -130,6 +131,8 @@ export async function building({ gh, number, stop }) {
   if (issue.state !== 'open') throw new Failure(`#${number} is not an open Workshop entry`);
   if (!labelNames(issue).includes(verdictLabel('take'))) throw new Failure(`#${number} is not planned: the owner has not taken it`);
   if (labelNames(issue).includes(BUILDING_LABEL)) return { number, entry, building: true, changed: false };
+  // GitHub would create a missing label itself, without its colour and description.
+  await ensureLabels({ gh, labels: LABELS.filter((label) => label.name === BUILDING_LABEL) });
   await gh.request('POST', gh.repoPath(`/issues/${number}/labels`), { body: { labels: [BUILDING_LABEL] } });
   return { number, entry, building: true, changed: true };
 }

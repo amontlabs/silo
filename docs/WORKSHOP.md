@@ -27,12 +27,13 @@ planned". A built entry is closed as "completed". Votes are 👍 reactions,
 comments are issue comments, and history is GitHub's.
 
 An entry being built now also carries `workshop:building` ("Being built now").
-Only the bot sets and removes it, with `workshop building <issue>` and
-`workshop building <issue> --stop` (see `tools/workshop/README.md`), and only
-on an open entry with `verdict:take`; `workshop built` removes it when it closes
-the entry. The verdict endpoints never touch it, so an entry dropped while it was
-being built keeps the label until `built` or `building --stop` runs on it; the
-server ignores it on a closed issue.
+The bot sets it with `workshop building <issue>`, only on an open entry with
+`verdict:take`, and removes it with `workshop building <issue> --stop` or when
+`workshop built` closes the entry (see `tools/workshop/README.md`). A verdict
+other than take (`later`, `refine`, `drop`, or cleared) removes it in the same
+write, so an entry taken again is not shown as being built. The server counts
+the label only on an open entry that also carries `verdict:take`, so a removal
+that failed, or a label left on an issue reopened by hand, shows nothing.
 
 ## The API
 
@@ -42,7 +43,7 @@ briefly here:
 
 | Endpoint | Who | What |
 | --- | --- | --- |
-| `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. An open entry carrying `workshop:building` also has `"building": true`; the field is absent on every other issue (closed entries, decisions, suggestions). |
+| `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. An open entry carrying both `workshop:building` and `verdict:take` also has `"building": true`; the field is absent on every other issue (other verdicts, closed entries, decisions, suggestions). |
 | `GET me` | signed in | `{ login, avatar, canDecide }`; `canDecide` is false when the permission could not be read (the next `me` tries again). 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
 | `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
@@ -52,7 +53,7 @@ briefly here:
 | `POST comment {n, text}` | signed in | Comments as that person. |
 | `POST vote {n, on}` | signed in | Adds or removes that person's 👍. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
-| `POST verdict {n, verdict, note?}` | can decide | Sets (`take`, `refine`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required. `refine` needs a note; the labels and the state change first, and the note is posted last, as the person's comment. |
+| `POST verdict {n, verdict, note?}` | can decide | Sets (`take`, `refine`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required. `refine` needs a note; the labels and the state change first, and the note is posted last, as the person's comment. Any verdict but `take` also removes `workshop:building` when the issue carries it (no call otherwise); if that removal fails, the verdict still stands. |
 | `POST decide {n, text}` | can decide | Comments on an open decision, then closes it as completed. A comment, a note or a decision text that the same person posted on that issue in the last five minutes is not posted again. |
 
 Errors are `{ "error": code, "message": plain words }` with 400 (bad input),
@@ -478,8 +479,9 @@ GitHub's own permissions apply (a locked issue refuses a visitor's comment)
 and GitHub records the person as the author. Every write first reads the issue
 and refuses with 404 unless it carries a Workshop label and is not a pull
 request; `verdict` works only on entries and `decide` only on open decisions.
-A verdict adds and removes only `verdict:*` labels, one at a time, so labels
-changed by someone else are kept. It changes the labels and the state first
+A verdict adds and removes only `verdict:*` labels, one at a time, and, for any
+verdict but take, `workshop:building`, so other labels changed by someone else
+are kept. It changes the labels and the state first
 and posts the note only after they succeeded, so a retry never posts the note
 twice. Clearing a verdict reopens only a dropped entry, never one closed as
 completed. A 401 on the installation token is a 502 and

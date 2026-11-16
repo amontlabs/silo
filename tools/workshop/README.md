@@ -89,7 +89,7 @@ tools/workshop/bin/workshop built 42
 - `ask` opens an open `workshop:decision` issue. Its title can be at most 120 characters. `--entry ID` adds a line naming that entry's issue.
 - `comment` comments only on an issue that carries a `workshop:` kind label; it refuses any other issue and any pull request.
 - `built` closes a `workshop:entry` issue as completed, then removes its `workshop:building` label; it leaves every other label alone. On an entry already closed as built it only removes a building label left on it. It refuses an entry closed as not planned (dropped).
-- `building` adds `workshop:building` to an open `workshop:entry` issue that carries `verdict:take`. It refuses any other issue, a closed entry, and an entry without `verdict:take` ("#N is not planned: the owner has not taken it"). `--stop` removes the label from any entry, open or closed, so a label left on a dropped entry can be cleared. Both report `changed: false` and write nothing when there is nothing to change.
+- `building` adds `workshop:building` to an open `workshop:entry` issue that carries `verdict:take`. When the repository lacks the label, it creates it first with its colour and description, the way `sync` does (GitHub would otherwise create it bare). The owner's verdict other than take removes the label on the Workshop's side. It refuses any other issue, a closed entry, and an entry without `verdict:take` ("#N is not planned: the owner has not taken it"). `--stop` removes the label from any entry, open or closed, so a label left on a dropped entry can be cleared. Both report `changed: false` and write nothing when there is nothing to change.
 
 `--body` and `--text` take the text itself, `@file`, or `-` for stdin.
 

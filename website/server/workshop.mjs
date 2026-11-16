@@ -10,7 +10,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAppAuth } from './app-auth.mjs';
 import { createGitHub, DEFAULT_TIMEOUT, GitHubError, nextLink } from './github.mjs';
-import { kindOf, LABELS, labelNames, reasonOf, VERDICTS } from './issues.mjs';
+import { BUILDING_LABEL, kindOf, LABELS, labelNames, reasonOf, VERDICTS } from './issues.mjs';
 import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCookie, SESSION_MAX_AGE, STATE_MAX_AGE, unseal } from './session.mjs';
 import { createSnapshot } from './snapshot.mjs';
 
@@ -811,6 +811,18 @@ export function createWorkshop({
         state = { state: 'open', reason: null };
       }
       snapshots.patch.fields(n, { verdict, ...state, ...(state.state === 'open' ? { closedAt: null } : {}) });
+      // An entry is built only while it is taken: any other verdict also takes its building label off.
+      // The issue just read says whether the label is there. A failed removal leaves the verdict
+      // standing; the state answer shows building only on a taken entry anyway.
+      if (verdict !== 'take' && labelNames(issue).includes(BUILDING_LABEL)) {
+        try {
+          await userRequest(session, 'DELETE', `/repos/${repo}/issues/${n}/labels/${encodeURIComponent(BUILDING_LABEL)}`);
+          snapshots.patch.building(n, false);
+        } catch (error) {
+          if (error instanceof GitHubError && error.status === 404) snapshots.patch.building(n, false);
+          else log({ endpoint: 'verdict', building_label: 'not_removed', ...(error instanceof GitHubError ? { github: error.status } : { failure: error?.name || 'Error' }) });
+        }
+      }
       if (note && !(await alreadyPosted(session, n, note))) {
         const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body: note } });
         if (data) snapshots.patch.comment(n, data);

@@ -79,9 +79,11 @@ function reduceIssue(issue) {
   };
 }
 
-// An entry is being built while its issue is open and carries the building label. The flag is read
-// when the answer is made, so a patch that closes the issue hides it at once.
-const summaryOf = (entry) => (entry.building && entry.summary.kind === 'entry' && entry.summary.state === 'open' ? { ...entry.summary, building: true } : entry.summary);
+// An entry is being built while its issue is open, taken and carries the building label. This is
+// read when the answer is made, so a patch that closes the issue or changes the verdict hides it at once.
+const summaryOf = (entry) => (entry.building && entry.summary.kind === 'entry' && entry.summary.state === 'open' && entry.summary.verdict === 'take'
+  ? { ...entry.summary, building: true }
+  : entry.summary);
 
 // `request(method, path, options)` calls GitHub with the installation token and
 // throws a GitHubError when GitHub fails or the installation must wait.
@@ -430,6 +432,9 @@ export function createSnapshot({
     },
     up(number, delta) {
       count(number, 'up', delta);
+    },
+    building(number, on) {
+      record(onEntry(number, (entry) => { entry.building = on; }));
     },
     fields(number, fields) {
       record(onEntry(number, (entry) => Object.assign(entry.summary, fields)));
