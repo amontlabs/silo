@@ -170,7 +170,7 @@ describe('an entry', () => {
     mockApi({ state: () => ok(later()) });
     history.replaceState(null, '', '/workshop#computers/exec');
     await renderApp();
-    expect(screen.getByText('Being built now.')).toBeInTheDocument();
+    expect(await screen.findByText('Being built now.')).toBeInTheDocument();
     expect(within(itemOf('Run a command')).getByText('building')).toBeInTheDocument();
     act(() => { location.hash = '#setup/shells'; });
     await waitFor(() => expect(screen.getByText('Planned.')).toBeInTheDocument());

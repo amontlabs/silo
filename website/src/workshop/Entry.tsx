@@ -9,6 +9,8 @@ import type { Workshop } from './useWorkshop';
 
 /** How long the closing body stays in place for its animation. */
 const CLOSE_MS = 240;
+/** How long an opening panel waits for its comments, so it opens at its final size. */
+export const HOLD_MS = 180;
 
 export interface EntryContext {
   w: Workshop;
@@ -52,15 +54,27 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   // The body stays mounted while it closes, so the close animates too.
   const [closing, setClosing] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
+  // The row shows itself open at once; its panel grows when the comments are in, or after HOLD_MS.
+  const detail = row.issue === null ? undefined : w.details[row.issue];
+  const ready = row.issue === null || row.issue <= 0 || !w.liveOk || typeof detail === 'object' || detail === 'error';
+  const [held, setHeld] = useState(false);
   if (wasOpen !== open) {
     setWasOpen(open);
     setClosing(!open);
+    setHeld(open && !ready);
   }
+  if (held && ready) setHeld(false);
   useEffect(() => {
     if (!closing) return;
     const timer = setTimeout(() => setClosing(false), CLOSE_MS);
     return () => clearTimeout(timer);
   }, [closing]);
+  useEffect(() => {
+    if (!held) return;
+    const timer = setTimeout(() => setHeld(false), HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [held]);
+  const grown = open && !held;
 
   const isSaving = row.issue !== null && w.saving[row.issue] === true;
   const live = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
@@ -74,14 +88,14 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   return (
     <li className={classes} id={row.key}>
       <div className="ws-line">
-        <button type="button" className="ws-row" aria-expanded={open} aria-controls={`${row.key}-more`} onClick={() => ctx.onToggle(row)} onPointerEnter={() => w.prefetch(row)} onFocus={() => w.prefetch(row)}>
+        <button type="button" className="ws-row" aria-expanded={open} aria-controls={`${row.key}-more`} onClick={() => ctx.onToggle(row)} onPointerEnter={() => w.prefetch(row)} onPointerDown={() => w.prefetch(row)} onTouchStart={() => w.prefetch(row)} onFocus={() => w.prefetch(row)}>
           <i className={pipClass(row)} aria-hidden="true" />
           <span className="ws-name">{row.name}</span>
           <b className={isSaving ? 'ws-word ws-pending' : 'ws-word'}>{word ?? ''}</b>
         </button>
         <Side row={row} ctx={ctx} />
       </div>
-      <div className={open ? 'ws-more open' : 'ws-more'} id={`${row.key}-more`} aria-hidden={open ? undefined : true} inert={!open}>
+      <div className={grown ? 'ws-more open' : 'ws-more'} id={`${row.key}-more`} aria-hidden={open ? undefined : true} inert={!open}>
         <div className="ws-more-in">{open || closing ? <Body row={row} ctx={ctx} /> : null}</div>
       </div>
     </li>

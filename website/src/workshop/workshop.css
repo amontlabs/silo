@@ -20,9 +20,15 @@
 :where(.ws) :is(h1, h2, h3, p, ul) { margin: 0; padding: 0; font-weight: 400; }
 :where(.ws) ul { list-style: none; }
 :where(.ws) button { background: none; padding: 0; text-align: left; font: inherit; color: inherit; }
-.ws-account-slot { min-width: 135px; display: flex; justify-content: flex-end; }
-@media (max-width: 480px) { .ws-account-slot { min-width: 60px; } }
-.ws-account { display: flex; align-items: center; gap: 12px; font: 12px var(--mono); color: var(--muted); }
+/* The account slot has one fixed width, chosen before anyone knows who is signed in: signed in when the
+   session marker is there, signed out otherwise. Only a stale marker changes it, once, when `me` answers. */
+.ws-account-slot { flex: none; width: 136px; display: flex; justify-content: flex-end; }
+.ws-session .ws-account-slot { width: 200px; }
+#workshop-account[data-account="out"] { width: 136px; }
+#workshop-account[data-account="in"] { width: 200px; }
+@media (max-width: 480px) { .ws-account-slot, .ws-session .ws-account-slot, #workshop-account[data-account] { width: 60px; } }
+.ws-account { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; max-width: 100%; font: 12px var(--mono); color: var(--muted); }
+.ws-account .ws-link { flex: none; }
 .ws-link { white-space: nowrap; background: none; padding: 0; font: 12px var(--mono); color: var(--faint); }
 .ws-link:hover { color: var(--accent-ink); }
 .ws-quiet { font: 12px var(--mono); color: var(--faint); }
@@ -425,7 +431,7 @@
 
 /* Followed up after the design review. */
 .ws-status { text-wrap: balance; }
-.ws-login { white-space: nowrap; }
+.ws-login { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 480px) { .ws-login { display: none; } }
 @media (max-width: 380px) { .ws-pip { width: 11px; } }
 .ws-c-ghost { height: 42px; border-radius: 3px; background: color-mix(in srgb, var(--line) 40%, transparent); }

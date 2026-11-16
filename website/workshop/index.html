@@ -3,6 +3,10 @@
   <head>
     <script src="/theme.js"></script>
     <script>
+      // A readable marker beside the session cookie: the header keeps the signed-in width from first paint.
+      if (/(?:^|;\s*)workshop-hint=1(?:;|$)/.test(document.cookie)) document.documentElement.classList.add('ws-session');
+    </script>
+    <script>
       // The page shows once its fonts are in, so nothing is laid out in a fallback face and then changes
       // width. After 1.2 s it shows regardless, and at once when a font fails; the fonts swap in when they arrive.
       (() => {

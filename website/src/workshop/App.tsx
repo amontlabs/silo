@@ -86,6 +86,13 @@ export function App({ data, accountSlot }: AppProps) {
   /** The control that opened the suggestions, the left-out list or the decisions, to return focus to. */
   const opener = useRef<string | null>(null);
   const foldedAt = useRef(0);
+  const lifting = useRef(false);
+  // Once `me` has answered, the account slot takes the width of what it holds (see workshop.css).
+  useEffect(() => {
+    if (!accountSlot) return;
+    if (w.me === undefined) accountSlot.removeAttribute('data-account');
+    else accountSlot.setAttribute('data-account', w.me ? 'in' : 'out');
+  }, [accountSlot, w.me]);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const swapTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const mainRef = useRef<HTMLDivElement>(null);
@@ -248,6 +255,26 @@ export function App({ data, accountSlot }: AppProps) {
   function openPlace(next: Place) {
     if (samePlace(next, shown)) {
       back();
+      return;
+    }
+    // From a scrolled full map, the page first goes back to the top, then the map folds: the two at once
+    // would move every part up and then down.
+    if (isHome && onMap() && scrollY > 0 && !still()) {
+      if (lifting.current) return;
+      lifting.current = true;
+      const from = scrollY;
+      const length = Math.min(260, 120 + from / 4);
+      const start = performance.now();
+      const step = (now: number) => {
+        const t = Math.min(1, (now - start) / length);
+        scrollTo({ top: from * (1 - (1 - (1 - t) ** 3)), behavior: 'instant' });
+        if (t < 1) requestAnimationFrame(step);
+        else {
+          lifting.current = false;
+          openPlace(next);
+        }
+      };
+      requestAnimationFrame(step);
       return;
     }
     if (next.kind !== 'area') opener.current = selectorOf(document.activeElement);
@@ -433,7 +460,7 @@ export function App({ data, accountSlot }: AppProps) {
   };
   const account = !w.liveOk || w.me === undefined ? null : w.me ? (
     <span className="ws-account">
-      <span className="ws-login">{w.me.login}</span>
+      <span className="ws-login" title={w.me.login}>{w.me.login}</span>
       <button type="button" className="ws-link" onClick={() => void w.signOut()}>Sign out</button>
     </span>
   ) : (

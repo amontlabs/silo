@@ -46,7 +46,9 @@ export function installFixture(data: BuildData, params: URLSearchParams): void {
   const wait = <T,>(ms: number, value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
   // `me` waits as long as `delay`; `detail=<ms>` holds back each issue's comments.
   const detail = Number(params.get('detail') ?? 0);
-  api.me = async () => wait(delay, as === 'owner' ? { login: 'owner-fake', avatar: '', canDecide: true } : as === 'visitor' ? { login: 'visitor-fake', avatar: '', canDecide: false } : null);
+  // `login=<name>` replaces the fake login, to see a long one.
+  const login = params.get('login');
+  api.me = async () => wait(delay, as === 'owner' ? { login: login ?? 'owner-fake', avatar: '', canDecide: true } : as === 'visitor' ? { login: login ?? 'visitor-fake', avatar: '', canDecide: false } : null);
   api.issue = async (n: number) => wait(detail, {
     number: n, title: state.issues[n]?.title ?? '', body: '', url: `https://github.com/amontlabs/silo/issues/${n}`, up: state.issues[n]?.up ?? 0,
     comments: (state.issues[n]?.comments ?? 0) > 0 ? [

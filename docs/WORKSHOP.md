@@ -35,8 +35,10 @@ What a person sees:
   window is at least 760 px tall); the area's entries open in place, each on
   its own. Opening or closing an entry never moves it or the rows above it. The
   entry opened last is the one in the address and the one a verdict goes to.
-  Comments load when a pointer or focus reaches the row, and on every opening;
-  while they load, each one the count announces holds its place. An entry named
+  Comments load when a pointer, a press or focus reaches the row, and on every
+  opening. The row shows itself open at once; its panel grows when the comments
+  are in or after 180 ms, and while they still load each one the count announces
+  holds its place. An entry named
   by the address opens once the live state is there.
 - The strip under the map links to what is left out (entries without an area,
   and every dropped entry) and to the suggestions.
@@ -47,6 +49,9 @@ What a person sees:
   dimmed until the 700 ms guard has passed. Verdicts are for entries only: the
   server refuses them on anything else.
   Nobody else is offered the decisions; their address shows the map.
+- The header's account slot has a fixed width from first paint: signed in when
+  the readable `workshop-hint` cookie is there (a long login is cut by an
+  ellipsis), signed out otherwise. It changes only when that cookie was stale.
 
 Addresses: `#<area>`, `#<area>/<entry id>`, `#suggested`, `#left` and
 `#decisions`, each with an optional open row (`#suggested/issue-<n>`). An entry
@@ -68,7 +73,7 @@ Back and Forward move between places; opening a row replaces the address.
 To look at a later state without the API, run `npm --prefix website run dev`
 and open `http://127.0.0.1:4173/workshop/?fixture=later` (some areas done, one
 being built, one next) or `?fixture=today`; add `&as=owner` or `&as=visitor` to
-be signed in, `&delay=2000` to hold the live state and the sign-in answer back,
+be signed in (`&login=<name>` for another login), `&delay=2000` to hold the live state and the sign-in answer back,
 and `&detail=700` to hold each entry's comments back. This exists only in
 development builds (`devFixture.ts`, loaded when `import.meta.env.DEV`); a
 production build has none of it.
