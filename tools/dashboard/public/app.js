@@ -605,7 +605,9 @@ function showStack({ focus = false, back = false } = {}) {
   // On a narrow screen the stages are a strip: keep the current one in view.
   const strip = layout.querySelector('.tower');
   const tier = strip?.querySelector('.tier[aria-current]');
-  if (strip && tier && strip.scrollWidth > strip.clientWidth) strip.scrollLeft = Math.max(0, tier.parentElement.offsetLeft - strip.clientWidth / 3);
+  if (strip && tier && strip.scrollWidth > strip.clientWidth) {
+    strip.scrollLeft = Math.max(0, strip.scrollLeft + tier.getBoundingClientRect().left - strip.getBoundingClientRect().left - strip.clientWidth / 3);
+  }
   // Coming next: the next five undecided entries after the current one.
   const next = new Set(list.slice(index + 1).filter((other) => !other.dataset.decided).slice(0, 5).map((other) => other.dataset.entry));
   layout.querySelectorAll('.coming [data-row]').forEach((row) => {

@@ -123,3 +123,62 @@ test('a failing migration leaves the version 1 store as it was', () => {
   assert.match(check.prepare("SELECT sql FROM sqlite_master WHERE name = 'items'").get().sql, /'shipped'\)\)/);
   check.close();
 });
+
+const hasVerdicts = (db) => db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'verdicts'").get().n === 1;
+
+test('a version 1 store goes straight to version 3: items kept, verdicts table added and usable', () => {
+  const home = versionOneStore();
+  const store = new Store(home);
+  try {
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.ok(hasVerdicts(store.db));
+    assert.equal(store.allItems().length, 3);
+    assert.equal(store.addVerdict('shell-a', { verdict: 'take', shown: 0 }), 1);
+    assert.deepEqual(store.currentVerdictRows().map((row) => [row.feature_id, row.verdict]), [['shell-a', 'take']]);
+  } finally {
+    store.close();
+  }
+});
+
+// A version 2 store is a version 3 store without the verdicts table.
+function versionTwoStore() {
+  const home = tempDir();
+  const store = new Store(home);
+  const item = store.createItem({ kind: 'decide', title: 'Pick', options: [{ label: 'A' }, { label: 'B' }] });
+  store.addReply(item, { author: 'owner', choice: 1 });
+  store.addNote({ anchor: 'journeys#live/start', anchorText: 'Start', reaction: 'nice' });
+  store.setSeen('docs_commit', 'abc');
+  store.db.exec('DROP TABLE verdicts; PRAGMA user_version = 2;');
+  store.close();
+  return home;
+}
+
+test('a version 2 store with data migrates to version 3 in place, and opening again changes nothing', () => {
+  const home = versionTwoStore();
+  const before = new DatabaseSync(path.join(home, 'dashboard.db'));
+  assert.equal(hasVerdicts(before), false);
+  const dump = (db) => JSON.stringify([db.prepare('SELECT * FROM items ORDER BY id').all(), db.prepare('SELECT * FROM replies ORDER BY id').all(), db.prepare('SELECT * FROM seen ORDER BY key').all()]);
+  const was = dump(before);
+  before.close();
+  const store = new Store(home);
+  try {
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.ok(hasVerdicts(store.db));
+    assert.equal(dump(store.db), was);
+    store.addVerdict('shell-a', { verdict: 'later', shown: 0 });
+  } finally {
+    store.close();
+  }
+  const again = new Store(home);
+  assert.equal(again.currentVerdictRows().length, 1);
+  assert.equal(again.allItems().length, 2);
+  again.close();
+});
+
+test('a newer store (version 4) is refused and left as it was', () => {
+  const home = tempDir();
+  const db = new DatabaseSync(path.join(home, 'dashboard.db'));
+  db.exec('PRAGMA user_version = 4');
+  db.close();
+  assert.throws(() => new Store(home), /schema version 4/);
+});
