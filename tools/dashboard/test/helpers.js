@@ -40,6 +40,8 @@ The owner installs the app and starts a computer.
 - [built] Install the app
 - [partial] Start a first computer
 - [missing] See a guided tour
+- [untested] Restore a computer
+- [later] Not a status, plain text
 
 ## Share a workspace
 

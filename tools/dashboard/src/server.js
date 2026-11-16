@@ -203,9 +203,17 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
         if (!file.startsWith(MERMAID_DIR + path.sep) || !/\.m?js$/.test(file)) return send(res, 404, 'Not found');
         return serveFile(req, res, file, { 'Content-Type': 'text/javascript; charset=utf-8' });
       }
-      match = /^\/attachments\/(\d+)(?:\/[^/]*)?$/.exec(pathname);
+      // /attachments/<id> or /attachments/<id>/<its recorded file name>.
+      match = /^\/attachments\/(\d+)(?:\/([^/]+))?$/.exec(pathname);
       if (match) {
         const attachment = store.getAttachment(Number(match[1]));
+        let name = null;
+        try {
+          name = match[2] === undefined ? null : decodeURIComponent(match[2]);
+        } catch {
+          return send(res, 404, 'Not found');
+        }
+        if (attachment && name !== null && name !== attachment.file) return send(res, 404, 'Not found');
         const file = attachment && store.attachmentPath(attachment);
         if (!file) return send(res, 404, 'Not found');
         return serveFile(req, res, file, attachmentHeaders(attachment));

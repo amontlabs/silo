@@ -307,7 +307,7 @@ export class Store {
       for (const id of ids) {
         const row = this.db.prepare('SELECT author FROM replies WHERE id = ?').get(id);
         if (!row) throw new NotFoundError(`no reply ${id}`);
-        if (row.author !== 'owner') throw new ValidationError(`reply ${id} is an agent reply; only owner replies are acknowledged`);
+        if (row.author !== 'owner') throw new ConflictError(`reply ${id} is an agent reply; only owner replies are acknowledged`);
       }
       for (const id of ids) this.db.prepare('UPDATE replies SET acked_at = ? WHERE id = ? AND acked_at IS NULL').run(when, id);
       return ids;
