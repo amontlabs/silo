@@ -16,31 +16,45 @@ const doc = parse(html);
 const text = (selector: string, from: Document = doc) =>
   [...from.querySelectorAll(selector)].map((node) => node.textContent?.replace(/\s+/g, ' ').trim());
 
-const STAGES = JSON.stringify([
-  { id: 'first', title: 'First', line: 'A fixture stage with a line.' },
-  { id: 'second', title: 'Second', line: 'Never shown.' },
-  { id: 'gone', title: 'Gone', line: 'Old things.' },
-]);
-const feature = (n: number, stage: string, verdict: string | null) =>
-  JSON.stringify({ n, id: `f${n}`, name: `Feature ${n}`, stage, what: 'Something.', verdict });
+// Fixture plan files, valid for every reader of the plan: features.jsonl entries outside the stage
+// `gone` carry an area, areas.json lists every area the Workshop's map draws, each with an entry.
+const AREA_IDS = ['engine', 'computers', 'app', 'checkpoints', 'forks', 'changes', 'agents', 'access', 'setup', 'tasks', 'devices', 'releases', 'trust', 'desktop', 'macos', 'sharing'];
+const AREAS = JSON.stringify(AREA_IDS.map((id) => ({ id, title: `Area ${id}`, line: `What ${id} covers.` })), null, 1);
+const DECISIONS = '# Decisions\n\n- 2026-11-16 · owner · A fixture decision.\n';
+const stages = (firstLine?: string) =>
+  JSON.stringify([
+    { id: 'first', title: 'First', ...(firstLine === undefined ? {} : { line: firstLine }) },
+    { id: 'second', title: 'Second', line: 'Never shown.' },
+    { id: 'gone', title: 'Gone', line: 'Old things.' },
+  ]);
+const STAGES = stages('A fixture stage with a line.');
+const feature = (n: number, stage: string, verdict: string | null, area?: string) =>
+  JSON.stringify({ n, id: `f${n}`, name: `Feature ${n}`, stage, what: 'Something.', verdict, ...(area ? { area } : {}) });
+// 16 entries in areas (2 planned), and 2 in the stage `gone` (one planned, which does not count).
 const FEATURES = [
-  feature(1, 'first', 'take'),
-  feature(2, 'first', 'take'),
-  feature(3, 'second', 'refine'),
-  feature(4, 'second', null),
-  feature(5, 'gone', 'take'),
-  feature(6, 'gone', 'drop'),
+  ...AREA_IDS.map((area, index) => feature(index + 1, index < 8 ? 'first' : 'second', index < 2 ? 'take' : index % 3 ? 'refine' : null, area)),
+  feature(17, 'gone', 'take'),
+  feature(18, 'gone', 'drop'),
 ].join('\n');
 
 const repositories: string[] = [];
-function fixtureRepository(files: { stages?: string; features?: string }): string {
+function fixtureRepository(files: { stages?: string; features?: string; areas?: string; decisions?: string }): string {
   const root = mkdtempSync(join(tmpdir(), 'silo-home-plan-'));
   repositories.push(root);
   mkdirSync(join(root, 'docs/product'), { recursive: true });
-  if (files.stages !== undefined) writeFileSync(join(root, 'docs/product/stages.json'), files.stages);
-  if (files.features !== undefined) writeFileSync(join(root, 'docs/product/features.jsonl'), files.features);
+  const write = (name: string, content: string | undefined) => {
+    if (content !== undefined) writeFileSync(join(root, 'docs/product', name), content);
+  };
+  write('stages.json', files.stages);
+  write('features.jsonl', files.features);
+  write('areas.json', files.areas ?? AREAS);
+  write('DECISIONS.md', files.decisions ?? DECISIONS);
   return root;
 }
+const fill = (files: Parameters<typeof fixtureRepository>[0]) => {
+  const root = fixtureRepository(files);
+  return fillHomePlan(html, root, join(root, 'recordings'));
+};
 afterEach(() => {
   for (const root of repositories.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -86,16 +100,15 @@ describe('the home page', () => {
   });
 
   it('fills the two plan lines from the plan files', () => {
-    const filled = parse(fillHomePlan(html, fixtureRepository({ stages: STAGES, features: FEATURES })));
+    const filled = parse(fill({ stages: STAGES, features: FEATURES }));
     expect(text('.hero-note', filled)).toEqual(['Not out yet. First up: a fixture stage with a line.']);
-    expect(text('.door-line', filled)).toEqual(['2 of 4 features are planned. Have a say in the rest.']);
-    expect(text('.door-line span', filled)).toEqual(['2 of 4 features are planned.', 'Have a say in the rest.']);
+    expect(text('.door-line', filled)).toEqual(['2 of 16 features are planned. Have a say in the rest.']);
+    expect(text('.door-line span', filled)).toEqual(['2 of 16 features are planned.', 'Have a say in the rest.']);
   });
 
   it('writes a plan line with $ or markup in it as text', () => {
     const line = 'Costs $& and $` and $\' and $$ <b>bold</b>.';
-    const stages = JSON.stringify([{ id: 'first', title: 'First', line }]);
-    const filled = fillHomePlan(html, fixtureRepository({ stages, features: feature(1, 'first', 'take') }));
+    const filled = fill({ stages: stages(line), features: FEATURES });
     const page = parse(filled);
     expect(text('.hero-note', page)).toEqual(['Not out yet. First up: costs $& and $` and $\' and $$ <b>bold</b>.']);
     expect(page.querySelector('.hero-note b')).toBeNull();
@@ -103,12 +116,12 @@ describe('the home page', () => {
   });
 
   it('stops the build when a plan file is missing or malformed', () => {
-    expect(() => fillHomePlan(html, fixtureRepository({ stages: STAGES }))).toThrow(/features\.jsonl: cannot be read/);
-    expect(() => fillHomePlan(html, fixtureRepository({ features: FEATURES }))).toThrow(/stages\.json: cannot be read/);
-    expect(() => fillHomePlan(html, fixtureRepository({ stages: '[', features: FEATURES }))).toThrow(/stages\.json: not valid JSON/);
-    expect(() => fillHomePlan(html, fixtureRepository({ stages: STAGES, features: '{"n": 1}' }))).toThrow(/features\.jsonl:1/);
-    const lineless = JSON.stringify([{ id: 'first', title: 'First' }]);
-    expect(() => fillHomePlan(html, fixtureRepository({ stages: lineless, features: '' }))).toThrow(/first stage has no line/);
+    expect(() => fill({ stages: STAGES })).toThrow(/features\.jsonl: cannot be read/);
+    expect(() => fill({ features: FEATURES })).toThrow(/stages\.json: cannot be read/);
+    expect(() => fill({ stages: '[', features: FEATURES })).toThrow(/stages\.json: not valid JSON/);
+    expect(() => fill({ stages: STAGES, features: '{"n": 1}' })).toThrow(/features\.jsonl:1/);
+    expect(() => fill({ stages: STAGES, features: FEATURES, decisions: '- not a decision line' })).toThrow(/DECISIONS\.md:1/);
+    expect(() => fill({ stages: stages(), features: FEATURES })).toThrow(/first stage has no line/);
   });
 
   it('keeps no style for a class or id the page and its script do not use', () => {

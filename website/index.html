@@ -4,12 +4,12 @@
     <script src="/theme.js"></script>
     <script>
       // The page shows once its fonts are in, so nothing is laid out in a fallback face and then
-      // changes width. After 3 s (the fonts' block period) it shows regardless.
+      // changes width. After 1.2 s it shows regardless, and the fonts swap in when they arrive.
       (() => {
         const root = document.documentElement;
         const show = () => root.classList.remove('fonts-pending');
         root.classList.add('fonts-pending');
-        setTimeout(show, 3000);
+        setTimeout(show, 1200);
         document.addEventListener('DOMContentLoaded', () => {
           const faces = ['italic 48px "IBM Plex Serif"', '17px "IBM Plex Serif"', '14px "IBM Plex Sans"', '12px "IBM Plex Mono"'];
           Promise.all(faces.map((face) => document.fonts.load(face))).then(show, show);

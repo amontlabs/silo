@@ -1,9 +1,9 @@
 import { join } from 'node:path';
+import { fillHomePlan } from './src/home-plan.ts';
 import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
-import { fillHomePlan } from './src/home-plan.ts';
 import { DECISIONS_FILE, FEATURES_FILE, readBuildData, STAGES_FILE } from './src/workshop/data.ts';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
@@ -26,18 +26,18 @@ function workshopData(): Plugin {
 /** Fills the home page's "First up" and Workshop lines from the plan at build time. */
 function homePlan(): Plugin {
   const home = fileURLToPath(new URL('./index.html', import.meta.url));
-  const files = [STAGES_FILE, FEATURES_FILE].map((file) => join(repository, file));
+  const plan = join(repository, 'docs/product');
   return {
     name: 'home-plan',
     configureServer(server) {
-      server.watcher.add(files);
+      server.watcher.add(plan);
       server.watcher.on('change', (file) => {
-        if (files.includes(file)) server.ws.send({ type: 'full-reload', path: '/index.html' });
+        if (file.startsWith(plan)) server.ws.send({ type: 'full-reload', path: '/index.html' });
       });
     },
     transformIndexHtml: {
       order: 'pre',
-      handler: (html, context) => (context.filename === home ? fillHomePlan(html, repository) : html),
+      handler: (html, context) => (context.filename === home ? fillHomePlan(html, repository, recordings) : html),
     },
   };
 }
