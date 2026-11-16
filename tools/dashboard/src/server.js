@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConflictError, DashboardError, NotFoundError, ValidationError } from './errors.js';
 import { DOC_FILES, MAX_ANCHOR_TEXT, docChanges, hasCommit, noteTargets, readDoc } from './docs.js';
+import { FEATURE_VERDICTS, readFeatures } from './features.js';
 import { parseAnchor } from './store.js';
 import { readPrivateNotes } from './private.js';
 import { renderPage } from './views.js';
@@ -169,6 +170,11 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
     return docs;
   };
 
+  const stackData = () => {
+    const list = readFeatures(repoRoot);
+    return list && { ...list, rows: store.currentVerdictRows() };
+  };
+
   const pageView = () => {
     const docs = readDocs();
     return {
@@ -176,6 +182,7 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
       docs,
       changes: docChanges(repoRoot, store.getSeen('docs_commit'), docs),
       notes: readPrivateNotes(store.home),
+      stack: stackData(),
     };
   };
 
@@ -287,6 +294,22 @@ export function createServer({ store, repoRoot = process.env.SILO_DASHBOARD_REPO
           after,
         });
         return sendJson(res, 201, result);
+      }
+      match = /^\/api\/features\/([^/]+)\/verdict$/.exec(pathname);
+      if (match) {
+        // A verdict on an entry of the feature list the checkout has now. The
+        // page sends the newest verdict row it showed for that entry.
+        const body = await jsonBody(req);
+        const list = readFeatures(repoRoot);
+        const feature = list?.features.find((entry) => entry.id === match[1]);
+        if (!feature) throw new NotFoundError(`no feature ${match[1]} in docs/product/features.jsonl`);
+        if (!Object.hasOwn(body, 'verdict') || (body.verdict !== null && !FEATURE_VERDICTS.includes(body.verdict))) {
+          throw new ValidationError(`verdict must be one of ${FEATURE_VERDICTS.join(', ')}, or null to clear it`);
+        }
+        if (body.note !== undefined && typeof body.note !== 'string') throw new ValidationError('note must be a string');
+        if (!Number.isSafeInteger(body.shown) || body.shown < 0) throw new ValidationError('send the newest verdict id the page showed (shown)');
+        const id = store.addVerdict(feature.id, { verdict: body.verdict, note: body.note ?? '', shown: body.shown, hasFileVerdict: feature.verdict !== null });
+        return sendJson(res, 201, { id });
       }
       if (pathname === '/api/docs/seen') {
         // The commit the page was rendered from, so changes made since stay unseen.

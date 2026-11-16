@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { ConflictError, DashboardError, NotFoundError, StoreVersionError, ValidationError } from './errors.js';
 import { currentReaction, itemState, seenValue } from './state.js';
 import { ID_SHAPE } from './docs.js';
+import { FEATURE_ID, FEATURE_VERDICTS } from './features.js';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const KINDS = ['look', 'decide', 'shipped', 'note'];
 // Kinds an agent posts. A note is created by the owner, from the page.
 export const POST_KINDS = ['look', 'decide', 'shipped'];
@@ -50,6 +51,21 @@ const ITEMS_COLUMNS = `  kind TEXT NOT NULL CHECK (kind IN ('look', 'decide', 's
 const CHOICE_COLUMN = 'choice INTEGER';
 const REACTION_COLUMN = "reaction TEXT CHECK (reaction IS NULL OR reaction IN ('essential', 'nice', 'unneeded'))";
 
+// Version 3: the owner's verdicts on the feature list. Every row is kept as
+// history; the newest row of a feature is its current verdict, and a row with
+// verdict NULL clears it.
+const VERDICTS_SCHEMA = `
+CREATE TABLE verdicts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  feature_id TEXT NOT NULL,
+  verdict TEXT CHECK (verdict IS NULL OR verdict IN ('take', 'refine', 'later', 'drop')),
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  acked_at TEXT
+);
+CREATE INDEX verdicts_by_feature ON verdicts (feature_id, id);
+`;
+
 const SCHEMA = `
 CREATE TABLE items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +97,7 @@ CREATE TABLE seen (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-`;
+${VERDICTS_SCHEMA}`;
 
 const MEDIA_TYPES = {
   '.png': 'image/png',
@@ -249,6 +265,7 @@ export class Store {
       if (current >= SCHEMA_VERSION) return;
       if (current === 0) this.db.exec(SCHEMA);
       if (current === 1) this.migrateFrom1();
+      if (current === 1 || current === 2) this.db.exec(VERDICTS_SCHEMA);
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     });
   }
@@ -539,6 +556,62 @@ export class Store {
 
   setSeen(key, value) {
     this.db.prepare('INSERT INTO seen (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
+  // ---- verdicts on the feature list ----
+
+  // Records the owner's verdict on a feature: a new row, so earlier ones stay
+  // as history. `verdict` null clears the current one. `shown` is the id of
+  // the newest row the caller showed for this feature (0 when none): a newer
+  // row refuses the action (ConflictError). Whether the feature exists in the
+  // list is the caller's check. Returns the new row id.
+  addVerdict(featureId, { verdict, note = '', shown = null, hasFileVerdict = false }) {
+    if (typeof featureId !== 'string' || !FEATURE_ID.test(featureId)) throw new ValidationError('feature id must be lowercase letters, digits and hyphens');
+    if (verdict !== null && !FEATURE_VERDICTS.includes(verdict)) throw new ValidationError(`verdict must be one of ${FEATURE_VERDICTS.join(', ')}, or null to clear it`);
+    const cleanNote = longText(note, 'note');
+    if (verdict === 'refine' && !cleanNote) throw new ValidationError('refine needs a note: what to change');
+    if (verdict === null && cleanNote) throw new ValidationError('clearing a verdict carries no note');
+    return this.tx(() => {
+      const newest = this.db.prepare('SELECT * FROM verdicts WHERE feature_id = ? ORDER BY id DESC LIMIT 1').get(featureId) ?? null;
+      if (shown != null && (newest?.id ?? 0) > shown) throw new ConflictError(`${featureId} has a newer verdict than the one shown; read it again`);
+      if (verdict === null && (newest ? newest.verdict === null : !hasFileVerdict)) throw new ValidationError('there is no verdict to clear');
+      const info = this.db.prepare('INSERT INTO verdicts (feature_id, verdict, note, created_at) VALUES (?, ?, ?, ?)').run(featureId, verdict, cleanNote, this.now());
+      return Number(info.lastInsertRowid);
+    });
+  }
+
+  // The newest verdict row of every feature that has one, by feature id.
+  currentVerdictRows() {
+    return this.db
+      .prepare('SELECT verdicts.* FROM verdicts JOIN (SELECT feature_id, max(id) AS id FROM verdicts GROUP BY feature_id) AS newest USING (id) ORDER BY verdicts.feature_id')
+      .all();
+  }
+
+  // Current verdicts an agent has not acknowledged yet (all current ones
+  // with `all`), oldest first.
+  verdictsToRead({ all = false } = {}) {
+    return this.currentVerdictRows()
+      .filter((row) => all || row.acked_at === null)
+      .sort((a, b) => a.id - b.id);
+  }
+
+  // Acknowledges the verdict rows of these features: every row, or with
+  // `upTo` a row id per feature, only the rows up to it, so a verdict the
+  // owner gave after the agent read the list stays unread. All or nothing: a
+  // feature without rows changes nothing.
+  ackVerdicts(requests) {
+    return this.tx(() => {
+      for (const { feature } of requests) {
+        if (!this.db.prepare('SELECT 1 FROM verdicts WHERE feature_id = ?').get(feature)) throw new NotFoundError(`no verdict on ${feature}`);
+      }
+      const when = this.now();
+      for (const { feature, upTo = null } of requests) {
+        this.db
+          .prepare(`UPDATE verdicts SET acked_at = ? WHERE feature_id = ? AND acked_at IS NULL ${upTo === null ? '' : 'AND id <= ?'}`)
+          .run(...[when, feature, ...(upTo === null ? [] : [upTo])]);
+      }
+      return requests.map((request) => request.feature);
+    });
   }
 
   // Creates an item with its attachments, all or nothing (files included).

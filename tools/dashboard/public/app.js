@@ -18,6 +18,10 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, reducedMotion.
 
 const state = { at: null, done: 0, all: false, gaps: false, busy: false };
 const guard = createGuard();
+// The Stack's queue has its own card and its own guard.
+const stack = { at: null, all: false, filter: 'all' };
+const stackGuard = createGuard();
+const guardFor = (element) => (element.closest('#stack') ? stackGuard : guard);
 
 // ---- views ----
 
@@ -66,9 +70,17 @@ function showRoute({ scroll = true, queue = true } = {}) {
     state.all = false;
     showQueue({ focus: true });
   }
+  // #feature-<id> names a Stack entry. Cards carry no id, so the browser
+  // never scrolls to one by itself.
+  const entry = queue && id.startsWith('feature-') ? entries().find((other) => other.dataset.entry === id.slice(8)) || null : null;
+  if (entry) {
+    stack.at = entry.dataset.entry;
+    stack.all = false;
+  }
+  if (view === 'stack' && queue) showStack({ focus: true });
   if (target && target.tagName === 'DETAILS') target.open = true;
   if (scroll) {
-    if (target && !card && target.id !== view && !target.classList.contains('reader')) {
+    if (target && !card && !entry && target.id !== view && !target.classList.contains('reader')) {
       requestAnimationFrame(() => target.scrollIntoView({ block: 'start' }));
     } else window.scrollTo(0, 0);
   }
@@ -130,9 +142,9 @@ function showQueue({ focus = false, back = false } = {}) {
 }
 
 // Shows the card's primary button as not ready for the rest of the guard's wait.
-function markNotReady(card) {
+function markNotReady(card, which = guard) {
   const primary = card?.querySelector('[data-primary]');
-  const wait = guard.remaining();
+  const wait = which.remaining();
   if (!primary || !wait) return;
   primary.classList.add('not-ready');
   primary.setAttribute('aria-disabled', 'true');
@@ -170,10 +182,12 @@ async function refresh() {
   const open = [...document.querySelectorAll('details[id][open]')].map((element) => element.id);
   const drafts = new Map();
   const openForms = new Set();
+  const modes = new Map();
   document.querySelectorAll('form[data-draft]').forEach((form) => {
     const text = form.querySelector('textarea')?.value;
     if (text) drafts.set(form.dataset.draft, text);
     if (form.classList.contains('on')) openForms.add(form.dataset.draft);
+    if (form.dataset.mode) modes.set(form.dataset.draft, form.dataset.mode);
   });
   const filter = document.getElementById('decision-filter')?.value || '';
 
@@ -201,6 +215,7 @@ async function refresh() {
   document.querySelectorAll('form[data-draft]').forEach((form) => {
     const text = drafts.get(form.dataset.draft);
     if (text) form.querySelector('textarea').value = text;
+    if (modes.has(form.dataset.draft)) setNoteMode(form, modes.get(form.dataset.draft));
     if (openForms.has(form.dataset.draft)) setSay(form, true);
   });
   const input = document.getElementById('decision-filter');
@@ -209,10 +224,13 @@ async function refresh() {
   applyGaps();
   document.querySelectorAll('.journey').forEach(markHot);
   const shown = guard.shown;
+  const stackShown = stackGuard.shown;
   route({ scroll: false, queue: false });
   showQueue();
+  showStack();
   // A refreshed card that stays current keeps whatever wait it had left.
   if (shown !== null && guard.shown === shown) markNotReady(currentCard());
+  if (stackShown !== null && stackGuard.shown === stackShown) markNotReady(currentEntry(), stackGuard);
 }
 
 // ---- sending ----
@@ -233,19 +251,23 @@ async function send(url, body) {
 }
 
 const sameControls = (a, b) =>
-  (a.dataset.item !== undefined && a.dataset.item === b.dataset.item) || (a.dataset.anchor !== undefined && a.dataset.anchor === b.dataset.anchor);
+  (a.dataset.item !== undefined && a.dataset.item === b.dataset.item) ||
+  (a.dataset.anchor !== undefined && a.dataset.anchor === b.dataset.anchor) ||
+  (a.dataset.feature !== undefined && a.dataset.feature === b.dataset.feature);
 
 // Sends one owner action with what the wrapper showed. Returns false after a
 // 409, once the page shows the item again with a note to read it first.
 async function act(origin, url, body) {
   const controls = origin.closest('[data-controls]');
   if (controls.dataset.after !== undefined) body.after = Number(controls.dataset.after);
+  if (controls.dataset.shown !== undefined) body.shown = Number(controls.dataset.shown);
   try {
     await send(url, body);
     return true;
   } catch (error) {
-    if (error.status !== 409 || (controls.dataset.item === undefined && controls.dataset.anchor === undefined)) throw error;
+    if (error.status !== 409 || (controls.dataset.item === undefined && controls.dataset.anchor === undefined && controls.dataset.feature === undefined)) throw error;
     if (controls.dataset.item !== undefined) state.at = Number(controls.dataset.item);
+    if (controls.dataset.feature !== undefined) stack.at = controls.dataset.feature;
     await refresh();
     // A refused note or reaction is always told, also when its box is gone.
     if (controls.dataset.anchor !== undefined) showNotice(noteRefusal({ text: body.text ?? '' }));
@@ -271,9 +293,11 @@ async function run(origin, action) {
   const button = origin.matches('form') ? origin.querySelector('button[type="submit"]') : origin;
   if (button) button.disabled = true;
   const card = origin.closest('.stage [data-card]');
+  const entry = origin.closest('#stack [data-entry]');
   try {
     if (await action()) {
       if (card) await leaveCard(card);
+      else if (entry) await leaveEntry(entry, { stay: origin.dataset.pick === 'clear' });
       else {
         const controls = origin.closest('[data-controls]');
         await refresh();
@@ -343,13 +367,51 @@ document.addEventListener('click', (event) => {
     applyGaps();
     return;
   }
-  if (button.matches('[data-primary]') && !guard.acceptsPrimary()) return;
+  if (button.matches('[data-stack-all]')) {
+    stack.all = !stack.all;
+    if (stack.all) {
+      const group = document.getElementById(`stack-group-${currentEntry()?.dataset.stage}`);
+      if (group) group.open = true;
+    }
+    showStack({ focus: !stack.all });
+    return;
+  }
+  if (button.matches('[data-entry-focus]')) {
+    stack.at = button.dataset.entryFocus;
+    stack.all = false;
+    showStack({ focus: true });
+    return;
+  }
+  if (button.matches('[data-stage-jump]')) {
+    const inStage = entries().filter((entry) => entry.dataset.stage === button.dataset.stageJump);
+    const first = inStage.find((entry) => !entry.dataset.decided) || inStage[0];
+    if (first) {
+      stack.at = first.dataset.entry;
+      stack.all = false;
+      showStack({ focus: true });
+    }
+    return;
+  }
+  if (button.matches('[data-stack-filter]')) {
+    stack.filter = button.dataset.stackFilter;
+    applyStackFilter();
+    return;
+  }
+  if (button.matches('[data-stack-skip]')) {
+    moveStack(1);
+    return;
+  }
+  if (button.matches('[data-primary]') && !guardFor(button).acceptsPrimary()) return;
   if (button.matches('[data-skip]')) {
     move(1);
     return;
   }
   const controls = button.closest('[data-controls]');
   if (!controls) return;
+  if (controls.dataset.feature !== undefined) {
+    featureClick(button, controls);
+    return;
+  }
   if (button.matches('[data-say]')) {
     const form = controls.querySelector('form.say');
     if (form?.classList.contains('on')) closeSay(form);
@@ -369,6 +431,14 @@ document.addEventListener('submit', (event) => {
   const controls = form?.closest('[data-controls]');
   if (!controls) return;
   event.preventDefault();
+  if (controls.dataset.feature !== undefined) {
+    // Refine sends itself; a note alone goes with the suggested verdict.
+    if (controls.classList.contains('decided') && !controls.classList.contains('changing')) return;
+    const pick = form.dataset.mode === 'refine' ? 'refine' : controls.querySelector('[data-primary]')?.dataset.pick;
+    const button = controls.querySelector(`[data-pick="${pick}"]`);
+    if (button && (!button.matches('[data-primary]') || stackGuard.acceptsPrimary())) sendVerdict(button, controls);
+    return;
+  }
   const area = form.querySelector('textarea');
   if (!area.value.trim()) {
     showError(form, 'Write something first.');
@@ -470,7 +540,12 @@ document.addEventListener('keydown', (event) => {
     }
     return;
   }
-  if (event.metaKey || event.ctrlKey || event.altKey || root.dataset.view !== 'for-you' || state.all) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (root.dataset.view === 'stack') {
+    stackKey(event);
+    return;
+  }
+  if (root.dataset.view !== 'for-you' || state.all) return;
   const card = currentCard();
   if (!card) return;
   const onControl = event.target.closest?.('button, a, summary, video, audio, details');
@@ -489,6 +564,208 @@ document.addEventListener('keydown', (event) => {
     openSay(card);
   }
 });
+
+// ---- the Stack ----
+
+const entries = () => [...document.querySelectorAll('#stack [data-entry]')];
+
+function currentEntry() {
+  const list = entries();
+  return list.find((entry) => entry.dataset.entry === stack.at) || list.find((entry) => entry.hasAttribute('data-start')) || list[0] || null;
+}
+
+// The first undecided entry after list position `index`, else the first
+// undecided one, else null.
+function undecidedAfter(list, index) {
+  const open = (entry) => !entry.dataset.decided;
+  return list.slice(index + 1).find(open) || list.find(open) || null;
+}
+
+function showStack({ focus = false, back = false } = {}) {
+  const layout = document.querySelector('[data-stack]');
+  if (!layout) return;
+  const list = entries();
+  const entry = currentEntry();
+  stack.at = entry ? entry.dataset.entry : null;
+  const index = list.indexOf(entry);
+  list.forEach((other) => {
+    other.classList.toggle('current', other === entry);
+    other.classList.toggle('back', other === entry && back);
+    other.classList.remove('out');
+  });
+  layout.querySelector('.stack-cards')?.classList.add('picked');
+  layout.classList.toggle('all', stack.all);
+  layout.querySelector('[data-stack-all]')?.setAttribute('aria-pressed', String(stack.all));
+  if (stackGuard.show(entry ? `feature:${entry.dataset.entry}` : null)) markNotReady(entry, stackGuard);
+  const stage = entry?.dataset.stage;
+  layout.querySelectorAll('.tier').forEach((tier) => {
+    if (tier.dataset.stage === stage) tier.setAttribute('aria-current', 'step');
+    else tier.removeAttribute('aria-current');
+  });
+  // On a narrow screen the stages are a strip: keep the current one in view.
+  const strip = layout.querySelector('.tower');
+  const tier = strip?.querySelector('.tier[aria-current]');
+  if (strip && tier && strip.scrollWidth > strip.clientWidth) strip.scrollLeft = Math.max(0, tier.parentElement.offsetLeft - strip.clientWidth / 3);
+  // Coming next: the next five undecided entries after the current one.
+  const next = new Set(list.slice(index + 1).filter((other) => !other.dataset.decided).slice(0, 5).map((other) => other.dataset.entry));
+  layout.querySelectorAll('.coming [data-row]').forEach((row) => {
+    row.hidden = !next.has(row.dataset.row);
+  });
+  layout.querySelector('.coming')?.toggleAttribute('hidden', next.size === 0);
+  // The product so far: the current entry's parts are drawn highlighted.
+  const id = entry?.dataset.entry;
+  layout.querySelectorAll('.so-far [data-features]').forEach((part) => {
+    part.classList.toggle('is-current', Boolean(id) && part.dataset.features.split(' ').includes(id));
+  });
+  layout.querySelectorAll('.stack-all [data-row]').forEach((row) => row.classList.toggle('on', row.dataset.row === id));
+  if (root.dataset.view === 'stack') {
+    const hash = entry && !stack.all ? `#feature-${entry.dataset.entry}` : '#stack';
+    if (location.hash !== hash) history.replaceState(null, '', hash);
+  }
+  applyStackFilter();
+  if (focus && entry && !stack.all) entry.focus({ preventScroll: true });
+}
+
+function applyStackFilter() {
+  const list = document.querySelector('.stack-all');
+  if (!list) return;
+  list.dataset.filter = stack.filter;
+  list.querySelectorAll('[data-stack-filter]').forEach((pill) => {
+    const on = pill.dataset.stackFilter === stack.filter;
+    pill.classList.toggle('on', on);
+    pill.setAttribute('aria-pressed', String(on));
+  });
+  const shows = {
+    all: () => true,
+    undecided: (v) => v === 'none',
+    taken: (v) => v === 'take' || v === 'refine',
+    later: (v) => v === 'later',
+    dropped: (v) => v === 'drop',
+  }[stack.filter] || (() => true);
+  list.querySelectorAll('.stack-group').forEach((group) => {
+    let any = false;
+    group.querySelectorAll('[data-row]').forEach((row) => {
+      row.hidden = !shows(row.dataset.v);
+      any ||= !row.hidden;
+    });
+    group.hidden = !any;
+  });
+}
+
+// → goes to the next undecided entry, ← to the previous entry in the list.
+async function moveStack(step) {
+  const list = entries();
+  const entry = currentEntry();
+  if (!entry) return;
+  const index = list.indexOf(entry);
+  const target = step > 0 ? undecidedAfter(list, index) : list[index - 1];
+  if (!target || target === entry) return;
+  entry.classList.add('out');
+  await wait(200);
+  stack.at = target.dataset.entry;
+  showStack({ focus: true, back: step < 0 });
+}
+
+// After a verdict: the card leaves and the next undecided entry enters. A
+// cleared verdict keeps the entry on screen.
+async function leaveEntry(entry, { stay = false } = {}) {
+  const id = entry.dataset.entry;
+  if (!stay) entry.classList.add('out');
+  await Promise.all([refresh(), wait(stay ? 0 : 200)]);
+  const list = entries();
+  const index = list.findIndex((other) => other.dataset.entry === id);
+  const next = stay ? list[index] : undecidedAfter(list, index);
+  stack.at = (next || list[index] || list[0])?.dataset.entry ?? null;
+  showStack({ focus: true });
+  if (root.dataset.view === 'stack') window.scrollTo(0, 0);
+}
+
+function setNoteMode(form, mode) {
+  form.dataset.mode = mode;
+  const area = form.querySelector('textarea');
+  const words = mode === 'refine' ? 'What should change?' : 'A note for this entry';
+  area.placeholder = words;
+  area.setAttribute('aria-label', words);
+}
+
+function openNote(controls, mode) {
+  const form = controls.querySelector('form.say');
+  if (!form) return;
+  setNoteMode(form, mode);
+  setSay(form, true);
+  form.querySelector('textarea')?.focus();
+}
+
+function featureClick(button, controls) {
+  const form = controls.querySelector('form.say');
+  if (button.matches('[data-say]')) {
+    if (form?.classList.contains('on')) closeSay(form);
+    else openNote(controls, 'note');
+  } else if (button.matches('[data-change]')) {
+    const on = !controls.classList.contains('changing');
+    controls.classList.toggle('changing', on);
+    button.setAttribute('aria-expanded', String(on));
+    if (on) controls.querySelector('[data-primary]')?.focus();
+  } else if (button.matches('[data-pick]')) {
+    sendVerdict(button, controls);
+  }
+}
+
+// Sends the verdict a button names for its own entry, with the note when the
+// note box is open. Refine without a note opens the box instead.
+function sendVerdict(button, controls) {
+  const pick = button.dataset.pick;
+  const form = controls.querySelector('form.say');
+  const area = form?.querySelector('textarea');
+  const note = form?.classList.contains('on') ? area.value : '';
+  if (pick === 'refine' && !note.trim()) {
+    if (form?.classList.contains('on')) showError(button, 'Say what to change first.');
+    openNote(controls, 'refine');
+    return;
+  }
+  const body = pick === 'clear' ? { verdict: null } : { verdict: pick, ...(note.trim() ? { note } : {}) };
+  const url = `/api/features/${encodeURIComponent(controls.dataset.feature)}/verdict`;
+  const draft = form?.dataset.draft;
+  run(button, async () => {
+    let ok = false;
+    try {
+      ok = await act(button, url, body);
+    } finally {
+      if (!ok && note.trim() && form) keepText(form, draft, note, false);
+    }
+    if (ok && form) {
+      area.value = '';
+      setSay(form, false);
+    }
+    return ok;
+  });
+}
+
+function stackKey(event) {
+  if (stack.all) return;
+  const entry = currentEntry();
+  if (!entry) return;
+  const onControl = event.target.closest?.('button, a, summary, details');
+  const free = event.target === document.body || event.target === root || event.target === entry;
+  if (event.key === 'Enter' && !onControl) {
+    const primary = entry.querySelector('[data-primary]');
+    if (!primary || primary.offsetParent === null) return;
+    event.preventDefault();
+    primary.click();
+  } else if (event.key === 'ArrowRight' && (free || onControl?.matches('button'))) {
+    event.preventDefault();
+    moveStack(1);
+  } else if (event.key === 'ArrowLeft' && (free || onControl?.matches('button'))) {
+    event.preventDefault();
+    moveStack(-1);
+  } else if (event.key === 'Tab' && !event.shiftKey && free) {
+    event.preventDefault();
+    const controls = entry.querySelector('[data-controls]');
+    // A decided entry first shows its verdict buttons again.
+    if (controls?.classList.contains('decided') && !controls.classList.contains('changing')) controls.querySelector('[data-change]')?.click();
+    else if (controls) openNote(controls, 'note');
+  }
+}
 
 // ---- journeys ----
 
@@ -568,6 +845,7 @@ async function renderMermaid() {
 
 route({ scroll: Boolean(location.hash) });
 showQueue();
+showStack();
 applyDecisionFilter();
 applyGaps();
 document.querySelectorAll('.journey').forEach(markHot);
