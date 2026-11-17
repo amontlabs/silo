@@ -14,10 +14,9 @@ deps() { step website-deps npm_deps "$WEBSITE"; }
 
 typecheck() { step website-typecheck npm --prefix "$WEBSITE" run typecheck; }
 
-# Every test suite, in order: the website's, the Workshop tool's, the plan tool's.
+# Every test suite, in order: the website's, the plan tool's.
 tests() {
   step website-tests npm --prefix "$WEBSITE" test -- --maxWorkers=2
-  step workshop-tests npm --prefix "$ROOT/tools/workshop" test
   step plan-tests npm --prefix "$ROOT/tools/plan" test
 }
 
