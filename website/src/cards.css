@@ -4,11 +4,14 @@
 .points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); background: var(--line); }
 .card { position: relative; background: var(--paper); cursor: pointer; }
 /* The line over a card fills while its picture plays. */
-.card .prog { position: absolute; left: 0; right: 0; top: -1px; height: 2px; overflow: hidden; }
+.card .prog { position: absolute; left: 0; right: 0; top: -1px; height: 2px; overflow: hidden; z-index: 1; }
 .card .prog b { position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; }
 .card.playing .prog b { animation: card-fill var(--dur) linear forwards; }
 @keyframes card-fill { to { transform: none; } }
-.card .txt { padding: 12px var(--gutter) 22px; border-top: 1px solid var(--line); }
+/* A card that stops or ends: its line fades out from the width it had. */
+.card .prog b.ebb { opacity: 0; transition: opacity var(--fade) linear; }
+/* The line between a picture and its text is lighter than the lines of the grid. */
+.card .txt { padding: 12px var(--gutter) 22px; border-top: 1px solid color-mix(in srgb, var(--line) 50%, var(--paper)); }
 .card .term { font: 12px/1.5 var(--mono); color: var(--accent-ink); }
 .card h3 { margin-top: 7px; font: 20px/1.3 var(--serif); letter-spacing: -0.2px; text-wrap: balance; }
 .card h3 + p { margin-top: 7px; font-size: 14px; line-height: 1.6; color: var(--muted); text-wrap: pretty; }
@@ -16,6 +19,8 @@
 
 /* The small pictures. Everything is drawn in a 320 by 140 box. */
 .mini { width: 100%; max-width: 460px; height: auto; margin: 0 auto; }
+/* A copy of a picture as it was, dissolving over the picture now (cards.ts). It lies on the picture's own box. */
+.card .mini.ghost { position: absolute; max-width: none; margin: 0; background: var(--paper); pointer-events: none; }
 .mini text { font: 10px var(--mono); fill: var(--muted); }
 .mini .i { fill: var(--ink); }
 .mini .a { fill: var(--accent-ink); }
