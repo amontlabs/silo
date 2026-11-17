@@ -9,4 +9,4 @@
 - How a teammate grants it: per computer, per checkpoint, or through the team's shared machine (`team-machine`).
 - What travels with the fork. Two rules pull apart: `fork-access` lets a parent hand its secrets to a fork, and `export` sends secrets as names only and leaves logins out. Which one applies between two people is not decided.
 - macOS. `export` says a macOS share goes as a recipe plus changes, because of Apple's licence. Whether a teammate's macOS computer can be forked at all is open.
-- Memory. `export` says a memory snapshot only restores on the same CPU and runtime, so a fork onto another person's device would cold-boot and running programs would restart.
+- Memory. `export` says a memory snapshot only restores on the same CPU and runtime. Unless a teammate's device matches both, a fork onto it would cold-boot and running programs would restart.
