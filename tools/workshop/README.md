@@ -109,4 +109,4 @@ The tool signs the App JWT itself (RS256, issued 60 seconds in the past, valid 9
 npm --prefix tools/workshop test
 ```
 
-The tests run against a fake GitHub (`test/fake-github.js`), with a temporary HOME, a temporary copy of `docs/product` and a replaced Keychain module. They never touch the real files, the real Keychain or GitHub, and every run asserts that no secret appears in the output. `app/SiloUI/scripts/ci/scripts.sh` runs them in CI.
+The tests run against a fake GitHub (`test/fake-github.js`), with a temporary HOME, a temporary copy of `docs/product` and a replaced Keychain module. They never touch the real files, the real Keychain or GitHub, and every run asserts that no secret appears in the output. `tools/ci/check.sh` runs them in CI.

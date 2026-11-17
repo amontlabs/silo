@@ -1,4 +1,0 @@
-python3 sudo ca-certificates curl dbus-x11 at-spi2-core xfce4-session xfce4-panel xfce4-settings
-xfdesktop4 xfwm4 thunar xfce4-terminal greybird-gtk-theme fonts-dejavu-core xauth
-x11-utils procps xvfb pulseaudio gnome-text-editor
-gsettings-desktop-schemas dconf-service dconf-gsettings-backend dconf-cli python3-pyatspi

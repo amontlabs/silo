@@ -1,8 +1,6 @@
 name: CI
 
-# Work lands directly on main, so every push to main and every pull request
-# runs the ordinary checks, including the release-tooling checks. Release
-# builds, packaging and live VM checks stay in their own workflows.
+# The whole check, the same script the merge gate runs.
 on:
   push:
     branches: [main]
@@ -11,50 +9,17 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request supersedes its older run. Pushes to main each
-# get their own group, so a merge no longer waits for the previous main run.
+# A newer push to a pull request supersedes its older run; pushes to main each
+# get their own run.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Pull requests that touch only the website, demo films, documentation or
-  # frontend sources that no Rust code reads skip the native jobs below (see
-  # app/SiloUI/scripts/ci-native-changes.py). A skipped job still satisfies the
-  # required check. Pushes to main skip this job, and a skip or failure here
-  # runs every job.
-  changes:
-    name: Detect native changes
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      native: ${{ steps.native.outputs.native }}
-    steps:
-      # A pull request checks out its merge commit, whose first parent is the base.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 2
-      - name: Check whether Rust code can read the changed paths
-        id: native
-        run: |
-          git -c core.quotePath=false diff --name-only --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/changed-paths.txt"
-          python3 app/SiloUI/scripts/ci-native-changes.py < "$RUNNER_TEMP/changed-paths.txt" | tee -a "$GITHUB_OUTPUT"
-
-  # The frontend unit suite dominates this workflow, so it runs as three
-  # parallel shards. Vitest assigns every file to exactly one shard.
-  frontend-tests:
-    name: Frontend tests (${{ matrix.shard }}/3)
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: app/SiloUI
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,79 +28,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: app/SiloUI/package-lock.json
-      - run: npm ci
-      - run: scripts/ci/frontend.sh tests --maxWorkers=2 --shard=${{ matrix.shard }}/3
-
-  frontend:
-    name: Frontend checks and scripts
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: app/SiloUI
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: |
-            app/SiloUI/package-lock.json
-            website/package-lock.json
-            demo/package-lock.json
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.12'
-      # scripts.sh runs its Python tests through uv with pinned packages.
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: '0.13.8'
-      - run: node scripts/preflight.mjs
-      - run: npm ci
-      # Typecheck, lint, the website demo and the demo films (frontend.sh
-      # installs their dependencies); the app's Vitest suite runs in frontend-tests.
-      - name: Frontend checks
-        run: scripts/ci/frontend.sh checks
-      # Node script suites, release version, Tauri command manifest, every
-      # scripts/test_*.py module, isolation evals and the reviewer service.
-      # They run whatever the frontend checks found.
-      - name: Release-tooling and script tests
-        if: ${{ !cancelled() }}
-        run: scripts/ci/scripts.sh
-
-  # silo-runner is a Go program of its own (app/SiloUI/runner); it shells out to `silo` and is
-  # tested against fakes, so it needs no engine, Rust or macOS.
-  runner:
-    name: silo-runner (Go)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: app/SiloUI/runner
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: app/SiloUI/runner/go.mod
-          cache-dependency-path: app/SiloUI/runner/go.sum
-      - name: Check formatting, vet and test
-        run: ../scripts/ci/runner.sh
-
-  docs:
-    name: Documentation links
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # lychee checks links; offline mode checks only local files, so web links
-      # never make CI flaky. The download is pinned to the release asset digest.
+          cache-dependency-path: website/package-lock.json
+      # Offline mode checks only local files; the download is pinned to the
+      # release asset digest.
       - name: Install lychee
         env:
           LYCHEE_RELEASE: lychee-v0.24.2
@@ -148,163 +43,4 @@ jobs:
           lychee=$(find "$RUNNER_TEMP/lychee" -type f -name lychee | head -n 1)
           test -x "$lychee"
           echo "LYCHEE=$lychee" >> "$GITHUB_ENV"
-      - name: Check relative links in documentation
-        run: app/SiloUI/scripts/ci/links.sh
-
-  # The engine and its daemon run on Linux hosts (Linux computers over KVM), so the
-  # engine, silod, the CLI and the client crates build and pass their tests there.
-  # macOS computers are stubbed on Linux and their host-only tests are gated off.
-  engine-linux:
-    name: Engine tests (Linux)
-    needs: changes
-    # Fails open: pushes skip detection, and a failed detection has an empty output.
-    if: ${{ !cancelled() && needs.changes.outputs.native != 'false' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: app/SiloUI
-    env:
-      # Synthetic build values from the release guide, as in the macOS job.
-      SILO_GITHUB_APP_SLUG: silo-ci-test
-      SILO_GITHUB_CLIENT_ID: test-client
-      SILO_GITHUB_CLIENT_SECRET: test-secret
-      CARGO_PROFILE_DEV_DEBUG: '0'
-      CARGO_PROFILE_TEST_DEBUG: '0'
-      CARGO_INCREMENTAL: '0'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-      - run: node scripts/preflight.mjs
-      # silo-host's desktop feature (the app's) links GTK on Linux and its tests run with
-      # it; the keyring Secret Service backend needs D-Bus. The tests also run OpenSSH and zsh.
-      - name: Install Linux build and test dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev libdbus-1-dev pkg-config openssh-client zsh
-      - name: Install pinned Rust toolchain
-        run: |
-          runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
-          rustup toolchain install "$runtime_toolchain" --profile minimal
-          rustup default "$runtime_toolchain"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: app/SiloUI
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Restore the pinned Git download
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: silo-git-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/SiloUI/scripts/git-runtime.mjs') }}
-          path: app/SiloUI/src-tauri/target/runtime-cache/dugite
-      # The bundled Git that host-push tests drive (pinned and checksummed),
-      # not MicroSandbox.
-      - name: Prepare the Linux tests
-        run: scripts/ci/linux-prepare.sh
-      # nextest runs each test in its own process, so tests that serialize on
-      # process-wide state in one libtest binary run in parallel. The download is
-      # pinned to the release asset digest.
-      - name: Install cargo-nextest
-        env:
-          NEXTEST_VERSION: 0.9.151
-          NEXTEST_ASSET: x86_64-unknown-linux-gnu
-          NEXTEST_SHA256: 1d4ce302b820c41f4b89c5fb9bce45f0f0c94882c1cf08fc360caf08be6e7df4
-        run: |
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/nextest.tar.gz" "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION/cargo-nextest-$NEXTEST_VERSION-$NEXTEST_ASSET.tar.gz"
-          echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
-          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$(dirname "$(command -v cargo)")"
-          cargo nextest --version
-      # Each part has its own time limit, and a failed part does not hide the
-      # later ones.
-      - name: Run engine tests
-        timeout-minutes: 30
-        run: scripts/ci/linux.sh engine
-      - name: Check that silod does not depend on GTK, then run daemon, CLI and client tests
-        if: ${{ !cancelled() }}
-        timeout-minutes: 30
-        run: scripts/ci/linux.sh daemon
-      - name: Run host helper tests
-        if: ${{ !cancelled() }}
-        timeout-minutes: 15
-        run: scripts/ci/linux.sh host
-
-  rust:
-    name: Rust tests
-    needs: changes
-    # Fails open: pushes skip detection, and a failed detection has an empty output.
-    if: ${{ !cancelled() && needs.changes.outputs.native != 'false' }}
-    runs-on: macos-15
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: app/SiloUI
-    env:
-      # Synthetic build values from the release guide: these tests never sign in
-      # to a GitHub account, and the test executables are never distributed.
-      SILO_GITHUB_APP_SLUG: silo-ci-test
-      SILO_GITHUB_CLIENT_ID: test-client
-      SILO_GITHUB_CLIENT_SECRET: test-secret
-      CARGO_PROFILE_DEV_DEBUG: '0'
-      CARGO_PROFILE_TEST_DEBUG: '0'
-      CARGO_INCREMENTAL: '0'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-      - run: node scripts/preflight.mjs
-      - name: Install shell test dependency
-        run: brew install fish
-      - name: Install pinned Rust toolchain
-        run: |
-          runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
-          rustup toolchain install "$runtime_toolchain" --profile minimal --component rustfmt
-          rustup default "$runtime_toolchain"
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.12'
-      - name: Install the hosted reviewer service dependencies
-        run: python3 -m pip install --quiet -r ../../reviewer-service/requirements.txt
-      # Release signing with disposable fixtures and Rust formatting need no
-      # native runtime, so they report before its preparation.
-      - name: Test macOS release signing and check Rust formatting
-        run: scripts/ci/macos.sh checks
-      # The Cargo workspace root is app/SiloUI, so its build output is
-      # app/SiloUI/target; src-tauri/target holds only the runtime cache.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: app/SiloUI
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      # Runtime preparation uses only Node built-ins, so this job needs no npm ci.
-      # Restores the patched MicroSandbox build that warm-release-caches.yml
-      # saves from main, instead of compiling it on every run.
-      - name: Prepare native resources
-        timeout-minutes: 30
-        uses: ./.github/actions/prepare-release-runtime
-        with:
-          runner: macos-15
-          target: aarch64-apple-darwin
-      # nextest runs each test in its own process, so tests that serialize on
-      # process-wide state in one libtest binary run in parallel. The download is
-      # pinned to the release asset digest.
-      - name: Install cargo-nextest
-        env:
-          NEXTEST_VERSION: 0.9.151
-          NEXTEST_ASSET: universal-apple-darwin
-          NEXTEST_SHA256: d1d7d025d4bfc9fb154cd76aea3949bd78534829a0589abefa6e5dd4edb135dd
-        run: |
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/nextest.tar.gz" "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION/cargo-nextest-$NEXTEST_VERSION-$NEXTEST_ASSET.tar.gz"
-          echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
-          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$(dirname "$(command -v cargo)")"
-          cargo nextest --version
-      - name: Run Rust tests
-        timeout-minutes: 30
-        env:
-          # The CLI's end-to-end test of the reviewer service fails instead of skipping.
-          SILO_REVIEWER_E2E_REQUIRED: '1'
-        run: scripts/ci/macos.sh tests
-      - name: Test patched updater transport and atomic installation
-        run: scripts/ci/updater.sh
+      - run: tools/ci/check.sh

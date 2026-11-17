@@ -170,11 +170,11 @@ test('only the bot’s issues match: a marker not on the last line, a person’s
   const fake = await startFake();
   t.after(fake.stop);
   const bot = { login: 'silo-workshop[bot]', type: 'Bot' };
-  const text = '2026-11-16 · owner · One, see [the restart](RESTART.md) and [docs](https://example.com/x).';
+  const text = '2026-11-16 · owner · One, see [the notes](NOTES.md) and [docs](https://example.com/x).';
   const box = sandbox(t, { features: '{"id": "a", "name": "A", "what": "x"}\n{"id": "b", "name": "B", "what": "y"}\n', decisions: `# D\n\n- ${text}\n` });
   const quoted = fake.addIssue({ title: 'A', body: 'x\n\n<!-- silo-entry: a -->\nquoted by someone', labels: ['workshop:entry'], user: bot });
   const person = fake.addIssue({ title: 'B', body: 'y\n\n<!-- silo-entry: b -->', labels: ['workshop:entry'] });
-  const reduced = '2026-11-16 · owner · One, see the restart and [docs](https://example.com/x).';
+  const reduced = '2026-11-16 · owner · One, see the notes and [docs](https://example.com/x).';
   const open = fake.addIssue({ title: 'One', body: reduced, labels: ['workshop:decision'], user: bot });
   const byPerson = fake.addIssue({ title: 'One', body: reduced, labels: ['workshop:decision'], state: 'closed', state_reason: 'completed' });
   const result = await run(['sync', '--json'], { fake, box });

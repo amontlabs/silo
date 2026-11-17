@@ -1,3 +1,0 @@
-make_zlib 2.53
-make_zlib 2.66
-make_zlib 2.56

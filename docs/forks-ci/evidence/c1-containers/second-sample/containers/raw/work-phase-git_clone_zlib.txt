@@ -1,3 +1,0 @@
-git_clone_zlib 0.53
-git_clone_zlib 0.48
-git_clone_zlib 0.40

@@ -1,7 +1,0 @@
-/* In a narrow container, the SSH address takes its own line above its copy and menu buttons. */
-@container (max-width: 260px) {
-  .ssh-endpoint .ssh-endpoint-address { grid-column: 1 / -1; }
-  .ssh-endpoint > button { grid-row: 2; }
-  .ssh-endpoint > button:first-of-type { grid-column: 2; }
-  .ssh-endpoint > button:last-of-type { grid-column: 3; }
-}

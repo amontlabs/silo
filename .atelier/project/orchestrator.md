@@ -1,9 +1,20 @@
 ## Silo
-- The owner's page is the dashboard ([docs/OWNER-DASHBOARD.md](../../docs/OWNER-DASHBOARD.md)): `tools/dashboard/bin/dashboard`. Start a session with `dashboard answers` and `dashboard verdicts` (the owner's verdicts on the feature list; write each into `docs/product/features.jsonl`, then `dashboard verdicts ack <id>@<row>`). For answers: write each answer that decides something into `docs/product/DECISIONS.md` (one dated line), act on it, then `dashboard ack`.
-- An item's brief is a few lines: what the user does and sees, and the command or API shape. It names its journey.
-- After a build, post to the dashboard, each item on its journey: one `shipped` item saying what landed; one `look` item per choice worth the owner's eyes, with the default that stands if they say nothing; a `decide` item only when no default can be picked. Never block on it. This replaces OWNER_REVIEW.md.
-- When a change alters what the user sees in a journey, record it on the Dev build and attach the recording to the `shipped` item.
-- A feature outside the three journeys is not extended before the owner has reviewed it (`docs/product/PRODUCT.md`).
-- Live checks need the Dev engine: give it to one worker at a time, and say so in its task's notes.
-- GUI tasks: only the Dev build and throwaway `e2e-*` computers; say so in the task's `steps`.
-- The `live` agent (a lastdrop name that `atelier agents` does not list) runs a live check and reads its logs; give it the check, the host and the Dev engine it may use. A GUI step goes to `gui`.
+One session works on one feature, from discussion to built.
+
+Start with `git pull` and `plan status`, then `plan show <id>` for the feature at hand.
+
+Discussing:
+- What we agree goes in the feature's two files, not only in the chat.
+- Anything about another feature goes in that feature's notes. A new idea gets its own entry with `plan add`.
+- A verdict the owner gives in the conversation: `plan decide <id> take|later|drop`.
+- Merge and push, so the Workshop shows it.
+
+Decisions (rule 2b):
+- About this feature: its notes file is the decision log.
+- Binding every feature: `plan/decisions.json`, what the owner settled for the whole product. Read it before deciding anything. Delete an entry once it no longer changes what an agent does.
+- A task, for a worker or a reviewer, names the decisions that apply to it, so that nobody decides again or flags what was decided on purpose.
+
+Building, only a feature the owner took:
+1. `plan start <id>`. It refuses if another session has the feature.
+2. Build it by the rules above.
+3. `plan finish <id>` in the last branch, when every part is merged and proven. Push.

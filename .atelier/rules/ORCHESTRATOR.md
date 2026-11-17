@@ -11,7 +11,7 @@
    - Reviewers get the task, not the decision log. Fixes go back to the worker that wrote the code.
    - Review a stacked branch for its own commits only; its lower branch is approved on its own and merges in the same batch or earlier.
    - Then `atelier approve <branch> <the commit you reviewed>`.
-4. Merge everything approved in one batch, as a background command: `atelier merge <branch>…`. It runs the full check on the merged tree, on every platform. A branch that changes `.atelier/` merges alone. When a merge ends, the next batch takes everything approved since.
+4. Merge everything approved in one batch, as a background command: `atelier merge <branch>…`. It runs the full check on the merged tree. A branch that changes `.atelier/` merges alone. When a merge ends, the next batch takes everything approved since.
    - Exit 1, or 5 "with main": send the output to the branch's worker; for a conflict it runs `atelier follow` and resolves.
    - Exit 5 "with <earlier branch>": merge again without the later branch. Once the earlier one lands, the later branch's worker runs `atelier follow`.
    - Exit 7: leave the main checkout alone; run `atelier promote` once it is clean.
@@ -20,23 +20,33 @@
    - "gate worktree has unknown files": keep what someone saved, remove the rest, merge again.
    - "a promotion was interrupted": stop merging, change nothing in the main checkout, give the owner atelier's list.
    - "rules changed": re-read these rules; tell running workers to `atelier follow` and re-read.
-   - Exit 3, no machine for a platform: waive it (`--waive <platform>`) only on the owner's word, quoted in `--reason`.
 4b. Worktrees are the default, not a requirement; you decide.
    - Several small items with disjoint files may share one worktree and branch, reviewed, approved and merged as one. Tell each agent its files; one commit per item, so a failing one can be dropped.
    - A change only to files that no build, test or check reads (top-level `docs/` and Markdown outside the app; not bundled help) may be committed straight to `main` by one agent, after checking its relative links, and only while no merge is running: a commit on `main` voids a running merge.
    - Anything else goes through `atelier merge`, however small.
 5. A test `atelier status` lists as flaky is a fix item, with its failing output, before anything else.
 6. Clean right after every green merge, before starting new items: `atelier clean`, read the plan, then `atelier clean --yes`.
-7. Done when everything is merged, no promotion is pending, and every platform passed on `main` or the owner waived it.
+7. Done when everything is merged and no promotion is pending.
 
 Agents: pick by role from `atelier agents`. Effort: low for lookups and mechanical edits, medium for an ordinary item, high for cross-crate, concurrency, migration or security work and for reviews of risky diffs. Never name models, retries or CI in a task. Reuse a worker for its fixes while its session is small; otherwise start a fresh one in the same worktree with a short handover. A report that only points elsewhere ("the report above stands") is lost: ask for it in full.
 
 ## Silo
-- The owner's page is the dashboard ([docs/OWNER-DASHBOARD.md](../../docs/OWNER-DASHBOARD.md)): `tools/dashboard/bin/dashboard`. Start a session with `dashboard answers` and `dashboard verdicts` (the owner's verdicts on the feature list; write each into `docs/product/features.jsonl`, then `dashboard verdicts ack <id>@<row>`). For answers: write each answer that decides something into `docs/product/DECISIONS.md` (one dated line), act on it, then `dashboard ack`.
-- An item's brief is a few lines: what the user does and sees, and the command or API shape. It names its journey.
-- After a build, post to the dashboard, each item on its journey: one `shipped` item saying what landed; one `look` item per choice worth the owner's eyes, with the default that stands if they say nothing; a `decide` item only when no default can be picked. Never block on it. This replaces OWNER_REVIEW.md.
-- When a change alters what the user sees in a journey, record it on the Dev build and attach the recording to the `shipped` item.
-- A feature outside the three journeys is not extended before the owner has reviewed it (`docs/product/PRODUCT.md`).
-- Live checks need the Dev engine: give it to one worker at a time, and say so in its task's notes.
-- GUI tasks: only the Dev build and throwaway `e2e-*` computers; say so in the task's `steps`.
-- The `live` agent (a lastdrop name that `atelier agents` does not list) runs a live check and reads its logs; give it the check, the host and the Dev engine it may use. A GUI step goes to `gui`.
+One session works on one feature, from discussion to built.
+
+Start with `git pull` and `plan status`, then `plan show <id>` for the feature at hand.
+
+Discussing:
+- What we agree goes in the feature's two files, not only in the chat.
+- Anything about another feature goes in that feature's notes. A new idea gets its own entry with `plan add`.
+- A verdict the owner gives in the conversation: `plan decide <id> take|later|drop`.
+- Merge and push, so the Workshop shows it.
+
+Decisions (rule 2b):
+- About this feature: its notes file is the decision log.
+- Binding every feature: `plan/decisions.json`, what the owner settled for the whole product. Read it before deciding anything. Delete an entry once it no longer changes what an agent does.
+- A task, for a worker or a reviewer, names the decisions that apply to it, so that nobody decides again or flags what was decided on purpose.
+
+Building, only a feature the owner took:
+1. `plan start <id>`. It refuses if another session has the feature.
+2. Build it by the rules above.
+3. `plan finish <id>` in the last branch, when every part is merged and proven. Push.

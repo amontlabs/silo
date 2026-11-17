@@ -1,3 +1,0 @@
-nodesk1 8.49
-nodesk2 8.62
-nodesk3 8.82

@@ -1,3 +1,0 @@
-nodesk1 11.09
-nodesk2 9.63
-nodesk3 10.28
