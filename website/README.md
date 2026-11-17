@@ -550,10 +550,11 @@ anything outside such a directory. Both
 The Vercel `silo` project is connected to `amontlabs/silo`. Pushes and merges to
 `main` deploy production; other branches get preview deployments without the
 Workshop's secrets. The project uses Node.js 26 and the repository root as its
-root directory, where Vercel reads `.vercel/output` after the build. Its build
-command must be `npm --prefix website run build:vercel`
-(`npm --prefix website run build` produces only the static site in
-`website/dist`), and its install command `npm --prefix website ci`.
+root directory, where Vercel reads `.vercel/output` after the build.
+`vercel.json` at the repository root sets the build command,
+`npm --prefix website run build:vercel` (`npm --prefix website run build`
+produces only the static site in `website/dist`), and the install command,
+`npm --prefix website ci`, so the project's own settings for them do not matter.
 
 For a manual deployment from the repository root:
 
@@ -635,9 +636,8 @@ The one place that says how the Workshop goes live, in order.
    - Install the App on `amontlabs/silo` only ("Only select repositories").
    - In the Vercel `silo` project: the seven variables of `vercel.env`, for
      Production only and marked Sensitive (see
-     [Environment variables](#environment-variables)); the build command
-     `npm --prefix website run build:vercel`; the install command
-     `npm --prefix website ci`.
+     [Environment variables](#environment-variables)). The build and install
+     commands come from `vercel.json`.
    - In the repository's Actions secrets: `WORKSHOP_APP_ID` and
      `WORKSHOP_PRIVATE_KEY`, which the Plan workflow
      (`.github/workflows/plan.yml`) uses to pull verdicts, push them and sync
