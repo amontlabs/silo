@@ -1,46 +1,74 @@
-import { cp, mkdir, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { readdirSync, realpathSync } from 'node:fs';
+import { cp, mkdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Packages the built site and the Workshop API with Vercel's Build Output API v3:
 // static files in static/, one Node.js function served at every
 // /api/workshop/<endpoint> path (the other paths are symlinks to it), and the
 // routes that serve the Workshop page at /workshop and /workshop/.
-export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'vote', 'suggest', 'verdict', 'decide'];
+//
+// The function holds the files it loads at the paths they have in the
+// repository: website/api/, website/server/, website/node_modules/ (only the
+// files of its packages that load) and tools/plan/model/ (the plan's model,
+// with tools/plan/package.json, which makes it ESM). Anything else it would
+// load outside website/ stops the packaging.
+export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'vote', 'suggest', 'verdict'];
 export const RUNTIME = 'nodejs24.x';
-// Packages the function imports at run time; only their files that load ship inside it.
-export const FUNCTION_DEPENDENCIES = ['@vercel/functions'];
+export const HANDLER = 'website/api/workshop.cjs';
 
 const website = fileURLToPath(new URL('..', import.meta.url));
 // Vercel's Git build reads .vercel/output in the project's root directory, the repository root.
 export const DEFAULT_OUTPUT = join(website, '..', '.vercel', 'output');
+/** The one folder outside website/ the function may load from, relative to the repository. */
+export const MODEL_DIR = join('tools', 'plan', 'model');
 
 async function exists(path) {
   return stat(path).then(() => true, () => false);
 }
 
-// Copies into `target` only the files of `names` that load: the module files Node loads when the
-// packages are required in a separate process, and each of their packages' package.json (needed to
-// resolve the import). Nothing that is never loaded ships.
-async function copyLoadedFiles(siteDir, names, target) {
-  const script = 'for (const name of JSON.parse(process.argv[1])) require(name); process.stdout.write(JSON.stringify(Object.keys(require.cache)));';
-  const loaded = JSON.parse(execFileSync(process.execPath, ['-e', script, JSON.stringify(names)], { cwd: siteDir, encoding: 'utf8' }));
-  const modules = join(siteDir, 'node_modules') + sep;
+// Every file the function loads, found by loading its entry point in a separate process with a
+// resolve hook that records each file (ESM imports and CommonJS requires alike).
+export function loadedFiles(siteDir) {
+  const script = `
+    import { registerHooks } from 'node:module';
+    import { pathToFileURL } from 'node:url';
+    const seen = new Set();
+    registerHooks({ resolve(specifier, context, next) { const result = next(specifier, context); if (result.url.startsWith('file:')) seen.add(result.url); return result; } });
+    await import(pathToFileURL(process.argv[1]).href);
+    await (await import('node:module')).createRequire(process.argv[1])(process.argv[2]);
+    process.stdout.write(JSON.stringify([...seen]));`;
+  const urls = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script, join(siteDir, 'server', 'node.mjs'), join(siteDir, 'api', 'workshop.cjs')], { cwd: siteDir, encoding: 'utf8', env: { ...process.env, WORKSHOP_APP_ID: '' } }));
+  return urls.map((url) => fileURLToPath(url));
+}
+
+// Where each loaded file goes in the function, by its path relative to the repository; refuses any
+// file outside website/ but the model's.
+function functionFiles(siteDir) {
+  // Node reports each file by its real path, so the folders are compared as real paths too.
+  const site = realpathSync(resolve(siteDir));
+  const root = dirname(site);
+  const modules = join(site, 'node_modules') + sep;
+  const model = join(root, MODEL_DIR) + sep;
   const files = new Set();
-  for (const file of loaded) {
-    if (!file.startsWith(modules)) throw new Error(`The function would load ${file}, outside node_modules.`);
-    files.add(file);
-    const parts = file.slice(modules.length).split(sep);
-    const root = join(modules, ...parts.slice(0, parts[0].startsWith('@') ? 2 : 1));
-    files.add(join(root, 'package.json'));
+  for (const file of loadedFiles(site)) {
+    if (file.startsWith(modules)) {
+      files.add(file);
+      const parts = file.slice(modules.length).split(sep);
+      files.add(join(modules, ...parts.slice(0, parts[0].startsWith('@') ? 2 : 1), 'package.json'));
+    } else if (file.startsWith(model) && !file.slice(model.length).includes(sep)) {
+      files.add(file);
+    } else if (!file.startsWith(site + sep)) {
+      throw new Error(`The function would load ${file}, outside website/.`);
+    }
   }
-  for (const file of files) {
-    const destination = join(target, file.slice(siteDir.length + 1));
-    await mkdir(dirname(destination), { recursive: true });
-    await cp(file, destination);
-  }
-  return [...files].map((file) => file.slice(siteDir.length + 1)).sort();
+  // The whole model ships, and the package.json that makes it ESM.
+  for (const name of readdirSync(join(root, MODEL_DIR))) if (name.endsWith('.js')) files.add(join(root, MODEL_DIR, name));
+  files.add(join(root, 'tools', 'plan', 'package.json'));
+  for (const name of readdirSync(join(site, 'server'))) if (name.endsWith('.mjs') && !name.endsWith('.test.mjs')) files.add(join(site, 'server', name));
+  files.add(join(site, 'api', 'workshop.cjs'));
+  return { root, files: [...files].sort() };
 }
 
 // Response headers for every path, static pages included: no page of the site may be framed.
@@ -53,6 +81,8 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
     : (await exists(join(distDir, 'workshop.html'))) ? '/workshop.html' : null;
   if (!page) throw new Error('The build has no Workshop page (workshop/index.html or workshop.html).');
 
+  // What the function loads is known before anything is written.
+  const { root, files } = functionFiles(siteDir);
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
   await cp(distDir, join(outputDir, 'static'), { recursive: true });
@@ -60,16 +90,15 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
   const functions = join(outputDir, 'functions', 'api', 'workshop');
   const [first, ...others] = ENDPOINTS;
   const main = join(functions, `${first}.func`);
-  await mkdir(join(main, 'api'), { recursive: true });
-  await cp(join(siteDir, 'api', 'workshop.cjs'), join(main, 'api', 'workshop.cjs'));
-  await mkdir(join(main, 'server'), { recursive: true });
-  for (const name of await readdir(join(siteDir, 'server'))) {
-    if (name.endsWith('.mjs') && !name.endsWith('.test.mjs')) await cp(join(siteDir, 'server', name), join(main, 'server', name));
+  for (const file of files) {
+    const destination = join(main, relative(root, file));
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(file, destination);
   }
-  const dependencies = await copyLoadedFiles(resolve(siteDir), FUNCTION_DEPENDENCIES, main);
+  const shipped = files.map((file) => relative(root, file));
   await writeFile(join(main, '.vc-config.json'), JSON.stringify({
     runtime: RUNTIME,
-    handler: 'api/workshop.cjs',
+    handler: HANDLER,
     launcherType: 'Nodejs',
     shouldAddHelpers: false,
     maxDuration: 15,
@@ -85,7 +114,7 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
     ],
   };
   await writeFile(join(outputDir, 'config.json'), JSON.stringify(config, null, 2) + '\n');
-  return { outputDir, page, config, dependencies };
+  return { outputDir, page, config, files: shipped };
 }
 
 // `--out <dir>` writes the output elsewhere.

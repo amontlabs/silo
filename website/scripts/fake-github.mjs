@@ -4,6 +4,7 @@
 // endpoints the Workshop uses. State lives in memory.
 import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
 import { createServer } from 'node:http';
+import { changeComment } from '../../tools/plan/model/index.js';
 
 export const FAKE_APP = { appId: '1001', clientId: 'Iv1.fakeclient', installationId: 7, repoId: 4242 };
 
@@ -30,6 +31,8 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     hook: null,
     perPage: null,
     requests: [],
+    // Files of the repository at a commit, as raw.githubusercontent.com serves them: `<commit>/<path>` to text.
+    raw: new Map(),
   };
   let baseUrl = '';
   const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
@@ -67,9 +70,10 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     return issue;
   }
 
-  function addComment(number, author, body) {
+  // `at` (milliseconds) dates the comment; without it, now.
+  function addComment(number, author, body, at) {
     const issue = state.issues.get(number);
-    const comment = { id: state.nextId++, user: author ? state.users.get(author) : bot, body, created_at: iso(), updated_at: iso() };
+    const comment = { id: state.nextId++, user: author ? state.users.get(author) : bot, body, created_at: iso(at), updated_at: iso(at) };
     issue.comments.push(comment);
     return comment;
   }
@@ -190,6 +194,12 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
   async function handle(req, res) {
     const url = new URL(req.url, 'http://fake');
     const path = url.pathname;
+    // raw.githubusercontent.com: /<owner>/<repo>/<commit>/<path>, readable from any origin.
+    if (path.startsWith(`/raw/${repo}/`)) {
+      const text = state.raw.get(path.slice(`/raw/${repo}/`.length));
+      res.writeHead(text === undefined ? 404 : 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+      return res.end(text ?? '404: Not Found');
+    }
     const who = caller(req);
     const record = { method: req.method, path, query: url.search, wall: Date.now(), kind: who?.kind ?? 'anonymous', login: who?.user?.login ?? null };
     state.requests.push(record);
@@ -403,7 +413,11 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     editComment,
     deleteComment,
     react,
+    repo,
     get url() { return baseUrl; },
+    /** Where the page reads files of the repository at a commit, as it reads raw.githubusercontent.com. */
+    get rawUrl() { return `${baseUrl}/raw`; },
+    setRaw(commit, path, text) { state.raw.set(`${commit}/${path}`, text); },
     async listen(port = 0, host = '127.0.0.1') {
       await new Promise((resolve) => server.listen(port, host, resolve));
       baseUrl = `http://${host}:${server.address().port}`;
@@ -428,28 +442,32 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
   };
 }
 
-// A small Workshop: entries from features.jsonl (when given), two decisions, a
-// suggestion, comments and votes, an unrelated issue and a pull request.
+// A small Workshop: entries from the plan (when given, in build order), two issues with the
+// retired label `workshop:decision` (no longer part of the Workshop), a suggestion, comments and
+// votes, an unrelated issue and a pull request.
 //
-// With `progress`, the entries carry the verdicts of the file, and a later state is shown: see
-// `progressOf`. Answers `{ progress }`, the plan that was applied (null without `progress`).
-export function seedDemo(fake, features = [], { progress = false } = {}) {
+// With `progress`, a later state: see `progressOf`, and the bot's history comments of every kind
+// beside people's comments. Answers `{ progress }`, the plan that was applied (null without `progress`).
+export function seedDemo(fake, features = [], { progress = false, now = Date.now() } = {}) {
   fake.addUser('owner-fake', { permission: 'admin' });
   fake.addUser('visitor-fake', { permission: 'read' });
+  if (progress) for (const login of ['lin-qi', 'mara-k', 'devin-oss']) fake.addUser(login, { permission: 'read' });
   const list = features.length ? features : [
     { id: 'engine-service', name: 'The engine runs on its own', what: 'A background engine owns every computer.' },
     { id: 'calls-and-events', name: 'Every call and event defined once', what: 'Each thing the engine can be asked is written down once.' },
     { id: 'vm-runtime', name: 'The VM runtime, packaged', what: 'Silo ships the program that runs each computer.' },
   ];
   const plan = progress ? progressOf(list) : null;
+  const numbers = new Map();
   for (const [index, feature] of list.entries()) {
     const labels = ['workshop:entry'];
     let verdict = index === 0 ? 'take' : index === 2 ? 'later' : null;
-    if (plan) verdict = VERDICT_NAMES.includes(feature.verdict) ? feature.verdict : null;
+    if (plan) verdict = plan.verdicts.get(feature.id) ?? null;
     if (verdict) labels.push(`verdict:${verdict}`);
     if (plan?.building.has(feature.id)) labels.push('workshop:building');
-    const closed = plan?.built.has(feature.id) ? 'completed' : verdict === 'drop' && plan ? 'not_planned' : null;
-    fake.addIssue({ title: feature.name, body: `${feature.what}\n<!-- silo-entry: ${feature.id} -->`, labels, ...(closed ? { state: 'closed', reason: closed } : {}) });
+    const closed = feature.built || plan?.built.has(feature.id) ? 'completed' : verdict === 'drop' && plan ? 'not_planned' : null;
+    const issue = fake.addIssue({ title: feature.name, body: `${feature.what}\n<!-- silo-entry: ${feature.id} -->`, labels, ...(closed ? { state: 'closed', reason: closed } : {}) });
+    numbers.set(feature.id, issue.number);
   }
   fake.addComment(1, 'visitor-fake', 'Looking forward to this.\nSee https://example.com for `context`.');
   fake.addComment(1, null, 'Posted by an agent.');
@@ -463,29 +481,71 @@ export function seedDemo(fake, features = [], { progress = false } = {}) {
   fake.react(suggestion.number, 'visitor-fake');
   fake.addIssue({ title: 'An ordinary bug report', body: 'Not part of the Workshop.', author: 'visitor-fake' });
   fake.addIssue({ title: 'A pull request with a Workshop label', labels: ['workshop:entry'], pull: true });
+  if (plan) seedHistory(fake, list, numbers, plan, now);
   return { progress: plan };
 }
 
-const VERDICT_NAMES = ['take', 'refine', 'later', 'drop'];
-const PROGRESS = { built: ['engine', 'computers', 'app'], building: 'agents', buildingCount: 2 };
+const sha = (text) => createHash('sha1').update(text).digest('hex');
+const HOUR = 3_600_000;
 
-// A later state of the plan, by area: every taken entry of the areas engine, computers and app
-// built, the first two taken entries of agents being built. When no entry has an area, by stage in
-// the order the file lists them: the first three stages built, two taken entries of the next being
-// built. Answers the ids of each, and which grouping was used.
-export function progressOf(features) {
-  const ordered = [...features].sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
-  const byArea = ordered.some((feature) => feature.area);
-  const groupOf = (feature) => (byArea ? feature.area : feature.stage);
-  let builtGroups = PROGRESS.built;
-  let buildingGroup = PROGRESS.building;
-  if (!byArea) {
-    const stages = [...new Set(ordered.map((feature) => feature.stage).filter(Boolean))];
-    builtGroups = stages.slice(0, 3);
-    buildingGroup = stages[3] ?? null;
+// The history comments and people's comments of the --progress state, oldest first, over the last
+// days: a verdict line for each entry that has one, then on chosen entries a text change (with its
+// before and after served as raw files), notes edited, a field changed, a verdict cleared and built.
+function seedHistory(fake, list, numbers, plan, now) {
+  let clock = now - 6 * 24 * HOUR;
+  let head = sha('seed');
+  const step = (hours = 1) => { clock += hours * HOUR; return clock; };
+  const history = (id, fields, extra = {}) => {
+    const before = head;
+    head = sha(`${before}:${id}:${fields.join(',')}`);
+    fake.addComment(numbers.get(id), null, changeComment({ commit: head, before, fields, ...extra }, { repo: fake.repo }), step(3));
+    return { before, commit: head };
+  };
+  const decided = list.filter((feature) => plan.verdicts.has(feature.id));
+  for (const feature of decided) history(feature.id, ['verdict'], { verdict: plan.verdicts.get(feature.id) });
+  const taken = decided.filter((feature) => plan.verdicts.get(feature.id) === 'take');
+  const [first, second, third] = taken;
+  const people = [['lin-qi', 'Does this also cover a computer the engine restarts after a crash?'], ['mara-k', 'This is the part that would make me trust it with my main.'], ['devin-oss', 'How does it behave when the disk is full?']];
+  if (first) {
+    fake.addComment(numbers.get(first.id), people[0][0], people[0][1], step(2));
+    const change = history(first.id, ['name', 'what']);
+    const old = { ...first, name: `${first.name}, always`, what: first.what.replace(/\.$/, ', started by the app at login.') };
+    const file = (feature) => `${JSON.stringify({ name: feature.name, what: feature.what, area: feature.area, needs: feature.needs ?? [] }, null, 2)}\n`;
+    fake.setRaw(change.before, `plan/features/${first.id}.json`, file(old));
+    fake.setRaw(change.commit, `plan/features/${first.id}.json`, file(first));
+    fake.addComment(numbers.get(first.id), 'owner-fake', 'Shorter, and the app no longer starts it.', step(1));
+    history(first.id, ['notes']);
+    fake.addComment(numbers.get(first.id), people[1][0], people[1][1], step(5));
   }
-  const taken = ordered.filter((feature) => feature.verdict === 'take');
-  const built = new Set(taken.filter((feature) => builtGroups.includes(groupOf(feature))).map((feature) => feature.id));
-  const building = new Set(taken.filter((feature) => groupOf(feature) === buildingGroup).slice(0, PROGRESS.buildingCount).map((feature) => feature.id));
-  return { by: byArea ? 'area' : 'stage', builtGroups, buildingGroup, built, building };
+  if (second) {
+    history(second.id, ['needs', 'notes']);
+    fake.addComment(numbers.get(second.id), people[2][0], people[2][1], step(4));
+  }
+  if (third) history(third.id, ['built'], { built: new Date(step(6)).toISOString().slice(0, 10) });
+  const cleared = list.find((feature) => !plan.verdicts.has(feature.id) && feature.area);
+  if (cleared) {
+    history(cleared.id, ['verdict'], { verdict: 'later' });
+    history(cleared.id, ['verdict'], { verdict: null });
+  }
+}
+
+const VERDICT_NAMES = ['take', 'later', 'drop'];
+/** The stages of the starter, whose entries are decided in the later state. */
+const DECIDED_STAGES = 4;
+const BUILDING_COUNT = 2;
+
+// A later state of the plan, in build order: the entries of the first four stages carry the verdict
+// of their file, else the one suggested for them; the first two taken are being built. Nothing is
+// built that the file does not say is built. Answers the verdicts, and the ids built and being built.
+export function progressOf(features) {
+  const stages = [...new Set(features.map((feature) => feature.stage).filter(Boolean))];
+  const decided = new Set(stages.slice(0, DECIDED_STAGES));
+  const verdicts = new Map();
+  for (const feature of features) {
+    const verdict = feature.verdict ?? (decided.has(feature.stage) ? feature.suggest?.verdict : undefined);
+    if (VERDICT_NAMES.includes(verdict)) verdicts.set(feature.id, verdict);
+  }
+  const built = new Set(features.filter((feature) => feature.built).map((feature) => feature.id));
+  const building = new Set(features.filter((feature) => verdicts.get(feature.id) === 'take' && !built.has(feature.id)).slice(0, BUILDING_COUNT).map((feature) => feature.id));
+  return { stages: stages.slice(0, DECIDED_STAGES), verdicts, built, building };
 }
