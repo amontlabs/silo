@@ -299,19 +299,58 @@ test('a cold refresh reads both issue lists and the first comment page together,
   assert.ok(capped.logs.some((line) => line.includes('issue_pages_limit')));
 });
 
-test('me fetches the installation token while it reads the person', async () => {
+// One refresh where the call `failing` matches fails after 100 ms while the others take 300 ms; with one
+// item a page, every listing would have a second page.
+async function failedRefresh(failing) {
+  const unhandled = [];
+  const note = (error) => unhandled.push(error);
+  process.on('unhandledRejection', note);
   const t = await setup();
   try {
+    t.fake.state.perPage = 1;
+    t.fake.state.commentsPerPage = 1;
     const c = t.client();
-    await c.signIn('visitor-fake');
-    t.clock.t += 2 * 3600_000;
-    t.fake.state.hook = (r) => (r.path === '/user' ? { delay: 200 } : null);
-    const before = t.fake.state.requests.length;
-    assert.equal((await c.call('GET', 'me')).status, 200);
-    const calls = t.fake.state.requests.slice(before);
-    const user = calls.find((r) => r.path === '/user');
-    const token = calls.find((r) => r.path.endsWith('/access_tokens'));
-    assert.ok(token && token.wall < user.done, 'the token was asked for before the person was read');
-    assert.deepEqual(calls.filter((r) => r.kind !== 'app').map((r) => r.path), ['/user', '/repos/amontlabs/silo/collaborators/visitor-fake/permission']);
-  } finally { t.fake.state.hook = null; await t.close(); }
+    const before = (await c.call('GET', 'state')).json;
+    t.fake.state.issues.get(1).title = 'Renamed';
+    t.clock.t += SNAPSHOT.maxAge + 1000;
+    const listings = (r) => r.kind === 'installation' && (LIST.test(r.path) || COMMENTS.test(r.path));
+    t.fake.state.hook = (r) => (listings(r) ? (failing(r) ? { delay: 100, status: 500 } : { delay: 300 }) : null);
+    const from = t.fake.state.requests.length;
+    const during = await c.call('GET', 'state');
+    assert.equal(during.json.old, true);
+    await t.workshop.idle();
+    await wait(500);
+    const calls = t.fake.state.requests.slice(from).filter(listings);
+    assert.equal(calls.length, 3, 'the other calls were aborted: no further page was asked for');
+    assert.ok(calls.every((r) => /[?&]page=1$/.test(r.query)));
+    assert.ok(t.logs.some((line) => line === '{"snapshot":"refresh_failed","github":500}'), 'the refresh failed with GitHub\'s answer, not with the aborts');
+    assert.ok(!t.logs.some((line) => line.includes('"refresh_failed","github":0')));
+    const after = await c.call('GET', 'state');
+    assert.deepEqual(after.json.issues, before.issues, 'the previous snapshot is still answered');
+    assert.equal(after.json.old, true);
+    const waiting = await timed(c, 'state?fresh=1');
+    assert.ok(waiting.ms < 100, 'while GitHub asks us to wait, fresh=1 answers at once');
+    assert.equal(waiting.json.old, true);
+    assert.equal(t.fake.state.requests.slice(from).filter(listings).length, 3, 'and starts no refresh');
+
+    t.fake.state.hook = null;
+    t.clock.t += SNAPSHOT.retryAfter + 1000;
+    const fresh = await c.call('GET', 'state?fresh=1');
+    assert.equal(Object.hasOwn(fresh.json, 'old'), false);
+    assert.equal(fresh.json.issues[1].title, 'Renamed', 'the next refresh works');
+    await wait(50);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    t.fake.state.hook = null;
+    process.off('unhandledRejection', note);
+    await t.close();
+  }
+}
+
+test('when one issue list fails, the refresh stops its other calls and the previous snapshot stays', async () => {
+  await failedRefresh((r) => LIST.test(r.path) && r.query.includes('workshop%3Aentry'));
+});
+
+test('when the first comment page fails, the refresh stops the issue lists and the previous snapshot stays', async () => {
+  await failedRefresh((r) => COMMENTS.test(r.path));
 });

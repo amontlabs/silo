@@ -193,13 +193,16 @@ test('when GitHub fails, the snapshot keeps answering, stale after 10 minutes, w
     const limited = await settle(t);
     assert.equal(limited.status, 200);
     assert.equal(limited.json.stale, undefined);
-    const tried = lists(t).length;
+    // Any listing call: a refresh whose first answer is a refusal aborts its other calls, which may
+    // then never reach GitHub.
+    const listings = () => t.fake.state.requests.filter((r) => r.kind === 'installation' && (LIST.test(r.path) || COMMENTS.test(r.path))).length;
+    const tried = listings();
     t.clock.t += 61_000;
     await settle(t);
-    assert.equal(lists(t).length, tried, 'GitHub gave 120 seconds');
+    assert.equal(listings(), tried, 'GitHub gave 120 seconds');
     t.clock.t += 60_000;
     await settle(t);
-    assert.equal(lists(t).length, tried + 1);
+    assert.ok(listings() > tried, 'tried again once that time had passed');
     t.clock.t += 9 * 60_000;
     const stale = await c.call('GET', 'state');
     assert.equal(stale.json.stale, true);

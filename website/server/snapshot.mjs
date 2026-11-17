@@ -225,7 +225,13 @@ export function createSnapshot({
     const comments = full
       ? pages(`/repos/${repo}/issues/comments?sort=created&direction=desc`, { left: SNAPSHOT.fullCommentPages }, commentPages, reduceComment, own)
       : pages(`/repos/${repo}/issues/comments?sort=updated&direction=asc&since=${new Date(current.startedAt - SNAPSHOT.overlap).toISOString().replace(/\.\d{3}Z$/, 'Z')}`, { left: SNAPSHOT.sinceCommentPages }, null, reduceComment, own);
-    comments.catch(() => {});
+    // A failed comment listing stops the issue listings too. The refresh fails with the first failure,
+    // not with the aborts it caused, so that a wait GitHub asked for is kept.
+    let failure = null;
+    comments.catch((error) => {
+      failure ??= error;
+      abort();
+    });
 
     try {
       // One conditional list per kind label, read at the same time, sharing one page budget. They
@@ -261,9 +267,10 @@ export function createSnapshot({
       fullDue = !full && !read.complete;
       return { startedAt: started, at: now(), issues, version: 0, stateAnswer: null };
     } catch (error) {
-      unknown(error);
+      failure ??= error;
+      unknown(failure);
       abort();
-      throw error;
+      throw failure;
     } finally {
       signal.removeEventListener('abort', abort);
     }

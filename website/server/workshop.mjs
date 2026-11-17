@@ -289,18 +289,17 @@ export function createWorkshop({
   }
 
   // Every installation-token call goes through here: nothing reaches GitHub while it has asked us to wait.
-  // `token` is a token request already started, to use instead of starting one.
-  async function asInstallation(call, token = null) {
+  async function asInstallation(call) {
     if (now() < blockedUntil) throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil((blockedUntil - now()) / 1000), as: 'installation' });
     try {
-      return await call(await bounded(token ?? app.installationToken()));
+      return await call(await bounded(app.installationToken()));
     } catch (error) {
       noteInstallationError(error);
       throw error;
     }
   }
 
-  const installationRequest = (method, path, options = {}, token = null) => asInstallation((value) => github.request(method, path, { ...options, token: value, as: 'installation' }), token);
+  const installationRequest = (method, path, options = {}) => asInstallation((token) => github.request(method, path, { ...options, token, as: 'installation' }));
 
   // The reads a session may make a minute: more for a person known to be able to decide.
   function readLimit(session) {
@@ -417,13 +416,10 @@ export function createWorkshop({
     if (cached) return cached.value;
     return shared(permissionPending, session.id, async () => {
       spendOrRefuse(deciders.has(session.id) ? 'decider' : 'permission');
-      // The installation token is fetched while the person is read, unless GitHub asked us to wait.
-      const token = now() < blockedUntil ? null : app.installationToken();
-      token?.catch(() => {});
       // The account's current login, from GitHub with the person's own token, never the cookie's.
       const { data: user } = await userRequest(session, 'GET', '/user');
       if (user?.id !== session.id) throw new GitHubError(401, { as: 'user' });
-      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(user.login)}/permission`, {}, token).catch((error) => {
+      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(user.login)}/permission`).catch((error) => {
         if (error instanceof GitHubError && error.status === 404) return { data: null };
         throw error;
       });
