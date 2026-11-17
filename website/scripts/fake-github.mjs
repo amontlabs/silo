@@ -6,7 +6,7 @@ import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypt
 import { createServer } from 'node:http';
 import { changeComment } from '../../tools/plan/model/index.js';
 
-export const FAKE_APP = { appId: '1001', clientId: 'Iv1.fakeclient', installationId: 7, repoId: 4242 };
+export const FAKE_APP = { appId: '1001', slug: 'silo-workshop', clientId: 'Iv1.fakeclient', installationId: 7, repoId: 4242 };
 
 function json(res, status, body, headers = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
@@ -92,6 +92,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     return {
       id: comment.id, body: comment.body, created_at: comment.created_at, updated_at: comment.updated_at,
       user: publicUser(comment.user), issue_url: `${baseUrl}/repos/${repo}/issues/${number}`,
+      performed_via_github_app: comment.user === bot ? { id: Number(FAKE_APP.appId), slug: FAKE_APP.slug } : null,
     };
   }
 
@@ -277,7 +278,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       for (const [value, other] of state.refresh) if (other.login === entry.login) state.refresh.delete(value);
       return json(res, 204);
     }
-    if (path === `/repos/${repo}/installation` && who.kind === 'app') return json(res, 200, { id: FAKE_APP.installationId });
+    if (path === `/repos/${repo}/installation` && who.kind === 'app') return json(res, 200, { id: FAKE_APP.installationId, app_slug: FAKE_APP.slug });
     if (path === `/app/installations/${FAKE_APP.installationId}/access_tokens` && req.method === 'POST' && who.kind === 'app') {
       const value = token('ghs');
       const expiresAt = now() + 3600_000;

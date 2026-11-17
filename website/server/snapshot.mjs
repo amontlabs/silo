@@ -121,8 +121,9 @@ function latestOf(snapshot) {
 // `keepAlive(promise)` asks the platform to keep the instance running until it settles.
 // `afterRefresh()` runs, detached, after each successful refresh.
 // `wall()` is the real clock for the floor, the lost-refresh limit and the waits.
+// `app()` is the Workshop's App, `{ id, login }`: only its comments become history lines.
 export function createSnapshot({
-  repo, request, now = Date.now, wall = Date.now, log = () => {},
+  repo, request, app = () => null, now = Date.now, wall = Date.now, log = () => {},
   detach = (fn) => fn(), keepAlive = () => {}, afterRefresh = () => {},
 }) {
   let current = null;
@@ -223,7 +224,7 @@ export function createSnapshot({
 
     const reduceComment = (comment) => {
       const number = commentIssue(comment);
-      return issues.has(number) ? { number, comment: commentOf(comment) } : null;
+      return issues.has(number) ? { number, comment: commentOf(comment, app()) } : null;
     };
     let comments;
     let incompleteSince = false;
@@ -452,7 +453,7 @@ export function createSnapshot({
 
   const patch = {
     comment(number, comment) {
-      const shown = commentOf(comment);
+      const shown = commentOf(comment, app());
       count(number, 'comments', 1);
       record(onEntry(number, (entry) => {
         if (entry.comments.has(shown.id)) return;

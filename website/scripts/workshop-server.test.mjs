@@ -18,7 +18,7 @@ import { SNAPSHOT } from '../server/snapshot.mjs';
 import { createFakeGitHub, FAKE_APP, progressOf, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, HANDLER, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
 import { loadFeatures, progressLine, startDev } from './workshop-dev.mjs';
-import { changeComment, readChange } from '../../tools/plan/model/index.js';
+import { changeComment, readChange, readEntryMarker, withoutMarkers } from '../../tools/plan/model/index.js';
 import { checkFiles } from '../../tools/plan/check/index.js';
 import { loadDir } from '../../tools/plan/read/index.js';
 
@@ -1045,8 +1045,14 @@ test('the silo-synced marker line is removed from a body, beside the entry marke
   const synced = `<!-- silo-synced: ${SHA_A} -->`;
   assert.deepEqual(readBody(`Text.\n${synced}\n<!-- silo-entry: engine-service -->`), { entry: 'engine-service', text: 'Text.' });
   assert.deepEqual(readBody(`${synced}\nOnly text.`), { entry: null, text: 'Only text.' });
-  assert.deepEqual(readBody('Text.\n<!-- silo-synced: nothex -->\n<!-- silo-entry: Bad Id! -->'), { entry: null, text: 'Text.' });
+  assert.deepEqual(readBody('Text.\n<!-- silo-synced: nothex -->\n<!-- silo-entry: Bad Id! -->').entry, null);
   assert.equal(readBody('<!-- silo-entry: UPPER -->').entry, null, 'an id must match the model pattern');
+  for (const body of [`Text.\n${synced}\n<!-- silo-entry: engine-service -->`, '<!-- silo-entry: a -->\nText.', 'Text.\n  <!--silo-entry:  a  -->', `${'x'.repeat(CUTS.body + 10)}\n<!-- silo-entry: engine-service -->`, 'Text.\r\n<!-- silo-entry: engine-service -->\r\n']) {
+    assert.equal(readBody(body).entry, readEntryMarker(body), 'the server reads the entry marker as the model does');
+    assert.equal(readBody(body).text, cut(withoutMarkers(body), CUTS.body), 'and removes the markers as the model does, then cuts');
+  }
+  const long = readBody(`${'x'.repeat(CUTS.body + 10)}\n<!-- silo-entry: engine-service -->`);
+  assert.deepEqual([long.entry, long.text.length], ['engine-service', CUTS.body], 'a marker past the cut is still read');
   const t = await setup();
   try {
     const issue = issueOf(t.fake, 1);
@@ -1060,7 +1066,7 @@ test('the silo-synced marker line is removed from a body, beside the entry marke
   } finally { await t.close(); }
 });
 
-test('a bot history comment carries its change; a person\'s identical comment, a cut one and a mid-comment marker do not', async () => {
+test('only the Workshop App\'s comments carry a change, read on the whole comment; a person\'s, another bot\'s and a mid-comment marker do not', async () => {
   const t = await setup();
   try {
     const text = changeComment(CHANGE, { repo: t.fake.repo });
@@ -1068,18 +1074,24 @@ test('a bot history comment carries its change; a person\'s identical comment, a
     t.fake.addComment(1, 'visitor-fake', text, START + 2000);
     t.fake.addComment(1, null, `${'x'.repeat(CUTS.comment)}\n${text}`, START + 3000);
     t.fake.addComment(1, null, `${text}\nAnd more.`, START + 4000);
+    t.fake.addUser('other-app[bot]', { type: 'Bot' });
+    t.fake.addComment(1, 'other-app[bot]', text, START + 5000);
+    t.fake.addUser('silo-workshop[bot]', { type: 'Bot' });
+    t.fake.addComment(1, 'silo-workshop[bot]', text, START + 6000);
     const c = t.client();
     await settle(t, c);
     const comments = (await c.call('GET', 'issue?n=1')).json.comments;
     const mine = comments.filter((x) => x.createdAt > new Date(START).toISOString());
-    assert.equal(mine.length, 4);
+    assert.equal(mine.length, 6);
     assert.deepEqual(mine[0].change, CHANGE);
     assert.equal(mine[0].bot, true);
     assert.deepEqual(mine[0].change, readChange(text));
     assert.equal(Object.hasOwn(mine[1], 'change'), false, 'a person cannot write history');
     assert.equal(mine[1].bot, false);
-    assert.deepEqual([mine[2].cut, Object.hasOwn(mine[2], 'change')], [true, false]);
+    assert.deepEqual([mine[2].cut, mine[2].change], [true, CHANGE], 'the marker is read on the whole comment, before the cut');
     assert.equal(Object.hasOwn(mine[3], 'change'), false, 'the marker is not the last line');
+    assert.deepEqual([mine[4].bot, Object.hasOwn(mine[4], 'change')], [false, false], 'another App\'s comment is an ordinary comment');
+    assert.deepEqual([mine[5].bot, mine[5].change], [true, CHANGE], 'the App\'s own account, by its login');
   } finally { await t.close(); }
 });
 

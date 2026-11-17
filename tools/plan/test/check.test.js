@@ -43,6 +43,8 @@ const CASES = [
   ['feature: a null instead of an absent key', (f) => { f['features/core.json'].verdict = null; }, 'plan/features/core.json', 'verdict', 'null'],
   ['feature: no name', (f) => { delete f['features/core.json'].name; }, 'plan/features/core.json', 'name', 'missing or empty'],
   ['feature: an empty what', (f) => { f['features/core.json'].what = ' '; }, 'plan/features/core.json', 'what', 'missing or empty'],
+  ['feature: a name with a comment opener', (f) => { f['features/core.json'].name = 'Core <!-- x'; }, 'plan/features/core.json', 'name', 'holds <!-- or -->'],
+  ['feature: a what with a comment closer', (f) => { f['features/core.json'].what = 'The engine. -->'; }, 'plan/features/core.json', 'what', 'holds <!-- or -->'],
   ['feature: no area outside gone', (f) => { delete f['features/core.json'].area; }, 'plan/features/core.json', 'area', 'missing'],
   ['feature: an unknown area', (f) => { f['features/core.json'].area = 'nowhere'; }, 'plan/features/core.json', 'area', 'is not an area'],
   ['feature: needs missing', (f) => { delete f['features/core.json'].needs; }, 'plan/features/core.json', 'needs', 'missing or not an array'],

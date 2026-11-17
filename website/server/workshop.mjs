@@ -344,6 +344,7 @@ export function createWorkshop({
 
   const snapshots = config.configured ? createSnapshot({
     repo,
+    app: () => ({ id: config.appId, login: app?.login() ?? null }),
     now,
     log,
     detach,

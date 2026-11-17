@@ -115,6 +115,9 @@ export function checkFiles(files, { knownAreas = null } = {}) {
     noNulls(file, '', data);
     if (!isText(data.name)) add(file, 'name', 'missing or empty', 'write the feature\'s name');
     if (!isText(data.what)) add(file, 'what', 'missing or empty', 'write what the feature does, in one or two sentences');
+    for (const field of ['name', 'what']) {
+      if (isText(data[field]) && (data[field].includes('<!--') || data[field].includes('-->'))) add(file, field, 'holds <!-- or -->', 'remove it: the issue body would read it as a marker');
+    }
     if (!placedCount.has(id)) add(file, '-', 'not in order.json', `place "${id}" in one stage of plan/order.json`);
     const stage = stageOf.get(id);
     if (data.area === undefined) {
