@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  areaGroups, areaStates, canonicalFeature, canonicalOrder, canonicalText, changeComment, countRows, entryMarker, featureStatus, isDate, isReady,
+  areaGroups, areaStates, canonicalFeature, canonicalOrder, canonicalText, changeComment, compareLink, countRows, entryMarker, featureFileAt, featureStatus, isDate, isReady,
   labelVerdict, readChange, readEntryMarker, readSyncedMarker, stateWords, statusLine, syncedMarker, waitingFor, wantedIssue, withoutMarkers,
 } from '../model/index.js';
 
@@ -113,6 +113,15 @@ test('history comment: written and read back, nothing from the plan in it', () =
   assert.equal(readChange(`<!-- silo-change: ${JSON.stringify({ ...change, fields: ['title'] })} -->`), null);
   assert.equal(readChange(`<!-- silo-change: ${JSON.stringify({ ...change, verdict: 'refine' })} -->`), null);
   assert.throws(() => changeComment({ ...change, fields: [] }));
+});
+
+test('the links of a change: the comparison on GitHub and a feature file at a commit', () => {
+  const change = { commit: 'b'.repeat(40), before: 'c'.repeat(40) };
+  assert.equal(compareLink(change, { repo: 'o/r' }), `https://github.com/o/r/compare/${'c'.repeat(40)}...${'b'.repeat(40)}`);
+  assert.equal(featureFileAt('b'.repeat(40), 'fork'), `https://raw.githubusercontent.com/amontlabs/silo/${'b'.repeat(40)}/plan/features/fork.json`);
+  assert.throws(() => compareLink({ ...change, before: '../x' }));
+  assert.throws(() => featureFileAt('b'.repeat(40), '../fork'));
+  assert.throws(() => featureFileAt('main', 'fork'));
 });
 
 test('wanted issue: title, body and state', () => {
