@@ -159,10 +159,10 @@ describe('addresses', () => {
 });
 
 describe('focus', () => {
-  it('returns to the link that opened the left-out list, the suggestions or the decisions', async () => {
+  it('returns to the link that opened the left-out list, the latest, the suggestions or the decisions', async () => {
     mockApi({ me: owner });
     await renderApp();
-    for (const [name, title] of [['Left out · 2', 'Left out'], ['2 suggested', 'Suggest a feature'], ['Decisions · 2 open', 'Decisions']]) {
+    for (const [name, title] of [['Left out · 2', 'Left out'], ['Latest', 'Latest'], ['2 suggested', 'Suggest a feature'], ['Decisions', 'Decisions']]) {
       await userEvent.click(screen.getByRole('link', { name }));
       expect(screen.getByRole('heading', { level: 2, name: title })).toHaveFocus();
       fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
@@ -206,12 +206,5 @@ describe('words', () => {
     await renderApp();
     expect(screen.getByText('Suggestions are offline.')).toBeInTheDocument();
     expect(screen.getAllByText('Votes and comments are offline.').length).toBeGreaterThan(0);
-  });
-
-  it('tell the owner there is nothing to decide', async () => {
-    mockApi({ me: owner, state: () => ok({ ...liveState(), issues: Object.fromEntries(Object.entries(liveState().issues).filter(([, item]) => item.kind !== 'decision')) }) });
-    history.replaceState(null, '', '/workshop#decisions');
-    await renderApp();
-    expect(await screen.findByText('Nothing to decide.')).toBeInTheDocument();
   });
 });

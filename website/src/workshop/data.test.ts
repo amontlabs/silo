@@ -1,22 +1,22 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { canonicalText } from '../../../tools/plan/model/index.js';
 import { describe, expect, it } from 'vitest';
-import { checkAreasUsed, parseAreas, parseDecisions, parseFeatures, parseStages, readBuildData } from './data';
-import { areasText, buildData, decisionsText, featuresText, stagesText } from './fixtures';
+import { buildDataFrom, readBuildData } from './data';
+import { AREAS, buildData, DECISIONS, ENGINE_NOTES, FEATURES, planFiles } from './fixtures';
 import { checkLayout, LAYOUT, LayoutError } from './map';
 
-const stages = parseStages(stagesText);
-const areas = parseAreas(areasText);
-const entry = (fields: Record<string, unknown>) => JSON.stringify({ n: 1, id: 'a', stage: 'shell', area: 'engine', name: 'A', what: 'W', verdict: null, ...fields });
-
-describe('reading the product files', () => {
-  it('reads decided lines newest first, with their issue and without Markdown links', () => {
-    const lines = buildData().decided;
-    expect(lines.map((line) => [line.date, line.issue])).toEqual([['2026-11-16', 40], ['2026-11-16', null], ['2026-11-15', null]]);
-    expect(lines[0].text).toBe('The engine is written in Zig. It is the core piece');
-    expect(lines[1].who).toBe("orchestrator, at the owner's word");
-    expect(lines[1].text).toBe('Merging changes main only. See the list.');
+describe('reading the plan files', () => {
+  it('reads features in build order, with their position, area, needs and suggestion', () => {
+    const data = buildData();
+    expect(data.features).toHaveLength(FEATURES.length);
+    expect(data.features.map((feature) => feature.position)).toEqual(data.features.map((_, index) => index + 1));
+    expect(data.features.slice(0, 3).map((feature) => feature.id)).toEqual(['engine', 'calls', 'computers']);
+    const engine = data.features[0];
+    expect(engine).toMatchObject({ area: 'engine', stage: 'shell', verdict: 'take', built: null, needs: [], suggest: { verdict: 'take', why: 'The core piece.' } });
+    expect(data.features.find((feature) => feature.id === 'calls')?.suggest).toEqual({ verdict: 'take', why: null });
+    expect(data.features.find((feature) => feature.id === 'computers')?.verdict).toBeNull();
   });
 
   it('reads each entry\'s area; only entries of the stage gone have none', () => {
@@ -25,55 +25,102 @@ describe('reading the product files', () => {
     expect(features.filter((f) => f.area === null).map((f) => f.id)).toEqual(['reviewer', 'old-desktop']);
   });
 
-  it('fails on a malformed line with its file and line', () => {
-    expect(() => parseFeatures(`${entry({})}\n{"n": 2,`, stages, areas)).toThrow(/^docs\/product\/features\.jsonl:2: not valid JSON/);
-    expect(() => parseFeatures(`${entry({})}\n\n${entry({ n: 3, id: 'b', name: '' })}`, stages, areas)).toThrow('docs/product/features.jsonl:3: missing "name"');
-    expect(() => parseFeatures(entry({ stage: 'nowhere' }), stages, areas)).toThrow('features.jsonl:1: unknown stage "nowhere"');
-    expect(() => parseFeatures(entry({ verdict: 'maybe' }), stages, areas)).toThrow('features.jsonl:1: unknown verdict "maybe"');
-    expect(() => parseFeatures(entry({ what: undefined }), stages, areas)).toThrow('features.jsonl:1: missing "what"');
-    expect(() => parseFeatures(entry({ issue: -3 }), stages, areas)).toThrow('features.jsonl:1: "issue" is not an issue number');
-    expect(() => parseFeatures(`${entry({})}\n${entry({ n: 2 })}`, stages, areas)).toThrow('features.jsonl:2: repeats the id a');
-    expect(() => parseFeatures(entry({ recordings: ['../x.mp4'] }), stages, areas)).toThrow('features.jsonl:1: recording "../x.mp4" is not a plain video file name');
-    expect(() => parseFeatures(entry({ recordings: ['x.mp4'] }), stages, areas, () => false)).toThrow('features.jsonl:1: recording x.mp4 is not in website/public/workshop/recordings');
-    expect(() => parseStages('[{"id":"a"}]')).toThrow('docs/product/stages.json: stage 1 (a) has no title');
-    expect(() => parseStages('{')).toThrow(/^docs\/product\/stages\.json: not valid JSON/);
-    expect(() => parseDecisions('# D\n\n- 2026-11-16 owner text')).toThrow('docs/product/DECISIONS.md:3: expected "- YYYY-MM-DD · who · text"');
+  it('reads the notes of a feature beside its file, and none when there are none', () => {
+    const features = buildData().features;
+    expect(features.find((f) => f.id === 'engine')?.notes).toBe(ENGINE_NOTES);
+    expect(features.find((f) => f.id === 'calls')?.notes).toBeNull();
+    expect(buildData({ notes: { engine: '  \n' } }).features[0].notes).toBeNull();
   });
 
-  it('stops on an unknown area, a missing area, a repeated area and an area with no entry', () => {
-    expect(() => parseFeatures(`${entry({})}\n${entry({ n: 2, id: 'b', area: 'nowhere' })}`, stages, areas)).toThrow('docs/product/features.jsonl:2: unknown area "nowhere"');
-    expect(() => parseFeatures(entry({ area: undefined }), stages, areas)).toThrow('features.jsonl:1: missing "area" (only entries of the stage "gone" have none)');
-    expect(() => parseFeatures(entry({ area: 3 }), stages, areas)).toThrow('features.jsonl:1: "area" is not text');
-    expect(parseFeatures(entry({ stage: 'gone', area: undefined }), stages, areas)[0].area).toBeNull();
-    const repeated = '[\n {"id": "a", "title": "A", "line": "L"},\n {"id": "b", "title": "B", "line": "L"},\n {"id": "a", "title": "A2", "line": "L"}\n]';
-    expect(() => parseAreas(repeated)).toThrow('docs/product/areas.json:4: repeats the area id a');
-    expect(() => parseAreas('[{"id": "a", "title": "A"}]')).toThrow('docs/product/areas.json:1: area a has no line');
-    expect(() => parseAreas('{')).toThrow(/^docs\/product\/areas\.json: not valid JSON/);
-    const features = parseFeatures(entry({}), stages, areas);
-    expect(() => checkAreasUsed(areas, features, areasText)).toThrow('docs/product/areas.json:8: area computers has no entry in docs/product/features.jsonl');
+  it('reads the areas and stages as the files give them', () => {
+    const data = buildData();
+    expect(data.areas.map((area) => area.id)).toEqual(AREAS.map((area) => area.id));
+    expect(data.areas[0]).toEqual({ id: 'engine', title: 'Engine', line: 'The core. Everything else talks to it.' });
+    expect(data.stages.map((stage) => stage.id)).toContain('gone');
   });
 
-  it('reads the four files from a repository folder and checks the map', () => {
+  it('reads the decisions newest first, those of one day in the file\'s order, with what they are about', () => {
+    const decisions = buildData().decisions;
+    expect(decisions.map((decision) => decision.id)).toEqual(['engine-in-zig', 'merge-main-only', 'security-properly']);
+    expect(decisions.map((decision) => decision.date)).toEqual(['2026-11-16', '2026-11-16', '2026-11-15']);
+    expect(decisions[0].about).toEqual(['engine']);
+    expect(decisions[2].about).toBeNull();
+    const same = buildData({ decisions: [...DECISIONS].reverse() }).decisions.map((decision) => decision.id);
+    expect(same).toEqual(['merge-main-only', 'engine-in-zig', 'security-properly']);
+  });
+
+  it('keeps no recordings, issue numbers or entry numbers', () => {
+    const feature = buildData().features[0] as unknown as Record<string, unknown>;
+    expect(Object.keys(feature).sort()).toEqual(['area', 'built', 'id', 'name', 'needs', 'notes', 'position', 'stage', 'suggest', 'verdict', 'what']);
+  });
+});
+
+describe('a plan with an error', () => {
+  it('stops with the file and the fix when a feature is missing from order.json', () => {
+    const files = planFiles();
+    files.set('features/stray.json', canonicalText({ name: 'Stray', what: 'Not in the order.', area: 'engine', needs: [] }));
+    let message = '';
+    try {
+      buildDataFrom(files);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('plan/');
+    expect(message).toContain('stray');
+    expect(message).toContain('Fix:');
+  });
+
+  it('stops with the file and the fix when a feature names an unknown area', () => {
+    const features = FEATURES.map((feature) => (feature.id === 'exec' ? { ...feature, area: 'nowhere' } : feature));
+    let message = '';
+    try {
+      buildData({ features });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('plan/features/exec.json');
+    expect(message).toContain('nowhere');
+    expect(message).toContain('Fix:');
+  });
+
+  it('stops on an area with no feature, with what to do', () => {
+    const features = FEATURES.filter((feature) => feature.area !== 'sharing').map((feature) => feature);
+    expect(() => buildData({ features })).toThrow(/plan\/areas\.json: sharing: has no feature\. Fix: /);
+  });
+
+  it('stops on an area the map has no place for, and on a place for an area the plan has not', () => {
+    const files = planFiles({ features: [...FEATURES, { id: 'pay', stage: 'extras', area: 'billing', name: 'Pay', what: 'Billing.' }] });
+    files.set('areas.json', canonicalText([...AREAS, { id: 'billing', title: 'Billing', line: 'Money.' }]));
+    expect(() => buildDataFrom(files)).toThrow('The map has no place for the area "billing" of plan/areas.json. Add it to website/src/workshop/map.ts.');
+  });
+
+  it('reports every problem of the files at once', () => {
+    const files = planFiles();
+    files.set('features/engine.json', '{');
+    files.set('areas.json', '[');
+    let message = '';
+    try {
+      buildDataFrom(files);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message.split('\n').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('reading plan/ from a repository folder', () => {
+  it('reads the folder, and stops when it cannot be read', () => {
     const root = mkdtempSync(join(tmpdir(), 'workshop-data-'));
     try {
-      mkdirSync(join(root, 'docs/product'), { recursive: true });
-      writeFileSync(join(root, 'docs/product/features.jsonl'), featuresText);
-      writeFileSync(join(root, 'docs/product/stages.json'), stagesText);
-      writeFileSync(join(root, 'docs/product/areas.json'), areasText);
-      writeFileSync(join(root, 'docs/product/DECISIONS.md'), decisionsText);
-      mkdirSync(join(root, 'recordings'));
-      expect(() => readBuildData(root, join(root, 'recordings'))).toThrow('recording create.mp4 is not in');
-      writeFileSync(join(root, 'recordings/create.mp4'), '');
-      const data = readBuildData(root, join(root, 'recordings'));
-      expect(data.features).toHaveLength(20);
-      expect(data.areas).toHaveLength(16);
-      expect(data.decided).toHaveLength(3);
-      // An area the map does not place stops the build with a plain message.
-      const more = JSON.parse(areasText);
-      writeFileSync(join(root, 'docs/product/areas.json'), JSON.stringify([...more, { id: 'billing', title: 'Billing', line: 'L' }]));
-      writeFileSync(join(root, 'docs/product/features.jsonl'), `${featuresText}\n${entry({ n: 30, id: 'pay', area: 'billing' })}`);
-      expect(() => readBuildData(root, join(root, 'recordings'))).toThrow('The map has no place for the area "billing" of docs/product/areas.json. Add it to website/src/workshop/map.ts.');
-      expect(() => readBuildData(join(root, 'missing'), root)).toThrow('docs/product/stages.json: cannot be read');
+      for (const [name, text] of planFiles()) {
+        mkdirSync(dirname(join(root, 'plan', name)), { recursive: true });
+        writeFileSync(join(root, 'plan', name), text);
+      }
+      const data = readBuildData(root);
+      expect(data.features).toHaveLength(FEATURES.length);
+      expect(data.areas).toHaveLength(AREAS.length);
+      expect(data.decisions).toHaveLength(DECISIONS.length);
+      expect(() => readBuildData(join(root, 'missing'))).toThrow('plan/: cannot be read');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -81,12 +128,14 @@ describe('reading the product files', () => {
 });
 
 describe('the map layout', () => {
+  const ids = AREAS.map((area) => area.id);
+
   it('places exactly the areas of the plan', () => {
-    expect(() => checkLayout(areas.map((area) => area.id))).not.toThrow();
-    expect(() => checkLayout([...areas.map((area) => area.id), 'billing'])).toThrow(LayoutError);
-    expect(() => checkLayout(areas.map((area) => area.id).filter((id) => id !== 'trust'))).toThrow('website/src/workshop/map.ts places the area "trust", which docs/product/areas.json does not have.');
+    expect(() => checkLayout(ids)).not.toThrow();
+    expect(() => checkLayout([...ids, 'billing'])).toThrow(LayoutError);
+    expect(() => checkLayout(ids.filter((id) => id !== 'trust'))).toThrow('website/src/workshop/map.ts places the area "trust", which plan/areas.json does not have.');
     const { tasks: _tasks, ...withoutTasks } = LAYOUT;
-    expect(() => checkLayout(Object.keys(withoutTasks), withoutTasks)).toThrow('website/src/workshop/map.ts draws a wire for the area "tasks", which docs/product/areas.json does not have.');
+    expect(() => checkLayout(Object.keys(withoutTasks), withoutTasks)).toThrow('website/src/workshop/map.ts draws a wire for the area "tasks", which plan/areas.json does not have.');
   });
 
   it('keeps every part inside the map, full and folded', () => {

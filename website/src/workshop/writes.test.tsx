@@ -128,45 +128,28 @@ describe('the decisions', () => {
       expect(document.querySelector('a[href="#decisions"]')).toBeNull();
       expect(part('engine')).toBeInTheDocument();
       for (const key of ['d', 'D', 'Enter', 'Escape']) fireEvent.keyDown(document.body, { key });
-      act(() => { location.hash = '#decisions/issue-42'; });
+      act(() => { location.hash = '#decisions/decided-engine-in-zig'; });
       await waitFor(() => expect(location.hash).toBe(''));
-      expect(screen.queryByText('After a task ends, what happens to its computer?')).not.toBeInTheDocument();
+      expect(screen.queryByText('The engine is written in Zig')).not.toBeInTheDocument();
       view.unmount();
     }
   });
 
-  it('open for the owner from the link, with open decisions then the decided log', async () => {
+  it('open for the owner from the link, from the plan file, newest first', async () => {
     mockApi({ me: owner });
     await renderApp();
-    await userEvent.click(screen.getByRole('link', { name: 'Decisions · 2 open' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Decisions' }));
     expect(location.hash).toBe('#decisions');
-    const open = screen.getByRole('region', { name: 'Open' });
-    expect(within(open).getAllByRole('button').map((b) => b.textContent)).toEqual(['After a task ends, what happens to its computer?', 'Which Zig version to pin']);
-    const decided = screen.getByRole('region', { name: 'Decided' });
-    expect(within(decided).getAllByRole('button').map((b) => b.textContent)).toEqual(['The engine is written in Zig', 'Merging changes main only', 'Security is built properly']);
-    expect(within(decided).getAllByText('16 Nov')).toHaveLength(2);
+    expect(screen.getByText('3 decided')).toBeInTheDocument();
+    const rows = within(document.querySelector('.ws-list') as HTMLElement).getAllByRole('button');
+    expect(within(document.querySelector('.ws-list') as HTMLElement).getAllByText(/^1[56] Nov$/).map((n) => n.textContent)).toEqual(['16 Nov', '16 Nov', '15 Nov']);
+    expect(rows.map((b) => b.textContent)).toEqual(['The engine is written in Zig', 'Merging changes main only', 'Security is built properly']);
     await userEvent.click(rowButton('Merging changes main only'));
-    expect(screen.getByText("16 Nov · orchestrator, at the owner's word")).toBeInTheDocument();
-    expect(location.hash).toBe('#decisions/decided-2');
-  });
-
-  it('let the owner decide an open decision, shown dimmed until it is confirmed', async () => {
-    let release: (value: { status: number; body: unknown }) => void = () => {};
-    const calls = mockApi({ me: owner, routes: { 'POST decide': () => new Promise((resolve) => { release = resolve; }) } });
-    history.replaceState(null, '', '/workshop#issue-42');
-    await renderApp();
-    await ownerOn('After a task ends');
-    expect(location.hash).toBe('#decisions/issue-42');
-    const decide = screen.getByRole('button', { name: 'Decide' });
-    expect(decide).toBeDisabled();
-    await userEvent.type(screen.getByRole('textbox', { name: 'Decision' }), 'It is deleted.');
-    await userEvent.click(decide);
-    expect(posts(calls, 'decide')[0].body).toEqual({ n: 42, text: 'It is deleted.' });
-    const pending = screen.getByText('It is deleted.').closest('.ws-c') as HTMLElement;
-    expect(pending).toHaveClass('ws-pending');
-    expect(within(screen.getByRole('region', { name: 'Open' })).getByRole('button', { name: /^After a task ends/ })).toBeInTheDocument();
-    await act(async () => release(ok()));
-    expect(within(screen.getByRole('region', { name: 'Decided' })).getByRole('button', { name: /^After a task ends/ })).toBeInTheDocument();
+    expect(screen.getByText('Merging changes main only. Nothing else moves.')).toBeInTheDocument();
+    expect(screen.getByText('16 Nov · Diff and merge, Fork a computer')).toBeInTheDocument();
+    expect(location.hash).toBe('#decisions/decided-merge-main-only');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
   });
 });
 
@@ -175,21 +158,19 @@ describe('the owner deciding entries', () => {
     mockApi({ me: owner });
     await renderApp();
     expect(part('computers').querySelector('.ws-todo')).toHaveTextContent('2');
-    // The carried-over verdict on `calls` waits for the owner's confirmation.
-    expect(part('engine').querySelector('.ws-todo')).toHaveTextContent('1');
+    // A verdict written in the file never waits for the owner.
+    expect(part('engine').querySelector('.ws-todo')).toBeNull();
     expect(part('setup').querySelector('.ws-todo')).toBeNull();
     expect(tile('computers')).toHaveTextContent('2 to decide');
     expect(part('computers')).toHaveAccessibleName(/, 2 to decide\./);
-    // The lowest-numbered entry waiting for the owner is the carried-over one, to confirm.
-    await userEvent.click(screen.getByRole('link', { name: '5 to decide' }));
-    await ownerOn('Every call defined once');
-    expect(location.hash).toBe('#engine/calls');
-    expect(within(itemOf('Every call defined once')).getByText('confirm')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Confirm/ })).toBeInTheDocument();
-    expect(document.activeElement).toBe(rowButton('Every call defined once'));
-    act(() => { location.hash = '#computers/computers'; });
+    // The lowest entry waiting for the owner.
+    await userEvent.click(screen.getByRole('link', { name: '4 to decide' }));
     await ownerOn('Create and delete a computer');
-    for (const name of [/^Take/, /^Later$/, /^Drop$/, /^Refine…$/]) expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    expect(location.hash).toBe('#computers/computers');
+    expect(within(itemOf('Create and delete a computer')).getByText('to decide')).toBeInTheDocument();
+    expect(document.activeElement).toBe(rowButton('Create and delete a computer'));
+    for (const name of [/^Take/, /^Later$/, /^Drop$/]) expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(Refine|Confirm)/ })).not.toBeInTheDocument();
     expect(screen.getByText('Suggested: take. Key records by id.')).toBeInTheDocument();
   });
 
@@ -218,9 +199,9 @@ describe('the owner deciding entries', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Later' }));
     expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }, { n: 13, verdict: 'later' }]);
     // Computers has none left: the lowest one anywhere opens, its area unfolds.
-    await ownerOn('Every call defined once');
-    expect(screen.getByRole('heading', { level: 2, name: 'Engine' })).toBeInTheDocument();
-    expect(location.hash).toBe('#engine/calls');
+    await ownerOn('Fork a computer');
+    expect(screen.getByRole('heading', { level: 2, name: 'Forks' })).toBeInTheDocument();
+    expect(location.hash).toBe('#forks/fork');
     // The guard holds across the area change.
     fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
     expect(posts(calls, 'verdict')).toHaveLength(2);
@@ -273,7 +254,7 @@ describe('the owner deciding entries', () => {
     expect(posts(calls, 'verdict')).toHaveLength(1);
   });
 
-  it('guards Later, Drop and Refine like Take, and needs a note to refine', async () => {
+  it('guards Later and Drop like Take', async () => {
     const time = clock();
     const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#computers/computers');
@@ -281,70 +262,26 @@ describe('the owner deciding entries', () => {
     await ownerOn('Create and delete a computer');
     await userEvent.click(screen.getByRole('button', { name: 'Later' }));
     await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Refine…' }));
-    const submit = screen.getByRole('button', { name: 'Refine' });
-    expect(submit).toBeDisabled();
-    await userEvent.type(screen.getByRole('textbox', { name: 'Note' }), 'x');
-    await userEvent.click(submit);
     expect(posts(calls, 'verdict')).toHaveLength(0);
     time.advance(OPEN_GUARD_MS);
-    await userEvent.click(screen.getByRole('button', { name: 'Refine' }));
-    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'refine', note: 'x' }]);
+    await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
+    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'drop' }]);
   });
 
-  it('confirms a carried-over verdict, and a carried-over refine with a note', async () => {
+  it('shows the server\'s refusal on a built entry in its row, and the row stays as it was', async () => {
     const time = clock();
-    const calls = mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#engine/calls');
-    const first = await renderApp();
-    // The row named by the address opens once the live state is there.
-    await ownerOn('Every call defined once');
-    expect(screen.getByText('Planned · carried over')).toBeInTheDocument();
-    time.advance(OPEN_GUARD_MS);
-    await userEvent.click(screen.getByRole('button', { name: /^Confirm/ }));
-    expect(posts(calls, 'verdict')[0].body).toEqual({ n: 11, verdict: 'take' });
-    first.unmount();
-
-    const data = buildData();
-    data.features = data.features.map((feature) => (feature.id === 'exec' ? { ...feature, verdict: 'refine' as const } : feature));
-    history.replaceState(null, '', '/workshop#computers/exec');
-    render(<App data={data} />);
-    await ownerOn('Run a command');
-    expect(screen.getByText('Being refined · carried over')).toBeInTheDocument();
-    time.advance(OPEN_GUARD_MS);
-    await userEvent.click(screen.getByRole('button', { name: /^Confirm/ }));
-    expect(posts(calls, 'verdict')).toHaveLength(1);
-    await userEvent.type(screen.getByRole('textbox', { name: 'Note' }), 'Still to split.');
-    await userEvent.click(screen.getByRole('button', { name: 'Refine' }));
-    expect(posts(calls, 'verdict')[1].body).toEqual({ n: 13, verdict: 'refine', note: 'Still to split.' });
-  });
-
-  it('gives a refused note back', async () => {
-    const time = clock();
-    mockApi({ me: owner, routes: { 'POST verdict': () => refused(502, 'GitHub failed.') } });
-    history.replaceState(null, '', '/workshop#computers/exec');
-    await renderApp();
-    await ownerOn('Run a command');
-    time.advance(OPEN_GUARD_MS);
-    await userEvent.click(screen.getByRole('button', { name: 'Refine…' }));
-    await userEvent.type(screen.getByRole('textbox', { name: 'Note' }), 'Split it.');
-    await userEvent.click(screen.getByRole('button', { name: 'Refine' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Run a command: not saved. GitHub failed.');
-    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('textbox', { name: 'Note' })).toHaveValue('Split it.');
-    expect(screen.queryByText('Split it.', { selector: '.ws-c p' })).not.toBeInTheDocument();
-  });
-
-  it('lets the owner decide a row being refined', async () => {
-    const time = clock();
-    const calls = mockApi({ me: owner, state: () => ok(liveState({ 12: issue({ entry: 'computers', verdict: 'refine' }) })) });
+    const calls = mockApi({ me: owner, routes: { 'POST verdict': () => refused(409, 'Built entries take no verdict.') } });
     history.replaceState(null, '', '/workshop#computers/computers');
     await renderApp();
     await ownerOn('Create and delete a computer');
-    expect(screen.getByText('Being refined.')).toBeInTheDocument();
     time.advance(OPEN_GUARD_MS);
-    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-    expect(posts(calls, 'verdict')[0].body).toEqual({ n: 12, verdict: 'take' });
+    await userEvent.click(screen.getByRole('button', { name: /^Take/ }));
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveTextContent('Create and delete a computer: not saved. Built entries take no verdict.');
+    expect(document.getElementById('entry-computers')).toContainElement(notice);
+    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
+    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
+    expect(within(itemOf('Create and delete a computer')).queryByText('planned')).not.toBeInTheDocument();
   });
 
   it('offers no verdict on a suggestion, which the server only records on entries', async () => {
@@ -362,7 +299,7 @@ describe('the owner deciding entries', () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
     await act(async () => {});
     expect(posts(calls, 'verdict')).toEqual([]);
-    expect(screen.getByRole('link', { name: '5 to decide' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '4 to decide' })).toBeInTheDocument();
     await act(async () => release(ok({ number: 80 })));
     await waitFor(() => expect(rowButton('Pause a computer').closest('.ws-item')).toHaveAttribute('id', 'issue-80'));
   });

@@ -112,16 +112,18 @@ describe('a tap during a view transition', () => {
 });
 
 describe('the owner\'s tally', () => {
-  it('takes each entry to confirm off its own status, never below zero', async () => {
+  it('counts only undecided entries with an issue, whatever their file says elsewhere', async () => {
     const data = buildData();
     const base = data.features.find((feature) => feature.id === 'exec') as Feature;
-    const carried = (['take', 'later', 'refine', 'drop'] as const).map((verdict, i): Feature => ({ ...base, n: 30 + i, id: `c-${verdict}`, name: `Carried ${verdict}`, verdict }));
-    data.features = [...data.features, ...carried];
-    mockApi({ me: owner, state: () => ok(liveState(Object.fromEntries(carried.map((feature, i) => [50 + i, issue({ entry: feature.id, title: feature.name })])))) });
+    // Entries whose file already holds a verdict never wait for the owner; undecided ones with an issue do.
+    const decided = (['take', 'later', 'drop'] as const).map((verdict, i): Feature => ({ ...base, position: 30 + i, id: `c-${verdict}`, name: `Decided ${verdict}`, verdict }));
+    const open = { ...base, position: 40, id: 'c-open', name: 'Open one', verdict: null } as Feature;
+    data.features = [...data.features, ...decided, open];
+    mockApi({ me: owner, state: () => ok(liveState(Object.fromEntries([...decided, open].map((feature, i) => [50 + i, issue({ entry: feature.id, title: feature.name })])))) });
     history.replaceState(null, '', '/workshop#computers');
     render(<App data={data} />);
     await waitFor(() => expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent(/to decide/));
-    // Two undecided entries and four carried over, one of each status: six to decide, nothing else.
-    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent(/^6 to decide$/);
+    // `computers`, `exec` and the new open one wait; the decided ones count as what their file says.
+    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('1 planned · 3 to decide · 1 later · 1 dropped');
   });
 });

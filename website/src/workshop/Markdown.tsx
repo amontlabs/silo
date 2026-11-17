@@ -18,8 +18,8 @@ const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
 const FENCE = /^\s*(```|~~~)/;
 
-/** A link to anything but http or https keeps only its label. */
-const plainLinks = (text: string) => text.replace(/\[([^\]\n]+)\]\((?!https?:\/\/)[^)\n]*\)/g, '$1');
+/** A link to anything but http or https keeps only its label (the address may hold one level of parentheses). */
+const plainLinks = (text: string) => text.replace(/\[([^\]\n]+)\]\((?!https?:\/\/)(?:[^()\n]|\([^()\n]*\))*\)/g, '$1');
 
 /** The blocks of a Markdown text, in one pass over its lines. */
 export function parseMarkdown(source: string): Block[] {

@@ -52,12 +52,13 @@ describe('a row named by the address', () => {
 });
 
 describe('the owner\'s tally', () => {
-  it('counts an entry to confirm once, as to decide', async () => {
+  it('counts an entry decided by its file as planned, never as to decide', async () => {
     mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#engine/calls');
     await renderApp();
     await ownerOn('Every call defined once');
-    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent(/^1 planned · 1 to decide$/);
+    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent(/^2 planned$/);
+    expect(within(itemOf('Every call defined once')).queryByText('to decide')).not.toBeInTheDocument();
   });
 });
 
