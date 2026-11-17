@@ -172,12 +172,21 @@ What a person sees:
   by the address opens at once when a live state is shown (remembered or
   answered); with none yet, it waits closed until the first answer. An address
   naming something the state shown lacks falls back to the plan only once the
-  load has answered or failed.
+  load has answered or failed, and the `fresh=1` ask has too when one was made.
+  The person's own vote on an opened row is checked only once `me` has answered
+  on this visit, so a session found gone on page load says nothing. The suggest
+  form shows whenever the person is shown signed in and keeps its draft; it
+  sends only while a state is shown.
 - What the page shows first: the plan is in the bundle. The live state (votes,
   comments, suggestions, the owner's marks) and who is signed in come from
   `GET state` and `GET me`, and the page remembers both in local storage
-  (`memory.ts`): the last state it showed, its own confirmed writes applied, and
-  the signed-in login, avatar and whether they decide. Both are drawn in the
+  (`memory.ts`): the newest answer as the server sent it, and the signed-in
+  login, avatar and whether they decide. The page's own confirmed writes are
+  kept apart (`writes.ts`), as a list with each one's time: values set (a
+  verdict, a new suggestion) and count changes (a vote +1 or -1, a comment +1),
+  never a count. What the page shows is the answer with every write applied in
+  order, except those the answer was fetched more than a minute after; a write
+  is dropped after a day, the page's own comments after six minutes. Both are drawn in the
   first frame. The person is used only while the `workshop-hint` cookie is
   there, and forgotten on sign-out, on a 401 and when `me` answers signed out; a
   state over 7 days old or of another shape is ignored. Without the cookie the
@@ -272,7 +281,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `AreaView.tsx`, `Suggest.tsx`, `Latest.tsx`, `Decisions.tsx` | An opened area and what is not carried over, the suggestions, the latest changes, the decisions. |
 | `Entry.tsx` | One row and what it shows open: notes, decisions, the thread with its history lines. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses, the rows on top of the plan's model, the drawing, the build-time reader. |
-| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (kept a day over older states, its comments six minutes), the remembered state and person, text from GitHub, notes, the fallback list. |
+| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set and count changes, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |
 
 ## Storage
 

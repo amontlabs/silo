@@ -451,13 +451,14 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   useEffect(() => {
     if (wantedHash.current === null) return;
     if (resolveHash(wantedHash.current, plan, rowByKey)) follow();
-    else if (live.load !== 'pending') {
-      // A link to something that the state shown does not have falls back to the plan, once the load has ended.
+    else if (w.settled) {
+      // A link to something that the state shown does not have falls back to the plan, once the load has ended
+      // (the `fresh=1` ask included, when one was made: what was just suggested may be only in that answer).
       wantedHash.current = null;
       history.replaceState(history.state, '', address());
       settle(HOME, null);
     }
-  }, [plan, rowByKey, live.load, follow]);
+  }, [plan, rowByKey, w.settled, follow]);
   useEffect(() => {
     const key = heldOpen.current;
     if (holding || !key) return;

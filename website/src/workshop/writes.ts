@@ -1,99 +1,147 @@
-// What the page wrote itself. A `state` answer can come from a cache up to a day old, and the page shows the state
-// it remembers before any answer, so the page's own values for an issue win over any state fetched before the
-// write (with a minute's room for the server's clock), across reloads too, for a day at most. Its own comments
-// are added to an `issue` answer that does not carry them yet, for six minutes.
+// What the page wrote itself, kept apart from what the server answered. A `state` answer can come from a cache up
+// to a day old, and the page shows the answer it remembers before any new one, so the page's own writes are kept
+// as a list, each with its time: values set on an issue (a whole issue for a new suggestion) and changes to a
+// count, never an absolute count. The state shown is the newest answer with every write applied in order, except
+// the writes the answer was fetched more than a minute after (a minute's room for the server's clock); a write is
+// dropped after a day. Applying is repeatable: the same answer and the same list give the same state. The page's
+// own comments are added to an `issue` answer that does not carry them yet, for six minutes.
 import type { Comment } from './api';
 import type { LiveIssue, LiveState } from './plan';
 
 /** How long the page's own comments are added to an answer. */
 export const KEEP_MS = 6 * 60_000;
-/** How long the page's own values for an issue are kept. */
+/** How long a write to an issue is kept. */
 export const KEEP_FIELDS_MS = 24 * 3600_000;
 /** A state fetched more than this after a write already holds it. */
 export const NEWER_MS = 60_000;
-const KEY = 'silo-workshop-writes';
+const KEY = 'silo-workshop-writes-2';
+/** The store before writes were a list; its comments and set values are carried over, its counts are not. */
+const OLD_KEY = 'silo-workshop-writes';
 
-export interface Kept {
-  /** When the issue's fields were last written. */
+type Settable = Omit<Partial<LiveIssue>, 'up' | 'comments'>;
+
+export interface Write {
+  n: number;
   at: number;
-  /** Fields of the issue after the write; a whole issue for a new suggestion. */
-  issue: Partial<LiveIssue>;
-  comments: Comment[];
-  /** When a comment was last added; older entries have only `at`. */
-  commentsAt?: number;
+  /** Values set on the issue; a whole issue for a new suggestion. */
+  set?: Settable | LiveIssue;
+  /** Changes to its counts. */
+  add?: { up?: number; comments?: number };
 }
 
-type Store = Record<string, Kept>;
+interface Store {
+  writes: Write[];
+  comments: { n: number; at: number; comment: Comment }[];
+}
 
-const commentsAt = (kept: Kept) => kept.commentsAt ?? kept.at;
-const fieldsFresh = (kept: Kept, now: number) => now >= kept.at && now - kept.at < KEEP_FIELDS_MS;
-const commentsFresh = (kept: Kept, now: number) => now >= commentsAt(kept) && now - commentsAt(kept) < KEEP_MS;
+const empty = (): Store => ({ writes: [], comments: [] });
+// The store as last written, used only once storage has refused it: the page keeps its writes until it reloads.
+let held: Store | null = null;
+let refused = false;
+
+function fresh(store: Store, now: number): Store {
+  return {
+    writes: store.writes.filter((write) => now >= write.at && now - write.at < KEEP_FIELDS_MS),
+    comments: store.comments.filter((kept) => now >= kept.at && now - kept.at < KEEP_MS),
+  };
+}
+
+function valid(raw: unknown): Store {
+  const store = empty();
+  if (typeof raw !== 'object' || raw === null) return store;
+  const { writes, comments } = raw as Partial<Store>;
+  if (Array.isArray(writes)) store.writes = writes.filter((w) => w && typeof w.n === 'number' && typeof w.at === 'number');
+  if (Array.isArray(comments)) store.comments = comments.filter((c) => c && typeof c.n === 'number' && typeof c.at === 'number' && c.comment);
+  return store;
+}
+
+/** The older store: per issue, one time, fields and comments. */
+function carried(): Store {
+  const store = empty();
+  try {
+    const raw = JSON.parse(localStorage.getItem(OLD_KEY) ?? '{}') as Record<string, { at?: unknown; issue?: Partial<LiveIssue>; comments?: Comment[] }>;
+    for (const [key, kept] of Object.entries(raw)) {
+      const n = Number(key);
+      if (!kept || typeof kept.at !== 'number' || !Number.isFinite(n)) continue;
+      const { up: _up, comments: _comments, ...set } = kept.issue ?? {};
+      if (Object.keys(set).length) store.writes.push({ n, at: kept.at, set });
+      for (const comment of kept.comments ?? []) store.comments.push({ n, at: kept.at, comment });
+    }
+  } catch {
+    // Nothing to carry over.
+  }
+  return store;
+}
 
 function read(now: number): Store {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Store;
-    const fresh: Store = {};
-    for (const [n, kept] of Object.entries(raw)) {
-      if (!kept || typeof kept.at !== 'number' || !kept.issue || !Array.isArray(kept.comments)) continue;
-      const fields = fieldsFresh(kept, now);
-      const comments = commentsFresh(kept, now);
-      if (fields || comments) fresh[n] = { ...kept, issue: fields ? kept.issue : {}, comments: comments ? kept.comments : [] };
-    }
-    return fresh;
+    if (refused && held) return fresh(held, now);
+    const raw = localStorage.getItem(KEY);
+    return fresh(raw === null ? carried() : valid(JSON.parse(raw)), now);
   } catch {
-    return {};
+    return fresh(held ?? empty(), now);
   }
 }
 
 function write(store: Store) {
+  held = store;
   try {
     localStorage.setItem(KEY, JSON.stringify(store));
+    localStorage.removeItem(OLD_KEY);
   } catch {
-    // Without storage the page still keeps its values until it reloads.
+    // Without storage the page still keeps its writes until it reloads.
+    refused = true;
   }
 }
 
-export function keep(n: number, issue: Partial<LiveIssue>, now: number, comment?: Comment) {
+/** Keeps a write the server confirmed, and the page's own comment with it. */
+export function keep(write$: Omit<Write, 'at'>, now: number, comment?: Comment) {
+  if (write$.n <= 0) return;
   const store = read(now);
-  const current = store[n];
-  const fields = Object.keys(issue).length > 0;
-  store[n] = {
-    at: fields || !current ? now : current.at,
-    issue: { ...current?.issue, ...issue },
-    comments: comment ? [...(current?.comments ?? []), comment] : current?.comments ?? [],
-    commentsAt: comment ? now : current ? commentsAt(current) : now,
-  };
+  store.writes.push({ ...write$, at: now });
+  if (comment) store.comments.push({ n: write$.n, at: now, comment });
   write(store);
 }
 
-function isWhole(issue: Partial<LiveIssue>): issue is LiveIssue {
-  return typeof issue.kind === 'string' && typeof issue.title === 'string' && typeof issue.state === 'string';
+function isWhole(issue: Settable | LiveIssue): issue is LiveIssue {
+  return typeof issue.kind === 'string' && typeof issue.title === 'string' && typeof issue.state === 'string'
+    && typeof (issue as LiveIssue).up === 'number' && typeof (issue as LiveIssue).comments === 'number';
 }
 
-/** The state with the page's own writes over it, except where the state was fetched well after them. */
+/** The answer with the page's own writes applied, in order, except those it was fetched well after. */
 export function applyKept(state: LiveState, now: number): LiveState {
-  const store = read(now);
   const fetched = Date.parse(state.fetchedAt);
+  const writes = read(now).writes.filter((write) => !(fetched > write.at + NEWER_MS)).sort((a, b) => a.at - b.at);
+  if (!writes.length) return state;
   const issues = { ...state.issues };
-  for (const [n, kept] of Object.entries(store)) {
-    if (!Object.keys(kept.issue).length || fetched > kept.at + NEWER_MS) continue;
-    const base = issues[n];
-    if (base) issues[n] = { ...base, ...kept.issue };
-    else if (isWhole(kept.issue)) issues[n] = kept.issue;
+  for (const write of writes) {
+    let issue = issues[write.n];
+    if (write.set) {
+      if (issue) issue = { ...issue, ...write.set };
+      else if (isWhole(write.set)) issue = write.set;
+    }
+    if (issue && write.add) {
+      issue = {
+        ...issue,
+        up: Math.max(0, issue.up + (write.add.up ?? 0)),
+        comments: Math.max(0, issue.comments + (write.add.comments ?? 0)),
+      };
+    }
+    if (issue) issues[write.n] = issue;
   }
   return { ...state, issues };
 }
 
-/** What the page shows after an answer: the answer with the page's writes over it, unless the state shown is newer. */
-export function afterAnswer(shown: LiveState | null, answer: LiveState, now: number): LiveState {
-  if (shown && Date.parse(shown.fetchedAt) > Date.parse(answer.fetchedAt)) return shown;
+/** The answer to keep after another: the newer of the two by `fetchedAt`, as the server sent it. */
+export function newerAnswer(current: LiveState | null, answer: LiveState): LiveState {
+  if (current && Date.parse(current.fetchedAt) > Date.parse(answer.fetchedAt)) return current;
   const { old: _old, ...next } = answer;
-  return applyKept({ ...next, issues: next.issues ?? {} }, now);
+  return { ...next, issues: next.issues ?? {} };
 }
 
 /** The page's own comments that a cached answer does not carry yet. */
 export function keptComments(n: number, comments: Comment[], now: number): Comment[] {
-  const mine = read(now)[n]?.comments ?? [];
+  const mine = read(now).comments.filter((kept) => kept.n === n).map((kept) => kept.comment);
   const missing = mine.filter((own) => !comments.some((c) => c.author === own.author && c.text.trim() === own.text.trim()));
   return missing.length ? [...comments, ...missing] : comments;
 }

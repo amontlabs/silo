@@ -11,12 +11,13 @@ export function SuggestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack
   if (w.me === undefined) {
     // Who is signed in is not known yet: the form's room is held.
     form = <div className="ws-form" aria-busy="true"><div className="ws-ph ws-ph-form" aria-hidden="true" /></div>;
-  } else if (w.me && (w.liveOk || w.waiting)) {
+  } else if (w.me) {
+    // Shown whenever the person is, and its draft kept; it sends only once a state is shown.
     form = (
       <form className="ws-form ws-late-p" onSubmit={(event) => void w.sendSuggestion(event)}>
         <input aria-label="Title" placeholder="Name it" maxLength={120} required value={suggestDraft.title} onChange={(event) => setSuggestDraft({ ...suggestDraft, title: event.target.value })} />
         <textarea aria-label="Why" placeholder="What should it do, and why?" maxLength={5000} rows={2} value={suggestDraft.text} onChange={(event) => setSuggestDraft({ ...suggestDraft, text: event.target.value })} />
-        <div><button type="submit" className="ws-btn go" disabled={!suggestDraft.title.trim()}>Suggest</button></div>
+        <div><button type="submit" className="ws-btn go" disabled={!suggestDraft.title.trim() || !w.liveOk}>Suggest</button></div>
       </form>
     );
   } else if (w.me === null) {

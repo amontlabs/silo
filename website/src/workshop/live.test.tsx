@@ -7,9 +7,9 @@ import { App, OPEN_GUARD_MS } from './App';
 import type { Me } from './api';
 import { buildData, issue, liveState } from './fixtures';
 import type { LiveState } from './plan';
-import { clock, itemOf, mockApi, ok, owner, part, posts, renderApp, rowButton } from './test-support';
+import { clock, itemOf, mockApi, ok, owner, part, posts, renderApp, rowButton, visitor } from './test-support';
 import { loadConfig } from './useWorkshop';
-import { afterAnswer, keep } from './writes';
+import { applyKept, keep, newerAnswer } from './writes';
 
 const STATE = 'silo-workshop-state';
 const PERSON = 'silo-workshop-me';
@@ -98,13 +98,13 @@ describe('the first frame', () => {
   it('forgets a remembered person without the session marker, and when `me` answers signed out', async () => {
     remember(liveState(), owner);
     mockApi();
-    await renderApp();
+    const first = await renderApp();
     expect(screen.queryByText('polarzero')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
+    first.unmount();
     marker();
     localStorage.setItem(PERSON, JSON.stringify(owner));
     mockApi({ routes: { 'GET me': () => ({ status: 401, body: { error: 'unauthorized' } }) } });
-    document.body.innerHTML = '';
     await renderApp();
     expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
     expect(localStorage.getItem(PERSON)).toBeNull();
@@ -123,7 +123,7 @@ describe('the first frame', () => {
     expect(document.querySelector('.ws-ph-vote')).toBeInTheDocument();
   });
 
-  it('remembers what it showed, its own writes applied, for the next visit', async () => {
+  it('remembers the answer and, apart, its own writes, and shows both on the next visit', async () => {
     const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#computers');
     const first = await renderApp();
@@ -136,6 +136,8 @@ describe('the first frame', () => {
     render(<App data={buildData()} />);
     expect(votes('Create and delete a computer')).toBe('👍 13');
     expect(screen.getByText('polarzero')).toBeInTheDocument();
+    // The answer is remembered as it came.
+    expect(JSON.parse(localStorage.getItem(STATE) ?? '{}').issues[12].up).toBe(12);
   });
 });
 
@@ -234,59 +236,131 @@ describe('the load', () => {
 });
 
 describe('the page\'s own writes over an answer', () => {
-  it('win over a state fetched before them, not over one fetched more than a minute after', async () => {
+  const computers = (up: number) => liveState({ 12: issue({ entry: 'computers', title: 'Create and delete a computer', up, comments: 5, updates: 3 }) });
+
+  it('count a vote from the server\'s number, not from a remembered one: remembered 12, real 20', async () => {
     const time = clock();
-    keep(12, { up: 13 }, Date.now());
-    const base = liveState();
-    const before = afterAnswer(null, { ...base, fetchedAt: at(Date.now() - 5 * 60_000) }, Date.now());
-    expect(before.issues[12].up).toBe(13);
-    const within = afterAnswer(null, { ...base, fetchedAt: at(Date.now() + 50_000) }, Date.now() + 50_000);
-    expect(within.issues[12].up).toBe(13);
+    marker();
+    remember({ ...computers(12), fetchedAt: at(Date.now() - 86_400_000) }, visitor);
+    const cdn = held<{ status: number; body: unknown; headers?: Record<string, string> }>();
+    const fresh = held<{ status: number; body: unknown }>();
+    const calls = mockApi({ me: visitor, state: (url) => (url.searchParams.get('fresh') === '1' ? fresh.promise : cdn.promise) });
+    history.replaceState(null, '', '/workshop#computers');
+    const first = render(<App data={buildData()} />);
+    expect(votes('Create and delete a computer')).toBe('👍 12');
+    // The visitor votes at once, before any answer.
+    fireEvent.click(screen.getByRole('button', { name: '12 votes' }));
+    await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
+    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 13'));
+    // The CDN's copy, fetched five minutes ago: 20, and the vote over it.
+    await act(async () => cdn.release({ status: 200, body: { ...computers(20), fetchedAt: at(Date.now() - 5 * 60_000) }, headers: { Age: '300' } }));
+    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 21'));
+    // The fresh answer, which counts the vote: 21.
     time.advance(2 * 60_000);
-    const after = afterAnswer(null, { ...base, fetchedAt: at(Date.now()) }, Date.now());
-    expect(after.issues[12].up).toBe(12);
-    // A day later the write is gone, whatever the state.
-    time.advance(24 * 3600_000);
-    expect(afterAnswer(null, { ...base, fetchedAt: at(0) }, Date.now()).issues[12].up).toBe(12);
+    await act(async () => fresh.release(ok({ ...computers(21), fetchedAt: at(Date.now()) })));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STATE) ?? '{}').issues[12].up).toBe(21));
+    expect(votes('Create and delete a computer')).toBe('👍 21');
+    first.unmount();
+    const next = held<{ status: number; body: unknown }>();
+    mockApi({ me: visitor, state: () => next.promise });
+    render(<App data={buildData()} />);
+    expect(votes('Create and delete a computer')).toBe('👍 21');
   });
 
-  it('hold on every path: random answers, writes and time, never back in time, own writes until a newer state', () => {
-    // The reference: the state shown is the newest answer accepted; issue 12 shows the page's own last write when
-    // that answer was fetched no later than a minute after it and the write is under a day old, else the answer's.
-    // A write also changes the state shown at once, as the page does.
+  it('keep changes, not counts: a vote and its removal leave the answer\'s number', () => {
+    clock();
+    keep({ n: 12, add: { up: 1 } }, Date.now());
+    expect(applyKept({ ...computers(12), fetchedAt: at(Date.now()) }, Date.now()).issues[12].up).toBe(13);
+    keep({ n: 12, add: { up: -1 } }, Date.now());
+    const answer = { ...computers(30), fetchedAt: at(Date.now() - 60_000) };
+    expect(applyKept(answer, Date.now()).issues[12].up).toBe(30);
+    // Repeatable: the same answer and the same list give the same state.
+    expect(applyKept(answer, Date.now())).toEqual(applyKept(answer, Date.now()));
+    expect(answer.issues[12].up).toBe(30);
+  });
+
+  it('keep a new suggestion over a remembered state and a cached answer that lack it', async () => {
+    clock();
+    const suggestion = issue({ kind: 'suggestion', title: 'A new idea', author: 'mara-k', bot: false });
+    keep({ n: 40, set: suggestion }, Date.now());
+    expect(applyKept({ ...liveState(), fetchedAt: at(Date.now() - 86_400_000) }, Date.now()).issues[40]).toEqual(suggestion);
+    expect(applyKept({ ...liveState(), fetchedAt: at(Date.now() + 30_000) }, Date.now()).issues[40]).toEqual(suggestion);
+    remember({ ...liveState(), fetchedAt: at(Date.now() - 3600_000) });
+    const answer = held<{ status: number; body: unknown }>();
+    mockApi({ state: () => answer.promise });
+    history.replaceState(null, '', '/workshop#suggested');
+    render(<App data={buildData()} />);
+    expect(screen.getByRole('button', { name: /^A new idea/ })).toBeInTheDocument();
+    await act(async () => answer.release(ok({ ...liveState(), fetchedAt: at(Date.now() - 5 * 60_000) })));
+    expect(screen.getByRole('button', { name: /^A new idea/ })).toBeInTheDocument();
+  });
+
+  it('carry over the older store\'s set values and comments, never its counts', () => {
+    clock();
+    localStorage.setItem('silo-workshop-writes', JSON.stringify({ 12: { at: Date.now(), issue: { up: 99, comments: 9, verdict: 'take' }, comments: [] } }));
+    const shown = applyKept({ ...computers(12), fetchedAt: at(Date.now()) }, Date.now());
+    expect(shown.issues[12]).toMatchObject({ up: 12, comments: 5, verdict: 'take' });
+  });
+
+  it('give way to an answer fetched more than a minute after them, and are dropped after a day', () => {
+    const time = clock();
+    keep({ n: 12, set: { verdict: 'take' } }, Date.now());
+    keep({ n: 12, add: { up: 1 } }, Date.now());
+    const base = computers(12);
+    expect(applyKept({ ...base, fetchedAt: at(Date.now() - 5 * 60_000) }, Date.now()).issues[12]).toMatchObject({ up: 13, verdict: 'take' });
+    expect(applyKept({ ...base, fetchedAt: at(Date.now() + 50_000) }, Date.now() + 50_000).issues[12]).toMatchObject({ up: 13, verdict: 'take' });
+    time.advance(2 * 60_000);
+    expect(applyKept({ ...base, fetchedAt: at(Date.now()) }, Date.now()).issues[12]).toMatchObject({ up: 12, verdict: null });
+    time.advance(24 * 3600_000);
+    expect(applyKept({ ...base, fetchedAt: at(0) }, Date.now()).issues[12]).toMatchObject({ up: 12, verdict: null });
+  });
+
+  it('hold on every path: random answers, writes and time; the newest answer kept as it came, writes applied in order', () => {
+    // The reference: the answer kept is the newest by fetchedAt, unchanged. Issue 12 shown is that answer with every
+    // write under a day old that the answer was not fetched more than a minute after, in order: a count change
+    // (never below 0) or a verdict set.
     let seed = 7;
     const random = () => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return seed / 2 ** 31; };
     for (let run = 0; run < 50; run += 1) {
       localStorage.clear();
       const time = clock();
-      let shown = null as LiveState | null;
-      let model = null as { fetched: number; up: number } | null;
-      let write = null as { at: number; up: number } | null;
+      let kept = null as LiveState | null;
+      let model = null as { fetched: number; up: number; verdict: 'take' | 'later' | null } | null;
+      const writes: { at: number; up?: number; verdict?: 'take' | 'later' }[] = [];
       for (let step = 0; step < 40; step += 1) {
         const roll = random();
-        if (roll < 0.25) {
-          write = { at: Date.now(), up: 100 + Math.floor(random() * 100) };
-          keep(12, { up: write.up }, Date.now());
-          if (shown && model) {
-            shown = { ...shown, issues: { ...shown.issues, 12: { ...shown.issues[12], up: write.up } } };
-            model = { ...model, up: write.up };
-          }
+        if (roll < 0.2) {
+          const up = random() < 0.5 ? 1 : -1;
+          writes.push({ at: Date.now(), up });
+          keep({ n: 12, add: { up } }, Date.now());
+        } else if (roll < 0.3) {
+          const verdict = random() < 0.5 ? 'take' : 'later';
+          writes.push({ at: Date.now(), verdict });
+          keep({ n: 12, set: { verdict } }, Date.now());
         } else if (roll < 0.75) {
           const fetched = Date.now() - Math.floor(random() * 10 * 60_000) + Math.floor(random() * 3 * 60_000);
-          const serverUp = Math.floor(random() * 100);
-          const answer = liveState({ 12: issue({ entry: 'computers', title: 'Create and delete a computer', up: serverUp }) });
-          shown = afterAnswer(shown, { ...answer, fetchedAt: at(fetched), old: random() < 0.5 }, Date.now());
-          if (!model || fetched >= model.fetched) {
-            const own = write && fetched <= write.at + 60_000 && Date.now() - write.at < 24 * 3600_000;
-            model = { fetched, up: own && write ? write.up : serverUp };
-          }
+          const up = Math.floor(random() * 5);
+          const answer = { ...computers(up), fetchedAt: at(fetched), old: random() < 0.5 };
+          kept = newerAnswer(kept, answer);
+          if (!model || fetched >= model.fetched) model = { fetched, up, verdict: null };
         } else {
           time.advance(Math.floor(random() * (random() < 0.1 ? 30 * 3600_000 : 4 * 60_000)));
         }
-        if (!shown || !model) continue;
-        expect(Date.parse(shown.fetchedAt)).toBe(model.fetched);
-        expect(shown.issues[12].up).toBe(model.up);
-        expect(shown.old).toBeUndefined();
+        if (!kept || !model) continue;
+        expect(Date.parse(kept.fetchedAt)).toBe(model.fetched);
+        expect(kept.issues[12].up).toBe(model.up);
+        expect(kept.old).toBeUndefined();
+        let up = model.up;
+        let verdict = model.verdict;
+        for (const write of writes) {
+          if (Date.now() - write.at >= 24 * 3600_000 || model.fetched > write.at + 60_000) continue;
+          if (write.up !== undefined) up = Math.max(0, up + write.up);
+          if (write.verdict) verdict = write.verdict;
+        }
+        const shown = applyKept(kept, Date.now());
+        expect(shown.issues[12].up).toBe(up);
+        expect(shown.issues[12].verdict).toBe(verdict);
+        expect(applyKept(kept, Date.now())).toEqual(shown);
       }
       vi.restoreAllMocks();
     }
@@ -315,6 +389,22 @@ describe('verdicts and `me`', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /^Take/ })).not.toHaveClass('ws-unarmed'));
     fireEvent.click(screen.getByRole('button', { name: /^Take/ }));
     expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
+  });
+
+  it('say nothing on page load when the session is gone: the vote check waits for `me`', async () => {
+    marker();
+    remember(liveState(), visitor);
+    const unauthorized = () => ({ status: 401, body: { error: 'unauthorized', message: 'Sign in again.' } });
+    const calls = mockApi({ routes: { 'GET me': unauthorized, 'GET vote': unauthorized } });
+    history.replaceState(null, '', '/workshop#computers/computers');
+    render(<App data={buildData()} />);
+    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sign in again.')).not.toBeInTheDocument();
+    expect(calls.some((call) => call.path === 'vote')).toBe(false);
+    expect(localStorage.getItem(PERSON)).toBeNull();
   });
 
   it('follow `me` when it answers differently from memory', async () => {
@@ -363,5 +453,61 @@ describe('addresses', () => {
     await act(async () => answer.release(ok(liveState())));
     await waitFor(() => expect(location.hash).toBe(''));
     expect(part('engine')).toBeInTheDocument();
+  });
+});
+
+describe('a link to what only the fresh answer has', () => {
+  for (const [label, freshOk] of [['opens it once the fresh answer has it', true], ['falls back to the plan when the fresh ask fails', false]] as const) {
+    it(label, async () => {
+      const fresh = held<{ status: number; body: unknown }>();
+      mockApi({ state: (url) => (url.searchParams.get('fresh') === '1' ? fresh.promise : ok({ ...liveState(), old: true })) });
+      history.replaceState(null, '', '/workshop#suggested/issue-57');
+      render(<App data={buildData()} />);
+      await waitFor(() => expect(document.querySelector('.ws[data-live="answered"]')).not.toBeNull());
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(location.hash).toBe('#suggested/issue-57');
+      await act(async () => fresh.release(freshOk
+        ? ok(liveState({ 57: issue({ kind: 'suggestion', title: 'Just suggested', author: 'lin-qi', bot: false }) }))
+        : { status: 502, body: { error: 'github', message: 'GitHub failed.' } }));
+      if (freshOk) {
+        await waitFor(() => expect(rowButton('Just suggested')).toHaveAttribute('aria-expanded', 'true'));
+        expect(location.hash).toBe('#suggested/issue-57');
+      } else {
+        await waitFor(() => expect(location.hash).toBe(''));
+      }
+    });
+  }
+});
+
+describe('the suggest form', () => {
+  it('shows for the person while no state is shown, keeps the draft, and sends once the state is in', async () => {
+    marker();
+    localStorage.setItem(PERSON, JSON.stringify(visitor));
+    const answer = held<{ status: number; body: unknown }>();
+    const calls = mockApi({ me: visitor, state: () => answer.promise, routes: { 'POST suggest': () => ok({ number: 77 }) } });
+    history.replaceState(null, '', '/workshop#suggested');
+    render(<App data={buildData()} />);
+    await userEvent.type(screen.getByRole('textbox', { name: 'Title' }), 'An idea');
+    const send = screen.getByRole('button', { name: 'Suggest' });
+    expect(send).toBeDisabled();
+    fireEvent.submit(send.closest('form') as HTMLFormElement);
+    expect(posts(calls, 'suggest')).toHaveLength(0);
+    expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('An idea');
+    await act(async () => answer.release(ok(liveState())));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Suggest' })).toBeEnabled());
+    await userEvent.click(screen.getByRole('button', { name: 'Suggest' }));
+    await waitFor(() => expect(posts(calls, 'suggest')).toHaveLength(1));
+  });
+
+  it('stays, with its draft, after a failed load', async () => {
+    marker();
+    localStorage.setItem(PERSON, JSON.stringify(visitor));
+    mockApi({ me: visitor, state: () => ({ status: 503, body: { error: 'not_configured', message: 'Not set up.' } }) });
+    history.replaceState(null, '', '/workshop#suggested');
+    render(<App data={buildData()} />);
+    await userEvent.type(screen.getByRole('textbox', { name: 'Title' }), 'Kept');
+    await waitFor(() => expect(document.querySelector('.ws[data-live="failed"]')).not.toBeNull());
+    expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Kept');
+    expect(screen.getByRole('button', { name: 'Suggest' })).toBeDisabled();
   });
 });

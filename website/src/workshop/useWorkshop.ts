@@ -5,7 +5,8 @@ import type { FormEvent, MutableRefObject } from 'react';
 import { api, ApiError, hasSessionHint } from './api';
 import type { Comment, IssueDetail, Me } from './api';
 import { recallPerson, recallState, rememberPerson, rememberState } from './memory';
-import { afterAnswer, applyKept, keep, keptComments } from './writes';
+import { applyKept, keep, keptComments, newerAnswer } from './writes';
+import type { Write } from './writes';
 import { allRows, buildPlan } from './plan';
 import type { BuildData, LiveIssue, LiveState, Notes, Row, Verdict } from './plan';
 
@@ -57,10 +58,14 @@ function verdictPatch(verdict: Verdict | null): Partial<LiveIssue> {
 }
 
 export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, nav: MutableRefObject<Nav>, loadNotes: () => Promise<Notes> = () => Promise.resolve({})) {
-  const [live, setLive] = useState<Live>(() => {
-    const remembered = recallState(Date.now());
-    return { load: 'pending', state: remembered ? applyKept(remembered, Date.now()) : null };
-  });
+  // The newest answer as the server sent it (or as remembered), how the load stands, and whether a `fresh=1` ask is
+  // still out. What the page shows is that answer with the page's own writes applied (writes.ts).
+  const [loaded, setLoaded] = useState<{ load: Live['load']; answer: LiveState | null; fresh: boolean }>(() => ({ load: 'pending', answer: recallState(Date.now()), fresh: false }));
+  const [writesTick, setWritesTick] = useState(0);
+  const shownState = useMemo(() => (loaded.answer ? applyKept(loaded.answer, Date.now()) : null), [loaded.answer, writesTick]);
+  const live: Live = useMemo(() => ({ load: loaded.load, state: shownState }), [loaded.load, shownState]);
+  /** The load has ended, the `fresh=1` ask included when one was made. */
+  const settled = loaded.load !== 'pending' && !loaded.fresh;
   const [answer, setMe] = useState<MeAnswer>(undefined);
   // The person remembered from the last visit, for display until `me` answers; without the session marker, nobody.
   const [remembered] = useState(recallPerson);
@@ -104,9 +109,9 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const mounted = useRef(true);
   const loading = useRef(false);
   const show = useCallback((state: LiveState) => {
-    setLive((current) => {
-      const next = afterAnswer(current.state, state, Date.now());
-      return next === current.state ? current : { ...current, state: next };
+    setLoaded((current) => {
+      const next = newerAnswer(current.answer, state);
+      return next === current.answer ? current : { ...current, answer: next };
     });
   }, []);
   const askMe = useCallback(() => {
@@ -118,7 +123,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const load = useCallback(async () => {
     if (loading.current) return;
     loading.current = true;
-    setLive((current) => (current.load === 'pending' ? current : { ...current, load: 'pending' }));
+    setLoaded((current) => (current.load === 'pending' ? current : { ...current, load: 'pending' }));
     let first: LiveState | null = null;
     try {
       first = await api.state();
@@ -131,15 +136,17 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     loading.current = false;
     if (!mounted.current) return;
     if (!first) {
-      setLive((current) => ({ ...current, load: 'failed' }));
+      setLoaded((current) => ({ ...current, load: 'failed' }));
       setOffline(true);
       return;
     }
     setOffline(false);
     show(first);
-    setLive((current) => ({ ...current, load: 'answered' }));
     const old = first.old === true || Date.now() - Date.parse(first.fetchedAt) > OLD_MS;
-    if (old) api.state(true).then((fresh) => { if (mounted.current) show(fresh); }, () => {});
+    setLoaded((current) => ({ ...current, load: 'answered', fresh: old }));
+    if (!old) return;
+    const done = () => { if (mounted.current) setLoaded((current) => ({ ...current, fresh: false })); };
+    api.state(true).then((fresh) => { if (mounted.current) show(fresh); done(); }, done);
   }, [show]);
   useEffect(() => {
     mounted.current = true;
@@ -154,9 +161,10 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   }, [load, askMe, answer]);
 
   // What the page shows is what the next visit shows first. The person is forgotten once known to be signed out.
+  // The answer is remembered as it came; the page's writes are kept apart and applied again on the next visit.
   useEffect(() => {
-    if (live.state) rememberState(live.state);
-  }, [live.state]);
+    if (loaded.answer) rememberState(loaded.answer);
+  }, [loaded.answer]);
   useEffect(() => {
     if (answer === null || (answer !== undefined && answer !== 'error')) rememberPerson(answer);
   }, [answer]);
@@ -166,16 +174,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     const timer = setTimeout(() => setNotice(null), NOTICE_MS);
     return () => clearTimeout(timer);
   }, [notice]);
-
-  const patchIssue = useCallback((n: number, patch: (issue: LiveIssue) => Partial<LiveIssue> | null) => {
-    setLive((current) => {
-      const issue = current.state?.issues[n];
-      if (!current.state || !issue) return current;
-      const change = patch(issue);
-      if (!change) return current;
-      return { ...current, state: { ...current.state, issues: { ...current.state.issues, [n]: { ...issue, ...change } } } };
-    });
-  }, []);
 
   // An issue's comments: fetched on every opening, in the background when some are already shown; a pointer
   // over the row or focus on it starts the fetch early, and a fetch younger than FRESH_MS counts as that opening's.
@@ -222,8 +220,9 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     if (liveOk && row?.issue != null) loadDetail(row.issue);
     // The plan changing under the same open row does not load again.
   }, [liveOk, openKey, openings, loadDetail]);
-  // One check of the person's own vote per opening of a row, never retried: a failure leaves 👍 off.
-  const signedInAs = me?.login ?? null;
+  // One check of the person's own vote per opening of a row, never retried: a failure leaves 👍 off. It waits for
+  // `me` to answer on this visit (not the remembered person), and a session found gone there says nothing.
+  const signedInAs = meKnown && answer ? answer.login : null;
   useEffect(() => {
     const row = openKey ? rowByKey.get(openKey) : undefined;
     const n = row?.issue;
@@ -231,7 +230,11 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     api.myVote(n).then(
       (on) => setVotes((current) => (n in current ? current : { ...current, [n]: on })),
       (error) => {
-        if (error instanceof ApiError && error.status === 401) signedOut();
+        if (error instanceof ApiError && error.status === 401) {
+          setMe(null);
+          setVotes({});
+          rememberPerson(null);
+        }
       },
     );
     // Re-rendering, or the plan changing under the same open row, does not ask again.
@@ -243,12 +246,10 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setPending(new Set(pendingRef.current));
   };
 
-  const liveRef = useRef(live);
-  liveRef.current = live;
-  /** The issue as confirmed so far, for computing what a confirmed write changes. */
-  const confirmedIssue = (n: number) => liveRef.current.state?.issues[n];
-  const remember = (n: number, fields: Partial<LiveIssue>, comment?: Comment) => {
-    if (n > 0) keep(n, fields, Date.now(), comment);
+  /** A write the server confirmed: kept, and shown at once over the answer. */
+  const remember = (write: Omit<Write, 'at'>, comment?: Comment) => {
+    keep(write, Date.now(), comment);
+    setWritesTick((tick) => tick + 1);
   };
 
   function signedOut() {
@@ -308,8 +309,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     try {
       await api.verdict(n, verdict);
       const confirmed = verdictPatch(verdict);
-      patchIssue(n, () => confirmed);
-      remember(n, confirmed);
+      remember({ n, set: confirmed });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         signedOut();
@@ -340,10 +340,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setAnnounce('Sending comment');
     try {
       await api.comment(n, text);
-      const comments = (confirmedIssue(n)?.comments ?? 0) + 1;
-      patchIssue(n, () => ({ comments }));
       confirmComment(n, own);
-      remember(n, { comments }, own);
+      remember({ n, add: { comments: 1 } }, own);
     } catch (error) {
       setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
       failed('Comment', error);
@@ -363,10 +361,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       const was = n in votes ? votes[n] : await api.myVote(n);
       const on = !was;
       await api.vote(n, on);
-      const up = Math.max(0, (confirmedIssue(n)?.up ?? 0) + (on ? 1 : -1));
       setVotes((current) => ({ ...current, [n]: on }));
-      patchIssue(n, () => ({ up }));
-      remember(n, { up });
+      remember({ n, add: { up: on ? 1 : -1 } });
     } catch (error) {
       failed('Vote', error);
     } finally {
@@ -388,9 +384,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     try {
       const { number } = await api.suggest(title, text);
       const issue: LiveIssue = { kind: 'suggestion', entry: null, title, state: 'open', reason: null, verdict: null, up: 0, comments: 0, author, bot: false, createdAt: new Date().toISOString(), closedAt: null };
-      setLive((current) => (current.state ? { ...current, state: { ...current.state, issues: { ...current.state.issues, [number]: issue } } } : current));
       setDetails((current) => ({ ...current, [number]: { number, title, body: text, url: '', up: 0, comments: [] } }));
-      keep(number, issue, Date.now());
+      remember({ n: number, set: issue });
     } catch (error) {
       setSuggestDraft({ title, text });
       failed('Suggestion', error);
@@ -412,7 +407,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   };
 
   return {
-    live, liveOk, waiting, offline, me, meKnown, canDecide, mayDecide, retry, plan, rowByKey, details, prefetch, notes, wantNotes, fetchNow, pending, pendingRef, saving, sending, votePending,
+    live, liveOk, waiting, offline, settled, me, meKnown, canDecide, mayDecide, retry, plan, rowByKey, details, prefetch, notes, wantNotes, fetchNow, pending, pendingRef, saving, sending, votePending,
     votes, suggestionsSending, notice, rowNotice, setRowNotice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, verdictReady, sendVerdict, sendComment, toggleVote,
     sendSuggestion, signOut,
