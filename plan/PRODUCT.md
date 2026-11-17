@@ -45,6 +45,11 @@ running. Other tools have those parts; none has the loop for a whole machine.
 The first four stages of [`order.json`](order.json) are the starter: a product the owner uses
 daily. Everything after it builds on the starter.
 
+## Where it runs
+
+On your own machine first: the starter is built for a Mac. The same computers then run on a
+shared server or in a cloud, and Silo will probably offer a cloud of its own.
+
 ## Everything else
 
 Every feature Silo had, wanted or considered has its file in `features/`. The owner decides
@@ -63,6 +68,5 @@ each one: take, later or drop. Nothing is built without a feature the owner took
 ## What Silo is not
 
 - Not a tool that runs agents on your own machine with a sandbox around one process.
-- Not a hosted service. Computers run on devices you own.
 - Not a project folder on your Mac: there is no `.silo` folder and no setup kept in a repository.
 - Not a CI product. Running GitHub jobs is one kind of task started from outside, not a goal of its own.

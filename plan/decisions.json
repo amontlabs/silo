@@ -133,5 +133,13 @@
     "id": "agents-may-push",
     "date": "2026-11-16",
     "text": "Agents may push to this repository's remote. The old history stays on the branch `legacy`."
+  },
+  {
+    "id": "runs-anywhere",
+    "date": "2026-11-17",
+    "text": "Silo is not limited to devices the user owns. Computers run on the user's own machine first, then on a shared server or in a cloud, and Silo will probably offer a cloud of its own.",
+    "about": [
+      "devices"
+    ]
   }
 ]
