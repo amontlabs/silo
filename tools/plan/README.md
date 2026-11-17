@@ -65,7 +65,7 @@ prints its errors and exits 1.
 | `plan add <id> --name "…" --area <area> (--after <id> \| --first-in <stage>) --what "…" [--from <issue>]` | A new feature file and its place in `order.json`. `--from` sets `suggested_in`. Prints the paths; commits nothing. Never into the stage `gone`. Refuses an id that has a file or is already in `order.json`, and writes nothing unless the plan it leaves passes `plan check`. |
 | `plan finish <id>` | Writes `built` (today, UTC) in a feature whose verdict is take and whose needs are built, and prints the `git commit` line, with the path as seen from the directory it was run in. The next sync closes the issue and removes the building label. |
 | `plan check` | The checks below. Each error reads `file: field: message. Fix: …`. |
-| `plan decide <id> take\|later\|drop\|clear` | A verdict the owner gave in conversation. The bot puts the label on the issue (the new one before the old one comes off) and comments `Recorded for the owner from a conversation.` (`clear` removes every verdict label and comments `Verdict cleared for the owner from a conversation.`). Prints `Recorded on GitHub. The commit follows: git pull.` When GitHub shows that verdict already: if the file at `origin/main` (fetched) has it too, prints `Already recorded: …` and changes nothing; else the bot removes the label and adds it again (for `clear`, adds the file's verdict label and removes it), so the newest verdict event is the bot's and a run starts, and comments as usual. Never writes the file. Exit 3 without credentials or GitHub; refused on a built feature. |
+| `plan decide <id> take\|later\|drop\|clear` | A verdict the owner gave in conversation. The bot puts the label on the issue (the new one before the old one comes off) and comments `Recorded for the owner from a conversation.`; `clear` removes each verdict label under the name the issue lists and comments `Verdict cleared for the owner from a conversation.` Prints `Recorded on GitHub. The commit follows: git pull.` It first fetches `origin/main` and reads the feature's file there; when that fails it says so and changes nothing. A label is never removed in order to add it again. When GitHub shows the wanted label already: if its newest `labeled` event is by someone who cannot decide, it prints `GitHub shows <verdict> on #N, set by <login>, who cannot decide. Remove that label on GitHub, then run plan decide again.`, changes nothing and exits 1 (with or without another verdict label beside it); else, with no other verdict label, it changes nothing and prints `Already recorded: …` when the file at `origin/main` has it too, or `GitHub already shows <verdict>. The commit comes with the next run of the Plan workflow (any push to main starts one).` when it does not. `clear` with no verdict label: when the file at `origin/main` has a verdict, the bot adds that label and removes it, so a counted removal is the newest verdict event; when it has none, it prints `There is no verdict to clear: …`. A removal `clear` asks for that GitHub does not make is an error. Never writes the file. Exit 3 without credentials or GitHub; refused on a built feature. |
 | `plan start <id> [--branch <b>]` | Refused unless the file's verdict is take and every need is built. Live: refused when `workshop:building` is set (naming the branch of the newest claim); else sets it, comments `Being built on <branch>.` (the checkout's branch), then reads the issue again. The earliest claim posted since the label was set wins, by comment id, whatever its branch: when it is not this session's, this session lost the race, deletes its comment and exits 1. Without GitHub, or without an issue yet: says the claim is not shared, exit 0. |
 | `plan stop <id>` | Removes `workshop:building`. On a feature not being built it says so, exit 0. |
 | `plan decline <issue> --why "…"` | Closes an open suggestion as not planned, the reason as the bot's comment. |
@@ -104,10 +104,12 @@ planned, commenting `Duplicate of #N.`, unless it carries a verdict label (then 
 left open); closes a suggestion named by `suggested_in` once, commenting `Placed in the plan as #N:
 <link>`. When a feature's files changed between its issue's marker and `origin/main`, it posts one
 history comment (no text from the plan) and moves the marker; when the marker's commit is not an
-ancestor any more, it only moves the marker. A feature unchanged since its marker keeps it. A marker
-is never moved backwards: when `origin/main` is an ancestor of the marker's commit (fetched first
-when it is not here), that issue is left alone, so a run of an older commit beside a newer one
-changes nothing the newer did. When the bot already posted a history comment whose `before` is the
+ancestor any more, it only moves the marker. A feature unchanged since its marker keeps it; closing
+an issue (built, dropped, no longer in the plan, a duplicate) moves its marker to `origin/main`. A
+marker is never moved backwards: when `origin/main` is an ancestor of the marker's commit (fetched
+first when it is not here), sync touches nothing on that issue (not its text, state or labels, and
+never closes it as no longer in the plan), so a run of an older commit beside a newer one changes
+nothing the newer did. When the bot already posted a history comment whose `before` is the
 marker's commit and whose `commit` is an ancestor of `origin/main` (a run stopped between the comment
 and the marker), sync starts from that comment's `commit`; with nothing changed since, it only moves
 the marker. A verdict label that pull has not brought to the file yet holds the issue's state. Sync
@@ -131,9 +133,11 @@ survives in the queue does everything. Triggers: a push to `main`, an `issues` `
 `plan`, never cancelled, set on the job so a skipped job never joins it. Steps: check out `main`
 with its whole history and no stored credentials; `plan pull --commit`; `plan check`; `bin/push-main`;
 `plan sync`, which runs even when the pull step failed. The workflow's own token (`contents: write`)
-is given to the push step only, as `PUSH_TOKEN`. `bin/push-main` pushes `HEAD` when it is a new
-commit and never rebases: on a rejected push it fetches `main`; if `main` did not move it fails at
-once with git's own message (a protected branch or a bad token is not "main moved"); else it resets
+is given to the push step only, as `PUSH_TOKEN`. `bin/push-main` refuses to run unless
+`GITHUB_ACTIONS` is `true` (it resets the checked-out branch) and on a tree with uncommitted changes.
+It pushes `HEAD` when it is a new commit and never rebases: on a rejected push it fetches `main`
+(when that fetch fails, it prints the push's message and the fetch's and stops); if `main` did not
+move it fails at once with git's own message (a protected branch or a bad token is not "main moved"); else it resets
 to `origin/main`, runs `plan pull --commit` and `plan check` again and pushes; three tries. A
 commit that fails the check is never pushed. The pull, push and sync steps use the secrets
 `WORKSHOP_APP_ID` and `WORKSHOP_PRIVATE_KEY`.

@@ -3,8 +3,17 @@
 # rebased: when main did not move, it fails at once with git's own message (a protected branch, a
 # bad token); when main moved, the checkout is reset to it, the verdicts are pulled and checked
 # again, and the push is tried again. Three tries. Never forces. PUSH_TOKEN, when set, authenticates
-# the push and the fetch only; the plan commands never see it.
+# the push and the fetch only; the plan commands never see it. It resets the checked-out branch, so
+# it runs only in GitHub Actions, and never on a tree with uncommitted changes.
 set -euo pipefail
+if [ "${GITHUB_ACTIONS:-}" != true ]; then
+  echo "push-main: runs only in the Plan workflow on GitHub (GITHUB_ACTIONS is not true); it resets the checked-out branch" >&2
+  exit 1
+fi
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "push-main: the tree has uncommitted changes; nothing pushed" >&2
+  exit 1
+fi
 here="$(cd "$(dirname "$0")" && pwd)"
 plan() { env -u PUSH_TOKEN "$here/plan" "$@"; }
 remote() {
@@ -23,7 +32,10 @@ for try in 1 2 3; do
   fi
   seen="$(git rev-parse origin/main)"
   if out="$(remote push --quiet origin HEAD:main 2>&1)"; then exit 0; fi
-  remote fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+  if ! fetched="$(remote fetch --quiet origin +refs/heads/main:refs/remotes/origin/main 2>&1)"; then
+    printf 'push-main: the push was rejected:\n%s\npush-main: and main could not be fetched to see whether it moved:\n%s\n' "$out" "$fetched" >&2
+    exit 1
+  fi
   if [ "$(git rev-parse origin/main)" = "$seen" ]; then
     printf '%s\n' "$out" >&2
     exit 1

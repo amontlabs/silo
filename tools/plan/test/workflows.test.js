@@ -68,13 +68,13 @@ async function job(t) {
   const env = {
     PATH: process.env.PATH, HOME: w.home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
     GIT_AUTHOR_NAME: 'Bot', GIT_AUTHOR_EMAIL: 'bot@example.invalid', GIT_COMMITTER_NAME: 'Bot', GIT_COMMITTER_EMAIL: 'bot@example.invalid',
-    WORKSHOP_GITHUB_API: w.fake.url, WORKSHOP_REPO: w.fake.repo, WORKSHOP_APP_ID: w.fake.appId, WORKSHOP_PRIVATE_KEY: appKeys().privateKey, PLAN_SITE: 'http://127.0.0.1:9',
+    GITHUB_ACTIONS: 'true', WORKSHOP_GITHUB_API: w.fake.url, WORKSHOP_REPO: w.fake.repo, WORKSHOP_APP_ID: w.fake.appId, WORKSHOP_PRIVATE_KEY: appKeys().privateKey, PLAN_SITE: 'http://127.0.0.1:9',
   };
   const pulled = await spawnFile(join(BIN, 'plan'), ['pull', '--commit'], { cwd: runner, env });
   assert.equal(pulled.code, 0, pulled.err);
   const pushMain = () => spawnFile(join(BIN, 'push-main'), [], { cwd: runner, env });
   const atOrigin = (id) => JSON.parse(git(w.origin, 'show', `main:plan/features/${id}.json`));
-  return { w, pushMain, atOrigin };
+  return { w, runner, env, pushMain, atOrigin };
 }
 
 test('push-main: a verdict on a main that did not move is pushed; with no commit there is nothing to push', async (t) => {
@@ -127,4 +127,38 @@ test('push-main: a main that moved to a plan failing the check gets no verdict c
   assert.notEqual(pushed.code, 0);
   assert.match(pushed.out, /main moved; pulling the verdicts again/);
   assert.equal(git(w.origin, 'rev-parse', 'main').trim(), broken, 'nothing pushed');
+});
+
+test('push-main: refuses outside GitHub Actions and on a tree with uncommitted changes, and touches nothing', async (t) => {
+  const { w, runner, env, pushMain } = await job(t);
+  const head = git(runner, 'rev-parse', 'HEAD').trim();
+  const before = git(w.origin, 'rev-parse', 'main').trim();
+  const { GITHUB_ACTIONS: _, ...unset } = env;
+  for (const without of [unset, { ...env, GITHUB_ACTIONS: 'false' }]) {
+    const refused = await spawnFile(join(BIN, 'push-main'), [], { cwd: runner, env: without });
+    assert.equal(refused.code, 1);
+    assert.match(refused.err, /runs only in the Plan workflow on GitHub \(GITHUB_ACTIONS is not true\)/);
+  }
+  const path = join(runner, 'plan', 'features', 'cli.json');
+  writeFileSync(path, `${readFileSync(path, 'utf8')}\n`);
+  const dirty = await pushMain();
+  assert.equal(dirty.code, 1);
+  assert.match(dirty.err, /the tree has uncommitted changes; nothing pushed/);
+  assert.equal(git(runner, 'rev-parse', 'HEAD').trim(), head);
+  assert.match(readFileSync(path, 'utf8'), /\n\n$/, 'the change is kept');
+  assert.equal(git(w.origin, 'rev-parse', 'main').trim(), before);
+});
+
+test('push-main: a rejected push whose fetch then fails prints both messages', async (t) => {
+  const { w, runner, pushMain } = await job(t);
+  const hook = join(w.origin, 'hooks', 'pre-receive');
+  writeFileSync(hook, '#!/bin/sh\necho "main is protected here" >&2\nexit 1\n');
+  chmodSync(hook, 0o755);
+  git(runner, 'remote', 'set-url', '--push', 'origin', w.origin);
+  git(runner, 'remote', 'set-url', 'origin', join(w.base, 'missing.git'));
+  const head = git(runner, 'rev-parse', 'HEAD').trim();
+  const pushed = await pushMain();
+  assert.equal(pushed.code, 1);
+  assert.match(pushed.err, /the push was rejected:\n[^]*main is protected here[^]*main could not be fetched to see whether it moved:\n[^]*missing\.git/);
+  assert.equal(git(runner, 'rev-parse', 'HEAD').trim(), head);
 });
