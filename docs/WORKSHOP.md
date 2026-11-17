@@ -14,23 +14,30 @@ locally, and its security properties.
 
 `website/workshop/index.html` and `website/src/workshop/`, React and
 TypeScript. At build time the `workshopData` plugin of `website/vite.config.ts`
-reads `docs/product/features.jsonl`, `areas.json`, `stages.json` and
-`DECISIONS.md` (`data.ts`). A malformed line, an unknown area, an entry without
-an area outside the stage `gone`, a repeated id or an area with no entry stops
-the build with the file and line. `map.ts` holds the drawing: where each area
-sits on the full map and on the folded one, and the wires. The build also stops
-when an area has no place there or the drawing places an unknown area; a new
-area needs a box in both tables.
+reads `plan/` with `tools/plan/read` and checks it with `tools/plan/check`
+(`data.ts`); any error of `plan check`, and an area with no feature, stops the
+build with the file, the field and the fix. The same plugins fill the home
+page's two plan lines (`home-plan.ts`). `map.ts` holds the drawing: where each
+area sits on the full map and on the folded one, and the wires. The build also
+stops when an area has no place there or the drawing places an unknown area; a
+new area needs a box in both tables.
+
+Names, labels, markers, the status rule and the areas' states come from
+`tools/plan/model/` (`plan.ts` imports them), as in the server: there is no
+second definition of them in the site.
 
 What a person sees:
 
 - At 1200 px and wider, the map of the areas (Map), or the same areas as tiles
   in the order of `areas.json` (Order). Narrower, the tiles only; opening a
   tile there is a view transition where the browser has them.
-- Each area's state comes from its entries (`plan.ts`, first match wins):
-  being built now, done, next (the lowest-numbered planned entry among areas not
-  being built), planned, not decided yet. An entry is being built when it is
-  planned and its open issue has the label `workshop:building`.
+- An entry's status is the model's (`featureStatus`): built when its file says
+  `built`; otherwise the verdict that counts (its issue's verdict label when it
+  has one, else the file's): dropped, being built (taken, and its open issue has
+  the label `workshop:building`), planned, later, not decided.
+- Each area's state comes from its entries (the model's `areaStates`, first
+  match wins): being built now, done, next (the first planned entry in build
+  order among areas not being built), planned, not decided yet.
 - Opening an area folds the map to a strip that stays on screen (when the
   window is at least 760 px tall); the area's entries open in place, each on
   its own. Opening or closing an entry never moves it or the rows above it. The
@@ -40,34 +47,53 @@ What a person sees:
   are in or after 180 ms, and while they still load each one the count announces
   holds its place. An entry named
   by the address opens once the live state is there.
-- An open entry, suggestion or decision shows its comments and a box to add
-  one. A visitor who is not signed in gets "Sign in to comment" and, under it,
+- An open entry shows its sentence, then "Notes" (its `<id>.md`), closed by
+  default, and opened in place: headings, paragraphs, lists, http and https
+  links, inline code and code blocks become elements (`Markdown.tsx`); nothing
+  is ever inserted as HTML, and anything else stays text. For the owner only,
+  "Decisions · N" sits on the same line: the decisions of `plan/decisions.json`
+  whose `about` names the entry's area or the entry.
+- An open entry or suggestion shows its thread and a box to add a comment. The
+  bot's history comments are history lines in the same thread, in time order:
+  no avatar and no box of their own, the time, what changed ("Taken",
+  "Dropped", "Later", "Verdict cleared", "Built", "Text changed", "Notes
+  edited", else the field's name) and the change on GitHub. "Text changed"
+  opens the name and the sentence before and after: the page reads
+  `plan/features/<id>.json` at the two commits from
+  `raw.githubusercontent.com` only then, and shows "not available" when it
+  cannot. While the thread loads, each comment and each history line the live
+  state counts holds its place. A visitor who is not signed in gets "Sign in to comment" and, under it,
   "or comment on GitHub", the one link to that row's issue; a signed-in person
   gets the box and "GitHub #N". Until `me` answers, the panel keeps the room of
   the shape the `workshop-hint` cookie predicts, so it moves only when that
   cookie was stale.
 - The strip under the map links to what is left out (entries without an area,
-  and every dropped entry) and to the suggestions.
-- A person who can decide also gets "Decisions", the number of entries still to
-  decide or to confirm (a verdict carried over from the file) on each part, and
-  a link to the lowest-numbered one. After a verdict the next entry waiting in
+  and every dropped entry), to Latest and to the suggestions. Latest (`#latest`)
+  lists the newest 30 comments and history lines across the entries, newest
+  first, each opening its entry.
+- A person who can decide also gets "Decisions" (`plan/decisions.json`, newest
+  first, carried in the page's bundle as the rest of the plan and shown to
+  nobody else), the number of entries still to decide on each part, and a link
+  to the first one in build order. After a verdict the next entry waiting in
   the same area opens, else the lowest one anywhere. Each open row has its own
   700 ms guard, and its verdict buttons look dimmed until it has passed; a row
   that becomes the current one after a verdict starts its guard again and is
   brought into view. Enter goes to the open row that holds the focus, else to
   the row opened last, and only when that row's verdict buttons are entirely in
-  the visible part of the window. A tap during a view transition is ignored. Verdicts are for entries only: the
-  server refuses them on anything else.
+  the visible part of the window. A tap during a view transition is ignored.
+  The verdicts are take, later and drop; a verdict takes no note. Verdicts are
+  for entries only, and never for a built one: the server refuses them.
   Nobody else is offered the decisions; their address shows the map.
 - The header's account slot has a fixed width from first paint: signed in when
   the readable `workshop-hint` cookie is there (a long login is cut by an
   ellipsis), signed out otherwise. It changes only when that cookie was stale.
 
 Addresses: `#<area>`, `#<area>/<entry id>`, `#suggested`, `#left` and
-`#decisions`, each with an optional open row (`#suggested/issue-<n>`). An entry
-is found by its id whatever area the address names, and the address is
-rewritten; an entry that no longer exists opens its area. The older
-`#entry-<id>`, `#issue-<n>` and `#decided-<i>` open that row where it now lives.
+`#decisions`, each with an optional open row (`#suggested/issue-<n>`,
+`#decisions/decided-<id>`), and `#latest`. An entry is found by its id whatever
+area the address names, and the address is rewritten; an entry that no longer
+exists opens its area. The older `#entry-<id>` and `#issue-<n>` open that row
+where it now lives.
 Back and Forward move between places; opening a row replaces the address.
 
 | File | What |
@@ -75,14 +101,14 @@ Back and Forward move between places; opening a row replaces the address.
 | `App.tsx` | Places, addresses, focus, keyboard, the layout. |
 | `useWorkshop.ts` | Live state and every write: pending writes, the verdict guard. |
 | `MapView.tsx`, `Tiles.tsx` | The map and the tiles. |
-| `AreaView.tsx`, `Suggest.tsx`, `Decisions.tsx` | An opened area, the suggestions and what is not carried over, the decisions. |
-| `Entry.tsx` | One row and what it shows open. |
-| `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses, the model, the drawing, the build-time reader. |
-| `api.ts`, `writes.ts`, `RichText.tsx`, `Boundary.tsx` | The API client, the six-minute memory of the page's own writes, text from GitHub, the fallback list. |
+| `AreaView.tsx`, `Suggest.tsx`, `Latest.tsx`, `Decisions.tsx` | An opened area and what is not carried over, the suggestions, the latest changes, the decisions. |
+| `Entry.tsx` | One row and what it shows open: notes, decisions, the thread with its history lines. |
+| `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses, the rows on top of the plan's model, the drawing, the build-time reader. |
+| `api.ts`, `writes.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the six-minute memory of the page's own writes, text from GitHub, notes, the fallback list. |
 
 To look at a later state without the API, run `npm --prefix website run dev`
-and open `http://127.0.0.1:4173/workshop/?fixture=later` (some areas done, one
-being built, one next) or `?fixture=today`; add `&as=owner` or `&as=visitor` to
+and open `http://127.0.0.1:4173/workshop/?fixture=later` (verdicts with their
+history lines, two entries being built) or `?fixture=today`; add `&as=owner` or `&as=visitor` to
 be signed in (`&login=<name>` for another login), `&delay=2000` to hold the live state and the sign-in answer back,
 and `&detail=700` to hold each entry's comments back. This exists only in
 development builds (`devFixture.ts`, loaded when `import.meta.env.DEV`); a
@@ -95,20 +121,23 @@ and nothing is written at run time apart from GitHub issues.
 
 | Label | What the issue is |
 | --- | --- |
-| `workshop:entry` | One line of `docs/product/features.jsonl`. The body ends with `<!-- silo-entry: <id> -->`. |
-| `workshop:decision` | A question for the owner. Open: to decide. Closed as completed: decided, and the owner's closing comment is the outcome. |
+| `workshop:entry` | One feature of `plan/features/`, created by the bot. The body ends with `<!-- silo-synced: <commit> -->` and `<!-- silo-entry: <id> -->`; the server removes both before answering. |
 | `workshop:suggestion` | A feature suggested by a visitor. |
 
-The owner's verdict on an entry is one label: `verdict:take`, `verdict:refine`
-or `verdict:later`. A dropped entry has `verdict:drop` and is closed as "not
-planned". A built entry is closed as "completed". Votes are 👍 reactions,
-comments are issue comments, and history is GitHub's.
+An issue that carries the retired label `workshop:decision` is not part of the
+Workshop. The owner's verdict on an entry is one label: `verdict:take` or
+`verdict:later`. A dropped entry has `verdict:drop` and is closed as "not
+planned". A built entry is closed as "completed". Votes are 👍 reactions and
+comments are issue comments. The history is the bot's history comments, whose
+last line is `<!-- silo-change: {…} -->` (see `tools/plan/README.md`); the
+server reads that marker only on a comment by a bot that was not cut, and
+gives it to the page as `change`.
 
 An entry being built now also carries `workshop:building` ("Being built now").
-The bot sets it with `workshop building <issue>`, only on an open entry with
-`verdict:take`, and removes it with `workshop building <issue> --stop` or when
-`workshop built` closes the entry (see `tools/workshop/README.md`). A verdict
-other than take (`later`, `refine`, `drop`, or cleared) removes it in the same
+`plan start <id>` sets it, `plan stop <id>` removes it, and `plan sync`
+removes it when it closes the entry once its file says `built` (see
+`tools/plan/README.md`). A verdict
+other than take (`later`, `drop`, or cleared) removes it in the same
 write, so an entry taken again is not shown as being built. The server counts
 the label only on an open entry that also carries `verdict:take`, so a removal
 that failed, or a label left on an issue reopened by hand, shows nothing.
@@ -121,9 +150,9 @@ briefly here:
 
 | Endpoint | Who | What |
 | --- | --- | --- |
-| `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. An open entry carrying both `workshop:building` and `verdict:take` also has `"building": true`; the field is absent on every other issue (other verdicts, closed entries, decisions, suggestions). |
+| `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. An open entry carrying both `workshop:building` and `verdict:take` also has `"building": true`; the field is absent on every other issue. An entry with history comments among those held has `updates`, their number. `latest`: the newest 30 comments held on entries, newest first, each `{ n, entry, author, bot, createdAt }` with `change` for a history comment, else `text`, its first line cut to 140 characters. |
 | `GET me` | signed in | `{ login, avatar, canDecide }`; `canDecide` is false when the permission could not be read (the next `me` tries again). 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
-| `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. The same public answer for everyone. |
+| `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text, a history comment with its parsed `change`; `more: true` when GitHub counts more. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
@@ -131,12 +160,15 @@ briefly here:
 | `POST comment {n, text}` | signed in | Comments as that person. |
 | `POST vote {n, on}` | signed in | Adds or removes that person's 👍. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
-| `POST verdict {n, verdict, note?}` | can decide | Sets (`take`, `refine`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required. `refine` needs a note; the labels and the state change first, and the note is posted last, as the person's comment. Any verdict but `take` also removes `workshop:building` when the issue carries it (no call otherwise); if that removal fails, the verdict still stands. |
-| `POST decide {n, text}` | can decide | Comments on an open decision, then closes it as completed. A comment, a note or a decision text that the same person posted on that issue in the last five minutes is not posted again. |
+| `POST verdict {n, verdict}` | can decide | Sets (`take`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required and a `note` is refused. An entry closed as completed (built) is refused with 409 `built` before anything changes. Any verdict but `take` also removes `workshop:building` when the issue carries it (no call otherwise); if that removal fails, the verdict still stands. |
+
+A comment that the same person posted on that issue in the last five minutes is
+not posted again.
 
 Errors are `{ "error": code, "message": plain words }` with 400 (bad input),
 401 (not signed in, or the session is gone), 403 (not allowed, or a request
-from another site), 404 (not a Workshop issue), 405, 413 (body over 64 KB),
+from another site), 404 (not a Workshop issue), 405, 409 (a verdict on a built
+entry), 413 (body over 64 KB),
 429 (GitHub's rate limit or one of ours), 502 (GitHub failed or took over 8
 seconds) and 503 `not_configured` (missing or invalid App settings). A
 suggestion whose issue was created but could not be labelled answers 502 with
@@ -152,7 +184,7 @@ cannot make a read slow.
 An issue is a Workshop issue when it carries exactly one of the three kind
 labels and is not a pull request.
 
-Comments, notes and decisions are limited to 5,000 characters, titles to 120
+Comments are limited to 5,000 characters, titles to 120
 characters on one line (no control characters or line breaks). Unicode
 direction controls (U+202A–U+202E, U+2066–U+2069) are removed from titles and
 text.
@@ -185,7 +217,7 @@ instances.
 - **Refresh.** A request that finds the snapshot over 30 seconds old starts a
   refresh and waits for it up to 1.5 seconds before answering from what it
   has. Any request that changed something on GitHub (a comment, a vote, a
-  suggestion, a verdict, a decision, even one that failed halfway) starts one
+  suggestion, a verdict, even one that failed halfway) starts one
   straight away; when it succeeded, it waits for that refresh up to 2 seconds
   (the page already shows the write as pending), but only when the refresh is
   running or will start within those 2 seconds; otherwise it answers at once
@@ -211,8 +243,8 @@ instances.
   read 2026-11-16). Correctness does not depend on it: the lost-refresh rule
   and the waits above cover a platform that stops the work.
 - **Issues.** A refresh reads one list per Workshop label: entries, then
-  decisions, then suggestions (`labels=workshop:…`, all states, newest first,
-  100 a page, at most 20 pages for the three together), so nothing else in the
+  suggestions (`labels=workshop:…`, all states, newest first, 100 a page, at
+  most 20 pages for the two together), so nothing else in the
   repository is fetched or counted against the cap, and issues without exactly
   one Workshop label or that are pull requests are skipped.
   `building` is read from the labels of the same lists, so it costs no call of
@@ -260,7 +292,7 @@ URL each time and always counts.
 The installation token is spent only on the snapshot refresh, the permission
 check, the repository lookup at sign-in and labelling a suggestion. Each has
 its own ceiling per instance, so that no use can starve another, and nothing
-a visitor does without signing in can make `verdict`, `decide`, `suggest`,
+a visitor does without signing in can make `verdict`, `suggest`,
 `comment`, `vote` or `me` answer 429:
 
 | Use | Calls a minute |
@@ -280,16 +312,16 @@ new sign-ins have a ceiling of 30 a minute and token refreshes of existing
 sessions a separate one of 60, so made-up sign-ins cannot stop sessions from
 refreshing.
 
-With each of the three lists on one page, a refresh is 4 calls (3 list pages,
+With each of the two lists on one page, a refresh is 3 calls (2 list pages,
 which are `304` and free when unchanged, and 1 `since` comment call, which
 always counts against GitHub's limit):
 
-- **No writes:** one refresh every 30 seconds, 120 an hour: 120 × 4 = 480
+- **No writes:** one refresh every 30 seconds, 120 an hour: 120 × 3 = 360
   calls in our ceiling, of which about 120 count at GitHub, plus 6 full
   comment reloads whose unchanged pages are free: about 130 calls an hour.
 - **Writes without pause:** write-started refreshes are at most one every 5
-  seconds, 12 a minute: 12 × 4 = 48 calls a minute, which the refresh ceiling
-  holds to 40 a minute (2,400 an hour). A refresh stopped by our own
+  seconds, 12 a minute: 12 × 3 = 36 calls a minute (2,160 an hour), under
+  the refresh ceiling of 40. A refresh stopped by our own
   ceiling is started again when the ceiling resets, without the 60-second
   wait used when GitHub fails.
 
@@ -316,8 +348,8 @@ snapshots catch up when the hour resets.
   counts only when the issue was created.
 - Each session may make 60 GitHub calls a minute for reads (`GET vote` and the
   reads before a write), or 300 for a person known to be able to decide; more
-  answer 429. A verdict and its note are admitted together: the reads the
-  whole action needs are checked before its first call.
+  answer 429. The reads a whole action needs are checked before its first
+  call.
 - A session GitHub has rejected (a 401, an invalid refresh token, a revoked
   grant) is remembered by a hash of its token for a day (at most 10,000) and
   answered 401 without calling GitHub; a request without a valid session calls
@@ -328,10 +360,10 @@ snapshots catch up when the hour resets.
   deadline for all its GitHub calls and every wait together, including waits
   on shared work such as an installation token another request is fetching
   (the platform stops a function at 15 seconds); past it, the answer is 502.
-  Steps are ordered so that a cut is safe to retry: `verdict` changes labels
-  and state, then posts the note; `decide` posts the comment, then closes;
-  `comment`, the note and `decide` skip posting when the same person posted
-  the identical text on that issue in the last five minutes.
+  Steps are ordered so that a cut is safe to retry: `verdict` changes only
+  labels and state, each step a no-op when already done; `comment` skips
+  posting when the same person posted the identical text on that issue in the
+  last five minutes.
 - Concurrent permission checks for the same person share one call.
 - `me` reads the cookie and calls GitHub only for the permission check (cached
   five minutes); it never refreshes the user token, and a failed permission
@@ -404,10 +436,9 @@ That gives them nothing: the server only ever uses the installation on
 `WORKSHOP_REPO`, and it requests user tokens for that repository only.
 
 Then generate a private key and a client secret, and install the App on
-`amontlabs/silo` only ("Only select repositories"). Create the eight labels in
-the repository (`workshop sync` does): `workshop:entry`, `workshop:decision`,
-`workshop:suggestion`, `verdict:take`, `verdict:refine`, `verdict:later`,
-`verdict:drop`, `workshop:building`.
+`amontlabs/silo` only ("Only select repositories"). Create the six labels in
+the repository (`plan sync` does): `workshop:entry`, `workshop:suggestion`,
+`verdict:take`, `verdict:later`, `verdict:drop`, `workshop:building`.
 
 For local work against the real GitHub, create a second App the same way with
 the callback `http://127.0.0.1:4174/api/workshop/callback`, installed on a test
@@ -442,8 +473,14 @@ following Vercel's
 
 - `static/`: the built site.
 - `functions/api/workshop/state.func/`: one Node.js function
-  (`.vc-config.json`: runtime `nodejs24.x`, handler `api/workshop.cjs`,
-  launcher `Nodejs`), holding the entry point and `server/`. The other
+  (`.vc-config.json`: runtime `nodejs24.x`, handler
+  `website/api/workshop.cjs`, launcher `Nodejs`). It holds the files it loads
+  at their paths in the repository: `website/api/`, `website/server/`, the
+  files of `website/node_modules/` that load, and the plan's model,
+  `tools/plan/model/*.js` with `tools/plan/package.json` (which makes it ESM).
+  The script finds what loads by loading the entry point in a separate process
+  with a resolve hook, and refuses, before writing anything, any other file
+  outside `website/`. The other
   endpoints (`me.func`, `issue.func`, `vote.func`, …) are symlinks to it, so
   Vercel creates one function served at every `/api/workshop/<endpoint>` path,
   as the [primitives reference](https://vercel.com/docs/build-output-api/primitives#functions)
@@ -477,19 +514,22 @@ npm --prefix website run workshop:dev -- --fake
 This serves `website/dist` and the API at `http://127.0.0.1:4174`
 (`--port` to change it), with the Workshop page at `/workshop` and
 `/workshop/`. `--fake` starts a fake GitHub on another local port, seeded with
-an entry for every line of `docs/product/features.jsonl`, two decisions (one
-open), a suggestion, comments, 👍 votes, an ordinary issue and a pull request.
+an entry for every feature of `plan/`, two issues with the retired label
+`workshop:decision` (outside the Workshop), a suggestion, comments, 👍 votes,
+an ordinary issue and a pull request. It also serves the files of the
+repository at a commit as `raw.githubusercontent.com` does, and the runner
+names it to the page (`<meta name="workshop-raw">`), so "Text changed" opens.
 Sign-in goes through the fake's page, which offers two people: `owner-fake`
 (admin, can decide) and `visitor-fake` (read only). Everything lives in memory
 and resets on restart.
 
-`--fake --progress` seeds a later state instead, to look at the page with
-progress in it: the entries carry the verdicts of `features.jsonl`, every taken
-entry of the areas `engine`, `computers` and `app` is closed as built, and the
-first two taken entries of `agents` are being built. When no line has an
-`area`, it goes by stage: the taken entries of the first three stages built and
-the first two taken entries of the fourth being built. The runner prints which
-one it used.
+`--fake --progress` seeds a later state instead: the entries of the first five
+stages carry the verdict of their file, else the one suggested for them, the
+first two taken are being built, and the thread of each decided entry holds the
+bot's history comments of every kind beside people's comments over the last
+days. Nothing shows as built that the file does not say is built (the page
+reads `built` from the file); the history line "Built" is seeded all the same.
+The runner prints what it seeded.
 
 Without `--fake`, the server uses GitHub with the `WORKSHOP_*` variables of the
 environment (a development App, see above); its origin is always
@@ -556,13 +596,10 @@ including reading the issue before a write, uses that person's token, so
 GitHub's own permissions apply (a locked issue refuses a visitor's comment)
 and GitHub records the person as the author. Every write first reads the issue
 and refuses with 404 unless it carries a Workshop label and is not a pull
-request; `verdict` works only on entries and `decide` only on open decisions.
+request; `verdict` works only on entries, and never on one closed as completed.
 A verdict adds and removes only `verdict:*` labels, one at a time, and, for any
 verdict but take, `workshop:building`, so other labels changed by someone else
-are kept. It changes the labels and the state first
-and posts the note only after they succeeded, so a retry never posts the note
-twice. Clearing a verdict reopens only a dropped entry, never one closed as
-completed. A 401 on the installation token is a 502 and
+are kept. It posts nothing. Clearing a verdict reopens only a dropped entry. A 401 on the installation token is a 502 and
 drops the cached token; it never signs anyone out. *Limit:* if labelling a
 suggestion fails twice, the new issue stays outside the Workshop until a
 background retry labels it (in memory, on that instance only), and the answer
@@ -571,7 +608,7 @@ carries its number.
 **Deciding.** `canDecide` is GitHub's answer: the person's permission on the
 repository (`write`, `maintain` or `admin`), read with the installation token
 and cached five minutes by GitHub account id, for yes and for no; that one
-cache serves `me`, `verdict` and `decide`. The permission is read for the
+cache serves `me` and `verdict`. The permission is read for the
 account's current login, asked of GitHub with the person's own token at that
 moment, never the login in the cookie, and the answer must be about the same
 account id as the session. Writes are not preceded by a re-read: they use the
@@ -620,13 +657,14 @@ GitHub or Vercel. These depend on the real services:
 ## Why built this way
 
 - **giscus** stores comments in GitHub Discussions and has no place for a
-  verdict, a vote that the owner's page counts, or a decision's state.
+  verdict or a vote that the owner's page counts.
 - **utterances** signs people in with an OAuth App that needs the broad
   `public_repo` scope, write access to every public repository of the person.
   A GitHub App's user token is limited to the App's permissions and, here, to
   one repository.
 - **A database of our own** is something to run, secure and back up. Issues
   keep the history, the authorship and the moderation tools on GitHub.
-- **Verdicts as commits** to `docs/product/features.jsonl` would put a commit
-  on `main` for every click, which interrupts a merge in progress. The file
-  keeps carried-over verdicts; new ones are labels.
+- **Verdicts as labels, then commits.** A click sets a label; a workflow then
+  records it in the feature's file with its own token (`plan pull`), so the
+  App's key, held by Vercel, never gets write access to the code. See
+  `tools/plan/README.md`.

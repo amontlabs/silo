@@ -7,10 +7,9 @@ Vite. It has two pages:
   picture of the loop (drawn by `src/loop.ts`, once, when it comes into view,
   unless the visitor prefers reduced motion), and the way into the Workshop. The
   page shows once its fonts are in (at most 3 s), so nothing changes width. Its "First up" line and its
-  count of planned features are written in at build time from
-  `docs/product/stages.json` and `docs/product/features.jsonl`
-  (`src/home-plan.ts`, the `homePlan` plugin in `vite.config.ts`); a missing or
-  malformed file stops the build.
+  count of planned features are written in at build time from `plan/`, read
+  and checked by `tools/plan` (`src/home-plan.ts`, the `homePlan` plugin in
+  `vite.config.ts`); any error of the plan stops the build.
 - **Workshop** (`workshop/index.html`, `src/workshop/`): Silo's plan, the
   product's areas drawn as a map (tiles on narrow screens), each with its
   entries, votes, comments, suggestions and the owner's verdicts. Its API lives under `/api/workshop/` (`server/`, `api/`); see
