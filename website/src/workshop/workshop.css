@@ -542,8 +542,9 @@
   background: color-mix(in srgb, var(--line) 40%, transparent); animation: ws-pulse 1.6s ease-in-out infinite;
 }
 /* At an address other than the plain one, the built plain view under the title row stays hidden, its room kept,
-   until the script draws the place (the head script of workshop/index.html sets ws-hold). */
-.ws-hold #workshop-root[data-prerendered] .ws > :not(.ws-top) { visibility: hidden; }
+   until the script draws the place (the head script of workshop/index.html sets ws-hold). The footer waits hidden
+   too: it shows where that place puts it rather than moving there from under the plain view. */
+.ws-hold #workshop-root[data-prerendered] .ws > :not(.ws-top), .ws-hold .workshop-shell:has(#workshop-root[data-prerendered]) .ws-foot { visibility: hidden; }
 
 /* What arrives after the first frames fades in where it stands. */
 .ws-arr-s .ws-late-s, .ws-arr-o .ws-late-o, .ws-arr-p .ws-late-p, .ws-key .ws-in, .ws-status.ws-in, #workshop-account.ws-arr-p > * { animation: ws-appear .15s ease-out both; }

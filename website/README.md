@@ -107,7 +107,8 @@ browser profile at 1440 × 900, the first area is visited twice (the second
 visit must have the votes in its first frame), and the owner signs in through
 the fake GitHub's page as `owner-fake` (so the session cookie, its marker and
 the remembered person are real) and visits again: the login, "N to decide"
-and the rows' "to decide" must be in its first frame. Then an entry of the
+and the rows' "to decide" must be in its first frame (the app's first frame:
+the markup the build drew does not count). Then an entry of the
 first area without comments is opened before the answers, at 1440 × 900 and
 390 × 844, and the rows below it must not move when they arrive; and
 `#suggested` is visited signed in with nobody remembered, and the list must not
@@ -120,7 +121,14 @@ error when that check fails, a first frame lacks what it must hold, or a
 load's layout shifts add up to more than 0.01 (the key gains an item when the
 state arrives, a shift of a few ten-thousandths). `--slow-api <ms>` holds back
 each API answer, `--slow-script <ms>` holds back the page's script, and
-`--owner` fakes the `me` answer as the owner. `npm test` does not run it.
+`--owner` fakes the `me` answer as the owner. Last, with the page's script
+held (run it with `--slow-script 3000`) and the API held longer, it loads the
+built page at 1440 × 900: on the plain view the first painted frame must hold
+the map and the sign-in button, the footer rule must hold, and the title row,
+the map, the footer and the account slot must not move and no layout shift
+happen when the script takes over; on the first area the plain map must never
+be painted and the area must be in the first frame after the takeover.
+`npm test` does not run it.
 
 ## Test
 
@@ -149,6 +157,34 @@ build with the file, the field and the fix. `map.ts` holds the drawing: where ea
 area sits on the full map and on the folded one, and the wires. The build also
 stops when an area has no place there or the drawing places an unknown area; a
 new area needs a box in both tables.
+
+`npm run build` then runs `scripts/prerender.mjs`, which renders the plain
+address `/workshop` (`src/workshop/prerender.tsx`: nothing remembered, nobody
+signed in, the load pending) and writes it into `dist/workshop/index.html`: the
+title row, the map, the tiles and the row under them in `#workshop-root`, and
+"Sign in with GitHub" with its tooltip in the header's account slot. Both carry
+`data-prerendered` until the script takes over. A prerender that throws fails
+the build; the dev server does not prerender. Rendering at build time reads
+nothing of `window`, `document`, `location`, `localStorage` or `matchMedia`
+(effects may). So the page is drawn whole before its script arrives:
+
+- The script takes over in one synchronous step (`takeover.ts`): React renders
+  over the markup and commits before the next frame, and the drawn sign-in
+  leaves the slot in the same task (it stays if the page fails to render, under
+  the plain list). On a first visit without a session at the plain address the
+  first render is the same markup (`prerender.test.tsx` compares them); with
+  something remembered it differs on purpose.
+- With the session marker (`ws-session` on `<html>`), CSS shows the account's
+  placeholder in the slot instead of the drawn sign-in.
+- At any other address (a hash, `?view=order`, `?signin=failed`) the head script
+  sets `ws-hold` before first paint: what is under the title row stays hidden
+  with its room kept, and the footer with it, until the script has drawn that
+  place. They show anyway when a script fails to load or after 4 s.
+- Without JavaScript the plan is readable from the page, and a line says that
+  voting, commenting and opening an area need it.
+- The page preloads every face it waits for and shows as soon as they are in
+  (at most 1.2 s), without waiting for its own script: the check runs right
+  after the fonts' stylesheet.
 
 Names, labels, markers, the status rule and the areas' states come from
 `tools/plan/model/` (`plan.ts` imports them), as in the server: there is no
