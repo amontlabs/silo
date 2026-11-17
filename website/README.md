@@ -355,11 +355,15 @@ instances.
   only when it completed, so a refresh that fails halfway leaves the previous
   one intact.
 - **Staying alive.** Work that outlives the response (refreshes and the label
-  retries) is handed to Vercel's `waitUntil()` from `@vercel/functions`, which
+  retries) is handed to Vercel's `waitUntil()`, which
   "extends the lifetime of the request handler for the lifetime of the given
   Promise"; such promises "have the same timeout as the function itself"
   ([@vercel/functions API reference](https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package),
-  read 2026-11-16). Correctness does not depend on it: the lost-refresh rule
+  read 2026-11-16). The server calls it as that package does (`wait-until.js`
+  and `get-context.js` of 3.11.3, read 2026-11-17): through the request
+  context Vercel keeps under `Symbol.for('@vercel/request-context')`. The
+  package itself is not used: from 3.11 its entry point loads 153 files from
+  21 packages. Correctness does not depend on it: the lost-refresh rule
   and the waits above cover a platform that stops the work.
 - **Issues.** A refresh reads one list per Workshop label: entries, then
   suggestions (`labels=workshop:…`, all states, newest first, 100 a page, at
@@ -527,11 +531,9 @@ snapshots catch up when the hour resets.
 
 All of them run with the website's `npm test`.
 
-The server uses Node's standard library (`crypto`, `fetch`, `http`) and one
-package, `@vercel/functions` (Apache-2.0, pinned to 3.10.5), for `waitUntil`.
-`prepare-vercel.mjs` ships only the files of it that load (found by loading it
-in a separate process) and its `package.json`: 16 files, and the whole
-function is about 180 KB.
+The server uses Node's standard library (`crypto`, `fetch`, `http`) and no
+package. `prepare-vercel.mjs` refuses a file the function would load from
+`website/node_modules/`, and the whole function is 19 files, about 100 KB.
 
 ## Build and deploy
 
@@ -550,7 +552,7 @@ following Vercel's
   (`.vc-config.json`: runtime `nodejs24.x`, handler
   `website/api/workshop.cjs`, launcher `Nodejs`). It holds the files it loads
   at their paths in the repository: `website/api/` and `website/server/` at
-  any depth, the files of `website/node_modules/` that load, and the plan's
+  any depth, and the plan's
   model, `tools/plan/model/*.js` with `tools/plan/package.json` (which makes it
   ESM). The script finds what loads by loading the entry point in a separate
   process with a resolve hook, and refuses by name, before writing anything,
@@ -754,7 +756,7 @@ services:
 - whether a refreshed user token stays limited to the repository;
 - a visitor removing their own 👍 with their user token;
 - the collaborator permission endpoint with only the Metadata read permission;
-- that `waitUntil()` from the copied `@vercel/functions` keeps a Build Output
+- that `waitUntil()` of the request context keeps a Build Output
   Node.js function alive after the response, as documented for Vercel
   Functions (the code does not depend on it);
 - that GitHub answers `304` to the conditional issue and comment list pages as

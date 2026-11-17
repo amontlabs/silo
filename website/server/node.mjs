@@ -1,10 +1,17 @@
 // Runs the Workshop API on Node's http request and response objects, as both
 // Vercel's Node.js launcher and the local server provide them.
-import { waitUntil } from '@vercel/functions';
 import { readConfig } from './config.mjs';
 import { createWorkshop } from './workshop.mjs';
 
 export const MAX_BODY = 64 * 1024;
+
+// Vercel keeps the context of the request being served under this symbol. Its `waitUntil` keeps the
+// instance running until the promise settles. Anywhere else there is no context and nothing is asked.
+const REQUEST_CONTEXT = Symbol.for('@vercel/request-context');
+
+export function waitUntil(promise) {
+  return globalThis[REQUEST_CONTEXT]?.get?.()?.waitUntil?.(promise);
+}
 
 export async function readRequest(req) {
   const headers = {};

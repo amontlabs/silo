@@ -10,7 +10,7 @@ import { Readable } from 'node:stream';
 import { createAppJwt } from '../server/app-auth.mjs';
 import { readConfig } from '../server/config.mjs';
 import { DEFAULT_TIMEOUT } from '../server/github.mjs';
-import { createNodeHandler, MAX_BODY, readRequest } from '../server/node.mjs';
+import { createNodeHandler, MAX_BODY, readRequest, waitUntil } from '../server/node.mjs';
 import { seal, unseal } from '../server/session.mjs';
 import { BUDGET, createWorkshop, LABELS } from '../server/workshop.mjs';
 import { CUTS, cut, readBody } from '../server/issues.mjs';
@@ -780,17 +780,13 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     assert.equal(HANDLER, vc.handler);
     assert.match(vc.runtime, /^nodejs(22|24|26)\.x$/);
     assert.deepEqual((await readdir(main)).sort(), ['.vc-config.json', 'tools', 'website']);
-    assert.deepEqual((await readdir(join(main, 'website'))).sort(), ['api', 'node_modules', 'server']);
+    // No package ships: the server runs on Node's standard library.
+    assert.deepEqual((await readdir(join(main, 'website'))).sort(), ['api', 'server']);
     // The plan's model ships beside the server, at its place in the repository, as ESM.
     const model = (await readdir(new URL('../../tools/plan/model/', import.meta.url))).filter((name) => name.endsWith('.js')).sort();
     assert.ok(model.includes('index.js') && model.includes('markers.js'));
     assert.deepEqual((await listFiles(join(main, 'tools'))).sort(), ['plan/package.json', ...model.map((name) => `plan/model/${name}`)].sort());
     assert.equal(JSON.parse(await readFile(join(main, 'tools', 'plan', 'package.json'), 'utf8')).type, 'module');
-    assert.deepEqual(await readdir(join(main, 'website', 'node_modules')), ['@vercel']);
-    assert.deepEqual(await readdir(join(main, 'website', 'node_modules', '@vercel')), ['functions'], 'only the package that loads');
-    const shipped = await listFiles(join(main, 'website', 'node_modules'));
-    assert.ok(shipped.length <= 20, `${shipped.length} files`);
-    assert.ok(shipped.includes('@vercel/functions/wait-until.js') && shipped.includes('@vercel/functions/package.json'));
 
     // The packaged function runs on its own, from a clean folder with nothing above it to resolve from.
     const clean = await mkdtemp(join(tmpdir(), 'workshop-func-'));
@@ -1174,7 +1170,7 @@ test('packaging ships server/ and api/ at any depth and the plan model, and refu
   try {
     const site = join(root, 'website');
     const here = new URL('..', import.meta.url).pathname;
-    for (const part of ['server', 'api', join('node_modules', '@vercel')]) await cp(join(here, part), join(site, part), { recursive: true });
+    for (const part of ['server', 'api']) await cp(join(here, part), join(site, part), { recursive: true });
     await cp(new URL('../../tools/plan/model', import.meta.url).pathname, join(root, 'tools', 'plan', 'model'), { recursive: true });
     await cp(new URL('../../tools/plan/package.json', import.meta.url).pathname, join(root, 'tools', 'plan', 'package.json'));
     const dist = await fixtureSite();
@@ -1200,8 +1196,35 @@ test('packaging ships server/ and api/ at any depth and the plan model, and refu
       await writeFile(config, `import '../lib/z.mjs';\n${original}`);
       await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'd', '.vercel', 'output') }), /lib\/z\.mjs, in website\/ but outside website\/server\/ and website\/api\//);
       await assert.rejects(lstat(join(root, 'd', '.vercel', 'output')), 'nothing is written');
+      // A package is refused like any other file outside server/ and api/.
+      await mkdir(join(site, 'node_modules', 'pkg'), { recursive: true });
+      await writeFile(join(site, 'node_modules', 'pkg', 'package.json'), '{ "name": "pkg", "type": "module", "main": "index.js" }\n');
+      await writeFile(join(site, 'node_modules', 'pkg', 'index.js'), 'export const p = 1;\n');
+      await writeFile(config, `import 'pkg';\n${original}`);
+      await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'e', '.vercel', 'output') }), /node_modules\/pkg\/index\.js, in website\/ but outside website\/server\/ and website\/api\//);
+      await assert.rejects(lstat(join(root, 'e', '.vercel', 'output')), 'nothing is written');
     } finally { await rm(dist, { recursive: true, force: true }); }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('waitUntil hands the promise to the request context Vercel keeps, and asks nothing without one', () => {
+  const key = Symbol.for('@vercel/request-context');
+  const before = globalThis[key];
+  try {
+    delete globalThis[key];
+    assert.equal(waitUntil(Promise.resolve()), undefined);
+    const kept = [];
+    globalThis[key] = { get: () => ({ waitUntil: (promise) => { kept.push(promise); } }) };
+    const promise = Promise.resolve();
+    waitUntil(promise);
+    assert.deepEqual(kept, [promise]);
+    // A context without the method asks nothing either.
+    globalThis[key] = { get: () => ({}) };
+    assert.equal(waitUntil(promise), undefined);
+  } finally {
+    if (before === undefined) delete globalThis[key];
+    else globalThis[key] = before;
+  }
 });
 
 test('packaging refuses an output directory that does not end in .vercel/output, and deletes nothing', async () => {
