@@ -1,7 +1,0 @@
-{
-  "channelIdentifier": "org.silo.dev",
-  "engineVersion": "0.2.0",
-  "engineBuild": "p2-silod-scaffold-development",
-  "protocolMin": 8,
-  "protocolMax": 8
-}

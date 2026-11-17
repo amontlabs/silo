@@ -1,3 +1,0 @@
-apt_download 9.06
-apt_download 15.00
-apt_download 17.59

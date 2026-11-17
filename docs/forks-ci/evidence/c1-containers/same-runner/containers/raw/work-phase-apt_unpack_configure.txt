@@ -1,3 +1,0 @@
-apt_unpack_configure 18.19
-apt_unpack_configure 17.08
-apt_unpack_configure 21.26

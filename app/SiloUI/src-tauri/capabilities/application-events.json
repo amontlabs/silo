@@ -1,7 +1,0 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "application-events",
-  "description": "The main window and status panel receive authoritative application and settings updates.",
-  "windows": ["main", "status"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
-}

@@ -1,3 +1,0 @@
-cargo_install_hexyl 15.03
-cargo_install_hexyl 15.21
-cargo_install_hexyl 14.52

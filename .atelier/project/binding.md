@@ -1,7 +1,8 @@
 ## Silo
+- Nothing is built without a feature the owner took (`"verdict": "take"` in its file).
+- Never write `verdict` or `built` by hand: `plan decide` and `plan finish` do, and the owner's click on the Workshop arrives as a commit.
+- `plan/decisions.json` holds what the owner settled for the whole product, and a feature's notes hold what was settled for that feature. They exist so that nobody decides the same thing twice or differently: do not decide it again, and do not report as a problem what they settle. This binds reviewers too.
+- Business material (prices, customers, funding) lives in Linear and never in this repository, which is public. Linear holds nothing else: product ideas and features go in `plan/`.
 - Agents are chosen by role name from `atelier agents`, never by provider model; `cheap` only when the owner asks.
-- Live checks run through `app/SiloUI/scripts/live/run <check> [--host mac|linux]`. A check runs on its own Dev engine instance when it can; one that drives the shared Dev engine or the Dev app holds `~/.local/state/silo-live/dev-engine.lock`. Only the Dev build and throwaway `e2e-*` computers, never production.
 - A test that fails and then passes is a fix item, not a retry.
-- Product: `docs/product/PRODUCT.md` says what Silo is, `features.jsonl` lists every feature in the order it is built with the owner's verdict on each, `DECISIONS.md` what was decided. Read them before building. Nothing is built without an entry the owner took.
-- Business material (prices, customers, funding) never goes in this repository: it is public.
-- Silo is being restarted from an empty tree. Read `docs/product/RESTART.md` before anything else: it says what is decided, where the work stands and what to do when a session starts. Add nothing to the current tree except the dashboard and `docs/product/`.
+- Being rebuilt: until `plan/` and `tools/plan` land, the plan is still `docs/product/` and its tool `tools/workshop`. Do not push `main` before the Workshop is live: a push deploys the public site.

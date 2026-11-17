@@ -1,3 +1,0 @@
-apt_update 1.63
-apt_update 1.42
-apt_update 1.30

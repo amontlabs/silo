@@ -1,4 +1,0 @@
-[[permission]]
-identifier = "allow-set-preview-theme"
-description = "Apply and inspect theme in the isolated native material fixture. Granted only by the example harness."
-commands.allow = ["set_preview_theme"]

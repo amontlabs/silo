@@ -1,18 +1,5 @@
 .DS_Store
-__pycache__/
-*.py[cod]
-.pytest_cache/
-/target/
-
-# Cargo build output, including the worktree-level CARGO_TARGET_DIR.
-target/
-
-.gazette
-
-# Smithers run store (ephemeral — never commit)
-smithers.db
-smithers.db-shm
-smithers.db-wal
+node_modules/
 
 # Local Claude Code settings, worktrees and agent state; the shared settings hold atelier's stop hook
 /.claude/*
@@ -21,19 +8,17 @@ smithers.db-wal
 # Generated browser snapshots and console logs
 /.playwright-mcp/
 
-# Vite dependency caches
-.vite/
-
-# Job registry databases; the engine keeps them in its data folder, never in the source tree
-registry.sqlite3
-registry.sqlite3-shm
-registry.sqlite3-wal
-
-# Job registry files that engine tests create under their working directory
-app/SiloUI/src-tauri/engine/engine/
-
-# Owner dashboard dependencies
-tools/dashboard/node_modules/
+# Smithers run store (ephemeral — never commit)
+smithers.db
+smithers.db-shm
+smithers.db-wal
 
 # Vercel Build Output written by `npm --prefix website run build:vercel`
 /.vercel
+
+# Folders of the earlier tree that may still hold private, untracked files
+# (signing material, build output) in an existing checkout
+/app/
+/artifacts/
+/demo/
+/reviewer-service/

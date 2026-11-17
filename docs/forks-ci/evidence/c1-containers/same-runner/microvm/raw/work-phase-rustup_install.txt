@@ -1,3 +1,0 @@
-rustup_install 10.23
-rustup_install 9.77
-rustup_install 9.83

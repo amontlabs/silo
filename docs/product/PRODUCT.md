@@ -3,8 +3,7 @@
 This page says what Silo is, who it is for and what comes first. It is the source of truth for
 product questions: agents read it before they build, and the owner changes it by deciding
 something (see [decisions](DECISIONS.md)). Silo is being rebuilt from an empty tree: the features,
-in the order they are built, are [the list](features.jsonl), and the state of that work is in
-[RESTART.md](RESTART.md).
+in the order they are built, are [the list](features.jsonl).
 
 ## In one sentence
 
@@ -63,8 +62,7 @@ refine, later or drop. Nothing is built without an accepted entry.
   it. Differences are only those the platform forces.
 - **A computer cannot get more than it has.** An agent inside a computer can do anything that
   gives it no more access than it already has. Anything wider asks you, in the Silo app.
-- **Git words.** Checkpoint, fork, diff, restore, merge, undo. One word per idea
-  ([vocabulary](../SiloUI-VOCABULARY.md)).
+- **Git words.** Checkpoint, fork, diff, restore, merge, undo. One word per idea.
 - **Security is built properly, and is not the current focus.** A change is made safely; security
   work for its own sake waits until the starter is good.
 
