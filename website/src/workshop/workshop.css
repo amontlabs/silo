@@ -534,11 +534,21 @@
 .ws-ph-notes .ws-ph { height: 14px; width: min(100%, 520px); }
 .ws-ph-notes .ws-ph:last-child { width: min(70%, 360px); }
 .ws-ph-account { width: 100%; height: 22px; }
+/* The built page draws sign-in in the header (prerender.tsx). With the session marker, before the script has
+   taken over, the slot shows the account's placeholder instead: the same box as .ws-ph.ws-ph-account. */
+.ws-session #workshop-account[data-prerendered] > .ws-signin-wrap { display: none; }
+.ws-session #workshop-account[data-prerendered]::before {
+  content: ''; display: block; width: 100%; height: 22px; border-radius: 3px;
+  background: color-mix(in srgb, var(--line) 40%, transparent); animation: ws-pulse 1.6s ease-in-out infinite;
+}
+/* At an address other than the plain one, the built plain view under the title row stays hidden, its room kept,
+   until the script draws the place (the head script of workshop/index.html sets ws-hold). */
+.ws-hold #workshop-root[data-prerendered] .ws > :not(.ws-top) { visibility: hidden; }
 
 /* What arrives after the first frames fades in where it stands. */
 .ws-arr-s .ws-late-s, .ws-arr-o .ws-late-o, .ws-arr-p .ws-late-p, .ws-key .ws-in, .ws-status.ws-in, #workshop-account.ws-arr-p > * { animation: ws-appear .15s ease-out both; }
 @media (prefers-reduced-motion: reduce) {
-  #workshop-account > * { animation: none !important; transition: none !important; }
+  #workshop-account > *, #workshop-account::before { animation: none !important; transition: none !important; }
 }
 
 /* For people who would rather not sign in here: a word under the header's sign-in, taking no room. */

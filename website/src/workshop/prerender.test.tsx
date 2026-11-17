@@ -1,0 +1,127 @@
+// The markup the build writes into the page (prerender.tsx) and the script's takeover of it (takeover.ts).
+import { StrictMode } from 'react';
+import type { ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { App } from './App';
+import { Boundary } from './Boundary';
+import { buildData } from './fixtures';
+import { prerender } from './prerender';
+import { takeOver } from './takeover';
+import { mockApi, owner } from './test-support';
+
+/** The markup as a browser holds it: React's text separators dropped, adjacent texts joined, styles rewritten. */
+function normal(html: string): string {
+  const box = document.createElement('div');
+  box.innerHTML = html;
+  const walker = document.createTreeWalker(box, NodeFilter.SHOW_COMMENT);
+  const comments: ChildNode[] = [];
+  while (walker.nextNode()) comments.push(walker.currentNode as ChildNode);
+  comments.forEach((node) => node.remove());
+  box.normalize();
+  // A style as the browser writes it back (the server writes `--x:24`, the browser `--x: 24;`).
+  for (const node of box.querySelectorAll<HTMLElement>('[style]')) node.setAttribute('style', node.style.cssText);
+  return box.innerHTML;
+}
+
+/** The built page's two containers, holding the prerendered markup. */
+function page(data = buildData()) {
+  const parts = prerender(data);
+  document.body.innerHTML = `<div class="ws-account-slot" id="workshop-account" data-prerendered>${parts.account}</div><main><div id="workshop-root" data-prerendered>${parts.root}</div></main>`;
+  return { parts, root: document.getElementById('workshop-root') as HTMLElement, slot: document.getElementById('workshop-account') as HTMLElement };
+}
+
+const workshop = (data: ReturnType<typeof buildData>, slot: Element | null): ReactNode => (
+  <StrictMode>
+    <Boundary data={data}>
+      <App data={data} accountSlot={slot} />
+    </Boundary>
+  </StrictMode>
+);
+
+let unmount: (() => void) | null = null;
+afterEach(() => {
+  unmount?.();
+  unmount = null;
+  document.body.innerHTML = '';
+  document.documentElement.classList.remove('ws-hold');
+});
+
+/** Takes over the page; what the takeover leaves is read before anything else runs. */
+function take(root: HTMLElement, slot: Element | null, node: ReactNode) {
+  takeOver(root, slot, node);
+  const seen = { root: root.innerHTML, slot: slot?.innerHTML ?? '' };
+  // React keeps its root on the container; emptying the body is enough to forget it between tests.
+  unmount = () => { document.body.innerHTML = ''; };
+  return seen;
+}
+
+describe('the prerendered Workshop', () => {
+  it('is what the script renders first on a first visit without a session at the plain address', () => {
+    mockApi({ state: () => new Promise(() => {}) });
+    const data = buildData();
+    const { parts, root, slot } = page(data);
+    const seen = take(root, slot, workshop(data, slot));
+    expect(normal(seen.root)).toBe(normal(parts.root));
+    expect(normal(seen.slot)).toBe(normal(parts.account));
+    expect(root.hasAttribute('data-prerendered')).toBe(false);
+    expect(slot.hasAttribute('data-prerendered')).toBe(false);
+    expect(slot.querySelectorAll('.ws-signin-wrap')).toHaveLength(1);
+  });
+
+  it('holds the title row, every part of the map and every tile, and sign-in in the header', () => {
+    const data = buildData();
+    const { root, slot } = page(data);
+    expect(root.querySelector('.ws.is-sheet .ws-top h1')?.textContent).toBe('Workshop');
+    expect(root.querySelector('.ws-suggest')?.textContent).toBe('Suggest a feature');
+    for (const area of data.areas) {
+      expect(root.querySelector(`.ws-part[data-part="${area.id}"]`)).not.toBeNull();
+      expect(root.querySelector(`.ws-tile[data-area="${area.id}"]`)).not.toBeNull();
+    }
+    expect(root.querySelector('.ws-account-inline, .ws-signin-wrap')).toBeNull();
+    expect(slot.querySelector('a.button')?.getAttribute('href')).toBe('/api/workshop/login?return=%2Fworkshop');
+  });
+
+  it('is replaced in one step when the browser remembers who is signed in: their login, and no sign-in', () => {
+    mockApi({ state: () => new Promise(() => {}), routes: { 'GET me': () => new Promise(() => {}) } });
+    document.cookie = 'workshop-hint=1; path=/';
+    localStorage.setItem('silo-workshop-me', JSON.stringify(owner));
+    const data = buildData();
+    const { parts, root, slot } = page(data);
+    const seen = take(root, slot, workshop(data, slot));
+    expect(normal(seen.slot)).not.toBe(normal(parts.account));
+    expect(slot.children).toHaveLength(1);
+    expect(slot.querySelector('.ws-login')?.textContent).toBe(owner.login);
+    expect(slot.querySelector('.ws-signin-wrap')).toBeNull();
+    expect(root.querySelector('.ws-account-inline')).toBeNull();
+  });
+
+  it('gives the address its own view in the same step, and lifts the hold on what the build drew', () => {
+    mockApi({ state: () => new Promise(() => {}) });
+    const data = buildData();
+    history.replaceState(null, '', `/workshop#${data.areas[0].id}`);
+    document.documentElement.classList.add('ws-hold');
+    const { root, slot } = page(data);
+    take(root, slot, workshop(data, slot));
+    expect(root.querySelector('.ws.is-open #ws-area-title')).not.toBeNull();
+    expect(document.documentElement.classList.contains('ws-hold')).toBe(false);
+  });
+
+  it('keeps the drawn sign-in when the page fails to render, under the plain list', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const data = buildData();
+    const { root, slot } = page(data);
+    const Broken = () => { throw new Error('broken'); };
+    take(root, slot, <Boundary data={data}><Broken /></Boundary>);
+    expect(root.querySelector('.ws-plain h1')?.textContent).toBe('Workshop');
+    expect(slot.querySelectorAll('.ws-signin-wrap')).toHaveLength(1);
+  });
+
+  it('reads nothing of a browser at build time', () => {
+    // Undefined, any read of these throws: the build has no window, document, address, storage or media queries.
+    for (const name of ['window', 'document', 'location', 'localStorage', 'matchMedia', 'history']) vi.stubGlobal(name, undefined);
+    const parts = prerender(buildData());
+    vi.unstubAllGlobals();
+    expect(parts.root).toContain('ws is-sheet v-map ws-boot');
+    expect(parts.account).toContain('Sign in');
+  });
+});
