@@ -537,16 +537,17 @@ following Vercel's
   Vercel creates one function served at every `/api/workshop/<endpoint>` path,
   as the [primitives reference](https://vercel.com/docs/build-output-api/primitives#functions)
   allows. An unknown endpoint is Vercel's 404.
-- `config.json`: `version: 3` and four routes. The first adds
+- `config.json`: `version: 3` and its routes. The first adds
   `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`
-  to every path and continues. The second adds
-  `Cache-Control: public, max-age=31536000, immutable` to Vite's hashed files
-  under `/assets/` and to the font files (`/fonts/*.woff2`), and continues: a
-  browser keeps them and does not ask again, so a font is never edited in place
-  and a new one gets a new name. The third,
+  to every path and continues. The second,
   `{ "src": "^/workshop/?$", "dest": "/workshop/index.html" }`, serves the
-  Workshop page at both `/workshop` and `/workshop/`. The fourth hands every
-  other path to the filesystem.
+  Workshop page at both `/workshop` and `/workshop/`. `{ "handle": "filesystem" }`
+  hands every other path to the filesystem. After `{ "handle": "hit" }`, so only
+  for a file that exists, the last route adds
+  `Cache-Control: public, max-age=31536000, immutable` to Vite's hashed files
+  under `/assets/` and to the font files (`/fonts/*.woff2`): a browser keeps
+  them and does not ask again, so a font is never edited in place and a new one
+  gets a new name.
 
 The script fails when the build has no Workshop page (`workshop/index.html`, or
 `workshop.html`). `--out <dir>` writes the output elsewhere; the script refuses

@@ -30,8 +30,13 @@ main,
 .strip:hover {
   color: inherit;
 }
-.strip:hover .button {
+.strip:hover .button,
+.strip:focus-visible .button {
   background: var(--accent-hover);
+}
+/* Inside the row: the header above would cover the top of a ring drawn outside it. */
+.strip:focus-visible {
+  outline-offset: -3px;
 }
 .strip-name {
   font: italic 17px/1.3 var(--serif);

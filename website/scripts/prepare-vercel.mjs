@@ -80,7 +80,9 @@ function functionFiles(siteDir) {
 export const FRAME_HEADERS = { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
 
 // Files whose name changes when their content does (Vite's hashed assets), and the font files, which are
-// never edited in place: a new font gets a new name. A browser keeps them and does not ask again.
+// never edited in place: a new font gets a new name. A browser keeps them and does not ask again. The
+// header is added in the `hit` phase, so only to a file that exists: a 404 for a file of another
+// deployment is never kept.
 export const KEPT_FILES = '^/(assets/.*|fonts/.*\\.woff2)$';
 export const KEPT_HEADERS = { 'Cache-Control': 'public, max-age=31536000, immutable' };
 
@@ -119,9 +121,10 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
     version: 3,
     routes: [
       { src: '^/(.*)$', headers: FRAME_HEADERS, continue: true },
-      { src: KEPT_FILES, headers: KEPT_HEADERS, continue: true },
       { src: '^/workshop/?$', dest: page },
       { handle: 'filesystem' },
+      { handle: 'hit' },
+      { src: KEPT_FILES, headers: KEPT_HEADERS, continue: true },
     ],
   };
   await writeFile(join(outputDir, 'config.json'), JSON.stringify(config, null, 2) + '\n');

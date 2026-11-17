@@ -751,16 +751,18 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     const config = JSON.parse(await readFile(join(outputDir, 'config.json'), 'utf8'));
     assert.deepEqual(config, { version: 3, routes: [
       { src: '^/(.*)$', headers: { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' }, continue: true },
-      { src: '^/(assets/.*|fonts/.*\\.woff2)$', headers: { 'Cache-Control': 'public, max-age=31536000, immutable' }, continue: true },
       { src: '^/workshop/?$', dest: '/workshop/index.html' },
       { handle: 'filesystem' },
+      { handle: 'hit' },
+      { src: '^/(assets/.*|fonts/.*\\.woff2)$', headers: { 'Cache-Control': 'public, max-age=31536000, immutable' }, continue: true },
     ] });
     for (const path of ['/', '/workshop', '/assets/x.js', '/api/workshop/state']) assert.match(path, new RegExp(config.routes[0].src));
-    // Only what never changes under its name is kept by the browser: hashed assets and font files.
-    for (const path of ['/assets/main-2DSE1Vge.js', '/assets/main-DpTBd47T.css', '/fonts/ibm-plex-sans-400-normal.woff2']) assert.match(path, new RegExp(config.routes[1].src));
-    for (const path of ['/', '/workshop', '/theme.js', '/og.png', '/favicon.svg', '/fonts/fonts.css', '/fonts/OFL.txt', '/api/workshop/state', '/x/assets/y.js']) assert.doesNotMatch(path, new RegExp(config.routes[1].src));
-    for (const path of ['/workshop', '/workshop/']) assert.match(path, new RegExp(config.routes[2].src));
-    for (const path of ['/workshops', '/workshop/x', '/api/workshop/state']) assert.doesNotMatch(path, new RegExp(config.routes[2].src));
+    for (const path of ['/workshop', '/workshop/']) assert.match(path, new RegExp(config.routes[1].src));
+    for (const path of ['/workshops', '/workshop/x', '/api/workshop/state']) assert.doesNotMatch(path, new RegExp(config.routes[1].src));
+    // Only what never changes under its name is kept by the browser: hashed assets and font files, and
+    // only when the file exists (the `hit` phase).
+    for (const path of ['/assets/main-2DSE1Vge.js', '/assets/main-DpTBd47T.css', '/fonts/ibm-plex-sans-400-normal.woff2']) assert.match(path, new RegExp(config.routes[4].src));
+    for (const path of ['/', '/workshop', '/workshop/index.html', '/theme.js', '/og.png', '/favicon.svg', '/fonts/fonts.css', '/fonts/OFL.txt', '/api/workshop/state', '/x/assets/y.js']) assert.doesNotMatch(path, new RegExp(config.routes[4].src));
     assert.equal(await readFile(join(outputDir, 'static', 'workshop', 'index.html'), 'utf8'), '<!doctype html><title>Workshop</title>');
     assert.ok((await lstat(join(outputDir, 'static', 'index.html'))).isFile());
 
@@ -828,7 +830,7 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
     const flat = await fixtureSite('workshop.html');
     try {
       const result = await prepareVercel({ siteDir: website, distDir: join(flat, 'dist'), outputDir: join(flat, '.vercel', 'output') });
-      assert.equal(result.config.routes[2].dest, '/workshop.html');
+      assert.equal(result.config.routes[1].dest, '/workshop.html');
     } finally { await rm(flat, { recursive: true, force: true }); }
     const none = await fixtureSite(null);
     try {
