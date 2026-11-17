@@ -1,10 +1,12 @@
 // What the page wrote itself, kept apart from what the server answered. A `state` answer can come from a cache up
 // to a day old, and the page shows the answer it remembers before any new one, so the page's own writes are kept
-// as a list, each with its time: values set on an issue (a whole issue for a new suggestion) and changes to a
-// count, never an absolute count. The state shown is the newest answer with every write applied in order, except
-// the writes the answer was fetched more than a minute after (a minute's room for the server's clock); a write is
-// dropped after a day. Applying is repeatable: the same answer and the same list give the same state. The page's
-// own comments are added to an `issue` answer that does not carry them yet, for six minutes.
+// as a list, each with its time: values set on an issue (a verdict; a vote or comment count as the server answered
+// it for that write; a whole issue for a new suggestion). Never a change to a count: the server patches its
+// snapshot in place, so an answer may already count a write made after its `fetchedAt`, and a change would count
+// it twice. The state shown is the newest answer with every write applied in order, except the writes the answer
+// was fetched more than a minute after (a minute's room for the server's clock); a write is dropped after a day.
+// Applying is repeatable: the same answer and the same list give the same state. The page's own comments are
+// added to an `issue` answer that does not carry them yet, for six minutes.
 import type { Comment } from './api';
 import type { LiveIssue, LiveState } from './plan';
 
@@ -18,15 +20,11 @@ const KEY = 'silo-workshop-writes-2';
 /** The store before writes were a list; its comments and set values are carried over, its counts are not. */
 const OLD_KEY = 'silo-workshop-writes';
 
-type Settable = Omit<Partial<LiveIssue>, 'up' | 'comments'>;
-
 export interface Write {
   n: number;
   at: number;
   /** Values set on the issue; a whole issue for a new suggestion. */
-  set?: Settable | LiveIssue;
-  /** Changes to its counts. */
-  add?: { up?: number; comments?: number };
+  set: Partial<LiveIssue>;
 }
 
 interface Store {
@@ -50,7 +48,7 @@ function valid(raw: unknown): Store {
   const store = empty();
   if (typeof raw !== 'object' || raw === null) return store;
   const { writes, comments } = raw as Partial<Store>;
-  if (Array.isArray(writes)) store.writes = writes.filter((w) => w && typeof w.n === 'number' && typeof w.at === 'number');
+  if (Array.isArray(writes)) store.writes = writes.filter((w) => w && typeof w.n === 'number' && typeof w.at === 'number' && typeof w.set === 'object' && w.set !== null);
   if (Array.isArray(comments)) store.comments = comments.filter((c) => c && typeof c.n === 'number' && typeof c.at === 'number' && c.comment);
   return store;
 }
@@ -103,9 +101,9 @@ export function keep(write$: Omit<Write, 'at'>, now: number, comment?: Comment) 
   write(store);
 }
 
-function isWhole(issue: Settable | LiveIssue): issue is LiveIssue {
+function isWhole(issue: Partial<LiveIssue>): issue is LiveIssue {
   return typeof issue.kind === 'string' && typeof issue.title === 'string' && typeof issue.state === 'string'
-    && typeof (issue as LiveIssue).up === 'number' && typeof (issue as LiveIssue).comments === 'number';
+    && typeof issue.up === 'number' && typeof issue.comments === 'number';
 }
 
 /** The answer with the page's own writes applied, in order, except those it was fetched well after. */
@@ -115,19 +113,9 @@ export function applyKept(state: LiveState, now: number): LiveState {
   if (!writes.length) return state;
   const issues = { ...state.issues };
   for (const write of writes) {
-    let issue = issues[write.n];
-    if (write.set) {
-      if (issue) issue = { ...issue, ...write.set };
-      else if (isWhole(write.set)) issue = write.set;
-    }
-    if (issue && write.add) {
-      issue = {
-        ...issue,
-        up: Math.max(0, issue.up + (write.add.up ?? 0)),
-        comments: Math.max(0, issue.comments + (write.add.comments ?? 0)),
-      };
-    }
-    if (issue) issues[write.n] = issue;
+    const issue = issues[write.n];
+    if (issue) issues[write.n] = { ...issue, ...write.set };
+    else if (isWhole(write.set)) issues[write.n] = write.set;
   }
   return { ...state, issues };
 }

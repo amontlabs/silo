@@ -236,46 +236,102 @@ describe('the load', () => {
 });
 
 describe('the page\'s own writes over an answer', () => {
-  const computers = (up: number) => liveState({ 12: issue({ entry: 'computers', title: 'Create and delete a computer', up, comments: 5, updates: 3 }) });
+  const computers = (up: number, comments = 5) => liveState({ 12: issue({ entry: 'computers', title: 'Create and delete a computer', up, comments, updates: 3 }) });
+  const stored = () => JSON.parse(localStorage.getItem(STATE) ?? '{}').issues[12];
 
-  it('count a vote from the server\'s number, not from a remembered one: remembered 12, real 20', async () => {
+  // Remembered 12, real 20: the person votes at once, the server answers 21. The page shows 21 over memory, over
+  // the CDN's copy (20), over a fresh answer seconds later that already has 21 and over one that still has 20; an
+  // answer fetched over a minute later shows its own number.
+  for (const [what, server] of [['a vote', true], ['a vote, from an older server that answers no count', false]] as const) {
+    it(`keep the count the server answered for ${what}`, async () => {
+      const time = clock();
+      marker();
+      remember({ ...computers(12), fetchedAt: at(Date.now() - 86_400_000) }, visitor);
+      const cdn = held<{ status: number; body: unknown; headers?: Record<string, string> }>();
+      const fresh = held<{ status: number; body: unknown }>();
+      const calls = mockApi({
+        me: visitor,
+        state: (url) => (url.searchParams.get('fresh') === '1' ? fresh.promise : cdn.promise),
+        routes: { 'POST vote': () => ok(server ? { ok: true, up: 21 } : { ok: true }) },
+      });
+      history.replaceState(null, '', '/workshop#computers');
+      const first = render(<App data={buildData()} />);
+      expect(votes('Create and delete a computer')).toBe('👍 12');
+      fireEvent.click(screen.getByRole('button', { name: '12 votes' }));
+      await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
+      // Without a count from the server, the count shown moves by one.
+      const kept = server ? '👍 21' : '👍 13';
+      await waitFor(() => expect(votes('Create and delete a computer')).toBe(kept));
+      await act(async () => cdn.release({ status: 200, body: { ...computers(20), fetchedAt: at(Date.now() - 5 * 60_000) }, headers: { Age: '300' } }));
+      await waitFor(() => expect(stored().up).toBe(20));
+      expect(votes('Create and delete a computer')).toBe(kept);
+      time.advance(5_000);
+      await act(async () => fresh.release(ok({ ...computers(21), fetchedAt: at(Date.now()) })));
+      await waitFor(() => expect(stored().up).toBe(21));
+      expect(votes('Create and delete a computer')).toBe(kept);
+      first.unmount();
+      // The next visit: memory has 21 and the write; an answer seconds later still has 20, one over a minute later 23.
+      const late = held<{ status: number; body: unknown }>();
+      mockApi({ me: visitor, state: () => late.promise });
+      const second = render(<App data={buildData()} />);
+      expect(votes('Create and delete a computer')).toBe(kept);
+      await act(async () => late.release(ok({ ...computers(20), fetchedAt: at(Date.now()) })));
+      expect(votes('Create and delete a computer')).toBe(kept);
+      second.unmount();
+      time.advance(2 * 60_000);
+      mockApi({ me: visitor, state: () => ok({ ...computers(23), fetchedAt: at(Date.now()) }) });
+      render(<App data={buildData()} />);
+      await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 23'));
+    });
+  }
+
+  it('keep the comment count the server answered, the whole count with history lines', async () => {
     const time = clock();
     marker();
-    remember({ ...computers(12), fetchedAt: at(Date.now() - 86_400_000) }, visitor);
-    const cdn = held<{ status: number; body: unknown; headers?: Record<string, string> }>();
+    remember({ ...computers(12, 5), fetchedAt: at(Date.now() - 86_400_000) }, visitor);
+    const cdn = held<{ status: number; body: unknown }>();
     const fresh = held<{ status: number; body: unknown }>();
-    const calls = mockApi({ me: visitor, state: (url) => (url.searchParams.get('fresh') === '1' ? fresh.promise : cdn.promise) });
-    history.replaceState(null, '', '/workshop#computers');
+    mockApi({ me: visitor, state: (url) => (url.search ? fresh.promise : cdn.promise), routes: { 'POST comment': () => ok({ ok: true, id: 1, comments: 9 }) } });
+    history.replaceState(null, '', '/workshop#computers/computers');
     const first = render(<App data={buildData()} />);
-    expect(votes('Create and delete a computer')).toBe('👍 12');
-    // The visitor votes at once, before any answer.
-    fireEvent.click(screen.getByRole('button', { name: '12 votes' }));
-    await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
-    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 13'));
-    // The CDN's copy, fetched five minutes ago: 20, and the vote over it.
-    await act(async () => cdn.release({ status: 200, body: { ...computers(20), fetchedAt: at(Date.now() - 5 * 60_000) }, headers: { Age: '300' } }));
-    await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 21'));
-    // The fresh answer, which counts the vote: 21.
-    time.advance(2 * 60_000);
-    await act(async () => fresh.release(ok({ ...computers(21), fetchedAt: at(Date.now()) })));
-    await waitFor(() => expect(JSON.parse(localStorage.getItem(STATE) ?? '{}').issues[12].up).toBe(21));
-    expect(votes('Create and delete a computer')).toBe('👍 21');
+    // 5 comments, 3 of them history lines.
+    expect(within(itemOf('Create and delete a computer')).getByLabelText('2 comments')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Comment' })).toBeEnabled());
+    await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Mine.');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByLabelText('6 comments')).toBeInTheDocument());
+    await act(async () => cdn.release(ok({ ...computers(12, 8), fetchedAt: at(Date.now() - 5 * 60_000) })));
+    expect(within(itemOf('Create and delete a computer')).getByLabelText('6 comments')).toBeInTheDocument();
+    // Seconds later, an answer that already counts it: still 6.
+    time.advance(5_000);
+    await act(async () => fresh.release(ok({ ...computers(12, 9), fetchedAt: at(Date.now()) })));
+    await waitFor(() => expect(stored().comments).toBe(9));
+    expect(within(itemOf('Create and delete a computer')).getByLabelText('6 comments')).toBeInTheDocument();
     first.unmount();
-    const next = held<{ status: number; body: unknown }>();
-    mockApi({ me: visitor, state: () => next.promise });
+    // Over a minute later, the server's own count.
+    time.advance(2 * 60_000);
+    mockApi({ me: visitor, state: () => ok({ ...computers(12, 11), fetchedAt: at(Date.now()) }) });
     render(<App data={buildData()} />);
-    expect(votes('Create and delete a computer')).toBe('👍 21');
+    await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByLabelText('8 comments')).toBeInTheDocument());
   });
 
-  it('keep changes, not counts: a vote and its removal leave the answer\'s number', () => {
+  it('keep a comment as the count shown plus one when the server answers no count', async () => {
+    mockApi({ me: visitor });
+    history.replaceState(null, '', '/workshop#computers/computers');
+    await renderApp();
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Mine.');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByLabelText('3 comments')).toBeInTheDocument());
+  });
+
+  it('keep values, never changes: a vote and its removal leave the last value answered', () => {
     clock();
-    keep({ n: 12, add: { up: 1 } }, Date.now());
-    expect(applyKept({ ...computers(12), fetchedAt: at(Date.now()) }, Date.now()).issues[12].up).toBe(13);
-    keep({ n: 12, add: { up: -1 } }, Date.now());
+    keep({ n: 12, set: { up: 13 } }, Date.now());
+    keep({ n: 12, set: { up: 12 } }, Date.now());
     const answer = { ...computers(30), fetchedAt: at(Date.now() - 60_000) };
-    expect(applyKept(answer, Date.now()).issues[12].up).toBe(30);
-    // Repeatable: the same answer and the same list give the same state.
-    expect(applyKept(answer, Date.now())).toEqual(applyKept(answer, Date.now()));
+    expect(applyKept(answer, Date.now()).issues[12].up).toBe(12);
+    // Repeatable: the same answer and the same list give the same state, and the answer is untouched.
+    expect(applyKept(answer, Date.now())).toEqual(applyKept(applyKept(answer, Date.now()), Date.now()));
     expect(answer.issues[12].up).toBe(30);
   });
 
@@ -295,17 +351,18 @@ describe('the page\'s own writes over an answer', () => {
     expect(screen.getByRole('button', { name: /^A new idea/ })).toBeInTheDocument();
   });
 
-  it('carry over the older store\'s set values and comments, never its counts', () => {
+  it('carry over the older store\'s set values and comments, never its counts, and ignore count changes', () => {
     clock();
     localStorage.setItem('silo-workshop-writes', JSON.stringify({ 12: { at: Date.now(), issue: { up: 99, comments: 9, verdict: 'take' }, comments: [] } }));
-    const shown = applyKept({ ...computers(12), fetchedAt: at(Date.now()) }, Date.now());
-    expect(shown.issues[12]).toMatchObject({ up: 12, comments: 5, verdict: 'take' });
+    expect(applyKept({ ...computers(12), fetchedAt: at(Date.now()) }, Date.now()).issues[12]).toMatchObject({ up: 12, comments: 5, verdict: 'take' });
+    localStorage.setItem('silo-workshop-writes-2', JSON.stringify({ writes: [{ n: 12, at: Date.now(), add: { up: 1 } }], comments: [] }));
+    expect(applyKept({ ...computers(12), fetchedAt: at(Date.now()) }, Date.now()).issues[12].up).toBe(12);
   });
 
   it('give way to an answer fetched more than a minute after them, and are dropped after a day', () => {
     const time = clock();
     keep({ n: 12, set: { verdict: 'take' } }, Date.now());
-    keep({ n: 12, add: { up: 1 } }, Date.now());
+    keep({ n: 12, set: { up: 13 } }, Date.now());
     const base = computers(12);
     expect(applyKept({ ...base, fetchedAt: at(Date.now() - 5 * 60_000) }, Date.now()).issues[12]).toMatchObject({ up: 13, verdict: 'take' });
     expect(applyKept({ ...base, fetchedAt: at(Date.now() + 50_000) }, Date.now() + 50_000).issues[12]).toMatchObject({ up: 13, verdict: 'take' });
@@ -315,34 +372,33 @@ describe('the page\'s own writes over an answer', () => {
     expect(applyKept({ ...base, fetchedAt: at(0) }, Date.now()).issues[12]).toMatchObject({ up: 12, verdict: null });
   });
 
-  it('hold on every path: random answers, writes and time; the newest answer kept as it came, writes applied in order', () => {
-    // The reference: the answer kept is the newest by fetchedAt, unchanged. Issue 12 shown is that answer with every
-    // write under a day old that the answer was not fetched more than a minute after, in order: a count change
-    // (never below 0) or a verdict set.
+  it('hold on every path: random answers, writes and time; the newest answer kept as it came, values applied in order', () => {
+    // The reference: the answer kept is the newest by fetchedAt, unchanged. Issue 12 shown is that answer with the
+    // value of the last write of each field that is under a day old and that the answer was not fetched more than a
+    // minute after. Showing it again changes nothing.
     let seed = 7;
     const random = () => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return seed / 2 ** 31; };
     for (let run = 0; run < 50; run += 1) {
       localStorage.clear();
       const time = clock();
       let kept = null as LiveState | null;
-      let model = null as { fetched: number; up: number; verdict: 'take' | 'later' | null } | null;
+      let model = null as { fetched: number; up: number } | null;
       const writes: { at: number; up?: number; verdict?: 'take' | 'later' }[] = [];
       for (let step = 0; step < 40; step += 1) {
         const roll = random();
         if (roll < 0.2) {
-          const up = random() < 0.5 ? 1 : -1;
+          const up = Math.floor(random() * 50);
           writes.push({ at: Date.now(), up });
-          keep({ n: 12, add: { up } }, Date.now());
+          keep({ n: 12, set: { up } }, Date.now());
         } else if (roll < 0.3) {
           const verdict = random() < 0.5 ? 'take' : 'later';
           writes.push({ at: Date.now(), verdict });
           keep({ n: 12, set: { verdict } }, Date.now());
         } else if (roll < 0.75) {
           const fetched = Date.now() - Math.floor(random() * 10 * 60_000) + Math.floor(random() * 3 * 60_000);
-          const up = Math.floor(random() * 5);
-          const answer = { ...computers(up), fetchedAt: at(fetched), old: random() < 0.5 };
-          kept = newerAnswer(kept, answer);
-          if (!model || fetched >= model.fetched) model = { fetched, up, verdict: null };
+          const up = Math.floor(random() * 50);
+          kept = newerAnswer(kept, { ...computers(up), fetchedAt: at(fetched), old: random() < 0.5 });
+          if (!model || fetched >= model.fetched) model = { fetched, up };
         } else {
           time.advance(Math.floor(random() * (random() < 0.1 ? 30 * 3600_000 : 4 * 60_000)));
         }
@@ -351,16 +407,16 @@ describe('the page\'s own writes over an answer', () => {
         expect(kept.issues[12].up).toBe(model.up);
         expect(kept.old).toBeUndefined();
         let up = model.up;
-        let verdict = model.verdict;
+        let verdict: 'take' | 'later' | null = null;
         for (const write of writes) {
           if (Date.now() - write.at >= 24 * 3600_000 || model.fetched > write.at + 60_000) continue;
-          if (write.up !== undefined) up = Math.max(0, up + write.up);
+          if (write.up !== undefined) up = write.up;
           if (write.verdict) verdict = write.verdict;
         }
         const shown = applyKept(kept, Date.now());
         expect(shown.issues[12].up).toBe(up);
         expect(shown.issues[12].verdict).toBe(verdict);
-        expect(applyKept(kept, Date.now())).toEqual(shown);
+        expect(applyKept(shown, Date.now())).toEqual(shown);
       }
       vi.restoreAllMocks();
     }

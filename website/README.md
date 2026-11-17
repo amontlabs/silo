@@ -182,9 +182,12 @@ What a person sees:
   `GET state` and `GET me`, and the page remembers both in local storage
   (`memory.ts`): the newest answer as the server sent it, and the signed-in
   login, avatar and whether they decide. The page's own confirmed writes are
-  kept apart (`writes.ts`), as a list with each one's time: values set (a
-  verdict, a new suggestion) and count changes (a vote +1 or -1, a comment +1),
-  never a count. What the page shows is the answer with every write applied in
+  kept apart (`writes.ts`), as a list with each one's time, of values set: a
+  verdict, a new suggestion, and for a vote or a comment the count the server
+  answered for that write (`up`, `comments`; the count shown plus or minus one
+  when an older server answers none). Never a change to a count: the server
+  patches its snapshot in place, so an answer may already count a write made
+  after its `fetchedAt`. What the page shows is the answer with every write applied in
   order, except those the answer was fetched more than a minute after; a write
   is dropped after a day, the page's own comments after six minutes. Both are drawn in the
   first frame. The person is used only while the `workshop-hint` cookie is
@@ -281,7 +284,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `AreaView.tsx`, `Suggest.tsx`, `Latest.tsx`, `Decisions.tsx` | An opened area and what is not carried over, the suggestions, the latest changes, the decisions. |
 | `Entry.tsx` | One row and what it shows open: notes, decisions, the thread with its history lines. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses, the rows on top of the plan's model, the drawing, the build-time reader. |
-| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set and count changes, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |
+| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |
 
 ## Storage
 

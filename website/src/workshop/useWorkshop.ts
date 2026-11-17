@@ -246,6 +246,10 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setPending(new Set(pendingRef.current));
   };
 
+  // The count the server answered for a write; an older server answers none, and the count shown moves by one.
+  const shownRef = useRef(shownState);
+  shownRef.current = shownState;
+  const count = (answered: unknown, fallback: number) => (typeof answered === 'number' && Number.isInteger(answered) && answered >= 0 ? answered : fallback);
   /** A write the server confirmed: kept, and shown at once over the answer. */
   const remember = (write: Omit<Write, 'at'>, comment?: Comment) => {
     keep(write, Date.now(), comment);
@@ -339,9 +343,9 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     startSending(n, own);
     setAnnounce('Sending comment');
     try {
-      await api.comment(n, text);
+      const answered = await api.comment(n, text);
       confirmComment(n, own);
-      remember({ n, add: { comments: 1 } }, own);
+      remember({ n, set: { comments: count(answered?.comments, (shownRef.current?.issues[n]?.comments ?? 0) + 1) } }, own);
     } catch (error) {
       setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
       failed('Comment', error);
@@ -360,9 +364,9 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     try {
       const was = n in votes ? votes[n] : await api.myVote(n);
       const on = !was;
-      await api.vote(n, on);
+      const answered = await api.vote(n, on);
       setVotes((current) => ({ ...current, [n]: on }));
-      remember({ n, add: { up: on ? 1 : -1 } });
+      remember({ n, set: { up: count(answered?.up, Math.max(0, (shownRef.current?.issues[n]?.up ?? 0) + (on ? 1 : -1))) } });
     } catch (error) {
       failed('Vote', error);
     } finally {
