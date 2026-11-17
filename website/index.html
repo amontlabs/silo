@@ -4,7 +4,9 @@
     <script src="/theme.js"></script>
     <script>
       // The page shows once its fonts are in, so nothing is laid out in a fallback face and then
-      // changes width. After 1.2 s it shows regardless, and the fonts swap in when they arrive.
+      // changes width. Every face it waits for is preloaded below, so the wait ends with the
+      // stylesheets on a first visit and at once on a later one. After 1.2 s it shows regardless,
+      // and the fonts swap in when they arrive.
       (() => {
         const root = document.documentElement;
         const show = () => root.classList.remove('fonts-pending');
@@ -33,6 +35,12 @@
     <meta property="og:description" content="Your agent gets its own computer and forks a copy for each task. You see everything the copy changed, then merge it or drop it." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://silo.amontlabs.com/" />
+    <meta property="og:site_name" content="Silo" />
+    <meta property="og:image" content="https://silo.amontlabs.com/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Silo: computers your agents can fork." />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="canonical" href="https://silo.amontlabs.com/" />
     <title>Silo — Computers your agents can fork</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -56,6 +64,7 @@
       }
     </style>
     <link rel="preload" href="/fonts/ibm-plex-serif-400-italic.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/ibm-plex-serif-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/ibm-plex-sans-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/ibm-plex-mono-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/fonts/fonts.css" />
@@ -118,6 +127,11 @@
         </div>
       </header>
       <main id="main">
+        <a class="strip joint" href="/workshop">
+          <span class="strip-name">Workshop</span>
+          <span class="strip-line">Follow us building Silo live, get an overview of every feature, suggest your ideas and give feedback.</span>
+          <span class="button primary small">Open<svg class="go" aria-hidden="true"><use href="#go" /></svg></span>
+        </a>
         <section class="hero joint" aria-labelledby="hero-title">
           <h1 id="hero-title">Computers your agents can fork.</h1>
           <p class="pitch">
@@ -130,7 +144,6 @@
               ><svg class="icon" aria-hidden="true"><use href="#github-icon" /></svg>View source</a
             >
           </div>
-          <p class="hero-note"><i class="mark" aria-hidden="true"></i>Not out yet. First up: <!-- plan:first-up --></p>
         </section>
         <section class="plate joint" id="why" aria-labelledby="plate-title">
           <div class="plate-inner">
@@ -178,18 +191,48 @@
             </figure>
           </div>
         </section>
-        <div class="points joint">
-          <p>The agent gets root and the network. Your files and keys stay out of its reach.</p>
-          <p>Every copy is a whole machine, so two tasks never share a port or a database.</p>
-          <p>Silo runs on machines you own, starting with your Mac. Nothing is hosted.</p>
-        </div>
-        <section class="door joint" aria-labelledby="door-title">
-          <div>
-            <h2 class="title" id="door-title">Workshop</h2>
-            <p class="door-line"><!-- plan:door --></p>
-          </div>
-          <a class="button primary" href="/workshop">Open the Workshop<svg class="go" aria-hidden="true"><use href="#go" /></svg></a>
+        <section class="for joint" aria-labelledby="for-title">
+          <h2 class="title" id="for-title">For high-velocity developers and small teams.</h2>
+          <ul class="points" role="list">
+            <li>
+              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="8" height="6.5" /><path d="M4.5 16h4M6.5 12.5V16" /><rect x="13.5" y="6" width="8" height="6.5" /><path d="M15.5 16h4M17.5 12.5V16" /><circle class="dot" cx="6.5" cy="9.25" r="1.1" /><circle class="dot" cx="17.5" cy="9.25" r="1.1" /></svg>parallel agents</p>
+              <h3>One virtual machine per agent</h3>
+              <p>Each fork is its own VM with its own network and disk, so two agents can listen on port 3000 and run the same migration at once.</p>
+            </li>
+            <li>
+              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6.5" rx="7" ry="2.8" /><path d="M5 6.5v11c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8v-11" /><path d="M5 12c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8" /></svg>environment setup</p>
+              <h3>Forks boot from main's disk</h3>
+              <p>A fork starts from a snapshot of main in seconds, with the repositories you cloned and the packages you installed already on it.</p>
+            </li>
+            <li>
+              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="1.5" /><path d="M9.2 9.5 8.2 14.5M12.2 9.5l-1 5M7.2 11h5.6M6.8 13h5.6M15.2 14.5h3" /></svg>full access</p>
+              <h3>Root in a VM with no route to your Mac</h3>
+              <p>The agent has sudo and the public internet. The VM cannot reach your Mac, your local network or your VPN, and real secrets are filled in outside it.</p>
+            </li>
+            <li>
+              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17" rx="1.5" /><path d="M6.5 9h3M8 7.5v3M12.5 9H18M6.5 15h3M12.5 15H18" /></svg>review</p>
+              <h3>A diff of the whole machine</h3>
+              <p>Silo compares a fork with the state it was forked from and groups the changes into code, packages, settings, files and databases.</p>
+            </li>
+            <li>
+              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3" /><path d="M3 19.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M15.5 5.8a3 3 0 0 1 0 5.6M17.5 14.3c2.1.7 3.5 2.6 3.5 5.2" /></svg>teams</p>
+              <h3>A shared host for the team</h3>
+              <p>A team's Mac mini or Linux server builds each recipe once for everyone and shows what each member has waiting to merge.</p>
+            </li>
+            <li>
+              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 18.5a4.5 4.5 0 0 1-.6-8.96 5.5 5.5 0 0 1 10.6 1.2A3.9 3.9 0 0 1 17 18.5Z" /></svg>where it runs</p>
+              <h3>Your Mac, a Linux server or the cloud</h3>
+              <p>The engine runs on a Mac, a Linux server with KVM or a cloud machine, and a computer takes the same commands on each.</p>
+            </li>
+          </ul>
         </section>
+        <div class="notice joint">
+          <p class="notice-label"><i class="mark" aria-hidden="true"></i>in heavy development</p>
+          <p>
+            Treat Silo as a build in public for now. If you try it, expect rough edges, breaking changes, no security guarantees and no data
+            migration between versions. Don't keep anything in it that isn't backed up.
+          </p>
+        </div>
       </main>
       <footer class="site-footer joint">
         <a class="brand" href="/" aria-label="Silo home"

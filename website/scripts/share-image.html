@@ -1,0 +1,122 @@
+<!doctype html>
+<!-- The picture a link to the site shows when shared: public/og.png is a 1200 x 630 capture of this page, opened from the dev server. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Silo share image</title>
+    <link rel="stylesheet" href="/fonts/fonts.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: #f7f7f4;
+        color: #282a2f;
+        font-family: 'IBM Plex Sans', Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .frame {
+        position: absolute;
+        inset: 0;
+        width: 1200px;
+        height: 630px;
+      }
+      .brand {
+        position: absolute;
+        left: 96px;
+        top: 37px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 34px;
+        font-weight: 500;
+        letter-spacing: -1.3px;
+      }
+      .brand svg {
+        width: 38px;
+        height: 38px;
+      }
+      .address {
+        position: absolute;
+        right: 96px;
+        top: 43px;
+        margin: 0;
+        font: 20px/1.4 'IBM Plex Mono', monospace;
+        color: #666a73;
+      }
+      h1 {
+        position: absolute;
+        left: 94px;
+        top: 150px;
+        margin: 0;
+        font: italic 400 98px/1.08 'IBM Plex Serif', Georgia, serif;
+        letter-spacing: -0.024em;
+        color: #995700;
+      }
+      .pitch {
+        position: absolute;
+        left: 96px;
+        top: 388px;
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.4;
+        color: #666a73;
+      }
+      .label {
+        position: absolute;
+        font: 20px/1.4 'IBM Plex Mono', monospace;
+        color: #666a73;
+      }
+      .merge {
+        color: #995700;
+      }
+    </style>
+  </head>
+  <body>
+    <svg class="frame" viewBox="0 0 1200 630" fill="none" aria-hidden="true">
+      <!-- The frame: two rails, a line under the header and one over the drawing, a diamond at each joint. -->
+      <g stroke="#dfe1df">
+        <path d="M60.5 0V630M1139.5 0V630M60 112.5H1140M60 470.5H1140" />
+        <g fill="#f7f7f4">
+          <rect x="-4" y="-4" width="8" height="8" transform="translate(60.5 112.5) rotate(45)" />
+          <rect x="-4" y="-4" width="8" height="8" transform="translate(1139.5 112.5) rotate(45)" />
+          <rect x="-4" y="-4" width="8" height="8" transform="translate(60.5 470.5) rotate(45)" />
+          <rect x="-4" y="-4" width="8" height="8" transform="translate(1139.5 470.5) rotate(45)" />
+        </g>
+      </g>
+      <!-- Main, a fork that is merged back, a fork that is dropped. -->
+      <g stroke="#888c92" stroke-width="1.5">
+        <path d="M96 528.5H1100M1090 522.5L1100 528.5L1090 534.5" />
+        <path d="M236 528.5V564Q236 580 252 580H470" />
+        <path d="M700 528.5V564Q700 580 716 580H900" />
+        <path d="M908 573l14 14M922 573l-14 14" stroke="#666a73" stroke-width="1.8" stroke-linecap="round" />
+        <g fill="#f7f7f4">
+          <rect x="-5" y="-5" width="10" height="10" transform="translate(236 528.5) rotate(45)" />
+          <rect x="-5" y="-5" width="10" height="10" transform="translate(700 528.5) rotate(45)" />
+        </g>
+      </g>
+      <path d="M470 580H520Q536 580 536 564V544.5Q536 528.5 552 528.5" stroke="#ff9f0a" stroke-width="2.2" />
+      <rect x="-5" y="-5" width="10" height="10" transform="translate(552 528.5) rotate(45)" fill="#ff9f0a" stroke="#ff9f0a" />
+    </svg>
+    <div class="brand">
+      <svg viewBox="21.5 21.5 85 85" aria-hidden="true">
+        <g fill="none" stroke-width="7" stroke-linecap="round">
+          <path d="M60.386 102.832A39 39 0 1 1 98.435 82.309" stroke="currentColor" />
+          <path d="M88.625 72.344A26 26 0 1 1 75.804 40.834" stroke="currentColor" />
+          <path d="M72.591 54.243A13 13 0 1 1 52.316 58.301" stroke="#ff9f0a" />
+        </g>
+      </svg>
+      <span>Silo</span>
+    </div>
+    <p class="address">silo.amontlabs.com</p>
+    <h1>Computers your<br />agents can fork.</h1>
+    <p class="pitch">Your agent gets its own computer and forks a copy for each task.</p>
+    <span class="label" style="left: 96px; top: 490px">main</span>
+    <span class="label" style="left: 256px; top: 540px">fork</span>
+    <span class="label merge" style="left: 572px; top: 540px">merge</span>
+    <span class="label" style="left: 720px; top: 540px">fork</span>
+    <span class="label" style="left: 938px; top: 566px">drop</span>
+  </body>
+</html>

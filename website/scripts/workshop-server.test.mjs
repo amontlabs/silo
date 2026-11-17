@@ -753,10 +753,16 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
       { src: '^/(.*)$', headers: { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' }, continue: true },
       { src: '^/workshop/?$', dest: '/workshop/index.html' },
       { handle: 'filesystem' },
+      { handle: 'hit' },
+      { src: '^/(assets/.*|fonts/.*\\.woff2)$', headers: { 'Cache-Control': 'public, max-age=31536000, immutable' }, continue: true },
     ] });
     for (const path of ['/', '/workshop', '/assets/x.js', '/api/workshop/state']) assert.match(path, new RegExp(config.routes[0].src));
     for (const path of ['/workshop', '/workshop/']) assert.match(path, new RegExp(config.routes[1].src));
     for (const path of ['/workshops', '/workshop/x', '/api/workshop/state']) assert.doesNotMatch(path, new RegExp(config.routes[1].src));
+    // Only what never changes under its name is kept by the browser: hashed assets and font files, and
+    // only when the file exists (the `hit` phase).
+    for (const path of ['/assets/main-2DSE1Vge.js', '/assets/main-DpTBd47T.css', '/fonts/ibm-plex-sans-400-normal.woff2']) assert.match(path, new RegExp(config.routes[4].src));
+    for (const path of ['/', '/workshop', '/workshop/index.html', '/theme.js', '/og.png', '/favicon.svg', '/fonts/fonts.css', '/fonts/OFL.txt', '/api/workshop/state', '/x/assets/y.js']) assert.doesNotMatch(path, new RegExp(config.routes[4].src));
     assert.equal(await readFile(join(outputDir, 'static', 'workshop', 'index.html'), 'utf8'), '<!doctype html><title>Workshop</title>');
     assert.ok((await lstat(join(outputDir, 'static', 'index.html'))).isFile());
 

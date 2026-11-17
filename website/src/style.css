@@ -1,7 +1,53 @@
-/* The home page. Type sizes: 12 (mono labels), 14 (interface), 17 (reading), 22 (section titles), 48 (headline), plus the wordmark. */
+/* The home page. Type sizes: 12 (mono labels), 14 (interface), 17 (reading), 20 (a point), 22 (section titles), 48 (headline), plus the wordmark. */
 .title {
   font: italic 22px/1.3 var(--serif);
   letter-spacing: -0.4px;
+}
+
+/*
+ * The frame is at least as tall as the window. On a window taller than the page, the hero and the
+ * picture share what is left over, so the footer is always the last row.
+ */
+.page-shell,
+main {
+  display: flex;
+  flex-direction: column;
+}
+main,
+.hero,
+.plate {
+  flex: 1 0 auto;
+}
+
+/* The Workshop, first on the page: its name, what it is, and the way in. The whole row is the link. */
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 6px 18px;
+  padding: 9px var(--gutter);
+  background: var(--accent-wash);
+}
+.strip:hover {
+  color: inherit;
+}
+.strip:hover .button,
+.strip:focus-visible .button {
+  background: var(--accent-hover);
+}
+/* Inside the row: the header above would cover the top of a ring drawn outside it. */
+.strip:focus-visible {
+  outline-offset: -3px;
+}
+.strip-name {
+  font: italic 17px/1.3 var(--serif);
+  letter-spacing: -0.3px;
+  flex-shrink: 0;
+}
+.strip-line {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.5;
+  text-wrap: pretty;
 }
 
 /* Hero: headline, pitch, the two ways in */
@@ -11,6 +57,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
 }
 .hero h1 {
   font: italic 48px/1.14 var(--serif);
@@ -37,27 +84,16 @@
   gap: 10px;
   margin-top: 30px;
 }
-.hero-note {
-  margin-top: 18px;
-  font: 12px/1.6 var(--mono);
-  color: var(--muted);
-  max-width: 60em;
-  text-wrap: balance;
-}
-.mark {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 10px;
-  transform: translateY(-1px) rotate(45deg);
-  border: 1px solid var(--accent);
-}
 
 /* The picture of the loop */
 .plate {
   padding: 22px var(--gutter) 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .plate-inner {
+  width: 100%;
   max-width: 940px;
   margin: 0 auto;
 }
@@ -389,40 +425,83 @@
   transition: none !important;
 }
 
-/* Three sentences */
+/* Who it is for: six points, each a term with its icon, what Silo does about it, and one sentence. The gaps of the grid are its lines. */
+.for .title {
+  padding: 24px var(--gutter) 22px;
+}
 .points {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+  background: var(--line);
 }
-.points p {
-  padding: 24px var(--gutter) 26px;
-  font: 17px/1.5 var(--serif);
-  border-right: 1px solid var(--line);
-  text-wrap: balance;
+.points li {
+  padding: 22px var(--gutter) 26px;
+  background: var(--paper);
 }
-.points p:last-child {
-  border-right: 0;
-}
-
-/* The way into the Workshop */
-.door {
+.term {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px 32px;
-  flex-wrap: wrap;
-  padding: 26px var(--gutter) 30px;
+  gap: 9px;
+  font: 12px/1.5 var(--mono);
+  color: var(--accent-ink);
 }
-.door-line {
-  margin-top: 6px;
-  font-size: 17px;
-  line-height: 1.5;
-  color: var(--muted);
+.term svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.dot {
+  fill: var(--accent);
+  stroke: none;
+}
+.points h3 {
+  margin-top: 14px;
+  font: 20px/1.3 var(--serif);
+  letter-spacing: -0.2px;
   text-wrap: balance;
 }
-/* One span per sentence: a narrow screen breaks between them, never inside the first. */
-.door-line span {
+.points h3 + p {
+  margin-top: 7px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+/* The notice: where Silo stands, under the same three columns as the points */
+.notice {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  padding: 20px 0 22px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.notice p {
+  padding: 0 var(--gutter);
+  text-wrap: pretty;
+}
+.notice-label {
+  font: 12px/1.9 var(--mono);
+  color: var(--accent-ink);
+}
+.mark {
   display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 10px;
+  transform: translateY(-1px) rotate(45deg);
+  border: 1px solid var(--accent);
 }
 
 /* Footer: one row */
@@ -454,15 +533,11 @@
     font-size: 42px;
   }
   .points {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .notice {
     grid-template-columns: 1fr;
-  }
-  .points p {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    padding: 18px var(--gutter) 19px;
-  }
-  .points p:last-child {
-    border-bottom: 0;
+    row-gap: 4px;
   }
 }
 @media (max-width: 640px) {
@@ -482,9 +557,22 @@
   .plate {
     padding-bottom: 30px;
   }
-  .door > div,
-  .door .button {
-    width: 100%;
+  .points {
+    grid-template-columns: 1fr;
+  }
+  .points li {
+    padding: 18px var(--gutter) 22px;
+  }
+  .strip {
+    flex-wrap: wrap;
+    padding: 11px var(--gutter) 13px;
+  }
+  .strip-line {
+    flex: 1 0 100%;
+    order: 3;
+  }
+  .strip .button {
+    margin-left: auto;
   }
 }
 @media (max-width: 335px) {
