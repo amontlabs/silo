@@ -620,41 +620,6 @@ the API answers 503 and the page shows the plan without live data.
 
 A missing or invalid value (a secret that is not 32 bytes of base64, a key that is not an RSA private key, a malformed repository or origin) leaves the API answering 503 `not_configured`. The response never says which value is wrong; the server log names the variable, never its value.
 
-## Going live
-
-The one place that says how the Workshop goes live, in order.
-
-1. **What only the owner can do.**
-   - Run `tools/plan/bin/plan setup`. It opens a page on `127.0.0.1` that posts
-     the App's manifest to GitHub (the settings of
-     [The GitHub App](#the-github-app)); click "Create GitHub App". The command
-     writes the seven variables Vercel needs to
-     `~/.local/state/silo-workshop/vercel.env` (mode 0600), then the App id,
-     client id, client secret and private key to the Keychain (service
-     `silo-workshop`). If the Keychain step fails, `tools/plan/bin/plan store`
-     finishes it from `vercel.env`.
-   - Install the App on `amontlabs/silo` only ("Only select repositories").
-   - In the Vercel `silo` project: the seven variables of `vercel.env`, for
-     Production only and marked Sensitive (see
-     [Environment variables](#environment-variables)). The build and install
-     commands come from `vercel.json`.
-   - In the repository's Actions secrets: `WORKSHOP_APP_ID` and
-     `WORKSHOP_PRIVATE_KEY`, which the Plan workflow
-     (`.github/workflows/plan.yml`) uses to pull verdicts, push them and sync
-     the issues.
-2. **`tools/plan/bin/plan doctor` passes**: every credential found, the App
-   public, installed on the repository, with Issues write. Before the first
-   sync it still reports the six labels missing: `plan sync` creates them.
-3. **The first push of `main`.**
-4. **What then happens on its own.** Vercel deploys the site and the
-   Workshop's function to production. The Plan workflow runs on the push:
-   `plan pull --commit`, `plan check`, then `plan sync`, which creates the
-   labels and one issue per feature.
-5. **What to check on the live site**: everything under
-   [Not verified until deployed](#not-verified-until-deployed).
-6. **Remove the "Not live yet" line** from `.atelier/project/binding.md`, run
-   `atelier rules`, and commit.
-
 ## Security properties and their limits
 
 **Session.** One cookie, `__Host-workshop-session` (`Path=/`, no `Domain`,
@@ -745,27 +710,28 @@ this on every response and log line of a session that includes failures.
 instance, in memory; several instances together can make more calls than one,
 and two instances can briefly show different versions.
 
-## Not verified until deployed
+## Not verified yet
 
-Everything above was run against the fake GitHub and in Node, not against
-GitHub or Vercel. These depend on the real services:
+The Workshop went live on 2026-11-17. That first deployment showed that
+Vercel's Git build uses `.vercel/output` at the repository root, that Vercel
+follows the symlinked functions and loads the `.cjs` handler, and that the Plan
+workflow's sync creates the labels and one issue per feature. Everything else
+was run against the fake GitHub and in Node. These still depend on the real
+services:
 
 - the token exchange body format: the server sends JSON with
   `Accept: application/json`, including `code_verifier` and `repository_id`;
 - whether a refreshed user token stays limited to the repository;
 - a visitor removing their own 👍 with their user token;
 - the collaborator permission endpoint with only the Metadata read permission;
-- that Vercel follows the symlinked functions, and loads the `.cjs` handler
-  with `req.url` as the original path;
-- that Vercel's Git build uses `.vercel/output` at the repository root;
 - that `waitUntil()` from the copied `@vercel/functions` keeps a Build Output
   Node.js function alive after the response, as documented for Vercel
   Functions (the code does not depend on it);
 - that GitHub answers `304` to the conditional issue and comment list pages as
   documented, and that the reaction summary in the issue list moves the page's
   ETag when a vote changes.
-- the Plan workflow, and what `tools/plan/README.md` lists as not verified
-  until the owner has created the App.
+- the verdict half of the Plan workflow (the owner's click becoming a commit
+  on `main`), and what `tools/plan/README.md` lists as not verified.
 
 ## Why built this way
 
