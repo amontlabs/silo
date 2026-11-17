@@ -1,0 +1,12 @@
+{
+  "name": "Search and jump to anything",
+  "what": "One shortcut finds every page and every action.",
+  "area": "app",
+  "needs": [
+    "app-window"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Proven and small. Natural once there are many actions."
+  }
+}

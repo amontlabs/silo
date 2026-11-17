@@ -1,0 +1,12 @@
+{
+  "name": "Hide background noise in a diff",
+  "what": "Measure what changes in an idle computer and leave that out of the diff.",
+  "area": "changes",
+  "needs": [
+    "diff"
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "Each measurement costs a whole extra fork and up to ten minutes. Filter known paths instead."
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "A hosted AI reviewer",
+  "what": "A hosted service that reads a fork's diff and returns findings.",
+  "needs": [],
+  "suggest": {
+    "verdict": "drop",
+    "why": "You set it aside on 10 Nov. Set aside on 10 Nov. Never deployed."
+  }
+}

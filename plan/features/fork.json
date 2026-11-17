@@ -1,0 +1,16 @@
+{
+  "name": "Fork a computer",
+  "what": "Copy a computer, or one of its checkpoints, into a new independent computer for a task, and throw it away when done.",
+  "area": "forks",
+  "needs": [
+    "checkpoints"
+  ],
+  "surfaces": {
+    "app": "button:Fork",
+    "cli": "silo fork · drop"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "The heart of the product. Proven: 21 s from inside main."
+  }
+}

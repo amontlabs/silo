@@ -1,0 +1,12 @@
+{
+  "name": "A private channel for Silo's tools",
+  "what": "Each computer reaches the engine through a private socket, not a port open on your device.",
+  "area": "trust",
+  "needs": [
+    "tools-inside"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Planned. It needs a patch to the VM runtime."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "Task time limits and a queue",
+  "what": "A task stops at a time limit, and tasks wait their turn for memory and disk.",
+  "area": "tasks",
+  "needs": [
+    "one-call-task",
+    "resource-floors"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Needed once tasks run with nobody watching."
+  }
+}

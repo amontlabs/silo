@@ -1,0 +1,12 @@
+{
+  "name": "Back up and restore a whole host",
+  "what": "Save the engine's state and base computers and restore them on a new machine.",
+  "area": "devices",
+  "needs": [
+    "export"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "An idea."
+  }
+}

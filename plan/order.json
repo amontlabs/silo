@@ -1,0 +1,222 @@
+{
+  "stages": [
+    {
+      "id": "shell",
+      "title": "Shell",
+      "line": "One computer you can open from the app and the command line.",
+      "features": [
+        "engine-service",
+        "calls-and-events",
+        "vm-runtime",
+        "guest-image",
+        "computers",
+        "run-commands",
+        "silo-cli",
+        "terminal",
+        "app-window",
+        "jobs",
+        "crash-recovery",
+        "no-route-home",
+        "dev-and-production",
+        "properties-checked"
+      ]
+    },
+    {
+      "id": "loop",
+      "title": "The loop",
+      "line": "Checkpoint, fork, see what changed, merge or drop.",
+      "features": [
+        "checkpoints",
+        "fork",
+        "quiet-forks",
+        "fork-tree",
+        "diff",
+        "merge",
+        "undo",
+        "no-credentials-in-merge"
+      ]
+    },
+    {
+      "id": "agent",
+      "title": "Agent inside",
+      "line": "Your agent lives in the computer and asks you for anything wider.",
+      "features": [
+        "agent-install",
+        "tools-inside",
+        "agent-rule",
+        "approvals",
+        "notifications",
+        "resource-floors"
+      ]
+    },
+    {
+      "id": "living",
+      "title": "Living in it",
+      "line": "Your setup, tools and access are inside main. This is the starter you can use daily.",
+      "features": [
+        "make-main",
+        "github",
+        "secrets",
+        "fork-access",
+        "access-view",
+        "editor",
+        "t3code",
+        "recipes",
+        "working-recipe",
+        "ports",
+        "network-policy",
+        "files",
+        "errors"
+      ]
+    },
+    {
+      "id": "loop2",
+      "title": "The loop, complete",
+      "line": "Merging when both sides changed, replacing main, history.",
+      "features": [
+        "merge-conflicts",
+        "merge-requests",
+        "replace-main",
+        "merge-and-recipe",
+        "steps",
+        "fork-many",
+        "checkpoint-memory",
+        "checkpoint-cleanup",
+        "credentials-used",
+        "merge-hooks",
+        "pull-request",
+        "diff-noise",
+        "auto-merge-rules"
+      ]
+    },
+    {
+      "id": "tasks",
+      "title": "Tasks from outside",
+      "line": "Something outside starts a task in a fresh computer and gets the result.",
+      "features": [
+        "fork-and-run",
+        "one-call-task",
+        "task-record",
+        "triggers",
+        "honest-checks",
+        "prepared-base",
+        "task-limits",
+        "ci-runner",
+        "task-extras"
+      ]
+    },
+    {
+      "id": "devices",
+      "title": "Other devices",
+      "line": "The same computers, on a Linux server or another Mac.",
+      "features": [
+        "linux-host",
+        "connect-device",
+        "remote-computers",
+        "remote-approvals",
+        "ssh-from-elsewhere",
+        "agent-host",
+        "phone-review"
+      ]
+    },
+    {
+      "id": "running",
+      "title": "Keeping it running",
+      "line": "Updates, releases, logs and disk: what someone else needs to install and keep it.",
+      "features": [
+        "release",
+        "updates",
+        "storage",
+        "keep-current",
+        "logs",
+        "updates-keep-running",
+        "resize",
+        "start-with-device",
+        "settings"
+      ]
+    },
+    {
+      "id": "trust",
+      "title": "Trust and proof",
+      "line": "Who did what, and evidence for each guarantee.",
+      "features": [
+        "audit-log",
+        "isolation-tests",
+        "hostile-content",
+        "stated-limits",
+        "private-channel",
+        "logins-stay-put",
+        "emergency-stop",
+        "known-programs",
+        "fewer-asks",
+        "policy-file",
+        "dns-log",
+        "outside-review",
+        "selling-extras"
+      ]
+    },
+    {
+      "id": "desktop",
+      "title": "Desktop and computer use",
+      "line": "A graphical desktop in a computer, for you and for agents.",
+      "features": [
+        "desktop",
+        "desktop-viewer",
+        "computer-use",
+        "clipboard"
+      ]
+    },
+    {
+      "id": "macos",
+      "title": "macOS computers",
+      "line": "The same loop for macOS guests.",
+      "features": [
+        "macos-create",
+        "macos-loop",
+        "macos-access",
+        "macos-screen",
+        "macos-tools",
+        "macos-extras"
+      ]
+    },
+    {
+      "id": "extras",
+      "title": "Sharing and extras",
+      "line": "Export, tokens, containers and other additions.",
+      "features": [
+        "export",
+        "computer-bisect",
+        "command-palette",
+        "menus-help",
+        "host-agent-plugin",
+        "personal-tokens",
+        "company-secrets",
+        "containers",
+        "exact-rebuilds",
+        "agent-tool-backends",
+        "backup-host",
+        "cloud-forks",
+        "public-face",
+        "export-logins",
+        "device-push",
+        "team-machine"
+      ]
+    },
+    {
+      "id": "gone",
+      "title": "Not carried over",
+      "line": "Dropped, replaced, or only useful for old data.",
+      "features": [
+        "old-data-migrations",
+        "linux-app",
+        "hosted-reviewer",
+        "project-folder",
+        "resident-agents",
+        "old-channel",
+        "other-backends",
+        "old-desktop-stacks",
+        "leftovers"
+      ]
+    }
+  ]
+}

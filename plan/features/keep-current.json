@@ -1,0 +1,12 @@
+{
+  "name": "Keep a computer current",
+  "what": "Silo's own parts inside a computer update at start. The system is rebuilt on the newest image while keeping your work.",
+  "area": "computers",
+  "needs": [
+    "tools-inside"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Proven for Linux. It matters once main has lived for weeks."
+  }
+}

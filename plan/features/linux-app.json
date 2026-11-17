@@ -1,0 +1,9 @@
+{
+  "name": "The Silo app on Linux",
+  "what": "A Linux build of the desktop app, with packages and an updater.",
+  "needs": [],
+  "suggest": {
+    "verdict": "drop",
+    "why": "Dropped on 4 Nov. Linux gets the engine and the command line."
+  }
+}

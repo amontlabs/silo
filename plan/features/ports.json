@@ -1,0 +1,16 @@
+{
+  "name": "Open a computer's website on your Mac",
+  "what": "Publish a port from a computer. Each gets its own local address and is never exposed to your network.",
+  "area": "access",
+  "needs": [
+    "computers"
+  ],
+  "surfaces": {
+    "app": "tab:Ports",
+    "cli": "silo publish"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "Proven. Per-computer addresses let many forks serve the same port."
+  }
+}

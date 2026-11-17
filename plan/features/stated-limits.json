@@ -1,0 +1,10 @@
+{
+  "name": "What Silo does not protect, stated plainly",
+  "what": "The threat model says what an agent can still do: send out data it can read, misuse access it was given.",
+  "area": "trust",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "Already written. Honest docs were a strength of the old project."
+  }
+}

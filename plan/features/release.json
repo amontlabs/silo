@@ -1,0 +1,12 @@
+{
+  "name": "Signed releases",
+  "what": "A versioned, signed and notarized app and engine, built the same way every time.",
+  "area": "releases",
+  "needs": [
+    "app-window"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Hard-won tooling. 81 changes were never released from the old tree."
+  }
+}

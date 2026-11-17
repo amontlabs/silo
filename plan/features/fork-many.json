@@ -1,0 +1,13 @@
+{
+  "name": "Many forks at once",
+  "what": "Make several forks of one checkpoint in parallel, each running a command.",
+  "area": "forks",
+  "needs": [
+    "fork",
+    "run-commands"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Small on top of fork."
+  }
+}

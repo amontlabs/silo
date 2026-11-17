@@ -1,0 +1,12 @@
+{
+  "name": "SSH into a computer from another machine",
+  "what": "Turn on SSH for a computer on your network, with a key you hand out.",
+  "area": "devices",
+  "needs": [
+    "terminal"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Built, never proven, and it overlaps with connecting a device."
+  }
+}

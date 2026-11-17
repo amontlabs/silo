@@ -1,0 +1,12 @@
+{
+  "name": "Dev and production never mix",
+  "what": "A development build has its own names, data and engine, so testing never touches the app you use.",
+  "area": "engine",
+  "needs": [
+    "engine-service"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Proven and small. Needed at once: the old Silo stays installed beside the new one."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "Exact rebuilds of a recipe",
+  "what": "A recipe rebuilt later or elsewhere gives identical tools, for example with Nix.",
+  "area": "setup",
+  "needs": [
+    "recipes"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "An idea."
+  }
+}

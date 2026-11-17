@@ -1,0 +1,17 @@
+{
+  "name": "See what was forked from what",
+  "what": "A tree of your computers: which came from which, their state, and what is waiting.",
+  "area": "forks",
+  "needs": [
+    "fork",
+    "app-window"
+  ],
+  "surfaces": {
+    "app": "tree",
+    "cli": "silo tree"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "Small and clean."
+  }
+}

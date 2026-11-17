@@ -1,0 +1,15 @@
+{
+  "name": "One recipe for your whole setup",
+  "what": "A recipe that gives a ready main: your agent, editor access, atelier, your repositories. Making one is guided, not a file written by hand.",
+  "area": "setup",
+  "needs": [
+    "recipes",
+    "agent-install",
+    "editor",
+    "github"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "New. You asked for it on 16 Nov."
+  }
+}

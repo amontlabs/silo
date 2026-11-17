@@ -1,0 +1,15 @@
+{
+  "name": "Browse and copy files",
+  "what": "See a computer's folders in the app and move files in and out.",
+  "area": "setup",
+  "needs": [
+    "app-window"
+  ],
+  "surfaces": {
+    "app": "tab:Files"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "Browsing is small. The old single-file copy is 3,600 lines over a second path; use one path."
+  }
+}

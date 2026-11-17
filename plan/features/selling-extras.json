@@ -1,0 +1,13 @@
+{
+  "name": "Measurement, reports and release paperwork",
+  "what": "Reports on agent work, opt-in usage counters, a bill of materials per release, governance files.",
+  "area": "trust",
+  "needs": [
+    "release",
+    "task-record"
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "They serve selling a pilot, not the product. Revisit when a customer asks."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "A ready computer per repository",
+  "what": "A checkpoint with a repository installed and its tests passing, refreshed on a schedule, that tasks start from.",
+  "area": "tasks",
+  "needs": [
+    "triggers"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "It is a recipe plus a schedule. Decide after the first real tasks."
+  }
+}

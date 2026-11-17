@@ -1,0 +1,13 @@
+{
+  "name": "A dedicated agent machine, or several",
+  "what": "A Mac mini or a server set up to run tasks, and tasks spread over several machines.",
+  "area": "devices",
+  "needs": [
+    "one-call-task",
+    "remote-computers"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Ideas. Mostly setup and docs on top of the entries above."
+  }
+}

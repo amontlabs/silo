@@ -1,0 +1,10 @@
+{
+  "name": "Every call and event defined once",
+  "what": "Each thing the engine can be asked, and each thing it reports, is written down once. The app, the command line and their docs are generated from it.",
+  "area": "engine",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "You decided this on 16 Nov: the app only talks to the engine, data first, with events. The old contract was clean. New: one model in Zig, Swift types generated from it."
+  }
+}

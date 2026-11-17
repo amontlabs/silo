@@ -24,7 +24,7 @@ run = ["tools/ci/check.sh", "typecheck"]
 compile = true
 
 [[check.steps]]
-name = "website-tests"
+name = "test-suites"
 run = ["tools/ci/check.sh", "tests"]
 
 [[check.steps]]
@@ -32,8 +32,8 @@ name = "website-build"
 run = ["tools/ci/check.sh", "build"]
 
 [[check.steps]]
-name = "workshop-tests"
-run = ["tools/ci/check.sh", "workshop"]
+name = "plan-check"
+run = ["tools/ci/check.sh", "plan"]
 
 [[check.steps]]
 name = "links"

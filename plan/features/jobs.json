@@ -1,0 +1,16 @@
+{
+  "name": "Long work you can follow",
+  "what": "Anything slow shows progress, can be cancelled, waits its turn instead of failing as busy, and keeps its result across an engine restart.",
+  "area": "engine",
+  "needs": [
+    "engine-service"
+  ],
+  "surfaces": {
+    "app": "progress",
+    "cli": "silo job"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "Proven design. It is what makes the app feel reliable."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "Stop every agent at once",
+  "what": "One action stops every computer and blocks every secret and token.",
+  "area": "trust",
+  "needs": [
+    "github",
+    "secrets"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "An idea. Small once the engine owns all state."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "GitHub Actions jobs in fresh computers",
+  "what": "Each job of a private repository runs in a fresh computer made from a recipe.",
+  "area": "tasks",
+  "needs": [
+    "one-call-task",
+    "github"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "7,500 lines of clean Go that passed 19 of 19 live. It becomes one trigger on top of tasks."
+  }
+}

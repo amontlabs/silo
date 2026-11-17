@@ -1,0 +1,13 @@
+{
+  "name": "Answer approvals from another device",
+  "what": "Requests waiting on a server can be answered from your Mac.",
+  "area": "devices",
+  "needs": [
+    "approvals",
+    "connect-device"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Needed for a server with no screen."
+  }
+}
