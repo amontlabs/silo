@@ -8,6 +8,7 @@ Discussing:
 - Anything about another feature goes in that feature's notes. A new idea gets its own entry with `plan add`.
 - A verdict the owner gives in the conversation: `plan decide <id> take|later|drop`.
 - Merge and push, so the Workshop shows it.
+- A rejected push means the owner decided meanwhile: when no merge is running, `git pull --no-rebase`, then push again. Never force.
 
 Decisions (rule 2b):
 - About this feature: its notes file is the decision log.

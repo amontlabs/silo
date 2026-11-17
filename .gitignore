@@ -15,10 +15,3 @@ smithers.db-wal
 
 # Vercel Build Output written by `npm --prefix website run build:vercel`
 /.vercel
-
-# Folders of the earlier tree that may still hold private, untracked files
-# (signing material, build output) in an existing checkout
-/app/
-/artifacts/
-/demo/
-/reviewer-service/
