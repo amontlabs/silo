@@ -19,13 +19,11 @@
       })();
     </script>
     <script>
-      // The picture of the loop draws itself once; until its script starts, it stays hidden so the
-      // finished picture never flashes first. If the script has not started after 3 s, the finished
-      // picture shows and stays. With reduced motion it is simply there.
-      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        document.documentElement.classList.add('loop-pending');
-        window.siloLoopFallback = setTimeout(() => document.documentElement.classList.remove('loop-pending'), 3000);
-      }
+      // The two pictures are drawn by their script. Until it has drawn them they stay hidden, with their room
+      // kept, so a half-drawn picture never shows first. If the script has not started after 3 s, the stills
+      // the page holds without script show and stay.
+      document.documentElement.classList.add('pictures-pending');
+      window.siloPicturesFallback = setTimeout(() => document.documentElement.classList.remove('pictures-pending'), 3000);
     </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -70,7 +68,9 @@
     <link rel="stylesheet" href="/fonts/fonts.css" />
     <link rel="stylesheet" href="/src/site.css" />
     <link rel="stylesheet" href="/src/style.css" />
-    <script type="module" src="/src/loop.ts"></script>
+    <link rel="stylesheet" href="/src/flow.css" />
+    <link rel="stylesheet" href="/src/cards.css" />
+    <script type="module" src="/src/home.ts"></script>
   </head>
   <body>
     <svg class="symbols" width="0" height="0" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -100,6 +100,9 @@
         <symbol id="out" viewBox="0 0 9 9"><path d="M2 7 7.5 1.5M3.2 1.5h4.3v4.3" /></symbol>
         <symbol id="go" viewBox="0 0 13 13"><path d="M2 6.5h9M7.5 3 11 6.5 7.5 10" /></symbol>
         <symbol id="computer" viewBox="0 0 14 14"><rect x="1.5" y="2.5" width="11" height="7.5" /><path d="M4.5 12.5h5M7 10v2.5" /></symbol>
+        <symbol id="ok" viewBox="0 0 12 12"><path d="M2.5 6.3 5 8.7l4.6-5.4" /></symbol>
+        <symbol id="branch" viewBox="0 0 10 12"><circle cx="2.5" cy="2" r="1.5" /><circle cx="2.5" cy="10" r="1.5" /><circle cx="7.5" cy="2" r="1.5" /><path d="M2.5 3.5v5M7.5 3.5v1.2c0 2.3-5 1.8-5 3.8" /></symbol>
+        <symbol id="pointer" viewBox="0 0 20 20"><path class="cur-edge" d="M3 2l12.5 6.6-5.4 1.5L8.2 15.6z" fill="currentColor" stroke-width="1.4" stroke-linejoin="round" /></symbol>
       </defs>
     </svg>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -146,84 +149,353 @@
           </div>
         </section>
         <section class="plate joint" id="why" aria-labelledby="plate-title">
-          <div class="plate-inner">
-            <div class="plate-head">
+          <div class="flow" id="flow">
+            <div class="flow-head">
               <h2 class="title" id="plate-title">Git for computers.</h2>
-              <button class="replay" type="button" id="replay" hidden>
-                <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M10.2 6a4.2 4.2 0 1 1-1.4-3.1M10.3 1.2v2.4H7.9" /></svg>Replay
-              </button>
+              <button class="ctl" type="button">Pause</button>
             </div>
-            <figure class="loop" id="loop" aria-labelledby="plate-title" aria-describedby="loop-caption">
-              <figcaption class="sr-only" id="loop-caption">Main is forked into two copies: one is merged back into main, the other is dropped.</figcaption>
-              <svg class="wires" aria-hidden="true" focusable="false"></svg>
-              <div class="pc main">
-                <p class="pc-name"><svg aria-hidden="true"><use href="#computer" /></svg>main</p>
-                <p class="pc-what"><i class="agent" aria-hidden="true"></i>Your agent and your setup</p>
-              </div>
-              <div class="pc copy c1">
-                <p class="pc-name"><svg aria-hidden="true"><use href="#computer" /></svg>copy of main</p>
-                <p class="pc-what"><i class="agent" aria-hidden="true"></i>Upgrade Postgres</p>
-              </div>
-              <div class="diff d1">
-                <p class="diff-title">what changed</p>
-                <dl>
-                  <div><dt>code</dt><dd>4 files</dd></div>
-                  <div><dt>packages</dt><dd>postgresql 17</dd></div>
-                  <div><dt>settings</dt><dd>pg_hba.conf</dd></div>
-                  <div><dt>database</dt><dd>2 tables, 310 rows</dd></div>
-                </dl>
-              </div>
-              <p class="end e1">merge</p>
-              <div class="pc copy c2">
-                <p class="pc-name"><svg aria-hidden="true"><use href="#computer" /></svg>copy of main</p>
-                <p class="pc-what"><i class="agent" aria-hidden="true"></i>Try a new parser</p>
-              </div>
-              <div class="diff d2">
-                <p class="diff-title">what changed</p>
-                <dl>
-                  <div><dt>code</dt><dd>12 files</dd></div>
-                  <div><dt>packages</dt><dd>tree-sitter</dd></div>
-                </dl>
-              </div>
-              <p class="end e2">drop</p>
-              <span class="verb" id="fork-verb" aria-hidden="true">fork</span>
-              <span class="tail" aria-hidden="true">main</span>
+            <figure aria-labelledby="plate-title" aria-describedby="flow-caption">
+              <figcaption class="sr-only" id="flow-caption">Two tasks are given to the agent in main, and each gets its own fork of main. Both forks work at the same time. One uses a secret, which is added outside the fork and only on requests to the host you allowed. Each fork shows everything it changed. One is merged into main and the other is dropped. Then a teammate's computer on a Linux server is forked onto your Mac.</figcaption>
+              <div class="stage" aria-hidden="true">
+                  <svg class="wires"></svg>
+                  <span class="dev dev-mac"><svg viewBox="0 0 14 14"><rect x="2.5" y="3" width="9" height="6" /><path d="M1 11.5h12" /></svg>your Mac</span>
+                  <span class="dev dev-srv"><svg viewBox="0 0 14 14"><rect x="2" y="2.5" width="10" height="4" /><rect x="2" y="7.5" width="10" height="4" /><path d="M4 4.5h1M4 9.5h1" /></svg>Linux server</span>
+                  <span class="team"><i class="pa">A</i><i class="pm">M</i><i class="pj">J</i></span>
+                  <span class="tag tf">fork</span>
+
+                  <div class="mac">
+                    <div class="pc main">
+                      <p class="pc-top"><span class="pc-name"><svg><use href="#computer" /></svg>main</span><span class="pc-state">running</span></p>
+                      <p class="pc-what"><i class="agent"></i>Your agent and your setup</p>
+                      <div class="said">
+                        <p><span>you</span><span class="ln l1">Upgrade Postgres</span></p>
+                        <p><span>you</span><span class="ln l2">Try Stripe checkout</span></p>
+                      </div>
+                      <p class="has"><span class="pg">postgresql 16</span><span class="btn undo">Undo</span></p>
+                    </div>
+
+                    <div class="forks">
+                      <div class="pc fork fa">
+                        <p class="pc-top">
+                          <span class="pc-name"><svg><use href="#computer" /></svg>pg-17</span>
+                          <span class="pc-state"></span>
+                          <span class="pc-acts"><span class="btn drop">Drop</span><span class="btn pri merge">Merge</span></span>
+                        </p>
+                        <p class="pc-what"><i class="agent"></i>Upgrade Postgres</p>
+                        <div class="body" data-view="term">
+                          <div class="v term">
+                            <span class="ln t1"><span class="pr">$</span> sudo apt install postgresql-17</span>
+                            <span class="ln t2"><span class="pr">$</span> bin/rails db:migrate</span>
+                            <span class="ln t3"><span class="pr">$</span> bin/dev</span>
+                            <span class="ln reply t4">listening on <span class="port">:3000</span></span>
+                          </div>
+                          <div class="v scrv">
+                            <div class="scrn">
+                              <span class="sbar"><i></i><i></i><i></i><em>localhost:3000</em></span>
+                              <u></u><u></u><b class="sbtn"></b>
+                              <svg class="tick"><use href="#ok" /></svg>
+                              <span class="acur"><svg viewBox="0 0 20 20"><path d="M3 2l12.5 6.6-5.4 1.5L8.2 15.6z" /></svg><em>agent</em></span>
+                            </div>
+                          </div>
+                          <div class="v diff">
+                            <p class="dr d1"><span>code</span><span>~/api · 4 files</span></p>
+                            <p class="cut">git diff ends here</p>
+                            <p class="dr d2"><span>packages</span><span>postgresql 16<svg class="ar"><use href="#go" /></svg>17</span></p>
+                            <p class="dr d3"><span>settings</span><span>pg_hba.conf</span></p>
+                            <p class="dr d4"><span>database</span><span>schema changed</span></p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="pc fork fb">
+                        <p class="pc-top">
+                          <span class="pc-name"><svg><use href="#computer" /></svg>stripe</span>
+                          <span class="pc-state"></span>
+                          <span class="pc-acts"><span class="btn drop">Drop</span><span class="btn pri merge">Merge</span></span>
+                        </p>
+                        <p class="pc-what"><i class="agent"></i>Try Stripe checkout</p>
+                        <div class="body" data-view="term">
+                          <div class="v term">
+                            <span class="ln t1"><span class="pr">$</span> npm install stripe</span>
+                            <span class="ln t2"><span class="pr">$</span> npm run dev</span>
+                            <span class="ln reply t3">listening on <span class="port">:3000</span></span>
+                          </div>
+                          <div class="v term2">
+                            <span class="ln u1"><span class="pr">$</span> echo $STRIPE_KEY</span>
+                            <span class="ln reply u2"><span class="ph">placeholder</span></span>
+                            <span class="ln u3"><span class="pr">$</span> curl api.stripe.com</span>
+                            <span class="ln reply u4">200 OK</span>
+                          </div>
+                          <div class="v diff">
+                            <p class="dr d1"><span>code</span><span>~/web · 9 files</span></p>
+                            <p class="cut">git diff ends here</p>
+                            <p class="dr d2"><span>packages</span><span>+ stripe</span></p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="net">
+                    <p class="host hs"><i></i>api.stripe.com</p>
+                    <p class="host he"><i></i>anywhere else</p>
+                  </div>
+                  <i class="pk p1"></i><i class="pk p2"></i>
+
+                  <div class="pc fork fc">
+                    <p class="pc-top"><span class="pc-name"><svg><use href="#computer" /></svg>search<b class="who pm">M</b></span><span class="pc-state"></span></p>
+                    <p class="pc-what"><i class="agent"></i>Rebuild search</p>
+                    <div class="body" data-view="term">
+                      <div class="v term">
+                        <span class="ln c1"><span class="pr">$</span> bin/dev</span>
+                        <span class="ln reply c2">listening on <span class="port2">:3000</span></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="srv">
+                    <div class="pc job busy">
+                      <p class="pc-top">
+                        <span class="pc-name"><b class="who pm">M</b>search</span>
+                        <span class="pc-state"></span>
+                        <span class="pc-acts"><span class="btn pri forkb">Fork</span></span>
+                      </p>
+                      <p class="pc-what"><i class="agent"></i>Rebuild search</p>
+                    </div>
+                  </div>
+                  <i class="cpk"></i>
+
+                  <div class="cursor">
+                    <svg viewBox="0 0 20 20"><path d="M3 2l12.5 6.6-5.4 1.5L8.2 15.6z" /></svg><i></i>
+                  </div>
+                </div>
             </figure>
+            <ol class="steps" aria-label="Steps of the picture">
+              <li><button type="button" aria-label="Fork"><i><b></b></i><span class="lb">Fork</span></button></li>
+              <li><button type="button" aria-label="Work"><i><b></b></i><span class="lb">Work</span></button></li>
+              <li><button type="button" aria-label="Screen"><i><b></b></i><span class="lb">Screen</span></button></li>
+              <li><button type="button" aria-label="Secrets"><i><b></b></i><span class="lb">Secrets</span></button></li>
+              <li><button type="button" aria-label="Diff"><i><b></b></i><span class="lb">Diff</span></button></li>
+              <li><button type="button" aria-label="Merge or drop"><i><b></b></i><span class="lb">Merge or drop</span></button></li>
+              <li><button type="button" aria-label="Other devices"><i><b></b></i><span class="lb">Other devices</span></button></li>
+            </ol>
           </div>
         </section>
         <section class="for joint" aria-labelledby="for-title">
           <h2 class="title" id="for-title">For high-velocity developers and small teams.</h2>
-          <ul class="points" role="list">
-            <li>
-              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="8" height="6.5" /><path d="M4.5 16h4M6.5 12.5V16" /><rect x="13.5" y="6" width="8" height="6.5" /><path d="M15.5 16h4M17.5 12.5V16" /><circle class="dot" cx="6.5" cy="9.25" r="1.1" /><circle class="dot" cx="17.5" cy="9.25" r="1.1" /></svg>parallel agents</p>
-              <h3>One virtual machine per agent</h3>
-              <p>Each fork is its own VM with its own network and disk, so two agents can listen on port 3000 and run the same migration at once.</p>
+          <ul class="points" id="cards" role="list">
+            <li class="card" data-mini="rec">
+              <span class="prog"><b></b></span>
+              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
+                <path class="bx" d="M14.5 20.5H84.5L98.5 34.5V118.5H14.5Z" /><path class="gl" d="M84.5 20.5V34.5H98.5" />
+                <text class="s9" x="24" y="39">recipe</text>
+                <text class="i f r1" x="24" y="62">ubuntu</text>
+                <text class="i f r2" x="24" y="79">node 22</text>
+                <text class="i f r3" x="24" y="96">postgresql</text>
+                <rect class="trk" x="112.5" y="65.5" width="54" height="10" rx="5" />
+                <rect class="fillb" x="114" y="67" width="51" height="7" rx="3.5" />
+                <text class="f bt a s9" x="139.5" y="92" text-anchor="middle">built once</text>
+                <path class="wr wc" pathLength="1" d="M166.5 70.5H180.5V35.5H194" />
+                <path class="wr wc" pathLength="1" d="M166.5 70.5H194" />
+                <path class="wr wc" pathLength="1" d="M166.5 70.5H180.5V105.5H194" />
+                <g class="p left c1"><rect class="bx" x="194.5" y="22.5" width="112" height="26" /><use href="#computer" class="gl" x="201" y="29" width="13" height="13" /><text class="i" x="219" y="39">main</text><circle class="av pa" cx="292" cy="35.5" r="7" /><text class="avt" x="292" y="38.2" text-anchor="middle">A</text></g>
+                <g class="p left c2"><rect class="bx" x="194.5" y="57.5" width="112" height="26" /><use href="#computer" class="gl" x="201" y="64" width="13" height="13" /><text class="i" x="219" y="74">main</text><circle class="av pm" cx="292" cy="70.5" r="7" /><text class="avt" x="292" y="73.2" text-anchor="middle">M</text></g>
+                <g class="p left c3"><rect class="bx" x="194.5" y="92.5" width="112" height="26" /><use href="#computer" class="gl" x="201" y="99" width="13" height="13" /><text class="i" x="219" y="109">main</text><circle class="av pj" cx="292" cy="105.5" r="7" /><text class="avt" x="292" y="108.2" text-anchor="middle">J</text></g>
+              </svg>
+              <div class="txt">
+                <p class="term">recipes</p>
+                <h3>A recipe is built once</h3>
+                <p>A short text file describes a computer. Silo builds it once, and every computer made from it starts in seconds.</p>
+              </div>
             </li>
-            <li>
-              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6.5" rx="7" ry="2.8" /><path d="M5 6.5v11c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8v-11" /><path d="M5 12c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8" /></svg>environment setup</p>
-              <h3>Forks boot from main's disk</h3>
-              <p>A fork starts from a snapshot of main in seconds, with the repositories you cloned and the packages you installed already on it.</p>
+            <li class="card" data-mini="tools">
+              <span class="prog"><b></b></span>
+              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
+                <rect class="bx" x="10.5" y="44.5" width="92" height="52" />
+                <use href="#computer" class="gl" x="19" y="51" width="13" height="13" /><text x="38" y="61.5">pg-17</text>
+                <circle class="ag" cx="24" cy="81" r="3" /><text class="i" x="33" y="84.5">:3000</text>
+                <path class="wr w1" pathLength="1" d="M102.5 70.5H120.5V40.5H138" />
+                <path class="wr w2" pathLength="1" d="M102.5 70.5H138" />
+                <path class="wr w3" pathLength="1" d="M102.5 70.5H120.5V100.5H138" />
+                <g class="app a1"><rect class="chip" x="138.5" y="29.5" width="170" height="22" rx="3" /><circle class="gl" cx="151" cy="40.5" r="4.5" /><path class="gl" d="M146.5 40.5h9M151 36c-2.4 3-2.4 6 0 9M151 36c2.4 3 2.4 6 0 9" /><text class="s9" x="162" y="43.7">pg-17.silo.localhost:3000</text></g>
+                <g class="app a2"><rect class="chip" x="138.5" y="59.5" width="170" height="22" rx="3" /><path class="gl" d="M149.5 67l-3.5 3.5 3.5 3.5M153 67l3.5 3.5-3.5 3.5" /><text class="s9" x="162" y="73.7">VS Code · ~/api</text></g>
+                <g class="app a3"><rect class="chip" x="138.5" y="89.5" width="170" height="22" rx="3" /><path class="gl" d="M147 97l3.5 3.5-3.5 3.5M152.5 104h4.5" /><text class="s9" x="162" y="103.7">ssh pg-17.silo</text></g>
+              </svg>
+              <div class="txt">
+                <p class="term">your tools</p>
+                <h3>Your browser, editor and terminal reach in</h3>
+                <p>Each fork's port gets its own address on your Mac, its folder opens in VS Code or Zed, and <code>ssh</code> reaches it by name.</p>
+              </div>
             </li>
-            <li>
-              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="1.5" /><path d="M9.2 9.5 8.2 14.5M12.2 9.5l-1 5M7.2 11h5.6M6.8 13h5.6M15.2 14.5h3" /></svg>full access</p>
-              <h3>Root in a VM with no route to your Mac</h3>
-              <p>The agent has sudo and the public internet. The VM cannot reach your Mac, your local network or your VPN, and real secrets are filled in outside it.</p>
+            <li class="card" data-mini="keys">
+              <span class="prog"><b></b></span>
+              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
+                <g transform="translate(10 30)">
+                  <rect class="bx" x="0.5" y="0.5" width="136" height="80" />
+                  <use href="#computer" class="gl" x="9" y="8" width="13" height="13" /><text x="28" y="18.5">stripe</text><circle class="ag busy" cx="124" cy="15" r="3" />
+                  <path class="rl" d="M0.5 29.5H136.5" />
+                  <text class="f l1 i" x="10" y="47"><tspan class="pr">$ </tspan>echo $STRIPE_KEY</text>
+                  <g class="f l2"><rect class="ph" x="10.5" y="54.5" width="82" height="15" rx="7.5" /><text x="18.5" y="65.5">placeholder</text></g>
+                </g>
+                <path class="edge" d="M172.5 12V128" />
+                <g class="f outside">
+                  <path class="wn" d="M147 70.5H162.5" />
+                  <path class="wn ws" d="M182.5 70.5H191.5V40.5H200" />
+                  <path class="wn wg" d="M182.5 70.5H200" />
+                  <path class="wn" d="M191.5 70.5V100.5H200" />
+                  <circle class="mk ms" cx="205.5" cy="40.5" r="3.5" /><text class="hs" x="215" y="44">api.stripe.com</text>
+                  <circle class="mk mg" cx="205.5" cy="70.5" r="3.5" /><use href="#branch" class="gl" x="215" y="64.5" width="10" height="12" /><text class="hg" x="230" y="74">acme/api</text>
+                  <path class="xx f xm" d="M202 97l7 7M209 97l-7 7" /><use href="#branch" class="gl" x="215" y="94.5" width="10" height="12" /><text x="230" y="104">acme/infra</text>
+                </g>
+                <g class="gate" transform="translate(172.5 70.5)"><rect x="-10" y="-10" width="20" height="20" rx="5" /><circle cx="-3" cy="0" r="2.4" /><path d="M-0.6 0H5.5M3.2 0v2.2M5.5 0v2.2" /></g>
+                <circle class="pk p1" r="3.5" /><circle class="pk p2" r="3.5" /><circle class="pk p3" r="3.5" />
+              </svg>
+              <div class="txt">
+                <p class="term">secrets</p>
+                <h3>Secrets and tokens stay outside the VM</h3>
+                <p>The computer holds a placeholder. The real value is added outside it, only on requests to the hosts and repositories you chose.</p>
+              </div>
             </li>
-            <li>
-              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3.5" width="18" height="17" rx="1.5" /><path d="M6.5 9h3M8 7.5v3M12.5 9H18M6.5 15h3M12.5 15H18" /></svg>review</p>
-              <h3>A diff of the whole machine</h3>
-              <p>Silo compares a fork with the state it was forked from and groups the changes into code, packages, settings, files and databases.</p>
+            <li class="card" data-mini="net">
+              <span class="prog"><b></b></span>
+              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
+                <rect class="trk" x="12.5" y="16.5" width="44" height="14" rx="7" />
+                <circle class="tick" cx="21.5" cy="23.5" r="1" /><circle class="tick" cx="34.5" cy="23.5" r="1" /><circle class="tick" cx="47.5" cy="23.5" r="1" />
+                <g class="mv knobg" transform="translate(21.5 0)"><circle class="knob" cx="0" cy="23.5" r="4.5" /></g>
+                <text class="mode mo-o i" x="64" y="27">open</text><text class="mode f mo-l a" x="64" y="27">limited</text>
+                <rect class="bx" x="10.5" y="45.5" width="92" height="50" />
+                <use href="#computer" class="gl" x="19" y="52" width="13" height="13" /><text x="38" y="62.5">stripe</text>
+                <circle class="ag" cx="24" cy="81" r="3" />
+                <path class="wl" d="M102.5 70.5H118.5V34.5H132" />
+                <path class="wl wp f" d="M118.5 56.5H132" />
+                <path class="wl wo" d="M118.5 70.5V80.5H132" />
+                <path class="wl dash" d="M118.5 80.5V106.5H132" />
+                <circle class="dk" cx="137.5" cy="34.5" r="3" /><text class="i" x="148" y="38">github.com</text>
+                <g class="f pp"><circle class="dk hot" cx="137.5" cy="56.5" r="3" /><text class="i" x="148" y="60">pypi.org</text></g>
+                <circle class="dk do" cx="137.5" cy="80.5" r="3" /><path class="xx f xo" d="M134 77l7 7M141 77l-7 7" /><text x="148" y="84">other hosts</text>
+                <path class="xx" d="M134 103l7 7M141 103l-7 7" /><text x="148" y="110">your Mac</text>
+                <g class="p askc"><rect class="chip lit" x="12.5" y="106.5" width="88" height="20" rx="10" /><text class="a s9" x="56.5" y="120" text-anchor="middle">+ pypi.org ?</text></g>
+                <use href="#pointer" class="cur mv f yc" width="16" height="16" />
+              </svg>
+              <div class="txt">
+                <p class="term">network rules</p>
+                <h3>Open, limited or closed, per computer</h3>
+                <p>A computer reaches the public internet, a list of hosts or nothing, and never your Mac. Its agent can ask for another host.</p>
+              </div>
             </li>
-            <li>
-              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3" /><path d="M3 19.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M15.5 5.8a3 3 0 0 1 0 5.6M17.5 14.3c2.1.7 3.5 2.6 3.5 5.2" /></svg>teams</p>
-              <h3>A shared host for the team</h3>
-              <p>A team's Mac mini or Linux server builds each recipe once for everyone and shows what each member has waiting to merge.</p>
+            <li class="card" data-mini="dif">
+              <span class="prog"><b></b></span>
+              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
+                <g class="f r1"><text x="30" y="32">code</text><text class="i" x="106" y="32">~/api · 4 files</text></g>
+                <path class="cutl f cut" d="M30 45.5H184" /><text class="f cut a s9" x="292" y="48.5" text-anchor="end">git diff ends here</text>
+                <path class="bar" d="M20 56V121" />
+                <g class="f r2"><text x="30" y="66">packages</text><text class="i" x="106" y="66">postgresql 16</text><path class="arw" d="M189 62.5h9M194.5 59l3.5 3.5-3.5 3.5" /><text class="i" x="203" y="66">17</text></g>
+                <g class="f r3"><text x="30" y="83">settings</text><text class="i" x="106" y="83">pg_hba.conf</text></g>
+                <g class="f r4"><text x="30" y="100">files</text><text class="i" x="106" y="100">uploads/ · 12 files</text></g>
+                <g class="f r5"><text x="30" y="117">database</text><text class="i" x="106" y="117">app_dev · schema changed</text></g>
+              </svg>
+              <div class="txt">
+                <p class="term">review</p>
+                <h3>A diff of the whole machine</h3>
+                <p>Silo compares a fork with the state it was forked from and groups the changes into code, packages, settings, files and databases.</p>
+              </div>
             </li>
-            <li>
-              <p class="term"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 18.5a4.5 4.5 0 0 1-.6-8.96 5.5 5.5 0 0 1 10.6 1.2A3.9 3.9 0 0 1 17 18.5Z" /></svg>where it runs</p>
-              <h3>Your Mac, a Linux server or the cloud</h3>
-              <p>The engine runs on a Mac, a Linux server with KVM or a cloud machine, and a computer takes the same commands on each.</p>
+            <li class="card" data-mini="wait">
+              <span class="prog"><b></b></span>
+              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
+                <rect class="bx" x="10.5" y="56.5" width="76" height="28" /><use href="#computer" class="gl" x="17" y="64" width="13" height="13" /><text class="i" x="35" y="74.5">main</text>
+                <text class="f c3 a s9" x="48.5" y="101" text-anchor="middle">3 waiting</text><text class="f c2 a s9" x="48.5" y="101" text-anchor="middle">2 waiting</text>
+                <path class="gl" d="M86.5 70.5H102.5V31.5H118" /><path class="gl" d="M102.5 70.5H118" /><path class="gl" d="M102.5 70.5V109.5H118" />
+                <path class="wr acc wm2" pathLength="1" d="M118 70.5H86.5" />
+                <g class="rw r1"><rect class="bx" x="118.5" y="17.5" width="190" height="28" /><circle class="av pa" cx="134" cy="31.5" r="7" /><text class="avt" x="134" y="34.2" text-anchor="middle">A</text><text class="i" x="147" y="35">pg-17</text><circle class="ag busy d1" cx="296" cy="31.5" r="3" /><g class="p b1"><rect class="mbtn" x="258.5" y="23.5" width="44" height="16" rx="2.5" /><text class="mbt" x="280.5" y="34.8" text-anchor="middle">Merge</text></g></g>
+                <g class="rw r2"><rect class="bx" x="118.5" y="56.5" width="190" height="28" /><circle class="av pm" cx="134" cy="70.5" r="7" /><text class="avt" x="134" y="73.2" text-anchor="middle">M</text><text class="i" x="147" y="74">search</text><circle class="ag busy d2" cx="296" cy="70.5" r="3" /><g class="p b2"><rect class="mbtn" x="258.5" y="62.5" width="44" height="16" rx="2.5" /><text class="mbt" x="280.5" y="73.8" text-anchor="middle">Merge</text></g><text class="f byr a s9" x="302" y="73.7" text-anchor="end">merged by rule</text></g>
+                <g class="rw r3"><rect class="bx" x="118.5" y="95.5" width="190" height="28" /><circle class="av pj" cx="134" cy="109.5" r="7" /><text class="avt" x="134" y="112.2" text-anchor="middle">J</text><text class="i" x="147" y="113">billing</text><circle class="ag busy d3" cx="296" cy="109.5" r="3" /><g class="p b3"><rect class="mbtn" x="258.5" y="101.5" width="44" height="16" rx="2.5" /><text class="mbt" x="280.5" y="112.8" text-anchor="middle">Merge</text></g></g>
+                <use href="#pointer" class="cur mv f yc" width="16" height="16" />
+              </svg>
+              <div class="txt">
+                <p class="term">merge requests</p>
+                <h3>Everything waiting to merge, in one list</h3>
+                <p>A fork marked ready waits with a fresh diff. A rule can merge those where only code changed and the tests pass.</p>
+              </div>
             </li>
+            <li class="card" data-mini="steps">
+              <span class="prog"><b></b></span>
+              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
+                <use href="#computer" class="gl" x="16" y="17" width="13" height="13" /><text class="i" x="35" y="27.5">main</text>
+                <path class="gl" d="M26 60.5H168" /><path class="gl f l4" d="M168 60.5H220" /><path class="gl f l5" d="M220 60.5H272" />
+                <g transform="translate(64.5 60.5) rotate(45)"><rect class="dm" x="-3.5" y="-3.5" width="7" height="7" /></g><use href="#ok" class="ok" x="59" y="38" width="11" height="11" /><text x="64.5" y="79" text-anchor="middle">11</text>
+                <g transform="translate(116.5 60.5) rotate(45)"><rect class="dm" x="-3.5" y="-3.5" width="7" height="7" /></g><use href="#ok" class="ok" x="111" y="38" width="11" height="11" /><text x="116.5" y="79" text-anchor="middle">12</text>
+                <g transform="translate(168.5 60.5) rotate(45)"><rect class="dm s13" x="-3.5" y="-3.5" width="7" height="7" /></g><use href="#ok" class="ok" x="163" y="38" width="11" height="11" /><text x="168.5" y="79" text-anchor="middle">13</text>
+                <g transform="translate(220.5 60.5) rotate(45)"><rect class="dm p s14" x="-3.5" y="-3.5" width="7" height="7" /></g><path class="xx f s14" d="M217 40l7 7M224 40l-7 7" /><text class="f s14" x="220.5" y="79" text-anchor="middle">14</text>
+                <g transform="translate(272.5 60.5) rotate(45)"><rect class="dm p s15" x="-3.5" y="-3.5" width="7" height="7" /></g><path class="xx f s15" d="M269 40l7 7M276 40l-7 7" /><text class="f s15" x="272.5" y="79" text-anchor="middle">15</text>
+                <path class="wr wb" pathLength="1" d="M168.5 86V112.5H186" />
+                <g class="p left fk"><rect class="bx" x="186.5" y="98.5" width="112" height="28" /><use href="#computer" class="gl" x="193" y="106" width="13" height="13" /><text x="211" y="116.5">fork</text><use href="#ok" class="ok" x="280" y="107" width="11" height="11" /></g>
+                <use href="#pointer" class="cur mv f yc" width="16" height="16" />
+              </svg>
+              <div class="txt">
+                <p class="term">step history</p>
+                <h3>Go back, or fork from any step</h3>
+                <p>Every command run through Silo is a numbered step. You can restore a checkpoint or fork from the step before things broke.</p>
+              </div>
+            </li>
+            <li class="card" data-mini="far">
+              <span class="prog"><b></b></span>
+              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
+                <rect class="fr" x="8.5" y="14.5" width="138" height="50" />
+                <rect class="lbg" x="16" y="8" width="82" height="13" /><text x="21" y="18">Linux server</text>
+                <rect class="bx" x="18.5" y="30.5" width="118" height="26" /><use href="#computer" class="gl" x="25" y="37" width="13" height="13" /><text x="43" y="47">fix-128</text><path class="gl" d="M93.5 39.5h4.3l4.4 4.4-3.7 3.7-5-5z" /><text class="s9" x="106" y="46.7">#128</text>
+                <rect class="fr" x="8.5" y="78.5" width="138" height="50" />
+                <rect class="lbg" x="16" y="70" width="76" height="17" /><circle class="av pm" cx="26" cy="78.5" r="7" /><text class="avt" x="26" y="81.2" text-anchor="middle">M</text><text x="37" y="82">teammate</text>
+                <rect class="bx" x="18.5" y="94.5" width="118" height="26" /><use href="#computer" class="gl" x="25" y="101" width="13" height="13" /><text x="43" y="111">search</text>
+                <rect class="fr" x="176.5" y="14.5" width="136" height="114" />
+                <rect class="lbg" x="184" y="8" width="58" height="13" /><text x="189" y="18">your Mac</text>
+                <path class="wr acc w1" pathLength="1" d="M136.5 43.5H186" />
+                <path class="wr acc w2" pathLength="1" d="M136.5 107.5H186" />
+                <g transform="translate(136.5 43.5) rotate(45)"><rect class="dm hot p cp1" x="-3.5" y="-3.5" width="7" height="7" /></g>
+                <g transform="translate(136.5 107.5) rotate(45)"><rect class="dm hot p cp2" x="-3.5" y="-3.5" width="7" height="7" /></g>
+                <g class="mv f fl1"><rect class="dm hot" x="-3.5" y="-3.5" width="7" height="7" transform="rotate(45)" /></g>
+                <g class="mv f fl2"><rect class="dm hot" x="-3.5" y="-3.5" width="7" height="7" transform="rotate(45)" /></g>
+                <g class="p left m1"><rect class="bx" x="186.5" y="30.5" width="116" height="26" /><use href="#computer" class="gl" x="193" y="37" width="13" height="13" /><text class="i" x="211" y="47">fix-128</text></g>
+                <g class="p left m2"><rect class="bx" x="186.5" y="94.5" width="116" height="26" /><use href="#computer" class="gl" x="193" y="101" width="13" height="13" /><text class="i" x="211" y="111">search</text></g>
+              </svg>
+              <div class="txt">
+                <p class="term">other devices</p>
+                <h3>A computer from your server or a teammate</h3>
+                <p>An issue label or a schedule starts a task on your Linux server. Bring its computer, or a teammate's, onto your Mac to check the work.</p>
+              </div>
+            </li>
+            <li class="card" data-mini="scr">
+              <span class="prog"><b></b></span>
+              <svg class="mini" viewBox="0 0 320 140" aria-hidden="true" focusable="false">
+                <rect class="fr" x="8.5" y="14.5" width="303" height="114" />
+                <rect class="lbg" x="16" y="8" width="58" height="13" /><text x="21" y="18">your Mac</text>
+                <g transform="translate(20 28)">
+                  <rect class="bx" x="0.5" y="0.5" width="150" height="88" />
+                  <path class="rl" d="M0.5 13.5H150.5" /><circle class="gl" cx="8" cy="7" r="1.8" /><circle class="gl" cx="14.5" cy="7" r="1.8" /><circle class="gl" cx="21" cy="7" r="1.8" />
+                  <text class="s9" x="143" y="10.2" text-anchor="end">Linux</text>
+                  <rect class="rlf" x="14" y="24" width="46" height="3" />
+                  <rect class="fld" x="14.5" y="33.5" width="96" height="14" /><rect class="fill f f1" x="19" y="39" width="52" height="3" />
+                  <rect class="btnr" x="14.5" y="56.5" width="46" height="15" rx="2" /><rect class="rlf" x="25" y="62.5" width="25" height="3" />
+                  <use href="#ok" class="ok f dk2" x="67" y="58.5" width="11" height="11" />
+                </g>
+                <g transform="translate(184 28)">
+                  <rect class="bx" x="0.5" y="0.5" width="116" height="88" />
+                  <path class="rl" d="M0.5 12.5H116.5" /><text class="s9" x="6" y="9.6">macOS</text>
+                  <rect class="fld" x="14.5" y="20.5" width="64" height="24" /><circle class="gl" cx="20" cy="25.5" r="1.5" /><circle class="gl" cx="25.5" cy="25.5" r="1.5" /><circle class="gl" cx="31" cy="25.5" r="1.5" />
+                  <rect class="rlf f mw" x="22" y="32" width="40" height="3" /><rect class="rlf f mw" x="22" y="38" width="28" height="3" />
+                  <rect class="trk" x="28.5" y="52.5" width="60" height="13" rx="3" /><rect class="rlf" x="34" y="56" width="6" height="6" /><rect class="rlf" x="45" y="56" width="6" height="6" /><rect class="rlf" x="56" y="56" width="6" height="6" /><rect class="rlf" x="67" y="56" width="6" height="6" /><rect class="rlf" x="78" y="56" width="6" height="6" />
+                </g>
+                <g class="mv f ac"><use href="#pointer" class="cur agentc" width="16" height="16" /><text class="a s9" x="17" y="21">agent</text></g>
+                <g class="mv f ac2"><use href="#pointer" class="cur agentc" width="16" height="16" /><text class="a s9" x="17" y="21">agent</text></g>
+                <g class="mv f yc"><use href="#pointer" class="cur" width="16" height="16" /><text class="i s9" x="17" y="21">you</text></g>
+              </svg>
+              <div class="txt">
+                <p class="term">linux, macos</p>
+                <h3>Linux and macOS computers on one Mac</h3>
+                <p>Your Mac hosts Linux and macOS computers side by side. Each has a screen you can open, and its agent can click through it.</p>
+              </div>
+            </li>
+
           </ul>
         </section>
         <div class="notice joint">

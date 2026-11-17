@@ -3,11 +3,24 @@
 The public site at [silo.amontlabs.com](https://silo.amontlabs.com), built with
 Vite. It has two pages:
 
-- **Home** (`index.html`, `src/style.css`, `src/loop.ts`): the pitch, the
-  picture of the loop (drawn by `src/loop.ts`, once, when it comes into view,
-  unless the visitor prefers reduced motion), who Silo is for, the way into the
-  Workshop, and a notice that Silo is in heavy development. Nothing on it is
-  read from the plan. The page shows once its fonts are in (at most 1.2 s), so
+- **Home** (`index.html`, `src/style.css`): the pitch, two pictures, the way
+  into the Workshop, and a notice that Silo is in heavy development. Nothing on
+  it is read from the plan.
+  - **The flow** (`src/flow.ts`, `src/flow.css`) plays one task in seven steps,
+    in a loop, with Pause and the step names under it.
+  - **The cards** (`src/cards.ts`, `src/cards.css`) say who Silo is for: nine
+    features, each with a small picture that plays one gesture.
+  - Both are scenes (`src/scene.ts`): markup plus a list of timed cues, which
+    can be held at any moment or played from one. `src/pictures.ts` starts
+    them and says which may move: only one thing moves on its own at a time
+    (the flow while it is in view, otherwise the cards in turn), a card the
+    visitor points at or presses holds the flow, a hidden tab holds
+    everything, and with reduced motion nothing moves until the visitor
+    presses Play or a card.
+  - The pictures stay hidden, with their room kept, until their script has
+    drawn them, and show a still without script.
+  - A part of a picture must not be named like a class the page already
+    styles (`go`, `out`); `src/home.test.ts` checks it. The page shows once its fonts are in (at most 1.2 s), so
   nothing changes width: it preloads every face it waits for, and the deployed
   site lets a browser keep the font files, so a later visit does not wait.
   A link to the site shows `public/og.png` when shared: a 1200 × 630 capture
