@@ -1,46 +1,71 @@
 // Development only (`?fixture=today` or `?fixture=later`, with `&as=owner` or `&as=visitor`): the page on a made-up
 // live state, without the API. main.tsx loads this only when import.meta.env.DEV, so a production build has none of it.
+import { changeComment } from '../../../tools/plan/model/index.js';
 import { api } from './api';
-import type { BuildData, LiveIssue, LiveState, Verdict } from './plan';
-
-/** Areas the "later" state shows as built; Diff and merge is under way, the agent's areas are decided. */
-const BUILT = new Set(['engine', 'app', 'computers', 'checkpoints', 'forks']);
-const AHEAD = new Set(['agents', 'access', 'setup']);
+import type { Comment } from './api';
+import type { BuildData, Change, LiveIssue, LiveLatest, LiveState, Verdict } from './plan';
 
 const hash = (text: string) => [...text].reduce((x, ch) => (x * 31 + ch.charCodeAt(0)) >>> 0, 7);
-const asVerdict = (value: string | null): Verdict | null => (value === 'take' || value === 'later' || value === 'drop' || value === 'refine' ? value : null);
+const hex = (text: string) => Array.from({ length: 5 }, (_, i) => hash(`${text}:${i}`).toString(16).padStart(8, '0')).join('');
 
 function entryIssue(fields: Partial<LiveIssue>): LiveIssue {
   return { kind: 'entry', entry: null, title: '', state: 'open', reason: null, verdict: null, up: 0, comments: 0, author: 'silo-workshop[bot]', bot: true, createdAt: '2026-11-14T10:00:00Z', closedAt: null, ...fields };
 }
 
-export function fixtureState(data: BuildData, when: 'today' | 'later'): LiveState {
+const PEOPLE: [string, string][] = [
+  ['lin-qi', 'Does this also cover a database the merge migrated?'],
+  ['devin-oss', 'This is the part that would make me trust it with my main.'],
+];
+
+/** Each issue's thread: the history line of its verdict, and people's comments on some. */
+function threads(data: BuildData, when: 'today' | 'later'): Map<string, Comment[]> {
+  const out = new Map<string, Comment[]>();
+  data.features.forEach((feature, index) => {
+    const comments: Comment[] = [];
+    const at = (days: number) => new Date(Date.parse('2026-11-16T10:00:00Z') - days * 86_400_000 + index * 60_000).toISOString();
+    const verdict: Verdict | undefined = when === 'later' && index < 40 ? feature.suggest?.verdict ?? undefined : undefined;
+    const history = (fields: Change['fields'], extra: Partial<Change>, days: number) => {
+      const change = { commit: hex(`${feature.id}${fields.join()}`), before: hex(`${feature.id}${fields.join()}-before`), fields, ...extra } as Change;
+      comments.push({ id: `${feature.id}-h${comments.length}`, author: 'silo-workshop[bot]', avatar: '', bot: true, createdAt: at(days), text: changeComment(change), change });
+    };
+    if (verdict) history(['verdict'], { verdict }, 3);
+    if (hash(feature.id) % 4 === 0) PEOPLE.forEach(([author, text], i) => comments.push({ id: `${feature.id}-c${i}`, author, avatar: '', bot: false, createdAt: at(2 - i), text }));
+    if (verdict && index % 5 === 0) history(['what', 'notes'], {}, 1);
+    out.set(feature.id, comments);
+  });
+  return out;
+}
+
+export function fixtureState(data: BuildData, when: 'today' | 'later'): { state: LiveState; comments: Map<number, Comment[]> } {
   const issues: Record<string, LiveIssue> = {};
-  for (const feature of data.features) {
-    const base = entryIssue({ entry: feature.id, title: feature.name, verdict: feature.verdict, up: (hash(feature.id) % 9) + (feature.n < 40 ? 3 : 0), comments: hash(feature.id) % 4 === 0 ? 2 : 0 });
-    let issue = base;
-    if (when === 'later' && feature.area) {
-      const suggested = asVerdict(feature.suggest === 'refine' ? null : feature.suggest);
-      if (BUILT.has(feature.area)) {
-        issue = suggested === 'later' || suggested === 'drop' ? { ...base, verdict: suggested, ...(suggested === 'drop' ? { state: 'closed', reason: 'not_planned' } : {}) } : { ...base, verdict: 'take', state: 'closed', reason: 'completed', closedAt: '2026-11-15T10:00:00Z' };
-      } else if (feature.area === 'changes') {
-        issue = feature.n <= 20 ? { ...base, verdict: 'take', state: 'closed', reason: 'completed', closedAt: '2026-11-15T10:00:00Z' } : feature.n <= 22 ? { ...base, verdict: 'take', building: true } : { ...base, verdict: suggested === 'drop' ? null : suggested };
-      } else if (AHEAD.has(feature.area)) {
-        issue = { ...base, verdict: suggested === 'drop' ? null : suggested };
-      }
-    }
-    issues[1000 + feature.n] = issue;
-  }
+  const comments = new Map<number, Comment[]>();
+  const byFeature = threads(data, when);
+  const latest: LiveLatest[] = [];
+  let building = 0;
+  data.features.forEach((feature, index) => {
+    const thread = byFeature.get(feature.id) ?? [];
+    const verdict = thread.find((comment) => comment.change?.fields.includes('verdict'))?.change?.verdict ?? null;
+    const take = verdict === 'take' && building < 2 && when === 'later';
+    if (take) building += 1;
+    const n = 1000 + index;
+    issues[n] = entryIssue({
+      entry: feature.id, title: feature.name, verdict, up: (hash(feature.id) % 9) + (index < 40 ? 3 : 0),
+      comments: thread.length, updates: thread.filter((comment) => comment.change).length,
+      ...(verdict === 'drop' ? { state: 'closed', reason: 'not_planned' } : {}), ...(take ? { building: true } : {}),
+    });
+    comments.set(n, thread);
+    for (const comment of thread) latest.push({ n, entry: feature.id, author: comment.author, bot: comment.bot, createdAt: comment.createdAt, ...(comment.change ? { change: comment.change } : { text: comment.text }) });
+  });
   issues[9001] = entryIssue({ kind: 'suggestion', title: 'Start a task from a Slack message', author: 'mara-k', bot: false, up: 14 });
   issues[9002] = entryIssue({ kind: 'suggestion', title: 'Share one base computer across a team', author: 'devin-oss', bot: false, up: 9 });
-  issues[9101] = entryIssue({ kind: 'decision', title: 'After a task ends, what happens to its computer?', comments: 3 });
-  return { repo: 'amontlabs/silo', fetchedAt: new Date().toISOString(), issues };
+  latest.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return { state: { repo: 'amontlabs/silo', fetchedAt: new Date().toISOString(), issues, latest: latest.slice(0, 30) }, comments };
 }
 
 export function installFixture(data: BuildData, params: URLSearchParams): void {
   const when = params.get('fixture') === 'later' ? 'later' : 'today';
   const as = params.get('as');
-  const state = fixtureState(data, when);
+  const { state, comments } = fixtureState(data, when);
   const delay = Number(params.get('delay') ?? 0);
   api.state = () => new Promise((resolve) => setTimeout(() => resolve(state), delay));
   const wait = <T,>(ms: number, value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
@@ -51,11 +76,8 @@ export function installFixture(data: BuildData, params: URLSearchParams): void {
   api.me = async () => wait(delay, as === 'owner' ? { login: login ?? 'owner-fake', avatar: '', canDecide: true } : as === 'visitor' ? { login: login ?? 'visitor-fake', avatar: '', canDecide: false } : null);
   api.issue = async (n: number) => wait(detail, {
     number: n, title: state.issues[n]?.title ?? '', body: '', url: `https://github.com/amontlabs/silo/issues/${n}`, up: state.issues[n]?.up ?? 0,
-    comments: (state.issues[n]?.comments ?? 0) > 0 ? [
-      { id: `${n}-1`, author: 'lin-qi', avatar: '', bot: false, createdAt: '2026-11-14T10:00:00Z', text: 'Does this also cover a database the merge migrated?' },
-      { id: `${n}-2`, author: 'devin-oss', avatar: '', bot: false, createdAt: '2026-11-15T10:00:00Z', text: 'This is the part that would make me trust it with my main.' },
-    ] : [],
+    comments: comments.get(n) ?? [],
   });
   api.myVote = async () => false;
-  for (const write of ['comment', 'vote', 'verdict', 'decide', 'logout'] as const) api[write] = async () => ({});
+  for (const write of ['comment', 'vote', 'verdict', 'logout'] as const) api[write] = async () => ({});
 }

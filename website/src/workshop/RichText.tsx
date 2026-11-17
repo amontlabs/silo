@@ -13,7 +13,7 @@ export function safeHref(url: string): string | null {
   }
 }
 
-function inline(text: string, key: string): ReactNode[] {
+export function inline(text: string, key: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   let index = 0;

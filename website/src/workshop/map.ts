@@ -1,6 +1,6 @@
 // The drawing of Silo: where each area sits on the full map and on the folded one, the zones around them
 // and the wires between them. Units are 1/1136 of the map's width; the full map is 572 units high, the fold 180.
-// The build checks this table against docs/product/areas.json (`checkLayout`).
+// The build checks this table against plan/areas.json (`checkLayout`).
 
 export type Box = [x: number, y: number, w: number, h: number];
 
@@ -129,12 +129,12 @@ export function checkLayout(areaIds: string[], layout = LAYOUT, wires: Wire[] = 
   const known = new Set(areaIds);
   const where = 'website/src/workshop/map.ts';
   for (const id of areaIds) {
-    if (!layout[id]) throw new LayoutError(`The map has no place for the area "${id}" of docs/product/areas.json. Add it to ${where}.`);
+    if (!layout[id]) throw new LayoutError(`The map has no place for the area "${id}" of plan/areas.json. Add it to ${where}.`);
   }
   for (const id of Object.keys(layout)) {
-    if (!known.has(id)) throw new LayoutError(`${where} places the area "${id}", which docs/product/areas.json does not have.`);
+    if (!known.has(id)) throw new LayoutError(`${where} places the area "${id}", which plan/areas.json does not have.`);
   }
   for (const wire of wires) {
-    if (!known.has(wire.of)) throw new LayoutError(`${where} draws a wire for the area "${wire.of}", which docs/product/areas.json does not have.`);
+    if (!known.has(wire.of)) throw new LayoutError(`${where} draws a wire for the area "${wire.of}", which plan/areas.json does not have.`);
   }
 }

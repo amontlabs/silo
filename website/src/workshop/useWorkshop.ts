@@ -57,7 +57,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const [votePending, setVotePending] = useState<ReadonlySet<number>>(new Set());
   const [suggestionsSending, setSuggestionsSending] = useState<{ id: number; title: string; author: string }[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [refining, setRefining] = useState<string | null>(null);
   const [suggestDraft, setSuggestDraft] = useState({ title: '', text: '' });
   const [announce, setAnnounce] = useState('');
   const [votes, setVotes] = useState<Record<number, boolean>>({});
@@ -166,7 +165,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   function signedOut() {
     setMe(null);
     setVotes({});
-    setRefining(null);
     setNotice('Sign in again.');
   }
 
@@ -204,17 +202,11 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       && nav.current.openedAt.has(row.key) && Date.now() - (nav.current.openedAt.get(row.key) as number) >= OPEN_GUARD_MS;
   };
 
-  const sendVerdict = async (row: Row, verdict: Verdict | null, note?: string) => {
+  const sendVerdict = async (row: Row, verdict: Verdict | null) => {
     const n = row.issue;
     if (n === null || !live.state?.issues[n] || !verdictReady(row)) return;
-    if (note !== undefined) {
-      setDrafts((current) => ({ ...current, [`note-${row.key}`]: '' }));
-      setRefining(null);
-    }
-    const own = note === undefined ? null : ownComment(note);
     setBusy(n, true);
     setSaving((current) => ({ ...current, [n]: true }));
-    startSending(n, own);
     setNotice(null);
     setRowNotice(null);
     // The queue moves on at once; the row shows "Saving…" until the server answers.
@@ -224,23 +216,17 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       setAnnounce((next) => (next ? `${row.name}: saving. ${next}` : `${row.name}: saving`));
     } else setAnnounce(`${row.name}: saving`);
     try {
-      await api.verdict(n, verdict, note);
-      const confirmed: Partial<LiveIssue> = { ...verdictPatch(verdict), ...(own ? { comments: (confirmedIssue(n)?.comments ?? 0) + 1 } : {}) };
+      await api.verdict(n, verdict);
+      const confirmed = verdictPatch(verdict);
       patchIssue(n, () => confirmed);
-      confirmComment(n, own);
-      remember(n, confirmed, own ?? undefined);
-      if (own) loadDetail(n, true);
+      remember(n, confirmed);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         signedOut();
         return;
       }
-      // Back to the row that was refused, with what was open there.
+      // Back to the row that was refused.
       nav.current.reopen(row);
-      if (note !== undefined) {
-        setDrafts((current) => ({ ...current, [`note-${row.key}`]: current[`note-${row.key}`] || note }));
-        setRefining(row.key);
-      }
       const message = error instanceof ApiError ? error.message : 'Something went wrong.';
       setRowNotice({ key: row.key, text: `${row.name}: not saved. ${message}` });
     } finally {
@@ -250,7 +236,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
         delete next[n];
         return next;
       });
-      stopSending(n, own);
     }
   };
 
@@ -273,32 +258,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
       setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
       failed('Comment', error);
     } finally {
-      stopSending(n, own);
-    }
-  };
-
-  const sendDecide = async (row: Row, event: FormEvent) => {
-    event.preventDefault();
-    const n = row.issue;
-    const text = (drafts[row.key] ?? '').trim();
-    const own = ownComment(text);
-    if (n === null || n <= 0 || !text || !own || !live.state?.issues[n] || pendingRef.current.has(n)) return;
-    setBusy(n, true);
-    setDrafts((current) => ({ ...current, [row.key]: '' }));
-    startSending(n, own);
-    setAnnounce(`${row.name}: sending`);
-    try {
-      await api.decide(n, text);
-      const confirmed: Partial<LiveIssue> = { state: 'closed', reason: 'completed', closedAt: new Date().toISOString(), comments: (confirmedIssue(n)?.comments ?? 0) + 1 };
-      patchIssue(n, () => confirmed);
-      confirmComment(n, own);
-      remember(n, confirmed, own);
-      loadDetail(n, true);
-    } catch (error) {
-      setDrafts((current) => ({ ...current, [row.key]: current[row.key] ? current[row.key] : text }));
-      failed(row.name, error);
-    } finally {
-      setBusy(n, false);
       stopSending(n, own);
     }
   };
@@ -363,8 +322,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
 
   return {
     live, liveOk, me, canDecide, plan, rowByKey, details, prefetch, fetchNow, pending, pendingRef, saving, sending, votePending,
-    votes, suggestionsSending, notice, rowNotice, setRowNotice, drafts, setDrafts, refining, setRefining, suggestDraft,
-    setSuggestDraft, announce, setAnnounce, signinFailed, verdictReady, sendVerdict, sendComment, sendDecide, toggleVote,
+    votes, suggestionsSending, notice, rowNotice, setRowNotice, drafts, setDrafts, suggestDraft,
+    setSuggestDraft, announce, setAnnounce, signinFailed, verdictReady, sendVerdict, sendComment, toggleVote,
     sendSuggestion, signOut,
   };
 }

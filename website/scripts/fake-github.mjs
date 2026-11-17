@@ -492,13 +492,13 @@ const HOUR = 3_600_000;
 // days: a verdict line for each entry that has one, then on chosen entries a text change (with its
 // before and after served as raw files), notes edited, a field changed, a verdict cleared and built.
 function seedHistory(fake, list, numbers, plan, now) {
-  let clock = now - 6 * 24 * HOUR;
+  let clock = now - 5 * 24 * HOUR;
   let head = sha('seed');
   const step = (hours = 1) => { clock += hours * HOUR; return clock; };
   const history = (id, fields, extra = {}) => {
     const before = head;
     head = sha(`${before}:${id}:${fields.join(',')}`);
-    fake.addComment(numbers.get(id), null, changeComment({ commit: head, before, fields, ...extra }, { repo: fake.repo }), step(3));
+    fake.addComment(numbers.get(id), null, changeComment({ commit: head, before, fields, ...extra }, { repo: fake.repo }), step(1));
     return { before, commit: head };
   };
   const decided = list.filter((feature) => plan.verdicts.has(feature.id));
@@ -530,11 +530,11 @@ function seedHistory(fake, list, numbers, plan, now) {
 }
 
 const VERDICT_NAMES = ['take', 'later', 'drop'];
-/** The stages of the starter, whose entries are decided in the later state. */
-const DECIDED_STAGES = 4;
+/** The first stages, whose entries are decided in the later state: the starter and the stage after it. */
+const DECIDED_STAGES = 5;
 const BUILDING_COUNT = 2;
 
-// A later state of the plan, in build order: the entries of the first four stages carry the verdict
+// A later state of the plan, in build order: the entries of the first five stages carry the verdict
 // of their file, else the one suggested for them; the first two taken are being built. Nothing is
 // built that the file does not say is built. Answers the verdicts, and the ids built and being built.
 export function progressOf(features) {

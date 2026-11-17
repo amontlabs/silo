@@ -1,5 +1,5 @@
 // The browser side of the Workshop's HTTP contract (`/api/workshop/`).
-import type { LiveState, Verdict } from './plan';
+import type { Change, LiveState, Verdict } from './plan';
 
 export const API = '/api/workshop';
 
@@ -16,6 +16,8 @@ export interface Comment {
   bot: boolean;
   createdAt: string;
   text: string;
+  /** Set on the bot's history comments: what changed, and in which commits. */
+  change?: Change;
 }
 
 export interface IssueDetail {
@@ -100,9 +102,7 @@ export const api = {
   comment: (n: number, text: string) => post<unknown>('comment', { n, text }),
   vote: (n: number, on: boolean) => post<unknown>('vote', { n, on }),
   suggest: (title: string, text: string) => post<{ number: number }>('suggest', { title, text }),
-  verdict: (n: number, verdict: Verdict | null, note?: string) =>
-    post<unknown>('verdict', note === undefined ? { n, verdict } : { n, verdict, note }),
-  decide: (n: number, text: string) => post<unknown>('decide', { n, text }),
+  verdict: (n: number, verdict: Verdict | null) => post<unknown>('verdict', { n, verdict }),
   logout: () => post<unknown>('logout', {}),
 };
 
