@@ -1,0 +1,17 @@
+{
+  "name": "Step history",
+  "what": "Every command run through Silo is a numbered step, and you can fork from any step.",
+  "area": "checkpoints",
+  "needs": [
+    "run-commands",
+    "fork"
+  ],
+  "surfaces": {
+    "app": "tab:Steps",
+    "cli": "silo steps"
+  },
+  "suggest": {
+    "verdict": "later",
+    "why": "Clean and small. Not needed for the starter."
+  }
+}

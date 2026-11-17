@@ -1,0 +1,13 @@
+{
+  "name": "Tasks from GitHub events and schedules",
+  "what": "A pull request, an issue label, a schedule or Fjord starts a task.",
+  "area": "tasks",
+  "needs": [
+    "one-call-task",
+    "github"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Your Fjord case. Keep triggers outside the engine: they only call 'start a task'."
+  }
+}

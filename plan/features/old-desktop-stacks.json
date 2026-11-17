@@ -1,0 +1,9 @@
+{
+  "name": "Earlier desktop and computer-use stacks",
+  "what": "KasmVNC, Luda, the ChatGPT app and a native display stream.",
+  "needs": [],
+  "suggest": {
+    "verdict": "drop",
+    "why": "Each was replaced."
+  }
+}

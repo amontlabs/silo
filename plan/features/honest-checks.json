@@ -1,0 +1,12 @@
+{
+  "name": "Checks the agent cannot fake",
+  "what": "The engine runs the tests in a fresh fork of the result, after the agent has stopped.",
+  "area": "tasks",
+  "needs": [
+    "one-call-task"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "The lesson from dropping 'keep a fork when its tests pass': tests run inside the fork can be faked."
+  }
+}

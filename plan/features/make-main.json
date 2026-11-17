@@ -1,0 +1,15 @@
+{
+  "name": "First run makes main",
+  "what": "Installing Silo, or one command, gives you main: created, started and reachable.",
+  "area": "computers",
+  "needs": [
+    "terminal"
+  ],
+  "surfaces": {
+    "cli": "silo up"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "You decided this on 10 Nov: installing Silo sets up main. Proven from the command line: 58 s. The app's own first run was never driven."
+  }
+}

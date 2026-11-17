@@ -1,0 +1,137 @@
+[
+  {
+    "id": "one-feature-at-a-time",
+    "date": "2026-11-16",
+    "text": "Silo is rebuilt piece by piece, carefully, one feature the owner took at a time, in the order of the list. The list is sorted so that the most certain and most useful features come first and every cut from the top is a product."
+  },
+  {
+    "id": "agent-lives-inside",
+    "date": "2026-11-10",
+    "text": "One main computer, the user's agent lives inside it, and forks and disposable computers serve tasks. An agent on the user's Mac driving Silo is not the main path."
+  },
+  {
+    "id": "agents-get-every-tool",
+    "date": "2026-11-10",
+    "text": "Agents inside a computer get every tool, scoped by where they are: anything the user could do in the app. A computer cannot get more than it has, and anything that widens access asks the user.",
+    "about": [
+      "agents",
+      "access"
+    ]
+  },
+  {
+    "id": "git-words",
+    "date": "2026-11-10",
+    "text": "\"Git for computers\" is the framing, and the words are Git's: one verb, merge (fast-forward when main is unchanged, item by item with conflicts asked otherwise), plus replace main. Fold, keep and promote are not used.",
+    "about": [
+      "changes"
+    ]
+  },
+  {
+    "id": "engine-in-zig",
+    "date": "2026-11-16",
+    "text": "The engine is written in Zig. It is the core piece: performant, secure, easy to reason about. The app, the command line and every tool only talk to it. Its design is data first, with events.",
+    "about": [
+      "engine"
+    ]
+  },
+  {
+    "id": "mac-app-in-swift",
+    "date": "2026-11-16",
+    "text": "The Mac app is written in Swift, comes first, and holds no logic. macOS computers are driven from Swift directly, never through Rust bindings.",
+    "about": [
+      "app",
+      "macos"
+    ]
+  },
+  {
+    "id": "engine-on-linux",
+    "date": "2026-11-16",
+    "text": "The engine also runs on Linux, to use a Linux machine as a host.",
+    "about": [
+      "engine",
+      "devices"
+    ]
+  },
+  {
+    "id": "properties-checked",
+    "date": "2026-11-16",
+    "text": "Properties are stated and checked as we build: state properties, formal verification, whatever shows what always holds."
+  },
+  {
+    "id": "old-code-outside",
+    "date": "2026-11-16",
+    "text": "The old code stays outside this tree. It is read only when needed, through a fresh agent dedicated to that lookup, which brings back only what is relevant. Parts may be moved across, reviewed and cleaned up."
+  },
+  {
+    "id": "first-user",
+    "date": "2026-11-15",
+    "text": "The first user is the owner, on a Mac. A developer in a company fits the same product. Team features come later, on the same product."
+  },
+  {
+    "id": "security-framing",
+    "date": "2026-11-16",
+    "text": "The agent is considered hostile. Rules exist to make an attack predictable: a hostile agent can do what the rules allow and nothing else. No destination is special: the user sets the rules for GitHub like for everything else. Silo is as secure as the rules the user sets, and it makes a secure setup as easy as the rest."
+  },
+  {
+    "id": "security-not-the-focus",
+    "date": "2026-11-15",
+    "text": "Security is built properly and is not the current focus."
+  },
+  {
+    "id": "mac-and-linux-consistent",
+    "date": "2026-11-10",
+    "text": "macOS and Linux computers are consistent: the same page in the app, the same image contents, an image upgrade path.",
+    "about": [
+      "macos",
+      "computers"
+    ]
+  },
+  {
+    "id": "tasks-start-ready",
+    "date": "2026-11-16",
+    "text": "A task started from outside starts from a recipe or a checkpoint, so it has no setup to wait for. Updating main after a pull request merges is an ordinary pull, not a Silo feature.",
+    "about": [
+      "tasks"
+    ]
+  },
+  {
+    "id": "github-is-storage",
+    "date": "2026-11-16",
+    "text": "GitHub is the Workshop's storage: issues of this repository, no database of ours and no separate backups. Agents post as a bot, not under the owner's name."
+  },
+  {
+    "id": "workshop-is-public",
+    "date": "2026-11-16",
+    "text": "The Workshop is a public page of silo.amontlabs.com that shows the plan as a map of the product's parts. The owner decides there; anyone signed in with GitHub can comment, vote and suggest features. Visitors see the plan; the decisions are shown to the owner only."
+  },
+  {
+    "id": "home-page-says-what-silo-is",
+    "date": "2026-11-16",
+    "text": "What Silo is belongs on the home page, not in the Workshop."
+  },
+  {
+    "id": "recordings-in-the-repo",
+    "date": "2026-11-16",
+    "text": "Recordings are committed to the repository as files and played on the site."
+  },
+  {
+    "id": "pages-are-short",
+    "date": "2026-11-16",
+    "text": "Pages for people must be obvious to use and short on text: one place to look, no explanatory paragraphs, no assistant-sounding copy."
+  },
+  {
+    "id": "stale-docs-are-deleted",
+    "date": "2026-11-15",
+    "text": "A doc that no longer describes the code is deleted, not moved to an archive."
+  },
+  {
+    "id": "no-time-estimates",
+    "date": "2026-11-15",
+    "text": "No time estimates and no plans built from dates."
+  },
+  {
+    "id": "agents-may-push",
+    "date": "2026-11-16",
+    "text": "Agents may push to this repository's remote. The old history stays on the branch `legacy`."
+  }
+]

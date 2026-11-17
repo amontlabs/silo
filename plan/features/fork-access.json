@@ -1,0 +1,14 @@
+{
+  "name": "Forks get only the access you name",
+  "what": "A fork starts with no secrets and read-only GitHub unless its parent hands over more, and never more than the parent has.",
+  "area": "forks",
+  "needs": [
+    "fork",
+    "github",
+    "secrets"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A property of the agent rule. Clean in the old code."
+  }
+}

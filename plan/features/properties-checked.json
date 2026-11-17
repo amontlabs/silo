@@ -1,0 +1,12 @@
+{
+  "name": "Properties checked on every change",
+  "what": "Each concept states what must always hold. A simulator runs random sequences of calls, crashes included, and checks it.",
+  "area": "engine",
+  "needs": [
+    "crash-recovery"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "You decided this on 16 Nov: properties checked as we build. New. Takes over from most of the old live-check and CI machinery for logic errors."
+  }
+}

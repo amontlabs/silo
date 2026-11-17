@@ -1,0 +1,12 @@
+{
+  "name": "Computers that start with your device",
+  "what": "Chosen computers start when the engine starts.",
+  "area": "computers",
+  "needs": [
+    "computers"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Built, small."
+  }
+}

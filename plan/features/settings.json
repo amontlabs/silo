@@ -1,0 +1,15 @@
+{
+  "name": "Settings",
+  "what": "Theme, startup, which terminal and editor to use, how much memory and disk to keep free.",
+  "area": "app",
+  "needs": [
+    "app-window"
+  ],
+  "surfaces": {
+    "app": "side:Settings"
+  },
+  "suggest": {
+    "verdict": "later",
+    "why": "Add each setting with the entry that needs it, not as a page built up front."
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "See what a computer holds",
+  "what": "One view of a computer's secrets by name, its GitHub access, open ports and network rules.",
+  "area": "access",
+  "needs": [
+    "app-window",
+    "github",
+    "secrets"
+  ],
+  "surfaces": {
+    "app": "tab:Access",
+    "cli": "silo access"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "Small, and it makes the access model visible."
+  }
+}

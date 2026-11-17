@@ -1,0 +1,9 @@
+{
+  "name": "Other ways to run computers",
+  "what": "E2B as the VM backend, forks that carry memory, one image cache shared by several engines.",
+  "needs": [],
+  "suggest": {
+    "verdict": "drop",
+    "why": "Studied and rejected, or left out on purpose."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "A macOS computer's screen",
+  "what": "A native window shows the macOS computer's display, with copy and paste.",
+  "area": "macos",
+  "needs": [
+    "macos-create",
+    "app-window"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Proven and small. Natural in a Swift app."
+  }
+}

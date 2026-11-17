@@ -1,0 +1,14 @@
+{
+  "name": "Computers on other devices, same as local",
+  "what": "Every command and the app's list work on a computer wherever it runs.",
+  "area": "devices",
+  "needs": [
+    "connect-device",
+    "silo-cli",
+    "app-window"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It falls out of the design when the app is only a client of an engine."
+  }
+}

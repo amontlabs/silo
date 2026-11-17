@@ -1,0 +1,16 @@
+{
+  "name": "Connect another device",
+  "what": "Link another Mac or Linux machine so this Silo manages its computers.",
+  "area": "devices",
+  "needs": [
+    "computers"
+  ],
+  "surfaces": {
+    "app": "side:Devices",
+    "cli": "silo devices"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "11,000 lines in the old code and no recorded run across two real devices. Design it again, small."
+  }
+}

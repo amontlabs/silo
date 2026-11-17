@@ -1,0 +1,16 @@
+{
+  "name": "A terminal into a computer",
+  "what": "`ssh name.silo`, or one click, opens a shell in a computer in the terminal you already use.",
+  "area": "computers",
+  "needs": [
+    "run-commands"
+  ],
+  "surfaces": {
+    "app": "button:Terminal",
+    "cli": "ssh main.silo"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "Proven. The name follows the computer's id, so a rename never breaks it."
+  }
+}

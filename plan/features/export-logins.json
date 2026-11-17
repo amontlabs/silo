@@ -1,0 +1,13 @@
+{
+  "name": "Exports without your logins",
+  "what": "An export leaves your sign-ins out.",
+  "area": "sharing",
+  "needs": [
+    "export",
+    "logins-stay-put"
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "A check showed the removed logins are still in the file. Solve it through logins that do not travel."
+  }
+}

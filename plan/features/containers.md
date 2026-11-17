@@ -1,0 +1,34 @@
+## Decided
+
+- 2026-11-10, owner: containers stay a choice the user can make, for a dev-only Linux machine with nothing sensitive, as the faster option. Never the default, and never decided by the host.
+- 2026-11-10, owner, an idea for later: the secrets proxy runs on another device and the container host's traffic is forced through it, so an escape finds nothing.
+
+## From the old code
+
+The old code had it partly built, about 17,000 lines, and it needs reworking.
+
+Lessons:
+- A container shares the host kernel: never the default, and an agent's create of one asks.
+- Chrome inside needs --no-sandbox because the hardening blocks nested user namespaces, so a browser compromise reaches the whole computer.
+- There is no rootless bound on the writable layer; protect the host's free space instead (refuse below a margin, stop the largest).
+- Host prerequisites (subuid, /dev/net/tun, AppArmor userns, cgroup delegation) must be checked and named, never set by Silo.
+- A running container's checkpoint must freeze its processes; one device-wide lock covers every freeze and thaw.
+- Unix socket paths over 107 bytes fail (SUN_LEN); keep state paths short.
+- Only live KVM runs found the container bugs (ACLs breaking unpack, socket path over 107 bytes, XDG_RUNTIME_DIR).
+- An escape as the agent lands as the engine's own user, which holds the host's secrets.
+
+Where it lived, at the tag legacy-2026-11-16:
+- `app/SiloUI/src-tauri/engine/src/containers`
+- `docs/forks-ci/CONTAINERS-PLAN.md`
+- `docs/forks-ci/evidence/c1-containers/README.md`
+- `docs/forks-ci/evidence/ct1-gateway/README.md`
+- `app/SiloUI/src-tauri/engine/src/containers/lifecycle.rs`
+- `app/SiloUI/src-tauri/engine/src/containers/mod.rs`
+- `app/SiloUI/container-shim/src/main.rs`
+- `docs/forks-ci/BUILD_LOG.md#L539`
+- `app/SiloUI/src-tauri/engine/src/containers/layers.rs`
+- `app/SiloUI/src-tauri/engine/src/containers/snapshots.rs`
+- `app/SiloUI/src-tauri/engine/src/containers/archive.rs`
+- `app/SiloUI/container-shim/src/merge.rs`
+
+Calls: `computers.create`, `silo create --container`, `silo host init`, `checkpoints.create`, `checkpoints.fork`, `exports.create`.

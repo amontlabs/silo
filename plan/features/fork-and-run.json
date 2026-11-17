@@ -1,0 +1,13 @@
+{
+  "name": "Fork and run a command",
+  "what": "One command forks, runs something in the fork and returns its exit code.",
+  "area": "tasks",
+  "needs": [
+    "fork",
+    "run-commands"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Proven: 13 s from a checkpoint. The seed of every task."
+  }
+}

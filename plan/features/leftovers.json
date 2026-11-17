@@ -1,0 +1,9 @@
+{
+  "name": "Small leftovers",
+  "what": "The backup page, the alpha banner, the glass window effect, copying production settings into Dev, an earlier GitHub Action, bandwidth limits.",
+  "needs": [],
+  "suggest": {
+    "verdict": "drop",
+    "why": "Removed, cosmetic, or tied to the old layout."
+  }
+}

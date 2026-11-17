@@ -1,0 +1,12 @@
+{
+  "name": "T3 Code connects in",
+  "what": "T3 Code stays on your Mac and works with the agent and the files inside main.",
+  "area": "setup",
+  "needs": [
+    "agent-install"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "You decided this on 16 Nov. New. You named it as what stops you using Silo today."
+  }
+}

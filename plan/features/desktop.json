@@ -1,0 +1,12 @@
+{
+  "name": "A desktop in a Linux computer",
+  "what": "A computer can run a graphical desktop that you and its agent share.",
+  "area": "desktop",
+  "needs": [
+    "computers"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Built and heavy. Take it when GUI automation inside main comes next."
+  }
+}

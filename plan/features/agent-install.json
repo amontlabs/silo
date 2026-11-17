@@ -1,0 +1,16 @@
+{
+  "name": "Install and open your agent",
+  "what": "Pick Claude Code or Codex. Silo installs a checked version in the computer, and one action opens it there.",
+  "area": "agents",
+  "needs": [
+    "terminal"
+  ],
+  "surfaces": {
+    "app": "button:Open agent",
+    "cli": "silo agents install"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "Proven: 14 s."
+  }
+}

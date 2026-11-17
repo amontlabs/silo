@@ -1,0 +1,16 @@
+{
+  "name": "Who did what",
+  "what": "Every call that changed something, or was refused or held, with who made it: you, another device, or a computer.",
+  "area": "trust",
+  "needs": [
+    "approvals"
+  ],
+  "surfaces": {
+    "app": "side:Activity",
+    "cli": "silo audit"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "Nearly free if the engine keeps one ordered log of everything that happened."
+  }
+}

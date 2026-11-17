@@ -1,0 +1,16 @@
+{
+  "name": "See and use a computer's desktop",
+  "what": "A window on your Mac shows the computer's screen, with sound and resize.",
+  "area": "desktop",
+  "needs": [
+    "desktop",
+    "app-window"
+  ],
+  "surfaces": {
+    "app": "button:Desktop"
+  },
+  "suggest": {
+    "verdict": "later",
+    "why": "9,000 lines, and the proven runs used a viewer that was later replaced."
+  }
+}

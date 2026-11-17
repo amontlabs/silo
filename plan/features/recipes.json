@@ -1,0 +1,16 @@
+{
+  "name": "Recipes: build once, fork fast",
+  "what": "A short text file describes a computer. Silo builds it once, and every new computer made from it starts in seconds.",
+  "area": "setup",
+  "needs": [
+    "fork"
+  ],
+  "surfaces": {
+    "app": "side:Recipes",
+    "cli": "silo recipe"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "Small, clean and proven: 12 s per new computer."
+  }
+}

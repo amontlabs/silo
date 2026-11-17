@@ -1,0 +1,13 @@
+{
+  "name": "Agents drive the desktop",
+  "what": "An agent inside a computer can look at its screen, click and type, asking you first unless you allow it.",
+  "area": "desktop",
+  "needs": [
+    "desktop",
+    "approvals"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Only ever tested against a fake engine."
+  }
+}

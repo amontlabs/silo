@@ -1,0 +1,12 @@
+{
+  "name": "A computer cannot reach your device",
+  "what": "A computer reaches the public internet only: not your Mac, your local network, your VPN or cloud metadata.",
+  "area": "computers",
+  "needs": [
+    "computers"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "A core guarantee, cheap when it is there from the first day."
+  }
+}

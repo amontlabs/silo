@@ -1,0 +1,10 @@
+{
+  "name": "Find which merge broke main",
+  "what": "Like `git bisect`, but over a computer's merges and checkpoints: Silo finds the merge after which main stopped working and lets you undo it.",
+  "area": "changes",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Useful once main has a long merge history; undo covers the common case until then."
+  }
+}

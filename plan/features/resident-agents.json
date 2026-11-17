@@ -1,0 +1,9 @@
+{
+  "name": "OpenClaw and Hermes recipes",
+  "what": "Built-in recipes for two resident chat agents.",
+  "needs": [],
+  "suggest": {
+    "verdict": "drop",
+    "why": "You set them aside on 10 Nov. Set aside on 10 Nov."
+  }
+}

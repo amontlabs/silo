@@ -1,0 +1,12 @@
+{
+  "name": "Agents cannot fill your device",
+  "what": "There is no cap on how many computers an agent makes. It is refused only when memory or disk would run out.",
+  "area": "agents",
+  "needs": [
+    "agent-rule"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "Decided on 10 Nov. Small."
+  }
+}

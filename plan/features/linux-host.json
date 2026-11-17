@@ -1,0 +1,12 @@
+{
+  "name": "Host computers on a Linux server",
+  "what": "A Linux server runs the engine as a service and hosts computers with nobody logged in.",
+  "area": "devices",
+  "needs": [
+    "computers"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "You decided this on 16 Nov: the engine also runs on Linux. Proven. One Zig engine built for both systems makes this cheaper than before."
+  }
+}

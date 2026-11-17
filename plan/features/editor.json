@@ -1,0 +1,15 @@
+{
+  "name": "Open a folder in your editor",
+  "what": "One action opens a computer's folder in VS Code or Zed on your Mac.",
+  "area": "setup",
+  "needs": [
+    "terminal"
+  ],
+  "surfaces": {
+    "app": "button:Editor"
+  },
+  "suggest": {
+    "verdict": "take",
+    "why": "The old code has 3,400 lines of editor profiles behind one command. Keep the command, cut the machinery."
+  }
+}
