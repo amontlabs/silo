@@ -175,6 +175,7 @@
         "macos-loop",
         "macos-access",
         "macos-screen",
+        "macos-computer-use",
         "macos-tools",
         "macos-extras"
       ]
@@ -199,7 +200,8 @@
         "public-face",
         "export-logins",
         "device-push",
-        "team-machine"
+        "team-machine",
+        "fork-from-teammate"
       ]
     },
     {

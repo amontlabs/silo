@@ -1,5 +1,10 @@
+## Decided
+
+- 2026-11-17, owner: an agent drives the screen of a macOS computer as well as a Linux desktop.
+
 ## Notes
 
+- The macOS half is its own entry, `macos-computer-use`, so this one can be finished on the Linux desktop alone.
 - Screenshot and mouse and keyboard input exposed through the engine and MCP, usable by any harness (Anthropic computer use, Cua Driver), without depending on a closed vendor app.
 
 ## From the old code
