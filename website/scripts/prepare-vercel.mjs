@@ -79,6 +79,11 @@ function functionFiles(siteDir) {
 // Response headers for every path, static pages included: no page of the site may be framed.
 export const FRAME_HEADERS = { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
 
+// Files whose name changes when their content does (Vite's hashed assets), and the font files, which are
+// never edited in place: a new font gets a new name. A browser keeps them and does not ask again.
+export const KEPT_FILES = '^/(assets/.*|fonts/.*\\.woff2)$';
+export const KEPT_HEADERS = { 'Cache-Control': 'public, max-age=31536000, immutable' };
+
 export async function prepareVercel({ siteDir = website, distDir = join(siteDir, 'dist'), outputDir = DEFAULT_OUTPUT } = {}) {
   outputDir = resolve(outputDir);
   if (!outputDir.endsWith(`${sep}.vercel${sep}output`)) throw new Error('The output directory must end in .vercel/output; nothing was written.');
@@ -114,6 +119,7 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
     version: 3,
     routes: [
       { src: '^/(.*)$', headers: FRAME_HEADERS, continue: true },
+      { src: KEPT_FILES, headers: KEPT_HEADERS, continue: true },
       { src: '^/workshop/?$', dest: page },
       { handle: 'filesystem' },
     ],

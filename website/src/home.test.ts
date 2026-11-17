@@ -1,12 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { canonicalText } from '../../tools/plan/model/index.js';
-import { planFiles } from './workshop/fixtures.ts';
-import { fillHomePlan, homePlanLines } from './home-plan.ts';
-import { readBuildData } from './workshop/data.ts';
-import { buildPlan } from './workshop/plan.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
 
 const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8');
 const css = readFileSync(join(process.cwd(), 'src/style.css'), 'utf8');
@@ -19,31 +13,6 @@ const parse = (source: string) => new DOMParser().parseFromString(source, 'text/
 const doc = parse(html);
 const text = (selector: string, from: Document = doc) =>
   [...from.querySelectorAll(selector)].map((node) => node.textContent?.replace(/\s+/g, ' ').trim());
-
-// A repository folder holding the fixture plan, written as plan/ files.
-const repositories: string[] = [];
-type Files = Map<string, string>;
-function fixtureRepository(edit?: (files: Files) => void): string {
-  const root = mkdtempSync(join(tmpdir(), 'silo-home-plan-'));
-  repositories.push(root);
-  const files = planFiles();
-  edit?.(files);
-  for (const [name, content] of files) {
-    mkdirSync(dirname(join(root, 'plan', name)), { recursive: true });
-    writeFileSync(join(root, 'plan', name), content);
-  }
-  return root;
-}
-const fill = (edit?: (files: Files) => void) => fillHomePlan(html, fixtureRepository(edit));
-/** The fixture plan with the first stage's line replaced. */
-const firstLine = (line: string) => (files: Files) => {
-  const order = JSON.parse(files.get('order.json') as string) as { stages: { line: string }[] };
-  order.stages[0].line = line;
-  files.set('order.json', canonicalText(order));
-};
-afterEach(() => {
-  for (const root of repositories.splice(0)) rmSync(root, { recursive: true, force: true });
-});
 
 describe('the home page', () => {
   it('leads with the headline and the pitch', () => {
@@ -58,7 +27,7 @@ describe('the home page', () => {
     const actions = [...doc.querySelectorAll('.hero-actions a')];
     expect(actions.map((link) => link.textContent?.trim())).toEqual(['Follow the build', 'View source']);
     expect(actions.map((link) => link.getAttribute('href'))).toEqual(['/workshop', 'https://github.com/amontlabs/silo']);
-    expect(doc.querySelector('.door a')?.getAttribute('href')).toBe('/workshop');
+    expect(doc.querySelector('main > :first-child')?.matches('a.strip[href="/workshop"]')).toBe(true);
   });
 
   it('has the navigation, with GitHub kept on phones', () => {
@@ -81,49 +50,51 @@ describe('the home page', () => {
       'Try a new parser',
       'drop',
     ]);
-    expect(text('.points p')[2]).toBe('Silo runs on machines you own, starting with your Mac. Nothing is hosted.');
     expect(text('.loop figcaption')).toEqual(['Main is forked into two copies: one is merged back into main, the other is dropped.']);
   });
 
-  it('fills the two plan lines from the plan files', () => {
-    const filled = parse(fill());
-    expect(text('.hero-note', filled)).toEqual(['Not out yet. First up: one computer you can open from the app and the command line.']);
-    // Three taken entries of the 18 outside the stage `gone`.
-    expect(text('.door-line', filled)).toEqual(['3 of 18 features are planned. Have a say in the rest.']);
-    expect(text('.door-line span', filled)).toEqual(['3 of 18 features are planned.', 'Have a say in the rest.']);
-    expect(homePlanLines(fixtureRepository()).door).toContain('<span>3 of 18 features are planned.</span>');
+  it('says who it is for, in six points: a term, what Silo does about it, one sentence', () => {
+    expect(text('.for .title')).toEqual(['For high-velocity developers and small teams.']);
+    expect(text('.points .term')).toEqual(['parallel agents', 'environment setup', 'full access', 'review', 'teams', 'where it runs']);
+    expect(text('.points h3')).toEqual([
+      'One virtual machine per agent',
+      "Forks boot from main's disk",
+      'Root in a VM with no route to your Mac',
+      'A diff of the whole machine',
+      'A shared host for the team',
+      'Your Mac, a Linux server or the cloud',
+    ]);
+    expect(doc.querySelectorAll('.points li > h3 + p')).toHaveLength(6);
+    expect(doc.querySelectorAll('.points .term svg[aria-hidden="true"]')).toHaveLength(6);
   });
 
-  it('counts planned as the map does: a built feature is built, not planned, and a dropped one is not counted', () => {
-    const root = fixtureRepository((files) => {
-      const engine = JSON.parse(files.get('features/engine.json') as string);
-      files.set('features/engine.json', canonicalText({ ...engine, built: '2026-11-01' }));
-      const fork = JSON.parse(files.get('features/fork.json') as string);
-      files.set('features/fork.json', canonicalText({ ...fork, verdict: 'drop' }));
-    });
-    const plan = buildPlan(readBuildData(root), null);
-    const planned = plan.areas.reduce((sum, group) => sum + group.counts.planned, 0);
-    const total = plan.areas.reduce((sum, group) => sum + group.rows.length - group.counts.dropped, 0);
-    expect([planned, total]).toEqual([2, 17]);
-    expect(homePlanLines(root).door).toContain('<span>2 of 17 features are planned.</span>');
+  it('says what the Workshop is, and where Silo stands, with nothing read from the plan', () => {
+    expect(text('.strip-line')).toEqual(['Follow us building Silo live, get an overview of every feature, suggest your ideas and give feedback.']);
+    expect(text('.notice p')).toEqual([
+      'in heavy development',
+      "Treat Silo as a build in public for now. If you try it, expect rough edges, breaking changes, no security guarantees and no data migration between versions. Don't keep anything in it that isn't backed up.",
+    ]);
+    expect(html).not.toMatch(/<!-- plan:|features are planned|First up|Not out yet/);
   });
 
-  it('writes a plan line with $ or markup in it as text', () => {
-    const line = 'Costs $& and $` and $\' and $$ <b>bold</b>.';
-    const filled = fill(firstLine(line));
-    const page = parse(filled);
-    expect(text('.hero-note', page)).toEqual(['Not out yet. First up: costs $& and $` and $\' and $$ <b>bold</b>.']);
-    expect(page.querySelector('.hero-note b')).toBeNull();
-    expect(filled.length).toBeLessThan(html.length + 200);
+  it('gives a shared link its picture: a 1200 x 630 PNG', () => {
+    const content = (selector: string) => doc.querySelector(selector)?.getAttribute('content');
+    expect(content('meta[property="og:image"]')).toBe('https://silo.amontlabs.com/og.png');
+    expect(content('meta[name="twitter:card"]')).toBe('summary_large_image');
+    const image = readFileSync(join(process.cwd(), 'public/og.png'));
+    expect(image.subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect([image.readUInt32BE(16), image.readUInt32BE(20)]).toEqual([1200, 630]);
+    expect([content('meta[property="og:image:width"]'), content('meta[property="og:image:height"]')]).toEqual(['1200', '630']);
   });
 
-  it('stops the build when the plan is missing or malformed', () => {
-    expect(() => fillHomePlan(html, join(tmpdir(), 'silo-home-plan-missing'))).toThrow('plan/: cannot be read');
-    expect(() => fill((files) => files.delete('order.json'))).toThrow(/order\.json/);
-    expect(() => fill((files) => files.set('areas.json', '['))).toThrow(/areas\.json/);
-    expect(() => fill((files) => files.set('features/engine.json', '{'))).toThrow(/features\/engine\.json/);
-    expect(() => fill((files) => files.set('decisions.json', '{}'))).toThrow(/decisions\.json/);
-    expect(() => fill(firstLine(''))).toThrow(/line/);
+  it('waits only for fonts it preloads', () => {
+    const waited = [...(html.match(/const faces = \[(.*?)\];/)?.[1].matchAll(/'((?:italic )?)\d+px "IBM Plex (\w+)"'/g) ?? [])].map(
+      ([, italic, family]) => `/fonts/ibm-plex-${family.toLowerCase()}-400-${italic ? 'italic' : 'normal'}.woff2`,
+    );
+    const preloaded = [...doc.querySelectorAll('link[rel="preload"][as="font"]')].map((link) => link.getAttribute('href') as string);
+    expect(waited).toHaveLength(4);
+    expect([...preloaded].sort()).toEqual([...waited].sort());
+    for (const href of preloaded) expect(existsSync(join(process.cwd(), 'public', href))).toBe(true);
   });
 
   it('keeps no style for a class or id the page and its script do not use', () => {

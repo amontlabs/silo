@@ -5,11 +5,14 @@ Vite. It has two pages:
 
 - **Home** (`index.html`, `src/style.css`, `src/loop.ts`): the pitch, the
   picture of the loop (drawn by `src/loop.ts`, once, when it comes into view,
-  unless the visitor prefers reduced motion), and the way into the Workshop. The
-  page shows once its fonts are in (at most 3 s), so nothing changes width. Its "First up" line and its
-  count of planned features are written in at build time from `plan/`, read
-  and checked by `tools/plan` (`src/home-plan.ts`, the `homePlan` plugin in
-  `vite.config.ts`); any error of the plan stops the build.
+  unless the visitor prefers reduced motion), who Silo is for, the way into the
+  Workshop, and a notice that Silo is in heavy development. Nothing on it is
+  read from the plan. The page shows once its fonts are in (at most 1.2 s), so
+  nothing changes width: it preloads every face it waits for, and the deployed
+  site lets a browser keep the font files, so a later visit does not wait.
+  A link to the site shows `public/og.png` when shared: a 1200 × 630 capture
+  of `scripts/share-image.html`, opened from the dev server at
+  `/scripts/share-image.html`.
 - **Workshop** (`workshop/index.html`, `src/workshop/`), at
   [silo.amontlabs.com/workshop](https://silo.amontlabs.com/workshop): Silo's
   plan, the product's areas drawn as a map (tiles on narrow screens), each with
@@ -534,11 +537,15 @@ following Vercel's
   Vercel creates one function served at every `/api/workshop/<endpoint>` path,
   as the [primitives reference](https://vercel.com/docs/build-output-api/primitives#functions)
   allows. An unknown endpoint is Vercel's 404.
-- `config.json`: `version: 3` and three routes. The first adds
+- `config.json`: `version: 3` and four routes. The first adds
   `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`
-  to every path and continues. The second,
+  to every path and continues. The second adds
+  `Cache-Control: public, max-age=31536000, immutable` to Vite's hashed files
+  under `/assets/` and to the font files (`/fonts/*.woff2`), and continues: a
+  browser keeps them and does not ask again, so a font is never edited in place
+  and a new one gets a new name. The third,
   `{ "src": "^/workshop/?$", "dest": "/workshop/index.html" }`, serves the
-  Workshop page at both `/workshop` and `/workshop/`. The third hands every
+  Workshop page at both `/workshop` and `/workshop/`. The fourth hands every
   other path to the filesystem.
 
 The script fails when the build has no Workshop page (`workshop/index.html`, or
