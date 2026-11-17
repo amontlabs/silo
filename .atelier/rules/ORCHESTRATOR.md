@@ -39,7 +39,7 @@ Discussing:
 - What we agree goes in the feature's two files, not only in the chat.
 - Anything about another feature goes in that feature's notes. A new idea gets its own entry with `plan add`.
 - A verdict the owner gives in the conversation: `plan decide <id> take|later|drop`.
-- Commit the plan files straight to `main` and push, so the Workshop shows it. Run `plan check` first, and commit only while no merge is running. No branch, review or approve.
+- Commit the plan files straight to `main` and push, so the Workshop shows it. No branch, review or approve. First run `tools/ci/check.sh plan`, then `links`, then `build` (seconds each; they read `plan/`), and commit only while no merge is running. Plan edits made while building stay on the build's branch.
 - A rejected push means the owner decided meanwhile: when no merge is running, `git pull --no-rebase`, then push again. Never force.
 
 Decisions (rule 2b):
