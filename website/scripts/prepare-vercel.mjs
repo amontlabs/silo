@@ -10,11 +10,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // routes that serve the Workshop page at /workshop and /workshop/.
 //
 // The function holds the files it loads at the paths they have in the
-// repository: website/api/ and website/server/ at any depth,
-// website/node_modules/ (only the files of its packages that load) and
+// repository: website/api/ and website/server/ at any depth, and
 // tools/plan/model/ (the plan's model, with tools/plan/package.json, which
 // makes it ESM). Any other file it would load, in website/ or outside it,
-// stops the packaging.
+// stops the packaging: a package in website/node_modules/ is one of them.
 export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'vote', 'suggest', 'verdict'];
 export const RUNTIME = 'nodejs24.x';
 export const HANDLER = 'website/api/workshop.cjs';
@@ -50,15 +49,10 @@ function functionFiles(siteDir) {
   // Node reports each file by its real path, so the folders are compared as real paths too.
   const site = realpathSync(resolve(siteDir));
   const root = dirname(site);
-  const modules = join(site, 'node_modules') + sep;
   const model = join(root, MODEL_DIR) + sep;
   const files = new Set();
   for (const file of loadedFiles(site)) {
-    if (file.startsWith(modules)) {
-      files.add(file);
-      const parts = file.slice(modules.length).split(sep);
-      files.add(join(modules, ...parts.slice(0, parts[0].startsWith('@') ? 2 : 1), 'package.json'));
-    } else if (file.startsWith(model) && !file.slice(model.length).includes(sep)) {
+    if (file.startsWith(model) && !file.slice(model.length).includes(sep)) {
       files.add(file);
     } else if (file.startsWith(join(site, 'server') + sep) || file.startsWith(join(site, 'api') + sep)) {
       files.add(file);
