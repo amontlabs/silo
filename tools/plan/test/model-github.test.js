@@ -12,12 +12,15 @@ const IDS = ['core', 'cli', 'fork'];
 const VERDICTS = ['take', 'later', 'drop'];
 const ACTORS = ['owner', 'maintainer', 'helper']; // helper has triage only
 
-for (const seed0 of [11, 29, 47]) {
+for (const seed0 of [11, 29, 47, 83]) {
   test(`model: random sequence ${seed0}`, async (t) => {
     let seed = seed0;
+    // mulberry32: every choice of every operation is reached.
     const random = (n) => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed % n;
+      seed = (seed + 0x6d2b79f5) | 0;
+      let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+      return ((x ^ (x >>> 14)) >>> 0) % n;
     };
     const w = await world(t, basePlan());
     assert.equal((await w.run(['sync'])).code, 0);
@@ -31,7 +34,7 @@ for (const seed0 of [11, 29, 47]) {
       git(w.root, 'push', '-q', 'origin', 'HEAD:main');
     };
 
-    for (let step = 0; step < 14; step += 1) {
+    for (let step = 0; step < 30; step += 1) {
       const id = IDS[random(IDS.length)];
       const m = model[id];
       const number = w.fake.entry(id).number;
@@ -54,11 +57,18 @@ for (const seed0 of [11, 29, 47]) {
         m.removalCounts = counts(actor);
         m.any = true;
       } else if (op === 2) {
-        const verdict = [...VERDICTS, 'clear'][random(4)];
-        assert.equal((await w.run(['decide', id, verdict])).code, 0);
+        // Half the time a verdict GitHub shows already: the paths that must change nothing.
+        const verdict = m.labels.size && random(2) ? [...m.labels][random(m.labels.size)] : [...VERDICTS, 'clear'][random(4)];
+        const result = await w.run(['decide', id, verdict]);
+        // The file at origin/main is the model's file: every pull is committed and pushed.
+        const refused = verdict !== 'clear' && m.labels.has(verdict) && !m.counted[verdict];
+        assert.equal(result.code, refused ? 1 : 0, result.err);
         const wanted = verdict === 'clear' ? [] : [verdict];
         const same = m.labels.size === wanted.length && wanted.every((v) => m.labels.has(v));
-        if (!same) {
+        if (refused) {
+          // The label set by someone who cannot decide stays; nothing changes.
+        } else if (!same || (verdict === 'clear' && m.file !== null)) {
+          // A clear with no label but a verdict in the file puts the file's label on, then off.
           if (verdict !== 'clear' && !m.labels.has(verdict)) m.counted[verdict] = true;
           m.labels = new Set(wanted);
           m.any = true;

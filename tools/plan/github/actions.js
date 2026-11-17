@@ -3,7 +3,8 @@ import { labelNames } from './client.js';
 import { Failure, NoIssue } from './errors.js';
 import { addLabel, builtOnGitHub, claimBranch, comment, commentsOf, entryIssue, eventsOf, isBuilding, isSuggestion, removeLabel } from './issues.js';
 import { CLEARED_COMMENT, RECORDED_COMMENT, buildingComment, labelVerdicts, readBuildingComment } from '../model/comments.js';
-import { BUILDING_LABEL, ENTRY_LABEL, verdictLabel } from '../model/names.js';
+import { BUILDING_LABEL, ENTRY_LABEL, labelVerdict, verdictLabel } from '../model/names.js';
+import { decider } from './pull.js';
 
 /** @typedef {import('./client.js').GitHub} GitHub */
 
@@ -17,33 +18,41 @@ async function needIssue(gh, id) {
 /**
  * Sets the verdict label (or removes every verdict label for `clear`) and says so in a comment.
  * The new label goes on before the others come off, so the issue never shows no verdict between.
- * When GitHub shows the wanted verdict already: nothing changes if the file at origin/main has it
- * too (`recorded`), else the bot removes the label and adds it again, so that the newest verdict
- * event is the bot's and a run starts (for `clear`, it adds the file's verdict label and removes it).
- * @param {{ gh: GitHub, id: string, verdict: 'take' | 'later' | 'drop' | 'clear', fileVerdict?: string | null }} options
- *   `fileVerdict`: the verdict of the file at origin/main, null for none, undefined when it could not be read
+ * A label is never removed in order to add it again. When GitHub shows the wanted verdict already,
+ * nothing changes: when that label does not count (its newest `labeled` event is by someone who
+ * cannot decide) it is a failure; else it is `recorded` when the file at origin/main has it too, or
+ * `waiting` for the next run of the Plan workflow to bring it. `clear` on an issue with no verdict
+ * label while the file has one adds the file's label and removes it, so that a counted removal is
+ * the newest verdict event.
+ * @param {{ gh: GitHub, id: string, verdict: 'take' | 'later' | 'drop' | 'clear', fileVerdict: string | null }} options
+ *   `fileVerdict`: the verdict of the file at origin/main, null for none
  */
 export async function decide({ gh, id, verdict, fileVerdict }) {
   const issue = await needIssue(gh, id);
   if (builtOnGitHub(issue)) throw new Failure(`${id} is built (#${issue.number} is closed as completed); its verdict never changes`);
   const present = labelVerdicts(labelNames(issue));
-  const wanted = verdict === 'clear' ? [] : [verdict];
-  const result = { id, issue: issue.number, verdict, changed: true, recorded: false };
-  if (present.length === wanted.length && present.every((v, i) => v === wanted[i])) {
-    const target = verdict === 'clear' ? null : verdict;
-    if (fileVerdict === target) return { ...result, changed: false, recorded: true };
-    if (verdict !== 'clear') {
-      await removeLabel(gh, issue, verdictLabel(verdict));
-      await addLabel(gh, issue.number, verdictLabel(verdict));
-    } else if (fileVerdict) {
+  const result = { id, issue: issue.number, verdict, changed: true, recorded: false, waiting: false };
+  if (verdict === 'clear') {
+    if (!present.length) {
+      if (!fileVerdict) return { ...result, changed: false, recorded: true };
       await addLabel(gh, issue.number, verdictLabel(fileVerdict));
       await removeLabel(gh, { number: issue.number, labels: [] }, verdictLabel(fileVerdict));
-    } else return { ...result, changed: false };
-  } else {
-    if (verdict !== 'clear' && !present.includes(verdict)) await addLabel(gh, issue.number, verdictLabel(verdict));
-    for (const other of present.filter((v) => v !== verdict)) await removeLabel(gh, issue, verdictLabel(other));
+    } else {
+      // Under the name the issue lists; a removal that fails is an error, never "recorded".
+      for (const other of present) await removeLabel(gh, issue, verdictLabel(other), { strict: true });
+    }
+    await comment(gh, issue.number, CLEARED_COMMENT);
+    return result;
   }
-  await comment(gh, issue.number, verdict === 'clear' ? CLEARED_COMMENT : RECORDED_COMMENT);
+  if (present.includes(verdict)) {
+    const labeled = (await eventsOf(gh, issue.number)).filter((e) => e.event === 'labeled' && labelVerdict(e.label?.name ?? '') === verdict).at(-1);
+    if (!labeled || !(await decider(gh)(labeled.actor, labeled))) {
+      throw new Failure(`GitHub shows ${verdict} on #${issue.number}, set by ${labeled?.actor?.login ?? 'someone unknown'}, who cannot decide. Remove that label on GitHub, then run plan decide again.`);
+    }
+    if (present.length === 1) return { ...result, changed: false, recorded: fileVerdict === verdict, waiting: fileVerdict !== verdict };
+  } else await addLabel(gh, issue.number, verdictLabel(verdict));
+  for (const other of present.filter((v) => v !== verdict)) await removeLabel(gh, issue, verdictLabel(other));
+  await comment(gh, issue.number, RECORDED_COMMENT);
   return result;
 }
 

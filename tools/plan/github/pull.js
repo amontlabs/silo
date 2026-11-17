@@ -16,7 +16,7 @@ const DECIDERS = new Set(['admin', 'maintain', 'write']);
 const isVerdictEvent = (event) => (event.event === 'labeled' || event.event === 'unlabeled') && labelVerdict(event.label?.name ?? '') !== null;
 
 /** @param {import('./client.js').GitHub} gh */
-function decider(gh) {
+export function decider(gh) {
   /** @type {Map<string, boolean>} */
   const known = new Map();
   /** Whether the actor of an event counts: the bot itself, or a person who can decide. */

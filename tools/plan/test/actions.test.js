@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { basePlan } from './helpers.js';
+import { join } from 'node:path';
+import { basePlan, git } from './helpers.js';
 import { fakeKeychain, world } from './github-helpers.js';
 import { CLEARED_COMMENT, RECORDED_COMMENT } from '../model/comments.js';
 
@@ -171,31 +172,101 @@ test('decide: GitHub and the file at origin/main show the verdict already: "alre
   assert.deepEqual([JSON.parse(cleared.out).changed, JSON.parse(cleared.out).recorded], [false, true]);
 });
 
-test('decide: the label is there but the file at origin/main differs: the bot removes and adds it again, so a run starts and pull counts it', async (t) => {
+test('decide: the label is there and counts, the file at origin/main differs: nothing changes, the next run of the Plan workflow brings it', async (t) => {
   const w = await synced(t);
   const fork = w.fake.entry('fork');
   // Set by the owner, but its run was lost: the file never got it.
   w.fake.setVerdictLabel(fork.number, 'take', 'owner');
+  const before = w.fake.snapshot();
   const events = w.fake.events.length;
   const result = await w.run(['decide', 'fork', 'take']);
   assert.equal(result.code, 0, result.err);
-  assert.equal(result.out, 'Recorded on GitHub. The commit follows: git pull.');
-  assert.deepEqual(w.fake.events.slice(events).map((e) => `${e.event} ${e.label.name} ${e.actor.login}`), [`unlabeled verdict:take ${w.fake.bot.login}`, `labeled verdict:take ${w.fake.bot.login}`]);
-  assert.deepEqual(verdictLabels(fork), ['verdict:take']);
-  assert.equal(w.fake.commentsOn(fork.number).at(-1).body, RECORDED_COMMENT);
+  assert.equal(result.out, 'GitHub already shows take. The commit comes with the next run of the Plan workflow (any push to main starts one).');
+  assert.equal(w.fake.events.length, events, 'no label removed and added again');
+  assert.equal(w.fake.snapshot(), before);
+  const json = JSON.parse((await w.run(['decide', 'fork', 'take', '--json'])).out);
+  assert.deepEqual([json.changed, json.recorded, json.waiting], [false, false, true]);
   const pulled = JSON.parse((await w.run(['pull', '--write', '--json'])).out);
-  assert.deepEqual(pulled.changes.map((c) => [c.id, c.to, c.by]), [['fork', 'take', w.fake.bot.login]]);
+  assert.deepEqual(pulled.changes.map((c) => [c.id, c.to, c.by]), [['fork', 'take', 'owner']]);
 
-  // clear, when GitHub shows no verdict and the file at origin/main still has one.
+  // clear, when GitHub shows no verdict and the file at origin/main still has one: the label goes on, then off.
   w.change({ cli: { verdict: 'later' } }, 'Owner: later cli');
   const cli = w.fake.entry('cli');
-  const before = w.fake.events.length;
+  const from = w.fake.events.length;
   assert.equal((await w.run(['decide', 'cli', 'clear'])).code, 0);
-  assert.deepEqual(w.fake.events.slice(before).map((e) => `${e.event} ${e.label.name}`), ['labeled verdict:later', 'unlabeled verdict:later']);
+  assert.deepEqual(w.fake.events.slice(from).map((e) => `${e.event} ${e.label.name}`), ['labeled verdict:later', 'unlabeled verdict:later']);
   assert.deepEqual(verdictLabels(cli), []);
   assert.equal(w.fake.commentsOn(cli.number).at(-1).body, CLEARED_COMMENT);
   const cleared = JSON.parse((await w.run(['pull', '--json'])).out);
   assert.deepEqual(cleared.changes.map((c) => [c.id, c.to, c.by]), [['cli', null, w.fake.bot.login]]);
+});
+
+test('decide: the wanted label is there but set by someone who cannot decide: nothing changes, exit 1', async (t) => {
+  const w = await synced(t);
+  const fork = w.fake.entry('fork');
+  w.fake.label(fork.number, 'verdict:take', 'helper');
+  const expected = `GitHub shows take on #${fork.number}, set by helper, who cannot decide. Remove that label on GitHub, then run plan decide again.`;
+  for (const beside of [null, 'later']) {
+    if (beside) w.fake.label(fork.number, `verdict:${beside}`, 'owner');
+    const before = w.fake.snapshot();
+    const events = w.fake.events.length;
+    const result = await w.run(['decide', 'fork', 'take']);
+    assert.equal(result.code, 1);
+    assert.equal(result.err.trim(), `plan: ${expected}`);
+    assert.equal(w.fake.events.length, events);
+    assert.equal(w.fake.snapshot(), before);
+  }
+  // Once the owner sets it themselves, it counts.
+  w.fake.unlabel(fork.number, 'verdict:take', 'owner');
+  w.fake.label(fork.number, 'verdict:take', 'owner');
+  const result = await w.run(['decide', 'fork', 'take']);
+  assert.equal(result.code, 0, result.err);
+  assert.deepEqual(verdictLabels(fork), ['verdict:take']);
+  assert.equal(w.fake.commentsOn(fork.number).at(-1).body, RECORDED_COMMENT);
+});
+
+test('decide: origin/main cannot be fetched: it says so and changes nothing', async (t) => {
+  const w = await synced(t);
+  git(w.root, 'remote', 'set-url', 'origin', join(w.base, 'missing.git'));
+  const before = w.fake.snapshot();
+  const result = await w.run(['decide', 'fork', 'take']);
+  assert.equal(result.code, 1);
+  assert.match(result.err, /the file of fork at origin\/main could not be read \(git fetch origin main failed/);
+  assert.equal(w.fake.snapshot(), before);
+});
+
+test('decide clear: removes the label under the name the issue lists; nothing to clear; a failed removal is an error', async (t) => {
+  const w = await synced(t);
+  const fork = w.fake.entry('fork');
+  w.fake.labels.push({ name: 'Verdict:Later', color: 'ededed', description: '' });
+  w.fake.labels = w.fake.labels.filter((l) => l.name !== 'verdict:later');
+  w.fake.label(fork.number, 'verdict:later', 'owner');
+  assert.deepEqual(fork.labels.filter((l) => /verdict/i.test(l)), ['Verdict:Later']);
+  const cleared = await w.run(['decide', 'fork', 'clear']);
+  assert.equal(cleared.code, 0, cleared.err);
+  assert.equal(cleared.out, 'Recorded on GitHub. The commit follows: git pull.');
+  assert.deepEqual(fork.labels.filter((l) => /verdict/i.test(l)), []);
+  assert.equal(w.fake.commentsOn(fork.number).at(-1).body, CLEARED_COMMENT);
+
+  // No label on the issue, none in the file.
+  const before = w.fake.snapshot();
+  const nothing = await w.run(['decide', 'fork', 'clear']);
+  assert.equal(nothing.code, 0, nothing.err);
+  assert.equal(nothing.out, `There is no verdict to clear: #${fork.number} and the file at origin/main both show none.`);
+  assert.equal(w.fake.snapshot(), before);
+
+  // Someone removes the label while decide runs: the removal fails, nothing is recorded.
+  w.fake.label(fork.number, 'verdict:take', 'owner');
+  const comments = w.fake.commentsOn(fork.number).length;
+  const fetch = (url, init) => {
+    if (init?.method === 'DELETE' && String(url).includes('/labels/')) w.fake.unlabel(fork.number, 'verdict:take', 'owner');
+    return w.deps.fetch(url, init);
+  };
+  const failed = await w.run(['decide', 'fork', 'clear'], { deps: { fetch } });
+  assert.equal(failed.code, 1);
+  assert.match(failed.err, /verdict:take could not be removed from #\d+: GitHub does not show it there; nothing is recorded/);
+  assert.doesNotMatch(failed.out, /Recorded/);
+  assert.equal(w.fake.commentsOn(fork.number).length, comments);
 });
 
 test('start: two claims under one branch name: the earliest comment wins, the other withdraws', async (t) => {

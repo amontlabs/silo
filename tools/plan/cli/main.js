@@ -455,24 +455,27 @@ async function decideCommand(ctx, argv) {
   if (data.built) throw new Refused(`${id} is built (${data.built}); its verdict never changes`);
   const gh = await connect(ctx);
   const fileVerdict = verdictAtMain(root, id);
+  if (fileVerdict === undefined) throw new Failure(`the file of ${id} at origin/main could not be read (git fetch origin main failed, or the file is not there); nothing changed`);
   const result = await decide({ gh, id, verdict: /** @type {any} */ (verdict), fileVerdict });
-  const line = 'Recorded on GitHub. The commit follows: git pull.';
+  const shown = verdict === 'clear' ? 'no verdict' : verdict;
   const text = result.changed
-    ? line
-    : result.recorded
-      ? `Already recorded: #${result.issue} and the file at origin/main both show ${verdict === 'clear' ? 'no verdict' : verdict}.`
-      : `#${result.issue} shows no verdict label; the file at origin/main could not be read to check it.`;
+    ? 'Recorded on GitHub. The commit follows: git pull.'
+    : result.waiting
+      ? `GitHub already shows ${verdict}. The commit comes with the next run of the Plan workflow (any push to main starts one).`
+      : verdict === 'clear'
+        ? `There is no verdict to clear: #${result.issue} and the file at origin/main both show none.`
+        : `Already recorded: #${result.issue} and the file at origin/main both show ${shown}.`;
   emit(ctx, flags.has('json'), { ok: true, ...result }, text);
   return 0;
 }
 
 /**
  * The verdict of a feature's file at origin/main, after fetching it: null for none, undefined when
- * it cannot be read.
+ * it cannot be read (the fetch failed, so origin/main may be stale, or the file is not there).
  * @param {string} root @param {string} id
  */
 function verdictAtMain(root, id) {
-  git(root, ['fetch', '--quiet', 'origin', 'main']);
+  if (git(root, ['fetch', '--quiet', 'origin', 'main']) === null) return undefined;
   const text = git(root, ['show', `origin/main:plan/features/${id}.json`]);
   if (text === null) return undefined;
   try {

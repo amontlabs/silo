@@ -5,6 +5,7 @@ import { BUILDING_LABEL, ENTRY_LABEL, LABELS, SUGGESTION_LABEL } from '../model/
 import { readBuildingComment } from '../model/comments.js';
 import { readEntryMarker } from '../model/markers.js';
 import { labelNames, labelOn } from './client.js';
+import { Failure } from './errors.js';
 
 /** @typedef {import('./client.js').GitHub} GitHub */
 
@@ -81,10 +82,15 @@ export async function addLabel(gh, number, name) {
   await gh.request('POST', gh.repoPath(`/issues/${number}/labels`), { body: { labels: [name] } });
 }
 
-/** Removes a label from an issue, under the name it has there in whatever capitalisation. @param {GitHub} gh @param {any} issue @param {string} name */
-export async function removeLabel(gh, issue, name) {
+/**
+ * Removes a label from an issue, under the name it has there in whatever capitalisation. A label
+ * already gone (404) is fine, unless `strict`: then it is an error.
+ * @param {GitHub} gh @param {any} issue @param {string} name @param {{ strict?: boolean }} [options]
+ */
+export async function removeLabel(gh, issue, name, { strict = false } = {}) {
   const actual = labelOn(issue, name) ?? name;
-  await gh.request('DELETE', gh.repoPath(`/issues/${issue.number}/labels/${encodeURIComponent(actual)}`), { allow: [404] });
+  const { status } = await gh.request('DELETE', gh.repoPath(`/issues/${issue.number}/labels/${encodeURIComponent(actual)}`), { allow: [404] });
+  if (strict && status === 404) throw new Failure(`${actual} could not be removed from #${issue.number}: GitHub does not show it there; nothing is recorded`);
 }
 
 /** @param {GitHub} gh @param {number} number @param {string} body */
