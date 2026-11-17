@@ -17,6 +17,9 @@ export class PlanError extends Error {
   }
 }
 
+/** A path with a part whose name starts with a dot (`.DS_Store`, `features/.x.json`): not a file of the plan, ignored. @param {string} rel */
+export const isHidden = (rel) => rel.split('/').some((part) => part.startsWith('.'));
+
 /**
  * Every file under a plan directory, by its path relative to it (`features/fork.json`).
  * @param {string} dir @returns {Map<string, string>}
@@ -26,6 +29,7 @@ export function loadDir(dir) {
   const files = new Map();
   const walk = (path, prefix) => {
     for (const name of readdirSync(path).sort()) {
+      if (name.startsWith('.')) continue;
       const full = join(path, name);
       const rel = prefix ? `${prefix}/${name}` : name;
       if (statSync(full).isDirectory()) walk(full, rel);
@@ -42,9 +46,12 @@ export function loadDir(dir) {
  * @returns {Map<string, string>}
  */
 export function loadRef(repo, ref, prefix = 'plan') {
-  const git = (args, input) => execFileSync('git', ['-C', repo, ...args], { input, stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 });
+  const inRepo = (dir, args, input) => execFileSync('git', ['-C', dir, ...args], { input, stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 });
+  // Paths given to git are relative to the directory it runs in: run it at the top level, so any directory inside the repository works.
+  const top = inRepo(repo, ['rev-parse', '--show-toplevel']).toString().trim();
+  const git = (args, input) => inRepo(top, args, input);
   const commit = git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).toString().trim();
-  const names = git(['ls-tree', '-r', '-z', '--name-only', commit, '--', `${prefix}/`]).toString().split('\0').filter(Boolean);
+  const names = git(['ls-tree', '-r', '-z', '--name-only', commit, '--', `${prefix}/`]).toString().split('\0').filter((name) => name && !isHidden(name.slice(prefix.length + 1)));
   /** @type {Map<string, string>} */
   const files = new Map();
   if (!names.length) return files;
@@ -107,7 +114,7 @@ export function parsePlan(files) {
   const raw = Object.create(null);
   for (const name of files.keys()) {
     const match = FEATURE_FILE.exec(name);
-    if (!match) continue;
+    if (!match || isHidden(name)) continue;
     const data = json(files, name, problems);
     if (data === undefined) continue;
     raw[match[1]] = data;

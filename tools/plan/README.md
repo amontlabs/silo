@@ -14,9 +14,11 @@ order below. Unknown keys are errors. An optional key is absent, never `null`.
 | `PRODUCT.md` | What Silo is, in prose. |
 | `areas.json` | `[{ "id", "title", "line" }]`: the parts of the product. |
 | `order.json` | `{ "stages": [{ "id", "title", "line", "features": [ids] }] }`: the build order. Every feature appears exactly once. The first four stages are the starter. The stage `gone`, when present, is last: old things proposed to be left behind. |
-| `decisions.json` | `[{ "id", "date", "text", "about" }]`: what the owner settled for the whole product. `about` (optional) lists area and feature ids; absent means the whole product. |
+| `decisions.json` | `[{ "id", "date", "text", "about" }]`: what the owner settled for the whole product. `about` (optional) lists area ids, each once; absent means the whole product. A decision about one feature goes in that feature's notes. |
 | `features/<id>.json` | One feature; the file name is its id, `^[a-z0-9][a-z0-9-]{0,62}$`. |
 | `features/<id>.md` | Optional notes: what was agreed, open points, and `## From the old code`. Its decision log. |
+
+A file or folder whose name starts with a dot (`.DS_Store`) is ignored. Any other file is an error.
 
 A feature's keys, in order:
 
@@ -49,16 +51,17 @@ Ready to build: `planned`, and every feature in `needs` is `built`.
 
 ## Commands
 
-Every command takes `--json`. Exit codes: 0 done, 1 refused or errors found, 2 wrong use, 3 live
-state could not be read. Run from anywhere inside the checkout.
+Every command takes `--json`, before or after the command name. Exit codes: 0 done, 1 refused or errors found, 2 wrong use, 3 live
+state could not be read. Run from anywhere inside the checkout. `status`, `show`, `add` and `finish`
+first run the checks of `plan check`; when the plan fails them, they print its errors and exit 1.
 
 | Command | What |
 |---|---|
 | `plan` | The commands, one line each. |
 | `plan status` | The latest verdicts (the newest five commits touching `plan/features/` whose subject starts with `Owner: `), the next feature to decide (the first in order without a verdict), what is being built, what is taken and not started (ready, or waiting for which needs), and ideas not placed. |
-| `plan show <id>` | One feature: its fields, stage and position, each need with its status, what needs it, the decisions about it (its id, its area, or the whole product), its notes, and its issue when live. |
-| `plan add <id> --name "…" --area <area> (--after <id> \| --first-in <stage>) [--what "…"] [--from <issue>]` | A new feature file and its place in `order.json`. `--from` sets `suggested_in`. Prints the paths; commits nothing. Never into the stage `gone`. Without `--what`, `plan check` fails until it is written. |
-| `plan finish <id>` | Writes `built` (today, UTC) in a feature whose verdict is take and whose needs are built, and prints the `git commit` line. |
+| `plan show <id>` | One feature: its fields, stage and position, each need with its status, what needs it, the decisions about it (those whose `about` names its area, and those with no `about`), its notes, and its issue when live. |
+| `plan add <id> --name "…" --area <area> (--after <id> \| --first-in <stage>) --what "…" [--from <issue>]` | A new feature file and its place in `order.json`. `--from` sets `suggested_in`. Prints the paths; commits nothing. Never into the stage `gone`. Refuses an id that has a file or is already in `order.json`, and writes nothing unless the plan it leaves passes `plan check`. |
+| `plan finish <id>` | Writes `built` (today, UTC) in a feature whose verdict is take and whose needs are built, and prints the `git commit` line, with the path as seen from the directory it was run in. |
 | `plan check` | The checks below. Each error reads `file: field: message. Fix: …`. |
 
 Live state (the issues on GitHub) is read through `live/`. For now it is never available: `status`
@@ -81,7 +84,7 @@ Offline. It fails when:
 - `needs` names a missing feature, the feature itself, a feature twice, or makes a cycle;
 - `suggest.verdict` or `verdict` is not take, later or drop; `suggested_in` is not an issue number;
 - `built` is not a date, or is set without the verdict take;
-- a decision's id is not unique, its date is not a date, or its `about` names no area or feature;
+- a decision's id is not unique, its date is not a date, or its `about` is empty, names something other than an area (a feature id included), or names an area twice;
 - an `.md` has no `.json`;
 - a JSON file is not in canonical form.
 
@@ -94,7 +97,7 @@ build checks it.
 - `model/`: names, the status function, area states and counts, the three GitHub markers
   (`silo-entry`, `silo-synced`, `silo-change`) and the wanted issue of an entry, the canonical
   form. Plain ESM; it imports nothing outside its folder and no `node:` module (a test enforces it).
-- `read/`: `readPlan(dir)` and `readPlanAt(repo, ref)` give one plan object: `areas`, `stages`
+- `read/`: `readPlan(dir)` and `readPlanAt(repo, ref)` (`repo`: any directory inside the repository) give one plan object: `areas`, `stages`
   (with their feature ids in order), `features` by id (each with `id`, `stage`, `position` from 1,
   and `notes`), `decisions`.
 - `check/`: `checkFiles(files)` gives `{ errors, notes }`.

@@ -4,7 +4,7 @@ import {
   AREA_KEYS, DECISION_KEYS, FEATURE_KEYS, GONE_STAGE, ID_PATTERN, ORDER_KEYS, PLAN_FILES, STAGE_KEYS, SUGGEST_KEYS, SURFACES_KEYS, VERDICTS, isDate,
 } from '../model/names.js';
 import { canonicalAreas, canonicalDecisions, canonicalFeature, canonicalOrder, canonicalText } from '../model/canonical.js';
-import { parsePlan } from '../read/index.js';
+import { isHidden, parsePlan } from '../read/index.js';
 
 /** @typedef {{ file: string, field: string, message: string, fix: string }} Problem */
 
@@ -29,6 +29,7 @@ export function checkFiles(files, { knownAreas = null } = {}) {
 
   // The folder: only the known files, and a feature's notes beside its file.
   for (const name of files.keys()) {
+    if (isHidden(name)) continue;
     const match = FEATURE_FILE.exec(name);
     if (match) {
       if (!ID_PATTERN.test(match[1])) add(`plan/${name}`, '-', `"${match[1]}" is not a feature id (${ID_PATTERN.source})`, 'rename the file: lowercase letters, digits and dashes');
@@ -199,10 +200,17 @@ export function checkFiles(files, { knownAreas = null } = {}) {
         if (!isDate(decision.date)) add(decisionFile, `${field}.date`, `"${decision.date}" is not a date`, 'write YYYY-MM-DD');
         if (!isText(decision.text)) add(decisionFile, `${field}.text`, 'missing or empty', 'write what was decided');
         if (decision.about !== undefined && decision.about !== null) {
-          if (!Array.isArray(decision.about) || !decision.about.length) add(decisionFile, `${field}.about`, 'not a list of ids', 'name areas or features, or leave about out for the whole product');
-          else decision.about.forEach((target, at) => {
-            if (!areaIds.has(target) && !Object.hasOwn(raw.features, target)) add(decisionFile, `${field}.about[${at}]`, `"${target}" is neither an area nor a feature`, 'name an existing area or feature');
-          });
+          if (!Array.isArray(decision.about) || !decision.about.length) add(decisionFile, `${field}.about`, 'not a list of area ids', 'name areas, or leave about out for the whole product');
+          else {
+            const named = new Set();
+            decision.about.forEach((target, at) => {
+              const where = `${field}.about[${at}]`;
+              if (typeof target === 'string' && Object.hasOwn(raw.features, target) && !areaIds.has(target)) add(decisionFile, where, `"${target}" is a feature, not an area`, `a decision about one feature goes in plan/features/${target}.md; about names areas only`);
+              else if (!areaIds.has(target)) add(decisionFile, where, `"${target}" is not an area`, `use one of the ids in plan/areas.json: ${[...areaIds].join(', ')}`);
+              if (named.has(target)) add(decisionFile, where, `"${target}" appears twice`, 'keep it once');
+              named.add(target);
+            });
+          }
         }
       });
     }

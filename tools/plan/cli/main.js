@@ -1,10 +1,10 @@
 // `plan`: the commands. Exit codes: 0 done, 1 refused or errors found, 2 wrong use, 3 live state could not be read.
 
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { checkFiles, formatProblem } from '../check/index.js';
 import { areaGroups, statusLine } from '../model/areas.js';
-import { canonicalFeature, canonicalOrder } from '../model/canonical.js';
+import { canonicalFeature, canonicalOrder, canonicalText } from '../model/canonical.js';
 import { GONE_STAGE, ID_PATTERN, today } from '../model/names.js';
 import { featureStatus, isReady, waitingFor } from '../model/status.js';
 import { offlineLive } from '../live/index.js';
@@ -15,7 +15,7 @@ import { findRoot, knownAreas, latestVerdicts, loadPlan, writeJson } from './rep
 export const COMMANDS = [
   { name: 'status', usage: 'plan status', what: 'Where things stand: latest verdicts, the next to decide, what is built and taken.' },
   { name: 'show', usage: 'plan show <id>', what: 'Everything about one feature.' },
-  { name: 'add', usage: 'plan add <id> --name "…" --area <area> (--after <id> | --first-in <stage>) [--what "…"] [--from <issue>]', what: 'A new feature file and its place in order.json.' },
+  { name: 'add', usage: 'plan add <id> --name "…" --area <area> (--after <id> | --first-in <stage>) --what "…" [--from <issue>]', what: 'A new feature file and its place in order.json.' },
   { name: 'finish', usage: 'plan finish <id>', what: 'Writes built (today, UTC) in a taken feature whose needs are built.' },
   { name: 'check', usage: 'plan check', what: 'The offline checks of plan/.' },
   { name: 'decide', usage: 'plan decide <id> take|later|drop|clear', what: 'A verdict the owner gave in conversation, recorded on GitHub.', coming: true },
@@ -44,8 +44,10 @@ export async function main(argv, context = {}) {
     err: (text) => process.stderr.write(`${text}\n`),
     ...context,
   };
+  // --json may come before or after the command name; the command always sees it after.
   const json = argv.includes('--json');
-  const [command, ...rest] = argv.filter((arg, index) => index > 0 || arg !== '--json');
+  const [command, ...others] = argv.filter((arg) => arg !== '--json');
+  const rest = json ? [...others, '--json'] : others;
   try {
     switch (command) {
       case undefined: return list(ctx, json);
@@ -62,7 +64,10 @@ export async function main(argv, context = {}) {
   } catch (error) {
     const code = error instanceof UsageError ? 2 : error instanceof Refused || error instanceof PlanError ? 1 : null;
     if (code === null) throw error;
-    if (json) ctx.out(JSON.stringify({ ok: false, error: error.message }, null, 2));
+    if (error instanceof PlanError) {
+      if (json) ctx.out(JSON.stringify({ ok: false, error: error.message, errors: error.problems }, null, 2));
+      else for (const problem of error.problems) ctx.err(formatProblem(problem));
+    } else if (json) ctx.out(JSON.stringify({ ok: false, error: error.message }, null, 2));
     else ctx.err(`plan: ${error.message}`);
     return code;
   }
@@ -79,10 +84,11 @@ function list(ctx, json) {
   return 0;
 }
 
-/** The plan, strictly: refuses when a file is missing or is not JSON. @param {string} root */
-function strictPlan(root) {
+/** The plan, when it passes `plan check`; else refuses with the check's errors. @param {string} root */
+function validPlan(root) {
   const loaded = loadPlan(root);
-  if (loaded.problems.length) throw new PlanError(loaded.problems);
+  const { errors } = checkFiles(loaded.files);
+  if (errors.length) throw new PlanError(errors);
   return loaded;
 }
 
@@ -116,7 +122,7 @@ async function status(ctx, argv) {
   const { flags, positional } = parseArgs(argv, {});
   if (positional.length) throw new UsageError('usage: plan status');
   const root = findRoot(ctx.cwd);
-  const { plan } = strictPlan(root);
+  const { plan } = validPlan(root);
   const live = await ctx.live.read();
   const statusOf = statusFunction(plan, live);
   const ids = ordered(plan);
@@ -173,7 +179,7 @@ async function show(ctx, argv) {
   if (positional.length !== 1) throw new UsageError('usage: plan show <id>');
   const [id] = positional;
   const root = findRoot(ctx.cwd);
-  const { plan } = strictPlan(root);
+  const { plan } = validPlan(root);
   const feature = plan.features[id];
   if (!feature) throw new Refused(`no feature "${id}" in plan/features/`);
   const live = await ctx.live.read();
@@ -183,7 +189,7 @@ async function show(ctx, argv) {
   const area = plan.areas.find((item) => item.id === feature.area);
   const needs = feature.needs.map((need) => ({ id: need, name: plan.features[need]?.name ?? null, status: statusOf(need) }));
   const neededBy = ids.filter((other) => plan.features[other].needs?.includes(id)).map((other) => ({ id: other, name: plan.features[other].name, status: statusOf(other) }));
-  const decisions = plan.decisions.filter((decision) => !decision.about || decision.about.includes(id) || (feature.area && decision.about.includes(feature.area)));
+  const decisions = plan.decisions.filter((decision) => !decision.about || (feature.area !== undefined && decision.about.includes(feature.area)));
   const issue = live.available ? (Object.hasOwn(live.entries, id) ? live.entries[id] : null) : undefined;
   const thread = issue
     ? [
@@ -247,12 +253,13 @@ async function show(ctx, argv) {
 /** @param {Context} ctx @param {string[]} argv */
 function add(ctx, argv) {
   const { flags, positional, values } = parseArgs(argv, { name: 'value', area: 'value', after: 'value', 'first-in': 'value', what: 'value', from: 'value' });
-  const usage = 'usage: plan add <id> --name "…" --area <area> (--after <id> | --first-in <stage>) [--what "…"] [--from <issue>]';
-  if (positional.length !== 1 || values.name === undefined || values.area === undefined) throw new UsageError(usage);
+  const usage = 'usage: plan add <id> --name "…" --area <area> (--after <id> | --first-in <stage>) --what "…" [--from <issue>]';
+  if (positional.length !== 1 || values.name === undefined || values.area === undefined || values.what === undefined) throw new UsageError(usage);
   if ((values.after === undefined) === (values['first-in'] === undefined)) throw new UsageError(`give one of --after and --first-in. ${usage}`);
   const [id] = positional;
   if (!ID_PATTERN.test(id)) throw new UsageError(`"${id}" is not a feature id (${ID_PATTERN.source})`);
   if (!values.name.trim()) throw new UsageError('--name is empty');
+  if (!values.what.trim()) throw new UsageError('--what is empty');
   let from;
   if (values.from !== undefined) {
     const text = values.from.replace(/^#/, '');
@@ -261,7 +268,11 @@ function add(ctx, argv) {
   }
 
   const root = findRoot(ctx.cwd);
-  const { plan, raw } = strictPlan(root);
+  if (existsSync(join(root, 'plan', 'features', `${id}.json`))) throw new Refused(`the feature "${id}" exists already`);
+  const loaded = loadPlan(root);
+  const placedIn = Array.isArray(loaded.raw.order?.stages) ? loaded.raw.order.stages.find((item) => Array.isArray(item?.features) && item.features.includes(id)) : undefined;
+  if (placedIn) throw new Refused(`"${id}" is already in plan/order.json, in the stage "${placedIn.id}"`);
+  const { plan, raw, files } = validPlan(root);
   if (Object.hasOwn(plan.features, id) || existsSync(join(root, 'plan', 'features', `${id}.json`))) throw new Refused(`the feature "${id}" exists already`);
   if (!plan.areas.some((area) => area.id === values.area)) throw new Refused(`no area "${values.area}" in plan/areas.json`);
   const order = structuredClone(raw.order);
@@ -281,15 +292,20 @@ function add(ctx, argv) {
   if (stageId === GONE_STAGE) throw new Refused(`the stage "${GONE_STAGE}" holds old things left behind; place a new feature elsewhere`);
 
   /** @type {Record<string, unknown>} */
-  const feature = { name: values.name.trim(), what: (values.what ?? '').trim(), area: values.area, needs: [] };
+  const feature = { name: values.name.trim(), what: values.what.trim(), area: values.area, needs: [] };
   if (from !== undefined) feature.suggested_in = from;
   const featurePath = `plan/features/${id}.json`;
+  // The plan as it would be, checked before anything is written: the command never leaves it failing its check.
+  const after = new Map(files);
+  after.set(`features/${id}.json`, canonicalText(canonicalFeature(feature)));
+  after.set('order.json', canonicalText(canonicalOrder(order)));
+  const { errors } = checkFiles(after);
+  if (errors.length) throw new PlanError(errors);
   writeJson(root, `features/${id}.json`, canonicalFeature(feature));
   writeJson(root, 'order.json', canonicalOrder(order));
   const paths = [featurePath, 'plan/order.json'];
-  const todo = feature.what ? null : `write what it does in ${featurePath}: plan check fails until then`;
-  if (flags.has('json')) ctx.out(JSON.stringify({ ok: true, id, stage: stageId, paths, todo }, null, 2));
-  else ctx.out([...paths, ...(todo ? [`Then ${todo}.`] : [])].join('\n'));
+  if (flags.has('json')) ctx.out(JSON.stringify({ ok: true, id, stage: stageId, paths }, null, 2));
+  else ctx.out(paths.join('\n'));
   return 0;
 }
 
@@ -299,7 +315,7 @@ function finish(ctx, argv) {
   if (positional.length !== 1) throw new UsageError('usage: plan finish <id>');
   const [id] = positional;
   const root = findRoot(ctx.cwd);
-  const { plan, raw } = strictPlan(root);
+  const { plan, raw } = validPlan(root);
   if (!Object.hasOwn(raw.features, id)) throw new Refused(`no feature "${id}" in plan/features/`);
   const data = raw.features[id];
   if (data.built) throw new Refused(`${id} is built already (${data.built})`);
@@ -309,11 +325,15 @@ function finish(ctx, argv) {
   const built = today(ctx.now);
   const path = `plan/features/${id}.json`;
   writeJson(root, `features/${id}.json`, canonicalFeature({ ...data, built }));
-  const commit = `git commit -m "Built ${id}" -- ${path}`;
+  // Git reads the path relative to the directory the command was run in.
+  const commit = `git commit -m "Built ${id}" -- ${shellWord(relative(resolve(ctx.cwd), join(root, path)))}`;
   if (flags.has('json')) ctx.out(JSON.stringify({ ok: true, id, built, path, commit }, null, 2));
   else ctx.out([`${path}: built ${built}`, commit].join('\n'));
   return 0;
 }
+
+/** @param {string} word @returns {string} the word as one shell word */
+const shellWord = (word) => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
 
 /** @param {Context} ctx @param {string[]} argv */
 function check(ctx, argv) {

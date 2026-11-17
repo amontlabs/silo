@@ -70,8 +70,10 @@ const CASES = [
   ['decisions: an id twice', (f) => { f['decisions.json'][1].id = 'everywhere'; }, 'plan/decisions.json', '[1].id', 'appears twice'],
   ['decisions: a date that is not a date', (f) => { f['decisions.json'][0].date = 'yesterday'; }, 'plan/decisions.json', '[0].date', 'is not a date'],
   ['decisions: no text', (f) => { f['decisions.json'][0].text = ''; }, 'plan/decisions.json', '[0].text', 'missing or empty'],
-  ['decisions: about names nothing', (f) => { f['decisions.json'][1].about = ['nowhere']; }, 'plan/decisions.json', '[1].about[0]', 'neither an area nor a feature'],
-  ['decisions: about empty', (f) => { f['decisions.json'][1].about = []; }, 'plan/decisions.json', '[1].about', 'not a list of ids'],
+  ['decisions: about names nothing', (f) => { f['decisions.json'][1].about = ['nowhere']; }, 'plan/decisions.json', '[1].about[0]', '"nowhere" is not an area'],
+  ['decisions: about names a feature', (f) => { f['decisions.json'][1].about = ['forks', 'fork']; }, 'plan/decisions.json', '[1].about[1]', '"fork" is a feature, not an area'],
+  ['decisions: about names an area twice', (f) => { f['decisions.json'][1].about = ['forks', 'engine', 'forks']; }, 'plan/decisions.json', '[1].about[2]', '"forks" appears twice'],
+  ['decisions: about empty', (f) => { f['decisions.json'][1].about = []; }, 'plan/decisions.json', '[1].about', 'not a list of area ids'],
   ['canonical: keys out of order', (f) => { f['features/core.json'] = `${JSON.stringify({ what: 'The engine.', name: 'Core', area: 'engine', needs: [] }, null, 2)}\n`; }, 'plan/features/core.json', '-', 'not in canonical form'],
   ['canonical: no final newline', (f) => { f['areas.json'] = JSON.stringify(f['areas.json'], null, 2); }, 'plan/areas.json', '-', 'not in canonical form'],
   ['canonical: four spaces', (f) => { f['order.json'] = `${JSON.stringify(f['order.json'], null, 4)}\n`; }, 'plan/order.json', '-', 'not in canonical form'],
@@ -105,4 +107,15 @@ test('a new area is mentioned with the map to draw', () => {
   assert.equal(notes.length, 1);
   assert.match(notes[0], /"access" is new.*website\/src\/workshop\/map\.ts/);
   assert.deepEqual(checkFiles(filesOf(files)).notes, []);
+});
+
+test('a decision about a feature points to its notes', () => {
+  const errors = errorsOf(variant((f) => { f['decisions.json'][1].about = ['fork']; }));
+  assert.deepEqual(errors.map(formatProblem), ['plan/decisions.json: [1].about[0]: "fork" is a feature, not an area. Fix: a decision about one feature goes in plan/features/fork.md; about names areas only']);
+});
+
+test('files whose name starts with a dot are ignored, wherever they are in plan/', () => {
+  const files = variant((f) => { f['.DS_Store'] = 'x'; f['features/.DS_Store'] = 'x'; f['features/.draft.json'] = '{'; f['.git/config'] = 'x'; });
+  assert.deepEqual(errorsOf(files), []);
+  assert.deepEqual(errorsOf(variant((f) => { f['DS_Store'] = 'x'; })).map((e) => e.file), ['plan/DS_Store']);
 });

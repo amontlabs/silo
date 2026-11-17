@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkFiles } from '../check/index.js';
@@ -91,19 +92,48 @@ test('add after a feature, first in a stage, and from a suggestion', async () =>
 
     const first = await run(root, ['add', 'merge', '--name', 'Merge', '--area', 'forks', '--first-in', 'loop', '--what', 'Merge.', '--from', '#42', '--json']);
     assert.equal(first.code, 0, first.err);
-    assert.deepEqual(JSON.parse(first.out), { ok: true, id: 'merge', stage: 'loop', paths: ['plan/features/merge.json', 'plan/order.json'], todo: null });
+    assert.deepEqual(JSON.parse(first.out), { ok: true, id: 'merge', stage: 'loop', paths: ['plan/features/merge.json', 'plan/order.json'] });
     assert.deepEqual(order(root)[1], ['loop', ['merge', 'fork', 'tree']]);
     assert.equal(readJson(root, 'features/merge.json').suggested_in, 42);
     assert.deepEqual(checkErrors(root), []);
   });
 });
 
-test('add without --what leaves a plan the check refuses until it is written', async () => {
+test('add needs --what, so it never leaves a plan the check refuses', async () => {
   await withPlan(basePlan(), async (root) => {
-    const { code, out } = await run(root, ['add', 'idea', '--name', 'Idea', '--area', 'engine', '--first-in', 'shell']);
-    assert.equal(code, 0);
-    assert.match(out, /write what it does in plan\/features\/idea\.json/);
-    assert.deepEqual(checkErrors(root).map((e) => `${e.file} ${e.field}`), ['plan/features/idea.json what']);
+    const before = loadDir(join(root, 'plan'));
+    const missing = await run(root, ['add', 'idea', '--name', 'Idea', '--area', 'engine', '--first-in', 'shell']);
+    assert.equal(missing.code, 2);
+    assert.match(missing.err, /usage: .*--what "…" \[--from/);
+    const empty = await run(root, ['add', 'idea', '--name', 'Idea', '--area', 'engine', '--first-in', 'shell', '--what', ' ']);
+    assert.equal(empty.code, 2);
+    assert.match(empty.err, /--what is empty/);
+    assert.deepEqual(loadDir(join(root, 'plan')), before);
+    assert.deepEqual(checkErrors(root), []);
+  });
+});
+
+test('add refuses an id that order.json already lists without a file, saying where', async () => {
+  const files = basePlan();
+  files['order.json'].stages[1].features.push('ghost');
+  await withPlan(files, async (root) => {
+    const before = loadDir(join(root, 'plan'));
+    const { code, err } = await run(root, ['add', 'ghost', '--name', 'Ghost', '--area', 'forks', '--first-in', 'shell', '--what', 'W']);
+    assert.equal(code, 1);
+    assert.match(err, /"ghost" is already in plan\/order\.json, in the stage "loop"/);
+    assert.deepEqual(loadDir(join(root, 'plan')), before);
+  });
+});
+
+test('add refuses on a plan that fails its check, and writes nothing', async () => {
+  const files = basePlan();
+  files['features/core.json'].area = 'nowhere';
+  await withPlan(files, async (root) => {
+    const before = loadDir(join(root, 'plan'));
+    const { code, err } = await run(root, ['add', 'idea', '--name', 'Idea', '--area', 'engine', '--first-in', 'shell', '--what', 'W']);
+    assert.equal(code, 1);
+    assert.match(err, /^plan\/features\/core\.json: area: "nowhere" is not an area\. Fix: /m);
+    assert.deepEqual(loadDir(join(root, 'plan')), before);
   });
 });
 
@@ -123,7 +153,8 @@ test('add refuses and changes nothing', async () => {
       [['add', 'new', '--area', 'forks', '--after', 'core'], 2, /usage/],
       [['add', 'new', '--name', 'N', '--area', 'forks', '--after', 'core', '--from', 'abc'], 2, /issue number/],
     ];
-    for (const [argv, code, message] of cases) {
+    for (const [given, code, message] of cases) {
+      const argv = given.includes('--name') ? [...given, '--what', 'W'] : given;
       const result = await run(root, argv);
       assert.equal(result.code, code, argv.join(' '));
       assert.match(result.err, message, argv.join(' '));
@@ -282,5 +313,98 @@ test('show: fields, place, needs, needed by, decisions, notes, and the issue whe
     assert.deepEqual(withLive.issue.thread.map((item) => item.kind), ['comment', 'history', 'comment']);
     const liveText = (await run(root, ['show', 'fork'], { live })).out;
     assert.match(liveText, /#5 https:\/\/github\.com\/o\/r\/issues\/5 \(4 votes\)\n {2}2026-11-16 bob: First\n {2}2026-11-17 updated in aaaaaaa: what\n {2}2026-11-18 ann: Looks good/);
+  });
+});
+
+test('finish prints a commit line that works from the directory it was run in', async () => {
+  const files = basePlan();
+  files['features/core.json'].verdict = 'take';
+  await withPlan(files, async (root) => {
+    initRepo(root);
+    mkdirSync(join(root, 'website', 'src'), { recursive: true });
+    const cwd = join(root, 'website', 'src');
+    const done = await run(cwd, ['finish', 'core', '--json']);
+    assert.equal(done.code, 0, done.err);
+    const json = JSON.parse(done.out);
+    assert.equal(json.path, 'plan/features/core.json');
+    assert.equal(json.commit, 'git commit -m "Built core" -- ../../plan/features/core.json');
+    execFileSync('/bin/sh', ['-c', json.commit], { cwd, env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.invalid', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }, stdio: 'ignore' });
+    assert.equal(git(root, 'status', '--porcelain'), '');
+    assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Built core');
+  });
+});
+
+test('--json works before or after the command name, for every command', async () => {
+  const files = basePlan();
+  files['features/core.json'].verdict = 'take';
+  for (const where of ['before', 'after']) {
+    await withPlan(files, async (root) => {
+      const commands = [
+        ['status'],
+        ['show', 'fork'],
+        ['check'],
+        ['add', 'idea', '--name', 'Idea', '--area', 'engine', '--first-in', 'shell', '--what', 'W'],
+        ['finish', 'core'],
+        ['show', 'nobody'],
+        [],
+      ];
+      for (const command of commands) {
+        const argv = where === 'before' ? ['--json', ...command] : [...command, '--json'];
+        const { out } = await run(root, argv);
+        assert.doesNotThrow(() => JSON.parse(out), `${argv.join(' ')} printed: ${out}`);
+      }
+    });
+  }
+});
+
+test('status, show and finish refuse a plan with a wrong shape with the check\'s lines', async () => {
+  const shapes = [
+    (f) => { delete f['features/cli.json'].needs; },
+    (f) => { f['features/cli.json'].needs = 'core'; },
+  ];
+  for (const shape of shapes) {
+    const files = structuredClone(basePlan());
+    files['features/core.json'].verdict = 'take';
+    shape(files);
+    await withPlan(files, async (root) => {
+      const before = loadDir(join(root, 'plan'));
+      for (const argv of [['status'], ['show', 'core'], ['show', 'cli'], ['finish', 'core']]) {
+        const result = await run(root, argv);
+        assert.equal(result.code, 1, argv.join(' '));
+        assert.equal(result.out, '');
+        assert.equal(result.err, 'plan/features/cli.json: needs: missing or not an array. Fix: write the ids of the features it needs, or []', argv.join(' '));
+        const json = JSON.parse((await run(root, [...argv, '--json'])).out);
+        assert.equal(json.ok, false);
+        assert.deepEqual(json.errors.map((e) => `${e.file} ${e.field}`), ['plan/features/cli.json needs']);
+      }
+      assert.deepEqual(loadDir(join(root, 'plan')), before);
+    });
+  }
+});
+
+test('show lists the decisions about the feature\'s area and those about the whole product, nothing else', async () => {
+  const files = basePlan();
+  files['decisions.json'].push({ id: 'engine-rule', date: '2026-11-11', text: 'About the engine.', about: ['engine'] });
+  files['decisions.json'].push({ id: 'both', date: '2026-11-12', text: 'About both.', about: ['engine', 'forks'] });
+  await withPlan(files, async (root) => {
+    const ids = async (id) => JSON.parse((await run(root, ['show', id, '--json'])).out).decisions.map((d) => d.id);
+    assert.deepEqual(await ids('fork'), ['everywhere', 'forks-rule', 'both']);
+    assert.deepEqual(await ids('core'), ['everywhere', 'engine-rule', 'both']);
+    assert.deepEqual(await ids('old'), ['everywhere']);
+  });
+});
+
+test('a dotfile in plan/ is ignored; any other unknown file is still an error', async () => {
+  const files = basePlan();
+  files['.DS_Store'] = 'x';
+  files['features/.DS_Store'] = 'x';
+  files['features/.draft.json'] = '{';
+  await withPlan(files, async (root) => {
+    assert.equal((await run(root, ['check'])).code, 0);
+    assert.equal((await run(root, ['status'])).code, 0);
+    writeFileSync(join(root, 'plan', 'stray.txt'), 'x');
+    const bad = await run(root, ['check']);
+    assert.equal(bad.code, 1);
+    assert.match(bad.out, /^plan\/stray\.txt: -: not a file of the plan/m);
   });
 });

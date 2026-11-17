@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PlanError, loadRef, readPlan, readPlanAt } from '../read/index.js';
 import { basePlan, cleanup, git, initRepo, writePlan } from './helpers.js';
@@ -56,6 +56,35 @@ test('a missing file or a file that is not JSON stops the strict readers', () =>
   const root = writePlan(files);
   try {
     assert.throws(() => readPlan(join(root, 'plan')), (error) => error instanceof PlanError && error.problems.length === 2 && /plan\/areas\.json: -: missing/.test(error.message));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('reads plan/ from a git ref given any directory inside the repository', () => {
+  const root = writePlan(basePlan());
+  try {
+    mkdirSync(join(root, 'website', 'src'), { recursive: true });
+    writeFileSync(join(root, 'website', 'src', 'x.ts'), 'x');
+    initRepo(root);
+    for (const dir of [join(root, 'website'), join(root, 'website', 'src'), join(root, 'plan', 'features')]) {
+      assertBase(readPlanAt(dir, 'HEAD'));
+      assert.equal(loadRef(dir, 'HEAD').size, 9);
+    }
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('dotfiles in plan/ are not read, from a directory or a git ref', () => {
+  const root = writePlan(basePlan());
+  try {
+    writeFileSync(join(root, 'plan', '.DS_Store'), 'x');
+    writeFileSync(join(root, 'plan', 'features', '.draft.json'), '{');
+    initRepo(root);
+    assertBase(readPlan(join(root, 'plan')));
+    assertBase(readPlanAt(root, 'HEAD'));
+    assert.equal(loadRef(root, 'HEAD').has('.DS_Store'), false);
   } finally {
     cleanup(root);
   }
