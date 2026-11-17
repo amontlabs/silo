@@ -101,8 +101,8 @@ test('background work is handed to keepAlive; a lost refresh is replaced at once
       t.fake.state.hook = null;
       t.clock.t += 31_000;
       await call('GET', 'state');
-      assert.equal(lists(t), before + 2, 'the lost refresh was replaced without the 60-second wait');
       await workshop.idle();
+      assert.equal(lists(t), before + 2, 'the lost refresh was replaced without the 60-second wait');
 
       const owner = t.client();
       await owner.signIn('owner-fake');
@@ -402,7 +402,7 @@ test('a lost refresh is aborted and stops spending; a late failure does not set 
       await t.workshop.idle();
       await wait(600);
       const calls = t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation' && r.method === 'GET');
-      assert.equal(calls.length, 1 + 3, 'the lost refresh made no call after its first; the new one made its three');
+      assert.equal(calls.length, 3 + 3, 'the lost refresh made no call after its first three, sent together; the new one made its three');
     });
     await withSnapshot({ lostAfter: 200, refreshLimit: 400 }, async () => {
       t.clock.t += 31_000;

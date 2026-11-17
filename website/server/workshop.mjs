@@ -13,7 +13,7 @@ import { createGitHub, DEFAULT_TIMEOUT, GitHubError, nextLink } from './github.m
 import { BUILDING_LABEL, kindOf, LABELS, labelNames, reasonOf, VERDICTS } from './issues.mjs';
 import { verdictLabel } from '../../tools/plan/model/index.js';
 import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCookie, SESSION_MAX_AGE, STATE_MAX_AGE, unseal } from './session.mjs';
-import { createSnapshot } from './snapshot.mjs';
+import { createSnapshot, SNAPSHOT } from './snapshot.mjs';
 
 export { LABELS, VERDICTS };
 
@@ -60,6 +60,10 @@ const REMEMBERED = 10_000;
 const SIGNIN_FAILED = '/workshop?signin=failed';
 
 const PUBLIC_READ = 'public, s-maxage=10, stale-while-revalidate=60';
+// `state` answers at once from whatever it has, so the CDN may serve an old copy while it asks again;
+// a `fresh=1` answer that is fresh is cached briefly, one that is still old is not cached at all.
+const STATE_READ = 'public, s-maxage=10, stale-while-revalidate=86400';
+const FRESH_READ = 'public, s-maxage=10';
 const PRIVATE = 'private, no-store';
 
 const ENDPOINTS = new Map(Object.entries({
@@ -386,12 +390,13 @@ export function createWorkshop({
     return (Array.isArray(data) ? data : []).find((comment) => comment.user?.id === session.id && (comment.body || '').trim() === body) ?? null;
   }
 
-  // The snapshot for an anonymous read. A cold instance waits for its first refresh, at most until the
-  // request's deadline (the refresh goes on in the background); with none, 502, or 503 when the App
-  // is not installed on the repository.
-  async function readSnapshot(ctx) {
+  // The snapshot for an anonymous read, waiting up to `wait` ms for a refresh when it is old. A cold
+  // instance waits for its first refresh. Every wait ends at the request's deadline at the latest (the
+  // refresh goes on in the background); with no snapshot, 502, or 503 when the App is not installed
+  // on the repository.
+  async function readSnapshot(ctx, wait = 0) {
     try {
-      return await bounded(snapshots.read());
+      return await bounded(snapshots.read({ wait }));
     } catch (error) {
       if (error instanceof GitHubError) ctx.githubStatus = error.status;
       if (error instanceof GitHubError && error.notInstalled) refuse(503, 'not_configured', 'Live comments are not set up on this server.');
@@ -616,10 +621,15 @@ export function createWorkshop({
   // Routes
 
   const routes = new Map(Object.entries({
+    // Answers at once from the snapshot it has, with `old` when that is over SNAPSHOT.maxAge old.
+    // `fresh=1`, the page's second ask, waits for a refresh up to SNAPSHOT.freshWait.
     async 'GET state'(ctx) {
-      const { snapshot, stale } = await readSnapshot(ctx);
+      const values = ctx.url.searchParams.getAll('fresh');
+      const fresh = values.length === 1 && values[0] === '1';
+      const { snapshot, stale, old } = await readSnapshot(ctx, fresh ? SNAPSHOT.freshWait : 0);
       const body = snapshots.stateAnswer(snapshot);
-      return json(200, stale ? { ...body, stale: true } : body, { 'Cache-Control': PUBLIC_READ });
+      const cache = fresh ? (old ? PRIVATE : FRESH_READ) : STATE_READ;
+      return json(200, stale || old ? { ...body, ...(stale ? { stale: true } : {}), ...(old ? { old: true } : {}) } : body, { 'Cache-Control': cache });
     },
 
     // Reads only the cookie; the permission check is the one GitHub call, cached five minutes. When it
@@ -641,7 +651,7 @@ export function createWorkshop({
 
     async 'GET issue'(ctx) {
       const n = queryNumber(ctx);
-      const { snapshot, stale } = await readSnapshot(ctx);
+      const { snapshot, stale } = await readSnapshot(ctx, SNAPSHOT.ageWait);
       const answer = snapshots.issueAnswer(snapshot, n);
       if (!answer) refuse(404, 'not_found', 'This is not a Workshop issue.');
       return json(200, stale ? { ...answer, stale: true } : answer, { 'Cache-Control': PUBLIC_READ });
@@ -717,16 +727,19 @@ export function createWorkshop({
       return json(200, { ok: true, revoked });
     },
 
+    // `comments` is the count GitHub gave in the read before the write, plus the comment this request
+    // posted; absent when that read gave none.
     async 'POST comment'(ctx) {
       const session = await writer(ctx);
       const input = readJson(ctx);
       const n = issueNumber(input.n);
       const body = text(input.text, { what: 'The comment' });
-      await workshopIssue(session, n);
+      const { issue } = await workshopIssue(session, n);
       const existing = await alreadyPosted(session, n, body);
       const data = existing ?? (await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } })).data;
       if (data && !existing) snapshots.patch.comment(n, data);
-      return json(200, { ok: true, id: data?.id ?? null });
+      const read = countOf(issue.comments);
+      return json(200, { ok: true, id: data?.id ?? null, ...(read === null ? {} : { comments: read + (existing ? 0 : 1) }) });
     },
 
     async 'POST vote'(ctx) {
@@ -734,18 +747,25 @@ export function createWorkshop({
       const input = readJson(ctx);
       const n = issueNumber(input.n);
       if (typeof input.on !== 'boolean') refuse(400, 'bad_input', 'The request was not understood.');
-      await workshopIssue(session, n);
+      const { issue } = await workshopIssue(session, n);
+      // `up` is the 👍 count GitHub gave in the read before the write, moved by what this request did;
+      // absent when that read gave none.
+      let up = countOf(issue.reactions?.['+1']);
       if (input.on) {
         const { status } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/reactions`, { body: { content: '+1' } });
-        if (status === 201) snapshots.patch.up(n, 1);
+        if (status === 201) {
+          snapshots.patch.up(n, 1);
+          if (up !== null) up += 1;
+        }
       } else {
         const mine = (await userPages(session, `/repos/${repo}/issues/${n}/reactions?content=%2B1`)).filter((reaction) => reaction.user?.id === session.id);
         for (const reaction of mine) {
           await userRequest(session, 'DELETE', `/repos/${repo}/issues/${n}/reactions/${reaction.id}`);
           snapshots.patch.up(n, -1);
+          if (up !== null) up = Math.max(0, up - 1);
         }
       }
-      return json(200, { ok: true });
+      return json(200, up === null ? { ok: true } : { ok: true, up });
     },
 
     // At most 3 suggestions a minute and 10 an hour per person; nothing is created when the label
@@ -856,6 +876,11 @@ function sameText(a, b) {
   const left = Buffer.from(String(a));
   const right = Buffer.from(String(b));
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+// A count GitHub gave, or null when it gave none.
+function countOf(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function json(status, body, headers = {}) {

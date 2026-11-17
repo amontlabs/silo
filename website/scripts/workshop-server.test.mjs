@@ -1394,3 +1394,50 @@ test('without progress the demo seed keeps its own verdicts and no entry is bein
     assert.equal(issues.some((i) => i.updates), false);
   } finally { await t.close(); }
 });
+
+test('vote and comment answer the new count, from the issue read before the write, with no extra call', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    await c.signIn('owner-fake');
+    const issue = (n) => t.fake.state.issues.get(n);
+    const ups = (n) => issue(n).reactions.filter((r) => r.content === '+1').length;
+    t.fake.react(3, 'visitor-fake');
+
+    const reads = () => t.fake.state.requests.filter((r) => r.kind === 'user' && r.method === 'GET').length;
+    let before = reads();
+    const added = await c.call('POST', 'vote', { body: { n: 3, on: true } });
+    assert.deepEqual(added.json, { ok: true, up: 2 }, 'a vote added counts');
+    assert.equal(ups(3), 2);
+    assert.equal(reads() - before, 1, 'only the issue read');
+
+    const again = await c.call('POST', 'vote', { body: { n: 3, on: true } });
+    assert.deepEqual(again.json, { ok: true, up: 2 }, 'a vote already there adds nothing');
+
+    const removed = await c.call('POST', 'vote', { body: { n: 3, on: false } });
+    assert.deepEqual(removed.json, { ok: true, up: 1 }, 'a vote removed');
+    assert.equal(ups(3), 1);
+    const none = await c.call('POST', 'vote', { body: { n: 3, on: false } });
+    assert.deepEqual(none.json, { ok: true, up: 1 }, 'nothing to remove');
+
+    const count = issue(3).comments.length;
+    before = reads();
+    const posted = await c.call('POST', 'comment', { body: { n: 3, text: 'Counted.' } });
+    assert.equal(posted.json.ok, true);
+    assert.equal(typeof posted.json.id, 'number');
+    assert.equal(posted.json.comments, count + 1, 'a comment posted counts');
+    assert.equal(issue(3).comments.length, count + 1);
+    assert.equal(reads() - before, 2, 'the issue read and the five-minute check, as before');
+
+    const repeated = await c.call('POST', 'comment', { body: { n: 3, text: 'Counted.' } });
+    assert.deepEqual(repeated.json, { ok: true, id: posted.json.id, comments: count + 1 }, 'a comment found already posted is the count as read');
+    assert.equal(issue(3).comments.length, count + 1);
+
+    t.fake.state.hook = (r) => (r.kind === 'user' && r.method === 'GET' && r.path === '/repos/amontlabs/silo/issues/3'
+      ? { status: 200, body: { number: 3, title: 'x', labels: [{ name: 'workshop:entry' }], state: 'open', user: { login: 'x' } } }
+      : null);
+    assert.deepEqual((await c.call('POST', 'vote', { body: { n: 3, on: true } })).json, { ok: true }, 'no count read, no field');
+    const bare = await c.call('POST', 'comment', { body: { n: 3, text: 'Uncounted.' } });
+    assert.equal(Object.hasOwn(bare.json, 'comments'), false);
+  } finally { t.fake.state.hook = null; await t.close(); }
+});

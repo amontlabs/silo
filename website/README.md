@@ -268,15 +268,15 @@ JSON.
 
 | Endpoint | Who | What |
 | --- | --- | --- |
-| `GET state` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. An open entry carrying both `workshop:building` and `verdict:take` also has `"building": true`; the field is absent on every other issue. An entry with history comments among those held has `updates`, their number. `latest`: the newest 30 comments held on entries, newest first, each `{ n, entry, author, bot, createdAt }` with `change` for a history comment, else `text`, its first line cut to 140 characters. |
+| `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. An open entry carrying both `workshop:building` and `verdict:take` also has `"building": true`; the field is absent on every other issue. An entry with history comments among those held has `updates`, their number. `latest`: the newest 30 comments held on entries, newest first, each `{ n, entry, author, bot, createdAt }` with `change` for a history comment, else `text`, its first line cut to 140 characters. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
 | `GET me` | signed in | `{ login, avatar, canDecide }`; `canDecide` is false when the permission could not be read (the next `me` tries again). 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
 | `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text, a history comment with its parsed `change`; `more: true` when GitHub counts more. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
 | `POST logout` | anyone | Revokes the person's whole grant for the App (all their sessions), then clears the cookies whatever happened. Answers `{ "ok": true, "revoked": true\|false }`. |
-| `POST comment {n, text}` | signed in | Comments as that person. |
-| `POST vote {n, on}` | signed in | Adds or removes that person's 👍. |
+| `POST comment {n, text}` | signed in | Comments as that person. Answers `{ "ok": true, id, comments }`: `comments` is the comment count GitHub gave in the issue read made before posting, plus 1 when this request posted the comment (not when it was found already posted); absent when that read gave no count. |
+| `POST vote {n, on}` | signed in | Adds or removes that person's 👍. Answers `{ "ok": true, up }`: `up` is the 👍 count from the issue's reaction summary in the read made before writing, plus 1 when GitHub created the reaction (a 👍 already there adds nothing), minus the person's 👍 removed, never below 0; absent when that read gave no count. Neither answer costs a GitHub call of its own. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
 | `POST verdict {n, verdict}` | can decide | Sets (`take`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required and a `note` is refused. An entry closed as completed (built) is refused with 409 `built` before anything changes. Any verdict but `take` also removes `workshop:building` when the issue carries it (no call otherwise); if that removal fails, the verdict still stands. |
 
@@ -319,9 +319,32 @@ all). Nothing GitHub sends is kept raw: from each list page only its ETag and
 the reduced fields of Workshop issues remain, and from comment pages only the
 cut comments of Workshop issues; every kept text is a fresh copy of its cut,
 never a slice that would keep GitHub's whole text alive. A number that is not in the snapshot is a
-404. Both reads are sent with
-`Cache-Control: public, s-maxage=10, stale-while-revalidate=60`, no
-`Vary: Cookie`, and read no cookie.
+404. Neither read sends `Vary: Cookie` or reads a cookie. Their `Cache-Control`:
+
+| Read | `Cache-Control` |
+| --- | --- |
+| `state` | `public, s-maxage=10, stale-while-revalidate=86400` |
+| `state?fresh=1`, answer not old | `public, s-maxage=10` |
+| `state?fresh=1`, answer still old | `private, no-store` |
+| `issue` | `public, s-maxage=10, stale-while-revalidate=60` |
+
+**What a read waits for.** `state` never waits for GitHub once the instance
+has a snapshot: it answers at once from the snapshot it has, whatever its age,
+with `"old": true` when that snapshot is over 30 seconds old. `old` is decided
+when the instance answers: a copy the CDN serves later keeps the body it was
+made with, so it can be hours old without `old`. The page therefore draws what
+it gets and asks `state?fresh=1` once when the answer has `old: true`, or its
+`Age` header is above 10, or its `fetchedAt` is more than 2 minutes before
+now. `state?fresh=1` waits until the snapshot is at most 30 seconds old: it
+joins the refresh that is running (or that will start within the wait), or
+starts one, and waits for it up to 8 seconds; then it answers from the
+snapshot it has, still with `old` when the refresh failed or did not end in
+time. While GitHub has asked us to wait, it starts no refresh and answers at
+once, with `old`. Only the exact value `fresh=1` does this; any other
+value, and any other parameter, is ignored. `issue` waits the same way, up to
+1.5 seconds, when its snapshot is over 30 seconds old. An instance with no
+snapshot yet makes every read wait for its first refresh. Every wait ends at
+the request's 12-second deadline at the latest.
 
 **What a read costs.** Nothing: no `state` or `issue` request calls GitHub.
 A read may start a refresh, which runs on its own ceiling.
@@ -331,11 +354,15 @@ the page shows it itself. Others on the same instance see it within a second
 or two, from the patch and then the refresh the write starts. Everyone else,
 including a new suggestion on other instances, sees it within about 40
 seconds: up to 10 seconds of CDN cache plus the 30-second refresh of the other
-instances.
+instances. A plain `state` may be older than that: from an instance that had
+not refreshed for a while, and then it says `old`, or from a copy the CDN kept,
+which the page tells by its `Age` header or its `fetchedAt`. In either case
+the page's `state?fresh=1` that follows brings the numbers to at most 30
+seconds plus the 10 seconds of CDN cache.
 
-- **Refresh.** A request that finds the snapshot over 30 seconds old starts a
-  refresh and waits for it up to 1.5 seconds before answering from what it
-  has. Any request that changed something on GitHub (a comment, a vote, a
+- **Refresh.** A read that finds the snapshot over 30 seconds old starts a
+  refresh, unless one is running or waiting to start, and waits for it as
+  described above (`state` not at all). Any request that changed something on GitHub (a comment, a vote, a
   suggestion, a verdict, even one that failed halfway) starts one
   straight away; when it succeeded, it waits for that refresh up to 2 seconds
   (the page already shows the write as pending), but only when the refresh is
@@ -349,7 +376,7 @@ instances.
   is declared lost (unfinished after 15 seconds), its calls are aborted and it
   stops spending, so two never spend at once; the next request starts a new
   one. A failure that arrives more than 15 seconds after its refresh started
-  (an instance that was frozen) does not set the 60-second wait. Only an instance with
+  (an instance that was frozen) does not set the 60-second wait. An instance with
   no snapshot yet makes its first requests wait for the refresh, at most until
   their 12-second deadline. A refresh builds a new snapshot and swaps it in
   only when it completed, so a refresh that fails halfway leaves the previous
@@ -365,11 +392,14 @@ instances.
   package itself is not used: from 3.11 its entry point loads 153 files from
   21 packages. Correctness does not depend on it: the lost-refresh rule
   and the waits above cover a platform that stops the work.
-- **Issues.** A refresh reads one list per Workshop label: entries, then
-  suggestions (`labels=workshop:…`, all states, newest first, 100 a page, at
-  most 20 pages for the two together), so nothing else in the
+- **Issues.** A refresh reads one list per Workshop label, entries and
+  suggestions at the same time (`labels=workshop:…`, all states, newest first,
+  100 a page, at most 20 pages for the two together, taken by whichever list
+  asks first), so nothing else in the
   repository is fetched or counted against the cap, and issues without exactly
-  one Workshop label or that are pull requests are skipped.
+  one Workshop label or that are pull requests are skipped. The two lists are
+  merged entries first, so an issue in both is read as an entry and entries
+  come first against the 2,000 cap.
   `building` is read from the labels of the same lists, so it costs no call of
   its own, and a label added or removed on GitHub shows at the next refresh.
   Each page is sent with `If-None-Match` and the ETag GitHub gave for it last
@@ -382,7 +412,11 @@ instances.
   for their issues. The refreshes in between ask only for comments updated
   since the previous refresh, less a minute of overlap (`since`, oldest update
   first, at most 10 pages; more than that schedules a full reload), and merge
-  them by id.
+  them by id. The first comment page is asked for at the same time as the
+  issue lists; GitHub's answer is reduced to Workshop comments as soon as the
+  lists are read, and the next pages are asked for only then. When an issue
+  list or the comment listing fails, the refresh's other calls are aborted,
+  and the refresh fails with that first failure.
 - **Writes.** After a signed-in person's write succeeds, the snapshot is
   patched in place: the new comment, the comment and 👍 counts, the verdict,
   open or closed (a drop sets `closedAt`), a new suggestion. Each patch is kept
@@ -526,7 +560,7 @@ snapshots catch up when the hour resets.
 | `website/scripts/workshop-server.test.mjs` | Endpoints, sign-in, sessions, refusals, configuration, packaging and the local server. |
 | `website/scripts/workshop-snapshot.test.mjs` | The snapshot: reads without GitHub calls, conditional refreshes, changes, patches, bounds. |
 | `website/scripts/workshop-limits.test.mjs` | Ceilings, `me`, sign-out, deadlines, patch timing, cleaned output, the App not installed. |
-| `website/scripts/workshop-refresh.test.mjs` | Refreshes started by writes, coalescing, the floor and the idle refresh. |
+| `website/scripts/workshop-refresh.test.mjs` | Refreshes started by writes, coalescing, the floor, the idle refresh, what each read waits for and its headers, the parallel refresh and its failures. |
 | `website/scripts/workshop-abuse.test.mjs` | What a visitor or a replayed cookie can make the server do, memory, waits and retries. |
 
 All of them run with the website's `npm test`.
