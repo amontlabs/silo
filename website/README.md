@@ -253,8 +253,8 @@ JSON.
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
 | `POST logout` | anyone | Revokes the person's whole grant for the App (all their sessions), then clears the cookies whatever happened. Answers `{ "ok": true, "revoked": true\|false }`. |
-| `POST comment {n, text}` | signed in | Comments as that person. |
-| `POST vote {n, on}` | signed in | Adds or removes that person's 👍. |
+| `POST comment {n, text}` | signed in | Comments as that person. Answers `{ "ok": true, id, comments }`: `comments` is the comment count GitHub gave in the issue read made before posting, plus 1 when this request posted the comment (not when it was found already posted); absent when that read gave no count. |
+| `POST vote {n, on}` | signed in | Adds or removes that person's 👍. Answers `{ "ok": true, up }`: `up` is the 👍 count from the issue's reaction summary in the read made before writing, plus 1 when GitHub created the reaction (a 👍 already there adds nothing), minus the person's 👍 removed, never below 0; absent when that read gave no count. Neither answer costs a GitHub call of its own. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
 | `POST verdict {n, verdict}` | can decide | Sets (`take`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required and a `note` is refused. An entry closed as completed (built) is refused with 409 `built` before anything changes. Any verdict but `take` also removes `workshop:building` when the issue carries it (no call otherwise); if that removal fails, the verdict still stands. |
 

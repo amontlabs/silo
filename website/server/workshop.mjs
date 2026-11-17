@@ -727,16 +727,19 @@ export function createWorkshop({
       return json(200, { ok: true, revoked });
     },
 
+    // `comments` is the count GitHub gave in the read before the write, plus the comment this request
+    // posted; absent when that read gave none.
     async 'POST comment'(ctx) {
       const session = await writer(ctx);
       const input = readJson(ctx);
       const n = issueNumber(input.n);
       const body = text(input.text, { what: 'The comment' });
-      await workshopIssue(session, n);
+      const { issue } = await workshopIssue(session, n);
       const existing = await alreadyPosted(session, n, body);
       const data = existing ?? (await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } })).data;
       if (data && !existing) snapshots.patch.comment(n, data);
-      return json(200, { ok: true, id: data?.id ?? null });
+      const read = countOf(issue.comments);
+      return json(200, { ok: true, id: data?.id ?? null, ...(read === null ? {} : { comments: read + (existing ? 0 : 1) }) });
     },
 
     async 'POST vote'(ctx) {
@@ -744,18 +747,25 @@ export function createWorkshop({
       const input = readJson(ctx);
       const n = issueNumber(input.n);
       if (typeof input.on !== 'boolean') refuse(400, 'bad_input', 'The request was not understood.');
-      await workshopIssue(session, n);
+      const { issue } = await workshopIssue(session, n);
+      // `up` is the 👍 count GitHub gave in the read before the write, moved by what this request did;
+      // absent when that read gave none.
+      let up = countOf(issue.reactions?.['+1']);
       if (input.on) {
         const { status } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/reactions`, { body: { content: '+1' } });
-        if (status === 201) snapshots.patch.up(n, 1);
+        if (status === 201) {
+          snapshots.patch.up(n, 1);
+          if (up !== null) up += 1;
+        }
       } else {
         const mine = (await userPages(session, `/repos/${repo}/issues/${n}/reactions?content=%2B1`)).filter((reaction) => reaction.user?.id === session.id);
         for (const reaction of mine) {
           await userRequest(session, 'DELETE', `/repos/${repo}/issues/${n}/reactions/${reaction.id}`);
           snapshots.patch.up(n, -1);
+          if (up !== null) up = Math.max(0, up - 1);
         }
       }
-      return json(200, { ok: true });
+      return json(200, up === null ? { ok: true } : { ok: true, up });
     },
 
     // At most 3 suggestions a minute and 10 an hour per person; nothing is created when the label
@@ -866,6 +876,11 @@ function sameText(a, b) {
   const left = Buffer.from(String(a));
   const right = Buffer.from(String(b));
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+// A count GitHub gave, or null when it gave none.
+function countOf(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function json(status, body, headers = {}) {
