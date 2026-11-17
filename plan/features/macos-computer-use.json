@@ -1,0 +1,9 @@
+{
+  "name": "Agents drive a macOS computer's screen",
+  "what": "An agent inside a macOS computer can look at its screen, click and type, asking you first unless you allow it.",
+  "area": "macos",
+  "needs": [
+    "macos-screen",
+    "computer-use"
+  ]
+}

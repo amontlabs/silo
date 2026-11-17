@@ -1,6 +1,6 @@
 ## Decided
 
-- 2026-11-17, owner: an agent drives the screen of a macOS computer as well as a Linux desktop.
+- 2026-11-17, owner: an agent drives the screen of a macOS computer as well as a Linux desktop. The macOS half is its own entry, `macos-computer-use`, so this one can be finished on the Linux desktop alone.
 
 ## Notes
 
