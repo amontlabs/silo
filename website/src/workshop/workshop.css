@@ -284,7 +284,6 @@
 .ws-more-pad { padding: 2px 24px 20px 52px; }
 .ws-what { color: var(--muted); max-width: 60ch; }
 .ws-what p + p { margin-top: 8px; }
-.ws-recording { margin-top: 12px; max-width: 560px; border: 1px solid var(--line); border-radius: 3px; background: var(--media); }
 .ws code { font: 12.5px var(--mono); padding: 0 3px; border-radius: 3px; background: var(--media); }
 .ws-state { margin-top: 12px; min-height: 34px; font-size: 14px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .ws-now { color: var(--accent-ink); }
@@ -443,7 +442,6 @@
 .ws-by { display: inline-block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .ws-more-pad .ws-box { max-width: 720px; }
 .ws-signin { line-height: 1.4; }
-.ws-recording { width: 100%; aspect-ratio: 16 / 10; }
 /* Faint text is for numbers and drawing labels; what a person reads or presses is muted. */
 .ws-side, .ws .ws-vote, .ws-signin, .ws-gh, .ws-hint, .ws-link { color: var(--muted); }
 /* Small controls get a taller target than they look. */
@@ -456,3 +454,59 @@
 .ws-gh-alt { justify-self: start; display: inline-flex; align-items: center; margin-top: -4px; padding: 4px 0; font: 12px/1.5 var(--mono); color: var(--muted); }
 .ws-gh-alt:hover { color: var(--accent-ink); }
 .ws-gh-alt .out { stroke: currentColor; }
+
+/* An entry's notes and, for the owner, its decisions: one line of toggles under the sentence, closed by default. */
+.ws-extras { margin-top: 10px; max-width: 720px; }
+.ws-extras-bar { display: flex; flex-wrap: nowrap; gap: 18px; height: 22px; white-space: nowrap; }
+.ws .ws-disc { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; margin: -4px 0; font: 12px/14px var(--mono); color: var(--muted); }
+.ws .ws-disc::before { content: ""; width: 0; height: 0; border-left: 4px solid currentColor; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .16s var(--ease-out); }
+.ws .ws-disc[aria-expanded="true"]::before { transform: rotate(90deg); }
+.ws .ws-disc:hover, .ws .ws-disc[aria-expanded="true"] { color: var(--ink); }
+.ws .ws-disc:focus-visible { outline-offset: 2px; }
+.ws-extras-in { margin-top: 10px; padding-left: 12px; border-left: 2px solid var(--line); }
+.ws-md { color: var(--muted); font-size: 14px; max-width: 68ch; overflow-wrap: anywhere; }
+.ws-md > * + * { margin-top: 8px; }
+.ws-md .ws-md-h { font: 500 12px/1.4 var(--mono); color: var(--ink); text-transform: none; margin-top: 14px; }
+.ws-md .ws-md-h:first-child { margin-top: 0; }
+.ws-md ul, .ws-md ol { padding-left: 18px; }
+.ws-md ul { list-style: disc; }
+.ws-md ol { list-style: decimal; }
+.ws-md li + li { margin-top: 3px; }
+.ws-md li > ul, .ws-md li > ol { margin-top: 3px; }
+.ws-md a { color: var(--accent-ink); text-decoration: underline; }
+.ws-md pre { padding: 8px 10px; border-radius: 3px; background: var(--media); overflow-x: auto; }
+.ws-md pre code { padding: 0; background: none; white-space: pre; }
+.ws-decs { display: grid; gap: 10px; font-size: 14px; color: var(--muted); max-width: 68ch; }
+.ws-decs small { font: 12px var(--mono); color: var(--faint); }
+.ws-decs p { margin-top: 2px; }
+
+/* A history line in the thread: no author, no box; when, what changed and the change on GitHub. */
+.ws-h { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; min-height: 22px; font: 12px/22px var(--mono); color: var(--muted); }
+.ws-h > i { justify-self: center; align-self: start; width: 7px; height: 7px; margin-top: 7.5px; border-radius: 50%; border: 1.5px solid var(--faint); }
+.ws-h p { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 10px; height: 22px; white-space: nowrap; }
+.ws-h-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; margin: 0 -4px; }
+.ws-h p > small, .ws-h-link { flex: none; }
+.ws-h small { color: var(--faint); font-size: 12px; }
+.ws .ws-h-btn { font: inherit; color: var(--ink); text-decoration: underline dotted; text-underline-offset: 3px; }
+.ws .ws-h-btn:hover, .ws .ws-h-btn[aria-expanded="true"] { color: var(--accent-ink); }
+.ws .ws-h-btn:focus-visible { outline-offset: 2px; }
+.ws-h-link { color: var(--faint); }
+.ws-h-link:hover { color: var(--accent-ink); }
+.ws-h-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 6px 0 2px; font: 13.5px/1.5 var(--sans); }
+.ws-h-diff > div { padding: 8px 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--paper); }
+.ws-h-diff small { display: block; font: 12px var(--mono); color: var(--faint); }
+.ws-h-diff b { display: block; font-weight: 500; color: var(--ink); }
+.ws-h-diff p { color: var(--muted); overflow-wrap: anywhere; }
+@media (max-width: 640px) { .ws-h-diff { grid-template-columns: 1fr; } }
+.ws-h-ghost { height: 22px; border-radius: 3px; background: color-mix(in srgb, var(--line) 25%, transparent); }
+
+/* Latest: one line per change or comment, under the entry it belongs to. */
+.ws-latest .ws-name { display: grid; }
+.ws-latest-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-latest-ghost .ws-pip { visibility: hidden; }
+.ws-latest-ghost .ws-latest-name, .ws-latest-ghost .ws-sub { justify-self: start; border-radius: 3px; background: color-mix(in srgb, var(--line) 25%, transparent); }
+.ws-latest-ghost .ws-latest-name { width: min(60%, 320px); }
+.ws-latest-ghost .ws-sub { width: min(40%, 220px); }
+.workshop-shell:has(.ws-list-loading) .ws-foot { opacity: 0; transition: none; }
+.ws-sub { font: 12px/1.5 var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-latest .ws-word { min-width: 0; }

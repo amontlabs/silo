@@ -23,7 +23,7 @@ describe('or comment on GitHub', () => {
     expect(within(item).queryByRole('link', { name: /^GitHub #/ })).not.toBeInTheDocument();
   });
 
-  it('is there for an open suggestion and decision too, and not on the suggest form', async () => {
+  it('is there for an open suggestion too, and not on the suggest form', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#suggested/issue-31');
     await renderApp();

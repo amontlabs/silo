@@ -11,6 +11,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAppAuth } from './app-auth.mjs';
 import { createGitHub, DEFAULT_TIMEOUT, GitHubError, nextLink } from './github.mjs';
 import { BUILDING_LABEL, kindOf, LABELS, labelNames, reasonOf, VERDICTS } from './issues.mjs';
+import { verdictLabel } from '../../tools/plan/model/index.js';
 import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCookie, SESSION_MAX_AGE, STATE_MAX_AGE, unseal } from './session.mjs';
 import { createSnapshot } from './snapshot.mjs';
 
@@ -63,7 +64,7 @@ const PRIVATE = 'private, no-store';
 
 const ENDPOINTS = new Map(Object.entries({
   state: ['GET'], me: ['GET'], issue: ['GET'], login: ['GET'], callback: ['GET'], vote: ['GET', 'POST'],
-  logout: ['POST'], comment: ['POST'], suggest: ['POST'], verdict: ['POST'], decide: ['POST'],
+  logout: ['POST'], comment: ['POST'], suggest: ['POST'], verdict: ['POST'],
 }));
 
 class Refusal extends Error {
@@ -343,6 +344,7 @@ export function createWorkshop({
 
   const snapshots = config.configured ? createSnapshot({
     repo,
+    app: () => ({ id: config.appId, login: app?.login() ?? null }),
     now,
     log,
     detach,
@@ -398,7 +400,7 @@ export function createWorkshop({
   }
 
   // The person's permission, by GitHub account id: yes and no are both cached five minutes, for `me`,
-  // `verdict` and `decide` alike. People known to be able to decide re-read on their own allowance.
+  // and `verdict`. People known to be able to decide re-read on their own allowance.
   function cachedPermission(id) {
     const cached = permissions.get(id);
     return cached && now() - cached.at < PERMISSION_TTL ? cached : null;
@@ -776,23 +778,22 @@ export function createWorkshop({
       return json(200, { number });
     },
 
-    // Labels and state change first; the note is posted last, after the change it explains succeeded,
-    // and not again when the same person posted the same text in the last five minutes. GitHub itself
-    // refuses the changes to someone without access.
+    // Labels and state change first. GitHub itself refuses the changes to someone without access.
+    // A built entry (closed as completed) keeps its verdict.
     async 'POST verdict'(ctx) {
       const session = await writer(ctx);
       const input = readJson(ctx);
       const n = issueNumber(input.n);
       if (!Object.hasOwn(input, 'verdict')) refuse(400, 'bad_input', 'The verdict is missing.');
+      if (Object.hasOwn(input, 'note')) refuse(400, 'bad_input', 'A verdict takes no note.');
       const verdict = input.verdict;
       if (verdict !== null && !VERDICTS.includes(verdict)) refuse(400, 'bad_input', 'That verdict is not known.');
-      const note = text(input.note, { required: verdict === 'refine', what: 'The note' });
       await requireDecider(session);
-      // The verdict and its note are admitted together: the issue read, and the duplicate check for the note.
-      admitReads(session, note ? 2 : 1);
+      admitReads(session, 1);
       const { issue, kind } = await workshopIssue(session, n);
       if (kind !== 'entry') refuse(404, 'not_found', 'This is not a Workshop entry.');
-      const target = verdict ? `verdict:${verdict}` : null;
+      if (issue.state === 'closed' && issue.state_reason === 'completed') refuse(409, 'built', 'This entry is built. Its verdict does not change.');
+      const target = verdict ? verdictLabel(verdict) : null;
       const current = labelNames(issue).filter((name) => name.startsWith('verdict:'));
       for (const name of current) {
         if (name === target) continue;
@@ -823,28 +824,6 @@ export function createWorkshop({
           else log({ endpoint: 'verdict', building_label: 'not_removed', ...(error instanceof GitHubError ? { github: error.status } : { failure: error?.name || 'Error' }) });
         }
       }
-      if (note && !(await alreadyPosted(session, n, note))) {
-        const { data } = await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body: note } });
-        if (data) snapshots.patch.comment(n, data);
-      }
-      return json(200, { ok: true });
-    },
-
-    // Comment, then close. A retry after a cut between the two finds the same comment from the same
-    // person in the last five minutes and does not post it again.
-    async 'POST decide'(ctx) {
-      const session = await writer(ctx);
-      const input = readJson(ctx);
-      const n = issueNumber(input.n);
-      const body = text(input.text, { what: 'The decision' });
-      await requireDecider(session);
-      const { issue, kind } = await workshopIssue(session, n);
-      if (kind !== 'decision' || issue.state !== 'open') refuse(404, 'not_found', 'This is not an open Workshop decision.');
-      const existing = await alreadyPosted(session, n, body);
-      const data = existing ? null : (await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } })).data;
-      if (data) snapshots.patch.comment(n, data);
-      await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'closed', state_reason: 'completed' } });
-      snapshots.patch.fields(n, { state: 'closed', reason: 'completed', closedAt: new Date(now()).toISOString() });
       return json(200, { ok: true });
     },
   }));

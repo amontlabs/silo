@@ -16,10 +16,13 @@ import { BUDGET, createWorkshop, LABELS } from '../server/workshop.mjs';
 import { CUTS, cut, readBody } from '../server/issues.mjs';
 import { SNAPSHOT } from '../server/snapshot.mjs';
 import { createFakeGitHub, FAKE_APP, progressOf, seedDemo } from './fake-github.mjs';
-import { DEFAULT_OUTPUT, ENDPOINTS, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
-import { progressLine, startDev } from './workshop-dev.mjs';
+import { DEFAULT_OUTPUT, ENDPOINTS, HANDLER, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
+import { loadFeatures, progressLine, startDev } from './workshop-dev.mjs';
+import { changeComment, readChange, readEntryMarker, withoutMarkers } from '../../tools/plan/model/index.js';
+import { checkFiles } from '../../tools/plan/check/index.js';
+import { loadDir } from '../../tools/plan/read/index.js';
 
-import { count, decisionNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
+import { count, retiredNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
 
 test('App JWT is RS256 with the App ID, and the installation token is cached until shortly before it expires', async () => {
   const t = await setup();
@@ -205,7 +208,6 @@ test('a signed-in person spends the installation token only on the permission ch
     await visitor.call('POST', 'verdict', { body: { n: 1, verdict: 'take' } });
     await visitor.call('POST', 'suggest', { body: { title: 'T', text: 'x' } });
     await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'later' } });
-    await owner.call('POST', 'decide', { body: { n: 4, text: 'd' } });
     await t.workshop.idle();
     const refreshes = /^\/repos\/amontlabs\/silo\/issues(\/comments)?$/;
     const installation = t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation' && !(r.method === 'GET' && refreshes.test(r.path)));
@@ -315,29 +317,52 @@ test('verdict transitions change only the verdict labels, one by one, with the p
       assert.ok(calls.every((r) => r.kind === 'user' && r.login === 'owner-fake'));
       assert.ok(calls.every((r) => /\/labels(\/[^/]+)?$/.test(r.path) || r.method === 'PATCH'));
     }
-    const refine = await c.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'refine', note: 'Narrow it to Linux.' } });
-    assert.equal(refine.status, 200);
-    assert.deepEqual(issue.comments.at(-1).user.login, 'owner-fake');
-    assert.deepEqual(issue.comments.at(-1).body, 'Narrow it to Linux.');
-    assert.ok(issue.labels.includes('verdict:refine'));
+    const labels = [...issue.labels];
+    const comments = issue.comments.length;
+    for (const body of [{ verdict: 'refine' }, { verdict: 'take', note: 'Narrow it to Linux.' }, { verdict: null, note: 'x' }]) {
+      const refused = await c.call('POST', 'verdict', { body: { n: entryNumber, ...body } });
+      assert.deepEqual([refused.status, refused.json.error], [400, 'bad_input'], JSON.stringify(body));
+    }
+    assert.deepEqual(issue.labels, labels);
+    assert.equal(issue.comments.length, comments, 'a verdict never posts a comment');
   } finally { await t.close(); }
 });
 
-test('decide comments and closes an open decision as completed', async () => {
+test('an issue with only the retired decision label is not a Workshop issue', async () => {
   const t = await setup();
   try {
     const c = t.client();
     await c.signIn('owner-fake');
-    const response = await c.call('POST', 'decide', { body: { n: decisionNumber, text: 'Debian.' } });
-    assert.equal(response.status, 200);
-    const issue = issueOf(t.fake, decisionNumber);
-    assert.equal(issue.state, 'closed');
-    assert.equal(issue.state_reason, 'completed');
-    assert.equal(issue.comments.at(-1).body, 'Debian.');
-    assert.equal(issue.comments.at(-1).user.login, 'owner-fake');
-    assert.equal((await c.call('POST', 'decide', { body: { n: decisionNumber, text: 'Again.' } })).status, 404, 'no longer open');
-    assert.equal((await c.call('POST', 'decide', { body: { n: entryNumber, text: 'x' } })).status, 404, 'not a decision');
-    assert.equal((await c.call('POST', 'verdict', { body: { n: decisionNumber, verdict: 'take' } })).status, 404, 'verdict only on entries');
+    const state = (await c.call('GET', 'state')).json.issues;
+    for (const n of [retiredNumber, retiredNumber + 1]) {
+      assert.equal(Object.hasOwn(state, n), false, `#${n} is not in the state`);
+      assert.equal((await c.call('GET', `issue?n=${n}`)).status, 404);
+      assert.equal((await c.call('POST', 'comment', { body: { n, text: 'x' } })).status, 404);
+      assert.equal((await c.call('GET', `vote?n=${n}`)).status, 404);
+      assert.equal((await c.call('POST', 'vote', { body: { n, on: true } })).status, 404);
+      assert.equal((await c.call('POST', 'verdict', { body: { n, verdict: 'take' } })).status, 404);
+    }
+    assert.equal(issueOf(t.fake, retiredNumber).comments.length, 1, 'nothing was written');
+    // Beside one kind label it is ignored: the issue is an entry.
+    const entry = t.fake.addIssue({ title: 'Entry with the old label', labels: ['workshop:entry', 'workshop:decision'] });
+    t.clock.t += 61_000;
+    await c.call('GET', 'state');
+    await t.workshop.idle();
+    assert.equal((await c.call('GET', 'state')).json.issues[entry.number].kind, 'entry');
+  } finally { await t.close(); }
+});
+
+test('there is no decide endpoint any more', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    await c.signIn('owner-fake');
+    const before = JSON.stringify([...t.fake.state.issues.values()]);
+    const post = await c.call('POST', 'decide', { body: { n: retiredNumber, text: 'Debian.' } });
+    assert.deepEqual([post.status, post.json.error], [404, 'not_found']);
+    assert.equal((await c.call('GET', 'decide')).status, 404);
+    assert.equal(JSON.stringify([...t.fake.state.issues.values()]), before);
+    assert.equal(ENDPOINTS.includes('decide'), false);
   } finally { await t.close(); }
 });
 
@@ -359,14 +384,16 @@ test('every refusal in the contract', async () => {
       [anonymous, 'vote', { n: 1, on: true }, {}, 401, 'signed_out'],
       [anonymous, 'suggest', { title: 'x', text: 'y' }, {}, 401, 'signed_out'],
       [anonymous, 'verdict', { n: 1, verdict: 'take' }, {}, 401, 'signed_out'],
-      [anonymous, 'decide', { n: 4, text: 'x' }, {}, 401, 'signed_out'],
       [visitor, 'verdict', { n: 1, verdict: 'take' }, {}, 403, 'cannot_decide'],
-      [visitor, 'decide', { n: 4, text: 'x' }, {}, 403, 'cannot_decide'],
+      [visitor, 'comment', { n: 4, text: 'x' }, {}, 404, 'not_found'],
+      [visitor, 'vote', { n: 5, on: true }, {}, 404, 'not_found'],
       [visitor, 'comment', { n: 7, text: 'x' }, {}, 404, 'not_found'],
       [visitor, 'vote', { n: 7, on: true }, {}, 404, 'not_found'],
       [visitor, 'comment', { n: 8, text: 'x' }, {}, 404, 'not_found'],
       [owner, 'verdict', { n: 7, verdict: 'take' }, {}, 404, 'not_found'],
-      [owner, 'decide', { n: 7, text: 'x' }, {}, 404, 'not_found'],
+      [owner, 'verdict', { n: 4, verdict: 'take' }, {}, 404, 'not_found'],
+      [owner, 'verdict', { n: 6, verdict: 'take' }, {}, 404, 'not_found'],
+      [owner, 'decide', { n: 4, text: 'x' }, {}, 404, 'not_found'],
       [visitor, 'comment', { n: 1, text: 'x'.repeat(5001) }, {}, 400, 'too_long'],
       [visitor, 'comment', { n: 1, text: '   ' }, {}, 400, 'empty'],
       [visitor, 'comment', { n: '1', text: 'x' }, {}, 400, 'bad_input'],
@@ -377,10 +404,11 @@ test('every refusal in the contract', async () => {
       [visitor, 'suggest', { title: 'bell\u0007', text: 'y' }, {}, 400, 'bad_input'],
       [visitor, 'suggest', { title: 'separator\u2028', text: 'y' }, {}, 400, 'bad_input'],
       [owner, 'verdict', { n: 1 }, {}, 400, 'bad_input'],
-      [owner, 'verdict', { n: 1, verdict: 'refine' }, {}, 400, 'empty'],
-      [owner, 'verdict', { n: 1, verdict: 'refine', note: 'x'.repeat(5001) }, {}, 400, 'too_long'],
+      [owner, 'verdict', { n: 1, verdict: 'refine' }, {}, 400, 'bad_input'],
+      [owner, 'verdict', { n: 1, verdict: 'refine', note: 'Narrow it.' }, {}, 400, 'bad_input'],
+      [owner, 'verdict', { n: 1, verdict: 'take', note: 'x' }, {}, 400, 'bad_input'],
+      [owner, 'verdict', { n: 1, verdict: null, note: '' }, {}, 400, 'bad_input'],
       [owner, 'verdict', { n: 1, verdict: 'maybe' }, {}, 400, 'bad_input'],
-      [owner, 'decide', { n: 4, text: '' }, {}, 400, 'empty'],
     ];
     for (const [who, path, body, headers, status, code] of cases) {
       const response = await who.call('POST', path, { body, headers });
@@ -556,8 +584,7 @@ test('no response and no log line carries a token, a code, the client secret or 
     await visitor.call('POST', 'comment', { body: { n: 1, text: 'hi' } });
     await visitor.call('POST', 'vote', { body: { n: 1, on: true } });
     await visitor.call('POST', 'suggest', { body: { title: 'T', text: 'x' } });
-    await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'refine', note: 'n' } });
-    await owner.call('POST', 'decide', { body: { n: 4, text: 'd' } });
+    await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'later' } });
     t.fake.state.failNext = 3;
     await visitor.call('POST', 'comment', { body: { n: 1, text: 'fails' } });
     t.fake.state.rateLimited = true;
@@ -582,7 +609,7 @@ test('no response and no log line carries a token, a code, the client secret or 
 // Model: random operations by random people on random issues. After every step,
 // only Workshop issues have changed, an entry carries at most one verdict label
 // that matches the model, it is closed as not planned exactly when dropped, and
-// decisions close only through decide by someone who can decide.
+// a built entry (closed as completed) is never changed by a verdict.
 test('model: writes only reach Workshop issues and keep verdicts consistent', async () => {
   const t = await setup();
   try {
@@ -590,49 +617,47 @@ test('model: writes only reach Workshop issues and keep verdicts consistent', as
     await owner.signIn('owner-fake');
     const visitor = t.client();
     await visitor.signIn('visitor-fake');
+    const built = t.fake.addIssue({ title: 'Built', body: 'x\n<!-- silo-entry: built-one -->', labels: ['workshop:entry', 'verdict:take'], state: 'closed', reason: 'completed' }).number;
+    const retired = [4, 5];
     const outside = [7, 8].map((n) => JSON.stringify(issueOf(t.fake, n)));
+    const retiredBefore = retired.map((n) => JSON.stringify(issueOf(t.fake, n)));
+    const builtBefore = JSON.stringify(issueOf(t.fake, built));
     const model = new Map([1, 2, 3].map((n) => [n, { verdict: ['take', null, 'later'][n - 1], dropped: false }]));
-    const decisions = new Map([[4, 'open'], [5, 'closed']]);
+    const workshop = new Set([1, 2, 3, 6, built]);
     let seed = 12345;
     const rand = (k) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % k; };
-    const numbers = [1, 2, 3, 4, 5, 6, 7, 8, 99];
-    const verdicts = ['take', 'refine', 'later', 'drop', null];
+    const numbers = [1, 2, 3, 4, 5, 6, 7, 8, built, 99];
+    const verdicts = ['take', 'later', 'drop', null, 'refine'];
     for (let step = 0; step < 200; step += 1) {
       t.clock.t += 3_000;
       const who = rand(2) ? owner : visitor;
       const isOwner = who === owner;
       const n = numbers[rand(numbers.length)];
-      const op = rand(5);
+      const op = rand(4);
       let response;
       if (op === 0) {
         const verdict = verdicts[rand(verdicts.length)];
-        const note = verdict === 'refine' || rand(3) === 0 ? `note ${step}` : undefined;
-        response = await who.call('POST', 'verdict', { body: { n, verdict, note } });
-        if (isOwner && model.has(n)) {
+        response = await who.call('POST', 'verdict', { body: { n, verdict } });
+        if (isOwner && model.has(n) && verdict !== 'refine') {
           assert.equal(response.status, 200, response.body);
           model.set(n, { verdict, dropped: verdict === 'drop' });
+        } else if (isOwner && n === built && verdict !== 'refine') {
+          assert.deepEqual([response.status, response.json.error], [409, 'built']);
         } else {
           assert.notEqual(response.status, 200);
         }
       } else if (op === 1) {
-        response = await who.call('POST', 'decide', { body: { n, text: `decided ${step}` } });
-        if (isOwner && decisions.get(n) === 'open') {
-          assert.equal(response.status, 200);
-          decisions.set(n, 'closed');
-        } else {
-          assert.notEqual(response.status, 200);
-        }
-      } else if (op === 2) {
         response = await who.call('POST', 'comment', { body: { n, text: `c ${step}` } });
-        assert.equal(response.status === 200, n <= 6, response.body);
-      } else if (op === 3) {
+        assert.equal(response.status === 200, workshop.has(n), response.body);
+      } else if (op === 2) {
         response = await who.call('POST', 'vote', { body: { n, on: rand(2) === 0 } });
-        assert.equal(response.status === 200, n <= 6);
+        assert.equal(response.status === 200, workshop.has(n));
       } else {
         response = await who.call('GET', `vote?n=${n}`);
-        assert.equal(response.status === 200, n <= 6);
+        assert.equal(response.status === 200, workshop.has(n));
       }
       assert.deepEqual([7, 8].map((m) => JSON.stringify(issueOf(t.fake, m))), outside);
+      assert.deepEqual(retired.map((m) => JSON.stringify(issueOf(t.fake, m))), retiredBefore);
       for (const [m, expected] of model) {
         const issue = issueOf(t.fake, m);
         const labels = issue.labels.filter((l) => l.startsWith('verdict:'));
@@ -640,8 +665,12 @@ test('model: writes only reach Workshop issues and keep verdicts consistent', as
         assert.equal(issue.state === 'closed' && issue.state_reason === 'not_planned', expected.dropped);
         assert.ok(issue.labels.includes('workshop:entry'));
       }
-      for (const [m, expected] of decisions) assert.equal(issueOf(t.fake, m).state, expected);
+      const done = issueOf(t.fake, built);
+      assert.deepEqual([done.labels, done.state, done.state_reason], [['workshop:entry', 'verdict:take'], 'closed', 'completed'], `built entry at step ${step}`);
     }
+    // Comments and votes were the only writes the built entry took.
+    const after = issueOf(t.fake, built);
+    assert.deepEqual(JSON.stringify({ ...after, comments: 0, reactions: 0 }), JSON.stringify({ ...JSON.parse(builtBefore), comments: 0, reactions: 0 }));
   } finally { await t.close(); }
 });
 
@@ -682,20 +711,33 @@ function fakeResponse() {
   };
 }
 
-// The plan a local server's fake GitHub is seeded from in these tests.
+// The plan a local server's fake GitHub is seeded from in these tests: a small valid plan directory.
 const FIXTURE_FEATURES = [
-  { n: 1, id: 'engine-service', name: 'The engine runs on its own', what: 'A background engine owns every computer.' },
-  { n: 2, id: 'calls-and-events', name: 'Every call and event defined once', what: 'Each call is written down once.' },
-  { n: 3, id: 'vm-runtime', name: 'The VM runtime, packaged', what: 'Silo ships the program that runs each computer.' },
-  { n: 4, id: 'fixture-only', name: 'Only in the fixture', what: 'Proves the fixture is read.' },
-].map((line) => JSON.stringify(line)).join('\n') + '\n';
+  ['engine-service', 'The engine runs on its own', 'A background engine owns every computer.'],
+  ['calls-and-events', 'Every call and event defined once', 'Each call is written down once.'],
+  ['vm-runtime', 'The VM runtime, packaged', 'Silo ships the program that runs each computer.'],
+  ['fixture-only', 'Only in the fixture', 'Proves the fixture is read.'],
+];
+
+const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
+
+async function writePlan(dir) {
+  await mkdir(join(dir, 'features'), { recursive: true });
+  await writeFile(join(dir, 'PRODUCT.md'), '# Fixture\n\nA small plan.\n');
+  await writeFile(join(dir, 'areas.json'), json([{ id: 'engine', title: 'Engine', line: 'The part that runs computers.' }]));
+  await writeFile(join(dir, 'order.json'), json({ stages: [{ id: 'start', title: 'Start', line: 'The first things.', features: FIXTURE_FEATURES.map(([id]) => id) }] }));
+  await writeFile(join(dir, 'decisions.json'), json([]));
+  for (const [id, name, what] of FIXTURE_FEATURES) await writeFile(join(dir, 'features', `${id}.json`), json({ name, what, area: 'engine', needs: [] }));
+  const found = checkFiles(loadDir(dir));
+  assert.deepEqual(found.errors, [], 'the fixture plan is valid');
+}
 
 async function fixtureSite(page = 'workshop/index.html') {
   const dir = await mkdtemp(join(tmpdir(), 'workshop-site-'));
   await mkdir(join(dir, 'dist', 'workshop'), { recursive: true });
   await writeFile(join(dir, 'dist', 'index.html'), '<!doctype html><title>Silo</title>');
   if (page) await writeFile(join(dir, 'dist', page), '<!doctype html><title>Workshop</title>');
-  await writeFile(join(dir, 'features.jsonl'), FIXTURE_FEATURES);
+  await writePlan(join(dir, 'plan'));
   return dir;
 }
 
@@ -728,11 +770,19 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
       assert.equal(await readlink(link), 'state.func');
     }
     const vc = JSON.parse(await readFile(join(main, '.vc-config.json'), 'utf8'));
-    assert.deepEqual(vc, { runtime: RUNTIME, handler: 'api/workshop.cjs', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 15 });
+    assert.deepEqual(vc, { runtime: RUNTIME, handler: 'website/api/workshop.cjs', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 15 });
+    assert.equal(HANDLER, vc.handler);
     assert.match(vc.runtime, /^nodejs(22|24|26)\.x$/);
-    assert.deepEqual(await readdir(join(main, 'node_modules')), ['@vercel']);
-    assert.deepEqual(await readdir(join(main, 'node_modules', '@vercel')), ['functions'], 'only the package that loads');
-    const shipped = await listFiles(join(main, 'node_modules'));
+    assert.deepEqual((await readdir(main)).sort(), ['.vc-config.json', 'tools', 'website']);
+    assert.deepEqual((await readdir(join(main, 'website'))).sort(), ['api', 'node_modules', 'server']);
+    // The plan's model ships beside the server, at its place in the repository, as ESM.
+    const model = (await readdir(new URL('../../tools/plan/model/', import.meta.url))).filter((name) => name.endsWith('.js')).sort();
+    assert.ok(model.includes('index.js') && model.includes('markers.js'));
+    assert.deepEqual((await listFiles(join(main, 'tools'))).sort(), ['plan/package.json', ...model.map((name) => `plan/model/${name}`)].sort());
+    assert.equal(JSON.parse(await readFile(join(main, 'tools', 'plan', 'package.json'), 'utf8')).type, 'module');
+    assert.deepEqual(await readdir(join(main, 'website', 'node_modules')), ['@vercel']);
+    assert.deepEqual(await readdir(join(main, 'website', 'node_modules', '@vercel')), ['functions'], 'only the package that loads');
+    const shipped = await listFiles(join(main, 'website', 'node_modules'));
     assert.ok(shipped.length <= 20, `${shipped.length} files`);
     assert.ok(shipped.includes('@vercel/functions/wait-until.js') && shipped.includes('@vercel/functions/package.json'));
 
@@ -743,7 +793,7 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
       const saved = Object.fromEntries(Object.keys(process.env).filter((k) => k.startsWith('WORKSHOP_')).map((k) => [k, process.env[k]]));
       for (const key of Object.keys(saved)) delete process.env[key];
       try {
-        const entry = createRequire(import.meta.url)(join(clean, 'state.func', 'api', 'workshop.cjs'));
+        const entry = createRequire(import.meta.url)(join(clean, 'state.func', HANDLER));
         const req = Object.assign(Readable.from([]), { method: 'GET', url: '/api/workshop/state', headers: {} });
         const res = fakeResponse();
         await entry(req, res);
@@ -753,7 +803,7 @@ test('Build Output layout: static site, one Node.js function at every endpoint, 
         Object.assign(process.env, saved);
       }
     } finally { await rm(clean, { recursive: true, force: true }); }
-    const serverFiles = (await readdir(join(main, 'server'))).sort();
+    const serverFiles = (await readdir(join(main, 'website', 'server'))).sort();
     assert.deepEqual(serverFiles, ['app-auth.mjs', 'config.mjs', 'github.mjs', 'issues.mjs', 'node.mjs', 'session.mjs', 'snapshot.mjs', 'workshop.mjs']);
 
     // The packaged entry point loads and answers on its own.
@@ -793,20 +843,22 @@ async function freePort() {
 
 test('workshop-dev --fake serves the site and the API on one port, with sign-in through the fake GitHub', async () => {
   const site = await fixtureSite();
-  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), featuresFile: join(site, 'features.jsonl'), log: () => {} });
+  await writeFile(join(site, 'dist', 'workshop', 'index.html'), '<!doctype html><head><title>Workshop</title></head>');
+  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), planDir: join(site, 'plan'), log: () => {} });
   try {
     for (const path of ['/workshop', '/workshop/']) {
       const page = await fetch(dev.origin + path);
       assert.equal(page.status, 200);
-      assert.equal(await page.text(), '<!doctype html><title>Workshop</title>');
+      assert.equal(await page.text(), `<!doctype html><head><meta name="workshop-raw" content="${dev.fakeGitHub.rawUrl}"><title>Workshop</title></head>`);
     }
+    assert.equal(loadFeatures(join(site, 'plan')).length, 4, 'seeded from the plan directory');
     assert.equal((await fetch(dev.origin + '/')).status, 200);
     assert.equal((await fetch(dev.origin + '/%2e%2e/package.json')).status, 404);
     const state = await (await fetch(dev.origin + '/api/workshop/state')).json();
     const entries = Object.values(state.issues).filter((i) => i.kind === 'entry');
     assert.ok(entries.length >= 3);
     assert.deepEqual(entries.map((i) => i.entry).sort(), ['calls-and-events', 'engine-service', 'fixture-only', 'vm-runtime']);
-    assert.ok(Object.values(state.issues).some((i) => i.kind === 'decision' && i.state === 'open'));
+    assert.equal(Object.values(state.issues).some((i) => i.kind === 'decision'), false, 'the retired kind is gone');
 
     const start = await fetch(dev.origin + '/api/workshop/login?return=/workshop', { redirect: 'manual' });
     const signin = start.headers.get('set-cookie').split(';')[0];
@@ -925,40 +977,169 @@ test('unlabelled suggestions are retried after a successful suggestion or a refr
   } finally { BUDGET.labelCallsPerMinute = saved; t.fake.state.hook = null; await t.close(); }
 });
 
-test('verdict: the note is posted only after labels and state succeeded; clearing never reopens a completed entry', async () => {
+test('verdict: a failed change leaves everything as it was; a built entry is refused 409 before any change', async () => {
   const t = await setup();
   try {
     const c = t.client();
     await c.signIn('owner-fake');
     const issue = issueOf(t.fake, entryNumber);
-    const comments = issue.comments.length;
     t.fake.state.hook = (r) => (r.method === 'PATCH' ? { status: 500 } : null);
-    const failed = await c.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop', note: 'Not now.' } });
-    assert.equal(failed.status, 502);
-    assert.equal(issue.comments.length, comments, 'no note after a failed change');
+    assert.equal((await c.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop' } })).status, 502);
+    assert.equal(issue.comments.length, 0, 'a verdict posts no comment');
     t.fake.state.hook = null;
-    assert.equal((await c.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop', note: 'Not now.' } })).status, 200);
-    assert.equal(issue.comments.length, comments + 1);
-    assert.equal(issue.comments.at(-1).body, 'Not now.');
-
-    const built = issueOf(t.fake, 3);
-    Object.assign(built, { state: 'closed', state_reason: 'completed' });
-    for (const verdict of [null, 'take']) {
-      assert.equal((await c.call('POST', 'verdict', { body: { n: 3, verdict } })).status, 200);
-      assert.deepEqual([built.state, built.state_reason], ['closed', 'completed']);
-    }
+    assert.equal((await c.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop' } })).status, 200);
+    assert.equal(issue.comments.length, 0, 'a verdict posts no comment');
+    assert.deepEqual([issue.state, issue.state_reason], ['closed', 'not_planned']);
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
-test('an issue with more than one Workshop kind label is not a Workshop issue', async () => {
+test('verdict on a built entry (closed as completed) is refused 409 built: labels, state and GitHub untouched', async () => {
   const t = await setup();
   try {
-    const both = t.fake.addIssue({ title: 'Both', labels: ['workshop:entry', 'workshop:decision'] });
+    const c = t.client();
+    await c.signIn('owner-fake');
+    const built = issueOf(t.fake, 3);
+    Object.assign(built, { state: 'closed', state_reason: 'completed', labels: ['workshop:entry', 'verdict:take', 'other-label'] });
+    await c.call('GET', 'me');
+    t.clock.t += 61_000;
+    await settle(t, c);
+    const snapshot = JSON.stringify(built);
+    const state = JSON.stringify((await c.call('GET', 'state')).json.issues);
+    const before = t.fake.state.requests.length;
+    for (const verdict of ['take', 'later', 'drop', null]) {
+      const response = await c.call('POST', 'verdict', { body: { n: 3, verdict } });
+      assert.deepEqual([response.status, response.json.error], [409, 'built'], String(verdict));
+    }
+    assert.equal(JSON.stringify(built), snapshot);
+    const writes = t.fake.state.requests.slice(before).filter((r) => r.method !== 'GET');
+    assert.deepEqual(writes, [], 'no write call reached GitHub');
+    assert.equal(JSON.stringify((await c.call('GET', 'state')).json.issues), state, 'the snapshot is untouched');
+    // Closed as not planned is not built: its verdict still changes.
+    Object.assign(built, { state_reason: 'not_planned' });
+    assert.equal((await c.call('POST', 'verdict', { body: { n: 3, verdict: 'later' } })).status, 200);
+  } finally { await t.close(); }
+});
+
+async function settle(t, client) {
+  await client.call('GET', 'state');
+  await t.workshop.idle();
+}
+
+test('an issue with two Workshop kind labels is not a Workshop issue', async () => {
+  const t = await setup();
+  try {
+    const both = t.fake.addIssue({ title: 'Both', labels: ['workshop:entry', 'workshop:suggestion'] });
     const c = t.client();
     await c.signIn('visitor-fake');
     assert.equal((await c.call('GET', 'state')).json.issues[both.number], undefined);
     assert.equal((await c.call('POST', 'comment', { body: { n: both.number, text: 'x' } })).status, 404);
     assert.equal((await c.call('GET', `vote?n=${both.number}`)).status, 404);
+  } finally { await t.close(); }
+});
+
+const SHA_A = 'a'.repeat(40);
+const SHA_B = 'b'.repeat(40);
+const CHANGE = { commit: SHA_B, before: SHA_A, fields: ['name', 'what'] };
+
+test('the silo-synced marker line is removed from a body, beside the entry marker', async () => {
+  const synced = `<!-- silo-synced: ${SHA_A} -->`;
+  assert.deepEqual(readBody(`Text.\n${synced}\n<!-- silo-entry: engine-service -->`), { entry: 'engine-service', text: 'Text.' });
+  assert.deepEqual(readBody(`${synced}\nOnly text.`), { entry: null, text: 'Only text.' });
+  assert.deepEqual(readBody('Text.\n<!-- silo-synced: nothex -->\n<!-- silo-entry: Bad Id! -->').entry, null);
+  assert.equal(readBody('<!-- silo-entry: UPPER -->').entry, null, 'an id must match the model pattern');
+  for (const body of [`Text.\n${synced}\n<!-- silo-entry: engine-service -->`, '<!-- silo-entry: a -->\nText.', 'Text.\n  <!--silo-entry:  a  -->', `${'x'.repeat(CUTS.body + 10)}\n<!-- silo-entry: engine-service -->`, 'Text.\r\n<!-- silo-entry: engine-service -->\r\n']) {
+    assert.equal(readBody(body).entry, readEntryMarker(body), 'the server reads the entry marker as the model does');
+    assert.equal(readBody(body).text, cut(withoutMarkers(body), CUTS.body), 'and removes the markers as the model does, then cuts');
+  }
+  const long = readBody(`${'x'.repeat(CUTS.body + 10)}\n<!-- silo-entry: engine-service -->`);
+  assert.deepEqual([long.entry, long.text.length], ['engine-service', CUTS.body], 'a marker past the cut is still read');
+  const t = await setup();
+  try {
+    const issue = issueOf(t.fake, 1);
+    issue.body = `A body.\n${synced}\n<!-- silo-entry: engine-service -->`;
+    t.clock.t += 61_000;
+    const c = t.client();
+    await settle(t, c);
+    const answer = (await c.call('GET', 'issue?n=1')).json;
+    assert.equal(answer.body, 'A body.');
+    assert.equal((await c.call('GET', 'state')).json.issues[1].entry, 'engine-service');
+  } finally { await t.close(); }
+});
+
+test('only the Workshop App\'s comments carry a change, read on the whole comment; a person\'s, another bot\'s and a mid-comment marker do not', async () => {
+  const t = await setup();
+  try {
+    const text = changeComment(CHANGE, { repo: t.fake.repo });
+    t.fake.addComment(1, null, text, START + 1000);
+    t.fake.addComment(1, 'visitor-fake', text, START + 2000);
+    t.fake.addComment(1, null, `${'x'.repeat(CUTS.comment)}\n${text}`, START + 3000);
+    t.fake.addComment(1, null, `${text}\nAnd more.`, START + 4000);
+    t.fake.addUser('other-app[bot]', { type: 'Bot' });
+    t.fake.addComment(1, 'other-app[bot]', text, START + 5000);
+    t.fake.addUser('silo-workshop[bot]', { type: 'Bot' });
+    t.fake.addComment(1, 'silo-workshop[bot]', text, START + 6000);
+    const c = t.client();
+    await settle(t, c);
+    const comments = (await c.call('GET', 'issue?n=1')).json.comments;
+    const mine = comments.filter((x) => x.createdAt > new Date(START).toISOString());
+    assert.equal(mine.length, 6);
+    assert.deepEqual(mine[0].change, CHANGE);
+    assert.equal(mine[0].bot, true);
+    assert.deepEqual(mine[0].change, readChange(text));
+    assert.equal(Object.hasOwn(mine[1], 'change'), false, 'a person cannot write history');
+    assert.equal(mine[1].bot, false);
+    assert.deepEqual([mine[2].cut, mine[2].change], [true, CHANGE], 'the marker is read on the whole comment, before the cut');
+    assert.equal(Object.hasOwn(mine[3], 'change'), false, 'the marker is not the last line');
+    assert.deepEqual([mine[4].bot, Object.hasOwn(mine[4], 'change')], [false, false], 'another App\'s comment is an ordinary comment');
+    assert.deepEqual([mine[5].bot, mine[5].change], [true, CHANGE], 'the App\'s own account, by its login');
+  } finally { await t.close(); }
+});
+
+test('state: updates counts the held history comments of an entry; latest is the newest 30 across entries, newest first', async () => {
+  const t = await setup();
+  try {
+    t.fake.addComment(6, null, changeComment(CHANGE, { repo: t.fake.repo }), START + 500_000);
+    t.fake.addComment(6, 'visitor-fake', 'On a suggestion, not listed.', START + 500_001);
+    let at = START + 1000;
+    const history = [];
+    for (let i = 0; i < 12; i += 1) {
+      const target = 1 + (i % 3);
+      if (i % 2 === 0) {
+        const change = { ...CHANGE, commit: String(i % 10).repeat(40), fields: [i % 4 === 0 ? 'verdict' : 'notes'], ...(i % 4 === 0 ? { verdict: 'take' } : {}) };
+        t.fake.addComment(target, null, changeComment(change, { repo: t.fake.repo }), at);
+        history.push([target, 'change', at]);
+      } else {
+        t.fake.addComment(target, 'visitor-fake', `\n\nLine ${i} ${'y'.repeat(200)}\nsecond line`, at);
+        history.push([target, 'text', at]);
+      }
+      at += 1000;
+    }
+    for (let i = 0; i < 25; i += 1) { t.fake.addComment(2, 'visitor-fake', `Filler ${i}`, at); at += 1000; }
+    const c = t.client();
+    await settle(t, c);
+    const state = (await c.call('GET', 'state')).json;
+    assert.deepEqual([1, 2, 3].map((n) => state.issues[n].updates), [2, 2, 2]);
+    assert.equal(Object.hasOwn(state.issues[6], 'updates'), false, 'suggestions carry no updates');
+    assert.equal(Object.hasOwn(state.issues[6], 'latest'), false);
+    assert.equal(state.latest.length, 30);
+    const times = state.latest.map((x) => x.createdAt);
+    assert.deepEqual(times, [...times].sort().reverse(), 'newest first');
+    assert.equal(state.latest[0].text, 'Filler 24');
+    assert.ok(state.latest.every((x) => ['engine-service', 'calls-and-events', 'vm-runtime'].includes(x.entry)), 'entries only');
+    assert.ok(state.latest.every((x) => [1, 2, 3].includes(x.n)));
+    assert.ok(state.latest.every((x) => Object.hasOwn(x, 'change') !== Object.hasOwn(x, 'text')), 'change or text');
+    const numbers = new Map([[1, 'engine-service'], [2, 'calls-and-events'], [3, 'vm-runtime']]);
+    assert.ok(state.latest.every((x) => x.entry === numbers.get(x.n)));
+    // Older ones, with the history lines among them, fall off: the 30 newest are 25 fillers and the last 5 of the 12.
+    const rest = state.latest.slice(25);
+    assert.equal(rest.length, 5);
+    assert.ok(rest.some((x) => x.change && x.bot === true), 'a history line shows its change');
+    const long = rest.find((x) => x.text?.startsWith('Line'));
+    assert.ok(long, 'a person comment shows its first non-empty line');
+    assert.equal(long.text.length <= 140, true);
+    assert.equal(long.bot, false);
+    assert.equal(long.author, 'visitor-fake');
+    assert.equal(Object.hasOwn(long, 'change'), false);
   } finally { await t.close(); }
 });
 
@@ -980,6 +1161,41 @@ test('configuration: a non-canonical secret or a bad key is not_configured at th
     assert.deepEqual(login.cookies, []);
     assert.ok(logs.some((line) => line.includes(name)));
   }
+});
+
+test('packaging ships server/ and api/ at any depth and the plan model, and refuses any other file the function loads', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'workshop-repo-'));
+  try {
+    const site = join(root, 'website');
+    const here = new URL('..', import.meta.url).pathname;
+    for (const part of ['server', 'api', join('node_modules', '@vercel')]) await cp(join(here, part), join(site, part), { recursive: true });
+    await cp(new URL('../../tools/plan/model', import.meta.url).pathname, join(root, 'tools', 'plan', 'model'), { recursive: true });
+    await cp(new URL('../../tools/plan/package.json', import.meta.url).pathname, join(root, 'tools', 'plan', 'package.json'));
+    const dist = await fixtureSite();
+    try {
+      const fine = await prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'a', '.vercel', 'output') });
+      assert.ok(fine.files.includes(join('tools', 'plan', 'model', 'status.js')));
+      await mkdir(join(root, 'tools', 'plan', 'read'), { recursive: true });
+      await writeFile(join(root, 'tools', 'plan', 'read', 'x.js'), 'export const x = 1;\n');
+      const config = join(site, 'server', 'config.mjs');
+      const original = await readFile(config, 'utf8');
+      await writeFile(config, `import '../../tools/plan/read/x.js';\n${original}`);
+      await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'b', '.vercel', 'output') }), /outside website\//);
+      await assert.rejects(lstat(join(root, 'b', '.vercel', 'output')), 'nothing is written');
+      // A file deeper in server/ or api/ ships; any other file in website/ is refused by name.
+      await mkdir(join(site, 'server', 'deep'), { recursive: true });
+      await writeFile(join(site, 'server', 'deep', 'y.mjs'), 'export const y = 1;\n');
+      await writeFile(config, `import './deep/y.mjs';\n${original}`);
+      const deep = await prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'c', '.vercel', 'output') });
+      assert.ok(deep.files.includes(join('website', 'server', 'deep', 'y.mjs')));
+      assert.ok((await lstat(join(root, 'c', '.vercel', 'output', 'functions', 'api', 'workshop', 'state.func', 'website', 'server', 'deep', 'y.mjs'))).isFile());
+      await mkdir(join(site, 'lib'), { recursive: true });
+      await writeFile(join(site, 'lib', 'z.mjs'), 'export const z = 1;\n');
+      await writeFile(config, `import '../lib/z.mjs';\n${original}`);
+      await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'd', '.vercel', 'output') }), /lib\/z\.mjs, in website\/ but outside website\/server\/ and website\/api\//);
+      await assert.rejects(lstat(join(root, 'd', '.vercel', 'output')), 'nothing is written');
+    } finally { await rm(dist, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('packaging refuses an output directory that does not end in .vercel/output, and deletes nothing', async () => {
@@ -1014,7 +1230,7 @@ test('API answers forbid framing; route names are own properties only', async ()
 
 test('the local server survives //, an aborted POST body and /api/workshop/constructor, and forbids framing', async () => {
   const site = await fixtureSite();
-  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), featuresFile: join(site, 'features.jsonl'), log: () => {} });
+  const dev = await startDev({ fake: true, port: await freePort(), distDir: join(site, 'dist'), planDir: join(site, 'plan'), log: () => {} });
   const { port } = new URL(dev.origin);
   const raw = (text) => new Promise((resolve) => {
     const socket = netConnect(Number(port), '127.0.0.1', () => socket.write(text));
@@ -1040,39 +1256,103 @@ test('the local server survives //, an aborted POST body and /api/workshop/const
   }
 });
 
+const STAGES = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'];
 const PLAN = [
-  ['e1', 'engine', 'shell', 'take'], ['e2', 'engine', 'shell', null], ['c1', 'computers', 'shell', 'take'],
-  ['p1', 'app', 'loop', 'take'], ['a1', 'agents', 'agent', 'take'], ['a2', 'agents', 'agent', 'later'],
-  ['a3', 'agents', 'agent', 'take'], ['a4', 'agents', 'living', 'take'], ['x1', 'changes', 'loop2', 'take'],
-  ['g1', undefined, 'gone', 'drop'],
-].map(([id, area, stage, verdict], index) => ({ n: index + 1, id, area, stage, verdict, name: id, what: id }));
+  ['a1', 's1', 'take', null, '2026-11-01'], ['a2', 's1', undefined, 'take'], ['b1', 's2', undefined, 'later'], ['b2', 's2', undefined, 'drop'],
+  ['c1', 's3', 'take'], ['c2', 's3', undefined, 'take'], ['d1', 's4', 'take'], ['d2', 's4'],
+  ['e1', 's5', undefined, 'take'], ['e2', 's5', 'later'], ['f1', 's6', undefined, 'take'], ['g1', 's7', 'take'],
+].map(([id, stage, verdict, suggested, built]) => ({
+  id, stage, area: 'engine', needs: [], name: `Name of ${id}`, what: `What ${id} does.`,
+  ...(verdict ? { verdict } : {}), ...(built ? { built } : {}), ...(suggested ? { suggest: { verdict: suggested, why: 'Because.' } } : {}),
+}));
 
-test('progress: taken entries of engine, computers and app built, two taken agents entries being built', async () => {
+test('progressOf: the first five stages carry their verdicts, the first two taken not built are being built', () => {
+  assert.deepEqual(STAGES.slice(0, 5), progressOf(PLAN).stages);
   const plan = progressOf(PLAN);
-  assert.equal(plan.by, 'area');
-  assert.deepEqual([...plan.built], ['e1', 'c1', 'p1']);
-  assert.deepEqual([...plan.building], ['a1', 'a3']);
-  assert.match(progressLine(plan), /^built: the taken entries of the areas engine, computers, app \(3\); being built: 2 of agents\.$/);
+  const verdicts = Object.fromEntries(plan.verdicts);
+  assert.deepEqual(verdicts, { a1: 'take', a2: 'take', b1: 'later', b2: 'drop', c1: 'take', c2: 'take', d1: 'take', e1: 'take', e2: 'later', g1: 'take' });
+  assert.equal(plan.verdicts.has('f1'), false, 'a suggestion in a later stage is not applied');
+  assert.equal(plan.verdicts.get('g1'), 'take', 'a file verdict counts in any stage');
+  assert.deepEqual([...plan.built], ['a1'], 'built comes only from the file');
+  assert.deepEqual([...plan.building], ['a2', 'c1']);
+  assert.match(progressLine(plan), /^Verdicts on the stages s1, s2, s3, s4, s5: 7 taken, 2 later, 1 dropped; being built: 2; built: 1\.$/);
+});
 
+test('seedDemo with progress: verdict labels, building, closed entries and a history comment of every kind', async () => {
   const t = await setup({ seed: false });
   try {
-    seedDemo(t.fake, PLAN, { progress: true });
-    const issues = Object.values((await t.client().call('GET', 'state')).json.issues).filter((i) => i.kind === 'entry');
-    const by = Object.fromEntries(issues.map((i) => [i.entry, i]));
-    for (const id of ['e1', 'c1', 'p1']) assert.deepEqual([by[id].state, by[id].reason], ['closed', 'completed'], id);
-    assert.deepEqual(issues.filter((i) => i.building).map((i) => i.entry).sort(), ['a1', 'a3']);
-    assert.deepEqual([by.a2.verdict, by.a2.state, by.e2.verdict, by.x1.state], ['later', 'open', null, 'open']);
-    assert.deepEqual([by.g1.verdict, by.g1.reason], ['drop', 'not_planned']);
+    const seeded = seedDemo(t.fake, PLAN, { progress: true, now: START });
+    assert.deepEqual([...seeded.progress.building], ['a2', 'c1']);
+    const c = t.client();
+    const state = (await c.call('GET', 'state')).json;
+    const entries = Object.values(state.issues).filter((i) => i.kind === 'entry');
+    const by = Object.fromEntries(entries.map((i) => [i.entry, i]));
+    assert.deepEqual(Object.keys(by).sort(), PLAN.map((f) => f.id).sort());
+    assert.deepEqual([by.a1.state, by.a1.reason], ['closed', 'completed']);
+    assert.deepEqual(entries.filter((i) => i.building).map((i) => i.entry).sort(), ['a2', 'c1']);
+    assert.deepEqual([by.b1.verdict, by.b2.verdict, by.b2.reason, by.d2.verdict, by.f1.verdict, by.g1.verdict], ['later', 'drop', 'not_planned', null, null, 'take']);
+    assert.ok(state.latest.length > 5 && state.latest.length <= 30);
+
+    // Every kind of history comment is there, read through the model.
+    const changes = [];
+    const people = new Set();
+    for (const issue of t.fake.state.issues.values()) {
+      for (const comment of issue.comments) {
+        const change = comment.user.type === 'Bot' ? readChange(comment.body) : null;
+        if (change) changes.push({ number: issue.number, change });
+        else if (comment.user.type !== 'Bot') people.add(comment.user.login);
+      }
+    }
+    const has = (test) => changes.some(({ change }) => test(change));
+    for (const verdict of ['take', 'later', 'drop', null]) assert.ok(has((x) => x.fields.includes('verdict') && x.verdict === verdict), `verdict ${verdict}`);
+    assert.ok(has((x) => x.fields.includes('built') && x.built), 'built');
+    assert.ok(has((x) => x.fields.includes('name') && x.fields.includes('what')), 'name and what');
+    assert.ok(has((x) => x.fields.includes('notes')), 'notes');
+    assert.ok(has((x) => x.fields.includes('needs')), 'a plain field');
+    assert.ok(people.size >= 3, 'people comment too');
+    for (const { number, change } of changes.filter(({ change }) => change.fields.includes('name'))) {
+      const id = [...Object.entries(state.issues)].find(([n]) => Number(n) === number)[1].entry;
+      for (const commit of [change.before, change.commit]) {
+        const raw = await fetch(`${t.fake.rawUrl}/${t.fake.repo}/${commit}/plan/features/${id}.json`);
+        assert.equal(raw.status, 200, `the file at ${commit.slice(0, 7)}`);
+        assert.ok(JSON.parse(await raw.text()).name);
+      }
+      const [before, after] = await Promise.all([change.before, change.commit].map(async (commit) => JSON.parse(await (await fetch(`${t.fake.rawUrl}/${t.fake.repo}/${commit}/plan/features/${id}.json`)).text())));
+      assert.notDeepEqual(before, after, 'the before and after differ');
+    }
+    // Every history line agrees with the entry's state: Built only on a built entry, the last verdict line is
+    // the verdict it shows.
+    const entryOf = (number) => state.issues[number];
+    for (const { number, change } of changes.filter(({ change }) => change.fields.includes('built'))) {
+      assert.deepEqual([entryOf(number).state, entryOf(number).reason], ['closed', 'completed'], `built line on ${entryOf(number).entry}`);
+    }
+    const lastVerdict = new Map();
+    for (const { number, change } of changes) if (change.fields.includes('verdict')) lastVerdict.set(number, change.verdict);
+    for (const [number, verdict] of lastVerdict) assert.equal(entryOf(number).verdict, verdict, `verdict line on ${entryOf(number).entry}`);
+    for (const entry of entries) {
+      const number = Number(Object.keys(state.issues).find((n) => state.issues[n] === entry));
+      if (entry.verdict) assert.equal(lastVerdict.get(number), entry.verdict, `${entry.entry} shows a verdict its lines give`);
+    }
+    // Entries with history say so in the state.
+    assert.ok(entries.some((i) => i.updates > 0));
   } finally { await t.close(); }
 });
 
-test('progress without areas goes by stage: the first three built, two taken of the fourth being built', () => {
-  const plan = progressOf(PLAN.map(({ area, ...rest }) => rest));
-  assert.equal(plan.by, 'stage');
-  assert.deepEqual(plan.builtGroups, ['shell', 'loop', 'agent']);
-  assert.deepEqual([...plan.built], ['e1', 'c1', 'p1', 'a1', 'a3']);
-  assert.deepEqual([...plan.building], ['a4']);
-  assert.match(progressLine(plan), /^No entry has an area, so progress goes by stage: .*stages shell, loop, agent/);
+test('the fake\'s raw endpoint serves a file at a commit from any origin, and 404 for anything else', async () => {
+  const t = await setup({ seed: false });
+  try {
+    t.fake.setRaw(SHA_A, 'plan/features/x.json', '{"name":"X"}\n');
+    const ok = await fetch(`${t.fake.rawUrl}/${t.fake.repo}/${SHA_A}/plan/features/x.json`);
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers.get('access-control-allow-origin'), '*');
+    assert.equal(await ok.text(), '{"name":"X"}\n');
+    for (const path of [`${SHA_B}/plan/features/x.json`, `${SHA_A}/plan/features/y.json`]) {
+      const missing = await fetch(`${t.fake.rawUrl}/${t.fake.repo}/${path}`);
+      assert.equal(missing.status, 404, path);
+      assert.equal(missing.headers.get('access-control-allow-origin'), '*');
+    }
+    assert.notEqual((await fetch(`${t.fake.rawUrl}/other/repo/${SHA_A}/plan/features/x.json`)).status, 200, 'only this repository');
+  } finally { await t.close(); }
 });
 
 test('without progress the demo seed keeps its own verdicts and no entry is being built', async () => {
@@ -1081,6 +1361,7 @@ test('without progress the demo seed keeps its own verdicts and no entry is bein
     assert.equal(seedDemo(t.fake, PLAN).progress, null);
     const issues = Object.values((await t.client().call('GET', 'state')).json.issues);
     assert.equal(issues.some((i) => Object.hasOwn(i, 'building')), false);
-    assert.equal(issues.filter((i) => i.kind === 'entry' && i.state === 'closed').length, 0);
+    assert.deepEqual(issues.filter((i) => i.kind === 'entry' && i.state === 'closed').map((i) => i.entry), ['a1'], 'only the entry its file says is built');
+    assert.equal(issues.some((i) => i.updates), false);
   } finally { await t.close(); }
 });

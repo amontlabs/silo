@@ -1,12 +1,12 @@
 // How GitHub issues and comments become Workshop data: kinds, verdicts, the
-// entry marker, and the cuts that bound every answer.
+// markers, and the cuts that bound every answer. Names, labels and markers come
+// from the plan's model (tools/plan/model).
+import { BUILDING_LABEL, ENTRY_LABEL, labelVerdict, readChange, readEntryMarker, SUGGESTION_LABEL, VERDICTS, withoutMarkers } from '../../tools/plan/model/index.js';
 
-export const LABELS = { entry: 'workshop:entry', decision: 'workshop:decision', suggestion: 'workshop:suggestion' };
-export const VERDICTS = ['take', 'refine', 'later', 'drop'];
-export const BUILDING_LABEL = 'workshop:building';
+export { BUILDING_LABEL, VERDICTS };
+export const LABELS = { entry: ENTRY_LABEL, suggestion: SUGGESTION_LABEL };
 export const CUTS = { body: 20_000, comment: 5000 };
 const KIND_BY_LABEL = new Map(Object.entries(LABELS).map(([kind, label]) => [label, kind]));
-const ENTRY_ID = /^[A-Za-z0-9_.-]{1,100}$/;
 
 const DIRECTION_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
 const CONTROLS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
@@ -30,26 +30,17 @@ export function cut(text, limit) {
   return fresh(text.slice(0, end));
 }
 
-function markerId(line) {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith('<!--') || !trimmed.endsWith('-->') || trimmed.length < 7) return null;
-  const inner = trimmed.slice(4, -3).trim();
-  if (!inner.startsWith('silo-entry:')) return null;
-  const id = inner.slice('silo-entry:'.length).trim();
-  return ENTRY_ID.test(id) ? id : '';
+// The entry id of an issue body and the body without its markers, both read by the model on the whole body; the text is cut after.
+export function readBody(raw) {
+  return { entry: readEntryMarker(raw), text: fresh(clean(cut(withoutMarkers(raw), CUTS.body))) };
 }
 
-// The entry id of an issue body, and the body without its marker line(s), in linear time.
-export function readBody(raw) {
-  const body = cut(raw || '', CUTS.body);
-  let entry = null;
-  const kept = [];
-  for (const line of body.split('\n')) {
-    const id = markerId(line);
-    if (id === null) kept.push(line);
-    else if (id && entry === null) entry = id;
-  }
-  return { entry, text: fresh(clean(kept.join('\n').trimEnd())) };
+// Whether a comment was written by the Workshop's own App: made through the App with the configured id, or by
+// its `<slug>[bot]` account. `app` is `{ id, login }`; either may be null while unknown.
+export function byApp(comment, app) {
+  const through = comment.performed_via_github_app?.id;
+  if (app?.id && through !== undefined && through !== null && String(through) === String(app.id)) return true;
+  return Boolean(app?.login) && comment.user?.login === app.login;
 }
 
 export function labelNames(issue) {
@@ -64,8 +55,8 @@ export function kindOf(issue) {
 }
 
 export function verdictOf(issue) {
-  const labels = labelNames(issue);
-  for (const verdict of VERDICTS) if (labels.includes(`verdict:${verdict}`)) return verdict;
+  const verdicts = new Set(labelNames(issue).map(labelVerdict).filter(Boolean));
+  for (const verdict of VERDICTS) if (verdicts.has(verdict)) return verdict;
   return null;
 }
 
@@ -73,18 +64,22 @@ export function reasonOf(issue) {
   return issue.state === 'closed' && (issue.state_reason === 'completed' || issue.state_reason === 'not_planned') ? issue.state_reason : null;
 }
 
-// A comment as `issue` returns it.
-export function commentOf(comment) {
+// A comment as `issue` returns it. Only the App's comments can be history lines; their marker is read on the
+// whole body, before the text is cut.
+export function commentOf(comment, app) {
   const full = comment.body || '';
   const text = fresh(clean(cut(full, CUTS.comment)));
+  const bot = byApp(comment, app);
+  const change = bot ? readChange(full) : null;
   return {
     id: comment.id,
     author: fresh(clean(comment.user?.login ?? 'ghost', { oneLine: true })),
     avatar: comment.user?.avatar_url ?? null,
-    bot: comment.user?.type === 'Bot',
+    bot,
     createdAt: comment.created_at,
     text,
     ...(full.length > CUTS.comment ? { cut: true } : {}),
+    ...(change ? { change } : {}),
   };
 }
 

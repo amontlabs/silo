@@ -37,6 +37,8 @@ export const LABELS = Object.freeze([
 export const DEFAULT_REPO = 'amontlabs/silo';
 export const DEFAULT_SITE = 'https://silo.amontlabs.com';
 export const DEFAULT_WEB = 'https://github.com';
+/** Where a file of the repository is read at a commit, as plain text, from any origin. */
+export const DEFAULT_RAW = 'https://raw.githubusercontent.com';
 
 /** Key orders of the canonical form, per shape. */
 export const FEATURE_KEYS = Object.freeze(['name', 'what', 'area', 'needs', 'surfaces', 'suggest', 'suggested_in', 'verdict', 'built']);

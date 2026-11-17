@@ -1,21 +1,33 @@
-// The Workshop's model: the plan built into the page, merged with the live state from GitHub.
+// The Workshop's model: the plan built into the page, merged with the live state from GitHub. Names, the
+// status rule and the areas' states come from the plan's model (tools/plan/model); this adds the rows.
+import { areaGroups, featureStatus } from '../../../tools/plan/model/index.js';
+import type { Change } from '../../../tools/plan/model/markers.js';
+import type { Counts } from '../../../tools/plan/model/areas.js';
+import type { Status, Verdict } from '../../../tools/plan/model/status.js';
 
-export type Verdict = 'take' | 'refine' | 'later' | 'drop';
+export { countRows, statusLine, stateWords, VERDICTS } from '../../../tools/plan/model/index.js';
+export type { Change, Counts, Status, Verdict };
 
 export interface Feature {
-  n: number;
   id: string;
-  stage: string;
-  /** The part of the product it belongs to; null for the old things not carried over. */
-  area: string | null;
   name: string;
   what: string;
-  suggest: string | null;
-  why: string | null;
+  /** The part of the product it belongs to; null for the old things not carried over. */
+  area: string | null;
+  needs: string[];
+  stage: string;
+  /** Build order, from 1. */
+  position: number;
+  suggest: { verdict: Verdict | null; why: string | null } | null;
   verdict: Verdict | null;
-  issue: number | null;
-  recordings: string[];
+  /** The day it was built, `YYYY-MM-DD`. */
+  built: string | null;
+  /** Whether it has notes; their text is a chunk of its own (`virtual:workshop-notes`), loaded on demand. */
+  notes: boolean;
 }
+
+/** The notes of the features that have some, Markdown, by feature id. */
+export type Notes = Record<string, string>;
 
 export interface Stage {
   id: string;
@@ -29,23 +41,24 @@ export interface Area {
   line: string;
 }
 
-export interface DecidedLine {
-  index: number;
+/** What the owner settled for the whole product (`about`: the areas it is about; null for all). */
+export interface Decision {
+  id: string;
   date: string;
-  who: string;
   text: string;
-  issue: number | null;
+  about: string[] | null;
 }
 
 export interface BuildData {
   features: Feature[];
   areas: Area[];
   stages: Stage[];
-  decided: DecidedLine[];
+  /** Newest first. */
+  decisions: Decision[];
 }
 
 export interface LiveIssue {
-  kind: 'entry' | 'decision' | 'suggestion';
+  kind: 'entry' | 'suggestion';
   entry: string | null;
   title: string;
   state: 'open' | 'closed';
@@ -53,23 +66,35 @@ export interface LiveIssue {
   verdict: Verdict | null;
   up: number;
   comments: number;
+  /** How many of its comments are history lines. */
+  updates?: number;
   author: string;
   bot: boolean;
   createdAt: string;
   closedAt: string | null;
-  /** Open and labelled `workshop:building`: the work is under way. */
+  /** Open, taken and labelled `workshop:building`: the work is under way. */
   building?: boolean;
+}
+
+/** One of the newest comments or history lines across the entries. */
+export interface LiveLatest {
+  n: number;
+  entry: string;
+  author: string;
+  bot: boolean;
+  createdAt: string;
+  text?: string;
+  change?: Change;
 }
 
 export interface LiveState {
   repo: string;
   fetchedAt: string;
   issues: Record<string, LiveIssue>;
+  latest?: LiveLatest[];
 }
 
-export type Status = 'undecided' | 'refine' | 'planned' | 'later' | 'building' | 'built' | 'dropped';
-
-export type RowKind = 'entry' | 'suggestion' | 'decision' | 'decided';
+export type RowKind = 'entry' | 'suggestion' | 'decided';
 
 export interface Row {
   key: string;
@@ -78,81 +103,74 @@ export interface Row {
   what: string | null;
   issue: number | null;
   status: Status;
-  carried: boolean;
-  fileVerdict: Verdict | null;
   stage: string | null;
   area: string | null;
   /** Build order, for entries. */
   n: number | null;
-  suggest: string | null;
-  why: string | null;
-  recordings: string[];
+  suggest: Feature['suggest'];
+  /** Whether the entry has notes. */
+  notes: boolean;
+  /** The day the file says it was built. */
+  built: string | null;
+  /** The decisions about its area, for entries; the areas it is about, for decisions. */
+  decisions: Decision[];
+  about: string[] | null;
   author: string | null;
   up: number | null;
+  /** People's comments: the issue's comments less its history lines. */
   comments: number | null;
+  updates: number;
   date: string | null;
-  who: string | null;
   closedAt: string | null;
 }
 
-/** The row name of a decided line: its first sentence or clause. */
+export interface LatestItem {
+  key: string;
+  row: Row;
+  author: string;
+  createdAt: string;
+  text: string | null;
+  change: Change | null;
+}
+
+/** The row name of a decision: its first sentence or clause. */
 export function decisionTitle(text: string): string {
   return text.split(/(?<=[.:])\s/)[0].replace(/[.:]$/, '').trim();
 }
 
-function statusFromVerdict(verdict: Verdict | null): Status {
-  switch (verdict) {
-    case 'take': return 'planned';
-    case 'later': return 'later';
-    case 'drop': return 'dropped';
-    case 'refine': return 'refine';
-    default: return 'undecided';
-  }
+/** A suggestion: closed as not planned is dropped, closed as completed is built, else its verdict label. */
+function suggestionStatus(live: LiveIssue): Status {
+  if (live.state === 'closed' && live.reason === 'completed') return 'built';
+  if (live.state === 'closed' && live.reason === 'not_planned') return 'dropped';
+  return featureStatus({}, { verdict: live.verdict, building: false });
 }
 
-/** A live issue decides the status; a file verdict without a live one is carried over. */
-export function issueStatus(live: LiveIssue | undefined, fileVerdict: Verdict | null): { status: Status; carried: boolean } {
-  if (live) {
-    if (live.state === 'closed' && live.reason === 'completed') return { status: 'built', carried: false };
-    if (live.verdict === 'drop' || (live.state === 'closed' && live.reason === 'not_planned')) return { status: 'dropped', carried: false };
-    if (live.verdict) return building(live, { status: statusFromVerdict(live.verdict), carried: false });
-  }
-  return building(live, { status: statusFromVerdict(fileVerdict), carried: fileVerdict !== null });
-}
-
-/** A planned entry whose open issue says the work is under way is being built. */
-function building(live: LiveIssue | undefined, result: { status: Status; carried: boolean }) {
-  return result.status === 'planned' && live?.state === 'open' && live.building === true ? { ...result, status: 'building' as const } : result;
+/** An entry: the status rule of the model, from its file and its live issue. */
+export function entryStatus(feature: Pick<Feature, 'verdict' | 'built'>, live: LiveIssue | undefined): Status {
+  return featureStatus(
+    { ...(feature.verdict ? { verdict: feature.verdict } : {}), ...(feature.built ? { built: feature.built } : {}) },
+    live ? { verdict: live.verdict, building: live.building === true } : null,
+  );
 }
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, name, what: null, issue: null, status: 'undecided', carried: false, fileVerdict: null, stage: null, area: null, n: null,
-    suggest: null, why: null, recordings: [], author: null, up: null, comments: null, date: null, who: null, closedAt: null,
+    key, kind, name, what: null, issue: null, status: 'undecided', stage: null, area: null, n: null, suggest: null, notes: false, built: null,
+    decisions: [], about: null, author: null, up: null, comments: null, updates: 0, date: null, closedAt: null,
   };
 }
 
 export type AreaState = 'now' | 'done' | 'next' | 'planned' | 'open';
 
-export interface Counts {
-  built: number;
-  building: number;
-  planned: number;
-  later: number;
-  /** Undecided or being refined. */
-  undecided: number;
-  dropped: number;
-}
-
 export interface AreaGroup {
   area: Area;
-  /** Position in docs/product/areas.json, from 1. */
+  /** Position in plan/areas.json, from 1. */
   number: number;
   /** Its entries in build order, dropped ones included. */
   rows: Row[];
   counts: Counts;
   state: AreaState;
-  /** Holds an entry of the stages up to the starter, so it sits in the first band of the sheet. */
+  /** Holds an entry of the starter's stages, so it sits in the first band of the sheet. */
   first: boolean;
 }
 
@@ -162,76 +180,26 @@ export interface Plan {
   left: Row[];
   /** Suggestions by votes; dropped ones last. */
   suggestions: Row[];
-  openDecisions: Row[];
+  /** The owner's decisions, newest first. */
   decided: Row[];
+  /** The newest comments and history lines across the entries, newest first. */
+  latest: LatestItem[];
 }
-
-/** The last stage of the starter: areas with an entry up to it come first in the sheet. */
-export const STARTER_LAST = 'living';
 
 export function isDecided(row: Row): boolean {
-  return row.status !== 'undecided' && row.status !== 'refine';
+  return row.status !== 'undecided';
 }
 
-export function countRows(rows: Row[]): Counts {
-  const counts: Counts = { built: 0, building: 0, planned: 0, later: 0, undecided: 0, dropped: 0 };
-  for (const row of rows) {
-    if (row.status === 'refine') counts.undecided += 1;
-    else counts[row.status] += 1;
-  }
-  return counts;
+/** The decisions about a feature: those whose `about` names its area (`about` holds area ids only). */
+export function decisionsAbout(decisions: Decision[], feature: Pick<Feature, 'area'>): Decision[] {
+  return decisions.filter((decision) => feature.area !== null && decision.about?.includes(feature.area) === true);
 }
 
-/**
- * Each area's state, first match wins: now (an entry is building), done (something built, nothing planned),
- * next (the area holding the lowest-numbered planned entry among areas not being built; at most one),
- * planned (an entry is planned), open (not decided yet).
- */
-export function areaStates(groups: { rows: Row[]; counts: Counts }[]): AreaState[] {
-  const states: AreaState[] = groups.map(({ counts }) => (counts.building ? 'now' : counts.built && !counts.planned ? 'done' : counts.planned ? 'planned' : 'open'));
-  let next = -1;
-  let lowest = Infinity;
-  groups.forEach(({ rows }, index) => {
-    if (states[index] === 'now') return;
-    for (const row of rows) {
-      if (row.status === 'planned' && row.n !== null && row.n < lowest) {
-        lowest = row.n;
-        next = index;
-      }
-    }
-  });
-  if (next !== -1) states[next] = 'next';
-  return states;
-}
-
-function listNames(names: string[]): string {
-  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
-
-/** Areas whose name reads with "the" in a sentence. */
-const WITH_THE = new Set(['engine']);
-
-/** The one line under the title: where the build is. */
-export function statusLine(groups: AreaGroup[]): string {
-  const now = groups.filter((group) => group.state === 'now').map((group) => group.area.title);
-  const next = groups.find((group) => group.state === 'next');
-  const built = groups.some((group) => group.counts.built > 0);
-  if (now.length) return `Building ${listNames(now)}.${next ? ` ${next.area.title} is next.` : ''}`;
-  if (!next) return '';
-  if (built) return `${next.area.title} is next.`;
-  return `Starting with ${WITH_THE.has(next.area.id) ? 'the ' : ''}${next.area.title}.`;
-}
-
-/** The few words on a part of the map or a tile. */
-export function stateWords(group: Pick<AreaGroup, 'state' | 'counts'>): string {
-  const { built, building, planned } = group.counts;
-  switch (group.state) {
-    case 'done': return 'done';
-    case 'now': return `now · ${built}/${built + building + planned}`;
-    case 'next': return 'next';
-    case 'planned': return built ? `${built}/${built + planned} built` : `${planned} planned`;
-    default: return '';
-  }
+/** The areas with their features in build order, counts and states: the model's `areaGroups` on the page's data. */
+export function groupAreas(data: BuildData, statusOf: (id: string) => Status) {
+  const features = Object.fromEntries(data.features.map((feature) => [feature.id, { ...feature, area: feature.area ?? undefined }]));
+  const stages = data.stages.map((stage) => ({ id: stage.id, features: data.features.filter((feature) => feature.stage === stage.id).map((feature) => feature.id) }));
+  return areaGroups({ areas: data.areas, stages, features }, statusOf);
 }
 
 export function buildPlan(data: BuildData, live: LiveState | null): Plan {
@@ -243,88 +211,70 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
   const counts = (row: Row) => {
     const issue = row.issue === null ? undefined : issues[row.issue];
     if (issue) {
+      row.updates = Math.max(0, Math.min(issue.updates ?? 0, issue.comments));
       row.up = issue.up;
-      row.comments = issue.comments;
+      row.comments = issue.comments - row.updates;
       row.closedAt = issue.closedAt;
     }
   };
 
-  const byArea = new Map<string, Row[]>();
   const unplaced: Row[] = [];
+  const entries = new Map<string, Row>();
   for (const feature of data.features) {
     const row = baseRow(`entry-${feature.id}`, 'entry', feature.name);
     row.what = feature.what;
     row.stage = feature.stage;
     row.area = feature.area;
-    row.n = feature.n;
+    row.n = feature.position;
     row.suggest = feature.suggest;
-    row.why = feature.why;
-    row.recordings = feature.recordings;
-    row.fileVerdict = feature.verdict;
-    row.issue = byEntry.get(feature.id) ?? feature.issue;
-    Object.assign(row, issueStatus(row.issue === null ? undefined : issues[row.issue], feature.verdict));
+    row.notes = feature.notes;
+    row.built = feature.built;
+    row.decisions = decisionsAbout(data.decisions, feature);
+    row.issue = byEntry.get(feature.id) ?? null;
+    row.status = entryStatus(feature, row.issue === null ? undefined : issues[row.issue]);
     counts(row);
+    entries.set(feature.id, row);
     if (feature.area === null) unplaced.push(row);
-    else byArea.set(feature.area, [...(byArea.get(feature.area) ?? []), row]);
   }
 
-  const stageIndex = new Map(data.stages.map((stage, index) => [stage.id, index]));
-  const starterEnd = stageIndex.get(STARTER_LAST) ?? Infinity;
-  const groups = data.areas.map((area, index) => {
-    const rows = (byArea.get(area.id) ?? []).sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
-    const first = rows.some((row) => (stageIndex.get(row.stage ?? '') ?? Infinity) <= starterEnd);
-    return { area, number: index + 1, rows, counts: countRows(rows), state: 'open' as AreaState, first };
-  });
-  areaStates(groups).forEach((state, index) => { groups[index].state = state; });
+  const groups: AreaGroup[] = groupAreas(data, (id) => (entries.get(id) as Row).status).map((group) => ({
+    ...group,
+    rows: group.rows.map((row) => entries.get(row.id) as Row),
+  }));
 
   const suggestions: Row[] = [];
-  const openDecisions: Row[] = [];
-  const closedDecisions: Row[] = [];
-  const referenced = new Set(data.decided.flatMap((line) => (line.issue === null ? [] : [line.issue])));
   for (const [key, issue] of Object.entries(issues)) {
+    if (issue.kind !== 'suggestion') continue;
     const number = Number(key);
-    if (issue.kind === 'suggestion') {
-      const row = baseRow(`issue-${number}`, 'suggestion', issue.title);
-      row.issue = number;
-      row.author = issue.author;
-      row.date = issue.createdAt;
-      Object.assign(row, issueStatus(issue, null));
-      counts(row);
-      suggestions.push(row);
-    } else if (issue.kind === 'decision' && !referenced.has(number)) {
-      const row = baseRow(`issue-${number}`, 'decision', issue.title);
-      row.issue = number;
-      row.date = issue.createdAt;
-      counts(row);
-      if (issue.state === 'open') openDecisions.push(row);
-      else if (issue.reason === 'completed') {
-        row.status = 'planned';
-        row.date = issue.closedAt ?? issue.createdAt;
-        closedDecisions.push(row);
-      }
-    }
+    const row = baseRow(`issue-${number}`, 'suggestion', issue.title);
+    row.issue = number;
+    row.author = issue.author;
+    row.date = issue.createdAt;
+    row.status = suggestionStatus(issue);
+    counts(row);
+    suggestions.push(row);
   }
   const dropped = (row: Row) => (row.status === 'dropped' ? 1 : 0);
   suggestions.sort((a, b) => dropped(a) - dropped(b) || (b.up ?? 0) - (a.up ?? 0) || (a.issue ?? 0) - (b.issue ?? 0));
-  openDecisions.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
-  closedDecisions.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
 
-  const decided = [
-    ...closedDecisions,
-    ...data.decided.map((line) => {
-      const row = baseRow(line.issue === null ? `decided-${line.index}` : `issue-${line.issue}`, 'decided', decisionTitle(line.text));
-      row.what = line.text;
-      row.issue = line.issue;
-      row.status = 'planned';
-      row.date = line.date;
-      row.who = line.who;
-      counts(row);
-      return row;
-    }),
-  ];
+  const decided = data.decisions.map((decision) => {
+    const row = baseRow(`decided-${decision.id}`, 'decided', decisionTitle(decision.text));
+    row.what = decision.text;
+    row.status = 'planned';
+    row.date = decision.date;
+    row.about = decision.about;
+    return row;
+  });
+
+  const latest: LatestItem[] = [];
+  for (const [index, item] of (live?.latest ?? []).entries()) {
+    const row = entries.get(item.entry);
+    if (!row || row.issue !== item.n) continue;
+    latest.push({ key: `latest-${index}`, row, author: item.author, createdAt: item.createdAt, text: item.text ?? null, change: item.change ?? null });
+  }
 
   const left = [...unplaced, ...groups.flatMap((group) => group.rows.filter((row) => row.status === 'dropped')).sort((a, b) => (a.n ?? 0) - (b.n ?? 0))];
-  return { areas: groups, left, suggestions, openDecisions, decided };
+  return { areas: groups, left, suggestions, decided, latest };
 }
 
 /** Every row once: the areas' entries, those left without an area, suggestions, then decisions. */
@@ -333,25 +283,45 @@ export function allRows(plan: Plan): Row[] {
     ...plan.areas.flatMap((group) => group.rows),
     ...plan.left.filter((row) => row.area === null),
     ...plan.suggestions,
-    ...plan.openDecisions,
     ...plan.decided,
   ];
 }
 
-/** An entry the owner still has to decide: undecided or being refined, with a real issue to record the verdict on. */
+/** An entry the owner still has to decide, with a real issue to record the verdict on. The server records verdicts on entries only. */
 export function awaitsVerdict(row: Row): boolean {
-  return row.kind === 'entry' && !isDecided(row) && !row.carried && row.issue !== null && row.issue > 0;
+  return row.kind === 'entry' && row.status === 'undecided' && row.issue !== null && row.issue > 0;
 }
 
-/** A verdict from the file that the owner has not confirmed on GitHub yet. */
-export function awaitsConfirm(row: Row): boolean {
-  return row.kind === 'entry' && row.carried && row.fileVerdict !== null && row.status !== 'built' && row.issue !== null && row.issue > 0;
+export const needsOwner = awaitsVerdict;
+
+const PHRASES: Record<string, string> = {
+  name: 'Text changed',
+  what: 'Text changed',
+  notes: 'Notes edited',
+  needs: 'Needs changed',
+  area: 'Moved to another part',
+  suggest: 'Suggestion changed',
+  surfaces: 'Surfaces changed',
+  built: 'Built',
+};
+
+/** What a history line says changed, one phrase per change in the order of its fields; `suggested_in` says nothing. */
+export function changeWords(change: Change): string[] {
+  const words: string[] = [];
+  for (const field of change.fields) {
+    const word = field === 'verdict'
+      ? change.verdict === 'take' ? 'Taken' : change.verdict === 'drop' ? 'Dropped' : change.verdict === 'later' ? 'Later' : 'Verdict cleared'
+      : PHRASES[field];
+    if (word && !words.includes(word)) words.push(word);
+  }
+  return words;
 }
 
-/** An entry the owner still has to act on: to decide, or to confirm. The server records verdicts on entries only. */
-export function needsOwner(row: Row): boolean {
-  return awaitsVerdict(row) || awaitsConfirm(row);
-}
+/** The phrases of a change on one line. */
+export const changeLine = (change: Change) => changeWords(change).join(' · ');
+
+/** Whether a change touched the text a person can compare: `name` or `what`. */
+export const changesText = (change: Change) => change.fields.includes('name') || change.fields.includes('what');
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

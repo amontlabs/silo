@@ -1,208 +1,118 @@
-// The plan as the repository holds it: docs/product/features.jsonl, areas.json, stages.json and DECISIONS.md.
-// Read and checked at build time; a malformed line stops the build with its file and line.
-import { existsSync, readFileSync } from 'node:fs';
+// The plan as the repository holds it, in plan/: read with tools/plan/read and checked with tools/plan/check
+// at build time. Any error stops the build with the file, the field and the fix.
 import { join } from 'node:path';
+import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
+import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
 import { checkLayout, LayoutError } from './map.ts';
-import type { Area, BuildData, DecidedLine, Feature, Stage, Verdict } from './plan.ts';
+import type { BuildData, Decision, Feature, Notes, Verdict } from './plan.ts';
 
-export const FEATURES_FILE = 'docs/product/features.jsonl';
-export const STAGES_FILE = 'docs/product/stages.json';
-export const AREAS_FILE = 'docs/product/areas.json';
-/** Old things not carried over: the only entries without an area. */
-export const GONE_STAGE = 'gone';
-export const DECISIONS_FILE = 'docs/product/DECISIONS.md';
-
-const VERDICTS = new Set(['take', 'refine', 'later', 'drop']);
-const RECORDING = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(mp4|webm|mov|m4v)$/;
-const DECISION_LINE = /^- (\d{4}-\d{2}-\d{2}) · (.+?) · (.+)$/;
+export const PLAN_DIR = 'plan';
 
 export class PlanFileError extends Error {}
 
-function fail(file: string, line: number | null, problem: string): never {
-  throw new PlanFileError(`${file}${line === null ? '' : `:${line}`}: ${problem}`);
+interface RawFeature {
+  name: string;
+  what: string;
+  area?: string;
+  needs?: string[];
+  suggest?: { verdict?: string; why?: string };
+  verdict?: string;
+  built?: string;
+  stage: string;
+  position: number;
+  notes: string | null;
 }
 
-function text(value: unknown): value is string {
-  return typeof value === 'string' && value.trim() !== '';
+interface RawPlan {
+  areas: { id: string; title: string; line: string }[];
+  stages: { id: string; title: string; line: string; features: string[] }[];
+  features: Record<string, RawFeature>;
+  decisions: { id: string; date: string; text: string; about?: string[] }[];
 }
 
-export function parseStages(source: string, file = STAGES_FILE): Stage[] {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(source);
-  } catch (error) {
-    fail(file, null, `not valid JSON (${(error as Error).message})`);
-  }
-  if (!Array.isArray(raw)) fail(file, null, 'expected a list of stages');
-  const seen = new Set<string>();
-  return raw.map((item: unknown, index) => {
-    const stage = item as Record<string, unknown> | null;
-    const where = `stage ${index + 1}`;
-    if (!stage || typeof stage !== 'object') fail(file, null, `${where} is not an object`);
-    if (!text(stage.id)) fail(file, null, `${where} has no id`);
-    if (!text(stage.title)) fail(file, null, `${where} (${stage.id}) has no title`);
-    if (stage.line !== undefined && typeof stage.line !== 'string') fail(file, null, `${where} (${stage.id}) has a line that is not text`);
-    if (seen.has(stage.id)) fail(file, null, `${where} repeats the id ${stage.id}`);
-    seen.add(stage.id);
-    return { id: stage.id, title: stage.title, line: typeof stage.line === 'string' ? stage.line : '' };
-  });
+const hasNotes = (raw: RawFeature) => typeof raw.notes === 'string' && raw.notes.trim() !== '';
+
+/** The notes of the features that have some, by id: the chunk the page loads when a person reaches "Notes". */
+export function toNotes(plan: RawPlan): Notes {
+  const notes: Notes = {};
+  for (const [id, raw] of Object.entries(plan.features)) if (hasNotes(raw)) notes[id] = raw.notes as string;
+  return notes;
 }
 
-/** The line of `"id": "<id>"` in a JSON file, the `nth` time it appears; null when it cannot be found. */
-function lineOfId(source: string, id: string, nth = 1): number | null {
-  const pattern = new RegExp(`"id"\\s*:\\s*${JSON.stringify(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g');
-  let seen = 0;
-  for (const match of source.matchAll(pattern)) {
-    seen += 1;
-    if (seen === nth) return source.slice(0, match.index).split('\n').length;
-  }
-  return null;
-}
-
-export function parseAreas(source: string, file = AREAS_FILE): Area[] {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(source);
-  } catch (error) {
-    fail(file, null, `not valid JSON (${(error as Error).message})`);
-  }
-  if (!Array.isArray(raw)) fail(file, null, 'expected a list of areas');
-  const seen = new Set<string>();
-  return raw.map((item: unknown, index) => {
-    const area = item as Record<string, unknown> | null;
-    const where = `area ${index + 1}`;
-    if (!area || typeof area !== 'object') fail(file, null, `${where} is not an object`);
-    if (!text(area.id)) fail(file, null, `${where} has no id`);
-    const line = lineOfId(source, area.id, seen.has(area.id) ? 2 : 1);
-    if (seen.has(area.id)) fail(file, line, `repeats the area id ${area.id}`);
-    if (!text(area.title)) fail(file, line, `area ${area.id} has no title`);
-    if (!text(area.line)) fail(file, line, `area ${area.id} has no line`);
-    seen.add(area.id);
-    return { id: area.id, title: area.title, line: area.line };
-  });
-}
-
-export function parseFeatures(
-  source: string,
-  stages: Stage[],
-  areas: Area[],
-  recordingExists: (name: string) => boolean = () => true,
-  file = FEATURES_FILE,
-): Feature[] {
-  const stageIds = new Set(stages.map((stage) => stage.id));
-  const areaIds = new Set(areas.map((area) => area.id));
-  const ids = new Set<string>();
-  const features: Feature[] = [];
-  source.split('\n').forEach((raw, index) => {
-    const line = index + 1;
-    if (!raw.trim()) return;
-    let value: unknown;
-    try {
-      value = JSON.parse(raw);
-    } catch (error) {
-      fail(file, line, `not valid JSON (${(error as Error).message})`);
-    }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) fail(file, line, 'expected an object');
-    const entry = value as Record<string, unknown>;
-    if (!Number.isInteger(entry.n)) fail(file, line, 'missing or invalid "n"');
-    for (const field of ['id', 'name', 'stage'] as const) if (!text(entry[field])) fail(file, line, `missing "${field}"`);
-    const id = entry.id as string;
-    if (ids.has(id)) fail(file, line, `repeats the id ${id}`);
-    ids.add(id);
-    if (!stageIds.has(entry.stage as string)) fail(file, line, `unknown stage "${entry.stage}"`);
-    if (entry.area !== undefined && entry.area !== null && !text(entry.area)) fail(file, line, '"area" is not text');
-    const area = text(entry.area) ? entry.area : null;
-    if (area !== null && !areaIds.has(area)) fail(file, line, `unknown area "${area}"`);
-    if (area === null && entry.stage !== GONE_STAGE) fail(file, line, `missing "area" (only entries of the stage "${GONE_STAGE}" have none)`);
-    if (typeof entry.what !== 'string') fail(file, line, 'missing "what"');
-    if (entry.verdict !== null && entry.verdict !== undefined && !(typeof entry.verdict === 'string' && VERDICTS.has(entry.verdict))) {
-      fail(file, line, `unknown verdict ${JSON.stringify(entry.verdict)}`);
-    }
-    for (const field of ['suggest', 'why'] as const) {
-      if (entry[field] !== null && entry[field] !== undefined && typeof entry[field] !== 'string') fail(file, line, `"${field}" is not text`);
-    }
-    if (entry.issue !== null && entry.issue !== undefined && !(Number.isInteger(entry.issue) && (entry.issue as number) > 0)) {
-      fail(file, line, '"issue" is not an issue number');
-    }
-    let recordings: string[] = [];
-    if (entry.recordings !== undefined) {
-      if (!Array.isArray(entry.recordings)) fail(file, line, '"recordings" is not a list');
-      recordings = entry.recordings.map((name: unknown) => {
-        if (typeof name !== 'string' || !RECORDING.test(name)) fail(file, line, `recording ${JSON.stringify(name)} is not a plain video file name`);
-        if (!recordingExists(name)) fail(file, line, `recording ${name} is not in website/public/workshop/recordings`);
-        return name;
-      });
-    }
-    features.push({
-      n: entry.n as number,
+/** The plan object of tools/plan/read, as the page holds it: features in build order, decisions newest first. */
+export function toBuildData(plan: RawPlan): BuildData {
+  const features: Feature[] = plan.stages.flatMap((stage) => stage.features).map((id) => {
+    const raw = plan.features[id];
+    return {
       id,
-      stage: entry.stage as string,
-      area,
-      name: entry.name as string,
-      what: entry.what,
-      suggest: text(entry.suggest) ? entry.suggest : null,
-      why: text(entry.why) ? entry.why : null,
-      verdict: (entry.verdict ?? null) as Verdict | null,
-      issue: (entry.issue ?? null) as number | null,
-      recordings,
-    });
+      name: raw.name,
+      what: raw.what,
+      area: raw.area ?? null,
+      needs: Array.isArray(raw.needs) ? raw.needs : [],
+      stage: raw.stage,
+      position: raw.position,
+      suggest: raw.suggest ? { verdict: (raw.suggest.verdict ?? null) as Verdict | null, why: raw.suggest.why ?? null } : null,
+      verdict: (raw.verdict ?? null) as Verdict | null,
+      built: raw.built ?? null,
+      notes: hasNotes(raw),
+    };
   });
-  return features.sort((a, b) => a.n - b.n);
-}
-
-/** Markdown links in the repository's own files keep only their label. */
-function stripLinks(value: string): string {
-  return value.replace(/\[([^\]]+)\]\([^)\s]*\)/g, '$1');
-}
-
-export function parseDecisions(markdown: string, file = DECISIONS_FILE): DecidedLine[] {
-  const lines: DecidedLine[] = [];
-  markdown.split('\n').forEach((raw, index) => {
-    const source = raw.trimEnd();
-    if (!source.startsWith('- ')) return;
-    const match = DECISION_LINE.exec(source);
-    if (!match) fail(file, index + 1, 'expected "- YYYY-MM-DD · who · text"');
-    if (Number.isNaN(Date.parse(`${match[1]}T00:00:00Z`))) fail(file, index + 1, `invalid date ${match[1]}`);
-    let body = match[3];
-    let issue: number | null = null;
-    const ref = / \(#(\d+)\)$/.exec(body);
-    if (ref) {
-      issue = Number(ref[1]);
-      body = body.slice(0, ref.index);
-    }
-    lines.push({ index: lines.length, date: match[1], who: match[2], text: stripLinks(body), issue });
-  });
-  // Newest first; lines of the same day keep the file's order.
-  return lines.sort((a, b) => (a.date === b.date ? a.index - b.index : a.date < b.date ? 1 : -1));
-}
-
-/** Every area holds at least one entry. */
-export function checkAreasUsed(areas: Area[], features: Feature[], source = '', file = AREAS_FILE): void {
-  const used = new Set(features.map((feature) => feature.area));
-  for (const area of areas) {
-    if (!used.has(area.id)) fail(file, lineOfId(source, area.id), `area ${area.id} has no entry in ${FEATURES_FILE}`);
-  }
-}
-
-/** Reads the four files under `repository` and returns the parsed plan, or throws with file and line. */
-export function readBuildData(repository: string, recordingsDir: string): BuildData {
-  const read = (file: string) => {
-    try {
-      return readFileSync(join(repository, file), 'utf8');
-    } catch {
-      fail(file, null, 'cannot be read');
-    }
+  // Newest first; decisions of the same day keep the file's order.
+  const decisions: Decision[] = plan.decisions
+    .map((decision, index) => ({ decision, index }))
+    .sort((a, b) => (a.decision.date === b.decision.date ? a.index - b.index : a.decision.date < b.decision.date ? 1 : -1))
+    .map(({ decision }) => ({ id: decision.id, date: decision.date, text: decision.text, about: decision.about ?? null }));
+  return {
+    areas: plan.areas.map((area) => ({ id: area.id, title: area.title, line: area.line })),
+    stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
+    features,
+    decisions,
   };
-  const stages = parseStages(read(STAGES_FILE));
-  const areasSource = read(AREAS_FILE);
-  const areas = parseAreas(areasSource);
-  const features = parseFeatures(read(FEATURES_FILE), stages, areas, (name) => existsSync(join(recordingsDir, name)));
-  checkAreasUsed(areas, features, areasSource);
+}
+
+/** Checks the files of a plan, or throws with every problem. */
+function checkedPlan(files: Map<string, string>): RawPlan {
+  const { errors } = checkFiles(files);
+  if (errors.length) throw new PlanFileError(errors.map(formatProblem).join('\n'));
+  return parsePlan(files).plan as RawPlan;
+}
+
+/** Checks the files of a plan and gives their notes, or throws with every problem. */
+export function notesFrom(files: Map<string, string>): Notes {
+  return toNotes(checkedPlan(files));
+}
+
+/** Checks the files of a plan and gives the page's data, or throws with every problem. */
+export function buildDataFrom(files: Map<string, string>): BuildData {
+  const data = toBuildData(checkedPlan(files));
+  // Every area holds at least one feature: the map has no empty part.
+  const used = new Set(data.features.map((feature) => feature.area));
+  for (const area of data.areas) {
+    if (!used.has(area.id)) throw new PlanFileError(`plan/areas.json: ${area.id}: has no feature. Fix: give it a feature, or remove the area`);
+  }
   try {
-    checkLayout(areas.map((area) => area.id));
+    checkLayout(data.areas.map((area) => area.id));
   } catch (error) {
     if (error instanceof LayoutError) throw new PlanFileError(error.message);
     throw error;
   }
-  return { stages, areas, features, decided: parseDecisions(read(DECISIONS_FILE)) };
+  return data;
+}
+
+function planFilesIn(repository: string): Map<string, string> {
+  try {
+    return loadDir(join(repository, PLAN_DIR));
+  } catch {
+    throw new PlanFileError(`${PLAN_DIR}/: cannot be read`);
+  }
+}
+
+/** Reads plan/ under `repository` and returns the page's data, or throws. */
+export function readBuildData(repository: string): BuildData {
+  return buildDataFrom(planFilesIn(repository));
+}
+
+/** Reads plan/ under `repository` and returns its notes, or throws. */
+export function readNotes(repository: string): Notes {
+  return notesFrom(planFilesIn(repository));
 }

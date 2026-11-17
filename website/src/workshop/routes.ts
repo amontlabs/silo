@@ -1,5 +1,5 @@
 // Addresses: `#<area>` and `#<area>/<entry id>`, `#suggested`, `#left` and `#decisions`, each with an optional
-// open row. The older `#entry-<id>`, `#issue-<n>` and `#decided-<i>` still open that row where it now lives.
+// open row, and `#latest`. The older `#entry-<id>` and `#issue-<n>` still open that row where it now lives.
 import type { Plan, Row } from './plan';
 
 export type Place =
@@ -7,7 +7,8 @@ export type Place =
   | { kind: 'area'; area: string }
   | { kind: 'suggested' }
   | { kind: 'left' }
-  | { kind: 'decisions' };
+  | { kind: 'decisions' }
+  | { kind: 'latest' };
 
 export const HOME: Place = { kind: 'home' };
 
@@ -18,7 +19,7 @@ export function samePlace(a: Place, b: Place): boolean {
 /** Where a row is shown. */
 export function placeOf(row: Row): Place {
   if (row.kind === 'suggestion') return { kind: 'suggested' };
-  if (row.kind === 'decision' || row.kind === 'decided') return { kind: 'decisions' };
+  if (row.kind === 'decided') return { kind: 'decisions' };
   return row.area ? { kind: 'area', area: row.area } : { kind: 'left' };
 }
 
@@ -33,7 +34,7 @@ export function rowsOf(plan: Plan, place: Place): Row[] {
     case 'area': return plan.areas.find((group) => group.area.id === place.area)?.rows ?? [];
     case 'suggested': return plan.suggestions;
     case 'left': return plan.left;
-    case 'decisions': return [...plan.openDecisions, ...plan.decided];
+    case 'decisions': return plan.decided;
     default: return [];
   }
 }
@@ -48,6 +49,7 @@ export function formatHash(place: Place, key: string | null = null): string {
     case 'suggested': return `#suggested${tail}`;
     case 'left': return `#left${tail}`;
     case 'decisions': return `#decisions${tail}`;
+    case 'latest': return '#latest';
     default: return '';
   }
 }
@@ -79,6 +81,7 @@ export function resolveHash(hash: string, plan: Plan, rows: Map<string, Row>): {
     // Issues may only appear with the live state, so those wait.
     return place.kind === 'area' && !/^(issue|decided)-/.test(tail) ? { place, key: null } : null;
   };
+  if (head === 'latest') return { place: { kind: 'latest' }, key: null };
   if (head === 'suggested' || head === 'left' || head === 'decisions') return named({ kind: head });
   if (plan.areas.some((group) => group.area.id === head)) return named({ kind: 'area', area: head });
   const loose = rows.get(tail ? rowKey(tail) : head);

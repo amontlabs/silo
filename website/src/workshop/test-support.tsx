@@ -3,7 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { expect, vi } from 'vitest';
 import { App } from './App';
 import type { IssueDetail, Me } from './api';
-import { buildData, liveState } from './fixtures';
+import type { BuildData } from './plan';
+import { buildData, fixtureNotes, liveState } from './fixtures';
 
 export type Call = { method: string; path: string; body: Record<string, unknown> | null; headers: Record<string, string> };
 export type Reply = { status: number; body: unknown } | Promise<{ status: number; body: unknown }>;
@@ -27,7 +28,6 @@ export function mockApi(options: { state?: Route; me?: Me | null; routes?: Recor
     'POST verdict': () => ok(),
     'POST comment': () => ok(),
     'POST vote': () => ok(),
-    'POST decide': () => ok(),
     'POST logout': () => ok(),
     ...options.routes,
   };
@@ -64,8 +64,8 @@ export function tile(id: string) {
 }
 export const areaTitle = () => document.getElementById('ws-area-title');
 
-export async function renderApp() {
-  const view = render(<App data={buildData()} />);
+export async function renderApp(data: BuildData = buildData(), loadNotes = () => Promise.resolve(fixtureNotes(data))) {
+  const view = render(<App data={data} loadNotes={loadNotes} />);
   await waitFor(() => expect(document.querySelector('.ws-account, .ws-account-inline a, .ws-note')).not.toBeNull());
   return view;
 }

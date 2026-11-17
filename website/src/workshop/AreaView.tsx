@@ -1,5 +1,5 @@
 // An opened area: its title, line, one dot per entry and the counts on the left, its entries on the right.
-// The same layout holds the suggestions, the entries not carried over and the owner's decisions.
+// The same layout holds the suggestions, the entries not carried over, the latest changes and the owner's decisions.
 import type { ReactNode } from 'react';
 import { Entry, pipClass } from './Entry';
 import type { EntryContext } from './Entry';
@@ -15,10 +15,12 @@ export interface BlockProps {
   list: ReactNode;
   /** Quiet lines under the counts: the API unavailable, sign-in failed. */
   notes?: ReactNode;
+  /** While the list loads, nothing sits below it in its column. */
+  loading?: boolean;
 }
 
 /** The two columns every opened place uses. */
-export function Block({ num, title, line, onBack, children, list, notes }: BlockProps) {
+export function Block({ num, title, line, onBack, children, list, notes, loading = false }: BlockProps) {
   return (
     <>
       <div className="ws-block">
@@ -31,7 +33,7 @@ export function Block({ num, title, line, onBack, children, list, notes }: Block
         {children}
         {notes ? <div className="ws-notes wide">{notes}</div> : null}
       </div>
-      <div className="ws-list">{list}{notes ? <div className="ws-notes narrow">{notes}</div> : null}</div>
+      <div className={loading ? 'ws-list ws-list-loading' : 'ws-list'}>{list}{notes && !loading ? <div className="ws-notes narrow">{notes}</div> : null}</div>
     </>
   );
 }
@@ -40,18 +42,10 @@ export function Rows({ rows, ctx }: { rows: Row[]; ctx: EntryContext }) {
   return <ul className="ws-rows">{rows.map((row) => <Entry key={row.key} row={row} open={ctx.open.has(row.key)} ctx={ctx} />)}</ul>;
 }
 
-/**
- * The counts under an area. An entry is counted once: one the owner has to confirm counts as to decide and
- * comes off the count of its own status (being refined counts as not decided). No count goes below zero.
- */
-function tally(counts: Counts, toDecide: number, toConfirm: Row[] = []): ReactNode[] {
-  const left = { ...counts };
-  for (const row of toConfirm) {
-    const status = row.status === 'refine' ? 'undecided' : row.status;
-    if (status in left) left[status as keyof Counts] = Math.max(0, left[status as keyof Counts] - 1);
-  }
-  const { built, building, planned, later, dropped } = left;
-  const undecided = Math.max(0, left.undecided - (toDecide - toConfirm.length));
+/** The counts under an area. An entry is counted once: one the owner has to decide comes off "not decided". */
+function tally(counts: Counts, toDecide: number): ReactNode[] {
+  const { built, building, planned, later, dropped } = counts;
+  const undecided = Math.max(0, counts.undecided - toDecide);
   const parts: ReactNode[] = [];
   // Each count stays on one line; lines break after a separator.
   const one = (n: number, words: string) => `${n} ${words}`.replace(/ /g, '\u00a0');
@@ -65,7 +59,7 @@ function tally(counts: Counts, toDecide: number, toConfirm: Row[] = []): ReactNo
   return parts.flatMap((part, index) => (index ? ['\u00a0· ', part] : [part]));
 }
 
-export function AreaPlace({ group, toDecide, toConfirm = [], ctx, onBack, notes }: { group: AreaGroup; toDecide: number; toConfirm?: Row[]; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
+export function AreaPlace({ group, toDecide, ctx, onBack, notes }: { group: AreaGroup; toDecide: number; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   return (
     <Block
       num={String(group.number).padStart(2, '0')} title={group.area.title} line={group.area.line} onBack={onBack} notes={notes}
@@ -74,7 +68,7 @@ export function AreaPlace({ group, toDecide, toConfirm = [], ctx, onBack, notes 
       <div className="ws-pips" aria-hidden="true">
         {group.rows.filter((row) => row.status !== 'dropped').map((row) => <i className={pipClass(row)} key={row.key} />)}
       </div>
-      <p className="ws-tally">{tally(group.counts, toDecide, toConfirm)}</p>
+      <p className="ws-tally">{tally(group.counts, toDecide)}</p>
     </Block>
   );
 }

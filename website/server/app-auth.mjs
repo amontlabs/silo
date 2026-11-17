@@ -22,6 +22,7 @@ export function createAppAuth({ config, github, now = Date.now }) {
   let cached = null;
   let pending = null;
   let repositoryId = null;
+  let slug = null;
 
   function appJwt() {
     return createAppJwt({ appId: config.appId, privateKey: config.privateKey, nowMs: now() });
@@ -34,6 +35,7 @@ export function createAppAuth({ config, github, now = Date.now }) {
       if (error instanceof GitHubError && error.status === 404) throw new GitHubError(404, { as: 'app', notInstalled: true });
       throw error;
     });
+    if (typeof installation.app_slug === 'string' && /^[a-z0-9][a-z0-9-]{0,99}$/.test(installation.app_slug)) slug = installation.app_slug;
     const name = config.repo.split('/')[1];
     const { data } = await github.request('POST', `/app/installations/${installation.id}/access_tokens`, {
       token: jwt,
@@ -60,5 +62,8 @@ export function createAppAuth({ config, github, now = Date.now }) {
     return repositoryId;
   }
 
-  return { installationToken, dropToken, repoId, appJwt };
+  // The App's account on GitHub, `<slug>[bot]`, once an installation token was fetched; null before.
+  const login = () => (slug ? `${slug}[bot]` : null);
+
+  return { installationToken, dropToken, repoId, appJwt, login };
 }

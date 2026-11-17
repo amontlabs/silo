@@ -5,11 +5,12 @@ import { createPortal, flushSync } from 'react-dom';
 import { loginUrl } from './api';
 import { AreaPlace, LeftPlace } from './AreaView';
 import { DecisionsPlace } from './Decisions';
+import { LatestPlace } from './Latest';
 import type { EntryContext } from './Entry';
 import { MapView } from './MapView';
 import { FOLD_HEIGHT, MAP_WIDTH } from './map';
-import { awaitsConfirm, awaitsVerdict, needsOwner, statusLine } from './plan';
-import type { AreaState, BuildData, Row } from './plan';
+import { awaitsVerdict, needsOwner, statusLine } from './plan';
+import type { AreaState, BuildData, Notes, Row } from './plan';
 import { formatHash, HOME, placeFrom, placeOf, resolveHash, rowsOf, samePlace } from './routes';
 import type { Place } from './routes';
 import { SuggestPlace } from './Suggest';
@@ -21,9 +22,13 @@ export { OPEN_GUARD_MS } from './useWorkshop';
 
 export interface AppProps {
   data: BuildData;
+  /** Loads the features' notes, a chunk apart: the first time a person reaches an entry's "Notes". */
+  loadNotes?: () => Promise<Notes>;
   /** The element in the site header that holds sign-in and the signed-in login. */
   accountSlot?: Element | null;
 }
+
+const noNotes = () => Promise.resolve({});
 
 type View = 'map' | 'order';
 type Focus = { kind: 'title' } | { kind: 'area'; area: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string } | { kind: 'buttons'; key: string };
@@ -84,7 +89,7 @@ function isField(target: EventTarget | null): boolean {
 const initialView = (): View => (new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
 const address = (hash = '') => `${location.pathname}${location.search}${hash}`;
 
-export function App({ data, accountSlot }: AppProps) {
+export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const [place, setPlace] = useState<Place>(HOME);
   // Rows open independently; `openKey` is the one opened last: the address, Enter and the guard follow it.
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -101,7 +106,7 @@ export function App({ data, accountSlot }: AppProps) {
   // The first frames take the state as it is, without animating into it.
   const [boot, setBoot] = useState(true);
   const nav = useRef<Nav>({ openKey: null, openedAt: new Map(), advanceFrom: () => {}, reopen: () => {} });
-  const w = useWorkshop(data, openKey, openKeys, openings, nav);
+  const w = useWorkshop(data, openKey, openKeys, openings, nav, loadNotes);
   const { plan, rowByKey, live, canDecide } = w;
   const focusNext = useRef<Focus | null>(null);
   const wantedHash = useRef<string | null>(null);
@@ -157,7 +162,6 @@ export function App({ data, accountSlot }: AppProps) {
 
   const waiting = useCallback((row: Row) => needsOwner(row) && row.issue !== null && Boolean(live.state?.issues[row.issue]), [live.state]);
   const toDecide = useMemo(() => new Map(canDecide ? plan.areas.map((group) => [group.area.id, group.rows.filter(waiting).length]) : []), [canDecide, plan, waiting]);
-  const toConfirm = useMemo(() => new Map(canDecide ? plan.areas.map((group) => [group.area.id, group.rows.filter((row) => waiting(row) && awaitsConfirm(row))]) : []), [canDecide, plan, waiting]);
   const totalToDecide = [...toDecide.values()].reduce((sum, n) => sum + n, 0);
   const byBuildOrder = useMemo(() => plan.areas.flatMap((group) => group.rows).sort((a, b) => (a.n ?? 0) - (b.n ?? 0)), [plan]);
   const free = (row: Row) => waiting(row) && !w.pendingRef.current.has(row.issue as number);
@@ -201,7 +205,6 @@ export function App({ data, accountSlot }: AppProps) {
     address$(next, key, options.push);
     if (next.kind === 'area' && shown.kind === 'home') foldedAt.current = Date.now();
     settle(next, key);
-    w.setRefining(null);
     w.setRowNotice((current) => (current?.key === key ? current : null));
     if (options.announce !== undefined) w.setAnnounce(options.announce);
     focusNext.current = options.focus ?? null;
@@ -250,7 +253,6 @@ export function App({ data, accountSlot }: AppProps) {
     nav.current.openKey = row.key;
     if (options.closing) nav.current.openedAt.delete(options.closing);
     nav.current.openedAt.set(row.key, Date.now());
-    w.setRefining(null);
     w.setRowNotice((current) => (current?.key === row.key ? current : null));
     w.setAnnounce(`${row.name}, open`);
     focusNext.current = options.focus ? { kind: 'row', key: row.key, reveal: options.reveal !== false } : null;
@@ -521,8 +523,6 @@ export function App({ data, accountSlot }: AppProps) {
   const mainAction = (row: Row) => {
     if (!w.verdictReady(row)) return;
     if (awaitsVerdict(row)) void w.sendVerdict(row, 'take');
-    else if (row.carried && row.fileVerdict === 'refine') w.setRefining(row.key);
-    else if (row.carried && row.fileVerdict) void w.sendVerdict(row, row.fileVerdict);
   };
 
   const shownRows = rowsOf(plan, shown);
@@ -591,10 +591,11 @@ export function App({ data, accountSlot }: AppProps) {
   let detail = null;
   if (shown.kind === 'area') {
     const group = plan.areas.find((item) => item.area.id === shown.area);
-    if (group) detail = <AreaPlace group={group} toDecide={toDecide.get(group.area.id) ?? 0} toConfirm={toConfirm.get(group.area.id) ?? []} ctx={ctx} onBack={back} notes={notes} />;
+    if (group) detail = <AreaPlace group={group} toDecide={toDecide.get(group.area.id) ?? 0} ctx={ctx} onBack={back} notes={notes} />;
   } else if (shown.kind === 'suggested') detail = <SuggestPlace ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'left') detail = <LeftPlace rows={plan.left} ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'decisions') detail = <DecisionsPlace ctx={ctx} onBack={back} notes={notes} />;
+  else if (shown.kind === 'latest') detail = <LatestPlace ctx={ctx} onBack={back} notes={notes} />;
 
   const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', canDecide ? 'ws-owner' : '', lifting ? 'ws-lifting' : '', held ? 'ws-held' : ''].filter(Boolean).join(' ');
   return (
@@ -615,7 +616,7 @@ export function App({ data, accountSlot }: AppProps) {
               ) : null}
               {canDecide ? (
                 <a className="ws-loglink" href="#decisions" aria-current={shown.kind === 'decisions' ? 'page' : undefined} onClick={link({ kind: 'decisions' })}>
-                  Decisions{plan.openDecisions.length ? <>{' · '}<b>{plan.openDecisions.length} open</b></> : null}
+                  Decisions
                 </a>
               ) : null}
               <div className="ws-seg" role="group" aria-label="Arrangement">
@@ -638,6 +639,7 @@ export function App({ data, accountSlot }: AppProps) {
           <div className="ws-under">
             <div className="ws-under-left">
               {plan.left.length ? <a className="ws-fold-link" href="#left" onClick={link({ kind: 'left' })}>Left out · {plan.left.length}</a> : null}
+              <a className="ws-fold-link" href="#latest" onClick={link({ kind: 'latest' })}>Latest</a>
               {suggested ? <a className="ws-fold-link" href="#suggested" onClick={link({ kind: 'suggested' })}>{suggested} suggested</a> : null}
               {notes}
             </div>

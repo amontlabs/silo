@@ -14,8 +14,7 @@
 // (Vercel's `waitUntil`), but nothing depends on it for correctness.
 //
 // A refresh reads, with the installation token:
-// - one issue list per Workshop label (entries, then decisions, then
-//   suggestions; all states, newest first, 100 a page), each page sent with the
+// - one issue list per Workshop label (entries, then suggestions; all states, newest first, 100 a page), each page sent with the
 //   ETag from the last refresh, so an unchanged page is a 304; nothing else in
 //   the repository is fetched or counted;
 // - the repository-wide comment list: the newest comments in full on the first
@@ -28,7 +27,7 @@
 // refresh swaps in, the patches made since that refresh began are applied
 // again, and older ones are dropped, since GitHub's answer already holds them.
 import { GitHubError, nextLink } from './github.mjs';
-import { BUILDING_LABEL, clean, commentIssue, commentOf, kindOf, labelNames, LABELS, readBody, reasonOf, verdictOf } from './issues.mjs';
+import { BUILDING_LABEL, clean, commentIssue, commentOf, cut, kindOf, labelNames, LABELS, readBody, reasonOf, verdictOf } from './issues.mjs';
 
 export const SNAPSHOT = {
   maxAge: 30_000,
@@ -41,6 +40,8 @@ export const SNAPSHOT = {
   fullReloadEvery: 10 * 60_000,
   overlap: 60_000,
   retryAfter: 60_000,
+  latest: 30,
+  latestText: 140,
   issues: 2000,
   issuePages: 20,
   fullCommentPages: 15,
@@ -81,9 +82,38 @@ function reduceIssue(issue) {
 
 // An entry is being built while its issue is open, taken and carries the building label. This is
 // read when the answer is made, so a patch that closes the issue or changes the verdict hides it at once.
-const summaryOf = (entry) => (entry.building && entry.summary.kind === 'entry' && entry.summary.state === 'open' && entry.summary.verdict === 'take'
-  ? { ...entry.summary, building: true }
-  : entry.summary);
+// An entry also says how many of its held comments are the bot's history lines (`updates`), so the page
+// holds the right room for them while they load.
+function summaryOf(entry) {
+  const building = entry.building && entry.summary.kind === 'entry' && entry.summary.state === 'open' && entry.summary.verdict === 'take';
+  let updates = 0;
+  if (entry.summary.kind === 'entry') for (const comment of entry.comments.values()) if (comment.change) updates += 1;
+  return building || updates ? { ...entry.summary, ...(building ? { building: true } : {}), ...(updates ? { updates } : {}) } : entry.summary;
+}
+
+// The first line of a comment, cut, for the list of what happened lately.
+function firstLine(text) {
+  const line = text.split('\n').map((part) => part.trim()).find(Boolean) ?? '';
+  return cut(line, SNAPSHOT.latestText);
+}
+
+// The newest comments and history lines across every entry, newest first.
+function latestOf(snapshot) {
+  const all = [];
+  for (const [number, entry] of snapshot.issues) {
+    if (entry.summary.kind !== 'entry' || !entry.summary.entry) continue;
+    for (const comment of entry.comments.values()) all.push([number, entry, comment]);
+  }
+  all.sort((a, b) => byAge(b[2], a[2]));
+  return all.slice(0, SNAPSHOT.latest).map(([number, entry, comment]) => ({
+    n: number,
+    entry: entry.summary.entry,
+    author: comment.author,
+    bot: comment.bot,
+    createdAt: comment.createdAt,
+    ...(comment.change ? { change: comment.change } : { text: firstLine(comment.text) }),
+  }));
+}
 
 // `request(method, path, options)` calls GitHub with the installation token and
 // throws a GitHubError when GitHub fails or the installation must wait.
@@ -91,8 +121,9 @@ const summaryOf = (entry) => (entry.building && entry.summary.kind === 'entry' &
 // `keepAlive(promise)` asks the platform to keep the instance running until it settles.
 // `afterRefresh()` runs, detached, after each successful refresh.
 // `wall()` is the real clock for the floor, the lost-refresh limit and the waits.
+// `app()` is the Workshop's App, `{ id, login }`: only its comments become history lines.
 export function createSnapshot({
-  repo, request, now = Date.now, wall = Date.now, log = () => {},
+  repo, request, app = () => null, now = Date.now, wall = Date.now, log = () => {},
   detach = (fn) => fn(), keepAlive = () => {}, afterRefresh = () => {},
 }) {
   let current = null;
@@ -193,7 +224,7 @@ export function createSnapshot({
 
     const reduceComment = (comment) => {
       const number = commentIssue(comment);
-      return issues.has(number) ? { number, comment: commentOf(comment) } : null;
+      return issues.has(number) ? { number, comment: commentOf(comment, app()) } : null;
     };
     let comments;
     let incompleteSince = false;
@@ -374,7 +405,7 @@ export function createSnapshot({
     if (!snapshot.stateAnswer || snapshot.stateAnswer.version !== snapshot.version) {
       const issues = {};
       for (const [number, entry] of snapshot.issues) issues[number] = summaryOf(entry);
-      snapshot.stateAnswer = { version: snapshot.version, body: { repo, fetchedAt: new Date(snapshot.at).toISOString(), issues } };
+      snapshot.stateAnswer = { version: snapshot.version, body: { repo, fetchedAt: new Date(snapshot.at).toISOString(), issues, latest: latestOf(snapshot) } };
     }
     return snapshot.stateAnswer.body;
   }
@@ -422,7 +453,7 @@ export function createSnapshot({
 
   const patch = {
     comment(number, comment) {
-      const shown = commentOf(comment);
+      const shown = commentOf(comment, app());
       count(number, 'comments', 1);
       record(onEntry(number, (entry) => {
         if (entry.comments.has(shown.id)) return;

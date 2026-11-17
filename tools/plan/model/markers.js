@@ -3,7 +3,7 @@
 //   <!-- silo-synced: <40 hex> -->    the commit the issue was last synced at
 //   <!-- silo-change: {json} -->      last line of a history comment
 
-import { CHANGE_FIELDS, DEFAULT_REPO, DEFAULT_WEB, ID_PATTERN, VERDICTS, isDate } from './names.js';
+import { CHANGE_FIELDS, DEFAULT_RAW, DEFAULT_REPO, DEFAULT_WEB, ID_PATTERN, VERDICTS, isDate } from './names.js';
 
 const SHA = /^[0-9a-f]{40}$/;
 const ENTRY = /<!-- silo-entry: ([a-z0-9][a-z0-9-]{0,62}) -->/;
@@ -75,7 +75,7 @@ export function changeComment(change, { repo = DEFAULT_REPO, web = DEFAULT_WEB }
   if (Object.hasOwn(change, 'built')) marker.built = change.built;
   return [
     `Updated in ${change.commit.slice(0, 7)}: ${change.fields.join(', ')}`,
-    `${web}/${repo}/compare/${change.before}...${change.commit}`,
+    compareLink(change, { repo, web }),
     `<!-- silo-change: ${JSON.stringify(marker)} -->`,
   ].join('\n');
 }
@@ -90,4 +90,17 @@ export function readChange(body) {
   } catch {
     return null;
   }
+}
+
+/** @param {{ commit: string, before: string }} change @param {{ repo?: string, web?: string }} [where] the change on GitHub. */
+export function compareLink(change, { repo = DEFAULT_REPO, web = DEFAULT_WEB } = {}) {
+  if (!SHA.test(change.commit) || !SHA.test(change.before)) throw new Error('not a commit');
+  return `${web}/${repo}/compare/${change.before}...${change.commit}`;
+}
+
+/** @param {string} commit @param {string} id @param {{ repo?: string, raw?: string }} [where] a feature's file at a commit, as plain text. */
+export function featureFileAt(commit, id, { repo = DEFAULT_REPO, raw = DEFAULT_RAW } = {}) {
+  if (!SHA.test(commit)) throw new Error(`not a commit: ${commit}`);
+  if (!ID_PATTERN.test(id)) throw new Error(`not a feature id: ${id}`);
+  return `${raw}/${repo}/${commit}/plan/features/${id}.json`;
 }

@@ -2,17 +2,16 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from './App';
-import { buildData, issue, liveState } from './fixtures';
+import { buildData, FEATURES, issue, liveState } from './fixtures';
 import type { LiveState } from './plan';
 import {
   areaTitle, detail, itemOf, mockApi, ok, owner, part, refused, renderApp, rowButton, tile,
 } from './test-support';
 import type { Route } from './test-support';
 
+// Engine and calls and `computers` are built, as their files say; `exec` is being built, as its issue says.
+const builtData = () => buildData({ features: FEATURES.map((feature) => (['engine', 'calls', 'computers'].includes(feature.id) ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature)) });
 const later = (): LiveState => liveState({
-  10: issue({ entry: 'engine', verdict: 'take', state: 'closed', reason: 'completed' }),
-  11: issue({ entry: 'calls', verdict: 'take', state: 'closed', reason: 'completed' }),
-  12: issue({ entry: 'computers', verdict: 'take', state: 'closed', reason: 'completed' }),
   13: issue({ entry: 'exec', verdict: 'take', building: true, up: 4 }),
   14: issue({ entry: 'fork', verdict: 'take' }),
 });
@@ -36,7 +35,7 @@ describe('the map', () => {
 
   it('shows built, building and next areas, on the map and the tiles alike', async () => {
     mockApi({ state: () => ok(later()) });
-    await renderApp();
+    await renderApp(builtData());
     expect(screen.getByText('Building Computers. Forks is next.')).toBeInTheDocument();
     expect(part('engine')).toHaveClass('s-done');
     expect(part('computers')).toHaveClass('s-now');
@@ -64,12 +63,12 @@ describe('the map', () => {
     expect(location.search).toBe('');
   });
 
-  it('links to what is left out and to the suggestions, in that order', async () => {
+  it('links to what is left out, the latest and the suggestions, in that order', async () => {
     mockApi();
     await renderApp();
     expect(screen.getByRole('link', { name: '2 suggested' })).toHaveAttribute('href', '#suggested');
     expect(screen.getByRole('link', { name: 'Left out · 2' })).toHaveAttribute('href', '#left');
-    expect([...document.querySelectorAll('.ws-fold-link')].map((a) => a.textContent)).toEqual(['Left out · 2', '2 suggested']);
+    expect([...document.querySelectorAll('.ws-fold-link')].map((a) => a.textContent)).toEqual(['Left out · 2', 'Latest', '2 suggested']);
   });
 });
 
@@ -137,7 +136,7 @@ describe('an area', () => {
 });
 
 describe('an entry', () => {
-  it('opens in place, loads its comments, plays its recording and is linked', async () => {
+  it('opens in place, loads its comments and is linked', async () => {
     const calls = mockApi({ routes: { 'GET issue': (url) => ok(detail(Number(url.searchParams.get('n')), { comments: [{ id: 1, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-14T10:00:00Z', text: 'Keep stop separate from pause.' }] })) } });
     history.replaceState(null, '', '/workshop#computers');
     await renderApp();
@@ -149,7 +148,7 @@ describe('an entry', () => {
     expect(screen.getByRole('link', { name: 'or comment on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/12');
     expect(calls.some((call) => call.path === 'issue' && call.method === 'GET')).toBe(true);
     expect(location.hash).toBe('#computers/computers');
-    expect(document.querySelector('video')).toHaveAttribute('src', '/workshop/recordings/create.mp4');
+    expect(document.querySelector('video')).toBeNull();
     expect(screen.getByText('Create and delete a computer, open')).toBeInTheDocument();
 
     // A second entry opens beside the first; each row closes only itself.
@@ -176,13 +175,14 @@ describe('an entry', () => {
     await waitFor(() => expect(screen.getByText('Planned.')).toBeInTheDocument());
   });
 
-  it('shows a carried-over verdict to a visitor as planned, without saying it was carried over', async () => {
+  it('shows a verdict written in the file as planned, with nothing to confirm', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#engine/calls');
     await renderApp();
     expect(await screen.findByText('Planned.')).toBeInTheDocument();
     expect(screen.queryByText(/carried over/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Confirm/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Refine/ })).not.toBeInTheDocument();
   });
 });
 

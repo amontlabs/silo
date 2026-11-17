@@ -1,11 +1,14 @@
-// One row of a list, and what it shows once open: the sentence, its state, recordings, comments and the box.
+// One row of a list, and what it shows once open: the sentence, its notes, its state, the thread (comments and
+// history lines) and the box.
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { hasSessionHint } from './api';
+import { compareLink, featureFileAt } from '../../../tools/plan/model/index.js';
+import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
-import { awaitsConfirm, awaitsVerdict, isDecided, relativeTime, shortDate } from './plan';
-import type { Row } from './plan';
+import { awaitsVerdict, changesText, changeWords, isDecided, relativeTime, shortDate } from './plan';
+import type { Change, Decision, Row } from './plan';
 import type { Detail, Workshop } from './useWorkshop';
 
 /** How long the closing body stays in place for its animation. */
@@ -29,9 +32,8 @@ export interface EntryContext {
 const WORDS: Partial<Record<Row['status'], string>> = { planned: 'planned', later: 'later', building: 'building', built: 'built', dropped: 'dropped' };
 
 export function pipClass(row: Row): string {
-  if (row.kind === 'decision') return 'ws-pip undecided';
   if (row.kind === 'decided') return 'ws-pip planned';
-  return `ws-pip ${row.status === 'refine' ? 'undecided' : row.status}`;
+  return `ws-pip ${row.status}`;
 }
 
 function initials(login: string): string {
@@ -43,9 +45,11 @@ function stateText(row: Row): string {
   switch (row.status) {
     case 'planned': return 'Planned.';
     case 'later': return 'Later.';
-    case 'refine': return 'Being refined.';
     case 'building': return 'Being built now.';
-    case 'built': return row.closedAt ? `Built, ${shortDate(row.closedAt)}.` : 'Built.';
+    case 'built': {
+      const day = row.built ?? row.closedAt;
+      return day ? `Built, ${shortDate(day)}.` : 'Built.';
+    }
     case 'dropped': return 'Dropped.';
     default: return 'Not decided yet.';
   }
@@ -145,12 +149,11 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   const isSaving = row.issue !== null && w.saving[row.issue] === true;
   const live = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
   const owed = w.canDecide && live && awaitsVerdict(row);
-  const confirm = w.canDecide && live && awaitsConfirm(row);
   const word = row.kind === 'entry' || row.kind === 'suggestion'
-    ? (isSaving ? 'Saving…' : owed ? 'to decide' : confirm ? 'confirm' : WORDS[row.status])
+    ? (isSaving ? 'Saving…' : owed ? 'to decide' : WORDS[row.status])
     : undefined;
   const quiet = (row.kind === 'entry' || row.kind === 'suggestion') && !isDecided(row);
-  const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : '', owed || confirm ? 'owed' : ''].filter(Boolean).join(' ');
+  const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : '', owed ? 'owed' : ''].filter(Boolean).join(' ');
   return (
     <li className={classes} id={row.key}>
       <div className="ws-line">
@@ -183,7 +186,7 @@ function Vote({ row, ctx }: { row: Row; ctx: EntryContext }) {
 
 function Side({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
-  const showComments = w.liveOk && row.comments !== null && (row.kind === 'decision' || row.kind === 'decided' || row.comments > 0);
+  const showComments = w.liveOk && row.comments !== null && row.comments > 0;
   return (
     <span className="ws-side">
       {row.kind === 'suggestion' && row.author ? <span className="ws-by">{row.author}</span> : null}
@@ -191,22 +194,6 @@ function Side({ row, ctx }: { row: Row; ctx: EntryContext }) {
       <span className="ws-votes"><Vote row={row} ctx={ctx} /></span>
       <span className="ws-talks">{showComments ? <span aria-label={`${row.comments} comments`}>💬 {row.comments}</span> : null}</span>
     </span>
-  );
-}
-
-function NoteBox({ row, busy, ctx }: { row: Row; busy: boolean; ctx: EntryContext }) {
-  const { w } = ctx;
-  if (w.refining !== row.key) return null;
-  const key = `note-${row.key}`;
-  return (
-    <form className="ws-box" onSubmit={(event) => {
-      event.preventDefault();
-      const note = (w.drafts[key] ?? '').trim();
-      if (note) void w.sendVerdict(row, 'refine', note);
-    }}>
-      <textarea aria-label="Note" placeholder="Note…" maxLength={5000} rows={2} autoFocus value={w.drafts[key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [key]: event.target.value }))} />
-      <button type="submit" className={ctx.armed(row) ? 'ws-btn' : 'ws-btn ws-unarmed'} disabled={busy || !(w.drafts[key] ?? '').trim()}>Refine</button>
-    </form>
   );
 }
 
@@ -220,28 +207,15 @@ function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
     if (!ctx.armed(row)) return;
     fn();
   };
-  if (row.carried && row.fileVerdict) {
-    return (
-      <>
-        <div className="ws-state">
-          <span>{stateText(row).replace(/\.$/, '')} · carried over</span>
-          <button type="button" className={cls('ws-btn go')} disabled={busy} onClick={act(() => ctx.mainAction(row))}>Confirm <kbd>↵</kbd></button>
-        </div>
-        <NoteBox row={row} busy={busy} ctx={ctx} />
-      </>
-    );
-  }
+  const suggested = row.suggest?.verdict ?? null;
   return (
     <>
-      {row.status === 'refine' ? <div className="ws-state"><span className="ws-muted">Being refined.</span></div> : null}
       <div className="ws-state">
         <button type="button" className={cls('ws-btn go')} disabled={busy} onClick={act(() => ctx.mainAction(row))}>Take <kbd>↵</kbd></button>
         <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'later'))}>Later</button>
         <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'drop'))}>Drop</button>
-        <button type="button" className={cls('ws-btn')} disabled={busy} aria-expanded={w.refining === row.key} onClick={() => w.setRefining(w.refining === row.key ? null : row.key)}>Refine…</button>
       </div>
-      <NoteBox row={row} busy={busy} ctx={ctx} />
-      {row.suggest ? <p className="ws-hint">Suggested: {row.suggest}.{row.why ? ` ${row.why}` : ''}</p> : null}
+      {suggested ? <p className="ws-hint">Suggested: {suggested}.{row.suggest?.why ? ` ${row.suggest.why}` : ''}</p> : null}
     </>
   );
 }
@@ -250,29 +224,90 @@ function StateLine({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
   const hasIssue = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
   if (row.kind === 'decided') {
-    return <div className="ws-state"><span className="ws-date">{row.date ? shortDate(row.date) : ''} · {row.who}</span></div>;
-  }
-  if (row.kind === 'decision') {
-    if (row.status === 'planned') return <div className="ws-state"><span className="ws-muted">Decided{row.date ? `, ${shortDate(row.date)}` : ''}.</span></div>;
-    if (w.canDecide && hasIssue && w.pending.has(row.issue as number)) return null;
-    if (w.canDecide && hasIssue) {
-      const busy = w.pending.has(row.issue as number);
-      return (
-        <form className="ws-box" onSubmit={(event) => void w.sendDecide(row, event)}>
-          <textarea aria-label="Decision" placeholder="Decision…" maxLength={5000} rows={2} value={w.drafts[row.key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
-          <button type="submit" className="ws-btn go" disabled={busy || !(w.drafts[row.key] ?? '').trim()}>Decide</button>
-        </form>
-      );
-    }
-    return <div className="ws-state"><span className="ws-muted">Not decided yet.</span></div>;
+    const about = (row.about ?? []).map((id) => w.plan.areas.find((group) => group.area.id === id)?.area.title ?? id);
+    return <div className="ws-state"><span className="ws-date">{row.date ? shortDate(row.date) : ''}{about.length ? ` · ${about.join(', ')}` : ''}</span></div>;
   }
   if (row.issue !== null && w.saving[row.issue]) return <div className="ws-state"><span className="ws-muted">Saving…</span></div>;
-  if (w.canDecide && hasIssue && (row.issue as number) > 0 && (awaitsVerdict(row) || (row.carried && row.fileVerdict && row.status !== 'built'))) return <VerdictButtons row={row} ctx={ctx} />;
+  if (w.canDecide && hasIssue && (row.issue as number) > 0 && awaitsVerdict(row)) return <VerdictButtons row={row} ctx={ctx} />;
   const text = stateText(row);
   const tone = row.status === 'building' ? 'ws-now' : isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
+  return <div className="ws-state"><span className={tone}>{text}</span></div>;
+}
+
+/** Where the page reads a feature's file at a commit: raw.githubusercontent.com, or what the page names. */
+function rawBase(): string | undefined {
+  const named = document.querySelector<HTMLMetaElement>('meta[name="workshop-raw"]')?.content;
+  return named && safeHref(named) ? named.replace(/\/+$/, '') : undefined;
+}
+
+type Texts = { name: string; what: string };
+const TEXT_LIMIT = 2000;
+
+async function textsAt(repo: string, commit: string, id: string): Promise<Texts> {
+  const raw = rawBase();
+  const response = await fetch(featureFileAt(commit, id, { repo, ...(raw ? { raw } : {}) }), { credentials: 'omit', cache: 'force-cache' });
+  if (!response.ok) throw new Error('not available');
+  const file = JSON.parse(await response.text()) as { name?: unknown; what?: unknown };
+  if (typeof file.name !== 'string' || typeof file.what !== 'string') throw new Error('not available');
+  return { name: file.name.slice(0, TEXT_LIMIT), what: file.what.slice(0, TEXT_LIMIT) };
+}
+
+/** A history line: when, what changed, and the change on GitHub. For the text, before and after on demand. */
+function HistoryLine({ change, createdAt, row, repo }: { change: Change; createdAt: string; row: Row; repo: string }) {
+  const [texts, setTexts] = useState<'closed' | 'loading' | 'error' | { before: Texts; after: Texts }>('closed');
+  const words = changeWords(change);
+  const id = row.key.startsWith('entry-') ? row.key.slice('entry-'.length) : null;
+  const comparable = changesText(change) && id !== null;
+  let link: string | null = null;
+  try {
+    link = safeHref(compareLink(change, { repo }));
+  } catch {
+    link = null;
+  }
+  const toggle = () => {
+    if (texts !== 'closed') {
+      setTexts('closed');
+      return;
+    }
+    setTexts('loading');
+    Promise.all([textsAt(repo, change.before, id as string), textsAt(repo, change.commit, id as string)]).then(
+      ([before, after]) => setTexts({ before, after }),
+      () => setTexts('error'),
+    );
+  };
+  const open = texts !== 'closed';
+  const panel = `${row.key}-${change.commit.slice(0, 12)}`;
   return (
-    <div className="ws-state">
-      <span className={tone}>{row.carried && w.canDecide ? `${text.replace(/\.$/, '')} · carried over` : text}</span>
+    <div className="ws-h">
+      <i aria-hidden="true" />
+      <div>
+        <p>
+          <span className="ws-h-what">
+            {words.map((word, index) => (
+              <Fragment key={word}>
+                {index ? ' · ' : ''}
+                {word === 'Text changed' && comparable
+                  ? <button type="button" className="ws-h-btn" aria-expanded={open} aria-controls={panel} onClick={toggle}>{word}</button>
+                  : word}
+              </Fragment>
+            ))}
+          </span>
+          <small>{relativeTime(createdAt)}</small>
+          {link ? <a className="ws-h-link" href={link} target="_blank" rel="noopener noreferrer" title="The change on GitHub">{change.commit.slice(0, 7)} ↗</a> : null}
+        </p>
+        {open ? (
+          <div className="ws-h-diff" id={panel}>
+            {texts === 'loading' ? <p className="ws-quiet">…</p> : null}
+            {texts === 'error' ? <p className="ws-quiet">not available</p> : null}
+            {typeof texts === 'object' ? (
+              <>
+                <div><small>Before</small>{texts.before.name !== texts.after.name ? <b>{texts.before.name}</b> : null}{texts.before.what !== texts.after.what ? <p>{texts.before.what}</p> : null}</div>
+                <div><small>After</small>{texts.before.name !== texts.after.name ? <b>{texts.after.name}</b> : null}{texts.before.what !== texts.after.what ? <p>{texts.after.what}</p> : null}</div>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -281,7 +316,8 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   const { w } = ctx;
   if (row.issue === null || row.issue <= 0) return null;
   const n = row.issue;
-  const url = (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`https://github.com/${w.live.state?.repo ?? 'amontlabs/silo'}/issues/${n}`);
+  const repo = w.live.state?.repo ?? 'amontlabs/silo';
+  const url = (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`https://github.com/${repo}/issues/${n}`);
   const github = url ? <a className="ws-gh" href={url} target="_blank" rel="noopener noreferrer">GitHub #{n} ↗</a> : null;
   if (!w.liveOk) return <div className="ws-talk"><div className="ws-box">{github}</div></div>;
   let box: ReactNode = <div className="ws-box">{github}</div>;
@@ -309,22 +345,28 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
       </>
     );
   }
+  // While the thread loads, each comment and history line the counts announce holds its place.
+  const loading = detail === undefined || detail === 'loading';
+  const ghostComments = loading ? Math.min(row.comments ?? 0, 20) : 0;
+  const ghostUpdates = loading ? Math.min(row.updates, 20 - ghostComments) : 0;
   return (
     <div className="ws-talk">
-      {/* While the comments load, each one the count announces holds its place. */}
-      {(detail === undefined || detail === 'loading') && row.comments ? Array.from({ length: Math.min(row.comments, 20) }, (_, i) => <div className="ws-c-ghost" key={i} aria-hidden="true" />) : null}
+      {Array.from({ length: ghostUpdates }, (_, i) => <div className="ws-h-ghost" key={`h${i}`} aria-hidden="true" />)}
+      {Array.from({ length: ghostComments }, (_, i) => <div className="ws-c-ghost" key={`c${i}`} aria-hidden="true" />)}
       {detail === 'error' ? <p className="ws-quiet">Comments could not load.</p> : null}
       {typeof detail === 'object' && detail.more && url ? <a className="ws-gh ws-earlier" href={url} target="_blank" rel="noopener noreferrer">Earlier comments on GitHub ↗</a> : null}
       {typeof detail === 'object'
-        ? detail.comments.map((comment) => (
-          <div className="ws-c" key={comment.id}>
-            <i aria-hidden="true">{initials(comment.author)}</i>
-            <div>
-              <b>{comment.author} <small>{relativeTime(comment.createdAt)}</small></b>
-              <RichText text={comment.text} />
+        ? detail.comments.map((comment) => (comment.change && comment.bot
+          ? <HistoryLine key={comment.id} change={comment.change} createdAt={comment.createdAt} row={row} repo={repo} />
+          : (
+            <div className="ws-c" key={comment.id}>
+              <i aria-hidden="true">{initials(comment.author)}</i>
+              <div>
+                <b>{comment.author} <small>{relativeTime(comment.createdAt)}</small></b>
+                <RichText text={comment.text} />
+              </div>
             </div>
-          </div>
-        ))
+          )))
         : null}
       {(w.sending[n] ?? []).map((comment) => (
         <div className="ws-c ws-pending" key={comment.id} aria-busy="true">
@@ -340,18 +382,56 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   );
 }
 
+/** The entry's notes and, for the owner, the decisions about its area: each closed until asked for, on one line. */
+function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
+  const { w } = ctx;
+  const [shown, setShown] = useState<'notes' | 'decisions' | null>(null);
+  const decisions: Decision[] = w.canDecide ? row.decisions : [];
+  // The line keeps its room from first paint whenever "Decisions" may still appear (until `me` and the live state
+  // answer, the session marker says), and keeps it once given, so nothing below moves when the answers arrive.
+  const mayDecide = row.decisions.length > 0 && w.live.status !== 'unavailable' && (w.me ? w.me.canDecide : w.me === undefined && hasSessionHint());
+  const [kept, setKept] = useState(() => row.notes || mayDecide);
+  if (!kept && (row.notes || mayDecide)) setKept(true);
+  if (!kept && !row.notes && !mayDecide) return null;
+  const toggle = (what: 'notes' | 'decisions') => () => setShown((current) => (current === what ? null : what));
+  const id = row.key.slice('entry-'.length);
+  const notes = typeof w.notes === 'object' ? w.notes[id] : undefined;
+  return (
+    <div className="ws-extras">
+      <div className="ws-extras-bar">
+        {row.notes ? (
+          <button
+            type="button" className="ws-disc" aria-expanded={shown === 'notes'} aria-controls={`${row.key}-notes`}
+            onPointerEnter={w.wantNotes} onPointerDown={w.wantNotes} onTouchStart={w.wantNotes} onFocus={w.wantNotes}
+            onClick={() => { w.wantNotes(); toggle('notes')(); }}
+          >Notes</button>
+        ) : null}
+        {decisions.length ? <button type="button" className="ws-disc" aria-expanded={shown === 'decisions'} aria-controls={`${row.key}-decisions`} onClick={toggle('decisions')}>Decisions · {decisions.length}</button> : null}
+      </div>
+      {shown === 'notes' && row.notes ? (
+        <div className="ws-extras-in" id={`${row.key}-notes`}>
+          {notes ? <Markdown text={notes} /> : w.notes === 'error' ? <p className="ws-quiet">Notes could not load.</p> : null}
+        </div>
+      ) : null}
+      {shown === 'decisions' && decisions.length ? (
+        <ul className="ws-extras-in ws-decs" id={`${row.key}-decisions`}>
+          {decisions.map((decision) => <li key={decision.id}><small>{shortDate(decision.date)}</small><p>{decision.text}</p></li>)}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function Body({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
   const { w } = ctx;
   const what = row.kind === 'entry' || row.kind === 'decided' ? row.what : typeof detail === 'object' ? detail.body : null;
   return (
     <div className="ws-more-pad">
       {what ? <div className="ws-what"><RichText text={what} /></div> : null}
-      {row.recordings.map((file) => (
-        <video className="ws-recording" key={file} controls preload="metadata" src={`/workshop/recordings/${encodeURIComponent(file)}`} />
-      ))}
+      {row.kind === 'entry' ? <Extras row={row} ctx={ctx} /> : null}
       {w.rowNotice?.key === row.key ? <p className="ws-row-notice" role="alert">{w.rowNotice.text}</p> : null}
       <StateLine row={row} ctx={ctx} />
-      <Talk row={row} ctx={ctx} detail={detail} />
+      {row.kind === 'decided' ? null : <Talk row={row} ctx={ctx} detail={detail} />}
     </div>
   );
 }
