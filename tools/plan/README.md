@@ -1,8 +1,9 @@
 # tools/plan
 
 The plan of Silo lives in [`plan/`](../../plan/) as plain files. Read them directly, and edit a
-feature in its own files. `bin/plan` does what touches more than one file (and, later, GitHub).
-Node 26, no dependency. `npm test` runs the tests, which use their own fixtures and never `plan/`.
+feature in its own files. `bin/plan` does what touches GitHub or more than one file.
+Node 26, no dependency. `npm test` runs the tests, which use their own fixtures and a fake GitHub
+(`test/fake-github.js`), never `plan/`, the real GitHub or the real Keychain.
 
 ## The data
 
@@ -52,8 +53,9 @@ Ready to build: `planned`, and every feature in `needs` is `built`.
 ## Commands
 
 Every command takes `--json`, before or after the command name. Exit codes: 0 done, 1 refused or errors found, 2 wrong use, 3 live
-state could not be read. Run from anywhere inside the checkout. `status`, `show`, `add` and `finish`
-first run the checks of `plan check`; when the plan fails them, they print its errors and exit 1.
+state could not be read (GitHub, or the credentials to reach it). Run from anywhere inside the checkout.
+Every command that reads the plan first runs the checks of `plan check`; when the plan fails them, it
+prints its errors and exits 1.
 
 | Command | What |
 |---|---|
@@ -61,14 +63,73 @@ first run the checks of `plan check`; when the plan fails them, they print its e
 | `plan status` | The latest verdicts (the newest five commits touching `plan/features/` whose subject starts with `Owner: `), the next feature to decide (the first in order without a verdict), what is being built, what is taken and not started (ready, or waiting for which needs), and ideas not placed. |
 | `plan show <id>` | One feature: its fields, stage and position, each need with its status, what needs it, the decisions about it (those whose `about` names its area, and those with no `about`), its notes, and its issue when live. |
 | `plan add <id> --name "…" --area <area> (--after <id> \| --first-in <stage>) --what "…" [--from <issue>]` | A new feature file and its place in `order.json`. `--from` sets `suggested_in`. Prints the paths; commits nothing. Never into the stage `gone`. Refuses an id that has a file or is already in `order.json`, and writes nothing unless the plan it leaves passes `plan check`. |
-| `plan finish <id>` | Writes `built` (today, UTC) in a feature whose verdict is take and whose needs are built, and prints the `git commit` line, with the path as seen from the directory it was run in. |
+| `plan finish <id>` | Writes `built` (today, UTC) in a feature whose verdict is take and whose needs are built, and prints the `git commit` line, with the path as seen from the directory it was run in. The next sync closes the issue and removes the building label. |
 | `plan check` | The checks below. Each error reads `file: field: message. Fix: …`. |
+| `plan decide <id> take\|later\|drop\|clear` | A verdict the owner gave in conversation. The bot puts the label on the issue (the new one before the old one comes off) and comments `Recorded for the owner from a conversation.` (`clear` removes every verdict label and comments `Verdict cleared for the owner from a conversation.`). Prints `Recorded on GitHub. The commit follows: git pull.` Never writes the file. Exit 3 without credentials or GitHub; refused on a built feature. |
+| `plan start <id> [--branch <b>]` | Refused unless the file's verdict is take and every need is built. Live: refused when `workshop:building` is set (naming the branch of the newest claim); else sets it, comments `Being built on <branch>.` (the checkout's branch), then reads the issue again. When an older claim for another branch was posted since the label was set, this session lost the race: it deletes its comment and exits 1. Without GitHub, or without an issue yet: says the claim is not shared, exit 0. |
+| `plan stop <id>` | Removes `workshop:building`. On a feature not being built it says so, exit 0. |
+| `plan decline <issue> --why "…"` | Closes an open suggestion as not planned, the reason as the bot's comment. |
+| `plan sync [--dry-run]` | The plan to GitHub (below). Run by `plan-sync.yml`; by hand when it failed. |
+| `plan pull [--write \| --commit]` | The owner's verdicts from GitHub to the files (below). Run by `plan-verdict.yml`. |
+| `plan setup [--org] [--site] [--replace]` | Creates the App (below). |
+| `plan store [--replace]` | Finishes a setup whose Keychain step failed, from `vercel.env`. |
+| `plan doctor` | Where each credential comes from (never a value), whether the App is public and installed, its permissions, the six labels. Exit 1 on a problem. |
 
-Live state (the issues on GitHub) is read through `live/`. For now it is never available: `status`
-and `show` say so for their live parts and print the rest.
+Live state (the issues on GitHub) is read through `live/`, in this order: the site's
+`GET <site>/api/workshop/state` (one call, no token; `issue?n=` for one issue's comments; the site
+is `https://silo.amontlabs.com`, `PLAN_SITE` overrides it), else GitHub with the bot's token, else
+"not available". `status` and `show` then say so for their live parts, print the rest and exit 0.
 
-Coming with the GitHub side: `plan decide`, `start`, `stop`, `decline`, `sync`, `pull`, `setup`,
-`store`, `doctor`.
+## GitHub
+
+Labels: `workshop:entry`, `workshop:suggestion`, `verdict:take`, `verdict:later`, `verdict:drop`,
+`workshop:building`. An entry's issue is one the bot created, labelled `workshop:entry`, whose body
+ends with `<!-- silo-entry: <id> -->`; when two carry one marker the oldest is used. Its body also
+holds `<!-- silo-synced: <commit> -->`, the commit it was last synced at. The bot is recognised by
+its login, `<app slug>[bot]`, or by `performed_via_github_app` naming the App on a bot's item.
+
+Repo to GitHub, `plan sync`: runs `git fetch origin main` and reads the plan at `origin/main`
+(refused when it fails `plan check`). It creates missing labels; creates, updates, closes (as
+completed when `built`, as not planned when the verdict is drop) and reopens each entry's issue;
+removes `workshop:building` from a closed one; closes a suggestion named by `suggested_in` once,
+commenting `Placed in the plan as #N: <link>`. When a feature's files changed between its issue's
+marker and `origin/main`, it posts one history comment (no text from the plan) and moves the marker;
+when the marker's commit is not an ancestor any more, it only moves the marker. A feature unchanged
+since its marker keeps it. A verdict label that pull has not brought to the file yet holds the
+issue's state. Sync never writes a verdict label. Writes go one a second; a history comment is
+looked for before it is posted, so a run stopped half way (exit 3 on GitHub's rate limit) resumes
+without duplicates, and a second run changes nothing.
+
+GitHub to repo, `plan pull`, the only path from a label to a file: one verdict label counts when
+its newest `labeled` event is by the bot or by a person with write, maintain or admin permission
+(`GET /collaborators/<login>/permission`, its `role_name` or `permission`); the file gets it. No
+verdict label: the file's verdict is removed when the newest verdict event is a removal that counts
+the same way, or when the issue never had one. A label that does not count, two verdict labels, a
+built feature whose issue shows another verdict: reported, the file left alone. A file changed
+during the run is left alone. `--write` edits the files; `--commit` also commits them, subject
+`Owner: take <id>, drop <id>` (72 characters at most, then `…`), a line per feature with who and when.
+
+Workflows, in one concurrency group `plan`, never cancelled, set on the job so a skipped job never
+joins it: `plan-sync.yml` on push to `main`; `plan-verdict.yml` on an `issues` label event whose
+label starts with `verdict:`: checks out `main` with its history, `plan pull --commit`, `bin/push-main`
+(three tries, `git pull --rebase` between) with the workflow's own token, then `plan sync`. Both use
+the secrets `WORKSHOP_APP_ID` and `WORKSHOP_PRIVATE_KEY`.
+
+The App: `plan setup` opens a page on `127.0.0.1` (it answers no other Host) that posts the
+manifest to GitHub: "Silo Workshop", public, Issues write and Metadata read, no webhook, sign-in
+callback `<site>/api/workshop/callback`. The owner clicks "Create GitHub App", then "Install" on
+`amontlabs/silo` only. The command writes the seven variables Vercel needs to
+`~/.local/state/silo-workshop/vercel.env` (0600) first, then the App id, client id, client secret
+and private key to the Keychain (service `silo-workshop`, through `security -i` on stdin). It never
+registers a second App by accident; `--replace` registers a new one. Credentials are looked up in
+the environment, then the Keychain (a locked one stops the command), then
+`~/.config/silo-workshop/credentials.json` (0600 or refused). `WORKSHOP_GITHUB_API` and
+`WORKSHOP_REPO` override the API and the repository.
+
+Not verified until the owner has created the App: the workflows, and every rule above that rests on
+how GitHub answers (the bot's login and `performed_via_github_app`, label events and their actors,
+the permission endpoint for an App token, closing and reopening with a reason). The tests hold them
+against the fake. No credential, token or key is ever printed or logged.
 
 ## `plan check`
 
@@ -101,4 +162,6 @@ build checks it.
   (with their feature ids in order), `features` by id (each with `id`, `stage`, `position` from 1,
   and `notes`), `decisions`.
 - `check/`: `checkFiles(files)` gives `{ errors, notes }`.
-- `live/`: the live state interface; `cli/`: the commands.
+- `github/`: the REST client, the App's JWT and installation token, credentials, the Keychain,
+  `setup` and `store`, `doctor`, `sync`, `pull`, and `decide`, `start`, `stop`, `decline`.
+- `live/`: the live state, from the site or GitHub; `cli/`: the commands.

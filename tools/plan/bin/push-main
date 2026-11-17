@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Pushes HEAD to origin main. A rejected push means main moved meanwhile: rebase on it and try
+# again, three tries in all. Never forces.
+set -euo pipefail
+for try in 1 2 3; do
+  if git push --quiet origin HEAD:main; then exit 0; fi
+  [ "$try" = 3 ] && break
+  git pull --quiet --rebase origin main
+done
+echo "push-main: origin rejected the push three times" >&2
+exit 1

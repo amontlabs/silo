@@ -20,23 +20,29 @@ async function withPlan(files, body) {
   }
 }
 
-test('plan alone lists the commands, the coming ones marked', async () => {
+test('plan alone lists every command of the spec, one line each', async () => {
+  const names = ['status', 'show', 'add', 'finish', 'check', 'decide', 'start', 'stop', 'decline', 'sync', 'pull', 'setup', 'store', 'doctor'];
   const { code, out } = await run(temp(), []);
   assert.equal(code, 0);
-  for (const name of ['status', 'show', 'add', 'finish', 'check']) assert.match(out, new RegExp(`plan ${name}`));
-  assert.match(out, /Coming with the GitHub side:[\s\S]*plan decide[\s\S]*plan doctor/);
+  for (const name of names) assert.match(out, new RegExp(`^  plan ${name}`, 'm'));
   const json = JSON.parse((await run(temp(), ['--json'])).out);
-  assert.deepEqual(json.commands.filter((item) => !item.coming).map((item) => item.name), ['status', 'show', 'add', 'finish', 'check']);
+  assert.deepEqual(json.commands.map((item) => item.name), names);
 });
 
-test('wrong use exits 2; a coming command is not built yet', async () => {
+test('wrong use exits 2; a GitHub command without credentials exits 3 and records nothing', async () => {
   await withPlan(basePlan(), async (root) => {
     assert.equal((await run(root, ['nonsense'])).code, 2);
-    const coming = await run(root, ['decide', 'fork', 'take']);
-    assert.equal(coming.code, 2);
-    assert.match(coming.err, /not built yet/);
     assert.equal((await run(root, ['show'])).code, 2);
     assert.equal((await run(root, ['check', '--nope'])).code, 2);
+    assert.equal((await run(root, ['decide', 'fork', 'refine'])).code, 2);
+    assert.equal((await run(root, ['decide', 'fork'])).code, 2);
+    assert.equal((await run(root, ['decline', 'x', '--why', 'No.'])).code, 2);
+    assert.equal((await run(root, ['decline', '4'])).code, 2);
+    assert.equal((await run(root, ['pull', 'x'])).code, 2);
+    const decide = await run(root, ['decide', 'fork', 'take']);
+    assert.equal(decide.code, 3);
+    assert.match(decide.err, /missing WORKSHOP_APP_ID and WORKSHOP_PRIVATE_KEY/);
+    for (const argv of [['stop', 'fork'], ['decline', '4', '--why', 'No.'], ['pull'], ['sync']]) assert.equal((await run(root, argv)).code, 3, argv.join(' '));
   });
 });
 
