@@ -490,8 +490,9 @@ const sha = (text) => createHash('sha1').update(text).digest('hex');
 const HOUR = 3_600_000;
 
 // The history comments and people's comments of the --progress state, oldest first, over the last
-// days: a verdict line for each entry that has one, then on chosen entries a text change (with its
-// before and after served as raw files), notes edited, a field changed, a verdict cleared and built.
+// days: a verdict line for each entry that has one and a built line for each entry built, then on
+// chosen entries a text change (with its before and after served as raw files), notes edited, a field
+// changed and a verdict cleared. Every line agrees with the state the sample shows.
 function seedHistory(fake, list, numbers, plan, now) {
   let clock = now - 5 * 24 * HOUR;
   let head = sha('seed');
@@ -504,8 +505,10 @@ function seedHistory(fake, list, numbers, plan, now) {
   };
   const decided = list.filter((feature) => plan.verdicts.has(feature.id));
   for (const feature of decided) history(feature.id, ['verdict'], { verdict: plan.verdicts.get(feature.id) });
+  // Built only on the entries the sample shows as built, after their verdict line.
+  for (const feature of decided.filter((f) => plan.built.has(f.id))) history(feature.id, ['built'], { built: feature.built });
   const taken = decided.filter((feature) => plan.verdicts.get(feature.id) === 'take');
-  const [first, second, third] = taken;
+  const [first, second] = taken;
   const people = [['lin-qi', 'Does this also cover a computer the engine restarts after a crash?'], ['mara-k', 'This is the part that would make me trust it with my main.'], ['devin-oss', 'How does it behave when the disk is full?']];
   if (first) {
     fake.addComment(numbers.get(first.id), people[0][0], people[0][1], step(2));
@@ -522,7 +525,6 @@ function seedHistory(fake, list, numbers, plan, now) {
     history(second.id, ['needs', 'notes']);
     fake.addComment(numbers.get(second.id), people[2][0], people[2][1], step(4));
   }
-  if (third) history(third.id, ['built'], { built: new Date(step(6)).toISOString().slice(0, 10) });
   const cleared = list.find((feature) => !plan.verdicts.has(feature.id) && feature.area);
   if (cleared) {
     history(cleared.id, ['verdict'], { verdict: 'later' });

@@ -1320,6 +1320,19 @@ test('seedDemo with progress: verdict labels, building, closed entries and a his
       const [before, after] = await Promise.all([change.before, change.commit].map(async (commit) => JSON.parse(await (await fetch(`${t.fake.rawUrl}/${t.fake.repo}/${commit}/plan/features/${id}.json`)).text())));
       assert.notDeepEqual(before, after, 'the before and after differ');
     }
+    // Every history line agrees with the entry's state: Built only on a built entry, the last verdict line is
+    // the verdict it shows.
+    const entryOf = (number) => state.issues[number];
+    for (const { number, change } of changes.filter(({ change }) => change.fields.includes('built'))) {
+      assert.deepEqual([entryOf(number).state, entryOf(number).reason], ['closed', 'completed'], `built line on ${entryOf(number).entry}`);
+    }
+    const lastVerdict = new Map();
+    for (const { number, change } of changes) if (change.fields.includes('verdict')) lastVerdict.set(number, change.verdict);
+    for (const [number, verdict] of lastVerdict) assert.equal(entryOf(number).verdict, verdict, `verdict line on ${entryOf(number).entry}`);
+    for (const entry of entries) {
+      const number = Number(Object.keys(state.issues).find((n) => state.issues[n] === entry));
+      if (entry.verdict) assert.equal(lastVerdict.get(number), entry.verdict, `${entry.entry} shows a verdict its lines give`);
+    }
     // Entries with history say so in the state.
     assert.ok(entries.some((i) => i.updates > 0));
   } finally { await t.close(); }
