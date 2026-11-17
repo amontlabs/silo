@@ -1,6 +1,12 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+import { loadConfig } from './useWorkshop';
+
+// A failed load is tried again after 1.5 s on the page; the tests that do not look at that wait only briefly.
+beforeEach(() => {
+  loadConfig.retryMs = 20;
+});
 
 afterEach(() => {
   cleanup();

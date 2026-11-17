@@ -234,6 +234,7 @@
 
 /* ---- an opened place ---- */
 .ws-detail { display: grid; grid-template-columns: 304px minmax(0, 1fr); animation: ws-rise .24s var(--ease-out) both; view-transition-name: detail; }
+.ws-detail.ws-still { animation: none; }
 .ws.leaving .ws-detail { opacity: 0; transition: opacity .13s; pointer-events: none; }
 .ws-block { position: sticky; top: 65px; align-self: start; padding: 20px 24px 28px; min-width: 0; }
 .ws .ws-back { font: 12px var(--mono); color: var(--muted); padding: 4px 0; }
@@ -512,3 +513,47 @@
 .workshop-shell:has(.ws-list-loading) .ws-foot { opacity: 0; transition: none; }
 .ws-sub { font: 12px/1.5 var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-latest .ws-word { min-width: 0; }
+
+/* Placeholders: where something is known to come and has not yet, its room held and gently pulsing. */
+@keyframes ws-pulse { 50% { opacity: .45; } }
+.ws-ph { display: block; border-radius: 3px; background: color-mix(in srgb, var(--line) 40%, transparent); }
+.ws-ph, .ws-c-ghost, .ws-h-ghost, .ws-latest-ghost .ws-latest-name, .ws-latest-ghost .ws-sub { animation: ws-pulse 1.6s ease-in-out infinite; }
+.ws-ph-vote { display: inline-block; width: 30px; height: 12px; vertical-align: middle; }
+/* A placeholder built from the real boxes (the suggest form, the comment box), so it has their exact size. */
+.ws .ws-ph-shape :is(input, textarea, .ws-btn) {
+  color: transparent; border-color: transparent; box-shadow: none; opacity: 1; resize: none; pointer-events: none;
+  background: color-mix(in srgb, var(--line) 40%, transparent); animation: ws-pulse 1.6s ease-in-out infinite;
+}
+/* One row shaped like a suggestion's: a bar for its name, a bar in the vote slot. */
+.ws-ph-row .ws-pip { visibility: hidden; }
+.ws-ph-row .ws-name .ws-ph { display: inline-block; width: min(55%, 300px); height: 14px; vertical-align: middle; }
+.ws-ph-row .ws-line:hover { background: none; }
+/* The room of something that comes with the state, held empty. */
+.ws-held { visibility: hidden; }
+.ws-ph-notes { display: grid; gap: 7px; padding: 3px 0; }
+.ws-ph-notes .ws-ph { height: 14px; width: min(100%, 520px); }
+.ws-ph-notes .ws-ph:last-child { width: min(70%, 360px); }
+.ws-ph-account { width: 100%; height: 22px; }
+
+/* What arrives after the first frames fades in where it stands. */
+.ws-arr-s .ws-late-s, .ws-arr-o .ws-late-o, .ws-arr-p .ws-late-p, .ws-key .ws-in, .ws-status.ws-in, #workshop-account.ws-arr-p > * { animation: ws-appear .15s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  #workshop-account > * { animation: none !important; transition: none !important; }
+}
+
+/* For people who would rather not sign in here: a word under the header's sign-in, taking no room. */
+.ws-signin-wrap { position: relative; display: inline-flex; }
+.ws-signin-tip {
+  position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; padding: 5px 9px 6px; border: 1px solid var(--line); border-radius: 3px;
+  background: var(--surface-hover); box-shadow: 0 6px 18px #0000001a, 0 1px 3px #0000000f; font: 12px/1.35 var(--mono); color: var(--muted);
+  white-space: nowrap; opacity: 0; visibility: hidden; transition: opacity .12s, visibility 0s .12s;
+}
+/* The gap between the button and the tooltip still counts as over it, so the pointer can move onto it. */
+.ws-signin-tip::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 8px; }
+.ws-signin-wrap:not(.closed):hover .ws-signin-tip, .ws-signin-wrap:not(.closed) a:focus-visible + .ws-signin-tip { opacity: 1; visibility: visible; transition: opacity .12s; }
+
+/* After a failed load: the line, and a way to try again; they wrap as two items, never indented. */
+.ws-offline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; }
+.ws-note .ws-retry { padding: 8px 0; margin-block: -8px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+.ws-note .ws-retry:hover { color: var(--accent-ink); }
+.ws-note .ws-retry:disabled { opacity: .55; cursor: default; }

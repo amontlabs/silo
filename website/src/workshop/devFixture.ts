@@ -1,7 +1,9 @@
 // Development only (`?fixture=today` or `?fixture=later`, with `&as=owner` or `&as=visitor`): the page on a made-up
-// live state, without the API. main.tsx loads this only when import.meta.env.DEV, so a production build has none of it.
+// live state, without the API. The page's memory of the last visit is off unless `&memory=1`, so `&delay=<ms>` shows
+// a first visit. main.tsx loads this only when import.meta.env.DEV, so a production build has none of it.
 import { changeComment } from '../../../tools/plan/model/index.js';
 import { api } from './api';
+import { memoryConfig } from './memory';
 import type { Comment } from './api';
 import type { BuildData, Change, LiveIssue, LiveLatest, LiveState, Verdict } from './plan';
 
@@ -67,6 +69,9 @@ export function installFixture(data: BuildData, params: URLSearchParams): void {
   const as = params.get('as');
   const { state, comments } = fixtureState(data, when);
   const delay = Number(params.get('delay') ?? 0);
+  memoryConfig.on = params.get('memory') === '1';
+  // The session marker the server would set: signed in as someone, or signed out.
+  document.cookie = as === 'owner' || as === 'visitor' ? 'workshop-hint=1; path=/' : 'workshop-hint=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   api.state = () => new Promise((resolve) => setTimeout(() => resolve(state), delay));
   const wait = <T,>(ms: number, value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
   // `me` waits as long as `delay`; `detail=<ms>` holds back each issue's comments.

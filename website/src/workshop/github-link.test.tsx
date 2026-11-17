@@ -7,14 +7,14 @@ import { buildData } from './fixtures';
 import { itemOf, mockApi, owner, refused, renderApp, rowButton, visitor } from './test-support';
 import type { Route } from './test-support';
 
-describe('or comment on GitHub', () => {
+describe('or comment directly on GitHub', () => {
   it('shows under "Sign in to comment" as the one link to the issue, from the panel\'s first paint', async () => {
     mockApi();
     history.replaceState(null, '', '/workshop#computers');
     await renderApp();
     await userEvent.click(rowButton('Create and delete a computer'));
     const item = itemOf('Create and delete a computer');
-    const link = within(item).getByRole('link', { name: 'or comment on GitHub' });
+    const link = within(item).getByRole('link', { name: 'or comment directly on GitHub' });
     expect(link).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/12');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
@@ -27,9 +27,9 @@ describe('or comment on GitHub', () => {
     mockApi();
     history.replaceState(null, '', '/workshop#suggested/issue-31');
     await renderApp();
-    expect(await screen.findByRole('link', { name: 'or comment on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/31');
+    expect(await screen.findByRole('link', { name: 'or comment directly on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/31');
     expect(screen.getByRole('link', { name: 'Sign in to suggest' })).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: 'or comment on GitHub' })).toHaveLength(1);
+    expect(screen.getAllByRole('link', { name: 'or comment directly on GitHub' })).toHaveLength(1);
   });
 
   it('is not offered to a signed-in person, who keeps "GitHub #N"', async () => {
@@ -38,7 +38,7 @@ describe('or comment on GitHub', () => {
     await renderApp();
     await screen.findByRole('textbox', { name: 'Comment' });
     expect(screen.getByRole('link', { name: 'GitHub #13 ↗' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'or comment on GitHub' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'or comment directly on GitHub' })).not.toBeInTheDocument();
   });
 
   it('is not shown when the live state is unavailable', async () => {
@@ -46,7 +46,7 @@ describe('or comment on GitHub', () => {
     history.replaceState(null, '', '/workshop#computers/exec');
     await renderApp();
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
-    expect(screen.queryByRole('link', { name: 'or comment on GitHub' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'or comment directly on GitHub' })).not.toBeInTheDocument();
     expect(screen.queryByText('Sign in to comment')).not.toBeInTheDocument();
   });
 
@@ -58,8 +58,8 @@ describe('or comment on GitHub', () => {
     render(<App data={buildData()} />);
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
     expect(screen.getByRole('textbox', { name: 'Comment' })).toBeDisabled();
-    expect(screen.queryByRole('link', { name: 'or comment on GitHub' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'or comment directly on GitHub' })).not.toBeInTheDocument();
     await act(async () => answer(refused(401, 'Not signed in.')));
-    expect(await screen.findByRole('link', { name: 'or comment on GitHub' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'or comment directly on GitHub' })).toBeInTheDocument();
   });
 });

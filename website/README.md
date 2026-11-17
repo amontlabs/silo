@@ -46,7 +46,8 @@ To look at a later state without the API, open
 `http://127.0.0.1:4173/workshop/?fixture=later` (verdicts with their
 history lines, two entries being built) or `?fixture=today`; add `&as=owner` or `&as=visitor` to
 be signed in (`&login=<name>` for another login), `&delay=2000` to hold the live state and the sign-in answer back,
-and `&detail=700` to hold each entry's comments back. This exists only in
+and `&detail=700` to hold each entry's comments back. The page's memory of the last visit is off with a fixture,
+so `&delay=` shows a first visit; `&memory=1` turns it on. This exists only in
 development builds (`devFixture.ts`, loaded when `import.meta.env.DEV`); a
 production build has none of it.
 
@@ -98,13 +99,28 @@ another URL after `--` to check another server) at 1440 × 900, 1440 × 1100,
 2560 × 1440, 1024 × 1366 and 390 × 844, on the plain view, the first area,
 `#latest` and `#suggested`. For each load it prints when the page first
 painted, when the account, the votes, the owner's marks and "Suggest a
-feature" appeared, and every layout shift. It checks that the footer is the
-last row of the frame, at the bottom of the window when the page is shorter
-than the window and right after the content otherwise, once before the page's
-script runs and once after everything has loaded. It exits with an error when
-that check fails or a layout shift is recorded. `--slow-api <ms>` holds back
+feature" appeared, what the page's first frame held, and every layout shift
+with their total. Every one of these loads is a first visit: its first frame
+must hold the sign-in button (unless `--owner`), "Suggest a feature" on the
+plain view, and a vote placeholder on every row of the first area. Then, in one
+browser profile at 1440 × 900, the first area is visited twice (the second
+visit must have the votes in its first frame), and the owner signs in through
+the fake GitHub's page as `owner-fake` (so the session cookie, its marker and
+the remembered person are real) and visits again: the login, "N to decide"
+and the rows' "to decide" must be in its first frame. Then an entry of the
+first area without comments is opened before the answers, at 1440 × 900 and
+390 × 844, and the rows below it must not move when they arrive; and
+`#suggested` is visited signed in with nobody remembered, and the list must not
+move when `me` answers. "account" is when the login or the sign-in button
+appeared, not its placeholder. It checks that the
+footer is the last row of the frame, at the bottom of the window when the page
+is shorter than the window and right after the content otherwise, once before
+the page's script runs and once after everything has loaded. It exits with an
+error when that check fails, a first frame lacks what it must hold, or a
+load's layout shifts add up to more than 0.01 (the key gains an item when the
+state arrives, a shift of a few ten-thousandths). `--slow-api <ms>` holds back
 each API answer, `--slow-script <ms>` holds back the page's script, and
-`--owner` loads the page as the signed-in owner. `npm test` does not run it.
+`--owner` fakes the `me` answer as the owner. `npm test` does not run it.
 
 ## Test
 
@@ -158,7 +174,50 @@ What a person sees:
   opening. The row shows itself open at once; its panel grows when the comments
   are in or after 180 ms, and while they still load each one the count announces
   holds its place. An entry named
-  by the address opens once the live state is there.
+  by the address opens at once when a live state is shown (remembered or
+  answered); with none yet, it waits closed until the first answer. An address
+  naming something the state shown lacks falls back to the plan only once the
+  load has answered or failed, and the `fresh=1` ask has too when one was made.
+  The person's own vote on an opened row is checked only once `me` has answered
+  on this visit, so a session found gone on page load says nothing. The suggest
+  form shows whenever the person is shown signed in and keeps its draft; it
+  sends only while a state is shown.
+- What the page shows first: the plan is in the bundle. The live state (votes,
+  comments, suggestions, the owner's marks) and who is signed in come from
+  `GET state` and `GET me`, and the page remembers both in local storage
+  (`memory.ts`): the newest answer as the server sent it, and the signed-in
+  login, avatar and whether they decide. The page's own confirmed writes are
+  kept apart (`writes.ts`), as a list with each one's time, of values set: a
+  verdict, a new suggestion, and for a vote or a comment the count the server
+  answered for that write (`up`, `comments`; the count shown plus or minus one
+  when an older server answers none). Never a change to a count: the server
+  patches its snapshot in place, so an answer may already count a write made
+  after its `fetchedAt`. What the page shows is the answer with every write applied in
+  order, except those the answer was fetched more than a minute after; a write
+  is dropped after a day, the page's own comments after six minutes. Both are drawn in the
+  first frame. The person is used only while the `workshop-hint` cookie is
+  there, and forgotten on sign-out, on a 401 and when `me` answers signed out; a
+  state over 7 days old or of another shape is ignored. Without the cookie the
+  visitor is signed out from the first frame ("Sign in with GitHub", "Sign in to
+  comment", "Sign in to suggest"). What is remembered about the person is for
+  display: a verdict is sent only once `me` has answered on this visit that
+  they decide, and until then the verdict buttons look dimmed.
+- The load: `state` is asked once. Its answer is shown unless the state shown
+  is newer (by `fetchedAt`). An old answer (`old: true`, an `Age` header over
+  10, or fetched over 2 minutes ago) is followed by one `state?fresh=1`, shown
+  in place; a failure of that ask says nothing. A failed first ask is tried
+  once more after 1.5 s (not on `not_configured`); then "Votes and comments are
+  offline." shows with "Try again", and remembered numbers stay on screen.
+- While no state is shown and the first answer is to come, placeholders hold the
+  room of what is known to come: the vote of every row, the header's account
+  when the cookie is there and nobody is remembered, Latest's lines, an open
+  entry's comment box, two rows of suggestions and the suggest form; notes have
+  their own while their chunk loads. They pulse slowly (not with reduced
+  motion), are `aria-hidden`, and their region is `aria-busy`. Nothing has a
+  placeholder that may not come (comment counts, "N suggested", the owner's
+  marks). What arrives after the first frames (numbers, the account, the
+  owner's marks, a new item of the key) fades in over 150 ms where it stands;
+  nothing fades on navigation or when a row opens, or with reduced motion.
 - An open entry shows its sentence, then "Notes" (its `<id>.md`), closed by
   default, and opened in place: headings, paragraphs, lists, http and https
   links (an address may hold one level of brackets), inline code and code
@@ -185,7 +244,7 @@ What a person sees:
   `raw.githubusercontent.com` only then, and shows "not available" when it
   cannot. While the thread loads, each comment and each history line the live
   state counts holds its place. A visitor who is not signed in gets "Sign in to comment" and, under it,
-  "or comment on GitHub", the one link to that row's issue; a signed-in person
+  "or comment directly on GitHub", the one link to that row's issue; a signed-in person
   gets the box and "GitHub #N". Until `me` answers, the panel keeps the room of
   the shape the `workshop-hint` cookie predicts, so it moves only when that
   cookie was stale.
@@ -211,6 +270,8 @@ What a person sees:
 - The header's account slot has a fixed width from first paint: signed in when
   the readable `workshop-hint` cookie is there (a long login is cut by an
   ellipsis), signed out otherwise. It changes only when that cookie was stale.
+  Under "Sign in with GitHub", on hover and keyboard focus, a tooltip tied to
+  the button says "or comment directly on GitHub", taking no room.
 
 Addresses: `#<area>`, `#<area>/<entry id>`, `#suggested`, `#left` and
 `#decisions`, each with an optional open row (`#suggested/issue-<n>`,
@@ -223,12 +284,12 @@ Back and Forward move between places; opening a row replaces the address.
 | File | What |
 | --- | --- |
 | `App.tsx` | Places, addresses, focus, keyboard, the layout. |
-| `useWorkshop.ts` | Live state and every write: pending writes, the verdict guard. |
+| `useWorkshop.ts` | Live state and every write: the load, pending writes, the verdict guard. |
 | `MapView.tsx`, `Tiles.tsx` | The map and the tiles. |
 | `AreaView.tsx`, `Suggest.tsx`, `Latest.tsx`, `Decisions.tsx` | An opened area and what is not carried over, the suggestions, the latest changes, the decisions. |
 | `Entry.tsx` | One row and what it shows open: notes, decisions, the thread with its history lines. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses, the rows on top of the plan's model, the drawing, the build-time reader. |
-| `api.ts`, `writes.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the six-minute memory of the page's own writes, text from GitHub, notes, the fallback list. |
+| `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |
 
 ## Storage
 

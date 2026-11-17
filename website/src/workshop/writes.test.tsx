@@ -325,11 +325,11 @@ describe('writes the server has not confirmed', () => {
     expect(within(pending).getByText('Sending…')).toBeInTheDocument();
     expect(within(itemOf('Run a command')).queryByText(/💬/)).not.toBeInTheDocument();
     expect(announced()).toBe('Sending comment');
-    expect(localStorage.getItem('silo-workshop-writes')).toBeNull();
+    expect(localStorage.getItem('silo-workshop-writes-2')).toBeNull();
     await act(async () => answer.release(ok()));
     expect(screen.getByText('On its way.').closest('.ws-c')).not.toHaveClass('ws-pending');
     expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
-    expect(localStorage.getItem('silo-workshop-writes')).toContain('On its way.');
+    expect(localStorage.getItem('silo-workshop-writes-2')).toContain('On its way.');
   });
 
   it('take back a comment that times out', async () => {
@@ -343,7 +343,7 @@ describe('writes the server has not confirmed', () => {
       expect(screen.getByText('Sending…')).toBeInTheDocument();
       expect(await screen.findByRole('alert')).toHaveTextContent('Comment: not saved. No answer.');
       expect(screen.getByRole('textbox', { name: 'Comment' })).toHaveValue('Lost.');
-      expect(localStorage.getItem('silo-workshop-writes')).toBeNull();
+      expect(localStorage.getItem('silo-workshop-writes-2')).toBeNull();
     } finally {
       apiConfig.writeTimeoutMs = 20_000;
     }
@@ -380,14 +380,14 @@ describe('writes the server has not confirmed', () => {
     await userEvent.click(rowButton('Create and delete a computer'));
     time.advance(OPEN_GUARD_MS);
     expect(within(itemOf('Create and delete a computer')).queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
-    expect(localStorage.getItem('silo-workshop-writes')).toBeNull();
+    expect(localStorage.getItem('silo-workshop-writes-2')).toBeNull();
     await act(async () => answer.release(ok()));
     expect(within(itemOf('Create and delete a computer')).getByText('planned')).toBeInTheDocument();
     expect(part('computers').querySelector('.ws-todo')).toHaveTextContent('1');
-    expect(localStorage.getItem('silo-workshop-writes')).toContain('take');
+    expect(localStorage.getItem('silo-workshop-writes-2')).toContain('take');
   });
 
-  it('keep the page\'s own writes for six minutes over an older state', async () => {
+  it('keep the page\'s own writes over an older state, not over one fetched well after them', async () => {
     const time = clock();
     const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#computers/computers');
@@ -447,7 +447,7 @@ describe('writes the server has not confirmed', () => {
     history.replaceState(null, '', '/workshop#computers/exec');
     await renderApp();
     await screen.findByText('Sign in to comment');
-    expect(screen.getByRole('link', { name: 'or comment on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
+    expect(screen.getByRole('link', { name: 'or comment directly on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
     expect(await screen.findByRole('link', { name: 'Earlier comments on GitHub ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
   });
 });

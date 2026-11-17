@@ -28,7 +28,7 @@ function Tile({ group, on, todo, onOpen }: { group: AreaGroup; on: boolean; todo
         <span className="ws-tile-top">
           <span className="ws-num">{number(group.number)}</span>
           <span className="ws-lab">
-            {todo ? <b>{todo} to decide</b> : <>{state === 'now' ? <i className="ws-live" /> : null}{stateWords(group)}</>}
+            {todo ? <b className="ws-late-o">{todo} to decide</b> : <>{state === 'now' ? <i className="ws-live" /> : null}{stateWords(group)}</>}
           </span>
         </span>
         <span className="ws-title"><i className="ws-mark" />{group.area.title}</span>

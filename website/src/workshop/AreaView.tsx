@@ -52,7 +52,7 @@ function tally(counts: Counts, toDecide: number): ReactNode[] {
   if (built) parts.push(one(built, 'built'));
   if (building) parts.push(<i key="b">{one(building, 'being built')}</i>);
   if (planned) parts.push(one(planned, 'planned'));
-  if (toDecide) parts.push(<i key="d">{one(toDecide, 'to decide')}</i>);
+  if (toDecide) parts.push(<i key="d" className="ws-late-o">{one(toDecide, 'to decide')}</i>);
   if (undecided) parts.push(one(undecided, 'not decided'));
   if (later) parts.push(one(later, 'later'));
   if (dropped) parts.push(one(dropped, 'dropped'));

@@ -149,7 +149,7 @@ export function historyComment(id: number, change: Change, createdAt: string): C
 export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLatest[] = []): LiveState {
   return {
     repo: 'amontlabs/silo',
-    fetchedAt: day,
+    fetchedAt: new Date(Date.now()).toISOString(),
     issues: {
       10: issue({ entry: 'engine', title: 'The engine runs on its own', verdict: 'take', up: 8 }),
       11: issue({ entry: 'calls', title: 'Every call defined once', up: 3 }),

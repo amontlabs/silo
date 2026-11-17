@@ -51,6 +51,10 @@ const FALLBACK: Record<number, string> = {
 export const apiConfig = { writeTimeoutMs: 20_000 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await respond<T>(path, init)).body;
+}
+
+async function respond<T>(path: string, init?: RequestInit): Promise<{ body: T; headers: Headers }> {
   let response: Response;
   const write = init?.method === 'POST';
   const controller = write ? new AbortController() : null;
@@ -75,7 +79,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(response.status, code, message);
   }
-  return (await response.json()) as T;
+  return { body: (await response.json()) as T, headers: response.headers };
+}
+
+/** A cached answer this many seconds old or more counts as old: the CDN serves it while it revalidates. */
+const STALE_AGE_S = 10;
+
+/** The live state; `fresh` waits for a snapshot at most 30 seconds old. `old` is set when the answer is older. */
+async function state(fresh = false): Promise<LiveState> {
+  const { body, headers } = await respond<LiveState>(fresh ? 'state?fresh=1' : 'state');
+  const age = Number(headers.get('Age'));
+  return Number.isFinite(age) && age > STALE_AGE_S ? { ...body, old: true } : body;
 }
 
 function post<T>(path: string, body: unknown): Promise<T> {
@@ -87,7 +101,7 @@ function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
-  state: () => request<LiveState>('state'),
+  state,
   me: async (): Promise<Me | null> => {
     if (!hasSessionHint()) return null;
     try {
@@ -99,8 +113,10 @@ export const api = {
   },
   issue: (n: number) => request<IssueDetail>(`issue?n=${n}`),
   myVote: async (n: number) => (await request<{ on: boolean }>(`vote?n=${n}`, { cache: 'no-store' })).on === true,
-  comment: (n: number, text: string) => post<unknown>('comment', { n, text }),
-  vote: (n: number, on: boolean) => post<unknown>('vote', { n, on }),
+  /** `comments`: the issue's whole count after the comment (history lines included), when the server says. */
+  comment: (n: number, text: string) => post<{ comments?: unknown }>('comment', { n, text }),
+  /** `up`: the issue's 👍 count after the vote, when the server says. */
+  vote: (n: number, on: boolean) => post<{ up?: unknown }>('vote', { n, on }),
   suggest: (title: string, text: string) => post<{ number: number }>('suggest', { title, text }),
   verdict: (n: number, verdict: Verdict | null) => post<unknown>('verdict', { n, verdict }),
   logout: () => post<unknown>('logout', {}),

@@ -7,7 +7,8 @@ import type { BuildData } from './plan';
 import { buildData, fixtureNotes, liveState } from './fixtures';
 
 export type Call = { method: string; path: string; body: Record<string, unknown> | null; headers: Record<string, string> };
-export type Reply = { status: number; body: unknown } | Promise<{ status: number; body: unknown }>;
+type Answer = { status: number; body: unknown; headers?: Record<string, string> };
+export type Reply = Answer | Promise<Answer>;
 export type Route = (url: URL, body: Record<string, unknown> | null) => Reply;
 
 export const ok = (body: unknown = {}) => ({ status: 200, body });
@@ -40,8 +41,8 @@ export function mockApi(options: { state?: Route; me?: Me | null; routes?: Recor
     const route = routes[`${method} ${path}`];
     const signal = init?.signal;
     const aborted = new Promise<never>((_, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
-    const reply = route ? await Promise.race([Promise.resolve(route(url, body)), aborted]) : refused(404, 'Not found.');
-    return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { 'Content-Type': 'application/json' } });
+    const reply: Answer = route ? await Promise.race([Promise.resolve(route(url, body)), aborted]) : refused(404, 'Not found.');
+    return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { 'Content-Type': 'application/json', ...reply.headers } });
   }));
   return calls;
 }
@@ -66,7 +67,9 @@ export const areaTitle = () => document.getElementById('ws-area-title');
 
 export async function renderApp(data: BuildData = buildData(), loadNotes = () => Promise.resolve(fixtureNotes(data))) {
   const view = render(<App data={data} loadNotes={loadNotes} />);
-  await waitFor(() => expect(document.querySelector('.ws-account, .ws-account-inline a, .ws-note')).not.toBeNull());
+  // Settled: the load has answered or failed, and the account shows who is signed in.
+  await waitFor(() => expect(document.querySelector('.ws[data-live="answered"], .ws[data-live="failed"]')).not.toBeNull());
+  await waitFor(() => expect(document.querySelector('.ws-account, .ws-account-inline a')).not.toBeNull());
   return view;
 }
 

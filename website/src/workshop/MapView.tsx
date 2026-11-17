@@ -142,7 +142,7 @@ export function MapView({ groups, folded, current, toDecide, onOpen }: MapViewPr
               <span className="ws-p-ttl">{group.area.title}</span>
               <span className="ws-p-st"><i className="ws-mk" /><span>{stateWords(group)}</span></span>
               {GLYPHS[id] ?? null}
-              {todo ? <b className="ws-todo">{todo}</b> : null}
+              {todo ? <b className="ws-todo ws-late-o">{todo}</b> : null}
             </button>
           );
         })}

@@ -160,7 +160,7 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
         <button type="button" className="ws-row" aria-expanded={open} aria-controls={`${row.key}-more`} onClick={() => ctx.onToggle(row)} onPointerEnter={() => w.prefetch(row)} onPointerDown={() => w.prefetch(row)} onTouchStart={() => w.prefetch(row)} onFocus={() => w.prefetch(row)}>
           <i className={pipClass(row)} aria-hidden="true" />
           <span className="ws-name">{row.name}</span>
-          <b className={isSaving ? 'ws-word ws-pending' : 'ws-word'}>{word ?? ''}</b>
+          <b className={isSaving ? 'ws-word ws-pending' : owed ? 'ws-word ws-late-o' : 'ws-word'}>{word ?? ''}</b>
         </button>
         <Side row={row} ctx={ctx} />
       </div>
@@ -173,12 +173,14 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
 
 function Vote({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
-  if (!w.liveOk || row.up === null || (row.kind !== 'entry' && row.kind !== 'suggestion')) return null;
+  if (row.kind !== 'entry' && row.kind !== 'suggestion') return null;
+  if (w.waiting) return <i className="ws-ph ws-ph-vote" aria-hidden="true" />;
+  if (!w.liveOk || row.up === null) return null;
   const on = row.issue !== null && w.votes[row.issue] === true;
   const busy = row.issue !== null && w.votePending.has(row.issue);
-  if (!w.me) return <a className="ws-vote" href={ctx.signIn} title="Sign in to vote" aria-label={`${row.up} votes, sign in to vote`}>👍 {row.up}</a>;
+  if (!w.me) return <a className="ws-vote ws-late-s" href={ctx.signIn} title="Sign in to vote" aria-label={`${row.up} votes, sign in to vote`}>👍 {row.up}</a>;
   return (
-    <button type="button" className={`ws-vote${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${row.up} votes`} onClick={() => void w.toggleVote(row)} disabled={busy || (row.issue ?? 0) <= 0}>
+    <button type="button" className={`ws-vote ws-late-s${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${row.up} votes`} onClick={() => void w.toggleVote(row)} disabled={busy || (row.issue ?? 0) <= 0}>
       👍 {row.up}
     </button>
   );
@@ -191,8 +193,8 @@ function Side({ row, ctx }: { row: Row; ctx: EntryContext }) {
     <span className="ws-side">
       {row.kind === 'suggestion' && row.author ? <span className="ws-by">{row.author}</span> : null}
       {row.kind === 'decided' && row.date ? <span className="ws-by">{shortDate(row.date)}</span> : null}
-      <span className="ws-votes"><Vote row={row} ctx={ctx} /></span>
-      <span className="ws-talks">{showComments ? <span aria-label={`${row.comments} comments`}>💬 {row.comments}</span> : null}</span>
+      <span className="ws-votes" aria-busy={w.waiting || undefined}><Vote row={row} ctx={ctx} /></span>
+      <span className="ws-talks">{showComments ? <span className="ws-late-s" aria-label={`${row.comments} comments`}>💬 {row.comments}</span> : null}</span>
     </span>
   );
 }
@@ -210,7 +212,7 @@ function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const suggested = row.suggest?.verdict ?? null;
   return (
     <>
-      <div className="ws-state">
+      <div className="ws-state ws-late-o">
         <button type="button" className={cls('ws-btn go')} disabled={busy} onClick={act(() => ctx.mainAction(row))}>Take <kbd>↵</kbd></button>
         <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'later'))}>Later</button>
         <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'drop'))}>Drop</button>
@@ -314,6 +316,26 @@ function HistoryLine({ change, createdAt, row, repo }: { change: Change; created
 
 function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
   const { w } = ctx;
+  // Until the first answer, the box's room is held.
+  if (w.waiting) {
+    // Until the first answer: signed out (no session marker), the sign-in box at once and the room of the line
+    // under it; otherwise the comment box's own boxes as a placeholder.
+    return (
+      <div className="ws-talk" aria-busy="true">
+        {w.me === null ? (
+          <>
+            <div className="ws-box"><a className="ws-signin" href={ctx.signIn}>Sign in to comment</a></div>
+            <span className="ws-gh-alt ws-held" aria-hidden="true">or comment directly on GitHub<svg className="out"><use href="#out" /></svg></span>
+          </>
+        ) : (
+          <div className="ws-box ws-ph-shape" aria-hidden="true" inert>
+            <textarea tabIndex={-1} rows={1} disabled />
+            <span className="ws-btn">Comment</span>
+          </div>
+        )}
+      </div>
+    );
+  }
   if (row.issue === null || row.issue <= 0) return null;
   const n = row.issue;
   const repo = w.live.state?.repo ?? 'amontlabs/silo';
@@ -338,8 +360,8 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
       <>
         <div className="ws-box"><a className="ws-signin" href={ctx.signIn}>Sign in to comment</a></div>
         {url ? (
-          <a className="ws-gh-alt" href={url} target="_blank" rel="noopener noreferrer" title={`GitHub #${n}`}>
-            or comment on GitHub<svg className="out" aria-hidden="true"><use href="#out" /></svg>
+          <a className="ws-gh-alt ws-late-s" href={url} target="_blank" rel="noopener noreferrer" title={`GitHub #${n}`}>
+            or comment directly on GitHub<svg className="out" aria-hidden="true"><use href="#out" /></svg>
           </a>
         ) : null}
       </>
@@ -389,7 +411,7 @@ function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const decisions: Decision[] = w.canDecide ? row.decisions : [];
   // The line keeps its room from first paint whenever "Decisions" may still appear (until `me` and the live state
   // answer, the session marker says), and keeps it once given, so nothing below moves when the answers arrive.
-  const mayDecide = row.decisions.length > 0 && w.live.status !== 'unavailable' && (w.me ? w.me.canDecide : w.me === undefined && hasSessionHint());
+  const mayDecide = row.decisions.length > 0 && (w.liveOk || w.waiting) && (w.me ? w.me.canDecide : w.me === undefined && hasSessionHint());
   const [kept, setKept] = useState(() => row.notes || mayDecide);
   if (!kept && (row.notes || mayDecide)) setKept(true);
   if (!kept && !row.notes && !mayDecide) return null;
@@ -406,11 +428,15 @@ function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
             onClick={() => { w.wantNotes(); toggle('notes')(); }}
           >Notes</button>
         ) : null}
-        {decisions.length ? <button type="button" className="ws-disc" aria-expanded={shown === 'decisions'} aria-controls={`${row.key}-decisions`} onClick={toggle('decisions')}>Decisions · {decisions.length}</button> : null}
+        {decisions.length ? <button type="button" className="ws-disc ws-late-o" aria-expanded={shown === 'decisions'} aria-controls={`${row.key}-decisions`} onClick={toggle('decisions')}>Decisions · {decisions.length}</button> : null}
       </div>
       {shown === 'notes' && row.notes ? (
         <div className="ws-extras-in" id={`${row.key}-notes`}>
-          {notes ? <Markdown text={notes} /> : w.notes === 'error' ? <p className="ws-quiet">Notes could not load.</p> : null}
+          {notes ? <Markdown text={notes} /> : w.notes === 'error' ? <p className="ws-quiet">Notes could not load.</p> : typeof w.notes === 'object' ? null : (
+            <div className="ws-ph-notes" aria-busy="true">
+              <i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" />
+            </div>
+          )}
         </div>
       ) : null}
       {shown === 'decisions' && decisions.length ? (
