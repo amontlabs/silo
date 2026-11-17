@@ -170,6 +170,47 @@ const LINGER = 600;
 const GAP = 400;
 const AFTER_POINTER = 900;
 
+/** How long a picture dissolves into its next look and a card's line fades out. CSS reads it as `--fade`. */
+const FADE = 250;
+
+/** Properties a keyframe lists that are not styles. */
+const NOT_STYLE = new Set(['offset', 'computedOffset', 'easing', 'composite']);
+
+/**
+ * A copy of `picture` as it looks now, laid over it and dissolving into whatever shows beneath. The copy keeps the
+ * classes of the picture. What is halfway through a transition or an animation (a part fading in, a dot on its way)
+ * gets its computed value written onto the copy, which itself runs nothing. It removes itself when its fade is over.
+ */
+function dissolve(card: HTMLElement, picture: Element) {
+  const copy = picture.cloneNode(true) as Element;
+  const live = [picture, ...picture.querySelectorAll('*')];
+  const parts = [copy, ...copy.querySelectorAll('*')];
+  for (const part of parts) part.removeAttribute('id');
+  for (const animation of picture.getAnimations?.({ subtree: true }) ?? []) {
+    const target = (animation.effect as KeyframeEffect | null)?.target;
+    const part = target && parts[live.indexOf(target)];
+    if (!part || !(part instanceof HTMLElement || part instanceof SVGElement)) continue;
+    const now = getComputedStyle(target) as unknown as Record<string, string>;
+    const style = part.style as unknown as Record<string, string>;
+    for (const keyframe of (animation.effect as KeyframeEffect).getKeyframes()) {
+      for (const property of Object.keys(keyframe)) if (!NOT_STYLE.has(property)) style[property] = now[property];
+    }
+  }
+  const room = card.getBoundingClientRect();
+  const box = picture.getBoundingClientRect();
+  copy.classList.add('ghost', 'jump');
+  copy.setAttribute('inert', '');
+  const style = (copy as HTMLElement | SVGElement).style;
+  style.left = `${box.left - room.left}px`;
+  style.top = `${box.top - room.top}px`;
+  style.width = `${box.width}px`;
+  style.height = `${box.height}px`;
+  // Right above the picture and under any copy still fading: what the visitor sees stays continuous.
+  picture.after(copy);
+  if (typeof copy.animate === 'function') copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: FADE, easing: 'linear', fill: 'forwards' });
+  window.setTimeout(() => copy.remove(), FADE);
+}
+
 /** Tells `seen` each time a card comes into view or leaves it. */
 export type Watch = (cards: Element[], seen: (index: number, inView: boolean) => void) => void;
 
@@ -200,10 +241,12 @@ export interface Cards {
 export function mountCards(list: HTMLElement, options: { still: boolean; watch?: Watch; onChange?: () => void }): Cards {
   const cards = [...list.querySelectorAll<HTMLElement>('.card')].map((card) => {
     const [end, cues] = MINIS[card.dataset.mini ?? ''];
-    const picture: Scene = scene(card.querySelector('.mini')!, cues, end);
+    const el = card.querySelector('.mini')!;
+    const picture: Scene = scene(el, cues, end);
     picture.hold();
-    return { card, picture };
+    return { card, picture: Object.assign(picture, { el }) };
   });
+  list.style.setProperty('--fade', `${FADE}ms`);
   const inView = cards.map(() => false);
   /** The card that is playing, and whether the visitor started it. */
   let current = -1;
@@ -227,25 +270,56 @@ export function mountCards(list: HTMLElement, options: { still: boolean; watch?:
     options.onChange?.();
   };
 
+  /** The timer that ends the fade of each card's line. */
+  const lineTimers = cards.map(() => 0);
+  const lineOf = (card: HTMLElement) => card.querySelector<HTMLElement>('.prog b')!;
+  /** Fades a card's line out from the width it has, instead of letting it vanish. */
+  function ease(i: number) {
+    const line = lineOf(cards[i].card);
+    line.style.transform = getComputedStyle(line).transform;
+    line.classList.add('ebb');
+    window.clearTimeout(lineTimers[i]);
+    lineTimers[i] = window.setTimeout(() => clear(i), FADE);
+  }
+  /** Takes a card's line back to empty at once. */
+  function clear(i: number) {
+    window.clearTimeout(lineTimers[i]);
+    const line = lineOf(cards[i].card);
+    line.classList.remove('ebb');
+    line.style.removeProperty('transform');
+  }
+  /** Ends the card that is playing: its line fades out from where it is. */
+  function finish(i: number) {
+    ease(i);
+    cards[i].card.classList.remove('playing');
+  }
+
   function stop() {
     window.clearTimeout(endTimer);
     if (current < 0) return;
+    dissolve(cards[current].card, cards[current].picture.el);
     cards[current].picture.hold();
-    cards[current].card.classList.remove('playing');
+    finish(current);
     current = -1;
     byHand = false;
   }
   function play(i: number, hand: boolean) {
+    const was = current;
     stop();
     current = i;
     byHand = hand;
     last = i;
     const { card, picture } = cards[i];
+    // A card that was playing has just been given its dissolve by `stop`.
+    if (was !== i) dissolve(card, picture.el);
+    // The line starts from empty, even for a card that was already playing: its animation starts again once style is computed without it.
+    clear(i);
+    void lineOf(card).getBoundingClientRect();
     card.style.setProperty('--dur', `${picture.end + LINGER}ms`);
     card.classList.add('playing');
     picture.play();
     endTimer = window.setTimeout(() => {
-      card.classList.remove('playing');
+      finish(i);
       current = -1;
       byHand = false;
       wait(GAP);
