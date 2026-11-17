@@ -23,12 +23,12 @@ describe('the home page', () => {
     expect(doc.querySelector('meta[property="og:description"]')?.getAttribute('content')).toBe(PITCH);
   });
 
-  it('offers the build and the source, and nothing of the old app', () => {
+  it('leads to the build from the strip and to the source from the navigation, and keeps nothing of the old app', () => {
     expect(html).not.toMatch(/download|releases|demo\.html|silo-tour|How to use|\/media\//i);
-    const actions = [...doc.querySelectorAll('.hero-actions a')];
-    expect(actions.map((link) => link.textContent?.trim())).toEqual(['Follow the build', 'View source']);
-    expect(actions.map((link) => link.getAttribute('href'))).toEqual(['/workshop', 'https://github.com/amontlabs/silo']);
     expect(doc.querySelector('main > :first-child')?.matches('a.strip[href="/workshop"]')).toBe(true);
+    // The hero is the headline and the pitch alone, so the picture under it starts high on the page.
+    expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName)).toEqual(['H1', 'P']);
+    expect(doc.querySelectorAll('.hero a, .hero button')).toHaveLength(0);
   });
 
   it('has the navigation, with GitHub kept on phones', () => {

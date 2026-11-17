@@ -4,14 +4,14 @@
 .flow { width: 100%; max-width: 940px; margin: 0 auto; container-type: inline-size; }
 .flow figure { margin: 0; }
 .flow button { background: none; padding: 0; }
-.flow-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 12px; }
+.flow-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 8px; }
 .flow .ctl { font: 12px/1.4 var(--mono); color: var(--muted); padding: 3px 0; }
 .flow .ctl:hover { color: var(--accent-ink); }
 
 /* The stage: your Mac (main and its forks), what is outside it, and another device */
 .flow .stage { --mode: wide; position: relative; padding-top: 8px; transition: opacity 0.4s; }
 .flow .stage.fade { opacity: 0; }
-.flow .mac { display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 16fr); column-gap: clamp(34px, 6%, 110px); align-items: center; padding: 22px 26px 14px 12px; margin-right: 150px; }
+.flow .mac { display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 16fr); column-gap: clamp(34px, 6%, 110px); align-items: center; padding: 18px 26px 12px 12px; margin-right: 150px; }
 .flow .main { width: 100%; max-width: 250px; justify-self: start; }
 .flow .forks { display: grid; gap: 14px; justify-self: end; width: 100%; max-width: 380px; }
 /* Above the boxes, so each diamond on a box edge is whole. */
@@ -141,7 +141,7 @@
 .flow .pk.real { border: 1.5px solid var(--accent); background: var(--accent); }
 
 /* another device: a teammate's computer on a server, and the checkpoint you fork onto your Mac */
-.flow .srv { margin-top: 20px; padding: 18px 14px 12px; display: flex; }
+.flow .srv { margin-top: 14px; padding: 16px 14px 10px; display: flex; }
 .flow .job { width: min(250px, 100%); }
 .flow .cpk { position: absolute; left: 0; top: 0; z-index: 2; width: 8px; height: 8px; margin: -4px 0 0 -4px; background: var(--accent); opacity: 0; transition: transform 0.6s cubic-bezier(0.3, 0.6, 0.2, 1), opacity 0.2s; }
 .flow .cpk.on { opacity: 1; }
@@ -156,7 +156,7 @@
 @keyframes flow-ring { from { opacity: 0.9; transform: scale(0.3); } to { opacity: 0; transform: scale(1.6); } }
 
 /* where you are in the flow, and a way to jump */
-.flow .steps { list-style: none; margin: 16px 0 0; padding: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.flow .steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
 .flow .steps button { display: block; width: 100%; text-align: left; font: 11px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
 .flow .steps i { display: block; height: 2px; background: var(--line); margin-bottom: 6px; position: relative; overflow: hidden; }
 .flow .steps b { position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; }
