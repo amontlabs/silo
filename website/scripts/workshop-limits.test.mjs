@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BUDGET, DEADLINE } from '../server/workshop.mjs';
 import { createWorkshop } from '../server/workshop.mjs';
-import { count, decisionNumber, entryNumber, issueOf, ORIGIN, SESSION, setup, withBudget } from './workshop-test-support.mjs';
+import { count, entryNumber, issueOf, ORIGIN, SESSION, setup, withBudget } from './workshop-test-support.mjs';
 
 const LIST = /^\/repos\/amontlabs\/silo\/issues$/;
 const COMMENTS = /^\/repos\/amontlabs\/silo\/issues\/comments$/;
@@ -32,7 +32,6 @@ test('anonymous reads cannot make a signed-in person\'s request answer 429', asy
         [visitor, 'vote', { n: 1, on: true }],
         [visitor, 'suggest', { title: 'Still possible', text: 'x' }],
         [owner, 'verdict', { n: entryNumber, verdict: 'take' }],
-        [owner, 'decide', { n: decisionNumber, text: 'Decided.' }],
       ]) {
         const response = await who.call('POST', path, { body });
         assert.equal(response.status, 200, `${path} ${response.body}`);
@@ -124,21 +123,6 @@ test('every handler has one deadline for all its GitHub calls, and answers 502 w
     await quick.idle();
     const warm = await quick.handle({ method: 'GET', url: '/api/workshop/state', headers: {}, body: '' });
     assert.equal(warm.status, 200, 'the refresh went on in the background');
-  } finally { t.fake.state.hook = null; await t.close(); }
-});
-
-test('decide retried after a cut between comment and close posts the comment once', async () => {
-  const t = await setup();
-  try {
-    const owner = t.client();
-    await owner.signIn('owner-fake');
-    t.fake.state.hook = (r) => (r.method === 'PATCH' ? { status: 502 } : null);
-    assert.equal((await owner.call('POST', 'decide', { body: { n: decisionNumber, text: 'Debian.' } })).status, 502);
-    t.fake.state.hook = null;
-    assert.equal((await owner.call('POST', 'decide', { body: { n: decisionNumber, text: 'Debian.' } })).status, 200);
-    const issue = issueOf(t.fake, decisionNumber);
-    assert.equal(issue.comments.filter((c) => c.body === 'Debian.').length, 1);
-    assert.deepEqual([issue.state, issue.state_reason], ['closed', 'completed']);
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 

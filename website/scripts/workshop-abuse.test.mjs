@@ -4,7 +4,7 @@ import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { SNAPSHOT } from '../server/snapshot.mjs';
 import { BUDGET, createWorkshop } from '../server/workshop.mjs';
-import { count, decisionNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, withBudget } from './workshop-test-support.mjs';
+import { count, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, withBudget } from './workshop-test-support.mjs';
 
 const LIST = /^\/repos\/amontlabs\/silo\/issues$/;
 // One per refresh: the first page of the entries list, which every refresh reads first.
@@ -107,12 +107,12 @@ test('background work is handed to keepAlive; a lost refresh is replaced at once
       const owner = t.client();
       await owner.signIn('owner-fake');
       const cookie = [...owner.jar].map(([k, v]) => `${k}=${v}`).join('; ');
-      t.fake.addComment(5, 'visitor-fake', 'Made on GitHub just before the write.');
+      t.fake.addComment(2, 'visitor-fake', 'Made on GitHub just before the write.');
       const keptBefore = kept.length;
       const write = await call('POST', 'comment', { n: 1, text: 'A write that waits.' }, cookie);
       assert.equal(write.status, 200);
       assert.ok(kept.length > keptBefore, 'the follow-up refresh is kept alive');
-      const issue = JSON.parse((await call('GET', 'issue?n=5')).body);
+      const issue = JSON.parse((await call('GET', 'issue?n=2')).body);
       assert.equal(issue.comments.at(-1).text, 'Made on GitHub just before the write.', 'the write\'s answer came after its refresh');
     });
   } finally { t.fake.state.hook = null; await t.close(); }
@@ -201,7 +201,7 @@ test('nothing raw is kept: 1,000 foreign issues and 1,000 large foreign comments
     gc(); gc();
     const before = process.memoryUsage().heapUsed;
     const state = await t.client().call('GET', 'state');
-    assert.equal(Object.keys(state.json.issues).length, 6);
+    assert.equal(Object.keys(state.json.issues).length, 4);
     await t.workshop.idle();
     gc(); gc();
     const added = process.memoryUsage().heapUsed - before;
@@ -275,15 +275,13 @@ test('a label that failed five times leaves the retry list', async () => {
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
-test('a comment or a verdict note retried within five minutes is posted once', async () => {
+test('a comment retried within five minutes is posted once', async () => {
   const t = await setup();
   try {
     const owner = t.client();
     await owner.signIn('owner-fake');
     for (let i = 0; i < 2; i += 1) assert.equal((await owner.call('POST', 'comment', { body: { n: 1, text: 'Only once.' } })).status, 200);
     assert.equal(issueOf(t.fake, 1).comments.filter((c) => c.body === 'Only once.').length, 1);
-    for (let i = 0; i < 2; i += 1) assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'refine', note: 'Narrow it.' } })).status, 200);
-    assert.equal(issueOf(t.fake, entryNumber).comments.filter((c) => c.body === 'Narrow it.').length, 1);
     t.clock.t += 6 * 60_000;
     assert.equal((await owner.call('POST', 'comment', { body: { n: 1, text: 'Only once.' } })).status, 200);
     assert.equal(issueOf(t.fake, 1).comments.filter((c) => c.body === 'Only once.').length, 2, 'after five minutes it is a new comment');
@@ -297,16 +295,11 @@ test('a request that changed GitHub and then failed still starts the refresh', a
     await owner.signIn('owner-fake');
     await t.client().call('GET', 'state');
     await t.workshop.idle();
-    let before = lists(t);
-    t.fake.state.hook = (r) => (r.method === 'POST' && r.path.endsWith(`/issues/${entryNumber}/comments`) ? { status: 500 } : null);
-    assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop', note: 'Not now.' } })).status, 502);
+    const before = lists(t);
+    t.fake.state.hook = (r) => (r.method === 'PATCH' ? { status: 500 } : null);
+    assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop' } })).status, 502);
     await t.workshop.idle();
     assert.equal(lists(t), before + 1, 'the label change was refreshed');
-    before = lists(t);
-    t.fake.state.hook = (r) => (r.method === 'PATCH' ? { status: 500 } : null);
-    assert.equal((await owner.call('POST', 'decide', { body: { n: decisionNumber, text: 'Debian.' } })).status, 502);
-    await t.workshop.idle();
-    assert.equal(lists(t), before + 1, 'the posted comment was refreshed');
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
@@ -368,7 +361,7 @@ test('large bodies and comments on Workshop issues keep only their cuts: 1,000 c
     await t.workshop.idle();
     gc(); gc();
     const added = process.memoryUsage().heapUsed - before;
-    assert.equal(Object.keys(state.issues).length, 16);
+    assert.equal(Object.keys(state.issues).length, 14);
     const one = (await t.client().call('GET', 'issue?n=9')).json;
     assert.equal(one.comments.length, 100);
     assert.ok(added < 10 * 1024 * 1024, `${(added / 1024 / 1024).toFixed(1)} MB`);
@@ -409,7 +402,7 @@ test('a lost refresh is aborted and stops spending; a late failure does not set 
       await t.workshop.idle();
       await wait(600);
       const calls = t.fake.state.requests.slice(before).filter((r) => r.kind === 'installation' && r.method === 'GET');
-      assert.equal(calls.length, 1 + 4, 'the lost refresh made no call after its first; the new one made its four');
+      assert.equal(calls.length, 1 + 3, 'the lost refresh made no call after its first; the new one made its three');
     });
     await withSnapshot({ lostAfter: 200, refreshLimit: 400 }, async () => {
       t.clock.t += 31_000;
@@ -432,29 +425,29 @@ test('only Workshop issues are listed: foreign issues are neither fetched nor co
   try {
     for (let i = 0; i < 2500; i += 1) t.fake.addIssue({ title: `Foreign ${i}`, author: 'visitor-fake' });
     const state = (await t.client().call('GET', 'state')).json;
-    assert.equal(Object.keys(state.issues).length, 6);
+    assert.equal(Object.keys(state.issues).length, 4);
     const pages = t.fake.state.requests.filter((r) => LIST.test(r.path));
-    assert.equal(pages.length, 3, 'one page of each of the three lists');
-    assert.ok(pages.every((r) => /labels=workshop%3A(entry|decision|suggestion)/.test(r.query)));
+    assert.equal(pages.length, 2, 'one page of each of the two lists');
+    assert.ok(pages.every((r) => /labels=workshop%3A(entry|suggestion)/.test(r.query)));
   } finally { await t.close(); }
 });
 
-test('a decider\'s session has 300 reads a minute; a verdict and its note are admitted together or not at all', async () => {
+test('a decider\'s session has 300 reads a minute; a verdict counts one read', async () => {
   assert.equal(BUDGET.deciderSessionReadsPerMinute, 300);
   const t = await setup();
   try {
     const owner = t.client();
     await owner.signIn('owner-fake');
     for (let i = 0; i < 60; i += 1) {
-      const response = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'refine', note: `note ${i}` } });
+      const response = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: ['take', 'later', 'drop', null][i % 4] } });
       assert.equal(response.status, 200, `verdict ${i}: ${response.body}`);
     }
     t.clock.t += 61_000;
     await withBudget({ deciderSessionReadsPerMinute: 3 }, async () => {
-      assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'refine', note: 'fits' } })).status, 200);
+      for (const verdict of ['take', 'later', 'drop']) assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict } })).status, 200);
       const before = t.fake.state.requests.length;
       const labels = [...issueOf(t.fake, entryNumber).labels];
-      const refused = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'later', note: 'does not fit' } });
+      const refused = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'take' } });
       assert.equal(refused.status, 429);
       assert.equal(t.fake.state.requests.length, before, 'refused before its first call');
       assert.deepEqual(issueOf(t.fake, entryNumber).labels, labels);

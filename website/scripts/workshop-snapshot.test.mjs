@@ -38,7 +38,7 @@ test('1,000 anonymous reads of state and issues cause no GitHub call beyond the 
     const started = t.clock.t;
     for (let i = 0; i < 1000; i += 1) {
       t.clock.t += 150;
-      const path = i % 2 ? 'state' : `issue?n=${(i % 6) + 1}`;
+      const path = i % 2 ? 'state' : `issue?n=${[1, 2, 3, 6][(i >> 1) % 4]}`;
       assert.equal((await c.call('GET', path)).status, 200);
       if (i % 50 === 0) await t.workshop.idle();
     }
@@ -48,17 +48,17 @@ test('1,000 anonymous reads of state and issues cause no GitHub call beyond the 
     assert.ok(refreshes <= Math.floor(elapsed / SNAPSHOT.maxAge), `${refreshes} refreshes in ${elapsed} ms`);
     const calls = t.fake.state.requests.slice(afterCold).filter((r) => r.kind !== 'app');
     assert.ok(calls.every((r) => LIST.test(r.path) || COMMENTS.test(r.path)), 'only refresh calls');
-    assert.equal(calls.length, refreshes * 4, 'one page of each of the three lists and one comment call per refresh');
+    assert.equal(calls.length, refreshes * 3, 'one page of each of the two lists and one comment call per refresh');
   } finally { await t.close(); }
 });
 
 test('a refresh with nothing changed sends conditional requests and gets 304s', async () => {
   const t = await setup();
   try {
-    t.fake.state.perPage = 3;
+    t.fake.state.perPage = 1;
     await t.client().call('GET', 'state');
     const cold = allLists(t);
-    assert.ok(cold.length >= 4 && cold.every((r) => r.status === 200), 'pages of all three lists');
+    assert.ok(cold.length >= 4 && cold.every((r) => r.status === 200), 'pages of both lists');
     t.clock.t += 61_000;
     await settle(t);
     const again = allLists(t).slice(cold.length);
@@ -82,13 +82,15 @@ test('changes on GitHub show up after the next refresh; a deleted comment within
     t.fake.react(3, 'visitor-fake');
     t.fake.state.issues.get(2).labels.push('verdict:take');
     const fresh = t.fake.addIssue({ title: 'New decision', labels: ['workshop:decision'] });
+    const fresh2 = t.fake.addIssue({ title: 'New entry', body: 'x\n<!-- silo-entry: new-one -->', labels: ['workshop:entry'] });
     Object.assign(t.fake.state.issues.get(6), { state: 'closed', state_reason: 'not_planned', closed_at: new Date(t.clock.t).toISOString() });
     t.clock.t += 61_000;
     const state = (await settle(t)).json.issues;
     assert.equal(state[1].comments, 3);
     assert.equal(state[3].up, 1);
     assert.equal(state[2].verdict, 'take');
-    assert.equal(state[fresh.number].kind, 'decision');
+    assert.equal(Object.hasOwn(state, fresh.number), false, 'the retired label makes no Workshop issue');
+    assert.deepEqual([state[fresh2.number].kind, state[fresh2.number].entry], ['entry', 'new-one']);
     assert.deepEqual([state[6].state, state[6].reason], ['closed', 'not_planned']);
     const issue = (await c.call('GET', 'issue?n=1')).json;
     assert.deepEqual(issue.comments.map((x) => x.text), ['Edited.', 'Posted by an agent.', 'A new comment.']);
@@ -115,25 +117,22 @@ test('each kind of write patches the snapshot at once, even when the refresh it 
     t.fake.state.hook = (r) => (r.kind === 'installation' && r.method === 'GET' && (LIST.test(r.path) || COMMENTS.test(r.path)) ? { status: 500 } : null);
     await visitor.call('POST', 'comment', { body: { n: 2, text: 'Patched in.' } });
     await visitor.call('POST', 'vote', { body: { n: 2, on: true } });
-    await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'drop', note: 'Not now.' } });
-    await owner.call('POST', 'decide', { body: { n: 4, text: 'Debian.' } });
+    await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'drop' } });
     const suggestion = await visitor.call('POST', 'suggest', { body: { title: 'Patched suggestion', text: 'x' } });
     await visitor.call('POST', 'vote', { body: { n: 1, on: false } });
     const state = (await reader.call('GET', 'state')).json.issues;
-    assert.deepEqual([state[2].comments, state[2].up, state[2].verdict, state[2].state, state[2].reason], [2, 2, 'drop', 'closed', 'not_planned']);
-    assert.deepEqual([state[4].state, state[4].reason, state[4].comments], ['closed', 'completed', 2]);
+    assert.deepEqual([state[2].comments, state[2].up, state[2].verdict, state[2].state, state[2].reason], [1, 2, 'drop', 'closed', 'not_planned']);
     assert.equal(state[1].up, 0);
     assert.deepEqual([state[suggestion.json.number].kind, state[suggestion.json.number].author], ['suggestion', 'visitor-fake']);
     const issue = (await reader.call('GET', 'issue?n=2')).json;
-    assert.deepEqual(issue.comments.slice(-2).map((x) => [x.author, x.text]), [['visitor-fake', 'Patched in.'], ['owner-fake', 'Not now.']]);
-    assert.equal((await reader.call('GET', 'issue?n=4')).json.comments.at(-1).text, 'Debian.');
+    assert.deepEqual(issue.comments.slice(-1).map((x) => [x.author, x.text]), [['visitor-fake', 'Patched in.']]);
     assert.equal((await reader.call('GET', `issue?n=${suggestion.json.number}`)).json.body, 'x');
     await t.workshop.idle();
     assert.equal((await reader.call('GET', 'state')).json.issues[2].verdict, 'drop', 'the patch holds through the failed refresh');
     t.fake.state.hook = null;
     t.clock.t += 61_000;
     const truth = (await settle(t)).json.issues;
-    assert.deepEqual([truth[2].comments, truth[2].up, truth[2].verdict], [2, 2, 'drop'], 'GitHub agrees after the refresh');
+    assert.deepEqual([truth[2].comments, truth[2].up, truth[2].verdict], [1, 2, 'drop'], 'GitHub agrees after the refresh');
   } finally { await t.close(); }
 });
 
@@ -168,7 +167,7 @@ test('cold start: GitHub down answers 502 and waits before trying again; GitHub 
 test('a refresh that fails halfway leaves the previous snapshot intact', async () => {
   const t = await setup();
   try {
-    t.fake.state.perPage = 3;
+    t.fake.state.perPage = 1;
     const before = (await t.client().call('GET', 'state')).json;
     t.fake.state.issues.get(1).title = 'Renamed';
     t.fake.addIssue({ title: 'Late entry', labels: ['workshop:entry'] });
@@ -285,14 +284,14 @@ test('state carries building only on open taken entries with the label, from the
     const c = t.client();
     await c.call('GET', 'state');
     const issues = t.fake.state.issues;
-    issues.get(2).labels.push('verdict:refine');
+    issues.get(2).labels.push('verdict:later');
     for (const n of [1, 2, 3, 5, 6, 7]) issues.get(n).labels.push('workshop:building');
     const closed = t.fake.addIssue({ title: 'Built', labels: ['workshop:entry', 'verdict:take', 'workshop:building'], state: 'closed', reason: 'completed' });
     const before = github(t);
     t.clock.t += 61_000;
     const state = (await settle(t)).json.issues;
     const calls = t.fake.state.requests.slice(before).filter((r) => r.kind !== 'app');
-    assert.equal(calls.length, 4, 'one page of each of the three lists and one comment call');
+    assert.equal(calls.length, 3, 'one page of each of the two lists and one comment call');
     assert.equal(state[1].building, true, 'open, taken, labelled');
     for (const n of [2, 3, 4, 5, 6, 7, closed.number]) assert.equal(building(state, n), false, `#${n}`);
 
@@ -333,8 +332,8 @@ test('a verdict other than take removes the building label in the same write, an
     t.clock.t += 61_000;
     assert.equal(building((await settle(t)).json.issues, 1), false, 'nor after a refresh');
 
-    // later, refine and cleared each take it off; with no label there is no call.
-    for (const [value, extra] of [['later'], ['refine', { note: 'Smaller.' }], [null]]) {
+    // later and cleared each take it off; with no label there is no call.
+    for (const [value, extra] of [['later'], [null]]) {
       issues.get(1).labels.push('workshop:building');
       if (!issues.get(1).labels.includes('verdict:take')) issues.get(1).labels.push('verdict:take');
       const calls = unlabels(t).length;
@@ -346,7 +345,7 @@ test('a verdict other than take removes the building label in the same write, an
       assert.equal(unlabels(t).length, again, `${value}: no call without the label`);
     }
     assert.equal((await verdict(2, 'later')).status, 200);
-    assert.equal(unlabels(t).length, 4, 'an entry never labelled costs no call');
+    assert.equal(unlabels(t).length, 3, 'an entry never labelled costs no call');
   } finally { await t.close(); }
 });
 

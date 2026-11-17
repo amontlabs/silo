@@ -73,7 +73,7 @@ export async function setup({ configured = true, seed = true, timeoutMs } = {}) 
 export const count = (fake, method, pattern, kind) => fake.state.requests.filter((r) => r.method === method && pattern.test(r.path) && (!kind || r.kind === kind)).length;
 export const issueOf = (fake, n) => fake.state.issues.get(n);
 export const entryNumber = 2;
-export const decisionNumber = 4;
+export const retiredNumber = 4;
 
 export async function withBudget(values, run) {
   const saved = { ...BUDGET };
