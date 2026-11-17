@@ -29,6 +29,8 @@
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   scroll-behavior: smooth;
+  /* Room for the scroll bar is kept on every page, so nothing moves sideways when a page becomes short enough to lose it. */
+  scrollbar-gutter: stable;
   scroll-padding-top: calc(var(--header-height) + 21px);
 }
 :root[data-theme="dark"] {

@@ -178,9 +178,44 @@ async function places(browser, url) {
   ];
 }
 
+/**
+ * Opening the first area from the map and going back never moves the page sideways, as a scroll bar coming or
+ * going would: the frame's left edge is sampled on every frame, at 1440x900.
+ */
+async function sideways(browser, url, area) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  const page = await context.newPage();
+  await page.goto(url);
+  await page.waitForLoadState('networkidle');
+  await wait(800);
+  await page.evaluate(() => {
+    const lefts = [];
+    const sample = () => {
+      lefts.push(Math.round(document.querySelector('.page-shell').getBoundingClientRect().left));
+      requestAnimationFrame(sample);
+    };
+    sample();
+    window.__lefts = lefts;
+  });
+  const left = () => page.evaluate(() => Math.round(document.querySelector('.page-shell').getBoundingClientRect().left));
+  const plain = await left();
+  await page.locator(`.ws-part[data-part="${area}"]`).click();
+  await wait(1500);
+  const opened = await left();
+  await page.locator('.ws-back').click();
+  await wait(1500);
+  const back = await left();
+  const seen = [...new Set(await page.evaluate(() => window.__lefts))];
+  await context.close();
+  const passed = plain === opened && opened === back && seen.length === 1;
+  console.log(`1440x900   open #${area} and go back: frame's left edge ${plain} px, opened ${opened} px, back ${back} px, on every frame ${seen.join(' / ')} px: ${passed ? 'ok' : 'FAIL: the page moved sideways'}`);
+  return passed;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const browser = await chromium.launch();
+  // Real scroll bars, as on Windows, Linux and a Mac with a mouse: headless Chromium hides them by default.
+  const browser = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
   let passed = true;
   try {
     const list = await places(browser, options.url);
@@ -188,6 +223,7 @@ async function main() {
     for (const size of SIZES) {
       for (const place of list) passed = report(await run(browser, options, size, place)) && passed;
     }
+    passed = (await sideways(browser, options.url, list[1].hash.slice(1))) && passed;
   } finally {
     await browser.close();
   }
