@@ -1,3 +1,7 @@
+## Decided
+
+- 2026-11-17, owner: an agent drives the screen of a macOS computer as well as a Linux desktop.
+
 ## Notes
 
 - Screenshot and mouse and keyboard input exposed through the engine and MCP, usable by any harness (Anthropic computer use, Cua Driver), without depending on a closed vendor app.

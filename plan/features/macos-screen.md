@@ -1,3 +1,7 @@
+## Notes
+
+- An agent drives this screen too, through `computer-use` (owner, 2026-11-17).
+
 ## From the old code
 
 The old code had it built and driven end to end, about 1,500 lines, and its approach can be reused.

@@ -199,7 +199,8 @@
         "public-face",
         "export-logins",
         "device-push",
-        "team-machine"
+        "team-machine",
+        "fork-from-teammate"
       ]
     },
     {

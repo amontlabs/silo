@@ -1,6 +1,7 @@
 ## Notes
 
 - `fork --on <device>` makes the fork on another device; one call lists pending merge requests from every connected device.
+- A task that ran on a server ends with someone forking its checkpoint onto their own computer to check the work. That shows more than a pull request does, which reads as ordinary CI (owner, 2026-11-17).
 
 ## From the old code
 
