@@ -43,6 +43,8 @@ export interface Nav {
 }
 
 function takeSigninFailure(): boolean {
+  // At build time there is no address.
+  if (typeof location === 'undefined') return false;
   const params = new URLSearchParams(location.search);
   if (params.get('signin') !== 'failed') return false;
   params.delete('signin');

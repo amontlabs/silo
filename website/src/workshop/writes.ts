@@ -72,6 +72,8 @@ function carried(): Store {
 }
 
 function read(now: number): Store {
+  // At build time there is no browser and nothing is kept.
+  if (typeof window === 'undefined') return empty();
   try {
     if (refused && held) return fresh(held, now);
     const raw = localStorage.getItem(KEY);

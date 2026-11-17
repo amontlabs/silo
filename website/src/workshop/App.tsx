@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { loginUrl } from './api';
+import type { Me } from './api';
 import { AreaPlace, LeftPlace } from './AreaView';
 import { DecisionsPlace } from './Decisions';
 import { LatestPlace } from './Latest';
@@ -24,8 +25,26 @@ export interface AppProps {
   data: BuildData;
   /** Loads the features' notes, a chunk apart: the first time a person reaches an entry's "Notes". */
   loadNotes?: () => Promise<Notes>;
-  /** The element in the site header that holds sign-in and the signed-in login. */
-  accountSlot?: Element | null;
+  /**
+   * The element in the site header that holds sign-in and the signed-in login; without one, they are drawn inline.
+   * `false` when the build draws them into the header itself (see prerender.tsx).
+   */
+  accountSlot?: Element | null | false;
+}
+
+/** Sign-in, the signed-in login with "Sign out", or a placeholder while it is not known who is signed in. */
+export function Account({ me, signIn, onSignOut }: { me: Me | null | undefined; signIn: string; onSignOut?: () => void }) {
+  // Each its own node (keys), so what replaces the placeholder arrives in place instead of the same node moving.
+  if (me === undefined) return <span key="placeholder" className="ws-ph ws-ph-account" aria-hidden="true" />;
+  if (me) {
+    return (
+      <span key="account" className="ws-account">
+        <span className="ws-login" title={me.login}>{me.login}</span>
+        <button type="button" className="ws-link" onClick={onSignOut}>Sign out</button>
+      </span>
+    );
+  }
+  return <SignIn key="signin" href={signIn} />;
 }
 
 const noNotes = () => Promise.resolve({});
@@ -152,7 +171,8 @@ function SignIn({ href }: { href: string }) {
   );
 }
 
-const initialView = (): View => (new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
+// At build time there is no address: the plain view.
+const initialView = (): View => (typeof location !== 'undefined' && new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
 const address = (hash = '') => `${location.pathname}${location.search}${hash}`;
 
 export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
@@ -196,14 +216,14 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     else accountSlot.setAttribute('data-account', w.me ? 'in' : 'out');
     if (w.me === undefined) accountSlot.setAttribute('aria-busy', 'true');
     else accountSlot.removeAttribute('aria-busy');
-    // The width this person's login and "Sign out" take: applied now when it differs from the reserved one (the
-    // slot moves once, as for a stale cookie), and kept for their next visit (a convenience only).
+    // The width this person's login and "Sign out" take, kept for their next visit, where the head script applies
+    // it before first paint (a convenience only). It is not applied now: once the page has painted, the slot keeps
+    // its width for a signed-in person, and the login sits right-aligned in it (truncated if it is longer).
     if (!w.me || !media('(min-width: 481px)', false)) return;
     const login = accountSlot.querySelector<HTMLElement>('.ws-login');
     const out = accountSlot.querySelector<HTMLElement>('.ws-link');
     if (!login || !out) return;
     const width = Math.min(200, Math.ceil(login.scrollWidth + 12 + out.offsetWidth));
-    if (Math.abs(width - accountSlot.getBoundingClientRect().width) > 1) document.documentElement.style.setProperty('--ws-account-w', `${width}px`);
     try {
       localStorage.setItem(ACCOUNT_WIDTH, String(width));
     } catch {
@@ -229,7 +249,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const arrivedPerson = useArrival(w.me !== undefined, boot);
   const arrivedOwner = useArrival(canDecide, boot);
   useLayoutEffect(() => {
-    accountSlot?.classList.toggle('ws-arr-p', arrivedPerson);
+    if (accountSlot) accountSlot.classList.toggle('ws-arr-p', arrivedPerson);
   }, [accountSlot, arrivedPerson]);
 
   // Visitors never see the decisions: the address shows them the plan.
@@ -637,20 +657,13 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     return () => document.removeEventListener('keydown', listener);
   }, []);
 
-  const signIn = loginUrl(location.hash);
+  const signIn = loginUrl(typeof location === 'undefined' ? '' : location.hash);
   const ctx: EntryContext = {
     w, signIn, mainAction, open: openKeys,
     onToggle: (row) => (openKeys.has(row.key) ? closeRow(row.key) : openRow(row.key)),
     armed: (row) => w.mayDecide && armed(row.key),
   };
-  const account = w.me === undefined ? <span className="ws-ph ws-ph-account" aria-hidden="true" /> : w.me ? (
-    <span className="ws-account">
-      <span className="ws-login" title={w.me.login}>{w.me.login}</span>
-      <button type="button" className="ws-link" onClick={() => void w.signOut()}>Sign out</button>
-    </span>
-  ) : (
-    <SignIn href={signIn} />
-  );
+  const account = <Account me={w.me} signIn={signIn} onSignOut={() => void w.signOut()} />;
 
   const notes = (
     <>
@@ -690,7 +703,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : '', arrivedOwner ? 'ws-arr-o' : ''].filter(Boolean).join(' ');
   return (
     <>
-      {accountSlot ? createPortal(account, accountSlot) : <div className="ws-account-inline">{account}</div>}
+      {accountSlot ? createPortal(account, accountSlot) : accountSlot === false ? null : <div className="ws-account-inline">{account}</div>}
       <div className={classes} ref={mainRef} data-live={live.load}>
         <section className="ws-top joint">
           <div className="ws-head">

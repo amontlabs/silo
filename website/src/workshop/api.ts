@@ -128,5 +128,7 @@ export function loginUrl(hash: string): string {
 
 /** The server sets this readable marker beside the session cookie; without it there is no session to ask about. */
 export function hasSessionHint(): boolean {
+  // At build time there is no document: nobody is signed in.
+  if (typeof document === 'undefined') return false;
   return /(?:^|;\s*)workshop-hint=1(?:;|$)/.test(document.cookie);
 }

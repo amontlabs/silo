@@ -31,7 +31,8 @@ export function isState(value: unknown): value is LiveState {
 }
 
 function read(key: string): unknown {
-  if (!memoryConfig.on) return null;
+  // At build time there is no browser and nothing is remembered.
+  if (!memoryConfig.on || typeof window === 'undefined') return null;
   try {
     const raw = localStorage.getItem(key);
     return raw === null ? null : (JSON.parse(raw) as unknown);

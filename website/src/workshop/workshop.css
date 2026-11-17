@@ -25,6 +25,9 @@
 /* The account slot has one fixed width, chosen before anyone knows who is signed in: signed in when the
    session marker is there, signed out otherwise. Only a stale marker changes it, once, when `me` answers. */
 .ws-account-slot { flex: none; width: 136px; display: flex; justify-content: flex-end; }
+/* One height too, the sign-in button's, with what it holds centred: the placeholder, the login or sign-in take its
+   place without moving it or the header. */
+.ws-account-slot { height: 34px; align-items: center; }
 .ws-session .ws-account-slot { width: var(--ws-account-w, 200px); }
 #workshop-account[data-account="out"] { width: 136px; }
 #workshop-account[data-account="in"] { width: var(--ws-account-w, 200px); }
@@ -38,7 +41,9 @@
 /* ---- top: the title and where the build is ---- */
 .ws-top { display: flex; align-items: flex-end; gap: 24px; padding: 30px 24px 18px; }
 .ws-top h1 { font: italic 40px/1.1 var(--serif); letter-spacing: -1.4px; color: var(--accent-ink); }
-.ws-status { color: var(--muted); margin-top: 8px; min-height: 22px; }
+.ws-status { color: var(--muted); margin-top: 8px; min-height: 1lh; }
+/* For visitors without JavaScript, under the plan, in the page's column. */
+.ws-noscript { padding: 0 24px 28px; }
 .ws-top-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 .ws-top { position: relative; }
 .ws-tools { display: flex; align-items: center; gap: 16px; min-height: 28px; }
@@ -369,6 +374,7 @@
   .ws-key { justify-content: flex-start; }
 }
 @media (max-width: 760px) {
+  .ws-noscript { padding: 0 16px 24px; }
   .ws-top { padding: 26px 16px 16px; }
   .ws-top h1 { font-size: 34px; }
   .ws-tools { top: 26px; right: 16px; flex-direction: column; align-items: flex-end; gap: 0; }
@@ -534,11 +540,24 @@
 .ws-ph-notes .ws-ph { height: 14px; width: min(100%, 520px); }
 .ws-ph-notes .ws-ph:last-child { width: min(70%, 360px); }
 .ws-ph-account { width: 100%; height: 22px; }
+/* The built page draws sign-in in the header (prerender.tsx). With the session marker, while the script may still
+   take over, the slot shows the account's placeholder instead: the same box as .ws-ph.ws-ph-account. Once the
+   page is known to stay without the script's account (ws-bare: see workshop/index.html and takeover.ts), the
+   drawn sign-in shows; it is a plain link. */
+.ws-session:not(.ws-bare) #workshop-account[data-prerendered] > .ws-signin-wrap { display: none; }
+.ws-session:not(.ws-bare) #workshop-account[data-prerendered]::before {
+  content: ''; display: block; width: 100%; height: 22px; border-radius: 3px;
+  background: color-mix(in srgb, var(--line) 40%, transparent); animation: ws-pulse 1.6s ease-in-out infinite;
+}
+/* At an address other than the plain one, the built plain view under the title row stays hidden, its room kept,
+   until the script draws the place (the head script of workshop/index.html sets ws-hold). The footer waits hidden
+   too: it shows where that place puts it rather than moving there from under the plain view. */
+.ws-hold #workshop-root[data-prerendered] .ws > :not(.ws-top), .ws-hold .workshop-shell:has(#workshop-root[data-prerendered]) .ws-foot { visibility: hidden; }
 
 /* What arrives after the first frames fades in where it stands. */
 .ws-arr-s .ws-late-s, .ws-arr-o .ws-late-o, .ws-arr-p .ws-late-p, .ws-key .ws-in, .ws-status.ws-in, #workshop-account.ws-arr-p > * { animation: ws-appear .15s ease-out both; }
 @media (prefers-reduced-motion: reduce) {
-  #workshop-account > * { animation: none !important; transition: none !important; }
+  #workshop-account > *, #workshop-account::before { animation: none !important; transition: none !important; }
 }
 
 /* For people who would rather not sign in here: a word under the header's sign-in, taking no room. */

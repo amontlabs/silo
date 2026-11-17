@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { HOLD_MS } from './Entry';
 import { buildData } from './fixtures';
@@ -36,6 +36,21 @@ describe('the account slot', () => {
     await waitFor(() => expect(slot).toHaveAttribute('data-account', 'in'));
     expect(screen.getByText(login)).toHaveAttribute('title', login);
     expect(screen.getByText(login)).toHaveClass('ws-login');
+    slot.remove();
+  });
+
+  it('keeps its width during the visit once `me` answers signed in, and stores the width of the login for the next', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(min-width: 481px)', media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(70);
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(52);
+    mockApi({ me: owner });
+    const slot = document.createElement('div');
+    document.body.append(slot);
+    render(<App data={buildData()} accountSlot={slot} />);
+    await waitFor(() => expect(slot).toHaveAttribute('data-account', 'in'));
+    await waitFor(() => expect(localStorage.getItem('silo-workshop-account-width')).toBe('134'));
+    // Applied only by the head script, before the next visit's first paint.
+    expect(document.documentElement.style.getPropertyValue('--ws-account-w')).toBe('');
     slot.remove();
   });
 
