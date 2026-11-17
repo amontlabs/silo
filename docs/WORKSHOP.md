@@ -49,15 +49,25 @@ What a person sees:
   by the address opens once the live state is there.
 - An open entry shows its sentence, then "Notes" (its `<id>.md`), closed by
   default, and opened in place: headings, paragraphs, lists, http and https
-  links, inline code and code blocks become elements (`Markdown.tsx`); nothing
-  is ever inserted as HTML, and anything else stays text. For the owner only,
-  "Decisions · N" sits on the same line: the decisions of `plan/decisions.json`
-  whose `about` names the entry's area or the entry.
+  links (an address may hold one level of brackets), inline code and code
+  blocks become elements (`Markdown.tsx`); nothing is ever inserted as HTML,
+  and anything else stays text. The notes of all features are a chunk of their
+  own (`virtual:workshop-notes`), loaded the first time a pointer, a press or
+  focus reaches a "Notes"; the page's bundle only knows which entries have
+  some. For the owner only, "Decisions · N" sits on the same line: the
+  decisions of `plan/decisions.json` whose `about` names the entry's area. That
+  line never wraps and has its height from first paint whenever it can appear:
+  until `me` answers, the `workshop-hint` cookie says whether "Decisions" may
+  come, and a line given room keeps it.
 - An open entry or suggestion shows its thread and a box to add a comment. The
   bot's history comments are history lines in the same thread, in time order:
-  no avatar and no box of their own, the time, what changed ("Taken",
-  "Dropped", "Later", "Verdict cleared", "Built", "Text changed", "Notes
-  edited", else the field's name) and the change on GitHub. "Text changed"
+  no avatar and no box of their own, one line each: what changed, the time and
+  the change on GitHub. What changed is one phrase per change, joined by
+  ` · `: "Text changed" (`name` or `what`, once), "Notes edited", "Needs
+  changed", "Moved to another part" (`area`), "Suggestion changed", "Surfaces
+  changed", "Taken", "Later", "Dropped", "Verdict cleared", "Built";
+  `suggested_in` says nothing, and no raw key ever shows. A phrase too long for
+  the line is cut with an ellipsis; the time and the link keep their place. "Text changed"
   opens the name and the sentence before and after: the page reads
   `plan/features/<id>.json` at the two commits from
   `raw.githubusercontent.com` only then, and shows "not available" when it
@@ -70,7 +80,9 @@ What a person sees:
 - The strip under the map links to what is left out (entries without an area,
   and every dropped entry), to Latest and to the suggestions. Latest (`#latest`)
   lists the newest 30 comments and history lines across the entries, newest
-  first, each opening its entry.
+  first, each opening its entry (a click with a modifier key, or a middle
+  click, is left to the browser). While it loads, ten one-line placeholders hold
+  its place and nothing sits below the list in its column.
 - A person who can decide also gets "Decisions" (`plan/decisions.json`, newest
   first, carried in the page's bundle as the rest of the plan and shown to
   nobody else), the number of entries still to decide on each part, and a link
@@ -130,8 +142,11 @@ Workshop. The owner's verdict on an entry is one label: `verdict:take` or
 planned". A built entry is closed as "completed". Votes are 👍 reactions and
 comments are issue comments. The history is the bot's history comments, whose
 last line is `<!-- silo-change: {…} -->` (see `tools/plan/README.md`); the
-server reads that marker only on a comment by a bot that was not cut, and
-gives it to the page as `change`.
+server gives it to the page as `change`. Only a comment by the Workshop's own
+App is read for it: its `performed_via_github_app` id is the configured App id
+(`WORKSHOP_APP_ID`), or its author is the App's account, `<slug>[bot]` (the
+slug read from the installation). A comment by any other bot is an ordinary
+comment.
 
 An entry being built now also carries `workshop:building` ("Being built now").
 `plan start <id>` sets it, `plan stop <id>` removes it, and `plan sync`
@@ -176,10 +191,11 @@ suggestion whose issue was created but could not be labelled answers 502 with
 answer JSON: any failure redirects to `/workshop?signin=failed`; cancelling on
 GitHub returns to the page.
 
-Each comment is cut to 5,000 characters and then carries `"cut": true`.
-Bodies and comments are cut before any processing, and the entry marker and
-trailing blank lines are removed with linear string code, so a hostile body
-cannot make a read slow.
+Each comment is cut to 5,000 characters and then carries `"cut": true`. Every
+marker is read with the readers of `tools/plan/model/` on the whole body or
+comment, and the text is cut after: one definition, shared with `plan`. The
+change marker is read only on the App's comments, so a person's comment never
+reaches that reader.
 
 An issue is a Workshop issue when it carries exactly one of the three kind
 labels and is not a pull request.
@@ -356,6 +372,9 @@ snapshots catch up when the hour resets.
   nothing.
 - A sign-in cookie works for one callback per instance (its id is remembered
   for its 10-minute life, at most 10,000).
+- History comments older than the comments the server holds (the latest 100
+  per issue, at most 5,000 in all) are not seen as history: GitHub's comment
+  count still includes them, so the page counts them as people's comments.
 - Every GitHub call has an 8-second limit, and every handler has a 12-second
   deadline for all its GitHub calls and every wait together, including waits
   on shared work such as an installation token another request is fetching
@@ -388,7 +407,7 @@ snapshots catch up when the hour resets.
 | `website/server/github.mjs` | GitHub REST client with pagination and an 8-second limit per call; errors carry a status and the identity used, never a body. |
 | `website/server/app-auth.mjs` | App JWT (RS256, Node's `crypto`) and the cached installation token. |
 | `website/server/session.mjs` | Sealed cookies (AES-256-GCM). |
-| `website/server/issues.mjs` | Kinds, verdicts, the entry marker and the cuts. |
+| `website/server/issues.mjs` | Kinds, verdicts, the markers (read by the plan model), which comments are the App's own, and the cuts. |
 | `website/server/snapshot.mjs` | The in-memory snapshot that answers every anonymous read, and its refresh. |
 | `website/server/workshop.mjs` | Every endpoint, independent of the HTTP server. |
 | `website/server/node.mjs` | Adapter for Node's `req`/`res`, used by Vercel and the local server. |
@@ -475,12 +494,12 @@ following Vercel's
 - `functions/api/workshop/state.func/`: one Node.js function
   (`.vc-config.json`: runtime `nodejs24.x`, handler
   `website/api/workshop.cjs`, launcher `Nodejs`). It holds the files it loads
-  at their paths in the repository: `website/api/`, `website/server/`, the
-  files of `website/node_modules/` that load, and the plan's model,
-  `tools/plan/model/*.js` with `tools/plan/package.json` (which makes it ESM).
-  The script finds what loads by loading the entry point in a separate process
-  with a resolve hook, and refuses, before writing anything, any other file
-  outside `website/`. The other
+  at their paths in the repository: `website/api/` and `website/server/` at
+  any depth, the files of `website/node_modules/` that load, and the plan's
+  model, `tools/plan/model/*.js` with `tools/plan/package.json` (which makes it
+  ESM). The script finds what loads by loading the entry point in a separate
+  process with a resolve hook, and refuses by name, before writing anything,
+  any other file it loads, in `website/` or outside it. The other
   endpoints (`me.func`, `issue.func`, `vote.func`, …) are symlinks to it, so
   Vercel creates one function served at every `/api/workshop/<endpoint>` path,
   as the [primitives reference](https://vercel.com/docs/build-output-api/primitives#functions)
@@ -528,7 +547,9 @@ stages carry the verdict of their file, else the one suggested for them, the
 first two taken are being built, and the thread of each decided entry holds the
 bot's history comments of every kind beside people's comments over the last
 days. Nothing shows as built that the file does not say is built (the page
-reads `built` from the file); the history line "Built" is seeded all the same.
+reads `built` from the file), and every history line agrees with the state the
+sample shows: "Built" only on an entry built, and an entry's last verdict line
+is its verdict.
 The runner prints what it seeded.
 
 Without `--fake`, the server uses GitHub with the `WORKSHOP_*` variables of the
