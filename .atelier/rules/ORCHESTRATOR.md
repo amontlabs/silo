@@ -39,6 +39,7 @@ Discussing:
 - What we agree goes in the feature's two files, not only in the chat.
 - Anything about another feature goes in that feature's notes. A new idea gets its own entry with `plan add`.
 - A verdict the owner gives in the conversation: `plan decide <id> take|later|drop`.
+- Plan text you wrote, here or while building, goes to the review role on its own branch, not a worker's, before you approve it. It never goes straight to `main`: the check reads `plan/`, so 4b does not cover it. The reviewer gets the text itself, notes included; the task names what the owner settled, which the reviewer checks is written as said and does not question. Findings come back to you, not to a worker: fix them, and when rule 3 calls for another round, send it with `--fixes`.
 - Merge and push, so the Workshop shows it.
 - A rejected push means the owner decided meanwhile: when no merge is running, `git pull --no-rebase`, then push again. Never force.
 
