@@ -10,10 +10,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // routes that serve the Workshop page at /workshop and /workshop/.
 //
 // The function holds the files it loads at the paths they have in the
-// repository: website/api/, website/server/, website/node_modules/ (only the
-// files of its packages that load) and tools/plan/model/ (the plan's model,
-// with tools/plan/package.json, which makes it ESM). Anything else it would
-// load outside website/ stops the packaging.
+// repository: website/api/ and website/server/ at any depth,
+// website/node_modules/ (only the files of its packages that load) and
+// tools/plan/model/ (the plan's model, with tools/plan/package.json, which
+// makes it ESM). Any other file it would load, in website/ or outside it,
+// stops the packaging.
 export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'vote', 'suggest', 'verdict'];
 export const RUNTIME = 'nodejs24.x';
 export const HANDLER = 'website/api/workshop.cjs';
@@ -44,7 +45,7 @@ export function loadedFiles(siteDir) {
 }
 
 // Where each loaded file goes in the function, by its path relative to the repository; refuses any
-// file outside website/ but the model's.
+// file it would not ship.
 function functionFiles(siteDir) {
   // Node reports each file by its real path, so the folders are compared as real paths too.
   const site = realpathSync(resolve(siteDir));
@@ -59,7 +60,11 @@ function functionFiles(siteDir) {
       files.add(join(modules, ...parts.slice(0, parts[0].startsWith('@') ? 2 : 1), 'package.json'));
     } else if (file.startsWith(model) && !file.slice(model.length).includes(sep)) {
       files.add(file);
-    } else if (!file.startsWith(site + sep)) {
+    } else if (file.startsWith(join(site, 'server') + sep) || file.startsWith(join(site, 'api') + sep)) {
+      files.add(file);
+    } else if (file.startsWith(site + sep)) {
+      throw new Error(`The function would load ${file}, in website/ but outside website/server/ and website/api/.`);
+    } else {
       throw new Error(`The function would load ${file}, outside website/.`);
     }
   }

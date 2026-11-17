@@ -1163,7 +1163,7 @@ test('configuration: a non-canonical secret or a bad key is not_configured at th
   }
 });
 
-test('packaging refuses a function that would load a file outside website/ other than the plan model', async () => {
+test('packaging ships server/ and api/ at any depth and the plan model, and refuses any other file the function loads', async () => {
   const root = await mkdtemp(join(tmpdir(), 'workshop-repo-'));
   try {
     const site = join(root, 'website');
@@ -1178,9 +1178,22 @@ test('packaging refuses a function that would load a file outside website/ other
       await mkdir(join(root, 'tools', 'plan', 'read'), { recursive: true });
       await writeFile(join(root, 'tools', 'plan', 'read', 'x.js'), 'export const x = 1;\n');
       const config = join(site, 'server', 'config.mjs');
-      await writeFile(config, `import '../../tools/plan/read/x.js';\n${await readFile(config, 'utf8')}`);
+      const original = await readFile(config, 'utf8');
+      await writeFile(config, `import '../../tools/plan/read/x.js';\n${original}`);
       await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'b', '.vercel', 'output') }), /outside website\//);
       await assert.rejects(lstat(join(root, 'b', '.vercel', 'output')), 'nothing is written');
+      // A file deeper in server/ or api/ ships; any other file in website/ is refused by name.
+      await mkdir(join(site, 'server', 'deep'), { recursive: true });
+      await writeFile(join(site, 'server', 'deep', 'y.mjs'), 'export const y = 1;\n');
+      await writeFile(config, `import './deep/y.mjs';\n${original}`);
+      const deep = await prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'c', '.vercel', 'output') });
+      assert.ok(deep.files.includes(join('website', 'server', 'deep', 'y.mjs')));
+      assert.ok((await lstat(join(root, 'c', '.vercel', 'output', 'functions', 'api', 'workshop', 'state.func', 'website', 'server', 'deep', 'y.mjs'))).isFile());
+      await mkdir(join(site, 'lib'), { recursive: true });
+      await writeFile(join(site, 'lib', 'z.mjs'), 'export const z = 1;\n');
+      await writeFile(config, `import '../lib/z.mjs';\n${original}`);
+      await assert.rejects(prepareVercel({ siteDir: site, distDir: join(dist, 'dist'), outputDir: join(root, 'd', '.vercel', 'output') }), /lib\/z\.mjs, in website\/ but outside website\/server\/ and website\/api\//);
+      await assert.rejects(lstat(join(root, 'd', '.vercel', 'output')), 'nothing is written');
     } finally { await rm(dist, { recursive: true, force: true }); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
