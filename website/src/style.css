@@ -4,16 +4,7 @@
   letter-spacing: -0.4px;
 }
 
-/*
- * The frame is at least as tall as the window. On a window taller than the page, the hero and the
- * picture share what is left over, so the footer is always the last row.
- */
-.page-shell,
-main {
-  display: flex;
-  flex-direction: column;
-}
-main,
+/* On a window taller than the page, the hero and the picture share what main has left over (site.css). */
 .hero,
 .plate {
   flex: 1 0 auto;

@@ -84,6 +84,28 @@ environment (a development App, see [The GitHub App](#the-github-app)); its orig
 `http://127.0.0.1:<port>`, so cookies are not `Secure` and have no `__Host-`
 prefix. Without the variables, the API answers 503.
 
+To check how the Workshop loads in a real browser, with the server above
+running:
+
+```sh
+npx --prefix website playwright-core install chromium-headless-shell
+npm --prefix website run load-check
+```
+
+The first command downloads Playwright's own Chromium once; the check never
+uses an installed Chrome. It opens `http://127.0.0.1:4174/workshop` (pass
+another URL after `--` to check another server) at 1440 × 900, 1440 × 1100,
+2560 × 1440, 1024 × 1366 and 390 × 844, on the plain view, the first area,
+`#latest` and `#suggested`. For each load it prints when the page first
+painted, when the account, the votes, the owner's marks and "Suggest a
+feature" appeared, and every layout shift. It checks that the footer is the
+last row of the frame, at the bottom of the window when the page is shorter
+than the window and right after the content otherwise, once before the page's
+script runs and once after everything has loaded. It exits with an error when
+that check fails or a layout shift is recorded. `--slow-api <ms>` holds back
+each API answer, `--slow-script <ms>` holds back the page's script, and
+`--owner` loads the page as the signed-in owner. `npm test` does not run it.
+
 ## Test
 
 ```sh

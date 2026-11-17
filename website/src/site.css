@@ -29,6 +29,8 @@
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   scroll-behavior: smooth;
+  /* Room for the scroll bar is kept on every page, so nothing moves sideways when a page becomes short enough to lose it. */
+  scrollbar-gutter: stable;
   scroll-padding-top: calc(var(--header-height) + 21px);
 }
 :root[data-theme="dark"] {
@@ -188,13 +190,23 @@ svg {
 /* The frame: two inner lines with an outer rail beside each, the full height of the window. */
 .page-shell {
   max-width: 1136px;
+  /* At least as tall as the window (on a phone, the window under its toolbars), so the footer is always the last row. */
   min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
   /* Room under the last row, so its diamonds never touch the window's edge. */
   padding-bottom: 32px;
   margin: 0 auto;
   border-left: 1px solid var(--line);
   border-right: 1px solid var(--line);
   position: relative;
+}
+/* The content takes what the window leaves over. */
+.page-shell > main {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
 }
 .page-shell:before,
 .page-shell:after {
