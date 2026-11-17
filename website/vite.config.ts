@@ -16,7 +16,6 @@ function workshopData(): Plugin {
     resolveId: (source) => (source === id ? `\0${id}` : null),
     load(source) {
       if (source !== `\0${id}`) return null;
-      this.addWatchFile(plan);
       return `export default ${JSON.stringify(readBuildData(repository))};`;
     },
   };
@@ -30,24 +29,24 @@ function workshopNotes(): Plugin {
     resolveId: (source) => (source === id ? `\0${id}` : null),
     load(source) {
       if (source !== `\0${id}`) return null;
-      this.addWatchFile(plan);
       return `export default ${JSON.stringify(readNotes(repository))};`;
     },
   };
 }
 
-/** While developing, the data reloads when a file of plan/ changes. */
+/** While developing, the page reloads with the new data when a file of plan/ is added, changed or removed. */
 function planWatch(): Plugin {
   return {
     name: 'plan-watch',
     configureServer(server) {
       server.watcher.add(plan);
-      server.watcher.on('change', (file) => {
+      server.watcher.on('all', (_event, file) => {
         if (!file.startsWith(plan)) return;
         for (const id of ['\0virtual:workshop-data', '\0virtual:workshop-notes']) {
           const module = server.moduleGraph.getModuleById(id);
           if (module) server.moduleGraph.invalidateModule(module);
         }
+        server.ws.send({ type: 'full-reload' });
       });
     },
   };
