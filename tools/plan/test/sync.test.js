@@ -8,7 +8,7 @@ import { readChange, readEntryMarker as readEntryText, readSyncedMarker, wantedI
 
 const readEntry = (issue) => readEntryText(issue.body);
 import { LABELS } from '../model/names.js';
-import { canonicalOrder, canonicalText } from '../model/canonical.js';
+import { canonicalFeature, canonicalOrder, canonicalText } from '../model/canonical.js';
 
 const SITE = 'http://127.0.0.1:9';
 const history = (w, number) => w.fake.commentsOn(number).map((c) => readChange(c.body)).filter(Boolean);
@@ -333,6 +333,80 @@ test('a sync of an older commit beside a newer one never moves a marker backward
   assert.deepEqual(history(w, fork.number), [{ commit: newer, before: older, fields: ['what'] }]);
 });
 
+/** Changes `order.json` in a checkout (and writes or removes feature files), commits and pushes; returns the commit. */
+function pushPlan(root, { stages, write = {}, remove = [] }) {
+  const path = join(root, 'plan', 'order.json');
+  const order = JSON.parse(readFileSync(path, 'utf8'));
+  order.stages = stages(order.stages);
+  writeFileSync(path, canonicalText(canonicalOrder(order)));
+  for (const [id, data] of Object.entries(write)) writeFileSync(join(root, 'plan', 'features', `${id}.json`), canonicalText(canonicalFeature(data)));
+  for (const id of remove) rmSync(join(root, 'plan', 'features', `${id}.json`));
+  git(root, 'add', '-A');
+  git(root, 'commit', '-q', '-m', 'Plan change');
+  git(root, 'push', '-q', 'origin', 'HEAD:main');
+  return git(root, 'rev-parse', 'HEAD').trim();
+}
+
+test('an older sync never closes as removed the issue of a feature a newer run added', async (t) => {
+  const w = await world(t, basePlan());
+  await w.run(['sync']);
+  const older = w.head();
+  let newer;
+  // This run syncs the plan without extra; a newer commit adds extra and is synced in the middle of it.
+  const fetch = interleaved(w, (url) => url.endsWith('/labels?per_page=100'), (other) => {
+    newer = pushPlan(other, {
+      stages: (stages) => stages.map((stage) => (stage.id === 'loop' ? { ...stage, features: [...stage.features, 'extra'] } : stage)),
+      write: { extra: { name: 'Extra', what: 'Added later.', area: 'forks', needs: [] } },
+    });
+  });
+  const result = await w.run(['sync', '--json'], { deps: { fetch } });
+  assert.equal(result.code, 0, result.err);
+  const json = JSON.parse(result.out);
+  assert.equal(json.synced, older);
+  assert.equal(json.removed, 0);
+  const extra = w.fake.entry('extra');
+  assert.ok(json.notes.includes(`#${extra.number} extra: synced at ${newer.slice(0, 7)}, newer than ${older.slice(0, 7)}; left alone`));
+  assert.equal(extra.state, 'open');
+  assert.deepEqual(w.fake.commentsOn(extra.number), []);
+  assert.equal(readSyncedMarker(extra.body), newer);
+});
+
+test('closing an issue as removed moves its marker, so an older sync never reopens it', async (t) => {
+  const w = await world(t, basePlan());
+  await w.run(['sync']);
+  const older = w.head();
+  const old = w.fake.entry('old');
+  let newer;
+  // This run syncs the plan with old; a newer commit removes old and is synced in the middle of it.
+  const fetch = interleaved(w, (url) => url.endsWith('/labels?per_page=100'), (other) => {
+    newer = pushPlan(other, { stages: (stages) => stages.map((stage) => ({ ...stage, features: stage.features.filter((id) => id !== 'old') })), remove: ['old'] });
+  });
+  const result = await w.run(['sync', '--json'], { deps: { fetch } });
+  assert.equal(result.code, 0, result.err);
+  const json = JSON.parse(result.out);
+  assert.equal(json.synced, older);
+  assert.equal(json.reopened, 0);
+  assert.ok(json.notes.includes(`#${old.number} old: synced at ${newer.slice(0, 7)}, newer than ${older.slice(0, 7)}; left alone`));
+  assert.deepEqual([old.state, old.state_reason], ['closed', 'not_planned']);
+  assert.equal(readSyncedMarker(old.body), newer);
+  assert.deepEqual(w.fake.commentsOn(old.number).map((c) => c.body), ['No longer in the plan.']);
+});
+
+test('closing an issue again (dropped, reopened by hand) moves its marker to the synced commit', async (t) => {
+  const w = await world(t, basePlan());
+  await w.run(['sync']);
+  w.change({ fork: { verdict: 'drop' } }, 'Owner: drop fork');
+  w.fake.setVerdictLabel(w.fake.entry('fork').number, 'drop', 'owner');
+  await w.run(['sync']);
+  const fork = w.fake.entry('fork');
+  assert.deepEqual([fork.state, fork.state_reason], ['closed', 'not_planned']);
+  Object.assign(fork, { state: 'open', state_reason: 'reopened' });
+  const head = w.change({ cli: { what: 'Another command.' } });
+  assert.equal((await w.run(['sync'])).code, 0);
+  assert.deepEqual([fork.state, fork.state_reason], ['closed', 'not_planned']);
+  assert.equal(readSyncedMarker(fork.body), head);
+});
+
 test('two runs that both create an issue: the next sync closes the duplicate, or reports it when it carries a verdict label', async (t) => {
   const w = await world(t, basePlan());
   await w.run(['sync']);
@@ -346,6 +420,8 @@ test('two runs that both create an issue: the next sync closes the duplicate, or
   const result = await w.run(['sync', '--json']);
   assert.equal(JSON.parse(result.out).duplicatesClosed, 1);
   assert.deepEqual([duplicate.state, duplicate.state_reason], ['closed', 'not_planned']);
+  assert.equal(readSyncedMarker(duplicate.body), w.head(), 'closing a duplicate moves its marker');
+  assert.equal(readEntry(duplicate), 'cli');
   assert.deepEqual(w.fake.commentsOn(duplicate.number).map((c) => [c.user.login, c.body]), [[w.fake.bot.login, `Duplicate of #${kept.number}.`]]);
   assert.equal(kept.state, 'open');
   const snapshot = w.fake.snapshot();

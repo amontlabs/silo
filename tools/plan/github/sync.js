@@ -1,7 +1,9 @@
 // `plan sync`: makes GitHub follow the plan at origin/main. Never reads the working tree, never
 // writes a verdict label. Each issue carries the commit it was last synced at (`silo-synced`), so
 // a run stopped half way is resumed by the next one and a second run changes nothing. A marker is
-// never moved backwards, so a run of an older commit beside a newer one leaves the newer's issues alone.
+// never moved backwards: sync touches no issue whose marker names a commit newer than the one it
+// syncs (not its text, state or labels), and closing an issue moves its marker to the synced commit,
+// so a run of an older commit beside a newer one leaves the newer's issues alone.
 import { execFileSync } from 'node:child_process';
 import { checkFiles } from '../check/index.js';
 import { addLabel, comment as postComment, commentsOf, ensureLabels, entryIssues, eventsOf, isBuilding, isEntryLabelled, isSuggestion, removeLabel } from './issues.js';
@@ -9,7 +11,7 @@ import { labelNames } from './client.js';
 import { Failure, RateLimited } from './errors.js';
 import { REMOVED_COMMENT, duplicateComment, placedComment, labelVerdicts } from '../model/comments.js';
 import { entryLink, wantedIssue } from '../model/issue.js';
-import { changeComment, readChange, readSyncedMarker, withoutMarkers } from '../model/markers.js';
+import { changeComment, readChange, readSyncedMarker, withSyncedMarker, withoutMarkers } from '../model/markers.js';
 import { BUILDING_LABEL, CHANGE_FIELDS, ENTRY_LABEL, FEATURE_KEYS } from '../model/names.js';
 import { loadRef, parsePlan } from '../read/index.js';
 
@@ -114,8 +116,15 @@ export async function sync({ gh, root, dryRun, log, site, web, repo }) {
       numbers.set(id, issue.number);
       await syncEntry({ gh, id, feature, issue, synced, site, web, repo, dryRun, act, counts, notes, filesAt, reachable, newer });
     }
-    await closeDuplicates({ gh, index, dryRun, act, counts, notes });
-    await closeRemoved({ gh, index, inPlan, dryRun, act, counts });
+    /** Whether an issue's marker names a commit newer than the synced one: then it is left alone, with a note. */
+    const leftAlone = (issue, what) => {
+      const marker = readSyncedMarker(issue.body);
+      if (!marker || !newer(marker)) return false;
+      notes.push(`#${issue.number} ${what}: synced at ${marker.slice(0, 7)}, newer than ${synced.slice(0, 7)}; left alone`);
+      return true;
+    };
+    await closeDuplicates({ gh, index, synced, dryRun, act, counts, notes, leftAlone });
+    await closeRemoved({ gh, index, inPlan, synced, dryRun, act, counts, leftAlone });
     await closeSuggestions({ gh, plan, numbers, site, dryRun, act, counts, notes });
   } catch (error) {
     if (!(error instanceof RateLimited)) throw error;
@@ -171,20 +180,22 @@ async function syncEntry({ gh, id, feature, issue, synced, site, web, repo, dryR
 
   let wanted = wantedIssue(feature, { synced: marker, site });
   const textChanged = issue.title !== wanted.title || withoutMarkers(issue.body) !== withoutMarkers(wanted.body);
-  if (textChanged && marker !== synced) {
-    marker = synced;
-    wanted = wantedIssue(feature, { synced: marker, site });
-  }
-  /** @type {Record<string, unknown>} */
-  const patch = {};
-  if (textChanged || marker !== before) Object.assign(patch, { title: wanted.title, body: wanted.body });
 
   // The verdict on the issue that pull has not brought to the file yet: the state waits for it.
   const labels = labelVerdicts(labelNames(issue));
   const pending = !feature.built && !(labels.length === (feature.verdict ? 1 : 0) && (labels[0] ?? undefined) === feature.verdict);
   const stateDiffers = issue.state !== wanted.state || (wanted.state === 'closed' && issue.state_reason !== wanted.stateReason);
   if (stateDiffers && pending) notes.push(`#${issue.number} ${id}: its verdict on GitHub is not in the file yet; its state waits for plan pull`);
-  else if (stateDiffers) {
+  const changeState = stateDiffers && !pending;
+  // A changed text, and a close, carry the synced commit, so that an older run leaves the issue alone.
+  if ((textChanged || (changeState && wanted.state === 'closed')) && marker !== synced) {
+    marker = synced;
+    wanted = wantedIssue(feature, { synced: marker, site });
+  }
+  /** @type {Record<string, unknown>} */
+  const patch = {};
+  if (textChanged || marker !== before) Object.assign(patch, { title: wanted.title, body: wanted.body });
+  if (changeState) {
     patch.state = wanted.state;
     if (wanted.state === 'closed') patch.state_reason = wanted.stateReason;
     else patch.state_reason = 'reopened';
@@ -211,9 +222,10 @@ async function syncEntry({ gh, id, feature, issue, synced, site, web, repo, dryR
 }
 
 /** An open duplicate of an entry's issue (two bot issues with one marker) is closed as not planned, unless it carries a verdict label. */
-async function closeDuplicates({ gh, index, dryRun, act, counts, notes }) {
+async function closeDuplicates({ gh, index, synced, dryRun, act, counts, notes, leftAlone }) {
   for (const { id, kept, duplicate } of index.duplicates) {
     const issue = index.issues.get(duplicate);
+    if (leftAlone(issue, `(a duplicate of #${kept}, ${id})`)) continue;
     if (labelVerdicts(labelNames(issue)).length) {
       notes.push(`#${duplicate} duplicates #${kept} (${id}) but carries a verdict label; left open`);
       continue;
@@ -223,19 +235,23 @@ async function closeDuplicates({ gh, index, dryRun, act, counts, notes }) {
     if (dryRun) continue;
     const text = duplicateComment(kept);
     if (!(await commentsOf(gh, duplicate)).some((c) => gh.isOwnBot(c.user, c) && c.body === text)) await postComment(gh, duplicate, text);
-    await gh.request('PATCH', gh.repoPath(`/issues/${duplicate}`), { body: { state: 'closed', state_reason: 'not_planned' } });
+    await gh.request('PATCH', gh.repoPath(`/issues/${duplicate}`), { body: { body: withSyncedMarker(issue.body, synced), state: 'closed', state_reason: 'not_planned' } });
   }
 }
 
-/** The open issue of a feature no longer in the plan is closed as not planned, with the bot's comment. */
-async function closeRemoved({ gh, index, inPlan, dryRun, act, counts }) {
+/**
+ * The open issue of a feature no longer in the plan is closed as not planned, with the bot's
+ * comment, unless its marker is newer than the synced commit (a newer plan may hold it).
+ */
+async function closeRemoved({ gh, index, inPlan, synced, dryRun, act, counts, leftAlone }) {
   for (const [id, issue] of index.byId) {
     if (inPlan.has(id) || issue.state !== 'open') continue;
+    if (leftAlone(issue, id)) continue;
     act(`close #${issue.number} ${id}: no longer in the plan`);
     counts.removed += 1;
     if (dryRun) continue;
     if (!(await commentsOf(gh, issue.number)).some((c) => gh.isOwnBot(c.user, c) && c.body === REMOVED_COMMENT)) await postComment(gh, issue.number, REMOVED_COMMENT);
-    await gh.request('PATCH', gh.repoPath(`/issues/${issue.number}`), { body: { state: 'closed', state_reason: 'not_planned' } });
+    await gh.request('PATCH', gh.repoPath(`/issues/${issue.number}`), { body: { body: withSyncedMarker(issue.body, synced), state: 'closed', state_reason: 'not_planned' } });
   }
 }
 
