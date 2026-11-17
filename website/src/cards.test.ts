@@ -50,7 +50,8 @@ describe('the dissolve of a card picture', () => {
     // The card ends by itself: nothing changes in its picture, so nothing dissolves.
     vi.advanceTimersByTime(3300 + 600);
     expect(document.querySelectorAll('svg.ghost')).toHaveLength(0);
-    pointer(card('tools'), 'pointerleave');
+    // Nothing is playing: a stop has no look to dissolve.
+    cards.rest();
     expect(document.querySelectorAll('svg.ghost')).toHaveLength(0);
   });
 
@@ -70,7 +71,7 @@ describe('the dissolve of a card picture', () => {
     expect(copies('rec')).toHaveLength(0);
   });
 
-  it('makes the copy over the picture, not content: inert, hidden, with no id and nothing that runs', () => {
+  it('makes the copy right after the picture, not content: inert, hidden, with no id, its parts held still by `jump`', () => {
     mount();
     live('rec').querySelector('.r1')!.id = 'part';
     pointer(card('rec'), 'pointerenter');
@@ -79,7 +80,6 @@ describe('the dissolve of a card picture', () => {
     expect(copy.hasAttribute('inert')).toBe(true);
     expect(copy.querySelector('[id]')).toBeNull();
     expect(copy.classList.contains('jump')).toBe(true);
-    expect(copy.nextSibling).not.toBe(live('rec'));
     expect(live('rec').nextElementSibling).toBe(copy);
   });
 
@@ -162,9 +162,24 @@ describe('the dissolve of a card picture', () => {
     expect(copies('rec')).toHaveLength(1);
   });
 
-  it('dissolves for a stop by the flow too, and with reduced motion', () => {
+  it('dissolves a card on its turn that the flow stops', () => {
+    const cards = mount();
+    seen(0, true);
+    cards.turns(true);
+    vi.advanceTimersByTime(1000);
+    const classes = [...live('rec').querySelectorAll('.on')].map((part) => part.getAttribute('class'));
+    expect(classes.length).toBeGreaterThan(0);
+    // The flow starts playing: the cards may no longer take turns.
+    cards.turns(false);
+    expect(card('rec').classList.contains('playing')).toBe(false);
+    expect(copies('rec')).toHaveLength(1);
+    expect([...copies('rec')[0].querySelectorAll('.on')].map((part) => part.getAttribute('class'))).toEqual(classes);
+  });
+
+  it('dissolves with reduced motion too: a pressed card, then the hidden tab that stops it', () => {
     const cards = mount(true);
     card('rec').click();
+    expect(copies('rec')).toHaveLength(1);
     vi.advanceTimersByTime(250);
     expect(copies('rec')).toHaveLength(0);
     vi.advanceTimersByTime(500);
@@ -179,15 +194,28 @@ describe('the dissolve of a card picture', () => {
 });
 
 describe('the line over a card', () => {
+  /** jsdom computes no transform: the line of `name` reports `transform` as the width it has. */
+  const widthOf = (name: string, transform: string) => {
+    const el = line(name);
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation(((part: Element) =>
+      part === el ? ({ transform } as CSSStyleDeclaration) : real(part)) as typeof getComputedStyle);
+  };
+
   it('fades out from the width it had when the card stops or ends, and is gone when the fade is over', () => {
     mount();
+    widthOf('rec', 'matrix(0.4, 0, 0, 1, 0, 0)');
     pointer(card('rec'), 'pointerenter');
     expect(card('rec').classList.contains('playing')).toBe(true);
     vi.advanceTimersByTime(1000);
     pointer(card('rec'), 'pointerleave');
     expect(card('rec').classList.contains('playing')).toBe(false);
+    // The width is kept on the line itself, since the animation that gave it is gone with `playing`.
+    expect(line('rec').style.transform).toBe('matrix(0.4, 0, 0, 1, 0, 0)');
     expect(line('rec').classList.contains('ebb')).toBe(true);
-    vi.advanceTimersByTime(250);
+    vi.advanceTimersByTime(249);
+    expect(line('rec').style.transform).toBe('matrix(0.4, 0, 0, 1, 0, 0)');
+    vi.advanceTimersByTime(1);
     expect(line('rec').classList.contains('ebb')).toBe(false);
     expect(line('rec').style.transform).toBe('');
 
@@ -199,14 +227,39 @@ describe('the line over a card', () => {
     expect(line('tools').classList.contains('ebb')).toBe(false);
   });
 
-  it('starts from empty at once, also for a card that is started again while it plays', () => {
+  it('starts from empty at once for a card that is started again while it plays', () => {
     mount();
     pointer(card('rec'), 'pointerenter');
     vi.advanceTimersByTime(1000);
-    const flush = vi.spyOn(line('rec'), 'getBoundingClientRect');
+    // What the line is like each time its style is computed during the press.
+    const computed: string[] = [];
+    const el = line('rec');
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => {
+      computed.push([card('rec').classList.contains('playing') && 'playing', el.classList.contains('ebb') && 'ebb', el.style.transform && 'held'].filter(Boolean).join(' '));
+      return {} as DOMRect;
+    });
     card('rec').click();
-    // Style was computed between the line being taken off and put on again, so its animation starts over.
-    expect(flush).toHaveBeenCalled();
+    // Style was computed while the line was off, not fading and not held: its animation starts over when `playing` returns.
+    expect(computed).toContain('');
+    expect(card('rec').classList.contains('playing')).toBe(true);
+    expect(el.classList.contains('ebb')).toBe(false);
+    expect(el.style.transform).toBe('');
+  });
+
+  it('starts from empty at once for a card that starts while its line still fades, and that fade ends nothing', () => {
+    mount();
+    widthOf('rec', 'matrix(0.4, 0, 0, 1, 0, 0)');
+    pointer(card('rec'), 'pointerenter');
+    vi.advanceTimersByTime(1000);
+    pointer(card('rec'), 'pointerleave');
+    vi.advanceTimersByTime(100);
+    expect(line('rec').classList.contains('ebb')).toBe(true);
+    pointer(card('rec'), 'pointerenter');
+    expect(line('rec').classList.contains('ebb')).toBe(false);
+    expect(line('rec').style.transform).toBe('');
+    expect(card('rec').classList.contains('playing')).toBe(true);
+    // The moment the earlier fade would have ended: the card plays on, its line untouched.
+    vi.advanceTimersByTime(150);
     expect(card('rec').classList.contains('playing')).toBe(true);
     expect(line('rec').classList.contains('ebb')).toBe(false);
     expect(line('rec').style.transform).toBe('');
