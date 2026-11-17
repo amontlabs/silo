@@ -13,7 +13,7 @@ import { createGitHub, DEFAULT_TIMEOUT, GitHubError, nextLink } from './github.m
 import { BUILDING_LABEL, kindOf, LABELS, labelNames, reasonOf, VERDICTS } from './issues.mjs';
 import { verdictLabel } from '../../tools/plan/model/index.js';
 import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCookie, SESSION_MAX_AGE, STATE_MAX_AGE, unseal } from './session.mjs';
-import { createSnapshot } from './snapshot.mjs';
+import { createSnapshot, SNAPSHOT } from './snapshot.mjs';
 
 export { LABELS, VERDICTS };
 
@@ -60,6 +60,10 @@ const REMEMBERED = 10_000;
 const SIGNIN_FAILED = '/workshop?signin=failed';
 
 const PUBLIC_READ = 'public, s-maxage=10, stale-while-revalidate=60';
+// `state` answers at once from whatever it has, so the CDN may serve an old copy while it asks again;
+// a `fresh=1` answer that is fresh is cached briefly, one that is still old is not cached at all.
+const STATE_READ = 'public, s-maxage=10, stale-while-revalidate=86400';
+const FRESH_READ = 'public, s-maxage=10';
 const PRIVATE = 'private, no-store';
 
 const ENDPOINTS = new Map(Object.entries({
@@ -285,17 +289,18 @@ export function createWorkshop({
   }
 
   // Every installation-token call goes through here: nothing reaches GitHub while it has asked us to wait.
-  async function asInstallation(call) {
+  // `token` is a token request already started, to use instead of starting one.
+  async function asInstallation(call, token = null) {
     if (now() < blockedUntil) throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil((blockedUntil - now()) / 1000), as: 'installation' });
     try {
-      return await call(await bounded(app.installationToken()));
+      return await call(await bounded(token ?? app.installationToken()));
     } catch (error) {
       noteInstallationError(error);
       throw error;
     }
   }
 
-  const installationRequest = (method, path, options = {}) => asInstallation((token) => github.request(method, path, { ...options, token, as: 'installation' }));
+  const installationRequest = (method, path, options = {}, token = null) => asInstallation((value) => github.request(method, path, { ...options, token: value, as: 'installation' }), token);
 
   // The reads a session may make a minute: more for a person known to be able to decide.
   function readLimit(session) {
@@ -386,12 +391,13 @@ export function createWorkshop({
     return (Array.isArray(data) ? data : []).find((comment) => comment.user?.id === session.id && (comment.body || '').trim() === body) ?? null;
   }
 
-  // The snapshot for an anonymous read. A cold instance waits for its first refresh, at most until the
-  // request's deadline (the refresh goes on in the background); with none, 502, or 503 when the App
-  // is not installed on the repository.
-  async function readSnapshot(ctx) {
+  // The snapshot for an anonymous read, waiting up to `wait` ms for a refresh when it is old. A cold
+  // instance waits for its first refresh. Every wait ends at the request's deadline at the latest (the
+  // refresh goes on in the background); with no snapshot, 502, or 503 when the App is not installed
+  // on the repository.
+  async function readSnapshot(ctx, wait = 0) {
     try {
-      return await bounded(snapshots.read());
+      return await bounded(snapshots.read({ wait }));
     } catch (error) {
       if (error instanceof GitHubError) ctx.githubStatus = error.status;
       if (error instanceof GitHubError && error.notInstalled) refuse(503, 'not_configured', 'Live comments are not set up on this server.');
@@ -411,10 +417,13 @@ export function createWorkshop({
     if (cached) return cached.value;
     return shared(permissionPending, session.id, async () => {
       spendOrRefuse(deciders.has(session.id) ? 'decider' : 'permission');
+      // The installation token is fetched while the person is read, unless GitHub asked us to wait.
+      const token = now() < blockedUntil ? null : app.installationToken();
+      token?.catch(() => {});
       // The account's current login, from GitHub with the person's own token, never the cookie's.
       const { data: user } = await userRequest(session, 'GET', '/user');
       if (user?.id !== session.id) throw new GitHubError(401, { as: 'user' });
-      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(user.login)}/permission`).catch((error) => {
+      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(user.login)}/permission`, {}, token).catch((error) => {
         if (error instanceof GitHubError && error.status === 404) return { data: null };
         throw error;
       });
@@ -616,10 +625,15 @@ export function createWorkshop({
   // Routes
 
   const routes = new Map(Object.entries({
+    // Answers at once from the snapshot it has, with `old` when that is over SNAPSHOT.maxAge old.
+    // `fresh=1`, the page's second ask, waits for a refresh up to SNAPSHOT.freshWait.
     async 'GET state'(ctx) {
-      const { snapshot, stale } = await readSnapshot(ctx);
+      const values = ctx.url.searchParams.getAll('fresh');
+      const fresh = values.length === 1 && values[0] === '1';
+      const { snapshot, stale, old } = await readSnapshot(ctx, fresh ? SNAPSHOT.freshWait : 0);
       const body = snapshots.stateAnswer(snapshot);
-      return json(200, stale ? { ...body, stale: true } : body, { 'Cache-Control': PUBLIC_READ });
+      const cache = fresh ? (old ? PRIVATE : FRESH_READ) : STATE_READ;
+      return json(200, stale || old ? { ...body, ...(stale ? { stale: true } : {}), ...(old ? { old: true } : {}) } : body, { 'Cache-Control': cache });
     },
 
     // Reads only the cookie; the permission check is the one GitHub call, cached five minutes. When it
@@ -641,7 +655,7 @@ export function createWorkshop({
 
     async 'GET issue'(ctx) {
       const n = queryNumber(ctx);
-      const { snapshot, stale } = await readSnapshot(ctx);
+      const { snapshot, stale } = await readSnapshot(ctx, SNAPSHOT.ageWait);
       const answer = snapshots.issueAnswer(snapshot, n);
       if (!answer) refuse(404, 'not_found', 'This is not a Workshop issue.');
       return json(200, stale ? { ...answer, stale: true } : answer, { 'Cache-Control': PUBLIC_READ });

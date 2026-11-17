@@ -1,8 +1,10 @@
 // The one in-memory snapshot that answers every anonymous read. A visitor's
 // request never calls GitHub: it reads the snapshot, and when the snapshot is
-// over 30 seconds old it starts one background refresh and waits for it at
-// most 1.5 seconds. A change made on GitHub through the Workshop starts one at
-// once. Only a cold instance waits for its first refresh.
+// over 30 seconds old it starts one background refresh. A read of the state
+// answers at once and says the snapshot is old; a read of an issue waits for
+// the refresh at most 1.5 seconds; a read that asks for fresh numbers waits at
+// most 8 seconds. A change made on GitHub through the Workshop starts one at
+// once. Only a cold instance makes every read wait for its first refresh.
 //
 // Refreshes are coalesced: at most one runs and one waits. A request for a
 // refresh while one runs makes exactly one more start when it ends, so a write
@@ -14,12 +16,15 @@
 // (Vercel's `waitUntil`), but nothing depends on it for correctness.
 //
 // A refresh reads, with the installation token:
-// - one issue list per Workshop label (entries, then suggestions; all states, newest first, 100 a page), each page sent with the
+// - one issue list per Workshop label (entries and suggestions, read at the same
+//   time; all states, newest first, 100 a page), each page sent with the
 //   ETag from the last refresh, so an unchanged page is a 304; nothing else in
 //   the repository is fetched or counted;
 // - the repository-wide comment list: the newest comments in full on the first
 //   refresh and every 10 minutes (so deleted comments disappear), and otherwise
 //   only comments updated since the previous refresh, less a minute of overlap.
+//   Its first page is read at the same time as the issue lists and reduced once
+//   they are known; the next pages follow after.
 // Only ETags and the reduced Workshop data are kept, never GitHub's raw objects.
 // A refresh builds a new snapshot and swaps it in only when it completed.
 //
@@ -35,6 +40,7 @@ export const SNAPSHOT = {
   lostAfter: 15_000,
   refreshLimit: 12_000,
   ageWait: 1500,
+  freshWait: 8000,
   writeWait: 2000,
   staleAfter: 10 * 60_000,
   fullReloadEvery: 10 * 60_000,
@@ -154,17 +160,20 @@ export function createSnapshot({
     };
   }
 
-  // Pages of one listing, each conditional on its last ETag. Each page keeps only its ETag and the
-  // items `reduce` returns (null drops an item). `fresh` collects the pages for the next refresh.
-  async function pages(path, limit, cache, reduce, signal, fresh = new Map()) {
+  // Pages of one listing, each conditional on its last ETag, while `budget.left` (shared by the
+  // listings read together) has pages left. Each page keeps only its ETag and the items the reducer
+  // returns (null drops an item). `reducer` is a promise of that function: a page fetched before it is
+  // known waits for it, and the next page is asked for only once it is known. `fresh` collects the
+  // pages for the next refresh.
+  async function pages(path, budget, cache, reducer, signal, fresh = new Map()) {
     const items = [];
     let complete = false;
-    let used = 0;
-    for (let page = 1; page <= limit; page += 1) {
+    for (let page = 1; budget.left > 0; page += 1) {
       const url = `${path}&per_page=100&page=${page}`;
       const known = cache?.get(url);
-      used += 1;
+      budget.left -= 1;
       const answer = await request('GET', url, { etag: known?.etag, signal });
+      const reduce = await reducer;
       let entry;
       if (answer.status === 304 && known) {
         entry = known;
@@ -179,7 +188,7 @@ export function createSnapshot({
         break;
       }
     }
-    return { items, cache: fresh, complete, used };
+    return { items, cache: fresh, complete };
   }
 
   function trim(issues) {
@@ -199,52 +208,65 @@ export function createSnapshot({
 
   async function build(signal) {
     const started = now();
-    // One conditional list per kind label, sharing one page budget.
-    const listing = { items: [], cache: new Map(), complete: true };
-    let budget = SNAPSHOT.issuePages;
-    for (const label of Object.values(LABELS)) {
-      if (budget <= 0) {
-        listing.complete = false;
-        break;
-      }
-      const part = await pages(`/repos/${repo}/issues?labels=${encodeURIComponent(label)}&state=all&sort=created&direction=desc`, budget, issuePages, reduceIssue, signal, listing.cache);
-      budget -= part.used;
-      listing.items.push(...part.items);
-      if (!part.complete) listing.complete = false;
-    }
-    if (!listing.complete) log({ snapshot: 'issue_pages_limit' });
+    // One signal for every call of this refresh: aborted with the refresh, or when one of its
+    // listings fails, so that the others stop spending.
+    const stop = new AbortController();
+    const abort = () => stop.abort();
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+    const own = stop.signal;
+    let known;
+    let unknown;
+    const reduceComment = new Promise((resolve, reject) => { known = resolve; unknown = reject; });
+    reduceComment.catch(() => {});
 
+    // The first comment page is read at the same time as the issue lists and waits for them.
     const full = fullDue || !current || started - lastFull >= SNAPSHOT.fullReloadEvery;
-    const issues = new Map();
-    for (const reduced of listing.items) {
-      if (issues.size >= SNAPSHOT.issues) break;
-      if (issues.has(reduced.number)) continue;
-      issues.set(reduced.number, entryOf(reduced, full ? null : current?.issues.get(reduced.number)));
-    }
+    const comments = full
+      ? pages(`/repos/${repo}/issues/comments?sort=created&direction=desc`, { left: SNAPSHOT.fullCommentPages }, commentPages, reduceComment, own)
+      : pages(`/repos/${repo}/issues/comments?sort=updated&direction=asc&since=${new Date(current.startedAt - SNAPSHOT.overlap).toISOString().replace(/\.\d{3}Z$/, 'Z')}`, { left: SNAPSHOT.sinceCommentPages }, null, reduceComment, own);
+    comments.catch(() => {});
 
-    const reduceComment = (comment) => {
-      const number = commentIssue(comment);
-      return issues.has(number) ? { number, comment: commentOf(comment, app()) } : null;
-    };
-    let comments;
-    let incompleteSince = false;
-    if (full) {
-      comments = await pages(`/repos/${repo}/issues/comments?sort=created&direction=desc`, SNAPSHOT.fullCommentPages, commentPages, reduceComment, signal);
-    } else {
-      const since = new Date(current.startedAt - SNAPSHOT.overlap).toISOString().replace(/\.\d{3}Z$/, 'Z');
-      comments = await pages(`/repos/${repo}/issues/comments?sort=updated&direction=asc&since=${since}`, SNAPSHOT.sinceCommentPages, null, reduceComment, signal);
-      incompleteSince = !comments.complete;
-    }
-    for (const { number, comment } of comments.items) issues.get(number)?.comments.set(comment.id, comment);
-    trim(issues);
+    try {
+      // One conditional list per kind label, read at the same time, sharing one page budget. They
+      // are merged in label order (entries first), which decides a duplicate and the issue cap.
+      const budget = { left: SNAPSHOT.issuePages };
+      const listingCache = new Map();
+      const parts = await Promise.all(Object.values(LABELS).map((label) => pages(
+        `/repos/${repo}/issues?labels=${encodeURIComponent(label)}&state=all&sort=created&direction=desc`,
+        budget, issuePages, reduceIssue, own, listingCache,
+      )));
+      if (parts.some((part) => !part.complete)) log({ snapshot: 'issue_pages_limit' });
 
-    issuePages = listing.cache;
-    if (full) {
-      commentPages = comments.cache;
-      lastFull = started;
+      const issues = new Map();
+      for (const reduced of parts.flatMap((part) => part.items)) {
+        if (issues.size >= SNAPSHOT.issues) break;
+        if (issues.has(reduced.number)) continue;
+        issues.set(reduced.number, entryOf(reduced, full ? null : current?.issues.get(reduced.number)));
+      }
+
+      known((comment) => {
+        const number = commentIssue(comment);
+        return issues.has(number) ? { number, comment: commentOf(comment, app()) } : null;
+      });
+      const read = await comments;
+      for (const { number, comment } of read.items) issues.get(number)?.comments.set(comment.id, comment);
+      trim(issues);
+
+      issuePages = listingCache;
+      if (full) {
+        commentPages = read.cache;
+        lastFull = started;
+      }
+      fullDue = !full && !read.complete;
+      return { startedAt: started, at: now(), issues, version: 0, stateAnswer: null };
+    } catch (error) {
+      unknown(error);
+      abort();
+      throw error;
+    } finally {
+      signal.removeEventListener('abort', abort);
     }
-    fullDue = incompleteSince;
-    return { startedAt: started, at: now(), issues, version: 0, stateAnswer: null };
   }
 
   function swapIn(snapshot) {
@@ -370,19 +392,31 @@ export function createSnapshot({
     });
   }
 
-  // The snapshot to answer from and whether it is stale; throws when there is none. When the snapshot
-  // is over SNAPSHOT.maxAge old, a refresh starts and this read waits for it up to SNAPSHOT.ageWait.
-  async function read() {
+  const isOld = () => now() - current.startedAt >= SNAPSHOT.maxAge;
+
+  // The wall-clock start a waiter of `ms` joins: the running refresh, or one scheduled to start within
+  // `ms`; null when there is none to wait for.
+  function joinable(ms) {
+    if (run) return run.startedWall;
+    if (timer && !blocked() && timerAt - wall() <= ms) return wall();
+    return null;
+  }
+
+  // The snapshot to answer from, whether it is stale, and whether it is old (over SNAPSHOT.maxAge);
+  // throws when there is none. A cold instance waits for its first refresh. When the snapshot is old,
+  // a refresh starts unless one runs or waits, and the read waits for the running or scheduled one
+  // up to `wait` ms (0: it answers at once).
+  async function read({ wait = 0 } = {}) {
     forgetLost();
     if (!current) {
       if (blocked()) throw lastError instanceof GitHubError ? lastError : new GitHubError(502);
       await (run?.promise ?? start());
-    } else if (now() - current.startedAt >= SNAPSHOT.maxAge && !blocked() && !run && !timer) {
-      const since = wall();
-      schedule();
-      if (run) await waitFor(since, SNAPSHOT.ageWait);
+    } else if (isOld()) {
+      if (!blocked() && !run && !timer) schedule();
+      const since = wait > 0 ? joinable(wait) : null;
+      if (since !== null) await waitFor(since, wait);
     }
-    return { snapshot: current, stale: now() - current.at > SNAPSHOT.staleAfter };
+    return { snapshot: current, stale: now() - current.at > SNAPSHOT.staleAfter, old: isOld() };
   }
 
   // After a change on GitHub: refresh at once (coalesced, at most one every SNAPSHOT.writeGap),

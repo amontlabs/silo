@@ -220,7 +220,7 @@ test('anonymous reads are public for everyone, read no cookie and set none', asy
     for (const path of ['state', 'issue?n=1']) {
       for (const who of [t.client(), signed]) {
         const response = await who.call('GET', path);
-        assert.equal(response.headers['Cache-Control'], 'public, s-maxage=10, stale-while-revalidate=60');
+        assert.equal(response.headers['Cache-Control'], path === 'state' ? 'public, s-maxage=10, stale-while-revalidate=86400' : 'public, s-maxage=10, stale-while-revalidate=60');
         assert.equal(response.headers.Vary, undefined);
         assert.deepEqual(response.cookies, []);
       }
