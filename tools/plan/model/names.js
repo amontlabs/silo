@@ -19,9 +19,9 @@ export const SUGGESTION_LABEL = 'workshop:suggestion';
 export const BUILDING_LABEL = 'workshop:building';
 export const verdictLabel = (verdict) => `verdict:${verdict}`;
 
-/** @param {string} label @returns {string | null} the verdict a label names, or null. */
+/** @param {string} label @returns {string | null} the verdict a label names, or null: only the three verdict labels, in any capitalisation. */
 export function labelVerdict(label) {
-  const match = /^verdict:(.+)$/.exec(label);
+  const match = /^verdict:(.+)$/.exec(String(label ?? '').toLowerCase());
   return match && VERDICTS.includes(match[1]) ? match[1] : null;
 }
 

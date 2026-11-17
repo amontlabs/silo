@@ -7,3 +7,4 @@ export * from './areas.js';
 export * from './markers.js';
 export * from './issue.js';
 export * from './canonical.js';
+export * from './comments.js';

@@ -82,11 +82,22 @@ export function initRepo(root) {
   git(root, 'commit', '-q', '-m', 'Plan');
 }
 
+/** Deps that reach nothing: no site, no credentials, no GitHub. */
+export const OFFLINE = Object.freeze({
+  env: {},
+  home: '/nonexistent/plan-test-home',
+  keychain: { available: () => false, get: () => null, set: () => { throw new Error('no Keychain in tests'); } },
+  fetch: async () => { throw new Error('no network in tests'); },
+  api: 'http://127.0.0.1:9', site: 'http://127.0.0.1:9', web: 'https://github.com', repo: 'amontlabs/silo',
+  writeDelayMs: 0, openBrowser: () => {},
+});
+
 /** Runs the command in `cwd`; returns { code, out, err }. */
 export async function run(cwd, argv, context = {}) {
   const out = [];
   const err = [];
-  const code = await main(argv, { cwd, now: new Date('2026-11-20T12:00:00Z'), out: (t) => out.push(t), err: (t) => err.push(t), ...context });
+  const { deps, ...rest } = context;
+  const code = await main(argv, { cwd, now: new Date('2026-11-20T12:00:00Z'), out: (t) => out.push(t), err: (t) => err.push(t), ...rest, deps: { ...OFFLINE, ...deps } });
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
 

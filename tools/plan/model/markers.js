@@ -36,6 +36,20 @@ export function readSyncedMarker(body) {
   return SYNCED.exec(normalized(body))?.[1] ?? null;
 }
 
+/**
+ * The body with its synced marker naming `commit`: the marker replaced where it is, else put
+ * before the entry marker ending the body, else at the end.
+ * @param {string | null | undefined} body @param {string} commit
+ */
+export function withSyncedMarker(body, commit) {
+  const marker = syncedMarker(commit);
+  const text = normalized(body);
+  if (SYNCED.test(text)) return text.replace(SYNCED, marker);
+  const lines = text.split('\n');
+  if (readEntryMarker(text)) return [...lines.slice(0, -1), marker, lines[lines.length - 1]].join('\n');
+  return text ? `${text}\n\n${marker}` : marker;
+}
+
 /** @param {string | null | undefined} body @returns {string} the body without the entry and synced markers. */
 export function withoutMarkers(body) {
   return normalized(body)
