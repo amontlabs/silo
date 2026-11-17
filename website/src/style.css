@@ -55,10 +55,12 @@
   color: var(--accent-ink);
   white-space: nowrap;
 }
+/* Balanced, so a sentence that has to wrap (a narrow window, a fallback face) never leaves one word on a line. */
 .pitch {
   font-size: 17px;
   line-height: 1.55;
   color: var(--muted);
+  text-wrap: balance;
 }
 .pitch span {
   display: block;
@@ -157,7 +159,6 @@
   }
   .pitch {
     max-width: 36em;
-    text-wrap: balance;
   }
 }
 @media (max-width: 900px) {
