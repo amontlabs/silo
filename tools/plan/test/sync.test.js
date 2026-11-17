@@ -407,6 +407,31 @@ test('closing an issue again (dropped, reopened by hand) moves its marker to the
   assert.equal(readSyncedMarker(fork.body), head);
 });
 
+test('the entry label is not put back while the issue\'s marker is newer; the next run puts it back', async (t) => {
+  const w = await world(t, basePlan());
+  await w.run(['sync']);
+  const fork = w.fake.entry('fork');
+  const interleave = interleaved(w, (url) => url.endsWith('/labels?per_page=100'), (other) => {
+    const path = join(other, 'plan', 'features', 'fork.json');
+    writeFileSync(path, readFileSync(path, 'utf8').replace('"Copy a computer."', '"Copy a computer, newer."'));
+    git(other, 'commit', '-q', '-am', 'Newer');
+    git(other, 'push', '-q', 'origin', 'HEAD:main');
+  });
+  // After the newer run, before this one reads the issues, someone removes the entry label.
+  let removed = false;
+  const fetch = async (url, init) => {
+    if (!removed && String(url).includes('creator=')) {
+      removed = true;
+      w.fake.unlabel(fork.number, 'workshop:entry', 'helper');
+    }
+    return interleave(url, init);
+  };
+  assert.equal((await w.run(['sync'], { deps: { fetch } })).code, 0);
+  assert.ok(!fork.labels.includes('workshop:entry'));
+  assert.equal((await w.run(['sync'])).code, 0);
+  assert.ok(fork.labels.includes('workshop:entry'));
+});
+
 test('two runs that both create an issue: the next sync closes the duplicate, or reports it when it carries a verdict label', async (t) => {
   const w = await world(t, basePlan());
   await w.run(['sync']);
