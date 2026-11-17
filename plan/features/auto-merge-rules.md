@@ -4,4 +4,4 @@
 - Always checkpoint main first so undo works.
 - Rules could differ per agent.
 - Test the matcher against recorded diff fixtures.
-- Built and merged on the old app (AMO-93) but carried by no feature.
+- Built and merged on the old app but carried by no feature.
