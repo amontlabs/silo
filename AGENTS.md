@@ -12,8 +12,12 @@ plan, the public site, and the code of the features built so far.
 - `tools/ci/check.sh` is the whole check. The merge gate and CI both run it.
 - [`WRITING.md`](WRITING.md) is how text for a visitor or a user is written (the site, the README, the
   words of the app). Read it before you write any; other work does not need it.
+- [`INTERFACE.md`](INTERFACE.md) is how a page or a screen is built (the site, the Workshop, the
+  app). Read it before you build any; other work does not need it.
 - The old code is not here. It is frozen at the tag `legacy-2026-11-16` and checked out in
   `~/code/projects/silo-legacy`. Only an agent sent for one lookup opens it.
+- Work on MicroSandbox or libkrun itself (a bug we found, an upstream PR) happens in
+  `~/code/projects/msb-upstream`. Read its `AGENTS.md` first; other work does not need it.
 
 Use Node.js 26.
 
