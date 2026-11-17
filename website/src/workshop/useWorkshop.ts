@@ -6,7 +6,7 @@ import { api, ApiError } from './api';
 import type { Comment, IssueDetail, Me } from './api';
 import { applyKept, keep, keptComments } from './writes';
 import { allRows, buildPlan } from './plan';
-import type { BuildData, LiveIssue, LiveState, Row, Verdict } from './plan';
+import type { BuildData, LiveIssue, LiveState, Notes, Row, Verdict } from './plan';
 
 /** A row that just opened refuses its main action for this long. */
 export const OPEN_GUARD_MS = 700;
@@ -44,7 +44,7 @@ function verdictPatch(verdict: Verdict | null): Partial<LiveIssue> {
     : { verdict, state: 'open', reason: null, closedAt: null };
 }
 
-export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, nav: MutableRefObject<Nav>) {
+export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, nav: MutableRefObject<Nav>, loadNotes: () => Promise<Notes> = () => Promise.resolve({})) {
   const [live, setLive] = useState<Live>({ status: 'loading', state: null });
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [details, setDetails] = useState<Record<number, Detail>>({});
@@ -119,6 +119,18 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     ).finally(() => fetching.current.delete(n));
   }, []);
   /** Early fetch for a row the person is about to open. */
+  // The features' notes: loaded once, the first time a person's pointer, press or focus reaches a "Notes"; a
+  // failed load is tried again at the next.
+  const [notes, setNotes] = useState<Notes | 'loading' | 'error' | undefined>(undefined);
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
+  const wantNotes = useCallback(() => {
+    if (notesRef.current === 'loading' || typeof notesRef.current === 'object') return;
+    notesRef.current = 'loading';
+    setNotes('loading');
+    loadNotes().then((loaded) => setNotes(loaded), () => setNotes('error'));
+  }, [loadNotes]);
+
   const prefetch = useCallback((row: Row) => {
     if (liveRefOk.current && row.issue !== null && row.issue > 0 && !openKeys.has(row.key)) loadDetail(row.issue);
   }, [loadDetail, openKeys]);
@@ -321,7 +333,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   };
 
   return {
-    live, liveOk, me, canDecide, plan, rowByKey, details, prefetch, fetchNow, pending, pendingRef, saving, sending, votePending,
+    live, liveOk, me, canDecide, plan, rowByKey, details, prefetch, notes, wantNotes, fetchNow, pending, pendingRef, saving, sending, votePending,
     votes, suggestionsSending, notice, rowNotice, setRowNotice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, verdictReady, sendVerdict, sendComment, toggleVote,
     sendSuggestion, signOut,

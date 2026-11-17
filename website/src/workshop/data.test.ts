@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { describe, expect, it } from 'vitest';
-import { buildDataFrom, readBuildData } from './data';
+import { buildDataFrom, notesFrom, readBuildData } from './data';
 import { AREAS, buildData, DECISIONS, ENGINE_NOTES, FEATURES, planFiles } from './fixtures';
 import { checkLayout, LAYOUT, LayoutError } from './map';
 
@@ -27,9 +27,13 @@ describe('reading the plan files', () => {
 
   it('reads the notes of a feature beside its file, and none when there are none', () => {
     const features = buildData().features;
-    expect(features.find((f) => f.id === 'engine')?.notes).toBe(ENGINE_NOTES);
-    expect(features.find((f) => f.id === 'calls')?.notes).toBeNull();
-    expect(buildData({ notes: { engine: '  \n' } }).features[0].notes).toBeNull();
+    expect(features.find((f) => f.id === 'engine')?.notes).toBe(true);
+    expect(features.find((f) => f.id === 'calls')?.notes).toBe(false);
+    expect(buildData({ notes: { engine: '  \n' } }).features[0].notes).toBe(false);
+    // The text is a chunk of its own: never in the page's data.
+    expect(notesFrom(planFiles())).toEqual({ engine: ENGINE_NOTES });
+    expect(notesFrom(planFiles({ notes: { engine: '  \n' } }))).toEqual({});
+    expect(JSON.stringify(buildData())).not.toContain('The engine owns every computer');
   });
 
   it('reads the areas and stages as the files give them', () => {

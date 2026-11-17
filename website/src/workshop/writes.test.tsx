@@ -146,7 +146,7 @@ describe('the decisions', () => {
     expect(rows.map((b) => b.textContent)).toEqual(['The engine is written in Zig', 'Merging changes main only', 'Security is built properly']);
     await userEvent.click(rowButton('Merging changes main only'));
     expect(screen.getByText('Merging changes main only. Nothing else moves.')).toBeInTheDocument();
-    expect(screen.getByText('16 Nov · Diff and merge, Fork a computer')).toBeInTheDocument();
+    expect(screen.getByText('16 Nov · Diff and merge, Forks')).toBeInTheDocument();
     expect(location.hash).toBe('#decisions/decided-merge-main-only');
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();

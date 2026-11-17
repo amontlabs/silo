@@ -2,7 +2,8 @@
 // Nothing here is ever inserted as HTML.
 import type { ReactNode } from 'react';
 
-const TOKEN = /(`[^`\n]+`)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
+// A labelled link's address may hold one level of brackets: `[x](https://en.wikipedia.org/wiki/Fork_(software))`.
+const TOKEN = /(`[^`\n]+`)|\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
 
 export function safeHref(url: string): string | null {
   try {

@@ -1,6 +1,6 @@
 // The Workshop's model: the plan built into the page, merged with the live state from GitHub. Names, the
 // status rule and the areas' states come from the plan's model (tools/plan/model); this adds the rows.
-import { areaStates, countRows, featureStatus, STARTER_STAGES } from '../../../tools/plan/model/index.js';
+import { areaGroups, featureStatus } from '../../../tools/plan/model/index.js';
 import type { Change } from '../../../tools/plan/model/markers.js';
 import type { Counts } from '../../../tools/plan/model/areas.js';
 import type { Status, Verdict } from '../../../tools/plan/model/status.js';
@@ -22,9 +22,12 @@ export interface Feature {
   verdict: Verdict | null;
   /** The day it was built, `YYYY-MM-DD`. */
   built: string | null;
-  /** Its notes, Markdown. */
-  notes: string | null;
+  /** Whether it has notes; their text is a chunk of its own (`virtual:workshop-notes`), loaded on demand. */
+  notes: boolean;
 }
+
+/** The notes of the features that have some, Markdown, by feature id. */
+export type Notes = Record<string, string>;
 
 export interface Stage {
   id: string;
@@ -38,7 +41,7 @@ export interface Area {
   line: string;
 }
 
-/** What the owner settled for the whole product (`about`: the areas or features it is about; null for all). */
+/** What the owner settled for the whole product (`about`: the areas it is about; null for all). */
 export interface Decision {
   id: string;
   date: string;
@@ -105,10 +108,11 @@ export interface Row {
   /** Build order, for entries. */
   n: number | null;
   suggest: Feature['suggest'];
-  notes: string | null;
+  /** Whether the entry has notes. */
+  notes: boolean;
   /** The day the file says it was built. */
   built: string | null;
-  /** The decisions about its area or itself, for entries; the areas and features it is about, for decisions. */
+  /** The decisions about its area, for entries; the areas it is about, for decisions. */
   decisions: Decision[];
   about: string[] | null;
   author: string | null;
@@ -151,7 +155,7 @@ export function entryStatus(feature: Pick<Feature, 'verdict' | 'built'>, live: L
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, name, what: null, issue: null, status: 'undecided', stage: null, area: null, n: null, suggest: null, notes: null, built: null,
+    key, kind, name, what: null, issue: null, status: 'undecided', stage: null, area: null, n: null, suggest: null, notes: false, built: null,
     decisions: [], about: null, author: null, up: null, comments: null, updates: 0, date: null, closedAt: null,
   };
 }
@@ -186,9 +190,16 @@ export function isDecided(row: Row): boolean {
   return row.status !== 'undecided';
 }
 
-/** The decisions about a feature: those naming its area or its id. */
-export function decisionsAbout(decisions: Decision[], feature: Pick<Feature, 'id' | 'area'>): Decision[] {
-  return decisions.filter((decision) => decision.about?.some((id) => id === feature.id || id === feature.area));
+/** The decisions about a feature: those whose `about` names its area (`about` holds area ids only). */
+export function decisionsAbout(decisions: Decision[], feature: Pick<Feature, 'area'>): Decision[] {
+  return decisions.filter((decision) => feature.area !== null && decision.about?.includes(feature.area) === true);
+}
+
+/** The areas with their features in build order, counts and states: the model's `areaGroups` on the page's data. */
+export function groupAreas(data: BuildData, statusOf: (id: string) => Status) {
+  const features = Object.fromEntries(data.features.map((feature) => [feature.id, { ...feature, area: feature.area ?? undefined }]));
+  const stages = data.stages.map((stage) => ({ id: stage.id, features: data.features.filter((feature) => feature.stage === stage.id).map((feature) => feature.id) }));
+  return areaGroups({ areas: data.areas, stages, features }, statusOf);
 }
 
 export function buildPlan(data: BuildData, live: LiveState | null): Plan {
@@ -207,7 +218,6 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
     }
   };
 
-  const byArea = new Map<string, Row[]>();
   const unplaced: Row[] = [];
   const entries = new Map<string, Row>();
   for (const feature of data.features) {
@@ -225,16 +235,12 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
     counts(row);
     entries.set(feature.id, row);
     if (feature.area === null) unplaced.push(row);
-    else byArea.set(feature.area, [...(byArea.get(feature.area) ?? []), row]);
   }
 
-  const starter = new Set(data.stages.slice(0, STARTER_STAGES).map((stage) => stage.id));
-  const groups: AreaGroup[] = data.areas.map((area, index) => {
-    const rows = (byArea.get(area.id) ?? []).sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
-    return { area, number: index + 1, rows, counts: countRows(rows), state: 'open' as AreaState, first: rows.some((row) => starter.has(row.stage ?? '')) };
-  });
-  areaStates(groups.map((group) => ({ counts: group.counts, rows: group.rows.map((row) => ({ status: row.status, position: row.n ?? Infinity })) })))
-    .forEach((state, index) => { groups[index].state = state; });
+  const groups: AreaGroup[] = groupAreas(data, (id) => (entries.get(id) as Row).status).map((group) => ({
+    ...group,
+    rows: group.rows.map((row) => entries.get(row.id) as Row),
+  }));
 
   const suggestions: Row[] = [];
   for (const [key, issue] of Object.entries(issues)) {
@@ -288,19 +294,31 @@ export function awaitsVerdict(row: Row): boolean {
 
 export const needsOwner = awaitsVerdict;
 
-/** What a history line says changed: the verdict, built, the text, the notes, else the field's name. */
+const PHRASES: Record<string, string> = {
+  name: 'Text changed',
+  what: 'Text changed',
+  notes: 'Notes edited',
+  needs: 'Needs changed',
+  area: 'Moved to another part',
+  suggest: 'Suggestion changed',
+  surfaces: 'Surfaces changed',
+  built: 'Built',
+};
+
+/** What a history line says changed, one phrase per change in the order of its fields; `suggested_in` says nothing. */
 export function changeWords(change: Change): string[] {
   const words: string[] = [];
   for (const field of change.fields) {
-    let word: string = field;
-    if (field === 'verdict') word = change.verdict === 'take' ? 'Taken' : change.verdict === 'drop' ? 'Dropped' : change.verdict === 'later' ? 'Later' : 'Verdict cleared';
-    else if (field === 'built') word = change.built ? 'Built' : 'built';
-    else if (field === 'name' || field === 'what') word = 'Text changed';
-    else if (field === 'notes') word = 'Notes edited';
-    if (!words.includes(word)) words.push(word);
+    const word = field === 'verdict'
+      ? change.verdict === 'take' ? 'Taken' : change.verdict === 'drop' ? 'Dropped' : change.verdict === 'later' ? 'Later' : 'Verdict cleared'
+      : PHRASES[field];
+    if (word && !words.includes(word)) words.push(word);
   }
   return words;
 }
+
+/** The phrases of a change on one line. */
+export const changeLine = (change: Change) => changeWords(change).join(' · ');
 
 /** Whether a change touched the text a person can compare: `name` or `what`. */
 export const changesText = (change: Change) => change.fields.includes('name') || change.fields.includes('what');

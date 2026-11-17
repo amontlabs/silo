@@ -457,7 +457,7 @@
 
 /* An entry's notes and, for the owner, its decisions: one line of toggles under the sentence, closed by default. */
 .ws-extras { margin-top: 10px; max-width: 720px; }
-.ws-extras-bar { display: flex; flex-wrap: wrap; gap: 4px 18px; min-height: 22px; }
+.ws-extras-bar { display: flex; flex-wrap: nowrap; gap: 18px; height: 22px; white-space: nowrap; }
 .ws .ws-disc { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; margin: -4px 0; font: 12px/14px var(--mono); color: var(--muted); }
 .ws .ws-disc::before { content: ""; width: 0; height: 0; border-left: 4px solid currentColor; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .16s var(--ease-out); }
 .ws .ws-disc[aria-expanded="true"]::before { transform: rotate(90deg); }
@@ -483,7 +483,9 @@
 /* A history line in the thread: no author, no box; when, what changed and the change on GitHub. */
 .ws-h { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; min-height: 22px; font: 12px/22px var(--mono); color: var(--muted); }
 .ws-h > i { justify-self: center; align-self: start; width: 7px; height: 7px; margin-top: 7.5px; border-radius: 50%; border: 1.5px solid var(--faint); }
-.ws-h p { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.ws-h p { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 10px; height: 22px; white-space: nowrap; }
+.ws-h-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; margin: 0 -4px; }
+.ws-h p > small, .ws-h-link { flex: none; }
 .ws-h small { color: var(--faint); font-size: 12px; }
 .ws .ws-h-btn { font: inherit; color: var(--ink); text-decoration: underline dotted; text-underline-offset: 3px; }
 .ws .ws-h-btn:hover, .ws .ws-h-btn[aria-expanded="true"] { color: var(--accent-ink); }
@@ -500,5 +502,11 @@
 
 /* Latest: one line per change or comment, under the entry it belongs to. */
 .ws-latest .ws-name { display: grid; }
+.ws-latest-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-latest-ghost .ws-pip { visibility: hidden; }
+.ws-latest-ghost .ws-latest-name, .ws-latest-ghost .ws-sub { justify-self: start; border-radius: 3px; background: color-mix(in srgb, var(--line) 25%, transparent); }
+.ws-latest-ghost .ws-latest-name { width: min(60%, 320px); }
+.ws-latest-ghost .ws-sub { width: min(40%, 220px); }
+.workshop-shell:has(.ws-list-loading) .ws-foot { opacity: 0; transition: none; }
 .ws-sub { font: 12px/1.5 var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-latest .ws-word { min-width: 0; }

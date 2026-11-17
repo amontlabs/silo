@@ -15,10 +15,12 @@ export interface BlockProps {
   list: ReactNode;
   /** Quiet lines under the counts: the API unavailable, sign-in failed. */
   notes?: ReactNode;
+  /** While the list loads, nothing sits below it in its column. */
+  loading?: boolean;
 }
 
 /** The two columns every opened place uses. */
-export function Block({ num, title, line, onBack, children, list, notes }: BlockProps) {
+export function Block({ num, title, line, onBack, children, list, notes, loading = false }: BlockProps) {
   return (
     <>
       <div className="ws-block">
@@ -31,7 +33,7 @@ export function Block({ num, title, line, onBack, children, list, notes }: Block
         {children}
         {notes ? <div className="ws-notes wide">{notes}</div> : null}
       </div>
-      <div className="ws-list">{list}{notes ? <div className="ws-notes narrow">{notes}</div> : null}</div>
+      <div className={loading ? 'ws-list ws-list-loading' : 'ws-list'}>{list}{notes && !loading ? <div className="ws-notes narrow">{notes}</div> : null}</div>
     </>
   );
 }

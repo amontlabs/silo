@@ -4,7 +4,7 @@ import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
-import { PLAN_DIR, readBuildData } from './src/workshop/data.ts';
+import { PLAN_DIR, readBuildData, readNotes } from './src/workshop/data.ts';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
 const plan = join(repository, PLAN_DIR);
@@ -19,6 +19,20 @@ function workshopData(): Plugin {
       if (source !== `\0${id}`) return null;
       this.addWatchFile(plan);
       return `export default ${JSON.stringify(readBuildData(repository))};`;
+    },
+  };
+}
+
+/** `virtual:workshop-notes`: the notes of every feature, a chunk of their own that the page loads on demand. */
+function workshopNotes(): Plugin {
+  const id = 'virtual:workshop-notes';
+  return {
+    name: 'workshop-notes',
+    resolveId: (source) => (source === id ? `\0${id}` : null),
+    load(source) {
+      if (source !== `\0${id}`) return null;
+      this.addWatchFile(plan);
+      return `export default ${JSON.stringify(readNotes(repository))};`;
     },
   };
 }
@@ -49,15 +63,17 @@ function planWatch(): Plugin {
       server.watcher.add(plan);
       server.watcher.on('change', (file) => {
         if (!file.startsWith(plan)) return;
-        const module = server.moduleGraph.getModuleById('\0virtual:workshop-data');
-        if (module) server.moduleGraph.invalidateModule(module);
+        for (const id of ['\0virtual:workshop-data', '\0virtual:workshop-notes']) {
+          const module = server.moduleGraph.getModuleById(id);
+          if (module) server.moduleGraph.invalidateModule(module);
+        }
       });
     },
   };
 }
 
 export default defineConfig({
-  plugins: [react(), workshopData(), homePlan(), planWatch()],
+  plugins: [react(), workshopData(), workshopNotes(), homePlan(), planWatch()],
   // The page imports the plan's model from tools/plan/model, outside website/.
   server: { fs: { allow: [repository] } },
   build: {

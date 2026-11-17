@@ -1,8 +1,8 @@
 // A small plan in the files of plan/, for the tests: they never read the real one.
 import { canonicalText, changeComment } from '../../../tools/plan/model/index.js';
-import { buildDataFrom } from './data';
+import { buildDataFrom, notesFrom } from './data';
 import type { Comment } from './api';
-import type { BuildData, Change, LiveIssue, LiveLatest, LiveState } from './plan';
+import type { BuildData, Change, LiveIssue, LiveLatest, LiveState, Notes } from './plan';
 
 interface FixtureFeature {
   id: string;
@@ -76,7 +76,7 @@ export const STAGES = [
 export const DECISIONS = [
   { id: 'security-properly', date: '2026-11-15', text: 'Security is built properly. It is not the focus yet.' },
   { id: 'engine-in-zig', date: '2026-11-16', text: 'The engine is written in Zig. It is the core piece.', about: ['engine'] },
-  { id: 'merge-main-only', date: '2026-11-16', text: 'Merging changes main only. Nothing else moves.', about: ['changes', 'fork'] },
+  { id: 'merge-main-only', date: '2026-11-16', text: 'Merging changes main only. Nothing else moves.', about: ['changes', 'forks'] },
 ];
 
 /** The notes of `engine`: every kind of block, a relative link and a link to another scheme. */
@@ -118,8 +118,18 @@ export function planFiles({ features = FEATURES, notes = { engine: ENGINE_NOTES 
   return files;
 }
 
+const NOTES = new WeakMap<BuildData, Notes>();
+
 export function buildData(options?: Parameters<typeof planFiles>[0]): BuildData {
-  return buildDataFrom(planFiles(options));
+  const files = planFiles(options);
+  const data = buildDataFrom(files);
+  NOTES.set(data, notesFrom(files));
+  return data;
+}
+
+/** The notes of a fixture plan made by `buildData`, as the page's notes chunk gives them. */
+export function fixtureNotes(data: BuildData): Notes {
+  return NOTES.get(data) ?? {};
 }
 
 const day = '2026-11-14T10:00:00Z';

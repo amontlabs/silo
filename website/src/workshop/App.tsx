@@ -10,7 +10,7 @@ import type { EntryContext } from './Entry';
 import { MapView } from './MapView';
 import { FOLD_HEIGHT, MAP_WIDTH } from './map';
 import { awaitsVerdict, needsOwner, statusLine } from './plan';
-import type { AreaState, BuildData, Row } from './plan';
+import type { AreaState, BuildData, Notes, Row } from './plan';
 import { formatHash, HOME, placeFrom, placeOf, resolveHash, rowsOf, samePlace } from './routes';
 import type { Place } from './routes';
 import { SuggestPlace } from './Suggest';
@@ -22,9 +22,13 @@ export { OPEN_GUARD_MS } from './useWorkshop';
 
 export interface AppProps {
   data: BuildData;
+  /** Loads the features' notes, a chunk apart: the first time a person reaches an entry's "Notes". */
+  loadNotes?: () => Promise<Notes>;
   /** The element in the site header that holds sign-in and the signed-in login. */
   accountSlot?: Element | null;
 }
+
+const noNotes = () => Promise.resolve({});
 
 type View = 'map' | 'order';
 type Focus = { kind: 'title' } | { kind: 'area'; area: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string } | { kind: 'buttons'; key: string };
@@ -85,7 +89,7 @@ function isField(target: EventTarget | null): boolean {
 const initialView = (): View => (new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
 const address = (hash = '') => `${location.pathname}${location.search}${hash}`;
 
-export function App({ data, accountSlot }: AppProps) {
+export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const [place, setPlace] = useState<Place>(HOME);
   // Rows open independently; `openKey` is the one opened last: the address, Enter and the guard follow it.
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -102,7 +106,7 @@ export function App({ data, accountSlot }: AppProps) {
   // The first frames take the state as it is, without animating into it.
   const [boot, setBoot] = useState(true);
   const nav = useRef<Nav>({ openKey: null, openedAt: new Map(), advanceFrom: () => {}, reopen: () => {} });
-  const w = useWorkshop(data, openKey, openKeys, openings, nav);
+  const w = useWorkshop(data, openKey, openKeys, openings, nav, loadNotes);
   const { plan, rowByKey, live, canDecide } = w;
   const focusNext = useRef<Focus | null>(null);
   const wantedHash = useRef<string | null>(null);

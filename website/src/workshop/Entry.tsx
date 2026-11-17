@@ -1,7 +1,7 @@
 // One row of a list, and what it shows once open: the sentence, its notes, its state, the thread (comments and
 // history lines) and the box.
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { hasSessionHint } from './api';
 import { compareLink, featureFileAt } from '../../../tools/plan/model/index.js';
@@ -224,7 +224,7 @@ function StateLine({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
   const hasIssue = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
   if (row.kind === 'decided') {
-    const about = (row.about ?? []).map((id) => w.plan.areas.find((group) => group.area.id === id)?.area.title ?? w.rowByKey.get(`entry-${id}`)?.name ?? id);
+    const about = (row.about ?? []).map((id) => w.plan.areas.find((group) => group.area.id === id)?.area.title ?? id);
     return <div className="ws-state"><span className="ws-date">{row.date ? shortDate(row.date) : ''}{about.length ? ` · ${about.join(', ')}` : ''}</span></div>;
   }
   if (row.issue !== null && w.saving[row.issue]) return <div className="ws-state"><span className="ws-muted">Saving…</span></div>;
@@ -282,14 +282,16 @@ function HistoryLine({ change, createdAt, row, repo }: { change: Change; created
       <i aria-hidden="true" />
       <div>
         <p>
-          {words.map((word, index) => (
-            <span key={word}>
-              {index ? ', ' : ''}
-              {word === 'Text changed' && comparable
-                ? <button type="button" className="ws-h-btn" aria-expanded={open} aria-controls={panel} onClick={toggle}>{word}</button>
-                : word}
-            </span>
-          ))}
+          <span className="ws-h-what">
+            {words.map((word, index) => (
+              <Fragment key={word}>
+                {index ? ' · ' : ''}
+                {word === 'Text changed' && comparable
+                  ? <button type="button" className="ws-h-btn" aria-expanded={open} aria-controls={panel} onClick={toggle}>{word}</button>
+                  : word}
+              </Fragment>
+            ))}
+          </span>
           <small>{relativeTime(createdAt)}</small>
           {link ? <a className="ws-h-link" href={link} target="_blank" rel="noopener noreferrer" title="The change on GitHub">{change.commit.slice(0, 7)} ↗</a> : null}
         </p>
@@ -380,20 +382,38 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   );
 }
 
-/** The entry's notes and, for the owner, the decisions about it: each closed until asked for, on one line. */
+/** The entry's notes and, for the owner, the decisions about its area: each closed until asked for, on one line. */
 function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
+  const { w } = ctx;
   const [shown, setShown] = useState<'notes' | 'decisions' | null>(null);
-  const decisions: Decision[] = ctx.w.canDecide ? row.decisions : [];
-  if (!row.notes && !decisions.length) return null;
+  const decisions: Decision[] = w.canDecide ? row.decisions : [];
+  // The line keeps its room from first paint whenever "Decisions" may still appear (until `me` and the live state
+  // answer, the session marker says), and keeps it once given, so nothing below moves when the answers arrive.
+  const mayDecide = row.decisions.length > 0 && w.live.status !== 'unavailable' && (w.me ? w.me.canDecide : w.me === undefined && hasSessionHint());
+  const [kept, setKept] = useState(() => row.notes || mayDecide);
+  if (!kept && (row.notes || mayDecide)) setKept(true);
+  if (!kept && !row.notes && !mayDecide) return null;
   const toggle = (what: 'notes' | 'decisions') => () => setShown((current) => (current === what ? null : what));
+  const id = row.key.slice('entry-'.length);
+  const notes = typeof w.notes === 'object' ? w.notes[id] : undefined;
   return (
     <div className="ws-extras">
       <div className="ws-extras-bar">
-        {row.notes ? <button type="button" className="ws-disc" aria-expanded={shown === 'notes'} aria-controls={`${row.key}-notes`} onClick={toggle('notes')}>Notes</button> : null}
+        {row.notes ? (
+          <button
+            type="button" className="ws-disc" aria-expanded={shown === 'notes'} aria-controls={`${row.key}-notes`}
+            onPointerEnter={w.wantNotes} onPointerDown={w.wantNotes} onTouchStart={w.wantNotes} onFocus={w.wantNotes}
+            onClick={() => { w.wantNotes(); toggle('notes')(); }}
+          >Notes</button>
+        ) : null}
         {decisions.length ? <button type="button" className="ws-disc" aria-expanded={shown === 'decisions'} aria-controls={`${row.key}-decisions`} onClick={toggle('decisions')}>Decisions · {decisions.length}</button> : null}
       </div>
-      {shown === 'notes' && row.notes ? <div className="ws-extras-in" id={`${row.key}-notes`}><Markdown text={row.notes} /></div> : null}
-      {shown === 'decisions' ? (
+      {shown === 'notes' && row.notes ? (
+        <div className="ws-extras-in" id={`${row.key}-notes`}>
+          {notes ? <Markdown text={notes} /> : w.notes === 'error' ? <p className="ws-quiet">Notes could not load.</p> : null}
+        </div>
+      ) : null}
+      {shown === 'decisions' && decisions.length ? (
         <ul className="ws-extras-in ws-decs" id={`${row.key}-decisions`}>
           {decisions.map((decision) => <li key={decision.id}><small>{shortDate(decision.date)}</small><p>{decision.text}</p></li>)}
         </ul>

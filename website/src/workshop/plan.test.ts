@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { areaStates } from '../../../tools/plan/model/index.js';
-import { buildData, FEATURES, issue, liveState } from './fixtures';
-import { awaitsVerdict, buildPlan, changeWords, countRows, decisionsAbout, decisionTitle, entryStatus, relativeTime, statusLine, stateWords } from './plan';
+import { areaGroups, areaStates } from '../../../tools/plan/model/index.js';
+import { parsePlan } from '../../../tools/plan/read/index.js';
+import { buildData, FEATURES, issue, liveState, planFiles } from './fixtures';
+import { awaitsVerdict, buildPlan, changeLine, changeWords, countRows, decisionsAbout, decisionTitle, entryStatus, relativeTime, statusLine, stateWords } from './plan';
 import type { AreaGroup, Change, Row } from './plan';
 
 const names = (rows: { name: string }[]) => rows.map((row) => row.name);
@@ -82,7 +83,16 @@ describe('the plan by area', () => {
     expect(decisionTitle('GitHub is the storage: issues. Agents post as a bot.')).toBe('GitHub is the storage');
   });
 
-  it('attaches the decisions about an entry\'s area or itself', () => {
+  it('groups the areas with the model\'s areaGroups: rows, counts, states and the first band', () => {
+    const plan = buildPlan(buildData(), liveState());
+    const statuses = new Map(plan.areas.flatMap((group) => group.rows).map((row) => [row.key.slice('entry-'.length), row.status]));
+    const model = areaGroups(parsePlan(planFiles()).plan, (id: string) => statuses.get(id) ?? 'undecided');
+    const shape = (groups: { area: { id: string }; rows: { id?: string; key?: string }[]; counts: unknown; state: string; first: boolean; number: number }[]) =>
+      groups.map((group) => [group.area.id, group.number, group.rows.map((row) => row.id ?? row.key?.slice('entry-'.length)), group.counts, group.state, group.first]);
+    expect(shape(plan.areas)).toEqual(shape(model));
+  });
+
+  it('attaches the decisions about an entry\'s area, never by its id', () => {
     const plan = buildPlan(buildData(), null);
     const rows = new Map(plan.areas.flatMap((group) => group.rows).map((r) => [r.key, r]));
     expect(rows.get('entry-engine')!.decisions.map((d) => d.id)).toEqual(['engine-in-zig']);
@@ -91,7 +101,11 @@ describe('the plan by area', () => {
     expect(rows.get('entry-diff')!.decisions.map((d) => d.id)).toEqual(['merge-main-only']);
     expect(rows.get('entry-exec')!.decisions).toEqual([]);
     const data = buildData();
-    expect(decisionsAbout(data.decisions, { id: 'x', area: null })).toEqual([]);
+    expect(decisionsAbout(data.decisions, { area: null })).toEqual([]);
+    // `about` holds area ids: one equal to a feature's id says nothing about that feature.
+    const byId = [{ id: 'd', date: '2026-11-16', text: 'T.', about: ['fork'] }];
+    expect(decisionsAbout(byId, { area: 'forks' })).toEqual([]);
+    expect(decisionsAbout(byId, { area: 'fork' })).toEqual(byId);
   });
 
   it('counts people\'s comments as the issue\'s comments less its history lines', () => {
@@ -123,7 +137,7 @@ describe('the plan by area', () => {
 describe('history words', () => {
   const change = (fields: string[], extra: Partial<Change> = {}) => ({ fields, before: 'a'.repeat(40), commit: 'b'.repeat(40), ...extra }) as Change;
 
-  it('name the verdict, built, the text, the notes, else the field', () => {
+  it('name each change in its phrase, never a raw key, joined by a middle dot', () => {
     expect(changeWords(change(['verdict'], { verdict: 'take' }))).toEqual(['Taken']);
     expect(changeWords(change(['verdict'], { verdict: 'drop' }))).toEqual(['Dropped']);
     expect(changeWords(change(['verdict'], { verdict: 'later' }))).toEqual(['Later']);
@@ -131,8 +145,16 @@ describe('history words', () => {
     expect(changeWords(change(['built'], { built: '2026-11-16' }))).toEqual(['Built']);
     expect(changeWords(change(['name', 'what']))).toEqual(['Text changed']);
     expect(changeWords(change(['notes']))).toEqual(['Notes edited']);
-    expect(changeWords(change(['needs']))).toEqual(['needs']);
-    expect(changeWords(change(['needs', 'verdict'], { verdict: 'take' }))).toEqual(['needs', 'Taken']);
+    expect(changeWords(change(['name']))).toEqual(['Text changed']);
+    expect(changeWords(change(['needs']))).toEqual(['Needs changed']);
+    expect(changeWords(change(['area']))).toEqual(['Moved to another part']);
+    expect(changeWords(change(['suggest']))).toEqual(['Suggestion changed']);
+    expect(changeWords(change(['surfaces']))).toEqual(['Surfaces changed']);
+    expect(changeWords(change(['suggested_in']))).toEqual([]);
+    expect(changeWords(change(['needs', 'verdict'], { verdict: 'take' }))).toEqual(['Needs changed', 'Taken']);
+    const every = change(['name', 'what', 'area', 'needs', 'surfaces', 'suggest', 'suggested_in', 'verdict', 'built', 'notes'], { verdict: 'take', built: '2026-11-16' });
+    expect(changeLine(every)).toBe('Text changed · Moved to another part · Needs changed · Surfaces changed · Suggestion changed · Taken · Built · Notes edited');
+    expect(changeLine(every)).not.toMatch(/[a-z]+_[a-z]+|\b(name|what|area|needs|surfaces|suggest|verdict|built|notes)\b/);
   });
 
   it('says how long ago', () => {

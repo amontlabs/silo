@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { canonicalText } from '../../tools/plan/model/index.js';
 import { planFiles } from './workshop/fixtures.ts';
 import { fillHomePlan, homePlanLines } from './home-plan.ts';
+import { readBuildData } from './workshop/data.ts';
+import { buildPlan } from './workshop/plan.ts';
 
 const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8');
 const css = readFileSync(join(process.cwd(), 'src/style.css'), 'utf8');
@@ -90,6 +92,20 @@ describe('the home page', () => {
     expect(text('.door-line', filled)).toEqual(['3 of 18 features are planned. Have a say in the rest.']);
     expect(text('.door-line span', filled)).toEqual(['3 of 18 features are planned.', 'Have a say in the rest.']);
     expect(homePlanLines(fixtureRepository()).door).toContain('<span>3 of 18 features are planned.</span>');
+  });
+
+  it('counts planned as the map does: a built feature is built, not planned, and a dropped one is not counted', () => {
+    const root = fixtureRepository((files) => {
+      const engine = JSON.parse(files.get('features/engine.json') as string);
+      files.set('features/engine.json', canonicalText({ ...engine, built: '2026-11-01' }));
+      const fork = JSON.parse(files.get('features/fork.json') as string);
+      files.set('features/fork.json', canonicalText({ ...fork, verdict: 'drop' }));
+    });
+    const plan = buildPlan(readBuildData(root), null);
+    const planned = plan.areas.reduce((sum, group) => sum + group.counts.planned, 0);
+    const total = plan.areas.reduce((sum, group) => sum + group.rows.length - group.counts.dropped, 0);
+    expect([planned, total]).toEqual([2, 17]);
+    expect(homePlanLines(root).door).toContain('<span>2 of 17 features are planned.</span>');
   });
 
   it('writes a plan line with $ or markup in it as text', () => {

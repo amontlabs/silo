@@ -7,12 +7,19 @@ import type { Comment } from './api';
 import { buildData, FEATURES, historyComment, issue, liveState, SHA } from './fixtures';
 import type { Change, LiveLatest } from './plan';
 import { detail, itemOf, mockApi, ok, owner, refused, renderApp, rowButton, visitor } from './test-support';
+import type { Route } from './test-support';
 
 const NOW = Date.parse('2026-11-17T12:00:00Z');
 const fixedNow = () => vi.spyOn(Date, 'now').mockReturnValue(NOW);
 const change = (fields: string[], extra: Partial<Change> = {}): Change => ({ fields, before: SHA.a, commit: SHA.b, ...extra }) as Change;
 const person = (id: number, text: string, createdAt: string): Comment => ({ id, author: 'mara-k', avatar: '', bot: false, createdAt, text });
 const notesButton = () => screen.getByRole('button', { name: 'Notes' });
+/** The notes once their chunk has loaded. */
+const shownNotes = () => waitFor(() => {
+  const md = document.querySelector('.ws-md');
+  expect(md).not.toBeNull();
+  return md as HTMLElement;
+});
 
 async function openEngine(data = buildData(), me = owner) {
   mockApi({ me });
@@ -34,7 +41,7 @@ describe('notes', () => {
     await openEngine();
     await userEvent.click(notesButton());
     expect(notesButton()).toHaveAttribute('aria-expanded', 'true');
-    const md = document.querySelector('.ws-md') as HTMLElement;
+    const md = await shownNotes();
     // The first "## Notes" heading is dropped: the toggle already says it.
     expect(within(md).queryByRole('heading', { name: 'Notes' })).not.toBeInTheDocument();
     expect(within(md).getByRole('heading', { level: 4, name: 'From the old code' })).toBeInTheDocument();
@@ -61,7 +68,7 @@ describe('notes', () => {
     const notes = '## Notes\n\nSee <img src=x onerror=alert(1)> and <script>window.hacked=1</script>\n\n[x](javascript:alert(1)) and [y](data:text/html,hi)\n\n- <b>bold</b>\n\n## <i>head</i>\n';
     await openEngine(buildData({ notes: { engine: notes } }));
     await userEvent.click(notesButton());
-    const md = document.querySelector('.ws-md') as HTMLElement;
+    const md = await shownNotes();
     expect(md.querySelector('img, script, b, i')).toBeNull();
     expect(md.textContent).toContain('<img src=x onerror=alert(1)>');
     expect(md.textContent).toContain('<script>window.hacked=1</script>');
@@ -69,6 +76,102 @@ describe('notes', () => {
     expect(md.querySelectorAll('a')).toHaveLength(0);
     expect(md.textContent).toContain('x and y');
     expect((window as unknown as { hacked?: number }).hacked).toBeUndefined();
+  });
+});
+
+describe('links with brackets in their address', () => {
+  it('keep one level of brackets inside an http or https address, in notes and in comments', async () => {
+    const notes = 'See [Fork](https://en.wikipedia.org/wiki/Fork_(software)) and [b](https://x.test/a_(b)_c), then (aside).';
+    await openEngine(buildData({ notes: { engine: notes } }));
+    await userEvent.click(notesButton());
+    const md = await shownNotes();
+    expect(within(md).getByRole('link', { name: 'Fork' })).toHaveAttribute('href', 'https://en.wikipedia.org/wiki/Fork_(software)');
+    expect(within(md).getByRole('link', { name: 'b' })).toHaveAttribute('href', 'https://x.test/a_(b)_c');
+    expect(md.textContent).toBe('See Fork and b, then (aside).');
+  });
+});
+
+describe('the notes chunk', () => {
+  it('is loaded once, the first time a pointer, a press or focus reaches "Notes", not when the entry opens', async () => {
+    const data = buildData();
+    const loads: number[] = [];
+    let release: () => void = () => {};
+    const loadNotes = () => {
+      loads.push(1);
+      return new Promise<Record<string, string>>((resolve) => { release = () => resolve({ engine: '## Notes\n\nFrom the chunk.' }); });
+    };
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#engine/engine');
+    await renderApp(data, loadNotes);
+    await waitFor(() => expect(rowButton('The engine runs on its own')).toHaveAttribute('aria-expanded', 'true'));
+    expect(loads).toHaveLength(0);
+    await userEvent.hover(notesButton());
+    expect(loads).toHaveLength(1);
+    act(() => notesButton().focus());
+    await userEvent.click(notesButton());
+    expect(loads).toHaveLength(1);
+    expect(document.querySelector('.ws-md')).toBeNull();
+    await act(async () => release());
+    expect((await shownNotes()).textContent).toBe('From the chunk.');
+  });
+
+  it('says so when it cannot load, and is tried again at the next reach', async () => {
+    let fail = true;
+    const loadNotes = vi.fn(() => (fail ? Promise.reject(new Error('offline')) : Promise.resolve({ engine: 'Back.' })));
+    mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#engine/engine');
+    await renderApp(buildData(), loadNotes);
+    await waitFor(() => expect(rowButton('The engine runs on its own')).toHaveAttribute('aria-expanded', 'true'));
+    await userEvent.click(notesButton());
+    expect(await screen.findByText('Notes could not load.')).toBeInTheDocument();
+    fail = false;
+    await userEvent.click(notesButton());
+    await userEvent.click(notesButton());
+    expect((await shownNotes()).textContent).toBe('Back.');
+    const calls = loadNotes.mock.calls.length;
+    await userEvent.click(notesButton());
+    await userEvent.click(notesButton());
+    expect(loadNotes).toHaveBeenCalledTimes(calls);
+  });
+});
+
+describe('the line of Notes and Decisions', () => {
+  // `calls` has no notes; one decision is about its area, `engine`.
+  const openCalls = async (me: Route) => {
+    mockApi({ me: owner, routes: { 'GET me': me } });
+    history.replaceState(null, '', '/workshop#engine/calls');
+    render(<App data={buildData()} />);
+    await waitFor(() => expect(rowButton('Every call defined once')).toHaveAttribute('aria-expanded', 'true'));
+    return itemOf('Every call defined once');
+  };
+
+  it('has its place from first paint while `me` is asked by a signed-in person, and keeps it whatever the answer', async () => {
+    let answer: (value: { status: number; body: unknown }) => void = () => {};
+    const item = await openCalls(() => new Promise((resolve) => { answer = resolve; }));
+    const bar = item.querySelector('.ws-extras-bar') as HTMLElement;
+    expect(bar).not.toBeNull();
+    expect(bar.children).toHaveLength(0);
+    await act(async () => answer(ok(owner)));
+    expect(item.querySelector('.ws-extras-bar')).toBe(bar);
+    expect(within(bar).getByRole('button', { name: 'Decisions · 1' })).toBeInTheDocument();
+  });
+
+  it('keeps its place, empty, when the signed-in person turns out not to be the owner', async () => {
+    let answer: (value: { status: number; body: unknown }) => void = () => {};
+    const item = await openCalls(() => new Promise((resolve) => { answer = resolve; }));
+    const bar = item.querySelector('.ws-extras-bar') as HTMLElement;
+    await act(async () => answer(ok(visitor)));
+    expect(item.querySelector('.ws-extras-bar')).toBe(bar);
+    expect(bar.children).toHaveLength(0);
+  });
+
+  it('is not there for a signed-out visitor on an entry without notes', async () => {
+    mockApi();
+    document.cookie = 'workshop-hint=; path=/; max-age=0';
+    history.replaceState(null, '', '/workshop#engine/calls');
+    await renderApp();
+    await waitFor(() => expect(rowButton('Every call defined once')).toHaveAttribute('aria-expanded', 'true'));
+    expect(itemOf('Every call defined once').querySelector('.ws-extras')).toBeNull();
   });
 });
 
@@ -96,7 +199,7 @@ describe('history lines', () => {
     const talk = itemOf('Create and delete a computer').querySelector('.ws-talk') as HTMLElement;
     const entries = [...talk.querySelectorAll(':scope > .ws-h, :scope > .ws-c')];
     expect(entries.map((node) => (node.classList.contains('ws-h') ? (node.querySelector('p') as HTMLElement).firstChild?.textContent ?? '' : 'comment'))).toEqual([
-      'comment', 'Taken', 'Dropped', 'Later', 'Verdict cleared', 'Built', 'Text changed', 'Notes edited', 'needs', 'comment',
+      'comment', 'Taken', 'Dropped', 'Later', 'Verdict cleared', 'Built', 'Text changed', 'Notes edited', 'Needs changed', 'comment',
     ]);
     const lines = [...talk.querySelectorAll('.ws-h')];
     expect(lines).toHaveLength(8);
@@ -117,6 +220,23 @@ describe('history lines', () => {
     expect(talk.querySelectorAll('textarea')).toHaveLength(1);
     // Only "Text changed" can be opened.
     expect(within(talk).getAllByRole('button').map((button) => button.textContent)).toEqual(['Text changed', 'Comment']);
+  });
+
+  it('keep the phrase, the date and the change on one line: only the phrase is cut', async () => {
+    fixedNow();
+    const every = change(['name', 'what', 'area', 'needs', 'surfaces', 'suggest', 'suggested_in', 'verdict', 'built', 'notes'], { verdict: 'take', built: '2026-11-16' });
+    mockApi({ me: visitor, routes: withThread([historyComment(1, every, '2026-11-16T10:00:00Z')]) });
+    history.replaceState(null, '', '/workshop#computers/computers');
+    await renderApp();
+    const line = await waitFor(() => {
+      const found = itemOf('Create and delete a computer').querySelector('.ws-h');
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    const p = line.querySelector('p') as HTMLElement;
+    expect([...p.children].map((child) => child.className || child.tagName)).toEqual(['ws-h-what', 'SMALL', 'ws-h-link']);
+    expect(p.querySelector('.ws-h-what')?.textContent).toBe('Text changed · Moved to another part · Needs changed · Surfaces changed · Suggestion changed · Taken · Built · Notes edited');
+    expect(p.querySelector('.ws-h-what button')).toHaveTextContent('Text changed');
   });
 
   it('compare the text before and after a change, fetched at the two commits', async () => {
@@ -254,6 +374,45 @@ describe('Latest', () => {
     expect(rows.map((row) => row.querySelector('.ws-word')?.textContent)).toEqual(['1 hour ago', '5 hours ago', 'yesterday']);
   });
 
+  it('holds its place with ten one-line ghosts while it loads, with nothing below in its column', async () => {
+    fixedNow();
+    let release: () => void = () => {};
+    mockApi({ state: () => new Promise((resolve) => { release = () => resolve(ok(liveState({}, latest))); }) });
+    history.replaceState(null, '', '/workshop#latest');
+    render(<App data={buildData()} loadNotes={() => Promise.resolve({})} />);
+    await waitFor(() => expect(document.querySelectorAll('.ws-latest-ghost')).toHaveLength(10));
+    const ghost = document.querySelector('.ws-latest-ghost') as HTMLElement;
+    expect(ghost.querySelector('.ws-latest-name')).not.toBeNull();
+    expect(ghost.querySelector('.ws-sub')).not.toBeNull();
+    expect(ghost).toHaveAttribute('aria-hidden', 'true');
+    const list = document.querySelector('.ws-list') as HTMLElement;
+    expect(list.classList.contains('ws-list-loading')).toBe(true);
+    expect(list.lastElementChild?.classList.contains('ws-latest')).toBe(true);
+    expect(screen.queryByText('Nothing yet.')).not.toBeInTheDocument();
+    await act(async () => release());
+    expect(document.querySelectorAll('.ws-latest-ghost')).toHaveLength(0);
+    expect(document.querySelectorAll('.ws-latest a.ws-row')).toHaveLength(3);
+    expect(list.classList.contains('ws-list-loading')).toBe(false);
+  });
+
+  it('leaves a click with a modifier key to the browser, so an item opens in a new tab', async () => {
+    fixedNow();
+    mockApi({ state: () => ok(liveState({}, latest)) });
+    history.replaceState(null, '', '/workshop#latest');
+    await renderApp();
+    const link = await screen.findByRole('link', { name: /^The engine runs on its own/ });
+    for (const init of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...init });
+      link.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(location.hash).toBe('#latest');
+    const plain = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    await act(async () => { link.dispatchEvent(plain); });
+    expect(plain.defaultPrevented).toBe(true);
+    await waitFor(() => expect(location.hash).toBe('#engine/engine'));
+  });
+
   it('opens the entry of a row in its area when clicked', async () => {
     fixedNow();
     mockApi({ state: () => ok(liveState({}, latest)) });
@@ -294,7 +453,7 @@ describe('decisions from the plan', () => {
     expect(document.getElementById('decided-engine-in-zig')).toBeNull();
   });
 
-  it('show on an open entry, to the owner only, those that name its area or itself', async () => {
+  it('show on an open entry, to the owner only, those that name its area', async () => {
     await openEngine();
     const toggle = screen.getByRole('button', { name: 'Decisions · 1' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -305,9 +464,9 @@ describe('decisions from the plan', () => {
     // Notes and decisions open one at a time, beside each other.
     await userEvent.click(notesButton());
     expect(screen.queryByText('The engine is written in Zig. It is the core piece.')).not.toBeInTheDocument();
-    expect(document.querySelector('.ws-md')).not.toBeNull();
+    await shownNotes();
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    // `fork` is named by its id, and `diff` by its area `changes`.
+    // `calls` is in the area `engine` too.
     await userEvent.click(rowButton('Every call defined once'));
     expect(within(itemOf('Every call defined once')).getByRole('button', { name: 'Decisions · 1' })).toBeInTheDocument();
   });
@@ -325,7 +484,7 @@ describe('decisions from the plan', () => {
     expect(screen.queryByText(/It is the core piece/)).not.toBeInTheDocument();
   });
 
-  it('match an entry by its id and by its area', async () => {
+  it('match an entry by its area', async () => {
     mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#forks/fork');
     const first = await renderApp();

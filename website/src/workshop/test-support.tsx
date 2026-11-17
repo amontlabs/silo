@@ -4,7 +4,7 @@ import { expect, vi } from 'vitest';
 import { App } from './App';
 import type { IssueDetail, Me } from './api';
 import type { BuildData } from './plan';
-import { buildData, liveState } from './fixtures';
+import { buildData, fixtureNotes, liveState } from './fixtures';
 
 export type Call = { method: string; path: string; body: Record<string, unknown> | null; headers: Record<string, string> };
 export type Reply = { status: number; body: unknown } | Promise<{ status: number; body: unknown }>;
@@ -64,8 +64,8 @@ export function tile(id: string) {
 }
 export const areaTitle = () => document.getElementById('ws-area-title');
 
-export async function renderApp(data: BuildData = buildData()) {
-  const view = render(<App data={data} />);
+export async function renderApp(data: BuildData = buildData(), loadNotes = () => Promise.resolve(fixtureNotes(data))) {
+  const view = render(<App data={data} loadNotes={loadNotes} />);
   await waitFor(() => expect(document.querySelector('.ws-account, .ws-account-inline a, .ws-note')).not.toBeNull());
   return view;
 }
