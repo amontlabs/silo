@@ -34,16 +34,17 @@ export interface AppProps {
 
 /** Sign-in, the signed-in login with "Sign out", or a placeholder while it is not known who is signed in. */
 export function Account({ me, signIn, onSignOut }: { me: Me | null | undefined; signIn: string; onSignOut?: () => void }) {
-  if (me === undefined) return <span className="ws-ph ws-ph-account" aria-hidden="true" />;
+  // Each its own node (keys), so what replaces the placeholder arrives in place instead of the same node moving.
+  if (me === undefined) return <span key="placeholder" className="ws-ph ws-ph-account" aria-hidden="true" />;
   if (me) {
     return (
-      <span className="ws-account">
+      <span key="account" className="ws-account">
         <span className="ws-login" title={me.login}>{me.login}</span>
         <button type="button" className="ws-link" onClick={onSignOut}>Sign out</button>
       </span>
     );
   }
-  return <SignIn href={signIn} />;
+  return <SignIn key="signin" href={signIn} />;
 }
 
 const noNotes = () => Promise.resolve({});
@@ -215,14 +216,14 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     else accountSlot.setAttribute('data-account', w.me ? 'in' : 'out');
     if (w.me === undefined) accountSlot.setAttribute('aria-busy', 'true');
     else accountSlot.removeAttribute('aria-busy');
-    // The width this person's login and "Sign out" take: applied now when it differs from the reserved one (the
-    // slot moves once, as for a stale cookie), and kept for their next visit (a convenience only).
+    // The width this person's login and "Sign out" take, kept for their next visit, where the head script applies
+    // it before first paint (a convenience only). It is not applied now: once the page has painted, the slot keeps
+    // its width for a signed-in person, and the login sits right-aligned in it (truncated if it is longer).
     if (!w.me || !media('(min-width: 481px)', false)) return;
     const login = accountSlot.querySelector<HTMLElement>('.ws-login');
     const out = accountSlot.querySelector<HTMLElement>('.ws-link');
     if (!login || !out) return;
     const width = Math.min(200, Math.ceil(login.scrollWidth + 12 + out.offsetWidth));
-    if (Math.abs(width - accountSlot.getBoundingClientRect().width) > 1) document.documentElement.style.setProperty('--ws-account-w', `${width}px`);
     try {
       localStorage.setItem(ACCOUNT_WIDTH, String(width));
     } catch {

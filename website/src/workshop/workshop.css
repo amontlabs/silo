@@ -25,6 +25,9 @@
 /* The account slot has one fixed width, chosen before anyone knows who is signed in: signed in when the
    session marker is there, signed out otherwise. Only a stale marker changes it, once, when `me` answers. */
 .ws-account-slot { flex: none; width: 136px; display: flex; justify-content: flex-end; }
+/* One height too, the sign-in button's, with what it holds centred: the placeholder, the login or sign-in take its
+   place without moving it or the header. */
+.ws-account-slot { height: 34px; align-items: center; }
 .ws-session .ws-account-slot { width: var(--ws-account-w, 200px); }
 #workshop-account[data-account="out"] { width: 136px; }
 #workshop-account[data-account="in"] { width: var(--ws-account-w, 200px); }

@@ -313,6 +313,10 @@ What a person sees:
 - The header's account slot has a fixed width from first paint: signed in when
   the readable `workshop-hint` cookie is there (a long login is cut by an
   ellipsis), signed out otherwise. It changes only when that cookie was stale.
+  The width the login and "Sign out" take is stored for the next visit, where
+  the head script applies it before first paint; it is never applied during a
+  visit, so on the first visit after signing in the login sits right-aligned in
+  the reserved width.
   Under "Sign in with GitHub", on hover and keyboard focus, a tooltip tied to
   the button says "or comment directly on GitHub", taking no room.
 
