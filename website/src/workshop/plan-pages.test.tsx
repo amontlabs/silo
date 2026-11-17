@@ -282,8 +282,11 @@ describe('history lines', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => (String(input).startsWith('https://raw.githubusercontent.com/') ? new Response('gone', { status: 404 }) : api(input, init))));
     history.replaceState(null, '', '/workshop#computers/computers');
     await renderApp();
-    const talk = itemOf('Create and delete a computer').querySelector('.ws-talk') as HTMLElement;
-    await userEvent.click(await screen.findByRole('button', { name: 'Text changed' }));
+    // The row the address names opens only once the live state is in, after renderApp returns: the thread is
+    // taken from the line found in it, not from the row at once.
+    const button = await screen.findByRole('button', { name: 'Text changed' });
+    const talk = button.closest('.ws-talk') as HTMLElement;
+    await userEvent.click(button);
     expect(await screen.findByText('not available')).toBeInTheDocument();
     expect(document.querySelectorAll('.ws-h-diff')).toHaveLength(1);
     expect(within(talk).queryByText('Before')).not.toBeInTheDocument();
