@@ -1,11 +1,38 @@
 #!/usr/bin/env bash
-# Pushes HEAD to origin main. A rejected push means main moved meanwhile: rebase on it and try
-# again, three tries in all. Never forces.
+# Pushes the verdict commit (HEAD) to origin main, when there is one. A rejected push is never
+# rebased: when main did not move, it fails at once with git's own message (a protected branch, a
+# bad token); when main moved, the checkout is reset to it, the verdicts are pulled and checked
+# again, and the push is tried again. Three tries. Never forces. PUSH_TOKEN, when set, authenticates
+# the push and the fetch only; the plan commands never see it.
 set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+plan() { env -u PUSH_TOKEN "$here/plan" "$@"; }
+remote() {
+  if [ -n "${PUSH_TOKEN:-}" ]; then
+    local auth
+    auth="$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 | tr -d '\n')"
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" git "$@"
+  else
+    git "$@"
+  fi
+}
 for try in 1 2 3; do
-  if git push --quiet origin HEAD:main; then exit 0; fi
+  if git merge-base --is-ancestor HEAD origin/main; then
+    echo "push-main: nothing to push"
+    exit 0
+  fi
+  seen="$(git rev-parse origin/main)"
+  if out="$(remote push --quiet origin HEAD:main 2>&1)"; then exit 0; fi
+  remote fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+  if [ "$(git rev-parse origin/main)" = "$seen" ]; then
+    printf '%s\n' "$out" >&2
+    exit 1
+  fi
   [ "$try" = 3 ] && break
-  git pull --quiet --rebase origin main
+  echo "push-main: main moved; pulling the verdicts again on it"
+  git reset --quiet --hard origin/main
+  plan pull --commit
+  plan check
 done
-echo "push-main: origin rejected the push three times" >&2
+echo "push-main: main moved during each of three tries; the next run brings the verdicts" >&2
 exit 1
