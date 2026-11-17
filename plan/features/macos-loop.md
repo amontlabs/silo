@@ -1,6 +1,7 @@
 ## Notes
 
 - Old findings: a macOS fork re-ran the developer tools install its source never ran (46 s) and shut down and booted three times (27 s). Personalization printed a password error yet exited 0; check the password change applies.
+- Hoy (Cua, Nov 2026, closed source) forks a running macOS VM in about 1 s on its own engine over Hypervisor.framework. The cold-boot fork is therefore a limit of Virtualization.framework, not of macOS. Its forks keep the memory and change name, address and ssh keys after resume. Untested idea: restore a fork with the source's MAC and identifier on its own link behind the gateway, then change identity inside the guest.
 
 ## From the old code
 
