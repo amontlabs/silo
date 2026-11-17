@@ -7,7 +7,7 @@ import { join, relative, resolve } from 'node:path';
 import { checkFiles, formatProblem } from '../check/index.js';
 import { areaGroups, statusLine } from '../model/areas.js';
 import { canonicalFeature, canonicalOrder, canonicalText } from '../model/canonical.js';
-import { GONE_STAGE, ID_PATTERN, today } from '../model/names.js';
+import { GONE_STAGE, ID_PATTERN, today, verdictLabel } from '../model/names.js';
 import { featureStatus, isReady, waitingFor } from '../model/status.js';
 import { createLive } from '../live/index.js';
 import { PlanError } from '../read/index.js';
@@ -136,15 +136,34 @@ function validPlan(root) {
   return loaded;
 }
 
-/** @param {any} plan @param {import('../live/index.js').LiveState} live */
+/**
+ * The status of each feature. The verdict is always the file's: an agent acts on its checkout. Live
+ * state adds only whether it is being built.
+ * @param {any} plan @param {import('../live/index.js').LiveState} live
+ */
 function statusFunction(plan, live) {
   const entries = live.available ? live.entries : {};
   return (id) => {
     const feature = plan.features[id];
     if (!feature) return 'undecided';
     const issue = Object.hasOwn(entries, id) ? entries[id] : null;
-    return featureStatus(feature, issue ? { verdict: issue.verdict, building: issue.building } : null);
+    return featureStatus(feature, issue ? { verdict: null, building: issue.building } : null);
   };
+}
+
+/**
+ * Where the file's verdict and the issue's verdict labels differ, or null when they agree.
+ * @param {any} feature @param {import('../live/index.js').LiveEntry | null | undefined} issue
+ * @returns {{ file: string | null, github: string[], line: string } | null}
+ */
+function notInSync(feature, issue) {
+  if (!issue) return null;
+  const file = feature.verdict ?? null;
+  const github = issue.verdicts ?? (issue.verdict ? [issue.verdict] : []);
+  if (github.length === (file ? 1 : 0) && (github[0] ?? null) === file) return null;
+  const says = file ? `the file says ${file}` : 'the file has no verdict';
+  const shows = github.length ? `#${issue.number} shows ${github.map(verdictLabel).join(', ')}` : `#${issue.number} shows no verdict label`;
+  return { file, github, line: `${says}, ${shows}` };
 }
 
 /** @param {string} iso @param {Date} now */
@@ -182,6 +201,9 @@ async function status(ctx, argv) {
   const placed = new Set(Object.values(plan.features).map((feature) => feature.suggested_in).filter((n) => n !== undefined));
   const ideas = live.available ? live.suggestions.filter((item) => item.open && !placed.has(item.number)) : null;
   const where = statusLine(areaGroups(plan, statusOf));
+  const differs = live.available
+    ? ids.map((id) => ({ id, name: name(id), ...notInSync(plan.features[id], Object.hasOwn(live.entries, id) ? live.entries[id] : null) })).filter((item) => item.line)
+    : null;
 
   const result = {
     line: where,
@@ -190,6 +212,7 @@ async function status(ctx, argv) {
     building: live.available ? building.map((id) => ({ id, name: name(id), branch: live.entries[id]?.branch ?? null })) : null,
     taken,
     ideas,
+    notInSync: differs,
     live: liveNote(live),
   };
   if (flags.has('json')) ctx.out(JSON.stringify(result, null, 2));
@@ -212,6 +235,10 @@ async function status(ctx, argv) {
     if (!ideas) out.push(`  not available: ${live.available ? '' : live.reason}`);
     else if (!ideas.length) out.push('  none');
     else for (const item of ideas) out.push(`  #${item.number} ${item.title} (${item.up} votes)`);
+    if (differs?.length) {
+      out.push('', 'Not in sync:');
+      for (const item of differs) out.push(`  ${item.id}: ${item.line}`);
+    }
     ctx.out(out.join('\n'));
   }
   return !live.available && live.failed ? 3 : 0;
@@ -242,6 +269,7 @@ async function show(ctx, argv) {
       ].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     : [];
 
+  const differs = issue ? notInSync(feature, issue) : null;
   const { notes, stage: _stage, position, id: _id, ...fields } = feature;
   const status = statusOf(id);
   const result = {
@@ -256,7 +284,8 @@ async function show(ctx, argv) {
     neededBy,
     decisions,
     notes,
-    issue: issue === undefined ? null : issue && { number: issue.number, url: issue.url, up: issue.up, verdict: issue.verdict, building: issue.building, thread },
+    issue: issue === undefined ? null : issue && { number: issue.number, url: issue.url, up: issue.up, building: issue.building, thread },
+    notInSync: differs,
     live: liveNote(live),
   };
   if (flags.has('json')) ctx.out(JSON.stringify(result, null, 2));
@@ -269,6 +298,7 @@ async function show(ctx, argv) {
     if (feature.surfaces) out.push(`Surfaces: ${[feature.surfaces.app && `app ${feature.surfaces.app}`, feature.surfaces.cli && `cli ${feature.surfaces.cli}`].filter(Boolean).join(' · ')}`);
     if (feature.suggested_in !== undefined) out.push(`Suggested in #${feature.suggested_in}`);
     if (feature.built) out.push(`Built: ${feature.built}`);
+    if (differs) out.push(`Not in sync: ${differs.line}`);
     out.push('', 'Needs:');
     if (!needs.length) out.push('  nothing');
     for (const need of needs) out.push(`  ${need.id}: ${need.status}`);
@@ -421,13 +451,36 @@ async function decideCommand(ctx, argv) {
   const choices = [...VERDICTS, 'clear'];
   if (positional.length !== 2 || !choices.includes(positional[1])) throw new UsageError('usage: plan decide <id> take|later|drop|clear');
   const [id, verdict] = positional;
-  const { data } = featureFile(ctx, id);
+  const { root, data } = featureFile(ctx, id);
   if (data.built) throw new Refused(`${id} is built (${data.built}); its verdict never changes`);
   const gh = await connect(ctx);
-  const result = await decide({ gh, id, verdict: /** @type {any} */ (verdict) });
+  const fileVerdict = verdictAtMain(root, id);
+  const result = await decide({ gh, id, verdict: /** @type {any} */ (verdict), fileVerdict });
   const line = 'Recorded on GitHub. The commit follows: git pull.';
-  emit(ctx, flags.has('json'), { ok: true, ...result }, result.changed ? line : `#${result.issue} shows that already. ${line}`);
+  const text = result.changed
+    ? line
+    : result.recorded
+      ? `Already recorded: #${result.issue} and the file at origin/main both show ${verdict === 'clear' ? 'no verdict' : verdict}.`
+      : `#${result.issue} shows no verdict label; the file at origin/main could not be read to check it.`;
+  emit(ctx, flags.has('json'), { ok: true, ...result }, text);
   return 0;
+}
+
+/**
+ * The verdict of a feature's file at origin/main, after fetching it: null for none, undefined when
+ * it cannot be read.
+ * @param {string} root @param {string} id
+ */
+function verdictAtMain(root, id) {
+  git(root, ['fetch', '--quiet', 'origin', 'main']);
+  const text = git(root, ['show', `origin/main:plan/features/${id}.json`]);
+  if (text === null) return undefined;
+  try {
+    const data = JSON.parse(text);
+    return VERDICTS.includes(data?.verdict) ? data.verdict : null;
+  } catch {
+    return undefined;
+  }
 }
 
 /** @param {Context} ctx @param {string[]} argv */
@@ -499,10 +552,9 @@ async function syncCommand(ctx, argv) {
   const result = await sync({ gh, root, dryRun, log: json ? () => {} : ctx.out, site: ctx.deps.site, web: ctx.deps.web, repo: ctx.deps.repo });
   if (json) ctx.out(JSON.stringify({ ok: !result.stopped, ...result }, null, 2));
   else {
-    for (const d of result.duplicates) ctx.out(`duplicate: #${d.duplicate} also carries the marker of ${d.id}; #${d.kept} is used`);
     for (const note of result.notes) ctx.out(`note: ${note}`);
     const w = (word) => (dryRun ? `would ${word}` : word);
-    ctx.out(`At ${result.synced.slice(0, 7)}: ${w('create')} ${result.created}, ${w('update')} ${result.updated}, ${w('close')} ${result.closed}, ${w('reopen')} ${result.reopened}, history ${result.history}, suggestions closed ${result.suggestions}, labels ${result.labels}, unchanged ${result.unchanged}.`);
+    ctx.out(`At ${result.synced.slice(0, 7)}: ${w('create')} ${result.created}, ${w('update')} ${result.updated}, ${w('close')} ${result.closed}, ${w('reopen')} ${result.reopened}, history ${result.history}, suggestions closed ${result.suggestions}, duplicates closed ${result.duplicatesClosed}, no longer in the plan ${result.removed}, labels ${result.labels}, unchanged ${result.unchanged}.`);
   }
   if (result.stopped) {
     ctx.err(`plan: stopped: ${result.stoppedMessage}; the next run resumes`);

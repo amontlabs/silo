@@ -153,3 +153,78 @@ test('decline closes a suggestion as not planned with the reason as the bot\'s c
   assert.match((await w.run(['decline', String(w.fake.entry('fork').number), '--why', 'No.'])).err, /is not a suggestion/);
   assert.match((await w.run(['decline', '999', '--why', 'No.'])).err, /is not a suggestion/);
 });
+
+test('decide: GitHub and the file at origin/main show the verdict already: "already recorded", nothing changes', async (t) => {
+  const files = basePlan();
+  files['features/fork.json'] = { ...files['features/fork.json'], verdict: 'take' };
+  const w = await synced(t, files);
+  const fork = w.fake.entry('fork');
+  w.fake.setVerdictLabel(fork.number, 'take', 'owner');
+  const before = w.fake.snapshot();
+  const events = w.fake.events.length;
+  const result = await w.run(['decide', 'fork', 'take']);
+  assert.equal(result.code, 0, result.err);
+  assert.equal(result.out, `Already recorded: #${fork.number} and the file at origin/main both show take.`);
+  assert.equal(w.fake.snapshot(), before);
+  assert.equal(w.fake.events.length, events);
+  const cleared = await w.run(['decide', 'core', 'clear', '--json']);
+  assert.deepEqual([JSON.parse(cleared.out).changed, JSON.parse(cleared.out).recorded], [false, true]);
+});
+
+test('decide: the label is there but the file at origin/main differs: the bot removes and adds it again, so a run starts and pull counts it', async (t) => {
+  const w = await synced(t);
+  const fork = w.fake.entry('fork');
+  // Set by the owner, but its run was lost: the file never got it.
+  w.fake.setVerdictLabel(fork.number, 'take', 'owner');
+  const events = w.fake.events.length;
+  const result = await w.run(['decide', 'fork', 'take']);
+  assert.equal(result.code, 0, result.err);
+  assert.equal(result.out, 'Recorded on GitHub. The commit follows: git pull.');
+  assert.deepEqual(w.fake.events.slice(events).map((e) => `${e.event} ${e.label.name} ${e.actor.login}`), [`unlabeled verdict:take ${w.fake.bot.login}`, `labeled verdict:take ${w.fake.bot.login}`]);
+  assert.deepEqual(verdictLabels(fork), ['verdict:take']);
+  assert.equal(w.fake.commentsOn(fork.number).at(-1).body, RECORDED_COMMENT);
+  const pulled = JSON.parse((await w.run(['pull', '--write', '--json'])).out);
+  assert.deepEqual(pulled.changes.map((c) => [c.id, c.to, c.by]), [['fork', 'take', w.fake.bot.login]]);
+
+  // clear, when GitHub shows no verdict and the file at origin/main still has one.
+  w.change({ cli: { verdict: 'later' } }, 'Owner: later cli');
+  const cli = w.fake.entry('cli');
+  const before = w.fake.events.length;
+  assert.equal((await w.run(['decide', 'cli', 'clear'])).code, 0);
+  assert.deepEqual(w.fake.events.slice(before).map((e) => `${e.event} ${e.label.name}`), ['labeled verdict:later', 'unlabeled verdict:later']);
+  assert.deepEqual(verdictLabels(cli), []);
+  assert.equal(w.fake.commentsOn(cli.number).at(-1).body, CLEARED_COMMENT);
+  const cleared = JSON.parse((await w.run(['pull', '--json'])).out);
+  assert.deepEqual(cleared.changes.map((c) => [c.id, c.to, c.by]), [['cli', null, w.fake.bot.login]]);
+});
+
+test('start: two claims under one branch name: the earliest comment wins, the other withdraws', async (t) => {
+  const w = await synced(t, taken());
+  const cli = w.fake.entry('cli');
+  w.fake.afterWrite = ({ method, path }) => {
+    if (method === 'POST' && path === `/issues/${cli.number}/labels`) {
+      w.fake.afterWrite = null;
+      w.fake.addComment(cli.number, w.fake.bot.login, 'Being built on feat/cli.', { type: 'Bot' });
+    }
+  };
+  const lost = await w.run(['start', 'cli', '--branch', 'feat/cli']);
+  assert.equal(lost.code, 1);
+  assert.match(lost.err, /another session claimed cli first, on feat\/cli/);
+  assert.deepEqual(w.fake.commentsOn(cli.number).map((c) => c.body), ['Being built on feat/cli.']);
+});
+
+test('start and stop read the building label in any capitalisation, and remove it under its own name', async (t) => {
+  const w = await synced(t, taken());
+  const cli = w.fake.entry('cli');
+  w.fake.labels.push({ name: 'Workshop:Building', color: 'ededed', description: '' });
+  w.fake.labels = w.fake.labels.filter((l) => l.name !== 'workshop:building');
+  w.fake.label(cli.number, 'workshop:building', 'owner');
+  assert.deepEqual(cli.labels.filter((l) => /building/i.test(l)), ['Workshop:Building']);
+  const again = await w.run(['start', 'cli', '--branch', 'b']);
+  assert.equal(again.code, 1);
+  assert.match(again.err, /being built already/);
+  const stopped = await w.run(['stop', 'cli']);
+  assert.equal(stopped.code, 0, stopped.err);
+  assert.match(stopped.out, /no longer being built/);
+  assert.deepEqual(cli.labels.filter((l) => /building/i.test(l)), []);
+});

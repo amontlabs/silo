@@ -19,8 +19,14 @@ function rateLimitOf(response) {
   return null;
 }
 
-/** @param {any} item @returns {string[]} */
-export const labelNames = (item) => (item?.labels ?? []).map((label) => (typeof label === 'string' ? label : label.name));
+/** The label names an item (an issue, an event's label) carries, lowercased: GitHub's label names are compared ignoring capitalisation. @param {any} item @returns {string[]} */
+export const labelNames = (item) => (item?.labels ?? []).map((label) => String((typeof label === 'string' ? label : label?.name) ?? '').toLowerCase());
+
+/** The name an item's label really has on GitHub, matched ignoring capitalisation, or null. @param {any} item @param {string} name */
+export function labelOn(item, name) {
+  const found = (item?.labels ?? []).map((label) => String((typeof label === 'string' ? label : label?.name) ?? '')).find((label) => label.toLowerCase() === name.toLowerCase());
+  return found ?? null;
+}
 
 export class GitHub {
   /** @param {{ api: string, repo: string, fetch?: typeof fetch, writeDelayMs?: number, sleep?: (ms: number) => Promise<void> }} options */
@@ -139,6 +145,12 @@ export class GitHub {
   /** @param {string} rest */
   repoPath(rest) {
     return `/repos/${this.repo}${rest}`;
+  }
+
+  /** Every issue this App's bot created, open and closed, pull requests left out. */
+  async botIssues() {
+    const issues = await this.paginate(this.repoPath(`/issues?state=all&creator=${encodeURIComponent(/** @type {string} */ (this.botLogin))}`));
+    return issues.filter((issue) => !issue.pull_request);
   }
 
   /** Issues carrying a label, open and closed, pull requests left out. @param {string} label */

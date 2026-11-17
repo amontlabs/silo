@@ -1,11 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { basePlan, git } from './helpers.js';
+import { basePlan, git, run } from './helpers.js';
 import { world } from './github-helpers.js';
-import { readChange, readSyncedMarker, wantedIssue } from '../model/index.js';
+import { readChange, readEntryMarker as readEntryText, readSyncedMarker, wantedIssue } from '../model/index.js';
+
+const readEntry = (issue) => readEntryText(issue.body);
 import { LABELS } from '../model/names.js';
+import { canonicalOrder, canonicalText } from '../model/canonical.js';
 
 const SITE = 'http://127.0.0.1:9';
 const history = (w, number) => w.fake.commentsOn(number).map((c) => readChange(c.body)).filter(Boolean);
@@ -222,4 +225,157 @@ test('an entry issue edited on GitHub after its marker is found again and put ba
   await w.run(['sync']);
   assert.equal(core.title, 'Core engine');
   assert.equal([...w.fake.issues.values()].find((i) => i.title === 'Planted').body, '<!-- silo-entry: core -->');
+});
+
+test('an entry issue whose workshop:entry label was removed is found by its marker, relabelled, and keeps its verdict', async (t) => {
+  const files = basePlan();
+  files['features/fork.json'] = { ...files['features/fork.json'], verdict: 'take' };
+  const w = await world(t, files);
+  await w.run(['sync']);
+  const fork = w.fake.entry('fork');
+  w.fake.setVerdictLabel(fork.number, 'take', 'owner');
+  w.fake.unlabel(fork.number, 'workshop:entry', 'helper'); // triage rights are enough
+  const result = await w.run(['sync', '--json']);
+  assert.equal(result.code, 0, result.err);
+  assert.equal(JSON.parse(result.out).created, 0);
+  assert.equal([...w.fake.issues.values()].length, 4);
+  assert.ok(fork.labels.includes('workshop:entry'));
+  const pulled = JSON.parse((await w.run(['pull', '--write', '--json'])).out);
+  assert.deepEqual([pulled.changes, pulled.reports], [[], []]);
+  assert.equal(w.feature('fork').verdict, 'take');
+});
+
+test('a deleted entry issue is made again; pull reports the file\'s verdict and leaves it alone', async (t) => {
+  const files = basePlan();
+  files['features/fork.json'] = { ...files['features/fork.json'], verdict: 'take' };
+  const w = await world(t, files);
+  await w.run(['sync']);
+  const old = w.fake.entry('fork');
+  w.fake.setVerdictLabel(old.number, 'take', 'owner');
+  w.fake.deleteIssue(old.number);
+  await w.run(['sync']);
+  const made = w.fake.entry('fork');
+  assert.notEqual(made.number, old.number);
+  assert.deepEqual(made.labels, ['workshop:entry'], 'sync never writes a verdict label');
+  const pulled = JSON.parse((await w.run(['pull', '--write', '--json'])).out);
+  assert.deepEqual(pulled.changes, []);
+  assert.match(pulled.reports.find((r) => r.id === 'fork').why, /the file says take, GitHub has no verdict: was the issue replaced\?/);
+  assert.equal(w.feature('fork').verdict, 'take');
+});
+
+test('history: a run stopped between the comment and the marker, then more commits: no change posted twice', async (t) => {
+  const w = await world(t, basePlan());
+  await w.run(['sync']);
+  const fork = w.fake.entry('fork');
+  const first = readSyncedMarker(fork.body);
+  const second = w.change({ fork: { what: 'Changed.' } });
+  w.fake.limitAfterWrites = w.fake.writes + 1; // the history comment lands, the marker does not
+  assert.equal((await w.run(['sync'])).code, 3);
+  w.fake.limitAfterWrites = null;
+  assert.equal(readSyncedMarker(fork.body), first);
+
+  // A commit that does not touch fork: its marker only moves.
+  const third = w.change({ core: { what: 'The engine, in Zig.' } });
+  assert.equal((await w.run(['sync'])).code, 0);
+  assert.deepEqual(history(w, fork.number), [{ commit: second, before: first, fields: ['what'] }]);
+  assert.equal(readSyncedMarker(fork.body), third);
+
+  // Stopped again, then a commit that does touch fork: one comment, from the last one's commit.
+  const fourth = w.change({ fork: { name: 'Fork it' } });
+  w.fake.limitAfterWrites = w.fake.writes + 1; // fork's history comment lands, its marker does not
+  assert.equal((await w.run(['sync'])).code, 3);
+  w.fake.limitAfterWrites = null;
+  const fifth = w.change({ fork: { what: 'Changed again.' } });
+  assert.equal((await w.run(['sync'])).code, 0);
+  assert.deepEqual(history(w, fork.number).slice(1), [{ commit: fourth, before: third, fields: ['name'] }, { commit: fifth, before: fourth, fields: ['what'] }]);
+  assert.equal(readSyncedMarker(fork.body), fifth);
+});
+
+/**
+ * A second sync, from another checkout, run to its end in the middle of this one: when this run
+ * sends the request `when` matches, the other one runs first (`before` prepares it).
+ */
+function interleaved(w, when, before) {
+  const other = join(w.base, 'other');
+  git(w.base, 'clone', '-q', w.origin, other);
+  let done = false;
+  return async (url, init) => {
+    if (!done && when(String(url), init)) {
+      done = true;
+      git(other, 'pull', '-q', 'origin', 'main');
+      before?.(other);
+      const result = await run(other, ['sync'], { deps: { ...w.deps } });
+      assert.equal(result.code, 0, result.err);
+    }
+    return w.deps.fetch(url, init);
+  };
+}
+
+test('a sync of an older commit beside a newer one never moves a marker backwards', async (t) => {
+  const w = await world(t, basePlan());
+  await w.run(['sync']);
+  const fork = w.fake.entry('fork');
+  const older = readSyncedMarker(fork.body);
+  let newer;
+  // This run has fetched origin/main; then a newer commit lands and is synced before this run reads the issues.
+  const fetch = interleaved(w, (url) => url.endsWith('/labels?per_page=100'), (other) => {
+    const path = join(other, 'plan', 'features', 'fork.json');
+    writeFileSync(path, readFileSync(path, 'utf8').replace('"Copy a computer."', '"Copy a computer, newer."'));
+    git(other, 'commit', '-q', '-am', 'Newer');
+    git(other, 'push', '-q', 'origin', 'HEAD:main');
+    newer = git(other, 'rev-parse', 'HEAD').trim();
+  });
+  const result = await w.run(['sync'], { deps: { fetch } });
+  assert.equal(result.code, 0, result.err);
+  assert.match(result.out, new RegExp(`#${fork.number} fork: synced at ${newer.slice(0, 7)}, newer than ${older.slice(0, 7)}; left alone`));
+  assert.equal(readSyncedMarker(fork.body), newer);
+  assert.match(fork.body, /^Copy a computer, newer\./);
+  assert.deepEqual(history(w, fork.number), [{ commit: newer, before: older, fields: ['what'] }]);
+});
+
+test('two runs that both create an issue: the next sync closes the duplicate, or reports it when it carries a verdict label', async (t) => {
+  const w = await world(t, basePlan());
+  await w.run(['sync']);
+  w.fake.deleteIssue(w.fake.entry('cli').number);
+  // Both runs read the issues before either creates cli's.
+  const fetch = interleaved(w, (url, init) => init?.method === 'POST' && url.endsWith('/issues'));
+  await w.run(['sync'], { deps: { fetch } });
+  const both = [...w.fake.issues.values()].filter((i) => readEntry(i) === 'cli');
+  assert.equal(both.length, 2);
+  const [kept, duplicate] = both;
+  const result = await w.run(['sync', '--json']);
+  assert.equal(JSON.parse(result.out).duplicatesClosed, 1);
+  assert.deepEqual([duplicate.state, duplicate.state_reason], ['closed', 'not_planned']);
+  assert.deepEqual(w.fake.commentsOn(duplicate.number).map((c) => [c.user.login, c.body]), [[w.fake.bot.login, `Duplicate of #${kept.number}.`]]);
+  assert.equal(kept.state, 'open');
+  const snapshot = w.fake.snapshot();
+  const again = JSON.parse((await w.run(['sync', '--json'])).out);
+  assert.deepEqual(again.duplicates, []);
+  assert.equal(w.fake.snapshot(), snapshot);
+
+  const fork = w.fake.entry('fork');
+  const marked = w.fake.addIssue({ title: 'Fork', body: fork.body, labels: ['workshop:entry'], user: w.fake.bot });
+  w.fake.label(marked.number, 'verdict:take', 'owner');
+  const { out } = await w.run(['sync']);
+  assert.match(out, new RegExp(`#${marked.number} duplicates #${fork.number} \\(fork\\) but carries a verdict label; left open`));
+  assert.equal(marked.state, 'open');
+});
+
+test('the issue of a feature removed from the plan is closed as not planned, once', async (t) => {
+  const w = await world(t, basePlan());
+  await w.run(['sync']);
+  const old = w.fake.entry('old');
+  const order = JSON.parse(readFileSync(join(w.root, 'plan', 'order.json'), 'utf8'));
+  order.stages = order.stages.map((stage) => ({ ...stage, features: stage.features.filter((id) => id !== 'old') }));
+  writeFileSync(join(w.root, 'plan', 'order.json'), canonicalText(canonicalOrder(order)));
+  rmSync(join(w.root, 'plan', 'features', 'old.json'));
+  git(w.root, 'add', '-A');
+  git(w.root, 'commit', '-q', '-m', 'Remove old');
+  git(w.root, 'push', '-q', 'origin', 'HEAD:main');
+  assert.equal((await w.run(['sync'])).code, 0);
+  assert.deepEqual([old.state, old.state_reason], ['closed', 'not_planned']);
+  assert.deepEqual(w.fake.commentsOn(old.number).map((c) => [c.user.login, c.body]), [[w.fake.bot.login, 'No longer in the plan.']]);
+  const snapshot = w.fake.snapshot();
+  await w.run(['sync']);
+  assert.equal(w.fake.snapshot(), snapshot);
 });

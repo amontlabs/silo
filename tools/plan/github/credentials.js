@@ -3,7 +3,7 @@
 // returned to callers and never printed; only their sources are reported.
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { Failure, Unavailable } from './errors.js';
+import { Failure, NotConfigured } from './errors.js';
 
 /** @param {string} home */
 export function credentialsFile(home) {
@@ -69,10 +69,10 @@ export function lookup(names, { env, home, keychain }) {
   return { values, sources };
 }
 
-/** The App id and private key; Unavailable (exit 3) naming what is missing, never a value. */
+/** The App id and private key; NotConfigured (exit 3) naming what is missing, never a value. */
 export function appCredentials(deps) {
   const { values, sources } = lookup(['WORKSHOP_APP_ID', 'WORKSHOP_PRIVATE_KEY'], deps);
   const missing = Object.keys(sources).filter((name) => !sources[name]);
-  if (missing.length) throw new Unavailable(`missing ${missing.join(' and ')}: run \`plan setup\`, or see tools/plan/README.md`);
+  if (missing.length) throw new NotConfigured(`missing ${missing.join(' and ')}: run \`plan setup\`, or see tools/plan/README.md`);
   return { appId: values.WORKSHOP_APP_ID, privateKey: values.WORKSHOP_PRIVATE_KEY, sources };
 }

@@ -104,15 +104,15 @@ test('live: GitHub with the bot\'s token when the site does not answer; the same
   assert.deepEqual(status.building, [{ id: 'cli', name: 'CLI', branch: 'feat/cli' }]);
 });
 
-test('live: not available when neither answers; status and show exit 0 with their offline parts', async (t) => {
+test('live: not available when neither answers; offline parts printed, exit 0 when GitHub is not configured, 3 when it failed', async (t) => {
   const w = await scene(t);
-  for (const deps of [{ keychain: fakeKeychain() }, { api: 'http://127.0.0.1:9' }]) {
+  for (const [deps, code] of [[{ keychain: fakeKeychain() }, 0], [{ api: 'http://127.0.0.1:9' }, 3]]) {
     const status = await w.run(['status'], { deps });
-    assert.equal(status.code, 0);
+    assert.equal(status.code, code);
     assert.match(status.out, /Being built:\n {2}not available: the site did not answer/);
     assert.match(status.out, /Taken, not started:\n {2}cli, CLI: ready\n {2}fork, Fork: ready/);
     const show = await w.run(['show', 'fork'], { deps });
-    assert.equal(show.code, 0);
+    assert.equal(show.code, code);
     assert.match(show.out, /Issue:\n {2}not available: /);
   }
 });

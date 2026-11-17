@@ -22,6 +22,14 @@ export function readBuildingComment(body) {
   return BUILDING.exec((body ?? '').trim())?.[1] ?? null;
 }
 
+/** `plan sync`: the comment that closes the issue of a feature no longer in the plan. */
+export const REMOVED_COMMENT = 'No longer in the plan.';
+
+/** `plan sync`: the comment that closes a second issue the bot made for one entry. @param {number} kept */
+export function duplicateComment(kept) {
+  return `Duplicate of #${kept}.`;
+}
+
 /**
  * `plan sync`: the comment that closes a visitor's suggestion once a feature names it.
  * @param {number} number the entry's issue @param {string} link the entry on the Workshop

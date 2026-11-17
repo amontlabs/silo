@@ -4,7 +4,8 @@
 // As GitHub does: adding a label an issue has already records no event, a label
 // added that the repository lacks is created bare, every label change records a
 // `labeled` or `unlabeled` event by its actor, and what the bot does carries
-// `performed_via_github_app`.
+// `performed_via_github_app`. Label names match ignoring capitalisation, as on GitHub: a label
+// added under another capitalisation is the repository's label; removing one takes its exact name.
 import { createPublicKey, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
 import { createServer } from 'node:http';
 
@@ -105,13 +106,21 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
     fake.comments.push(comment);
     return comment;
   };
+  const same = (a, b) => a.toLowerCase() === b.toLowerCase();
   /** A person (or the bot) adds a label, as on GitHub. */
-  fake.label = (number, name, login = 'owner') => {
+  fake.label = (number, wanted, login = 'owner') => {
     const issue = fake.issues.get(number);
-    if (issue.labels.includes(name)) return;
-    ensureRepoLabel(name);
+    if (issue.labels.some((n) => same(n, wanted))) return;
+    ensureRepoLabel(wanted);
+    const name = fake.labels.find((l) => same(l.name, wanted)).name;
     issue.labels.push(name);
     event(number, 'labeled', actorOf(login), { label: { name } });
+  };
+  /** Deletes an issue, as an admin can. */
+  fake.deleteIssue = (number) => {
+    fake.issues.delete(number);
+    fake.comments = fake.comments.filter((c) => c.issue !== number);
+    fake.events = fake.events.filter((e) => e.issue !== number);
   };
   fake.unlabel = (number, name, login = 'owner') => {
     const issue = fake.issues.get(number);
@@ -124,7 +133,7 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
   fake.setVerdictLabel = (number, verdict, login = 'owner') => {
     const issue = fake.issues.get(number);
     if (verdict) fake.label(number, `verdict:${verdict}`, login);
-    for (const name of issue.labels.filter((n) => n.startsWith('verdict:') && n !== `verdict:${verdict}`)) fake.unlabel(number, name, login);
+    for (const name of issue.labels.filter((n) => /^verdict:/i.test(n) && !same(n, `verdict:${verdict}`))) fake.unlabel(number, name, login);
   };
   fake.close = (number, reason, login = 'owner') => {
     const issue = fake.issues.get(number);
@@ -139,7 +148,7 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
     event(number, 'reopened', actorOf(login));
   };
   fake.commentsOn = (number) => fake.comments.filter((c) => c.issue === number);
-  fake.entry = (id) => [...fake.issues.values()].find((i) => i.labels.includes('workshop:entry') && i.user.login === bot.login && (i.body ?? '').trim().endsWith(`<!-- silo-entry: ${id} -->`));
+  fake.entry = (id) => [...fake.issues.values()].find((i) => i.user.login === bot.login && (i.body ?? '').trim().endsWith(`<!-- silo-entry: ${id} -->`));
   fake.snapshot = () => JSON.stringify({ issues: [...fake.issues.values()].map((i) => ({ number: i.number, title: i.title, body: i.body, labels: [...i.labels].sort(), state: i.state, state_reason: i.state_reason })), comments: fake.comments.map((c) => [c.id, c.body]), labels: fake.labels.map((l) => l.name) });
 
   const page = (res, items, url) => {
@@ -255,9 +264,11 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
     if (rest === '/issues' && req.method === 'GET') {
       const state = url.searchParams.get('state') ?? 'open';
       const wanted = (url.searchParams.get('labels') ?? '').split(',').filter(Boolean);
+      const creator = url.searchParams.get('creator');
       const items = [...fake.issues.values()]
         .filter((i) => state === 'all' || i.state === state)
-        .filter((i) => wanted.every((name) => i.labels.includes(name)))
+        .filter((i) => wanted.every((name) => i.labels.some((n) => same(n, name))))
+        .filter((i) => !creator || i.user.login === creator)
         .sort((a, b) => b.number - a.number)
         .map(fake.issueJson);
       return page(res, items, url);

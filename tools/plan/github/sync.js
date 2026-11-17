@@ -1,12 +1,13 @@
 // `plan sync`: makes GitHub follow the plan at origin/main. Never reads the working tree, never
 // writes a verdict label. Each issue carries the commit it was last synced at (`silo-synced`), so
-// a run stopped half way is resumed by the next one and a second run changes nothing.
+// a run stopped half way is resumed by the next one and a second run changes nothing. A marker is
+// never moved backwards, so a run of an older commit beside a newer one leaves the newer's issues alone.
 import { execFileSync } from 'node:child_process';
 import { checkFiles } from '../check/index.js';
-import { comment as postComment, commentsOf, ensureLabels, entryIssues, eventsOf, isBuilding, isSuggestion, removeLabel } from './issues.js';
+import { addLabel, comment as postComment, commentsOf, ensureLabels, entryIssues, eventsOf, isBuilding, isEntryLabelled, isSuggestion, removeLabel } from './issues.js';
 import { labelNames } from './client.js';
 import { Failure, RateLimited } from './errors.js';
-import { placedComment, labelVerdicts } from '../model/comments.js';
+import { REMOVED_COMMENT, duplicateComment, placedComment, labelVerdicts } from '../model/comments.js';
 import { entryLink, wantedIssue } from '../model/issue.js';
 import { changeComment, readChange, readSyncedMarker, withoutMarkers } from '../model/markers.js';
 import { BUILDING_LABEL, CHANGE_FIELDS, ENTRY_LABEL, FEATURE_KEYS } from '../model/names.js';
@@ -62,7 +63,7 @@ export async function sync({ gh, root, dryRun, log, site, web, repo }) {
   if (errors.length) throw new Failure(`the plan at origin/main (${synced.slice(0, 7)}) fails plan check (${errors.length} error${errors.length === 1 ? '' : 's'}); nothing synced`);
   const { plan } = parsePlan(files);
 
-  const counts = { labels: 0, created: 0, updated: 0, closed: 0, reopened: 0, history: 0, unchanged: 0, suggestions: 0 };
+  const counts = { labels: 0, created: 0, updated: 0, closed: 0, reopened: 0, history: 0, unchanged: 0, suggestions: 0, duplicatesClosed: 0, removed: 0 };
   /** @type {string[]} */
   const actions = [];
   /** @type {string[]} */
@@ -78,6 +79,12 @@ export async function sync({ gh, root, dryRun, log, site, web, repo }) {
     return /** @type {Map<string, string>} */ (atCommit.get(commit));
   };
   const reachable = (commit) => commit === synced || gitOk(root, ['merge-base', '--is-ancestor', commit, synced]);
+  /** Whether a marker's commit is newer than the synced one. A commit not here yet is fetched from origin first. */
+  const newer = (commit) => {
+    if (commit === synced) return false;
+    if (!gitOk(root, ['cat-file', '-e', `${commit}^{commit}`])) gitOk(root, ['fetch', '--quiet', 'origin', commit]);
+    return gitOk(root, ['merge-base', '--is-ancestor', synced, commit]);
+  };
 
   let stopped = null;
   let duplicates = [];
@@ -87,7 +94,8 @@ export async function sync({ gh, root, dryRun, log, site, web, repo }) {
     duplicates = index.duplicates;
     /** @type {Map<string, number>} */
     const numbers = new Map();
-    for (const id of plan.stages.flatMap((stage) => stage.features)) {
+    const inPlan = new Set(plan.stages.flatMap((stage) => stage.features));
+    for (const id of inPlan) {
       const feature = plan.features[id];
       const issue = index.byId.get(id);
       if (!issue) {
@@ -104,8 +112,10 @@ export async function sync({ gh, root, dryRun, log, site, web, repo }) {
         continue;
       }
       numbers.set(id, issue.number);
-      await syncEntry({ gh, id, feature, issue, synced, site, web, repo, dryRun, act, counts, notes, filesAt, reachable });
+      await syncEntry({ gh, id, feature, issue, synced, site, web, repo, dryRun, act, counts, notes, filesAt, reachable, newer });
     }
+    await closeDuplicates({ gh, index, dryRun, act, counts, notes });
+    await closeRemoved({ gh, index, inPlan, dryRun, act, counts });
     await closeSuggestions({ gh, plan, numbers, site, dryRun, act, counts, notes });
   } catch (error) {
     if (!(error instanceof RateLimited)) throw error;
@@ -114,29 +124,49 @@ export async function sync({ gh, root, dryRun, log, site, web, repo }) {
   return { dryRun, synced, ...counts, duplicates, notes, actions, stopped: stopped ? (stopped.resetAt?.toISOString() ?? 'unknown') : null, stoppedMessage: stopped?.message ?? null };
 }
 
-/** One existing entry issue: history, title, body, state, building label. */
-async function syncEntry({ gh, id, feature, issue, synced, site, web, repo, dryRun, act, counts, notes, filesAt, reachable }) {
+/** One existing entry issue: its entry label, history, title, body, state, building label. */
+async function syncEntry({ gh, id, feature, issue, synced, site, web, repo, dryRun, act, counts, notes, filesAt, reachable, newer }) {
   const before = readSyncedMarker(issue.body);
+  if (before && newer(before)) {
+    notes.push(`#${issue.number} ${id}: synced at ${before.slice(0, 7)}, newer than ${synced.slice(0, 7)}; left alone`);
+    counts.unchanged += 1;
+    return;
+  }
+  if (!isEntryLabelled(issue)) {
+    act(`put ${ENTRY_LABEL} back on #${issue.number} ${id}`);
+    counts.updated += 1;
+    if (!dryRun) await addLabel(gh, issue.number, ENTRY_LABEL);
+  }
   let marker = before ?? synced;
   /** @type {import('../model/markers.js').Change | null} */
   let change = null;
   if (before !== synced) {
     if (!before || !reachable(before)) marker = synced;
     else {
-      const found = changedFields(filesAt(before), filesAt(synced), id);
-      if (found.fields.length) {
-        change = { ...found, commit: synced, before };
-        marker = synced;
+      // A history comment posted by a run that stopped before moving the marker: start from it.
+      const posted = (await commentsOf(gh, issue.number)).filter((c) => gh.isOwnBot(c.user, c)).map((c) => readChange(c.body)).filter(Boolean);
+      let from = before;
+      const seen = new Set([from]);
+      for (;;) {
+        const next = posted.find((c) => c.before === from && !seen.has(c.commit) && reachable(c.commit));
+        if (!next) break;
+        from = next.commit;
+        seen.add(from);
+      }
+      if (from !== before) marker = synced;
+      if (from !== synced) {
+        const found = changedFields(filesAt(from), filesAt(synced), id);
+        if (found.fields.length) {
+          change = { ...found, commit: synced, before: from };
+          marker = synced;
+        }
       }
     }
   }
   if (change) {
-    const posted = (await commentsOf(gh, issue.number)).some((c) => gh.isOwnBot(c.user, c) && readChange(c.body)?.commit === synced);
-    if (!posted) {
-      act(`post the history of ${id} on #${issue.number} (${change.fields.join(', ')})`);
-      counts.history += 1;
-      if (!dryRun) await postComment(gh, issue.number, changeComment(change, { repo, web }));
-    }
+    act(`post the history of ${id} on #${issue.number} (${change.fields.join(', ')})`);
+    counts.history += 1;
+    if (!dryRun) await postComment(gh, issue.number, changeComment(change, { repo, web }));
   }
 
   let wanted = wantedIssue(feature, { synced: marker, site });
@@ -176,7 +206,36 @@ async function syncEntry({ gh, id, feature, issue, synced, site, web, repo, dryR
   const closedNow = patch.state === 'closed' || (issue.state === 'closed' && patch.state === undefined && wanted.state === 'closed');
   if (closedNow && isBuilding(issue)) {
     act(`remove ${BUILDING_LABEL} from #${issue.number} ${id}`);
-    if (!dryRun) await removeLabel(gh, issue.number, BUILDING_LABEL);
+    if (!dryRun) await removeLabel(gh, issue, BUILDING_LABEL);
+  }
+}
+
+/** An open duplicate of an entry's issue (two bot issues with one marker) is closed as not planned, unless it carries a verdict label. */
+async function closeDuplicates({ gh, index, dryRun, act, counts, notes }) {
+  for (const { id, kept, duplicate } of index.duplicates) {
+    const issue = index.issues.get(duplicate);
+    if (labelVerdicts(labelNames(issue)).length) {
+      notes.push(`#${duplicate} duplicates #${kept} (${id}) but carries a verdict label; left open`);
+      continue;
+    }
+    act(`close #${duplicate} as a duplicate of #${kept} (${id})`);
+    counts.duplicatesClosed += 1;
+    if (dryRun) continue;
+    const text = duplicateComment(kept);
+    if (!(await commentsOf(gh, duplicate)).some((c) => gh.isOwnBot(c.user, c) && c.body === text)) await postComment(gh, duplicate, text);
+    await gh.request('PATCH', gh.repoPath(`/issues/${duplicate}`), { body: { state: 'closed', state_reason: 'not_planned' } });
+  }
+}
+
+/** The open issue of a feature no longer in the plan is closed as not planned, with the bot's comment. */
+async function closeRemoved({ gh, index, inPlan, dryRun, act, counts }) {
+  for (const [id, issue] of index.byId) {
+    if (inPlan.has(id) || issue.state !== 'open') continue;
+    act(`close #${issue.number} ${id}: no longer in the plan`);
+    counts.removed += 1;
+    if (dryRun) continue;
+    if (!(await commentsOf(gh, issue.number)).some((c) => gh.isOwnBot(c.user, c) && c.body === REMOVED_COMMENT)) await postComment(gh, issue.number, REMOVED_COMMENT);
+    await gh.request('PATCH', gh.repoPath(`/issues/${issue.number}`), { body: { state: 'closed', state_reason: 'not_planned' } });
   }
 }
 

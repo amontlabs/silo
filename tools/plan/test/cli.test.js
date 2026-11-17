@@ -265,7 +265,10 @@ test('status: outside git the verdicts say so; with live state the live parts sh
   files['features/fork.json'] = { ...files['features/fork.json'], verdict: 'take', suggested_in: 9 };
   await withPlan(files, async (root) => {
     const live = fakeLive({
-      entries: { cli: { number: 2, url: 'u', verdict: 'take', building: true, branch: 'feat/cli', up: 0, comments: [], history: [] } },
+      entries: {
+        cli: { number: 2, url: 'u', verdict: 'take', building: true, branch: 'feat/cli', up: 0, comments: [], history: [] },
+        fork: { number: 3, url: 'u3', verdict: 'drop', verdicts: ['drop'], building: false, up: 0, comments: [], history: [] },
+      },
       suggestions: [{ number: 9, url: 'u9', title: 'Placed', up: 3, open: true }, { number: 10, url: 'u10', title: 'Loose', up: 1, open: true }, { number: 11, url: 'u11', title: 'Closed', up: 0, open: false }],
     });
     const json = JSON.parse((await run(root, ['status', '--json'], { live })).out);
@@ -274,6 +277,10 @@ test('status: outside git the verdicts say so; with live state the live parts sh
     assert.deepEqual(json.taken, [{ id: 'fork', name: 'Fork', ready: false, waiting: ['core'] }]);
     assert.deepEqual(json.ideas.map((item) => item.number), [10]);
     assert.equal(json.live, null);
+    // The file's take counts, not the label's drop; the difference is listed.
+    assert.deepEqual(json.notInSync, [{ id: 'fork', name: 'Fork', file: 'take', github: ['drop'], line: 'the file says take, #3 shows verdict:drop' }]);
+    const text = (await run(root, ['status'], { live })).out;
+    assert.match(text, /\nNot in sync:\n {2}fork: the file says take, #3 shows verdict:drop$/);
     const failed = { async read() { return { available: false, reason: 'GitHub did not answer', failed: true }; } };
     const result = await run(root, ['status'], { live: failed });
     assert.equal(result.code, 3);
@@ -315,9 +322,11 @@ test('show: fields, place, needs, needed by, decisions, notes, and the issue whe
       },
     });
     const withLive = JSON.parse((await run(root, ['show', 'fork', '--json'], { live })).out);
-    assert.equal(withLive.status, 'planned');
+    assert.equal(withLive.status, 'undecided', 'the verdict is the file\'s, never the label\'s');
+    assert.deepEqual(withLive.notInSync, { file: null, github: ['take'], line: 'the file has no verdict, #5 shows verdict:take' });
     assert.deepEqual(withLive.issue.thread.map((item) => item.kind), ['comment', 'history', 'comment']);
     const liveText = (await run(root, ['show', 'fork'], { live })).out;
+    assert.match(liveText, /\nNot in sync: the file has no verdict, #5 shows verdict:take\n/);
     assert.match(liveText, /#5 https:\/\/github\.com\/o\/r\/issues\/5 \(4 votes\)\n {2}2026-11-16 bob: First\n {2}2026-11-17 updated in aaaaaaa: what\n {2}2026-11-18 ann: Looks good/);
   });
 });

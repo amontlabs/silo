@@ -1,9 +1,10 @@
-// Finding the plan's issues on GitHub: an entry's issue is one the bot created, labelled
-// workshop:entry, whose body ends with the entry marker.
+// Finding the plan's issues on GitHub: an entry's issue is one the bot created whose body ends with
+// the entry marker. They are found among every issue the bot created, not by the workshop:entry
+// label, which anyone with triage rights can remove; sync puts the label back.
 import { BUILDING_LABEL, ENTRY_LABEL, LABELS, SUGGESTION_LABEL } from '../model/names.js';
 import { readBuildingComment } from '../model/comments.js';
 import { readEntryMarker } from '../model/markers.js';
-import { labelNames } from './client.js';
+import { labelNames, labelOn } from './client.js';
 
 /** @typedef {import('./client.js').GitHub} GitHub */
 
@@ -22,29 +23,33 @@ function markerOf(body) {
 }
 
 /**
- * The bot's entry issues by id. When two carry one marker, the oldest (lowest number) is used and
- * the others are reported.
+ * The bot's entry issues by id, from issues the bot created (others are left out). When two carry
+ * one marker, the oldest (lowest number) is used; the open others are duplicates.
  * @param {GitHub} gh @param {any[]} issues
+ * @returns {{ byId: Map<string, any>, duplicates: { id: string, kept: number, duplicate: number }[], issues: Map<number, any> }}
  */
 export function entryIndex(gh, issues) {
   /** @type {Map<string, any>} */
   const byId = new Map();
+  /** @type {Map<number, any>} */
+  const byNumber = new Map();
   /** @type {{ id: string, kept: number, duplicate: number }[]} */
   const duplicates = [];
   for (const issue of [...issues].sort((a, b) => a.number - b.number)) {
-    if (issue.pull_request || !gh.isOwnBot(issue.user, issue) || !labelNames(issue).includes(ENTRY_LABEL)) continue;
+    if (issue.pull_request || !gh.isOwnBot(issue.user, issue)) continue;
     const id = markerOf(issue.body);
     if (!id) continue;
+    byNumber.set(issue.number, issue);
     const kept = byId.get(id);
-    if (kept) duplicates.push({ id, kept: kept.number, duplicate: issue.number });
-    else byId.set(id, issue);
+    if (!kept) byId.set(id, issue);
+    else if (issue.state === 'open') duplicates.push({ id, kept: kept.number, duplicate: issue.number });
   }
-  return { byId, duplicates };
+  return { byId, duplicates, issues: byNumber };
 }
 
 /** @param {GitHub} gh */
 export async function entryIssues(gh) {
-  return entryIndex(gh, await gh.issuesWithLabel(ENTRY_LABEL));
+  return entryIndex(gh, await gh.botIssues());
 }
 
 /** @param {GitHub} gh @param {string} id @returns {Promise<any | null>} */
@@ -76,9 +81,10 @@ export async function addLabel(gh, number, name) {
   await gh.request('POST', gh.repoPath(`/issues/${number}/labels`), { body: { labels: [name] } });
 }
 
-/** @param {GitHub} gh @param {number} number @param {string} name */
-export async function removeLabel(gh, number, name) {
-  await gh.request('DELETE', gh.repoPath(`/issues/${number}/labels/${encodeURIComponent(name)}`), { allow: [404] });
+/** Removes a label from an issue, under the name it has there in whatever capitalisation. @param {GitHub} gh @param {any} issue @param {string} name */
+export async function removeLabel(gh, issue, name) {
+  const actual = labelOn(issue, name) ?? name;
+  await gh.request('DELETE', gh.repoPath(`/issues/${issue.number}/labels/${encodeURIComponent(actual)}`), { allow: [404] });
 }
 
 /** @param {GitHub} gh @param {number} number @param {string} body */
@@ -104,4 +110,5 @@ export function claimBranch(gh, comments) {
 
 export const isBuilding = (issue) => labelNames(issue).includes(BUILDING_LABEL);
 export const isSuggestion = (issue) => labelNames(issue).includes(SUGGESTION_LABEL);
+export const isEntryLabelled = (issue) => labelNames(issue).includes(ENTRY_LABEL);
 export const builtOnGitHub = (issue) => issue.state === 'closed' && issue.state_reason === 'completed';

@@ -17,24 +17,40 @@ async function needIssue(gh, id) {
 /**
  * Sets the verdict label (or removes every verdict label for `clear`) and says so in a comment.
  * The new label goes on before the others come off, so the issue never shows no verdict between.
- * @param {{ gh: GitHub, id: string, verdict: 'take' | 'later' | 'drop' | 'clear' }} options
+ * When GitHub shows the wanted verdict already: nothing changes if the file at origin/main has it
+ * too (`recorded`), else the bot removes the label and adds it again, so that the newest verdict
+ * event is the bot's and a run starts (for `clear`, it adds the file's verdict label and removes it).
+ * @param {{ gh: GitHub, id: string, verdict: 'take' | 'later' | 'drop' | 'clear', fileVerdict?: string | null }} options
+ *   `fileVerdict`: the verdict of the file at origin/main, null for none, undefined when it could not be read
  */
-export async function decide({ gh, id, verdict }) {
+export async function decide({ gh, id, verdict, fileVerdict }) {
   const issue = await needIssue(gh, id);
   if (builtOnGitHub(issue)) throw new Failure(`${id} is built (#${issue.number} is closed as completed); its verdict never changes`);
   const present = labelVerdicts(labelNames(issue));
   const wanted = verdict === 'clear' ? [] : [verdict];
-  if (present.length === wanted.length && present.every((v, i) => v === wanted[i])) return { id, issue: issue.number, verdict, changed: false };
-  if (verdict !== 'clear' && !present.includes(verdict)) await addLabel(gh, issue.number, verdictLabel(verdict));
-  for (const other of present.filter((v) => v !== verdict)) await removeLabel(gh, issue.number, verdictLabel(other));
+  const result = { id, issue: issue.number, verdict, changed: true, recorded: false };
+  if (present.length === wanted.length && present.every((v, i) => v === wanted[i])) {
+    const target = verdict === 'clear' ? null : verdict;
+    if (fileVerdict === target) return { ...result, changed: false, recorded: true };
+    if (verdict !== 'clear') {
+      await removeLabel(gh, issue, verdictLabel(verdict));
+      await addLabel(gh, issue.number, verdictLabel(verdict));
+    } else if (fileVerdict) {
+      await addLabel(gh, issue.number, verdictLabel(fileVerdict));
+      await removeLabel(gh, { number: issue.number, labels: [] }, verdictLabel(fileVerdict));
+    } else return { ...result, changed: false };
+  } else {
+    if (verdict !== 'clear' && !present.includes(verdict)) await addLabel(gh, issue.number, verdictLabel(verdict));
+    for (const other of present.filter((v) => v !== verdict)) await removeLabel(gh, issue, verdictLabel(other));
+  }
   await comment(gh, issue.number, verdict === 'clear' ? CLEARED_COMMENT : RECORDED_COMMENT);
-  return { id, issue: issue.number, verdict, changed: true };
+  return result;
 }
 
 /**
  * Claims a feature: sets the building label, comments `Being built on <branch>.`, then reads the
- * issue again. When an older claim for another branch was posted since the label was set, this
- * session lost the race: its comment is removed and it refuses.
+ * issue again. The earliest claim posted since the label was set wins, by comment id, whatever its
+ * branch: when it is not this session's, this session lost the race, removes its comment and refuses.
  * @param {{ gh: GitHub, id: string, branch: string }} options
  */
 export async function start({ gh, id, branch }) {
@@ -48,11 +64,11 @@ export async function start({ gh, id, branch }) {
   await addLabel(gh, issue.number, BUILDING_LABEL);
   const mine = await comment(gh, issue.number, text);
 
-  const labeled = (await eventsOf(gh, issue.number)).filter((e) => e.event === 'labeled' && e.label?.name === BUILDING_LABEL).at(-1);
+  const labeled = (await eventsOf(gh, issue.number)).filter((e) => e.event === 'labeled' && String(e.label?.name ?? '').toLowerCase() === BUILDING_LABEL).at(-1);
   const since = labeled?.created_at ? Date.parse(labeled.created_at) : -Infinity;
   const claims = (await commentsOf(gh, issue.number)).filter((c) => gh.isOwnBot(c.user, c) && readBuildingComment(c.body) && Date.parse(c.created_at) >= since);
-  const first = claims.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id)[0];
-  if (first && first.id !== mine.id && readBuildingComment(first.body) !== branch) {
+  const first = claims.sort((a, b) => a.id - b.id)[0];
+  if (first && first.id !== mine.id) {
     await gh.request('DELETE', gh.repoPath(`/issues/comments/${mine.id}`), { allow: [404] });
     throw new Failure(`another session claimed ${id} first, on ${readBuildingComment(first.body)} (#${issue.number}); this claim is withdrawn`);
   }
@@ -63,7 +79,7 @@ export async function start({ gh, id, branch }) {
 export async function stop({ gh, id }) {
   const issue = await needIssue(gh, id);
   if (!isBuilding(issue)) return { id, issue: issue.number, changed: false };
-  await removeLabel(gh, issue.number, BUILDING_LABEL);
+  await removeLabel(gh, issue, BUILDING_LABEL);
   return { id, issue: issue.number, changed: true };
 }
 

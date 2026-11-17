@@ -1,28 +1,31 @@
 // The live state of the plan on GitHub, as `status` and `show` read it.
 //
 // One interface: `read({ issue })` resolves to either
-//   { available: false, reason, failed }   `failed` true when GitHub was tried and could not be read (exit 3)
+//   { available: false, reason, failed }   `failed` true when GitHub was tried and could not be read (exit 3),
+//                                          false when it is not configured (no credentials: exit 0)
 //   { available: true, entries, suggestions, source }
 // with
-//   entries[id] = { number, url, verdict, building, branch, up, comments: [{ author, createdAt, body }],
+//   entries[id] = { number, url, verdict, verdicts, building, branch, up, comments: [{ author, createdAt, body }],
 //                   history: [{ createdAt, url, change }] }   (`change` as model/markers.js readChange gives it)
 //   suggestions = [{ number, url, title, up, open }]
+// `verdicts` are the verdict labels the issue shows (`verdict` the one when there is exactly one).
 // `comments` and `history` are read for the entry named by `issue` only; `branch` for entries being built.
 //
 // The real reader tries, in order: the site's `GET <site>/api/workshop/state` (one call, no token;
 // `issue?n=` for one issue's comments), then GitHub with the bot's token, else "not available".
-// Neither failing is an error: `status` and `show` print their offline parts and exit 0.
+// `status` and `show` print their offline parts either way.
 
 import { appCredentials } from '../github/credentials.js';
 import { GitHub, labelNames } from '../github/client.js';
+import { NotConfigured } from '../github/errors.js';
 import { entryIndex } from '../github/issues.js';
-import { readBuildingComment } from '../model/comments.js';
+import { labelVerdicts, readBuildingComment } from '../model/comments.js';
 import { readChange } from '../model/markers.js';
 import { BUILDING_LABEL, DEFAULT_WEB, ENTRY_LABEL, ID_PATTERN, SUGGESTION_LABEL, VERDICTS } from '../model/names.js';
 
 /** @typedef {{ available: false, reason: string, failed: boolean }} LiveUnavailable */
 /**
- * @typedef {{ number: number, url: string, verdict: import('../model/status.js').Verdict | null, building: boolean, branch?: string | null, up: number,
+ * @typedef {{ number: number, url: string, verdict: import('../model/status.js').Verdict | null, verdicts: import('../model/status.js').Verdict[], building: boolean, branch?: string | null, up: number,
  *   comments: { author: string, createdAt: string, body: string }[], history: { createdAt: string, url?: string, change: import('../model/markers.js').Change }[] }} LiveEntry
  */
 /** @typedef {{ number: number, url: string, title: string, up: number, open: boolean }} LiveSuggestion */
@@ -78,12 +81,12 @@ export function createLive(deps) {
       try {
         credentials = appCredentials(deps);
       } catch (error) {
-        return { available: false, reason: `the site did not answer (${siteReason}) and GitHub cannot be read (${/** @type {Error} */ (error).message})`, failed: false };
+        return { available: false, reason: `the site did not answer (${siteReason}) and GitHub cannot be read (${/** @type {Error} */ (error).message})`, failed: !(error instanceof NotConfigured) };
       }
       try {
         return await fromGitHub(deps, web, credentials, issue);
       } catch (error) {
-        return { available: false, reason: `the site did not answer (${siteReason}) and GitHub did not either (${/** @type {Error} */ (error).message})`, failed: false };
+        return { available: false, reason: `the site did not answer (${siteReason}) and GitHub did not either (${/** @type {Error} */ (error).message})`, failed: true };
       }
     },
   };
@@ -122,7 +125,8 @@ async function fromSite(deps, web, wanted) {
     const url = `${web}/${repo}/issues/${number}`;
     const up = Number.isInteger(item.up) ? item.up : 0;
     if (item.kind === 'entry' && item.bot === true && typeof item.entry === 'string' && ID_PATTERN.test(item.entry) && !entries[item.entry]) {
-      entries[item.entry] = { number, url, verdict: verdictOf(item.verdict), building: item.building === true, branch: null, up, comments: [], history: [] };
+      const verdict = verdictOf(item.verdict);
+      entries[item.entry] = { number, url, verdict, verdicts: verdict ? [verdict] : [], building: item.building === true, branch: null, up, comments: [], history: [] };
     } else if (item.kind === 'suggestion') {
       suggestions.push({ number, url, title: String(item.title ?? ''), up, open: item.state === 'open' });
     }
@@ -142,15 +146,15 @@ async function fromSite(deps, web, wanted) {
 async function fromGitHub(deps, web, credentials, wanted) {
   const gh = new GitHub({ api: deps.api, repo: deps.repo, fetch: deps.fetch, writeDelayMs: 0 });
   await gh.authenticate(credentials);
-  const { byId } = entryIndex(gh, await gh.issuesWithLabel(ENTRY_LABEL));
+  const { byId } = entryIndex(gh, await gh.botIssues());
   /** @type {Record<string, LiveEntry>} */
   const entries = Object.create(null);
   for (const [id, issue] of byId) {
     const labels = labelNames(issue);
-    const verdicts = VERDICTS.filter((v) => labels.includes(`verdict:${v}`));
+    const verdicts = labelVerdicts(labels);
     const verdict = verdicts.length === 1 ? verdicts[0] : null;
     const building = labels.includes(BUILDING_LABEL) && issue.state === 'open';
-    const entry = { number: issue.number, url: issue.html_url ?? `${web}/${deps.repo}/issues/${issue.number}`, verdict, building, branch: null, up: issue.reactions?.['+1'] ?? 0, comments: [], history: [] };
+    const entry = { number: issue.number, url: issue.html_url ?? `${web}/${deps.repo}/issues/${issue.number}`, verdict, verdicts, building, branch: null, up: issue.reactions?.['+1'] ?? 0, comments: [], history: [] };
     if (building || id === wanted) {
       const items = (await gh.paginate(gh.repoPath(`/issues/${issue.number}/comments`))).map((c) => ({ author: c.user?.login ?? 'ghost', bot: gh.isOwnBot(c.user, c), createdAt: c.created_at, body: c.body ?? '' }));
       const read = thread(items, web, deps.repo);

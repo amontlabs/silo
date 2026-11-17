@@ -1,6 +1,8 @@
 // `plan pull`: makes each feature's verdict equal to the verdict that counts on its issue. The only
 // path from a label to a file. A label counts when the newest `labeled` event for it is by a person
-// with write, maintain or admin permission, or by the Workshop bot itself (`plan decide`).
+// with write, maintain or admin permission, or by the Workshop bot itself (`plan decide`). A verdict
+// is removed from a file only on a counted removal: an issue with no verdict event at all (one that
+// was replaced) never clears it. Only the three verdict labels count, in any capitalisation.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,10 +10,10 @@ import { labelNames } from './client.js';
 import { entryIssues, eventsOf } from './issues.js';
 import { labelVerdicts } from '../model/comments.js';
 import { canonicalFeature, canonicalText } from '../model/canonical.js';
-import { verdictLabel } from '../model/names.js';
+import { labelVerdict, verdictLabel } from '../model/names.js';
 
 const DECIDERS = new Set(['admin', 'maintain', 'write']);
-const isVerdictEvent = (event) => (event.event === 'labeled' || event.event === 'unlabeled') && /^verdict:/.test(event.label?.name ?? '');
+const isVerdictEvent = (event) => (event.event === 'labeled' || event.event === 'unlabeled') && labelVerdict(event.label?.name ?? '') !== null;
 
 /** @param {import('./client.js').GitHub} gh */
 function decider(gh) {
@@ -65,15 +67,16 @@ export async function readVerdicts({ gh, root: _root, plan, raw }) {
     }
     const events = (await eventsOf(gh, issue.number)).filter(isVerdictEvent);
     if (target) {
-      const event = events.filter((e) => e.event === 'labeled' && e.label.name === verdictLabel(target)).at(-1);
+      const event = events.filter((e) => e.event === 'labeled' && labelVerdict(e.label.name) === target).at(-1);
       if (event && (await counts(event.actor, event))) changes.push({ id, issue: issue.number, from: file, to: target, by: event.actor.login, at: event.created_at ?? null });
       else report(`${verdictLabel(target)} was set by ${event?.actor?.login ?? 'someone unknown'}, who cannot decide; the file is left alone`);
       continue;
     }
-    // No verdict label. The newest verdict event, when there is one, must count.
+    // No verdict label while the file has one: only a counted removal clears it.
     const event = events.at(-1);
-    if (!event) changes.push({ id, issue: issue.number, from: file, to: null, by: null, at: null });
-    else if (event.event === 'unlabeled' && (await counts(event.actor, event))) changes.push({ id, issue: issue.number, from: file, to: null, by: event.actor.login, at: event.created_at ?? null });
+    if (!event) report(`the file says ${file}, GitHub has no verdict: was the issue replaced? The file is left alone`);
+    else if (event.event !== 'unlabeled') report(`GitHub shows no verdict label but its newest verdict event adds ${event.label.name}; the file is left alone`);
+    else if (await counts(event.actor, event)) changes.push({ id, issue: issue.number, from: file, to: null, by: event.actor.login, at: event.created_at ?? null });
     else report(`its verdict label was removed by ${event.actor?.login ?? 'someone unknown'}, who cannot decide; the file is left alone`);
   }
   return { changes, reports, duplicates: index.duplicates };

@@ -52,7 +52,7 @@ test('a label that does not count, two labels, a built feature: reported, the fi
   assert.equal(w.feature('core').verdict, 'take');
 });
 
-test('no verdict label clears the file, when the removal counts or the label was never set', async (t) => {
+test('no verdict label clears the file only on a counted removal; an issue with no verdict event is reported', async (t) => {
   const files = basePlan();
   for (const id of ['core', 'cli', 'fork']) files[`features/${id}.json`] = { ...files[`features/${id}.json`], verdict: 'later' };
   const w = await synced(t, files);
@@ -60,10 +60,11 @@ test('no verdict label clears the file, when the removal counts or the label was
   w.fake.unlabel(w.fake.entry('core').number, 'verdict:later', 'owner');
   w.fake.unlabel(w.fake.entry('cli').number, 'verdict:later', 'helper');
   const report = await pull(w, '--write');
-  assert.deepEqual(report.changes.map((c) => [c.id, c.to, c.by]), [['core', null, 'owner'], ['fork', null, null]]);
+  assert.deepEqual(report.changes.map((c) => [c.id, c.to, c.by]), [['core', null, 'owner']]);
   assert.match(report.reports.find((r) => r.id === 'cli').why, /removed by helper, who cannot decide/);
+  assert.match(report.reports.find((r) => r.id === 'fork').why, /the file says later, GitHub has no verdict: was the issue replaced\?/);
   assert.equal(w.feature('core').verdict, undefined);
-  assert.equal(w.feature('fork').verdict, undefined);
+  assert.equal(w.feature('fork').verdict, 'later');
   assert.equal(w.feature('cli').verdict, 'later');
 });
 
@@ -113,4 +114,31 @@ test('pull writes only over the verdict it read: a file changed meanwhile is ski
   assert.deepEqual(json.written, []);
   assert.match(json.skipped[0], /changed during the run/);
   assert.equal(w.feature('fork').verdict, 'later');
+});
+
+test('only the three verdict labels are verdict labels: a stray verdict:* label is no verdict and no verdict event', async (t) => {
+  const files = basePlan();
+  files['features/core.json'] = { ...files['features/core.json'], verdict: 'later' };
+  const w = await synced(t, files);
+  const core = w.fake.entry('core');
+  const fork = w.fake.entry('fork');
+  w.fake.label(core.number, 'verdict:later', 'owner');
+  w.fake.unlabel(core.number, 'verdict:later', 'owner');
+  w.fake.label(core.number, 'verdict:refine', 'owner'); // newer, but not a verdict
+  w.fake.label(fork.number, 'verdict:tkae', 'owner');
+  const report = await pull(w);
+  assert.deepEqual(report.changes.map((c) => [c.id, c.to, c.by]), [['core', null, 'owner']]);
+  assert.deepEqual(report.reports, []);
+});
+
+test('verdict labels in another capitalisation are read the same', async (t) => {
+  const w = await synced(t);
+  w.fake.labels.push({ name: 'Verdict:Take', color: 'ededed', description: '' });
+  w.fake.labels = w.fake.labels.filter((l) => l.name !== 'verdict:take');
+  w.fake.label(w.fake.entry('fork').number, 'verdict:take', 'owner');
+  w.fake.label(w.fake.entry('cli').number, 'VERDICT:DROP', 'owner');
+  assert.ok(w.fake.entry('fork').labels.includes('Verdict:Take'));
+  const report = await pull(w);
+  assert.deepEqual(report.changes.map((c) => [c.id, c.to]), [['cli', 'drop'], ['fork', 'take']]);
+  assert.deepEqual(report.reports, []);
 });
