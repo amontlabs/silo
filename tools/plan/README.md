@@ -139,7 +139,9 @@ It pushes `HEAD` when it is a new commit and never rebases: on a rejected push i
 (when that fetch fails, it prints the push's message and the fetch's and stops); if `main` did not
 move it fails at once with git's own message (a protected branch or a bad token is not "main moved"); else it resets
 to `origin/main`, runs `plan pull --commit` and `plan check` again and pushes; three tries. A
-commit that fails the check is never pushed. The pull, push and sync steps use the secrets
+commit that fails the check is never pushed. `main` must accept a push from the workflow's
+token: a ruleset or a branch protection that requires pull requests, signed commits or status
+checks refuses it, and the verdict then stays on GitHub only. The pull, push and sync steps use the secrets
 `WORKSHOP_APP_ID` and `WORKSHOP_PRIVATE_KEY`.
 
 The App: `plan setup` opens a page on `127.0.0.1` (it answers no other Host) that posts the
@@ -153,8 +155,9 @@ the environment, then the Keychain (a locked one stops the command), then
 `~/.config/silo-workshop/credentials.json` (0600 or refused). `WORKSHOP_GITHUB_API` and
 `WORKSHOP_REPO` override the API and the repository.
 
-Not verified until the owner has created the App: the workflow, and every rule above that rests on
-how GitHub answers (the bot's login and `performed_via_github_app`, listing issues by
+The Workshop went live on 2026-11-17, and the first sync created the labels and one issue per
+feature as the bot. Still not verified against the real GitHub: the verdict half of the workflow
+(pull, commit, push), and every rule above that rests on how GitHub answers (the bot's login and `performed_via_github_app`, listing issues by
 `creator=<slug>[bot]`, label events and their actors, label names matched ignoring capitalisation,
 the permission endpoint for an App token, closing and reopening with a reason, fetching a commit by
 its id, `contains` in the workflow's `if` ignoring case). The tests hold them

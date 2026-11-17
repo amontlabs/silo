@@ -5,4 +5,3 @@
 - Business material (prices, customers, funding) lives in Linear and never in this repository, which is public. Linear holds nothing else: product ideas and features go in `plan/`.
 - Agents are chosen by role name from `atelier agents`, never by provider model; `cheap` only when the owner asks.
 - A test that fails and then passes is a fix item, not a retry.
-- Not live yet: do not push `main` until the owner has created the GitHub App and set up Vercel (see "Going live" in `website/README.md`): a push deploys the public site. Remove this line when the Workshop is live.
