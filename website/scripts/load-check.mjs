@@ -15,7 +15,7 @@ import { chromium } from 'playwright-core';
 
 const SIZES = [[1440, 900], [1440, 1100], [2560, 1440], [1024, 1366], [390, 844]];
 const LATE = {
-  account: '#workshop-account > *',
+  account: '#workshop-account > :not(.ws-ph)',
   votes: '.ws-vote',
   'owner marks': '.ws.ws-owner',
   'Suggest a feature': '.ws-suggest',
@@ -162,9 +162,18 @@ async function run(browser, options, [width, height], place, shared = null) {
   release();
   await page.waitForLoadState('load');
   await page.waitForSelector('.ws');
+  // A visit can act before the answers (open an entry), then watch a box that must not move when they arrive.
+  if (place.act) await place.act(page);
+  const top = (selector) => page.evaluate((sel) => {
+    const nodes = document.querySelectorAll(sel);
+    const node = nodes[nodes.length - 1];
+    return node ? node.getBoundingClientRect().top + scrollY : null;
+  }, selector);
+  const watchedBefore = place.watch ? await top(place.watch) : null;
   await page.waitForLoadState('networkidle');
   // Late answers and the transitions they start.
   await wait(1200);
+  const watchedAfter = place.watch ? await top(place.watch) : null;
   const after = await page.evaluate(footerRule, SLACK);
   const timeline = await page.evaluate(() => ({
     ...window.__loadCheck,
@@ -172,7 +181,8 @@ async function run(browser, options, [width, height], place, shared = null) {
   }));
   if (shared) await page.close();
   else await context.close();
-  return { size: `${width}x${height}`, place: place.name, before, after, ...timeline };
+  const moved = place.watch ? (watchedBefore === null || watchedAfter === null ? NaN : Math.round(watchedAfter - watchedBefore)) : null;
+  return { size: `${width}x${height}`, place: place.name, before, after, moved, watch: place.watch, ...timeline };
 }
 
 /** What a first frame must hold, by the kind of visit; returns the problems. */
@@ -202,16 +212,18 @@ function report(result, wants = {}) {
   const frame = firstFrame(first, wants);
   const total = result.shifts.reduce((sum, shift) => sum + shift.value, 0);
   const shifted = total > SHIFT_BUDGET;
+  const moved = result.moved !== null && !(Math.abs(result.moved) <= SLACK);
   const lines = [
     `${result.size.padEnd(10)} ${result.place}`,
     `  first paint ${result.paint} ms; ${late}`,
     `  first frame (${first?.at ?? '—'} ms): ${held}${frame.length ? ` — FAIL: ${frame.join('; ')}` : ''}`,
+    ...(result.moved !== null ? [`  ${result.watch} moved ${result.moved} px when the answers came${moved ? ' — FAIL' : ''}`] : []),
     `  footer before the script: ${rule(result.before)}`,
     `  footer after loading: ${rule(result.after)}`,
     `  layout shifts: ${result.shifts.length ? `${result.shifts.map((shift) => `${shift.at} ms ${shift.value} (${shift.nodes.join(' ')})`).join(', ')}; total ${Number(total.toFixed(4))}${shifted ? ` — FAIL: over ${SHIFT_BUDGET}` : ''}` : 'none'}`,
   ];
   console.log(lines.join('\n'));
-  return !result.before.length && !result.after.length && !frame.length && !shifted;
+  return !result.before.length && !result.after.length && !frame.length && !shifted && !moved;
 }
 
 /** Signs in through the fake GitHub's page as `login`, in this context; the page sets the real session cookies. */
@@ -243,6 +255,36 @@ async function visits(browser, options, place) {
   await signIn(owner, options.url, 'owner-fake');
   passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, owner-fake signed in, second visit` }, owner)) }, { votes: true, login: 'owner-fake', toDecide: true }) && passed;
   await owner.close();
+
+  // An entry of the first area opened before the answers: the rows below it do not move when they arrive. The
+  // entry has no comments: their number comes with the state, and their lines are not held before it.
+  const live = await (await fetch(`${new URL(options.url).origin}/api/workshop/state`)).json();
+  const quiet = Object.values(live.issues ?? {}).filter((issue) => issue.kind === 'entry' && issue.entry && issue.comments === 0).map((issue) => `entry-${issue.entry}`);
+  for (const narrow of [false, true]) {
+    const view = narrow ? [390, 844] : size;
+    const fresh = await browser.newContext({ viewport: { width: view[0], height: view[1] }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
+    let opened = null;
+    const open = async (page) => {
+      opened = await page.evaluate((ids) => [...document.querySelectorAll('.ws-detail .ws-item')].map((item) => item.id).find((id) => ids.includes(id)) ?? null, quiet);
+      if (!opened) throw new Error('the first area has no entry without comments');
+      await page.click(`#${opened} .ws-row`);
+      await wait(500);
+    };
+    const result = await run(browser, plain, view, { ...place, name: `${place.name}, an entry opened before the answers`, act: open, watch: '.ws-detail .ws-item' }, fresh);
+    passed = report({ ...result, place: `${result.place} (${opened})` }) && passed;
+    await fresh.close();
+  }
+
+  // #suggested with the session marker and nobody remembered: the list does not move when `me` answers.
+  const marked = await context();
+  await signIn(marked, options.url, 'owner-fake');
+  const forget = await marked.newPage();
+  // A page of the same origin that is not the Workshop, so nothing remembers the person again.
+  await forget.goto(`${new URL(options.url).origin}/favicon.svg`);
+  await forget.evaluate(() => localStorage.removeItem('silo-workshop-me'));
+  await forget.close();
+  passed = report({ ...(await run(browser, plain, size, { name: '#suggested, signed in, nobody remembered', hash: '#suggested', watch: 'section[aria-label="Suggested by people"]' }, marked)) }) && passed;
+  await marked.close();
   return passed;
 }
 

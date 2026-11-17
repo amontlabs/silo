@@ -1,7 +1,6 @@
 // Suggest a feature: the form, or a way to sign in, then what people have suggested, by votes.
 import type { ReactNode } from 'react';
 import { Block, Rows } from './AreaView';
-import { ghost } from './Latest';
 import type { EntryContext } from './Entry';
 
 export function SuggestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
@@ -9,8 +8,16 @@ export function SuggestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack
   const { suggestDraft, setSuggestDraft } = w;
   let form: ReactNode = null;
   if (w.me === undefined) {
-    // Who is signed in is not known yet: the form's room is held.
-    form = <div className="ws-form" aria-busy="true"><div className="ws-ph ws-ph-form" aria-hidden="true" /></div>;
+    // Who is signed in is not known yet: the form's room is held by the form's own boxes, drawn as placeholders.
+    form = (
+      <div aria-busy="true">
+        <div className="ws-form ws-ph-shape" aria-hidden="true" inert>
+          <input tabIndex={-1} disabled />
+          <textarea tabIndex={-1} rows={2} disabled />
+          <div><span className="ws-btn go">Suggest</span></div>
+        </div>
+      </div>
+    );
   } else if (w.me) {
     // Shown whenever the person is, and its draft kept; it sends only once a state is shown.
     form = (
@@ -32,7 +39,16 @@ export function SuggestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack
           {form}
           <section aria-label="Suggested by people" aria-busy={w.waiting || undefined}>
             <h3 className="ws-grp">Suggested by people</h3>
-            {w.waiting ? <ul className="ws-rows">{[0, 1].map(ghost)}</ul> : null}
+            {w.waiting ? (
+              <ul className="ws-rows">
+                <li className="ws-item ws-ph-row" aria-hidden="true">
+                  <div className="ws-line">
+                    <div className="ws-row"><i className="ws-pip" /><span className="ws-name"><i className="ws-ph" /></span><b className="ws-word" /></div>
+                    <span className="ws-side"><span className="ws-votes"><i className="ws-ph ws-ph-vote" /></span><span className="ws-talks" /></span>
+                  </div>
+                </li>
+              </ul>
+            ) : null}
             {people || w.waiting ? null : <p className="ws-empty">{w.liveOk ? 'Nothing yet.' : 'Suggestions are offline.'}</p>}
             <Rows rows={w.plan.suggestions} ctx={ctx} />
             {w.suggestionsSending.length ? (

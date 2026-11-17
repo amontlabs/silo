@@ -107,7 +107,12 @@ browser profile at 1440 × 900, the first area is visited twice (the second
 visit must have the votes in its first frame), and the owner signs in through
 the fake GitHub's page as `owner-fake` (so the session cookie, its marker and
 the remembered person are real) and visits again: the login, "N to decide"
-and the rows' "to decide" must be in its first frame. It checks that the
+and the rows' "to decide" must be in its first frame. Then an entry of the
+first area without comments is opened before the answers, at 1440 × 900 and
+390 × 844, and the rows below it must not move when they arrive; and
+`#suggested` is visited signed in with nobody remembered, and the list must not
+move when `me` answers. "account" is when the login or the sign-in button
+appeared, not its placeholder. It checks that the
 footer is the last row of the frame, at the bottom of the window when the page
 is shorter than the window and right after the content otherwise, once before
 the page's script runs and once after everything has loaded. It exits with an

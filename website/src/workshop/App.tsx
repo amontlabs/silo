@@ -114,6 +114,44 @@ function KeyItem({ mark, label, boot }: { mark: string; label: string; boot: boo
   return <li className={fade ? 'ws-in' : undefined}><i className={mark} />{label}</li>;
 }
 
+/** The line under the title; a line that appears or changes after the first frames fades in. */
+function Status({ text, boot }: { text: string; boot: boolean }) {
+  const [fade] = useState(!boot);
+  return <p className={fade ? 'ws-status ws-in' : 'ws-status'}>{text}</p>;
+}
+
+/**
+ * "Sign in with GitHub", and under it a tooltip for people who will not sign in here. It stays while the pointer is
+ * over it; Escape closes it until the pointer or the focus leaves the button.
+ */
+function SignIn({ href }: { href: string }) {
+  const [closed, setClosed] = useState(false);
+  const [over, setOver] = useState(false);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!over && !focused) {
+      setClosed(false);
+      return;
+    }
+    if (closed) return;
+    const listener = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setClosed(true);
+    };
+    document.addEventListener('keydown', listener, true);
+    return () => document.removeEventListener('keydown', listener, true);
+  }, [over, focused, closed]);
+  return (
+    <span className={closed ? 'ws-signin-wrap closed' : 'ws-signin-wrap'} onPointerEnter={() => setOver(true)} onPointerLeave={() => setOver(false)}>
+      <a className="button small" href={href} aria-describedby="ws-signin-tip" onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
+        <span>Sign in{' '}<span className="ws-wide">with GitHub</span></span>
+      </a>
+      <span className="ws-signin-tip" id="ws-signin-tip" role="tooltip">or comment directly on GitHub</span>
+    </span>
+  );
+}
+
 const initialView = (): View => (new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
 const address = (hash = '') => `${location.pathname}${location.search}${hash}`;
 
@@ -611,16 +649,13 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       <button type="button" className="ws-link" onClick={() => void w.signOut()}>Sign out</button>
     </span>
   ) : (
-    <span className="ws-signin-wrap">
-      <a className="button small" href={signIn} aria-describedby="ws-signin-tip"><span>Sign in{' '}<span className="ws-wide">with GitHub</span></span></a>
-      <span className="ws-signin-tip" id="ws-signin-tip" role="tooltip">or comment directly on GitHub</span>
-    </span>
+    <SignIn href={signIn} />
   );
 
   const notes = (
     <>
       {w.offline ? (
-        <p className="ws-quiet ws-note">
+        <p className="ws-quiet ws-note ws-offline">
           <span>Votes and comments are offline.</span>
           <button type="button" className="ws-link ws-retry" disabled={live.load === 'pending'} onClick={w.retry}>Try again</button>
         </p>
@@ -646,6 +681,11 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   else if (shown.kind === 'decisions') detail = <DecisionsPlace ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'latest') detail = <LatestPlace ctx={ctx} onBack={back} notes={notes} />;
 
+  // The place in the first frame is drawn where it stands: it never runs its entrance afterwards. A place opened
+  // later rises in as before.
+  const firstPlace = useRef<string | null>(null);
+  if (boot && !isHome) firstPlace.current = formatHash(shown);
+  else if (!boot && firstPlace.current !== null && firstPlace.current !== formatHash(shown)) firstPlace.current = null;
   const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', canDecide ? 'ws-owner' : '', lifting ? 'ws-lifting' : '', held ? 'ws-held' : '',
     arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : '', arrivedOwner ? 'ws-arr-o' : ''].filter(Boolean).join(' ');
   return (
@@ -655,7 +695,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
         <section className="ws-top joint">
           <div className="ws-head">
             <h1>Workshop</h1>
-            <p className="ws-status">{statusLine(plan.areas)}</p>
+            <Status key={statusLine(plan.areas)} text={statusLine(plan.areas)} boot={boot} />
           </div>
           <div className="ws-top-side">
             <div className="ws-tools">
@@ -696,7 +736,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
             <a className="ws-btn ws-suggest" href="#suggested" onClick={link({ kind: 'suggested' })}>Suggest a feature</a>
           </div>
         ) : (
-          <section className="ws-detail" key={formatHash(shown)} aria-labelledby="ws-area-title">{detail}</section>
+          <section className={formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : 'ws-detail'} key={formatHash(shown)} aria-labelledby="ws-area-title">{detail}</section>
         )}
         <p className="sr-only" aria-live="polite">{w.announce}</p>
         {w.notice ? <p className="ws-notice" role="alert">{w.notice}</p> : null}

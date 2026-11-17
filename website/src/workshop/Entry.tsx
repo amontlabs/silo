@@ -317,7 +317,25 @@ function HistoryLine({ change, createdAt, row, repo }: { change: Change; created
 function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
   const { w } = ctx;
   // Until the first answer, the box's room is held.
-  if (w.waiting) return <div className="ws-talk" aria-busy="true"><div className="ws-ph ws-ph-box" aria-hidden="true" /></div>;
+  if (w.waiting) {
+    // Until the first answer: signed out (no session marker), the sign-in box at once and the room of the line
+    // under it; otherwise the comment box's own boxes as a placeholder.
+    return (
+      <div className="ws-talk" aria-busy="true">
+        {w.me === null ? (
+          <>
+            <div className="ws-box"><a className="ws-signin" href={ctx.signIn}>Sign in to comment</a></div>
+            <span className="ws-gh-alt ws-held" aria-hidden="true">or comment directly on GitHub<svg className="out"><use href="#out" /></svg></span>
+          </>
+        ) : (
+          <div className="ws-box ws-ph-shape" aria-hidden="true" inert>
+            <textarea tabIndex={-1} rows={1} disabled />
+            <span className="ws-btn">Comment</span>
+          </div>
+        )}
+      </div>
+    );
+  }
   if (row.issue === null || row.issue <= 0) return null;
   const n = row.issue;
   const repo = w.live.state?.repo ?? 'amontlabs/silo';
@@ -342,7 +360,7 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
       <>
         <div className="ws-box"><a className="ws-signin" href={ctx.signIn}>Sign in to comment</a></div>
         {url ? (
-          <a className="ws-gh-alt" href={url} target="_blank" rel="noopener noreferrer" title={`GitHub #${n}`}>
+          <a className="ws-gh-alt ws-late-s" href={url} target="_blank" rel="noopener noreferrer" title={`GitHub #${n}`}>
             or comment directly on GitHub<svg className="out" aria-hidden="true"><use href="#out" /></svg>
           </a>
         ) : null}

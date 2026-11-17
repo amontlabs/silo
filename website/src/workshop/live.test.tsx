@@ -65,20 +65,21 @@ describe('the first frame', () => {
     expect(screen.queryByText(/to decide/)).not.toBeInTheDocument();
   });
 
-  it('holds the suggestions\' place with two ghost rows, and says offline only for a failed load', async () => {
+  it('holds the suggestions\' place with one ghost row, and says offline only for a failed load', async () => {
     const answer = held<{ status: number; body: unknown }>();
     mockApi({ state: () => answer.promise });
     history.replaceState(null, '', '/workshop#suggested');
     render(<App data={buildData()} />);
     const section = screen.getByRole('region', { name: 'Suggested by people' });
     expect(section).toHaveAttribute('aria-busy', 'true');
-    expect(section.querySelectorAll('.ws-latest-ghost')).toHaveLength(2);
+    expect(section.querySelectorAll('.ws-ph-row')).toHaveLength(1);
+    expect(section.querySelector('.ws-ph-row .ws-votes .ws-ph-vote')).toBeInTheDocument();
     expect(screen.queryByText('Suggestions are offline.')).not.toBeInTheDocument();
     // Signed out: "Sign in to suggest" at once.
     expect(screen.getByRole('link', { name: 'Sign in to suggest' })).toBeInTheDocument();
     await act(async () => answer.release(ok(liveState())));
     expect(await screen.findByRole('button', { name: /^Share a base computer/ })).toBeInTheDocument();
-    expect(section.querySelector('.ws-latest-ghost')).toBeNull();
+    expect(section.querySelector('.ws-ph-row')).toBeNull();
     expect(section).not.toHaveAttribute('aria-busy');
   });
 
@@ -565,5 +566,84 @@ describe('the suggest form', () => {
     await waitFor(() => expect(document.querySelector('.ws[data-live="failed"]')).not.toBeNull());
     expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Kept');
     expect(screen.getByRole('button', { name: 'Suggest' })).toBeDisabled();
+  });
+});
+
+describe('the look while waiting', () => {
+  it('holds the suggest form with the form\'s own boxes while `me` is asked, out of reach', () => {
+    marker();
+    const answer = held<{ status: number; body: unknown }>();
+    mockApi({ state: () => answer.promise, routes: { 'GET me': () => answer.promise } });
+    history.replaceState(null, '', '/workshop#suggested');
+    render(<App data={buildData()} />);
+    const shape = document.querySelector('.ws-form.ws-ph-shape') as HTMLElement;
+    expect(shape).toHaveAttribute('aria-hidden', 'true');
+    expect(shape.parentElement).toHaveAttribute('aria-busy', 'true');
+    expect(shape.querySelectorAll('input, textarea')).toHaveLength(2);
+    expect(shape.querySelector('textarea')).toHaveAttribute('rows', '2');
+    for (const field of shape.querySelectorAll('input, textarea')) expect(field).toHaveAttribute('tabindex', '-1');
+    expect(screen.queryByRole('textbox', { name: 'Title' })).not.toBeInTheDocument();
+  });
+
+  it('opens an entry before the answer with "Sign in to comment" and the room of the line under it, signed out', async () => {
+    const answer = held<{ status: number; body: unknown }>();
+    mockApi({ state: () => answer.promise });
+    history.replaceState(null, '', '/workshop#computers');
+    render(<App data={buildData()} />);
+    fireEvent.click(rowButton('Create and delete a computer'));
+    const item = itemOf('Create and delete a computer');
+    expect(within(item).getByRole('link', { name: 'Sign in to comment' })).toBeInTheDocument();
+    expect(item.querySelector('.ws-gh-alt.ws-held')).toHaveAttribute('aria-hidden', 'true');
+    await act(async () => answer.release(ok(liveState())));
+    expect(await within(item).findByRole('link', { name: 'or comment directly on GitHub' })).toBeInTheDocument();
+    expect(item.querySelector('.ws-held')).toBeNull();
+  });
+
+  it('holds the comment box with its own boxes when someone may be signed in', () => {
+    marker();
+    const answer = held<{ status: number; body: unknown }>();
+    mockApi({ state: () => answer.promise, routes: { 'GET me': () => answer.promise } });
+    history.replaceState(null, '', '/workshop#computers');
+    render(<App data={buildData()} />);
+    fireEvent.click(rowButton('Create and delete a computer'));
+    const shape = itemOf('Create and delete a computer').querySelector('.ws-box.ws-ph-shape') as HTMLElement;
+    expect(shape.querySelector('textarea')).toHaveAttribute('rows', '1');
+    expect(shape.querySelector('.ws-btn')).toHaveTextContent('Comment');
+  });
+
+  it('draws the place in the first frame without its entrance; a place opened later rises in', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop#computers');
+    await renderApp();
+    expect(document.querySelector('.ws-detail')).toHaveClass('ws-still');
+    await waitFor(() => expect(document.querySelector('.ws')).not.toHaveClass('ws-boot'));
+    expect(document.querySelector('.ws-detail')).toHaveClass('ws-still');
+    await userEvent.click(screen.getAllByRole('button', { name: /Full map|All areas/ })[0]);
+    await userEvent.click(part('engine'));
+    await waitFor(() => expect(document.querySelector('.ws-detail')).not.toBeNull());
+    expect(document.querySelector('.ws-detail')).not.toHaveClass('ws-still');
+  });
+
+  it('closes the sign-in tooltip with Escape until the focus leaves, without leaving the place', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop#computers');
+    await renderApp();
+    const button = screen.getByRole('link', { name: 'Sign in with GitHub' });
+    const wrap = button.closest('.ws-signin-wrap') as HTMLElement;
+    act(() => button.focus());
+    fireEvent.keyDown(button, { key: 'Escape' });
+    expect(wrap).toHaveClass('closed');
+    expect(location.hash).toBe('#computers');
+    act(() => button.blur());
+    await waitFor(() => expect(wrap).not.toHaveClass('closed'));
+    fireEvent.pointerEnter(wrap);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(wrap).toHaveClass('closed');
+    expect(location.hash).toBe('#computers');
+    fireEvent.pointerLeave(wrap);
+    await waitFor(() => expect(wrap).not.toHaveClass('closed'));
+    // With the tooltip closed or not shown, Escape goes back as before.
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => expect(location.hash).toBe(''));
   });
 });
