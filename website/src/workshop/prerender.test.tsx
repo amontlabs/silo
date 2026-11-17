@@ -23,9 +23,20 @@ function normal(html: string): string {
   return box.innerHTML;
 }
 
+/** The markup as the build makes it: without a window, a document, an address, storage or media queries. */
+function built(data = buildData()) {
+  // Undefined, any read of these throws.
+  for (const name of ['window', 'document', 'location', 'localStorage', 'matchMedia', 'history']) vi.stubGlobal(name, undefined);
+  try {
+    return prerender(data);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
 /** The built page's two containers, holding the prerendered markup. */
 function page(data = buildData()) {
-  const parts = prerender(data);
+  const parts = built(data);
   document.body.innerHTML = `<div class="ws-account-slot" id="workshop-account" data-prerendered>${parts.account}</div><main><div id="workshop-root" data-prerendered>${parts.root}</div></main>`;
   return { parts, root: document.getElementById('workshop-root') as HTMLElement, slot: document.getElementById('workshop-account') as HTMLElement };
 }
@@ -43,7 +54,7 @@ afterEach(() => {
   unmount?.();
   unmount = null;
   document.body.innerHTML = '';
-  document.documentElement.classList.remove('ws-hold');
+  document.documentElement.classList.remove('ws-hold', 'ws-bare');
 });
 
 /** Takes over the page; what the takeover leaves is read before anything else runs. */
@@ -106,21 +117,30 @@ describe('the prerendered Workshop', () => {
     expect(document.documentElement.classList.contains('ws-hold')).toBe(false);
   });
 
-  it('keeps the drawn sign-in when the page fails to render, under the plain list', () => {
+  it.each([false, true])('keeps the drawn sign-in, shown, when the page fails to render (session marker: %s)', (marker) => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    if (marker) document.documentElement.classList.add('ws-session');
     const data = buildData();
     const { root, slot } = page(data);
     const Broken = () => { throw new Error('broken'); };
     take(root, slot, <Boundary data={data}><Broken /></Boundary>);
     expect(root.querySelector('.ws-plain h1')?.textContent).toBe('Workshop');
     expect(slot.querySelectorAll('.ws-signin-wrap')).toHaveLength(1);
+    // ws-bare lifts the session marker's placeholder (workshop.css): the drawn link shows.
+    expect(document.documentElement.classList.contains('ws-bare')).toBe(true);
+    document.documentElement.classList.remove('ws-session');
+  });
+
+  it('does not mark the page bare when the script gives it an account', () => {
+    mockApi({ state: () => new Promise(() => {}) });
+    const data = buildData();
+    const { root, slot } = page(data);
+    take(root, slot, workshop(data, slot));
+    expect(document.documentElement.classList.contains('ws-bare')).toBe(false);
   });
 
   it('reads nothing of a browser at build time', () => {
-    // Undefined, any read of these throws: the build has no window, document, address, storage or media queries.
-    for (const name of ['window', 'document', 'location', 'localStorage', 'matchMedia', 'history']) vi.stubGlobal(name, undefined);
-    const parts = prerender(buildData());
-    vi.unstubAllGlobals();
+    const parts = built();
     expect(parts.root).toContain('ws is-sheet v-map ws-boot');
     expect(parts.account).toContain('Sign in');
   });

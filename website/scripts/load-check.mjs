@@ -9,7 +9,8 @@
 // its first frame, and the owner signed in through the fake GitHub's page (the real session marker), whose
 // second visit has the login and the owner's words in its first frame.
 // Last, with the page's script held, what the build drew into the page: the plain view in the first painted
-// frame and the script taking over without a move; at an area's address, the plain map never painted.
+// frame and the script taking over without a move; at an area's address, the plain map never painted; on a
+// second visit, the remembered state drawn at the takeover without moving anything under the title row.
 // It exits non-zero when the footer rule fails, a first frame lacks what it must hold, or a run's layout shifts
 // add up to more than SHIFT_BUDGET.
 // It drives Playwright's own browser: `npx playwright-core install chromium-headless-shell` once.
@@ -352,9 +353,10 @@ function recordFrames() {
     const box = node.getBoundingClientRect();
     return box.width > 0 && box.height > 0 && getComputedStyle(node).visibility === 'visible';
   };
-  const boxes = () => Object.fromEntries(['.ws-top', '.ws-swap-map', '.ws-foot', '#workshop-account'].map((selector) => {
+  // To the hundredth of a pixel, so a move of half a pixel shows.
+  const boxes = () => Object.fromEntries(['.ws-top', '.ws-swap-map', '.ws-under', '.ws-foot', '#workshop-account'].map((selector) => {
     const box = document.querySelector(selector)?.getBoundingClientRect();
-    return [selector, box ? [box.top + scrollY, box.left, box.width, box.height].map(Math.round) : null];
+    return [selector, box ? [box.top + scrollY, box.left, box.width, box.height].map((value) => Math.round(value * 100) / 100) : null];
   }));
   const step = () => {
     if (document.body && !document.documentElement.classList.contains('fonts-pending')) {
@@ -377,9 +379,12 @@ function recordFrames() {
   window.__frames = state;
 }
 
-/** One load at 1440x900 with the script held: the frames until it has taken over, the footer rule meanwhile. */
-async function drawn(browser, options, place) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
+/**
+ * One load with the script held (1440x900 unless a context is given): the frames until it has taken over, the
+ * footer rule meanwhile.
+ */
+async function drawn(browser, options, place, shared = null) {
+  const context = shared ?? await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
   const page = await context.newPage();
   await page.addInitScript(recordTimeline, LATE);
   await page.addInitScript(recordFrames);
@@ -394,14 +399,47 @@ async function drawn(browser, options, place) {
   await page.waitForFunction(() => window.__frames.firstMounted, null, { timeout: 30000 });
   await wait(300);
   const result = await page.evaluate(() => ({ ...window.__frames, shifts: window.__loadCheck.shifts }));
-  await context.close();
+  if (shared) await page.close();
+  else await context.close();
   return { prerendered, before, ...result };
 }
 
-const boxMoves = (from, to) => Object.keys(from).filter((selector) => {
+/** A box that moves or resizes by half a pixel or more counts. */
+const HALF = 0.5;
+const boxMoves = (from, to, only = Object.keys(from)) => only.filter((selector) => {
   const [a, b] = [from[selector], to[selector]];
-  return !a || !b || a.some((value, i) => Math.abs(value - b[i]) > SLACK);
+  if (!a && !b) return false;
+  return !a || !b || a.some((value, i) => Math.abs(value - b[i]) >= HALF);
 }).map((selector) => `${selector} ${JSON.stringify(from[selector])} → ${JSON.stringify(to[selector])}`);
+
+/**
+ * A second visit, the state remembered, with the script held: the first render draws the remembered state over
+ * the plain view the build drew, and nothing under the title row moves, to the half pixel, at 1440x900 and 390x844.
+ */
+async function drawnSecondVisit(browser, options) {
+  let passed = true;
+  for (const [width, height] of [[1440, 900], [390, 844]]) {
+    const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
+    const first = await context.newPage();
+    await first.goto(options.url);
+    await first.waitForSelector('.ws[data-live="answered"]', { timeout: 30000 });
+    await first.waitForLoadState('networkidle');
+    await first.close();
+    const r = await drawn(browser, options, { hash: '' }, context);
+    await context.close();
+    const problems = [];
+    if (!r.prerendered) problems.push('the page holds no prerendered markup');
+    const moves = r.lastDrawn && r.firstMounted ? boxMoves(r.lastDrawn.boxes, r.firstMounted.boxes, ['.ws-swap-map', '.ws-under', '.ws-foot']) : ['no frame before the takeover'];
+    const top = r.lastDrawn && r.firstMounted ? [r.lastDrawn.boxes['.ws-top'], r.firstMounted.boxes['.ws-top']] : null;
+    if (top && Math.abs(top[0][0] + top[0][3] - (top[1][0] + top[1][3])) >= HALF) moves.unshift(`the title row's bottom ${top[0][0] + top[0][3]} → ${top[1][0] + top[1][3]}`);
+    if (moves.length) problems.push(`moved at the takeover: ${moves.join(', ')}`);
+    console.log(`${`${width}x${height}`.padEnd(10)} plain view, second visit (state remembered)
+  script took over at ${r.firstMounted?.at} ms: ${moves.length ? 'moved' : 'nothing under the title row moved'}
+  ${problems.length ? `FAIL: ${problems.join('; ')}` : 'ok'}`);
+    passed = !problems.length && passed;
+  }
+  return passed;
+}
 
 /** The plain address: the map and sign-in in the first painted frame, the footer rule, no move at the takeover. */
 async function drawnPlain(browser, options) {
@@ -459,6 +497,7 @@ async function main() {
     passed = (await visits(browser, options, list[1])) && passed;
     passed = (await drawnPlain(browser, options)) && passed;
     passed = (await drawnArea(browser, options, list[1])) && passed;
+    passed = (await drawnSecondVisit(browser, options)) && passed;
   } finally {
     await browser.close();
   }

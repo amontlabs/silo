@@ -9,10 +9,16 @@ export function takeOver(root: HTMLElement, slot: Element | null, page: ReactNod
   const drawn = slot?.hasAttribute('data-prerendered') ? [...slot.childNodes] : [];
   // React empties the root when it commits its first render; flushSync commits it before this returns.
   flushSync(() => createRoot(root).render(page));
-  // Kept when the page failed and nothing replaced it: the sign-in link still works without the script.
-  if (slot && slot.childNodes.length > drawn.length) for (const node of drawn) node.remove();
   root.removeAttribute('data-prerendered');
-  slot?.removeAttribute('data-prerendered');
   // The address's own view is now drawn: nothing the build drew is held hidden any more (workshop/index.html).
   document.documentElement.classList.remove('ws-hold');
+  if (!slot) return;
+  if (slot.childNodes.length > drawn.length) {
+    for (const node of drawn) node.remove();
+    slot.removeAttribute('data-prerendered');
+  } else if (drawn.length) {
+    // The script gave the page no account (it failed to render, under the plain list): the page keeps the drawn
+    // sign-in, shown with or without the session marker, as when the script never came (ws-bare, workshop.css).
+    document.documentElement.classList.add('ws-bare');
+  }
 }

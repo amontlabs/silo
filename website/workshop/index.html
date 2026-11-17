@@ -22,14 +22,19 @@
     <script>
       // The built page holds the plain view's markup. At any other address (an area, Order, a sign-in that
       // failed), what is under the title row stays hidden, its room kept, until the script draws that place, so
-      // no frame shows the plain map first. It shows anyway when a script fails to load or after 4 s.
-      if (location.hash.length > 1 || location.search) {
+      // no frame shows the plain map first. When a script fails to load, or the script has not taken over after
+      // 4 s, the page stays as the build drew it: everything shows (ws-bare), the drawn sign-in included.
+      (() => {
         const root = document.documentElement;
-        const reveal = () => root.classList.remove('ws-hold');
-        root.classList.add('ws-hold');
-        setTimeout(reveal, 4000);
-        addEventListener('error', (event) => { if (event.target instanceof HTMLScriptElement) reveal(); }, true);
-      }
+        const bare = () => {
+          if (!document.querySelector('#workshop-root[data-prerendered]') && document.readyState !== 'loading') return;
+          root.classList.remove('ws-hold');
+          root.classList.add('ws-bare');
+        };
+        if (location.hash.length > 1 || location.search) root.classList.add('ws-hold');
+        setTimeout(bare, 4000);
+        addEventListener('error', (event) => { if (event.target instanceof HTMLScriptElement) bare(); }, true);
+      })();
     </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -133,7 +138,7 @@
       </header>
       <main id="main" class="workshop">
         <div id="workshop-root"></div>
-        <noscript><p class="ws-quiet">Voting, commenting and opening an area need JavaScript.</p></noscript>
+        <noscript><p class="ws-quiet ws-noscript">Opening an area or a list, switching between Map and Order, voting, commenting, suggesting a feature and choosing a color theme need JavaScript.</p></noscript>
       </main>
       <footer class="ws-foot">
         <a href="https://github.com/amontlabs/silo">Source code ↗</a>

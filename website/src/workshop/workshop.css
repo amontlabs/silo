@@ -38,7 +38,9 @@
 /* ---- top: the title and where the build is ---- */
 .ws-top { display: flex; align-items: flex-end; gap: 24px; padding: 30px 24px 18px; }
 .ws-top h1 { font: italic 40px/1.1 var(--serif); letter-spacing: -1.4px; color: var(--accent-ink); }
-.ws-status { color: var(--muted); margin-top: 8px; min-height: 22px; }
+.ws-status { color: var(--muted); margin-top: 8px; min-height: 1lh; }
+/* For visitors without JavaScript, under the plan, in the page's column. */
+.ws-noscript { padding: 0 24px 28px; }
 .ws-top-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 .ws-top { position: relative; }
 .ws-tools { display: flex; align-items: center; gap: 16px; min-height: 28px; }
@@ -369,6 +371,7 @@
   .ws-key { justify-content: flex-start; }
 }
 @media (max-width: 760px) {
+  .ws-noscript { padding: 0 16px 24px; }
   .ws-top { padding: 26px 16px 16px; }
   .ws-top h1 { font-size: 34px; }
   .ws-tools { top: 26px; right: 16px; flex-direction: column; align-items: flex-end; gap: 0; }
@@ -534,10 +537,12 @@
 .ws-ph-notes .ws-ph { height: 14px; width: min(100%, 520px); }
 .ws-ph-notes .ws-ph:last-child { width: min(70%, 360px); }
 .ws-ph-account { width: 100%; height: 22px; }
-/* The built page draws sign-in in the header (prerender.tsx). With the session marker, before the script has
-   taken over, the slot shows the account's placeholder instead: the same box as .ws-ph.ws-ph-account. */
-.ws-session #workshop-account[data-prerendered] > .ws-signin-wrap { display: none; }
-.ws-session #workshop-account[data-prerendered]::before {
+/* The built page draws sign-in in the header (prerender.tsx). With the session marker, while the script may still
+   take over, the slot shows the account's placeholder instead: the same box as .ws-ph.ws-ph-account. Once the
+   page is known to stay without the script's account (ws-bare: see workshop/index.html and takeover.ts), the
+   drawn sign-in shows; it is a plain link. */
+.ws-session:not(.ws-bare) #workshop-account[data-prerendered] > .ws-signin-wrap { display: none; }
+.ws-session:not(.ws-bare) #workshop-account[data-prerendered]::before {
   content: ''; display: block; width: 100%; height: 22px; border-radius: 3px;
   background: color-mix(in srgb, var(--line) 40%, transparent); animation: ws-pulse 1.6s ease-in-out infinite;
 }

@@ -127,7 +127,9 @@ built page at 1440 × 900: on the plain view the first painted frame must hold
 the map and the sign-in button, the footer rule must hold, and the title row,
 the map, the footer and the account slot must not move and no layout shift
 happen when the script takes over; on the first area the plain map must never
-be painted and the area must be in the first frame after the takeover.
+be painted and the area must be in the first frame after the takeover; and on a
+second visit, the state remembered, nothing under the title row may move by
+half a pixel or more when the script takes over, at 1440 × 900 and 390 × 844.
 `npm test` does not run it.
 
 ## Test
@@ -170,18 +172,23 @@ nothing of `window`, `document`, `location`, `localStorage` or `matchMedia`
 
 - The script takes over in one synchronous step (`takeover.ts`): React renders
   over the markup and commits before the next frame, and the drawn sign-in
-  leaves the slot in the same task (it stays if the page fails to render, under
-  the plain list). On a first visit without a session at the plain address the
-  first render is the same markup (`prerender.test.tsx` compares them); with
-  something remembered it differs on purpose.
+  leaves the slot in the same task. On a first visit without a session at the
+  plain address the first render is the same markup as the build makes it
+  (`prerender.test.tsx` compares them); with something remembered it differs
+  on purpose.
 - With the session marker (`ws-session` on `<html>`), CSS shows the account's
-  placeholder in the slot instead of the drawn sign-in.
+  placeholder in the slot instead of the drawn sign-in, while the script may
+  still take over.
 - At any other address (a hash, `?view=order`, `?signin=failed`) the head script
   sets `ws-hold` before first paint: what is under the title row stays hidden
   with its room kept, and the footer with it, until the script has drawn that
-  place. They show anyway when a script fails to load or after 4 s.
-- Without JavaScript the plan is readable from the page, and a line says that
-  voting, commenting and opening an area need it.
+  place.
+- When the script gives the page no account (a script fails to load, it has not
+  taken over after 4 s, or the page fails to render and shows the plain list),
+  `ws-bare` goes on `<html>`: everything the build drew shows, and the drawn
+  "Sign in with GitHub" replaces the placeholder, marker or not.
+- Without JavaScript the plan is readable from the page, and a line under it
+  says what needs JavaScript.
 - The page preloads every face it waits for and shows as soon as they are in
   (at most 1.2 s), without waiting for its own script: the check runs right
   after the fonts' stylesheet.

@@ -50,7 +50,7 @@ test('the header holds sign-in with its tooltip, returning to the plain address'
 });
 
 test('without JavaScript a line says what needs it, and every face the page waits for is preloaded', () => {
-  assert.match(html, /<noscript><p class="ws-quiet">Voting, commenting and opening an area need JavaScript.<\/p><\/noscript>/);
+  assert.match(html, /<noscript><p class="ws-quiet ws-noscript">Opening an area or a list, switching between Map and Order, voting, commenting, suggesting a feature and choosing a color theme need JavaScript.<\/p><\/noscript>/);
   for (const face of ['serif-400-italic', 'serif-400-normal', 'sans-400-normal', 'mono-400-normal']) {
     assert.match(html, new RegExp(`<link rel="preload" href="/fonts/ibm-plex-${face}.woff2" as="font"`), face);
   }
