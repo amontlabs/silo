@@ -201,6 +201,8 @@ describe('words', () => {
     const first = await renderApp();
     expect(within(itemOf('Run a command')).getByRole('link', { name: /4 votes/ })).toHaveAttribute('title', 'Sign in to vote');
     first.unmount();
+    // A first visit: nothing remembered.
+    localStorage.clear();
     mockApi({ state: () => refused(503, 'not configured') });
     history.replaceState(null, '', '/workshop#suggested');
     await renderApp();

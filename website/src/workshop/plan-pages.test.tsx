@@ -433,6 +433,8 @@ describe('Latest', () => {
     const first = await renderApp();
     expect(await screen.findByText('Nothing yet.')).toBeInTheDocument();
     first.unmount();
+    // A first visit: nothing remembered.
+    localStorage.clear();
     mockApi({ state: () => refused(503, 'not configured') });
     await renderApp();
     expect(await screen.findByText('Latest is offline.')).toBeInTheDocument();

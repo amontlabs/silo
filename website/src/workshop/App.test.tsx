@@ -145,7 +145,7 @@ describe('an entry', () => {
     expect(screen.getByText('Make a Linux computer.')).toBeInTheDocument();
     expect(screen.getByText('Not decided yet.')).toBeInTheDocument();
     expect(await screen.findByText('Keep stop separate from pause.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'or comment on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/12');
+    expect(screen.getByRole('link', { name: 'or comment directly on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/12');
     expect(calls.some((call) => call.path === 'issue' && call.method === 'GET')).toBe(true);
     expect(location.hash).toBe('#computers/computers');
     expect(document.querySelector('video')).toBeNull();
@@ -275,10 +275,11 @@ describe('when the API is missing or slow', () => {
       await renderApp();
       expect(screen.getAllByText('Votes and comments are offline.').length).toBeGreaterThan(0);
       expect(part('engine')).toHaveClass('s-next');
-      expect(screen.queryByText(/Sign in/)).not.toBeInTheDocument();
-      expect(screen.queryByText('polarzero')).not.toBeInTheDocument();
+      // Who is signed in does not depend on the live state; deciding does.
+      expect(screen.getByText('polarzero')).toBeInTheDocument();
       expect(screen.queryByText(/^Decisions/)).not.toBeInTheDocument();
-      expect(screen.queryByRole('link', { name: 'Suggest a feature' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/to decide/)).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Suggest a feature' })).toBeInTheDocument();
       await userEvent.click(part('computers'));
       expect(screen.queryByText(/^👍/)).not.toBeInTheDocument();
       await userEvent.click(rowButton('Create and delete a computer'));

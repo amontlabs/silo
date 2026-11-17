@@ -92,6 +92,8 @@ export interface LiveState {
   fetchedAt: string;
   issues: Record<string, LiveIssue>;
   latest?: LiveLatest[];
+  /** Set when the snapshot is older than the server's freshness bound, or a cache served it stale. */
+  old?: boolean;
 }
 
 export type RowKind = 'entry' | 'suggestion' | 'decided';

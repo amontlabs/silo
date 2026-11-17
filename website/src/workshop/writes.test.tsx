@@ -387,7 +387,7 @@ describe('writes the server has not confirmed', () => {
     expect(localStorage.getItem('silo-workshop-writes')).toContain('take');
   });
 
-  it('keep the page\'s own writes for six minutes over an older state', async () => {
+  it('keep the page\'s own writes over an older state, not over one fetched well after them', async () => {
     const time = clock();
     const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#computers/computers');
@@ -447,7 +447,7 @@ describe('writes the server has not confirmed', () => {
     history.replaceState(null, '', '/workshop#computers/exec');
     await renderApp();
     await screen.findByText('Sign in to comment');
-    expect(screen.getByRole('link', { name: 'or comment on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
+    expect(screen.getByRole('link', { name: 'or comment directly on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
     expect(await screen.findByRole('link', { name: 'Earlier comments on GitHub ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
   });
 });

@@ -2,9 +2,10 @@
 // and what the page remembers of its own writes. Navigation lives in App and reaches in through `nav`.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, MutableRefObject } from 'react';
-import { api, ApiError } from './api';
+import { api, ApiError, hasSessionHint } from './api';
 import type { Comment, IssueDetail, Me } from './api';
-import { applyKept, keep, keptComments } from './writes';
+import { recallPerson, recallState, rememberPerson, rememberState } from './memory';
+import { afterAnswer, applyKept, keep, keptComments } from './writes';
 import { allRows, buildPlan } from './plan';
 import type { BuildData, LiveIssue, LiveState, Notes, Row, Verdict } from './plan';
 
@@ -14,7 +15,18 @@ const NOTICE_MS = 8000;
 /** A fetch of an issue's comments this recent serves an opening. */
 const FRESH_MS = 4000;
 
-export type Live = { status: 'loading' | 'ok' | 'unavailable'; state: LiveState | null };
+/** How long the page waits before asking `state` a second time after a failure. */
+export const loadConfig = { retryMs: 1500 };
+/** A state fetched this long before now is old: the page asks for a fresh one. */
+const OLD_MS = 2 * 60_000;
+
+/**
+ * Two separate things: the state the page shows (remembered, or from the server; null when there is none yet), and
+ * how this visit's load stands. Whatever shows numbers reads `state`, whatever the load's status.
+ */
+export type Live = { load: 'pending' | 'answered' | 'failed'; state: LiveState | null };
+/** `me` as answered on this visit: not yet, failed, or the answer. */
+type MeAnswer = Me | null | undefined | 'error';
 export type Detail = IssueDetail | 'loading' | 'error';
 
 /** What the writes need from navigation. */
@@ -45,8 +57,16 @@ function verdictPatch(verdict: Verdict | null): Partial<LiveIssue> {
 }
 
 export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, nav: MutableRefObject<Nav>, loadNotes: () => Promise<Notes> = () => Promise.resolve({})) {
-  const [live, setLive] = useState<Live>({ status: 'loading', state: null });
-  const [me, setMe] = useState<Me | null | undefined>(undefined);
+  const [live, setLive] = useState<Live>(() => {
+    const remembered = recallState(Date.now());
+    return { load: 'pending', state: remembered ? applyKept(remembered, Date.now()) : null };
+  });
+  const [answer, setMe] = useState<MeAnswer>(undefined);
+  // The person remembered from the last visit, for display until `me` answers; without the session marker, nobody.
+  const [remembered] = useState(recallPerson);
+  const meKnown = answer !== undefined && answer !== 'error';
+  /** Who the page shows as signed in: `me`'s answer, else the remembered person; undefined while not known. */
+  const me: Me | null | undefined = meKnown ? answer : !hasSessionHint() ? null : remembered ?? (answer === 'error' ? null : undefined);
   const [details, setDetails] = useState<Record<number, Detail>>({});
   const [pending, setPending] = useState<ReadonlySet<number>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
@@ -63,26 +83,83 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const [signinFailed] = useState(takeSigninFailure);
   const pendingRef = useRef(new Set<number>());
 
-  const liveOk = live.status === 'ok';
+  /** A state is shown, from memory or from the server. */
+  const liveOk = live.state !== null;
+  /** Nothing is shown yet and the load is under way: what will come has a placeholder. */
+  // After a failed load, the page says it is offline until a load answers; trying again keeps that look.
+  const [offline, setOffline] = useState(false);
+  const waiting = !liveOk && live.load === 'pending' && !offline;
   const liveRefOk = useRef(liveOk);
   liveRefOk.current = liveOk;
+  /** The owner's marks and words show for someone the page shows as deciding, remembered or answered. */
   const canDecide = liveOk && me?.canDecide === true;
+  /** A verdict is sent only once `me` answered on this visit that this person decides. */
+  const mayDecide = liveOk && meKnown && answer?.canDecide === true;
   const plan = useMemo(() => buildPlan(data, live.state), [data, live.state]);
   const rows = useMemo(() => allRows(plan), [plan]);
   const rowByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
 
-  useEffect(() => {
-    let cancelled = false;
-    api.state().then(
-      (state) => { if (!cancelled) setLive({ status: 'ok', state: applyKept({ ...state, issues: state.issues ?? {} }, Date.now()) }); },
-      () => { if (!cancelled) setLive({ status: 'unavailable', state: null }); },
-    );
-    api.me().then(
-      (who) => { if (!cancelled) setMe(who); },
-      () => { if (!cancelled) setMe(null); },
-    );
-    return () => { cancelled = true; };
+  // The load: `state` once, again after a failure (not when the server has no live state at all), and once more
+  // with `fresh=1` when the answer is old. An answer is shown unless the state shown is newer.
+  const mounted = useRef(true);
+  const loading = useRef(false);
+  const show = useCallback((state: LiveState) => {
+    setLive((current) => {
+      const next = afterAnswer(current.state, state, Date.now());
+      return next === current.state ? current : { ...current, state: next };
+    });
   }, []);
+  const askMe = useCallback(() => {
+    api.me().then(
+      (who) => { if (mounted.current) setMe(who); },
+      () => { if (mounted.current) setMe((current) => (current === undefined ? 'error' : current)); },
+    );
+  }, []);
+  const load = useCallback(async () => {
+    if (loading.current) return;
+    loading.current = true;
+    setLive((current) => (current.load === 'pending' ? current : { ...current, load: 'pending' }));
+    let first: LiveState | null = null;
+    try {
+      first = await api.state();
+    } catch (error) {
+      if (!(error instanceof ApiError && error.code === 'not_configured')) {
+        await new Promise((resolve) => setTimeout(resolve, loadConfig.retryMs));
+        if (mounted.current) first = await api.state().catch(() => null);
+      }
+    }
+    loading.current = false;
+    if (!mounted.current) return;
+    if (!first) {
+      setLive((current) => ({ ...current, load: 'failed' }));
+      setOffline(true);
+      return;
+    }
+    setOffline(false);
+    show(first);
+    setLive((current) => ({ ...current, load: 'answered' }));
+    const old = first.old === true || Date.now() - Date.parse(first.fetchedAt) > OLD_MS;
+    if (old) api.state(true).then((fresh) => { if (mounted.current) show(fresh); }, () => {});
+  }, [show]);
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    askMe();
+    return () => { mounted.current = false; };
+  }, []);
+  /** "Try again" after a failed load; `me` is asked again too when it failed. */
+  const retry = useCallback(() => {
+    void load();
+    if (answer === 'error') askMe();
+  }, [load, askMe, answer]);
+
+  // What the page shows is what the next visit shows first. The person is forgotten once known to be signed out.
+  useEffect(() => {
+    if (live.state) rememberState(live.state);
+  }, [live.state]);
+  useEffect(() => {
+    if (answer === null || (answer !== undefined && answer !== 'error')) rememberPerson(answer);
+  }, [answer]);
 
   useEffect(() => {
     if (!notice) return;
@@ -176,6 +253,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
 
   function signedOut() {
     setMe(null);
+    rememberPerson(null);
     setVotes({});
     setNotice('Sign in again.');
   }
@@ -210,7 +288,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   /** The one guard every verdict passes, by key or by click. */
   const verdictReady = (row: Row): boolean => {
     const n = row.issue;
-    return canDecide && n !== null && n > 0 && Boolean(live.state?.issues[n]) && !pendingRef.current.has(n)
+    return mayDecide && n !== null && n > 0 && Boolean(live.state?.issues[n]) && !pendingRef.current.has(n)
       && nav.current.openedAt.has(row.key) && Date.now() - (nav.current.openedAt.get(row.key) as number) >= OPEN_GUARD_MS;
   };
 
@@ -325,6 +403,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     try {
       await api.logout();
       setMe(null);
+      rememberPerson(null);
       setVotes({});
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) signedOut();
@@ -333,7 +412,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   };
 
   return {
-    live, liveOk, me, canDecide, plan, rowByKey, details, prefetch, notes, wantNotes, fetchNow, pending, pendingRef, saving, sending, votePending,
+    live, liveOk, waiting, offline, me, meKnown, canDecide, mayDecide, retry, plan, rowByKey, details, prefetch, notes, wantNotes, fetchNow, pending, pendingRef, saving, sending, votePending,
     votes, suggestionsSending, notice, rowNotice, setRowNotice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, verdictReady, sendVerdict, sendComment, toggleVote,
     sendSuggestion, signOut,

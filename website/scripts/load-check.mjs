@@ -2,10 +2,14 @@
 // Loads the Workshop in a real browser at several window sizes and places, and checks what a first visit shows.
 //   node scripts/load-check.mjs [url] [--slow-api <ms>] [--slow-script <ms>] [--owner]
 // The url defaults to the `workshop:dev --fake` server. --slow-api and --slow-script hold back the API's answers
-// and the page's script; --owner loads the page as the signed-in owner.
-// Each run prints when the page first painted, when each late item appeared and every layout shift, and checks
-// the footer rule before the script has run and once everything has loaded. It exits non-zero when the rule
-// fails or a layout shift is recorded.
+// and the page's script; --owner fakes the `me` answer as the owner.
+// Each run prints when the page first painted, when each late item appeared, what the page's first frame held
+// and every layout shift, and checks the footer rule before the script has run and once everything has loaded.
+// Then come the visits that need a browser profile: a second visit, which draws what the first one showed in
+// its first frame, and the owner signed in through the fake GitHub's page (the real session marker), whose
+// second visit has the login and the owner's words in its first frame.
+// It exits non-zero when the footer rule fails, a first frame lacks what it must hold, or a run's layout shifts
+// add up to more than SHIFT_BUDGET.
 // It drives Playwright's own browser: `npx playwright-core install chromium-headless-shell` once.
 import { chromium } from 'playwright-core';
 
@@ -18,6 +22,8 @@ const LATE = {
 };
 // Room for rounding between boxes, in CSS pixels.
 const SLACK = 1;
+/** A run fails when its layout shifts add up to more than this (the key gains an item when the state arrives). */
+const SHIFT_BUDGET = 0.01;
 
 function parseArgs(argv) {
   const options = { url: 'http://127.0.0.1:4174/workshop', slowApi: 0, slowScript: 0, owner: false };
@@ -39,7 +45,26 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function recordTimeline(late) {
   const seen = {};
   const shifts = [];
+  // What the page's first frame holds: read when the app's first render is in the document, before it is painted.
+  let first = null;
+  const frame = () => {
+    const words = [...document.querySelectorAll('.ws-detail .ws-word')].filter((node) => node.textContent === 'to decide').length;
+    const rows = [...document.querySelectorAll('.ws-detail .ws-item')].filter((row) => row.querySelector('.ws-votes'));
+    return {
+      at: Math.round(performance.now()),
+      signIn: Boolean(document.querySelector('#workshop-account a.button')),
+      suggest: Boolean(document.querySelector('.ws-suggest')),
+      rows: rows.length,
+      rowsWithPlaceholder: rows.filter((row) => row.querySelector('.ws-votes .ws-ph-vote')).length,
+      votes: document.querySelectorAll('.ws-vote').length,
+      login: document.querySelector('#workshop-account .ws-login')?.textContent ?? null,
+      toDecideLink: document.querySelector('.ws-loglink b')?.textContent ?? null,
+      toDecideWords: words,
+    };
+  };
   const check = () => {
+    if (!first && document.querySelector('.ws')) first = frame();
+    window.__loadCheck.first = first;
     for (const [name, selector] of Object.entries(late)) {
       if (seen[name] === undefined && document.querySelector(selector)) seen[name] = Math.round(performance.now());
     }
@@ -56,7 +81,7 @@ function recordTimeline(late) {
       shifts.push({ at: Math.round(entry.startTime), value: Number(entry.value.toFixed(4)), nodes });
     }
   }).observe({ type: 'layout-shift', buffered: true });
-  window.__loadCheck = { seen, shifts };
+  window.__loadCheck = { seen, shifts, first };
 }
 
 /**
@@ -123,9 +148,9 @@ async function slowApi(page, delay, owner) {
 }
 
 /** One load of one place at one size: the rule before the script runs, then the timeline and the rule after. */
-async function run(browser, options, [width, height], place) {
-  const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
-  if (options.owner) await context.addCookies([{ name: 'workshop-hint', value: '1', url: options.url }]);
+async function run(browser, options, [width, height], place, shared = null) {
+  const context = shared ?? await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
+  if (options.owner && !shared) await context.addCookies([{ name: 'workshop-hint', value: '1', url: options.url }]);
   const page = await context.newPage();
   await page.addInitScript(recordTimeline, LATE);
   await slowApi(page, options.slowApi, options.owner);
@@ -145,22 +170,80 @@ async function run(browser, options, [width, height], place) {
     ...window.__loadCheck,
     paint: Math.round(performance.getEntriesByName('first-paint')[0]?.startTime ?? NaN),
   }));
-  await context.close();
+  if (shared) await page.close();
+  else await context.close();
   return { size: `${width}x${height}`, place: place.name, before, after, ...timeline };
 }
 
-function report(result) {
+/** What a first frame must hold, by the kind of visit; returns the problems. */
+function firstFrame(first, wants) {
+  if (!first) return ['the page never rendered'];
+  const problems = [];
+  if (wants.signIn && !first.signIn) problems.push('no sign-in button');
+  if (wants.suggest && !first.suggest) problems.push('no "Suggest a feature"');
+  if (wants.placeholders && (first.rows === 0 || first.rowsWithPlaceholder !== first.rows)) problems.push(`${first.rowsWithPlaceholder} of ${first.rows} rows have a vote placeholder`);
+  if (wants.votes && first.votes === 0) problems.push('no votes');
+  if (wants.login && first.login !== wants.login) problems.push(`login ${JSON.stringify(first.login)}, not ${wants.login}`);
+  if (wants.toDecide && !/^\d+ to decide$/.test(first.toDecideLink ?? '')) problems.push('no "N to decide"');
+  if (wants.toDecide && first.toDecideWords === 0) problems.push('no "to decide" words in the rows');
+  return problems;
+}
+
+function report(result, wants = {}) {
   const late = Object.keys(LATE).map((name) => `${name} ${result.seen[name] === undefined ? '—' : `${result.seen[name]} ms`}`).join(', ');
   const rule = (problems) => (problems.length ? `FAIL: ${problems.join('; ')}` : 'ok');
+  const first = result.first;
+  const held = first ? [
+    first.signIn ? 'sign-in' : null, first.suggest ? 'Suggest a feature' : null,
+    first.rows ? `${first.rowsWithPlaceholder}/${first.rows} rows with a vote placeholder` : null,
+    first.votes ? `${first.votes} votes` : null, first.login ? `login ${first.login}` : null,
+    first.toDecideLink ? `"${first.toDecideLink}"` : null, first.toDecideWords ? `${first.toDecideWords} "to decide" words` : null,
+  ].filter(Boolean).join(', ') || 'nothing live' : '—';
+  const frame = firstFrame(first, wants);
+  const total = result.shifts.reduce((sum, shift) => sum + shift.value, 0);
+  const shifted = total > SHIFT_BUDGET;
   const lines = [
     `${result.size.padEnd(10)} ${result.place}`,
     `  first paint ${result.paint} ms; ${late}`,
+    `  first frame (${first?.at ?? '—'} ms): ${held}${frame.length ? ` — FAIL: ${frame.join('; ')}` : ''}`,
     `  footer before the script: ${rule(result.before)}`,
     `  footer after loading: ${rule(result.after)}`,
-    `  layout shifts: ${result.shifts.length ? result.shifts.map((shift) => `${shift.at} ms ${shift.value} (${shift.nodes.join(' ')})`).join(', ') : 'none'}`,
+    `  layout shifts: ${result.shifts.length ? `${result.shifts.map((shift) => `${shift.at} ms ${shift.value} (${shift.nodes.join(' ')})`).join(', ')}; total ${Number(total.toFixed(4))}${shifted ? ` — FAIL: over ${SHIFT_BUDGET}` : ''}` : 'none'}`,
   ];
   console.log(lines.join('\n'));
-  return !result.before.length && !result.after.length && !result.shifts.length;
+  return !result.before.length && !result.after.length && !frame.length && !shifted;
+}
+
+/** Signs in through the fake GitHub's page as `login`, in this context; the page sets the real session cookies. */
+async function signIn(context, url, login) {
+  const page = await context.newPage();
+  const origin = new URL(url).origin;
+  await page.goto(`${origin}/api/workshop/login?return=${encodeURIComponent('/workshop')}`);
+  await page.getByText(`Sign in as ${login}`).click();
+  await page.waitForURL((next) => next.origin === origin && next.pathname === '/workshop', { timeout: 30000 });
+  await page.waitForSelector('.ws-login');
+  // The visit ends once the state is shown, so the next one remembers it.
+  await page.waitForSelector('.ws[data-live="answered"]', { timeout: 30000 });
+  await page.waitForLoadState('networkidle');
+  await page.close();
+}
+
+/** The visits that need a browser profile: a second visit, and the owner's second visit after signing in. */
+async function visits(browser, options, place) {
+  const size = [1440, 900];
+  const context = () => browser.newContext({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
+  const plain = { ...options, owner: false };
+  let passed = true;
+  console.log('\nvisits in one browser profile');
+  const visitor = await context();
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, first visit` }, visitor)) }, { signIn: true, placeholders: true }) && passed;
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, second visit` }, visitor)) }, { signIn: true, votes: true }) && passed;
+  await visitor.close();
+  const owner = await context();
+  await signIn(owner, options.url, 'owner-fake');
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, owner-fake signed in, second visit` }, owner)) }, { votes: true, login: 'owner-fake', toDecide: true }) && passed;
+  await owner.close();
+  return passed;
 }
 
 /** The plain view, the first area, Latest and the suggestions. */
@@ -221,9 +304,15 @@ async function main() {
     const list = await places(browser, options.url);
     console.log(`${options.url}, API held ${options.slowApi} ms, script held ${options.slowScript} ms${options.owner ? ', as the owner' : ''}`);
     for (const size of SIZES) {
-      for (const place of list) passed = report(await run(browser, options, size, place)) && passed;
+      for (const place of list) {
+        // Every run here is a first visit: nothing is remembered, so the first frame has the placeholders and,
+        // signed out, the sign-in button and "Suggest a feature".
+        const wants = { signIn: !options.owner, suggest: place.hash === '', placeholders: place.hash === list[1].hash };
+        passed = report(await run(browser, options, size, place), wants) && passed;
+      }
     }
     passed = (await sideways(browser, options.url, list[1].hash.slice(1))) && passed;
+    passed = (await visits(browser, options, list[1])) && passed;
   } finally {
     await browser.close();
   }

@@ -34,6 +34,8 @@ type View = 'map' | 'order';
 type Focus = { kind: 'title' } | { kind: 'area'; area: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string } | { kind: 'buttons'; key: string };
 
 const LEAVE_MS = 140;
+/** How long what just arrived is marked, for its fade in (about 150 ms). */
+const ARRIVE_MS = 400;
 const ACCOUNT_WIDTH = 'silo-workshop-account-width';
 const SWAP_MS = 130;
 /** How long the map takes to fold, and an entry to open. */
@@ -86,6 +88,32 @@ function isField(target: EventTarget | null): boolean {
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
+/**
+ * True for a moment after `on` turns true, unless it was true in the first frames: what arrives then fades in.
+ * Set before the browser paints, so nothing shows a frame at full opacity first.
+ */
+function useArrival(on: boolean, boot: boolean): boolean {
+  const [arriving, setArriving] = useState(false);
+  const was = useRef(on);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useLayoutEffect(() => {
+    const flipped = on && !was.current;
+    was.current = on;
+    if (!flipped || boot) return;
+    setArriving(true);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setArriving(false), ARRIVE_MS);
+  }, [on, boot]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return arriving;
+}
+
+/** An item of the key; one that appears after the first frames fades in. */
+function KeyItem({ mark, label, boot }: { mark: string; label: string; boot: boolean }) {
+  const [fade] = useState(!boot);
+  return <li className={fade ? 'ws-in' : undefined}><i className={mark} />{label}</li>;
+}
+
 const initialView = (): View => (new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
 const address = (hash = '') => `${location.pathname}${location.search}${hash}`;
 
@@ -108,6 +136,8 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const nav = useRef<Nav>({ openKey: null, openedAt: new Map(), advanceFrom: () => {}, reopen: () => {} });
   const w = useWorkshop(data, openKey, openKeys, openings, nav, loadNotes);
   const { plan, rowByKey, live, canDecide } = w;
+  /** No state is shown and the first answer is still to come. */
+  const holding = !live.state && live.load === 'pending';
   const focusNext = useRef<Focus | null>(null);
   const wantedHash = useRef<string | null>(null);
   /** A row named by the address while the live state loads; it opens once the state is there. */
@@ -121,11 +151,13 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const navigations = useRef(0);
   /** Clears the page's held height after the map unfolds; only the next going back or unmounting cancels it. */
   const heldHeight = useRef<ReturnType<typeof setTimeout>>(undefined);
-  // Once `me` has answered, the account slot takes the width of what it holds (see workshop.css).
+  // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
     if (w.me === undefined) accountSlot.removeAttribute('data-account');
     else accountSlot.setAttribute('data-account', w.me ? 'in' : 'out');
+    if (w.me === undefined) accountSlot.setAttribute('aria-busy', 'true');
+    else accountSlot.removeAttribute('aria-busy');
     // The width this person's login and "Sign out" take: applied now when it differs from the reserved one (the
     // slot moves once, as for a stale cookie), and kept for their next visit (a convenience only).
     if (!w.me || !media('(min-width: 481px)', false)) return;
@@ -154,6 +186,13 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     return () => cancelAnimationFrame(frame);
   }, []);
   const later = (fn: () => void, ms: number) => { timers.current.push(setTimeout(fn, ms)); };
+  // What arrives after the first frames fades in where it stands: the numbers, the person, the owner's marks.
+  const arrivedState = useArrival(w.liveOk, boot);
+  const arrivedPerson = useArrival(w.me !== undefined, boot);
+  const arrivedOwner = useArrival(canDecide, boot);
+  useLayoutEffect(() => {
+    accountSlot?.classList.toggle('ws-arr-p', arrivedPerson);
+  }, [accountSlot, arrivedPerson]);
 
   // Visitors never see the decisions: the address shows them the plan.
   const shown: Place = place.kind === 'decisions' && !canDecide ? HOME : place;
@@ -389,16 +428,17 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     const canonical = formatHash(resolved.place, resolved.key);
     if (location.hash && canonical !== location.hash) history.replaceState(history.state, '', address(canonical));
     // While the live state loads, the named row waits closed: it would grow when votes and comments arrive.
-    const hold = resolved.key !== null && liveStatus.current === 'loading';
+    const hold = resolved.key !== null && holdingRef.current;
     settle(resolved.place, hold ? null : resolved.key);
     if (hold) heldOpen.current = resolved.key;
     focusNext.current = resolved.key && !hold ? { kind: 'reveal', key: resolved.key } : null;
   }, [plan, rowByKey]);
-  const liveStatus = useRef(live.status);
-  liveStatus.current = live.status;
+  const holdingRef = useRef(holding);
+  holdingRef.current = holding;
   const followRef = useRef(follow);
   followRef.current = follow;
-  useEffect(() => {
+  // The address is read before the first paint, so the first frame is already the place it names.
+  useLayoutEffect(() => {
     followRef.current();
     const listener = () => followRef.current();
     addEventListener('popstate', listener);
@@ -411,16 +451,16 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   useEffect(() => {
     if (wantedHash.current === null) return;
     if (resolveHash(wantedHash.current, plan, rowByKey)) follow();
-    else if (live.status !== 'loading') {
-      // A link to something that does not exist falls back to the plan.
+    else if (live.load !== 'pending') {
+      // A link to something that the state shown does not have falls back to the plan, once the load has ended.
       wantedHash.current = null;
       history.replaceState(history.state, '', address());
       settle(HOME, null);
     }
-  }, [plan, rowByKey, live.status, follow]);
+  }, [plan, rowByKey, live.load, follow]);
   useEffect(() => {
     const key = heldOpen.current;
-    if (live.status === 'loading' || !key) return;
+    if (holding || !key) return;
     heldOpen.current = null;
     if (!rowByKey.has(key)) return;
     nav.current.openedAt.set(key, Date.now());
@@ -431,14 +471,14 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     setOpenings((n) => n + 1);
     nav.current.openKey = key;
     focusNext.current = { kind: 'reveal', key };
-  }, [live.status, rowByKey]);
+  }, [holding, rowByKey]);
   // Once it is known that this person cannot decide, the decisions address is dropped.
   useEffect(() => {
-    if (place.kind === 'decisions' && live.status !== 'loading' && w.me !== undefined && !canDecide) {
+    if (place.kind === 'decisions' && live.load !== 'pending' && w.meKnown && !canDecide) {
       history.replaceState(history.state, '', address());
       settle(HOME, null);
     }
-  }, [place, live.status, w.me, canDecide]);
+  }, [place, live.load, w.meKnown, canDecide]);
 
   // Focus follows what the person asked for; a new area starts at its top, under the folded map.
   useLayoutEffect(() => {
@@ -533,7 +573,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       return;
     }
     if (event.key !== 'Enter' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (!canDecide || isField(event.target)) return;
+    if (!w.mayDecide || isField(event.target)) return;
     // One rule, whatever holds the focus: the open row that contains the focus, else the row opened last, takes
     // Enter only if it is armed, waits for a verdict and its verdict buttons are entirely where the person sees
     // them. Other buttons and links keep their own Enter.
@@ -562,20 +602,28 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const ctx: EntryContext = {
     w, signIn, mainAction, open: openKeys,
     onToggle: (row) => (openKeys.has(row.key) ? closeRow(row.key) : openRow(row.key)),
-    armed: (row) => armed(row.key),
+    armed: (row) => w.mayDecide && armed(row.key),
   };
-  const account = !w.liveOk || w.me === undefined ? null : w.me ? (
+  const account = w.me === undefined ? <span className="ws-ph ws-ph-account" aria-hidden="true" /> : w.me ? (
     <span className="ws-account">
       <span className="ws-login" title={w.me.login}>{w.me.login}</span>
       <button type="button" className="ws-link" onClick={() => void w.signOut()}>Sign out</button>
     </span>
   ) : (
-    <a className="button small" href={signIn}><span>Sign in{' '}<span className="ws-wide">with GitHub</span></span></a>
+    <span className="ws-signin-wrap">
+      <a className="button small" href={signIn} aria-describedby="ws-signin-tip"><span>Sign in{' '}<span className="ws-wide">with GitHub</span></span></a>
+      <span className="ws-signin-tip" id="ws-signin-tip" role="tooltip">or comment directly on GitHub</span>
+    </span>
   );
 
   const notes = (
     <>
-      {live.status === 'unavailable' ? <p className="ws-quiet ws-note">Votes and comments are offline.</p> : null}
+      {w.offline ? (
+        <p className="ws-quiet ws-note">
+          <span>Votes and comments are offline.</span>
+          <button type="button" className="ws-link ws-retry" disabled={live.load === 'pending'} onClick={w.retry}>Try again</button>
+        </p>
+      ) : null}
       {w.signinFailed ? <p className="ws-quiet ws-note">Sign-in did not complete.</p> : null}
     </>
   );
@@ -597,11 +645,12 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   else if (shown.kind === 'decisions') detail = <DecisionsPlace ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'latest') detail = <LatestPlace ctx={ctx} onBack={back} notes={notes} />;
 
-  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', canDecide ? 'ws-owner' : '', lifting ? 'ws-lifting' : '', held ? 'ws-held' : ''].filter(Boolean).join(' ');
+  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', canDecide ? 'ws-owner' : '', lifting ? 'ws-lifting' : '', held ? 'ws-held' : '',
+    arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : '', arrivedOwner ? 'ws-arr-o' : ''].filter(Boolean).join(' ');
   return (
     <>
       {accountSlot ? createPortal(account, accountSlot) : <div className="ws-account-inline">{account}</div>}
-      <div className={classes} ref={mainRef}>
+      <div className={classes} ref={mainRef} data-live={live.load}>
         <section className="ws-top joint">
           <div className="ws-head">
             <h1>Workshop</h1>
@@ -610,12 +659,12 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
           <div className="ws-top-side">
             <div className="ws-tools">
               {canDecide && firstToDecide ? (
-                <a className="ws-loglink" href={formatHash(placeOf(firstToDecide), firstToDecide.key)} onClick={(event) => { event.preventDefault(); openRow(firstToDecide.key, { focus: true }); }}>
+                <a className="ws-loglink ws-late-o" href={formatHash(placeOf(firstToDecide), firstToDecide.key)} onClick={(event) => { event.preventDefault(); openRow(firstToDecide.key, { focus: true }); }}>
                   <b>{totalToDecide} to decide</b>
                 </a>
               ) : null}
               {canDecide ? (
-                <a className="ws-loglink" href="#decisions" aria-current={shown.kind === 'decisions' ? 'page' : undefined} onClick={link({ kind: 'decisions' })}>
+                <a className="ws-loglink ws-late-o" href="#decisions" aria-current={shown.kind === 'decisions' ? 'page' : undefined} onClick={link({ kind: 'decisions' })}>
                   Decisions
                 </a>
               ) : null}
@@ -625,7 +674,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
               </div>
             </div>
             <ul className="ws-key" aria-label="Key">
-              {KEY.filter(([state]) => present.has(state)).map(([state, mark, label]) => <li key={state}><i className={mark} />{label}</li>)}
+              {KEY.filter(([state]) => present.has(state)).map(([state, mark, label]) => <KeyItem key={state} mark={mark} label={label} boot={boot} />)}
             </ul>
           </div>
         </section>
@@ -640,10 +689,10 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
             <div className="ws-under-left">
               {plan.left.length ? <a className="ws-fold-link" href="#left" onClick={link({ kind: 'left' })}>Left out · {plan.left.length}</a> : null}
               <a className="ws-fold-link" href="#latest" onClick={link({ kind: 'latest' })}>Latest</a>
-              {suggested ? <a className="ws-fold-link" href="#suggested" onClick={link({ kind: 'suggested' })}>{suggested} suggested</a> : null}
+              {suggested ? <a className="ws-fold-link ws-late-s" href="#suggested" onClick={link({ kind: 'suggested' })}>{suggested} suggested</a> : null}
               {notes}
             </div>
-            {w.liveOk && w.me !== undefined ? <a className="ws-btn ws-suggest" href="#suggested" onClick={link({ kind: 'suggested' })}>Suggest a feature</a> : null}
+            <a className="ws-btn ws-suggest" href="#suggested" onClick={link({ kind: 'suggested' })}>Suggest a feature</a>
           </div>
         ) : (
           <section className="ws-detail" key={formatHash(shown)} aria-labelledby="ws-area-title">{detail}</section>

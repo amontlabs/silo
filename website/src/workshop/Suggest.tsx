@@ -1,22 +1,26 @@
 // Suggest a feature: the form, or a way to sign in, then what people have suggested, by votes.
 import type { ReactNode } from 'react';
 import { Block, Rows } from './AreaView';
+import { ghost } from './Latest';
 import type { EntryContext } from './Entry';
 
 export function SuggestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   const { w } = ctx;
   const { suggestDraft, setSuggestDraft } = w;
   let form: ReactNode = null;
-  if (w.liveOk && w.me) {
+  if (w.me === undefined) {
+    // Who is signed in is not known yet: the form's room is held.
+    form = <div className="ws-form" aria-busy="true"><div className="ws-ph ws-ph-form" aria-hidden="true" /></div>;
+  } else if (w.me && (w.liveOk || w.waiting)) {
     form = (
-      <form className="ws-form" onSubmit={(event) => void w.sendSuggestion(event)}>
+      <form className="ws-form ws-late-p" onSubmit={(event) => void w.sendSuggestion(event)}>
         <input aria-label="Title" placeholder="Name it" maxLength={120} required value={suggestDraft.title} onChange={(event) => setSuggestDraft({ ...suggestDraft, title: event.target.value })} />
         <textarea aria-label="Why" placeholder="What should it do, and why?" maxLength={5000} rows={2} value={suggestDraft.text} onChange={(event) => setSuggestDraft({ ...suggestDraft, text: event.target.value })} />
         <div><button type="submit" className="ws-btn go" disabled={!suggestDraft.title.trim()}>Suggest</button></div>
       </form>
     );
-  } else if (w.liveOk && w.me === null) {
-    form = <div className="ws-form"><a className="ws-signin" href={ctx.signIn}>Sign in to suggest</a></div>;
+  } else if (w.me === null) {
+    form = <div className="ws-form ws-late-p"><a className="ws-signin" href={ctx.signIn}>Sign in to suggest</a></div>;
   }
   const people = w.plan.suggestions.length + w.suggestionsSending.length;
   return (
@@ -25,9 +29,10 @@ export function SuggestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack
       list={(
         <>
           {form}
-          <section aria-label="Suggested by people">
+          <section aria-label="Suggested by people" aria-busy={w.waiting || undefined}>
             <h3 className="ws-grp">Suggested by people</h3>
-            {people ? null : <p className="ws-empty">{w.liveOk ? 'Nothing yet.' : 'Suggestions are offline.'}</p>}
+            {w.waiting ? <ul className="ws-rows">{[0, 1].map(ghost)}</ul> : null}
+            {people || w.waiting ? null : <p className="ws-empty">{w.liveOk ? 'Nothing yet.' : 'Suggestions are offline.'}</p>}
             <Rows rows={w.plan.suggestions} ctx={ctx} />
             {w.suggestionsSending.length ? (
               <ul className="ws-rows">

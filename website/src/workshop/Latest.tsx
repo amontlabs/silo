@@ -24,7 +24,8 @@ function opener(ctx: EntryContext, row: Row) {
   };
 }
 
-const ghost = (index: number) => (
+/** A line that holds the place of one still to come. */
+export const ghost = (index: number) => (
   <li className="ws-item ws-latest-ghost" key={`ghost-${index}`} aria-hidden="true">
     <div className="ws-line">
       <div className="ws-row">
@@ -39,7 +40,7 @@ const ghost = (index: number) => (
 export function LatestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   const { w } = ctx;
   const items = w.plan.latest;
-  const loading = w.live.status === 'loading';
+  const loading = w.waiting;
   let empty: ReactNode = null;
   if (!items.length && !loading) empty = <p className="ws-empty">{w.liveOk ? 'Nothing yet.' : 'Latest is offline.'}</p>;
   return (
@@ -51,7 +52,7 @@ export function LatestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack:
           <ul className="ws-rows ws-latest" aria-busy={loading || undefined}>
             {loading ? Array.from({ length: LATEST_GHOSTS }, (_, index) => ghost(index)) : null}
             {items.map((item) => (
-              <li className="ws-item" key={item.key}>
+              <li className="ws-item ws-late-s" key={item.key}>
                 <div className="ws-line">
                   <a className="ws-row" href={formatHash(placeOf(item.row), item.row.key)} onClick={opener(ctx, item.row)}>
                     <i className={pipClass(item.row)} aria-hidden="true" />
