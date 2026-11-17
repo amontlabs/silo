@@ -1,4 +1,4 @@
-/* The home page. Type sizes: 12 (mono labels), 14 (interface), 17 (reading), 20 (a point), 22 (section titles), 48 (headline), plus the wordmark. */
+/* The home page. Type sizes: 12 (mono labels), 14 (interface), 17 (reading), 20 (a point), 22 (section titles), 40 (headline), plus the wordmark. */
 .title {
   font: italic 22px/1.3 var(--serif);
   letter-spacing: -0.4px;
@@ -15,7 +15,7 @@
   display: flex;
   align-items: center;
   gap: 6px 18px;
-  padding: 9px var(--gutter);
+  padding: 5px var(--gutter);
   background: var(--accent-wash);
 }
 .strip:hover {
@@ -41,44 +41,34 @@
   text-wrap: pretty;
 }
 
-/* Hero: headline, pitch, the two ways in */
+/* Hero: the headline with the pitch beside it, one short row, so the picture under it fits a laptop's window. */
 .hero {
-  padding: 60px var(--gutter) 44px;
-  text-align: center;
+  padding: 18px var(--gutter);
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 10px 40px;
 }
 .hero h1 {
-  font: italic 48px/1.14 var(--serif);
+  font: italic 40px/1.14 var(--serif);
   letter-spacing: -0.022em;
   color: var(--accent-ink);
-  max-width: 15em;
-  text-wrap: balance;
+  white-space: nowrap;
 }
+/* Balanced, so a sentence that has to wrap (a narrow window, a fallback face) never leaves one word on a line. */
 .pitch {
-  margin-top: 20px;
   font-size: 17px;
-  line-height: 1.6;
+  line-height: 1.55;
   color: var(--muted);
-  max-width: 36em;
   text-wrap: balance;
 }
 .pitch span {
   display: block;
 }
-.hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 30px;
-}
 
 /* The picture under "Git for computers.": this is its room, flow.css draws it. */
 .plate {
-  padding: 22px var(--gutter) 34px;
+  padding: 14px var(--gutter) 34px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -154,13 +144,24 @@
   white-space: nowrap;
 }
 
-@media (max-width: 900px) {
+/* Too narrow for one row: the headline goes over the pitch, centred. */
+@media (max-width: 1220px) {
   .hero {
-    padding-top: 52px;
+    flex-direction: column;
+    justify-content: center;
+    padding: 22px var(--gutter) 20px;
+    text-align: center;
   }
   .hero h1 {
-    font-size: 42px;
+    max-width: 15em;
+    white-space: normal;
+    text-wrap: balance;
   }
+  .pitch {
+    max-width: 36em;
+  }
+}
+@media (max-width: 900px) {
   .notice {
     grid-template-columns: 1fr;
     row-gap: 4px;
@@ -169,6 +170,7 @@
 @media (max-width: 640px) {
   .hero {
     padding: 46px var(--gutter) 40px;
+    gap: 20px;
   }
   .hero h1 {
     font-size: 36px;
@@ -176,9 +178,6 @@
   }
   .pitch span {
     display: inline;
-  }
-  .hero-actions {
-    margin-top: 26px;
   }
   .plate {
     padding-bottom: 26px;
@@ -193,12 +192,6 @@
   }
   .strip .button {
     margin-left: auto;
-  }
-}
-@media (max-width: 335px) {
-  .hero-actions {
-    flex-direction: column;
-    align-items: stretch;
   }
 }
 @media (prefers-reduced-motion: reduce) {
