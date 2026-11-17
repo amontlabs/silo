@@ -388,11 +388,13 @@ export function mountFlow(root: HTMLElement, options: { still: boolean; onChange
   });
   steps.forEach((li, i) => li.querySelector('button')?.addEventListener('click', () => show(wanted ? STEPS[i] : endOf(i))));
 
-  // A change of width moves the boxes, so everything is drawn again at the same moment of the flow.
-  let width = stage.clientWidth;
+  // A change of size (a wider window, larger text) moves the boxes, so everything is drawn again at the same
+  // moment of the flow. The stage keeps one size through every step, so playing never causes this.
+  let size = `${stage.clientWidth} ${stage.clientHeight}`;
   new ResizeObserver(() => {
-    if (stage.clientWidth === width) return;
-    width = stage.clientWidth;
+    const found = `${stage.clientWidth} ${stage.clientHeight}`;
+    if (found === size) return;
+    size = found;
     show(now());
   }).observe(stage);
 

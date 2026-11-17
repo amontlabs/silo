@@ -213,7 +213,11 @@ export function mountCards(list: HTMLElement, options: { still: boolean; watch?:
   /** The last card that played: the next turn goes to the first card in view after it. */
   let last = -1;
   let mayTurn = false;
-  let timer = 0;
+  /** Ends the card that is playing. */
+  let endTimer = 0;
+  /** The pause before the next turn. While it runs, no card starts on its own. */
+  let gapTimer = 0;
+  let waiting = false;
   let wasBusy = false;
 
   const busy = () => pointed >= 0 || (current >= 0 && byHand);
@@ -224,7 +228,7 @@ export function mountCards(list: HTMLElement, options: { still: boolean; watch?:
   };
 
   function stop() {
-    window.clearTimeout(timer);
+    window.clearTimeout(endTimer);
     if (current < 0) return;
     cards[current].picture.hold();
     cards[current].card.classList.remove('playing');
@@ -240,24 +244,29 @@ export function mountCards(list: HTMLElement, options: { still: boolean; watch?:
     card.style.setProperty('--dur', `${picture.end + LINGER}ms`);
     card.classList.add('playing');
     picture.play();
-    timer = window.setTimeout(() => {
+    endTimer = window.setTimeout(() => {
       card.classList.remove('playing');
       current = -1;
       byHand = false;
-      changed();
       wait(GAP);
+      changed();
     }, picture.end + LINGER);
   }
   function next() {
-    if (!mayTurn || pointed >= 0 || current >= 0) return;
+    if (!mayTurn || waiting || pointed >= 0 || current >= 0) return;
     for (let k = 1; k <= cards.length; k++) {
       const i = (last + k) % cards.length;
       if (inView[i]) return play(i, false);
     }
   }
+  /** Leaves `ms` before the next turn. The pause is set before anyone is told a card ended, so nothing starts a card inside it. */
   function wait(ms: number) {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(next, ms);
+    window.clearTimeout(gapTimer);
+    waiting = true;
+    gapTimer = window.setTimeout(() => {
+      waiting = false;
+      next();
+    }, ms);
   }
 
   cards.forEach(({ card }, i) => {
@@ -272,8 +281,8 @@ export function mountCards(list: HTMLElement, options: { still: boolean; watch?:
       if (event.pointerType !== 'mouse' || pointed !== i) return;
       pointed = -1;
       stop();
-      changed();
       wait(AFTER_POINTER);
+      changed();
     });
     card.addEventListener('click', () => {
       play(i, true);

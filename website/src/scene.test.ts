@@ -74,6 +74,17 @@ describe('a scene', () => {
     expect(state(el)).toBe('a | b on');
   });
 
+  it('applies a cue at moment 0 at once, held or played: it is where a part starts', () => {
+    const seen: boolean[] = [];
+    const { picture } = make([[0, (_q, instant) => seen.push(instant)]]);
+    picture.play();
+    expect(seen).toEqual([true]);
+    vi.advanceTimersByTime(1000);
+    expect(seen).toEqual([true]);
+    picture.hold(0);
+    expect(seen).toEqual([true, true]);
+  });
+
   it('measures the fresh markup before any cue', () => {
     const order: string[] = [];
     const { el, picture } = make([[100, () => order.push('cue')]], () => order.push(`layout:${state(el)}`));

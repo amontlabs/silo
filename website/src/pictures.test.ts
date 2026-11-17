@@ -28,6 +28,16 @@ const pointer = (target: Element, type: string, kind: string) => {
   Object.defineProperty(event, 'pointerType', { value: kind });
   target.dispatchEvent(event);
 };
+/** The cards that play over the next `ms`, in order. */
+const turnsOver = (ms: number) => {
+  const turns: string[] = [];
+  for (let passed = 0; passed <= ms; passed += 100) {
+    const name = playing()[0];
+    if (name && name !== turns[turns.length - 1]) turns.push(name);
+    vi.advanceTimersByTime(100);
+  }
+  return turns;
+};
 const show = (state: string) => {
   visibility = state;
   document.dispatchEvent(new Event('visibilitychange'));
@@ -116,12 +126,7 @@ describe('the two pictures', () => {
     see(card('rec'), 1);
     see(card('keys'), 0.6);
     see(card('net'), 0.2);
-    const turns: (string | undefined)[] = [];
-    for (let i = 0; i < 4; i++) {
-      turns.push(playing()[0]);
-      vi.advanceTimersByTime(6000);
-    }
-    expect(turns).toEqual(['rec', 'keys', 'rec', 'keys']);
+    expect(turnsOver(16000)).toEqual(['rec', 'keys', 'rec', 'keys']);
   });
 
   it('hold the flow at its moment when it leaves the view, and carry on from there', () => {
@@ -194,6 +199,64 @@ describe('the two pictures', () => {
     vi.advanceTimersByTime(3300 + 600);
     expect(playing()).toEqual([]);
     expect(flowIs()).toBe('moving');
+  });
+
+  it('keep taking turns after the pointer leaves a card, once the pause after it is over', () => {
+    mountPictures();
+    see(card('rec'), 1);
+    see(card('tools'), 1);
+    see(card('keys'), 1);
+    pointer(card('rec'), 'pointerenter', 'mouse');
+    vi.advanceTimersByTime(1000);
+    pointer(card('rec'), 'pointerleave', 'mouse');
+    expect(playing()).toEqual([]);
+    vi.advanceTimersByTime(899);
+    expect(playing()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(turnsOver(15000)).toEqual(['tools', 'keys', 'rec', 'tools']);
+  });
+
+  it('keep taking turns after a pressed card ends, once the pause between two turns is over', () => {
+    mountPictures();
+    see(card('rec'), 1);
+    see(card('dif'), 1);
+    card('dif').click();
+    expect(playing()).toEqual(['dif']);
+    vi.advanceTimersByTime(3300 + 600);
+    expect(playing()).toEqual([]);
+    vi.advanceTimersByTime(399);
+    expect(playing()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(turnsOver(9000)).toEqual(['rec', 'dif', 'rec']);
+  });
+
+  it('never leave a card playing for longer than its picture lasts', () => {
+    mountPictures();
+    for (const name of ['rec', 'tools', 'keys', 'net', 'dif', 'wait', 'steps', 'far', 'scr']) see(card(name), 1);
+    // A visitor's hand in every order, between turns: whatever happened, a minute later the cards still take turns.
+    const hands = [
+      () => pointer(card('net'), 'pointerenter', 'mouse'),
+      () => pointer(card('net'), 'pointerleave', 'mouse'),
+      () => card('wait').click(),
+      () => see(stage(), 1),
+      () => see(stage(), 0),
+      () => show('hidden'),
+      () => show('visible'),
+      () => $('.ctl').click(),
+    ];
+    let seed = 7;
+    const pick = () => (seed = (seed * 1103515245 + 12345) % 2147483648);
+    for (let round = 0; round < 300; round++) {
+      hands[pick() % hands.length]();
+      vi.advanceTimersByTime(pick() % 2500);
+      expect(playing().length).toBeLessThanOrEqual(1);
+    }
+    // Back to rest: pointer away, tab shown, flow out of view.
+    pointer(card('net'), 'pointerleave', 'mouse');
+    show('visible');
+    see(stage(), 0);
+    vi.advanceTimersByTime(10000);
+    expect(new Set(turnsOver(60000)).size).toBe(9);
   });
 
   it('pause at the end of the step that was playing, and go on with the next step', () => {

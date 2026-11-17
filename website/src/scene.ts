@@ -23,7 +23,8 @@ export interface Scene {
 /**
  * Makes a scene of `el`. Each time it is held or played, `el` gets back the markup it had here, so no cue has
  * to be undone and nothing kept on an element inside `el` survives. `layout` runs on that fresh markup, before
- * any cue, for what has to be measured.
+ * any cue, for what has to be measured. A cue at moment 0 says where a part starts: it is always applied at
+ * once, so a pointer is at its place before it shows instead of sliding there from the corner.
  */
 export function scene(el: Element, cues: readonly Cue[], end: number, layout?: () => void): Scene {
   const initial = el.innerHTML;
@@ -36,7 +37,7 @@ export function scene(el: Element, cues: readonly Cue[], end: number, layout?: (
     el.classList.add('jump');
     el.innerHTML = initial;
     layout?.();
-    for (const [when, run] of cues) if (when < t) run(q, true);
+    for (const [when, run] of cues) if (when < t || when === 0) run(q, true);
     void el.getBoundingClientRect();
     el.classList.remove('jump');
   };
@@ -45,7 +46,7 @@ export function scene(el: Element, cues: readonly Cue[], end: number, layout?: (
     hold: (t = end) => set(t),
     play: (from = 0) => {
       set(from);
-      for (const [when, run] of cues) if (when >= from) timers.push(window.setTimeout(() => run(q, false), when - from));
+      for (const [when, run] of cues) if (when >= from && when > 0) timers.push(window.setTimeout(() => run(q, false), when - from));
     },
   };
 }

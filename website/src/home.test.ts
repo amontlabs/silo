@@ -60,7 +60,7 @@ describe('the home page', () => {
     expect(doc.querySelector('.stage')?.getAttribute('aria-hidden')).toBe('true');
     const figure = doc.querySelector('.flow figure');
     expect(figure?.getAttribute('aria-describedby')).toBe('flow-caption');
-    expect(text('#flow-caption')[0]).toMatch(/^Two tasks are given to the agent in main.*forked onto your Mac\.$/);
+    expect(text('#flow-caption')[0]).toMatch(/^Two tasks are given to the agent in main.*you fork its checkpoint onto your Mac to check the work\.$/);
   });
 
   it('gives the flow controls a screen reader can name, also where a step shows no name', () => {
@@ -164,7 +164,13 @@ describe('the home page', () => {
           .filter((selector) => !selector.trim().startsWith('@'))
           .flatMap((selector) => [...selector.matchAll(/\.([A-Za-z][\w-]*)/g)].map((match) => match[1])),
       );
-    const page = new Set([...names(read('src/site.css')), ...names(html.slice(html.indexOf('<style>'), html.indexOf('</style>')))]);
+    const page = new Set([
+      ...names(read('src/site.css')),
+      ...names(read('src/style.css')),
+      ...names(html.slice(html.indexOf('<style>'), html.indexOf('</style>'))),
+    ]);
+    // What style.css styles on purpose: the pictures' own frames, hidden until they are drawn, and a scene being put at a moment.
+    for (const own of ['stage', 'steps', 'ctl', 'mini', 'jump']) page.delete(own);
     const pictures = doc.querySelectorAll('.stage, .stage *, .steps, .steps *, .mini, .mini *');
     const inMarkup = [...pictures].flatMap((part) => [...part.classList]);
     // In the scripts: the class names in a selector, those a cue adds or removes, and those of the wires it draws.
