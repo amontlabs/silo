@@ -166,7 +166,7 @@ One word per idea. The words for computers are Git's (Decided).
 | **record** | Everything Silo has written down about what happened: all the facts. |
 | **fact** | One thing that was observed, with its time, its computer and where it was seen. |
 | **label** | An opinion computed from facts: which run a fact belongs to, what kind of file this is, "stuck". |
-| **rule** | Data that stops something, holds it for your answer, or tells you about it. |
+| **rule** | Data that blocks something, holds it for your answer, or tells you about it. "Block" is the word for a rule; "stop" is kept for a computer. |
 | **plugin** | A program that reads the record and reports. It runs in a computer. |
 | **receipt** | The account of one run, one task or one fork, made from the record and not by the agent. |
 | **flag** | What a rule or a plugin raises for your attention. |
@@ -376,7 +376,7 @@ helps get around a provider's terms, such as rotating accounts".
 - Main has rules of its own. Holding every project does not let it reach everything. (Notes)
 - An allowed host is still a way out. So the record shows what was sent to each host, not only
   which hosts were reached. (Agreed)
-- A host seen for the first time is flagged. Refused attempts are recorded with the host, the time
+- A host seen for the first time is flagged. Blocked attempts are recorded with the host, the time
   and the process. (Agreed, Notes)
 - Rules can be proposed from the record: run open for a while, then keep the hosts that were
   actually used. (Agreed)
@@ -393,8 +393,8 @@ helps get around a provider's terms, such as rotating accounts".
 - A spending limit is enforced outside the agent, where model traffic leaves the computer. (Notes)
 - Spend is shown in dollars or as a share of a plan, never as raw tokens. (Notes)
 - A budget on a computer, and a budget on a conversation, can be exact, because the boundary sees
-  both. A budget on a run depends on a label and can only tell, not stop. (Proposed)
-- Whether a budget stops or asks at each threshold, and whether it can be a rate, is Open in the
+  both. A budget on a run depends on a label and can only tell, not block. (Proposed)
+- Whether a budget blocks or holds at each threshold, and whether it can be a rate, is Open in the
   notes.
 - All of this depends on 5.8.
 
@@ -432,13 +432,13 @@ rules on top and a base on which people can notice patterns. The owner called th
 |---|---|---|---|
 | **Facts** | Every process, file change, connection, model call, secret use and checkpoint. Append-only. Each fact says where it was seen. | The engine and its drivers | No. A gap is recorded as a gap. |
 | **Labels** | Which run a fact belongs to, what kind of file or call it is, "stuck", "repeated", "risky". | Functions over facts, plus data about agent programs and ecosystems, plus the user's answers | Yes. So labels are recomputed from facts and never written into them. |
-| **Rules** | Stop, hold, tell. | The user, as data. Silo can propose them from the record. | A rule that stops or holds reads only facts. A rule that tells may read labels. |
-| **Plugins** | Anything that looks and reports: a script, a classifier, an agent, a notifier, a company's set. | Anyone | A plugin can flag, checkpoint, pause and stop. It cannot approve or change a rule. |
+| **Rules** | Block, hold, tell. | The user, as data. Silo can propose them from the record. | A rule that blocks or holds reads only facts. A rule that tells may read labels. |
+| **Plugins** | Anything that looks and reports: a script, a classifier, an agent, a notifier, a company's set. | Anyone | A plugin can flag, and checkpoint, pause or stop a computer. It cannot approve or change a rule. |
 
 **The rule between the layers: nothing flows down.**
 
 - An opinion is never stored as a fact.
-- A rule that stops never depends on an opinion.
+- A rule that blocks or holds never depends on an opinion.
 - Something that watches never widens access.
 
 Why it matters. A guess does harm when it is stored as truth and built on: every later guess
@@ -464,7 +464,7 @@ source. It is written once and never edited. A correction is a new fact.
 | **boundary: network** | Every connection in and out, and the content of traffic it opens (5.8) | Certain |
 | **boundary: disk** | What changed on the disk between two moments (how is To find out, 9.7) | Certain |
 | **boundary: screen** | The computer's display and the input sent to it | Certain |
-| **inside** | Processes and which process touched which file, reported from inside the computer | As told from inside. An agent with full access can interfere with it. Never used to stop anything. |
+| **inside** | Processes and which process touched which file, reported from inside the computer | As told from inside. An agent with full access can interfere with it. Never used to block or hold anything. |
 
 **Kinds of facts** (Proposed; the list is meant to stay short and fixed)
 
@@ -473,7 +473,7 @@ source. It is written once and never edited. A correction is a new fact.
 | control | A computer was created, started, stopped or dropped. A checkpoint, a fork, a restore. A rule was set. An ask was raised and answered. A secret was given or taken back. A plugin was given access. Each with who did it. |
 | process | Started: command, parent, user. Exited: code, and totals of processor, memory and disk use. |
 | file | Created, changed, deleted or renamed: path and change in size, and the process when known. |
-| connection | Host, port, bytes each way. Allowed, refused or held, and by which version of which rule. For opened traffic: method, path, status and sizes. The secret used, by name. |
+| connection | Host, port, bytes each way. Allowed, blocked or held, and by which version of which rule. For opened traffic: method, path, status and sizes. The secret used, by name. |
 | model call | Provider and login by name. Model asked and model that answered. Tokens in, out and cached, and cost. Conversation and turn. The tool calls the reply asked for, and the result sent back for each, which includes the output of commands. A refusal or a reroute. What the provider says is left of a limit. |
 | screen | A stretch of recording while an agent drives the screen, and the input events. |
 | meter | Disk, memory and processor use of a computer, sampled. |
@@ -570,7 +570,7 @@ labeler is run on recorded facts and compared with the answers before it replace
 
 **What a label may read.** A labeler may read content inside a computer, such as the state of a
 Git repository. That content is under the agent's control. This is acceptable for a label and is
-the reason a label never stops anything.
+the reason a label never blocks or holds anything.
 
 **How a label is shown.** As a label. A guess is shown as a guess. (Notes)
 
@@ -578,8 +578,9 @@ the reason a label never stops anything.
 
 - A rule is data. Every rule is set by picking among choices, and can be shown and set as text
   through the command line. Using Silo never requires writing code. (Notes)
-- A rule does one of three things: **stop**, **hold** for your answer, or **tell** you.
-- A rule that stops or holds reads only facts seen by the engine or at the boundary. It is
+- A rule does one of three things: **block**, **hold** for your answer, or **tell** you. (Agreed:
+  "block" is the word for a rule, and "stop" is kept for a computer.)
+- A rule that blocks or holds reads only facts seen by the engine or at the boundary. It is
   enforced at the boundary, and each decision is recorded with the version of the rule. (Agreed)
 - A rule that tells may read labels. It raises a flag. (Agreed)
 - Silo can propose rules from the record, such as the list of hosts a computer actually used.
@@ -587,9 +588,10 @@ the reason a label never stops anything.
 - A named set of rules can be switched on a computer in one step. (Notes)
 - Each rule states its worst case when it is set. (Notes)
 
-Examples of rules that stop or hold: a host not on the list; a secret sent to a host it is not
-bound to; a budget reached; a package younger than a set age; a device running out of memory or
-disk.
+Examples of rules that block or hold: a host not on the list; a secret sent to a host it is not
+bound to; a budget reached; a package younger than a set age.
+
+What Silo does when the Mac or a computer runs low on memory or disk is Open (14.1, question 14).
 
 Examples of rules that tell: a run with no activity for a set time; a disk growing fast; a host
 seen for the first time; writes that no run accounts for; a change to a file that looks like a
@@ -710,7 +712,7 @@ repeated calls, repeated writes and reads, the shape of agents' work.
 
 ### 5.8 What all of this depends on: reading model traffic at the boundary
 
-Spend per conversation, budgets that stop, the model that really answered, the tool calls, the
+Spend per conversation, budgets that block, the model that really answered, the tool calls, the
 turns, and telling "stuck" from "working" all come from the traffic between an agent program and
 its model provider.
 
@@ -896,7 +898,7 @@ Where the computer connected, what it sent, what it installed and what it spent.
  github.com           212 calls  3 pushes to you/app    secret used: github
  registry.npmjs.org    58 calls  3 packages younger than 3 days ⚠
  paste.rs               1 call   2.1 MB sent  codex     first time seen ⚠   [block]
- Refused            your Mac ×2 · cloud metadata ×4
+ Blocked            your Mac ×2 · cloud metadata ×4
 ```
 
 ### 7.5 Timeline
@@ -1272,8 +1274,8 @@ Additions for the record (Proposed):
 
 - A fake source that drops facts, repeats them and delivers them late. The property: every loss
   shows as a gap.
-- A fake inside that lies about which process did something. The property: no rule that stops
-  changes its decision.
+- A fake inside that lies about which process did something. The property: no rule that blocks
+  or holds changes its decision.
 - A fake computer that floods. The property: older facts stay.
 
 **Formal methods.** Properties are stated and checked as we build: "state properties, formal
@@ -1304,13 +1306,13 @@ always holds, and they are not the same thing (Proposed):
 
 **Where each kind of checking goes** (Proposed). A function can only be checked against a
 statement of what it must do. Where such a statement exists, it is tested or proved. Where the
-answer is an opinion, it is scored. The layers say which is which: what can stop or hurt is
-checked hardest, and labels were made unable to stop anything so that they do not need proof.
+answer is an opinion, it is scored. The layers say which is which: what can block or hurt is
+checked hardest, and labels were made unable to block anything so that they do not need proof.
 
 | What | Is there an exact statement of "right"? | How it is checked |
 |---|---|---|
 | Recording facts | Yes: everything that crossed the boundary has a fact, or a gap | Hostile tests on the real boundary, the balance of 5.2, the simulator with faulty sources |
-| The core's decisions: access, rules that stop | Yes: access widens only through the user | The model of access, the simulator, proof later if needed |
+| The core's decisions: access, rules that block or hold | Yes: access widens only through the user | The model of access, the simulator, proof later if needed |
 | A labeler's mechanics | Yes: the same facts give the same labels; no fact changes; anything unknown is "only here" | Random inputs with these properties stated |
 | A labeler's opinion | No: "is this folder a build?" has no exact answer | Scored against the user's answers, and compared with the previous version on recorded history |
 | A plugin | Its bound, yes. Its behaviour, no. | Paths for the bound; a trial on recorded history for the behaviour (5.5) |
@@ -1436,13 +1438,13 @@ simulator checks, and as what a hostile test tries to break. All Proposed unless
 | A restore or a drop cannot erase the record. (Notes) | safety | simulator |
 | Every loss of facts is itself recorded as a gap. | safety | simulator with a faulty source |
 | What runs are shown to have done adds up to what the boundary measured, and the rest is shown as unattributed. | safety | live check |
-| A rule that stops reads only what the engine or the boundary saw. | safety | simulator with a lying inside |
+| A rule that blocks or holds reads only what the engine or the boundary saw. | safety | simulator with a lying inside |
 | Deleting every label and computing them again gives the same labels. | safety | test |
 | A flood from one computer never removes older facts. | safety | simulator |
 | Access widens only through an input from the user. | safety | model of access, simulator |
 | Nothing a plugin can call gives any computer, or itself, more access than it had. | safety | model of access, simulator |
 | Every path by which data can leave a computer is among the paths Silo shows for it. | safety | hostile test |
-| A budget stops what it meters: once it is reached, no further metered request leaves. | safety | hostile test |
+| A budget blocks what it meters: once it is reached, no further metered request leaves. | safety | hostile test |
 | A dropped fork can be brought back until its time in the bin ends. After that nothing of it remains. | safety | simulator, live check |
 | If the engine stops, running computers keep running under the rules they had. (Notes) | safety | live check |
 | No effect is carried out twice. (Notes) | safety | simulator with crashes |
@@ -1597,7 +1599,7 @@ repository and is not part of this copy.
 5. **How a fork ends** (6.3): dropped or becomes main, in place of merged or dropped.
 6. **One main or several** (3.1).
 7. **May a computer read its own record by default** (7.6)?
-8. **Does a budget stop or ask** at each threshold (4.6)?
+8. **Does a budget block or hold** at each threshold (4.6)?
 9. **The order of work** (section 15).
 10. **Is a small model of access written and checked before the first engine code** (9.5)?
 11. **Is "Git for computers" still the framing?** The decision `git-words` named it. The words
@@ -1606,6 +1608,10 @@ repository and is not part of this copy.
     their own.", and the decision's text was cut down to the words.
 12. **How agent apps connect to computers** (8.5). The whole part.
 13. **Are recipes made of pieces, and is Nix their base** (8.1)?
+14. **What does Silo do when the Mac or a computer runs low on memory or disk** (5.4)? It was
+    listed among the rules that block or hold, without saying what happens. The owner's first
+    thoughts, rough: for disk, what many apps already do; for memory, pause and tell; how early
+    is a setting with a few presets. (Owner) To settle with the product and its design.
 
 ### 14.2 To find out
 

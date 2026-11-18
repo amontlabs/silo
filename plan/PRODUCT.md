@@ -60,8 +60,8 @@ On your own machine first: a Mac. The same computers then run on a shared server
   it. Differences are only those the platform forces.
 - **A computer cannot get more than it has.** An agent inside a computer can do anything that
   gives it no more access than it already has. Anything wider asks you, in the Silo app.
-- **Nothing flows down.** An opinion is never stored as a fact. A rule that stops never depends
-  on an opinion. Something that watches never widens access.
+- **Nothing flows down.** An opinion is never stored as a fact. A rule that blocks or holds never
+  depends on an opinion. Something that watches never widens access.
 - **Git's words where Git has one.** Checkpoint, fork, restore. One word per idea.
 - **Security is built properly, and is not the current focus.** A change is made safely; security
   work for its own sake waits until the first version is good.
