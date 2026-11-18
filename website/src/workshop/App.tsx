@@ -307,8 +307,19 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     focusNext.current = options.focus ?? null;
   }
 
+  /**
+   * A new move starts: what an earlier one left waiting (the end of going back, a view transition's update) never
+   * lands after it. Returns this move's count.
+   */
+  function moveStarts(): number {
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+    return ++navigations.current;
+  }
+
   /** Runs a change of place; off the map, the tile that was tapped travels to its place (view transitions). */
   function travel(update: () => void, hero: string | null) {
+    const mine = moveStarts();
     const start = (document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } }).startViewTransition?.bind(document);
     if (onMap() || still() || !start) {
       update();
@@ -317,7 +328,6 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     const tile = hero ? document.querySelector<HTMLElement>(`.ws-tile[data-area="${hero}"]`) : null;
     if (tile) tile.style.viewTransitionName = 'hero';
     // The update waits for the old view's picture; a navigation made meanwhile wins over it.
-    const mine = ++navigations.current;
     const vt = start(() => { if (navigations.current === mine) flushSync(update); }) as { finished: Promise<void>; ready?: Promise<void> };
     vt.ready?.catch(() => {});
     vt.finished.catch(() => {}).finally(() => { if (tile) tile.style.viewTransitionName = ''; });
@@ -431,6 +441,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       }, LEAVE_MS + 420);
     }
     if (scrollY > 0) scrollTo({ top: 0, behavior: 'smooth' });
+    moveStarts();
     setLeaving(true);
     later(finish, LEAVE_MS);
   }
@@ -495,10 +506,18 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   holdingRef.current = holding;
   const followRef = useRef(follow);
   followRef.current = follow;
-  // The address is read before the first paint, so the first frame is already the place it names.
+  // The address is read before the first paint, so the first frame is already the place it names. On Back, Forward
+  // and an address followed, the view is the one the address names too, as on a fresh load: a swap still under way
+  // is dropped, and the view is set without one.
   useLayoutEffect(() => {
     followRef.current();
-    const listener = () => followRef.current();
+    const listener = () => {
+      swapTimers.current.forEach(clearTimeout);
+      swapTimers.current = [];
+      setSwap(null);
+      setViewState(initialView());
+      followRef.current();
+    };
     addEventListener('popstate', listener);
     addEventListener('hashchange', listener);
     return () => {

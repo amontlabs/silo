@@ -64,6 +64,7 @@ function shownArea(): string {
   return document.querySelector('.ws-tile.on')?.getAttribute('data-area') ?? '?';
 }
 const shownView = () => (rootOf().classList.contains('v-order') ? 'order' : 'map');
+const addressView = () => (new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
 
 /** The app on a fresh page, with the clock faked from the start so that every timer it makes can be run. */
 async function mount() {
@@ -141,6 +142,10 @@ describe('moves between places', () => {
     ['a second move while the first waits for its view transition', [open('engine'), open('computers', 10), { kind: 'escape', after: 10 }, open('forks', 0)]],
     ['an address that is followed while a view transition waits', [open('engine'), { kind: 'address', area: 'computers', after: 5 }]],
     ['Escape and Back after a view', [open('computers', 600), view('order', 600), { kind: 'escape', after: 600 }, { kind: 'back', after: 600 }, view('map', 0), { kind: 'back', after: 0 }]],
+    ['Order and a tile while the map unfolds', [open('computers', 600), { kind: 'full-map', after: 0 }, view('order', 135), open('forks')]],
+    ['Back to an entry without the view', [open('computers', 600), view('order', 600), { kind: 'back', after: 600 }]],
+    ['Back to an entry without the view, then Order', [open('computers', 600), view('order', 600), { kind: 'back', after: 600 }, view('order', 600)]],
+    ['Back while the view swaps', [open('computers', 600), view('order', 20), { kind: 'back', after: 600 }]],
   ];
   const configs: Config[] = [true, false].flatMap((motion) => [true, false].flatMap((wide) => (['finishing', 'failing', 'absent'] as Mode[]).map((mode) => ({ motion, wide, mode }))));
 
@@ -159,7 +164,7 @@ describe('moves between places', () => {
     const moving = new Set<string>();
     try {
       for (const config of configs) {
-        const sequences: [string, Step[]][] = [...named, ...[1, 2, 3, 4, 5, 6].map((seed): [string, Step[]] => [`seed ${seed}`, sequence(seed, 7)])];
+        const sequences: [string, Step[]][] = [...named, ...[1, 2, 3, 4, 5, 6, 77].map((seed): [string, Step[]] => [`seed ${seed}`, sequence(seed, 7)])];
         for (const [name, steps] of sequences) {
           const where = `${name} (${JSON.stringify(config)}): ${steps.map((step) => `${step.kind}${'area' in step ? ` ${step.area}` : 'to' in step ? ` ${step.to}` : ''} +${step.after}`).join(', ')}`;
           screenOf(config);
@@ -168,7 +173,7 @@ describe('moves between places', () => {
           const push = vi.spyOn(history, 'pushState');
           // What the last move that took effect asks for; null where the address decides (after Back).
           let area: string | null = '';
-          let wanted: 'map' | 'order' = 'map';
+          let wanted: 'map' | 'order' | null = 'map';
           let depth = 0;
           let heldHeight = false;
           const note = () => { for (const name of classesOf()) if (!rest['full-map map'].includes(name) && !rest['area order'].includes(name)) moving.add(name); };
@@ -198,10 +203,13 @@ describe('moves between places', () => {
                 act(() => history.back());
                 await elapse(1);
                 area = null;
+                wanted = null;
               }
             } else {
               act(() => { history.pushState(null, '', `/workshop${location.search}${hashOf(step.area)}`); dispatchEvent(new PopStateEvent('popstate')); });
               area = step.area;
+              // An address followed names its view, as on a fresh load.
+              wanted = addressView();
             }
             if (heldHeight) {
               expect(rootOf().style.minHeight, `${where}: the page height is kept while the map unfolds`).not.toBe('');
@@ -222,10 +230,9 @@ describe('moves between places', () => {
           if (named) expect(areaTitle()?.textContent, `${where}: the title of the area`).toBe(document.querySelector(`.ws-tile[data-area="${named}"] .ws-title`)?.textContent);
           else expect(areaTitle(), `${where}: no area is open`).toBeNull();
           if (area !== null) expect(named, `${where}: the last move decides the place`).toBe(area);
-          // Only a person's choice changes the view. Back and Forward restore the place alone, so after one the
-          // address may still name the view of the entry it came from.
-          expect(shownView(), `${where}: the view last chosen`).toBe(wanted);
-          if (!steps.some((step) => step.kind === 'back')) expect(new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map', `${where}: the view the address names`).toBe(shownView());
+          // The view shown is the one the address names, and the one last chosen unless Back decided it.
+          expect(shownView(), `${where}: the view the address names`).toBe(addressView());
+          if (wanted !== null) expect(shownView(), `${where}: the view last chosen`).toBe(wanted);
           expect(screen.getByRole('button', { name: shownView() === 'order' ? 'Order' : 'Map' }), `${where}: the pressed button`).toHaveAttribute('aria-pressed', 'true');
           // Nothing is left half done: no state class beyond those of a page at rest, no height kept, all in sight.
           expect(classesOf(), `${where}: the classes of a page at rest`).toEqual(rest[`${named ? 'area' : 'full-map'} ${shownView()}`]);
