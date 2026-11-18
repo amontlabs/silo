@@ -207,8 +207,12 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const lift = useRef<{ frame: number; from: number; full: number } | null>(null);
   /** A count of navigations, so a view transition's update that has been overtaken never applies. */
   const navigations = useRef(0);
-  /** Clears the page's held height after the map unfolds; only the next going back or unmounting cancels it. */
+  /** Clears the page's held height after the map unfolds; the next move or unmounting releases it sooner. */
   const heldHeight = useRef<ReturnType<typeof setTimeout>>(undefined);
+  /** The count of the move that is a going-back; while no move came after it, that going-back is under way. */
+  const goingBack = useRef(-1);
+  /** The control to focus once Back or Forward has shown the other view, when the focus was in the one hidden. */
+  const viewFocus = useRef<string | null>(null);
   // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
@@ -309,21 +313,28 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
 
   /**
    * A new move starts: what an earlier one left waiting (the end of going back, a view transition's update) never
-   * lands after it. Returns this move's count.
+   * lands after it, and the height a going-back kept is let go at once. Returns this move's count.
    */
   function moveStarts(): number {
     timers.current.forEach(clearTimeout);
     timers.current = [];
+    clearTimeout(heldHeight.current);
+    if (mainRef.current) mainRef.current.style.minHeight = '';
+    setHeld(false);
+    setLeaving(false);
     return ++navigations.current;
   }
 
+  /** True while a going-back has started and neither landed nor been overtaken by another move. */
+  const backUnderWay = () => goingBack.current === navigations.current;
+
   /** Runs a change of place; off the map, the tile that was tapped travels to its place (view transitions). */
-  function travel(update: () => void, hero: string | null) {
+  function travel(update: () => void, hero: string | null): number {
     const mine = moveStarts();
     const start = (document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } }).startViewTransition?.bind(document);
     if (onMap() || still() || !start) {
       update();
-      return;
+      return mine;
     }
     const tile = hero ? document.querySelector<HTMLElement>(`.ws-tile[data-area="${hero}"]`) : null;
     if (tile) tile.style.viewTransitionName = 'hero';
@@ -331,6 +342,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     const vt = start(() => { if (navigations.current === mine) flushSync(update); }) as { finished: Promise<void>; ready?: Promise<void> };
     vt.ready?.catch(() => {});
     vt.finished.catch(() => {}).finally(() => { if (tile) tile.style.viewTransitionName = ''; });
+    return mine;
   }
 
   /** Opens a row: next to the open ones in this place, or alone where it lives. */
@@ -417,7 +429,8 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   nav.current.reopen = (row: Row) => openRow(row.key, { focus: true, push: false });
 
   function back() {
-    if (isHome) return;
+    // A going-back under way lands at its time: a second one (the button pressed twice, Escape again) changes nothing.
+    if (isHome || backUnderWay()) return;
     const focus: Focus | null = shown.kind === 'area' ? { kind: 'area', area: shown.area } : opener.current ? { kind: 'selector', selector: opener.current } : shown.kind === 'suggested' ? { kind: 'area', area: 'suggested' } : null;
     const hero = shown.kind === 'area' ? shown.area : shown.kind === 'suggested' ? 'suggested' : null;
     const finish = () => go(HOME, null, { push: true, focus, announce: '' });
@@ -426,9 +439,10 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       return;
     }
     if (!onMap()) {
-      travel(finish, hero);
+      goingBack.current = travel(finish, hero);
       return;
     }
+    goingBack.current = moveStarts();
     // The page keeps its height while the map unfolds, then scrolls to the top.
     const main = mainRef.current;
     if (main) {
@@ -441,14 +455,15 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       }, LEAVE_MS + 420);
     }
     if (scrollY > 0) scrollTo({ top: 0, behavior: 'smooth' });
-    moveStarts();
     setLeaving(true);
     later(finish, LEAVE_MS);
   }
 
   function openPlace(next: Place) {
     if (samePlace(next, shown)) {
-      back();
+      // While going back from this place, its part or tile is a new move that keeps it open: the going-back is dropped.
+      if (backUnderWay()) moveStarts();
+      else back();
       return;
     }
     // From a scrolled full map, the fold drives the scroll back to the top: each frame the page is scrolled in
@@ -506,16 +521,31 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   holdingRef.current = holding;
   const followRef = useRef(follow);
   followRef.current = follow;
+  const moveStartsRef = useRef(moveStarts);
+  moveStartsRef.current = moveStarts;
+  const viewRef = useRef(view);
+  viewRef.current = view;
   // The address is read before the first paint, so the first frame is already the place it names. On Back, Forward
   // and an address followed, the view is the one the address names too, as on a fresh load: a swap still under way
-  // is dropped, and the view is set without one.
+  // is dropped, and the view is set without one. It is a new move, even when the place it names is not known yet.
   useLayoutEffect(() => {
     followRef.current();
     const listener = () => {
+      moveStartsRef.current();
       swapTimers.current.forEach(clearTimeout);
       swapTimers.current = [];
       setSwap(null);
-      setViewState(initialView());
+      const next = initialView();
+      // On a wide screen the other view's panel is taken out of sight: the focus inside it goes to the same area in
+      // the view now shown, else to the title, rather than to the page itself.
+      const hidden = document.querySelector(`.ws-swap-${viewRef.current}`);
+      const focused = document.activeElement;
+      if (next !== viewRef.current && wide() && focused && hidden?.contains(focused)) {
+        const area = focused.closest<HTMLElement>('[data-part], [data-area]');
+        const id = area?.dataset.part ?? area?.dataset.area;
+        viewFocus.current = !id ? '' : next === 'map' ? `.ws-part[data-part="${id}"]` : `.ws-tile[data-area="${id}"] .ws-tile-hit`;
+      }
+      setViewState(next);
       followRef.current();
     };
     addEventListener('popstate', listener);
@@ -557,6 +587,16 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       settle(HOME, null);
     }
   }, [place, live.load, w.meKnown, canDecide]);
+
+  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown.
+  useLayoutEffect(() => {
+    const selector = viewFocus.current;
+    if (selector === null) return;
+    viewFocus.current = null;
+    const node = (selector && document.querySelector<HTMLElement>(selector)) || document.querySelector<HTMLElement>('.ws-top h1');
+    if (node?.tagName === 'H1' && !node.hasAttribute('tabindex')) node.setAttribute('tabindex', '-1');
+    node?.focus({ preventScroll: true });
+  });
 
   // Focus follows what the person asked for; a new area starts at its top, under the folded map.
   useLayoutEffect(() => {
@@ -647,7 +687,8 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const keyHandler = useRef<(event: KeyboardEvent) => void>(() => {});
   keyHandler.current = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && !isHome && !isField(event.target)) {
-      back();
+      // A held key repeats: only the press itself goes back.
+      if (!event.repeat) back();
       return;
     }
     if (event.key !== 'Enter' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
