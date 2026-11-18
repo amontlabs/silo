@@ -434,8 +434,8 @@
 .ws.ws-boot *, .ws.ws-boot *::before, .ws.ws-boot *::after { transition: none !important; animation: none !important; }
 /* Going back to the full map, the footer is hidden at once, waits while the page keeps its height, then fades in. */
 .workshop-shell:has(.ws.ws-keeping) .ws-foot { opacity: 0; transition: none; }
-.ws-foot { transition: opacity .2s; display: flex; gap: 24px; justify-content: space-between; padding: 16px 24px 56px; border-top: 1px solid var(--line); font: 12px var(--mono); color: var(--muted); }
-@media (max-width: 760px) { .ws-foot { padding: 16px 16px 48px; } }
+/* The footer is the site's own (site.css); here it only gets the line above it and its fade. */
+.ws-foot { transition: opacity .2s; border-top: 1px solid var(--line); }
 @media (max-width: 480px) { .ws-wide { display: none; } }
 /* Room kept for what the live state fills in, so nothing below moves when it arrives. */
 .ws-under { min-height: 92px; }
