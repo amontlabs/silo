@@ -4,9 +4,6 @@
 .flow { width: 100%; max-width: 940px; margin: 0 auto; container-type: inline-size; }
 .flow figure { margin: 0; }
 .flow button { background: none; padding: 0; }
-.flow-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 8px; }
-.flow .ctl { font: 12px/1.4 var(--mono); color: var(--muted); padding: 3px 0; }
-.flow .ctl:hover { color: var(--accent-ink); }
 
 /* The stage: your Mac (main and its forks), what is outside it, and another device */
 .flow .stage { --mode: wide; position: relative; padding-top: 8px; transition: opacity 0.4s; }
@@ -155,8 +152,12 @@
 .flow .cursor.click i { animation: flow-ring 0.4s ease-out; }
 @keyframes flow-ring { from { opacity: 0.9; transform: scale(0.3); } to { opacity: 0; transform: scale(1.6); } }
 
-/* where you are in the flow, and a way to jump */
-.flow .steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+/* where you are in the flow, a way to jump, and Pause at the end of the row, on the line of the step names. Pause keeps
+   the width of its longer word, so the bars do not move when it reads Play. */
+.flow-foot { display: flex; align-items: flex-end; gap: 16px; margin-top: 12px; }
+.flow .steps { flex: 1; min-width: 0; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.flow .ctl { flex-shrink: 0; min-width: 5ch; padding: 3px 0 0; text-align: right; font: 11px/1.4 var(--mono); color: var(--muted); }
+.flow .ctl:hover { color: var(--accent-ink); }
 .flow .steps button { display: block; width: 100%; text-align: left; font: 11px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
 .flow .steps i { display: block; height: 2px; background: var(--line); margin-bottom: 6px; position: relative; overflow: hidden; }
 .flow .steps b { position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; }
@@ -170,7 +171,8 @@
 .flow.held .steps li.on b { animation-play-state: paused; }
 .flow:is(.paused, .held) .busy .agent { animation: none; }
 
-/* Narrow: one column. The steps keep their bars and name only the one that is playing. */
+/* Narrow: one column. The steps keep their bars across the whole width and name only the one that is playing, with
+   Pause at the other end of that line. */
 @container (max-width: 669px) {
   .flow .stage { --mode: stack; }
   .flow .mac { grid-template-columns: 1fr; row-gap: 18px; padding: 22px 12px 26px; margin: 0 0 78px; }
@@ -181,6 +183,8 @@
   .flow .steps button { padding: 8px 0; }
   .flow .steps i { margin-bottom: 0; }
   .flow .steps .lb { display: none; position: absolute; left: 0; bottom: 0; }
+  .flow-foot { position: relative; }
+  .flow .ctl { position: absolute; right: 0; bottom: 0; }
   .flow .steps li.on .lb { display: block; }
 }
 

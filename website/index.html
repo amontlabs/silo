@@ -129,20 +129,14 @@
           <span class="strip-line">Follow us building Silo live, get an overview of every feature, suggest your ideas and give feedback.</span>
           <span class="button primary small">Open<svg class="go" aria-hidden="true"><use href="#go" /></svg></span>
         </a>
-        <section class="hero joint" aria-labelledby="hero-title">
+        <section class="hero joint" id="why" aria-labelledby="hero-title">
           <h1 id="hero-title">Computers your agents can fork.</h1>
           <p class="pitch">
             <span>Your agent gets its own computer and forks a copy for each task.</span>
             <span>You see everything the copy changed, then merge it or drop it.</span>
           </p>
-        </section>
-        <section class="plate joint" id="why" aria-labelledby="plate-title">
           <div class="flow" id="flow">
-            <div class="flow-head">
-              <h2 class="title" id="plate-title">Git for computers.</h2>
-              <button class="ctl" type="button">Pause</button>
-            </div>
-            <figure aria-labelledby="plate-title" aria-describedby="flow-caption">
+            <figure aria-labelledby="hero-title" aria-describedby="flow-caption">
               <figcaption class="sr-only" id="flow-caption">Two tasks are given to the agent in main, and each gets its own fork of main. Both forks work at the same time. One uses a secret, which is added outside the fork and only on requests to the host you allowed. Each fork shows everything it changed. One is merged into main and the other is dropped. Then a teammate's task on a Linux server is done, and you fork its checkpoint onto your Mac to check the work.</figcaption>
               <div class="stage" aria-hidden="true">
                   <svg class="wires"></svg>
@@ -258,15 +252,18 @@
                   </div>
                 </div>
             </figure>
-            <ol class="steps" aria-label="Steps of the picture">
-              <li><button type="button" aria-label="Fork"><i><b></b></i><span class="lb">Fork</span></button></li>
-              <li><button type="button" aria-label="Work"><i><b></b></i><span class="lb">Work</span></button></li>
-              <li><button type="button" aria-label="Screen"><i><b></b></i><span class="lb">Screen</span></button></li>
-              <li><button type="button" aria-label="Secrets"><i><b></b></i><span class="lb">Secrets</span></button></li>
-              <li><button type="button" aria-label="Diff"><i><b></b></i><span class="lb">Diff</span></button></li>
-              <li><button type="button" aria-label="Merge or drop"><i><b></b></i><span class="lb">Merge or drop</span></button></li>
-              <li><button type="button" aria-label="Other devices"><i><b></b></i><span class="lb">Other devices</span></button></li>
-            </ol>
+            <div class="flow-foot">
+              <ol class="steps" aria-label="Steps of the picture">
+                <li><button type="button" aria-label="Fork"><i><b></b></i><span class="lb">Fork</span></button></li>
+                <li><button type="button" aria-label="Work"><i><b></b></i><span class="lb">Work</span></button></li>
+                <li><button type="button" aria-label="Screen"><i><b></b></i><span class="lb">Screen</span></button></li>
+                <li><button type="button" aria-label="Secrets"><i><b></b></i><span class="lb">Secrets</span></button></li>
+                <li><button type="button" aria-label="Diff"><i><b></b></i><span class="lb">Diff</span></button></li>
+                <li><button type="button" aria-label="Merge or drop"><i><b></b></i><span class="lb">Merge or drop</span></button></li>
+                <li><button type="button" aria-label="Other devices"><i><b></b></i><span class="lb">Other devices</span></button></li>
+              </ol>
+              <button class="ctl" type="button">Pause</button>
+            </div>
           </div>
         </section>
         <section class="for joint" aria-labelledby="for-title">
