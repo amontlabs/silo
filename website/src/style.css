@@ -90,27 +90,6 @@
   border: 1px solid var(--accent);
 }
 
-/* Footer: one row */
-.site-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px 32px;
-  flex-wrap: wrap;
-  padding: 24px var(--gutter);
-}
-.site-footer nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 26px;
-  font-size: 14px;
-}
-.site-footer nav a {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-}
-
 @media (max-width: 900px) {
   .notice {
     grid-template-columns: 1fr;

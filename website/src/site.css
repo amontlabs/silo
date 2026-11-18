@@ -249,6 +249,24 @@ svg.go {
   right: -4px;
 }
 
+/* Footer: one short row of links, the same on every page */
+.site-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px var(--gutter);
+}
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  font-size: 13px;
+}
+.site-footer nav a {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
 /* Header */
 .site-header {
   height: var(--header-height);
