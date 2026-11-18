@@ -1475,6 +1475,10 @@ repository and is not part of this copy.
 8. **Does a budget stop or ask** at each threshold (4.6)?
 9. **The order of work** (section 15).
 10. **Is a small model of access written and checked before the first engine code** (9.5)?
+11. **Is "Git for computers" still the framing?** The decision `git-words` named it. The words
+    stay Git's, but merging one computer into another has left the core. At the reset of
+    18 November 2026 the home page took an interim headline, "Your agents work in a computer of
+    their own.", and the decision's text was cut down to the words.
 
 ### 14.2 To find out
 
