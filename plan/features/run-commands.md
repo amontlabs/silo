@@ -1,3 +1,13 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Property: Each run starts from a clean environment and inherits nothing from the session that launched it.
+- Rule: Prompts and large payloads enter a computer through a file or standard input with an explicit size limit, and never as process arguments.
+- Detail: Long-running work is detached by default.
+- Detail: The user can watch any fork's run live, and watching does not block the conversation with the agent.
+- Detail: Every command run in a computer through the engine can carry a deadline.
+
 ## From the old code
 
 The old code had it built and driven end to end, about 2,700 lines, and its approach can be reused.

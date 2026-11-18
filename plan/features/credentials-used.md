@@ -1,3 +1,9 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Detail: The diff also lists what left the fork and stays done after a drop, such as pushes, messages sent and other requests made with a secret.
+
 ## Notes
 
 - The old secrets proxy logged nothing on success, and macOS dropped its stderr; it needs host and method logging on both platforms before this line can exist.

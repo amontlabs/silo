@@ -1,0 +1,13 @@
+{
+  "name": "A written account of each fork",
+  "what": "A model writes in plain words what a fork's agent did: a paragraph kept current while it runs, and a page beside the diff when it ends.",
+  "area": "forks",
+  "needs": [
+    "fork-tree",
+    "diff"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Your agent in main can already tell you what a fork did from its events and diff; worth taking once you settle which account pays."
+  }
+}

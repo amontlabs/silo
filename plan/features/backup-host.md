@@ -1,3 +1,10 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- Is a continuous copy of the engine's log to storage you own enough as the backup, before any sync product is considered?
+  - Recommendation: Yes for the engine's state, as a first step, with computers' disks still travelling by export.
+
 ## From the old code
 
 The old code had it only as an idea and how much can be reused is not known.

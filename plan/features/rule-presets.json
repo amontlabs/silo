@@ -1,0 +1,13 @@
+{
+  "name": "Named sets of rules",
+  "what": "A set of rules has a name, such as dev or playground, and is switched on a computer in one step.",
+  "area": "access",
+  "needs": [
+    "network-policy",
+    "secrets"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "access-view asks whether presets come with it; which ones ship is settled once the rules exist."
+  }
+}

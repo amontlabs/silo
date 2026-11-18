@@ -1,0 +1,13 @@
+{
+  "name": "What agents learned, per computer",
+  "what": "Agents note their mistakes and what they lacked. Silo lists the notes per computer, later runs read them, and a note is cleared once the setup covers it.",
+  "area": "agents",
+  "needs": [
+    "tools-inside",
+    "recipes"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "A file in main that agents append to gives most of it; Silo's part pays once recipes are edited from those notes."
+  }
+}

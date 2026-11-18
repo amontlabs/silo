@@ -1,3 +1,11 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Detail: A named setup covers a layout of several machines: a work device, a device that hosts the agents and a server for overflow.
+- Docs: The sizing advice says that for Rust work a fast disk matters before more memory, and that 16 GB of memory ran out on Rust builds.
+- Docs: The sizing advice says several smaller NVMe disks beat one large one.
+
 ## From the old code
 
 The old code had it only as an idea and how much can be reused is not known.

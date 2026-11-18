@@ -1,0 +1,14 @@
+{
+  "name": "A record of each agent session",
+  "what": "Each agent session in a fork leaves one durable record of what it loaded (files, guides, tools), how it went and the context it used.",
+  "area": "agents",
+  "needs": [
+    "fork",
+    "agent-install",
+    "task-record"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "task-record keeps a task's output first; one record across agent programs pays once you debug agents often."
+  }
+}

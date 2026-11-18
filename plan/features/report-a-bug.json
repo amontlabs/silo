@@ -1,0 +1,14 @@
+{
+  "name": "Report a Silo bug with evidence",
+  "what": "From the app, or by an agent inside with one command, a Silo bug is reported with evidence the engine gathers: inputs, state before and what failed.",
+  "area": "app",
+  "needs": [
+    "app-window",
+    "logs",
+    "tools-inside"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing in the loop depends on it; worth taking once people other than the owner use Silo daily."
+  }
+}

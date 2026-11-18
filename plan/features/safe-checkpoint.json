@@ -1,0 +1,13 @@
+{
+  "name": "A last good state of main",
+  "what": "Main carries a marker, apart from its latest state, that moves only after checks pass, so forks and restores can start from a state that works.",
+  "area": "checkpoints",
+  "needs": [
+    "checkpoints",
+    "honest-checks"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "It needs honest-checks to decide when the marker moves; worth taking once merges land without you."
+  }
+}

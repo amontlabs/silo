@@ -1,3 +1,9 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Rule: An engine update restarts the engine from saved state and never swaps code inside a running process.
+
 ## From the old code
 
 The old code had it built, about 6,300 lines, and it needs reworking.

@@ -1,0 +1,12 @@
+{
+  "name": "Command rules per fork",
+  "what": "Rules on which commands may run inside a computer, set per fork: allowed in this fork, refused in that one.",
+  "area": "access",
+  "needs": [
+    "fork-access"
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "security-framing: the agent is root in its computer and considered hostile, so a rule on commands inside bounds nothing."
+  }
+}

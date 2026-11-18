@@ -1,3 +1,14 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- Apple allows two macOS computers per Mac, so when a third is asked for, does Silo refuse, queue it, or offer to stop one?
+  - Recommendation: Refuse in one line that names the two and offers to stop one, as resource-floors refuses when memory would run out.
+
+### For whoever builds it
+
+- Rule: The Swift code that drives Apple's virtualization framework belongs to the engine side and never runs inside the app.
+
 ## From the old code
 
 The old code had it partly built, about 45,600 lines, and it needs reworking.

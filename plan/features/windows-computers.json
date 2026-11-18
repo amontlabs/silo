@@ -1,0 +1,12 @@
+{
+  "name": "Windows computers",
+  "what": "A computer can run Windows, with the same loop as Linux and macOS.",
+  "area": "computers",
+  "needs": [
+    "computers"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "It is a third system while macOS is still far off; worth it once macOS computers work and users ask."
+  }
+}

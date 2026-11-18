@@ -1,0 +1,12 @@
+{
+  "name": "Repository access on other Git hosts",
+  "what": "Access per repository works the same for Gitea, Forgejo, GitLab or a private forge as it does for GitHub.",
+  "area": "access",
+  "needs": [
+    "github"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "The first user is on GitHub; worth taking when a user on another host asks."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "One log stream for the agent",
+  "what": "A computer gathers its logs, from services, tests and the browser, into one stream its agent reads with one command, and new errors reach the agent as they happen.",
+  "area": "agents",
+  "needs": [
+    "tools-inside"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "The agent can already read each log as root; worth it if agents keep losing turns hunting for logs."
+  }
+}

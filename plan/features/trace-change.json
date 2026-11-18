@@ -1,0 +1,13 @@
+{
+  "name": "Trace a change to its brief",
+  "what": "From a line or file in main or a diff, Silo shows the merge that brought it, its fork, its task and the brief behind it.",
+  "area": "changes",
+  "needs": [
+    "diff",
+    "merge"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Forks already keep their brief (fork-tree); worth it once main has a long merge history."
+  }
+}

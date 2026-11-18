@@ -1,3 +1,17 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- May a cheap model sort approvals into "routine" and "needs a look", given that approvals was settled with no broker agent?
+  - Recommendation: No, because its mistakes become Silo's and a "routine" label invites the reflexive yes.
+
+### For whoever builds it
+
+- Rule: Silo asks only for a merge or a widening of access, never for a choice the agent was told to make, and whatever the rules allow runs without a request.
+- Rule: The person's steps are few and sit at chosen points, such as after a spec and before a merge, never at every action.
+- Rule: Requests and notifications from many computers are gathered and quiet, and none interrupts the session the user is driving.
+- Detail: Anything that waits for an answer has an action that explains it simply, with a recommendation.
+
 ## From the old code
 
 The old code planned it but did not build it and how much can be reused is not known.

@@ -1,3 +1,9 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Rule: The app and the command line also reach the engine through a unix socket protected by file permissions, never through a network port.
+
 ## From the old code
 
 The old code planned it but did not build it and how much can be reused is not known.

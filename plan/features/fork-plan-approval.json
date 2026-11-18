@@ -1,0 +1,13 @@
+{
+  "name": "Approve an agent's plan of forks",
+  "what": "Before it runs, Silo shows the forks and subagents an agent plans to start. You approve the plan and are told when the work leaves it.",
+  "area": "agents",
+  "needs": [
+    "fork-many",
+    "approvals"
+  ],
+  "suggest": {
+    "verdict": "drop",
+    "why": "agent-rule: making forks widens nothing, so it never asks, and planning forks is your agent's work in main."
+  }
+}

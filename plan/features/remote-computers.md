@@ -1,3 +1,11 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Property: A dropped connection to a device loses no work, and the app and the command line pick up where they were when it returns.
+- Rule: A request to a device that is offline waits only until its deadline, then fails and says so, and it never runs later.
+- Detail: A computer can move whole to another device, keeping its name and access, and leaves the first device once it runs on the second.
+
 ## Notes
 
 - `fork --on <device>` makes the fork on another device; one call lists pending merge requests from every connected device.

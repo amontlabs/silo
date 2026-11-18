@@ -1,3 +1,10 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- To find out: Can a macOS computer give an agent a way to test an iOS or Mac app end to end, for example with agent-device?
+- Test: Start a Docker container with a volume inside a macOS computer; the container reads and writes the volume's files.
+
 ## From the old code
 
 The old code had it built, about 1,600 lines, and it needs reworking.

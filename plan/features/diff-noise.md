@@ -1,3 +1,9 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Detail: The user can mark scratch files and debug output in a fork as never merged, which keeps them out of its diff and its merge.
+
 ## From the old code
 
 The old code had it built, about 800 lines, and it needs reworking.

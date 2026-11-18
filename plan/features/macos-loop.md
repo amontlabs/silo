@@ -1,3 +1,9 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- To find out: Can a macOS computer be forked while it runs, given the limit of two macOS computers per Mac?
+
 ## Notes
 
 - Old findings: a macOS fork re-ran the developer tools install its source never ran (46 s) and shut down and booted three times (27 s). Personalization printed a password error yet exited 0; check the password change applies.

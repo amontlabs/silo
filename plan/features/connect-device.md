@@ -1,3 +1,23 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- Do devices reach each other over a private network the user already runs, such as Tailscale, or through device keys Silo manages itself as the old code did?
+  - Recommendation: A network the user already runs, because Silo's own version grew large and never had a recorded run across two real devices.
+
+### For whoever builds it
+
+- Rule: The engine listens on loopback by default and requires a token on any other address.
+- Property: When a coordinating service is down, devices and their computers keep working, and only joining a device and rotating keys wait for it.
+- Detail: Connecting another device is one guided step, and an agent finds that step in the command line's help.
+- Detail: A remote client that is refused is told exactly how to connect.
+- Test: An agent given no hints connects a Mac's app to an engine on a Linux server over a private network, and the first run works.
+- The docs give an SSH port forward and `tailscale serve` as supported ways to reach an engine from another device.
+- Find out whether the engine can listen on a private network address with only its token in front, or needs a proxy there.
+- To find out: If devices need messages, streams or a key-value store between them, compare using NATS with writing it.
+- To find out: If devices ever share state, find out whether agreeing on the event log is enough, with no device replaying it.
+- To find out: If devices ever share state, find out whether TigerBeetle's Viewstamped Replication over Silo's state machine is a route.
+
 ## From the old code
 
 The old code had it partly built, about 15,000 lines, and it needs reworking.

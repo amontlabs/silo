@@ -1,3 +1,14 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- Can a recipe name services that Silo starts in a fork before its task, while the other services the fork copied stay off?
+  - Recommendation: Yes, as an explicit list in the recipe, so a task finds its daemon running with no setup, as `tasks-start-ready` asks.
+
+### For whoever builds it
+
+- Detail: A fork can be made with the agent's memory and configuration emptied and its login kept, so nothing the parent's agent remembered carries over.
+
 ## Notes
 
 - Old-app finding: a Linux fork of a running main was a twin. A poller ran 24 times and cron twice in 130 s; hostname, machine id and tokens were the same.

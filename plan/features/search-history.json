@@ -1,0 +1,13 @@
+{
+  "name": "Search what happened across forks",
+  "what": "Search forks by what happened in them and by topic, such as everything to do with the login page, including the instructions you gave agents.",
+  "area": "app",
+  "needs": [
+    "steps",
+    "command-palette"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "It needs records that have piled up; worth it once forks number in the hundreds."
+  }
+}

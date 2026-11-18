@@ -2,6 +2,12 @@
 
 - 2026-11-16, owner: T3 Code runs on the Mac and connects into the computer; it does not run inside.
 
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Rule: After a restore or a fork, T3 Code shows the agent's conversation as it stood at the checkpoint, read from the computer.
+
 ## From the old code
 
 The old code planned it but did not build it and how much can be reused is not known.

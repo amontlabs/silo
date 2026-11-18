@@ -66,7 +66,8 @@
         "ports",
         "network-policy",
         "files",
-        "errors"
+        "errors",
+        "host-sleep"
       ]
     },
     {
@@ -75,18 +76,36 @@
       "line": "Merging when both sides changed, replacing main, history.",
       "features": [
         "merge-conflicts",
+        "rebase-forks",
+        "fork-overlap",
         "merge-requests",
+        "agent-questions",
         "replace-main",
         "merge-and-recipe",
+        "suggested-steps",
+        "agent-learnings",
         "steps",
+        "fork-status",
+        "fork-summary",
+        "drop-and-rerun",
         "fork-many",
+        "compare-forks",
+        "read-only-fork",
+        "step-into-agent",
+        "fork-plan-approval",
         "checkpoint-memory",
+        "pause-idle",
         "checkpoint-cleanup",
         "credentials-used",
+        "spend-per-fork",
+        "provider-limits",
         "merge-hooks",
         "pull-request",
         "diff-noise",
-        "auto-merge-rules"
+        "diff-map",
+        "auto-merge-rules",
+        "declared-scope",
+        "merge-queue"
       ]
     },
     {
@@ -97,12 +116,20 @@
         "fork-and-run",
         "one-call-task",
         "task-record",
+        "session-record",
+        "replay-responses",
         "triggers",
+        "inbound-webhooks",
         "honest-checks",
+        "safe-checkpoint",
         "prepared-base",
         "task-limits",
+        "spend-limits",
+        "cost-estimates",
+        "task-dependencies",
         "ci-runner",
-        "task-extras"
+        "task-extras",
+        "tracker-mirror"
       ]
     },
     {
@@ -116,7 +143,11 @@
         "remote-approvals",
         "ssh-from-elsewhere",
         "agent-host",
-        "phone-review"
+        "same-setup-on-devices",
+        "phone-review",
+        "agent-from-any-frontend",
+        "web-dashboard",
+        "notes-place"
       ]
     },
     {
@@ -127,8 +158,13 @@
         "release",
         "updates",
         "storage",
+        "shared-caches",
         "keep-current",
         "logs",
+        "agent-log-stream",
+        "process-list",
+        "engine-query",
+        "report-a-bug",
         "updates-keep-running",
         "resize",
         "start-with-device",
@@ -144,13 +180,20 @@
         "isolation-tests",
         "hostile-content",
         "stated-limits",
+        "exposure-report",
         "private-channel",
         "logins-stay-put",
+        "agent-accounts",
         "emergency-stop",
         "known-programs",
         "fewer-asks",
+        "proposed-rules",
         "policy-file",
+        "rule-presets",
+        "package-age",
+        "command-rules",
         "dns-log",
+        "canary-secret",
         "outside-review",
         "selling-extras"
       ]
@@ -187,21 +230,36 @@
       "features": [
         "export",
         "computer-bisect",
+        "trace-change",
         "command-palette",
+        "search-history",
+        "quick-entry",
+        "app-terminal",
         "menus-help",
+        "terminal-interface",
+        "custom-panels",
         "host-agent-plugin",
         "personal-tokens",
+        "own-identity",
+        "other-git-hosts",
         "company-secrets",
+        "connector-rules",
         "containers",
+        "windows-computers",
         "exact-rebuilds",
+        "install-recipe",
+        "recipe-directory",
         "agent-tool-backends",
+        "local-models",
         "backup-host",
         "cloud-forks",
         "public-face",
         "export-logins",
         "device-push",
         "team-machine",
-        "fork-from-teammate"
+        "fork-from-teammate",
+        "share-computer-link",
+        "share-diff-link"
       ]
     },
     {

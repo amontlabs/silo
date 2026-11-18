@@ -1,0 +1,12 @@
+{
+  "name": "Sleep does not lose work",
+  "what": "While a computer has work running, your Mac stays awake. If it sleeps anyway, its computers resume on wake with nothing lost.",
+  "area": "computers",
+  "needs": [
+    "computers"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The starter runs on a Mac, and a run left overnight there stalls without it."
+  }
+}

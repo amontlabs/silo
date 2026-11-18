@@ -1,3 +1,9 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Test: A file is edited under a development server running in a computer; the page reloads by itself inside the computer and through the published port.
+
 ## Notes
 
 - A reverse proxy in the engine routes by host name, so several forks can all serve port 3000 at once at `http://<fork>.silo.localhost:<port>`, with no DNS setup or administrator rights. Routes go away when the fork is dropped.

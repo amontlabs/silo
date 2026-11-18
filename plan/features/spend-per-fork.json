@@ -1,0 +1,13 @@
+{
+  "name": "What each fork spent",
+  "what": "Silo records model spend per computer, fork and subagent from the first event, and shows it in dollars or as a share of a subscription's limit.",
+  "area": "agents",
+  "needs": [
+    "fork",
+    "agent-install"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "The loop runs without it; worth taking once spend can be read reliably for subscription sign-ins."
+  }
+}

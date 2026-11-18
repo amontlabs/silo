@@ -1,0 +1,13 @@
+{
+  "name": "See where open forks will collide",
+  "what": "One view lists what several open forks changed in common and flags the merges that will conflict. The agent handing out work reads the same list.",
+  "area": "changes",
+  "needs": [
+    "diff",
+    "fork-tree"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "merge-conflicts settles a collision when it happens; predicting it pays once many forks run on one main at once."
+  }
+}

@@ -1,3 +1,20 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- When a step fails, does the engine retry with backoff until someone steps in, or stop after a set number of attempts and mark the operation as needing attention?
+  - Recommendation: Stop and mark it, since the plan gives every operation a result and an error you can read, and endless retries reach neither.
+
+### For whoever builds it
+
+- Detail: A unit of work has typed input and output, a timeout, bounded retries, a heartbeat, declared dependencies, a run id and persisted state.
+- Rule: The engine watches work started in the background, so it is followed even when the agent that started it stops.
+- Detail: Each long operation shows what is wanted, what is seen and what the engine is waiting for, with the current step and the reason, such as "blocked: waiting on an approval".
+- Detail: `silo why <computer or operation>` gives the same answer from the command line, for an operation or a computer that is blocked or stopped.
+- Detail: Outside signals, such as an approval or a webhook, enter a waiting operation as inputs.
+- Property: A wait inside an operation survives an engine restart and fires once.
+- Test: The simulator retries an operation; it runs with exactly the settings of its first attempt and never falls back to a default limit.
+
 ## From the old code
 
 The old code had it built, about 6,000 lines, and its approach can be reused.

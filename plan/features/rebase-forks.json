@@ -1,0 +1,14 @@
+{
+  "name": "Merge main into an open fork",
+  "what": "When main moves, an open fork takes main's new changes and keeps its name, its checkpoints and a diff of its own work only.",
+  "area": "forks",
+  "needs": [
+    "fork",
+    "merge-conflicts",
+    "tools-inside"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "merge-conflicts handles a moved main at merge time; this is worth it once forks stay open for days."
+  }
+}

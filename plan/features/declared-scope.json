@@ -1,0 +1,13 @@
+{
+  "name": "What a fork may change",
+  "what": "A fork names up front the files and state it may change, and a computer can name files no fork may change. Anything else blocks the merge.",
+  "area": "changes",
+  "needs": [
+    "diff",
+    "merge"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "auto-merge-rules already judges a fork by what it changed; worth taking once forks merge without you reading every diff."
+  }
+}

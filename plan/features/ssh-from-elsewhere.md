@@ -1,3 +1,10 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Rule: Every SSH path into a computer or between devices accepts keys only, and passwords are refused by default.
+- Detail: One command on another device reaches a computer and opens the website it serves in that device's browser.
+
 ## From the old code
 
 The old code had it built, about 3,000 lines, and it needs reworking.

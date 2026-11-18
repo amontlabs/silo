@@ -1,3 +1,18 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- Do computers start only from Silo's own Ubuntu image, or from other distributions and arbitrary images too?
+  - Recommendation: Only Silo's image, because a controlled base is what makes forks and 800 ms starts possible; recipes add the rest.
+- Does the base image ship Docker and the common package managers ready to use, or stay minimal and leave them to recipes?
+  - Recommendation: Ship them: macOS computers come with Git and Node (macos-tools), mac-and-linux-consistent asks for the same contents, and recipes arrive three stages later.
+
+### For whoever builds it
+
+- Test: In a new Linux computer, Docker, compose, bubblewrap and the common package managers, pnpm included, work with no setup, and a test suite that needs Docker passes.
+- Detail: The base image includes a general scripting language, so an agent whose only tool is running a command can script everything else.
+- Test: A shell in a new computer reports true colour through COLORTERM, and agent programs such as Claude Code render correctly on their first run.
+
 ## From the old code
 
 The old code had it built, about 3,000 lines, and its approach can be reused.

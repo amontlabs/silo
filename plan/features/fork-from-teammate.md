@@ -1,3 +1,14 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- What travels with a teammate's fork: the running state (memory, programs, the agent's conversation, the browser) and the diff, or only the disk and the diff?
+  - Recommendation: The disk, the diff and the conversation always, and memory only between devices with the same CPU and runtime, where it can restore.
+- How does a teammate grant a fork: a link to one checkpoint or computer, read-only or with write permission, or through the team machine?
+  - Recommendation: A link to a checkpoint, as the home page's flow shows it, so two people need no team machine.
+- Can you merge a teammate's fork into your own main, which it did not come from, or only back into theirs?
+  - Recommendation: Only back into theirs at first, since merge brings a fork's changes into the computer it came from.
+
 ## Notes
 
 - Owner, 2026-11-17, about what the home page shows: a computer "can be shared from linux server yes but also from a teammate". The owner asked for this entry the same day.

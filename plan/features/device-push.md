@@ -1,3 +1,9 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Detail: One command forks, runs the agent, commits inside the fork, shows the commit on your device for review, and pushes it from there.
+
 ## From the old code
 
 The old code had it partly built, about 5,400 lines, and it would be written again.

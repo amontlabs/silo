@@ -1,0 +1,13 @@
+{
+  "name": "Reach your agent from a phone",
+  "what": "From your phone or a chat app, you send your agent a prompt and read its replies through Silo, while its computer stays closed to incoming connections.",
+  "area": "agents",
+  "needs": [
+    "agent-install",
+    "phone-review"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "phone-review comes first; worth it if you want to steer work away from the desk as well as review it."
+  }
+}

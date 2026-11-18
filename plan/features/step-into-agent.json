@@ -1,0 +1,13 @@
+{
+  "name": "Step into a fork's agent session",
+  "what": "From the app or the command line, you attach to a fork's agent session, running or finished, watch it, send a correction or take over, then detach.",
+  "area": "agents",
+  "needs": [
+    "agent-install",
+    "run-commands"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "It saves forks from being dropped, and run-commands already keeps a session running after you disconnect."
+  }
+}

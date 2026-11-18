@@ -1,0 +1,13 @@
+{
+  "name": "See what runs in each computer",
+  "what": "The app lists the processes in each computer, agents first with their usage and the run that started each, and can stop one.",
+  "area": "computers",
+  "needs": [
+    "app-window",
+    "run-commands"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "terminal shows the same through ps; worth it in the app once several agents run per computer."
+  }
+}

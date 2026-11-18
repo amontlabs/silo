@@ -1,3 +1,13 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Detail: A new terminal tab or split can open directly in a computer or in a fresh fork.
+- Test: Start a process from the app, and it runs with the user's own shell and PATH, under fish as well as bash.
+- Test: Run a command-line agent program under tmux in a computer, and it works unchanged.
+- Detail: Clicking a file path in a terminal or a log opens that file.
+- To find out: For the entry app-terminal, does the app own a renderer or embed an existing terminal view? Study how Ghostty's app builds on libghostty, which gives parsing and terminal state only, and what Conductor does.
+
 ## From the old code
 
 The old code had it built and driven end to end, about 2,400 lines, and it needs reworking.

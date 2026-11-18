@@ -1,0 +1,13 @@
+{
+  "name": "Recipes add their own views",
+  "what": "A computer or a recipe adds its own view to the app, such as a progress page, sent as data that the app draws.",
+  "area": "app",
+  "needs": [
+    "app-window",
+    "hostile-content"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "Anything from a computer is untrusted, so this follows hostile-content; worth it once recipes want to show their own progress."
+  }
+}

@@ -1,3 +1,21 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- What memory does a new computer get by default: 8 GB, the edge for a large Rust build, or 16 GB, which is safe?
+  - Recommendation: 16 GB, because a machine too small for integration and browser tests is the recurring complaint about sandboxes.
+
+### For whoever builds it
+
+- Property: Creating a computer and setting its rules are one change, so a computer never exists without its rules.
+- Property: Stopping or deleting a computer, or dropping a fork, ends every process started in it, detached ones included.
+- Detail: Each computer has CPU and memory limits, so tests in one fork do not starve the others.
+- Property: A computer that runs out of memory stops only itself.
+- Property: A computer has no time limit, and nothing stops it after 24 hours.
+- Detail: Computers and operations carry a readable name and a description beside their id.
+- The docs give the reason for each default size: 8 GB is the edge for a large Rust build, 16 GB is safe, and a large Lean proof can exceed 16 GB.
+- The docs say plainly whether a computer gets a GPU.
+
 ## From the old code
 
 The old code had it partly built, about 9,800 lines, and its approach can be reused.

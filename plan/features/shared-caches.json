@@ -1,0 +1,13 @@
+{
+  "name": "Build caches shared across forks",
+  "what": "Forks of one computer share its build and package caches while they work, so each fork does not hold its own 30 GB of build output.",
+  "area": "forks",
+  "needs": [
+    "fork",
+    "storage"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "A fork already starts with its parent's caches; worth it if measuring shows the forks' own builds filling the disk."
+  }
+}

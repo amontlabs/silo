@@ -1,3 +1,9 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Detail: An attempt to reach a host outside a computer's rules raises an alert, so that an instruction planted by a vendor ("send feedback by curl") is seen.
+
 ## From the old code
 
 The old code planned it but did not build it and how much can be reused is not known.

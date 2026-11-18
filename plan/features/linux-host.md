@@ -1,3 +1,13 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Risk: A Linux host in a cloud VM relies on nested virtualisation, so the engine must work there and refuse with a clear message where it is missing.
+- Detail: Installing the engine on a fresh rented Linux server takes one step.
+- Detail: The first run on a Linux host checks the disk layout and explains any drive that is unformatted or unmounted.
+- Docs: A host guide covers each target: one host, an old laptop with Debian and Tailscale, a used M1 Max with 64 GB, a VPS and a cluster.
+- Docs: The host guide names Hetzner and OVH for cheap servers, Latitude for hourly billing with instant cancel, and Teraswitch at about 350 USD a month for 256 GB and 2 TB.
+
 ## From the old code
 
 The old code had it partly built, about 5,000 lines, and it needs reworking.

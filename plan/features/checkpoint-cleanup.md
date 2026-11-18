@@ -1,3 +1,10 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Detail: A prune command keeps what replaying history needs and drops the detail of transcripts.
+- To find out: How much disk is used for how much kept history (space amplification)?
+
 ## Notes
 
 - The old engine never pruned: chained snapshots needed forcing. Prune on drop and on checkpoint removal, keep a retention count for checkpoints taken before merges, and check the disk really comes back.

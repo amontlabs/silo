@@ -1,3 +1,22 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- Is holding issues and comments written by outsiders, until you let them through to the agent, part of this feature, a later one, or out?
+  - Recommendation: Later, with `triggers`, because `security-framing` already treats the agent as hostile, so the rules bound what an outsider's text can make it do.
+- When a computer has its own GitHub identity, whose name do its commits carry: the computer's, yours, or both?
+  - Recommendation: The computer's, in line with `github-is-storage`, where agents post as a bot; you noted that commits could otherwise be farmed.
+
+### For whoever builds it
+
+- Detail: A repository can be given to a computer without access to its workflows, so that nothing can leave through them.
+- Detail: The user can set a rule that refuses, or asks before, a push that rewrites the history of a protected branch.
+- Property: The GitHub connection spreads its request budget across forks and backs off when GitHub limits it.
+- Detail: A fork that GitHub's rate limit holds back says so and does not fail.
+- Test: Before a preview or a release, sign in to GitHub from an account that is not the owner's; it works, and the GitHub App is public.
+- Detail: One command clones a repository into a computer and gives that computer access to it.
+- Rule: The engine counts its calls to GitHub's API and stays well under its rate limit, since every fork and task adds to them.
+
 ## Open points
 
 - Needs `secrets`, which comes later in the order: both use the same placeholder swap.

@@ -1,3 +1,10 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- Rule: A summary written by an agent is untrusted content, so a merge decision never rests on it alone.
+- Test: A very large log is produced or pasted inside a computer, and the device stays responsive.
+
 ## From the old code
 
 The old code had it built, about 700 lines, and its approach can be reused.

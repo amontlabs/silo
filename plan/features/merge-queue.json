@@ -1,0 +1,13 @@
+{
+  "name": "A merge queue",
+  "what": "Forks ready to merge wait in order, and each is brought onto the new main and checked again before it lands.",
+  "area": "changes",
+  "needs": [
+    "merge-conflicts",
+    "merge-requests"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "It matters when merges arrive faster than you decide them, as with auto-merge-rules."
+  }
+}

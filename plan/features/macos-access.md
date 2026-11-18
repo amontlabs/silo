@@ -1,3 +1,10 @@
+## Proposed, not confirmed by the owner
+
+### For whoever builds it
+
+- To find out: Can the component that swaps secrets for Linux computers also serve a macOS computer, or does macOS need a gateway that copies microsandbox's swap, as first intended?
+- Property: Every property stated for secrets on Linux also holds for a macOS computer.
+
 ## From the old code
 
 The old code had it partly built, about 7,700 lines, and it needs reworking.

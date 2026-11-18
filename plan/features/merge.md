@@ -1,3 +1,17 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- Does what an agent taught itself in a fork (a skill, a tool, its rules files, its memory) merge with the rest, or only on its own approval?
+  - Recommendation: Its own approval, since these are unreviewed instructions that steer every later task.
+- Can one group or item be left out of a merge while the rest lands, or does the first merge take the whole fork?
+  - Recommendation: The whole fork, since `git-words` makes this merge a fast-forward and `merge-conflicts` brings item by item later.
+
+### For whoever builds it
+
+- Property: After a merge, main's history shows which fork brought each change, with each merge kept as one unit.
+- Test: A fork undoes a fix that an earlier merge brought into main; the merge view flags it before the merge.
+
 ## Notes
 
 - Old live test: merges onto a running main with Postgres and a dev server only passed once migrations, a crontab merge and service restarts were added (see merge-hooks).

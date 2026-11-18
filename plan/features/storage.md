@@ -1,3 +1,17 @@
+## Proposed, not confirmed by the owner
+
+### For the owner to settle
+
+- Are Silo's disk images left out of Time Machine by default, which keeps main out of the Mac's backups until backup-host is built?
+  - Recommendation: Yes, with a line in the Storage tab that says so, because a disk image that changes all day makes every backup huge.
+
+### For whoever builds it
+
+- Detail: Disk use is shown per computer, per fork and per checkpoint, in the app and the command line.
+- Detail: The disk view names images and build folders, stale build output inside a fork included.
+- Detail: Stale build output inside a fork can be reclaimed on its own.
+- Detail: On a Mac, Silo's disk images, fork data and caches are excluded from Spotlight by default.
+
 ## From the old code
 
 The old code had it partly built, about 1,300 lines, and its approach can be reused.

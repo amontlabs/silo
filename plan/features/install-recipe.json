@@ -1,0 +1,12 @@
+{
+  "name": "Install a published recipe",
+  "what": "A recipe someone published installs with one command, and its content can be read before anything runs.",
+  "area": "setup",
+  "needs": [
+    "recipes"
+  ],
+  "suggest": {
+    "verdict": "later",
+    "why": "first-user: nobody else has recipes to publish yet; worth taking with the first users after the owner."
+  }
+}
