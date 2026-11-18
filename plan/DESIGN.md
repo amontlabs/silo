@@ -348,6 +348,21 @@ What is known and will bear on the design:
   and makes assigning an account a rule. Whether a subscription sign-in works with substitution at
   all is To find out (Notes).
 - The choice is tied to 5.8: if Silo holds logins, it already opens the traffic to model providers.
+- Anthropic's terms, read on 18 November 2026, say that a developer may not collect, store or pass
+  on the credentials of a Claude subscription, and that the sign-in must complete through
+  Anthropic's own flow. An API key that its owner places in a secrets manager is allowed. So the
+  second mechanism fits an API key and does not fit a subscription login. The terms of other
+  providers were not read.
+- Reading the traffic (5.8) holds no login. Claude Code documents that a proxy which inspects
+  traffic works once its certificate is trusted.
+- Claude Code has an official long-lived token for a machine with no window (`claude
+  setup-token`). It can only make model requests. Whether a user may keep it as a Silo secret is
+  a question for Anthropic.
+
+What the owner said after reading this (Owner, 18 November 2026): how a login gets into a computer
+is not for Silo to solve. A person connects the vendor's own app the official way, over SSH, or
+runs the agent program inside the computer with an API key held as a Silo secret. The question
+that stays open is wider than logins: how agent apps connect to computers at all (8.5).
 
 One line of the notes is now in question and is the owner's to settle: "Silo builds nothing that
 helps get around a provider's terms, such as rotating accounts".
@@ -937,6 +952,58 @@ rules file that sits in a repository. So:
 
 Whether this is how the owner wants it is Open (Appendix A).
 
+**Recipes made of pieces (Owner, 18 November 2026).** A computer is blank by default: a bare macOS
+or Linux machine. A recipe says what goes in it. Silo ships recipes, and people write and share
+their own. A recipe is made of pieces that combine. Two examples: the tools of the computer that
+watches the others (11.6), and computer use. Most pieces are the same for every agent program.
+Some have a part that differs, because each program keeps its instructions and skills in a
+different place.
+
+- A piece is a small recipe, and a recipe can include other recipes. (Proposed)
+- The data file of an agent program (8.3) also says where the program keeps its instructions and
+  skills, so that a piece is written once for every program. (Proposed)
+- A computer made from a recipe asks for no approval by hand for what the recipe installs, such as
+  the permissions computer use needs. (Owner) The old Silo did this on macOS computers. During
+  set-up it wrote the approvals for Accessibility and Screen Recording into the system's
+  permission database, with System Integrity Protection turned off in the computer. A fork's disk
+  copy carried them. Whether this holds on the current macOS, and for a fork of a running
+  computer, is To find out.
+
+**Nix (Owner, 18 November 2026).** The owner sees Nix as what recipes need: security,
+predictability, and machines that can be rebuilt exactly. Silo audits its built-in recipes and
+updates them often. A company does the same for its own. What Nix gives and costs as the base of
+recipes was researched the same day.
+
+What that research found:
+
+- Nix pins every package of a machine to an exact version and checks signatures. It does not show
+  that anyone reviewed what was pinned. The audit is work Silo does: a pinned list, a wait before
+  taking new versions, and a reading of what changed between two versions of a machine.
+- The products built on Nix for development machines hide it behind a short file or a command
+  (Replit, Google's Firebase Studio, devbox, Flox). One that showed it to its users left it, for
+  that reason among others.
+- On Linux, Nix can describe the whole machine. On macOS it covers one layer: command-line tools
+  and settings. The base system comes from Apple's installer, apps come through Homebrew, and
+  privacy permissions are outside it.
+- A machine managed wholly by Nix does not run a program downloaded from the internet without a
+  fix. Agents download such programs all the time.
+- Nix does not see what an agent installs by other means, and nothing was found that detects it.
+  The "only here" list is what covers this (6.4).
+- Agent programs are packaged for Nix within hours of their release, outside the main package
+  set. A module exists that places Claude Code's settings, instructions, skills and servers. None
+  was found for the other agent programs.
+- The Nix store is heavy. Linux computers can share one store, read-only. Whether macOS computers
+  can is To find out.
+
+What follows (Proposed):
+
+- Nix is the engine under recipes. It is not what a user writes: a user picks pieces and writes a
+  short list.
+- A recipe has the same shape on both systems: a pinned base system, then a layer built by Nix.
+  On Linux the base is an ordinary distribution, so that what agents download runs.
+- What Nix cannot describe is a step Silo owns: the base image, and on macOS the permissions of
+  computer use.
+
 **State and steps** (Notes, adapted). A computer can be described by its state or by its steps. A
 checkpoint is exact and opaque. A recipe is readable and repeatable, and it can drift from the
 computer it made. Silo needs both. The "only here" list (6.4) is the bridge between them: it
@@ -991,7 +1058,65 @@ of it work inside their Silo computers? The owner wants good onboarding for it. 
   looking at. (Notes)
 - A user who leaves takes each computer as a standard disk image, and each recipe and rule as
   text. (Notes)
-- How logins come in is part of 4.4 and is Open.
+- How logins come in is part of 4.4 and 8.5, and is Open.
+
+### 8.5 Connecting agent apps to computers (Open)
+
+The owner's question (Owner, 18 November 2026): people use the app of their agent program on the
+Mac and connect it to a machine over SSH. That can be the way into a computer. It is not yet clear
+how it works with many computers. Adding each one to SSH by hand is too heavy, a user switches
+between computers, and an agent may start other computers. The owner expects this to need several
+discussions, and wants it researched first: similar tools, and people who have the same problem.
+
+What is known:
+
+- Over SSH, the app on the Mac is only the window. The agent program runs inside the computer, so
+  its model traffic still crosses the boundary (5.8). The Claude desktop app installs Claude Code
+  on the remote machine, and the Codex app starts its server there.
+- The Claude desktop app appears to keep the login on the Mac and to give the session a
+  short-lived token. With Codex, the sign-in is done on the remote machine. Where the token lands
+  is To find out for each app.
+- An agent that starts with no app connected has nobody to hand it a login. It needs a sign-in
+  done inside the computer, or an API key.
+
+The question in three parts (Proposed):
+
+1. **Reaching a computer.** How any program on the Mac reaches any computer, including one made a
+   moment ago, with nothing added by hand.
+2. **Following the work.** A conversation lives in one computer. What the user's app shows, and
+   where the conversation continues, when work moves to a fork.
+3. **Agents making computers.** Whether an agent may ask for a fork or a fresh computer, and how
+   its work there reaches the user.
+
+What the research of 18 November 2026 found. Its files are kept outside this repository.
+
+- No product moves a conversation from one machine to another. In every one, a conversation stays
+  on the machine where it started, and the window attaches to it there.
+- A window finds a conversation in two ways. The user points the app at a machine over SSH (the
+  Claude desktop app, the Codex app, T3 Code, Zed, Cursor). Or the conversation announces itself
+  through the vendor's account (Claude Code's Remote Control, the vendors' cloud sessions).
+- No app documents a way for another program to add a machine to it. Most read the Mac's SSH
+  settings. The Codex app lists only the machines named one by one there.
+- What people report most is not adding machines by hand. It is signing in again on every fresh
+  machine, several agents in one machine destroying each other's work, and losing sight of what
+  sub-agents do.
+- The tools people praise for following many agents show a list of pieces of work, and which one
+  needs the user. They do not show a list of machines.
+- The SSH mode of the desktop apps is young. It has open bugs with several conversations on one
+  machine, and for Claude it takes no API key. A terminal over SSH is the path that always works.
+
+What follows (Proposed):
+
+- Silo does not try to make the window of an agent app follow the work. The agent app is where the
+  user talks to one agent in one computer. Silo's window is where the user sees all the work, from
+  the record, whichever agent program did it.
+- Silo keeps one file of SSH entries: one named entry per computer, with its key. The Mac's SSH
+  settings include that file once, with the user's yes. Every tool then reaches every computer by
+  name, with no prompt.
+- A fork carries the conversation with it, because it is a copy of the whole computer. The agent
+  program resumes it there. Whether each program does so in a copied computer is To find out.
+- From a run in Silo's window, one action opens a terminal in the right computer, resumed in the
+  right conversation.
 
 ---
 
@@ -1479,6 +1604,8 @@ repository and is not part of this copy.
     stay Git's, but merging one computer into another has left the core. At the reset of
     18 November 2026 the home page took an interim headline, "Your agents work in a computer of
     their own.", and the decision's text was cut down to the words.
+12. **How agent apps connect to computers** (8.5). The whole part.
+13. **Are recipes made of pieces, and is Nix their base** (8.1)?
 
 ### 14.2 To find out
 
@@ -1502,6 +1629,12 @@ On computers:
 12. Which process holds the boundary and the real secret values.
 13. Which VM engine runs Linux computers on a Mac, given that the macOS one is built first.
 14. Whether a subscription sign-in works with substitution at all.
+15. Whether the old Silo's way of giving a macOS computer the approvals of computer use still
+    works on the current macOS, and for a fork of a running computer (8.1).
+16. Whether each agent program resumes a conversation in a copied computer (8.5).
+17. Whether macOS computers can share one Nix store read-only, and what the first build of a
+    recipe costs in time and disk (8.1).
+18. Where the token lands when each agent app connects over SSH (8.5).
 
 ---
 
