@@ -540,7 +540,7 @@ const DECIDED_STAGES = 6;
 const BUILDING_COUNT = 2;
 
 // A later state of the plan, in build order: the entries of the first six stages carry the verdict
-// of their file, else the one suggested for them; the first two taken, topics apart, are being built. Nothing is
+// of their file, else the one suggested for them; the first two taken are being built. Nothing is
 // built that the file does not say is built. Answers the verdicts, and the ids built and being built.
 export function progressOf(features) {
   const stages = [...new Set(features.map((feature) => feature.stage).filter(Boolean))];
@@ -551,6 +551,6 @@ export function progressOf(features) {
     if (VERDICT_NAMES.includes(verdict)) verdicts.set(feature.id, verdict);
   }
   const built = new Set(features.filter((feature) => feature.built).map((feature) => feature.id));
-  const building = new Set(features.filter((feature) => verdicts.get(feature.id) === 'take' && !built.has(feature.id) && feature.area !== 'ground').slice(0, BUILDING_COUNT).map((feature) => feature.id));
+  const building = new Set(features.filter((feature) => verdicts.get(feature.id) === 'take' && !built.has(feature.id)).slice(0, BUILDING_COUNT).map((feature) => feature.id));
   return { stages: stages.slice(0, DECIDED_STAGES), verdicts, built, building };
 }

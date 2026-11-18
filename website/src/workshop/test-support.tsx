@@ -93,10 +93,10 @@ export const shownNotes = () => waitFor(() => {
   return md as HTMLElement;
 });
 
-/** The engine's row opened from the address, as the owner unless another person is given. */
-export async function openEngine(data = buildData(), me = owner) {
+/** The row of `core` opened from the address, as the owner unless another person is given. */
+export async function openCore(data = buildData(), me = owner) {
   mockApi({ me });
-  history.replaceState(null, '', '/workshop#engine/engine');
+  history.replaceState(null, '', '/workshop#part-a/core');
   await renderApp(data);
   await waitFor(() => expect(rowButton('The engine runs on its own')).toHaveAttribute('aria-expanded', 'true'));
 }

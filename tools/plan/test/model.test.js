@@ -75,7 +75,7 @@ test('area groups from a plan, and the status line', () => {
   const statuses = { a: 'planned', b: 'planned', c: 'undecided', d: 'undecided' };
   const groups = areaGroups(plan, (id) => statuses[id]);
   assert.deepEqual(groups.map((g) => [g.area.id, g.number, g.rows.map((r) => r.id), g.state, g.first]), [['engine', 1, ['a', 'd'], 'next', true], ['forks', 2, ['b', 'c'], 'planned', true]]);
-  assert.equal(statusLine(groups), 'Starting with the Engine.');
+  assert.equal(statusLine(groups), 'Starting with Engine.');
   statuses.a = 'building';
   assert.equal(statusLine(areaGroups(plan, (id) => statuses[id])), 'Building Engine. Forks is next.');
   statuses.a = 'built';

@@ -1,9 +1,9 @@
-// The drawing of Silo, part by part. Every part is a button; opening one folds the drawing to a strip that
+// The map of the plan, part by part, drawn from a layout (map.ts). Every part is a button; opening one folds the drawing to a strip that
 // stays on screen. Each box carries both of its places, so the fold is a CSS transition of the same elements.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
-import { arrowPath, crossPath, FOLD_HEIGHT, GHOSTS, LAYOUT, MAP_HEIGHT, MAP_WIDTH, OUTSIDE, placeStyle, WIRES_FOLD, WIRES_FULL, ZONES } from './map';
-import type { Wire } from './map';
+import type { CSSProperties } from 'react';
+import { arrowPath, crossPath, FOLD_HEIGHT, MAP_HEIGHT, MAP_WIDTH, placeStyle } from './map';
+import type { Glyph, MapLayout, Wire } from './map';
 import { stateWords } from './plan';
 import type { AreaGroup, AreaState } from './plan';
 
@@ -12,35 +12,19 @@ const SPOKEN: Record<AreaState, string> = { done: 'done', now: 'being built now'
 /** What a screen reader hears for a part or a tile. */
 export function spoken(group: AreaGroup, toDecide: number): string {
   const count = group.rows.length - group.counts.dropped;
-  const noun = group.area.id === 'ground' ? 'topic' : 'feature';
   const state = group.state === 'planned' ? stateWords(group) : SPOKEN[group.state];
-  return `${group.area.title}, ${state}, ${count} ${count === 1 ? noun : `${noun}s`}${toDecide ? `, ${toDecide} to decide` : ''}. ${group.area.line}`;
+  return `${group.area.title}, ${state}, ${count} ${count === 1 ? 'feature' : 'features'}${toDecide ? `, ${toDecide} to decide` : ''}. ${group.area.line}`;
 }
 
-const GLYPHS: Record<string, ReactNode> = {
-  app: (
-    <svg className="ws-gl" viewBox="0 0 148 50" aria-hidden="true" style={{ left: 'calc(15 * var(--u))', top: 'calc(70 * var(--u))', width: 'calc(148 * var(--u))' }}>
-      <rect x=".5" y=".5" width="68" height="48" rx="2" /><path d="M.5 11.5h68" />
-      <circle className="solid" cx="7.5" cy="6" r="1.2" /><circle className="solid" cx="12.5" cy="6" r="1.2" /><circle className="solid" cx="17.5" cy="6" r="1.2" />
-      <path d="M8.5 21h4m6 0h34M8.5 30h4m6 0h26M8.5 39h4m6 0h30" />
-      <rect x="79.5" y=".5" width="68" height="48" rx="2" /><text x="87.5" y="20.5">$ silo</text>
-      <rect className="solid" x="126.5" y="12.5" width="5" height="10" /><path d="M87.5 32h30M87.5 40h18" />
+/** A part's glyph, drawn from the layout's paths. */
+function GlyphView({ glyph }: { glyph: Glyph }) {
+  const [left, top, width] = glyph.at;
+  return (
+    <svg className="ws-gl" viewBox={glyph.viewBox} strokeLinecap="round" aria-hidden="true" style={{ left: `calc(${left} * var(--u))`, top: `calc(${top} * var(--u))`, width: `calc(${width} * var(--u))` }}>
+      {glyph.paths.map((path, index) => <path key={index} className={path.kind} vectorEffect="non-scaling-stroke" d={path.d} />)}
     </svg>
-  ),
-  engine: (
-    <svg className="ws-gl" viewBox="21.5 21.5 85 85" strokeLinecap="round" aria-hidden="true" style={{ left: 'calc(30 * var(--u))', top: 'calc(160 * var(--u))', width: 'calc(52 * var(--u))' }}>
-      <path vectorEffect="non-scaling-stroke" d="M60.386 102.832A39 39 0 1 1 98.435 82.309" />
-      <path vectorEffect="non-scaling-stroke" d="M88.625 72.344A26 26 0 1 1 75.804 40.834" />
-      <path className="core" vectorEffect="non-scaling-stroke" d="M72.591 54.243A13 13 0 1 1 52.316 58.301" />
-    </svg>
-  ),
-  devices: (
-    <svg className="ws-gl" viewBox="0 0 81 51" aria-hidden="true" style={{ left: 'calc(15 * var(--u))', top: 'calc(62 * var(--u))', width: 'calc(81 * var(--u))' }}>
-      <rect x=".5" y=".5" width="13" height="50" rx="1.5" /><rect x="30.5" y=".5" width="50" height="21" rx="1.5" />
-      <rect x="30.5" y="29.5" width="50" height="21" rx="1.5" /><path d="M13.5 11h17M13.5 40h17" />
-    </svg>
-  ),
-};
+  );
+}
 
 function Wires({ wires, height, className, states }: { wires: Wire[]; height: number; className: string; states: Map<string, AreaState> }) {
   return (
@@ -66,6 +50,7 @@ function focusVisible(node: Element): boolean {
 const style = (vars: Record<string, string | number>) => vars as CSSProperties;
 
 export interface MapViewProps {
+  layout: MapLayout;
   groups: AreaGroup[];
   folded: boolean;
   current: string | null;
@@ -73,7 +58,7 @@ export interface MapViewProps {
   onOpen: (area: string) => void;
 }
 
-export function MapView({ groups, folded, current, toDecide, onOpen }: MapViewProps) {
+export function MapView({ layout, groups, folded, current, toDecide, onOpen }: MapViewProps) {
   const states = new Map(groups.map((group) => [group.area.id, group.state]));
   const byId = new Map(groups.map((group) => [group.area.id, group]));
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
@@ -105,28 +90,31 @@ export function MapView({ groups, folded, current, toDecide, onOpen }: MapViewPr
 
   return (
     <section className="ws-mapsec" aria-label="Silo, part by part">
-      <div className={folded ? 'ws-stage fold' : 'ws-stage'}>
-        {ZONES.map((zone) => (
+      <div className={['ws-stage', folded ? 'fold' : '', groups.length ? '' : 'ws-stage-empty'].filter(Boolean).join(' ')}>
+        {groups.length ? null : <p className="ws-quiet">No part yet.</p>}
+        {layout.zones.map((zone) => (
           <div className={`ws-geo ws-zone${zone.rounded ? ' rounded' : ''}`} key={zone.label} style={style(placeStyle(zone.full, zone.fold))} aria-hidden="true">
             <span className="ws-zlabel">{zone.label}</span>
             {zone.corners ? <><i className="ws-dia tl" /><i className="ws-dia tr" /><i className="ws-dia bl" /><i className="ws-dia br" /></> : null}
           </div>
         ))}
-        <Wires wires={WIRES_FULL} height={MAP_HEIGHT} className="w-full" states={states} />
-        <Wires wires={WIRES_FOLD} height={FOLD_HEIGHT} className="w-fold" states={states} />
-        {WIRES_FULL.filter((wire) => wire.label).map((wire, index) => {
+        <Wires wires={layout.wires.full} height={MAP_HEIGHT} className="w-full" states={states} />
+        <Wires wires={layout.wires.fold} height={FOLD_HEIGHT} className="w-fold" states={states} />
+        {layout.wires.full.filter((wire) => wire.label).map((wire, index) => {
           const [x, y, text, anchor] = wire.label!;
           return (
             <span className={`ws-wl s-${states.get(wire.of) ?? 'open'}${anchor === 'middle' ? ' mid' : ''}`} key={index} aria-hidden="true" style={style({ '--lx': x, '--ly': y })}>{text}</span>
           );
         })}
-        <div className="ws-geo ws-node" style={style(placeStyle(OUTSIDE.full, OUTSIDE.fold))} aria-hidden="true">
-          <b>{OUTSIDE.title}</b><span>{OUTSIDE.line}</span>
-        </div>
-        {GHOSTS.map((ghost, index) => (
+        {layout.notes.map((note) => (
+          <div className="ws-geo ws-node" key={note.title} style={style(placeStyle(note.full, note.fold))} aria-hidden="true">
+            <b>{note.title}</b><span>{note.line}</span>
+          </div>
+        ))}
+        {layout.ghosts.map((ghost, index) => (
           <i className={`ws-geo ws-ghost s-${states.get(ghost.of) ?? 'open'}`} key={index} style={style(placeStyle(ghost.full, ghost.fold))} aria-hidden="true" />
         ))}
-        {Object.entries(LAYOUT).map(([id, place]) => {
+        {Object.entries(layout.places).map(([id, place]) => {
           const group = byId.get(id);
           if (!group) return null;
           const todo = toDecide.get(id) ?? 0;
@@ -142,7 +130,7 @@ export function MapView({ groups, folded, current, toDecide, onOpen }: MapViewPr
             >
               <span className="ws-p-ttl">{group.area.title}</span>
               <span className="ws-p-st"><i className="ws-mk" /><span>{stateWords(group)}</span></span>
-              {GLYPHS[id] ?? null}
+              {place.glyph ? <GlyphView glyph={place.glyph} /> : null}
               {todo ? <b className="ws-todo ws-late-o">{todo}</b> : null}
             </button>
           );

@@ -10,7 +10,7 @@ import type { Route } from './test-support';
 describe('or comment directly on GitHub', () => {
   it('shows under "Sign in to comment" as the one link to the issue, from the panel\'s first paint', async () => {
     mockApi();
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     await userEvent.click(rowButton('Create and delete a computer'));
     const item = itemOf('Create and delete a computer');
@@ -34,7 +34,7 @@ describe('or comment directly on GitHub', () => {
 
   it('is not offered to a signed-in person, who keeps "GitHub #N"', async () => {
     mockApi({ me: visitor });
-    history.replaceState(null, '', '/workshop#computers/exec');
+    history.replaceState(null, '', '/workshop#part-b/exec');
     await renderApp();
     await screen.findByRole('textbox', { name: 'Comment' });
     expect(screen.getByRole('link', { name: 'GitHub #13 ↗' })).toBeInTheDocument();
@@ -43,7 +43,7 @@ describe('or comment directly on GitHub', () => {
 
   it('is not shown when the live state is unavailable', async () => {
     mockApi({ state: () => refused(503, 'not configured') });
-    history.replaceState(null, '', '/workshop#computers/exec');
+    history.replaceState(null, '', '/workshop#part-b/exec');
     await renderApp();
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
     expect(screen.queryByRole('link', { name: 'or comment directly on GitHub' })).not.toBeInTheDocument();
@@ -54,7 +54,7 @@ describe('or comment directly on GitHub', () => {
     let answer: (value: { status: number; body: unknown }) => void = () => {};
     const me: Route = () => new Promise((resolve) => { answer = resolve; });
     mockApi({ me: owner, routes: { 'GET me': me } });
-    history.replaceState(null, '', '/workshop#computers/exec');
+    history.replaceState(null, '', '/workshop#part-b/exec');
     render(<App data={buildData()} />);
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
     expect(screen.getByRole('textbox', { name: 'Comment' })).toBeDisabled();

@@ -3,7 +3,8 @@
 import { join } from 'node:path';
 import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
 import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
-import { checkLayout, LayoutError } from './map.ts';
+import { checkLayout, LayoutError, SILO_MAP } from './map.ts';
+import type { MapLayout } from './map.ts';
 import type { BuildData, Decision, Feature, Notes, Verdict } from './plan.ts';
 
 export const PLAN_DIR = 'plan';
@@ -40,7 +41,7 @@ export function toNotes(plan: RawPlan): Notes {
 }
 
 /** The plan object of tools/plan/read, as the page holds it: features in build order, decisions newest first. */
-export function toBuildData(plan: RawPlan): BuildData {
+export function toBuildData(plan: RawPlan, map: MapLayout = SILO_MAP): BuildData {
   const features: Feature[] = plan.stages.flatMap((stage) => stage.features).map((id) => {
     const raw = plan.features[id];
     return {
@@ -67,6 +68,7 @@ export function toBuildData(plan: RawPlan): BuildData {
     stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
     features,
     decisions,
+    map,
   };
 }
 
@@ -82,18 +84,16 @@ export function notesFrom(files: Map<string, string>): Notes {
   return toNotes(checkedPlan(files));
 }
 
-/** Checks the files of a plan and gives the page's data, or throws with every problem. */
-export function buildDataFrom(files: Map<string, string>): BuildData {
-  const data = toBuildData(checkedPlan(files));
+/** Checks the files of a plan and gives the page's data, drawn with `map`, or throws with every problem. */
+export function buildDataFrom(files: Map<string, string>, map: MapLayout = SILO_MAP): BuildData {
+  const data = toBuildData(checkedPlan(files), map);
   // Every area holds at least one feature: the map has no empty part.
   const used = new Set(data.features.map((feature) => feature.area));
   for (const area of data.areas) {
     if (!used.has(area.id)) throw new PlanFileError(`plan/areas.json: ${area.id}: has no feature. Fix: give it a feature, or remove the area`);
   }
-  // A plan with no area draws no map, so the map's places are checked only against a plan that has areas.
-  if (data.areas.length === 0) return data;
   try {
-    checkLayout(data.areas.map((area) => area.id));
+    checkLayout(data.areas.map((area) => area.id), map);
   } catch (error) {
     if (error instanceof LayoutError) throw new PlanFileError(error.message);
     throw error;
@@ -109,9 +109,9 @@ function planFilesIn(repository: string): Map<string, string> {
   }
 }
 
-/** Reads plan/ under `repository` and returns the page's data, or throws. */
-export function readBuildData(repository: string): BuildData {
-  return buildDataFrom(planFilesIn(repository));
+/** Reads plan/ under `repository` and returns the page's data, drawn with `map`, or throws. */
+export function readBuildData(repository: string, map: MapLayout = SILO_MAP): BuildData {
+  return buildDataFrom(planFilesIn(repository), map);
 }
 
 /** Reads plan/ under `repository` and returns its notes, or throws. */

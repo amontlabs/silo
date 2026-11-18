@@ -724,10 +724,10 @@ const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 async function writePlan(dir) {
   await mkdir(join(dir, 'features'), { recursive: true });
   await writeFile(join(dir, 'PRODUCT.md'), '# Fixture\n\nA small plan.\n');
-  await writeFile(join(dir, 'areas.json'), json([{ id: 'engine', title: 'Engine', line: 'The part that runs computers.' }]));
+  await writeFile(join(dir, 'areas.json'), json([{ id: 'part-a', title: 'Part A', line: 'The one part of this plan.' }]));
   await writeFile(join(dir, 'order.json'), json({ stages: [{ id: 'start', title: 'Start', line: 'The first things.', features: FIXTURE_FEATURES.map(([id]) => id) }] }));
   await writeFile(join(dir, 'decisions.json'), json([]));
-  for (const [id, name, what] of FIXTURE_FEATURES) await writeFile(join(dir, 'features', `${id}.json`), json({ name, what, area: 'engine', needs: [] }));
+  for (const [id, name, what] of FIXTURE_FEATURES) await writeFile(join(dir, 'features', `${id}.json`), json({ name, what, area: 'part-a', needs: [] }));
   const found = checkFiles(loadDir(dir));
   assert.deepEqual(found.errors, [], 'the fixture plan is valid');
 }
@@ -1291,7 +1291,7 @@ const PLAN = [
   ['c1', 's3', 'take'], ['c2', 's3', undefined, 'take'], ['d1', 's4', 'take'], ['d2', 's4'],
   ['e1', 's5', undefined, 'take'], ['e2', 's5', 'later'], ['f1', 's6', undefined, 'take'], ['g1', 's7', 'take'], ['h1', 's7', undefined, 'take'],
 ].map(([id, stage, verdict, suggested, built]) => ({
-  id, stage, area: 'engine', needs: [], name: `Name of ${id}`, what: `What ${id} does.`,
+  id, stage, area: 'part-a', needs: [], name: `Name of ${id}`, what: `What ${id} does.`,
   ...(verdict ? { verdict } : {}), ...(built ? { built } : {}), ...(suggested ? { suggest: { verdict: suggested, why: 'Because.' } } : {}),
 }));
 

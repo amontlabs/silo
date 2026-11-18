@@ -4,7 +4,8 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { Boundary } from './Boundary';
-import { buildData } from './fixtures';
+import { buildDataFrom } from './data';
+import { buildData, emptyPlanFiles } from './fixtures';
 import { prerender } from './prerender';
 import { takeOver } from './takeover';
 import { mockApi, owner } from './test-support';
@@ -72,9 +73,12 @@ function take(root: HTMLElement, slot: Element | null, node: ReactNode) {
 }
 
 describe('the prerendered Workshop', () => {
-  it('is what the script renders first on a first visit without a session at the plain address', () => {
+  it.each([
+    ['a plan with parts', buildData],
+    ['a plan with no part', () => buildDataFrom(emptyPlanFiles())],
+  ])('is what the script renders first on a first visit without a session at the plain address, for %s', (_, plan) => {
     mockApi({ state: () => new Promise(() => {}) });
-    const data = buildData();
+    const data = plan();
     const { parts, root, slot } = page(data);
     const seen = take(root, slot, workshop(data, slot));
     expect(normal(seen.root)).toBe(normal(parts.root));
