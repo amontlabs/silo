@@ -74,7 +74,7 @@
 
 /* ---- the map: each box carries its full and its folded place ---- */
 .ws-mapsec { position: relative; container-type: inline-size; border-bottom: 1px solid var(--line); background: var(--paper); }
-.ws-stage { --u: calc(100cqw / 1136); position: relative; height: calc(614 * var(--u)); overflow: hidden; transition: height .42s var(--ease); }
+.ws-stage { --u: calc(100cqw / 1136); position: relative; height: calc(620 * var(--u)); overflow: hidden; transition: height .42s var(--ease); }
 .ws-stage.fold { height: calc(180 * var(--u)); }
 .ws-geo {
   position: absolute;

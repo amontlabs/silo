@@ -1,5 +1,5 @@
 // The drawing of Silo: where each area sits on the full map and on the folded one, the zones around them
-// and the wires between them. Units are 1/1136 of the map's width; the full map is 614 units high, the fold 180.
+// and the wires between them. Units are 1/1136 of the map's width; the full map is 620 units high, the fold 180.
 // The build checks this table against plan/areas.json (`checkLayout`).
 
 export type Box = [x: number, y: number, w: number, h: number];
@@ -19,7 +19,7 @@ export interface Place {
 }
 
 export const MAP_WIDTH = 1136;
-export const MAP_HEIGHT = 614;
+export const MAP_HEIGHT = 620;
 export const FOLD_HEIGHT = 180;
 
 /** In Tab order: roughly left to right, then top to bottom, Groundwork last (it sits under the drawing). */

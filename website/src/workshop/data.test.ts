@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
@@ -149,6 +149,16 @@ describe('the map layout', () => {
       const [cx, cy, cw, ch] = place.fold;
       expect([id, x + w <= 1136 && y + h <= MAP_HEIGHT && cx + cw <= 1136 && cy + ch <= 180]).toEqual([id, true]);
     }
+  });
+
+  it('gives the stage in the stylesheet the height of the full map, which clips what goes past it', () => {
+    const css = readFileSync(join(dirname(new URL(import.meta.url).pathname), 'workshop.css'), 'utf8');
+    expect(css).toContain(`.ws-stage { --u: calc(100cqw / 1136); position: relative; height: calc(${MAP_HEIGHT} * var(--u));`);
+  });
+
+  it('leaves room under every part for its focus ring, which is drawn 4 px outside the box', () => {
+    const tight = Object.entries(LAYOUT).filter(([, place]) => place.full[1] + place.full[3] > MAP_HEIGHT - 5).map(([id]) => id);
+    expect(tight).toEqual([]);
   });
 
   it('keeps Groundwork clear of every other part, the GitHub text and the zones\' labels, full and folded', () => {
