@@ -213,6 +213,9 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const goingBack = useRef(-1);
   /** The control to focus once Back or Forward has shown the other view, when the focus was in the one hidden. */
   const viewFocus = useRef<string | null>(null);
+  // A link under the map that held the focus when Back or Forward moved: if the move takes it off the page, the title
+  // takes the focus.
+  const underFocus = useRef<Element | null>(null);
   // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
@@ -396,7 +399,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     const group = rowsOf(plan, placeFrom(row, shown, plan));
     const at = group.findIndex((item) => item.key === row.key);
     const ordered = at === -1 ? group : [...group.slice(at + 1), ...group.slice(0, at)];
-    // Another open entry here still waiting: it becomes the current one, with its own guard as it was.
+    // Another open entry here still waiting becomes the current one.
     const waitingOpen = ordered.find((item) => item.key !== row.key && openKeys.has(item.key) && free(item));
     // It is treated as freshly opened: its guard starts again and its buttons are brought into view.
     if (waitingOpen) {
@@ -536,11 +539,14 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       swapTimers.current = [];
       setSwap(null);
       const next = initialView();
-      // On a wide screen the other view's panel is taken out of sight: the focus inside it goes to the same area in
-      // the view now shown, else to the title, rather than to the page itself.
+      // On a wide screen the other view's panel is taken out of sight, and Order also hides "Suggest a feature" under
+      // the map: the focus on what gets hidden goes to the same area in the view now shown, else to the title, rather
+      // than to the page itself.
       const hidden = document.querySelector(`.ws-swap-${viewRef.current}`);
       const focused = document.activeElement;
-      if (next !== viewRef.current && wide() && focused && hidden?.contains(focused)) {
+      const hides = !!focused && (!!hidden?.contains(focused) || (next === 'order' && focused.matches('.ws-under .ws-suggest')));
+      underFocus.current = focused?.closest('.ws-under') ? focused : null;
+      if (next !== viewRef.current && wide() && focused && hides) {
         const area = focused.closest<HTMLElement>('[data-part], [data-area]');
         const id = area?.dataset.part ?? area?.dataset.area;
         viewFocus.current = !id ? '' : next === 'map' ? `.ws-part[data-part="${id}"]` : `.ws-tile[data-area="${id}"] .ws-tile-hit`;
@@ -588,8 +594,12 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     }
   }, [place, live.load, w.meKnown, canDecide]);
 
-  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown.
+  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown; a link
+  // under the map that the move took off the page hands the focus to the title.
   useLayoutEffect(() => {
+    const under = underFocus.current;
+    underFocus.current = null;
+    if (under && !under.isConnected && viewFocus.current === null) viewFocus.current = '';
     const selector = viewFocus.current;
     if (selector === null) return;
     viewFocus.current = null;
