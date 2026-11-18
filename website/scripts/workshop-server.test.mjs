@@ -1289,22 +1289,22 @@ const STAGES = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'];
 const PLAN = [
   ['a1', 's1', 'take', null, '2026-11-01'], ['a2', 's1', undefined, 'take'], ['b1', 's2', undefined, 'later'], ['b2', 's2', undefined, 'drop'],
   ['c1', 's3', 'take'], ['c2', 's3', undefined, 'take'], ['d1', 's4', 'take'], ['d2', 's4'],
-  ['e1', 's5', undefined, 'take'], ['e2', 's5', 'later'], ['f1', 's6', undefined, 'take'], ['g1', 's7', 'take'],
+  ['e1', 's5', undefined, 'take'], ['e2', 's5', 'later'], ['f1', 's6', undefined, 'take'], ['g1', 's7', 'take'], ['h1', 's7', undefined, 'take'],
 ].map(([id, stage, verdict, suggested, built]) => ({
   id, stage, area: 'engine', needs: [], name: `Name of ${id}`, what: `What ${id} does.`,
   ...(verdict ? { verdict } : {}), ...(built ? { built } : {}), ...(suggested ? { suggest: { verdict: suggested, why: 'Because.' } } : {}),
 }));
 
-test('progressOf: the first five stages carry their verdicts, the first two taken not built are being built', () => {
-  assert.deepEqual(STAGES.slice(0, 5), progressOf(PLAN).stages);
+test('progressOf: the first six stages carry their verdicts, the first two taken not built are being built', () => {
+  assert.deepEqual(STAGES.slice(0, 6), progressOf(PLAN).stages);
   const plan = progressOf(PLAN);
   const verdicts = Object.fromEntries(plan.verdicts);
-  assert.deepEqual(verdicts, { a1: 'take', a2: 'take', b1: 'later', b2: 'drop', c1: 'take', c2: 'take', d1: 'take', e1: 'take', e2: 'later', g1: 'take' });
-  assert.equal(plan.verdicts.has('f1'), false, 'a suggestion in a later stage is not applied');
+  assert.deepEqual(verdicts, { a1: 'take', a2: 'take', b1: 'later', b2: 'drop', c1: 'take', c2: 'take', d1: 'take', e1: 'take', e2: 'later', f1: 'take', g1: 'take' });
+  assert.equal(plan.verdicts.has('h1'), false, 'a suggestion in a later stage is not applied');
   assert.equal(plan.verdicts.get('g1'), 'take', 'a file verdict counts in any stage');
   assert.deepEqual([...plan.built], ['a1'], 'built comes only from the file');
   assert.deepEqual([...plan.building], ['a2', 'c1']);
-  assert.match(progressLine(plan), /^Verdicts on the stages s1, s2, s3, s4, s5: 7 taken, 2 later, 1 dropped; being built: 2; built: 1\.$/);
+  assert.match(progressLine(plan), /^Verdicts on the stages s1, s2, s3, s4, s5, s6: 8 taken, 2 later, 1 dropped; being built: 2; built: 1\.$/);
 });
 
 test('seedDemo with progress: verdict labels, building, closed entries and a history comment of every kind', async () => {
@@ -1319,7 +1319,7 @@ test('seedDemo with progress: verdict labels, building, closed entries and a his
     assert.deepEqual(Object.keys(by).sort(), PLAN.map((f) => f.id).sort());
     assert.deepEqual([by.a1.state, by.a1.reason], ['closed', 'completed']);
     assert.deepEqual(entries.filter((i) => i.building).map((i) => i.entry).sort(), ['a2', 'c1']);
-    assert.deepEqual([by.b1.verdict, by.b2.verdict, by.b2.reason, by.d2.verdict, by.f1.verdict, by.g1.verdict], ['later', 'drop', 'not_planned', null, null, 'take']);
+    assert.deepEqual([by.b1.verdict, by.b2.verdict, by.b2.reason, by.d2.verdict, by.h1.verdict, by.g1.verdict], ['later', 'drop', 'not_planned', null, null, 'take']);
     assert.ok(state.latest.length > 5 && state.latest.length <= 30);
 
     // Every kind of history comment is there, read through the model.

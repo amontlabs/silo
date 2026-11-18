@@ -1,0 +1,10 @@
+{
+  "name": "How performance is measured",
+  "what": "The owner settles how a performance number is taken and when it counts.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "What tests must show",
+  "what": "The owner settles what a test must show, what agents may not do to tests, and which outside suites Silo runs.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}

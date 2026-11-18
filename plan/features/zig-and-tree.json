@@ -1,0 +1,10 @@
+{
+  "name": "Zig, its sources and the tree's layout",
+  "what": "The owner settles how Zig is pinned and taught to agents, where pinned sources sit, and how the tree is laid out.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before the engine's first code."
+  }
+}

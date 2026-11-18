@@ -1,0 +1,10 @@
+{
+  "name": "Words, docs and the public repository",
+  "what": "The owner settles the words agents may use, how app text is written, and what the public repository shows.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}

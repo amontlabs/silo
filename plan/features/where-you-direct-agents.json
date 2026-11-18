@@ -1,0 +1,10 @@
+{
+  "name": "Where you direct your agents",
+  "what": "Which surface the user directs agents from, and what the app, the terminal and the chat are each for.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before \"The Mac app: your computers\", the first feature it bears on."
+  }
+}

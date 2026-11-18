@@ -1,0 +1,10 @@
+{
+  "name": "What the app tells you",
+  "what": "When the app interrupts the user, what it shows first, and how far what it shows can be trusted.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before \"The Mac app: your computers\", the first feature it bears on."
+  }
+}

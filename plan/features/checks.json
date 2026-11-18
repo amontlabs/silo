@@ -1,0 +1,10 @@
+{
+  "name": "How checks and repository tools behave",
+  "what": "The owner settles how checks report, which ones exist, where they run, and how repository tools grow.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}

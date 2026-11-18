@@ -19,16 +19,16 @@ function row(status: Row['status'], n: number): Row {
 describe('the plan by area', () => {
   it('groups entries by area in the order of the areas file, in build order', () => {
     const plan = buildPlan(buildData(), null);
-    expect(plan.areas.map((group) => group.area.id)).toEqual(['engine', 'computers', 'app', 'checkpoints', 'forks', 'changes', 'agents', 'access', 'setup', 'tasks', 'devices', 'releases', 'trust', 'desktop', 'macos', 'sharing']);
-    expect(plan.areas.map((group) => group.number)).toEqual([...Array(16).keys()].map((i) => i + 1));
+    expect(plan.areas.map((group) => group.area.id)).toEqual(['engine', 'computers', 'app', 'checkpoints', 'forks', 'changes', 'agents', 'access', 'setup', 'tasks', 'devices', 'releases', 'trust', 'desktop', 'macos', 'sharing', 'ground']);
+    expect(plan.areas.map((group) => group.number)).toEqual([...Array(17).keys()].map((i) => i + 1));
     expect(names(plan.areas[0].rows)).toEqual(['The engine runs on its own', 'Every call defined once']);
-    expect(plan.areas[1].rows.map((r) => r.n)).toEqual([3, 4]);
+    expect(plan.areas[1].rows.map((r) => r.n)).toEqual([4, 5]);
     expect(plan.areas[0].rows.every((r) => r.up === null && r.comments === null)).toBe(true);
   });
 
   it('puts areas with an entry up to the starter in the first band', () => {
     const plan = buildPlan(buildData(), null);
-    expect(plan.areas.filter((group) => group.first).map((group) => group.area.id)).toEqual(['engine', 'computers', 'app', 'checkpoints', 'forks', 'changes', 'agents', 'access', 'setup']);
+    expect(plan.areas.filter((group) => group.first).map((group) => group.area.id)).toEqual(['engine', 'computers', 'app', 'checkpoints', 'forks', 'changes', 'agents', 'access', 'setup', 'ground']);
   });
 
   it('lists what is not carried over: entries without an area, then every dropped entry', () => {

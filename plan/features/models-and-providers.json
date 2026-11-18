@@ -1,0 +1,10 @@
+{
+  "name": "Models, providers and what Silo spends",
+  "what": "Whether Silo ever chooses or runs a model, what it may spend, and how it stands toward provider terms.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before \"Install and open your agent\", the first feature it bears on."
+  }
+}

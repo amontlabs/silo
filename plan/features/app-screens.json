@@ -1,0 +1,10 @@
+{
+  "name": "How the app's screens are built",
+  "what": "The owner settles who designs the screens, how agents see what they build, and how a change on screen is proven.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before the app's first code."
+  }
+}

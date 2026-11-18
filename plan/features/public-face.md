@@ -55,7 +55,7 @@
   - Docs: If the site says how Silo contacts users, it says Silo never asks anyone to run a command during a call.
 - Keeping it true
   - Rule: The public docs describe the latest release, and anything only on the main branch is marked unreleased.
-  - Rule: A feature is documented only once the owner has used it himself.
+  - Rule: A feature is documented only once the owner has used it.
   - Rule: Before an agent-written page is published, every quote, price and claim about another product in it is checked against a source.
   - Docs: The README and the site always say what is unfinished and which parts are ready for real work, as the heavy-development notice does now.
   - Rule: The README has no relative dates and no date that goes stale.

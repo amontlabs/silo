@@ -1,0 +1,10 @@
+{
+  "name": "What is carried from the old code",
+  "what": "The owner settles how behaviour of the old Silo and of replaced dependencies is carried into the new tree.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}

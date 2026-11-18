@@ -88,9 +88,10 @@ Sign-in goes through the fake's page, which offers two people: `owner-fake`
 (admin, can decide) and `visitor-fake` (read only). Everything lives in memory
 and resets on restart.
 
-`--fake --progress` seeds a later state instead: the entries of the first five
+`--fake --progress` seeds a later state instead: the entries of the first six
 stages carry the verdict of their file, else the one suggested for them, the
-first two taken are being built, and the thread of each decided entry holds the
+first two taken are being built (a topic of Groundwork never is, so that area
+always shows as next), and the thread of each decided entry holds the
 bot's history comments of every kind beside people's comments over the last
 days. Nothing shows as built that the file does not say is built (the page
 reads `built` from the file), and every history line agrees with the state the

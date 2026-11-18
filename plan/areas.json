@@ -1,5 +1,10 @@
 [
   {
+    "id": "ground",
+    "title": "Groundwork",
+    "line": "What the owner settles for the whole product and for how it is built."
+  },
+  {
     "id": "engine",
     "title": "Engine",
     "line": "The core. Everything else talks to it."

@@ -1,0 +1,10 @@
+{
+  "name": "What holds whatever the agent does",
+  "what": "How Silo's guarantees are enforced and stated, and how simple access stays.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before \"A computer cannot reach your device\", the first feature it bears on."
+  }
+}

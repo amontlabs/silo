@@ -1,0 +1,10 @@
+{
+  "name": "When a feature counts as done",
+  "what": "The owner settles what marks a feature carries beyond `built`, and what a worker may report as passed.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}

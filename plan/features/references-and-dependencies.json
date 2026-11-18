@@ -1,0 +1,10 @@
+{
+  "name": "References and dependencies",
+  "what": "The owner settles how references are found and used, and how Silo takes, writes and upgrades a dependency.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}

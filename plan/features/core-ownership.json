@@ -1,0 +1,10 @@
+{
+  "name": "Who designs and reads the engine core",
+  "what": "The owner settles which engine decisions and changes need the owner, and how the tree keeps that part apart.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before the engine's first code."
+  }
+}

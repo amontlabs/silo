@@ -11,9 +11,10 @@ const SPOKEN: Record<AreaState, string> = { done: 'done', now: 'being built now'
 
 /** What a screen reader hears for a part or a tile. */
 export function spoken(group: AreaGroup, toDecide: number): string {
-  const features = group.rows.length - group.counts.dropped;
+  const count = group.rows.length - group.counts.dropped;
+  const noun = group.area.id === 'ground' ? 'topic' : 'feature';
   const state = group.state === 'planned' ? stateWords(group) : SPOKEN[group.state];
-  return `${group.area.title}, ${state}, ${features} ${features === 1 ? 'feature' : 'features'}${toDecide ? `, ${toDecide} to decide` : ''}. ${group.area.line}`;
+  return `${group.area.title}, ${state}, ${count} ${count === 1 ? noun : `${noun}s`}${toDecide ? `, ${toDecide} to decide` : ''}. ${group.area.line}`;
 }
 
 const GLYPHS: Record<string, ReactNode> = {
@@ -130,7 +131,7 @@ export function MapView({ groups, folded, current, toDecide, onOpen }: MapViewPr
           if (!group) return null;
           const todo = toDecide.get(id) ?? 0;
           const on = current === id;
-          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', on ? 'on' : ''].filter(Boolean).join(' ');
+          const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : ''].filter(Boolean).join(' ');
           return (
             <button
               type="button" key={id} data-part={id} className={classes} style={style(placeStyle(place.full, place.fold, place))}
