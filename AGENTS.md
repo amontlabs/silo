@@ -16,10 +16,6 @@ plan, the public site, and the code of the features built so far.
   app). Read it before you build any; other work does not need it.
 - The old code is not here. It is frozen at the tag `legacy-2026-11-16` and checked out in
   `~/code/projects/silo-legacy`. Only an agent sent for one lookup opens it.
-- The research of November 2026, behind most of the lines proposed in the features' notes, is not
-  here. It is in `~/code/projects/silo-research`, where
-  `2026-11-16-engine-and-product-insights/triage/final/placed.json` names the sources of each line.
-  Only an agent sent for one lookup opens it.
 - Work on MicroSandbox or libkrun itself (a bug we found, an upstream PR) happens in
   `~/code/projects/msb-upstream`. Read its `AGENTS.md` first; other work does not need it.
 
