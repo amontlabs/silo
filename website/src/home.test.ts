@@ -8,7 +8,7 @@ const css = ['src/style.css', 'src/flow.css', 'src/cards.css'].map(read).join('\
 const scripts = ['src/home.ts', 'src/pictures.ts', 'src/flow.ts', 'src/cards.ts', 'src/scene.ts'].map(read).join('\n');
 const theme = readFileSync(join(process.cwd(), 'public/theme.js'), 'utf8');
 const workshop = readFileSync(join(process.cwd(), 'workshop/index.html'), 'utf8');
-const PITCH = 'Your agent gets its own computer and forks a copy for each task. You see everything the copy changed, then merge it or drop it.';
+const PITCH = 'Your agent lives in a virtual machine on your Mac and forks it for each task. You see everything a fork changed, then merge it back or drop it.';
 
 const parse = (source: string) => new DOMParser().parseFromString(source, 'text/html');
 const doc = parse(html);
@@ -17,7 +17,7 @@ const text = (selector: string, from: Document = doc) =>
 
 describe('the home page', () => {
   it('leads with the headline and the pitch', () => {
-    expect(text('h1')).toEqual(['Computers your agents can fork.']);
+    expect(text('h1')).toEqual(['Git for computers.']);
     expect(text('.pitch')).toEqual([PITCH]);
     expect(doc.querySelector('meta[name="description"]')?.getAttribute('content')).toBe(PITCH);
     expect(doc.querySelector('meta[property="og:description"]')?.getAttribute('content')).toBe(PITCH);
