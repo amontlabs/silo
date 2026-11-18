@@ -48,9 +48,11 @@
    nothing is missing, so the note about it is not shown. */
 .ws-blank-body { flex: 1 0 auto; display: flex; flex-direction: column; gap: 12px; padding: 14px 24px 56px; max-width: 640px; color: var(--muted); }
 .ws-blank-body a { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 3px; }
-.ws-blank-body .ws-quiet a { color: inherit; }
+.ws-blank-body .ws-quiet a { color: inherit; white-space: nowrap; }
 .ws-blank-body .ws-quiet { margin-top: 8px; }
 main:has(.ws-blank) .ws-noscript { display: none; }
+/* No account either: its slot in the header takes no room. */
+.workshop-shell:has(.ws-blank) .ws-account-slot { display: none; }
 .ws-top-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 .ws-top { position: relative; }
 .ws-tools { display: flex; align-items: center; gap: 16px; min-height: 28px; }

@@ -54,7 +54,7 @@ test('the header holds sign-in with its tooltip, returning to the plain address'
 
 test('with a plan that holds no part, the page says so and links the design, with nothing to sign in, vote or suggest', { skip: !empty && 'the plan has parts' }, () => {
   const root = between('<div id="workshop-root" data-prerendered>', '<noscript>');
-  assert.match(root, /^<div class="ws is-sheet ws-blank">/);
+  assert.match(root, /^<div class="ws ws-blank">/);
   assert.match(root, /<h1>Workshop<\/h1>/);
   assert.match(root, /The plan is being rewritten from a new design, one part at a time\./);
   assert.match(root, /Parts appear here as the owner settles them\./);

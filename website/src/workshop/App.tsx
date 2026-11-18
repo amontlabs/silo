@@ -184,7 +184,7 @@ const EARLIER_PLAN = 'https://github.com/amontlabs/silo/tree/plan-2026-11-18/pla
  */
 export function EmptyPlan() {
   return (
-    <div className="ws is-sheet ws-blank">
+    <div className="ws ws-blank">
       <section className="ws-top">
         <div className="ws-head">
           <h1>Workshop</h1>
