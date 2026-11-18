@@ -26,9 +26,9 @@ describe('the home page', () => {
   it('leads to the build from the strip and to the source from the navigation, and keeps nothing of the old app', () => {
     expect(html).not.toMatch(/download|releases|demo\.html|silo-tour|How to use|\/media\//i);
     expect(doc.querySelector('main > :first-child')?.matches('a.strip[href="/workshop"]')).toBe(true);
-    // The hero is the headline and the pitch alone, so the picture under it starts high on the page.
-    expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName)).toEqual(['H1', 'P']);
-    expect(doc.querySelectorAll('.hero a, .hero button')).toHaveLength(0);
+    // The hero is the headline, the pitch and the flow, and no link of its own, so the flow starts high on the page.
+    expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName + (node.id ? `#${node.id}` : ''))).toEqual(['H1#hero-title', 'P', 'DIV#flow']);
+    expect(doc.querySelectorAll('.hero a')).toHaveLength(0);
   });
 
   it('has the navigation, with GitHub kept on phones', () => {
@@ -44,7 +44,9 @@ describe('the home page', () => {
   });
 
   it('tells the flow in reading order without script, and in words for a screen reader', () => {
-    expect(text('.flow .title')).toEqual(['Git for computers.']);
+    // The flow has no title of its own: the headline above it names it.
+    expect(doc.querySelectorAll('.flow :is(h2, h3, .title)')).toHaveLength(0);
+    expect(doc.querySelector('.flow figure')?.getAttribute('aria-labelledby')).toBe('hero-title');
     // The teammate's computer and its fork carry the teammate's initial beside the name.
     expect(text('.stage .pc-name')).toEqual(['main', 'pg-17', 'stripe', 'searchM', 'Msearch']);
     expect(text('.stage .pc-what')).toEqual([

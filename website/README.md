@@ -7,9 +7,10 @@ Vite. It has two pages:
   into the Workshop, and a notice that Silo is in heavy development. Nothing on
   it is read from the plan.
   - The rows above the flow are kept short: the header, the Workshop strip,
-    then the headline with the pitch beside it (under it on a window 1220px
-    wide or less). The whole flow, down to its step names, shows without
-    scrolling in a 1440 × 790 window; keep it so when a row above it changes.
+    then the headline and the pitch, centred, with the flow right under them
+    in the same row and no title of its own (the headline names it). The
+    whole flow, down to its step names, shows without scrolling in a
+    1440 × 790 window; keep it so when anything above it changes.
   - **The flow** (`src/flow.ts`, `src/flow.css`) plays one task in seven steps,
     in a loop, with Pause and the step names under it.
   - **The cards** (`src/cards.ts`, `src/cards.css`) say who Silo is for: nine

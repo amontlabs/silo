@@ -4,9 +4,8 @@
   letter-spacing: -0.4px;
 }
 
-/* On a window taller than the page, the hero and the picture share what main has left over (site.css). */
-.hero,
-.plate {
+/* On a window taller than the page, the hero takes what main has left over (site.css). */
+.hero {
   flex: 1 0 auto;
 }
 
@@ -41,37 +40,37 @@
   text-wrap: pretty;
 }
 
-/* Hero: the headline with the pitch beside it, one short row, so the picture under it fits a laptop's window. */
+/* Hero: the headline and the pitch, centred, then the flow right under them as their picture, with no title of its
+   own. Kept short, so the whole flow, down to its step names, shows in a laptop's window. */
 .hero {
-  padding: 18px var(--gutter);
+  padding: 24px var(--gutter) 34px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px 40px;
+  justify-content: center;
 }
 .hero h1 {
   font: italic 40px/1.14 var(--serif);
   letter-spacing: -0.022em;
   color: var(--accent-ink);
-  white-space: nowrap;
+  max-width: 15em;
+  text-align: center;
+  text-wrap: balance;
 }
-/* Balanced, so a sentence that has to wrap (a narrow window, a fallback face) never leaves one word on a line. */
 .pitch {
+  margin-top: 8px;
+  max-width: 36em;
   font-size: 17px;
   line-height: 1.55;
   color: var(--muted);
+  text-align: center;
   text-wrap: balance;
 }
 .pitch span {
   display: block;
 }
-
-/* The picture under "Git for computers.": this is its room, flow.css draws it. */
-.plate {
-  padding: 14px var(--gutter) 34px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+.hero .flow {
+  margin-top: 22px;
 }
 
 /* What the flow (flow.css) and the cards (cards.css) share. */
@@ -144,23 +143,6 @@
   white-space: nowrap;
 }
 
-/* Too narrow for one row: the headline goes over the pitch, centred. */
-@media (max-width: 1220px) {
-  .hero {
-    flex-direction: column;
-    justify-content: center;
-    padding: 22px var(--gutter) 20px;
-    text-align: center;
-  }
-  .hero h1 {
-    max-width: 15em;
-    white-space: normal;
-    text-wrap: balance;
-  }
-  .pitch {
-    max-width: 36em;
-  }
-}
 @media (max-width: 900px) {
   .notice {
     grid-template-columns: 1fr;
@@ -169,18 +151,20 @@
 }
 @media (max-width: 640px) {
   .hero {
-    padding: 46px var(--gutter) 40px;
-    gap: 20px;
+    padding: 46px var(--gutter) 26px;
   }
   .hero h1 {
     font-size: 36px;
     letter-spacing: -0.018em;
   }
+  .pitch {
+    margin-top: 20px;
+  }
   .pitch span {
     display: inline;
   }
-  .plate {
-    padding-bottom: 26px;
+  .hero .flow {
+    margin-top: 32px;
   }
   .strip {
     flex-wrap: wrap;
