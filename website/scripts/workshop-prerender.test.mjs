@@ -24,8 +24,11 @@ await run(process.execPath, [vite, 'build', '--logLevel', 'error', '--outDir', d
 await run(process.execPath, [join(website, 'scripts', 'prerender.mjs'), dist], { cwd: website });
 const html = await readFile(join(dist, 'workshop', 'index.html'), 'utf8');
 const between = (open, close) => html.slice(html.indexOf(open) + open.length, html.indexOf(close, html.indexOf(open)));
+// The real plan decides which page is built: the map and the lists, or the lines that replace them while the plan
+// holds no part. The other case is covered with fixtures in src/workshop/prerender.test.tsx and empty.test.tsx.
+const empty = areas.length === 0;
 
-test('the built page holds the plain view: the title row, the map with every area, the tiles and the row under them', () => {
+test('the built page holds the plain view: the title row, the map with every area, the tiles and the row under them', { skip: empty && 'the plan holds no part' }, () => {
   const root = between('<div id="workshop-root" data-prerendered>', '<noscript>');
   assert.match(root, /^<div class="ws is-sheet v-map ws-boot" data-live="pending">/);
   assert.match(root, /<h1>Workshop<\/h1>/);
@@ -42,11 +45,25 @@ test('the built page holds the plain view: the title row, the map with every are
   assert.doesNotMatch(root, /ws-account-inline|Sign in/);
 });
 
-test('the header holds sign-in with its tooltip, returning to the plain address', () => {
+test('the header holds sign-in with its tooltip, returning to the plain address', { skip: empty && 'the plan holds no part' }, () => {
   const slot = between('<div class="ws-account-slot" id="workshop-account" data-prerendered>', '</div>');
   assert.match(slot, /^<span class="ws-signin-wrap"><a class="button small" href="\/api\/workshop\/login\?return=%2Fworkshop" aria-describedby="ws-signin-tip">/);
   assert.match(slot, /<span class="ws-signin-tip" id="ws-signin-tip" role="tooltip">or comment directly on GitHub<\/span><\/span>$/);
   assert.equal(html.match(/Sign in/g).length, 1, 'one sign-in button');
+});
+
+test('with a plan that holds no part, the page says so and links the design, with nothing to sign in, vote or suggest', { skip: !empty && 'the plan has parts' }, () => {
+  const root = between('<div id="workshop-root" data-prerendered>', '<noscript>');
+  assert.match(root, /^<div class="ws is-sheet ws-blank">/);
+  assert.match(root, /<h1>Workshop<\/h1>/);
+  assert.match(root, /The plan is being rewritten from a new design, one part at a time\./);
+  assert.match(root, /Parts appear here as the owner settles them\./);
+  assert.match(root, /<a class="ws-blank-link" href="https:\/\/github\.com\/amontlabs\/silo\/blob\/main\/plan\/DESIGN\.md">Read the design<\/a>/);
+  assert.match(root, /The earlier plan is kept at the tag <a href="https:\/\/github\.com\/amontlabs\/silo\/tree\/plan-2026-11-18\/plan">plan-2026-11-18<\/a>\./);
+  assert.doesNotMatch(root, /data-part=|Suggest|#latest/);
+  // The header's slot is left empty and unmarked, so no account placeholder shows in it.
+  assert.ok(html.includes('<div class="ws-account-slot" id="workshop-account"></div>'));
+  assert.doesNotMatch(html, /Sign in/);
 });
 
 test('without JavaScript a line says what needs it, and every face the page waits for is preloaded', () => {

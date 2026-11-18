@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { describe, expect, it } from 'vitest';
 import { buildDataFrom, notesFrom, readBuildData } from './data';
-import { AREAS, buildData, DECISIONS, ENGINE_NOTES, FEATURES, planFiles } from './fixtures';
+import { AREAS, buildData, DECISIONS, emptyPlanFiles, ENGINE_NOTES, FEATURES, planFiles } from './fixtures';
 import { checkLayout, LAYOUT, LayoutError, MAP_HEIGHT, OUTSIDE, ZONES } from './map';
 import type { Box } from './map';
 
@@ -39,6 +39,15 @@ describe('reading the plan files', () => {
     expect(decisions[2].about).toBeNull();
     const same = buildData({ decisions: [...DECISIONS].reverse() }).decisions.map((decision) => decision.id);
     expect(same).toEqual(['merge-main-only', 'engine-in-zig', 'security-properly']);
+  });
+});
+
+describe('a plan that holds no part', () => {
+  it('reads with no area, stage or feature, and keeps its decisions', () => {
+    const data = buildDataFrom(emptyPlanFiles());
+    expect(data).toMatchObject({ areas: [], stages: [], features: [] });
+    expect(data.decisions).toHaveLength(DECISIONS.length);
+    expect(notesFrom(emptyPlanFiles())).toEqual({});
   });
 });
 
