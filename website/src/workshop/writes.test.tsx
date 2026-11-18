@@ -49,26 +49,6 @@ describe('a signed-in person', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 
-  it('gets a refused comment back in the box with a plain message', async () => {
-    mockApi({ me: visitor, routes: { 'POST comment': () => refused(429, 'GitHub is busy.') } });
-    history.replaceState(null, '', '/workshop#computers/exec');
-    await renderApp();
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Hello');
-    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Comment: not saved. GitHub is busy.');
-    expect(screen.getByRole('textbox', { name: 'Comment' })).toHaveValue('Hello');
-    expect(within(itemOf('Run a command')).queryByText(/💬/)).not.toBeInTheDocument();
-  });
-
-  it('rolls back a refused vote', async () => {
-    mockApi({ me: visitor, routes: { 'POST vote': () => refused(502, 'GitHub failed.') } });
-    history.replaceState(null, '', '/workshop#computers');
-    await renderApp();
-    await userEvent.click(within(itemOf('Run a command')).getByRole('button', { name: /4 votes/ }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Vote: not saved. GitHub failed.');
-    expect(within(itemOf('Run a command')).getByRole('button', { name: /4 votes/ })).toHaveAttribute('aria-pressed', 'false');
-  });
-
   it('suggests a feature that appears under Suggested by people, dimmed until it has its issue', async () => {
     let release: (value: { status: number; body: unknown }) => void = () => {};
     const calls = mockApi({ me: visitor, routes: { 'POST suggest': () => new Promise((resolve) => { release = resolve; }) } });
@@ -87,28 +67,6 @@ describe('a signed-in person', () => {
     const group = screen.getByRole('region', { name: 'Suggested by people' });
     expect(within(group).getByRole('button', { name: /^Pause a computer/ }).closest('.ws-item')).toHaveAttribute('id', 'issue-77');
     expect(within(group).getAllByRole('button', { name: /votes/ }).map((b) => b.textContent)).toEqual(['👍 14', '👍 9', '👍 0']);
-  });
-
-  it('gets a refused suggestion back in the form', async () => {
-    mockApi({ me: visitor, routes: { 'POST suggest': () => refused(400, 'The title is too long.') } });
-    history.replaceState(null, '', '/workshop#suggested');
-    await renderApp();
-    await userEvent.type(screen.getByRole('textbox', { name: 'Title' }), 'Pause');
-    await userEvent.click(screen.getByRole('button', { name: 'Suggest' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Suggestion: not saved. The title is too long.');
-    expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Pause');
-    expect(screen.queryByRole('button', { name: /^Pause/ })).not.toBeInTheDocument();
-  });
-
-  it('drops to signed out when a write answers 401', async () => {
-    mockApi({ me: visitor, routes: { 'POST comment': () => refused(401, 'Not signed in.') } });
-    history.replaceState(null, '', '/workshop#computers/exec');
-    await renderApp();
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Hello');
-    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/^Sign in again\.$/);
-    expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Sign in to comment' })).toBeInTheDocument();
   });
 
   it('says once that sign-in did not complete and cleans the address', async () => {
@@ -246,28 +204,6 @@ describe('the owner deciding entries', () => {
     fireEvent.keyDown(await screen.findByRole('textbox', { name: 'Comment' }), { key: 'Enter' });
     fireEvent.keyDown(screen.getByRole('button', { name: 'Drop' }), { key: 'Enter' });
     expect(posts(calls, 'verdict')).toHaveLength(0);
-  });
-
-  it('records the verdict for the row it was given, and rolls back a refused one', async () => {
-    const time = clock();
-    let release: (value: { status: number; body: unknown }) => void = () => {};
-    const calls = mockApi({ me: owner, routes: { 'POST verdict': () => new Promise((resolve) => { release = resolve; }) } });
-    history.replaceState(null, '', '/workshop#computers/computers');
-    await renderApp();
-    await ownerOn('Create and delete a computer');
-    time.advance(OPEN_GUARD_MS);
-    await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
-    expect(itemOf('Create and delete a computer').querySelector('.ws-word')).toHaveTextContent('Saving…');
-    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
-    await act(async () => release(refused(403, 'Not allowed.')));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Create and delete a computer: not saved. Not allowed.');
-    expect(within(itemOf('Create and delete a computer')).queryByText('dropped')).not.toBeInTheDocument();
-    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'drop' }]);
-    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
-    expect(document.getElementById('entry-computers')).toContainElement(screen.getByRole('alert'));
-    expect(location.hash).toBe('#computers/computers');
-    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-    expect(posts(calls, 'verdict')).toHaveLength(1);
   });
 
   it('each have their own guard: an earlier open row stays armed when another opens', async () => {
@@ -409,23 +345,6 @@ describe('writes the server has not confirmed', () => {
     expect(localStorage.getItem('silo-workshop-writes-2')).toContain('On its way.');
   });
 
-  it('take back a comment that times out', async () => {
-    apiConfig.writeTimeoutMs = 30;
-    try {
-      mockApi({ me: visitor, routes: { 'POST comment': () => new Promise(() => {}) } });
-      history.replaceState(null, '', '/workshop#computers/exec');
-      await renderApp();
-      await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Lost.');
-      await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
-      expect(screen.getByText('Sending…')).toBeInTheDocument();
-      expect(await screen.findByRole('alert')).toHaveTextContent('Comment: not saved. No answer.');
-      expect(screen.getByRole('textbox', { name: 'Comment' })).toHaveValue('Lost.');
-      expect(localStorage.getItem('silo-workshop-writes-2')).toBeNull();
-    } finally {
-      apiConfig.writeTimeoutMs = 20_000;
-    }
-  });
-
   it('show a vote being sent as pending with the count unchanged', async () => {
     const answer = deferred();
     const calls = mockApi({ me: visitor, routes: { 'POST vote': answer.route } });
@@ -462,5 +381,131 @@ describe('writes the server has not confirmed', () => {
     await screen.findByText('Sign in to comment');
     expect(screen.getByRole('link', { name: 'or comment directly on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
     expect(await screen.findByRole('link', { name: 'Earlier comments on GitHub ↗' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/13');
+  });
+});
+
+// Every write the page makes, refused every way the API can refuse it.
+describe('a refused write', () => {
+  type Reply = { status: number; body: unknown };
+  const STORE = 'silo-workshop-writes-2';
+  const ROW = 'Create and delete a computer';
+  const VOTED = 'Run a command';
+
+  // `make` sends the write; `during` is what the person sees while it is out; `undone` is what must be back
+  // once it is refused; `typed` is what must come back in its input.
+  const writes = [
+    {
+      name: 'comment', as: visitor, at: '#computers/exec', route: 'POST comment', alert: /comment/i,
+      async make() {
+        await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Hello');
+        await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+      },
+      during: () => expect(screen.getByText('Hello', { ignore: 'textarea' })).toBeInTheDocument(),
+      undone: () => {
+        expect(screen.queryByText('Hello', { ignore: 'textarea' })).not.toBeInTheDocument();
+        expect(within(itemOf(VOTED)).queryByText(/💬/)).not.toBeInTheDocument();
+      },
+      typed: () => expect(screen.getByRole('textbox', { name: 'Comment' })).toHaveValue('Hello'),
+    },
+    {
+      name: 'vote', as: visitor, at: '#computers', route: 'POST vote', alert: /vote/i,
+      async make() {
+        await userEvent.click(within(itemOf(VOTED)).getByRole('button', { name: /4 votes/ }));
+      },
+      during: () => expect(within(itemOf(VOTED)).getByRole('button', { name: /4 votes/ })).toBeDisabled(),
+      undone: () => {
+        // Still four votes, not marked as mine (signed out, the thumb is a link instead of a button).
+        const thumb = within(itemOf(VOTED)).getByLabelText(/4 votes/);
+        expect(thumb).not.toHaveAttribute('aria-pressed', 'true');
+        expect(thumb).not.toBeDisabled();
+      },
+      typed: null,
+    },
+    {
+      name: 'suggestion', as: visitor, at: '#suggested', route: 'POST suggest', alert: /suggest/i,
+      async make() {
+        await userEvent.type(screen.getByRole('textbox', { name: 'Title' }), 'Pause');
+        await userEvent.click(screen.getByRole('button', { name: 'Suggest' }));
+      },
+      during: () => expect(screen.getByText('Pause')).toBeInTheDocument(),
+      undone: () => expect(screen.queryByText('Pause')).not.toBeInTheDocument(),
+      typed: () => expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Pause'),
+    },
+    {
+      name: 'verdict', as: owner, at: '#computers/computers', route: 'POST verdict', alert: new RegExp(ROW),
+      async make(time: ReturnType<typeof clock>) {
+        await ownerOn(ROW);
+        time.advance(OPEN_GUARD_MS);
+        await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
+      },
+      during: () => {
+        expect(itemOf(ROW).querySelector('.ws-word')).toHaveTextContent('Saving…');
+        // The queue has moved on to the next row while this one saves.
+        expect(rowButton(VOTED)).toHaveAttribute('aria-expanded', 'true');
+      },
+      undone: () => expect(within(itemOf(ROW)).queryByText('dropped')).not.toBeInTheDocument(),
+      typed: null,
+    },
+  ];
+
+  const refusals: { name: string; reply: Reply | null; why: string | null; out?: boolean }[] = [
+    { name: 'refused (400)', reply: refused(400, 'Too long by two words.'), why: 'Too long by two words.' },
+    { name: 'forbidden (403)', reply: refused(403, 'Only the owner may do that.'), why: 'Only the owner may do that.' },
+    { name: 'conflict (409)', reply: refused(409, 'Someone decided first.'), why: 'Someone decided first.' },
+    { name: 'a server error with no message (500)', reply: { status: 500, body: {} }, why: null },
+    { name: 'signed out (401)', reply: refused(401, 'Session ended.'), why: null, out: true },
+    { name: 'no answer', reply: null, why: null },
+  ];
+
+  describe.each(writes)('$name', (write) => {
+    it.each(refusals)('answered by $name is told, undone and not kept', async ({ reply, why, out }) => {
+      const time = clock();
+      const gate: { release: (answer: Reply) => void } = { release: () => {} };
+      const calls = mockApi({
+        me: write.as,
+        routes: { [write.route]: () => new Promise<Reply>((resolve) => { gate.release = resolve; }) },
+      });
+      history.replaceState(null, '', `/workshop${write.at}`);
+      const timeout = apiConfig.writeTimeoutMs;
+      if (!reply) apiConfig.writeTimeoutMs = 30;
+      try {
+        await renderApp();
+        await write.make(time);
+        await waitFor(() => expect(posts(calls, write.route.replace('POST ', ''))).toHaveLength(1));
+        write.during();
+        if (reply) await act(async () => gate.release(reply));
+
+        const alert = await screen.findByRole('alert');
+        if (out) {
+          // The person is shown signed out: no login, the way back in, and the alert says to sign in.
+          expect(alert).toHaveTextContent(/sign in/i);
+          expect(screen.queryByText(write.as.login, { selector: '.ws-login' })).not.toBeInTheDocument();
+          expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
+        } else {
+          // It names what failed and why; where the server gave a reason, that is the reason shown.
+          expect(alert).toHaveTextContent(write.alert);
+          expect(alert).toHaveTextContent(/not saved\.\s*\S/i);
+          if (why) expect(alert).toHaveTextContent(why);
+          write.typed?.();
+        }
+        if (write.name === 'verdict' && !out) {
+          // The alert is in the entry it concerns, and that row is open again, with its address.
+          expect(document.getElementById('entry-computers')).toContainElement(alert);
+          expect(rowButton(ROW)).toHaveAttribute('aria-expanded', 'true');
+          expect(location.hash).toBe('#computers/computers');
+        }
+        write.undone();
+        expect(screen.queryByText('Sending…')).not.toBeInTheDocument();
+        expect(screen.queryByText('Saving…')).not.toBeInTheDocument();
+        expect(localStorage.getItem(STORE)).toBeNull();
+        if (write.name === 'verdict') {
+          // The refused verdict is not sent again by a key press.
+          fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
+          expect(posts(calls, 'verdict')).toHaveLength(1);
+        }
+      } finally {
+        apiConfig.writeTimeoutMs = timeout;
+      }
+    });
   });
 });
