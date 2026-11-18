@@ -1,6 +1,8 @@
 // Entries opening independently, late answers, addresses, focus and the Map/Order swap.
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { App, OPEN_GUARD_MS } from './App';
 import { buildData, issue, liveState } from './fixtures';
@@ -168,6 +170,41 @@ describe('focus', () => {
       fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
       await waitFor(() => expect(screen.getByRole('link', { name })).toHaveFocus());
     }
+  });
+});
+
+describe('state classes', () => {
+  it('puts the classes of the Workshop\'s states on no other element', () => {
+    // A state class is set on .ws alone (App.tsx). Another element carrying the same name would take the rule written
+    // for it, or give its rule to the whole Workshop: .ws-held, which hides an empty box, once hid the page.
+    const dir = join(process.cwd(), 'src/workshop');
+    const app = readFileSync(join(dir, 'App.tsx'), 'utf8');
+    const statement = app.slice(app.indexOf('const classes = ['), app.indexOf('].filter(Boolean)', app.indexOf('const classes = [')));
+    // A name built from a state (`v-${view}`) takes each value of that state's type, read from its useState.
+    const valuesOf = (name: string) => {
+      let type = app.match(new RegExp(`const \\[${name}, \\w+\\] = useState<([^>]+)>`))?.[1] ?? '';
+      if (/^\w+$/.test(type)) type = app.match(new RegExp(`type ${type} = ([^;]+);`))?.[1] ?? '';
+      const values = [...type.matchAll(/'([a-z][\w-]*)'/g)].map((match) => match[1]);
+      expect(values, `the values of ${name}`).not.toEqual([]);
+      return values;
+    };
+    const states = new Set([
+      ...[...statement.matchAll(/'([a-z][\w-]*)'/g)].map((match) => match[1]),
+      ...[...statement.matchAll(/`([a-z][\w-]*)\$\{(\w+)\}`/g)].flatMap(([, prefix, name]) => valuesOf(name).map((value) => prefix + value)),
+    ]);
+    states.delete('ws');
+    expect(states).toContain('v-map');
+    expect(states).toContain('swap-out');
+    const sources = readdirSync(dir).filter((file) => /\.tsx?$/.test(file) && !/\.test\.|test-|fixtures|devFixture/.test(file));
+    const elsewhere = sources.flatMap((file) => {
+      const code = readFileSync(join(dir, file), 'utf8').replace(statement, '');
+      return [...code.matchAll(/'[^'\n]*'|"[^"\n]*"|`[^`\n]*`/g)]
+        .flatMap(([literal]) => literal.slice(1, -1).split(/[\s.]+/))
+        .filter((name) => states.has(name))
+        .map((name) => `${file}: ${name}`);
+    });
+    // The same state on purpose: the account slot in the header fades in with the person's details, like the Workshop.
+    expect(elsewhere.filter((hit) => hit !== 'App.tsx: ws-arr-p')).toEqual([]);
   });
 });
 

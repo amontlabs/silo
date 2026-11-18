@@ -699,7 +699,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const firstPlace = useRef<string | null>(null);
   if (boot && !isHome) firstPlace.current = formatHash(shown);
   else if (!boot && firstPlace.current !== null && firstPlace.current !== formatHash(shown)) firstPlace.current = null;
-  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', canDecide ? 'ws-owner' : '', lifting ? 'ws-lifting' : '', held ? 'ws-held' : '',
+  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', canDecide ? 'ws-owner' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '',
     arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : '', arrivedOwner ? 'ws-arr-o' : ''].filter(Boolean).join(' ');
   return (
     <>
