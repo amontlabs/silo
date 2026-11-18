@@ -372,7 +372,7 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   const ghostComments = loading ? Math.min(row.comments ?? 0, 20) : 0;
   const ghostUpdates = loading ? Math.min(row.updates, 20 - ghostComments) : 0;
   return (
-    <div className="ws-talk">
+    <div className="ws-talk" aria-busy={ghostUpdates + ghostComments > 0 ? 'true' : undefined}>
       {Array.from({ length: ghostUpdates }, (_, i) => <div className="ws-h-ghost" key={`h${i}`} aria-hidden="true" />)}
       {Array.from({ length: ghostComments }, (_, i) => <div className="ws-c-ghost" key={`c${i}`} aria-hidden="true" />)}
       {detail === 'error' ? <p className="ws-quiet">Comments could not load.</p> : null}
