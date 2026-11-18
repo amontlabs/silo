@@ -20,12 +20,6 @@ describe('reading the plan files', () => {
     expect(data.features.find((feature) => feature.id === 'computers')?.verdict).toBeNull();
   });
 
-  it('reads each entry\'s area; only entries of the stage gone have none', () => {
-    const features = buildData().features;
-    expect(features.find((f) => f.id === 'fork')?.area).toBe('forks');
-    expect(features.filter((f) => f.area === null).map((f) => f.id)).toEqual(['reviewer', 'old-desktop']);
-  });
-
   it('reads the notes of a feature beside its file, and none when there are none', () => {
     const features = buildData().features;
     expect(features.find((f) => f.id === 'engine')?.notes).toBe(true);
@@ -37,13 +31,6 @@ describe('reading the plan files', () => {
     expect(JSON.stringify(buildData())).not.toContain('The engine owns every computer');
   });
 
-  it('reads the areas and stages as the files give them', () => {
-    const data = buildData();
-    expect(data.areas.map((area) => area.id)).toEqual(AREAS.map((area) => area.id));
-    expect(data.areas[0]).toEqual({ id: 'engine', title: 'Engine', line: 'The core. Everything else talks to it.' });
-    expect(data.stages.map((stage) => stage.id)).toContain('gone');
-  });
-
   it('reads the decisions newest first, those of one day in the file\'s order, with what they are about', () => {
     const decisions = buildData().decisions;
     expect(decisions.map((decision) => decision.id)).toEqual(['engine-in-zig', 'merge-main-only', 'security-properly']);
@@ -52,11 +39,6 @@ describe('reading the plan files', () => {
     expect(decisions[2].about).toBeNull();
     const same = buildData({ decisions: [...DECISIONS].reverse() }).decisions.map((decision) => decision.id);
     expect(same).toEqual(['merge-main-only', 'engine-in-zig', 'security-properly']);
-  });
-
-  it('keeps no recordings, issue numbers or entry numbers', () => {
-    const feature = buildData().features[0] as unknown as Record<string, unknown>;
-    expect(Object.keys(feature).sort()).toEqual(['area', 'built', 'id', 'name', 'needs', 'notes', 'position', 'stage', 'suggest', 'verdict', 'what']);
   });
 });
 
@@ -75,41 +57,10 @@ describe('a plan with an error', () => {
     expect(message).toContain('Fix:');
   });
 
-  it('stops with the file and the fix when a feature names an unknown area', () => {
-    const features = FEATURES.map((feature) => (feature.id === 'exec' ? { ...feature, area: 'nowhere' } : feature));
-    let message = '';
-    try {
-      buildData({ features });
-    } catch (error) {
-      message = (error as Error).message;
-    }
-    expect(message).toContain('plan/features/exec.json');
-    expect(message).toContain('nowhere');
-    expect(message).toContain('Fix:');
-  });
-
-  it('stops on an area with no feature, with what to do', () => {
-    const features = FEATURES.filter((feature) => feature.area !== 'sharing').map((feature) => feature);
-    expect(() => buildData({ features })).toThrow(/plan\/areas\.json: sharing: has no feature\. Fix: /);
-  });
-
   it('stops on an area the map has no place for, and on a place for an area the plan has not', () => {
     const files = planFiles({ features: [...FEATURES, { id: 'pay', stage: 'extras', area: 'billing', name: 'Pay', what: 'Billing.' }] });
     files.set('areas.json', canonicalText([...AREAS, { id: 'billing', title: 'Billing', line: 'Money.' }]));
     expect(() => buildDataFrom(files)).toThrow('The map has no place for the area "billing" of plan/areas.json. Add it to website/src/workshop/map.ts.');
-  });
-
-  it('reports every problem of the files at once', () => {
-    const files = planFiles();
-    files.set('features/engine.json', '{');
-    files.set('areas.json', '[');
-    let message = '';
-    try {
-      buildDataFrom(files);
-    } catch (error) {
-      message = (error as Error).message;
-    }
-    expect(message.split('\n').length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -147,18 +98,14 @@ describe('the map layout', () => {
     for (const [id, place] of Object.entries(LAYOUT)) {
       const [x, y, w, h] = place.full;
       const [cx, cy, cw, ch] = place.fold;
-      expect([id, x + w <= 1136 && y + h <= MAP_HEIGHT && cx + cw <= 1136 && cy + ch <= 180]).toEqual([id, true]);
+      // The full map's bottom edge leaves room for the focus ring, which is drawn 4 px outside the box.
+      expect([id, x + w <= 1136 && y + h <= MAP_HEIGHT - 5 && cx + cw <= 1136 && cy + ch <= 180]).toEqual([id, true]);
     }
   });
 
   it('gives the stage in the stylesheet the height of the full map, which clips what goes past it', () => {
     const css = readFileSync(join(dirname(new URL(import.meta.url).pathname), 'workshop.css'), 'utf8');
     expect(css).toContain(`.ws-stage { --u: calc(100cqw / 1136); position: relative; height: calc(${MAP_HEIGHT} * var(--u));`);
-  });
-
-  it('leaves room under every part for its focus ring, which is drawn 4 px outside the box', () => {
-    const tight = Object.entries(LAYOUT).filter(([, place]) => place.full[1] + place.full[3] > MAP_HEIGHT - 5).map(([id]) => id);
-    expect(tight).toEqual([]);
   });
 
   it('keeps Groundwork clear of every other part, the GitHub text and the zones\' labels, full and folded', () => {

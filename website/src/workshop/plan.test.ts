@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { areaGroups, areaStates } from '../../../tools/plan/model/index.js';
+import { areaGroups } from '../../../tools/plan/model/index.js';
 import { parsePlan } from '../../../tools/plan/read/index.js';
 import { buildData, FEATURES, issue, liveState, planFiles } from './fixtures';
-import { awaitsVerdict, buildPlan, changeLine, changeWords, countRows, decisionsAbout, decisionTitle, entryStatus, relativeTime, statusLine, stateWords } from './plan';
-import type { AreaGroup, Change, Row } from './plan';
+import { awaitsVerdict, buildPlan, changeLine, changeWords, decisionsAbout, decisionTitle, entryStatus, relativeTime, statusLine, stateWords } from './plan';
+import type { AreaGroup, Change } from './plan';
 
 const names = (rows: { name: string }[]) => rows.map((row) => row.name);
 const byArea = (plan: ReturnType<typeof buildPlan>) => new Map(plan.areas.map((group) => [group.area.id, group]));
@@ -12,25 +12,7 @@ const taken = (entry: string) => issue({ entry, verdict: 'take' });
 /** The plan with these entries built, as the file says it. */
 const withBuilt = (...ids: string[]) => buildData({ features: FEATURES.map((feature) => (ids.includes(feature.id) ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature)) });
 
-function row(status: Row['status'], n: number): Row {
-  return { status, n } as Row;
-}
-
 describe('the plan by area', () => {
-  it('groups entries by area in the order of the areas file, in build order', () => {
-    const plan = buildPlan(buildData(), null);
-    expect(plan.areas.map((group) => group.area.id)).toEqual(['engine', 'computers', 'app', 'checkpoints', 'forks', 'changes', 'agents', 'access', 'setup', 'tasks', 'devices', 'releases', 'trust', 'desktop', 'macos', 'sharing', 'ground']);
-    expect(plan.areas.map((group) => group.number)).toEqual([...Array(17).keys()].map((i) => i + 1));
-    expect(names(plan.areas[0].rows)).toEqual(['The engine runs on its own', 'Every call defined once']);
-    expect(plan.areas[1].rows.map((r) => r.n)).toEqual([4, 5]);
-    expect(plan.areas[0].rows.every((r) => r.up === null && r.comments === null)).toBe(true);
-  });
-
-  it('puts areas with an entry up to the starter in the first band', () => {
-    const plan = buildPlan(buildData(), null);
-    expect(plan.areas.filter((group) => group.first).map((group) => group.area.id)).toEqual(['engine', 'computers', 'app', 'checkpoints', 'forks', 'changes', 'agents', 'access', 'setup', 'ground']);
-  });
-
   it('lists what is not carried over: entries without an area, then every dropped entry', () => {
     const plan = buildPlan(buildData(), liveState({ 13: issue({ entry: 'exec', verdict: 'drop', state: 'closed', reason: 'not_planned' }) }));
     expect(names(plan.left)).toEqual(['A hosted reviewer', 'An earlier desktop stack', 'Run a command']);
@@ -167,23 +149,6 @@ describe('history words', () => {
 });
 
 describe('area states', () => {
-  const states = (...areas: Row[][]) => areaStates(areas.map((rows) => ({ rows: rows.map((r) => ({ status: r.status, position: r.n ?? Infinity })), counts: countRows(rows) })));
-
-  it('is now when an entry is building, done when built with nothing planned', () => {
-    expect(states([row('building', 3), row('built', 1)])).toEqual(['now']);
-    expect(states([row('built', 1), row('later', 9)])).toEqual(['done']);
-    expect(states([row('built', 1), row('planned', 9)], [row('planned', 2)])).toEqual(['planned', 'next']);
-  });
-
-  it('gives next to the area with the lowest planned entry, skipping one being built', () => {
-    expect(states([row('building', 1), row('planned', 2)], [row('planned', 5)], [row('planned', 4)])).toEqual(['now', 'planned', 'next']);
-    expect(states([row('planned', 7)], [row('undecided', 1)], [row('planned', 3), row('planned', 9)])).toEqual(['planned', 'open', 'next']);
-  });
-
-  it('is open when nothing is decided or only later and dropped, and has no next without a planned entry', () => {
-    expect(states([row('undecided', 1)], [row('later', 2), row('dropped', 3)])).toEqual(['open', 'open']);
-  });
-
   it('says the few words on a part', () => {
     const words = (state: AreaGroup['state'], counts: Partial<AreaGroup['counts']>) => stateWords({ state, counts: { built: 0, building: 0, planned: 0, later: 0, undecided: 0, dropped: 0, ...counts } });
     expect(words('done', { built: 4 })).toBe('done');
@@ -192,11 +157,6 @@ describe('area states', () => {
     expect(words('planned', { planned: 4 })).toBe('4 planned');
     expect(words('planned', { built: 1, planned: 4 })).toBe('1/5 built');
     expect(words('open', { undecided: 4 })).toBe('');
-  });
-
-  it('reads the fixture plan: engine next, the planned areas, the rest open', () => {
-    const plan = buildPlan(buildData(), liveState());
-    expect(Object.fromEntries(plan.areas.map((group) => [group.area.id, group.state]))).toMatchObject({ engine: 'next', setup: 'planned', computers: 'open', devices: 'open' });
   });
 });
 

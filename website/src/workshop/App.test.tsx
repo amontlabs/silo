@@ -221,6 +221,31 @@ describe('addresses', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Workshop' })).toBeInTheDocument();
     expect(document.querySelector('.ws-item.open')).toBeNull();
   });
+
+  it('open a dropped entry in the left-out list where it was opened', async () => {
+    mockApi({ state: () => ok(liveState({ 13: issue({ entry: 'exec', verdict: 'drop', state: 'closed', reason: 'not_planned' }) })) });
+    history.replaceState(null, '', '/workshop#left');
+    await renderApp();
+    await userEvent.click(rowButton('Run a command'));
+    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('heading', { level: 2, name: 'Left out' })).toBeInTheDocument();
+    expect(location.hash).toBe('#left/exec');
+    act(() => { history.replaceState(null, '', '/workshop#left/exec'); dispatchEvent(new PopStateEvent('popstate')); });
+    expect(screen.getByRole('heading', { level: 2, name: 'Left out' })).toBeInTheDocument();
+  });
+
+  it('open the area when its entry no longer exists, and find an entry under another area', async () => {
+    history.replaceState(null, '', '/workshop#engine/gone-away');
+    mockApi();
+    const first = await renderApp();
+    expect(screen.getByRole('heading', { level: 2, name: 'Engine' })).toBeInTheDocument();
+    expect(location.hash).toBe('#engine');
+    first.unmount();
+    history.replaceState(null, '', '/workshop#forks/exec');
+    await renderApp();
+    await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
+    expect(location.hash).toBe('#computers/exec');
+  });
 });
 
 describe('the bottom strip', () => {
@@ -243,6 +268,17 @@ describe('the bottom strip', () => {
     const group = screen.getByRole('region', { name: 'Suggested by people' });
     expect(within(group).getAllByRole('button', { name: /^(Share|Start)/ }).map((b) => b.textContent)).toEqual(['Share a base computer', 'Start a task from Slack']);
     expect(screen.getByRole('link', { name: 'Sign in to suggest' })).toHaveAttribute('href', '/api/workshop/login?return=%2Fworkshop%23suggested');
+  });
+
+  it('returns to the link that opened the left-out list, the latest, the suggestions or the decisions', async () => {
+    mockApi({ me: owner });
+    await renderApp();
+    for (const [name, title] of [['Left out · 2', 'Left out'], ['Latest', 'Latest'], ['2 suggested', 'Suggest a feature'], ['Decisions', 'Decisions']]) {
+      await userEvent.click(screen.getByRole('link', { name }));
+      expect(screen.getByRole('heading', { level: 2, name: title })).toHaveFocus();
+      fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+      await waitFor(() => expect(screen.getByRole('link', { name })).toHaveFocus());
+    }
   });
 });
 

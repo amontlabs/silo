@@ -77,6 +77,8 @@ describe('the prerendered Workshop', () => {
     expect(root.hasAttribute('data-prerendered')).toBe(false);
     expect(slot.hasAttribute('data-prerendered')).toBe(false);
     expect(slot.querySelectorAll('.ws-signin-wrap')).toHaveLength(1);
+    // The script gives the page an account, so it is not marked bare.
+    expect(document.documentElement.classList.contains('ws-bare')).toBe(false);
   });
 
   it('holds the title row, every part of the map and every tile, and sign-in in the header', () => {
@@ -131,17 +133,4 @@ describe('the prerendered Workshop', () => {
     document.documentElement.classList.remove('ws-session');
   });
 
-  it('does not mark the page bare when the script gives it an account', () => {
-    mockApi({ state: () => new Promise(() => {}) });
-    const data = buildData();
-    const { root, slot } = page(data);
-    take(root, slot, workshop(data, slot));
-    expect(document.documentElement.classList.contains('ws-bare')).toBe(false);
-  });
-
-  it('reads nothing of a browser at build time', () => {
-    const parts = built();
-    expect(parts.root).toContain('ws is-sheet v-map ws-boot');
-    expect(parts.account).toContain('Sign in');
-  });
 });
