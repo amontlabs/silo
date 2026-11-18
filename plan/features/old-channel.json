@@ -1,9 +1,0 @@
-{
-  "name": "Requests through a shared folder",
-  "what": "The first way a computer reached the engine: request files in a shared folder.",
-  "needs": [],
-  "suggest": {
-    "verdict": "drop",
-    "why": "Replaced by the per-computer channel."
-  }
-}

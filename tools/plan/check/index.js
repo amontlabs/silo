@@ -14,7 +14,7 @@ export const formatProblem = (p) => `${p.file}: ${p.field}: ${p.message}. Fix: $
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isText = (value) => typeof value === 'string' && value.trim() !== '';
 const FEATURE_FILE = /^features\/([^/]+)\.(json|md)$/;
-const TOP_FILES = new Set([PLAN_FILES.product, PLAN_FILES.areas, PLAN_FILES.order, PLAN_FILES.decisions]);
+const TOP_FILES = new Set([PLAN_FILES.product, PLAN_FILES.design, PLAN_FILES.areas, PLAN_FILES.order, PLAN_FILES.decisions]);
 
 /**
  * @param {Map<string, string>} files the files of `plan/`, by path relative to it
@@ -35,7 +35,7 @@ export function checkFiles(files, { knownAreas = null } = {}) {
       if (!ID_PATTERN.test(match[1])) add(`plan/${name}`, '-', `"${match[1]}" is not a feature id (${ID_PATTERN.source})`, 'rename the file: lowercase letters, digits and dashes');
       else if (match[2] === 'md' && !files.has(`features/${match[1]}.json`)) add(`plan/${name}`, '-', 'notes without a feature file', `create plan/features/${match[1]}.json or delete the notes`);
     } else if (!TOP_FILES.has(name)) {
-      add(`plan/${name}`, '-', 'not a file of the plan', 'move it out of plan/; plan/ holds PRODUCT.md, areas.json, order.json, decisions.json and features/<id>.json and <id>.md');
+      add(`plan/${name}`, '-', 'not a file of the plan', 'move it out of plan/; plan/ holds PRODUCT.md, DESIGN.md, areas.json, order.json, decisions.json and features/<id>.json and <id>.md');
     }
   }
 

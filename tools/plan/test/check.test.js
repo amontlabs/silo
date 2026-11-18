@@ -15,6 +15,10 @@ test('the base fixture passes', () => {
   assert.deepEqual(errorsOf(basePlan()), []);
 });
 
+test('DESIGN.md is a file of the plan', () => {
+  assert.deepEqual(errorsOf(variant((f) => { f['DESIGN.md'] = '# Design\n'; })), []);
+});
+
 // One failing fixture per rule: [rule, edit, file, field, words in the message].
 const CASES = [
   ['a missing file', (f) => { delete f['order.json']; }, 'plan/order.json', '-', 'missing'],

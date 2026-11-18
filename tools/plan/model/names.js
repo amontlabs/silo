@@ -55,6 +55,7 @@ export const CHANGE_FIELDS = Object.freeze([...FEATURE_KEYS, 'notes']);
 /** The files of `plan/`, relative to it. */
 export const PLAN_FILES = Object.freeze({
   product: 'PRODUCT.md',
+  design: 'DESIGN.md',
   areas: 'areas.json',
   order: 'order.json',
   decisions: 'decisions.json',

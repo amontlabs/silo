@@ -1,9 +1,0 @@
-{
-  "name": "Moving old saved data",
-  "what": "Screens and code that convert data from earlier versions of Silo.",
-  "needs": [],
-  "suggest": {
-    "verdict": "drop",
-    "why": "Nothing to migrate when starting from an empty tree."
-  }
-}
