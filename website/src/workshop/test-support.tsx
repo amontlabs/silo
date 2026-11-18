@@ -1,5 +1,5 @@
 // Shared by the page's tests: a fake API on fetch, and ways to find what a person sees.
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { expect, vi } from 'vitest';
 import { App } from './App';
 import type { IssueDetail, Me } from './api';
@@ -81,4 +81,22 @@ export function clock() {
   let now = 1_000_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   return { advance(ms: number) { now += ms; } };
+}
+
+export const wait = (ms: number) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+
+export const notesButton = () => screen.getByRole('button', { name: 'Notes' });
+/** The notes once their chunk has loaded. */
+export const shownNotes = () => waitFor(() => {
+  const md = document.querySelector('.ws-md');
+  expect(md).not.toBeNull();
+  return md as HTMLElement;
+});
+
+/** The engine's row opened from the address, as the owner unless another person is given. */
+export async function openEngine(data = buildData(), me = owner) {
+  mockApi({ me });
+  history.replaceState(null, '', '/workshop#engine/engine');
+  await renderApp(data);
+  await waitFor(() => expect(rowButton('The engine runs on its own')).toHaveAttribute('aria-expanded', 'true'));
 }

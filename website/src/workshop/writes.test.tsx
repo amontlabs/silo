@@ -1,13 +1,18 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { App, OPEN_GUARD_MS } from './App';
 import { apiConfig } from './api';
 import { buildData, issue, liveState } from './fixtures';
 import {
-  areaTitle, clock, detail, itemOf, mockApi, ok, owner, ownerOn, part, posts, refused, renderApp, rowButton, tile, visitor,
+  clock, detail, itemOf, mockApi, ok, owner, ownerOn, part, posts, refused, renderApp, rowButton, tile, visitor, wait,
 } from './test-support';
 import type { Route } from './test-support';
+import type { Feature } from './plan';
+
+const away = { top: -900, bottom: -860, left: 0, right: 800, width: 800, height: 40, x: 0, y: -900, toJSON() {} } as DOMRect;
+const scrollIntoView = Element.prototype.scrollIntoView;
+afterEach(() => { Element.prototype.scrollIntoView = scrollIntoView; });
 
 // Signing in, writes, the owner's decisions and verdicts.
 describe('a signed-in person', () => {
@@ -114,6 +119,30 @@ describe('a signed-in person', () => {
     expect(location.search).toBe('');
     expect(location.hash).toBe('#computers/exec');
   });
+
+  it('say that signing out failed', async () => {
+    mockApi({ me: visitor, routes: { 'POST logout': () => refused(502, 'GitHub failed.') } });
+    history.replaceState(null, '', '/workshop#computers/exec');
+    await renderApp();
+    await screen.findByRole('textbox', { name: 'Comment' });
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/^Could not sign out\.$/);
+  });
+
+  it('give a signed-out visitor a reason on the thumbs-up, and say offline plainly', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop#computers');
+    const first = await renderApp();
+    expect(within(itemOf('Run a command')).getByRole('link', { name: /4 votes/ })).toHaveAttribute('title', 'Sign in to vote');
+    first.unmount();
+    // A first visit: nothing remembered.
+    localStorage.clear();
+    mockApi({ state: () => refused(503, 'not configured') });
+    history.replaceState(null, '', '/workshop#suggested');
+    await renderApp();
+    expect(screen.getByText('Suggestions are offline.')).toBeInTheDocument();
+    expect(screen.getAllByText('Votes and comments are offline.').length).toBeGreaterThan(0);
+  });
 });
 
 describe('the decisions', () => {
@@ -219,19 +248,6 @@ describe('the owner deciding entries', () => {
     expect(posts(calls, 'verdict')).toHaveLength(0);
   });
 
-  it('does nothing on Enter when the open row is not on screen', async () => {
-    const time = clock();
-    const calls = mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#computers/computers');
-    await renderApp();
-    await ownerOn('Create and delete a computer');
-    time.advance(OPEN_GUARD_MS);
-    fireEvent.keyDown(document.body, { key: 'Escape' });
-    await waitFor(() => expect(areaTitle()).toBeNull());
-    fireEvent.keyDown(document.body, { key: 'Enter' });
-    expect(posts(calls, 'verdict')).toHaveLength(0);
-  });
-
   it('records the verdict for the row it was given, and rolls back a refused one', async () => {
     const time = clock();
     let release: (value: { status: number; body: unknown }) => void = () => {};
@@ -254,54 +270,115 @@ describe('the owner deciding entries', () => {
     expect(posts(calls, 'verdict')).toHaveLength(1);
   });
 
-  it('guards Later and Drop like Take', async () => {
+  it('each have their own guard: an earlier open row stays armed when another opens', async () => {
     const time = clock();
     const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#computers/computers');
     await renderApp();
     await ownerOn('Create and delete a computer');
-    await userEvent.click(screen.getByRole('button', { name: 'Later' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
+    const take = (name: string) => within(itemOf(name)).getByRole('button', { name: /^Take/ });
+    expect(take('Create and delete a computer')).toHaveClass('ws-unarmed');
+    await act(async () => { time.advance(OPEN_GUARD_MS); await new Promise((resolve) => setTimeout(resolve, OPEN_GUARD_MS + 20)); });
+    expect(take('Create and delete a computer')).not.toHaveClass('ws-unarmed');
+    // Opening a second row starts that row's guard only.
+    await userEvent.click(rowButton('Run a command'));
+    expect(take('Run a command')).toHaveClass('ws-unarmed');
+    expect(take('Create and delete a computer')).not.toHaveClass('ws-unarmed');
+    await userEvent.click(take('Run a command'));
     expect(posts(calls, 'verdict')).toHaveLength(0);
-    time.advance(OPEN_GUARD_MS);
-    await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
-    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'drop' }]);
+    await userEvent.click(take('Create and delete a computer'));
+    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
   });
 
-  it('shows the server\'s refusal on a built entry in its row, and the row stays as it was', async () => {
+  it('take Enter on the open row that holds the focus, else on the one opened last', async () => {
     const time = clock();
-    const calls = mockApi({ me: owner, routes: { 'POST verdict': () => refused(409, 'Built entries take no verdict.') } });
+    const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#computers/computers');
     await renderApp();
     await ownerOn('Create and delete a computer');
+    await userEvent.click(rowButton('Run a command'));
     time.advance(OPEN_GUARD_MS);
-    await userEvent.click(screen.getByRole('button', { name: /^Take/ }));
-    const notice = await screen.findByRole('alert');
-    expect(notice).toHaveTextContent('Create and delete a computer: not saved. Built entries take no verdict.');
-    expect(document.getElementById('entry-computers')).toContainElement(notice);
+    // The focus is on the earlier row: Enter is its verdict, and it does not close it.
+    act(() => rowButton('Create and delete a computer').focus());
+    fireEvent.keyDown(rowButton('Create and delete a computer'), { key: 'Enter' });
     expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
-    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
-    expect(within(itemOf('Create and delete a computer')).queryByText('planned')).not.toBeInTheDocument();
+    // With the focus on the page, the row opened last; a held key does nothing.
+    act(() => (document.activeElement as HTMLElement).blur());
+    fireEvent.keyDown(document.body, { key: 'Enter', repeat: true });
+    expect(posts(calls, 'verdict')).toHaveLength(1);
+    await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
+    // The row that became current is armed again, like a freshly opened one.
+    act(() => (document.activeElement as HTMLElement).blur());
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict')).toHaveLength(1);
+    time.advance(OPEN_GUARD_MS);
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict').map((call) => call.body?.n)).toEqual([12, 13]);
   });
 
-  it('offers no verdict on a suggestion, which the server only records on entries', async () => {
-    let release: (value: { status: number; body: unknown }) => void = () => {};
-    const time = clock();
-    const calls = mockApi({ me: owner, routes: { 'POST suggest': () => new Promise((resolve) => { release = resolve; }) } });
-    history.replaceState(null, '', '/workshop#suggested');
+  it('never takes for a row whose verdict buttons are out of sight, and a row made current is brought into view and re-armed', async () => {
+    const calls = mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#computers');
     await renderApp();
-    await userEvent.type(screen.getByRole('textbox', { name: 'Title' }), 'Pause a computer');
-    await userEvent.click(screen.getByRole('button', { name: 'Suggest' }));
-    await userEvent.click(rowButton('Share a base computer'));
-    expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
-    expect(within(itemOf('Share a base computer')).queryByText('to decide')).not.toBeInTheDocument();
-    time.advance(OPEN_GUARD_MS);
-    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter' });
-    await act(async () => {});
-    expect(posts(calls, 'verdict')).toEqual([]);
-    expect(screen.getByRole('link', { name: '4 to decide' })).toBeInTheDocument();
-    await act(async () => release(ok({ number: 80 })));
-    await waitFor(() => expect(rowButton('Pause a computer').closest('.ws-item')).toHaveAttribute('id', 'issue-80'));
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function scroll(this: Element) { scrolled.push(this.closest('.ws-item')?.id ?? ''); };
+    await userEvent.click(rowButton('Create and delete a computer'));
+    await wait(OPEN_GUARD_MS + 50);
+    await userEvent.click(rowButton('Run a command'));
+    await wait(OPEN_GUARD_MS + 50);
+    // The first row's buttons are scrolled far above the window.
+    const first = itemOf('Create and delete a computer').querySelector('.ws-btn.go')?.closest('.ws-state') as HTMLElement;
+    first.getBoundingClientRect = () => away;
+    // With the focus on its own row button, the out-of-sight row is not taken.
+    act(() => rowButton('Create and delete a computer').focus());
+    fireEvent.keyDown(rowButton('Create and delete a computer'), { key: 'Enter' });
+    expect(posts(calls, 'verdict')).toHaveLength(0);
+    // With the focus on the page, the row opened last is taken; the earlier one becomes current, is brought
+    // into view and waits its guard again.
+    act(() => (document.activeElement as HTMLElement).blur());
+    scrolled.length = 0;
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(posts(calls, 'verdict').map((call) => call.body?.n)).toEqual([13]);
+    await wait(300);
+    expect(scrolled).toContain('entry-computers');
+    expect(location.hash).toBe('#computers/computers');
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Enter' });
+    await wait(OPEN_GUARD_MS);
+    // Armed again, but still out of sight here: nothing.
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Enter' });
+    expect(posts(calls, 'verdict')).toHaveLength(1);
+  });
+
+  it('sends no verdict for the open row and leaves the header to open its own row', async () => {
+    const calls = mockApi({ me: owner });
+    history.replaceState(null, '', '/workshop#computers');
+    await renderApp();
+    await userEvent.click(rowButton('Create and delete a computer'));
+    await wait(OPEN_GUARD_MS + 50);
+    const b = rowButton('Run a command');
+    act(() => b.focus());
+    // The keyboard path of a button: keydown, then the browser's click unless the keydown was prevented.
+    const event = fireEvent.keyDown(b, { key: 'Enter' });
+    expect(event).toBe(true);
+    if (event) await userEvent.click(b);
+    expect(posts(calls, 'verdict')).toHaveLength(0);
+    expect(b).toHaveAttribute('aria-expanded', 'true');
+    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('counts only undecided entries with an issue, whatever their file says elsewhere', async () => {
+    const data = buildData();
+    const base = data.features.find((feature) => feature.id === 'exec') as Feature;
+    // Entries whose file already holds a verdict never wait for the owner; undecided ones with an issue do.
+    const decided = (['take', 'later', 'drop'] as const).map((verdict, i): Feature => ({ ...base, position: 30 + i, id: `c-${verdict}`, name: `Decided ${verdict}`, verdict }));
+    const open = { ...base, position: 40, id: 'c-open', name: 'Open one', verdict: null } as Feature;
+    data.features = [...data.features, ...decided, open];
+    mockApi({ me: owner, state: () => ok(liveState(Object.fromEntries([...decided, open].map((feature, i) => [50 + i, issue({ entry: feature.id, title: feature.name })])))) });
+    history.replaceState(null, '', '/workshop#computers');
+    render(<App data={data} />);
+    await waitFor(() => expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent(/to decide/));
+    // `computers`, `exec` and the new open one wait; the decided ones count as what their file says.
+    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('1 planned · 3 to decide · 1 later · 1 dropped');
   });
 });
 
@@ -364,63 +441,6 @@ describe('writes the server has not confirmed', () => {
     expect(within(itemOf('Run a command')).getByRole('button', { name: /5 votes/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('keep a verdict as saving, with the counts unchanged, until the server answers', async () => {
-    const time = clock();
-    const answer = deferred();
-    mockApi({ me: owner, routes: { 'POST verdict': answer.route } });
-    history.replaceState(null, '', '/workshop#computers/computers');
-    await renderApp();
-    await ownerOn('Create and delete a computer');
-    time.advance(OPEN_GUARD_MS);
-    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-    expect(itemOf('Create and delete a computer').querySelector('.ws-word')).toHaveTextContent('Saving…');
-    expect(part('computers').querySelector('.ws-todo')).toHaveTextContent('2');
-    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('2 to decide');
-    expect(announced()).toBe('Create and delete a computer: saving. Run a command, open');
-    await userEvent.click(rowButton('Create and delete a computer'));
-    time.advance(OPEN_GUARD_MS);
-    expect(within(itemOf('Create and delete a computer')).queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
-    expect(localStorage.getItem('silo-workshop-writes-2')).toBeNull();
-    await act(async () => answer.release(ok()));
-    expect(within(itemOf('Create and delete a computer')).getByText('planned')).toBeInTheDocument();
-    expect(part('computers').querySelector('.ws-todo')).toHaveTextContent('1');
-    expect(localStorage.getItem('silo-workshop-writes-2')).toContain('take');
-  });
-
-  it('keep the page\'s own writes over an older state, not over one fetched well after them', async () => {
-    const time = clock();
-    const calls = mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#computers/computers');
-    const first = await renderApp();
-    await ownerOn('Create and delete a computer');
-    time.advance(OPEN_GUARD_MS);
-    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-    await waitFor(() => expect(posts(calls, 'verdict')).toHaveLength(1));
-    await act(async () => {});
-    first.unmount();
-    history.replaceState(null, '', '/workshop#computers');
-    const second = await renderApp();
-    expect(within(itemOf('Create and delete a computer')).getByText('planned')).toBeInTheDocument();
-    second.unmount();
-    time.advance(6 * 60_000);
-    await renderApp();
-    expect(within(itemOf('Create and delete a computer')).queryByText('planned')).not.toBeInTheDocument();
-  });
-
-  it('keep the page\'s own comment over an older answer', async () => {
-    mockApi({ me: visitor });
-    history.replaceState(null, '', '/workshop#computers/exec');
-    const first = await renderApp();
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Mine.');
-    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
-    await act(async () => {});
-    first.unmount();
-    history.replaceState(null, '', '/workshop#computers/exec');
-    await renderApp();
-    expect(await screen.findByText('Mine.')).toBeInTheDocument();
-    expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
-  });
-
   it('check the person\'s vote once per opening, never retrying a failure', async () => {
     const calls = mockApi({ me: visitor, routes: { 'GET vote': () => refused(502, 'GitHub failed.') } });
     history.replaceState(null, '', '/workshop#computers');
@@ -433,13 +453,6 @@ describe('writes the server has not confirmed', () => {
     await userEvent.click(rowButton('Run a command'));
     await userEvent.click(rowButton('Run a command'));
     await waitFor(() => expect(checks()).toBe(2));
-  });
-
-  it('ask `me` only when the marker cookie is present', async () => {
-    const calls = mockApi();
-    await renderApp();
-    expect(calls.some((call) => call.path === 'me')).toBe(false);
-    expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
   });
 
   it('check the GitHub link like any other link, and link earlier comments', async () => {

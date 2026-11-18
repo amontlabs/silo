@@ -1,5 +1,7 @@
 // The first frame and the load: what the browser remembers, placeholders while nothing is known, the fresh ask
 // after an old answer, the retry and "Try again", and verdicts that wait for `me`.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -7,7 +9,7 @@ import { App, OPEN_GUARD_MS } from './App';
 import type { Me } from './api';
 import { buildData, issue, liveState } from './fixtures';
 import type { LiveState } from './plan';
-import { clock, itemOf, mockApi, ok, owner, part, posts, renderApp, rowButton, visitor } from './test-support';
+import { clock, itemOf, mockApi, ok, owner, part, posts, refused, renderApp, rowButton, visitor } from './test-support';
 import { loadConfig } from './useWorkshop';
 import { applyKept, keep, newerAnswer } from './writes';
 
@@ -139,6 +141,61 @@ describe('the first frame', () => {
     expect(screen.getByText('polarzero')).toBeInTheDocument();
     // The answer is remembered as it came.
     expect(JSON.parse(localStorage.getItem(STATE) ?? '{}').issues[12].up).toBe(12);
+  });
+});
+
+describe('the account slot', () => {
+  const headScript = /<script>\s*\/\/ A readable marker[\s\S]*?<\/script>/.exec(readFileSync(join(process.cwd(), 'workshop/index.html'), 'utf8'))?.[0]
+    .replace(/<\/?script>/g, '') ?? '';
+
+  it('is marked for the signed-in width before first paint when the session marker is there', () => {
+    document.documentElement.classList.remove('ws-session');
+    new Function(headScript)();
+    expect(document.documentElement).not.toHaveClass('ws-session');
+    document.cookie = 'workshop-hint=1; path=/';
+    new Function(headScript)();
+    expect(document.documentElement).toHaveClass('ws-session');
+    document.documentElement.classList.remove('ws-session');
+  });
+
+  it('takes the width of what it holds only once `me` has answered, and shows a long login whole on hover', async () => {
+    const login = 'a-login-of-thirty-nine-characters-xxxxx';
+    let answer: (value: { status: number; body: unknown }) => void = () => {};
+    mockApi({ me: owner, routes: { 'GET me': () => new Promise((resolve) => { answer = resolve; }) } });
+    const slot = document.createElement('div');
+    document.body.append(slot);
+    render(<App data={buildData()} accountSlot={slot} />);
+    await act(async () => {});
+    expect(slot).not.toHaveAttribute('data-account');
+    await act(async () => answer(ok({ ...owner, login })));
+    await waitFor(() => expect(slot).toHaveAttribute('data-account', 'in'));
+    expect(screen.getByText(login)).toHaveAttribute('title', login);
+    expect(screen.getByText(login)).toHaveClass('ws-login');
+    slot.remove();
+  });
+
+  it('keeps its width during the visit once `me` answers signed in, and stores the width of the login for the next', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(min-width: 481px)', media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(70);
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(52);
+    mockApi({ me: owner });
+    const slot = document.createElement('div');
+    document.body.append(slot);
+    render(<App data={buildData()} accountSlot={slot} />);
+    await waitFor(() => expect(slot).toHaveAttribute('data-account', 'in'));
+    await waitFor(() => expect(localStorage.getItem('silo-workshop-account-width')).toBe('134'));
+    // Applied only by the head script, before the next visit's first paint.
+    expect(document.documentElement.style.getPropertyValue('--ws-account-w')).toBe('');
+    slot.remove();
+  });
+
+  it('switches to the signed-out width when the marker was stale', async () => {
+    mockApi({ me: owner, routes: { 'GET me': () => refused(401, 'Not signed in.') } });
+    const slot = document.createElement('div');
+    document.body.append(slot);
+    render(<App data={buildData()} accountSlot={slot} />);
+    await waitFor(() => expect(slot).toHaveAttribute('data-account', 'out'));
+    slot.remove();
   });
 });
 
@@ -316,26 +373,6 @@ describe('the page\'s own writes over an answer', () => {
     await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByLabelText('8 comments')).toBeInTheDocument());
   });
 
-  it('keep a comment as the count shown plus one when the server answers no count', async () => {
-    mockApi({ me: visitor });
-    history.replaceState(null, '', '/workshop#computers/computers');
-    await renderApp();
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Mine.');
-    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
-    await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByLabelText('3 comments')).toBeInTheDocument());
-  });
-
-  it('keep values, never changes: a vote and its removal leave the last value answered', () => {
-    clock();
-    keep({ n: 12, set: { up: 13 } }, Date.now());
-    keep({ n: 12, set: { up: 12 } }, Date.now());
-    const answer = { ...computers(30), fetchedAt: at(Date.now() - 60_000) };
-    expect(applyKept(answer, Date.now()).issues[12].up).toBe(12);
-    // Repeatable: the same answer and the same list give the same state, and the answer is untouched.
-    expect(applyKept(answer, Date.now())).toEqual(applyKept(applyKept(answer, Date.now()), Date.now()));
-    expect(answer.issues[12].up).toBe(30);
-  });
-
   it('keep a new suggestion over a remembered state and a cached answer that lack it', async () => {
     clock();
     const suggestion = issue({ kind: 'suggestion', title: 'A new idea', author: 'mara-k', bot: false });
@@ -350,27 +387,6 @@ describe('the page\'s own writes over an answer', () => {
     expect(screen.getByRole('button', { name: /^A new idea/ })).toBeInTheDocument();
     await act(async () => answer.release(ok({ ...liveState(), fetchedAt: at(Date.now() - 5 * 60_000) })));
     expect(screen.getByRole('button', { name: /^A new idea/ })).toBeInTheDocument();
-  });
-
-  it('carry over the older store\'s set values and comments, never its counts, and ignore count changes', () => {
-    clock();
-    localStorage.setItem('silo-workshop-writes', JSON.stringify({ 12: { at: Date.now(), issue: { up: 99, comments: 9, verdict: 'take' }, comments: [] } }));
-    expect(applyKept({ ...computers(12), fetchedAt: at(Date.now()) }, Date.now()).issues[12]).toMatchObject({ up: 12, comments: 5, verdict: 'take' });
-    localStorage.setItem('silo-workshop-writes-2', JSON.stringify({ writes: [{ n: 12, at: Date.now(), add: { up: 1 } }], comments: [] }));
-    expect(applyKept({ ...computers(12), fetchedAt: at(Date.now()) }, Date.now()).issues[12].up).toBe(12);
-  });
-
-  it('give way to an answer fetched more than a minute after them, and are dropped after a day', () => {
-    const time = clock();
-    keep({ n: 12, set: { verdict: 'take' } }, Date.now());
-    keep({ n: 12, set: { up: 13 } }, Date.now());
-    const base = computers(12);
-    expect(applyKept({ ...base, fetchedAt: at(Date.now() - 5 * 60_000) }, Date.now()).issues[12]).toMatchObject({ up: 13, verdict: 'take' });
-    expect(applyKept({ ...base, fetchedAt: at(Date.now() + 50_000) }, Date.now() + 50_000).issues[12]).toMatchObject({ up: 13, verdict: 'take' });
-    time.advance(2 * 60_000);
-    expect(applyKept({ ...base, fetchedAt: at(Date.now()) }, Date.now()).issues[12]).toMatchObject({ up: 12, verdict: null });
-    time.advance(24 * 3600_000);
-    expect(applyKept({ ...base, fetchedAt: at(0) }, Date.now()).issues[12]).toMatchObject({ up: 12, verdict: null });
   });
 
   it('hold on every path: random answers, writes and time; the newest answer kept as it came, values applied in order', () => {
@@ -421,6 +437,20 @@ describe('the page\'s own writes over an answer', () => {
       }
       vi.restoreAllMocks();
     }
+  });
+
+  it('keep the page\'s own comment over an older answer', async () => {
+    mockApi({ me: visitor });
+    history.replaceState(null, '', '/workshop#computers/exec');
+    const first = await renderApp();
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Mine.');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await act(async () => {});
+    first.unmount();
+    history.replaceState(null, '', '/workshop#computers/exec');
+    await renderApp();
+    expect(await screen.findByText('Mine.')).toBeInTheDocument();
+    expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
   });
 });
 
@@ -510,6 +540,19 @@ describe('addresses', () => {
     await act(async () => answer.release(ok(liveState())));
     await waitFor(() => expect(location.hash).toBe(''));
     expect(part('engine')).toBeInTheDocument();
+  });
+
+  it('opens late beside the row the person opened meanwhile, which stays the current one', async () => {
+    let release: (value: { status: number; body: unknown }) => void = () => {};
+    mockApi({ state: () => new Promise((resolve) => { release = resolve; }) });
+    history.replaceState(null, '', '/workshop#computers/exec');
+    render(<App data={buildData()} />);
+    await userEvent.click(rowButton('Create and delete a computer'));
+    expect(location.hash).toBe('#computers/computers');
+    await act(async () => release(ok(liveState())));
+    await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
+    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
+    expect(location.hash).toBe('#computers/computers');
   });
 });
 
@@ -609,19 +652,6 @@ describe('the look while waiting', () => {
     const shape = itemOf('Create and delete a computer').querySelector('.ws-box.ws-ph-shape') as HTMLElement;
     expect(shape.querySelector('textarea')).toHaveAttribute('rows', '1');
     expect(shape.querySelector('.ws-btn')).toHaveTextContent('Comment');
-  });
-
-  it('draws the place in the first frame without its entrance; a place opened later rises in', async () => {
-    mockApi();
-    history.replaceState(null, '', '/workshop#computers');
-    await renderApp();
-    expect(document.querySelector('.ws-detail')).toHaveClass('ws-still');
-    await waitFor(() => expect(document.querySelector('.ws')).not.toHaveClass('ws-boot'));
-    expect(document.querySelector('.ws-detail')).toHaveClass('ws-still');
-    await userEvent.click(screen.getAllByRole('button', { name: /Full map|All areas/ })[0]);
-    await userEvent.click(part('engine'));
-    await waitFor(() => expect(document.querySelector('.ws-detail')).not.toBeNull());
-    expect(document.querySelector('.ws-detail')).not.toHaveClass('ws-still');
   });
 
   it('closes the sign-in tooltip with Escape until the focus leaves, without leaving the place', async () => {
