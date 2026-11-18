@@ -1,6 +1,6 @@
 # Silo
 
-Computers your agents can fork. Silo is built one feature at a time. This repository holds the
+Git for computers. Silo is built one feature at a time. This repository holds the
 plan, the public site, and the code of the features built so far.
 
 - `plan/` is the plan: what Silo is (`PRODUCT.md`), every feature (`features/<id>.json`, notes in
