@@ -1,10 +1,8 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - The docs say that a checkpoint with memory resumes the whole computer after a crash, so an agent program needs no resume machinery of its own.
-- Detail: A fork can be paused from the app, which saves a checkpoint with its memory and stops it, and resumed where it was.
-- Detail: A pause, of one fork or of all, can first let each agent finish its current step, so the work resumes from a clean point.
+- A fork can be paused from the app, which saves a checkpoint with its memory and stops it, and resumed where it was.
+- A pause, of one fork or of all, can first let each agent finish its current step, so the work resumes from a clean point.
 
 ## From the old code
 

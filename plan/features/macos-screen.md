@@ -1,6 +1,6 @@
 ## Notes
 
-- An agent drives this screen too: see `macos-computer-use` (owner, 2026-11-17).
+- An agent drives this screen too: see `macos-computer-use` (2026-11-17).
 
 ## From the old code
 

@@ -1,16 +1,14 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: Silo notifies only on a transition that needs a person (an approval or a question pending, a task finished, failed or stalled) and never sends a stream of every event.
 - Rule: The engine raises 'needs you' itself when a computer waits on the user, so the signal never depends on the agent marking it.
-- Detail: Everything that waits on the user sits in one queue across all computers and forks, ordered by importance.
-- Detail: Each item of the queue is answered in place, in one step, one after another.
-- Detail: A computer can raise a softer 'I may need you' signal, which shows in its status in the app and sends no notification.
-- Detail: Items that ask for attention are deduplicated by fingerprint and counted, with the first and the last time seen.
-- Detail: An item can be acknowledged, resolved or silenced, and the record keeps who did each.
+- Everything that waits on the user sits in one queue across all computers and forks, ordered by importance.
+- Each item of the queue is answered in place, in one step, one after another.
+- A computer can raise a softer 'I may need you' signal, which shows in its status in the app and sends no notification.
+- Items that ask for attention are deduplicated by fingerprint and counted, with the first and the last time seen.
+- An item can be acknowledged, resolved or silenced, and the record keeps who did each.
 - Test: When an agent says it waits on an answer, the pending item exists in the app, or the claim is shown as unfounded.
-- Detail: The menu bar item shows what finished, stalled or waits on you since you last looked, with what each changed.
+- The menu bar item shows what finished, stalled or waits on you since you last looked, with what each changed.
 
 ## From the old code
 

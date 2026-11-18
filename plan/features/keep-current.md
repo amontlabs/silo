@@ -1,11 +1,9 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: Silo announces a change before it makes one on the user's behalf in their computers or repositories, such as an upgrade pull request.
-- Detail: One action updates the guest kernel and base image of every existing computer.
-- Detail: Silo shows which computers still run an old kernel or base image.
-- Detail: An upgrade to a recipe or to Silo's own files in a computer can come as a migration prompt that an agent runs in a fork, merged like any other change.
+- One action updates the guest kernel and base image of every existing computer.
+- Silo shows which computers still run an old kernel or base image.
+- An upgrade to a recipe or to Silo's own files in a computer can come as a migration prompt that an agent runs in a fork, merged like any other change.
 
 ## From the old code
 

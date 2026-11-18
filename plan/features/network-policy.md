@@ -1,28 +1,26 @@
 ## Decided
 
-- 2026-11-10, owner: the egress policy is set by the user, with requests from the agent.
+- 2026-11-10: the egress policy is set by the user, with requests from the agent.
 
-## Proposed, not confirmed by the owner
-
-### For the owner to settle
-
-- Should a preset let a computer read freely and hold every network write for approval, per computer or per destination, when a read can also carry data out?
-  - Recommendation: No, because a read carries data out as well as a write, so the preset would promise more than it holds and ask often.
-- Should a computer be able to have a network identity of its own, such as its own outbound address, as someone running one computer per account wants?
-  - Recommendation: No for now, because nothing in the plan needs it and whether it fits providers' terms is unknown.
-
-### For whoever builds it
+## Proposed
 
 - Property: Nothing done inside a computer can change or invalidate its network rules.
 - Rule: Main has network rules of its own, and holding every project does not let it reach everything.
 - Rule: Opening or closing a computer's network is one step.
 - Rule: Work inside a computer never prompts per command.
 - Rule: Hosts that serve documentation to agents, and tools that report bugs to their maker, are destinations like any other, and each preset names the ones it allows.
-- Detail: An editable preset limits a computer's model calls to named providers and their endpoints, and covers several vendors, routers and hosted open models.
-- Detail: A fork's diff lists the network attempts that were denied in it, each with the host, the time and the process that tried.
+- An editable preset limits a computer's model calls to named providers and their endpoints, and covers several vendors, routers and hosted open models.
+- A fork's diff lists the network attempts that were denied in it, each with the host, the time and the process that tried.
+- Test: An agent makes many short calls to several model endpoints per step; the network rules hold for every call and the usage count is exact.
+
+## Open
+
+- Should a preset let a computer read freely and hold every network write for approval, per computer or per destination, when a read can also carry data out?
+  - Suggested: No, because a read carries data out as well as a write, so the preset would promise more than it holds and ask often.
+- Should a computer be able to have a network identity of its own, such as its own outbound address, as someone running one computer per account wants?
+  - Suggested: No for now, because nothing in the plan needs it and whether it fits providers' terms is unknown.
 - To find out: Can a preset limit which Git hosts and organisations a computer clones from, given that an organisation is a path and not a host?
 - To find out: On a Linux host, do eBPF or XDP enforce a computer's network rules better than the alternatives?
-- Test: An agent makes many short calls to several model endpoints per step; the network rules hold for every call and the usage count is exact.
 
 ## From the old code
 

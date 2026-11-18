@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - How operations are built
   - Rule: Every multi-step operation (fork, merge, restore, recipe run) advances through explicit steps, each safe to stop after.
@@ -17,7 +15,7 @@
   - Test: For every driver, a test crashes the engine exactly between sending an effect and recording its result; after the restart the effect is not carried out again.
   - Test: A test resumes an operation from any saved point with no extra arguments.
   - Test: A live check on a real Mac runs the engine's store for hours with several writers and crashes, and records any I/O error.
-  - Detail: Recovery time, how long the engine takes to be useful again after a crash, is measured and kept over time.
+  - Recovery time, how long the engine takes to be useful again after a crash, is measured and kept over time.
 
 ## From the old code
 

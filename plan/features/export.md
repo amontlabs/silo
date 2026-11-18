@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: The export format is plain and documented, so a user can take computers and their data out of Silo and leave.
 

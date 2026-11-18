@@ -9,6 +9,6 @@
   ],
   "suggest": {
     "verdict": "later",
-    "why": "Nothing in the loop depends on it; worth taking once people other than the owner use Silo daily."
+    "why": "Nothing in the loop depends on it; worth taking once other people use Silo daily."
   }
 }

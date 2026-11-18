@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: An engine update restarts the engine from saved state and never swaps code inside a running process.
 

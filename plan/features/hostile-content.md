@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: A summary written by an agent is untrusted content, so a merge decision never rests on it alone.
 - Test: A very large log is produced or pasted inside a computer, and the device stays responsive.

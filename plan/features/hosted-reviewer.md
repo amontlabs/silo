@@ -1,6 +1,6 @@
 ## Decided
 
-- 2026-11-10, owner: left aside for now.
+- 2026-11-10: left aside for now.
 
 ## From the old code
 

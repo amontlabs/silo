@@ -1,3 +1,3 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
 Why: A setup made by hand on each device drifts apart.

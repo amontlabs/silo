@@ -1,30 +1,20 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
 - The engine is its own program, not a library inside the app, so computers keep running when the app closes.
 - The core decides and touches nothing: it takes state and a call and returns the new state, events and things to do. Drivers do them (run a VM, set up the network, talk to GitHub).
 - Layout: `engine/` (model, core, drivers, server, sim), `cli/`, `app/`, `guest/`, `tools/`.
 - Zig pinned to one version (0.17.1 was the latest stable on 2026-11-02), with its docs at hand.
 
-### For the owner to settle
-
-- When the engine crashes or is updated, do running computers keep running while changes wait, or may they pause and resume as `updates-keep-running` plans?
-  - Recommendation: Keep running, so that an assertion stopping the engine costs no running work, at the price of one helper process per computer.
-- Does the engine save its state plus the inputs since the last save, or keep every event forever and rewrite the whole log at each upgrade?
-  - Recommendation: State plus recent inputs, since disk stays bounded and new code never reads old inputs, with history and the audit log kept as their own records.
-
-### For whoever builds it
-
 - Running on its own
   - Rule: A broken invariant stops the engine through an assertion, and the engine restarts from saved state; it is never returned as an ordinary error.
   - Test: With computers running, stop the engine and install a new version; every computer keeps running throughout, and only changes wait for the engine.
-  - To find out: Can a restarted engine find and take back one helper process per computer, under Apple's virtualization framework and MicroSandbox's process model?
   - Property: A crash of a computer or of its helper stops neither the engine, nor other computers, nor a program driving Silo from outside.
   - Rule: Each computer has one owner at a time, decided by a version check or a lease, so a stale engine or helper never overwrites newer state.
   - Test: Run two engines, or two operations, on one store; the second is refused or safe, and nothing races on the file.
   - Property: A fork and the agent session in it run for several days across engine restarts without losing work.
   - Test: Quit the app during a long run and open it again; the state and the history it shows are complete.
   - Property: The engine listens at a fixed address the user controls, and a second client or tool on the same device never moves it.
-  - Detail: Clients reach the engine over a local Unix socket, and the same calls and events also work over a network transport.
+  - Clients reach the engine over a local Unix socket, and the same calls and events also work over a network transport.
   - Rule: The engine uses no message broker such as NATS or Kafka, since it is one program per device; devices talking to each other may reopen this.
   - Property: The engine's idle memory is measured and stated, with a target under 100 MB; a comparable always-on agent gateway uses 247 MB resident.
 - State and events
@@ -42,14 +32,10 @@
   - Rule: Derived views such as history and statistics may lag behind the event log, and the transactional path never waits for them.
   - Rule: No optimisation of the core removes or reorders its numbered events.
   - Rule: Command output, logs and large files go to a log store and stay out of the state records.
-  - Detail: An event records the alternatives the core weighed and did not take, for example why a merge needed approval.
+  - An event records the alternatives the core weighed and did not take, for example why a merge needed approval.
   - Rule: A format change to the stored state or the calls ships with its migration, under one versioning rule for the tables that needs no file per change.
-  - Detail: Putting the engine's own records back to an earlier event number truncates the event log after that number, and covers only what the engine holds.
+  - Putting the engine's own records back to an earlier event number truncates the event log after that number, and covers only what the engine holds.
   - Rule: A second storage backend is not announced until the whole test suite has run against it.
-  - To find out: What does recording every event cost on the busiest path, and can full recording stay on at all times?
-  - To find out: Where else does recording everything as an event not fit, and what is used there?
-  - To find out: If the store uses SQLite, which journal mode avoids the SQLITE_IOERR_VNODE errors reported in WAL mode on macOS?
-  - To find out: Does any planned feature need two devices holding the same state to compare their stores byte for byte, which needs a deterministic on-disk layout?
 - Effects and drivers
   - Rule: An effect is a request with an id and no return value, and its answer, or a timeout, reaches the core later as an input.
   - Rule: Each record keeps what was asked and what was last seen, and the core issues effects until they match, never trusting an old answer.
@@ -70,8 +56,6 @@
   - Rule: The engine's core contains nothing about agents, and agent features are built from its primitives.
   - Rule: Each kind of work is one generic record type with its variant as a field, such as a task with an agent field.
   - Rule: Before a driver is built, rough numbers for its network, storage, memory and compute are sketched, for both bandwidth and latency.
-  - To find out: Does any planned operation need a third class of effect, one that can be undone, beside safe to repeat and once only?
-  - To find out: Can approvals and telemetry run as observers of the event stream, outside each operation's code, without writing state or weakening the trusted path for approvals?
   - The docs list what the core may ask the outside world to do, which driver does each, and which drivers each core operation needs.
   - Docs: Each driver's fault model lists every behaviour that a pinning test established.
 - Limits and memory
@@ -118,6 +102,20 @@
   - Rule: A failure the event log and simulator cannot explain first gets the event or check that would have explained it, then its fix.
   - The docs explain the engine as an event that updates the state, after which the plan is computed again from the state.
   - Docs: Wherever the docs say 'state machine', they name which part is the state and which part is the transitions.
+
+## Open
+
+- When the engine crashes or is updated, do running computers keep running while changes wait, or may they pause and resume as `updates-keep-running` plans?
+  - Suggested: Keep running, so that an assertion stopping the engine costs no running work, at the price of one helper process per computer.
+- Does the engine save its state plus the inputs since the last save, or keep every event forever and rewrite the whole log at each upgrade?
+  - Suggested: State plus recent inputs, since disk stays bounded and new code never reads old inputs, with history and the audit log kept as their own records.
+- To find out: Can a restarted engine find and take back one helper process per computer, under Apple's virtualization framework and MicroSandbox's process model?
+- To find out: What does recording every event cost on the busiest path, and can full recording stay on at all times?
+- To find out: Where else does recording everything as an event not fit, and what is used there?
+- To find out: If the store uses SQLite, which journal mode avoids the SQLITE_IOERR_VNODE errors reported in WAL mode on macOS?
+- To find out: Does any planned feature need two devices holding the same state to compare their stores byte for byte, which needs a deterministic on-disk layout?
+- To find out: Does any planned operation need a third class of effect, one that can be undone, beside safe to repeat and once only?
+- To find out: Can approvals and telemetry run as observers of the event stream, outside each operation's code, without writing state or weakening the trusted path for approvals?
 
 ## From the old code
 

@@ -1,23 +1,16 @@
-## Proposed, not confirmed by the owner
-
-### For the owner to settle
-
-- Which fork time does Silo commit to: 3 s to a shell as the old target says, or under 1 s as JJHub claims (800 ms on bare metal)?
-  - Recommendation: 3 s to a shell first: the old app ranged from 1.2 s to 21 s by what was counted, and a user left another tool at 10 s.
-
-### For whoever builds it
+## Proposed
 
 - What a fork is
   - Property: A fork's life ends in exactly one outcome, merged or dropped, and the outcome is reported.
   - Rule: A fork reports to its parent, and forks have no way to message their siblings.
-  - Detail: An agent working in a fork can fork that fork the same way, to explore a side path.
-  - Detail: Finished forks are dropped in one step, so dead forks do not pile up.
+  - An agent working in a fork can fork that fork the same way, to explore a side path.
+  - Finished forks are dropped in one step, so dead forks do not pile up.
 - Storage
   - Property: A fork shares its parent's disk at block level and stores only what changes afterwards, so a first write to a large file does not copy the whole file.
   - Property: A computer is paused or forked only with its whole virtual machine paused, so nothing is caught half done.
   - Property: What one fork writes to a build or package cache never appears in another fork or in its parent.
   - Test: A computer running a memory-mapped database is forked and benchmarked, using Reth's database library, which is reported to fail on OverlayFS; the database works in the fork.
-  - Detail: Where a computer's storage would copy whole files on write, Silo detects a database on it and warns.
+  - Where a computer's storage would copy whole files on write, Silo detects a database on it and warns.
   - Risk: fuse-overlayfs was rewritten in Rust shortly before May 2026, so its maturity is checked before Silo uses it.
 - Agents in a fork
   - Property: An agent session's durable state (session ids, resume files) survives a fork, a checkpoint restore and an engine restart.
@@ -27,14 +20,19 @@
 - Speed
   - Test: The first build in a fresh fork is timed against the same build in main on sample Rust, Zig and TypeScript projects; the fork's build is incremental.
   - Test: Start, stop and fork times of a Linux and a macOS computer are measured on each device and published per device.
-  - Detail: The limits of the fork budget (time, memory, disk) are configurable per device.
+  - The limits of the fork budget (time, memory, disk) are configurable per device.
   - Test: A computer holding a 6.5 GB repository (3.9 GB of tests, a 1.5 GB git folder, 1 GB of build output) is forked; time and disk use stay within budget.
-  - To find out: Measure disk I/O during a fork, a build and a bulk delete, early, on a Mac's internal disk and on a Linux host with a standard NVMe drive.
-  - To find out: Measure fork time and memory with many forks open, to say whether one fork per subagent is practical.
 - Other
-  - Detail: Dropping a fork can first bring chosen files back to its parent, such as its notes, and discards everything else.
-  - Detail: A fork can carry labels (text, number or yes-or-no values) that every event of the fork carries, so forks can be filtered by them.
+  - Dropping a fork can first bring chosen files back to its parent, such as its notes, and discards everything else.
+  - A fork can carry labels (text, number or yes-or-no values) that every event of the fork carries, so forks can be filtered by them.
   - Risk: A fork starts with no secrets and read-only GitHub but still carries every file of its source, including other projects' data held in main.
+
+## Open
+
+- Which fork time does Silo commit to: 3 s to a shell as the old target says, or under 1 s as JJHub claims (800 ms on bare metal)?
+  - Suggested: 3 s to a shell first: the old app ranged from 1.2 s to 21 s by what was counted, and a user left another tool at 10 s.
+- To find out: Measure disk I/O during a fork, a build and a bulk delete, early, on a Mac's internal disk and on a Linux host with a standard NVMe drive.
+- To find out: Measure fork time and memory with many forks open, to say whether one fork per subagent is practical.
 
 ## Notes
 
@@ -46,7 +44,7 @@ The old code had it partly built, about 4,000 lines, and it needs reworking.
 
 Lessons:
 - A fork must drop the source's Silo-tools token and get its own endpoint, or it answers as its parent (T5b S3).
-- A fork may get only what the caller already has; forking an earlier checkpoint of itself asks, since it can hold what the owner since took away.
+- A fork may get only what the caller already has; forking an earlier checkpoint of itself asks, since it can hold what the user since took away.
 - A fork always cold-boots the disks, never memory, so nothing of the source keeps running.
 - The engine does not copy published ports; the CLI republishes them, each on its own device port.
 - Early plan said forks stay stopped until an explicit Start; the CLI later starts them by default.

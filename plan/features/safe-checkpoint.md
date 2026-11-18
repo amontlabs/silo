@@ -1,12 +1,10 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
 Why: The latest state of main is not always a working one.
 
-### For the owner to settle
+- Rule: Only passing checks move the marker, an urgent merge included.
+
+## Open
 
 - Is the safe state a marker on main, or main itself, with forks merging first into a working line?
-  - Recommendation: A marker on main, which adds no second computer to keep.
-
-### For whoever builds it
-
-- Rule: Only passing checks move the marker, an urgent merge included.
+  - Suggested: A marker on main, which adds no second computer to keep.

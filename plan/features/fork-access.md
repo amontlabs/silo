@@ -1,9 +1,7 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For whoever builds it
-
-- Property: The simulator checks that a fork made by a computer never holds more access than its maker; a fork the owner made by hand may hold more than its parent.
-- Detail: The call that makes a fork can also name a subset of the parent's network rules, beside the secrets it hands over, so each subagent gets a narrower computer.
+- Property: The simulator checks that a fork made by a computer never holds more access than its maker; a fork the user made by hand may hold more than its parent.
+- The call that makes a fork can also name a subset of the parent's network rules, beside the secrets it hands over, so each subagent gets a narrower computer.
 - The docs say that credential files and signed-in command-line tools on the disk travel into a fork, whatever secrets it is given, until `logins-stay-put` settles it.
 
 ## Notes

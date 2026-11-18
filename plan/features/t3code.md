@@ -1,10 +1,8 @@
 ## Decided
 
-- 2026-11-16, owner: T3 Code runs on the Mac and connects into the computer; it does not run inside.
+- 2026-11-16: T3 Code runs on the Mac and connects into the computer; it does not run inside.
 
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: After a restore or a fork, T3 Code shows the agent's conversation as it stood at the checkpoint, read from the computer.
 
@@ -13,7 +11,7 @@
 The old code planned it but did not build it and how much can be reused is not known.
 
 Lessons:
-- Owner decided 2026-11-16 that T3 Code runs on the Mac and connects in; it does not run inside the computer.
+- Decided 2026-11-16: T3 Code runs on the Mac and connects in; it does not run inside the computer.
 - The macOS template still contains Claude Code because changing it rebuilds every user's template.
 
 Where it lived, at the tag legacy-2026-11-16:

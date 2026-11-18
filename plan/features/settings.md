@@ -1,10 +1,8 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: A setting is a device-wide default that a computer can override.
 - Rule: An unfinished feature is switched off and does not appear in Settings.
-- Detail: Settings has an entry for the default shell.
+- Settings has an entry for the default shell.
 
 ## From the old code
 

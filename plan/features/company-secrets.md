@@ -1,10 +1,8 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Property: Neither a person nor any agent can read a secret from a layer above their own.
-- Detail: Secrets come in layers, where an admin gives fine-grained secrets to each person and a person adds their own.
-- Detail: A person can lend a secret for one fork and one task, usable and never readable, for example to pay for someone else's inference.
+- Secrets come in layers, where an admin gives fine-grained secrets to each person and a person adds their own.
+- A person can lend a secret for one fork and one task, usable and never readable, for example to pay for someone else's inference.
 
 ## Notes
 

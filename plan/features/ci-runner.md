@@ -1,6 +1,6 @@
 ## Decided
 
-- 2026-11-10, owner: the CI runner is the GitHub-specific case of tasks from outside that start a computer; the general form comes first.
+- 2026-11-10: the CI runner is the GitHub-specific case of tasks from outside that start a computer; the general form comes first.
 
 ## From the old code
 

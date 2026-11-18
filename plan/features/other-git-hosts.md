@@ -1,3 +1,3 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
 Why: Many repositories live outside GitHub.

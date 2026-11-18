@@ -1,13 +1,11 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For the owner to settle
+- Besides the state before a merge, any conflicted or agent-resolved state during it is kept as a checkpoint the user can return to.
+
+## Open
 
 - Does undo only put a computer back to before its last merge, or can it also take back one merged change and keep the rest?
-  - Recommendation: The whole last merge only: it is exact, while taking back one change is a reverse merge that can conflict.
-
-### For whoever builds it
-
-- Detail: Besides the state before a merge, any conflicted or agent-resolved state during it is kept as a checkpoint the user can return to.
+  - Suggested: The whole last merge only: it is exact, while taking back one change is a reverse merge that can conflict.
 
 ## From the old code
 

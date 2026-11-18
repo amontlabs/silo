@@ -1,8 +1,6 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For whoever builds it
-
-- Detail: The user can mark scratch files and debug output in a fork as never merged, which keeps them out of its diff and its merge.
+- The user can mark scratch files and debug output in a fork as never merged, which keeps them out of its diff and its merge.
 
 ## From the old code
 

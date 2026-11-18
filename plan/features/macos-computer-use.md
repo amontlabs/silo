@@ -1,12 +1,10 @@
 ## Decided
 
-- 2026-11-17, owner: an agent drives the screen of a macOS computer as well as a Linux desktop.
+- 2026-11-17: an agent drives the screen of a macOS computer as well as a Linux desktop.
 
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For whoever builds it
-
-- Detail: An agent can operate real apps in a macOS computer through a tool server per app.
+- An agent can operate real apps in a macOS computer through a tool server per app.
 
 ## Notes
 

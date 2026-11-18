@@ -1,3 +1,3 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
 Why: Some people supervise their work from a tracker and want no second list.

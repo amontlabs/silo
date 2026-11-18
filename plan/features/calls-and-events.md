@@ -1,16 +1,7 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
 - The engine is state, calls and events. State is a set of records. A call asks for a change. An event says what happened. The app shows state and follows events.
 - One name per concept everywhere: a part of the plan, a group of calls, one engine file, a command, a screen.
-
-### For the owner to settle
-
-- Does the Swift app link the Zig client through a C interface, or speak the protocol in Swift generated from the definition?
-  - Recommendation: Link the Zig client, so reconnection and status are written once and run in the simulator; mac-app-in-swift rules out bindings only for driving macOS computers.
-- Does Silo promise never to rename or break a published call or command, with an unstable mark as the only way out?
-  - Recommendation: Yes, with every call marked unstable until the starter is in daily use, because agents script against names and a break is silent for them.
-
-### For whoever builds it
 
 - Calls
   - Rule: One call carries one whole user intention, as fork and run does, and has a variant that waits and returns the result.
@@ -22,32 +13,31 @@
   - Rule: Every list call is paged by cursor and limit from the first version.
   - Rule: Each kind of identifier (computer, fork, checkpoint, device, call) is its own type, checked at the boundary and kept as such in the Swift app.
   - Rule: The engine gets no query language (the entry engine-query) unless a written problem shows that typed calls cannot solve it.
-  - To find out: Do agents need to batch calls, or to pipeline them so that a call uses an earlier call's result without a round trip?
 - Events and state
   - Property: A client that starts from the state at event N and applies every later event in order holds the same state as the engine.
   - Rule: Events are numbered, a client reconnects by giving its last event number, and the engine keeps no state per client.
   - Rule: A client's surface is requests and one pushed stream of numbered events from one writer, and the first versions have no general sync engine.
-  - Detail: An agent waits for an event (a fork finished, a command exited, an approval answered) with a wait call on the numbered events, so nothing polls a computer.
-  - Detail: Another consumer, such as another device or a team view, can follow or export the same event stream from the first version.
+  - An agent waits for an event (a fork finished, a command exited, an approval answered) with a wait call on the numbered events, so nothing polls a computer.
+  - Another consumer, such as another device or a team view, can follow or export the same event stream from the first version.
   - Risk: Synced state copes badly with megabyte-sized values, so bulky data stays out of the state sent to clients.
   - Property: Engine state and events serialise to one stable form that every binding reads.
   - Rule: Records stay flat with readable fields, so a generic table browser can serve as a stopgap interface.
-  - Detail: Status, block reason and unhealthy reason are computed once, in the engine or the Zig client, and every interface renders them the same way.
+  - Status, block reason and unhealthy reason are computed once, in the engine or the Zig client, and every interface renders them the same way.
   - The docs list what a client can subscribe to (the state of a computer, a fork or a diff, approvals, checks), and the event design is checked against that list.
 - What the definition generates
-  - Detail: Calls and events are defined as plain Zig data, and record layouts, encoders and handlers are computed from that definition at comptime.
-  - Detail: The definition also generates a typed client library and a skill that describes every call in machine-readable form, so an agent can use Silo without an MCP server.
-  - Detail: An HTTP API and an MCP server can be generated from the same definition.
-  - Detail: The client library and the command line ship as separate small packages that other tools can adopt.
+  - Calls and events are defined as plain Zig data, and record layouts, encoders and handlers are computed from that definition at comptime.
+  - The definition also generates a typed client library and a skill that describes every call in machine-readable form, so an agent can use Silo without an MCP server.
+  - An HTTP API and an MCP server can be generated from the same definition.
+  - The client library and the command line ship as separate small packages that other tools can adopt.
 - Clients and bindings
-  - Detail: One Zig client serves the command line and every later interface, and it runs in the simulator.
+  - One Zig client serves the command line and every later interface, and it runs in the simulator.
   - Rule: C is the only binding promised, for Swift and the command line.
   - Rule: Any other binding (WebAssembly, Python, Kotlin) is added on demand, and has its own tests and docs before it is called ready.
   - Rule: The C interface has one written rule for memory ownership, either caller-provided buffers or a paired free call for every returned allocation, fixed before the app is built on it.
   - Rule: One stated rule says which version wins among the global command line, the client linked in the app and the engine.
   - Rule: A version mismatch is an error that names both versions.
   - Rule: The client validates every frame from the engine against an explicit shape and raises a named error on a malformed one.
-  - Detail: Client transports are HTTP as the baseline, so that curl can drive the engine, an in-memory transport for tests, and a streaming channel for events.
+  - Client transports are HTTP as the baseline, so that curl can drive the engine, an in-memory transport for tests, and a streaming channel for events.
   - Property: The client library exposes low-level calls that compose and imposes no architecture on its caller, and helpers for a UI framework are optional and sit on top.
   - Rule: Higher-level patterns of the client library ship as documented examples or agent skills, and no code is exported for them.
   - Risk: The build time of the bindings generated between the Zig client and Swift may grow faster than the number of record types, so it is measured as types are added.
@@ -58,11 +48,19 @@
   - Test: The engine, the Zig client, the app and the command line run the same conformance tests, from one source of protocol definitions and fixtures, and all pass.
   - Test: A benchmark counts messages, round trips and state for the common flows.
 - Other
-  - Detail: A heavy call, such as a merge, a restore or a recipe build, can be asked as a dry run that returns its effects and changes nothing.
+  - A heavy call, such as a merge, a restore or a recipe build, can be asked as a dry run that returns its effects and changes nothing.
   - The docs show how an outside tool, such as a diff viewer or a notifier, follows the events and makes calls.
   - Rule: In calls, events and file formats, a list of named things is an array of records that each carry a name field, never a map keyed by name.
   - Rule: Call and command names follow written principles kept in these notes, and a design that splits opinion stays out unless it measures better.
   - Test: Every example in the generated docs runs against the command line in the whole check, so an example that no longer works fails it.
+
+## Open
+
+- Does the Swift app link the Zig client through a C interface, or speak the protocol in Swift generated from the definition?
+  - Suggested: Link the Zig client, so reconnection and status are written once and run in the simulator; mac-app-in-swift rules out bindings only for driving macOS computers.
+- Does Silo promise never to rename or break a published call or command, with an unstable mark as the only way out?
+  - Suggested: Yes, with every call marked unstable until the starter is in daily use, because agents script against names and a break is silent for them.
+- To find out: Do agents need to batch calls, or to pipeline them so that a call uses an earlier call's result without a round trip?
 
 ## From the old code
 

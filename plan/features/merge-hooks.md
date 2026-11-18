@@ -1,13 +1,11 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For the owner to settle
+- A recipe's after-merge step or check can name the paths it depends on, and it runs only when the merge changed one of them.
+
+## Open
 
 - Do a recipe's steps also run at a fork, at a checkpoint and before a merge is offered, or only after a merge as planned?
-  - Recommendation: Only after a merge for now, since checks before a merge belong to honest-checks and quiet-forks already covers what a fork turns off.
-
-### For whoever builds it
-
-- Detail: A recipe's after-merge step or check can name the paths it depends on, and it runs only when the merge changed one of them.
+  - Suggested: Only after a merge for now, since checks before a merge belong to honest-checks and quiet-forks already covers what a fork turns off.
 
 ## From the old code
 

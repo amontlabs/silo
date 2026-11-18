@@ -1,8 +1,9 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For whoever builds it
+- A prune command keeps what replaying history needs and drops the detail of transcripts.
 
-- Detail: A prune command keeps what replaying history needs and drops the detail of transcripts.
+## Open
+
 - To find out: How much disk is used for how much kept history (space amplification)?
 
 ## Notes

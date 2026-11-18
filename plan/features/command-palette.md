@@ -1,14 +1,12 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For the owner to settle
+- The search also finds computers, forks, recipes, changed files and events.
+- Results and autocomplete appear as you type, under a shortcut in the style of cmd+K or cmd+P.
+
+## Open
 
 - Does the palette also start work, with "fork: <prompt>" starting a fork in the background, or does it only find and jump?
-  - Recommendation: Start work too, once starting a task from a prompt exists (one-call-task, or the new entry quick-entry), so that the palette only calls it.
-
-### For whoever builds it
-
-- Detail: The search also finds computers, forks, recipes, changed files and events.
-- Detail: Results and autocomplete appear as you type, under a shortcut in the style of cmd+K or cmd+P.
+  - Suggested: Start work too, once starting a task from a prompt exists (one-call-task, or the new entry quick-entry), so that the palette only calls it.
 
 ## From the old code
 

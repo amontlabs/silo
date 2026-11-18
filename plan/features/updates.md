@@ -1,11 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For the owner to settle
-
-- Across versions, is the engine's state upgraded in place, or does the new engine start beside it and import it?
-  - Recommendation: Import, leaving the old state untouched, so a failed update goes back by starting the old engine.
-
-### For whoever builds it
+## Proposed
 
 - Rule: Update notices appear in the app, and Silo never tells the user anything by putting text into an agent's context.
 - Property: An update or a changed default never lets a computer reach more than the user's rules allowed before it.
@@ -13,7 +6,12 @@
 - Property: After an update, an existing install has every integration and plugin that a fresh install of that version gets.
 - Test: A test opens computers and engine state saved by an older version of Silo, and each one works.
 - Docs: Every release note says what happens to stored state: nothing, migrated by itself, or what the user must do.
-- Detail: An agent can ask the `silo` command whether the installed version is out of date.
+- An agent can ask the `silo` command whether the installed version is out of date.
+
+## Open
+
+- Across versions, is the engine's state upgraded in place, or does the new engine start beside it and import it?
+  - Suggested: Import, leaving the old state untouched, so a failed update goes back by starting the old engine.
 
 ## From the old code
 

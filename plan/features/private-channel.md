@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: The app and the command line also reach the engine through a unix socket protected by file permissions, never through a network port.
 

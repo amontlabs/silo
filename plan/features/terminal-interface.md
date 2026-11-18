@@ -1,8 +1,8 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
 Why: Terminal users ask for it before they try an app.
 
-### For the owner to settle
+## Open
 
 - Is it written in Zig with libvaxis, or in Go with Bubble Tea?
-  - Recommendation: Zig, so it shares the command line's client code in one language.
+  - Suggested: Zig, so it shares the command line's client code in one language.

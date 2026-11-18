@@ -1,20 +1,18 @@
-## Proposed, not confirmed by the owner
-
-### For the owner to settle
-
-- Is the record of who did what kept whole, or capped per computer with the oldest rows dropped, as the old code did at 20,000 rows?
-  - Recommendation: Whole, with repeats collapsed and floods rate-limited, because under a cap an agent removes its own trail by making 20,000 new rows.
-- Do any of Silo's records need a proof others can check, the audit journal for example, or is a plain copy enough?
-  - Recommendation: A plain copy for now, because the first user is the owner and a proof matters once someone else has to be convinced.
-
-### For whoever builds it
+## Proposed
 
 - Property: Nothing written inside a computer can change the record of what was done there, which is the engine's events and checkpoints, kept outside the computer.
 - Property: No call, from a computer or from the app, edits an entry of the record or removes one.
 - Rule: Git history inside a computer is content the agent controls and never serves as the record.
 - Property: Every call that changed something is in the record with who made it, and the simulator checks it.
-- Detail: Each action that was approved or that widened access leaves a receipt: what was approved, what was done with its exact inputs or a recording, and the result.
-- Detail: For each agent action, the record shows the state it ran against: the computer, the checkpoint and what had changed since.
+- Each action that was approved or that widened access leaves a receipt: what was approved, what was done with its exact inputs or a recording, and the result.
+- For each agent action, the record shows the state it ran against: the computer, the checkpoint and what had changed since.
+
+## Open
+
+- Is the record of who did what kept whole, or capped per computer with the oldest rows dropped, as the old code did at 20,000 rows?
+  - Suggested: Whole, with repeats collapsed and floods rate-limited, because under a cap an agent removes its own trail by making 20,000 new rows.
+- Do any of Silo's records need a proof others can check, the audit journal for example, or is a plain copy enough?
+  - Suggested: A plain copy for now, because there is one user for now, and a proof matters once someone else has to be convinced.
 
 ## From the old code
 

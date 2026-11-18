@@ -17,7 +17,7 @@ order below. Unknown keys are errors. An optional key is absent, never `null`.
 | `order.json` | `{ "stages": [{ "id", "title", "line", "features": [ids] }] }`: the build order. Every feature appears exactly once. The first five stages are the starter. The stage `gone`, when present, is last: old things proposed to be left behind. |
 | `decisions.json` | `[{ "id", "date", "text", "about" }]`: what the owner settled for the whole product. `about` (optional) lists area ids, each once; absent means the whole product. A decision about one feature goes in that feature's notes. |
 | `features/<id>.json` | One feature; the file name is its id, `^[a-z0-9][a-z0-9-]{0,62}$`. |
-| `features/<id>.md` | Optional notes: what was agreed, open points, and `## From the old code`. Its decision log. |
+| `features/<id>.md` | Optional notes: the feature's documentation and its decision log. Sections, each optional, in this order: `## Decided` (agreed, each line with its date), `## Proposed` (how it works, not agreed yet), `## Open` (questions, with a `Suggested:` answer when there is one, and what is left to find out), `## Notes`, `## From the old code`. Written in the present tense, about Silo; the person who uses Silo is "the user". |
 
 A file or folder whose name starts with a dot (`.DS_Store`) is ignored. Any other file is an error.
 

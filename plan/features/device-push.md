@@ -1,8 +1,6 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For whoever builds it
-
-- Detail: One command forks, runs the agent, commits inside the fork, shows the commit on your device for review, and pushes it from there.
+- One command forks, runs the agent, commits inside the fork, shows the commit on your device for review, and pushes it from there.
 
 ## From the old code
 

@@ -1,3 +1,3 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
 Why: Some work needs Windows, and Silo covers two systems.

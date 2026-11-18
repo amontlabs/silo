@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Every claim
   - Rule: Every public security claim names the mechanism that enforces it, the adversary it holds against and what it does not stop.

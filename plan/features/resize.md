@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Open
 
 - To find out: Run a Rust build in a computer with 16 GB of memory, record whether it runs out, and state a minimum size for Rust work.
 

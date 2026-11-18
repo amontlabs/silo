@@ -1,14 +1,15 @@
 ## Decided
 
-- 2026-11-17, owner: an agent drives the screen of a macOS computer as well as a Linux desktop.
+- 2026-11-17: an agent drives the screen of a macOS computer as well as a Linux desktop.
 
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Property: Each fork has its own display, so computer use in a fork and in main run at the same time without competing for one screen.
-- Detail: An agent can capture the computer's display and compare it against a reference image, to check its own interface work.
-- Detail: Besides screenshots, an agent can read rendered output, computed styles included, through a browser it drives.
+- An agent can capture the computer's display and compare it against a reference image, to check its own interface work.
+- Besides screenshots, an agent can read rendered output, computed styles included, through a browser it drives.
+
+## Open
+
 - To find out: How does an agent see a terminal interface it is building, given that screenshots failed there and the other way tried is a server that reads the terminal's contents?
 
 ## Notes

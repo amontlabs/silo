@@ -1,8 +1,6 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For whoever builds it
-
-- Detail: The diff also lists what left the fork and stays done after a drop, such as pushes, messages sent and other requests made with a secret.
+- The diff also lists what left the fork and stays done after a drop, such as pushes, messages sent and other requests made with a secret.
 
 ## Notes
 

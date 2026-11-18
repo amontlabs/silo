@@ -1,13 +1,11 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For the owner to settle
+- A pull request from a fork records the agent program and the review it went through, as commit trailers or in its body.
+
+## Open
 
 - Does a pull request from a fork carry the prompt that started the work, or only the agent program, the model and what was run?
-  - Recommendation: Only those by default, with the prompt added when you ask, since a prompt can hold private context and the repository may be public.
-
-### For whoever builds it
-
-- Detail: A pull request from a fork records the agent program and the review it went through, as commit trailers or in its body.
+  - Suggested: Only those by default, with the prompt added when you ask, since a prompt can hold private context and the repository may be public.
 
 ## From the old code
 

@@ -1,16 +1,14 @@
-## Proposed, not confirmed by the owner
-
-### For the owner to settle
-
-- Does what an agent taught itself in a fork (a skill, a tool, its rules files, its memory) merge with the rest, or only on its own approval?
-  - Recommendation: Its own approval, since these are unreviewed instructions that steer every later task.
-- Can one group or item be left out of a merge while the rest lands, or does the first merge take the whole fork?
-  - Recommendation: The whole fork, since `git-words` makes this merge a fast-forward and `merge-conflicts` brings item by item later.
-
-### For whoever builds it
+## Proposed
 
 - Property: After a merge, main's history shows which fork brought each change, with each merge kept as one unit.
 - Test: A fork undoes a fix that an earlier merge brought into main; the merge view flags it before the merge.
+
+## Open
+
+- Does what an agent taught itself in a fork (a skill, a tool, its rules files, its memory) merge with the rest, or only on its own approval?
+  - Suggested: Its own approval, since these are unreviewed instructions that steer every later task.
+- Can one group or item be left out of a merge while the rest lands, or does the first merge take the whole fork?
+  - Suggested: The whole fork, since `git-words` makes this merge a fast-forward and `merge-conflicts` brings item by item later.
 
 ## Notes
 
@@ -27,7 +25,7 @@ The old code had it built and driven end to end, about 6,000 lines, and it needs
 Lessons:
 - A database is never combined; only one side is taken.
 - Keeping a fork without asking when its tests pass was dropped: the tests run in the fork, so the fork can fake them.
-- An agent merging into its own computer asks the owner and must carry the digest of a diff it ran.
+- An agent merging into its own computer asks the user and must carry the digest of a diff it ran.
 - A Linux merge reads and writes as root; run repo commands as the folder's owner.
 - Hash both computers live at merge time; a file the collector could not hash is never taken as unchanged.
 - A journal synced before main changes lets the next merge, undo or engine start restore an interrupted merge.

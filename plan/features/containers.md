@@ -1,20 +1,18 @@
 ## Decided
 
-- 2026-11-10, owner: containers stay a choice the user can make, for a dev-only Linux machine with nothing sensitive, as the faster option. Never the default, and never decided by the host.
-- 2026-11-10, owner, an idea for later: the secrets proxy runs on another device and the container host's traffic is forced through it, so an escape finds nothing.
+- 2026-11-10: containers stay a choice the user can make, for a dev-only Linux machine with nothing sensitive, as the faster option. Never the default, and never decided by the host.
+- 2026-11-10, an idea for later: the secrets proxy runs on another device and the container host's traffic is forced through it, so an escape finds nothing.
 
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For the owner to settle
+- Rule: Containers stay the one lighter kind of computer; gVisor and Kubernetes are not offered as a computer's boundary.
+
+## Open
 
 - Can the lighter, kernel-sharing kind be chosen for a single fork, for work you trust, or only for a whole computer?
-  - Recommendation: Only for a whole computer, because you kept containers for a dev-only Linux machine with nothing sensitive and a fork is a copy of its source.
-
-### For whoever builds it
-
+  - Suggested: Only for a whole computer, because you kept containers for a dev-only Linux machine with nothing sensitive and a fork is a copy of its source.
 - To find out: Does youki give real x86 on a Mac?
 - To find out: Can youki be used as an image in microsandbox?
-- Rule: Containers stay the one lighter kind of computer; gVisor and Kubernetes are not offered as a computer's boundary.
 
 ## From the old code
 

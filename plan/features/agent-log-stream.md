@@ -1,3 +1,3 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
 Why: An agent hunts for the right log and learns of an error only when it asks.

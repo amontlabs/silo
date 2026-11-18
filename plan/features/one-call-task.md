@@ -1,14 +1,12 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: Before a task starts, the engine checks that its limits are set, its end condition is defined and the access it needs is already granted.
-- Detail: A task declares its inputs and its result as schemas, and its result is never inferred from a file name.
+- A task declares its inputs and its result as schemas, and its result is never inferred from a file name.
 - Rule: A task or child fork that succeeds but returns nothing its caller can see ends as an error.
-- Detail: A task can name the agent program and the model it runs, so a planner, an implementer and a reviewer can each differ.
-- Detail: The app fills a task's inputs from a small form built from its schema, so nobody writes JSON by hand.
+- A task can name the agent program and the model it runs, so a planner, an implementer and a reviewer can each differ.
+- The app fills a task's inputs from a small form built from its schema, so nobody writes JSON by hand.
 - Find out whether a fast model that reviews a task and its prompt before it starts catches enough to be worth its cost and wait.
-- Detail: One call can name several commands that run in one fork and land as one merge if all pass, or are dropped together.
+- One call can name several commands that run in one fork and land as one merge if all pass, or are dropped together.
 
 ## Notes
 

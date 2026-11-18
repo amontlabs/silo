@@ -1,9 +1,7 @@
-## Proposed, not confirmed by the owner
-
-### For the owner to settle
+## Open
 
 - Which path does the viewer take: Selkies (where the old code ended), Wayland with Waypipe (its flags need careful choosing), or another?
-  - Recommendation: Selkies, unless a short trial shows Waypipe clearly better, because its lessons from the old code are already paid for.
+  - Suggested: Selkies, unless a short trial shows Waypipe clearly better, because its lessons from the old code are already paid for.
 
 ## From the old code
 

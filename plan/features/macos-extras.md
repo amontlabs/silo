@@ -1,4 +1,4 @@
-## Open points
+## Open
 
 - Needs `export`, which comes later in the order.
 
@@ -7,7 +7,7 @@
 The old code had it partly built, about 2,000 lines, and it needs reworking.
 
 Lessons:
-- The framework's private _VZVNCServer listens on every interface; the guest's own Screen Sharing reachable only from the owner is safer.
+- The framework's private _VZVNCServer listens on every interface; the guest's own Screen Sharing reachable only from the user is safer.
 - The suspected cause is the Recovery partition blocking expansion; nothing retries it later.
 - Screen Sharing does not work in Setup Assistant or Recovery; Apple's VNC server is private API.
 

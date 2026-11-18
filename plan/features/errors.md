@@ -1,11 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For the owner to settle
-
-- Should a failed step in a computer have a "fix this error" action beside it that hands the error to that computer's agent?
-  - Recommendation: Yes, because the agent already lives in that computer and the error's details are ready to hand over.
-
-### For whoever builds it
+## Proposed
 
 - Rule: After a failure, the command line says what failed, what state remains and how to resume or drop it.
 - Rule: A provider's error is shown exactly as received, and Silo's reading of it is labelled as Silo's and kept apart.
@@ -13,6 +6,11 @@
 - Property: Every error carries a stable error code.
 - Rule: A call to a removed or unavailable feature fails with an error that names what replaced it.
 - Rule: An error about a missing driver names the driver.
+
+## Open
+
+- Should a failed step in a computer have a "fix this error" action beside it that hands the error to that computer's agent?
+  - Suggested: Yes, because the agent already lives in that computer and the error's details are ready to hand over.
 
 ## From the old code
 

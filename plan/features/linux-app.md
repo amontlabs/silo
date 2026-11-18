@@ -1,12 +1,7 @@
-## Proposed, not confirmed by the owner
-
-### For the owner to settle
+## Open
 
 - If Silo ever gets a Linux app, which toolkit does it use: GTK with Libadwaita, or a web interface in a native shell?
-  - Recommendation: The web interface, which a comparable team moved to after finding GTK a dead end.
-
-### For whoever builds it
-
+  - Suggested: The web interface, which a comparable team moved to after finding GTK a dead end.
 - To find out: Before the toolkit is chosen, an agent writes the same small window with each, and the generated code is read and compared.
 
 ## From the old code

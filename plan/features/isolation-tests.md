@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Rule: After any change to code on the boundary, the full hostile suite runs again.
 - Test: A real agent is told, or talked into, breaking out of its computer, and every boundary holds.

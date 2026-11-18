@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - What always holds
   - Property: Nothing run inside a computer yields a secret's real value, whether the agent program's file tool, the shell, a script or a binary placed inside.
@@ -8,17 +6,16 @@
   - Property: Command output returned to a caller and transcripts exported from a computer contain no real secret value; any that appears is redacted.
 - Entering and handing out
   - Rule: A secret's value is entered in Silo's own prompt, on the same trusted path as an approval and outside any chat, so the agent learns only its name.
-  - Detail: A secret given to a computer or a fork can have an end time, after which it is taken back without its value ever being shown.
-  - Detail: When Silo withholds or changes a credential, it says so in one plain line with the reason.
-  - Detail: A secret is checked against common formats when entered, such as Stripe API keys, OAuth tokens and Postgres connection strings.
+  - A secret given to a computer or a fork can have an end time, after which it is taken back without its value ever being shown.
+  - When Silo withholds or changes a credential, it says so in one plain line with the reason.
+  - A secret is checked against common formats when entered, such as Stripe API keys, OAuth tokens and Postgres connection strings.
   - Rule: A payment credential, such as a wallet key or a card, is held as a secret like any other.
   - Rule: This feature builds no integration for a named service; an outside service is used through one secret and one allowed host.
 - Credentials that change
-  - Detail: Substitution keeps working for a credential that lasts two hours, a sign-in that needs a person, and a rotated value.
+  - Substitution keeps working for a credential that lasts two hours, a sign-in that needs a person, and a rotated value.
   - Find out whether a subscription's browser sign-in, with its callback or copy-link flow and refreshed tokens, works with substitution at all.
   - Find out how a sign-in that needs a hardware key held by a person (FIDO2) gets into a computer.
 - Docs
-  - To find out: Check against the real design whether the process that holds real secret values is separate from the one that runs the VMs and from every computer.
   - The docs say which process holds the real secret values, and whether it is the process that runs the VMs.
   - The docs say that substitution happens in the network stack that carries a computer's requests, and that no proxy is configured inside the computer.
   - The docs show one worked example, Linear with a scoped key, and the pattern behind it.
@@ -27,9 +24,13 @@
   - Test: After a run, search every log, event and journal entry for the real value of each secret; none appears.
   - Test: Run a local balancer that holds several accounts inside a computer under its network rules; the real credentials never appear inside.
 - Other
-  - Detail: A secret can be limited to reading, for example sent only with GET requests to its hosts, so an agent can read a chat and cannot post to it.
+  - A secret can be limited to reading, for example sent only with GET requests to its hosts, so an agent can read a chat and cannot post to it.
   - Property: Swapping a secret into a request to a model provider leaves the rest of the request unchanged byte for byte, so the provider's prompt cache still hits.
-  - To find out: Read fucory's MicroSandbox fork with the iron-proxy features and how Centaur injects secrets from outside the sandbox, and record why iron-proxy was not adopted.
+
+## Open
+
+- To find out: Check against the real design whether the process that holds real secret values is separate from the one that runs the VMs and from every computer.
+- To find out: Read fucory's MicroSandbox fork with the iron-proxy features and how Centaur injects secrets from outside the sandbox, and record why iron-proxy was not adopted.
 
 ## From the old code
 

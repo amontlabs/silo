@@ -1,13 +1,14 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For whoever builds it
+- Property: Windows and apps an agent opens stay inside the computer and never take focus or the screen on the user's device unless the user opens them.
+- A recipe can turn on the desktop and computer use.
+- Property: A computer built with its desktop on forks and checkpoints like any other.
+- The image of a computer with a desktop includes a browser the agent can drive.
+
+## Open
 
 - To find out: Does the VM runtime give a Linux computer a real display, with a window manager or Wayland, given one report that microVMs do not and QEMU does?
-- Property: Windows and apps an agent opens stay inside the computer and never take focus or the screen on the user's device unless the user opens them.
 - To find out: How much memory does a fork need with a browser running on its desktop, given that every fork pays it again?
-- Detail: A recipe can turn on the desktop and computer use.
-- Property: A computer built with its desktop on forks and checkpoints like any other.
-- Detail: The image of a computer with a desktop includes a browser the agent can drive.
 
 ## From the old code
 

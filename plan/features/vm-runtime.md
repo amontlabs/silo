@@ -1,13 +1,6 @@
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For the owner to settle
-
-- Does the VM runtime link into the engine binary, or run as a separate process behind a driver?
-  - Recommendation: A separate process, so an engine crash or update need not stop every computer; the loop has to be safe to leave running.
-
-### For whoever builds it
-
-- Detail: The first driver may run the runtime's commands.
+- The first driver may run the runtime's commands.
 - Risk: The VM runtime could be wound down, relicensed or drop a feature Silo needs, so its source stays vendored and buildable, and Silo keeps the means to patch or fork it.
 - Rule: Each patch Silo carries on the VM runtime has an upstream issue or pull request aimed at removing it.
 - Risk: The VM runtime moves fast and is not stable, so its commits and its replies to issues are watched.
@@ -15,6 +8,11 @@
 - Test: Run a build and an I/O-heavy parallel test suite in a computer and on a plain Linux machine, and compare the times; an 8x slowdown is the failure to avoid.
 - Rule: A shared folder or a filesystem layer between host and guest is measured the same way before it is adopted, because it can serialise I/O.
 - Test: Stress the runtime with many computers on one Mac, and report upstream what breaks.
+
+## Open
+
+- Does the VM runtime link into the engine binary, or run as a separate process behind a driver?
+  - Suggested: A separate process, so an engine crash or update need not stop every computer; the loop has to be safe to leave running.
 - To find out: Build a proof of concept against Apple's virtualization framework to settle which process hosts a VM.
 - To find out: How does MicroSandbox compare with stock Firecracker on Linux hosts for snapshots, fork with memory, suspend and resume, and start time? Record the gaps, and check the choice against the microvm-2026 overview.
 - To find out: Does the VM runtime support memory ballooning or hotplug, so that idle computers give memory back to the Mac?

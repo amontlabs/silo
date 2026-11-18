@@ -1,6 +1,6 @@
 ## Decided
 
-- 2026-11-10, owner: a `.silo` folder in a repository on the Mac (a project-first flow) is not the product the owner wants.
+- 2026-11-10: a `.silo` folder in a repository on the Mac (a project-first flow) is not what Silo is.
 
 ## From the old code
 

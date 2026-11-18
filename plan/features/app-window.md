@@ -1,15 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For the owner to settle
-
-- Does the app open on the list of computers as planned, on only the decisions waiting for you, or on an agent session?
-  - Recommendation: The list of computers with what waits on you at the top; nothing waits in the shell stage, and opening on a chat hides the rest of the app.
-- Does the app add an overview level between the list and a computer's page, showing what the computer is doing with an approval to answer in place?
-  - Recommendation: Yes, added in the agent stage; until there is an approval to answer, the list and the page are enough.
-- Is the app one window for every computer as planned, a window or tab set per fork, or a main view with an inspector window beside it?
-  - Recommendation: One window, because the app must show many forks in one view and each extra window is one more place to look.
-
-### For whoever builds it
+## Proposed
 
 - Zig client inside the app
   - Rule: The part of the app that speaks the engine's calls and events and keeps the current state is Zig, linked through a C interface as Ghostty links its core.
@@ -17,8 +6,8 @@
   - Rule: The app holds one store fed by the Zig client, and views are a function of that store, with no state of their own and no knowledge of the transport.
   - Rule: Calls across the Swift and Zig boundary are few and coarse, with one batch of changes per update and never one call per record.
   - Rule: Everything the engine hands to the Swift side is bounded in size, count and length.
-  - Detail: Linking the Zig client into the app takes a hand-written C header, a static library, an xcframework and a module map, with exported functions limited to C types.
-  - Detail: The app needs no universal binary, because Silo targets Apple Silicon only.
+  - Linking the Zig client into the app takes a hand-written C header, a static library, an xcframework and a module map, with exported functions limited to C types.
+  - The app needs no universal binary, because Silo targets Apple Silicon only.
   - Rule: Swift code that parses bytes never indexes `Data` from zero after removing a prefix; it uses `startIndex` or copies the bytes, and a test covers it.
 - State on screen
   - Property: The app never shows a state the engine never had.
@@ -33,12 +22,12 @@
   - Rule: The app shows no spinner where the state is already local.
 - In the window
   - Rule: The app is designed for about three things needing the user at once, whatever the number of forks.
-  - Detail: Each computer in the list has its failure reason or its latest log line beside it.
-  - Detail: When a failure or an approval needs to be seen, the app opens the page that shows it without being asked.
-  - Detail: Running work can be stopped or cancelled from any view that lists it.
-  - Detail: The app has back and forward navigation between views.
-  - Detail: Forks can be pinned in the app.
-  - Detail: An agent session offers to copy the command that attaches to it from a terminal.
+  - Each computer in the list has its failure reason or its latest log line beside it.
+  - When a failure or an approval needs to be seen, the app opens the page that shows it without being asked.
+  - Running work can be stopped or cancelled from any view that lists it.
+  - The app has back and forward navigation between views.
+  - Forks can be pinned in the app.
+  - An agent session offers to copy the command that attaches to it from a terminal.
 - Tests
   - Test: A simulator and app test navigates back and forth fast, leaves and returns during a fork or a merge, and drops a fork with a call in flight; no stale or doubled action remains.
   - Test: A check on the Zig client and the Swift app shows that view code can change engine state only by sending a call.
@@ -47,6 +36,15 @@
   - Test: Every view is checked with the window shrunk to less than half the screen; tables and layouts do not break.
   - Test: A test opens a computer or a folder that holds old state; the app does not hang.
   - Test: Each release measures the app's idle CPU use and publishes the figure.
+
+## Open
+
+- Does the app open on the list of computers as planned, on only the decisions waiting for you, or on an agent session?
+  - Suggested: The list of computers with what waits on you at the top; nothing waits in the shell stage, and opening on a chat hides the rest of the app.
+- Does the app add an overview level between the list and a computer's page, showing what the computer is doing with an approval to answer in place?
+  - Suggested: Yes, added in the agent stage; until there is an approval to answer, the list and the page are enough.
+- Is the app one window for every computer as planned, a window or tab set per fork, or a main view with an inspector window beside it?
+  - Suggested: One window, because the app must show many forks in one view and each extra window is one more place to look.
 
 ## From the old code
 

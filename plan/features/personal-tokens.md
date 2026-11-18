@@ -1,6 +1,6 @@
 ## Decided
 
-- 2026-11-10, owner: personal GitHub tokens are kept and become ordinary secrets bound to GitHub's hosts, several allowed, assigned per computer.
+- 2026-11-10: personal GitHub tokens are kept and become ordinary secrets bound to GitHub's hosts, several allowed, assigned per computer.
 
 ## From the old code
 

@@ -1,17 +1,15 @@
 ## Decided
 
-- 2026-11-10, owner: left aside for now.
+- 2026-11-10: left aside for now.
 
-## Proposed, not confirmed by the owner
+## Proposed
 
-### For the owner to settle
+- Each resident agent's recipe comes with a preset of rules fit for a personal agent.
+
+## Open
 
 - Does the feature cover Eliza as a third resident agent, beside OpenClaw and Hermes?
-  - Recommendation: No: the feature is set aside, and each extra recipe is one more agent to keep working.
-
-### For whoever builds it
-
-- Detail: Each resident agent's recipe comes with a preset of rules fit for a personal agent.
+  - Suggested: No: the feature is set aside, and each extra recipe is one more agent to keep working.
 
 ## Notes
 

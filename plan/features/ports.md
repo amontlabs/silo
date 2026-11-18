@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Proposed
 
 - Test: A file is edited under a development server running in a computer; the page reloads by itself inside the computer and through the published port.
 

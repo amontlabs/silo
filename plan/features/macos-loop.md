@@ -1,6 +1,4 @@
-## Proposed, not confirmed by the owner
-
-### For whoever builds it
+## Open
 
 - To find out: Can a macOS computer be forked while it runs, given the limit of two macOS computers per Mac?
 
