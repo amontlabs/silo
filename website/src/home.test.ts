@@ -4,11 +4,14 @@ import { describe, expect, it } from 'vitest';
 
 const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8');
 const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
-const css = ['src/style.css', 'src/flow.css', 'src/cards.css'].map(read).join('\n');
-const scripts = ['src/home.ts', 'src/pictures.ts', 'src/flow.ts', 'src/cards.ts', 'src/scene.ts'].map(read).join('\n');
+const css = read('src/style.css');
 const theme = readFileSync(join(process.cwd(), 'public/theme.js'), 'utf8');
 const workshop = readFileSync(join(process.cwd(), 'workshop/index.html'), 'utf8');
-const PITCH = 'Your agent lives in a virtual machine on your Mac and forks it for each task. You see everything a fork changed, then merge it back or drop it.';
+const HEADLINE = 'Your agents work in a computer of their own.';
+const PITCH = [
+  'Silo records everything they do there, shows you what matters, and takes you back to any moment.',
+  'The computer is a virtual machine on your Mac. Nothing of yours is inside unless you put it there.',
+];
 
 const parse = (source: string) => new DOMParser().parseFromString(source, 'text/html');
 const doc = parse(html);
@@ -16,19 +19,26 @@ const text = (selector: string, from: Document = doc) =>
   [...from.querySelectorAll(selector)].map((node) => node.textContent?.replace(/\s+/g, ' ').trim());
 
 describe('the home page', () => {
-  it('leads with the headline and the pitch', () => {
-    expect(text('h1')).toEqual(['Git for computers.']);
-    expect(text('.pitch')).toEqual([PITCH]);
-    expect(doc.querySelector('meta[name="description"]')?.getAttribute('content')).toBe(PITCH);
-    expect(doc.querySelector('meta[property="og:description"]')?.getAttribute('content')).toBe(PITCH);
+  it('leads with the headline and the pitch, and is titled Silo', () => {
+    expect(text('h1')).toEqual([HEADLINE]);
+    expect(text('.pitch span')).toEqual(PITCH);
+    expect(doc.querySelector('meta[name="description"]')?.getAttribute('content')).toBe(PITCH[0]);
+    expect(doc.querySelector('meta[property="og:description"]')?.getAttribute('content')).toBe(PITCH[0]);
+    expect(doc.title).toBe('Silo');
+    expect(doc.querySelector('meta[property="og:title"]')?.getAttribute('content')).toBe('Silo');
   });
 
-  it('leads to the build from the strip and to the source from the navigation, and keeps nothing of the old app', () => {
-    expect(html).not.toMatch(/download|releases|demo\.html|silo-tour|How to use|\/media\//i);
-    expect(doc.querySelector('main > :first-child')?.matches('a.strip[href="/workshop"]')).toBe(true);
-    // The hero is the headline, the pitch and the flow, and no link of its own, so the flow starts high on the page.
-    expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName + (node.id ? `#${node.id}` : ''))).toEqual(['H1#hero-title', 'P', 'DIV#flow']);
+  it('holds the hero, then the way to the Workshop, and no script, picture or card', () => {
+    expect([...doc.querySelectorAll('main > *')].map((node) => node.tagName + (node.className ? `.${node.className.split(' ')[0]}` : ''))).toEqual(['SECTION.hero', 'A.strip']);
+    expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName + (node.id ? `#${node.id}` : ''))).toEqual(['H1#hero-title', 'P']);
     expect(doc.querySelectorAll('.hero a')).toHaveLength(0);
+    expect(doc.querySelector('main > a.strip')?.getAttribute('href')).toBe('/workshop');
+    expect(doc.querySelectorAll('script[type="module"], figure, .card, .stage')).toHaveLength(0);
+  });
+
+  it('describes the new design, not the loop of fork, diff and merge, and keeps nothing of the old app', () => {
+    expect(html).not.toMatch(/download|releases|demo\.html|silo-tour|How to use|\/media\//i);
+    expect(html).not.toMatch(/Git for computers|\bmerge|\bdiff\b|\bforks?\b/i);
   });
 
   it('has the navigation, with GitHub kept on phones', () => {
@@ -43,82 +53,18 @@ describe('the home page', () => {
     expect(html).not.toMatch(/[↗↑→✓]/);
   });
 
-  it('tells the flow in reading order without script, and in words for a screen reader', () => {
-    // The flow has no title of its own: the headline above it names it.
-    expect(doc.querySelectorAll('.flow :is(h2, h3, .title)')).toHaveLength(0);
-    expect(doc.querySelector('.flow figure')?.getAttribute('aria-labelledby')).toBe('hero-title');
-    // The teammate's computer and its fork carry the teammate's initial beside the name.
-    expect(text('.stage .pc-name')).toEqual(['main', 'pg-17', 'stripe', 'searchM', 'Msearch']);
-    expect(text('.stage .pc-what')).toEqual([
-      'Your agent and your setup',
-      'Upgrade Postgres',
-      'Try Stripe checkout',
-      'Rebuild search',
-      'Rebuild search',
-    ]);
-    expect(text('.stage .fa .diff .dr > span:first-child')).toEqual(['code', 'packages', 'settings', 'database']);
-    expect(text('.stage .fa .diff .d4 > span:last-child')).toEqual(['schema changed']);
-    // The picture is drawn for the eye; a screen reader gets the caption instead.
-    expect(doc.querySelector('.stage')?.getAttribute('aria-hidden')).toBe('true');
-    const figure = doc.querySelector('.flow figure');
-    expect(figure?.getAttribute('aria-describedby')).toBe('flow-caption');
-    expect(text('#flow-caption')[0]).toMatch(/^Two tasks are given to the agent in main.*you fork its checkpoint onto your Mac to check the work\.$/);
-  });
-
-  it('gives the flow controls a screen reader can name, also where a step shows no name', () => {
-    expect(text('.flow .ctl')).toEqual(['Pause']);
-    const steps = [...doc.querySelectorAll('.steps li > button[type="button"]')];
-    expect(steps.map((button) => button.getAttribute('aria-label'))).toEqual(['Fork', 'Work', 'Screen', 'Secrets', 'Diff', 'Merge or drop', 'Other devices']);
-    expect(text('.steps .lb')).toEqual(steps.map((button) => button.getAttribute('aria-label')));
-    // What is drawn inside the picture is not a control: nothing in it takes the keyboard.
-    expect(doc.querySelectorAll('.stage :is(button, a, input, [tabindex])')).toHaveLength(0);
-  });
-
-  it('says who it is for, in nine cards: a picture, a label, what Silo does about it, one sentence', () => {
-    expect(text('.for .title')).toEqual(['For high-velocity developers and small teams.']);
-    expect(text('.points .term')).toEqual([
-      'recipes',
-      'your tools',
-      'secrets',
-      'network rules',
-      'review',
-      'merge requests',
-      'step history',
-      'other devices',
-      'linux, macos',
-    ]);
-    expect(text('.points h3')).toEqual([
-      'A recipe is built once',
-      'Your browser, editor and terminal reach in',
-      'Secrets and tokens stay outside the VM',
-      'Open, limited or closed, per computer',
-      'A diff of the whole machine',
-      'Everything waiting to merge, in one list',
-      'Go back, or fork from any step',
-      'A computer from your server or a teammate',
-      'Linux and macOS computers on one Mac',
-    ]);
-    expect(doc.querySelectorAll('.points > li.card > .txt > .term + h3 + p:last-child')).toHaveLength(9);
-    expect(doc.querySelectorAll('.points > li.card > svg.mini[aria-hidden="true"][viewBox="0 0 320 140"]')).toHaveLength(9);
-    expect(new Set([...doc.querySelectorAll('.card')].map((card) => card.getAttribute('data-mini'))).size).toBe(9);
-  });
-
   it('says nothing the plan contradicts: no root, no row counts', () => {
     expect(doc.querySelector('main')?.textContent).not.toMatch(/\broot\b|\d+ rows/i);
   });
 
-  it('takes every colour of the pictures from the theme, so the dark theme changes them', () => {
+  it('takes every colour of the page from the theme, so the dark theme changes them', () => {
     const body = html.slice(html.indexOf('<main'));
     expect(body).not.toMatch(/(?:fill|stroke|style)="[^"]*#[0-9a-f]{3,8}/i);
-    expect(scripts).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
 
-  it('says what the Workshop is, and where Silo stands, with nothing read from the plan', () => {
-    expect(text('.strip-line')).toEqual(['Follow us building Silo live, get an overview of every feature, suggest your ideas and give feedback.']);
-    expect(text('.notice p')).toEqual([
-      'in heavy development',
-      "Treat Silo as a build in public for now. If you try it, expect rough edges, breaking changes, no security guarantees and no data migration between versions. Don't keep anything in it that isn't backed up.",
-    ]);
+  it('says where Silo stands beside the way to the Workshop, with nothing read from the plan', () => {
+    expect(text('.strip-name')).toEqual(['Workshop']);
+    expect(text('.strip-line')).toEqual(['Silo is being rebuilt in the open from a new design.']);
     expect(html).not.toMatch(/<!-- plan:|features are planned|First up|Not out yet/);
   });
 
@@ -137,17 +83,13 @@ describe('the home page', () => {
       ([, italic, family]) => `/fonts/ibm-plex-${family.toLowerCase()}-400-${italic ? 'italic' : 'normal'}.woff2`,
     );
     const preloaded = [...doc.querySelectorAll('link[rel="preload"][as="font"]')].map((link) => link.getAttribute('href') as string);
-    expect(waited).toHaveLength(4);
+    expect(waited).toHaveLength(2);
     expect([...preloaded].sort()).toEqual([...waited].sort());
     for (const href of preloaded) expect(existsSync(join(process.cwd(), 'public', href))).toBe(true);
   });
 
-  it('keeps no style for a class or id the page and its scripts do not use', () => {
-    const used = new Set([
-      ...[...html.matchAll(/class="([^"]*)"/g)].flatMap((match) => match[1].split(/\s+/)),
-      ...[...scripts.matchAll(/['"`.]([a-z][\w-]*)/g)].map((match) => match[1]),
-      ...[...scripts.matchAll(/class="([^"$]*)/g)].flatMap((match) => match[1].split(/\s+/)),
-    ]);
+  it('keeps no style for a class or id the page does not use', () => {
+    const used = new Set([...html.matchAll(/class="([^"]*)"/g)].flatMap((match) => match[1].split(/\s+/)));
     const ids = new Set([...html.matchAll(/id="([^"]*)"/g)].map((match) => match[1]));
     const selectors = css.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+(?=\{)/g) ?? [];
     const unused = selectors
@@ -156,33 +98,6 @@ describe('the home page', () => {
       .filter(([, kind, name]) => (kind === '.' ? !used.has(name) : !ids.has(name)))
       .map(([whole]) => whole);
     expect([...new Set(unused)]).toEqual([]);
-  });
-
-  it('gives the pictures no class name the rest of the page already styles', () => {
-    // A part of a picture named like the page's `go` or `out` icon would take that icon's size.
-    const names = (source: string) =>
-      new Set(
-        (source.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+(?=\{)/g) ?? [])
-          .filter((selector) => !selector.trim().startsWith('@'))
-          .flatMap((selector) => [...selector.matchAll(/\.([A-Za-z][\w-]*)/g)].map((match) => match[1])),
-      );
-    const page = new Set([
-      ...names(read('src/site.css')),
-      ...names(read('src/style.css')),
-      ...names(html.slice(html.indexOf('<style>'), html.indexOf('</style>'))),
-    ]);
-    // What style.css styles on purpose: the pictures' own frames, hidden until they are drawn, and a scene being put at a moment.
-    for (const own of ['stage', 'steps', 'ctl', 'mini', 'jump']) page.delete(own);
-    const pictures = doc.querySelectorAll('.stage, .stage *, .steps, .steps *, .mini, .mini *');
-    const inMarkup = [...pictures].flatMap((part) => [...part.classList]);
-    // In the scripts: the class names in a selector, those a cue adds or removes, and those of the wires it draws.
-    const code = read('src/flow.ts') + read('src/cards.ts') + read('src/scene.ts');
-    const inScripts = [
-      ...[...code.matchAll(/'[^'\n]*'|`[^`\n]*`/g)].flatMap(([literal]) => [...literal.matchAll(/\.([a-z][\w-]*)/g)].map((match) => match[1])),
-      ...[...code.matchAll(/(?:add|rem|once|toggle|remove)\((?:'[^'\n]*', )?'([a-z][\w-]*)'/g)].map((match) => match[1]),
-      ...[...code.matchAll(/class="([^"$]*)/g)].flatMap((match) => match[1].split(/\s+/)),
-    ];
-    expect([...new Set([...inMarkup, ...inScripts])].filter((name) => page.has(name))).toEqual([]);
   });
 
   it('has a theme script with only what the two pages use', () => {
