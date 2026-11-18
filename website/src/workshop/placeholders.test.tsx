@@ -42,7 +42,7 @@ const focusable = (element: Element) => [element, ...element.querySelectorAll('*
   && !node.matches(':disabled') && node.getAttribute('tabindex') !== '-1' && !node.closest('[inert]'));
 
 type Holds = { state?: boolean; me?: boolean; issue?: boolean };
-type Visit = { name: string; hash: string; opens?: string; holds: Holds; signedIn: boolean; unmarked?: boolean };
+type Visit = { name: string; hash: string; opens?: string; holds: Holds; signedIn: boolean };
 
 // Each place that waits, with the answers it waits on. The marker (signed in before) makes `me` a question to ask.
 const VISITS: Visit[] = [
@@ -54,7 +54,7 @@ const VISITS: Visit[] = [
   { name: 'Latest, state asked, signed out', hash: '#latest', holds: { state: true }, signedIn: false },
   { name: 'suggest form, only me asked', hash: '#suggested', holds: { me: true }, signedIn: true },
   { name: 'rows, only me asked', hash: '#computers', holds: { me: true }, signedIn: true },
-  { name: 'the thread of an open entry, only its comments asked', hash: '#computers', opens: 'Create and delete a computer', holds: { issue: true }, signedIn: true, unmarked: true },
+  { name: 'the thread of an open entry, only its comments asked', hash: '#computers', opens: 'Create and delete a computer', holds: { issue: true }, signedIn: true },
 ];
 
 /** Between two visits in one test: what the first one remembered (the answer, the sign-in marker) must not reach the next. */
@@ -113,7 +113,7 @@ describe('placeholders while the page waits', () => {
       for (const element of found) {
         const label = element.outerHTML.slice(0, 80);
         expect(element.closest('[aria-hidden="true"]'), `hidden from screen readers: ${label}`).not.toBeNull();
-        if (!visit.unmarked) expect(element.closest('[aria-busy="true"]'), `in a container that says it is busy: ${label}`).not.toBeNull();
+        expect(element.closest('[aria-busy="true"]'), `in a container that says it is busy: ${label}`).not.toBeNull();
         expect(focusable(element).map((node) => node.outerHTML.slice(0, 60)), `nothing focusable in ${label}`).toEqual([]);
       }
       await release();
