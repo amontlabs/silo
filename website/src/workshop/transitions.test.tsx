@@ -334,6 +334,16 @@ describe('Back, Forward and Escape', () => {
     await elapse(1);
     expect(shownView()).toBe('order');
     expect(document.activeElement).toBe(order);
+    // "Suggest a feature" under the map is hidden in Order too: its focus goes to the title.
+    act(() => history.back());
+    await elapse(1);
+    expect(shownView()).toBe('map');
+    const suggest = screen.getByRole('link', { name: 'Suggest a feature' });
+    act(() => suggest.focus());
+    act(() => history.forward());
+    await elapse(1);
+    expect(shownView()).toBe('order');
+    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Workshop' }));
   });
 
   it('drops a going-back when Back leads to an address that is not known yet', async () => {
