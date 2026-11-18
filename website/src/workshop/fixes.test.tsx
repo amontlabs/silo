@@ -175,11 +175,12 @@ describe('focus', () => {
 
 describe('state classes', () => {
   it('puts the classes of the Workshop\'s states on no other element', () => {
-    // A state class is set on .ws alone (App.tsx). Another element carrying the same name would take the rule written
-    // for it, or give its rule to the whole Workshop: .ws-held, which hides an empty box, once hid the page.
+    // A state class is set on .ws alone (App.tsx), and workshop.css styles it there. Another element carrying the same
+    // name would take the rules written for the whole Workshop, or give its own rules to the Workshop.
     const dir = join(process.cwd(), 'src/workshop');
     const app = readFileSync(join(dir, 'App.tsx'), 'utf8');
-    const statement = app.slice(app.indexOf('const classes = ['), app.indexOf('].filter(Boolean)', app.indexOf('const classes = [')));
+    const begin = app.indexOf('const classes = [');
+    const statement = app.slice(begin, app.indexOf('].filter(Boolean)', begin));
     // A name built from a state (`v-${view}`) takes each value of that state's type, read from its useState.
     const valuesOf = (name: string) => {
       let type = app.match(new RegExp(`const \\[${name}, \\w+\\] = useState<([^>]+)>`))?.[1] ?? '';
@@ -188,23 +189,40 @@ describe('state classes', () => {
       expect(values, `the values of ${name}`).not.toEqual([]);
       return values;
     };
-    const states = new Set([
-      ...[...statement.matchAll(/'([a-z][\w-]*)'/g)].map((match) => match[1]),
-      ...[...statement.matchAll(/`([a-z][\w-]*)\$\{(\w+)\}`/g)].flatMap(([, prefix, name]) => valuesOf(name).map((value) => prefix + value)),
-    ]);
+    // Every item of the list is read: a name, a name built from a state, or either one behind a condition.
+    const nameOf = (text: string): string[] => {
+      const plain = text.match(/^'([a-z][\w-]*)'$/);
+      if (plain) return [plain[1]];
+      const built = text.match(/^`([a-z][\w-]*)\$\{(\w+)\}([\w-]*)`$/);
+      if (built) return valuesOf(built[2]).map((value) => built[1] + value + built[3]);
+      throw new Error(`a state class this check cannot read: ${text}`);
+    };
+    const items = statement.slice('const classes = ['.length).split(',').map((item) => item.trim()).filter(Boolean);
+    const states = new Set(items.flatMap((item) => {
+      const branches = item.match(/^[\w.!&| ]+\?\s*(.+?)\s*:\s*(.+)$/);
+      return (branches ? [branches[1], branches[2]] : [item]).filter((text) => text !== "''").flatMap(nameOf);
+    }));
     states.delete('ws');
     expect(states).toContain('v-map');
     expect(states).toContain('swap-out');
-    const sources = readdirSync(dir).filter((file) => /\.tsx?$/.test(file) && !/\.test\.|test-|fixtures|devFixture/.test(file));
-    const elsewhere = sources.flatMap((file) => {
-      const code = readFileSync(join(dir, file), 'utf8').replace(statement, '');
-      return [...code.matchAll(/'[^'\n]*'|"[^"\n]*"|`[^`\n]*`/g)]
-        .flatMap(([literal]) => literal.slice(1, -1).split(/[\s.]+/))
-        .filter((name) => states.has(name))
-        .map((name) => `${file}: ${name}`);
-    });
     // The same state on purpose: the account slot in the header fades in with the person's details, like the Workshop.
-    expect(elsewhere.filter((hit) => hit !== 'App.tsx: ws-arr-p')).toEqual([]);
+    const shared = "accountSlot.classList.toggle('ws-arr-p'";
+    expect(app).toContain(shared);
+    const walk = (folder: string): string[] => readdirSync(folder, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? walk(join(folder, entry.name)) : [join(folder, entry.name)]);
+    const site = join(process.cwd(), 'src');
+    const sources = [
+      ...walk(site).filter((file) => /\.(tsx?|html)$/.test(file) && !/\.test\.|test-|fixtures|devFixture/.test(file)),
+      join(process.cwd(), 'index.html'),
+      join(process.cwd(), 'workshop/index.html'),
+    ];
+    const elsewhere = sources.flatMap((file) => {
+      const code = readFileSync(file, 'utf8').replace(statement, '').replace(shared, '').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+      // A class name stands between quotes, spaces or a dot, wherever it is written: in a template, after text, in a selector.
+      return [...states].filter((name) => new RegExp(`(^|[\\s'"\`.])${name}(?=[\\s'"\`.:>)\\]]|$)`, 'm').test(code))
+        .map((name) => `${file.slice(process.cwd().length + 1)}: ${name}`);
+    });
+    expect(elsewhere).toEqual([]);
   });
 });
 
