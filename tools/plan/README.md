@@ -13,6 +13,7 @@ order below. Unknown keys are errors. An optional key is absent, never `null`.
 | File | Holds |
 |---|---|
 | `PRODUCT.md` | What Silo is, in prose. |
+| `DESIGN.md` | Optional: the design the plan is written from, in prose. |
 | `areas.json` | `[{ "id", "title", "line" }]`: the parts of the product. |
 | `order.json` | `{ "stages": [{ "id", "title", "line", "features": [ids] }] }`: the build order. Every feature appears exactly once. The first five stages are the starter. The stage `gone`, when present, is last: old things proposed to be left behind. |
 | `decisions.json` | `[{ "id", "date", "text", "about" }]`: what the owner settled for the whole product. `about` (optional) lists area ids, each once; absent means the whole product. A decision about one feature goes in that feature's notes. |

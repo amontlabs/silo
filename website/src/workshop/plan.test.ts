@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { areaGroups } from '../../../tools/plan/model/index.js';
 import { parsePlan } from '../../../tools/plan/read/index.js';
 import { buildData, FEATURES, issue, liveState, planFiles } from './fixtures';
-import { awaitsVerdict, buildPlan, changeLine, changeWords, decisionsAbout, decisionTitle, entryStatus, relativeTime, statusLine, stateWords } from './plan';
+import { allRows, awaitsVerdict, buildPlan, changeLine, changeWords, decisionsAbout, decisionTitle, entryStatus, relativeTime, statusLine, stateWords } from './plan';
 import type { AreaGroup, Change } from './plan';
 
 const names = (rows: { name: string }[]) => rows.map((row) => row.name);
@@ -19,6 +19,16 @@ describe('the plan by area', () => {
     expect(plan.left.map((r) => r.status)).toEqual(['dropped', 'undecided', 'dropped']);
     // A dropped entry still shows in its own area.
     expect(names(byArea(plan).get('computers')!.rows)).toContain('Run a command');
+  });
+
+  it('ignores the issue of a feature the plan no longer holds, closed or open', () => {
+    const keys = (plan: ReturnType<typeof buildPlan>) => allRows(plan).map((row) => `${row.key}:${row.status}`);
+    const gone = buildPlan(buildData(), liveState({
+      40: issue({ entry: 'gone-feature', title: 'Gone', verdict: 'take', state: 'closed', reason: 'not_planned', closedAt: '2026-11-18T00:00:00Z' }),
+      41: issue({ entry: 'other-gone', title: 'Other', verdict: 'take' }),
+    }));
+    expect(keys(gone)).toEqual(keys(buildPlan(buildData(), liveState())));
+    expect(names(allRows(gone))).not.toContain('Gone');
   });
 
   it('reads the status from the file, and a live verdict label wins over the file\'s verdict', () => {

@@ -1,9 +1,0 @@
-{
-  "name": "A project folder on your Mac",
-  "what": "A .silo folder in a repository, and forking a local folder.",
-  "needs": [],
-  "suggest": {
-    "verdict": "drop",
-    "why": "You dropped it on 10 Nov. Dropped on 10 Nov: it assumes the code and the agent live on your Mac."
-  }
-}

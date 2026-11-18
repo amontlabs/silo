@@ -121,6 +121,17 @@ export function planFiles({ features = FEATURES, notes = { engine: ENGINE_NOTES 
   return files;
 }
 
+/** The files of a plan that holds no part, no stage and no feature, with the fixture's decisions. */
+export function emptyPlanFiles(): Map<string, string> {
+  return new Map([
+    ['PRODUCT.md', 'Silo.\n'],
+    ['DESIGN.md', 'The design.\n'],
+    ['areas.json', canonicalText([])],
+    ['order.json', canonicalText({ stages: [] })],
+    ['decisions.json', canonicalText(DECISIONS.map(({ about: _about, ...decision }) => decision))],
+  ]);
+}
+
 const NOTES = new WeakMap<BuildData, Notes>();
 
 export function buildData(options?: Parameters<typeof planFiles>[0]): BuildData {

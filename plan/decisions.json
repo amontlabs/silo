@@ -12,45 +12,27 @@
   {
     "id": "agents-get-every-tool",
     "date": "2026-11-10",
-    "text": "Agents inside a computer get every tool, scoped by where they are: anything the user could do in the app. A computer cannot get more than it has, and anything that widens access asks the user.",
-    "about": [
-      "agents",
-      "access"
-    ]
+    "text": "Agents inside a computer get every tool, scoped by where they are: anything the user could do in the app. A computer cannot get more than it has, and anything that widens access asks the user."
   },
   {
     "id": "git-words",
-    "date": "2026-11-10",
-    "text": "\"Git for computers\" is the framing, and the words are Git's: one verb, merge (fast-forward when main is unchanged, item by item with conflicts asked otherwise), plus replace main. Fold, keep and promote are not used.",
-    "about": [
-      "changes"
-    ]
+    "date": "2026-11-18",
+    "text": "The words for computers are Git's: checkpoint, fork, restore. One word per idea. Fold, keep and promote are not used."
   },
   {
     "id": "engine-in-zig",
     "date": "2026-11-16",
-    "text": "The engine is written in Zig. It is the core piece: performant, secure, easy to reason about. The app, the command line and every tool only talk to it. Its design is data first, with events.",
-    "about": [
-      "engine"
-    ]
+    "text": "The engine is written in Zig. It is the core piece: performant, secure, easy to reason about. The app, the command line and every tool only talk to it. Its design is data first, with events."
   },
   {
     "id": "mac-app-in-swift",
     "date": "2026-11-16",
-    "text": "The Mac app is written in Swift, comes first, and holds no logic. macOS computers are driven from Swift directly, never through Rust bindings.",
-    "about": [
-      "app",
-      "macos"
-    ]
+    "text": "The Mac app is written in Swift, comes first, and holds no logic. macOS computers are driven from Swift directly, never through Rust bindings."
   },
   {
     "id": "engine-on-linux",
     "date": "2026-11-16",
-    "text": "The engine also runs on Linux, to use a Linux machine as a host.",
-    "about": [
-      "engine",
-      "devices"
-    ]
+    "text": "The engine also runs on Linux, to use a Linux machine as a host."
   },
   {
     "id": "properties-checked",
@@ -80,19 +62,12 @@
   {
     "id": "mac-and-linux-consistent",
     "date": "2026-11-10",
-    "text": "macOS and Linux computers are consistent: the same page in the app, the same image contents, an image upgrade path.",
-    "about": [
-      "macos",
-      "computers"
-    ]
+    "text": "macOS and Linux computers are consistent: the same page in the app, the same image contents, an image upgrade path."
   },
   {
     "id": "tasks-start-ready",
     "date": "2026-11-16",
-    "text": "A task started from outside starts from a recipe or a checkpoint, so it has no setup to wait for. Updating main after a pull request merges is an ordinary pull, not a Silo feature.",
-    "about": [
-      "tasks"
-    ]
+    "text": "A task started from outside starts from a recipe or a checkpoint, so it has no setup to wait for. Updating main after a pull request merges is an ordinary pull, not a Silo feature."
   },
   {
     "id": "github-is-storage",
@@ -137,9 +112,6 @@
   {
     "id": "runs-anywhere",
     "date": "2026-11-17",
-    "text": "Silo is not limited to devices the user owns. Computers run on the user's own machine first, then on a shared server or in a cloud, and Silo will probably offer a cloud of its own.",
-    "about": [
-      "devices"
-    ]
+    "text": "Silo is not limited to devices the user owns. Computers run on the user's own machine first, then on a shared server or in a cloud, and Silo will probably offer a cloud of its own."
   }
 ]

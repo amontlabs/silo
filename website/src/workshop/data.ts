@@ -90,6 +90,8 @@ export function buildDataFrom(files: Map<string, string>): BuildData {
   for (const area of data.areas) {
     if (!used.has(area.id)) throw new PlanFileError(`plan/areas.json: ${area.id}: has no feature. Fix: give it a feature, or remove the area`);
   }
+  // A plan with no area draws no map, so the map's places are checked only against a plan that has areas.
+  if (data.areas.length === 0) return data;
   try {
     checkLayout(data.areas.map((area) => area.id));
   } catch (error) {

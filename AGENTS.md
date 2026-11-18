@@ -1,11 +1,12 @@
 # Silo
 
-Git for computers. Silo is built one feature at a time. This repository holds the
+Silo is built one feature at a time. This repository holds the
 plan, the public site, and the code of the features built so far.
 
 - `plan/` is the plan: what Silo is (`PRODUCT.md`), every feature (`features/<id>.json`, notes in
   `<id>.md`), their order (`order.json`), the parts of the product (`areas.json`) and the
   decisions in force (`decisions.json`). Plain files: read them, and edit a feature in its own files.
+- `plan/DESIGN.md` is the design of 18 November 2026. The plan is being rewritten from it, part by part. Where it and an older text disagree, it is the newer word.
 - `website/` is the home page and the Workshop, which shows the plan live. GitHub issues hold the
   conversation: one issue per feature, with votes, comments, the owner's verdicts and the history.
 - `tools/plan/bin/plan` does what touches GitHub or more than one file. `plan` alone lists its commands.
@@ -16,6 +17,7 @@ plan, the public site, and the code of the features built so far.
   app). Read it before you build any; other work does not need it.
 - The old code is not here. It is frozen at the tag `legacy-2026-11-16` and checked out in
   `~/code/projects/silo-legacy`. Only an agent sent for one lookup opens it.
+- The plan as it stood before that design is frozen at the tag `plan-2026-11-18`. Only an agent sent for one lookup reads it.
 - Work on MicroSandbox or libkrun itself (a bug we found, an upstream PR) happens in
   `~/code/projects/msb-upstream`. Read its `AGENTS.md` first; other work does not need it.
 

@@ -1,15 +1,18 @@
 # Silo: the product
 
-This page says what Silo is, who it is for and what comes first. It is the source of truth for
-product questions: agents read it before they build, and the owner changes it by deciding
-something (see [the decisions](decisions.json)). Silo is being rebuilt from an empty tree: every
-feature has its own file in [`features/`](features/), and the order they are built in is
-[`order.json`](order.json).
+This page says what Silo is, who it is for and how it is being built. It is the source of truth
+for product questions: agents read it before they build, and the owner changes it by deciding
+something (see [the decisions](decisions.json)).
+
+Silo is being redesigned. The design is recorded in [DESIGN.md](DESIGN.md), written on
+18 November 2026, and this page is its short form. The owner goes through the design part by
+part. A part gets its features here once he has settled it. Until then the plan holds no feature,
+and nothing is built.
 
 ## In one sentence
 
-Silo gives an agent its own computer, lets it copy that computer for each task, shows you
-everything the copy changed, and lets you merge it or drop it.
+Agents work in a computer of their own. Silo records everything they do there, shows you what
+matters, and takes you back to any moment.
 
 ## Who it is for
 
@@ -19,41 +22,37 @@ company fits the same description. Team features come later, on top of the same 
 
 ## The problem
 
-- An agent that is useful needs root, the network, credentials and a real environment. On your
-  own machine that puts your files, keys and accounts in its reach.
-- Agents working in parallel collide: the same ports, the same database, the same checkout.
-- A Git diff shows the code an agent changed. It does not show the packages it installed, the
-  settings it edited or what it did to the database.
-- Every new task starts with setup that was already done once.
+- A useful agent needs root, the network, credentials and a real environment. On your own
+  machine that puts your files, keys and accounts in its reach.
+- You cannot see what agents are doing while they run. After a long run you cannot tell what they
+  did or what it cost.
+- When an agent breaks something you cannot go back, and part of the damage happens outside the
+  machine.
+- Agents leave things behind: full disks, processes that keep running, folders nobody can tie to
+  a session.
+- Rules that live inside the agent program are walked around by the agent.
 
-## The loop
+## The shape
 
-1. **A computer.** Your setup and your agent live in one computer, called main. It is a virtual
-   machine on your device. Nothing from your device is shared into it.
-2. **A copy per task.** The agent, or you, forks main, or starts a fresh computer from a recipe
-   or a checkpoint. The copy is a whole machine, so two tasks never share a port or a database.
-3. **Everything that changed.** The diff covers code, packages, settings, files and databases.
-4. **Merge or drop.** Merging brings the changes into main and asks you first. Dropping leaves
-   nothing behind.
+1. **A computer.** Your agents live and work in one long-lived computer, called main. It is a
+   virtual machine on your device, running macOS or Linux. Nothing from your device is shared
+   into it.
+2. **The record.** Silo writes down what happens in the computer, seen from outside it: every
+   process, file change, connection and model call. Opinions about those facts, such as which
+   run did this or what a rebuild would bring back, are computed on top of them and never stored
+   as facts.
+3. **Going back.** Silo takes checkpoints on its own. You restore one, or continue from it in a
+   fork.
+4. **Forks for the exception.** A fork is a copy of a computer: for a risky try, for a tool to
+   test before trusting it, for a task that needs a clean machine. It is dropped, or it becomes
+   main.
 
-This loop is the product. The parts around it (secrets an agent can use but not read, GitHub
-access per repository, network rules per computer) exist so that the loop is safe to leave
-running. Other tools have those parts; none has the loop for a whole machine.
-
-## What comes first
-
-The first five stages of [`order.json`](order.json) are the starter: Groundwork, which says
-how the engine is built, then a product the owner uses daily. Everything after it builds on the starter.
+The parts around it (secrets an agent can use but not read, network rules per computer, limits
+on spending, approvals only you can answer) exist so that this is safe to leave running.
 
 ## Where it runs
 
-On your own machine first: the starter is built for a Mac. The same computers then run on a
-shared server or in a cloud, and Silo will probably offer a cloud of its own.
-
-## Everything else
-
-Every feature Silo had, wanted or considered has its file in `features/`. The owner decides
-each one: take, later or drop. Nothing is built without a feature the owner took.
+On your own machine first: a Mac. The same computers then run on a shared server or in a cloud.
 
 ## Rules that hold everywhere
 
@@ -61,12 +60,16 @@ each one: take, later or drop. Nothing is built without a feature the owner took
   it. Differences are only those the platform forces.
 - **A computer cannot get more than it has.** An agent inside a computer can do anything that
   gives it no more access than it already has. Anything wider asks you, in the Silo app.
-- **Git words.** Checkpoint, fork, diff, restore, merge, undo. One word per idea.
+- **Nothing flows down.** An opinion is never stored as a fact. A rule that stops never depends
+  on an opinion. Something that watches never widens access.
+- **Git's words where Git has one.** Checkpoint, fork, restore. One word per idea.
 - **Security is built properly, and is not the current focus.** A change is made safely; security
-  work for its own sake waits until the starter is good.
+  work for its own sake waits until the first version is good.
 
 ## What Silo is not
 
 - Not a tool that runs agents on your own machine with a sandbox around one process.
-- Not a project folder on your Mac: there is no `.silo` folder and no setup kept in a repository.
-- Not a CI product. Running GitHub jobs is one kind of task started from outside, not a goal of its own.
+- Not an agent program. It runs the vendors' programs, unmodified, and never chooses a model.
+- Not an orchestrator, a chat window or a board for tracking work.
+- Not a project folder on your Mac.
+- Not a CI product.

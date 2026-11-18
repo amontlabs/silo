@@ -1,15 +1,11 @@
-/* The home page. Type sizes: 12 (mono labels), 14 (interface), 17 (reading), 20 (a point), 22 (section titles), 40 (headline), plus the wordmark. */
-.title {
-  font: italic 22px/1.3 var(--serif);
-  letter-spacing: -0.4px;
-}
+/* The home page. Type sizes: 14 (interface), 17 (reading), 40 (headline), plus the wordmark. */
 
 /* On a window taller than the page, the hero takes what main has left over (site.css). */
 .hero {
   flex: 1 0 auto;
 }
 
-/* The Workshop, first on the page: its name, what it is, and the way in. The whole row is the link. */
+/* The Workshop, under the hero: its name, where Silo stands, and the way in. The whole row is the link. */
 .strip {
   display: flex;
   align-items: center;
@@ -40,10 +36,9 @@
   text-wrap: pretty;
 }
 
-/* Hero: the headline and the pitch, centred, then the flow right under them as their picture, with no title of its
-   own. Kept short, so the whole flow, down to its step names, shows in a laptop's window. */
+/* Hero: the headline and the pitch, centred in the height the window leaves over. */
 .hero {
-  padding: 24px var(--gutter) 34px;
+  padding: 56px var(--gutter) 64px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -58,8 +53,8 @@
   text-wrap: balance;
 }
 .pitch {
-  margin-top: 8px;
-  max-width: 36em;
+  margin-top: 12px;
+  max-width: 48em;
   font-size: 17px;
   line-height: 1.55;
   color: var(--muted);
@@ -69,59 +64,6 @@
 .pitch span {
   display: block;
 }
-.hero .flow {
-  margin-top: 22px;
-}
-
-/* What the flow (flow.css) and the cards (cards.css) share. */
-/* The three people in the pictures: the tint behind each one's initial. */
-:root {
-  --who-a: #e3ddcf;
-  --who-m: #d5dde0;
-  --who-j: #f1dcb7;
-}
-:root[data-theme="dark"] {
-  --who-a: #4b463c;
-  --who-m: #3b474a;
-  --who-j: #5c4827;
-}
-/* While a picture is put at a moment in one go, nothing in it animates. */
-.jump,
-.jump * {
-  transition: none !important;
-  animation: none !important;
-}
-/* Until their script has drawn them, the pictures and the flow's controls stay hidden, with their room kept. */
-.pictures-pending :is(.stage, .steps, .ctl, .mini) {
-  visibility: hidden;
-}
-
-/* The notice: where Silo stands, under the same three columns as the points */
-.notice {
-  display: grid;
-  grid-template-columns: 1fr 2fr;
-  padding: 20px 0 22px;
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--muted);
-}
-.notice p {
-  padding: 0 var(--gutter);
-  text-wrap: pretty;
-}
-.notice-label {
-  font: 12px/1.9 var(--mono);
-  color: var(--accent-ink);
-}
-.mark {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 10px;
-  transform: translateY(-1px) rotate(45deg);
-  border: 1px solid var(--accent);
-}
-
 /* Footer: one row */
 .site-footer {
   display: flex;
@@ -143,15 +85,9 @@
   white-space: nowrap;
 }
 
-@media (max-width: 900px) {
-  .notice {
-    grid-template-columns: 1fr;
-    row-gap: 4px;
-  }
-}
 @media (max-width: 640px) {
   .hero {
-    padding: 46px var(--gutter) 26px;
+    padding: 46px var(--gutter) 48px;
   }
   .hero h1 {
     font-size: 36px;
@@ -162,9 +98,6 @@
   }
   .pitch span {
     display: inline;
-  }
-  .hero .flow {
-    margin-top: 32px;
   }
   .strip {
     flex-wrap: wrap;
