@@ -74,7 +74,7 @@
 
 /* ---- the map: each box carries its full and its folded place ---- */
 .ws-mapsec { position: relative; container-type: inline-size; border-bottom: 1px solid var(--line); background: var(--paper); }
-.ws-stage { --u: calc(100cqw / 1136); position: relative; height: calc(572 * var(--u)); overflow: hidden; transition: height .42s var(--ease); }
+.ws-stage { --u: calc(100cqw / 1136); position: relative; height: calc(614 * var(--u)); overflow: hidden; transition: height .42s var(--ease); }
 .ws-stage.fold { height: calc(180 * var(--u)); }
 .ws-geo {
   position: absolute;
@@ -120,6 +120,7 @@
 .ws-part.inner .ws-p-ttl { left: calc(11 * var(--u)); font-size: max(12px, calc(14 * var(--u))); }
 .ws-p-st { position: absolute; left: calc(15 * var(--u)); top: calc(var(--sy, 34) * var(--u)); display: flex; align-items: center; gap: calc(6 * var(--u)); font: 400 max(12px, calc(11.5 * var(--u)))/1.3 var(--mono); letter-spacing: -0.02em; white-space: nowrap; color: var(--muted); transition: opacity .2s; }
 .ws-part.inner .ws-p-st { left: calc(11 * var(--u)); }
+.ws-part.wide .ws-p-st { left: calc(138 * var(--u)); }
 .ws-mk { position: relative; flex: none; width: calc(8 * var(--u)); height: calc(8 * var(--u)); min-width: 7px; min-height: 7px; border-radius: 50%; border: 1.4px solid var(--faint); transition: background-color .3s, border-color .3s; }
 .ws-gl { position: absolute; color: var(--g); fill: none; stroke: currentColor; stroke-width: 1; overflow: visible; transition: opacity .2s, color .3s; }
 .ws-gl text { font: 9.5px var(--mono); fill: currentColor; stroke: none; }

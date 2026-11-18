@@ -42,8 +42,8 @@ running. Other tools have those parts; none has the loop for a whole machine.
 
 ## What comes first
 
-The first four stages of [`order.json`](order.json) are the starter: a product the owner uses
-daily. Everything after it builds on the starter.
+The first five stages of [`order.json`](order.json) are the starter: Groundwork, where the owner settles
+how Silo is built, then a product the owner uses daily. Everything after it builds on the starter.
 
 ## Where it runs
 

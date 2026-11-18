@@ -11,8 +11,8 @@ export const VERDICTS = Object.freeze(['take', 'later', 'drop']);
 /** The last stage: old things proposed to be left behind. Only its features may have no area. */
 export const GONE_STAGE = 'gone';
 
-/** The first four stages of `order.json` are the starter; this is its last. */
-export const STARTER_STAGES = 4;
+/** The first five stages of `order.json` are the starter; this is its last. */
+export const STARTER_STAGES = 5;
 
 export const ENTRY_LABEL = 'workshop:entry';
 export const SUGGESTION_LABEL = 'workshop:suggestion';

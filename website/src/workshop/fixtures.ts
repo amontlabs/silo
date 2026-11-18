@@ -37,6 +37,7 @@ export const FEATURES: FixtureFeature[] = [
   { id: 'export', stage: 'extras', area: 'sharing', name: 'Share a computer as a file', what: 'Export and import.', suggest: { verdict: 'later' } },
   { id: 'reviewer', stage: 'gone', name: 'A hosted reviewer', what: 'A hosted service.', verdict: 'drop', suggest: { verdict: 'drop' } },
   { id: 'old-desktop', stage: 'gone', name: 'An earlier desktop stack', what: 'KasmVNC.', suggest: { verdict: 'drop' } },
+  { id: 'intake', stage: 'ground', area: 'ground', name: 'How research enters the plan', what: 'Where a new line goes.', suggest: { verdict: 'take' } },
 ];
 
 export const AREAS = [
@@ -56,9 +57,11 @@ export const AREAS = [
   { id: 'desktop', title: 'Desktop', line: 'A screen you share.' },
   { id: 'macos', title: 'macOS computers', line: 'macOS inside.' },
   { id: 'sharing', title: 'Sharing', line: 'Move a computer as a file.' },
+  { id: 'ground', title: 'Groundwork', line: 'What the owner settles for the whole product.' },
 ];
 
 export const STAGES = [
+  { id: 'ground', title: 'Groundwork', line: 'What the owner settles first.' },
   { id: 'shell', title: 'Shell', line: 'One computer you can open from the app and the command line.' },
   { id: 'loop', title: 'The loop', line: 'Checkpoint, fork, see what changed, merge or drop.' },
   { id: 'agent', title: 'Agent inside', line: 'Your agent lives inside.' },

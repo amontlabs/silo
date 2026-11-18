@@ -1,5 +1,5 @@
 // The drawing of Silo: where each area sits on the full map and on the folded one, the zones around them
-// and the wires between them. Units are 1/1136 of the map's width; the full map is 572 units high, the fold 180.
+// and the wires between them. Units are 1/1136 of the map's width; the full map is 614 units high, the fold 180.
 // The build checks this table against plan/areas.json (`checkLayout`).
 
 export type Box = [x: number, y: number, w: number, h: number];
@@ -11,16 +11,18 @@ export interface Place {
   inner?: boolean;
   /** Tall enough that its folded title sits at the top, not in the middle. */
   tall?: boolean;
+  /** A bar: the state is written on the title's line, after it. */
+  wide?: boolean;
   /** Title and state line offsets for short boxes. */
   ty?: number;
   sy?: number;
 }
 
 export const MAP_WIDTH = 1136;
-export const MAP_HEIGHT = 572;
+export const MAP_HEIGHT = 614;
 export const FOLD_HEIGHT = 180;
 
-/** In Tab order: roughly left to right, then top to bottom. */
+/** In Tab order: roughly left to right, then top to bottom, Groundwork last (it sits under the drawing). */
 export const LAYOUT: Record<string, Place> = {
   app: { full: [48, 114, 192, 144], fold: [40, 38, 176, 30] },
   releases: { full: [48, 322, 192, 56], fold: [40, 84, 176, 30], ty: 9, sy: 31 },
@@ -38,6 +40,8 @@ export const LAYOUT: Record<string, Place> = {
   access: { full: [812, 154, 104, 48], fold: [824, 38, 96, 30], ty: 6, sy: 27 },
   tasks: { full: [936, 18, 176, 48], fold: [944, 10, 168, 30], ty: 6, sy: 27 },
   devices: { full: [936, 426, 176, 128], fold: [944, 140, 168, 30] },
+  // One wide, low bar under the whole drawing, from the zone's left edge to the right edge of Other devices.
+  ground: { full: [24, 578, 1088, 36], fold: [944, 96, 168, 30], wide: true, ty: 8, sy: 10 },
 };
 
 export interface Zone {

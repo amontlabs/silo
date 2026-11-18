@@ -22,13 +22,14 @@ describe('the map', () => {
     await renderApp();
     expect(screen.getByRole('heading', { level: 1, name: 'Workshop' })).toBeInTheDocument();
     expect(screen.getByText('Starting with the Engine.')).toBeInTheDocument();
-    expect(document.querySelectorAll('.ws-part')).toHaveLength(16);
+    expect(document.querySelectorAll('.ws-part')).toHaveLength(17);
     expect(part('engine')).toHaveClass('s-next');
     expect(part('engine')).toHaveTextContent('next');
     expect(part('setup')).toHaveClass('s-planned');
     expect(part('setup')).toHaveTextContent('1 planned');
     expect(part('computers')).toHaveClass('s-open');
     expect(part('computers')).toHaveAccessibleName('Computers, not decided yet, 2 features. A whole virtual machine for your agent.');
+    expect(part('ground')).toHaveAccessibleName('Groundwork, not decided yet, 1 topic. What the owner settles for the whole product.');
     const key = screen.getByRole('list', { name: 'Key' });
     expect(within(key).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['next', 'planned', 'not decided yet']);
   });
