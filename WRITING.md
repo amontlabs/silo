@@ -33,7 +33,7 @@ Simple does not mean vague. Name the real thing: "its own virtual machine", not 
 the whole machine"; "a snapshot of main's disk"; "sudo"; "a Linux server with KVM". A concrete
 case says more than an adjective: "two agents can listen on port 3000".
 
-The terms and the measured facts are in the feature's files under [`plan/features/`](plan/features/).
+The terms and the measured facts are in the plan's files under [`plan/`](plan/).
 Take them from there, and state nothing the plan does not support. One precise term per idea is
 enough: a sentence stacked with technical words reads as badly as a slogan.
 

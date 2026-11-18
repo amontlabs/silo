@@ -3,31 +3,13 @@
 The public site at [silo.amontlabs.com](https://silo.amontlabs.com), built with
 Vite. It has two pages:
 
-- **Home** (`index.html`, `src/style.css`): the pitch, two pictures, the way
-  into the Workshop, and a notice that Silo is in heavy development. Nothing on
-  it is read from the plan.
-  - The rows above the flow are kept short: the header, the Workshop strip,
-    then the headline and the pitch, centred, with the flow right under them
-    in the same row and no title of its own (the headline names it). The
-    whole flow, down to its step names, shows without scrolling in a
-    1440 × 790 window; keep it so when anything above it changes.
-  - **The flow** (`src/flow.ts`, `src/flow.css`) plays one task in seven steps,
-    in a loop, with Pause and the step names under it.
-  - **The cards** (`src/cards.ts`, `src/cards.css`) say who Silo is for: nine
-    features, each with a small picture that plays one gesture.
-  - Both are scenes (`src/scene.ts`): markup plus a list of timed cues, which
-    can be held at any moment or played from one. `src/pictures.ts` starts
-    them and says which may move: only one thing moves on its own at a time
-    (the flow while it is in view, otherwise the cards in turn), a card the
-    visitor points at or presses holds the flow, a hidden tab holds
-    everything, and with reduced motion nothing moves until the visitor
-    presses Play or a card.
-  - The pictures stay hidden, with their room kept, until their script has
-    drawn them, and show a still without script.
-  - A part of a picture must not be named like a class the page already
-    styles (`go`, `out`); `src/home.test.ts` checks it. The page shows once its fonts are in (at most 1.2 s), so
-  nothing changes width: it preloads every face it waits for, and the deployed
-  site lets a browser keep the font files, so a later visit does not wait.
+- **Home** (`index.html`, `src/style.css`): the headline and the pitch,
+  centred in the height the window leaves, then the way into the Workshop with
+  one line on where Silo stands. Its texts are interim, until the owner settles
+  the new design. It has no script of its own and nothing on it is read from
+  the plan. The page shows once its fonts are in (at most 1.2 s), so nothing
+  changes width: it preloads every face it waits for, and the deployed site
+  lets a browser keep the font files, so a later visit does not wait.
   A link to the site shows `public/og.png` when shared: a 1200 × 630 capture
   of `scripts/share-image.html`, opened from the dev server at
   `/scripts/share-image.html`.
@@ -37,7 +19,9 @@ Vite. It has two pages:
   its entries, votes, comments, suggestions and the owner's verdicts. Anyone
   signed in with GitHub can vote, comment and suggest a feature, and the owner
   decides each entry there. Its API lives under `/api/workshop/` (`server/`,
-  `api/`).
+  `api/`). While the plan holds no part, as now that it is being rewritten
+  from `plan/DESIGN.md`, the page shows that instead, with links to the design
+  and to the earlier plan (the tag `plan-2026-11-18`).
 
 Shared files: `src/site.css` (tokens, the gutter, the frame and its diamonds,
 the header, buttons, the theme switch and the drawn arrow and check icons),
@@ -177,7 +161,11 @@ reads `plan/` with `tools/plan/read` and checks it with `tools/plan/check`
 build with the file, the field and the fix. `map.ts` holds the drawing: where each
 area sits on the full map and on the folded one, and the wires. The build also
 stops when an area has no place there or the drawing places an unknown area; a
-new area needs a box in both tables.
+new area needs a box in both tables. A plan with no area draws no map, so the
+drawing is not checked against it: the page (`EmptyPlan` in `App.tsx`) says
+the plan is being rewritten, reads nothing live, and offers no sign-in, vote or
+suggestion. The build then leaves the header's account slot empty and
+unmarked.
 
 `npm run build` then runs `scripts/prerender.mjs`, which renders the plain
 address `/workshop` (`src/workshop/prerender.tsx`: nothing remembered, nobody
