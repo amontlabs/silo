@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { App, OPEN_GUARD_MS } from './App';
 import { buildData, issue, liveState } from './fixtures';
@@ -203,6 +203,8 @@ describe('state classes', () => {
       return (branches ? [branches[1], branches[2]] : [item]).filter((text) => text !== "''").flatMap(nameOf);
     }));
     states.delete('ws');
+    // A name with a hyphen cannot be a variable, so finding it anywhere in the code means an element may carry it.
+    expect([...states].filter((name) => !name.includes('-'))).toEqual([]);
     expect(states).toContain('v-map');
     expect(states).toContain('swap-out');
     // The same state on purpose: the account slot in the header fades in with the person's details, like the Workshop.
@@ -212,14 +214,14 @@ describe('state classes', () => {
       entry.isDirectory() ? walk(join(folder, entry.name)) : [join(folder, entry.name)]);
     const site = join(process.cwd(), 'src');
     const sources = [
-      ...walk(site).filter((file) => /\.(tsx?|html)$/.test(file) && !/\.test\.|test-|fixtures|devFixture/.test(file)),
+      ...walk(site).filter((file) => /\.(tsx?|html)$/.test(file) && !/\.test\.|^workshop\/(test-support|test-setup|fixtures|devFixture)\./.test(relative(site, file))),
       join(process.cwd(), 'index.html'),
       join(process.cwd(), 'workshop/index.html'),
     ];
     const elsewhere = sources.flatMap((file) => {
-      const code = readFileSync(file, 'utf8').replace(statement, '').replace(shared, '').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-      // A class name stands between quotes, spaces or a dot, wherever it is written: in a template, after text, in a selector.
-      return [...states].filter((name) => new RegExp(`(^|[\\s'"\`.])${name}(?=[\\s'"\`.:>)\\]]|$)`, 'm').test(code))
+      // Comments go; a `//` inside a URL stays, since it follows a colon, not a space.
+      const code = readFileSync(file, 'utf8').replace(statement, '').replace(shared, '').replace(/\/\*[\s\S]*?\*\/|(^|\s)\/\/.*$/gm, '$1');
+      return [...states].filter((name) => new RegExp(`(^|[^\\w-])${name}(?![\\w-])`, 'm').test(code))
         .map((name) => `${file.slice(process.cwd().length + 1)}: ${name}`);
     });
     expect(elsewhere).toEqual([]);
