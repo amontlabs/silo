@@ -176,7 +176,7 @@ One word per idea. The words for computers are Git's (Decided).
 | **conversation** | One exchange with a model. A run can hold several: subagents, a cleared session. |
 | **turn** | One reply of the model in a conversation. |
 | **tool call** | One thing a turn asked for: a command, a file edit, a search. |
-| **effect** | What a tool call did: processes, file changes, connections. |
+| **trace** | What a tool call left behind: processes, file changes, connections. The discussion called it "effect"; that word is kept for the engine's request to a driver (9.1). |
 | **recipe** | A text that says how to make a computer. |
 | **task** | A command run in a fork or in a fresh computer, with an end and a receipt. |
 | **only here** | Said of something that nothing else would bring back if it vanished (6.4). |
@@ -402,8 +402,8 @@ helps get around a provider's terms, such as rotating accounts".
 
 - Approvals are native to Silo: shown in the Silo app, two-way with the agent, not a prompt of the
   agent program. No broker agent. (Decided)
-- An ask exists only for something that widens access. It is shown in Silo's words, with the exact
-  effect. Work inside a computer never prompts per command. (Notes)
+- An ask exists only for something that widens access. It is shown in Silo's words, with exactly
+  what it would allow. Work inside a computer never prompts per command. (Notes)
 - No model decides a widening of access. A cheap model may only label a request, and the label is
   shown as a guess. (Notes)
 - A pending ask holds only the call that asked. The computer keeps running. (Notes)
@@ -430,10 +430,10 @@ rules on top and a base on which people can notice patterns. The owner called th
 
 | Layer | What it holds | Who writes it | Can it be wrong? |
 |---|---|---|---|
-| **Facts** | Every process, file change, connection, model call, secret use and checkpoint. Append-only. Each fact says where it was seen. | The engine and its drivers | No. A gap is recorded as a gap. |
-| **Labels** | Which run a fact belongs to, what kind of file or call it is, "stuck", "repeated", "risky". | Functions over facts, plus data about agent programs and ecosystems, plus the user's answers | Yes. So labels are recomputed from facts and never written into them. |
-| **Rules** | Block, hold, tell. | The user, as data. Silo can propose them from the record. | A rule that blocks or holds reads only facts. A rule that tells may read labels. |
-| **Plugins** | Anything that looks and reports: a script, a classifier, an agent, a notifier, a company's set. | Anyone | A plugin can flag, and checkpoint, pause or stop a computer. It cannot approve or change a rule. |
+| **Facts** | Every process, file change, connection, model call, secret use and checkpoint. Append-only. Each fact says where it was seen. | The engine and its drivers | Not when it was seen from outside: a gap is recorded as a gap. A fact reported from inside is what the inside said (5.2). |
+| **Labels** | Which run a fact belongs to, what kind of file or call it is, "stuck", "repeated", "risky". | Functions over facts, plus data about agent programs and ecosystems, plus the user's answers, plus plugins | Yes. So labels are recomputed from facts and never written into them. |
+| **Rules** | Block, hold, tell. | The user, as data. Silo can propose them from the record. | A rule that blocks or holds reads only facts seen from outside the computer. A rule that tells may read labels. |
+| **Plugins** | Anything that looks and reports: a script, a classifier, an agent, a notifier, a company's set. | Anyone | A plugin can flag and, if the user grants it, checkpoint, pause or stop a computer. It cannot approve or change a rule. |
 
 **The rule between the layers: nothing flows down.**
 
@@ -441,8 +441,13 @@ rules on top and a base on which people can notice patterns. The owner called th
 - A rule that blocks or holds never depends on an opinion.
 - Something that watches never widens access.
 
+"Down" means toward what is trusted more, and the law is these three sentences, no more. A plugin
+that adds labels crosses nothing: its labels are opinions like any other. A plugin that pauses or
+stops a computer on an opinion crosses nothing either: the second sentence binds rules, and a
+pause or a stop takes access away and gives none. (Proposed)
+
 Why it matters. A guess does harm when it is stored as truth and built on: every later guess
-inherits the error. Here the facts are hard and hold no opinion. Everything that is a matter of
+inherits the error. Here the facts hold no opinion, and each says where it was seen. Everything that is a matter of
 judgement (what can be rebuilt, which run did it, what looks wrong) is a function on top. A better
 function replaces a worse one and the labels are computed again. Nothing is migrated. (Agreed; the
 owner's words: it is much easier to improve step by step than something that needs migrations.)
@@ -488,7 +493,7 @@ computer
     conversation   one exchange with a model
       turn         one reply of the model
         tool call  one thing the reply asked for
-          effect   what it did: processes, file changes, connections
+          trace    what it left: processes, file changes, connections
 ```
 
 Where each link comes from:
@@ -496,7 +501,7 @@ Where each link comes from:
 | Link | Known from | Certainty |
 |---|---|---|
 | tool call → turn → conversation | Model traffic at the boundary | Certain, when the traffic can be read (5.8) |
-| effect → process | Inside | As told from inside |
+| trace → process | Inside | As told from inside |
 | process → run | The process tree, and a data list of agent programs | As told from inside |
 | conversation → run | Which process owned the connection | As told from inside |
 | tool call → the processes it started | Time. Ambiguous only when one process runs several tool calls at the same instant | A label |
@@ -510,8 +515,8 @@ hooks. The discussion settled on the opposite:
   boundary.
 - A hook is the agent program reporting on itself. The app shows what the engine saw, never what
   an agent reports. (Notes)
-- A hook sees the call, not the effect. One build command writes tens of thousands of files, and a
-  server it starts keeps writing after the call returns. The effects are the disk problem.
+- A hook sees the call, not its traces. One build command writes tens of thousands of files, and a
+  server it starts keeps writing after the call returns. The traces are the disk problem.
 - Which run did something is the operating system's knowledge: a run is a process tree.
 - A hook earns a place in one case: several subagents in one process running tools at the same
   instant. There it can stamp the call's identifier on the command it starts.
@@ -547,7 +552,8 @@ version, can lag behind the facts, and can be deleted and computed again at any 
 
 **Built-in labelers** (Proposed list)
 
-1. **Runs and conversations.** The joins of the chain above.
+1. **Runs, and the run of each conversation.** The joins of the chain above that the boundary does
+   not see. A conversation itself is read from model traffic at the boundary (5.2).
 2. **How a path would come back** (6.4): by a pull, by a rebuild, or by nothing ("only here").
    Also a coarse kind: code, build output, dependency, cache, agent data, scratch, log,
    configuration, credential-like.
@@ -570,7 +576,9 @@ labeler is run on recorded facts and compared with the answers before it replace
 
 **What a label may read.** A labeler may read content inside a computer, such as the state of a
 Git repository. That content is under the agent's control. This is acceptable for a label and is
-the reason a label never blocks or holds anything.
+the reason a label never blocks or holds anything. Such a label, and a label from a plugin or a
+model, can come out differently when it is computed again. It carries where it came from.
+(Proposed)
 
 **How a label is shown.** As a label. A guess is shown as a guess. (Notes)
 
@@ -589,7 +597,10 @@ the reason a label never blocks or holds anything.
 - Each rule states its worst case when it is set. (Notes)
 
 Examples of rules that block or hold: a host not on the list; a secret sent to a host it is not
-bound to; a budget reached; a package younger than a set age.
+bound to; a budget on a computer or on a conversation reached; a package younger than a set age.
+
+A rule that blocks or holds carries what it needs as its own data, such as the hosts and paths of
+package registries. It does not read the label "kind of call". (Proposed)
 
 What Silo does when the Mac or a computer runs low on memory or disk is Open (14.1, question 14).
 
@@ -754,7 +765,7 @@ would carry the source "inside".
 - A checkpoint is stored where the agent in the computer cannot reach it. It never changes once
   saved. (Notes)
 - A restore first saves where you were. (Notes)
-- A restore to a moment in the middle of a tool call can repeat an effect outside the computer,
+- A restore to a moment in the middle of a tool call can repeat an outside action,
   so the moment before the call is the one to use. (Notes)
 - Old automatic checkpoints are thinned, and removing them really frees space. (Notes)
 - A checkpoint that also keeps running programs (memory) comes later. (Notes)
@@ -839,6 +850,7 @@ What this gives:
 - **A package installed by hand** and absent from the computer's recipe is "only here". Silo
   offers to add it to the recipe.
 - **Checkpoints stay light**: what a rebuild brings back does not need a long history (9.6).
+  This lets a label decide what is forgotten, which is Open (14.1, question 16).
 
 This is the diff of the whole machine reduced to the part worth reading.
 
@@ -1138,13 +1150,15 @@ clock ────────────────────────�
                                                 no clock of its own    effects ─▶ drivers
 ```
 
-- **State** is a small set of flat tables of plain records that refer to each other by id.
+- **State** is a small set of flat tables of plain rows that refer to each other by id.
 - **A call** asks for a change. **An event** says what happened. **An effect** is a request to a
   driver.
 - **The core** decides and touches nothing. **Drivers** do things: run a virtual machine, carry
   the network, take a checkpoint.
-- **Wanted and seen.** Each record keeps what was asked and what was last observed. The core
-  issues effects until they match. A virtual machine can die by itself and the device can reboot,
+- **Wanted and seen.** Each row keeps what was asked and what was last observed. While they
+  differ, the core issues effects to make them match, or says what it is waiting for. What it
+  does when a computer stops by itself is Open (14.1, question 15). A virtual machine can die by
+  itself and the device can reboot,
   so the saved state is never assumed to describe the world.
 
 Three ideas stand behind it:
@@ -1192,10 +1206,11 @@ Rules for the fact path:
 8. **A secret's real value is never written.**
 9. **Bulky content is stored once**, by its hash, apart from the facts that point to it: the text
    of a message, the output of a command, a recording.
-10. **Labels are stored apart**, with the labeler's version. Deleting every label loses nothing.
+10. **Labels are stored apart**, with the labeler's version. Deleting every label computed from facts alone loses nothing.
 
-What stays true of the core: it contains nothing about agents (Notes). Runs and conversations are
-labels. Model call facts come from the network driver. A budget is, for the core, a counter with a
+What stays true of the core: it contains nothing about agents (Notes). Runs are labels. A
+conversation is read from model traffic at the boundary, and which run it belongs to is a label.
+Model call facts come from the network driver. A budget is, for the core, a counter with a
 threshold.
 
 The record is also the history and the audit journal. The core's own saved state stays small.
@@ -1313,7 +1328,7 @@ checked hardest, and labels were made unable to block anything so that they do n
 |---|---|---|
 | Recording facts | Yes: everything that crossed the boundary has a fact, or a gap | Hostile tests on the real boundary, the balance of 5.2, the simulator with faulty sources |
 | The core's decisions: access, rules that block or hold | Yes: access widens only through the user | The model of access, the simulator, proof later if needed |
-| A labeler's mechanics | Yes: the same facts give the same labels; no fact changes; anything unknown is "only here" | Random inputs with these properties stated |
+| A labeler's mechanics | Yes: for a labeler that reads facts alone, the same facts give the same labels; no fact changes; anything unknown is "only here" | Random inputs with these properties stated |
 | A labeler's opinion | No: "is this folder a build?" has no exact answer | Scored against the user's answers, and compared with the previous version on recorded history |
 | A plugin | Its bound, yes. Its behaviour, no. | Paths for the bound; a trial on recorded history for the behaviour (5.5) |
 
@@ -1329,7 +1344,8 @@ its hash, removes that. A request is then a short list of hashes.
 
 **Trap 2: checkpointing what a rebuild brings back.** One large build rewrites gigabytes, and
 each checkpoint keeps the old ones. The label from 6.4 is the fix: what a rebuild brings back
-needs no long history.
+needs no long history. A wrong label would then lose history that cannot be computed again: Open
+(14.1, question 16).
 
 Design constraints (Proposed):
 
@@ -1439,7 +1455,7 @@ simulator checks, and as what a hostile test tries to break. All Proposed unless
 | Every loss of facts is itself recorded as a gap. | safety | simulator with a faulty source |
 | What runs are shown to have done adds up to what the boundary measured, and the rest is shown as unattributed. | safety | live check |
 | A rule that blocks or holds reads only what the engine or the boundary saw. | safety | simulator with a lying inside |
-| Deleting every label and computing them again gives the same labels. | safety | test |
+| Deleting every label computed from facts alone and computing them again gives the same labels. | safety | test |
 | A flood from one computer never removes older facts. | safety | simulator |
 | Access widens only through an input from the user. | safety | model of access, simulator |
 | Nothing a plugin can call gives any computer, or itself, more access than it had. | safety | model of access, simulator |
@@ -1447,8 +1463,9 @@ simulator checks, and as what a hostile test tries to break. All Proposed unless
 | A budget blocks what it meters: once it is reached, no further metered request leaves. | safety | hostile test |
 | A dropped fork can be brought back until its time in the bin ends. After that nothing of it remains. | safety | simulator, live check |
 | If the engine stops, running computers keep running under the rules they had. (Notes) | safety | live check |
-| No effect is carried out twice. (Notes) | safety | simulator with crashes |
+| No effect happens twice: one issued again changes nothing. (Notes) | safety | simulator with crashes |
 | A repeated call does nothing twice. (Notes) | safety | simulator |
+| A call the engine has accepted is never forgotten: it is carried out, or it fails with a reason. | safety | simulator with crashes |
 | The app never shows a state the engine never had. (Notes) | safety | simulator |
 | Nothing grows without limit. (Notes) | safety | assertions |
 | Every change is recorded with who made it. (Notes) | safety | simulator |
@@ -1612,6 +1629,17 @@ repository and is not part of this copy.
     listed among the rules that block or hold, without saying what happens. The owner's first
     thoughts, rough: for disk, what many apps already do; for memory, pause and tell; how early
     is a setting with a few presets. (Owner) To settle with the product and its design.
+15. **What does Silo do when a computer stops by itself** (9.1)? The engine notices it the way it
+    notices anything: what is seen no longer matches what is wanted. Then it can (a) start the
+    computer again and tell you, and after a few failures in a row stop trying and ask; (b) start
+    it again silently, as often as needed; (c) leave it stopped and tell you. Under each, whatever
+    was running in it is gone; whether agents start again with it is part of the question.
+    (Proposed: a.) It was a choice under the film `engine-one-call`. The owner moved it here on
+    18 November 2026: it is decided with the whole design.
+16. **May a label decide what a checkpoint keeps** (6.4, 9.6)? Leaving out of long history what a
+    rebuild brings back rests on a label. If the label is wrong, that history is gone, it cannot
+    be computed again, and a restore does not bring back the whole computer. (Proposed: only under
+    a rule the user set, and such a checkpoint says what it left out.)
 
 ### 14.2 To find out
 
@@ -1641,6 +1669,11 @@ On computers:
 17. Whether macOS computers can share one Nix store read-only, and what the first build of a
     recipe costs in time and disk (8.1).
 18. Where the token lands when each agent app connects over SSH (8.5).
+19. Where the engine's events are kept until the recorder has them, so that control facts never
+    have a gap (9.2, 9.6).
+20. How a conversation is recognised in each provider's traffic, and whether a program can get
+    around a budget on a conversation by starting a new one (4.6). A budget on a computer has no
+    such way around.
 
 ---
 
