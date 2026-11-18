@@ -46,15 +46,15 @@ type Visit = { name: string; hash: string; opens?: string; holds: Holds; signedI
 
 // Each place that waits, with the answers it waits on. The marker (signed in before) makes `me` a question to ask.
 const VISITS: Visit[] = [
-  { name: 'rows and an open entry, state and me asked', hash: '#computers', opens: 'Create and delete a computer', holds: { state: true, me: true }, signedIn: true },
+  { name: 'rows and an open entry, state and me asked', hash: '#part-b', opens: 'Create and delete a computer', holds: { state: true, me: true }, signedIn: true },
   { name: 'suggestions, state and me asked', hash: '#suggested', holds: { state: true, me: true }, signedIn: true },
   { name: 'Latest, state and me asked', hash: '#latest', holds: { state: true, me: true }, signedIn: true },
-  { name: 'rows and an open entry, state asked, signed out', hash: '#computers', opens: 'Create and delete a computer', holds: { state: true }, signedIn: false },
+  { name: 'rows and an open entry, state asked, signed out', hash: '#part-b', opens: 'Create and delete a computer', holds: { state: true }, signedIn: false },
   { name: 'suggestions, state asked, signed out', hash: '#suggested', holds: { state: true }, signedIn: false },
   { name: 'Latest, state asked, signed out', hash: '#latest', holds: { state: true }, signedIn: false },
   { name: 'suggest form, only me asked', hash: '#suggested', holds: { me: true }, signedIn: true },
-  { name: 'rows, only me asked', hash: '#computers', holds: { me: true }, signedIn: true },
-  { name: 'the thread of an open entry, only its comments asked', hash: '#computers', opens: 'Create and delete a computer', holds: { issue: true }, signedIn: true },
+  { name: 'rows, only me asked', hash: '#part-b', holds: { me: true }, signedIn: true },
+  { name: 'the thread of an open entry, only its comments asked', hash: '#part-b', opens: 'Create and delete a computer', holds: { issue: true }, signedIn: true },
 ];
 
 /** Between two visits in one test: what the first one remembered (the answer, the sign-in marker) must not reach the next. */

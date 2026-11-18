@@ -44,15 +44,6 @@
 .ws-status { color: var(--muted); margin-top: 8px; min-height: 1lh; }
 /* For visitors without JavaScript, under the plan, in the page's column. */
 .ws-noscript { padding: 0 24px 28px; }
-/* While the plan holds no part: a few lines in the page's column, in place of the map and the lists. Without JavaScript
-   nothing is missing, so the note about it is not shown. */
-.ws-blank-body { flex: 1 0 auto; display: flex; flex-direction: column; gap: 12px; padding: 14px 24px 56px; max-width: 640px; color: var(--muted); }
-.ws-blank-body a { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 3px; }
-.ws-blank-body .ws-quiet a { color: inherit; white-space: nowrap; }
-.ws-blank-body .ws-quiet { margin-top: 8px; }
-main:has(.ws-blank) .ws-noscript { display: none; }
-/* No account either: its slot in the header takes no room. */
-.workshop-shell:has(.ws-blank) .ws-account-slot { display: none; }
 .ws-top-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 .ws-top { position: relative; }
 .ws-tools { display: flex; align-items: center; gap: 16px; min-height: 28px; }
@@ -85,6 +76,8 @@ main:has(.ws-blank) .ws-noscript { display: none; }
 .ws-mapsec { position: relative; container-type: inline-size; border-bottom: 1px solid var(--line); background: var(--paper); }
 .ws-stage { --u: calc(100cqw / 1136); position: relative; height: calc(620 * var(--u)); overflow: hidden; transition: height .42s var(--ease); }
 .ws-stage.fold { height: calc(180 * var(--u)); }
+/* A plan with no part: one line, at the folded map's height whether folded or not, so nothing moves. */
+.ws-stage.ws-stage-empty { height: calc(180 * var(--u)); display: grid; place-items: center; }
 .ws-geo {
   position: absolute;
   left: calc(var(--x) * var(--u)); top: calc(var(--y) * var(--u)); width: calc(var(--w) * var(--u)); height: calc(var(--h) * var(--u));
@@ -385,7 +378,6 @@ main:has(.ws-blank) .ws-noscript { display: none; }
 }
 @media (max-width: 760px) {
   .ws-noscript { padding: 0 16px 24px; }
-  .ws-blank-body { padding: 12px 16px 48px; }
   .ws-top { padding: 26px 16px 16px; }
   .ws-top h1 { font-size: 34px; }
   .ws-tools { top: 26px; right: 16px; flex-direction: column; align-items: flex-end; gap: 0; }

@@ -9,8 +9,8 @@ import {
 } from './test-support';
 import type { Route } from './test-support';
 
-// Engine and calls and `computers` are built, as their files say; `exec` is being built, as its issue says.
-const builtData = () => buildData({ features: FEATURES.map((feature) => (['engine', 'calls', 'computers'].includes(feature.id) ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature)) });
+// `core`, `calls` and `create` are built, as their files say; `exec` is being built, as its issue says.
+const builtData = () => buildData({ features: FEATURES.map((feature) => (['core', 'calls', 'create'].includes(feature.id) ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature)) });
 const later = (): LiveState => liveState({
   13: issue({ entry: 'exec', verdict: 'take', building: true, up: 4 }),
   14: issue({ entry: 'fork', verdict: 'take' }),
@@ -21,15 +21,16 @@ describe('the map', () => {
     mockApi();
     await renderApp();
     expect(screen.getByRole('heading', { level: 1, name: 'Workshop' })).toBeInTheDocument();
-    expect(screen.getByText('Starting with the Engine.')).toBeInTheDocument();
-    expect(document.querySelectorAll('.ws-part')).toHaveLength(17);
-    expect(part('engine')).toHaveClass('s-next');
-    expect(part('engine')).toHaveTextContent('next');
-    expect(part('setup')).toHaveClass('s-planned');
-    expect(part('setup')).toHaveTextContent('1 planned');
-    expect(part('computers')).toHaveClass('s-open');
-    expect(part('computers')).toHaveAccessibleName('Computers, not decided yet, 2 features. A whole virtual machine for your agent.');
-    expect(part('ground')).toHaveAccessibleName('Groundwork, not decided yet, 1 topic. What the owner settles for the whole product.');
+    expect(screen.getByText('Starting with Part A.')).toBeInTheDocument();
+    expect(document.querySelectorAll('.ws-part')).toHaveLength(5);
+    expect(part('part-a')).toHaveClass('s-next');
+    expect(part('part-a')).toHaveTextContent('next');
+    expect(part('part-c')).toHaveClass('s-planned');
+    expect(part('part-c')).toHaveTextContent('1 planned');
+    expect(part('part-b')).toHaveClass('s-open');
+    expect(part('part-b')).toHaveAccessibleName('Part B, not decided yet, 2 features. A part that holds another.');
+    expect(part('part-c')).toHaveAccessibleName('Part C, 1 planned, 1 feature. A part inside Part B.');
+    expect(part('part-d')).toHaveAccessibleName('Part D, not decided yet, 7 features. A part with copies behind it.');
     const key = screen.getByRole('list', { name: 'Key' });
     expect(within(key).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['next', 'planned', 'not decided yet']);
   });
@@ -37,15 +38,15 @@ describe('the map', () => {
   it('shows built, building and next areas, on the map and the tiles alike', async () => {
     mockApi({ state: () => ok(later()) });
     await renderApp(builtData());
-    expect(screen.getByText('Building Computers. Forks is next.')).toBeInTheDocument();
-    expect(part('engine')).toHaveClass('s-done');
-    expect(part('computers')).toHaveClass('s-now');
-    expect(part('computers')).toHaveTextContent('now · 1/2');
-    expect(part('forks')).toHaveClass('s-next');
-    for (const [id, state] of [['engine', 's-done'], ['computers', 's-now'], ['forks', 's-next'], ['setup', 's-planned'], ['trust', 's-open']]) {
+    expect(screen.getByText('Building Part B. Part D is next.')).toBeInTheDocument();
+    expect(part('part-a')).toHaveClass('s-done');
+    expect(part('part-b')).toHaveClass('s-now');
+    expect(part('part-b')).toHaveTextContent('now · 1/2');
+    expect(part('part-d')).toHaveClass('s-next');
+    for (const [id, state] of [['part-a', 's-done'], ['part-b', 's-now'], ['part-d', 's-next'], ['part-c', 's-planned'], ['part-e', 's-open']]) {
       expect(tile(id).parentElement).toHaveClass(state);
     }
-    expect(tile('computers')).toHaveTextContent('now · 1/2');
+    expect(tile('part-b')).toHaveTextContent('now · 1/2');
     expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['done', 'building now', 'next', 'planned', 'not decided yet']);
   });
 
@@ -57,7 +58,7 @@ describe('the map', () => {
     expect(screen.getByRole('button', { name: 'Order' })).toHaveAttribute('aria-pressed', 'true');
     expect(location.search).toBe('?view=order');
     const order = [...document.querySelectorAll<HTMLElement>('.ws-tile')].map((t) => t.dataset.area);
-    expect(order.slice(0, 3)).toEqual(['engine', 'computers', 'app']);
+    expect(order.slice(0, 4)).toEqual(['part-a', 'part-b', 'part-c', 'part-d']);
     expect(order.at(-1)).toBe('suggested');
     expect(screen.getByText('After that')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Map' }));
@@ -77,59 +78,59 @@ describe('an area', () => {
   it('opens from its part: the map folds, the area and its entries show, the address and focus follow', async () => {
     mockApi();
     await renderApp();
-    await userEvent.click(part('computers'));
-    expect(location.hash).toBe('#computers');
+    await userEvent.click(part('part-b'));
+    expect(location.hash).toBe('#part-b');
     expect(document.querySelector('.ws-stage')).toHaveClass('fold');
-    expect(part('computers')).toHaveAttribute('aria-current', 'true');
-    expect(screen.getByRole('heading', { level: 2, name: 'Computers' })).toHaveFocus();
-    expect(within(document.querySelector('.ws-detail') as HTMLElement).getByText('A whole virtual machine for your agent.')).toBeInTheDocument();
+    expect(part('part-b')).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('heading', { level: 2, name: 'Part B' })).toHaveFocus();
+    expect(within(document.querySelector('.ws-detail') as HTMLElement).getByText('A part that holds another.')).toBeInTheDocument();
     expect(screen.getByText('2 not decided')).toBeInTheDocument();
     expect(rowButton('Create and delete a computer')).toBeInTheDocument();
     expect(rowButton('Run a command')).toBeInTheDocument();
-    expect(screen.getByText('Computers, open')).toBeInTheDocument();
+    expect(screen.getByText('Part B, open')).toBeInTheDocument();
   });
 
   it('switches to another part, goes back with the button, Escape and Back, and returns focus', async () => {
     mockApi();
     await renderApp();
-    await userEvent.click(part('computers'));
-    await userEvent.click(part('forks'));
-    expect(location.hash).toBe('#forks');
-    expect(screen.getByRole('heading', { level: 2, name: 'Forks' })).toBeInTheDocument();
+    await userEvent.click(part('part-b'));
+    await userEvent.click(part('part-d'));
+    expect(location.hash).toBe('#part-d');
+    expect(screen.getByRole('heading', { level: 2, name: 'Part D' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /Full map/ }));
     expect(location.hash).toBe('');
     expect(document.querySelector('.ws-stage')).not.toHaveClass('fold');
-    expect(part('forks')).toHaveFocus();
+    expect(part('part-d')).toHaveFocus();
 
-    await userEvent.click(part('devices'));
+    await userEvent.click(part('part-e'));
     fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
     expect(areaTitle()).toBeNull();
-    expect(part('devices')).toHaveFocus();
+    expect(part('part-e')).toHaveFocus();
 
-    await userEvent.click(part('engine'));
+    await userEvent.click(part('part-a'));
     act(() => history.back());
     await waitFor(() => expect(areaTitle()).toBeNull());
     act(() => history.forward());
-    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Engine' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Part A' })).toBeInTheDocument());
   });
 
   it('opens from a tile too, and the same tile closes it', async () => {
     mockApi();
     await renderApp();
-    await userEvent.click(tile('devices'));
-    expect(location.hash).toBe('#devices');
-    expect(tile('devices')).toHaveAttribute('aria-current', 'true');
-    await userEvent.click(tile('devices'));
+    await userEvent.click(tile('part-e'));
+    expect(location.hash).toBe('#part-e');
+    expect(tile('part-e')).toHaveAttribute('aria-current', 'true');
+    await userEvent.click(tile('part-e'));
     expect(location.hash).toBe('');
   });
 
   it('shows each entry\'s state word, votes and comment counts', async () => {
-    history.replaceState(null, '', '/workshop#engine');
+    history.replaceState(null, '', '/workshop#part-a');
     mockApi();
     await renderApp();
     expect(within(itemOf('The engine runs on its own')).getByText('planned')).toBeInTheDocument();
     expect(within(itemOf('The engine runs on its own')).getByText('👍 8')).toBeInTheDocument();
-    act(() => { location.hash = '#computers'; });
+    act(() => { location.hash = '#part-b'; });
     await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByText('💬 2')).toBeInTheDocument());
     expect(within(itemOf('Create and delete a computer')).getByText('👍 12')).toBeInTheDocument();
     expect(within(itemOf('Run a command')).queryByText(/💬/)).not.toBeInTheDocument();
@@ -139,7 +140,7 @@ describe('an area', () => {
 describe('an entry', () => {
   it('opens in place, loads its comments and is linked', async () => {
     const calls = mockApi({ routes: { 'GET issue': (url) => ok(detail(Number(url.searchParams.get('n')), { comments: [{ id: 1, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-14T10:00:00Z', text: 'Keep stop separate from pause.' }] })) } });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     await userEvent.click(rowButton('Create and delete a computer'));
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
@@ -148,7 +149,7 @@ describe('an entry', () => {
     expect(await screen.findByText('Keep stop separate from pause.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'or comment directly on GitHub' })).toHaveAttribute('href', 'https://github.com/amontlabs/silo/issues/12');
     expect(calls.some((call) => call.path === 'issue' && call.method === 'GET')).toBe(true);
-    expect(location.hash).toBe('#computers/computers');
+    expect(location.hash).toBe('#part-b/create');
     expect(document.querySelector('video')).toBeNull();
     expect(screen.getByText('Create and delete a computer, open')).toBeInTheDocument();
 
@@ -156,29 +157,29 @@ describe('an entry', () => {
     await userEvent.click(rowButton('Run a command'));
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
-    expect(location.hash).toBe('#computers/exec');
+    expect(location.hash).toBe('#part-b/exec');
     await userEvent.click(rowButton('Create and delete a computer'));
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'false');
     await waitFor(() => expect(screen.queryByText('Make a Linux computer.')).not.toBeInTheDocument());
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
-    expect(location.hash).toBe('#computers/exec');
+    expect(location.hash).toBe('#part-b/exec');
     await userEvent.click(rowButton('Run a command'));
-    expect(location.hash).toBe('#computers');
+    expect(location.hash).toBe('#part-b');
   });
 
   it('says being built and planned in a few words', async () => {
     mockApi({ state: () => ok(later()) });
-    history.replaceState(null, '', '/workshop#computers/exec');
+    history.replaceState(null, '', '/workshop#part-b/exec');
     await renderApp();
     expect(await screen.findByText('Being built now.')).toBeInTheDocument();
     expect(within(itemOf('Run a command')).getByText('building')).toBeInTheDocument();
-    act(() => { location.hash = '#setup/shells'; });
+    act(() => { location.hash = '#part-c/shells'; });
     await waitFor(() => expect(screen.getByText('Planned.')).toBeInTheDocument());
   });
 
   it('shows a verdict written in the file as planned, with nothing to confirm', async () => {
     mockApi();
-    history.replaceState(null, '', '/workshop#engine/calls');
+    history.replaceState(null, '', '/workshop#part-a/calls');
     await renderApp();
     expect(await screen.findByText('Planned.')).toBeInTheDocument();
     expect(screen.queryByText(/carried over/)).not.toBeInTheDocument();
@@ -193,7 +194,7 @@ describe('addresses', () => {
     mockApi();
     await renderApp();
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
-    expect(location.hash).toBe('#computers/exec');
+    expect(location.hash).toBe('#part-b/exec');
     act(() => { location.hash = '#entry-reviewer'; });
     await waitFor(() => expect(rowButton('A hosted reviewer')).toHaveAttribute('aria-expanded', 'true'));
     expect(location.hash).toBe('#left/reviewer');
@@ -235,16 +236,16 @@ describe('addresses', () => {
   });
 
   it('open the area when its entry no longer exists, and find an entry under another area', async () => {
-    history.replaceState(null, '', '/workshop#engine/gone-away');
+    history.replaceState(null, '', '/workshop#part-a/gone-away');
     mockApi();
     const first = await renderApp();
-    expect(screen.getByRole('heading', { level: 2, name: 'Engine' })).toBeInTheDocument();
-    expect(location.hash).toBe('#engine');
+    expect(screen.getByRole('heading', { level: 2, name: 'Part A' })).toBeInTheDocument();
+    expect(location.hash).toBe('#part-a');
     first.unmount();
-    history.replaceState(null, '', '/workshop#forks/exec');
+    history.replaceState(null, '', '/workshop#part-d/exec');
     await renderApp();
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
-    expect(location.hash).toBe('#computers/exec');
+    expect(location.hash).toBe('#part-b/exec');
   });
 });
 
@@ -311,13 +312,13 @@ describe('when the API is missing or slow', () => {
       mockApi({ state, me: owner });
       await renderApp();
       expect(screen.getAllByText('Votes and comments are offline.').length).toBeGreaterThan(0);
-      expect(part('engine')).toHaveClass('s-next');
+      expect(part('part-a')).toHaveClass('s-next');
       // Who is signed in does not depend on the live state; deciding does.
       expect(screen.getByText('polarzero')).toBeInTheDocument();
       expect(screen.queryByText(/^Decisions/)).not.toBeInTheDocument();
       expect(screen.queryByText(/to decide/)).not.toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Suggest a feature' })).toBeInTheDocument();
-      await userEvent.click(part('computers'));
+      await userEvent.click(part('part-b'));
       expect(screen.queryByText(/^👍/)).not.toBeInTheDocument();
       await userEvent.click(rowButton('Create and delete a computer'));
       expect(screen.getByText('Not decided yet.')).toBeInTheDocument();
@@ -329,9 +330,9 @@ describe('when the API is missing or slow', () => {
   it('shows the plan from the file while the state is still loading', async () => {
     let release: (value: { status: number; body: unknown }) => void = () => {};
     mockApi({ state: () => new Promise((resolve) => { release = resolve; }) });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     render(<App data={buildData()} />);
-    expect(part('engine')).toHaveClass('s-next');
+    expect(part('part-a')).toHaveClass('s-next');
     expect(rowButton('Create and delete a computer')).toBeInTheDocument();
     expect(screen.queryByText('Live comments are unavailable.')).not.toBeInTheDocument();
     expect(screen.queryByText(/^👍/)).not.toBeInTheDocument();

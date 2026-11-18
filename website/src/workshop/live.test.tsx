@@ -35,7 +35,7 @@ describe('the first frame', () => {
     remember(liveState(), owner);
     const answer = held<{ status: number; body: unknown }>();
     mockApi({ state: () => answer.promise, routes: { 'GET me': () => answer.promise } });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     render(<App data={buildData()} />);
     expect(votes('Create and delete a computer')).toBe('👍 12');
     expect(within(itemOf('Create and delete a computer')).getByLabelText('2 comments')).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe('the first frame', () => {
   it('ignores a remembered state over seven days old or of another shape', () => {
     const answer = held<{ status: number; body: unknown }>();
     mockApi({ state: () => answer.promise });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     remember({ ...liveState(), fetchedAt: at(Date.now() - 8 * 86_400_000) });
     const old = render(<App data={buildData()} />);
     expect(document.querySelector('.ws-ph-vote')).toBeInTheDocument();
@@ -91,7 +91,7 @@ describe('the first frame', () => {
 
   it('remembers the answer and, apart, its own writes, and shows both on the next visit', async () => {
     const calls = mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     const first = await renderApp();
     await userEvent.click(screen.getByRole('button', { name: '12 votes' }));
     await waitFor(() => expect(posts(calls, 'vote')).toHaveLength(1));
@@ -169,11 +169,11 @@ describe('the load', () => {
       state: (url) => {
         asked.push(url.search);
         return url.searchParams.get('fresh') === '1'
-          ? ok(liveState({ 12: issue({ entry: 'computers', title: 'Create and delete a computer', up: 30, comments: 5, updates: 3 }) }))
+          ? ok(liveState({ 12: issue({ entry: 'create', title: 'Create and delete a computer', up: 30, comments: 5, updates: 3 }) }))
           : ok({ ...liveState(), fetchedAt: at(Date.now() - 1000), old: true });
       },
     });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     await waitFor(() => expect(votes('Create and delete a computer')).toBe('👍 30'));
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -202,13 +202,13 @@ describe('the load', () => {
   });
 
   it('never replaces a newer state shown with an older answer, and says nothing when the fresh ask fails', async () => {
-    remember(liveState({ 12: issue({ entry: 'computers', title: 'Create and delete a computer', up: 40, comments: 5, updates: 3 }) }));
+    remember(liveState({ 12: issue({ entry: 'create', title: 'Create and delete a computer', up: 40, comments: 5, updates: 3 }) }));
     const calls = mockApi({
       state: (url) => (url.searchParams.get('fresh') === '1'
         ? { status: 502, body: { error: 'github', message: 'GitHub failed.' } }
         : ok({ ...liveState(), fetchedAt: at(Date.now() - 3600_000), old: true })),
     });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     await waitFor(() => expect(calls.filter((call) => call.path === 'state')).toHaveLength(2));
     await act(async () => {});
@@ -221,7 +221,7 @@ describe('the load', () => {
     loadConfig.retryMs = 150;
     let fail = true;
     const calls = mockApi({ state: () => (fail ? { status: 502, body: { error: 'github', message: 'GitHub failed.' } } : ok(liveState())) });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     render(<App data={buildData()} />);
     await waitFor(() => expect(calls.filter((call) => call.path === 'state')).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 60));
@@ -249,7 +249,7 @@ describe('the load', () => {
   it('keeps remembered numbers on screen when the load fails', async () => {
     remember(liveState());
     mockApi({ state: () => ({ status: 502, body: { error: 'github', message: 'GitHub failed.' } }) });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     expect(votes('Create and delete a computer')).toBe('👍 12');
     expect(screen.getAllByText('Votes and comments are offline.').length).toBeGreaterThan(0);
@@ -257,7 +257,7 @@ describe('the load', () => {
 });
 
 describe('the page\'s own writes over an answer', () => {
-  const computers = (up: number, comments = 5) => liveState({ 12: issue({ entry: 'computers', title: 'Create and delete a computer', up, comments, updates: 3 }) });
+  const computers = (up: number, comments = 5) => liveState({ 12: issue({ entry: 'create', title: 'Create and delete a computer', up, comments, updates: 3 }) });
   const stored = () => JSON.parse(localStorage.getItem(STATE) ?? '{}').issues[12];
 
   // Remembered 12, real 20: the person votes at once, the server answers 21. The page shows 21 over memory, over
@@ -275,7 +275,7 @@ describe('the page\'s own writes over an answer', () => {
         state: (url) => (url.searchParams.get('fresh') === '1' ? fresh.promise : cdn.promise),
         routes: { 'POST vote': () => ok(server ? { ok: true, up: 21 } : { ok: true }) },
       });
-      history.replaceState(null, '', '/workshop#computers');
+      history.replaceState(null, '', '/workshop#part-b');
       const first = render(<App data={buildData()} />);
       expect(votes('Create and delete a computer')).toBe('👍 12');
       fireEvent.click(screen.getByRole('button', { name: '12 votes' }));
@@ -313,7 +313,7 @@ describe('the page\'s own writes over an answer', () => {
     const cdn = held<{ status: number; body: unknown }>();
     const fresh = held<{ status: number; body: unknown }>();
     mockApi({ me: visitor, state: (url) => (url.search ? fresh.promise : cdn.promise), routes: { 'POST comment': () => ok({ ok: true, id: 1, comments: 9 }) } });
-    history.replaceState(null, '', '/workshop#computers/computers');
+    history.replaceState(null, '', '/workshop#part-b/create');
     const first = render(<App data={buildData()} />);
     // 5 comments, 3 of them history lines.
     expect(within(itemOf('Create and delete a computer')).getByLabelText('2 comments')).toBeInTheDocument();
@@ -404,13 +404,13 @@ describe('the page\'s own writes over an answer', () => {
 
   it('keep the page\'s own comment over an older answer', async () => {
     mockApi({ me: visitor });
-    history.replaceState(null, '', '/workshop#computers/exec');
+    history.replaceState(null, '', '/workshop#part-b/exec');
     const first = await renderApp();
     await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Mine.');
     await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
     await act(async () => {});
     first.unmount();
-    history.replaceState(null, '', '/workshop#computers/exec');
+    history.replaceState(null, '', '/workshop#part-b/exec');
     await renderApp();
     expect(await screen.findByText('Mine.')).toBeInTheDocument();
     expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
@@ -424,7 +424,7 @@ describe('verdicts and `me`', () => {
     remember(liveState(), owner);
     const me = held<{ status: number; body: unknown }>();
     const calls = mockApi({ routes: { 'GET me': () => me.promise } });
-    history.replaceState(null, '', '/workshop#computers/computers');
+    history.replaceState(null, '', '/workshop#part-b/create');
     render(<App data={buildData()} />);
     // The state is remembered: the row opens at once.
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
@@ -446,7 +446,7 @@ describe('verdicts and `me`', () => {
     remember(liveState(), visitor);
     const unauthorized = () => ({ status: 401, body: { error: 'unauthorized', message: 'Sign in again.' } });
     const calls = mockApi({ routes: { 'GET me': unauthorized, 'GET vote': unauthorized } });
-    history.replaceState(null, '', '/workshop#computers/computers');
+    history.replaceState(null, '', '/workshop#part-b/create');
     render(<App data={buildData()} />);
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
     expect(await screen.findByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
@@ -461,7 +461,7 @@ describe('verdicts and `me`', () => {
     marker();
     remember(liveState(), owner);
     mockApi({ me: { login: 'mara-k', avatar: '', canDecide: false } });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     render(<App data={buildData()} />);
     expect(screen.getByText('polarzero')).toBeInTheDocument();
     expect(await screen.findByText('mara-k')).toBeInTheDocument();
@@ -474,7 +474,7 @@ describe('addresses', () => {
   it('hold a named row closed only while nothing is shown and the load is pending', async () => {
     const answer = held<{ status: number; body: unknown }>();
     mockApi({ state: () => answer.promise });
-    history.replaceState(null, '', '/workshop#computers/computers');
+    history.replaceState(null, '', '/workshop#part-b/create');
     render(<App data={buildData()} />);
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'false');
     await act(async () => answer.release(ok(liveState())));
@@ -502,20 +502,20 @@ describe('addresses', () => {
     expect(location.hash).toBe('#suggested/issue-41');
     await act(async () => answer.release(ok(liveState())));
     await waitFor(() => expect(location.hash).toBe(''));
-    expect(part('engine')).toBeInTheDocument();
+    expect(part('part-a')).toBeInTheDocument();
   });
 
   it('opens late beside the row the person opened meanwhile, which stays the current one', async () => {
     let release: (value: { status: number; body: unknown }) => void = () => {};
     mockApi({ state: () => new Promise((resolve) => { release = resolve; }) });
-    history.replaceState(null, '', '/workshop#computers/exec');
+    history.replaceState(null, '', '/workshop#part-b/exec');
     render(<App data={buildData()} />);
     await userEvent.click(rowButton('Create and delete a computer'));
-    expect(location.hash).toBe('#computers/computers');
+    expect(location.hash).toBe('#part-b/create');
     await act(async () => release(ok(liveState())));
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
-    expect(location.hash).toBe('#computers/computers');
+    expect(location.hash).toBe('#part-b/create');
   });
 });
 
@@ -578,20 +578,20 @@ describe('the suggest form', () => {
 describe('the look while waiting', () => {
   it('closes the sign-in tooltip with Escape until the focus leaves, without leaving the place', async () => {
     mockApi();
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     const button = screen.getByRole('link', { name: 'Sign in with GitHub' });
     const wrap = button.closest('.ws-signin-wrap') as HTMLElement;
     act(() => button.focus());
     fireEvent.keyDown(button, { key: 'Escape' });
     expect(wrap).toHaveClass('closed');
-    expect(location.hash).toBe('#computers');
+    expect(location.hash).toBe('#part-b');
     act(() => button.blur());
     await waitFor(() => expect(wrap).not.toHaveClass('closed'));
     fireEvent.pointerEnter(wrap);
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(wrap).toHaveClass('closed');
-    expect(location.hash).toBe('#computers');
+    expect(location.hash).toBe('#part-b');
     fireEvent.pointerLeave(wrap);
     await waitFor(() => expect(wrap).not.toHaveClass('closed'));
     // With the tooltip closed or not shown, Escape goes back as before.

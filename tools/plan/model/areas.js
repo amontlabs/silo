@@ -61,9 +61,6 @@ function listNames(names) {
   return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
-/** Areas whose name reads with "the" in a sentence. */
-const WITH_THE = new Set(['engine']);
-
 /** @param {{ area: { id: string, title: string }, state: AreaState, counts: Counts }[]} groups @returns {string} where the build is, in one line. */
 export function statusLine(groups) {
   const now = groups.filter((group) => group.state === 'now').map((group) => group.area.title);
@@ -72,7 +69,7 @@ export function statusLine(groups) {
   if (now.length) return `Building ${listNames(now)}.${next ? ` ${next.area.title} is next.` : ''}`;
   if (!next) return '';
   if (built) return `${next.area.title} is next.`;
-  return `Starting with ${WITH_THE.has(next.area.id) ? 'the ' : ''}${next.area.title}.`;
+  return `Starting with ${next.area.title}.`;
 }
 
 /** @param {{ state: AreaState, counts: Counts }} group @returns {string} the few words on a part of the map. */

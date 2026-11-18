@@ -3,11 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { buildData } from './fixtures';
-import { notesButton, openEngine, shownNotes } from './test-support';
+import { notesButton, openCore, shownNotes } from './test-support';
 
 describe('notes', () => {
   it('show headings, paragraphs, lists, nested and ordered lists, code and http links once opened', async () => {
-    await openEngine();
+    await openCore();
     await userEvent.click(notesButton());
     expect(notesButton()).toHaveAttribute('aria-expanded', 'true');
     const md = await shownNotes();
@@ -37,7 +37,7 @@ describe('notes', () => {
 describe('links with brackets in their address', () => {
   it('keep one level of brackets inside an http or https address, in notes and in comments', async () => {
     const notes = 'See [Fork](https://en.wikipedia.org/wiki/Fork_(software)) and [b](https://x.test/a_(b)_c), then (aside).';
-    await openEngine(buildData({ notes: { engine: notes } }));
+    await openCore(buildData({ notes: { core: notes } }));
     await userEvent.click(notesButton());
     const md = await shownNotes();
     expect(within(md).getByRole('link', { name: 'Fork' })).toHaveAttribute('href', 'https://en.wikipedia.org/wiki/Fork_(software)');

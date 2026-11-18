@@ -6,7 +6,7 @@ import { App } from './App';
 import type { Comment } from './api';
 import { buildData, FEATURES, historyComment, issue, liveState, SHA } from './fixtures';
 import type { Change, LiveLatest } from './plan';
-import { detail, itemOf, mockApi, notesButton, ok, openEngine, owner, refused, renderApp, rowButton, shownNotes, visitor } from './test-support';
+import { detail, itemOf, mockApi, notesButton, ok, openCore, owner, refused, renderApp, rowButton, shownNotes, visitor } from './test-support';
 import type { Route } from './test-support';
 
 const NOW = Date.parse('2026-11-17T12:00:00Z');
@@ -15,7 +15,7 @@ const change = (fields: string[], extra: Partial<Change> = {}): Change => ({ fie
 const person = (id: number, text: string, createdAt: string): Comment => ({ id, author: 'mara-k', avatar: '', bot: false, createdAt, text });
 describe('notes', () => {
   it('are closed by default, and an entry without notes has no toggle', async () => {
-    await openEngine();
+    await openCore();
     expect(notesButton()).toHaveAttribute('aria-expanded', 'false');
     expect(document.querySelector('.ws-md')).toBeNull();
     await userEvent.click(rowButton('Every call defined once'));
@@ -24,7 +24,7 @@ describe('notes', () => {
 
   it('never turn markup or a script link into elements', async () => {
     const notes = '## Notes\n\nSee <img src=x onerror=alert(1)> and <script>window.hacked=1</script>\n\n[x](javascript:alert(1)) and [y](data:text/html,hi)\n\n- <b>bold</b>\n\n## <i>head</i>\n';
-    await openEngine(buildData({ notes: { engine: notes } }));
+    await openCore(buildData({ notes: { core: notes } }));
     await userEvent.click(notesButton());
     const md = await shownNotes();
     expect(md.querySelector('img, script, b, i')).toBeNull();
@@ -40,9 +40,9 @@ describe('notes', () => {
 describe('the notes chunk', () => {
   it('says so when it cannot load, and is tried again at the next reach', async () => {
     let fail = true;
-    const loadNotes = vi.fn(() => (fail ? Promise.reject(new Error('offline')) : Promise.resolve({ engine: 'Back.' })));
+    const loadNotes = vi.fn(() => (fail ? Promise.reject(new Error('offline')) : Promise.resolve({ core: 'Back.' })));
     mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#engine/engine');
+    history.replaceState(null, '', '/workshop#part-a/core');
     await renderApp(buildData(), loadNotes);
     await waitFor(() => expect(rowButton('The engine runs on its own')).toHaveAttribute('aria-expanded', 'true'));
     await userEvent.click(notesButton());
@@ -59,10 +59,10 @@ describe('the notes chunk', () => {
 });
 
 describe('the line of Notes and Decisions', () => {
-  // `calls` has no notes; one decision is about its area, `engine`.
+  // `calls` has no notes; one decision is about its area, `part-a`.
   const openCalls = async (me: Route) => {
     mockApi({ me: owner, routes: { 'GET me': me } });
-    history.replaceState(null, '', '/workshop#engine/calls');
+    history.replaceState(null, '', '/workshop#part-a/calls');
     render(<App data={buildData()} />);
     await waitFor(() => expect(rowButton('Every call defined once')).toHaveAttribute('aria-expanded', 'true'));
     return itemOf('Every call defined once');
@@ -91,7 +91,7 @@ describe('the line of Notes and Decisions', () => {
   it('is not there for a signed-out visitor on an entry without notes', async () => {
     mockApi();
     document.cookie = 'workshop-hint=; path=/; max-age=0';
-    history.replaceState(null, '', '/workshop#engine/calls');
+    history.replaceState(null, '', '/workshop#part-a/calls');
     await renderApp();
     await waitFor(() => expect(rowButton('Every call defined once')).toHaveAttribute('aria-expanded', 'true'));
     expect(itemOf('Every call defined once').querySelector('.ws-extras')).toBeNull();
@@ -116,7 +116,7 @@ describe('history lines', () => {
   it('show each kind of change in its words, in time order with the comments, and no avatar or reply box of their own', async () => {
     fixedNow();
     mockApi({ me: visitor, routes: withThread() });
-    history.replaceState(null, '', '/workshop#computers/computers');
+    history.replaceState(null, '', '/workshop#part-b/create');
     await renderApp();
     await screen.findByText('Thanks, noted.');
     const talk = itemOf('Create and delete a computer').querySelector('.ws-talk') as HTMLElement;
@@ -159,17 +159,17 @@ describe('history lines', () => {
       if (!String(input).startsWith('https://raw.githubusercontent.com/')) return api(input, init);
       urls.push(String(input));
       const file = files[String(input).split('/')[5]];
-      return file ? new Response(JSON.stringify({ ...file, area: 'computers', needs: [] })) : new Response('', { status: 404 });
+      return file ? new Response(JSON.stringify({ ...file, area: 'part-b', needs: [] })) : new Response('', { status: 404 });
     }));
-    history.replaceState(null, '', '/workshop#computers/computers');
+    history.replaceState(null, '', '/workshop#part-b/create');
     await renderApp();
     const button = await screen.findByRole('button', { name: 'Text changed' });
     expect(urls).toEqual([]);
     await userEvent.click(button);
     expect(await screen.findByText('Before')).toBeInTheDocument();
     expect(urls.sort()).toEqual([
-      `https://raw.githubusercontent.com/amontlabs/silo/${SHA.a}/plan/features/computers.json`,
-      `https://raw.githubusercontent.com/amontlabs/silo/${SHA.b}/plan/features/computers.json`,
+      `https://raw.githubusercontent.com/amontlabs/silo/${SHA.a}/plan/features/create.json`,
+      `https://raw.githubusercontent.com/amontlabs/silo/${SHA.b}/plan/features/create.json`,
     ].sort());
     const diff = document.querySelector('.ws-h-diff') as HTMLElement;
     const [before, after] = [...diff.children] as HTMLElement[];
@@ -186,7 +186,7 @@ describe('history lines', () => {
     mockApi({ routes: withThread(comments) });
     const api = fetch;
     vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => (String(input).startsWith('https://raw.githubusercontent.com/') ? new Response('gone', { status: 404 }) : api(input, init))));
-    history.replaceState(null, '', '/workshop#computers/computers');
+    history.replaceState(null, '', '/workshop#part-b/create');
     await renderApp();
     // The row the address names opens only once the live state is in, after renderApp returns: the thread is
     // taken from the line found in it, not from the row at once.
@@ -219,12 +219,12 @@ describe('history lines', () => {
         }
         return api(input, init);
       }));
-      history.replaceState(null, '', '/workshop#computers/computers');
+      history.replaceState(null, '', '/workshop#part-b/create');
       await renderApp();
       await userEvent.click(await screen.findByRole('button', { name: 'Text changed' }));
       expect(await screen.findByText('Old.')).toBeInTheDocument();
       expect(screen.getByText('New.')).toBeInTheDocument();
-      expect(urls).toContain(`https://raw.example.org/amontlabs/silo/${SHA.b}/plan/features/computers.json`);
+      expect(urls).toContain(`https://raw.example.org/amontlabs/silo/${SHA.b}/plan/features/create.json`);
     } finally {
       meta.remove();
     }
@@ -235,8 +235,8 @@ describe('history lines', () => {
 describe('Latest', () => {
   const at = (hours: number) => new Date(NOW - hours * 3_600_000).toISOString();
   const latest: LiveLatest[] = [
-    { n: 12, entry: 'computers', author: 'mara-k', bot: false, createdAt: at(1), text: 'Keep stop separate.' },
-    { n: 10, entry: 'engine', author: 'silo-workshop[bot]', bot: true, createdAt: at(5), change: change(['verdict'], { verdict: 'take' }) },
+    { n: 12, entry: 'create', author: 'mara-k', bot: false, createdAt: at(1), text: 'Keep stop separate.' },
+    { n: 10, entry: 'core', author: 'silo-workshop[bot]', bot: true, createdAt: at(5), change: change(['verdict'], { verdict: 'take' }) },
     { n: 14, entry: 'fork', author: 'devin-oss', bot: false, createdAt: at(30), text: 'Fork what, exactly?' },
   ];
 
@@ -250,7 +250,7 @@ describe('Latest', () => {
     expect(location.hash).toBe('#latest');
     expect(screen.getByRole('heading', { level: 2, name: 'Latest' })).toHaveFocus();
     const rows = [...document.querySelectorAll<HTMLAnchorElement>('.ws-latest a.ws-row')];
-    expect(rows.map((row) => row.getAttribute('href'))).toEqual(['#computers/computers', '#engine/engine', '#forks/fork']);
+    expect(rows.map((row) => row.getAttribute('href'))).toEqual(['#part-b/create', '#part-a/core', '#part-d/fork']);
     expect(rows.map((row) => row.querySelector('.ws-name')?.textContent)).toEqual([
       'Create and delete a computermara-k: Keep stop separate.',
       'The engine runs on its ownTaken',
@@ -274,7 +274,7 @@ describe('Latest', () => {
     const plain = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
     await act(async () => { link.dispatchEvent(plain); });
     expect(plain.defaultPrevented).toBe(true);
-    await waitFor(() => expect(location.hash).toBe('#engine/engine'));
+    await waitFor(() => expect(location.hash).toBe('#part-a/core'));
   });
 
   it('opens the entry of a row in its area when clicked', async () => {
@@ -283,8 +283,8 @@ describe('Latest', () => {
     history.replaceState(null, '', '/workshop#latest');
     await renderApp();
     await userEvent.click(await screen.findByRole('link', { name: /^The engine runs on its own/ }));
-    expect(location.hash).toBe('#engine/engine');
-    expect(screen.getByRole('heading', { level: 2, name: 'Engine' })).toBeInTheDocument();
+    expect(location.hash).toBe('#part-a/core');
+    expect(screen.getByRole('heading', { level: 2, name: 'Part A' })).toBeInTheDocument();
     await waitFor(() => expect(rowButton('The engine runs on its own')).toHaveAttribute('aria-expanded', 'true'));
   });
 
@@ -304,31 +304,31 @@ describe('Latest', () => {
 
 describe('decisions from the plan', () => {
   it('show on an open entry, to the owner only, those that name its area', async () => {
-    await openEngine();
+    await openCore();
     const toggle = screen.getByRole('button', { name: 'Decisions · 1' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('The engine is written in Zig. It is the core piece.')).not.toBeInTheDocument();
+    expect(screen.queryByText('The core is written in Zig. It is the core piece.')).not.toBeInTheDocument();
     await userEvent.click(toggle);
-    expect(screen.getByText('The engine is written in Zig. It is the core piece.')).toBeInTheDocument();
+    expect(screen.getByText('The core is written in Zig. It is the core piece.')).toBeInTheDocument();
     expect(screen.queryByText('Security is built properly. It is not the focus yet.')).not.toBeInTheDocument();
     // Notes and decisions open one at a time, beside each other.
     await userEvent.click(notesButton());
-    expect(screen.queryByText('The engine is written in Zig. It is the core piece.')).not.toBeInTheDocument();
+    expect(screen.queryByText('The core is written in Zig. It is the core piece.')).not.toBeInTheDocument();
     await shownNotes();
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    // `calls` is in the area `engine` too.
+    // `calls` is in the area `part-a` too.
     await userEvent.click(rowButton('Every call defined once'));
     expect(within(itemOf('Every call defined once')).getByRole('button', { name: 'Decisions · 1' })).toBeInTheDocument();
   });
 
   it('are not offered on an entry nothing is about, nor to a visitor', async () => {
     mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#computers/exec');
+    history.replaceState(null, '', '/workshop#part-b/exec');
     const first = await renderApp();
     await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
     expect(screen.queryByRole('button', { name: /^Decisions/ })).not.toBeInTheDocument();
     first.unmount();
-    await openEngine(buildData(), visitor);
+    await openCore(buildData(), visitor);
     expect(notesButton()).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Decisions/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/It is the core piece/)).not.toBeInTheDocument();
@@ -340,7 +340,7 @@ describe('the status of an entry', () => {
 
   it('is built when the file says so, whatever the live verdict label says', async () => {
     mockApi({ state: () => ok(liveState({ 14: issue({ entry: 'fork', verdict: 'later', title: 'Fork a computer' }) })) });
-    history.replaceState(null, '', '/workshop#forks/fork');
+    history.replaceState(null, '', '/workshop#part-d/fork');
     await renderApp(built('fork'));
     await waitFor(() => expect(rowButton('Fork a computer')).toHaveAttribute('aria-expanded', 'true'));
     expect(within(itemOf('Fork a computer')).getByText('built')).toBeInTheDocument();

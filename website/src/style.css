@@ -5,7 +5,7 @@
   flex: 1 0 auto;
 }
 
-/* The Workshop, under the hero: its name, where Silo stands, and the way in. The whole row is the link. */
+/* The Workshop, first on the page: its name, what it is, and the way in. The whole row is the link. */
 .strip {
   display: flex;
   align-items: center;

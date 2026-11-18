@@ -4,6 +4,7 @@ import { areaGroups, featureStatus } from '../../../tools/plan/model/index.js';
 import type { Change } from '../../../tools/plan/model/markers.js';
 import type { Counts } from '../../../tools/plan/model/areas.js';
 import type { Status, Verdict } from '../../../tools/plan/model/status.js';
+import type { MapLayout } from './map';
 
 export { countRows, statusLine, stateWords, VERDICTS } from '../../../tools/plan/model/index.js';
 export type { Change, Counts, Status, Verdict };
@@ -55,6 +56,8 @@ export interface BuildData {
   stages: Stage[];
   /** Newest first. */
   decisions: Decision[];
+  /** Where the areas sit on the map: Silo's own (map.ts), or the example the tests draw. */
+  map: MapLayout;
 }
 
 export interface LiveIssue {

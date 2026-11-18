@@ -1,10 +1,11 @@
 // The markup the build writes into the page (prerender.tsx) and the script's takeover of it (takeover.ts).
-import { StrictMode } from 'react';
+import { StrictMode, act } from 'react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { Boundary } from './Boundary';
-import { buildData } from './fixtures';
+import { buildDataFrom } from './data';
+import { buildData, emptyPlanFiles } from './fixtures';
 import { prerender } from './prerender';
 import { takeOver } from './takeover';
 import { mockApi, owner } from './test-support';
@@ -49,9 +50,9 @@ const workshop = (data: ReturnType<typeof buildData>, slot: Element | null): Rea
   </StrictMode>
 );
 
-let unmount: (() => void) | null = null;
-afterEach(() => {
-  unmount?.();
+let unmount: (() => Promise<void>) | null = null;
+afterEach(async () => {
+  await unmount?.();
   unmount = null;
   document.body.innerHTML = '';
   document.documentElement.classList.remove('ws-hold', 'ws-bare');
@@ -59,17 +60,25 @@ afterEach(() => {
 
 /** Takes over the page; what the takeover leaves is read before anything else runs. */
 function take(root: HTMLElement, slot: Element | null, node: ReactNode) {
-  takeOver(root, slot, node);
+  const react = takeOver(root, slot, node);
   const seen = { root: root.innerHTML, slot: slot?.innerHTML ?? '' };
-  // React keeps its root on the container; emptying the body is enough to forget it between tests.
-  unmount = () => { document.body.innerHTML = ''; };
+  // The takeover renders outside act, so React leaves the work it schedules (effects, updates from answers) to its
+  // scheduler, which runs it on a later turn of the event loop. Left pending at the end of the file, that work runs
+  // after the test environment has removed `window` and fails the run: the test unmounts, then lets it run.
+  unmount = async () => {
+    act(() => react.unmount());
+    await new Promise((done) => setTimeout(done, 0));
+  };
   return seen;
 }
 
 describe('the prerendered Workshop', () => {
-  it('is what the script renders first on a first visit without a session at the plain address', () => {
+  it.each([
+    ['a plan with parts', buildData],
+    ['a plan with no part', () => buildDataFrom(emptyPlanFiles())],
+  ])('is what the script renders first on a first visit without a session at the plain address, for %s', (_, plan) => {
     mockApi({ state: () => new Promise(() => {}) });
-    const data = buildData();
+    const data = plan();
     const { parts, root, slot } = page(data);
     const seen = take(root, slot, workshop(data, slot));
     expect(normal(seen.root)).toBe(normal(parts.root));

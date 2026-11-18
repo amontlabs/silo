@@ -19,9 +19,8 @@ Vite. It has two pages:
   its entries, votes, comments, suggestions and the owner's verdicts. Anyone
   signed in with GitHub can vote, comment and suggest a feature, and the owner
   decides each entry there. Its API lives under `/api/workshop/` (`server/`,
-  `api/`). While the plan holds no part, as now that it is being rewritten
-  from `plan/DESIGN.md`, the page shows that instead, with links to the design
-  and to the earlier plan (the tag `plan-2026-11-18`).
+  `api/`). While the plan holds no part, it is the same page with nothing in
+  it: the map says "No part yet." and the lists are empty.
 
 Shared files: `src/site.css` (tokens, the gutter, the frame and its diamonds,
 the header, buttons, the theme switch and the drawn arrow and check icons),
@@ -74,8 +73,7 @@ and resets on restart.
 
 `--fake --progress` seeds a later state instead: the entries of the first six
 stages carry the verdict of their file, else the one suggested for them, the
-first two taken are being built (a topic of Groundwork never is, so that area
-always shows as next), and the thread of each decided entry holds the
+first two taken are being built, and the thread of each decided entry holds the
 bot's history comments of every kind beside people's comments over the last
 days. Nothing shows as built that the file does not say is built (the page
 reads `built` from the file), and every history line agrees with the state the
@@ -158,14 +156,14 @@ secondary rate limits, locked issues, and a hook that delays or fails any call.
 React and TypeScript. At build time the `workshopData` plugin of `website/vite.config.ts`
 reads `plan/` with `tools/plan/read` and checks it with `tools/plan/check`
 (`data.ts`); any error of `plan check`, and an area with no feature, stops the
-build with the file, the field and the fix. `map.ts` holds the drawing: where each
-area sits on the full map and on the folded one, and the wires. The build also
-stops when an area has no place there or the drawing places an unknown area; a
-new area needs a box in both tables. A plan with no area draws no map, so the
-drawing is not checked against it: the page (`EmptyPlan` in `App.tsx`) says
-the plan is being rewritten, reads nothing live, and offers no sign-in, vote or
-suggestion. The build then leaves the header's account slot empty and
-unmarked.
+build with the file, the field and the fix. `map.ts` holds the drawing
+(`SILO_MAP`): where each area sits on the full map and on the folded one, the
+zones, the text that is not a part, and the wires. The build also stops when an
+area has no place there or the drawing places, wires or stacks a copy behind an
+unknown area; a new area needs a box on both maps. The plan holds no area yet,
+so `SILO_MAP` is empty. `map-example.ts` is a made-up layout of five parts that
+shows every kind of thing a layout can hold; the tests draw their fixture plan
+(`fixtures.ts`) with it, and the page never shows it.
 
 `npm run build` then runs `scripts/prerender.mjs`, which renders the plain
 address `/workshop` (`src/workshop/prerender.tsx`: nothing remembered, nobody

@@ -14,15 +14,15 @@ type Display = 'undecided' | 'planned' | 'later' | 'dropped' | 'saving';
 type Sent = { n: number; verdict: Verdict; resolve: (status: number) => void };
 
 const ISSUE_OF: Record<string, number> = {
-  'entry-engine': 10, 'entry-calls': 11, 'entry-computers': 12, 'entry-exec': 13, 'entry-fork': 14,
-  'entry-shells': 15, 'entry-devices': 16, 'entry-reviewer': 17, 'issue-30': 30, 'issue-31': 31,
+  'entry-core': 10, 'entry-calls': 11, 'entry-create': 12, 'entry-exec': 13, 'entry-fork': 14,
+  'entry-shells': 15, 'entry-linux': 16, 'entry-reviewer': 17, 'issue-30': 30, 'issue-31': 31,
 };
 const FILE: Record<number, Verdict | null> = { 10: 'take', 11: 'take', 15: 'take', 17: 'drop' };
 const LIVE: Record<number, Verdict | null> = { 10: 'take', 15: 'take' };
 /** Entries in an area that wait for a verdict: no file verdict, no live one. */
 const IN_AREAS = [12, 13, 14, 16];
-// Computers holds the two entries that can be open together and still wait for a verdict, so it comes up more often.
-const PLACES = ['#computers', '#computers', '#computers', '#forks', '#devices', '#engine', '#setup', '#left', '#suggested', '#decisions', '#latest', ''];
+// Part B holds the two entries that can be open together and still wait for a verdict, so it comes up more often.
+const PLACES = ['#part-b', '#part-b', '#part-b', '#part-d', '#part-e', '#part-a', '#part-c', '#left', '#suggested', '#decisions', '#latest', ''];
 
 function random(seed: number) {
   let a = seed;
@@ -56,7 +56,7 @@ async function run(seed: number): Promise<number> {
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   document.cookie = 'workshop-hint=1; path=/';
   localStorage.clear();
-  history.replaceState(null, '', '/workshop#computers');
+  history.replaceState(null, '', '/workshop#part-b');
   const sent: Sent[] = [];
   const inFlight: Sent[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {

@@ -11,7 +11,7 @@ describe('comments that arrive late', () => {
   it('hold one place per expected comment while loading, with no loading line, and load on hover', async () => {
     let release: () => void = () => {};
     const calls = mockApi({ routes: { 'GET issue': (url) => new Promise((resolve) => { release = () => resolve(ok(detail(Number(url.searchParams.get('n')), { comments: [1, 2].map((id) => ({ id, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-14T10:00:00Z', text: `Comment ${id}.` })) }))); }) } });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     fireEvent.pointerEnter(rowButton('Create and delete a computer'));
     expect(calls.filter((call) => call.path === 'issue')).toHaveLength(1);
@@ -30,7 +30,7 @@ describe('comments that arrive late', () => {
     let fail = true;
     const calls = mockApi({ routes: { 'GET issue': (url) => (fail ? refused(502, 'GitHub failed.') : ok(detail(Number(url.searchParams.get('n'))))) } });
     const time = clock();
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     const fetches = () => calls.filter((call) => call.path === 'issue').length;
     await userEvent.click(rowButton('Run a command'));
@@ -53,7 +53,7 @@ describe('a failed early fetch', () => {
   it('shows held places, not the error, while the opening tries again', async () => {
     let calls = 0;
     mockApi({ routes: { 'GET issue': (url) => { calls += 1; return calls === 1 ? refused(502, 'GitHub failed.') : new Promise(() => detail(Number(url.searchParams.get('n')))); } } });
-    history.replaceState(null, '', '/workshop#computers');
+    history.replaceState(null, '', '/workshop#part-b');
     await renderApp();
     fireEvent.pointerEnter(rowButton('Create and delete a computer'));
     await waitFor(() => expect(calls).toBe(1));
@@ -115,7 +115,7 @@ describe('an opening panel', () => {
           },
         },
       });
-      history.replaceState(null, '', '/workshop#computers');
+      history.replaceState(null, '', '/workshop#part-b');
       await renderApp();
       if (mode === 'cached' || mode === 'failed then retried') {
         fireEvent.pointerEnter(rowButton(name));

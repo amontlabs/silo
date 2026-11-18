@@ -18,7 +18,7 @@ type Move =
 type Step = Move & { after: number };
 type Config = { motion: boolean; wide: boolean; mode: Mode };
 
-const AREAS = ['computers', 'forks', 'engine', 'devices'];
+const AREAS = ['part-b', 'part-d', 'part-a', 'part-e'];
 /** Milliseconds between two moves: none, a few, and around the lengths of the page's own animations. */
 const GAPS = [0, 3, 20, 60, 130, 140, 200, 500];
 
@@ -136,20 +136,20 @@ describe('moves between places', () => {
   const open = (area: string, after = 0): Step => ({ kind: 'open', area, after });
   const view = (to: 'map' | 'order', after = 0): Step => ({ kind: 'view', to, after });
   const named: [string, Step[]][] = [
-    ['a part clicked while the view swaps', [view('order'), open('forks')]],
-    ['a part, then another after the first has landed', [open('computers', 600), open('forks', 600), view('order', 600), view('map')]],
-    ['the full map taken again and again', [open('computers', 600), { kind: 'full-map', after: 600 }, open('forks', 400), { kind: 'full-map', after: 0 }, open('engine'), { kind: 'full-map', after: 0 }, open('devices', 20)]],
-    ['a second move while the first waits for its view transition', [open('engine'), open('computers', 10), { kind: 'escape', after: 10 }, open('forks', 0)]],
-    ['an address that is followed while a view transition waits', [open('engine'), { kind: 'address', area: 'computers', after: 5 }]],
-    ['Escape and Back after a view', [open('computers', 600), view('order', 600), { kind: 'escape', after: 600 }, { kind: 'back', after: 600 }, view('map', 0), { kind: 'back', after: 0 }]],
-    ['Order and a tile while the map unfolds', [open('computers', 600), { kind: 'full-map', after: 0 }, view('order', 135), open('forks')]],
-    ['Back to an entry without the view', [open('computers', 600), view('order', 600), { kind: 'back', after: 600 }]],
-    ['Back to an entry without the view, then Order', [open('computers', 600), view('order', 600), { kind: 'back', after: 600 }, view('order', 600)]],
-    ['Back while the view swaps', [open('computers', 600), view('order', 20), { kind: 'back', after: 600 }]],
-    ['the area being left opened again while the map unfolds', [open('computers', 600), { kind: 'full-map', after: 60 }, open('computers', 600)]],
-    ['the area being left opened again at once', [open('computers', 600), { kind: 'escape', after: 10 }, open('computers', 600)]],
-    ['Escape again while the map unfolds', [open('computers', 600), { kind: 'escape', after: 100 }, { kind: 'escape', after: 60 }]],
-    ['Escape again while the view transition waits', [open('computers', 600), { kind: 'escape', after: 20 }, { kind: 'escape', after: 20 }]],
+    ['a part clicked while the view swaps', [view('order'), open('part-d')]],
+    ['a part, then another after the first has landed', [open('part-b', 600), open('part-d', 600), view('order', 600), view('map')]],
+    ['the full map taken again and again', [open('part-b', 600), { kind: 'full-map', after: 600 }, open('part-d', 400), { kind: 'full-map', after: 0 }, open('part-a'), { kind: 'full-map', after: 0 }, open('part-e', 20)]],
+    ['a second move while the first waits for its view transition', [open('part-a'), open('part-b', 10), { kind: 'escape', after: 10 }, open('part-d', 0)]],
+    ['an address that is followed while a view transition waits', [open('part-a'), { kind: 'address', area: 'part-b', after: 5 }]],
+    ['Escape and Back after a view', [open('part-b', 600), view('order', 600), { kind: 'escape', after: 600 }, { kind: 'back', after: 600 }, view('map', 0), { kind: 'back', after: 0 }]],
+    ['Order and a tile while the map unfolds', [open('part-b', 600), { kind: 'full-map', after: 0 }, view('order', 135), open('part-d')]],
+    ['Back to an entry without the view', [open('part-b', 600), view('order', 600), { kind: 'back', after: 600 }]],
+    ['Back to an entry without the view, then Order', [open('part-b', 600), view('order', 600), { kind: 'back', after: 600 }, view('order', 600)]],
+    ['Back while the view swaps', [open('part-b', 600), view('order', 20), { kind: 'back', after: 600 }]],
+    ['the area being left opened again while the map unfolds', [open('part-b', 600), { kind: 'full-map', after: 60 }, open('part-b', 600)]],
+    ['the area being left opened again at once', [open('part-b', 600), { kind: 'escape', after: 10 }, open('part-b', 600)]],
+    ['Escape again while the map unfolds', [open('part-b', 600), { kind: 'escape', after: 100 }, { kind: 'escape', after: 60 }]],
+    ['Escape again while the view transition waits', [open('part-b', 600), { kind: 'escape', after: 20 }, { kind: 'escape', after: 20 }]],
   ];
   const handWritten = new Set(named.map(([name]) => name));
   const configs: Config[] = [true, false].flatMap((motion) => [true, false].flatMap((wide) => (['finishing', 'failing', 'absent'] as Mode[]).map((mode) => ({ motion, wide, mode }))));
@@ -163,8 +163,8 @@ describe('moves between places', () => {
     const rest: Record<string, string[]> = {
       'full-map map': await atRest('', ''),
       'full-map order': await atRest('', '?view=order'),
-      'area map': await atRest('#computers', ''),
-      'area order': await atRest('#computers', '?view=order'),
+      'area map': await atRest('#part-b', ''),
+      'area order': await atRest('#part-b', '?view=order'),
     };
     const moving = new Set<string>();
     try {
@@ -310,17 +310,17 @@ describe('Back, Forward and Escape', () => {
   it('moves the focus out of the view that Back or Forward hides, to the same area in the one shown', async () => {
     screenOf({ motion: false, wide: true, mode: 'absent' });
     await mount();
-    act(() => { fireEvent.click(part('computers')); });
+    act(() => { fireEvent.click(part('part-b')); });
     act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
-    act(() => tile('computers').focus());
+    act(() => tile('part-b').focus());
     act(() => history.back());
     await elapse(1);
     expect(shownView()).toBe('map');
-    expect(document.activeElement).toBe(part('computers'));
+    expect(document.activeElement).toBe(part('part-b'));
     act(() => history.forward());
     await elapse(1);
     expect(shownView()).toBe('order');
-    expect(document.activeElement).toBe(tile('computers'));
+    expect(document.activeElement).toBe(tile('part-b'));
     // A tile with no part on the map: the title takes the focus.
     act(() => tile('suggested').focus());
     act(() => history.back());
@@ -341,7 +341,7 @@ describe('Back, Forward and Escape', () => {
     await mount();
     const title = () => screen.getByRole('heading', { level: 1, name: 'Workshop' });
     // The full map in Map, an area in Order, then the full map again in Order.
-    act(() => { fireEvent.click(part('computers')); });
+    act(() => { fireEvent.click(part('part-b')); });
     act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
     act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
     await elapse(1);
@@ -366,7 +366,7 @@ describe('Back, Forward and Escape', () => {
     act(() => screen.getByRole('link', { name: 'Latest' }).focus());
     act(() => history.forward());
     await elapse(1);
-    expect(location.hash).toBe('#computers');
+    expect(location.hash).toBe('#part-b');
     expect(document.activeElement).toBe(title());
   });
 
@@ -376,7 +376,7 @@ describe('Back, Forward and Escape', () => {
     await mount();
     // An entry the page has not seen yet, then an area opened over it.
     act(() => { history.pushState(null, '', '/workshop#suggested/issue-999999'); });
-    act(() => { fireEvent.click(part('computers')); });
+    act(() => { fireEvent.click(part('part-b')); });
     await elapse(600);
     act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
     await elapse(20);
@@ -391,9 +391,9 @@ describe('Back, Forward and Escape', () => {
   it('goes back once for a held Escape', async () => {
     screenOf({ motion: false, wide: true, mode: 'absent' });
     await mount();
-    act(() => { fireEvent.click(part('computers')); });
+    act(() => { fireEvent.click(part('part-b')); });
     act(() => { fireEvent.keyDown(document.body, { key: 'Escape', repeat: true }); });
-    expect(shownArea()).toBe('computers');
+    expect(shownArea()).toBe('part-b');
     act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
     expect(shownArea()).toBe('');
   });
@@ -418,7 +418,7 @@ describe('a tap during a view transition', () => {
     const run = transitions();
     const calls = mockApi({ me: owner });
     await renderApp();
-    await userEvent.click(tile('computers'));
+    await userEvent.click(tile('part-b'));
     // A pan that starts on the transition's picture: the browser sends pointercancel, no pointerup.
     act(() => { fireEvent.pointerDown(document.documentElement, { pointerType: 'touch' }); fireEvent.pointerCancel(document.documentElement, { pointerType: 'touch' }); });
     act(() => run());
@@ -435,7 +435,7 @@ describe('a tap during a view transition', () => {
     const run = transitions();
     mockApi();
     await renderApp();
-    await userEvent.click(tile('engine'));
+    await userEvent.click(tile('part-a'));
     act(() => run());
     const row = rowButton('The engine runs on its own');
     act(() => { fireEvent.pointerDown(document.documentElement, { button: 2 }); fireEvent.pointerUp(row, { button: 2 }); });

@@ -175,37 +175,7 @@ function SignIn({ href }: { href: string }) {
 const initialView = (): View => (typeof location !== 'undefined' && new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
 const address = (hash = '') => `${location.pathname}${location.search}${hash}`;
 
-const DESIGN = 'https://github.com/amontlabs/silo/blob/main/plan/DESIGN.md';
-const EARLIER_PLAN = 'https://github.com/amontlabs/silo/tree/plan-2026-11-18/plan';
-
-/**
- * The page while the plan holds no part: what is going on and where to read, in place of the map and the lists. It
- * reads nothing live and offers no sign-in, vote or suggestion, since there is nothing to attach them to.
- */
-export function EmptyPlan() {
-  return (
-    <div className="ws ws-blank">
-      <section className="ws-top">
-        <div className="ws-head">
-          <h1>Workshop</h1>
-          <p className="ws-status">The plan is being rewritten from a new design, one part at a time.</p>
-        </div>
-      </section>
-      <div className="ws-blank-body">
-        <p>Parts appear here as the owner settles them.</p>
-        <p><a className="ws-blank-link" href={DESIGN}>Read the design</a></p>
-        <p className="ws-quiet">The earlier plan is kept at the tag <a href={EARLIER_PLAN}>plan-2026-11-18</a>.</p>
-      </div>
-    </div>
-  );
-}
-
-/** The Workshop for this plan: the map and the lists, or, while the plan holds no part, what replaces them. */
-export function App(props: AppProps) {
-  return props.data.areas.length ? <PlanApp {...props} /> : <EmptyPlan />;
-}
-
-function PlanApp({ data, loadNotes = noNotes, accountSlot }: AppProps) {
+export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const [place, setPlace] = useState<Place>(HOME);
   // Rows open independently; `openKey` is the one opened last: the address, Enter and the guard follow it.
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -833,7 +803,7 @@ function PlanApp({ data, loadNotes = noNotes, accountSlot }: AppProps) {
           </div>
         </section>
         <div className="ws-swap ws-swap-map">
-          <MapView groups={plan.areas} folded={!isHome && !leaving} current={current} toDecide={toDecide} onOpen={(area) => openPlace({ kind: 'area', area })} />
+          <MapView layout={data.map} groups={plan.areas} folded={!isHome && !leaving} current={current} toDecide={toDecide} onOpen={(area) => openPlace({ kind: 'area', area })} />
         </div>
         <div className="ws-swap ws-swap-order">
           <Tiles groups={plan.areas} current={current} toDecide={toDecide} suggested={suggested} onOpen={(area) => openPlace({ kind: 'area', area })} onSuggest={() => openPlace({ kind: 'suggested' })} />
