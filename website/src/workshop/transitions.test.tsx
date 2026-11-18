@@ -334,16 +334,40 @@ describe('Back, Forward and Escape', () => {
     await elapse(1);
     expect(shownView()).toBe('order');
     expect(document.activeElement).toBe(order);
-    // "Suggest a feature" under the map is hidden in Order too: its focus goes to the title.
-    act(() => history.back());
+  });
+
+  it('gives the title the focus of a link under the map that Back or Forward hides or takes away', async () => {
+    screenOf({ motion: false, wide: true, mode: 'absent' });
+    await mount();
+    const title = () => screen.getByRole('heading', { level: 1, name: 'Workshop' });
+    // The full map in Map, an area in Order, then the full map again in Order.
+    act(() => { fireEvent.click(part('computers')); });
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    await elapse(1);
+    expect(location.hash).toBe('');
+    expect(shownView()).toBe('order');
+    // Back to the full map in Map, then Forward to the full map in Order: Order hides "Suggest a feature".
+    act(() => history.go(-2));
     await elapse(1);
     expect(shownView()).toBe('map');
-    const suggest = screen.getByRole('link', { name: 'Suggest a feature' });
-    act(() => suggest.focus());
+    act(() => screen.getByRole('link', { name: 'Suggest a feature' }).focus());
+    act(() => history.go(2));
+    await elapse(1);
+    expect(location.hash).toBe('');
+    expect(shownView()).toBe('order');
+    expect(document.activeElement).toBe(title());
+    // Back to the full map in Map with the focus on Latest; Forward to the area takes the links under the map off the
+    // page.
+    act(() => history.go(-2));
+    await elapse(1);
+    expect(location.hash).toBe('');
+    expect(shownView()).toBe('map');
+    act(() => screen.getByRole('link', { name: 'Latest' }).focus());
     act(() => history.forward());
     await elapse(1);
-    expect(shownView()).toBe('order');
-    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Workshop' }));
+    expect(location.hash).toBe('#computers');
+    expect(document.activeElement).toBe(title());
   });
 
   it('drops a going-back when Back leads to an address that is not known yet', async () => {

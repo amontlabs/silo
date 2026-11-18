@@ -213,6 +213,9 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const goingBack = useRef(-1);
   /** The control to focus once Back or Forward has shown the other view, when the focus was in the one hidden. */
   const viewFocus = useRef<string | null>(null);
+  // A link under the map that held the focus when Back or Forward moved: if the move takes it off the page, the title
+  // takes the focus.
+  const underFocus = useRef<Element | null>(null);
   // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
@@ -542,6 +545,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       const hidden = document.querySelector(`.ws-swap-${viewRef.current}`);
       const focused = document.activeElement;
       const hides = !!focused && (!!hidden?.contains(focused) || (next === 'order' && focused.matches('.ws-under .ws-suggest')));
+      underFocus.current = focused?.closest('.ws-under') ? focused : null;
       if (next !== viewRef.current && wide() && focused && hides) {
         const area = focused.closest<HTMLElement>('[data-part], [data-area]');
         const id = area?.dataset.part ?? area?.dataset.area;
@@ -590,8 +594,12 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     }
   }, [place, live.load, w.meKnown, canDecide]);
 
-  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown.
+  // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown; a link
+  // under the map that the move took off the page hands the focus to the title.
   useLayoutEffect(() => {
+    const under = underFocus.current;
+    underFocus.current = null;
+    if (under && !under.isConnected && viewFocus.current === null) viewFocus.current = '';
     const selector = viewFocus.current;
     if (selector === null) return;
     viewFocus.current = null;
