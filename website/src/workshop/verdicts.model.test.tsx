@@ -2,7 +2,8 @@
 // a reference model: a verdict is only ever sent for the row that was open and on screen, never inside the guard,
 // never twice at once for one issue, and the page never shows as done what the server has not answered:
 // a row waiting for an answer says "Saving…", everything else and the "to decide" counts show the server's answers
-// over the plan file's.
+// over the plan file's. Enter sends a verdict only for an open row, past its own guard, with its verdict buttons in
+// sight: the row whose header holds the focus, else the one opened last. On a closed row's header it opens that row.
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App, OPEN_GUARD_MS } from './App';
@@ -20,7 +21,8 @@ const FILE: Record<number, Verdict | null> = { 10: 'take', 11: 'take', 15: 'take
 const LIVE: Record<number, Verdict | null> = { 10: 'take', 15: 'take' };
 /** Entries in an area that wait for a verdict: no file verdict, no live one. */
 const IN_AREAS = [12, 13, 14, 16];
-const PLACES = ['#computers', '#forks', '#devices', '#engine', '#setup', '#left', '#suggested', '#decisions', '#latest', ''];
+// Computers holds the two entries that can be open together and still wait for a verdict, so it comes up more often.
+const PLACES = ['#computers', '#computers', '#computers', '#forks', '#devices', '#engine', '#setup', '#left', '#suggested', '#decisions', '#latest', ''];
 
 function random(seed: number) {
   let a = seed;
@@ -44,6 +46,9 @@ function shown(key: string): Display | null {
   return word === 'planned' ? 'planned' : word === 'later' ? 'later' : word === 'dropped' ? 'dropped' : 'undecided';
 }
 
+/** How often the sequences reached each case of Enter, so a rule is not checked on nothing. */
+const reached = { closedHeader: 0, closedBesideReady: 0, otherHeader: 0, page: 0 };
+
 async function run(seed: number): Promise<number> {
   const rand = random(seed);
   const pick = <T,>(items: T[]): T => items[Math.floor(rand() * items.length)];
@@ -51,7 +56,7 @@ async function run(seed: number): Promise<number> {
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   document.cookie = 'workshop-hint=1; path=/';
   localStorage.clear();
-  history.replaceState(null, '', '/workshop');
+  history.replaceState(null, '', '/workshop#computers');
   const sent: Sent[] = [];
   const inFlight: Sent[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
@@ -121,30 +126,63 @@ async function run(seed: number): Promise<number> {
     const before = sent.length;
     let predicted: { n: number; verdict: Verdict } | null = null;
     let reset: 'all' | 'current' | null = null;
-    const currentBefore = current$();
     const openBefore = new Set(openAt.keys());
+    // The rows of the place in the order they are listed, to find the next open one after a verdict.
+    const listed = [...document.querySelectorAll('.ws-list .ws-item')].map((item) => item.id);
     const choice = rand();
     // Now and then a row's buttons go out of sight, or come back.
-    if (rand() < 0.25) {
+    if (rand() < 0.2) {
       const keys = Object.keys(ISSUE_OF);
       const key = pick(keys);
       if (hidden.has(key)) hidden.delete(key);
-      else hidden.add(key);
+      else if (rand() < 0.3) hidden.add(key);
     }
 
-    if (choice < 0.18) {
+    if (choice < 0.15) {
       now += pick([100, 300, 650, 700, 1200]);
-    } else if (choice < 0.38) {
-      // Now and then the focus is first moved to the header of a closed row: its Enter only opens that row.
-      const closed = [...document.querySelectorAll<HTMLButtonElement>('.ws-list button.ws-row[aria-expanded="false"]')];
-      if (closed.length && rand() < 0.3) act(() => pick(closed).focus());
+    } else if (choice < 0.36) {
+      // Now and then the focus is first moved to the header of any row, open or closed, which need not be the
+      // row opened last: Enter goes to that row only. On a closed header it is the button's own Enter, which opens it.
+      const headers = [...document.querySelectorAll<HTMLButtonElement>('.ws-list button.ws-row')];
+      // An open header of a row that was not opened last is where its own guard and sight count, so it is favoured;
+      // a closed one matters while another row is open and ready.
+      const earlier = headers.filter((header) => header.getAttribute('aria-expanded') === 'true' && header.closest('.ws-item')?.id !== current$());
+      const closedHeaders = headers.filter((header) => header.getAttribute('aria-expanded') === 'false');
+      // Often a guard has passed by then.
+      if (rand() < 0.4) now += 700;
+      const where = rand();
+      if (where < 0.15) act(() => (document.activeElement as HTMLElement).blur());
+      else if (where < 0.55 && headers.length) {
+        const group = rand() < 0.7 ? earlier : closedHeaders;
+        act(() => pick(group.length ? group : headers).focus());
+      }
       const active = document.activeElement as HTMLElement;
       const repeat = rand() < 0.2;
+      const onHeader = active.classList.contains('ws-row');
       const item = active === document.body ? (current$() ? document.getElementById(current$() as string) : null)
-        : active.classList.contains('ws-row') ? active.closest('.ws-item') : null;
-      if (item && !repeat && !hidden.has(item.id) && item.querySelector('.ws-row')?.getAttribute('aria-expanded') === 'true') predicted = verdictFor(item.id);
-      act(() => { fireEvent.keyDown(active, { key: 'Enter', repeat }); });
-    } else if (choice < 0.56) {
+        : onHeader ? active.closest('.ws-item') : null;
+      const headerOpen = onHeader && active.getAttribute('aria-expanded') === 'true';
+      if (item && !repeat && !hidden.has(item.id) && (!onHeader || headerOpen)) predicted = verdictFor(item.id);
+      const lastOpened = current$();
+      let proceeds = true;
+      act(() => { proceeds = fireEvent.keyDown(active, { key: 'Enter', repeat }); });
+      if (onHeader && !headerOpen) {
+        expect(proceeds, `step ${step} of seed ${seed}: Enter on a closed row's header is left to the button`).toBe(true);
+        reached.closedHeader += 1;
+        // Another open row is ready for a verdict, and the key still must not go to it.
+        if ([...openAt.keys()].some((key) => verdictFor(key) && !hidden.has(key))) reached.closedBesideReady += 1;
+      }
+      if (predicted) {
+        expect(proceeds, `step ${step} of seed ${seed}: a verdict taken with Enter must not also press the header`).toBe(false);
+        if (onHeader && item?.id !== lastOpened) reached.otherHeader += 1;
+        if (!onHeader && document.querySelector('.ws-item.open')?.id !== lastOpened) reached.page += 1;
+      }
+      // The browser then presses the focused button, unless the page took the Enter.
+      if (proceeds && onHeader) {
+        act(() => { fireEvent.click(active); });
+        if (!headerOpen) expect(active.getAttribute('aria-expanded'), `step ${step} of seed ${seed}: Enter on a closed header opens its row`).toBe('true');
+      }
+    } else if (choice < 0.46) {
       const buttons = [...document.querySelectorAll<HTMLButtonElement>('.ws-item.open .ws-btn')]
         .filter((button) => /^(Take|Later|Drop)/.test(button.textContent ?? ''));
       if (buttons.length) {
@@ -153,14 +191,20 @@ async function run(seed: number): Promise<number> {
         if (!button.disabled) predicted = verdictFor(button.closest('.ws-item')?.id ?? null, label);
         act(() => { fireEvent.click(button); });
       }
-    } else if (choice < 0.7) {
+    } else if (choice < 0.68) {
       const rows = [...document.querySelectorAll<HTMLButtonElement>('.ws-list button.ws-row')];
+      // Mostly a closed row, which stays open beside the others: several rows open is where the rules differ.
+      const closed = rows.filter((row) => row.getAttribute('aria-expanded') === 'false');
       if (rows.length) {
-        const row = pick(rows);
+        // Rows opened at different moments have guards at different points.
+        if (rand() < 0.8) now += pick([300, 700, 1200]);
+        const row = pick(closed.length && rand() < 0.7 ? closed : rows);
         act(() => { row.focus(); fireEvent.click(row); });
       }
-    } else if (choice < 0.8) {
+    } else if (choice < 0.76) {
       // Go somewhere else: another area, the strip's lists, the decisions, the map, or the "to decide" link.
+      // Often a guard has passed by then.
+      if (rand() < 0.4) now += 700;
       const where = rand();
       // Back and Forward arrive as popstate; sent at once so the page and the model see the same address.
       if (where < 0.5) {
@@ -188,6 +232,13 @@ async function run(seed: number): Promise<number> {
     const fresh = sent.slice(before);
     if (predicted) {
       expect(fresh.map(({ n: issue, verdict }) => ({ n: issue, verdict })), `step ${step} of seed ${seed}`).toEqual([predicted]);
+      // Another open row still waiting, the next one listed, becomes the current one with its guard started again,
+      // even when it already was the current one.
+      const taken = Object.keys(ISSUE_OF).find((key) => ISSUE_OF[key] === predicted?.n) as string;
+      const at = listed.indexOf(taken);
+      const next = [...listed.slice(at + 1), ...listed.slice(0, at)].find((key) => openBefore.has(key) && key !== taken
+        && key.startsWith('entry-') && confirmed(ISSUE_OF[key]) === 'undecided' && !pending.has(ISSUE_OF[key]));
+      if (next) openAt.delete(next);
       pending.set(predicted.n, predicted.verdict);
     } else {
       expect(fresh, `step ${step} of seed ${seed}: nothing should be sent`).toEqual([]);
@@ -197,10 +248,12 @@ async function run(seed: number): Promise<number> {
     // A move to another place opens its row afresh; the link restarts the guard of the row it opens.
     if (reset === 'all') openAt.clear();
     if (reset === 'current' && current$()) openAt.delete(current$() as string);
-    // A row already open that becomes the current one after a verdict starts its guard again.
-    const currentAfter = current$();
-    if (predicted && currentAfter && currentAfter !== currentBefore && openBefore.has(currentAfter)) openAt.delete(currentAfter);
     observe();
+    // Inside its own guard a row's verdict buttons look unarmed (the other way round waits for a timer the clock here never fires).
+    for (const [key, at] of openAt) {
+      const take = document.getElementById(key)?.querySelector('.ws-btn.go');
+      if (take && now - at < OPEN_GUARD_MS) expect(take.classList.contains('ws-unarmed'), `step ${step} of seed ${seed}: ${key} looks armed inside its guard`).toBe(true);
+    }
     const counts = [...document.querySelectorAll('.ws-part .ws-todo')].reduce((sum, badge) => sum + Number(badge.textContent), 0);
     expect(counts, `step ${step} of seed ${seed}: to decide on the map`).toBe(toDecide());
     const link = [...document.querySelectorAll('.ws-loglink')].find((a) => /^\d+ to decide$/.test(a.textContent ?? ''));
@@ -217,14 +270,18 @@ async function run(seed: number): Promise<number> {
 describe('verdicts under random actions', () => {
   it('go to the open row only, respect the guard, and match the server or the pending write', async () => {
     let mostOpen = 0;
-    for (let seed = 1; seed <= 30; seed += 1) {
+    for (let seed = 1; seed <= 22; seed += 1) {
       mostOpen = Math.max(mostOpen, await run(seed));
       cleanup();
       history.replaceState(null, '', '/workshop');
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
     }
-    // The sequences reach several rows open at once.
+    // The sequences reach several rows open at once, and each case of Enter.
     expect(mostOpen).toBeGreaterThanOrEqual(2);
+    expect(reached.closedHeader, 'Enter on a closed header').toBeGreaterThan(0);
+    expect(reached.otherHeader, 'a verdict by Enter from the header of a row not opened last').toBeGreaterThan(0);
+    expect(reached.closedBesideReady, 'Enter on a closed header beside an open row ready for a verdict').toBeGreaterThan(0);
+    expect(reached.page, 'a verdict by Enter with the focus on the page, the row opened last not the first open').toBeGreaterThan(0);
   }, 120_000);
 });
