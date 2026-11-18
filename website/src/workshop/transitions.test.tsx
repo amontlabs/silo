@@ -64,6 +64,7 @@ function shownArea(): string {
   return document.querySelector('.ws-tile.on')?.getAttribute('data-area') ?? '?';
 }
 const shownView = () => (rootOf().classList.contains('v-order') ? 'order' : 'map');
+const addressView = () => (new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
 
 /** The app on a fresh page, with the clock faked from the start so that every timer it makes can be run. */
 async function mount() {
@@ -141,7 +142,16 @@ describe('moves between places', () => {
     ['a second move while the first waits for its view transition', [open('engine'), open('computers', 10), { kind: 'escape', after: 10 }, open('forks', 0)]],
     ['an address that is followed while a view transition waits', [open('engine'), { kind: 'address', area: 'computers', after: 5 }]],
     ['Escape and Back after a view', [open('computers', 600), view('order', 600), { kind: 'escape', after: 600 }, { kind: 'back', after: 600 }, view('map', 0), { kind: 'back', after: 0 }]],
+    ['Order and a tile while the map unfolds', [open('computers', 600), { kind: 'full-map', after: 0 }, view('order', 135), open('forks')]],
+    ['Back to an entry without the view', [open('computers', 600), view('order', 600), { kind: 'back', after: 600 }]],
+    ['Back to an entry without the view, then Order', [open('computers', 600), view('order', 600), { kind: 'back', after: 600 }, view('order', 600)]],
+    ['Back while the view swaps', [open('computers', 600), view('order', 20), { kind: 'back', after: 600 }]],
+    ['the area being left opened again while the map unfolds', [open('computers', 600), { kind: 'full-map', after: 60 }, open('computers', 600)]],
+    ['the area being left opened again at once', [open('computers', 600), { kind: 'escape', after: 10 }, open('computers', 600)]],
+    ['Escape again while the map unfolds', [open('computers', 600), { kind: 'escape', after: 100 }, { kind: 'escape', after: 60 }]],
+    ['Escape again while the view transition waits', [open('computers', 600), { kind: 'escape', after: 20 }, { kind: 'escape', after: 20 }]],
   ];
+  const handWritten = new Set(named.map(([name]) => name));
   const configs: Config[] = [true, false].flatMap((motion) => [true, false].flatMap((wide) => (['finishing', 'failing', 'absent'] as Mode[]).map((mode) => ({ motion, wide, mode }))));
 
   it('always ends on the place and the view the address names, with nothing left half done', async () => {
@@ -159,7 +169,7 @@ describe('moves between places', () => {
     const moving = new Set<string>();
     try {
       for (const config of configs) {
-        const sequences: [string, Step[]][] = [...named, ...[1, 2, 3, 4, 5, 6].map((seed): [string, Step[]] => [`seed ${seed}`, sequence(seed, 7)])];
+        const sequences: [string, Step[]][] = [...named, ...[1, 2, 3, 4, 5, 6, 77].map((seed): [string, Step[]] => [`seed ${seed}`, sequence(seed, 7)])];
         for (const [name, steps] of sequences) {
           const where = `${name} (${JSON.stringify(config)}): ${steps.map((step) => `${step.kind}${'area' in step ? ` ${step.area}` : 'to' in step ? ` ${step.to}` : ''} +${step.after}`).join(', ')}`;
           screenOf(config);
@@ -168,18 +178,50 @@ describe('moves between places', () => {
           const push = vi.spyOn(history, 'pushState');
           // What the last move that took effect asks for; null where the address decides (after Back).
           let area: string | null = '';
-          let wanted: 'map' | 'order' = 'map';
+          let wanted: 'map' | 'order' | null = 'map';
           let depth = 0;
           let heldHeight = false;
+          // When the going-back under way lands: as it started, never later. Null when none is under way.
+          let landsAt: number | null = null;
+          const landed = () => {
+            if (landsAt === null || Date.now() < landsAt) return;
+            expect(shownArea(), `${where}: going back has landed at its time`).toBe('');
+            landsAt = null;
+          };
+          // A new move lets go at once of the height a going-back kept, before anything has settled.
+          const released = () => expect(rootOf().style.minHeight, `${where}: the page height is let go when a move starts`).toBe('');
           const note = () => { for (const name of classesOf()) if (!rest['full-map map'].includes(name) && !rest['area order'].includes(name)) moving.add(name); };
           for (const step of steps) {
+            landed();
             const here = shownArea();
             const onMap = rootOf().classList.contains('v-map');
+            // Going back from an area: the map unfolds for a while, a view transition waits for its update, or it is
+            // done at once. Another going-back meanwhile changes nothing.
+            const goBack = () => {
+              area = '';
+              if (landsAt !== null) return;
+              const unfolds = config.motion && config.wide && onMap;
+              const waits = config.motion && !unfolds && config.mode !== 'absent';
+              landsAt = unfolds ? Date.now() + 140 : waits ? Date.now() + 30 : null;
+              // A map that unfolds keeps the page's height meanwhile, so the page below does not jump.
+              heldHeight = unfolds;
+            };
+            // Read before the move, so that the entries it pushes at once are counted too.
+            const before = push.mock.calls.length;
             if (step.kind === 'open') {
               const tiles = !config.wide || rootOf().classList.contains('v-order');
               const button = tiles ? tile(step.area) : part(step.area);
               act(() => { fireEvent.click(button); });
-              area = here === step.area ? '' : step.area;
+              if (here !== step.area) {
+                area = step.area;
+                landsAt = null;
+                released();
+              } else if (landsAt !== null) {
+                // The area being left is asked for again: it stays open, and the going-back is dropped.
+                area = here;
+                landsAt = null;
+                released();
+              } else goBack();
             } else if (step.kind === 'view') {
               act(() => { fireEvent.click(screen.getByRole('button', { name: step.to === 'order' ? 'Order' : 'Map' })); });
               wanted = step.to;
@@ -187,32 +229,37 @@ describe('moves between places', () => {
               const back = document.querySelector<HTMLButtonElement>('.ws-back');
               if (step.kind === 'full-map' && back) act(() => { fireEvent.click(back); });
               else if (step.kind === 'escape') act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
-              if (here !== '' && (step.kind === 'escape' || back)) {
-                area = '';
-                // A map that unfolds keeps the page's height meanwhile, so the page below does not jump.
-                heldHeight = config.motion && config.wide && onMap;
-              }
+              if (here !== '' && (step.kind === 'escape' || back)) goBack();
             } else if (step.kind === 'back') {
+              // Each Back of a hand-written case has an entry to go back to; there, it is what is being checked.
+              if (handWritten.has(name)) expect(depth, `${where}: a Back that goes back`).toBeGreaterThan(0);
               if (depth > 0) {
                 depth -= 1;
                 act(() => history.back());
                 await elapse(1);
                 area = null;
+                wanted = null;
+                landsAt = null;
+                released();
               }
             } else {
               act(() => { history.pushState(null, '', `/workshop${location.search}${hashOf(step.area)}`); dispatchEvent(new PopStateEvent('popstate')); });
               area = step.area;
+              // An address followed names its view, as on a fresh load.
+              wanted = addressView();
+              landsAt = null;
+              released();
             }
             if (heldHeight) {
               expect(rootOf().style.minHeight, `${where}: the page height is kept while the map unfolds`).not.toBe('');
               heldHeight = false;
             }
-            const before = push.mock.calls.length;
             await elapse(step.after);
-            // A push that lands now is one more entry to go back to; a pushed address also drops the ones ahead.
+            // A push is one more entry to go back to; a pushed address also drops the ones ahead.
             depth += push.mock.calls.length - before;
             note();
           }
+          landed();
           await settleAll();
           const address = location.href;
           const hash = location.hash;
@@ -222,10 +269,9 @@ describe('moves between places', () => {
           if (named) expect(areaTitle()?.textContent, `${where}: the title of the area`).toBe(document.querySelector(`.ws-tile[data-area="${named}"] .ws-title`)?.textContent);
           else expect(areaTitle(), `${where}: no area is open`).toBeNull();
           if (area !== null) expect(named, `${where}: the last move decides the place`).toBe(area);
-          // Only a person's choice changes the view. Back and Forward restore the place alone, so after one the
-          // address may still name the view of the entry it came from.
-          expect(shownView(), `${where}: the view last chosen`).toBe(wanted);
-          if (!steps.some((step) => step.kind === 'back')) expect(new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map', `${where}: the view the address names`).toBe(shownView());
+          // The view shown is the one the address names, and the one last chosen unless Back decided it.
+          expect(shownView(), `${where}: the view the address names`).toBe(addressView());
+          if (wanted !== null) expect(shownView(), `${where}: the view last chosen`).toBe(wanted);
           expect(screen.getByRole('button', { name: shownView() === 'order' ? 'Order' : 'Map' }), `${where}: the pressed button`).toHaveAttribute('aria-pressed', 'true');
           // Nothing is left half done: no state class beyond those of a page at rest, no height kept, all in sight.
           expect(classesOf(), `${where}: the classes of a page at rest`).toEqual(rest[`${named ? 'area' : 'full-map'} ${shownView()}`]);
@@ -253,6 +299,70 @@ describe('moves between places', () => {
     // The check did see the page move: some state class was set on the way.
     expect(moving.size).toBeGreaterThan(0);
   }, 120_000);
+});
+
+describe('Back, Forward and Escape', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+  });
+
+  it('moves the focus out of the view that Back or Forward hides, to the same area in the one shown', async () => {
+    screenOf({ motion: false, wide: true, mode: 'absent' });
+    await mount();
+    act(() => { fireEvent.click(part('computers')); });
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
+    act(() => tile('computers').focus());
+    act(() => history.back());
+    await elapse(1);
+    expect(shownView()).toBe('map');
+    expect(document.activeElement).toBe(part('computers'));
+    act(() => history.forward());
+    await elapse(1);
+    expect(shownView()).toBe('order');
+    expect(document.activeElement).toBe(tile('computers'));
+    // A tile with no part on the map: the title takes the focus.
+    act(() => tile('suggested').focus());
+    act(() => history.back());
+    await elapse(1);
+    expect(shownView()).toBe('map');
+    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Workshop' }));
+    // The focus outside the panel that is hidden stays where it is.
+    const order = screen.getByRole('button', { name: 'Order' });
+    act(() => order.focus());
+    act(() => history.forward());
+    await elapse(1);
+    expect(shownView()).toBe('order');
+    expect(document.activeElement).toBe(order);
+  });
+
+  it('drops a going-back when Back leads to an address that is not known yet', async () => {
+    screenOf({ motion: true, wide: true, mode: 'finishing' });
+    viewTransitions('finishing');
+    await mount();
+    // An entry the page has not seen yet, then an area opened over it.
+    act(() => { history.pushState(null, '', '/workshop#suggested/issue-999999'); });
+    act(() => { fireEvent.click(part('computers')); });
+    await elapse(600);
+    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    await elapse(20);
+    const push = vi.spyOn(history, 'pushState');
+    act(() => history.back());
+    await elapse(1000);
+    expect(push).not.toHaveBeenCalled();
+    expect(rootOf().classList.contains('ws-leaving')).toBe(false);
+    expect(rootOf().style.minHeight).toBe('');
+  });
+
+  it('goes back once for a held Escape', async () => {
+    screenOf({ motion: false, wide: true, mode: 'absent' });
+    await mount();
+    act(() => { fireEvent.click(part('computers')); });
+    act(() => { fireEvent.keyDown(document.body, { key: 'Escape', repeat: true }); });
+    expect(shownArea()).toBe('computers');
+    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    expect(shownArea()).toBe('');
+  });
 });
 
 describe('a tap during a view transition', () => {
