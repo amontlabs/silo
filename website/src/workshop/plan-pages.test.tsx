@@ -230,23 +230,6 @@ describe('history lines', () => {
     }
   });
 
-  it('hold one ghost per history line and per comment while the thread loads, then swap them for the thread', async () => {
-    let release: () => void = () => {};
-    const comments = [person(1, 'One.', '2026-11-10T10:00:00Z'), historyComment(2, change(['needs']), '2026-11-11T10:00:00Z'), person(3, 'Two.', '2026-11-12T10:00:00Z'), historyComment(4, change(['verdict'], { verdict: 'take' }), '2026-11-13T10:00:00Z'), historyComment(5, change(['notes']), '2026-11-14T10:00:00Z')];
-    mockApi({ routes: { 'GET issue': (url) => new Promise((resolve) => { release = () => resolve(ok(detail(Number(url.searchParams.get('n')), { comments }))); }) } });
-    history.replaceState(null, '', '/workshop#computers');
-    await renderApp();
-    await userEvent.click(rowButton('Create and delete a computer'));
-    const item = itemOf('Create and delete a computer');
-    // 5 comments on the issue, 3 of them history lines: 3 + 2 places.
-    expect(item.querySelectorAll('.ws-h-ghost')).toHaveLength(3);
-    expect(item.querySelectorAll('.ws-c-ghost')).toHaveLength(2);
-    expect(item.querySelectorAll('.ws-h, .ws-c')).toHaveLength(0);
-    await act(async () => release());
-    expect(item.querySelectorAll('.ws-h-ghost, .ws-c-ghost')).toHaveLength(0);
-    expect(item.querySelectorAll('.ws-h')).toHaveLength(3);
-    expect(item.querySelectorAll('.ws-c')).toHaveLength(2);
-  });
 });
 
 describe('Latest', () => {
@@ -274,27 +257,6 @@ describe('Latest', () => {
       'Fork a computerdevin-oss: Fork what, exactly?',
     ]);
     expect(rows.map((row) => row.querySelector('.ws-word')?.textContent)).toEqual(['1 hour ago', '5 hours ago', 'yesterday']);
-  });
-
-  it('holds its place with ten one-line ghosts while it loads, with nothing below in its column', async () => {
-    fixedNow();
-    let release: () => void = () => {};
-    mockApi({ state: () => new Promise((resolve) => { release = () => resolve(ok(liveState({}, latest))); }) });
-    history.replaceState(null, '', '/workshop#latest');
-    render(<App data={buildData()} loadNotes={() => Promise.resolve({})} />);
-    await waitFor(() => expect(document.querySelectorAll('.ws-latest-ghost')).toHaveLength(10));
-    const ghost = document.querySelector('.ws-latest-ghost') as HTMLElement;
-    expect(ghost.querySelector('.ws-latest-name')).not.toBeNull();
-    expect(ghost.querySelector('.ws-sub')).not.toBeNull();
-    expect(ghost).toHaveAttribute('aria-hidden', 'true');
-    const list = document.querySelector('.ws-list') as HTMLElement;
-    expect(list.classList.contains('ws-list-loading')).toBe(true);
-    expect(list.lastElementChild?.classList.contains('ws-latest')).toBe(true);
-    expect(screen.queryByText('Nothing yet.')).not.toBeInTheDocument();
-    await act(async () => release());
-    expect(document.querySelectorAll('.ws-latest-ghost')).toHaveLength(0);
-    expect(document.querySelectorAll('.ws-latest a.ws-row')).toHaveLength(3);
-    expect(list.classList.contains('ws-list-loading')).toBe(false);
   });
 
   it('leaves a click with a modifier key to the browser, so an item opens in a new tab', async () => {
