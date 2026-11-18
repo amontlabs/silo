@@ -3,26 +3,12 @@
     {
       "id": "ground",
       "title": "Groundwork",
-      "line": "What is settled about how Silo is built before the engine's first code.",
+      "line": "How the engine is built, before its first code.",
       "features": [
-        "plan-intake",
         "core-ownership",
         "order-of-work",
         "engine-style",
-        "zig-and-tree",
-        "feature-notes",
-        "tests",
-        "done",
-        "reviews",
-        "briefs-and-sessions",
-        "rules-files",
-        "nothing-unasked",
-        "checks",
-        "references-and-dependencies",
-        "old-code",
-        "bugs-and-upstream",
-        "measuring",
-        "words-and-repository"
+        "zig-and-tree"
       ]
     },
     {
@@ -194,7 +180,6 @@
       "title": "Keeping it running",
       "line": "Updates, releases, logs and disk: what someone else needs to install and keep it.",
       "features": [
-        "silo-builds-silo",
         "release",
         "updates",
         "storage",

@@ -1,6 +1,6 @@
 {
   "name": "Speed, and the bar to ship",
-  "what": "How fast the loop must be, and what a feature needs before it ships.",
+  "what": "How fast the loop must be, and what a feature and the first release need before they ship.",
   "area": "ground",
   "needs": [],
   "suggest": {

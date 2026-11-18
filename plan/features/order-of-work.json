@@ -1,6 +1,6 @@
 {
   "name": "What is built first",
-  "what": "The owner settles whether checks come before features, the stages an engine feature goes through, and when a throwaway version comes first.",
+  "what": "Whether checks come before features, the steps an engine feature goes through, and how the engine is tested.",
   "area": "ground",
   "needs": [],
   "suggest": {

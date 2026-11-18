@@ -1,6 +1,6 @@
 {
   "name": "Who designs and reads the engine core",
-  "what": "The owner settles which engine decisions and changes need the owner, and how the tree keeps that part apart.",
+  "what": "Which engine decisions and changes go through a person, and how the tree keeps the core apart.",
   "area": "ground",
   "needs": [],
   "suggest": {
