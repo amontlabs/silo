@@ -5,7 +5,7 @@ Vite. It has two pages:
 
 - **Home** (`index.html`, `src/style.css`): the headline and the pitch,
   centred in the height the window leaves, then the way into the Workshop with
-  one line on where Silo stands. Its texts are interim, until the owner settles
+  one line on where Silo stands, and under it the "in heavy development" notice. Its texts are interim, until the owner settles
   the new design. It has no script of its own and nothing on it is read from
   the plan. The page shows once its fonts are in (at most 1.2 s), so nothing
   changes width: it preloads every face it waits for, and the deployed site

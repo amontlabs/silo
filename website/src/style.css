@@ -64,6 +64,32 @@
 .pitch span {
   display: block;
 }
+/* The notice: where Silo stands, under the same three columns as the points */
+.notice {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  padding: 20px 0 22px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.notice p {
+  padding: 0 var(--gutter);
+  text-wrap: pretty;
+}
+.notice-label {
+  font: 12px/1.9 var(--mono);
+  color: var(--accent-ink);
+}
+.mark {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 10px;
+  transform: translateY(-1px) rotate(45deg);
+  border: 1px solid var(--accent);
+}
+
 /* Footer: one row */
 .site-footer {
   display: flex;
@@ -85,6 +111,12 @@
   white-space: nowrap;
 }
 
+@media (max-width: 900px) {
+  .notice {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+  }
+}
 @media (max-width: 640px) {
   .hero {
     padding: 46px var(--gutter) 48px;

@@ -28,8 +28,8 @@ describe('the home page', () => {
     expect(doc.querySelector('meta[property="og:title"]')?.getAttribute('content')).toBe('Silo');
   });
 
-  it('holds the hero, then the way to the Workshop, and no script, picture or card', () => {
-    expect([...doc.querySelectorAll('main > *')].map((node) => node.tagName + (node.className ? `.${node.className.split(' ')[0]}` : ''))).toEqual(['SECTION.hero', 'A.strip']);
+  it('holds the hero, then the way to the Workshop and the notice, and no script, picture or card', () => {
+    expect([...doc.querySelectorAll('main > *')].map((node) => node.tagName + (node.className ? `.${node.className.split(' ')[0]}` : ''))).toEqual(['SECTION.hero', 'A.strip', 'DIV.notice']);
     expect([...doc.querySelectorAll('.hero > *')].map((node) => node.tagName + (node.id ? `#${node.id}` : ''))).toEqual(['H1#hero-title', 'P']);
     expect(doc.querySelectorAll('.hero a')).toHaveLength(0);
     expect(doc.querySelector('main > a.strip')?.getAttribute('href')).toBe('/workshop');
@@ -65,6 +65,10 @@ describe('the home page', () => {
   it('says where Silo stands beside the way to the Workshop, with nothing read from the plan', () => {
     expect(text('.strip-name')).toEqual(['Workshop']);
     expect(text('.strip-line')).toEqual(['Silo is being rebuilt in the open from a new design.']);
+    expect(text('.notice p')).toEqual([
+      'in heavy development',
+      "Treat Silo as a build in public for now. If you try it, expect rough edges, breaking changes, no security guarantees and no data migration between versions. Don't keep anything in it that isn't backed up.",
+    ]);
     expect(html).not.toMatch(/<!-- plan:|features are planned|First up|Not out yet/);
   });
 
