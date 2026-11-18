@@ -146,7 +146,7 @@ svg {
   mask: var(--icon-out) center / contain no-repeat;
 }
 /* The forward arrow inside a button. */
-.go {
+svg.go {
   width: 13px;
   height: 13px;
   fill: none;
@@ -157,7 +157,7 @@ svg {
   flex-shrink: 0;
   transition: transform 0.16s;
 }
-.button:hover .go {
+.button:hover svg.go {
   transform: translateX(2px);
 }
 .sr-only {

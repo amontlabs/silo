@@ -180,7 +180,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .button,
-  .go {
+  svg.go {
     transition: none !important;
   }
 }
