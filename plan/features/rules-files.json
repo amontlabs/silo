@@ -1,0 +1,10 @@
+{
+  "name": "How the rules files are kept",
+  "what": "The owner settles how a line gets into the rules files, how lines are pruned, and what docs for agents say.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}

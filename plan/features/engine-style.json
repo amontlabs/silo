@@ -1,0 +1,10 @@
+{
+  "name": "How the engine core is written",
+  "what": "The owner settles the engine's coding style and limits, and the languages and platforms it is built for.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before the engine's first code."
+  }
+}

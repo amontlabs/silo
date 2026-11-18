@@ -1,0 +1,10 @@
+{
+  "name": "What enters the plan, and as what",
+  "what": "The owner settles how the research and agents' claims are written into the plan, and what an entry needs before it is taken.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "The research has just entered the plan, and these lines say how such material enters it."
+  }
+}

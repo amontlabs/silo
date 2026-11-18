@@ -1,0 +1,10 @@
+{
+  "name": "Keeping out what nobody asked for",
+  "what": "The owner settles what keeps unasked code, options and compatibility out of the tree.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}

@@ -1,21 +1,55 @@
 {
   "stages": [
     {
+      "id": "ground",
+      "title": "Groundwork",
+      "line": "What is settled about how Silo is built before the engine's first code.",
+      "features": [
+        "plan-intake",
+        "core-ownership",
+        "order-of-work",
+        "engine-style",
+        "zig-and-tree",
+        "feature-notes",
+        "tests",
+        "done",
+        "reviews",
+        "briefs-and-sessions",
+        "rules-files",
+        "nothing-unasked",
+        "checks",
+        "references-and-dependencies",
+        "old-code",
+        "bugs-and-upstream",
+        "measuring",
+        "words-and-repository"
+      ]
+    },
+    {
       "id": "shell",
       "title": "Shell",
       "line": "One computer you can open from the app and the command line.",
       "features": [
         "engine-service",
+        "agents-as-users",
+        "words-and-names",
+        "rules-recipes-formats",
         "calls-and-events",
+        "on-the-device",
         "vm-runtime",
         "guest-image",
+        "speed-and-shipping",
         "computers",
         "run-commands",
         "silo-cli",
         "terminal",
+        "app-screens",
+        "where-you-direct-agents",
+        "what-the-app-tells",
         "app-window",
         "jobs",
         "crash-recovery",
+        "guarantees",
         "no-route-home",
         "dev-and-production",
         "properties-checked"
@@ -26,6 +60,7 @@
       "title": "The loop",
       "line": "Checkpoint, fork, see what changed, merge or drop.",
       "features": [
+        "main-and-forks",
         "checkpoints",
         "fork",
         "quiet-forks",
@@ -41,7 +76,10 @@
       "title": "Agent inside",
       "line": "Your agent lives in the computer and asks you for anything wider.",
       "features": [
+        "agent-programs",
+        "models-and-providers",
         "agent-install",
+        "built-in-or-left",
         "tools-inside",
         "agent-rule",
         "approvals",
@@ -54,6 +92,7 @@
       "title": "Living in it",
       "line": "Your setup, tools and access are inside main. This is the starter you can use daily.",
       "features": [
+        "starting-and-leaving",
         "make-main",
         "github",
         "secrets",
@@ -155,6 +194,7 @@
       "title": "Keeping it running",
       "line": "Updates, releases, logs and disk: what someone else needs to install and keep it.",
       "features": [
+        "silo-builds-silo",
         "release",
         "updates",
         "storage",

@@ -1,0 +1,10 @@
+{
+  "name": "Speed, and the bar to ship",
+  "what": "How fast the loop must be, and what a feature needs before it ships.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before \"Create, start, stop and delete a computer\", the first feature it bears on."
+  }
+}

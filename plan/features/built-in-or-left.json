@@ -1,0 +1,10 @@
+{
+  "name": "What Silo builds in, what it leaves",
+  "what": "Where the line runs between what Silo provides and what the user runs inside a computer.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "take",
+    "why": "To settle before \"Silo's tools inside a computer\", the first feature it bears on."
+  }
+}

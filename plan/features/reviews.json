@@ -1,0 +1,10 @@
+{
+  "name": "How reviews are run",
+  "what": "The owner settles what a reviewer is told, who reviews what, and when review rounds stop.",
+  "area": "ground",
+  "needs": [],
+  "suggest": {
+    "verdict": "later",
+    "why": "Nothing waits on it, so it can be settled at any time."
+  }
+}
