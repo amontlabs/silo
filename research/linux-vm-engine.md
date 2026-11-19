@@ -124,8 +124,15 @@ HVF (macOS on Apple Silicon) and WHP (Windows).
   request ([#762](https://github.com/libkrun/libkrun/pull/762), about 3,200 lines) saves and
   restores a running VM on HVF; lazy copy-on-write restore is planned
   ([RFC #748](https://github.com/libkrun/libkrun/issues/748)). The maintainers want snapshots for
-  2.x and, on 1 September, put the review off until after 2.0. Someone has offered to start the
-  KVM side.
+  2.x and, on 1 September, put the review off until after 2.0, then expected in about four
+  weeks. On 19 November:
+  - 2.0 is not out, and no newer date was found.
+  - The pull request's last commit is from 15 July and its last activity from 24 September. It
+    may need rework against the new interface.
+  - Restore loads all of memory up front. Copy-on-write restore, which forking needs, is planned
+    but not written.
+  - Nothing exists for KVM: one person offered on 24 September to start it.
+  - No date has been given by anyone. Getting it sooner means doing the work.
 - **Screen: the plumbing, not the window.** A virtio-gpu device (with Venus for GPU drawing), a
   display interface the host program implements (configure a screen, receive each frame and its
   changed area), and an input interface the host program feeds
@@ -207,6 +214,9 @@ What it would take, from the facts above:
 - **Silo gives up for a while** memory snapshots and forks of a running computer, until they land
   upstream or Silo carries them. The design already starts Linux checkpoints with the disk only
   (9.7).
+- **This is MicroSandbox's strongest point.** It has memory snapshots and forks of a running
+  computer working today, on a Mac and on Linux. With libkrun, Silo either goes without them for
+  an unknown time or builds them.
 - **Two ways to get memory snapshots.** Port them from `msb_krun` into Silo's own copy, or help
   [#762](https://github.com/libkrun/libkrun/pull/762) land upstream. The first means carrying
   thousands of lines of device and memory state code against an upstream in the middle of its 2.0

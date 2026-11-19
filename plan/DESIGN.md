@@ -1803,9 +1803,12 @@ The research, with its sources and dates, is in
 
 **What libkrun lacks** (facts)
 
-- Memory snapshots and forks of a running computer. MicroSandbox has them. Upstream has a pull
-  request for them on the Mac, wanted by the maintainers and put off until after libkrun 2.0,
-  which is not out.
+- Memory snapshots and forks of a running computer. MicroSandbox has them working today, on a
+  Mac and on Linux: this is the strongest point in its favour. Upstream has one pull request, for
+  the Mac only, wanted by the maintainers and put off until after libkrun 2.0. On 19 November,
+  2.0 is not out and has no date, the pull request has had no commit since 15 July, copy-on-write
+  restore (which forking needs) is not written, and nothing exists for Linux hosts. Nobody has
+  given a date; getting it sooner means Silo doing the work.
 - A window for the screen. libkrun hands each frame to the host program; the Mac window, a
   hardware cursor and resizing are Silo's to build. steamac, an open-source project running
   SteamOS on libkrun on a Mac, carries patches for most of it.
