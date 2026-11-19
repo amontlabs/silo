@@ -749,6 +749,66 @@ To find out, for each agent program and provider:
 - Does the sign-in flow of a subscription still work?
 - Does reading leave requests unchanged byte for byte?
 
+**What a first test found (19 November 2026).** Claude Code 2.1.327 under a Claude subscription
+and Codex 0.170.0 under a ChatGPT sign-in were each run once on a Mac, behind an ordinary
+inspecting proxy that stood in for the boundary.
+
+- Both accept the certificate, and both refuse to connect without it. Neither falls back to
+  another route, so there is no unread way through.
+- Claude Code sends plain requests and receives a stream. Codex holds a persistent socket for the
+  model and sends plain requests for the rest. All of it was read: the model that answered, the
+  token counts, the tool calls.
+- Both providers answered normally to a connection the proxy had opened. One short run cannot
+  show what happens over days or under heavy use.
+- Neither program hands out its encryption keys. So reading without ending the connection is not
+  possible, and the boundary ends it, as planned.
+- Still To find out: signing in from scratch and the renewal of a token through the boundary;
+  trust through the computer's trust store alone, with no setting in the program; that Silo's own
+  boundary forwards byte for byte; other agent programs.
+
+**What the vendors' terms say (read on 19 November 2026).**
+
+- Anthropic documents the set-up: "Enterprise TLS-inspection proxies work without additional
+  configuration when their root certificate is installed in the OS trust store". Its terms do not
+  prevent "an end user from signing in to the unmodified Claude Code binary with their own Claude
+  subscription, including where a platform hosts Claude Code".
+- The same terms forbid a developer to "collect, store, or intermediate" a subscription's sign-in
+  (4.4). No text defines "intermediate". The token passes through the boundary, as it passes
+  through a company's proxy, and Anthropic's own pages describe that passage. How Anthropic reads
+  its word for a product like Silo is To find out, by asking.
+- Where Silo installs Claude Code in a computer, Anthropic's terms ask that the program is not
+  modified, and that no sign-in method built into it is removed, disabled or restricted.
+- OpenAI's terms, read in full, have no clause on reading one's own traffic. Its documentation
+  gives Codex a setting for "a corporate TLS proxy or private root CA". The nearest clauses forbid
+  sharing an account's credentials, extracting output automatically, and trying to extract the
+  model's protected reasoning.
+- Other products go further: at least one sandbox keeps a subscription's sign-in outside the
+  machine and injects it. That shows what a vendor ships, not what the terms allow, and this
+  design does not lean on it.
+
+**How the boundary reads, so that it stays inside those words (Proposed).**
+
+- The user signs in to the unmodified program inside the computer, through the vendor's own
+  flow. Silo holds, stores and injects no subscription sign-in. An API key held as a secret is the
+  other case (4.4).
+- The boundary forwards every request and every answer byte for byte. The sign-in token inside a
+  request is forwarded and written nowhere: not in the record, not in a log.
+- Silo's own connection to the provider is an ordinary one. It does not imitate the agent
+  program.
+- The model's hidden reasoning is never opened. The record says that it passed, and its size.
+- Silo never blocks a sign-in method of an agent program.
+
+**The watch from inside (Owner, 19 November 2026).** Agent programs can report on themselves:
+each model request, its model, its token counts, its tool calls. Alone this is useless for what
+Silo promises, because an agent can turn it off or falsify it. Collected in parallel, with the
+source "inside", it becomes a check. A request the boundary saw and the program did not report, or
+reported with other numbers, is a flag: an agent tampered with something it knows is watched.
+
+- In the test, Claude Code's own report matched the boundary on every request: the same request
+  id, the same model, the same token counts. The request id joins the two accounts.
+- To find out: the same for Codex and the other programs, and what the flag is in the record's
+  terms (a label, or a rule that tells).
+
 If a program cannot be read, the boundary still gives hosts, sizes and timing, and the
 conversation would have to come from the program's own files inside the computer. Those facts
 would carry the source "inside".
@@ -1645,7 +1705,8 @@ repository and is not part of this copy.
 
 On the record:
 
-1. Can the boundary read the model traffic of each agent program (5.8)?
+1. Can the boundary read the model traffic of each agent program (5.8)? A first test on
+   19 November 2026 says yes for Claude Code and Codex. What is left is listed in 5.8.
 2. Which route gives file changes from outside, and what does each cost (9.7)?
 3. Which means give processes from inside on Linux, and how far a hostile agent can interfere
    (9.7)?
@@ -1674,6 +1735,10 @@ On computers:
 20. How a conversation is recognised in each provider's traffic, and whether a program can get
     around a budget on a conversation by starting a new one (4.6). A budget on a computer has no
     such way around.
+21. How Anthropic reads "intermediate" for a boundary that forwards a sign-in token and keeps
+    nothing (5.8).
+22. Whether the watch from inside holds for each agent program, and what a mismatch is in the
+    record (5.8).
 
 ---
 
