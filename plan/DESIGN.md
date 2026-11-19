@@ -197,7 +197,7 @@ One word per idea. The words for computers are Git's (Decided).
 | **record** | Everything Silo has written down about a computer: its facts and its reports, in the order they came, never changed afterwards. Engineers call this an append-only log. Opinions are computed from it and kept apart. |
 | **fact** | One thing Silo saw itself, from outside the computer, with its time and its computer. Written once. |
 | **report** | One thing a program inside the computer told Silo. Written once, as told. The agent can interfere with it. |
-| **opinion** | What a classifier, or you, think about facts and reports: which run did this, what kind of file this is, "stuck". It can be wrong, it says whose it is, and it is computed again when its classifier improves. |
+| **opinion** | What a classifier, or you, think about facts and reports: which run did this, what kind of file this is, "stuck". It can be wrong, it says whose it is, and it is computed again when its classifier improves. One you gave yourself is kept as you gave it. |
 | **classifier** | Whatever gives an opinion: a pattern, a function, a small model, an agent. It never acts. |
 | **rule** | Data you set. It is triggered by a fact, it is exact, and it may do anything you wrote in it. At the boundary it allows, holds or denies. |
 | **precaution** | Data you set. It is triggered by a report or an opinion, so it can be wrong, and it takes only reversible actions. |
@@ -460,7 +460,7 @@ helps get around a provider's terms, such as rotating accounts".
   it keeps its own limit and ends the hold itself, every time. The thing is then denied, with an
   error the agent program can read. Waiting for a classifier's opinion is not a hold: a hold
   waits for you. That wait ends at Silo's limit in the same way, and what then happens to the
-  thing is the default of 14.1, question 17. A program that gives up first closes its connection, and Silo
+  thing is the default of 14.1, question 17. (Proposed) A program that gives up first closes its connection, and Silo
   sees that. Nothing here may be best effort. (Owner; the mechanism Agreed) How long the limit
   is, and how each agent program takes the error, is To find out (14.2).
 - An ask has to reach you where you are. A chat app or a phone may show you the ask and lead back
@@ -492,7 +492,7 @@ change happens inside a computer and is seen from outside, so it is a fact.
 |---|---|---|---|
 | **Fact** | Silo saw it itself, from outside the computer. | The engine and the parts of Silo at the boundary | No. What was not seen is recorded as a gap. |
 | **Report** | A program inside the computer told Silo. | Silo's probe, a small part of Silo that runs inside the computer, and an agent program's own account of itself (5.8) | It is what the inside said. An agent with full access can interfere with it. |
-| **Opinion** | A classifier, or you, think so. | Classifiers, and you through your answers to questions (5.3) | Yes. So it says whose it is, it is computed again when its classifier improves, and it is never written into a fact or a report. |
+| **Opinion** | A classifier, or you, think so. | Classifiers, and you when you give one yourself (5.3) | Yes. So it says whose it is, it is computed again when its classifier improves, and it is never written into a fact or a report. |
 
 Facts and reports are written once, and together they are the record. Opinions are computed from
 the record and kept apart.
@@ -648,11 +648,12 @@ wants avoided because it compounds.
 ### 5.3 Opinions and classifiers
 
 **What an opinion is.** What a classifier, or you, think about facts and reports. It is stored
-apart from the record, says whose it is (the classifier's name and version, or you), can lag
-behind the record, and can be deleted and computed again at any time. (Agreed)
+apart from the record, says whose it is (the classifier's name and version, or you), and can lag
+behind the record. An opinion a classifier computed can be deleted and computed again at any
+time. One you gave yourself is kept as you gave it. (Agreed)
 
 **What a classifier is.** Whatever gives an opinion: a pattern, a function, a small model, an
-agent. It reads the record, which holds your answers, and it gives opinions. It never acts (5.1).
+agent. It reads the record and the opinions you gave, and it gives opinions. It never acts (5.1).
 Silo ships some, and others are added (5.5). The word is the textbook one: a classifier is
 anything that sorts what it reads into kinds, and everyone already treats its answer as something
 that can be wrong. (Agreed)
@@ -675,10 +676,13 @@ that can be wrong. (Agreed)
 7. **Owner of leftovers.** The last run that wrote a path, and whether that run is still alive.
 8. **Heat.** Paths written by many runs. (Agreed: the map only, see 5.7)
 
-**Your own opinions** (Owner; that an answer is kept as a fact, Proposed). The app can put a question to you ("is this a build?"). That you
-answered is a fact (5.2): it is kept and never computed again. The opinion it gives (a path
-pattern and a kind, yours) is computed from it like any other. It applies to the past as well as
-the future, because opinions are computed again.
+**Your own opinions** (Owner). The app can put a question to you ("is this a build?"). Your
+answer is your opinion. It is given, not computed: Silo keeps it as you gave it until you change
+it, and computing the other opinions again never deletes it. It is stored as a path pattern and a
+kind, so it applies to the past as well as the future. It is still an opinion: it can be wrong,
+and no rule reads it. Like everything you do in Silo, that you answered is written in the record
+(5.2). (How it is kept is Proposed. An earlier wording called the answer itself a fact, which the
+owner found weird, and it was dropped on 19 November 2026.)
 
 **Improving a classifier** (Owner, Proposed). Your answers are also test cases. A new version of
 a classifier is run on the record and compared with your answers before it replaces the old one.
