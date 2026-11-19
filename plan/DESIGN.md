@@ -788,6 +788,11 @@ inspecting proxy that stood in for the boundary.
 - Other products go further: at least one sandbox keeps a subscription's sign-in outside the
   machine and injects it. That shows what a vendor ships, not what the terms allow, and this
   design does not lean on it.
+- Anthropic's own documentation recommends running Claude Code in a virtual machine, and lists
+  "cloud instances, local hypervisors, and microVMs". It names another company's product for
+  it. Several products, hosted and local, come with Claude Code already installed and let the
+  user sign in inside. That is this design's path. Anthropic's rule for such products dates from
+  August 2026, and Anthropic has published no explanation of it.
 
 **How the boundary reads, so that it stays inside those words (Proposed).**
 
