@@ -12,7 +12,7 @@
   {
     "id": "agents-get-every-tool",
     "date": "2026-11-10",
-    "text": "Agents inside a computer get every tool, scoped by where they are: anything the user could do in the app. A computer cannot get more than it has, and anything that widens access asks the user."
+    "text": "Agents inside a computer get every tool, scoped by where they are: anything the user could do in the app. A computer cannot get more than it has, and anything that would grant it more asks the user."
   },
   {
     "id": "git-words",

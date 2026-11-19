@@ -5,7 +5,7 @@ for product questions: agents read it before they build, and the owner changes i
 something (see [the decisions](decisions.json)).
 
 Silo is being redesigned. The design is recorded in [DESIGN.md](DESIGN.md), written on
-18 November 2026, and this page is its short form. The owner goes through the design part by
+18 November 2026 and revised the day after, and this page is its short form. The owner goes through the design part by
 part. A part gets its features here once he has settled it. Until then the plan holds no feature,
 and nothing is built.
 
@@ -37,10 +37,11 @@ company fits the same description. Team features come later, on top of the same 
 1. **A computer.** Your agents live and work in one long-lived computer, called main. It is a
    virtual machine on your device, running macOS or Linux. Nothing from your device is shared
    into it.
-2. **The record.** Silo writes down what happens in the computer, seen from outside it: every
-   process, file change, connection and model call. Opinions about those facts, such as which
-   run did this or what a rebuild would bring back, are computed on top of them and never stored
-   as facts.
+2. **The record.** Silo writes down what happens in the computer. What it saw itself, from
+   outside, is a fact: every file change, connection and model call. What a program inside told
+   it, such as which process did something, is a report. Opinions about the record, such as
+   which run did this or what a rebuild would bring back, are computed on top of it and never
+   stored as facts.
 3. **Going back.** Silo takes checkpoints on its own. You restore one, or continue from it in a
    fork.
 4. **Forks for the exception.** A fork is a copy of a computer: for a risky try, for a tool to
@@ -59,9 +60,11 @@ On your own machine first: a Mac. The same computers then run on a shared server
 - **One kind of thing.** A computer is a computer, whatever its system and whichever device runs
   it. Differences are only those the platform forces.
 - **A computer cannot get more than it has.** An agent inside a computer can do anything that
-  gives it no more access than it already has. Anything wider asks you, in the Silo app.
-- **Nothing flows down.** An opinion is never stored as a fact. A rule that blocks or holds never
-  depends on an opinion. Something that watches never widens access.
+  gives it no more access than it already has. Anything that would grant it more asks you, in
+  the Silo app.
+- **The less sure the trigger, the less it may do.** A report or an opinion is never stored as a
+  fact. A rule reads only facts, and only you or a rule can grant. A precaution, which rests on
+  a report or an opinion, takes only actions that can be undone.
 - **Git's words where Git has one.** Checkpoint, fork, restore. One word per idea.
 - **Security is built properly, and is not the current focus.** A change is made safely; security
   work for its own sake waits until the first version is good.
