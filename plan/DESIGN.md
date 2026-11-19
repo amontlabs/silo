@@ -74,6 +74,8 @@ line carries its own.
 - The plan's notes in the Silo repository as they stood on 18 November 2026.
 - The discussion of 19 November 2026, about the film on the record's layers. Section 0.4 says
   what it changed.
+- The research of 19 November 2026 on the VM engine for Linux computers, and the owner's view on
+  it (9.10). The research itself is in [research/linux-vm-engine.md](../research/linux-vm-engine.md).
 
 ### 0.4 Revised on 19 November 2026
 
@@ -1552,7 +1554,7 @@ the engine or the helper. It does not read the record back. (Proposed)
 - The engine is its own program, not a library inside the app. (Notes)
 - Computers outlive the engine. (Notes, suggested) The price is one helper per computer.
 - A virtual machine lives in the process that created it. Whether a restarted engine can find its
-  helpers and take them back is To find out, for Apple's framework and for MicroSandbox. (Notes)
+  helpers and take them back is To find out, for Apple's framework and for the Linux engine (9.10). (Notes)
 - Whether the boundary lives in the helper, as the table assumes, is To find out. The notes also
   ask which process holds real secret values.
 - Whether the recorder is its own process or a part of the engine program outside the core is
@@ -1705,15 +1707,15 @@ Opening an alert on the turn that led to it needs that turn's text. This is the 
 
 | | Linux computer | macOS computer |
 |---|---|---|
-| VM engine | MicroSandbox, pinned and patchable (Notes) | Apple's virtualization framework, driven from Swift (Decided) |
+| VM engine | Open. libkrun with Silo's own patches on top looks best to the owner; MicroSandbox was the earlier choice (9.10) | Apple's virtualization framework, driven from Swift (Decided) |
 | Network at the boundary | Silo's network stack | The same. Never Apple's NAT. (Notes) |
 | Model calls, secrets, budgets | At the boundary | The same |
 | Checkpoint | A snapshot of the disk. Memory later. | A clone of the disk. A memory state can be saved, and is refused after some updates of the host. (Notes) |
 | Fork | Shares blocks. Under two seconds in earlier measurements. (Notes) | A clone of the disk and a cold boot. One other macOS computer may run. (Notes) |
-| Screen | Needs a desktop in the computer. (To find out, Notes) | Native. |
+| Screen | Needs a desktop in the computer. libkrun hands over each frame; the window is Silo's to draw (9.10). (To find out, Notes) | Native. |
 | File changes, seen from outside | To find out | To find out |
 | Processes, reported from inside | To find out | To find out |
-| Memory given back when idle | To find out (Notes) | To find out |
+| Memory given back when idle | To find out. libkrun returns freed memory on a Mac since 1.19.8; MicroSandbox does not (9.10). (Notes) | To find out |
 | Containers inside | Yes | Expected no. (To find out) |
 | Image | One Ubuntu image, downloaded once. (Notes) | Downloaded and installed on each Mac. (Notes) |
 
@@ -1770,6 +1772,65 @@ for the record)
   checked against the promises by the simulator, by reviews and by engineers he trusts.
 - No time estimates. (Decided)
 - Properties are stated and checked as we build. (Decided)
+
+### 9.10 The VM engine for Linux computers (research, 19 November 2026)
+
+The research, with its sources and dates, is in
+[research/linux-vm-engine.md](../research/linux-vm-engine.md). This section is its summary.
+
+**Where it stands**
+
+- Which engine runs Linux computers is Open. It is decided when the time comes. (Owner)
+- The owner's view: libkrun, with Silo's own patches on top for whatever Silo wants, looks best.
+  Everything is open source, and patches are cheap to write with agents. What Silo would add is
+  mostly convenience: snapshots, the screen, smoother use. (Owner, 19 November 2026)
+- MicroSandbox was the earlier choice (Notes, `vm-runtime`). It is built on libkrun.
+
+**Why libkrun rather than MicroSandbox** (facts as of 19 November 2026)
+
+- It runs on a Mac and on a Linux host, which the design needs (Decided: `engine-on-linux`).
+  Apple's framework runs only on a Mac, and Firecracker and Cloud Hypervisor only on Linux, so
+  each would mean a second Linux engine.
+- Silo's design builds what MicroSandbox adds on top of libkrun: the network stack and its rules,
+  secrets, images, checkpoints. What Silo needs is the VM library underneath.
+- libkrun takes Silo's network stack through a socket, returns freed memory on a Mac, runs a VM
+  in the process that calls it (the helper per computer of 9.3), and has a C interface for the
+  Zig engine. MicroSandbox does none of the four.
+- libkrun is led by Red Hat with several regular maintainers. MicroSandbox rests on two founders
+  and one new committer, and its own copy of libkrun is 653 commits behind upstream.
+- Most of what broke in MicroSandbox for the old Silo was in its snapshot store and disk layers,
+  which Silo would replace.
+
+**What libkrun lacks** (facts)
+
+- Memory snapshots and forks of a running computer. MicroSandbox has them. Upstream has a pull
+  request for them on the Mac, wanted by the maintainers and put off until after libkrun 2.0,
+  which is not out.
+- A window for the screen. libkrun hands each frame to the host program; the Mac window, a
+  hardware cursor and resizing are Silo's to build. steamac, an open-source project running
+  SteamOS on libkrun on a Mac, carries patches for most of it.
+
+**What Silo takes on with it** (Proposed)
+
+- Disk checkpoints and forks that share blocks, a guest agent or SSH, and the Mac window.
+- Memory snapshots arrive by helping the upstream pull request land, with MicroSandbox's code as a
+  reference, rather than by moving them into Silo's own copy. A large patch carried against a
+  rewrite in progress drifts the way MicroSandbox's copy did.
+- Every patch Silo carries has an upstream pull request aimed at removing it (Notes,
+  `vm-runtime`).
+- A patch to the engine is reviewed as boundary code. Snapshot, device and display code runs in
+  the helper process, which a hostile guest attacks, and restore reads back state the guest
+  controlled. Most of MicroSandbox's security advisories of 2026 were in such layers: snapshot
+  capture and import, the disk journal, file copy. (Fact, then Proposed)
+
+**Measured before deciding** (To find out)
+
+1. A Zig helper boots the Ubuntu image on libkrun through its C interface, with its traffic sent
+   to a stub network stack over a socket, on a Mac and on the Linux test machine.
+2. How long a fork takes from a cloned disk with a cold boot.
+3. Whether systemd and Docker run in that image.
+4. How much memory an idle computer gives back on a Mac.
+5. How fast the work folders are, against the budget of 9.8.
 
 ---
 
@@ -2033,7 +2094,8 @@ On computers:
 10. Whether macOS and Linux computers can give memory back when idle, and how much.
 11. Whether a restarted engine can take back a helper per computer, on both VM engines.
 12. Which process holds the boundary and the real secret values.
-13. Which VM engine runs Linux computers on a Mac, given that the macOS one is built first.
+13. Which VM engine runs Linux computers, on a Mac and on a Linux host (9.10). What settles it is
+    measured first: the five measurements of 9.10.
 14. Whether a subscription sign-in works with substitution at all.
 15. Whether the old Silo's way of giving a macOS computer the approvals of computer use still
     works on the current macOS, and for a fork of a running computer (8.1).
@@ -2220,3 +2282,6 @@ here. Its parts on the loop of fork, diff and merge describe the earlier shape a
 
 **The plan's notes** in the Silo repository, under `plan/features/`, as they stood on 18 November
 2026.
+
+**The VM engine for Linux computers** (9.10): [research/linux-vm-engine.md](../research/linux-vm-engine.md),
+19 November 2026, with every source and its date.

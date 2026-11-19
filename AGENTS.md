@@ -7,6 +7,7 @@ plan, the public site, and the code of the features built so far.
   `<id>.md`), their order (`order.json`), the parts of the product (`areas.json`) and the
   decisions in force (`decisions.json`). Plain files: read them, and edit a feature in its own files.
 - `plan/DESIGN.md` is the design of 18 November 2026. The plan is being rewritten from it, part by part. Where it and an older text disagree, it is the newer word.
+- `research/` holds dated research the design cites. Each fact carries its source and date.
 - `website/` is the home page and the Workshop, which shows the plan live. GitHub issues hold the
   conversation: one issue per feature, with votes, comments, the owner's verdicts and the history.
 - `tools/plan/bin/plan` does what touches GitHub or more than one file. `plan` alone lists its commands.
