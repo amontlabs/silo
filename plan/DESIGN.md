@@ -776,8 +776,11 @@ inspecting proxy that stood in for the boundary.
   (4.4). No text defines "intermediate". The token passes through the boundary, as it passes
   through a company's proxy, and Anthropic's own pages describe that passage. How Anthropic reads
   its word for a product like Silo is To find out, by asking.
-- Where Silo installs Claude Code in a computer, Anthropic's terms ask that the program is not
-  modified, and that no sign-in method built into it is removed, disabled or restricted.
+- Anthropic has a rule for a product that preinstalls or runs Claude Code: the program is not
+  modified, and no sign-in method built into it is removed, disabled or restricted. Whether a
+  recipe falls under that rule is To find out, by asking. Silo keeps both conditions either way.
+- Claude Code's licence reserves all rights. So a recipe fetches Claude Code from Anthropic on
+  the user's Mac, and Silo ships no copy of it. (Proposed; it belongs with recipes, 8.1.)
 - OpenAI's terms, read in full, have no clause on reading one's own traffic. Its documentation
   gives Codex a setting for "a corporate TLS proxy or private root CA". The nearest clauses forbid
   sharing an account's credentials, extracting output automatically, and trying to extract the
