@@ -808,6 +808,9 @@ reported with other numbers, is a flag: an agent tampered with something it know
   id, the same model, the same token counts. The request id joins the two accounts.
 - To find out: the same for Codex and the other programs, and what the flag is in the record's
   terms (a label, or a rule that tells).
+- It is extra processing, and the owner sees it as optional: the kind of thing a user opts into,
+  or can at least turn off. Whether it is on by default, and how it is built, are not settled.
+  (Owner, 19 November 2026)
 
 If a program cannot be read, the boundary still gives hosts, sizes and timing, and the
 conversation would have to come from the program's own files inside the computer. Those facts
