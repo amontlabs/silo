@@ -31,23 +31,24 @@
 Agents: pick by role from `atelier agents`. Effort: low for lookups and mechanical edits, medium for an ordinary item, high for cross-crate, concurrency, migration or security work and for reviews of risky diffs. Never name models, retries or CI in a task. Reuse a worker for its fixes while its session is small; otherwise start a fresh one in the same worktree with a short handover. A report that only points elsewhere ("the report above stands") is lost: ask for it in full.
 
 ## Silo
-One session works on one feature, from discussion to built.
+One session works on one entry of the plan, a decision or a feature, from discussion to done.
 
-Start with `git pull` and `plan status`, then `plan show <id>` for the feature at hand.
+Start with `git pull` and `plan`, then `plan show <id>` for the entry at hand: it prints the entry, what it links to and what binds it.
 
 Discussing:
-- What we agree goes in the feature's two files, not only in the chat.
-- Anything about another feature goes in that feature's notes. A new idea gets its own entry with `plan add`.
-- A verdict the owner gives in the conversation: `plan decide <id> take|later|drop`.
+- What we agree goes in the entry's file and its notes, not only in the chat.
+- Anything about another entry goes in that entry's notes. A new question or idea gets its own entry: a file in its part, and its place in `plan/order.json`.
+- A sentence the owner has not taken is never written into a list: it sits under `sets` of the entry that puts it forward.
+- A verdict the owner gives in the conversation: `plan take <id>` or `plan drop <id>`. "Not now" is a move to a later stage of `plan/order.json`.
 - Commit the plan files straight to `main` and push, so the Workshop shows it. No branch, review or approve. First run `tools/ci/check.sh plan`, then `links`, then `build` (seconds each; they read `plan/`), and commit only while no merge is running. Plan edits made while building stay on the build's branch.
 - A rejected push means the owner decided meanwhile: when no merge is running, `git pull --no-rebase`, then push again. Never force.
 
 Decisions (rule 2b):
-- About this feature: its notes file is the decision log.
-- Binding every feature: `plan/decisions.json`, what the owner settled for the whole product. Read it before deciding anything. Delete an entry once it no longer changes what an agent does.
-- A task, for a worker or a reviewer, names the decisions that apply to it, so that nobody decides again or flags what was decided on purpose.
+- About this entry: its notes file is the decision log.
+- Binding every entry: the plan's lists (`words.json`, `principles.json`, each part's `properties.json`) and every taken decision. `plan show <id>` prints the ones that bind an entry. Read them before deciding anything.
+- A task, for a worker or a reviewer, names the properties and decisions that apply to it, so that nobody decides again or flags what was decided on purpose.
 
 Building, only a feature the owner took:
-1. `plan start <id>`. It refuses if another session has the feature.
-2. Build it by the rules above.
-3. `plan finish <id>` in the last branch, when every part is merged and proven. Push.
+1. `plan show <id>`: every entry it needs is done.
+2. Build it by the rules above. Each property it adds gets a check, and the property's `at` names that check's file.
+3. Write `built` with today's date in the feature's file, in the last branch, when every part is merged and proven. `plan check` refuses it until the feature's needs are done and each property it adds has its `at`. Push.
