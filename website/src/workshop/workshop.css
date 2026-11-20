@@ -496,7 +496,7 @@
 .ws-decs small { font: 12px var(--mono); color: var(--faint); }
 .ws-decs p { margin-top: 2px; }
 
-/* A history line in the thread: no author, no box; when, what changed and the change on GitHub. */
+/* A line of an entry's History: when, what changed and the commit. */
 .ws-h { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; min-height: 22px; font: 12px/22px var(--mono); color: var(--muted); }
 .ws-h > i { justify-self: center; align-self: start; width: 7px; height: 7px; margin-top: 7.5px; border-radius: 50%; border: 1.5px solid var(--faint); }
 .ws-h > div > p { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 10px; height: 22px; white-space: nowrap; }

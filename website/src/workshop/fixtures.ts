@@ -265,7 +265,7 @@ export function issue(fields: Partial<LiveIssue>): LiveIssue {
 
 export const SHA = { a: 'a'.repeat(40), b: 'b'.repeat(40), c: 'c'.repeat(40), d: 'd'.repeat(40) };
 
-/** Live state: `core` has votes, `create` has votes, comments and history lines. */
+/** Live state: `core` has votes, `create` has votes and comments. */
 export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLatest[] = []): LiveState {
   return {
     repo: 'amontlabs/silo',
