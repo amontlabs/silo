@@ -305,6 +305,7 @@ function verdict(ctx, argv, kind) {
       const path = join(root, 'plan', name);
       try {
         // The file that failed may be untouched (it could not be opened): leave it as it is then.
+        // A deleted file reads as null, so it is written back.
         if (!files.has(name)) rmSync(path, { force: true });
         else if (readOr(path) !== files.get(name)) writeFileSync(path, /** @type {string} */ (files.get(name)));
       } catch {
@@ -319,12 +320,16 @@ function verdict(ctx, argv, kind) {
     for (const [name, text] of outcome.changed) {
       const path = join(root, 'plan', name);
       written.push(name);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, text);
+      // null: a decision replaced whole, its file or its notes deleted.
+      if (text === null) rmSync(path);
+      else {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, text);
+      }
     }
   } catch (error) {
     const left = restore(written);
-    throw new Refused(`could not write plan/${written.at(-1)} (${/** @type {Error} */ (error).message}); ${left ? `the files written were put back${left}` : 'nothing changed'}`);
+    throw new Refused(`could not ${outcome.changed.get(/** @type {string} */ (written.at(-1))) === null ? 'delete' : 'write'} plan/${written.at(-1)} (${/** @type {Error} */ (error).message}); ${left ? `the files written were put back${left}` : 'nothing changed'}`);
   }
   const subject = `Owner: ${kind} ${id}`;
   const committed = git(root, ['add', '--', ...paths]) !== null && git(root, ['commit', '-q', '-m', subject, '--', ...paths]) !== null;
@@ -333,6 +338,6 @@ function verdict(ctx, argv, kind) {
     const left = restore(outcome.changed.keys());
     throw new Refused(`git could not commit "${subject}"; ${left ? `the files written were put back${left}` : 'nothing changed'}`);
   }
-  ctx.out([`${subject}`, ...paths.map((path) => `  ${path}`)].join('\n'));
+  ctx.out([`${subject}`, ...[...outcome.changed].map(([name, text]) => `  plan/${name}${text === null ? ' (deleted)' : ''}`)].join('\n'));
   return 0;
 }

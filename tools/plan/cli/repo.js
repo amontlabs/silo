@@ -1,22 +1,41 @@
 // The checkout the command works in: its root, its plan files, git.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { ruledKeysDiffer } from '../check/index.js';
 import { isHidden, loadDir, loadRef } from '../read/index.js';
 import { Refused } from './args.js';
 
-/** @param {string} cwd @returns {string} the nearest directory, from cwd up, that holds `plan/order.json`. */
+/**
+ * The nearest directory, from cwd up, that holds `plan/order.json`. A `plan` that is a symbolic
+ * link, dangling or not, stops the search there with the reader's error: it is never followed, and
+ * a plan higher up is not the one meant.
+ * @param {string} cwd @returns {string}
+ */
 export function findRoot(cwd) {
   let dir = resolve(cwd);
   for (;;) {
-    if (existsSync(join(dir, 'plan', 'order.json'))) return dir;
+    const plan = join(dir, 'plan');
+    if (isLink(plan)) {
+      loadDir(plan); // throws the reader's PlanError for a link
+      throw new Refused(`${plan} is a symbolic link`);
+    }
+    if (existsSync(join(plan, 'order.json'))) return dir;
     const up = dirname(dir);
     if (up === dir) throw new Refused(`no plan/ found in ${cwd} or above it`);
     dir = up;
   }
 }
+
+/** @param {string} path @returns {boolean} whether the path itself is a symbolic link. */
+const isLink = (path) => {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
 
 /** @param {string} root @param {string[]} args @returns {string | null} git's output, or null when git fails. */
 export function git(root, args) {

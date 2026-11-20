@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { basePlan, canonicalFile, cleanup, git, initRepo, run, temp, writePlan } from './helpers.js';
 import { canonicalText } from '../model/canonical.js';
@@ -14,6 +14,8 @@ Object.assign(process.env, {
 const readJson = (root, rel) => JSON.parse(readFileSync(join(root, 'plan', rel), 'utf8'));
 const head = (root) => git(root, 'rev-parse', 'HEAD').trim();
 const clean = (root) => git(root, 'status', '--porcelain') === '';
+/** Writes a file of plan/ in canonical form. @param {string} root @param {string} rel @param {any} value */
+const writeJson = (root, rel, value) => writeFileSync(join(root, 'plan', rel), canonicalText(canonicalFile(rel)(value)));
 
 /** A git repository holding the sample plan, removed after the body. */
 async function withRepo(body, files = basePlan()) {
@@ -50,6 +52,30 @@ test('outside a plan the command refuses with 1', async () => {
     assert.match(err, /no plan\/ found/);
   } finally {
     cleanup(dir);
+  }
+});
+
+test('a plan that is a symbolic link stops the search for the root with the reader\'s error, dangling or not: no plan higher up is used', async () => {
+  const outer = writePlan(basePlan());
+  const target = writePlan(basePlan());
+  try {
+    initRepo(outer);
+    const sub = join(outer, 'sub');
+    mkdirSync(sub);
+    for (const link of [join(outer, 'missing'), join(target, 'plan')]) {
+      symlinkSync(link, join(sub, 'plan'));
+      for (const argv of [['check'], [], ['show', 'the-design'], ['take', 'losses-show']]) {
+        const { code, out, err } = await run(sub, argv);
+        assert.equal(code, 1, `${link} ${argv.join(' ')}: ${out}`);
+        assert.match(err, /plan\/: -: a symbolic link/, `${link} ${argv.join(' ')}`);
+      }
+      rmSync(join(sub, 'plan'));
+    }
+    assert.ok(clean(outer));
+    assert.equal(git(outer, 'log', '-1', '--format=%s').trim(), 'Plan');
+  } finally {
+    cleanup(outer);
+    cleanup(target);
   }
 });
 
@@ -167,6 +193,39 @@ test('take commits only the changed files as "Owner: take <id>", and the check p
   });
 });
 
+test('a take that replaces every sentence of a decision taken on sentences alone deletes its file, its notes and its place in order.json in the same commit', async () => {
+  const files = basePlan();
+  const { answer: _answer, ...onlySets } = files['record/decisions/losses-show.json'];
+  files['record/decisions/losses-show.json'] = onlySets;
+  files['record/decisions/losses-show.md'] = 'Why the record shows its losses.\n';
+  await withRepo(async (root) => {
+    assert.equal((await run(root, ['take', 'losses-show'])).code, 0);
+    writeJson(root, 'record/decisions/gap-reworded.json', {
+      asks: 'How is a loss said?',
+      answer: 'As a gap in the record.',
+      sets: [{ in: 'record/properties', id: 'every-loss-is-a-gap', says: 'Every loss of facts or reports leaves a gap in the record.', kind: 'safety', check: ['simulator'] }],
+    });
+    const order = readJson(root, 'order.json');
+    order.stages.at(-1).entries.push('gap-reworded');
+    writeJson(root, 'order.json', order);
+    git(root, 'add', 'plan');
+    git(root, 'commit', '-qm', 'Plan: gap-reworded');
+    const { code, out, err } = await run(root, ['take', 'gap-reworded']);
+    assert.equal(code, 0, `${out}${err}`);
+    assert.match(out, /plan\/record\/decisions\/losses-show\.json \(deleted\)/);
+    assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Owner: take gap-reworded');
+    assert.deepEqual(git(root, 'show', '--name-status', '--format=', 'HEAD').trim().split('\n').sort(), [
+      'D\tplan/record/decisions/losses-show.json',
+      'D\tplan/record/decisions/losses-show.md',
+      'M\tplan/order.json',
+      'M\tplan/record/decisions/gap-reworded.json',
+      'M\tplan/record/properties.json',
+    ]);
+    assert.ok(clean(root));
+    assert.equal((await run(root, ['check'])).code, 0);
+  }, files);
+});
+
 test('a refused take writes and commits nothing: no answer, uncommitted changes in plan/', async () => {
   await withRepo(async (root) => {
     const before = head(root);
@@ -208,9 +267,6 @@ test('take and drop outside git refuse', async () => {
     cleanup(root);
   }
 });
-
-/** Writes an entry file in canonical form. @param {string} root @param {string} rel @param {any} value */
-const writeJson = (root, rel, value) => writeFileSync(join(root, 'plan', rel), canonicalText(canonicalFile(rel)(value)));
 
 test('a symbolic link under plan/ stops every command, and take writes nothing outside plan/', async () => {
   const outside = temp('plan-outside-');

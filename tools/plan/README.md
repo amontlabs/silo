@@ -13,7 +13,7 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 |---|---|
 | `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the sentences it sets), the features ready to build, and the features that wait and for what. |
 | `plan show <id>` | For an entry: its keys, its stage and position, each need with its status, what needs it, its notes, and what binds it: every principle, the properties of the root, of its part and in `keeps`, and the taken decisions of the root, of its part and in `needs`. For a sentence: the sentence, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. |
-| `plan take <id>` | The owner's yes. Writes what the entry sets into the lists, removes what it removes, moves those ids out of the `adds` of the entries that brought them, writes `adds` and `"verdict": "take"`, and commits only the changed files as `Owner: take <id>`. |
+| `plan take <id>` | The owner's yes. Writes what the entry sets into the lists, removes what it removes, moves those ids out of the `adds` of the entries that brought them, deletes a taken decision left with neither an `answer` nor an `adds` (its file, its notes and its place in `order.json`), writes `adds` and `"verdict": "take"`, and commits only the changed files as `Owner: take <id>`. |
 | `plan drop <id>` | The owner's no. Writes `"verdict": "drop"`, keeps `sets` and `removes`, and commits `Owner: drop <id>`. |
 | `plan check` | Checks the plan. The merge gate and the site's build run it. |
 
@@ -23,8 +23,10 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 `plan take` refuses when the plan fails the check, when `plan/` has uncommitted changes, when the
 entry is built, when a decision has neither an `answer` nor a `sets`, or when a decision needs a
 decision that is not taken. A decision that puts forward only sentences needs no `answer`: its `sets`
-stands for one. It also refuses a take that would leave a taken decision with neither an `answer`
-nor an `adds`, as when every sentence it brought is replaced. On an entry already taken it says so
+stands for one. A taken decision that had no `answer` and whose every sentence the take replaces
+or removes is replaced whole: its file, its notes and its place in `order.json` are deleted in the
+same commit. A taken decision with an `answer` stays, with no `adds`. The take is refused, naming
+both, when another entry needs a decision it would delete. On an entry already taken it says so
 and exits 0. `plan drop` refuses a built entry and a taken entry that has `adds`, and also refuses a
 plan that fails the check or has uncommitted changes. A taken decision that brought no sentence may be dropped. Both check the plan they would
 write and write nothing when it fails.

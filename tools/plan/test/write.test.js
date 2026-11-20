@@ -9,10 +9,13 @@ import { basePlan, filesOf } from './helpers.js';
 /** The sample plan as the files the functions take, with changes on top. @param {Record<string, unknown>} [changes] */
 const sample = (changes = {}) => filesOf({ ...basePlan(), ...changes });
 
-/** The files after an outcome. @param {Map<string, string>} files @param {{ changed: Map<string, string> }} outcome */
+/** The files after an outcome: null deletes. @param {Map<string, string>} files @param {{ changed: Map<string, string | null> }} outcome */
 const apply = (files, outcome) => {
   const after = new Map(files);
-  for (const [name, text] of outcome.changed) after.set(name, text);
+  for (const [name, text] of outcome.changed) {
+    if (text === null) after.delete(name);
+    else after.set(name, text);
+  }
   return after;
 };
 
@@ -177,6 +180,66 @@ test('removes deletes the sentence and takes it out of the adds that brought it;
   assert.deepEqual(parse(after, 'decisions/no-fork.json'), { asks: 'Is a fork a word of its own?', answer: 'No.', verdict: 'take' });
 });
 
+/**
+ * The sample with losses-show taken on its sentence alone (no answer), with notes, and a later
+ * decision gap-reworded that sets the same sentence again, not taken yet.
+ * @param {{ answer?: boolean }} [options] answer: losses-show keeps its answer
+ */
+function replacing({ answer = false } = {}) {
+  const { answer: _answer, ...onlySets } = basePlan()['record/decisions/losses-show.json'];
+  let files = sample({ 'record/decisions/losses-show.json': answer ? basePlan()['record/decisions/losses-show.json'] : onlySets, 'record/decisions/losses-show.md': 'Why the record shows its losses.\n' });
+  files = apply(files, take(files, 'losses-show'));
+  files.set('record/decisions/gap-reworded.json', canonicalText(canonicalDecision({
+    asks: 'How is a loss said?',
+    answer: 'As a gap in the record.',
+    sets: [{ in: 'record/properties', id: 'every-loss-is-a-gap', says: 'Every loss of facts or reports leaves a gap in the record.', kind: 'safety', check: ['simulator'] }],
+  })));
+  place(files, 'gap-reworded');
+  assert.deepEqual(checkFiles(files).errors, []);
+  return files;
+}
+
+test('a take that replaces every sentence of a decision taken on sentences alone deletes that decision: its file, its notes and its place in order.json', () => {
+  const files = replacing();
+  assert.deepEqual(parse(files, 'record/decisions/losses-show.json').adds, ['every-loss-is-a-gap']);
+  const outcome = take(files, 'gap-reworded');
+  assert.equal(outcome.status, 'done', `${outcome.message} ${JSON.stringify(outcome.errors ?? [])}`);
+  assert.equal(outcome.changed.get('record/decisions/losses-show.json'), null);
+  assert.equal(outcome.changed.get('record/decisions/losses-show.md'), null);
+  const after = apply(files, outcome);
+  assert.ok(!after.has('record/decisions/losses-show.json'));
+  assert.ok(!after.has('record/decisions/losses-show.md'));
+  assert.ok(!parse(after, 'order.json').stages.some((stage) => stage.entries.includes('losses-show')));
+  assert.deepEqual(parse(after, 'record/decisions/gap-reworded.json').adds, ['every-loss-is-a-gap']);
+  assert.equal(parse(after, 'record/properties.json').find((p) => p.id === 'every-loss-is-a-gap').says, 'Every loss of facts or reports leaves a gap in the record.');
+  assert.deepEqual(checkFiles(after).errors, []);
+});
+
+test('a decision with an answer whose every sentence is replaced stays, with no adds', () => {
+  const files = replacing({ answer: true });
+  const outcome = take(files, 'gap-reworded');
+  assert.equal(outcome.status, 'done', `${outcome.message} ${JSON.stringify(outcome.errors ?? [])}`);
+  assert.ok(![...outcome.changed.values()].includes(null));
+  assert.ok(!outcome.changed.has('order.json'));
+  const after = apply(files, outcome);
+  const kept = parse(after, 'record/decisions/losses-show.json');
+  assert.equal(kept.verdict, 'take');
+  assert.equal(kept.adds, undefined);
+  assert.equal(after.get('record/decisions/losses-show.md'), 'Why the record shows its losses.\n');
+  assert.deepEqual(checkFiles(after).errors, []);
+});
+
+test('a take that would delete a decision another entry needs is refused, names both, and writes nothing', () => {
+  const files = replacing();
+  files.set('record/decisions/no-detour.json', canonicalText(canonicalDecision({ ...parse(files, 'record/decisions/no-detour.json'), needs: ['losses-show'] })));
+  assert.deepEqual(checkFiles(files).errors, []);
+  const outcome = take(files, 'gap-reworded');
+  assert.equal(outcome.status, 'refused');
+  assert.match(outcome.message, /losses-show/);
+  assert.match(outcome.message, /no-detour needs losses-show/);
+  assert.equal(outcome.changed.size, 0);
+});
+
 test('drop writes the verdict and keeps sets; it refuses a taken entry that brought sentences', () => {
   const files = sample();
   const outcome = drop(files, 'losses-show');
@@ -209,7 +272,7 @@ function random(seed) {
 
 const PROPERTY_LISTS = ['properties', 'engine/properties', 'record/properties'];
 
-test('model: any sequence of takes keeps the lists equal to a reference, every sentence in the adds of exactly one taken entry, and every taken decision with an answer or an adds', () => {
+test('model: any sequence of takes keeps the lists equal to a reference, every sentence in the adds of exactly one taken entry, and every taken decision with an answer or an adds; a decision emptied of its sentences is deleted unless needed', () => {
   for (let seed = 1; seed <= 25; seed += 1) {
     const rng = random(seed);
     const files = sample();
@@ -218,6 +281,9 @@ test('model: any sequence of takes keeps the lists equal to a reference, every s
     const model = new Map();
     // The taken decisions that had no answer: their adds stands for it.
     const onlySets = new Set();
+    // The decisions this test took and that still exist, and what each needs.
+    /** @type {Map<string, string[]>} */
+    const alive = new Map();
     for (let step = 0; step < 12; step += 1) {
       const id = `step-${seed}-${step}`;
       const sets = [];
@@ -242,27 +308,43 @@ test('model: any sequence of takes keeps the lists equal to a reference, every s
       const removes = candidates.length && rng.int(3) === 0 ? [rng.pick(candidates)] : [];
       // A decision that sets sentences may have no answer.
       const answered = !sets.length || rng.int(3) !== 0;
-      files.set(`decisions/${id}.json`, canonicalText(canonicalDecision({ asks: `Step ${step}?`, ...(answered ? { answer: 'Yes.' } : {}), ...(sets.length ? { sets } : {}), ...(removes.length ? { removes } : {}) })));
+      // Now and then it needs an earlier decision, which a take may then not delete.
+      const needs = alive.size && rng.int(3) === 0 ? [rng.pick([...alive.keys()])] : [];
+      files.set(`decisions/${id}.json`, canonicalText(canonicalDecision({ asks: `Step ${step}?`, ...(answered ? { answer: 'Yes.' } : {}), ...(needs.length ? { needs } : {}), ...(sets.length ? { sets } : {}), ...(removes.length ? { removes } : {}) })));
       place(files, id);
 
-      // A take that would leave a decision without an answer or an adds is refused and writes nothing;
-      // with its own answer written, the same take is then done.
+      // A decision taken on sentences alone whose every sentence this take replaces or removes is
+      // deleted. When another entry needs it the take is refused and writes nothing; with the
+      // needed one's answer written, the same take is then done and that one stays.
       const gone = new Set([...used, ...removes]);
       const emptied = [...onlySets].filter((owner) => [...model].filter(([, sentence]) => sentence.by === owner).every(([sid]) => gone.has(sid)));
+      const needers = [...alive, [id, needs]].filter(([other]) => !emptied.includes(other));
+      const needed = emptied.filter((owner) => needers.some(([, list]) => list.includes(owner)));
       let outcome = take(files, id);
-      if (emptied.length) {
-        assert.equal(outcome.status, 'refused', `seed ${seed} step ${step}: would empty the adds of ${emptied.join(', ')}`);
+      if (needed.length) {
+        assert.equal(outcome.status, 'refused', `seed ${seed} step ${step}: would delete ${needed.join(', ')}, which is needed`);
         assert.equal(outcome.changed.size, 0);
-        assert.match(JSON.stringify(outcome.errors ?? []), /without an answer or adds/);
-        for (const owner of emptied) {
+        for (const owner of needed) assert.match(outcome.message, new RegExp(`needs ${owner}\\b`));
+        for (const owner of needed) {
           files.set(`decisions/${owner}.json`, canonicalText(canonicalDecision({ ...parse(files, `decisions/${owner}.json`), answer: 'Yes.' })));
           onlySets.delete(owner);
         }
         outcome = take(files, id);
       }
       assert.equal(outcome.status, 'done', `seed ${seed} step ${step}: ${outcome.message} ${JSON.stringify(outcome.errors ?? [])}`);
+      const deleted = emptied.filter((owner) => !needed.includes(owner));
+      assert.deepEqual([...outcome.changed].filter(([, text]) => text === null).map(([name]) => name).sort(), deleted.map((owner) => `decisions/${owner}.json`).sort(), `seed ${seed} step ${step}: deleted`);
       if (!answered) onlySets.add(id);
-      for (const [name, text] of outcome.changed) files.set(name, text);
+      alive.set(id, needs);
+      for (const [name, text] of outcome.changed) {
+        if (text === null) files.delete(name);
+        else files.set(name, text);
+      }
+      for (const owner of deleted) {
+        alive.delete(owner);
+        onlySets.delete(owner);
+        assert.ok(!parse(files, 'order.json').stages.some((stage) => stage.entries.includes(owner)), `seed ${seed} step ${step}: ${owner} still placed`);
+      }
       for (const { in: list, ...value } of sets) model.set(list === 'words' ? wordId(value.word) : value.id, { list, value, by: id });
       for (const sid of removes) model.delete(sid);
 
