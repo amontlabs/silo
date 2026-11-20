@@ -514,10 +514,10 @@ comes from its issue alone: open is not decided, closed as "not planned" is
 dropped, closed as "completed" is built. GitHub holds only what people add
 (comments, suggestions and votes) and the threads the bot opens for them. The
 history of an entry is read from git when the site is built. A comment is
-marked `bot` when it is by the Workshop's own App: its
-`performed_via_github_app` id is the configured App id (`WORKSHOP_APP_ID`), or
-its author is the App's account, `<slug>[bot]` (the slug read from the
-installation). It is otherwise an ordinary comment.
+marked `bot` only when its author is the Workshop's own App account,
+`<slug>[bot]` (the slug read from the installation). A comment a person
+writes through the Workshop is not, though GitHub records it as made via the
+App.
 
 ## The API
 

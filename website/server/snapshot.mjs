@@ -137,7 +137,7 @@ function latestOf(snapshot, threads) {
 // `keepAlive(promise)` asks the platform to keep the instance running until it settles.
 // `afterRefresh()` runs, detached, after each successful refresh.
 // `wall()` is the real clock for the floor, the lost-refresh limit and the waits.
-// `app()` is the Workshop's App, `{ id, login }`: its comments are marked as the bot's.
+// `app()` is the Workshop's App, `{ login }`: its comments are marked as the bot's.
 // `entries` are the plan's entries by id (see entries.mjs): the state names the thread of each.
 export function createSnapshot({
   repo, request, app = () => null, entries = new Map(), now = Date.now, wall = Date.now, log = () => {},
