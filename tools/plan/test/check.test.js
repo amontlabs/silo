@@ -260,20 +260,13 @@ test('rule 2: a text holding U+FFFD is valid UTF-8 and passes', () => {
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].asks = 'Which tool checks the model \uFFFD of access?'; })), []);
 });
 
-test('rule 10: the words under not are refused on word boundaries, in any case, except inside a not list', () => {
-  assert.deepEqual(errorsOf(variant((f) => { f['engine/README.md'] += '\nThe Wall stops it.\n'; })), ['plan/engine/README.md -: "wall" is not a word of the plan']);
-  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].asks = 'Which tool checks every DOOR?'; })), ['plan/engine/decisions/model-tool.json asks: "door" is not a word of the plan']);
-  assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].says = 'A guess is never a fact.'; })), ['plan/record/decisions/losses-show.json sets[0].says: "guess" is not a word of the plan']);
-  // Inside another word, it is not the word.
-  assert.deepEqual(errorsOf(variant((f) => { f['engine/README.md'] += '\nA wallet, doors, a watchdog, labels.\n'; })), []);
-  // A phrase: matched across any run of spaces, and only whole.
-  const phrase = (f) => { f['words.json'][2].not.push('hard edge'); };
-  assert.deepEqual(errorsOf(variant((f) => { phrase(f); f['PRODUCT.md'] += '\nIt is a Hard\n  Edge.\n'; })), ['plan/PRODUCT.md -: "hard edge" is not a word of the plan']);
-  assert.deepEqual(errorsOf(variant((f) => { phrase(f); f['PRODUCT.md'] += '\nA hard edges case, an edge.\n'; })), []);
-  // Inside a not list, here of a word an entry sets, the words are allowed.
-  assert.deepEqual(errorsOf(variant((f) => {
-    f['engine/decisions/model-tool.json'].sets = [{ in: 'words', word: 'gate', means: 'A part of the boundary.', not: ['wall'] }];
-  })), []);
+test('a word under not is only listed: using it in the plan is no error', () => {
+  // The sample's words list "wall", "door" and "guess" under not.
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/README.md'] += '\nThe Wall stops it.\n'; })), []);
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].asks = 'Which tool checks every DOOR?'; })), []);
+  assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].says = 'A guess is never a fact.'; })), []);
+  // The list itself is still checked for its shape.
+  assert.notDeepEqual(errorsOf(variant((f) => { f['words.json'][2].not = 'wall'; })), []);
 });
 
 test('rule 11: an entry whose text changed while its verdict stayed', () => {

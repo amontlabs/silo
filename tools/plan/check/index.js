@@ -63,12 +63,6 @@ function canonicalOf(name) {
 const isEmpty = (value) => value === null || (typeof value === 'string' && value.trim() === '')
   || (Array.isArray(value) && value.length === 0) || (isObject(value) && Object.keys(value).length === 0);
 
-/** A word or a phrase, matched on word boundaries, in any case, its spaces matching any run of spaces. */
-function phrasePattern(phrase) {
-  const body = phrase.trim().split(/\s+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
-  return new RegExp(`(?<![\\p{L}\\p{N}_])${body}(?![\\p{L}\\p{N}_])`, 'iu');
-}
-
 /** The id of a statement: a word's is derived from `word`, the others carry `id`. */
 const statementId = (kind, statement) => (kind === 'word' ? (typeof statement.word === 'string' ? wordId(statement.word) : null) : statement.id);
 const idField = (kind) => (kind === 'word' ? 'word' : 'id');
@@ -550,27 +544,7 @@ export function checkFiles(files, { exists } = {}) {
   }
   if (!exists) notes.push({ file: 'plan/', field: '-', message: 'the files named by at were not looked for', fix: 'run plan check in the repository' });
 
-  // Rule 10: the words under not, in every JSON string value and every .md file, except inside a not list.
-  /** @type {{ phrase: string, pattern: RegExp, word: string }[]} */
-  const refused = [];
-  for (const statement of statements) {
-    if (statement.kind !== 'word' || !Array.isArray(statement.value.not)) continue;
-    for (const phrase of statement.value.not) if (isText(phrase)) refused.push({ phrase, pattern: phrasePattern(phrase), word: statement.value.word });
-  }
-  if (refused.length) {
-    const scan = (file, field, text) => {
-      for (const { phrase, pattern, word } of refused) if (pattern.test(text)) add(file, field, `"${phrase}" is not a word of the plan`, `write "${word}" instead`);
-    };
-    const walk = (file, field, value) => {
-      if (typeof value === 'string') scan(file, field || '-', value);
-      else if (Array.isArray(value)) value.forEach((item, index) => walk(file, `${field}[${index}]`, item));
-      else if (isObject(value)) for (const [key, item] of Object.entries(value)) if (key !== 'not') walk(file, at(field, key), item);
-    };
-    for (const name of names) {
-      if (name.endsWith('.md')) scan(`plan/${name}`, '-', /** @type {string} */ (files.get(name)));
-      else if (json.has(name)) walk(`plan/${name}`, '', json.get(name));
-    }
-  }
+  // A word's `not` is read by people and agents only: no rule looks for its words in the plan's text.
 
   return { errors, notes };
 }

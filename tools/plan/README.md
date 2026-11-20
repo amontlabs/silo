@@ -97,7 +97,6 @@ Each problem names the file, the field, what is wrong and the fix.
   `.` or `..` part), or that does not name a regular file there: a directory, a missing file, or a
   link that leads outside the repository. Without the repository, only the file test is left out,
   and a note says so.
-- A word listed in a word's `not`, used anywhere else in `plan/`.
 - Against the merged plan (`origin/main`, else `HEAD`): an entry whose question, answer, name,
   description, `replaces`, `sets` or `removes` changed while its verdict stayed. Only the command
   checks this, not the offline check of a tree. It does not apply to an entry when the latest
