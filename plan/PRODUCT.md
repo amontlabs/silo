@@ -1,78 +1,43 @@
-# Silo: the product
+# Silo
 
-This page says what Silo is, who it is for and how it is being built. It is the source of truth
-for product questions: agents read it before they build, and the owner changes it by deciding
-something (see [the decisions](decisions.json)).
+What Silo is for, and what holds in every part of it. The parts are listed in
+[`parts.json`](parts.json); each has its own page. This page names sentences and decisions by id
+and does not repeat them: `plan show <id>` gives each one.
 
-Silo is being redesigned. The design is recorded in [DESIGN.md](DESIGN.md), written on
-18 November 2026 and revised the day after, and this page is its short form. The owner goes through the design part by
-part. A part gets its features here once he has settled it. Until then the plan holds no feature,
-and nothing is built.
+## For
 
-## In one sentence
+A useful agent needs full access. On your own machine that puts your files, your keys and your
+accounts in its reach, and after a long run you cannot tell what it did. Silo gives your agents a
+computer of their own, a virtual machine, with a record of what happens in it and a way back
+(`the-shape`, `computer`, `record`).
 
-Agents work in a computer of their own. Silo records everything they do there, shows you what
-matters, and takes you back to any moment.
+The first user is the owner, on a Mac (`who-it-is-for`). Where computers run after that:
+`where-it-runs`. The sentence that says what Silo is, for the home page, is still to decide:
+`one-sentence`.
 
-## Who it is for
+## Why it is so
 
-A developer who runs several coding agents and wants them to work with full access, without
-giving them their own machine. The first user is the owner, on a Mac. A developer inside a
-company fits the same description. Team features come later, on top of the same product.
+- **The agent is treated as hostile** (`security-framing`). So inside its computer it has full
+  access (`full-access-inside`), and every limit is set outside, at the boundary
+  (`where-limits-are-set`, `boundary`).
+- **Access is handed down, never up.** Whatever would give a computer more than it has needs
+  your yes (`what-an-agent-inside-may-do`).
+- **The record is the core of the product** (`the-shape`). Silo tells apart what it saw, what it
+  was told and what is only an opinion (`fact`, `report`, `opinion`).
+- **What Silo does by itself depends on how sure it is** (`less-sure-less-power`). Only a fact or
+  you can grant (`grant-needs-a-fact-or-you`), and a precaution can only protect
+  (`precaution-grants-nothing`).
+- **Every addition answers the same questions** (`questions-for-an-addition`): what kind each of
+  its actions is (`kind-before-design`), what triggers it, and what its bad paths are
+  (`bad-paths-first`).
+- **How much security work comes now:** `security-is-not-the-focus`.
 
-## The problem
+What Silo is not: `what-silo-is-not`. What it does not build is still to decide:
+`what-silo-does-not-build`.
 
-- A useful agent needs root, the network, credentials and a real environment. On your own
-  machine that puts your files, keys and accounts in its reach.
-- You cannot see what agents are doing while they run. After a long run you cannot tell what they
-  did or what it cost.
-- When an agent breaks something you cannot go back, and part of the damage happens outside the
-  machine.
-- Agents leave things behind: full disks, processes that keep running, folders nobody can tie to
-  a session.
-- Rules that live inside the agent program are walked around by the agent.
+## One example
 
-## The shape
-
-1. **A computer.** Your agents live and work in one long-lived computer, called main. It is a
-   virtual machine on your device, running macOS or Linux. Nothing from your device is shared
-   into it.
-2. **The record.** Silo writes down what happens in the computer. What it saw itself, from
-   outside, is a fact: every file change, connection and model call. What a program inside told
-   it, such as which process did something, is a report. Opinions about the record, such as
-   which run did this or what a rebuild would bring back, are computed on top of it and never
-   stored as facts.
-3. **Going back.** Silo takes checkpoints on its own. You restore one, or continue from it in a
-   fork.
-4. **Forks for the exception.** A fork is a copy of a computer: for a risky try, for a tool to
-   test before trusting it, for a task that needs a clean machine. It is dropped, or it becomes
-   main.
-
-The parts around it (secrets an agent can use but not read, network rules per computer, limits
-on spending, approvals only you can answer) exist so that this is safe to leave running.
-
-## Where it runs
-
-On your own machine first: a Mac. The same computers then run on a shared server or in a cloud.
-
-## Rules that hold everywhere
-
-- **One kind of thing.** A computer is a computer, whatever its system and whichever device runs
-  it. Differences are only those the platform forces.
-- **A computer cannot get more than it has.** An agent inside a computer can do anything that
-  gives it no more access than it already has. Anything that would grant it more asks you, in
-  the Silo app.
-- **The less sure the trigger, the less it may do.** A report or an opinion is never stored as a
-  fact. A rule reads only facts, and only you or a rule can grant. A precaution, which rests on
-  a report or an opinion, takes only actions that can be undone.
-- **Git's words where Git has one.** Checkpoint, fork, restore. One word per idea.
-- **Security is built properly, and is not the current focus.** A change is made safely; security
-  work for its own sake waits until the first version is good.
-
-## What Silo is not
-
-- Not a tool that runs agents on your own machine with a sandbox around one process.
-- Not an agent program. It runs the vendors' programs, unmodified, and never chooses a model.
-- Not an orchestrator, a chat window or a board for tracking work.
-- Not a project folder on your Mac.
-- Not a CI product.
+You want an agent to try a tool you do not trust yet. It works in a fork of main (`fork`,
+`main`), with `sudo` and nothing asking for approval (`full-access-inside`). Checkpoints are taken
+on their own (`the-shape`). If the try goes wrong, you restore one, or you drop the fork and it
+waits in the bin for a time (`restore`, `drop`, `drop-and-bin`).
