@@ -33,9 +33,18 @@ Simple does not mean vague. Name the real thing: "its own virtual machine", not 
 the whole machine"; "a snapshot of main's disk"; "sudo"; "a Linux server with KVM". A concrete
 case says more than an adjective: "two agents can listen on port 3000".
 
-The terms and the measured facts are in the plan's files under [`plan/`](plan/).
-Take them from there, and state nothing the plan does not support. One precise term per idea is
+The terms are in [`plan/words.json`](../plan/words.json), and the measured facts in the plan's
+files under [`plan/`](../plan/). Take them from there, and state nothing the plan does not support. One precise term per idea is
 enough: a sentence stacked with technical words reads as badly as a slogan.
+
+## What not to say
+
+- **"Operating system for agents."**
+- **"Sandbox."** A tired word, and people cannot tell sandbox products apart.
+- **"Safe", "secure", "proven".** Silo enforces the rules the user sets and shows what they allow.
+  Say "enforced", "what the rules allow", "checked by a simulator against these failures".
+- **"Observability", "dashboard", "monitoring".** People ask for less to look at, not more.
+- **Fear.** Safety is not what this audience asks for. Full access without worry is.
 
 ## Before you show it
 

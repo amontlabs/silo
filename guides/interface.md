@@ -2,6 +2,8 @@
 
 Read this before you build a page or a screen: the site, the Workshop, the app.
 
+- Pages for people must be obvious to use and short on text: one place to look, no explanatory
+  paragraphs, no assistant-sounding copy.
 - Nothing stays blank and then fills in. Content that arrives after the page shows gets a
   placeholder in its exact place.
 - Design the wait out first: show the last answer from a cache, and never wait on the server on
