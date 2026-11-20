@@ -13,6 +13,8 @@ import { createNodeHandler, FRAME_HEADERS } from '../server/node.mjs';
 import { createWorkshop } from '../server/workshop.mjs';
 import { readPlan } from '../../tools/plan/read/index.js';
 import { createFakeGitHub, seedDemo } from './fake-github.mjs';
+import { readPlanEntries } from '../server/entries.mjs';
+import { planEntries } from './plan-entries.mjs';
 
 const website = fileURLToPath(new URL('..', import.meta.url));
 
@@ -51,7 +53,7 @@ export function loadEntries(dir) {
     .map((entry) => ({ id: entry.id, name: entry.name ?? entry.asks, what: entry.what ?? entry.answer ?? entry.asks, ...(entry.built ? { built: entry.built } : {}) }));
 }
 
-// `planDir` is the plan the fake GitHub is seeded from.
+// `planDir` is the plan whose entries the server knows, and the one the fake GitHub is seeded from.
 export async function startDev({ fake = false, planDir = PLAN, port = 4174, host = '127.0.0.1', distDir = join(website, 'dist'), env = process.env, log } = {}) {
   const origin = `http://${host}:${port}`;
   let fakeGitHub = null;
@@ -64,7 +66,8 @@ export async function startDev({ fake = false, planDir = PLAN, port = 4174, host
   } else {
     config = readConfig({ ...env, WORKSHOP_SITE_ORIGIN: origin });
   }
-  const api = createNodeHandler(createWorkshop({ config, ...(log ? { log } : {}) }));
+  const entries = readPlanEntries(planEntries(planDir));
+  const api = createNodeHandler(createWorkshop({ config, entries, ...(log ? { log } : {}) }));
   const server = createServer(async (req, res) => {
     let pathname;
     try {

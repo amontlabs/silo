@@ -3,6 +3,8 @@ import { cp, mkdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ENTRIES_FILE } from '../server/entries.mjs';
+import { planDir as defaultPlanDir, planEntries } from './plan-entries.mjs';
 
 // Packages the built site and the Workshop API with Vercel's Build Output API v3:
 // static files in static/, one Node.js function served at every
@@ -14,7 +16,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // tools/workshop/model/ (the Workshop's model, with tools/workshop/package.json,
 // which makes it ESM). Any other file it would load, in website/ or outside it,
 // stops the packaging: a package in website/node_modules/ is one of them.
-export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'vote', 'suggest'];
+// Beside the server goes plan-entries.json, the plan's entries made from the
+// plan at build time (scripts/plan-entries.mjs), which the server reads.
+export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'comment-vote', 'vote', 'suggest'];
 export const RUNTIME = 'nodejs24.x';
 export const HANDLER = 'website/api/workshop.cjs';
 
@@ -80,15 +84,17 @@ export const FRAME_HEADERS = { 'Content-Security-Policy': "frame-ancestors 'none
 export const KEPT_FILES = '^/(assets/.*|fonts/.*\\.woff2)$';
 export const KEPT_HEADERS = { 'Cache-Control': 'public, max-age=31536000, immutable' };
 
-export async function prepareVercel({ siteDir = website, distDir = join(siteDir, 'dist'), outputDir = DEFAULT_OUTPUT } = {}) {
+// `planDir` is the plan whose entries the server knows: plan/, or the one WORKSHOP_PLAN names.
+export async function prepareVercel({ siteDir = website, distDir = join(siteDir, 'dist'), outputDir = DEFAULT_OUTPUT, planDir = defaultPlanDir() } = {}) {
   outputDir = resolve(outputDir);
   if (!outputDir.endsWith(`${sep}.vercel${sep}output`)) throw new Error('The output directory must end in .vercel/output; nothing was written.');
   const page = (await exists(join(distDir, 'workshop', 'index.html'))) ? '/workshop/index.html'
     : (await exists(join(distDir, 'workshop.html'))) ? '/workshop.html' : null;
   if (!page) throw new Error('The build has no Workshop page (workshop/index.html or workshop.html).');
 
-  // What the function loads is known before anything is written.
+  // What the function loads, and the plan's entries, are known before anything is written.
   const { root, files } = functionFiles(siteDir);
+  const entries = planEntries(planDir);
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
   await cp(distDir, join(outputDir, 'static'), { recursive: true });
@@ -101,7 +107,9 @@ export async function prepareVercel({ siteDir = website, distDir = join(siteDir,
     await mkdir(dirname(destination), { recursive: true });
     await cp(file, destination);
   }
-  const shipped = files.map((file) => relative(root, file));
+  const entriesFile = join(main, 'website', 'server', ENTRIES_FILE);
+  await writeFile(entriesFile, JSON.stringify(entries) + '\n');
+  const shipped = [...files.map((file) => relative(root, file)), relative(main, entriesFile)];
   await writeFile(join(main, '.vc-config.json'), JSON.stringify({
     runtime: RUNTIME,
     handler: HANDLER,

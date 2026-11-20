@@ -5,6 +5,7 @@ import { readConfig } from '../server/config.mjs';
 import { BUDGET, createWorkshop } from '../server/workshop.mjs';
 import { SNAPSHOT } from '../server/snapshot.mjs';
 import { createFakeGitHub, seedDemo } from './fake-github.mjs';
+import { readPlanEntries } from '../server/entries.mjs';
 
 // Tests run with a short floor between write-started refreshes and short waits so they do not wait
 // on the real clock; the tests of those numbers set them explicitly.
@@ -17,7 +18,18 @@ export const START = Date.parse('2026-11-16T12:00:00Z');
 export const SESSION = '__Host-workshop-session';
 export const FAILED = '/workshop?signin=failed';
 
-export async function setup({ configured = true, seed = true, timeoutMs } = {}) {
+// The plan's entries the server knows in the tests: the three seedDemo opens issues for (#1 to #3),
+// two without an issue, and one written from the suggestion seedDemo opens (#6).
+export const PLAN_ENTRIES = [
+  { id: 'engine-service', kind: 'feature', title: 'The engine runs on its own', part: 'engine', suggestedIn: null },
+  { id: 'calls-and-events', kind: 'feature', title: 'Every call and event defined once', part: 'engine', suggestedIn: null },
+  { id: 'vm-runtime', kind: 'feature', title: 'The VM runtime, packaged', part: 'computers', suggestedIn: null },
+  { id: 'fork-computers', kind: 'feature', title: 'Fork a computer', part: 'computers', suggestedIn: null },
+  { id: 'which-distro', kind: 'decision', title: 'Which Linux distribution do computers start with?', part: null, suggestedIn: null },
+  { id: 'share-link', kind: 'feature', title: 'Share a computer with a link', part: 'computers', suggestedIn: 6 },
+];
+
+export async function setup({ configured = true, seed = true, timeoutMs, entries = PLAN_ENTRIES } = {}) {
   const clock = { t: START };
   const now = () => clock.t;
   const fake = createFakeGitHub({ now });
@@ -27,7 +39,7 @@ export async function setup({ configured = true, seed = true, timeoutMs } = {}) 
   const outputs = [];
   const env = configured ? fake.workshopEnv(ORIGIN) : { WORKSHOP_SITE_ORIGIN: ORIGIN };
   const config = readConfig(env, { apiBase: fake.url, webBase: fake.url });
-  const workshop = createWorkshop({ config, now, log: (entry) => logs.push(JSON.stringify(entry)), ...(timeoutMs ? { timeoutMs } : {}) });
+  const workshop = createWorkshop({ config, entries: readPlanEntries(entries), now, log: (entry) => logs.push(JSON.stringify(entry)), ...(timeoutMs ? { timeoutMs } : {}) });
   const secrets = () => [...fake.issuedTokens, fake.clientSecret, env.WORKSHOP_SESSION_SECRET, ...[...fake.state.codes.keys()]].filter(Boolean);
 
   function client() {

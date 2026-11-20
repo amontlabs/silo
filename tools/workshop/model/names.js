@@ -14,8 +14,12 @@ export const LABELS = Object.freeze([
   { name: SUGGESTION_LABEL, color: 'fbca04', description: 'Workshop: a feature suggested by a visitor' },
 ]);
 
-/** The labels something still puts on an issue: the site labels each new suggestion. `workshop doctor` checks these. */
-export const SET_LABELS = Object.freeze(LABELS.filter((label) => label.name === SUGGESTION_LABEL));
+/**
+ * The labels something puts on an issue: the site labels each new suggestion, and opens an entry's thread
+ * with the entry label. GitHub's documentation does not say that it creates a label an issue names, so
+ * `workshop doctor` checks that these exist.
+ */
+export const SET_LABELS = LABELS;
 
 export const DEFAULT_REPO = 'amontlabs/silo';
 export const DEFAULT_SITE = 'https://silo.amontlabs.com';
