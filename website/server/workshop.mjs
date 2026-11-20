@@ -496,7 +496,7 @@ export function createWorkshop({
   // Closes an issue this instance opened, as not planned and without the label `workshop:entry`, and
   // takes it out of the snapshot: it is no thread, even when closing it fails.
   async function retire(number) {
-    snapshots.patch.retired(number);
+    snapshots.patch.noThread(number);
     try {
       await repair('PATCH', `/repos/${repo}/issues/${number}`, { body: { state: 'closed', state_reason: 'not_planned', labels: [] } });
     } catch (error) {
@@ -526,21 +526,23 @@ export function createWorkshop({
   }
 
   // Finds the entry's thread on GitHub and, with `open`, opens it as the App when there is none.
-  // Answers `{ promise, thread }`. `promise` gives `{ candidates }`, the numbers to confirm, lowest
-  // first, and `opened`, the issue this call opened when it is the thread. `thread` is the thread's
-  // number once the opening has made one known, so that a request whose wait ends first still
-  // names it. Requests that may open share one call per entry on this instance. An opening is
-  // bounded only by the `open` ceiling.
+  // Answers `{ promise, thread, remember }`. `promise` gives `{ candidates }`, the numbers to
+  // confirm, lowest first, and `opened`, the issue this call opened when it is the thread. `thread`
+  // is the thread's number once the opening has made one known, so that a request whose wait ends
+  // first still names it, and `remember()` then puts the issue just opened in the snapshot at once.
+  // Requests that may open share one call per entry on this instance. An opening is bounded only by
+  // the `open` ceiling.
   //
-  // The issue GitHub's POST answered, once it carries its label, is the entry's thread for this
-  // instance from that moment: it goes into the snapshot before any read, because GitHub's list by
-  // label may not show it for some time. The entry issues are then read again, only to find a lower
-  // issue that names the entry (another instance opened one at the same moment): that one is the
-  // thread, and the issue this call opened is closed. That the new issue is missing from that read
-  // is no failure, and when the read fails the new issue is the thread.
+  // After the opening, the entry issues are read again, only to find a lower issue that names the
+  // entry (another instance opened one at the same moment): that one is the thread, and the issue
+  // this call opened is closed. Otherwise the issue GitHub's POST answered, with its label, is the
+  // thread: that the read does not show it is no failure (GitHub's list by label may not show it for
+  // some time), and when the read fails it is the thread too. It is put in the snapshot only then,
+  // so that no other request writes on an issue that may yet be closed; until then, requests for
+  // the entry share the opening.
   function lookUp(entry, ignore, open) {
     const store = requests.getStore();
-    const lookup = { promise: null, thread: null };
+    const lookup = { promise: null, thread: null, remember: () => {} };
     const run = async () => {
       const before = await entryIssuesOnGitHub(entry.id, ignore);
       if (before.numbers.length || !open) return { candidates: before.numbers, opened: null };
@@ -550,18 +552,26 @@ export function createWorkshop({
       const { data } = await installationRequest('POST', `/repos/${repo}/issues`, { body: { title: threadTitle(entry.title), body: threadBody(entry), labels: [LABELS.entry] } });
       if (store) store.changed = true;
       const issue = await labelled(data, entry);
-      snapshots.patch.opened(issue);
+      let remembered = false;
       lookup.thread = issue.number;
-      let after;
+      lookup.remember = () => {
+        if (remembered) return;
+        remembered = true;
+        snapshots.patch.opened(issue);
+      };
+      let after = null;
       try {
         after = await entryIssuesOnGitHub(entry.id, ignore, { paidIn });
       } catch (error) {
         log({ endpoint: 'thread', failure: 'read_after_opening_failed', ...(error instanceof GitHubError ? { github: error.status } : {}) });
+      }
+      const lowest = after?.numbers[0];
+      if (lowest === undefined || lowest >= issue.number) {
+        lookup.remember();
         return { candidates: [issue.number], opened: issue };
       }
-      const lowest = after.numbers[0];
-      if (lowest === undefined || lowest >= issue.number) return { candidates: [issue.number], opened: issue };
       lookup.thread = lowest;
+      lookup.remember = () => {};
       await retire(issue.number);
       const lower = after.found.get(lowest);
       if (lower) snapshots.patch.issue(lower, 'entry');
@@ -580,7 +590,9 @@ export function createWorkshop({
   // The entry's thread: the suggestion it was written from when that is a Workshop suggestion, else the
   // lowest-numbered entry issue that names it. Every candidate, from the snapshot or from GitHub, is
   // confirmed by the read of it the write makes anyway: an issue whose label or marker was changed on
-  // GitHub is no thread, and the thread is then looked up on GitHub once more. With `open`, an entry
+  // GitHub is no thread, and the thread is then looked up on GitHub once more; a thread this instance
+  // opened and still holds apart is then forgotten. When GitHub answers 404 or 410 for such a thread,
+  // the answer says to try again, with `n`: GitHub may not serve it everywhere yet. With `open`, an entry
   // without one gets one; without, null. Answers `{ n, issue, fresh }`, `fresh` when this request
   // opened the issue and holds it as GitHub created it. Once a thread is known, `ctx.thread` names it,
   // so that every answer to the write carries it, errors included.
@@ -593,10 +605,13 @@ export function createWorkshop({
     const confirm = async (n) => {
       ctx.thread = n;
       const read = await userRequest(session, 'GET', `/repos/${repo}/issues/${n}`).catch((error) => {
-        if (error instanceof GitHubError && (error.status === 404 || error.status === 410)) return null;
-        throw error;
+        if (!(error instanceof GitHubError && (error.status === 404 || error.status === 410))) throw error;
+        // GitHub may not serve an issue just opened everywhere yet: no second one is opened for it.
+        if (snapshots.remembers(n)) refuse(502, 'github_failed', 'GitHub could not find the thread just opened. Try again.');
+        return null;
       });
       if (read && isThreadOf(read.data, entry)) return read.data;
+      if (read && snapshots.remembers(n)) snapshots.patch.noThread(n);
       ctx.thread = undefined;
       ignore.add(n);
       return null;
@@ -615,6 +630,7 @@ export function createWorkshop({
       const lookup = shared ?? lookUp(entry, ignore, open);
       const { candidates, opened } = await bounded(lookup.promise).catch((error) => {
         if (lookup.thread) ctx.thread = lookup.thread;
+        lookup.remember();
         throw error;
       });
       if (opened && !shared) return found(opened.number, opened, true);

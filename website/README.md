@@ -565,27 +565,39 @@ an id of the plan, never both. With `entry`:
   issue. When the issue still lacks it, the App closes the issue, and the
   answer is 502 with `"error": "github"`. No open issue without the label is
   left behind.
-- Once GitHub has answered the opening and the issue carries its label, that
-  issue is the entry's thread for this instance. The server puts it in the
-  snapshot at once, before any read. GitHub's list of issues by label does not
-  show a new issue at once: on 2026-11-20 it showed one about 30 seconds after
-  it was opened, and nothing says how long it can take.
+- GitHub's list of issues by label does not show a new issue at once: on
+  2026-11-20 it showed one about 30 seconds after it was opened, and nothing
+  says how long it can take.
 - After the opening, the App reads the entry issues again, to find a lower
   issue that names the entry. There is one when another instance opened one
   at the same moment. The lower one is then the thread, and the person's
-  write goes on it. The App closes the issue it opened, as not planned, takes
-  the label `workshop:entry` off it, and takes it out of the snapshot.
+  write goes on it. The App closes the issue it opened, as not planned, and
+  takes the label `workshop:entry` off it.
 - When that read shows no lower issue, the issue just opened is the thread,
   whether the read shows it or not. When the read fails, or has no room left
-  in the ceiling below, the issue just opened is the thread too.
+  in the ceiling below, the issue just opened is the thread too. The server
+  then puts it in the snapshot.
+- Two requests for the same entry on the same instance share one opening,
+  until the read after it has ended. So no write goes on an issue the App may
+  still close. A request that comes after the opening finds the thread in the
+  snapshot. When a request's wait ends before the opening does, the issue
+  just opened is put in the snapshot at once, unless the App closed it.
 - The person's comment or 👍 then goes on the thread with the person's own
   token. The answer carries `n`.
-- Two requests for the same entry on the same instance share one opening. A
-  request that comes after it finds the thread in the snapshot.
 - A refresh of the snapshot keeps a thread this instance opened until a
-  refresh's own list shows its number, and at most 10 minutes after the
-  opening. Until then, every write on that entry from this instance goes on
-  it, and no second issue is opened.
+  refresh's own list shows its number, and at most an hour after the opening.
+  Until then, every write on that entry from this instance goes on it, and no
+  second issue is opened. A list that lags more than an hour would let this
+  instance open a second issue.
+- The instance forgets a thread it opened sooner in two cases. A refresh's
+  own list shows a lower issue for the entry: that one is the thread, and the
+  instance's issue stays open, since it may carry a person's write. Or a
+  person's read of the issue shows that its label or marker was changed on
+  GitHub: it is no thread, as above.
+- When a person's read of a thread this instance opened answers 404 or 410,
+  GitHub may not serve the new issue everywhere yet. The answer is 502, "GitHub
+  could not find the thread just opened. Try again.", with `n`, and no second
+  issue is opened.
 - An issue whose label `workshop:entry` was removed can stay in GitHub's list
   by label for some time, without the label in its own `labels`. Such an
   issue is no thread and no Workshop issue.
@@ -600,9 +612,11 @@ an id of the plan, never both. With `entry`:
   reads the issue once more. When it is closed or locked, the answer is 403
   `closed`: "This thread is closed on GitHub." No second issue is opened.
 
-What can still happen: two instances that each open an issue for the same
-entry before GitHub's list shows the other's each keep their own issue, and
-each makes its person's write on it. Once the list shows both, the lowest
+What can still happen: an entry gets a second issue when two instances each
+open one before GitHub's list shows the other's, or when GitHub opens an
+issue and its answer is lost (a 5xx or a timeout), so the instance never
+learns the number and opens another during the list's lag. Each issue then
+gets its person's write. Once the list shows both, the lowest
 number is the thread. The write on the other issue stays on GitHub, and the
 Workshop does not show it. `workshop doctor` reports the entry.
 
@@ -766,8 +780,8 @@ seconds plus the 10 seconds of CDN cache.
   patches are dropped, since GitHub's answer already holds them. A count moves
   only from the value it had when the write happened, so a write GitHub
   already shows is not counted twice. An entry's thread the App has just
-  opened is put in at once and kept by a different rule, given under
-  "Writing to an entry": GitHub's list may not show it yet.
+  opened is put in and kept by a different rule, given under "Writing to an
+  entry": GitHub's list may not show it yet.
 - **When GitHub fails**, times out or asks us to wait, the snapshot keeps
   answering whatever its age, with `"stale": true` once it is over 10 minutes
   old, and no refresh starts before the time GitHub gave, or 60 seconds. With

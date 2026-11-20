@@ -33,7 +33,8 @@
 // again, and older ones are dropped, since GitHub's answer already holds them.
 // An entry's thread this instance opened is kept apart: GitHub's list by label
 // may miss a new issue for some time, so the thread stays in every snapshot
-// until a refresh's own list shows its number, and at most 10 minutes.
+// until a refresh's own list shows its number or a lower issue for its entry,
+// and at most an hour.
 import { GitHubError, nextLink } from './github.mjs';
 import { clean, commentIssue, commentOf, cut, kindOf, LABELS, readBody, reasonOf } from './issues.mjs';
 import { issuesByEntry } from '../../tools/workshop/model/index.js';
@@ -59,7 +60,7 @@ export const SNAPSHOT = {
   commentsPerIssue: 100,
   comments: 5000,
   patches: 500,
-  openedFor: 10 * 60_000,
+  openedFor: 60 * 60_000,
 };
 
 const byAge = (a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id - b.id);
@@ -288,7 +289,7 @@ export function createSnapshot({
     }
   }
 
-  // Forgets the opened threads held for 10 minutes or more.
+  // Forgets the opened threads held for SNAPSHOT.openedFor or more.
   function expireOpened() {
     for (const [number, thread] of opened) if (now() - thread.at >= SNAPSHOT.openedFor) opened.delete(number);
   }
@@ -303,9 +304,14 @@ export function createSnapshot({
   }
 
   // The new snapshot replaces the current one. An opened thread its own list shows is an ordinary
-  // issue from then on; one it does not show is carried over, until 10 minutes after the opening.
+  // issue from then on. One whose entry the list shows a lower issue for is no longer the thread, and
+  // is forgotten (not closed: it may carry a person's write). Any other is carried over, until
+  // SNAPSHOT.openedFor after the opening.
   function swapIn(snapshot) {
-    for (const number of opened.keys()) if (snapshot.issues.has(number)) opened.delete(number);
+    const listed = entryIssuesOf(snapshot);
+    for (const [number, thread] of opened) {
+      if (snapshot.issues.has(number) || (listed.get(thread.entry)?.[0] ?? Infinity) < number) opened.delete(number);
+    }
     expireOpened();
     for (const number of opened.keys()) placeOpened(snapshot, number, current);
     patches = patches.filter((patch) => patch.at >= snapshot.startedAt);
@@ -567,18 +573,23 @@ export function createSnapshot({
         snapshot.version += 1;
       });
     },
-    // An entry's thread this instance just opened, as GitHub's POST answered it with its label: held
-    // until a refresh's own list shows it, and at most SNAPSHOT.openedFor.
+    // An entry's thread this instance opened, as GitHub's POST answered it with its label, once no
+    // lower issue for the entry was found: held until a refresh's own list shows it or a lower issue
+    // for its entry, and at most SNAPSHOT.openedFor.
     opened(issue) {
       const reduced = reduceIssue({ ...issue, labels: [{ name: LABELS.entry }] });
       if (!reduced?.summary.entry) return;
       opened.set(issue.number, { at: now(), entry: reduced.summary.entry, reduced });
       if (current) placeOpened(current, issue.number, current);
     },
-    // An issue this instance opened and then closed: it is no thread, so it leaves the snapshot.
-    retired(number) {
+    // An issue this instance learned is no thread: one it opened and closed, or a thread it opened
+    // whose label or marker was changed on GitHub. It is no longer held, and it leaves the snapshot,
+    // also one from a refresh that was already running.
+    noThread(number) {
       opened.delete(number);
-      if (current?.issues.delete(number)) current.version += 1;
+      record((snapshot) => {
+        if (snapshot.issues.delete(number)) snapshot.version += 1;
+      });
     },
   };
 
@@ -591,5 +602,11 @@ export function createSnapshot({
     }
   }
 
-  return { read, stateAnswer, issueAnswer, held, patch, idle, refreshSoon };
+  // Whether `number` is a thread this instance opened and still holds apart.
+  function remembers(number) {
+    expireOpened();
+    return opened.has(number);
+  }
+
+  return { read, stateAnswer, issueAnswer, held, remembers, patch, idle, refreshSoon };
 }
