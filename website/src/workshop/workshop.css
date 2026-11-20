@@ -282,6 +282,28 @@
 .ws-what p + p { margin-top: 8px; }
 .ws code { font: 12.5px var(--mono); padding: 0 3px; border-radius: 3px; background: var(--media); }
 .ws-state { margin-top: 12px; min-height: 34px; font-size: 14px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* What an open entry says of the plan's lists: a small quiet label and its lines under it, at the size of the answer. */
+.ws-fact { margin-top: 14px; max-width: 70ch; }
+.ws-fact-label { display: block; margin-bottom: 4px; font: 12px/16px var(--mono); color: var(--faint); }
+.ws-fact-text { color: var(--muted); overflow-wrap: anywhere; }
+.ws-fact-lines { display: grid; gap: 6px; color: var(--muted); }
+.ws-fact-lines li { display: grid; grid-template-columns: 76px minmax(0, 1fr); column-gap: 8px; row-gap: 2px; overflow-wrap: anywhere; }
+.ws-keeps li, .ws-needs li { display: block; }
+.ws-tag { font: 12px/1.9 var(--mono); color: var(--faint); }
+.ws-fact-lines code { justify-self: start; padding: 0; background: none; font: 12px/1.9 var(--mono); color: var(--faint); }
+.ws-st b { font-weight: 400; color: var(--ink); }
+.ws-st-asks { color: var(--faint); }
+.ws-need-word { margin-left: 6px; font: 12px var(--mono); color: var(--faint); }
+.ws-fact-lines a { color: var(--accent-ink); text-decoration: underline; }
+/* The id and its button: the button keeps the width of its longer word, so nothing moves when it changes. */
+.ws-id { display: inline-flex; align-items: center; gap: 10px; margin-left: 8px; }
+.ws-id code { padding: 0; background: none; font: 12px var(--mono); color: var(--faint); overflow-wrap: anywhere; user-select: all; }
+.ws .ws-copy { display: inline-grid; padding: 2px 8px; border: 1px solid var(--line); border-radius: 3px; font: 12px/16px var(--mono); color: var(--muted); text-align: center; }
+.ws-copy > span { grid-area: 1 / 1; }
+.ws-copy > span + span { visibility: hidden; }
+.ws .ws-copy:hover { color: var(--ink); border-color: var(--faint); }
+.ws .ws-copy:focus-visible { outline-offset: 2px; }
+.ws-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ws-yes { color: var(--ink); }
 .ws-muted { color: var(--muted); }
 .ws-date { font: 12px var(--mono); color: var(--faint); }

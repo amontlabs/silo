@@ -8,7 +8,7 @@ import { recallPerson, recallState, rememberPerson, rememberState } from './memo
 import { applyKept, keep, keptComments, newerAnswer } from './writes';
 import type { Write } from './writes';
 import { allRows, buildPlan } from './plan';
-import type { BuildData, LiveIssue, LiveState, Notes, Row } from './plan';
+import type { BuildData, Facts, LiveIssue, LiveState, Notes, Row } from './plan';
 
 const NOTICE_MS = 8000;
 /** A fetch of an issue's comments this recent serves an opening. */
@@ -39,7 +39,7 @@ function takeSigninFailure(): boolean {
   return true;
 }
 
-export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, loadNotes: () => Promise<Notes> = () => Promise.resolve({})) {
+export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, loadNotes: () => Promise<Notes> = () => Promise.resolve({}), loadFacts: () => Promise<Facts> = () => Promise.resolve({ entries: {}, statements: {} })) {
   // The newest answer as the server sent it (or as remembered), how the load stands, and whether a `fresh=1` ask is
   // still out. What the page shows is that answer with the page's own writes applied (writes.ts).
   const [loaded, setLoaded] = useState<{ load: Live['load']; answer: LiveState | null; fresh: boolean }>(() => ({ load: 'pending', answer: recallState(Date.now()), fresh: false }));
@@ -180,9 +180,22 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     loadNotes().then((loaded) => setNotes(loaded), () => setNotes('error'));
   }, [loadNotes]);
 
+  // What the entries say of the statements: loaded once, the first time a row with something to show is reached or
+  // opened; a failed load is tried again at the next.
+  const [facts, setFacts] = useState<Facts | 'loading' | 'error' | undefined>(undefined);
+  const factsRef = useRef(facts);
+  factsRef.current = facts;
+  const wantFacts = useCallback(() => {
+    if (factsRef.current === 'loading' || typeof factsRef.current === 'object') return;
+    factsRef.current = 'loading';
+    setFacts('loading');
+    loadFacts().then((loaded) => setFacts(loaded), () => setFacts('error'));
+  }, [loadFacts]);
+
   const prefetch = useCallback((row: Row) => {
+    if (row.more) wantFacts();
     if (liveRefOk.current && row.issue !== null && row.issue > 0 && !openKeys.has(row.key)) loadDetail(row.issue);
-  }, [loadDetail, openKeys]);
+  }, [loadDetail, openKeys, wantFacts]);
   /** The fetch of a row being opened, asked for in the same event so the row never shows a stale error first. */
   const fetchNow = useCallback((row: Row) => {
     if (liveRefOk.current && row.issue !== null && row.issue > 0) loadDetail(row.issue);
@@ -336,7 +349,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   };
 
   return {
-    live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, fetchNow, sending, votePending,
+    live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, facts, wantFacts, fetchNow, sending, votePending,
     votes, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
     setSuggestDraft, announce, setAnnounce, signinFailed, sendComment, toggleVote,
     sendSuggestion, signOut,

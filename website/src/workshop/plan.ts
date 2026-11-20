@@ -37,6 +37,40 @@ export interface Entry {
   built: string | null;
   /** Whether it has notes; their text is a chunk of its own (`virtual:workshop-notes`), loaded on demand. */
   notes: boolean;
+  /** Whether it has anything to show from `Facts` (the chunk `virtual:workshop-facts`), given its verdict. */
+  more: boolean;
+}
+
+export type StatementKind = 'word' | 'principle' | 'property';
+
+/** A statement of the plan's lists: a word, a principle or a property. */
+export interface Statement {
+  id: string;
+  kind: StatementKind;
+  /** A word's own spelling; null for the others. */
+  word: string | null;
+  /** A word's `means`, a principle's or a property's `says`. */
+  text: string;
+  /** A principle's question; null for the others. */
+  asks: string | null;
+}
+
+/** What an entry's file holds beyond what the rows need to be drawn. */
+export interface EntryFacts {
+  suggest?: { verdict: Verdict; why: string };
+  /** What a yes would write into the lists, as statements. */
+  sets?: Statement[];
+  removes?: string[];
+  adds?: string[];
+  keeps?: string[];
+  surfaces?: { app?: string; cli?: string };
+}
+
+/** The statements in force and what each entry says of them: a chunk of its own (`virtual:workshop-facts`), loaded when a row is first opened. */
+export interface Facts {
+  entries: Record<string, EntryFacts>;
+  /** Every statement in force, by id. */
+  statements: Record<string, Statement>;
 }
 
 /** The notes of the entries that have some, Markdown, by entry id. */
@@ -118,6 +152,12 @@ export interface Row {
   n: number | null;
   /** Whether the entry has notes. */
   notes: boolean;
+  /** Whether the entry has something to show from `Facts`. */
+  more: boolean;
+  /** The entry's verdict; null for no verdict, and for anything that is not an entry. */
+  verdict: Verdict | null;
+  /** The keys of the rows of the entries it needs. */
+  needs: string[];
   /** The day the file says it was built. */
   built: string | null;
   author: string | null;
@@ -234,7 +274,7 @@ function suggestionStatus(live: LiveIssue): Status {
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, built: null,
+    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, verdict: null, needs: [], built: null,
     author: null, up: null, comments: null, updates: 0, replaces: [], replacedBy: null, date: null, closedAt: null,
   };
 }
@@ -323,6 +363,9 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
     row.part = entry.part;
     row.n = entry.position;
     row.notes = entry.notes;
+    row.more = entry.more;
+    row.verdict = entry.verdict;
+    row.needs = entry.needs.map((id) => `entry-${id}`);
     row.built = entry.built;
     // A dropped decision replaces nothing, so it names nothing.
     row.replaces = entry.kind === 'decision' && statuses.get(entry.id) !== 'dropped' ? entry.replaces.map((id) => `entry-${id}`) : [];

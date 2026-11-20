@@ -10,7 +10,7 @@ import type { EntryContext } from './Entry';
 import { MapView } from './MapView';
 import { FOLD_HEIGHT, hasMap, MAP_WIDTH } from './map';
 import { statusLine } from './plan';
-import type { PartState, BuildData, Notes } from './plan';
+import type { PartState, BuildData, Facts, Notes } from './plan';
 import { formatHash, HOME, placeFrom, resolveHash, samePlace } from './routes';
 import type { Place } from './routes';
 import { SuggestPlace } from './Suggest';
@@ -21,6 +21,8 @@ export interface AppProps {
   data: BuildData;
   /** Loads the features' notes, a chunk apart: the first time a person reaches an entry's "Notes". */
   loadNotes?: () => Promise<Notes>;
+  /** Loads the statements in force and what the entries say of them, a chunk apart: the first time a row with something to show is reached. */
+  loadFacts?: () => Promise<Facts>;
   /**
    * The element in the site header that holds sign-in and the signed-in login; without one, they are drawn inline.
    * `false` when the build draws them into the header itself (see prerender.tsx).
@@ -51,6 +53,7 @@ export function Account({ me, signIn, tip, onSignOut }: { me: Me | null | undefi
 }
 
 const noNotes = () => Promise.resolve({});
+const noFacts = () => Promise.resolve({ entries: {}, statements: {} });
 
 type View = 'map' | 'order';
 type Focus = { kind: 'title' } | { kind: 'part'; part: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string };
@@ -160,7 +163,7 @@ function SignIn({ href }: { href: string }) {
 const viewFrom = (map: boolean): View => (!map || (typeof location !== 'undefined' && new URLSearchParams(location.search).get('view') === 'order') ? 'order' : 'map');
 const address = (hash = '') => `${location.pathname}${location.search}${hash}`;
 
-export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
+export function App({ data, loadNotes = noNotes, loadFacts = noFacts, accountSlot }: AppProps) {
   const mapped = hasMap(data.map);
   const initialView = () => viewFrom(mapped);
   const [place, setPlace] = useState<Place>(HOME);
@@ -179,7 +182,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const [boot, setBoot] = useState(true);
   // The row opened last, read by handlers that run after a render.
   const openKeyRef = useRef<string | null>(null);
-  const w = useWorkshop(data, openKey, openKeys, openings, loadNotes);
+  const w = useWorkshop(data, openKey, openKeys, openings, loadNotes, loadFacts);
   const { plan, rowByKey, live } = w;
   /** No state is shown and the first answer is still to come. */
   const holding = !live.state && live.load === 'pending';

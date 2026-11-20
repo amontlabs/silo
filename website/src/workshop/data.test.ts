@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { describe, expect, it } from 'vitest';
 import { loadDir } from '../../../tools/plan/read/index.js';
-import { buildDataFrom, notesFrom, planDir, readBuildData } from './data';
-import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, ZIG_NOTES } from './fixtures';
+import { buildDataFrom, factsFrom, notesFrom, planDir, readBuildData } from './data';
+import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
 import { checkLayout, LayoutError, MAP_HEIGHT, SILO_MAP } from './map';
 import type { Box, MapLayout } from './map';
 import { EXAMPLE_MAP } from './map-example';
@@ -46,6 +46,53 @@ describe('reading the plan files', () => {
     expect(buildDataFrom(emptyPlanFiles())).toMatchObject({ threads: false });
     expect(buildData()).toMatchObject({ threads: true });
     expect(buildData()).not.toHaveProperty('decide');
+  });
+});
+
+describe('what an entry says of the plan\'s lists', () => {
+  const files = () => planFiles(withLists());
+  const more = (id: string) => buildData(withLists()).entries.find((entry) => entry.id === id)?.more;
+
+  it('marks the entries that have something to show given their verdict, and no other', () => {
+    // No verdict: a recommendation, what a yes sets, what it removes. A feature's keeps and surfaces whatever its verdict.
+    expect(['create', 'name-a-snapshot', 'retire-scrap', 'bound-a-wait', 'fork-keeps'].map(more)).toEqual([true, true, true, true, true]);
+    // Taken: what it added. Its recommendation is not shown any more.
+    expect(['what-we-call-things', 'leak-guard'].map(more)).toEqual([true, true]);
+    expect(['core', 'calls', 'security-properly', 'one-way', 'reviewer'].map(more)).toEqual([false, false, false, false, false]);
+    expect(buildData().entries.some((entry) => entry.more)).toBe(true);
+  });
+
+  it('keeps what a taken entry says of a recommendation out of the chunk, and a dropped one\'s sets', () => {
+    const facts = factsFrom(files());
+    expect(facts.entries.core).toBeUndefined();
+    expect(facts.entries['leak-guard']).toEqual({ adds: ['never-leaks', 'ends-up'] });
+    const dropped = factsFrom(planFiles({ ...withLists(), decisions: withLists()?.decisions?.map((decision) => (decision.id === 'bound-a-wait' ? { ...decision, verdict: 'drop' as const } : decision)) }));
+    expect(dropped.entries['bound-a-wait']).toBeUndefined();
+  });
+
+  it('reads what an entry sets as statements: a word, a principle and a property, each with its id', () => {
+    const { entries } = factsFrom(files());
+    expect(entries['name-a-snapshot'].sets).toEqual([
+      { id: 'snapshot', kind: 'word', word: 'snapshot', text: 'A saved moment of a computer.', asks: null },
+      { id: 'least-power', kind: 'principle', word: null, text: 'The less sure the trigger, the less it may do, and it asks first.', asks: 'What triggers it, and what does it ask?' },
+    ]);
+    expect(entries['name-a-snapshot'].suggest).toEqual({ verdict: 'take', why: 'The word is already in use.' });
+    expect(entries['bound-a-wait'].sets).toEqual([{ id: 'wait-is-bounded', kind: 'property', word: null, text: 'A wait at the edge ends within its limit.', asks: null }]);
+    expect(entries['retire-scrap']).toMatchObject({ removes: ['scrap'], suggest: { verdict: 'drop' } });
+    expect(entries['fork-keeps']).toEqual({ keeps: ['never-leaks', 'ends-up'], surfaces: { app: 'Computers, then Fork', cli: 'silo fork <computer>' } });
+  });
+
+  it('reads the statements in force, by id, a word by its lower-case id', () => {
+    const { statements } = factsFrom(files());
+    expect(Object.keys(statements).sort()).toEqual(['ends-up', 'least-power', 'never-leaks', 'scrap', 'twin']);
+    expect(statements.twin).toEqual({ id: 'twin', kind: 'word', word: 'twin', text: 'A copy of a computer.', asks: null });
+    expect(statements['least-power']).toMatchObject({ kind: 'principle', asks: 'What triggers it?' });
+    expect(statements['never-leaks']).toEqual({ id: 'never-leaks', kind: 'property', word: null, text: 'Nothing leaves a computer unasked.', asks: null });
+  });
+
+  it('keeps all of it out of the page\'s own data: the first load only learns which entries have something', () => {
+    const text = JSON.stringify(buildData(withLists()));
+    for (const quiet of ['A saved moment of a computer', 'Nothing leaves a computer unasked', 'silo fork', 'The word is already in use']) expect(text).not.toContain(quiet);
   });
 });
 
