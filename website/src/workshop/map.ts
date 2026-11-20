@@ -1,6 +1,6 @@
-// The map of the Workshop: where each part of plan/areas.json sits on the full map and on the folded one, the zones
+// The map of the Workshop: where each part of plan/parts.json sits on the full map and on the folded one, the zones
 // around them, the text that is not a part and the wires between them. Units are 1/1136 of the map's width; the full
-// map is 620 units high, the fold 180. The build checks the layout against plan/areas.json (`checkLayout`).
+// map is 620 units high, the fold 180. The build checks the layout against plan/parts.json (`checkLayout`).
 // map-example.ts shows every kind of thing a layout can hold.
 
 export type Box = [x: number, y: number, w: number, h: number];
@@ -58,7 +58,7 @@ export interface Ghost {
 export type Arrow = [x: number, y: number, dir: 'r' | 'l' | 'u' | 'd'];
 
 export interface Wire {
-  /** The area whose state colours the wire. */
+  /** The part whose state colours the wire. */
   of: string;
   d: string;
   arrows?: Arrow[];
@@ -68,7 +68,7 @@ export interface Wire {
 }
 
 export interface MapLayout {
-  /** Every part of plan/areas.json by id, in Tab order: roughly left to right, then top to bottom. */
+  /** Every part of plan/parts.json by id, in Tab order: roughly left to right, then top to bottom. */
   places: Record<string, Place>;
   zones: Zone[];
   notes: Note[];
@@ -77,7 +77,7 @@ export interface MapLayout {
   wires: { full: Wire[]; fold: Wire[] };
 }
 
-/** Silo's map. The plan holds no part yet, so it is empty; each part of plan/areas.json gets its place here. */
+/** Silo's map. It is not drawn yet: with no place, the page shows the parts as tiles only. */
 export const SILO_MAP: MapLayout = {
   places: {},
   zones: [],
@@ -111,22 +111,27 @@ export function placeStyle(full: Box, fold: Box, place?: Pick<Place, 'ty' | 'sy'
   };
 }
 
+/** Whether a layout draws a map: it places at least one part. */
+export const hasMap = (layout: MapLayout) => Object.keys(layout.places).length > 0;
+
 export class LayoutError extends Error {}
 
-/** Every area has a place on the map, and the map places, wires and stacks copies for only areas that exist. */
-export function checkLayout(areaIds: string[], layout: MapLayout = SILO_MAP): void {
-  const known = new Set(areaIds);
+/** An empty layout passes. Otherwise every part has a place on the map, and the map places, wires and stacks copies for only parts that exist. */
+export function checkLayout(partIds: string[], layout: MapLayout = SILO_MAP): void {
+  const known = new Set(partIds);
   const where = 'website/src/workshop/map.ts';
-  for (const id of areaIds) {
-    if (!layout.places[id]) throw new LayoutError(`The map has no place for the area "${id}" of plan/areas.json. Add it to ${where}.`);
+  // An empty layout is no map at all: the page shows the tiles alone, and any plan passes.
+  if (!hasMap(layout) && !layout.zones.length && !layout.notes.length && !layout.ghosts.length && !layout.wires.full.length && !layout.wires.fold.length) return;
+  for (const id of partIds) {
+    if (!layout.places[id]) throw new LayoutError(`The map has no place for the part "${id}" of plan/parts.json. Add it to ${where}.`);
   }
   for (const id of Object.keys(layout.places)) {
-    if (!known.has(id)) throw new LayoutError(`${where} places the area "${id}", which plan/areas.json does not have.`);
+    if (!known.has(id)) throw new LayoutError(`${where} places the part "${id}", which plan/parts.json does not have.`);
   }
   for (const wire of [...layout.wires.full, ...layout.wires.fold]) {
-    if (!known.has(wire.of)) throw new LayoutError(`${where} draws a wire for the area "${wire.of}", which plan/areas.json does not have.`);
+    if (!known.has(wire.of)) throw new LayoutError(`${where} draws a wire for the part "${wire.of}", which plan/parts.json does not have.`);
   }
   for (const ghost of layout.ghosts) {
-    if (!known.has(ghost.of)) throw new LayoutError(`${where} stacks a copy behind the area "${ghost.of}", which plan/areas.json does not have.`);
+    if (!known.has(ghost.of)) throw new LayoutError(`${where} stacks a copy behind the part "${ghost.of}", which plan/parts.json does not have.`);
   }
 }

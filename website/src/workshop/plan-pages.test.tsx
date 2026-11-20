@@ -58,34 +58,13 @@ describe('the notes chunk', () => {
   });
 });
 
-describe('the line of Notes and Decisions', () => {
-  // `calls` has no notes; one decision is about its area, `part-a`.
-  const openCalls = async (me: Route) => {
-    mockApi({ me: owner, routes: { 'GET me': me } });
+describe('the line of Notes', () => {
+  it('is there only on an entry with notes, for the owner as for anyone', async () => {
+    mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#part-a/calls');
-    render(<App data={buildData()} />);
+    await renderApp();
     await waitFor(() => expect(rowButton('Every call defined once')).toHaveAttribute('aria-expanded', 'true'));
-    return itemOf('Every call defined once');
-  };
-
-  it('has its place from first paint while `me` is asked by a signed-in person, and keeps it whatever the answer', async () => {
-    let answer: (value: { status: number; body: unknown }) => void = () => {};
-    const item = await openCalls(() => new Promise((resolve) => { answer = resolve; }));
-    const bar = item.querySelector('.ws-extras-bar') as HTMLElement;
-    expect(bar).not.toBeNull();
-    expect(bar.children).toHaveLength(0);
-    await act(async () => answer(ok(owner)));
-    expect(item.querySelector('.ws-extras-bar')).toBe(bar);
-    expect(within(bar).getByRole('button', { name: 'Decisions · 1' })).toBeInTheDocument();
-  });
-
-  it('keeps its place, empty, when the signed-in person turns out not to be the owner', async () => {
-    let answer: (value: { status: number; body: unknown }) => void = () => {};
-    const item = await openCalls(() => new Promise((resolve) => { answer = resolve; }));
-    const bar = item.querySelector('.ws-extras-bar') as HTMLElement;
-    await act(async () => answer(ok(visitor)));
-    expect(item.querySelector('.ws-extras-bar')).toBe(bar);
-    expect(bar.children).toHaveLength(0);
+    expect(itemOf('Every call defined once').querySelector('.ws-extras')).toBeNull();
   });
 
   it('is not there for a signed-out visitor on an entry without notes', async () => {
@@ -122,13 +101,14 @@ describe('history lines', () => {
     const talk = itemOf('Create and delete a computer').querySelector('.ws-talk') as HTMLElement;
     const entries = [...talk.querySelectorAll(':scope > .ws-h, :scope > .ws-c')];
     expect(entries.map((node) => (node.classList.contains('ws-h') ? (node.querySelector('p') as HTMLElement).firstChild?.textContent ?? '' : 'comment'))).toEqual([
-      'comment', 'Taken', 'Dropped', 'Later', 'Verdict cleared', 'Built', 'Text changed', 'Notes edited', 'Needs changed', 'comment',
+      'comment', 'Taken', 'Dropped', 'Verdict cleared', 'Built', 'Text changed', 'Notes edited', 'Needs changed', 'comment',
     ]);
+    // The old "later" says nothing, so it draws no line.
     const lines = [...talk.querySelectorAll('.ws-h')];
-    expect(lines).toHaveLength(8);
+    expect(lines).toHaveLength(7);
     // The line shows when it happened, and the change on GitHub.
     expect(within(lines[0] as HTMLElement).getByText('6 days ago')).toBeInTheDocument();
-    expect(within(lines[7] as HTMLElement).getByText('2 hours ago')).toBeInTheDocument();
+    expect(within(lines[6] as HTMLElement).getByText('2 hours ago')).toBeInTheDocument();
     const compare = within(lines[0] as HTMLElement).getByRole('link', { name: /^bbbbbbb/ });
     expect(compare).toHaveAttribute('href', `https://github.com/amontlabs/silo/compare/${SHA.a}...${SHA.b}`);
     expect(compare.getAttribute('rel')).toContain('noopener');
@@ -159,7 +139,7 @@ describe('history lines', () => {
       if (!String(input).startsWith('https://raw.githubusercontent.com/')) return api(input, init);
       urls.push(String(input));
       const file = files[String(input).split('/')[5]];
-      return file ? new Response(JSON.stringify({ ...file, area: 'part-b', needs: [] })) : new Response('', { status: 404 });
+      return file ? new Response(JSON.stringify({ ...file, part: 'part-b', needs: [] })) : new Response('', { status: 404 });
     }));
     history.replaceState(null, '', '/workshop#part-b/create');
     await renderApp();
@@ -277,7 +257,7 @@ describe('Latest', () => {
     await waitFor(() => expect(location.hash).toBe('#part-a/core'));
   });
 
-  it('opens the entry of a row in its area when clicked', async () => {
+  it('opens the entry of a row in its part when clicked', async () => {
     fixedNow();
     mockApi({ state: () => ok(liveState({}, latest)) });
     history.replaceState(null, '', '/workshop#latest');
@@ -303,35 +283,19 @@ describe('Latest', () => {
 });
 
 describe('decisions from the plan', () => {
-  it('show on an open entry, to the owner only, those that name its area', async () => {
-    await openCore();
-    const toggle = screen.getByRole('button', { name: 'Decisions · 1' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('The core is written in Zig. It is the core piece.')).not.toBeInTheDocument();
-    await userEvent.click(toggle);
-    expect(screen.getByText('The core is written in Zig. It is the core piece.')).toBeInTheDocument();
-    expect(screen.queryByText('Security is built properly. It is not the focus yet.')).not.toBeInTheDocument();
-    // Notes and decisions open one at a time, beside each other.
-    await userEvent.click(notesButton());
-    expect(screen.queryByText('The core is written in Zig. It is the core piece.')).not.toBeInTheDocument();
-    await shownNotes();
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    // `calls` is in the area `part-a` too.
-    await userEvent.click(rowButton('Every call defined once'));
-    expect(within(itemOf('Every call defined once')).getByRole('button', { name: 'Decisions · 1' })).toBeInTheDocument();
-  });
-
-  it('are not offered on an entry nothing is about, nor to a visitor', async () => {
+  it('are rows of their part: the asks, then the answer and the notes once open', async () => {
     mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#part-b/exec');
-    const first = await renderApp();
-    await waitFor(() => expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true'));
+    history.replaceState(null, '', '/workshop#part-a/core-in-zig');
+    await renderApp();
+    await waitFor(() => expect(rowButton('Which language is the core written in?')).toHaveAttribute('aria-expanded', 'true'));
+    expect(screen.getByText('Zig. It is the core piece.')).toBeInTheDocument();
+    expect(screen.getByText('Decided.')).toBeInTheDocument();
+    await userEvent.click(notesButton());
+    expect(await screen.findByText('Zig keeps the engine small.')).toBeInTheDocument();
+    // A decision is never offered for a verdict here, and no row lists "Decisions" any more.
+    expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
+    await userEvent.click(rowButton('The engine runs on its own'));
     expect(screen.queryByRole('button', { name: /^Decisions/ })).not.toBeInTheDocument();
-    first.unmount();
-    await openCore(buildData(), visitor);
-    expect(notesButton()).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Decisions/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/It is the core piece/)).not.toBeInTheDocument();
   });
 });
 
@@ -339,7 +303,7 @@ describe('the status of an entry', () => {
   const built = (id: string) => buildData({ features: FEATURES.map((feature) => (feature.id === id ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature)) });
 
   it('is built when the file says so, whatever the live verdict label says', async () => {
-    mockApi({ state: () => ok(liveState({ 14: issue({ entry: 'fork', verdict: 'later', title: 'Fork a computer' }) })) });
+    mockApi({ state: () => ok(liveState({ 14: issue({ entry: 'fork', verdict: 'drop', title: 'Fork a computer' }) })) });
     history.replaceState(null, '', '/workshop#part-d/fork');
     await renderApp(built('fork'));
     await waitFor(() => expect(rowButton('Fork a computer')).toHaveAttribute('aria-expanded', 'true'));

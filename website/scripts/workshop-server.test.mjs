@@ -17,7 +17,7 @@ import { CUTS, cut, readBody } from '../server/issues.mjs';
 import { SNAPSHOT } from '../server/snapshot.mjs';
 import { createFakeGitHub, FAKE_APP, progressOf, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, HANDLER, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
-import { loadFeatures, progressLine, startDev } from './workshop-dev.mjs';
+import { loadEntries, progressLine, startDev } from './workshop-dev.mjs';
 import { changeComment, readChange, readEntryMarker, withoutMarkers } from '../../tools/workshop/model/index.js';
 
 import { count, retiredNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
@@ -673,12 +673,15 @@ const FIXTURE_FEATURES = [
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 
 async function writePlan(dir) {
-  await mkdir(join(dir, 'features'), { recursive: true });
+  await mkdir(join(dir, 'part-a', 'features'), { recursive: true });
+  await writeFile(join(dir, 'README.md'), 'The model.\n');
   await writeFile(join(dir, 'PRODUCT.md'), '# Fixture\n\nA small plan.\n');
-  await writeFile(join(dir, 'areas.json'), json([{ id: 'part-a', title: 'Part A', line: 'The one part of this plan.' }]));
-  await writeFile(join(dir, 'order.json'), json({ stages: [{ id: 'start', title: 'Start', line: 'The first things.', features: FIXTURE_FEATURES.map(([id]) => id) }] }));
-  await writeFile(join(dir, 'decisions.json'), json([]));
-  for (const [id, name, what] of FIXTURE_FEATURES) await writeFile(join(dir, 'features', `${id}.json`), json({ name, what, area: 'part-a', needs: [] }));
+  await writeFile(join(dir, 'parts.json'), json([{ id: 'part-a', title: 'Part A', line: 'The one part of this plan.' }]));
+  await writeFile(join(dir, 'part-a', 'README.md'), 'Part A.\n');
+  await writeFile(join(dir, 'order.json'), json({ stages: [{ id: 'start', title: 'Start', line: 'The first things.', entries: FIXTURE_FEATURES.map(([id]) => id) }] }));
+  await writeFile(join(dir, 'words.json'), json([]));
+  await writeFile(join(dir, 'principles.json'), json([]));
+  for (const [id, name, what] of FIXTURE_FEATURES) await writeFile(join(dir, 'part-a', 'features', `${id}.json`), json({ name, what }));
   // The plan tool is loaded only by the tests that write a plan: the server's own tests never need it.
   const { checkFiles } = await import('../../tools/plan/check/index.js');
   const { loadDir } = await import('../../tools/plan/read/index.js');
@@ -807,7 +810,7 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
       assert.equal(page.status, 200);
       assert.equal(await page.text(), `<!doctype html><head><meta name="workshop-raw" content="${dev.fakeGitHub.rawUrl}"><title>Workshop</title></head>`);
     }
-    assert.equal(loadFeatures(join(site, 'plan')).length, 4, 'seeded from the plan directory');
+    assert.equal(loadEntries(join(site, 'plan')).length, 4, 'seeded from the plan directory');
     assert.equal((await fetch(dev.origin + '/')).status, 200);
     assert.equal((await fetch(dev.origin + '/%2e%2e/package.json')).status, 404);
     const state = await (await fetch(dev.origin + '/api/workshop/state')).json();

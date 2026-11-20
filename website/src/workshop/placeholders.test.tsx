@@ -8,7 +8,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { describe, expect, it } from 'vitest';
 import { App } from './App';
 import type { Comment } from './api';
-import { buildData, historyComment, liveState, SHA } from './fixtures';
+import { buildDataFrom } from './data';
+import { buildData, historyComment, issue, liveState, planFiles, SHA } from './fixtures';
+import { EXAMPLE_MAP } from './map-example';
 import { LATEST_GHOSTS } from './Latest';
 import type { Change } from './plan';
 import { detail, itemOf, mockApi, ok, owner, rowButton } from './test-support';
@@ -85,12 +87,17 @@ async function hold(visit: Visit) {
   // Like the page: the account is drawn in a slot of the header, which the page marks busy.
   const slot = document.body.appendChild(document.createElement('div'));
   render(<App data={buildData()} accountSlot={slot} />);
-  await waitFor(() => expect(document.getElementById('ws-area-title')).not.toBeNull());
+  await waitFor(() => expect(document.getElementById('ws-part-title')).not.toBeNull());
   if (!visit.holds.state) await waitFor(() => expect(document.querySelector('.ws[data-live="answered"]')).not.toBeNull());
   if (visit.opens) fireEvent.click(rowButton(visit.opens));
   const release = async () => {
     await act(async () => {
-      state.release(ok(liveState()));
+      // Old issues on GitHub whose markers name these entries, with votes and comments: never matched while threads are off.
+      state.release(ok(liveState({
+        10: issue({ entry: 'core', title: 'The engine runs on its own', verdict: 'take', up: 8, comments: 5, updates: 1 }),
+        40: issue({ entry: 'core-in-zig', title: 'Which language is the core written in?', up: 6, comments: 4 }),
+        41: issue({ entry: 'calls', title: 'Every call defined once', up: 3, comments: 2 }),
+      })));
       me.release(ok(owner));
       comments.release(ok(detail(12, { comments: thread })));
     });
@@ -175,5 +182,53 @@ describe('placeholders while the page waits', () => {
     expect(screen.getByRole('link', { name: 'Sign in to comment' })).toBeInTheDocument();
     await open();
     expect(await screen.findByRole('link', { name: 'or comment directly on GitHub' })).toBeInTheDocument();
+  });
+});
+
+describe('a row without a thread', () => {
+  // The real build: entries have no thread yet (BuildData.threads is false).
+  const unthreaded = () => buildDataFrom(planFiles(), { map: EXAMPLE_MAP });
+
+  it('draws no placeholder while the state and `me` are asked, nor once they answer: no vote, no count, no comment box, no GitHub link', async () => {
+    document.cookie = 'workshop-hint=1; path=/';
+    const state = held();
+    const me = held();
+    mockApi({ state: () => state.promise, routes: { 'GET me': () => me.promise } });
+    history.replaceState(null, '', '/workshop#part-a/core-in-zig');
+    render(<App data={unthreaded()} />);
+    await waitFor(() => expect(rowButton('Which language is the core written in?')).toHaveAttribute('aria-expanded', 'true'));
+    fireEvent.click(rowButton('The engine runs on its own'));
+    const rows = () => [...document.querySelectorAll('.ws-detail .ws-item')];
+    const nothingOfAThread = () => {
+      expect(rows().length).toBe(3);
+      for (const row of rows()) {
+        expect(row.querySelector(PLACEHOLDER), row.id).toBeNull();
+        expect(row.querySelector('.ws-vote, .ws-talk, .ws-gh, .ws-gh-alt, textarea, [aria-busy]'), row.id).toBeNull();
+        expect(row.querySelector('.ws-votes')?.childElementCount, row.id).toBe(0);
+        expect(row.querySelector('.ws-talks')?.childElementCount, row.id).toBe(0);
+        expect(row.querySelector('a[href*="github.com"]'), row.id).toBeNull();
+        expect(row.textContent, row.id).not.toMatch(/👍|comments?\b/);
+      }
+    };
+    // Both open rows show their sentence, their state and, for the decision, its notes.
+    expect(screen.getByText('Zig. It is the core piece.')).toBeInTheDocument();
+    expect(screen.getByText('A background engine owns every computer.')).toBeInTheDocument();
+    expect(screen.getByText('Decided.')).toBeInTheDocument();
+    expect(itemOf('Which language is the core written in?').querySelector('.ws-extras')).not.toBeNull();
+    nothingOfAThread();
+    await act(async () => {
+      // Old issues on GitHub whose markers name these entries, with votes and comments: never matched while threads are off.
+      state.release(ok(liveState({
+        10: issue({ entry: 'core', title: 'The engine runs on its own', verdict: 'take', up: 8, comments: 5, updates: 1 }),
+        40: issue({ entry: 'core-in-zig', title: 'Which language is the core written in?', up: 6, comments: 4 }),
+        41: issue({ entry: 'calls', title: 'Every call defined once', up: 3, comments: 2 }),
+      })));
+      me.release(ok(owner));
+    });
+    await waitFor(() => expect(document.querySelector('.ws')).toHaveAttribute('data-live', 'answered'));
+    nothingOfAThread();
+    // The owner sees no verdict button and no "to decide" in a build without verdicts.
+    expect(screen.queryByRole('button', { name: /^Take/ })).toBeNull();
+    expect(screen.queryByText(/to decide/)).toBeNull();
   });
 });

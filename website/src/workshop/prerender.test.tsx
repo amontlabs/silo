@@ -1,14 +1,19 @@
 // The markup the build writes into the page (prerender.tsx) and the script's takeover of it (takeover.ts).
+import { join } from 'node:path';
 import { StrictMode, act } from 'react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { Boundary } from './Boundary';
 import { buildDataFrom } from './data';
+import { loadDir } from '../../../tools/plan/read/index.js';
 import { buildData, emptyPlanFiles } from './fixtures';
-import { prerender } from './prerender';
+import { inject, prerender } from './prerender';
+import { NOSCRIPT_LINE } from './NoScript';
 import { takeOver } from './takeover';
 import { mockApi, owner } from './test-support';
+
+const SAMPLE = join(process.cwd(), '../tools/plan/test/fixtures/sample');
 
 /** The markup as a browser holds it: React's text separators dropped, adjacent texts joined, styles rewritten. */
 function normal(html: string): string {
@@ -76,6 +81,8 @@ describe('the prerendered Workshop', () => {
   it.each([
     ['a plan with parts', buildData],
     ['a plan with no part', () => buildDataFrom(emptyPlanFiles())],
+    // The real build's shape: parts without a map, no verdicts, no threads.
+    ['the plan tool\'s sample, as the real build reads it', () => buildDataFrom(loadDir(SAMPLE))],
   ])('is what the script renders first on a first visit without a session at the plain address, for %s', (_, plan) => {
     mockApi({ state: () => new Promise(() => {}) });
     const data = plan();
@@ -95,9 +102,9 @@ describe('the prerendered Workshop', () => {
     const { root, slot } = page(data);
     expect(root.querySelector('.ws.is-sheet .ws-top h1')?.textContent).toBe('Workshop');
     expect(root.querySelector('.ws-suggest')?.textContent).toBe('Suggest a feature');
-    for (const area of data.areas) {
-      expect(root.querySelector(`.ws-part[data-part="${area.id}"]`)).not.toBeNull();
-      expect(root.querySelector(`.ws-tile[data-area="${area.id}"]`)).not.toBeNull();
+    for (const part of data.parts) {
+      expect(root.querySelector(`.ws-part[data-part="${part.id}"]`)).not.toBeNull();
+      expect(root.querySelector(`.ws-tile[data-part="${part.id}"]`)).not.toBeNull();
     }
     expect(root.querySelector('.ws-account-inline, .ws-signin-wrap')).toBeNull();
     expect(slot.querySelector('a.button')?.getAttribute('href')).toBe('/api/workshop/login?return=%2Fworkshop');
@@ -120,11 +127,11 @@ describe('the prerendered Workshop', () => {
   it('gives the address its own view in the same step, and lifts the hold on what the build drew', () => {
     mockApi({ state: () => new Promise(() => {}) });
     const data = buildData();
-    history.replaceState(null, '', `/workshop#${data.areas[0].id}`);
+    history.replaceState(null, '', `/workshop#${data.parts[0].id}`);
     document.documentElement.classList.add('ws-hold');
     const { root, slot } = page(data);
     take(root, slot, workshop(data, slot));
-    expect(root.querySelector('.ws.is-open #ws-area-title')).not.toBeNull();
+    expect(root.querySelector('.ws.is-open #ws-part-title')).not.toBeNull();
     expect(document.documentElement.classList.contains('ws-hold')).toBe(false);
   });
 
@@ -142,4 +149,46 @@ describe('the prerendered Workshop', () => {
     document.documentElement.classList.remove('ws-session');
   });
 
+});
+
+describe('the Workshop without JavaScript', () => {
+  /** The list the build writes into the page's <noscript>, as a browser without JavaScript reads it. */
+  function noscript(data = buildData()) {
+    const box = document.createElement('div');
+    box.innerHTML = built(data).noscript;
+    return box;
+  }
+  const rowsOf = (section: Element | null) => [...(section?.querySelectorAll('li') ?? [])].map((li) => li.textContent);
+
+  it('lists a part with its decisions and features: id, name and state, in the order of order.json', () => {
+    const box = noscript();
+    expect(box.querySelector('.ws-quiet')?.textContent).toBe(NOSCRIPT_LINE);
+    const partA = box.querySelector('section[data-part="part-a"]');
+    expect(partA?.querySelector('h2')?.textContent).toBe('Part A');
+    expect(rowsOf(partA)).toEqual([
+      'core-in-zig Which language is the core written in? Decided.',
+      'core The engine runs on its own Planned.',
+      'calls Every call defined once Planned.',
+    ]);
+    expect(rowsOf(box.querySelector('section[data-part="part-b"]'))).toContain('create Create and delete a computer Not decided yet.');
+    expect([...box.querySelectorAll('section')].map((section) => section.getAttribute('data-part'))).toEqual([...buildData().parts.map((part) => part.id), 'product']);
+  });
+
+  it('lists the decisions of the whole product, and keeps them on a plan with no part', () => {
+    for (const data of [buildData(), buildDataFrom(emptyPlanFiles())]) {
+      const product = noscript(data).querySelector('section[data-part="product"]');
+      expect(product?.querySelector('h2')?.textContent).toBe('The whole product');
+      expect(rowsOf(product)?.map((row) => row?.split(' ')[0])).toEqual(['security-properly', 'one-host']);
+    }
+  });
+
+  it('goes into the page\'s <noscript> only, so the page drawn with JavaScript is unchanged', () => {
+    const parts = built();
+    const html = '<div class="ws-account-slot" id="workshop-account"></div><div id="workshop-root"></div><noscript id="workshop-noscript"><p>line</p></noscript>';
+    const out = inject(html, parts);
+    expect(out).toContain(`<noscript id="workshop-noscript">${parts.noscript}</noscript>`);
+    expect(out).toContain(`<div id="workshop-root" data-prerendered>${parts.root}</div>`);
+    expect(parts.root).not.toContain('ws-noscript');
+    expect(() => inject(html.replace(/<noscript[\s\S]*<\/noscript>/, ''), parts)).toThrow('must hold');
+  });
 });

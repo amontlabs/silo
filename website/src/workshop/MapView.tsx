@@ -5,15 +5,17 @@ import type { CSSProperties } from 'react';
 import { arrowPath, crossPath, FOLD_HEIGHT, MAP_HEIGHT, MAP_WIDTH, placeStyle } from './map';
 import type { Glyph, MapLayout, Wire } from './map';
 import { stateWords } from './plan';
-import type { AreaGroup, AreaState } from './plan';
+import type { PartGroup, PartState } from './plan';
 
-const SPOKEN: Record<AreaState, string> = { done: 'done', now: 'being built now', next: 'next', planned: 'planned', open: 'not decided yet' };
+const SPOKEN: Record<PartState, string> = { done: 'done', next: 'next', planned: 'planned', open: 'not decided yet' };
 
 /** What a screen reader hears for a part or a tile. */
-export function spoken(group: AreaGroup, toDecide: number): string {
-  const count = group.rows.length - group.counts.dropped;
+export function spoken(group: PartGroup, toDecide: number): string {
+  const features = group.counts.built + group.counts.planned + group.counts.undecided;
+  const decisions = group.decisions.decided + group.decisions.undecided;
   const state = group.state === 'planned' ? stateWords(group) : SPOKEN[group.state];
-  return `${group.area.title}, ${state}, ${count} ${count === 1 ? 'feature' : 'features'}${toDecide ? `, ${toDecide} to decide` : ''}. ${group.area.line}`;
+  const counted = [`${features} ${features === 1 ? 'feature' : 'features'}`, ...(decisions ? [`${decisions} ${decisions === 1 ? 'decision' : 'decisions'}`] : [])];
+  return `${group.part.title}, ${state}, ${counted.join(', ')}${toDecide ? `, ${toDecide} to decide` : ''}. ${group.part.line}`;
 }
 
 /** A part's glyph, drawn from the layout's paths. */
@@ -26,7 +28,7 @@ function GlyphView({ glyph }: { glyph: Glyph }) {
   );
 }
 
-function Wires({ wires, height, className, states }: { wires: Wire[]; height: number; className: string; states: Map<string, AreaState> }) {
+function Wires({ wires, height, className, states }: { wires: Wire[]; height: number; className: string; states: Map<string, PartState> }) {
   return (
     <svg className={`ws-wires ${className}`} viewBox={`0 0 ${MAP_WIDTH} ${height}`} aria-hidden="true">
       {wires.map((wire, index) => (
@@ -51,16 +53,16 @@ const style = (vars: Record<string, string | number>) => vars as CSSProperties;
 
 export interface MapViewProps {
   layout: MapLayout;
-  groups: AreaGroup[];
+  groups: PartGroup[];
   folded: boolean;
   current: string | null;
   toDecide: Map<string, number>;
-  onOpen: (area: string) => void;
+  onOpen: (part: string) => void;
 }
 
 export function MapView({ layout, groups, folded, current, toDecide, onOpen }: MapViewProps) {
-  const states = new Map(groups.map((group) => [group.area.id, group.state]));
-  const byId = new Map(groups.map((group) => [group.area.id, group]));
+  const states = new Map(groups.map((group) => [group.part.id, group.state]));
+  const byId = new Map(groups.map((group) => [group.part.id, group]));
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const tipRef = useRef<HTMLDivElement>(null);
@@ -74,11 +76,11 @@ export function MapView({ layout, groups, folded, current, toDecide, onOpen }: M
   }, [tip]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const showTip = (target: HTMLElement, group: AreaGroup) => {
+  const showTip = (target: HTMLElement, group: PartGroup) => {
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       const box = target.getBoundingClientRect();
-      const text = folded ? `${group.area.title}. ${group.area.line}` : group.area.line;
+      const text = folded ? `${group.part.title}. ${group.part.line}` : group.part.line;
       const below = box.height < 200 && box.bottom + 40 < innerHeight;
       setTip({ text, x: box.left + box.width / 2, y: below ? box.bottom + 8 : box.top - 34 });
     }, 240);
@@ -128,7 +130,7 @@ export function MapView({ layout, groups, folded, current, toDecide, onOpen }: M
               onMouseEnter={(event) => showTip(event.currentTarget, group)} onMouseLeave={hideTip}
               onFocus={(event) => { if (focusVisible(event.currentTarget)) showTip(event.currentTarget, group); }} onBlur={hideTip}
             >
-              <span className="ws-p-ttl">{group.area.title}</span>
+              <span className="ws-p-ttl">{group.part.title}</span>
               <span className="ws-p-st"><i className="ws-mk" /><span>{stateWords(group)}</span></span>
               {place.glyph ? <GlyphView glyph={place.glyph} /> : null}
               {todo ? <b className="ws-todo ws-late-o">{todo}</b> : null}

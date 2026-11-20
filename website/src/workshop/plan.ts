@@ -1,24 +1,30 @@
-// The Workshop's model: the plan built into the page, merged with the live state from GitHub. Names, the
-// status rule and the areas' states come from the plan's model (tools/plan/model); this adds the rows.
-import { areaGroups, featureStatus } from '../../../tools/plan/model/index.js';
+// The Workshop's model: the plan built into the page, merged with the live state from GitHub. An entry's status
+// comes from its file alone, through the plan's model (tools/plan/model); this adds the rows, the parts' counts
+// and states, and the words the page uses for them.
+import { entryStatus as modelStatus } from '../../../tools/plan/model/index.js';
+import type { Verdict } from '../../../tools/plan/model/status.js';
 import type { Change } from '../../../tools/workshop/model/markers.js';
-import type { Counts } from '../../../tools/plan/model/areas.js';
-import type { Status, Verdict } from '../../../tools/plan/model/status.js';
 import type { MapLayout } from './map';
 
-export { countRows, statusLine, stateWords, VERDICTS } from '../../../tools/plan/model/index.js';
-export type { Change, Counts, Status, Verdict };
+export type { Change, Verdict };
 
-export interface Feature {
+/** A row's status, in the page's words. A taken feature, ready or not, is planned; a taken decision is decided. */
+export type Status = 'built' | 'planned' | 'undecided' | 'dropped';
+
+/** A decision or a feature, as the page holds it. */
+export interface Entry {
   id: string;
-  name: string;
-  what: string;
-  /** The part of the product it belongs to; null for the old things not carried over. */
-  area: string | null;
-  needs: string[];
+  kind: 'decision' | 'feature';
+  /** The part it belongs to; null for a decision of the whole product. */
+  part: string | null;
   stage: string;
-  /** Build order, from 1. */
+  /** Place in order.json, from 1. */
   position: number;
+  /** A feature's `name`, a decision's `asks`. */
+  name: string;
+  /** A feature's `what`, a decision's `answer` (null while it has none). */
+  what: string | null;
+  needs: string[];
   suggest: { verdict: Verdict | null; why: string | null } | null;
   verdict: Verdict | null;
   /** The day it was built, `YYYY-MM-DD`. */
@@ -27,7 +33,7 @@ export interface Feature {
   notes: boolean;
 }
 
-/** The notes of the features that have some, Markdown, by feature id. */
+/** The notes of the entries that have some, Markdown, by entry id. */
 export type Notes = Record<string, string>;
 
 export interface Stage {
@@ -36,28 +42,23 @@ export interface Stage {
   line: string;
 }
 
-export interface Area {
+export interface Part {
   id: string;
   title: string;
   line: string;
 }
 
-/** What the owner settled for the whole product (`about`: the areas it is about; null for all). */
-export interface Decision {
-  id: string;
-  date: string;
-  text: string;
-  about: string[] | null;
-}
-
 export interface BuildData {
-  features: Feature[];
-  areas: Area[];
+  parts: Part[];
   stages: Stage[];
-  /** Newest first. */
-  decisions: Decision[];
-  /** Where the areas sit on the map: Silo's own (map.ts), or the example the tests draw. */
+  /** Every decision and feature, in the order of order.json. */
+  entries: Entry[];
+  /** Where the parts sit on the map: Silo's own (map.ts), or the example the tests draw. Without places, no map. */
   map: MapLayout;
+  /** Whether the owner's verdict buttons may show. The server has no verdict route: off in the real build. */
+  decide: boolean;
+  /** Whether entries have threads on GitHub (votes, comments, history). Off in the real build: no entry has one yet. */
+  threads: boolean;
 }
 
 export interface LiveIssue {
@@ -75,8 +76,6 @@ export interface LiveIssue {
   bot: boolean;
   createdAt: string;
   closedAt: string | null;
-  /** Open, taken and labelled `workshop:building`: the work is under way. */
-  building?: boolean;
 }
 
 /** One of the newest comments or history lines across the entries. */
@@ -99,32 +98,33 @@ export interface LiveState {
   old?: boolean;
 }
 
-export type RowKind = 'entry' | 'suggestion' | 'decided';
+export type RowKind = 'entry' | 'suggestion';
 
 export interface Row {
   key: string;
   kind: RowKind;
+  /** For an entry: a decision or a feature. */
+  of: Entry['kind'] | null;
   name: string;
   what: string | null;
   issue: number | null;
   status: Status;
   stage: string | null;
-  area: string | null;
-  /** Build order, for entries. */
+  part: string | null;
+  /** Place in order.json, for entries. */
   n: number | null;
-  suggest: Feature['suggest'];
+  suggest: Entry['suggest'];
   /** Whether the entry has notes. */
   notes: boolean;
   /** The day the file says it was built. */
   built: string | null;
-  /** The decisions about its area, for entries; the areas it is about, for decisions. */
-  decisions: Decision[];
-  about: string[] | null;
   author: string | null;
   up: number | null;
   /** People's comments: the issue's comments less its history lines. */
   comments: number | null;
   updates: number;
+  /** The owner's verdict as its issue records it. It never changes the status, which comes from the file. */
+  recorded: Verdict | null;
   date: string | null;
   closedAt: string | null;
 }
@@ -138,80 +138,160 @@ export interface LatestItem {
   change: Change | null;
 }
 
-/** The row name of a decision: its first sentence or clause. */
-export function decisionTitle(text: string): string {
-  return text.split(/(?<=[.:])\s/)[0].replace(/[.:]$/, '').trim();
+/** A part's features by status. */
+export interface Counts {
+  built: number;
+  planned: number;
+  undecided: number;
+  dropped: number;
+}
+
+/** A part's decisions: taken, open or answered, dropped. */
+export interface DecisionCounts {
+  decided: number;
+  undecided: number;
+  dropped: number;
+}
+
+/** done: something built and nothing planned; next: holds the first planned feature in order (one part at most); planned; open. */
+export type PartState = 'done' | 'next' | 'planned' | 'open';
+
+export interface PartGroup {
+  part: Part;
+  /** Position in plan/parts.json, from 1. */
+  number: number;
+  /** Its decisions and features in the order of order.json, dropped ones included. */
+  rows: Row[];
+  /** Its features' counts: a part's state, counts and status line come from its features only. */
+  counts: Counts;
+  decisions: DecisionCounts;
+  state: PartState;
+  /** Holds an entry of the first STARTER_STAGES stages, so it sits in the first band of the sheet. */
+  first: boolean;
+}
+
+export interface Plan {
+  parts: PartGroup[];
+  /** The decisions of the whole product (plan/decisions/), in order. */
+  product: Row[];
+  /** Every dropped entry of the parts, in order. */
+  left: Row[];
+  /** Suggestions by votes; dropped ones last. */
+  suggestions: Row[];
+  /** The newest comments and history lines across the entries, newest first; empty without threads. */
+  latest: LatestItem[];
+  /** Whether entries have threads (BuildData.threads). */
+  threads: boolean;
+}
+
+/** How many stages make the first band of the sheet. */
+export const STARTER_STAGES = 5;
+
+export function isDecided(row: Row): boolean {
+  return row.status !== 'undecided';
+}
+
+type ModelEntry = Parameters<typeof modelStatus>[0];
+
+function modelEntry(entry: Entry): ModelEntry {
+  return {
+    kind: entry.kind,
+    ...(entry.verdict ? { verdict: entry.verdict } : {}),
+    ...(entry.kind === 'decision' && entry.what !== null ? { answer: entry.what } : {}),
+    ...(entry.built ? { built: entry.built } : {}),
+    needs: entry.needs,
+  };
+}
+
+/** The page's status of every entry, by id: the model's, from the files alone, in the page's words. */
+export function entryStatuses(entries: Entry[]): Map<string, Status> {
+  const models: Record<string, ModelEntry> = Object.fromEntries(entries.map((entry) => [entry.id, modelEntry(entry)]));
+  return new Map(entries.map((entry) => {
+    switch (modelStatus(models[entry.id], models)) {
+      case 'built': return [entry.id, 'built'];
+      case 'dropped': return [entry.id, 'dropped'];
+      case 'taken': case 'ready': return [entry.id, 'planned'];
+      default: return [entry.id, 'undecided'];
+    }
+  }));
 }
 
 /** A suggestion: closed as not planned is dropped, closed as completed is built, else its verdict label. */
 function suggestionStatus(live: LiveIssue): Status {
   if (live.state === 'closed' && live.reason === 'completed') return 'built';
   if (live.state === 'closed' && live.reason === 'not_planned') return 'dropped';
-  return featureStatus({}, { verdict: live.verdict, building: false });
-}
-
-/** An entry: the status rule of the model, from its file and its live issue. */
-export function entryStatus(feature: Pick<Feature, 'verdict' | 'built'>, live: LiveIssue | undefined): Status {
-  return featureStatus(
-    { ...(feature.verdict ? { verdict: feature.verdict } : {}), ...(feature.built ? { built: feature.built } : {}) },
-    live ? { verdict: live.verdict, building: live.building === true } : null,
-  );
+  return live.verdict === 'take' ? 'planned' : live.verdict === 'drop' ? 'dropped' : 'undecided';
 }
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, name, what: null, issue: null, status: 'undecided', stage: null, area: null, n: null, suggest: null, notes: false, built: null,
-    decisions: [], about: null, author: null, up: null, comments: null, updates: 0, date: null, closedAt: null,
+    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, suggest: null, notes: false, built: null,
+    author: null, up: null, comments: null, updates: 0, recorded: null, date: null, closedAt: null,
   };
 }
 
-export type AreaState = 'now' | 'done' | 'next' | 'planned' | 'open';
-
-export interface AreaGroup {
-  area: Area;
-  /** Position in plan/areas.json, from 1. */
-  number: number;
-  /** Its entries in build order, dropped ones included. */
-  rows: Row[];
-  counts: Counts;
-  state: AreaState;
-  /** Holds an entry of the starter's stages, so it sits in the first band of the sheet. */
-  first: boolean;
+/** @param rows the features of a part */
+export function countRows(rows: { status: Status }[]): Counts {
+  const counts: Counts = { built: 0, planned: 0, undecided: 0, dropped: 0 };
+  for (const row of rows) counts[row.status] += 1;
+  return counts;
 }
 
-export interface Plan {
-  areas: AreaGroup[];
-  /** Not carried over: the entries without an area, then every dropped entry. */
-  left: Row[];
-  /** Suggestions by votes; dropped ones last. */
-  suggestions: Row[];
-  /** The owner's decisions, newest first. */
-  decided: Row[];
-  /** The newest comments and history lines across the entries, newest first. */
-  latest: LatestItem[];
+/** @param rows the decisions of a part */
+export function countDecisions(rows: { status: Status }[]): DecisionCounts {
+  const counts: DecisionCounts = { decided: 0, undecided: 0, dropped: 0 };
+  for (const row of rows) {
+    if (row.status === 'dropped') counts.dropped += 1;
+    else if (row.status === 'undecided') counts.undecided += 1;
+    else counts.decided += 1;
+  }
+  return counts;
 }
 
-export function isDecided(row: Row): boolean {
-  return row.status !== 'undecided';
+/** Each part's state, from its features: done, next (at most one), planned, open. */
+export function partStates(groups: { rows: Row[]; counts: Counts }[]): PartState[] {
+  const states: PartState[] = groups.map(({ counts }) => (counts.built && !counts.planned ? 'done' : counts.planned ? 'planned' : 'open'));
+  let next = -1;
+  let lowest = Infinity;
+  groups.forEach(({ rows }, index) => {
+    for (const row of rows) {
+      if (row.of === 'feature' && row.status === 'planned' && row.n !== null && row.n < lowest) {
+        lowest = row.n;
+        next = index;
+      }
+    }
+  });
+  if (next !== -1) states[next] = 'next';
+  return states;
 }
 
-/** The decisions about a feature: those whose `about` names its area (`about` holds area ids only). */
-export function decisionsAbout(decisions: Decision[], feature: Pick<Feature, 'area'>): Decision[] {
-  return decisions.filter((decision) => feature.area !== null && decision.about?.includes(feature.area) === true);
+/** Where the build is, in one line: the part that holds the first planned feature. */
+export function statusLine(groups: { part: Part; state: PartState; counts: Counts }[]): string {
+  const next = groups.find((group) => group.state === 'next');
+  if (!next) return '';
+  if (groups.some((group) => group.counts.built > 0)) return `${next.part.title} is next.`;
+  return `Starting with ${next.part.title}.`;
 }
 
-/** The areas with their features in build order, counts and states: the model's `areaGroups` on the page's data. */
-export function groupAreas(data: BuildData, statusOf: (id: string) => Status) {
-  const features = Object.fromEntries(data.features.map((feature) => [feature.id, { ...feature, area: feature.area ?? undefined }]));
-  const stages = data.stages.map((stage) => ({ id: stage.id, features: data.features.filter((feature) => feature.stage === stage.id).map((feature) => feature.id) }));
-  return areaGroups({ areas: data.areas, stages, features }, statusOf);
+/** The few words on a part's tile or place on the map. */
+export function stateWords(group: { state: PartState; counts: Counts }): string {
+  const { built, planned } = group.counts;
+  switch (group.state) {
+    case 'done': return 'done';
+    case 'next': return 'next';
+    case 'planned': return built ? `${built}/${built + planned} built` : `${planned} planned`;
+    default: return '';
+  }
 }
 
 export function buildPlan(data: BuildData, live: LiveState | null): Plan {
   const issues = live?.issues ?? {};
+  // Old issues on GitHub are never matched to an entry while entries have no threads.
   const byEntry = new Map<string, number>();
-  for (const [number, issue] of Object.entries(issues)) {
-    if (issue.kind === 'entry' && issue.entry) byEntry.set(issue.entry, Number(number));
+  if (data.threads) {
+    for (const [number, issue] of Object.entries(issues)) {
+      if (issue.kind === 'entry' && issue.entry) byEntry.set(issue.entry, Number(number));
+    }
   }
   const counts = (row: Row) => {
     const issue = row.issue === null ? undefined : issues[row.issue];
@@ -219,33 +299,41 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
       row.updates = Math.max(0, Math.min(issue.updates ?? 0, issue.comments));
       row.up = issue.up;
       row.comments = issue.comments - row.updates;
+      row.recorded = issue.verdict === 'take' || issue.verdict === 'drop' ? issue.verdict : null;
       row.closedAt = issue.closedAt;
     }
   };
 
-  const unplaced: Row[] = [];
+  const statuses = entryStatuses(data.entries);
   const entries = new Map<string, Row>();
-  for (const feature of data.features) {
-    const row = baseRow(`entry-${feature.id}`, 'entry', feature.name);
-    row.what = feature.what;
-    row.stage = feature.stage;
-    row.area = feature.area;
-    row.n = feature.position;
-    row.suggest = feature.suggest;
-    row.notes = feature.notes;
-    row.built = feature.built;
-    row.decisions = decisionsAbout(data.decisions, feature);
-    row.issue = byEntry.get(feature.id) ?? null;
-    row.status = entryStatus(feature, row.issue === null ? undefined : issues[row.issue]);
+  for (const entry of data.entries) {
+    const row = baseRow(`entry-${entry.id}`, 'entry', entry.name);
+    row.of = entry.kind;
+    row.what = entry.what;
+    row.stage = entry.stage;
+    row.part = entry.part;
+    row.n = entry.position;
+    row.suggest = entry.suggest;
+    row.notes = entry.notes;
+    row.built = entry.built;
+    row.issue = byEntry.get(entry.id) ?? null;
+    row.status = statuses.get(entry.id) as Status;
     counts(row);
-    entries.set(feature.id, row);
-    if (feature.area === null) unplaced.push(row);
+    entries.set(entry.id, row);
   }
+  const rows = [...entries.values()];
 
-  const groups: AreaGroup[] = groupAreas(data, (id) => (entries.get(id) as Row).status).map((group) => ({
-    ...group,
-    rows: group.rows.map((row) => entries.get(row.id) as Row),
-  }));
+  const starter = new Set(data.stages.slice(0, STARTER_STAGES).map((stage) => stage.id));
+  const groups: PartGroup[] = data.parts.map((part, index) => {
+    const own = rows.filter((row) => row.part === part.id);
+    return {
+      part, number: index + 1, rows: own,
+      counts: countRows(own.filter((row) => row.of === 'feature')),
+      decisions: countDecisions(own.filter((row) => row.of === 'decision')),
+      state: 'open', first: own.some((row) => row.stage !== null && starter.has(row.stage)),
+    };
+  });
+  partStates(groups).forEach((state, index) => { groups[index].state = state; });
 
   const suggestions: Row[] = [];
   for (const [key, issue] of Object.entries(issues)) {
@@ -262,43 +350,34 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
   const dropped = (row: Row) => (row.status === 'dropped' ? 1 : 0);
   suggestions.sort((a, b) => dropped(a) - dropped(b) || (b.up ?? 0) - (a.up ?? 0) || (a.issue ?? 0) - (b.issue ?? 0));
 
-  const decided = data.decisions.map((decision) => {
-    const row = baseRow(`decided-${decision.id}`, 'decided', decisionTitle(decision.text));
-    row.what = decision.text;
-    row.status = 'planned';
-    row.date = decision.date;
-    row.about = decision.about;
-    return row;
-  });
-
   const latest: LatestItem[] = [];
-  for (const [index, item] of (live?.latest ?? []).entries()) {
+  for (const [index, item] of (data.threads ? live?.latest ?? [] : []).entries()) {
     const row = entries.get(item.entry);
     if (!row || row.issue !== item.n) continue;
     latest.push({ key: `latest-${index}`, row, author: item.author, createdAt: item.createdAt, text: item.text ?? null, change: item.change ?? null });
   }
 
-  const left = [...unplaced, ...groups.flatMap((group) => group.rows.filter((row) => row.status === 'dropped')).sort((a, b) => (a.n ?? 0) - (b.n ?? 0))];
-  return { areas: groups, left, suggestions, decided, latest };
+  const product = rows.filter((row) => row.part === null);
+  const left = groups.flatMap((group) => group.rows.filter((row) => row.status === 'dropped')).sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
+  return { parts: groups, product, left, suggestions, latest, threads: data.threads };
 }
 
-/** Every row once: the areas' entries, those left without an area, suggestions, then decisions. */
+/** Every row once: the parts' entries, the whole product's decisions, then suggestions. */
 export function allRows(plan: Plan): Row[] {
-  return [
-    ...plan.areas.flatMap((group) => group.rows),
-    ...plan.left.filter((row) => row.area === null),
-    ...plan.suggestions,
-    ...plan.decided,
-  ];
+  return [...plan.parts.flatMap((group) => group.rows), ...plan.product, ...plan.suggestions];
 }
 
-/** An entry the owner still has to decide, with a real issue to record the verdict on. The server records verdicts on entries only. */
+/**
+ * A feature the owner may still take or drop: undecided in its file, with a real issue that records no verdict yet.
+ * Decisions are taken with `plan take`.
+ */
 export function awaitsVerdict(row: Row): boolean {
-  return row.kind === 'entry' && row.status === 'undecided' && row.issue !== null && row.issue > 0;
+  return row.kind === 'entry' && row.of === 'feature' && row.status === 'undecided' && row.recorded === null && row.issue !== null && row.issue > 0;
 }
 
 export const needsOwner = awaitsVerdict;
 
+/** By the field names of a history marker (tools/workshop/model): `area` is that wire format's name for the part. */
 const PHRASES: Record<string, string> = {
   name: 'Text changed',
   what: 'Text changed',
@@ -314,9 +393,12 @@ const PHRASES: Record<string, string> = {
 export function changeWords(change: Change): string[] {
   const words: string[] = [];
   for (const field of change.fields) {
-    const word = field === 'verdict'
-      ? change.verdict === 'take' ? 'Taken' : change.verdict === 'drop' ? 'Dropped' : change.verdict === 'later' ? 'Later' : 'Verdict cleared'
-      : PHRASES[field];
+    let word: string | undefined;
+    if (field !== 'verdict') word = PHRASES[field];
+    else if (change.verdict === 'take') word = 'Taken';
+    else if (change.verdict === 'drop') word = 'Dropped';
+    // A verdict that is no longer one (the old "later") says nothing.
+    else if (!change.verdict) word = 'Verdict cleared';
     if (word && !words.includes(word)) words.push(word);
   }
   return words;

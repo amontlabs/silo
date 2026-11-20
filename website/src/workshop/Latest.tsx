@@ -1,6 +1,6 @@
 // What happened lately across the entries: the newest comments and history lines, each linking to its entry.
 import type { MouseEvent, ReactNode } from 'react';
-import { Block } from './AreaView';
+import { Block } from './PartView';
 import { pipClass } from './Entry';
 import type { EntryContext } from './Entry';
 import { changeLine, relativeTime } from './plan';

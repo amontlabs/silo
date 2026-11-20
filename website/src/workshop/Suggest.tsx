@@ -1,6 +1,6 @@
 // Suggest a feature: the form, or a way to sign in, then what people have suggested, by votes.
 import type { ReactNode } from 'react';
-import { Block, Rows } from './AreaView';
+import { Block, Rows } from './PartView';
 import type { EntryContext } from './Entry';
 
 export function SuggestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {

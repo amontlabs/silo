@@ -43,7 +43,6 @@ describe('the first frame', () => {
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
     // The owner's words, from memory.
     expect(screen.getByRole('link', { name: /to decide/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Decisions' })).toBeInTheDocument();
     expect(within(itemOf('Create and delete a computer')).getByText('to decide')).toBeInTheDocument();
     expect(document.querySelector('.ws-ph')).toBeNull();
   });
@@ -59,6 +58,19 @@ describe('the first frame', () => {
     expect(document.getElementById('ws-signin-tip')).toHaveAttribute('role', 'tooltip');
     expect(screen.getByRole('link', { name: 'Suggest a feature' })).toBeInTheDocument();
     expect(calls.some((call) => call.path === 'me')).toBe(false);
+  });
+
+  it('gives sign-in no tooltip pointing to GitHub when entries have no thread: signing in serves suggestions only', async () => {
+    mockApi({ state: () => new Promise(() => {}) });
+    history.replaceState(null, '', '/workshop');
+    render(<App data={{ ...buildData(), threads: false }} />);
+    const signIn = screen.getByRole('link', { name: 'Sign in with GitHub' });
+    expect(signIn).not.toHaveAttribute('aria-describedby');
+    expect(document.getElementById('ws-signin-tip')).toBeNull();
+    expect(screen.queryByText('or comment directly on GitHub')).toBeNull();
+    // Where signing in serves, the page says what for.
+    act(() => { history.pushState(null, '', '/workshop#suggested'); dispatchEvent(new HashChangeEvent('hashchange')); });
+    expect(await screen.findByRole('link', { name: 'Sign in to suggest' })).toBeInTheDocument();
   });
 
   it('forgets a remembered person without the session marker, and when `me` answers signed out', async () => {
@@ -363,7 +375,7 @@ describe('the page\'s own writes over an answer', () => {
       const time = clock();
       let kept = null as LiveState | null;
       let model = null as { fetched: number; up: number } | null;
-      const writes: { at: number; up?: number; verdict?: 'take' | 'later' }[] = [];
+      const writes: { at: number; up?: number; verdict?: 'take' | 'drop' }[] = [];
       for (let step = 0; step < 40; step += 1) {
         const roll = random();
         if (roll < 0.2) {
@@ -371,7 +383,7 @@ describe('the page\'s own writes over an answer', () => {
           writes.push({ at: Date.now(), up });
           keep({ n: 12, set: { up } }, Date.now());
         } else if (roll < 0.3) {
-          const verdict = random() < 0.5 ? 'take' : 'later';
+          const verdict = random() < 0.5 ? 'take' : 'drop';
           writes.push({ at: Date.now(), verdict });
           keep({ n: 12, set: { verdict } }, Date.now());
         } else if (roll < 0.75) {
@@ -387,7 +399,7 @@ describe('the page\'s own writes over an answer', () => {
         expect(kept.issues[12].up).toBe(model.up);
         expect(kept.old).toBeUndefined();
         let up = model.up;
-        let verdict: 'take' | 'later' | null = null;
+        let verdict: 'take' | 'drop' | null = null;
         for (const write of writes) {
           if (Date.now() - write.at >= 24 * 3600_000 || model.fetched > write.at + 60_000) continue;
           if (write.up !== undefined) up = write.up;

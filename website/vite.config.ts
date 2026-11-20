@@ -1,14 +1,14 @@
-import { join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
-import { PLAN_DIR, readBuildData, readNotes } from './src/workshop/data.ts';
+import { planDir, readBuildData, readNotes } from './src/workshop/data.ts';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
-const plan = join(repository, PLAN_DIR);
+// plan/, or the plan WORKSHOP_PLAN names: a fixture plan proves the page without the real one.
+const plan = planDir(repository);
 
-/** `virtual:workshop-data`: the plan from plan/, read with tools/plan/read and checked with tools/plan/check; any error stops the build. */
+/** `virtual:workshop-data`: the plan, read with tools/plan/read and checked with tools/plan/check; any error stops the build. */
 function workshopData(): Plugin {
   const id = 'virtual:workshop-data';
   return {
@@ -21,7 +21,7 @@ function workshopData(): Plugin {
   };
 }
 
-/** `virtual:workshop-notes`: the notes of every feature, a chunk of their own that the page loads on demand. */
+/** `virtual:workshop-notes`: the notes of every entry, a chunk of their own that the page loads on demand. */
 function workshopNotes(): Plugin {
   const id = 'virtual:workshop-notes';
   return {
@@ -34,7 +34,7 @@ function workshopNotes(): Plugin {
   };
 }
 
-/** While developing, the page reloads with the new data when a file of plan/ is added, changed or removed. */
+/** While developing, the page reloads with the new data when a file of the plan is added, changed or removed. */
 function planWatch(): Plugin {
   return {
     name: 'plan-watch',

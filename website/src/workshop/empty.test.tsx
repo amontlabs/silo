@@ -1,4 +1,4 @@
-// The Workshop while the plan holds no part: its normal page, with nothing in the map, the tiles or the lists.
+// The Workshop while the plan holds no part, as the real build draws it: no map, no verdicts, no threads.
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -20,33 +20,31 @@ describe('the Workshop with an empty plan', () => {
     expect(Object.keys(SILO_MAP.places)).toEqual([]);
   });
 
-  it('is the normal page with nothing in it: the title row, Map and Order, sign-in, the lists, and the live reading', async () => {
+  it('is the normal page with nothing in it: the title row, the tiles without a map, sign-in, the lists, and the live reading', async () => {
     const calls = mockApi({ state: () => ok(withGoneEntries()) });
     await renderApp(empty());
     expect(screen.getByRole('heading', { level: 1, name: 'Workshop' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Map' })).toHaveAttribute('aria-pressed', 'true');
+    // No map: no Map and Order control, no drawing, only the tiles.
+    expect(screen.queryByRole('button', { name: 'Map' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Order' })).toBeNull();
+    expect(document.querySelector('.ws-swap-map, .ws-stage')).toBeNull();
+    expect(document.querySelector('.ws')).toHaveClass('v-order');
+    expect([...document.querySelectorAll<HTMLElement>('.ws-tile')].map((tile) => tile.dataset.part)).toEqual(['suggested']);
+    expect(screen.queryByText('After that')).toBeNull();
     expect(screen.getByRole('link', { name: 'Sign in with GitHub' })).toBeInTheDocument();
     expect(calls.some((call) => call.method === 'GET' && call.path === 'state')).toBe(true);
-    // The map says it has no part, in one line, instead of an empty drawing.
-    const map = screen.getByRole('region', { name: 'Silo, part by part' });
-    expect(within(map).getByText('No part yet.')).toBeInTheDocument();
-    expect(document.querySelectorAll('.ws-part, .ws-wires path, .ws-zone')).toHaveLength(0);
     // The issue of a feature the plan no longer holds shows nowhere; people's suggestions still count.
     expect(screen.queryByText('Gone')).toBeNull();
     expect(screen.getByRole('link', { name: '2 suggested' })).toHaveAttribute('href', '#suggested');
-    expect(screen.getByRole('link', { name: 'Latest' })).toHaveAttribute('href', '#latest');
+    // Entries have no threads in the real build: nothing to show under Latest, so no link to it.
+    expect(screen.queryByRole('link', { name: 'Latest' })).toBeNull();
     expect(screen.queryByRole('link', { name: /Left out/ })).toBeNull();
     expect(screen.getByRole('link', { name: 'Suggest a feature' })).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Order' }));
-    expect(location.search).toBe('?view=order');
-    expect([...document.querySelectorAll<HTMLElement>('.ws-tile')].map((tile) => tile.dataset.area)).toEqual(['suggested']);
-    expect(screen.queryByText('After that')).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: 'Map' }));
-
-    await userEvent.click(screen.getByRole('link', { name: 'Latest' }));
-    expect(location.hash).toBe('#latest');
-    expect(screen.queryByText('Gone')).toBeNull();
+    await userEvent.click(screen.getByRole('link', { name: 'The whole product' }));
+    expect(location.hash).toBe('#product');
+    expect(screen.getByRole('heading', { level: 2, name: 'The whole product' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /← All parts/ })).toBeInTheDocument();
   });
 
   it('lets a signed-in person suggest a feature, which appears under Suggested by people', async () => {

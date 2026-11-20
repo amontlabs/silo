@@ -20,7 +20,7 @@
       setTimeout(() => document.documentElement.classList.remove('fonts-pending'), 1200);
     </script>
     <script>
-      // The built page holds the plain view's markup. At any other address (an area, Order, a sign-in that
+      // The built page holds the plain view's markup. At any other address (a part, Order, a sign-in that
       // failed), what is under the title row stays hidden, its room kept, until the script draws that place, so
       // no frame shows the plain map first. When a script fails to load, or the script has not taken over after
       // 4 s, the page stays as the build drew it: everything shows (ws-bare), the drawn sign-in included.
@@ -39,9 +39,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f7f7f4" />
-    <meta name="description" content="Silo's plan, part by part. Vote, comment or suggest a feature." />
+    <meta name="description" content="Silo's plan, part by part, with its decisions and features. Suggest a feature." />
     <meta property="og:title" content="Workshop — Silo" />
-    <meta property="og:description" content="Silo's plan, part by part. Vote, comment or suggest a feature." />
+    <meta property="og:description" content="Silo's plan, part by part, with its decisions and features. Suggest a feature." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://silo.amontlabs.com/workshop" />
     <link rel="canonical" href="https://silo.amontlabs.com/workshop" />
@@ -138,7 +138,7 @@
       </header>
       <main id="main" class="workshop">
         <div id="workshop-root"></div>
-        <noscript><p class="ws-quiet ws-noscript">Opening an area or a list, switching between Map and Order, voting, commenting, suggesting a feature and choosing a color theme need JavaScript.</p></noscript>
+        <noscript id="workshop-noscript"><div class="ws-noscript"><p class="ws-quiet">Reading an entry's notes, seeing the suggestions, suggesting a feature, voting and commenting on suggestions, and choosing a color theme need JavaScript.</p></div></noscript>
       </main>
       <footer class="site-footer joint ws-foot">
         <nav aria-label="Footer navigation">

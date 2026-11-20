@@ -61,9 +61,9 @@ export function part(id: string) {
   return document.querySelector<HTMLButtonElement>(`.ws-part[data-part="${id}"]`) as HTMLButtonElement;
 }
 export function tile(id: string) {
-  return document.querySelector<HTMLButtonElement>(`.ws-tile[data-area="${id}"] .ws-tile-hit`) as HTMLButtonElement;
+  return document.querySelector<HTMLButtonElement>(`.ws-tile[data-part="${id}"] .ws-tile-hit`) as HTMLButtonElement;
 }
-export const areaTitle = () => document.getElementById('ws-area-title');
+export const partTitle = () => document.getElementById('ws-part-title');
 
 export async function renderApp(data: BuildData = buildData(), loadNotes = () => Promise.resolve(fixtureNotes(data))) {
   const view = render(<App data={data} loadNotes={loadNotes} />);

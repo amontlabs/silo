@@ -3,62 +3,72 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
 import { describe, expect, it } from 'vitest';
-import { buildDataFrom, notesFrom, readBuildData } from './data';
-import { AREAS, buildData, DECISIONS, emptyPlanFiles, CORE_NOTES, FEATURES, planFiles } from './fixtures';
+import { loadDir } from '../../../tools/plan/read/index.js';
+import { buildDataFrom, notesFrom, planDir, readBuildData } from './data';
+import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, ZIG_NOTES } from './fixtures';
 import { checkLayout, LayoutError, MAP_HEIGHT, SILO_MAP } from './map';
 import type { Box, MapLayout } from './map';
 import { EXAMPLE_MAP } from './map-example';
 
+const SAMPLE = join(dirname(new URL(import.meta.url).pathname), '../../../tools/plan/test/fixtures/sample');
+
 describe('reading the plan files', () => {
-  it('reads features in build order, with their position, area, needs and suggestion', () => {
+  it('reads decisions and features in the order of order.json, with their position, part, needs and suggestion', () => {
     const data = buildData();
-    expect(data.features).toHaveLength(FEATURES.length);
-    expect(data.features.map((feature) => feature.position)).toEqual(data.features.map((_, index) => index + 1));
-    expect(data.features.slice(0, 3).map((feature) => feature.id)).toEqual(['intake', 'core', 'calls']);
-    const engine = data.features[1];
-    expect(engine).toMatchObject({ area: 'part-a', stage: 'second', verdict: 'take', built: null, needs: [], suggest: { verdict: 'take', why: 'The core piece.' } });
-    expect(data.features.find((feature) => feature.id === 'calls')?.suggest).toEqual({ verdict: 'take', why: null });
-    expect(data.features.find((feature) => feature.id === 'create')?.verdict).toBeNull();
+    expect(data.entries).toHaveLength(FEATURES.length + DECISIONS.length);
+    expect(data.entries.map((entry) => entry.position)).toEqual(data.entries.map((_, index) => index + 1));
+    expect(data.entries.slice(0, 5).map((entry) => entry.id)).toEqual(['security-properly', 'one-host', 'core-in-zig', 'intake', 'core']);
+    const engine = data.entries.find((entry) => entry.id === 'core');
+    expect(engine).toMatchObject({ kind: 'feature', part: 'part-a', stage: 'second', verdict: 'take', built: null, needs: [], suggest: { verdict: 'take', why: 'The core piece.' } });
+    expect(data.entries.find((entry) => entry.id === 'calls')?.suggest).toEqual({ verdict: 'take', why: 'It fits.' });
+    expect(data.entries.find((entry) => entry.id === 'create')?.verdict).toBeNull();
   });
 
-  it('reads the notes of a feature beside its file, and none when there are none', () => {
-    const features = buildData().features;
-    expect(features.find((f) => f.id === 'core')?.notes).toBe(true);
-    expect(features.find((f) => f.id === 'calls')?.notes).toBe(false);
-    expect(buildData({ notes: { core: '  \n' } }).features[0].notes).toBe(false);
+  it('reads a decision as a row: its asks is its name, its answer its body, and a decision of the whole product has no part', () => {
+    const entries = buildData().entries;
+    expect(entries.find((entry) => entry.id === 'core-in-zig')).toMatchObject({ kind: 'decision', part: 'part-a', name: 'Which language is the core written in?', what: 'Zig. It is the core piece.', verdict: 'take', notes: true });
+    expect(entries.find((entry) => entry.id === 'security-properly')).toMatchObject({ kind: 'decision', part: null });
+    expect(entries.find((entry) => entry.id === 'one-host')).toMatchObject({ what: null, verdict: null });
+  });
+
+  it('reads the notes of an entry beside its file, and none when there are none', () => {
+    const entries = buildData().entries;
+    expect(entries.find((f) => f.id === 'core')?.notes).toBe(true);
+    expect(entries.find((f) => f.id === 'calls')?.notes).toBe(false);
+    expect(buildData({ notes: { core: '  \n' } }).entries.find((f) => f.id === 'core')?.notes).toBe(false);
     // The text is a chunk of its own: never in the page's data.
-    expect(notesFrom(planFiles())).toEqual({ core: CORE_NOTES });
+    expect(notesFrom(planFiles())).toEqual({ 'core-in-zig': ZIG_NOTES, core: CORE_NOTES });
     expect(notesFrom(planFiles({ notes: { core: '  \n' } }))).toEqual({});
     expect(JSON.stringify(buildData())).not.toContain('The engine owns every computer');
   });
 
-  it('reads the decisions newest first, those of one day in the file\'s order, with what they are about', () => {
-    const decisions = buildData().decisions;
-    expect(decisions.map((decision) => decision.id)).toEqual(['core-in-zig', 'one-way', 'security-properly']);
-    expect(decisions.map((decision) => decision.date)).toEqual(['2026-11-16', '2026-11-16', '2026-11-15']);
-    expect(decisions[0].about).toEqual(['part-a']);
-    expect(decisions[2].about).toBeNull();
-    const same = buildData({ decisions: [...DECISIONS].reverse() }).decisions.map((decision) => decision.id);
-    expect(same).toEqual(['one-way', 'core-in-zig', 'security-properly']);
+  it('turns the owner\'s verdicts and entries\' threads off in the real build, and on in the fixtures', () => {
+    expect(buildDataFrom(emptyPlanFiles())).toMatchObject({ decide: false, threads: false });
+    expect(buildData()).toMatchObject({ decide: true, threads: true });
   });
 });
 
 describe('a plan that holds no part', () => {
-  it('reads with no area, stage or feature, and keeps its decisions', () => {
+  it('reads with no part and no feature, and keeps the decisions of the whole product', () => {
     const data = buildDataFrom(emptyPlanFiles());
-    expect(data).toMatchObject({ areas: [], stages: [], features: [], map: SILO_MAP });
-    expect(data.decisions).toHaveLength(DECISIONS.length);
+    expect(data).toMatchObject({ parts: [], map: SILO_MAP });
+    expect(data.entries.map((entry) => entry.id)).toEqual(['security-properly', 'one-host']);
     expect(notesFrom(emptyPlanFiles())).toEqual({});
+  });
+
+  it('reads a part with no feature: nothing stops the build', () => {
+    const data = buildDataFrom(planFiles({ features: FEATURES.filter((feature) => feature.part !== 'part-b') }));
+    expect(data.parts.map((part) => part.id)).toContain('part-b');
   });
 });
 
 describe('a plan with an error', () => {
   it('stops with the file and the fix when a feature is missing from order.json', () => {
     const files = planFiles();
-    files.set('features/stray.json', canonicalText({ name: 'Stray', what: 'Not in the order.', area: 'part-a', needs: [] }));
+    files.set('part-a/features/stray.json', canonicalText({ name: 'Stray', what: 'Not in the order.' }));
     let message = '';
     try {
-      buildDataFrom(files, EXAMPLE_MAP);
+      buildDataFrom(files, { map: EXAMPLE_MAP });
     } catch (error) {
       message = (error as Error).message;
     }
@@ -67,12 +77,10 @@ describe('a plan with an error', () => {
     expect(message).toContain('Fix:');
   });
 
-  it('stops on an area the map has no place for, and on a place for an area the plan has not', () => {
-    const files = planFiles({ features: [...FEATURES, { id: 'pay', stage: 'twelfth', area: 'billing', name: 'Pay', what: 'Billing.' }] });
-    files.set('areas.json', canonicalText([...AREAS, { id: 'billing', title: 'Billing', line: 'Money.' }]));
-    expect(() => buildDataFrom(files, EXAMPLE_MAP)).toThrow('The map has no place for the area "billing" of plan/areas.json. Add it to website/src/workshop/map.ts.');
-    // Silo's own map holds no part yet, so a plan with parts needs each of them added to it.
-    expect(() => buildDataFrom(planFiles())).toThrow('The map has no place for the area "part-a" of plan/areas.json.');
+  it('stops on a part the example map has no place for; Silo\'s own map, empty, draws no map and takes any plan', () => {
+    const files = planFiles({ parts: [...PARTS, { id: 'billing', title: 'Billing', line: 'Money.' }] });
+    expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "billing" of plan/parts.json. Add it to website/src/workshop/map.ts.');
+    expect(buildDataFrom(files).map).toBe(SILO_MAP);
   });
 });
 
@@ -85,33 +93,42 @@ describe('reading plan/ from a repository folder', () => {
         writeFileSync(join(root, 'plan', name), text);
       }
       const data = readBuildData(root, EXAMPLE_MAP);
-      expect(data.features).toHaveLength(FEATURES.length);
-      expect(data.areas).toHaveLength(AREAS.length);
-      expect(data.decisions).toHaveLength(DECISIONS.length);
-      expect(() => readBuildData(join(root, 'missing'))).toThrow('plan/: cannot be read');
+      expect(data.entries).toHaveLength(FEATURES.length + DECISIONS.length);
+      expect(data.parts).toHaveLength(PARTS.length);
+      expect(data).toMatchObject({ decide: false, threads: false });
+      expect(() => readBuildData(join(root, 'missing'))).toThrow('cannot be read');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('reads the plan named by WORKSHOP_PLAN instead: the plan tool\'s sample', () => {
+    expect(planDir('/repo', {})).toBe('/repo/plan');
+    expect(planDir('/repo', { WORKSHOP_PLAN: SAMPLE })).toBe(SAMPLE);
+    const data = buildDataFrom(loadDir(SAMPLE));
+    expect(data.parts.map((part) => part.id)).toEqual(['engine', 'record']);
+    expect(data.entries.filter((entry) => entry.part === null).map((entry) => entry.id)).toEqual(['the-design', 'nothing-without-a-reason']);
+  });
 });
 
 describe('the map layout', () => {
-  const ids = AREAS.map((area) => area.id);
+  const ids = PARTS.map((part) => part.id);
 
   it('draws the fixture plan with the example, and Silo\'s plan with its own map', () => {
     expect(buildData().map).toBe(EXAMPLE_MAP);
     expect(Object.keys(EXAMPLE_MAP.places)).toEqual(ids);
-    expect(() => checkLayout(JSON.parse(readFileSync(join(dirname(new URL(import.meta.url).pathname), '../../../plan/areas.json'), 'utf8')).map((area: { id: string }) => area.id))).not.toThrow();
+    // Silo's own map is empty: every plan passes, and the page shows the tiles alone.
+    expect(() => checkLayout(['engine', 'record'])).not.toThrow();
   });
 
-  it('places exactly the areas of the plan', () => {
+  it('places exactly the parts of the plan', () => {
     expect(() => checkLayout(ids, EXAMPLE_MAP)).not.toThrow();
     expect(() => checkLayout([...ids, 'billing'], EXAMPLE_MAP)).toThrow(LayoutError);
-    expect(() => checkLayout(ids.filter((id) => id !== 'part-c'), EXAMPLE_MAP)).toThrow('website/src/workshop/map.ts places the area "part-c", which plan/areas.json does not have.');
+    expect(() => checkLayout(ids.filter((id) => id !== 'part-c'), EXAMPLE_MAP)).toThrow('website/src/workshop/map.ts places the part "part-c", which plan/parts.json does not have.');
     const without = (id: string): MapLayout => ({ ...EXAMPLE_MAP, places: Object.fromEntries(Object.entries(EXAMPLE_MAP.places).filter(([place]) => place !== id)) });
-    expect(() => checkLayout(ids.filter((id) => id !== 'part-b'), without('part-b'))).toThrow('website/src/workshop/map.ts draws a wire for the area "part-b", which plan/areas.json does not have.');
+    expect(() => checkLayout(ids.filter((id) => id !== 'part-b'), without('part-b'))).toThrow('website/src/workshop/map.ts draws a wire for the part "part-b", which plan/parts.json does not have.');
     const noWires = { ...without('part-d'), wires: { full: EXAMPLE_MAP.wires.full.filter((wire) => wire.of !== 'part-d'), fold: EXAMPLE_MAP.wires.fold.filter((wire) => wire.of !== 'part-d') } };
-    expect(() => checkLayout(ids.filter((id) => id !== 'part-d'), noWires)).toThrow('website/src/workshop/map.ts stacks a copy behind the area "part-d", which plan/areas.json does not have.');
+    expect(() => checkLayout(ids.filter((id) => id !== 'part-d'), noWires)).toThrow('website/src/workshop/map.ts stacks a copy behind the part "part-d", which plan/parts.json does not have.');
   });
 
   for (const [name, layout] of [['Silo\'s map', SILO_MAP], ['the example', EXAMPLE_MAP]] as const) {
