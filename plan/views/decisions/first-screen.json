@@ -1,0 +1,5 @@
+{
+  "asks": "What is the first screen of the app?",
+  "answer": "The first screen is a short ranked list of what needs you. It is not a dashboard. Each line of the list opens one of the four places below.",
+  "verdict": "take"
+}

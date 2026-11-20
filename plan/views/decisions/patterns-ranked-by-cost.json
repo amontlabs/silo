@@ -1,0 +1,5 @@
+{
+  "asks": "How are patterns shown?",
+  "answer": "Patterns are shown as lists ranked by what they cost in time, money and disk. Graphs of agents are not the main view.",
+  "verdict": "take"
+}

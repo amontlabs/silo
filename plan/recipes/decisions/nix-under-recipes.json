@@ -1,0 +1,7 @@
+{
+  "asks": "Is Nix the base of recipes?",
+  "answer": "Nix is the engine under recipes. It is not what a user writes: a user picks pieces and writes a short list.",
+  "needs": [
+    "recipe-pieces"
+  ]
+}

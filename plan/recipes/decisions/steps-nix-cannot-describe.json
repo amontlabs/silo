@@ -1,0 +1,7 @@
+{
+  "asks": "Who owns what Nix cannot describe?",
+  "answer": "What Nix cannot describe is a step Silo owns: the base image, and on macOS the permissions of computer use.",
+  "needs": [
+    "nix-under-recipes"
+  ]
+}

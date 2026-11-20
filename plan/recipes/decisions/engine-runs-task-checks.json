@@ -1,0 +1,7 @@
+{
+  "asks": "Who runs the checks of a task?",
+  "answer": "The engine runs the checks, on a machine the agent never touched. The agent cannot fake that result.",
+  "needs": [
+    "tasks-test-your-changes"
+  ]
+}

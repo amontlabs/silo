@@ -1,0 +1,4 @@
+{
+  "asks": "Where does everything that waits on you sit?",
+  "answer": "Everything that waits on the user sits in one queue across all computers, ordered by importance. Each item is answered in place."
+}

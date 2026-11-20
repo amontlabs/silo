@@ -1,0 +1,4 @@
+{
+  "asks": "When does Silo alert you?",
+  "answer": "Silo alerts you only on a change that needs a person. It never sends a stream of every event."
+}

@@ -1,0 +1,11 @@
+{
+  "asks": "Is a recipe made of pieces?",
+  "answer": "A recipe is made of pieces that combine. A piece is a small recipe, and a recipe can include other recipes.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "piece",
+      "means": "A small recipe that a recipe can include."
+    }
+  ]
+}

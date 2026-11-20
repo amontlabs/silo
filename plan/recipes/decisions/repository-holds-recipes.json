@@ -1,0 +1,4 @@
+{
+  "asks": "May a repository hold recipes?",
+  "answer": "A repository can hold recipes, in the repository itself or in the app: one for macOS computers, one for Linux computers. Tasks use them."
+}

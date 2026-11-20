@@ -1,0 +1,7 @@
+{
+  "asks": "What shape does a recipe have on each system?",
+  "answer": "A recipe has the same shape on both systems: a pinned base system, then a layer built by Nix. On Linux the base is an ordinary distribution, so that what agents download runs.",
+  "needs": [
+    "nix-under-recipes"
+  ]
+}

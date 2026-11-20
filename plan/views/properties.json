@@ -1,0 +1,10 @@
+[
+  {
+    "id": "never-shown-as-a-fact",
+    "says": "A report or an opinion is never shown as a fact.",
+    "kind": "safety",
+    "check": [
+      "test"
+    ]
+  }
+]

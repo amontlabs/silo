@@ -1,0 +1,7 @@
+{
+  "asks": "What does Silo do when you want to test your changes?",
+  "answer": "While working, you want to test your changes. Silo makes a Linux computer and a macOS computer from the repository's recipes, with the current changes, and runs the tests in each.",
+  "needs": [
+    "repository-holds-recipes"
+  ]
+}

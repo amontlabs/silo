@@ -1,0 +1,4 @@
+{
+  "asks": "What is written down when an ask is answered or a grant is made?",
+  "answer": "Each ask that was answered and each grant is a control fact: what was asked, the answer, what was done and the result."
+}

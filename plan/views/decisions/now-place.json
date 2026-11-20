@@ -1,0 +1,4 @@
+{
+  "asks": "What does the place Now show?",
+  "answer": "Each run with one line: what it runs, since when, whether it is working, waiting or stuck, and what it has spent. The line comes from the record, and its state is the opinion of a built-in classifier."
+}

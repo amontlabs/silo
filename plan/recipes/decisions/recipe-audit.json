@@ -1,0 +1,4 @@
+{
+  "asks": "Who audits the recipes that ship with Silo?",
+  "answer": "Silo audits its built-in recipes and updates them often. The audit is work Silo does: a pinned list, a wait before taking new versions, and a reading of what changed between two versions of a machine."
+}

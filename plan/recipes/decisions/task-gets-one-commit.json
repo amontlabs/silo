@@ -1,0 +1,7 @@
+{
+  "asks": "What does a task's computer get from main?",
+  "answer": "Main hands each computer one commit that includes the uncommitted work. The recipe brings the rest.",
+  "needs": [
+    "tasks-test-your-changes"
+  ]
+}

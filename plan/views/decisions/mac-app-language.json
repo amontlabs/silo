@@ -1,0 +1,5 @@
+{
+  "asks": "How is the Mac app built?",
+  "answer": "The Mac app is written in Swift, comes first, and holds no logic. The app is views only.",
+  "verdict": "take"
+}
