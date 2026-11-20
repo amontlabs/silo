@@ -4,19 +4,12 @@
   "replaces": [
     "denied-call-in-the-reply"
   ],
-  "sets": [
-    {
-      "in": "traffic/properties",
-      "id": "no-silent-change-to-traffic",
-      "says": "Silo changes nothing in traffic without recording the change.",
-      "kind": "safety",
-      "check": [
-        "hostile test"
-      ]
-    }
+  "adds": [
+    "no-silent-change-to-traffic"
   ],
   "suggest": {
     "verdict": "take",
     "why": "It states the target, and leaves how Silo makes the error exist to be found out (denied-tool-call-mechanism)."
-  }
+  },
+  "verdict": "take"
 }
