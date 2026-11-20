@@ -57,8 +57,9 @@ Until it is taken, a decision or a feature shows in full the sentences it would 
 - A yes to part of an entry splits it first: the part taken, and the rest still to decide.
 - An entry whose sentence changes loses its verdict. An entry with no verdict is edited freely.
 - A taken decision stays, as a built feature does. When a later entry puts a new sentence in
-  place of one it brought, that id moves to the later entry's `adds`. The owner can rule again:
-  a taken decision that brought no sentence may be dropped.
+  place of one it brought, that id moves to the later entry's `adds`. A taken decision with no
+  answer of its own, whose every sentence was replaced, is deleted by that take. The owner can
+  rule again: a taken decision that brought no sentence may be dropped.
 - A decision is taken only after the decisions it needs. A feature may be taken before what it
   needs is built: it waits.
 - A feature is built when `built` holds a date. That needs the verdict take, everything it needs
