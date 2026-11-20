@@ -577,10 +577,12 @@ an id of the plan, never both. With `entry`:
   whether the read shows it or not. When the read fails, or has no room left
   in the ceiling below, the issue just opened is the thread too. The server
   then puts it in the snapshot.
-- Two requests for the same entry on the same instance share one opening,
-  until the read after it has ended. So no write goes on an issue the App may
-  still close. A request that comes after the opening finds the thread in the
-  snapshot. When a request's wait ends before the opening does, the issue
+- Two requests for the same entry on the same instance share one opening.
+  While an opening is in flight, every request for that entry on the instance
+  waits for it before anything else, even when the snapshot already holds an
+  issue for the entry (a refresh may have put the new one there). So no write
+  goes on an issue the App may still close. A request that comes after the
+  opening finds the thread in the snapshot. When a request's wait ends before the opening does, the issue
   just opened is put in the snapshot at once, unless the App closed it.
 - The person's comment or 👍 then goes on the thread with the person's own
   token. The answer carries `n`.

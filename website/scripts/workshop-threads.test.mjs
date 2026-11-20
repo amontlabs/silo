@@ -689,6 +689,80 @@ test('a request that comes during the read after an opening shares the opening: 
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
+test('a request that comes after a refresh put the new issue in the snapshot during the read after its opening still waits for the opening, and writes on the lower issue', async () => {
+  const t = await setup();
+  try {
+    const a = await signedIn(t);
+    const b = await signedIn(t, 'owner-fake');
+    let lower = null;
+    let reading;
+    const inRead = new Promise((resolve) => { reading = resolve; });
+    t.fake.state.hook = (r) => {
+      if (r.kind !== 'installation' || !ISSUES.test(r.path) || /[?&]page=/.test(r.query)) return null;
+      if (r.method === 'POST' && !lower) {
+        // Another instance's issue for the entry, not labelled yet: no list shows it.
+        lower = t.fake.addIssue({ title: 'Fork a computer', body: 'Feature.\n\n<!-- silo-entry: fork-computers -->' });
+      } else if (r.method === 'GET' && lower) {
+        reading();
+        return { delay: 400 };
+      }
+      return null;
+    };
+    const first = a.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'From a.' } });
+    await inRead;
+    const n = lower.number + 1;
+    // A refresh during the read after the opening: its list shows the new issue.
+    t.clock.t += 31_000;
+    assert.equal((await b.call('GET', 'state?fresh=1')).json.threads['fork-computers'], n);
+    // The other instance's issue gets its label; the read after the opening will show it.
+    t.fake.setLabels(lower, ['workshop:entry']);
+    const second = await b.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'From b.' } });
+    const one = await first;
+    t.fake.state.hook = null;
+    assert.deepEqual([one.status, one.json.n, second.status, second.json.n], [200, lower.number, 200, lower.number], one.body + second.body);
+    assert.deepEqual(issueOf(t.fake, lower.number).comments.map((x) => x.body).sort(), ['From a.', 'From b.']);
+    const own = issueOf(t.fake, n);
+    assert.deepEqual([own.state, own.labels, own.comments.length], ['closed', [], 0]);
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('an issue the App closes stays out of the snapshot of a refresh that began while it was being closed', async () => {
+  const t = await setup();
+  try {
+    const a = await signedIn(t);
+    const b = await signedIn(t, 'owner-fake');
+    let lower = null;
+    let during = null;
+    let held = false;
+    t.fake.state.hook = (r) => {
+      if (r.kind !== 'installation') return null;
+      if (!lower && r.method === 'POST' && ISSUES.test(r.path)) {
+        // Another instance opened an issue for the entry just before; the list shows it.
+        lower = t.fake.addIssue({ title: 'Fork a computer', body: 'Feature.\n\n<!-- silo-entry: fork-computers -->', labels: ['workshop:entry'] });
+      } else if (lower && !during && r.method === 'PATCH') {
+        // While the App closes its issue, a refresh begins; it reads the issue still labelled, and
+        // swaps in after the closing has answered.
+        t.clock.t += 31_000;
+        during = b.call('GET', 'state?fresh=1');
+        return { delay: 100 };
+      } else if (during && !held && r.method === 'GET' && r.path === '/repos/amontlabs/silo/issues/comments') {
+        held = true;
+        return { delay: 400 };
+      }
+      return null;
+    };
+    const one = await a.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'From a.' } });
+    const state = (await during).json;
+    t.fake.state.hook = null;
+    assert.deepEqual([one.status, one.json.n], [200, lower.number], one.body);
+    const n = lower.number + 1;
+    assert.equal(issueOf(t.fake, n).state, 'closed');
+    assert.ok(held, 'the refresh ran during the closing');
+    assert.equal(state.issues[n], undefined);
+    assert.equal(state.threads['fork-computers'], lower.number);
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
 test('a refresh whose list shows a lower issue for the entry makes the instance forget the thread it opened, without closing it', async () => {
   const t = await setup();
   try {

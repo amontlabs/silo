@@ -495,12 +495,16 @@ export function createWorkshop({
 
   // Closes an issue this instance opened, as not planned and without the label `workshop:entry`, and
   // takes it out of the snapshot: it is no thread, even when closing it fails.
+  // The removal is recorded again once GitHub has answered, so that it also holds against a refresh
+  // that began while the issue was being closed and read it still labelled.
   async function retire(number) {
     snapshots.patch.noThread(number);
     try {
       await repair('PATCH', `/repos/${repo}/issues/${number}`, { body: { state: 'closed', state_reason: 'not_planned', labels: [] } });
     } catch (error) {
       log({ endpoint: 'thread', failure: 'retire_failed', ...(error instanceof GitHubError ? { github: error.status } : {}) });
+    } finally {
+      snapshots.patch.noThread(number);
     }
   }
 
@@ -596,11 +600,23 @@ export function createWorkshop({
   // without one gets one; without, null. Answers `{ n, issue, fresh }`, `fresh` when this request
   // opened the issue and holds it as GitHub created it. Once a thread is known, `ctx.thread` names it,
   // so that every answer to the write carries it, errors included.
+  //
+  // While an opening for the entry is in flight on this instance, the request waits for it before
+  // anything else, even when the snapshot holds a thread for the entry: a refresh may have put the
+  // new issue there while the opening still looks for a lower one, and the App may yet close it.
   async function threadOf(ctx, session, entry, { open }) {
     const found = (n, issue, fresh = false) => {
       ctx.thread = n;
       return { n, issue, fresh };
     };
+    const pending = openings.get(entry.id);
+    if (pending) {
+      await bounded(pending.promise).catch((error) => {
+        if (pending.thread) ctx.thread = pending.thread;
+        pending.remember();
+        throw error;
+      });
+    }
     const ignore = new Set();
     const confirm = async (n) => {
       ctx.thread = n;
