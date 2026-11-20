@@ -1,0 +1,362 @@
+{
+ "engine": "kokoro",
+ "speed": 1.0,
+ "before": 0.4,
+ "between": 0.35,
+ "after": 0.6,
+ "voices": [
+  {
+   "id": "af_heart",
+   "label": "Heart",
+   "scenes": [
+    {
+     "sentences": [
+      {
+       "text": "A rule is triggered by a fact, and it reads only facts.",
+       "file": "voice/de963f04795dd215.mp3",
+       "start": 0.4,
+       "length": 3.162
+      },
+      {
+       "text": "So it is exact.",
+       "file": "voice/65ab4e953383230e.mp3",
+       "start": 3.912,
+       "length": 1.047
+      },
+      {
+       "text": "It may do anything you wrote in it.",
+       "file": "voice/d42d6540eda2af76.mp3",
+       "start": 5.309,
+       "length": 1.568
+      },
+      {
+       "text": "Here a fake secret that no honest task uses is about to leave the computer.",
+       "file": "voice/875ed73a5a4587e7.mp3",
+       "start": 7.227,
+       "length": 4.528
+      },
+      {
+       "text": "The rule denies it, stops the computer and alerts you.",
+       "file": "voice/dccfbc9e28796a9a.mp3",
+       "start": 12.105,
+       "length": 2.966
+      }
+     ],
+     "total": 15.671
+    },
+    {
+     "sentences": [
+      {
+       "text": "A precaution is triggered by a report or an opinion, and those can be wrong.",
+       "file": "voice/47ebf7d1c61560c8.mp3",
+       "start": 0.4,
+       "length": 4.112
+      },
+      {
+       "text": "An opinion: a classifier thinks an agent is working against you.",
+       "file": "voice/c9f9a6961f649d38.mp3",
+       "start": 4.862,
+       "length": 3.731
+      },
+      {
+       "text": "Or a report: an agent program's own account does not match what Silo saw.",
+       "file": "voice/0f2273aec5895921.mp3",
+       "start": 8.943,
+       "length": 4.333
+      },
+      {
+       "text": "Because its trigger can be wrong, a precaution takes only reversible actions, such as alert, checkpoint, pause, deny and hold.",
+       "file": "voice/327edb2063486109.mp3",
+       "start": 13.626,
+       "length": 7.624
+      },
+      {
+       "text": "It never allows, never resumes and never stops a computer.",
+       "file": "voice/b7bfb18befbb64c5.mp3",
+       "start": 21.6,
+       "length": 3.425
+      },
+      {
+       "text": "Silo is built so that such a precaution cannot even be written.",
+       "file": "voice/bd13110e78de2053.mp3",
+       "start": 25.375,
+       "length": 3.544
+      },
+      {
+       "text": "Like a rule, a precaution is kept outside the computer, and nothing inside can change it.",
+       "file": "voice/f822a526ba95b8f3.mp3",
+       "start": 29.269,
+       "length": 4.889
+      },
+      {
+       "text": "What an agent may see of it is still open.",
+       "file": "voice/aa5600f25df787d5.mp3",
+       "start": 34.508,
+       "length": 1.989
+      }
+     ],
+     "total": 37.097
+    },
+    {
+     "sentences": [
+      {
+       "text": "Who or what triggers something decides what it may do.",
+       "file": "voice/9d27248037ffb040.mp3",
+       "start": 0.4,
+       "length": 2.644
+      },
+      {
+       "text": "You can do anything.",
+       "file": "voice/433564bb358ba675.mp3",
+       "start": 3.394,
+       "length": 1.036
+      },
+      {
+       "text": "A fact, through a rule, does what the rule says.",
+       "file": "voice/b194fb44dca4588f.mp3",
+       "start": 4.78,
+       "length": 2.304
+      },
+      {
+       "text": "A report or an opinion, through a precaution, does only what can be undone.",
+       "file": "voice/6df5db6433559832.mp3",
+       "start": 7.434,
+       "length": 4.224
+      },
+      {
+       "text": "A budget shows the difference.",
+       "file": "voice/004cb874cc6adc8b.mp3",
+       "start": 12.008,
+       "length": 1.406
+      },
+      {
+       "text": "On a computer it is a rule: the boundary counts every call.",
+       "file": "voice/96454369d9b67b43.mp3",
+       "start": 13.764,
+       "length": 3.274
+      },
+      {
+       "text": "On a run it is a precaution: which run made a call is an opinion.",
+       "file": "voice/6e0dc73449df409b.mp3",
+       "start": 17.388,
+       "length": 3.832
+      },
+      {
+       "text": "A wrong grant lets something out that cannot be taken back.",
+       "file": "voice/73fc06459b1a8790.mp3",
+       "start": 21.57,
+       "length": 2.949
+      },
+      {
+       "text": "A wrong pause costs time.",
+       "file": "voice/e50a53df7a7ae99e.mp3",
+       "start": 24.869,
+       "length": 1.459
+      },
+      {
+       "text": "A classifier itself never acts.",
+       "file": "voice/32ad0d0aa3a770e9.mp3",
+       "start": 26.678,
+       "length": 1.876
+      },
+      {
+       "text": "And there is no detour.",
+       "file": "voice/f2c33c76f91f27f6.mp3",
+       "start": 28.904,
+       "length": 1.177
+      },
+      {
+       "text": "That a classifier gave an opinion, or that a precaution acted, is itself a fact.",
+       "file": "voice/a924e421d2567f2a.mp3",
+       "start": 30.431,
+       "length": 4.798
+      },
+      {
+       "text": "No rule may be triggered by it.",
+       "file": "voice/bec4212bd519ab31.mp3",
+       "start": 35.579,
+       "length": 1.587
+      }
+     ],
+     "total": 37.766
+    },
+    {
+     "sentences": [
+      {
+       "text": "A rule or a precaution can be synchronous or asynchronous.",
+       "file": "voice/8fd6fc5e8d8bdcb2.mp3",
+       "start": 0.4,
+       "length": 3.36
+      },
+      {
+       "text": "Synchronous: the thing waits at the boundary for the answer, so it can still be denied or held.",
+       "file": "voice/fef2e09828c82ff3.mp3",
+       "start": 4.11,
+       "length": 5.203
+      },
+      {
+       "text": "A rule answers on the spot, because a fact is known on the spot.",
+       "file": "voice/e602c443f2629949.mp3",
+       "start": 9.663,
+       "length": 3.546
+      },
+      {
+       "text": "Here the budget of main is reached, and in this example the next model call is denied.",
+       "file": "voice/678d1c844693a223.mp3",
+       "start": 13.559,
+       "length": 4.65
+      },
+      {
+       "text": "A precaution makes the thing wait for a classifier's opinion.",
+       "file": "voice/d2a31c2173fd8ce5.mp3",
+       "start": 18.559,
+       "length": 3.009
+      },
+      {
+       "text": "Here the opinion is not safe, and the precaution denies it.",
+       "file": "voice/6e01d0453b6692a3.mp3",
+       "start": 21.918,
+       "length": 3.306
+      }
+     ],
+     "total": 25.824
+    },
+    {
+     "sentences": [
+      {
+       "text": "Asynchronous: nothing waits, and only the computer is left to act on.",
+       "file": "voice/5caef13c9929ae25.mp3",
+       "start": 0.4,
+       "length": 4.237
+      },
+      {
+       "text": "A rule: the memory of the Mac runs low.",
+       "file": "voice/07ca7982734c1452.mp3",
+       "start": 4.987,
+       "length": 2.207
+      },
+      {
+       "text": "The meter is a fact, and in this example the rule pauses main and alerts you.",
+       "file": "voice/e6b01109dca93071.mp3",
+       "start": 7.544,
+       "length": 4.365
+      },
+      {
+       "text": "A precaution: a classifier's opinion comes after the thing has passed, and the precaution pauses main.",
+       "file": "voice/f73f4bc42fc01a9b.mp3",
+       "start": 12.259,
+       "length": 6.152
+      },
+      {
+       "text": "The timing does not change the kinds: a rule may trigger any kind, and a precaution only reversible ones.",
+       "file": "voice/d781f2f7c2e33b5c.mp3",
+       "start": 18.761,
+       "length": 6.482
+      }
+     ],
+     "total": 25.843
+    },
+    {
+     "sentences": [
+      {
+       "text": "A model's reply asks for a command to be run: a tool call.",
+       "file": "voice/a5d2a5a18d29ab12.mp3",
+       "start": 0.4,
+       "length": 3.612
+      },
+      {
+       "text": "It waits at the boundary for a classifier.",
+       "file": "voice/47e5bedf896f95e0.mp3",
+       "start": 4.362,
+       "length": 2.023
+      },
+      {
+       "text": "That wait has a limit too, and Silo ends it itself.",
+       "file": "voice/e9f47a9e87d948ac.mp3",
+       "start": 6.735,
+       "length": 2.926
+      },
+      {
+       "text": "If the opinion is safe, the precaution does nothing, and the call passes as the rules allow.",
+       "file": "voice/e340651f319a73b7.mp3",
+       "start": 10.011,
+       "length": 5.205
+      },
+      {
+       "text": "If it is unsure, in this example the precaution holds it for you.",
+       "file": "voice/37f349df73481b38.mp3",
+       "start": 15.566,
+       "length": 3.65
+      }
+     ],
+     "total": 19.816
+    },
+    {
+     "sentences": [
+      {
+       "text": "Here it says: not safe.",
+       "file": "voice/a79202c70ae10b1b.mp3",
+       "start": 0.4,
+       "length": 1.407
+      },
+      {
+       "text": "The precaution denies the call, and Silo changes the reply: the tool call is replaced by a refusal.",
+       "file": "voice/a9bfaa5dd7014997.mp3",
+       "start": 2.157,
+       "length": 6.118
+      },
+      {
+       "text": "The agent program sends the refusal back with its next request, and the model reads it.",
+       "file": "voice/386b9bde174e217b.mp3",
+       "start": 8.625,
+       "length": 4.727
+      },
+      {
+       "text": "The original and the replacement are both kept as facts.",
+       "file": "voice/61615fb9e9979c95.mp3",
+       "start": 13.702,
+       "length": 3.055
+      },
+      {
+       "text": "This works where Silo can read the model's traffic.",
+       "file": "voice/eecd83dc503935dd.mp3",
+       "start": 17.107,
+       "length": 2.682
+      },
+      {
+       "text": "How each agent program takes a changed reply is still to be tested.",
+       "file": "voice/5bd8ceec96657667.mp3",
+       "start": 20.139,
+       "length": 4.065
+      }
+     ],
+     "total": 24.804
+    },
+    {
+     "sentences": [
+      {
+       "text": "A classifier can be fooled: a bad action can be cut into steps that each look innocent.",
+       "file": "voice/5e31c62ef43dbd64.mp3",
+       "start": 0.4,
+       "length": 5.121
+      },
+      {
+       "text": "A rule at the boundary cannot be got around, even by an agent that knows it by heart.",
+       "file": "voice/74034e4bd0b5e1b5.mp3",
+       "start": 5.871,
+       "length": 4.85
+      },
+      {
+       "text": "So the rules are the promise, and a precaution is extra caution on top.",
+       "file": "voice/7159406566c6f0ab.mp3",
+       "start": 11.071,
+       "length": 4.121
+      }
+     ],
+     "total": 15.792
+    }
+   ],
+   "total": 202.613
+  }
+ ]
+}

@@ -1,0 +1,93 @@
+{
+  "id": "actions-and-kinds",
+  "kind": "decides",
+  "title": "Actions and their kinds",
+  "line": "At the boundary it allows, holds or denies. Every action is granting, destructive or reversible.",
+  "shows": [
+    "channel-list",
+    "which-rule-wins",
+    "what-an-ask-holds",
+    "deny-beats-hold-beats-allow",
+    "meanings-for-the-boundary",
+    "meanings-for-computers",
+    "kinds-of-action",
+    "kind-before-design",
+    "hold-limit",
+    "yes-to-an-ask",
+    "why-destructive",
+    "rules-out-of-reach",
+    "rules-inside-are-no-boundary",
+    "rule-that-only-alerts"
+  ],
+  "words": [
+    {
+      "word": "boundary",
+      "means": "the edge of a computer. Everything that enters or leaves it passes through parts of Silo that run outside it."
+    },
+    {
+      "word": "channel",
+      "means": "one way through the boundary. None exists by default."
+    },
+    {
+      "word": "rule",
+      "means": "data you set. At the boundary it allows, holds or denies. The next film says what triggers it."
+    },
+    {
+      "word": "allow, hold, deny",
+      "means": "what happens to one thing waiting at the boundary: it passes, it waits for your answer, or it is refused."
+    },
+    {
+      "word": "ask",
+      "means": "what a hold shows you: a request that waits for your answer."
+    },
+    {
+      "word": "grant",
+      "means": "to give a computer the ability to do something. Its opposite is to revoke. The words come from access control."
+    },
+    {
+      "word": "alert",
+      "means": "what Silo raises for your attention."
+    },
+    {
+      "word": "pause",
+      "means": "freeze a whole computer: nothing in it runs, nothing crosses its boundary, and nothing is lost. Undone by resume."
+    },
+    {
+      "word": "stop",
+      "means": "end the programs running in a computer. Its disk stays."
+    },
+    {
+      "word": "checkpoint",
+      "means": "a saved moment of a computer. It never changes once saved."
+    },
+    {
+      "word": "restore",
+      "means": "put a computer back to a checkpoint."
+    },
+    {
+      "word": "fork",
+      "means": "a copy of a computer, or of one of its checkpoints, that then lives its own life."
+    },
+    {
+      "word": "drop",
+      "means": "remove a fork. It goes to the bin first."
+    },
+    {
+      "word": "bin",
+      "means": "where a dropped fork waits for a time before it is removed for good."
+    },
+    {
+      "word": "secret",
+      "means": "a value a computer can use and cannot read."
+    },
+    {
+      "word": "granting, destructive, reversible",
+      "means": "the three kinds of action."
+    }
+  ],
+  "clear": true,
+  "test": {
+    "question": "One rule allows main to reach github.com. A second rule denies anything that carries the secret named deploy-key unless it goes to deploy.example.com. An agent pushes to github.com with that key. What happens, and does it matter which rule you wrote first?",
+    "answer": "The push is denied. One rule allows it and another denies it, and deny beats allow. The order in which you wrote the rules does not matter: rules have no order. The computer keeps running, because a deny forbids one thing only."
+  }
+}

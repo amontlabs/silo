@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explainer</title>
+<link rel="stylesheet" href="KIT/player.css">
+<script src="KIT/vendor/gsap.min.js"></script>
+<script src="KIT/vendor/MotionPathPlugin.min.js"></script>
+<script src="KIT/vendor/DrawSVGPlugin.min.js"></script>
+<script src="KIT/vendor/MorphSVGPlugin.min.js"></script>
+<script src="KIT/vendor/CustomEase.min.js"></script>
+<script src="KIT/vendor/icons.js"></script>
+</head>
+<body>
+<div id="frame">
+  <p class="ask"></p>
+  <h1 class="answer"></h1>
+  <svg id="stage" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div class="caption" aria-live="polite"></div>
+  <div class="source"></div>
+  <nav><button class="pp" aria-label="Pause"></button><div class="segs"></div><span class="time"></span><button class="src" aria-pressed="false">Sources</button></nav>
+  <pre id="errors"></pre>
+</div>
+<script src="KIT/kit.js"></script>
+<script>window.ASK = ASK_JSON;</script>
+<script src="explainer.js"></script>
+</body>
+</html>

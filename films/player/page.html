@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><!--TITLE--></title>
+<style><!--STYLE--></style>
+<!--VENDOR-->
+</head>
+<body>
+<main>
+  <header class="head">
+    <h1><!--TITLE--></h1>
+    <p class="line"><!--LINE--></p>
+  </header>
+
+  <section id="frame" aria-label="Film">
+    <p class="ask" hidden></p>
+    <h2 class="answer" hidden></h2>
+    <div class="caption" aria-live="polite"></div>
+    <div class="screen">
+      <svg id="stage" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg"></svg>
+      <button class="bigplay" aria-label="Play the film" hidden>
+        <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
+        <span>Play</span>
+      </button>
+    </div>
+    <p class="subtitle" aria-live="off"></p>
+    <div class="source"></div>
+    <nav><button class="pp" aria-label="Play"></button><div class="segs"></div><span class="time"></span><button class="src" aria-pressed="false">Sources</button></nav>
+    <pre id="errors"></pre>
+  </section>
+
+  <div class="parts"></div>
+
+  <section class="send" data-part="copy">
+    <button class="copy">Copy my answers</button>
+    <span class="copied" role="status"></span>
+  </section>
+</main>
+<script>window.FILM = <!--FILM-->;</script>
+<script>window.FILM_VOICE_DATA = <!--VOICE-->;</script>
+<!--PLAYER-->
+<script><!--EXPLAINER--></script>
+<script><!--PAGE--></script>
+</body>
+</html>

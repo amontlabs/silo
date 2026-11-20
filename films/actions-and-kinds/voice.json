@@ -1,0 +1,310 @@
+{
+ "engine": "kokoro",
+ "speed": 1.0,
+ "before": 0.4,
+ "between": 0.35,
+ "after": 0.6,
+ "voices": [
+  {
+   "id": "af_heart",
+   "label": "Heart",
+   "scenes": [
+    {
+     "sentences": [
+      {
+       "text": "A computer has an edge: the boundary.",
+       "file": "voice/42e94d98d4cd9fad.mp3",
+       "start": 0.4,
+       "length": 2.065
+      },
+      {
+       "text": "Everything that enters or leaves passes through Silo there.",
+       "file": "voice/97dae9038541911c.mp3",
+       "start": 2.815,
+       "length": 3.16
+      },
+      {
+       "text": "Each way through is a channel: the network, ports, files, secrets, the screen, the clipboard, repository access.",
+       "file": "voice/9e791fa39a1bd9f8.mp3",
+       "start": 6.325,
+       "length": 6.8
+      },
+      {
+       "text": "None exists by default.",
+       "file": "voice/181cdf6538cb0490.mp3",
+       "start": 13.475,
+       "length": 1.484
+      },
+      {
+       "text": "You add each one.",
+       "file": "voice/2ec8555e55d08906.mp3",
+       "start": 15.309,
+       "length": 0.966
+      }
+     ],
+     "total": 16.875
+    },
+    {
+     "sentences": [
+      {
+       "text": "You set rules.",
+       "file": "voice/ae8b0857fa810992.mp3",
+       "start": 0.4,
+       "length": 0.93
+      },
+      {
+       "text": "Silo keeps them outside the computer, and nothing inside can change them.",
+       "file": "voice/d1ae9f0ca68e0128.mp3",
+       "start": 1.68,
+       "length": 3.939
+      },
+      {
+       "text": "Rules that live inside an agent program are not a boundary: the agent can get around them.",
+       "file": "voice/3e8fa3a5cf7a22e4.mp3",
+       "start": 5.969,
+       "length": 5.187
+      },
+      {
+       "text": "When something reaches the boundary, one of three things happens.",
+       "file": "voice/d8f8713a95eae6ea.mp3",
+       "start": 11.506,
+       "length": 3.13
+      },
+      {
+       "text": "It is allowed, and passes.",
+       "file": "voice/40441f17f75ef8c0.mp3",
+       "start": 14.986,
+       "length": 1.488
+      },
+      {
+       "text": "It is held, and waits for your answer.",
+       "file": "voice/e90a4d726bbdfeb6.mp3",
+       "start": 16.824,
+       "length": 1.898
+      },
+      {
+       "text": "Or it is denied, before anything passes.",
+       "file": "voice/fed5f4acc65627e6.mp3",
+       "start": 19.072,
+       "length": 2.377
+      },
+      {
+       "text": "Whatever no rule allows, and you have not said yes to, is denied.",
+       "file": "voice/77391db97158e4bc.mp3",
+       "start": 21.799,
+       "length": 3.519
+      }
+     ],
+     "total": 25.918
+    },
+    {
+     "sentences": [
+      {
+       "text": "A hold makes only one thing wait: the thing it is about.",
+       "file": "voice/05d1feca54f16514.mp3",
+       "start": 0.4,
+       "length": 3.084
+      },
+      {
+       "text": "The computer keeps running.",
+       "file": "voice/6dd606a119e4ef40.mp3",
+       "start": 3.834,
+       "length": 1.393
+      },
+      {
+       "text": "What you see is an ask.",
+       "file": "voice/b502957f6733c13e.mp3",
+       "start": 5.577,
+       "length": 1.201
+      },
+      {
+       "text": "Your yes is a grant.",
+       "file": "voice/d9070720028f8821.mp3",
+       "start": 7.128,
+       "length": 1.187
+      },
+      {
+       "text": "The ask says exactly what it lets pass.",
+       "file": "voice/9aca86123ee168cb.mp3",
+       "start": 8.665,
+       "length": 2.12
+      },
+      {
+       "text": "And a hold always ends.",
+       "file": "voice/92d29e40077c3162.mp3",
+       "start": 11.135,
+       "length": 1.45
+      },
+      {
+       "text": "If you do not answer, Silo ends it at its own limit.",
+       "file": "voice/9f3a4147b87376a5.mp3",
+       "start": 12.935,
+       "length": 2.888
+      },
+      {
+       "text": "The thing is denied, with an error the agent program can read.",
+       "file": "voice/2aba2a744655d17e.mp3",
+       "start": 16.173,
+       "length": 3.451
+      },
+      {
+       "text": "If the agent program gives up first and closes its connection, Silo sees that too.",
+       "file": "voice/047658fe9f894943.mp3",
+       "start": 19.974,
+       "length": 4.62
+      }
+     ],
+     "total": 25.194
+    },
+    {
+     "sentences": [
+      {
+       "text": "Rules have no order.",
+       "file": "voice/7ad2971be84434e5.mp3",
+       "start": 0.4,
+       "length": 1.17
+      },
+      {
+       "text": "If one rule allows and another denies, deny wins.",
+       "file": "voice/7b292420cec0a304.mp3",
+       "start": 1.92,
+       "length": 2.972
+      },
+      {
+       "text": "Hold beats allow.",
+       "file": "voice/e7fdcd79a260d1d2.mp3",
+       "start": 5.242,
+       "length": 1.019
+      },
+      {
+       "text": "With no rule at all, it is denied.",
+       "file": "voice/69bfeaaa144fc18b.mp3",
+       "start": 6.611,
+       "length": 1.809
+      },
+      {
+       "text": "So the order in which you wrote them never changes the result.",
+       "file": "voice/feeda33e306cfa1f.mp3",
+       "start": 8.77,
+       "length": 3.417
+      },
+      {
+       "text": "An alert is one more action, never a decision.",
+       "file": "voice/73a27644de376006.mp3",
+       "start": 12.537,
+       "length": 2.689
+      },
+      {
+       "text": "A rule that only alerts leaves the thing to the other rules.",
+       "file": "voice/fff5d99d37948072.mp3",
+       "start": 15.576,
+       "length": 3.254
+      }
+     ],
+     "total": 19.43
+    },
+    {
+     "sentences": [
+      {
+       "text": "A deny forbids one thing, and the computer keeps running.",
+       "file": "voice/955fe7edf37b6892.mp3",
+       "start": 0.4,
+       "length": 3.078
+      },
+      {
+       "text": "Pause and stop act on the whole computer.",
+       "file": "voice/89596d71ae339274.mp3",
+       "start": 3.828,
+       "length": 2.219
+      },
+      {
+       "text": "Pause freezes everything, nothing is lost, and you can resume.",
+       "file": "voice/12294a5b64772f07.mp3",
+       "start": 6.397,
+       "length": 3.426
+      },
+      {
+       "text": "Stop ends the programs that were running.",
+       "file": "voice/8034fe895cc46b21.mp3",
+       "start": 10.173,
+       "length": 2.036
+      },
+      {
+       "text": "The disk stays.",
+       "file": "voice/fba2374030b9627a.mp3",
+       "start": 12.559,
+       "length": 0.947
+      }
+     ],
+     "total": 14.106
+    },
+    {
+     "sentences": [
+      {
+       "text": "Every action Silo can take has a kind.",
+       "file": "voice/6bfdbe10c84d116c.mp3",
+       "start": 0.4,
+       "length": 2.2
+      },
+      {
+       "text": "Granting: the computer can do something it could not just before.",
+       "file": "voice/04e24e6c2ea596ef.mp3",
+       "start": 2.95,
+       "length": 3.217
+      },
+      {
+       "text": "Destructive: it ends or erases something, and that cannot be undone.",
+       "file": "voice/bce7653b1c6fcb83.mp3",
+       "start": 6.517,
+       "length": 4.038
+      },
+      {
+       "text": "Stop, restore and drop are here because each ends the programs that were running.",
+       "file": "voice/6474c79f9f7f82a7.mp3",
+       "start": 10.905,
+       "length": 4.439
+      },
+      {
+       "text": "The disk is not lost.",
+       "file": "voice/5b98ffb338b1c4c8.mp3",
+       "start": 15.694,
+       "length": 1.319
+      },
+      {
+       "text": "Reversible: it grants nothing and destroys nothing.",
+       "file": "voice/552c4b4324672dca.mp3",
+       "start": 17.363,
+       "length": 2.911
+      },
+      {
+       "text": "A wrong one costs only time.",
+       "file": "voice/4aa1f956f22b54d0.mp3",
+       "start": 20.624,
+       "length": 1.528
+      },
+      {
+       "text": "Two of these are still for you to agree: taking back a secret, and closing a network.",
+       "file": "voice/313f0173020d71f5.mp3",
+       "start": 22.502,
+       "length": 4.735
+      },
+      {
+       "text": "If they are reversible, a precaution can do them.",
+       "file": "voice/9780366a2da43052.mp3",
+       "start": 27.587,
+       "length": 2.655
+      },
+      {
+       "text": "Anything added to Silo says the kind of each of its actions first.",
+       "file": "voice/722b60e58d09dcb2.mp3",
+       "start": 30.592,
+       "length": 3.709
+      }
+     ],
+     "total": 34.901
+    }
+   ],
+   "total": 136.424
+  }
+ ]
+}

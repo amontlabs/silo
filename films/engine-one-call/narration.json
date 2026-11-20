@@ -1,0 +1,45 @@
+{
+  "speed": 1.0,
+  "voices": [
+    {
+      "id": "af_heart",
+      "label": "Heart"
+    }
+  ],
+  "scenes": [
+    [
+      "The engine keeps what it knows in small tables.",
+      "This is the table of computers.",
+      "Each row is one computer: its number, its name, what you want it to be, and what the engine last saw."
+    ],
+    [
+      "You click Start in the app.",
+      "The app starts nothing itself.",
+      "It sends a call, start computer seven, into one queue.",
+      "Everything that can change the state enters through that queue, one at a time."
+    ],
+    [
+      "The core is a function.",
+      "It reads the state and the call, and checks that computer seven exists and is stopped.",
+      "Then it returns three things: the new state, an event, and an effect."
+    ],
+    [
+      "The effect is only a request.",
+      "A driver does the real work: it starts the virtual machine.",
+      "That takes time, and it can fail.",
+      "When it is done, its answer comes back through the same queue, as an input."
+    ],
+    [
+      "The core handles that input the same way.",
+      "It writes seen running, and a second event.",
+      "What you want and what the engine saw now agree, so there is nothing left to do."
+    ],
+    [
+      "The core touches nothing.",
+      "So the same inputs, in the same order, always give the same result: the engine can replay a history, and pick up after a crash.",
+      "The numbered events are how the app follows what the engine did.",
+      "What agents do inside a computer is not in them: that is the record, and it is written apart.",
+      "And the core can be tested with millions of random sequences of inputs before it ever starts a real machine."
+    ]
+  ]
+}

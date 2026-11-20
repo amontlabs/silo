@@ -1,0 +1,25 @@
+# Made by the tools, never tracked: each film's built page and stills, the films' list,
+# the Python environment and caches.
+out/
+/index.html
+/.venv
+__pycache__/
+*.pyc
+# voice.py's temporary folder, left behind if a run is cut short.
+/*/voice/tmp*/
+# The kit is vendored and never edited: anything else under kit/ is a render (render.sh, audit.py's audit/).
+/kit/*
+!/kit/CLAUDE.md
+!/kit/NOTICE.md
+!/kit/audit.py
+!/kit/guard.sh
+!/kit/render.sh
+!/kit/sheet.py
+!/kit/shot.sh
+!/kit/kit/
+/kit/kit/*
+!/kit/kit/fonts/
+!/kit/kit/vendor/
+!/kit/kit/kit.js
+!/kit/kit/player.css
+!/kit/kit/player.html

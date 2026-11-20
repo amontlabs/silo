@@ -1,0 +1,50 @@
+{
+  "id": "engine-one-call",
+  "kind": "teaches",
+  "title": "One call through the engine",
+  "line": "A click becomes one input. The core turns it into new state, an event and an effect.",
+  "shows": [
+    "engine-state",
+    "engine-inputs",
+    "engine-under-failure",
+    "call-ids",
+    "engine-shape",
+    "numbered-events",
+    "how-effects-work",
+    "multi-step-operations",
+    "engine-reconciles",
+    "deterministic-core"
+  ],
+  "words": [
+    {
+      "word": "state",
+      "means": "what the engine knows right now, kept in tables."
+    },
+    {
+      "word": "input",
+      "means": "anything that may change the state. Inputs are handled one at a time."
+    },
+    {
+      "word": "core",
+      "means": "the function that decides. It does nothing itself."
+    },
+    {
+      "word": "event",
+      "means": "a numbered line saying what happened in the engine. The app follows them. What agents do inside a computer is not in the events: that is the record, written apart."
+    },
+    {
+      "word": "effect",
+      "means": "a request for a driver to do something in the real world."
+    },
+    {
+      "word": "driver",
+      "means": "the part that does things, such as starting a virtual machine."
+    }
+  ],
+  "clear": true,
+  "test": {
+    "question": "An hour later the virtual machine crashes by itself. Nobody clicked anything. The row still reads wanted running, seen running. What happens next?",
+    "answer": "The driver sees that the machine is gone, and that is an input. The core writes seen stopped. What is wanted and what is seen differ again, and that is how the engine knows. Nothing special was written to notice a crash: it is the same path as your click. What the engine does next is still open, and is decided with the whole design: start the machine again, or leave it stopped and alert you."
+  },
+  "wrong": "Have you seen a tool show something as running, done or saved when it was not? Tell it in one or two lines. Each story becomes a case the simulator's fake drivers have to reproduce."
+}

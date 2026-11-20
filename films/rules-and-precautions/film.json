@@ -1,0 +1,54 @@
+{
+  "id": "rules-and-precautions",
+  "kind": "decides",
+  "title": "Rules and precautions",
+  "line": "The less sure the trigger, the less it may do.",
+  "shows": [
+    "what-a-rule-may-do",
+    "rule-reads-only-facts",
+    "what-a-precaution-may-do",
+    "less-sure-less-power",
+    "what-you-may-do",
+    "how-an-opinion-acts",
+    "synchronous-or-asynchronous",
+    "classifier-asked-synchronously",
+    "denied-call-in-the-reply",
+    "promise-and-caution",
+    "no-detour",
+    "classifier-wait-limit",
+    "budget-rule-or-precaution",
+    "low-memory-or-disk",
+    "where-precautions-live",
+    "precautions-out-of-reach",
+    "rule-holds-when-known",
+    "bad-state",
+    "precaution-grants-nothing"
+  ],
+  "words": [
+    {
+      "word": "rule",
+      "means": "data you set. It is triggered by a fact, it reads only facts, it is exact, and it may do anything you wrote in it."
+    },
+    {
+      "word": "precaution",
+      "means": "data you set. It is triggered by a report or an opinion, so it can be wrong, and it takes only reversible actions."
+    },
+    {
+      "word": "synchronous",
+      "means": "the thing waits at the boundary for the answer."
+    },
+    {
+      "word": "asynchronous",
+      "means": "nothing waits. The trigger is something already seen, and only the computer is left to act on."
+    },
+    {
+      "word": "tool call",
+      "means": "one thing a model's reply asks for: a command, a file edit, a search."
+    }
+  ],
+  "clear": true,
+  "test": {
+    "question": "In the middle of the night a classifier wrongly thinks your agent is working against you. What is the worst its precaution can do, and what can it never do?",
+    "answer": "The worst is lost time. Main is paused until you look, and you resume it. Nothing that was running is ended and nothing is erased, because a precaution never stops, restores or drops a computer. And it can never let anything through: it cannot allow, resume or give a secret. Only you, or a rule you set, can do those."
+  }
+}
