@@ -1,7 +1,7 @@
 """check_page.py <film dir> < dump: the built page shows every part film.json names, with the right number of
 items, and none it does not name. Each entry the film shows is printed with its id; one not decided has its three
 buttons and a note, and under its text every statement a yes would set (its list, its id or word, its text) and
-every id it would remove; one in force or dropped has none of these."""
+every id it would remove; one in force, replaced or dropped has none of these."""
 import json, pathlib, re, sys
 import entries, place
 ch = place.film(sys.argv[1])

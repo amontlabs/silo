@@ -115,7 +115,7 @@ Each film is one of two kinds, set by `kind` in `film.json`. The script says whi
 Under both kinds, the entries the film shows are printed from `plan/`. An entry not decided shows,
 under its text, every statement a yes would set (the list it goes to, its id or word, and its
 `says` or `means`) and every id it would remove, since a yes covers exactly that. Then it has Agree,
-Change and Leave open, and a note. An entry in force, or dropped, shows its text and no buttons.
+Change and Leave open, and a note. An entry in force, replaced or dropped shows its text and no buttons.
 
 ## Making a film from a script
 
@@ -205,7 +205,7 @@ All commands run from `films/`.
    3. **page parts**: the built page shows every part named in `film.json`, with the right number
       of items, and no part that is not there. Every id in `shows` is listed, in order, with its
       text and status from `plan/`. An entry not decided has its three buttons and a note, and
-      every statement it would set and id it would remove; one in force or dropped has none of
+      every statement it would set and id it would remove; one in force, replaced or dropped has none of
       these. `film.json` has no `statements`, no `marks` and no `promises`. The build
       itself stops on an id that `plan/` does not hold.
    4. **stills**: the held frame at the end of every scene, in light and in dark, goes to

@@ -7,8 +7,8 @@ Uses only the standard library, so it runs with any Python 3 and needs no enviro
   text    the text: a word's meaning, a principle's or a property's `says`, a decision's
           `answer` (its `asks` while it has none), a feature's `what`
   asks    a decision's question, when it has an answer too
-  status  "in force" (a statement, or an entry the owner took), "not decided" (no verdict) or
-          "dropped" (the owner said no)
+  status  "in force" (a statement, or an entry the owner took), "replaced" (a decision that a
+          later one took the place of), "not decided" (no verdict) or "dropped" (the owner said no)
   sets    for an entry not decided: every statement a yes would set, in order, as
           { "in": the list it goes to, "name": its id or its word, "text": its `says` or `means` }
   removes for an entry not decided: the ids a yes would take out of the lists
@@ -45,6 +45,8 @@ def read_plan(plan=PLAN):
         elif rel.parent.name in ("decisions", "features"):
             eid = path.stem
             status = {"take": "in force", "drop": "dropped"}.get(data.get("verdict"), "not decided")
+            if data.get("replaced_by"):
+                status = "replaced"
             if rel.parent.name == "decisions":
                 e = {"id": eid, "kind": "decision", "text": data.get("answer") or data["asks"], "status": status}
                 if data.get("answer"):
