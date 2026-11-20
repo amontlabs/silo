@@ -121,5 +121,31 @@ replaced decision.
 | `read/` | Reads `plan/` from a directory or a git ref into one plan object. |
 | `check/` | `checkFiles(files, { exists })` for a tree, `checkChange(files, baseFiles)` against the merged plan, `formatProblem`. |
 | `write/` | `take(files, id)` and `drop(files, id)`: pure functions, files in and changed files out, so the Workshop can call them. |
+| `history/` | `readSteps(root)` reads from git the commits that changed an entry, and `entryHistory(steps)` turns them into each entry's changes. Neither is a command. `entryHistory` and the names it uses import no `node:` module, so the site can use them. |
 | `cli/` | The command: arguments, the checkout, git. |
 | `bin/plan` | The entry point. |
+
+## The history of an entry
+
+`readSteps(root)` returns `{ steps, shallow }` for the git repository at `root`. It starts at most three git processes, whatever the number of commits, and makes no network call. It never throws: with no repository, no commit or no entry in the history, `steps` is empty.
+
+A step is a commit of the first-parent chain of `HEAD` that changed an entry's file or its notes. A merge is one step, compared with its first parent. `shallow` is true for a shallow clone, and then the oldest step holds the whole plan as added.
+
+`entryHistory(steps)` returns a `Map` from an entry's id to its changes, newest first. An entry is followed by the name of its file (`decisions/<id>.json`, `<part>/decisions/<id>.json` or `<part>/features/<id>.json`), wherever the file is, and its notes are the `<id>.md` beside it. Any other path is ignored.
+
+A change is `{ commit, date, what }`, with `text` or `by` when `what` names them. `commit` is the full hash and `date` the committer date in UTC. `what` lists one or more of these names, in this order, and `WHAT` exports them:
+
+| Name | The step |
+|---|---|
+| `added` | is the first where the entry exists, or where its file comes back after a deletion. It names nothing else. |
+| `moved` | puts the file under another part, or the root. |
+| `text` | changes `asks` or `answer` of a decision, `name` or `what` of a feature. `text` is `{ before: { title, body }, after: { title, body } }`, with `body` null when there is none. |
+| `sets` | changes `sets`, `removes` or `replaces` of an entry with no verdict before and after it. |
+| `needs`, `keeps`, `surfaces`, `suggest` | changes that key. |
+| `notes` | changes the notes, adds them or deletes them. |
+| `taken`, `dropped` | gives the entry that verdict. |
+| `cleared` | takes the verdict `take` or `drop` away. |
+| `replaced` | adds `replaced_by`. `by` is its value. |
+| `built` | adds `built`. |
+
+A step that changes none of these gives no change: `adds`, `suggested_in`, the order of keys and white space are not changes, because values are compared as parsed JSON. A step where the entry's file is not a JSON object is skipped for that entry, and the next step is compared with the last version that parsed. A step that deletes the file gives no change.
