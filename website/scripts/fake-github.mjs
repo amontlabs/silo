@@ -31,6 +31,10 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     failNext: 0,
     hook: null,
     perPage: null,
+    // How long, in milliseconds, the list by label lags behind a change of an issue's labels, as
+    // GitHub's does: an issue labelled less than this ago is missing from it, and one whose label was
+    // removed less than this ago is still returned, without the label in its own `labels`. 0: no lag.
+    listLag: 0,
     requests: [],
   };
   let baseUrl = '';
@@ -56,15 +60,32 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
 
   const bot = { id: 900, login: 'silo-workshop[bot]', type: 'Bot', avatar_url: 'https://avatars.example.test/bot.png', permission: 'write' };
 
+  // Sets an issue's labels, noting when each label was added or removed, for the list's lag.
+  function setLabels(issue, labels) {
+    const next = [...new Set(labels)];
+    for (const name of new Set([...issue.labels, ...next])) {
+      if (issue.labels.includes(name) !== next.includes(name)) issue.labelChanged.set(name, now());
+    }
+    issue.labels = next;
+  }
+
+  // Whether the list by `label` returns `issue`, with the lag `state.listLag`.
+  function listed(issue, label) {
+    const at = issue.labelChanged?.get(label);
+    const recent = state.listLag > 0 && at !== undefined && now() - at < state.listLag;
+    return issue.labels.includes(label) ? !recent : recent;
+  }
+
   function addIssue({ title, body = '', labels = [], author, state: issueState = 'open', reason = null, pull = false, createdAt }) {
     const number = state.nextIssue++;
     const user = author ? state.users.get(author) : bot;
     const issue = {
-      number, title, body, labels: [...labels], user,
+      number, title, body, labels: [], labelChanged: new Map(), user,
       state: issueState, state_reason: issueState === 'closed' ? reason || 'completed' : null,
       created_at: createdAt || iso(), closed_at: issueState === 'closed' ? iso() : null,
       comments: [], reactions: [], pull_request: pull ? {} : undefined,
     };
+    setLabels(issue, labels);
     state.issues.set(number, issue);
     return issue;
   }
@@ -307,7 +328,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       const wanted = url.searchParams.get('state') || 'open';
       const ascending = url.searchParams.get('direction') === 'asc';
       const all = [...state.issues.values()]
-        .filter((i) => labels.every((l) => i.labels.includes(l)))
+        .filter((i) => labels.every((l) => listed(i, l)))
         .filter((i) => wanted === 'all' || i.state === wanted)
         .sort((a, b) => (ascending ? a.number - b.number : b.number - a.number));
       return listPage(req, res, url, all.map(issueJson), record, state.perPage);
@@ -390,7 +411,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (!rest && req.method === 'PATCH') {
       if (!canWrite(who)) return json(res, 403, { message: 'Forbidden' });
       const body = await readBody(req);
-      if (body.labels) issue.labels = [...new Set(body.labels)];
+      if (body.labels) setLabels(issue, body.labels);
       if (body.state === 'closed') {
         if (issue.state !== 'closed') issue.closed_at = iso();
         issue.state = 'closed';
@@ -408,13 +429,13 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
       if (!canWrite(who)) return json(res, 403, { message: 'Forbidden' });
       const name = decodeURIComponent(labelDelete[1]);
       if (!issue.labels.includes(name)) return json(res, 404, { message: 'Label does not exist' });
-      issue.labels = issue.labels.filter((l) => l !== name);
+      setLabels(issue, issue.labels.filter((l) => l !== name));
       return json(res, 200, issue.labels.map((l) => ({ name: l })));
     }
     if (rest === '/labels' && req.method === 'POST') {
       if (!canWrite(who)) return json(res, 403, { message: 'Forbidden' });
       const body = await readBody(req);
-      issue.labels = [...new Set([...issue.labels, ...body.labels.filter((name) => !state.missingLabels.has(name))])];
+      setLabels(issue, [...issue.labels, ...body.labels.filter((name) => !state.missingLabels.has(name))]);
       return json(res, 200, issue.labels.map((name) => ({ name })));
     }
     if (rest === '/comments' && req.method === 'GET') {
@@ -464,6 +485,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     issuedTokens,
     addUser,
     addIssue,
+    setLabels,
     addComment,
     editComment,
     deleteComment,

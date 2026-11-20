@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CUTS } from '../server/issues.mjs';
-import { SNAPSHOT } from '../server/snapshot.mjs';
+import { createSnapshot, SNAPSHOT } from '../server/snapshot.mjs';
 import { BUDGET } from '../server/workshop.mjs';
 import { count, setup, withBudget } from './workshop-test-support.mjs';
 
@@ -270,4 +270,37 @@ test('the refresh counts against the installation backstop', async () => {
       assert.equal((await t.client().call('GET', 'state')).status, 502);
     });
   } finally { await t.close(); }
+});
+
+test('an issue taken out of the snapshot stays out when a refresh that read it before swaps in', async () => {
+  const thread = {
+    number: 5, title: 'Fork a computer', body: 'Feature.\n\n<!-- silo-entry: fork-computers -->', labels: [{ name: 'workshop:entry' }],
+    state: 'open', user: { login: 'silo-workshop[bot]', type: 'Bot' }, created_at: '2026-11-20T12:00:00Z', html_url: 'https://github.com/amontlabs/silo/issues/5',
+    comments: 0, reactions: { '+1': 0 },
+  };
+  let clock = Date.parse('2026-11-20T12:00:00Z');
+  let gate = null;
+  let listed;
+  const request = async (method, url) => {
+    if (url.includes('/issues/comments')) await gate;
+    else if (url.includes('workshop%3Aentry')) listed?.();
+    return { status: 200, data: url.includes('workshop%3Aentry') ? [thread] : [], headers: new Headers() };
+  };
+  const snapshots = createSnapshot({ repo: 'amontlabs/silo', request, now: () => clock });
+  assert.ok(snapshots.stateAnswer((await snapshots.read()).snapshot).issues[5]);
+
+  // A refresh begins and reads the list with #5 in it; its comments are held back.
+  clock += SNAPSHOT.maxAge;
+  let release;
+  gate = new Promise((resolve) => { release = resolve; });
+  const read = new Promise((resolve) => { listed = resolve; });
+  await snapshots.read();
+  await read;
+  snapshots.patch.noThread(5);
+  assert.equal(snapshots.stateAnswer((await snapshots.read()).snapshot).issues[5], undefined);
+  release();
+  await snapshots.idle();
+  const { snapshot, old } = await snapshots.read();
+  assert.equal(old, false, 'the refresh swapped in');
+  assert.equal(snapshots.stateAnswer(snapshot).issues[5], undefined);
 });
