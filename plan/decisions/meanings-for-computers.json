@@ -1,5 +1,5 @@
 {
-  "asks": "What do these words for a computer mean: computer, fork, fresh computer, checkpoint, restore, drop, bin, pause, stop?",
+  "asks": "What do these words for a computer mean: computer, fork, fresh computer, checkpoint, restore, drop, bin, pause, stop, only here?",
   "needs": [
     "words-for-computers"
   ],
@@ -48,6 +48,11 @@
       "in": "words",
       "word": "stop",
       "means": "End the programs running in a computer. Its disk stays."
+    },
+    {
+      "in": "words",
+      "word": "only here",
+      "means": "Said of something that nothing else would bring back if it vanished."
     }
   ],
   "suggest": {

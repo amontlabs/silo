@@ -1,7 +1,7 @@
 [
   {
     "word": "main",
-    "means": "The long-lived computer where your agents work."
+    "means": "One long-lived computer where your agents work."
   },
   {
     "word": "bin",
@@ -9,13 +9,12 @@
   },
   {
     "word": "probe",
-    "means": "Silo's own small program inside a computer."
+    "means": "A small part of Silo that runs inside the computer."
   },
   {
     "word": "boundary",
     "means": "The edge of a computer.",
     "not": [
-      "wall",
       "door"
     ]
   },
@@ -28,7 +27,7 @@
   },
   {
     "word": "record",
-    "means": "Everything Silo has written down about a computer: its facts and its reports, written once."
+    "means": "Facts and reports are written once, and together they are the record."
   },
   {
     "word": "fact",
@@ -39,7 +38,7 @@
   },
   {
     "word": "report",
-    "means": "One thing a program inside the computer told Silo. Written once. The agent can interfere with it.",
+    "means": "One thing a program inside the computer told Silo. Written once. An agent with full access can interfere with it.",
     "not": [
       "inside fact"
     ]
@@ -53,10 +52,7 @@
   },
   {
     "word": "classifier",
-    "means": "Whatever gives an opinion.",
-    "not": [
-      "labeler"
-    ]
+    "means": "Whatever gives an opinion."
   },
   {
     "word": "rule",
@@ -99,19 +95,15 @@
   },
   {
     "word": "turn",
-    "means": "One reply of the model in a conversation."
+    "means": "One reply of the model."
   },
   {
     "word": "tool call",
-    "means": "One thing a turn asked for."
+    "means": "One thing the reply asked for."
   },
   {
     "word": "trace",
-    "means": "What a tool call left behind: processes, file changes, connections."
-  },
-  {
-    "word": "only here",
-    "means": "Said of something that nothing else would bring back if it vanished."
+    "means": "What it left: processes, file changes, connections."
   },
   {
     "word": "engine",

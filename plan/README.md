@@ -48,7 +48,7 @@ Until it is taken, a decision or a feature shows in full the sentences it would 
 
 | `verdict` | Meaning |
 |---|---|
-| absent | Not decided. A decision with no `answer` is open |
+| absent | Not decided. A decision with no `answer` and nothing under `sets` is open |
 | `take` | The owner said yes to exactly what the entry shows: its sentence, what it sets and what it removes |
 | `drop` | The owner said no. The entry stays, and is skipped |
 

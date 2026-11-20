@@ -6,4 +6,4 @@ word list's own meaning, which replaces the word in `words.json` when taken.
 
 - agent program: no marked line holds its meaning.
 - login: no marked line holds its meaning.
-- tool call: in force as "One thing a turn asked for.", from the chain (record 5.2, Agreed, l.589–599); the examples have no mark.
+- tool call: in force as "One thing the reply asked for.", the chain's own words (record 5.2, Agreed, l.598).

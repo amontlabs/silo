@@ -13,3 +13,5 @@ word list's own meaning, which replaces the word in `words.json` when taken.
 - bin: in force as "Where a dropped computer waits." (STATE: a dropped computer waits in a bin).
 - pause: no marked line holds its meaning.
 - stop: no marked line holds its meaning.
+- only here: no marked line can be cut into its meaning (record l.1168, l.1174), so the word is
+  not in force.

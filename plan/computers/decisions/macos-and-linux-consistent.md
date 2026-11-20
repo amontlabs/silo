@@ -2,5 +2,6 @@
 
 Decided on 10 November 2026.
 
-The principle `one-kind-of-thing` states the general rule. This decision names the three things
+The general rule is a sentence held by the taken decision `one-kind-of-computer`; as the principle
+`one-kind-of-thing` it is only put forward, by `kind-of-thing-question`. This decision names the three things
 that stay the same.

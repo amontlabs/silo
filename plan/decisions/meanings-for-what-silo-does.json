@@ -1,5 +1,5 @@
 {
-  "asks": "What do these words for what Silo does mean: rule, precaution, protective, alert?",
+  "asks": "What do these words for what Silo does mean: rule, precaution, alert?",
   "needs": [
     "words-for-what-silo-does"
   ],
@@ -7,20 +7,12 @@
     {
       "in": "words",
       "word": "rule",
-      "means": "Data you set. It is triggered by a fact, so it is exact."
+      "means": "Data you set. It is triggered by a fact, it is exact, and it may do anything you wrote in it. At the boundary it allows, holds or denies."
     },
     {
       "in": "words",
       "word": "precaution",
-      "means": "Data you set. It is triggered by a report or an opinion, so it can be wrong."
-    },
-    {
-      "in": "words",
-      "word": "protective",
-      "means": "Said of an action that is neither granting nor destructive, so a wrong one costs only time.",
-      "not": [
-        "reversible"
-      ]
+      "means": "Data you set. It is triggered by a report or an opinion, so it can be wrong, and it takes only protective actions."
     },
     {
       "in": "words",
