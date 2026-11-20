@@ -1,0 +1,12 @@
+{
+  "asks": "May Silo hide something that is the user's to know?",
+  "answer": "No. Nothing that is the user's to know is hidden.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "nothing-yours-is-hidden",
+      "says": "Nothing that is the user's to know is hidden.",
+      "asks": "What here is the user's to know, and where is it shown?"
+    }
+  ]
+}

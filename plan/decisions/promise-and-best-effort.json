@@ -1,0 +1,12 @@
+{
+  "asks": "May something a promise rests on be best effort?",
+  "answer": "No. Nothing is best effort where a promise rests on it.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "no-best-effort",
+      "says": "Nothing is best effort where a promise rests on it.",
+      "asks": "What does the promise rest on here, and can any of it fail without saying so?"
+    }
+  ]
+}

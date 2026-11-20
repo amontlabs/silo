@@ -1,0 +1,12 @@
+{
+  "asks": "May a promise rest on the agent not knowing it?",
+  "answer": "No. A promise never rests on the agent not knowing it.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "holds-when-known",
+      "says": "A promise never rests on the agent not knowing it.",
+      "asks": "Does it still hold when the agent knows exactly how it works?"
+    }
+  ]
+}

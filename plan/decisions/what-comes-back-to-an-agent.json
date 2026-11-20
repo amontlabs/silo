@@ -1,0 +1,12 @@
+{
+  "asks": "What may come back to an agent?",
+  "answer": "What comes back to an agent is true and readable.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "true-and-readable",
+      "says": "What comes back to an agent is true and readable.",
+      "asks": "What does the agent get back, and is all of it true?"
+    }
+  ]
+}
