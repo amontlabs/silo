@@ -319,6 +319,13 @@ test('at 4 of 5 openings for the person, two openings at once create one issue',
     assert.deepEqual(both.map((answer) => answer.status).sort(), [200, 429]);
     assert.equal(both.find((answer) => answer.status === 429).json.message, 'You have started too many new threads this hour. Try again later.');
     assert.equal(created(t).length, 5);
+    // At 5 of 5, a comment on a thread another instance opened, which this instance's snapshot does not hold, opens nothing and is posted.
+    const elsewhere = t.fake.addIssue({ title: 'Fork a computer', body: 'Feature.\n\n<!-- silo-entry: fork-computers -->', labels: ['workshop:entry'] });
+    t.clock.t += 61_000;
+    const posted = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'At the limit.' } });
+    assert.deepEqual([posted.status, posted.json.n], [200, elsewhere.number], posted.body);
+    assert.deepEqual(issueOf(t.fake, elsewhere.number).comments.map((x) => x.body), ['At the limit.']);
+    assert.equal(created(t).length, 5);
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
@@ -470,5 +477,32 @@ test('every answer to a write naming an entry whose thread the server knows carr
       const failed = await c.call('POST', endpoint, { body });
       assert.deepEqual([failed.status, failed.json.n], [502, 1], failed.body);
     }
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
+test('the read after an opening succeeding without the issue just opened: the person\'s write is not made', async () => {
+  const t = await setup();
+  try {
+    const c = await signedIn(t);
+    let opened = false;
+    let emptied = false;
+    t.fake.state.hook = (r) => {
+      if (r.method === 'POST' && ISSUES.test(r.path)) opened = true;
+      else if (opened && !emptied && r.method === 'GET' && ISSUES.test(r.path) && r.kind === 'installation') {
+        emptied = true;
+        return { status: 200, body: [] };
+      }
+      return null;
+    };
+    const answer = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Not yet.' } });
+    t.fake.state.hook = null;
+    assert.equal(answer.status, 502, answer.body);
+    assert.match(answer.json.message, /Try again/);
+    assert.equal(Object.hasOwn(answer.json, 'n'), false);
+    const [n] = entryIssues(t, 'fork-computers');
+    assert.deepEqual(issueOf(t.fake, n).comments, []);
+    const again = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Not yet.' } });
+    assert.deepEqual([again.status, again.json.n], [200, n]);
+    assert.equal(created(t).length, 1);
   } finally { t.fake.state.hook = null; await t.close(); }
 });

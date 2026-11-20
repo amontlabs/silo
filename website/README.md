@@ -531,11 +531,12 @@ an id of the plan, never both. With `entry`:
   issue. When the issue still lacks it, the App closes the issue, and the
   answer is 502 with `"error": "github"`. No open issue without the label is
   left behind.
-- After the opening, the App reads the entry issues again. When that read
-  fails, or the ceiling below has no room left for it, the person's write is
-  not made: the answer is an error that says to try again, and the next try
-  finds the issue. No write goes to an issue that this read has not shown to
-  be the lowest for the entry.
+- After the opening, the App reads the entry issues again. That read confirms
+  the opening only when it shows the issue just opened. When it fails, has no
+  room left in the ceiling below, or does not show that issue, the person's
+  write is not made: the answer is an error that says to try again, and the
+  next try finds the issue. No write goes to an issue that this read has not
+  shown to be the lowest for the entry.
 - When that read shows a lower issue for the entry, another instance opened
   one at the same moment. The lower one is the thread, and the person's write
   goes on it. The App closes the issue it opened, as not planned, and takes
@@ -814,9 +815,12 @@ snapshots catch up when the hour resets.
   instance's memory, because the Workshop has no storage but GitHub: another
   instance, or a restart, starts it again. A write that would cause the 6th
   answers 429: "You have started too many new threads this hour."
-- A person's opening is charged before any call to GitHub, and given back
-  when nothing was opened: when the read found a thread, or the opening
-  failed. A write on an entry that has a thread is no opening. On one
+- Only an opening is limited: the server first looks the thread up on
+  GitHub, and a write on an entry that has a thread, there or in the
+  snapshot, is refused by neither count. When an issue has to be opened, the
+  person's count and everyone's are checked and charged in one step, with no
+  wait between, and the person's charge is given back when the opening
+  failed. On one
   instance, two openings at once by one person at 4 of 5, or by anyone at 29
   of 30, open one issue. Two instances opening at the same moment can each
   pass at 29, since neither sees the other's issue yet.

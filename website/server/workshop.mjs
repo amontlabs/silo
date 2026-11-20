@@ -555,21 +555,20 @@ export function createWorkshop({
   function lookUp(session, entry, ignore, open) {
     const store = requests.getStore();
     const run = async () => {
-      if (!open) return { candidates: (await entryIssuesOnGitHub(entry.id, ignore)).numbers, opened: null };
-      // The person's charge is taken before any call, and given back unless an issue was opened.
-      const person = openingsPerson.take(session.id, BUDGET.openingsPerPersonPerHour, now());
+      const before = await entryIssuesOnGitHub(entry.id, ignore);
+      if (before.numbers.length || !open) return { candidates: before.numbers, opened: null };
+      // Only an opening is limited. The person's count and everyone's are checked and charged in one
+      // step, with no wait between, so that two openings at once cannot both pass; the charge is given
+      // back when nothing was opened.
+      const person = openingsPerson.peek(session.id, BUDGET.openingsPerPersonPerHour, now());
       if (person) tooMany(person, 'You have started too many new threads this hour. Try again later.');
+      const everyone = openingsInHour(before.lastHour);
+      if (everyone.count >= BUDGET.openingsPerHour) tooMany(everyone.wait, 'Too many new threads were started on the Workshop this hour. Try again later.');
+      openingsPerson.take(session.id, BUDGET.openingsPerPersonPerHour, now());
       const mine = { at: now(), number: null };
+      ownOpenings.add(mine);
       let data;
       try {
-        const before = await entryIssuesOnGitHub(entry.id, ignore);
-        if (before.numbers.length) {
-          openingsPerson.give(session.id, now());
-          return { candidates: before.numbers, opened: null };
-        }
-        const everyone = openingsInHour(before.lastHour);
-        if (everyone.count >= BUDGET.openingsPerHour) tooMany(everyone.wait, 'Too many new threads were started on the Workshop this hour. Try again later.');
-        ownOpenings.add(mine);
         // Room for the opening and the read that confirms it.
         if (!hasRoom('open', 2)) spendOrRefuse('open', 2);
         spendOrRefuse('open');
@@ -582,8 +581,10 @@ export function createWorkshop({
       mine.number = data.number;
       if (store) store.changed = true;
       const issue = await labelled(data, entry);
+      // The read confirms only when it shows the issue just opened; otherwise the write is not made.
       const after = await entryIssuesOnGitHub(entry.id, ignore);
-      const lowest = Math.min(issue.number, ...after.numbers);
+      if (!after.found.has(issue.number)) refuse(502, 'github_failed', 'GitHub did not show the new thread yet. Try again.');
+      const lowest = after.numbers[0];
       if (lowest === issue.number) {
         snapshots.patch.issue(issue, 'entry');
         return { candidates: [lowest], opened: issue };
