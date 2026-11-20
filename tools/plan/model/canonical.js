@@ -1,8 +1,10 @@
-// The canonical form of the plan's JSON: keys in the order of their shape, two spaces, a final newline.
+// The canonical form of the plan's JSON: keys in the order of their kind, two spaces, a final newline.
 
-import { AREA_KEYS, DECISION_KEYS, FEATURE_KEYS, STAGE_KEYS, SUGGEST_KEYS, SURFACES_KEYS } from './names.js';
+import {
+  DECISION_KEYS, FEATURE_KEYS, ORDER_KEYS, PART_KEYS, PRINCIPLE_KEYS, PROPERTY_KEYS, STAGE_KEYS, SUGGEST_KEYS, SURFACES_KEYS, WORD_KEYS, listKind,
+} from './names.js';
 
-/** @param {unknown} value @returns {string} */
+/** @param {unknown} value @returns {string} the file's text. */
 export function canonicalText(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
@@ -10,7 +12,8 @@ export function canonicalText(value) {
 /**
  * Copies an object with the known keys first, in order, then any other key in its own order
  * (the check reports unknown keys; the canonical form keeps them so nothing is lost).
- * @param {Record<string, unknown>} object @param {readonly string[]} keys
+ * Anything that is not a plain object is returned as it is.
+ * @param {any} object @param {readonly string[]} keys
  */
 function ordered(object, keys) {
   if (object === null || typeof object !== 'object' || Array.isArray(object)) return object;
@@ -21,27 +24,50 @@ function ordered(object, keys) {
   return out;
 }
 
-const each = (list, fn) => (Array.isArray(list) ? list.map(fn) : list);
+/** @param {any} value @param {string} key @param {(v: any) => any} fn */
+function within(value, key, fn) {
+  if (value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, key)) value[key] = fn(value[key]);
+  return value;
+}
 
-/** @param {any} feature */
-export function canonicalFeature(feature) {
-  const out = /** @type {any} */ (ordered(feature, FEATURE_KEYS));
-  if (out && typeof out === 'object') {
-    if (out.surfaces) out.surfaces = ordered(out.surfaces, SURFACES_KEYS);
-    if (out.suggest) out.suggest = ordered(out.suggest, SUGGEST_KEYS);
-  }
+const each = (fn) => (list) => (Array.isArray(list) ? list.map(fn) : list);
+
+/** @param {any} word */
+export const canonicalWord = (word) => ordered(word, WORD_KEYS);
+/** @param {any} principle */
+export const canonicalPrinciple = (principle) => ordered(principle, PRINCIPLE_KEYS);
+/** @param {any} property */
+export const canonicalProperty = (property) => ordered(property, PROPERTY_KEYS);
+/** @param {any} part */
+export const canonicalPart = (part) => ordered(part, PART_KEYS);
+
+const SENTENCE_KEYS = { word: WORD_KEYS, principle: PRINCIPLE_KEYS, property: PROPERTY_KEYS };
+
+/**
+ * An item of `sets`: `in`, then the keys of the sentence kind its list holds (none known when the
+ * list is not one).
+ * @param {any} item
+ */
+export function canonicalSetItem(item) {
+  const kind = item && typeof item === 'object' ? listKind(item.in) : null;
+  return ordered(item, ['in', ...(kind ? SENTENCE_KEYS[kind] : [])]);
+}
+
+/** @param {any} entry @param {readonly string[]} keys */
+function canonicalEntry(entry, keys) {
+  const out = ordered(entry, keys);
+  within(out, 'sets', each(canonicalSetItem));
+  within(out, 'suggest', (suggest) => ordered(suggest, SUGGEST_KEYS));
+  within(out, 'surfaces', (surfaces) => ordered(surfaces, SURFACES_KEYS));
   return out;
 }
 
-/** @param {any} areas */
-export const canonicalAreas = (areas) => each(areas, (area) => ordered(area, AREA_KEYS));
+/** @param {any} decision */
+export const canonicalDecision = (decision) => canonicalEntry(decision, DECISION_KEYS);
+/** @param {any} feature */
+export const canonicalFeature = (feature) => canonicalEntry(feature, FEATURE_KEYS);
 
 /** @param {any} order */
 export function canonicalOrder(order) {
-  const out = /** @type {any} */ (ordered(order, ['stages']));
-  if (out && typeof out === 'object') out.stages = each(out.stages, (stage) => ordered(stage, STAGE_KEYS));
-  return out;
+  return within(ordered(order, ORDER_KEYS), 'stages', each((stage) => ordered(stage, STAGE_KEYS)));
 }
-
-/** @param {any} decisions */
-export const canonicalDecisions = (decisions) => each(decisions, (decision) => ordered(decision, DECISION_KEYS));

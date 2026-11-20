@@ -1,0 +1,21 @@
+{
+  "asks": "Which design does Silo follow?",
+  "answer": "The design of 18 November 2026: Silo knows facts, reports and opinions, a rule is triggered by a fact and a precaution by a report or an opinion.",
+  "adds": [
+    "computer",
+    "fork",
+    "boundary",
+    "channel",
+    "fact",
+    "report",
+    "opinion",
+    "rule",
+    "precaution",
+    "less-sure-less-power",
+    "rule-reads-only-facts",
+    "nothing-told-passes-as-seen",
+    "precaution-grants-nothing",
+    "classifier-never-acts"
+  ],
+  "verdict": "take"
+}

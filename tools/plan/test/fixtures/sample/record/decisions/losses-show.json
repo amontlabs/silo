@@ -1,0 +1,15 @@
+{
+  "asks": "What does the record say when Silo missed something?",
+  "answer": "Every loss of facts or reports is itself recorded as a gap.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "every-loss-is-a-gap",
+      "says": "Every loss of facts or reports is itself recorded as a gap.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

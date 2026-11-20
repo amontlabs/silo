@@ -1,0 +1,14 @@
+{
+  "asks": "What may a piece of Silo be given?",
+  "answer": "Nothing without a reason: no access, no visibility, no resource.",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "least-privilege",
+      "says": "Nothing is given without a reason: no access, no visibility, no resource.",
+      "asks": "What does it need, and why each?",
+      "known_as": "least privilege",
+      "why": "What a piece does not have, it cannot leak, misuse or be tricked into using."
+    }
+  ]
+}

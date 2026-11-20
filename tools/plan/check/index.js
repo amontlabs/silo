@@ -1,240 +1,486 @@
-// `plan check`: the offline checks of `plan/`. Each problem is { file, field, message, fix }.
+// `plan check`: the checks of `plan/`, rules 1 to 11 of the migration contract.
+//
+//   checkFiles(files, { exists })  rules 1 to 10, on a tree of files: { errors, notes }
+//   checkChange(files, baseFiles)  rule 11, against the merged plan: { errors }
+//
+// A problem, error or note, is { file, field, message, fix }. `field` is `-` for the whole file.
 
 import {
-  AREA_KEYS, DECISION_KEYS, FEATURE_KEYS, GONE_STAGE, ID_PATTERN, ORDER_KEYS, PLAN_FILES, STAGE_KEYS, SUGGEST_KEYS, SURFACES_KEYS, VERDICTS, isDate,
+  CHECKS, DECISION_KEYS, FEATURE_KEYS, ID_PATTERN, ORDER_KEYS, PART_KEYS, PRINCIPLE_KEYS, PROPERTY_KEYS, PROPERTY_KINDS,
+  REQUIRED_KEYS, STAGE_KEYS, SUGGEST_KEYS, SURFACES_KEYS, VERDICTS, WORD_KEYS, isDate, listKind, wordId,
 } from '../model/names.js';
-import { canonicalAreas, canonicalDecisions, canonicalFeature, canonicalOrder, canonicalText } from '../model/canonical.js';
-import { isHidden, parsePlan } from '../read/index.js';
+import {
+  canonicalDecision, canonicalFeature, canonicalOrder, canonicalPart, canonicalPrinciple, canonicalProperty, canonicalText, canonicalWord,
+} from '../model/canonical.js';
+import { isDone } from '../model/status.js';
+import { isHidden } from '../read/index.js';
 
 /** @typedef {{ file: string, field: string, message: string, fix: string }} Problem */
 
-/** @param {Problem} problem */
+/** @param {Problem} p */
 export const formatProblem = (p) => `${p.file}: ${p.field}: ${p.message}. Fix: ${p.fix}`;
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isText = (value) => typeof value === 'string' && value.trim() !== '';
-const FEATURE_FILE = /^features\/([^/]+)\.(json|md)$/;
-const TOP_FILES = new Set([PLAN_FILES.product, PLAN_FILES.design, PLAN_FILES.areas, PLAN_FILES.order, PLAN_FILES.decisions]);
+const each = (fn) => (list) => (Array.isArray(list) ? list.map(fn) : list);
+const at = (field, key) => (field ? `${field}.${key}` : key);
+
+/** The files at the root of `plan/` that are not entries. */
+const ROOT_FILES = new Set(['README.md', 'PRODUCT.md', 'parts.json', 'order.json', 'words.json', 'principles.json', 'properties.json']);
+const LISTS = ['parts.json', 'order.json', 'words.json', 'principles.json'];
+/** `decisions/<id>.json|md` at the root, `<part>/decisions/…` or `<part>/features/…` in a part. */
+const ENTRY_FILE = /^(?:([^/]+)\/)?(decisions|features)\/([^/]+)\.(json|md)$/;
+const PART_FILE = /^([^/]+)\/(README\.md|properties\.json)$/;
+const RESERVED_PARTS = new Set(['decisions', 'features']);
+
+const SENTENCE_KEYS = { word: WORD_KEYS, principle: PRINCIPLE_KEYS, property: PROPERTY_KEYS };
+
+/** The canonical form of a JSON file of the plan, by its path relative to `plan/`. */
+function canonicalOf(name) {
+  if (name === 'parts.json') return each(canonicalPart);
+  if (name === 'order.json') return canonicalOrder;
+  if (name === 'words.json') return each(canonicalWord);
+  if (name === 'principles.json') return each(canonicalPrinciple);
+  if (/^(?:[^/]+\/)?properties\.json$/.test(name)) return each(canonicalProperty);
+  if (/(?:^|\/)decisions\/[^/]+\.json$/.test(name)) return canonicalDecision;
+  return canonicalFeature;
+}
+
+/** An optional key that holds nothing: absent is the only way to say "none". */
+const isEmpty = (value) => value === null || (typeof value === 'string' && value.trim() === '')
+  || (Array.isArray(value) && value.length === 0) || (isObject(value) && Object.keys(value).length === 0);
+
+/** A word or a phrase, matched on word boundaries, in any case, its spaces matching any run of spaces. */
+function phrasePattern(phrase) {
+  const body = phrase.trim().split(/\s+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${body}(?![\\p{L}\\p{N}_])`, 'iu');
+}
+
+/** The id of a sentence: a word's is derived from `word`, the others carry `id`. */
+const sentenceId = (kind, sentence) => (kind === 'word' ? (typeof sentence.word === 'string' ? wordId(sentence.word) : null) : sentence.id);
+const idField = (kind) => (kind === 'word' ? 'word' : 'id');
 
 /**
+ * Rules 1 to 10 on a tree of files.
  * @param {Map<string, string>} files the files of `plan/`, by path relative to it
- * @param {{ knownAreas?: string[] | null }} [options] the area ids of the merged plan, to mention the map for a new one
- * @returns {{ errors: Problem[], notes: string[] }}
+ * @param {{ exists?: (path: string) => boolean }} [options] `exists` says whether a repository path exists (rule 9's file test)
+ * @returns {{ errors: Problem[], notes: Problem[] }}
  */
-export function checkFiles(files, { knownAreas = null } = {}) {
-  const { problems, raw } = parsePlan(files);
+export function checkFiles(files, { exists } = {}) {
   /** @type {Problem[]} */
-  const errors = [...problems];
+  const errors = [];
+  /** @type {Problem[]} */
+  const notes = [];
   const add = (file, field, message, fix) => errors.push({ file, field, message, fix });
+  const names = [...files.keys()].filter((name) => !isHidden(name)).sort();
 
-  // The folder: only the known files, and a feature's notes beside its file.
-  for (const name of files.keys()) {
-    if (isHidden(name)) continue;
-    const match = FEATURE_FILE.exec(name);
-    if (match) {
-      if (!ID_PATTERN.test(match[1])) add(`plan/${name}`, '-', `"${match[1]}" is not a feature id (${ID_PATTERN.source})`, 'rename the file: lowercase letters, digits and dashes');
-      else if (match[2] === 'md' && !files.has(`features/${match[1]}.json`)) add(`plan/${name}`, '-', 'notes without a feature file', `create plan/features/${match[1]}.json or delete the notes`);
-    } else if (!TOP_FILES.has(name)) {
-      add(`plan/${name}`, '-', 'not a file of the plan', 'move it out of plan/; plan/ holds PRODUCT.md, DESIGN.md, areas.json, order.json, decisions.json and features/<id>.json and <id>.md');
+  /** Reports keys that are not in `keys`. */
+  function unknownKeys(file, field, object, keys) {
+    for (const key of Object.keys(object)) if (!keys.includes(key)) add(file, at(field, key), 'unknown key', `remove it; the keys are ${keys.join(', ')}`);
+  }
+  /** Reports required keys that are missing or empty, and optional keys that hold nothing. */
+  function present(file, field, object, required) {
+    for (const key of required) if (!Object.hasOwn(object, key) || isEmpty(object[key])) add(file, at(field, key), 'missing or empty', `write ${key}`);
+    for (const [key, value] of Object.entries(object)) {
+      if (!required.includes(key) && isEmpty(value)) add(file, at(field, key), 'empty', 'leave an optional key out instead of leaving it empty');
+    }
+  }
+  function textKey(file, field, object, key) {
+    if (Object.hasOwn(object, key) && !isEmpty(object[key]) && typeof object[key] !== 'string') add(file, at(field, key), 'not a text', `write ${key} as a string`);
+  }
+  /** A list of distinct texts; returns its items that are texts. */
+  function textList(file, field, value, what) {
+    if (value === undefined || isEmpty(value)) return [];
+    if (!Array.isArray(value)) {
+      add(file, field, 'not a list', `write a list of ${what}`);
+      return [];
+    }
+    const seen = new Set();
+    value.forEach((item, index) => {
+      if (!isText(item)) add(file, `${field}[${index}]`, 'not a text', `write ${what} as strings`);
+      else if (seen.has(item)) add(file, `${field}[${index}]`, `"${item}" appears twice`, 'list it once');
+      seen.add(item);
+    });
+    return value.filter(isText);
+  }
+
+  // Rule 2: UTF-8, valid JSON, canonical text. Every JSON file is parsed once here.
+  /** @type {Map<string, any>} */
+  const json = new Map();
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    const text = /** @type {string} */ (files.get(name));
+    if (text.includes('�')) add(`plan/${name}`, '-', 'not UTF-8', 'save the file as UTF-8');
+    let value;
+    try {
+      value = JSON.parse(text);
+    } catch (error) {
+      add(`plan/${name}`, '-', `not JSON (${/** @type {Error} */ (error).message})`, 'write valid JSON');
+      continue;
+    }
+    json.set(name, value);
+    if (text !== canonicalText(canonicalOf(name)(structuredClone(value)))) {
+      add(`plan/${name}`, '-', 'not in canonical form', 'write it as JSON.stringify(value, null, 2) with a final newline, keys in the order of plan/README.md');
     }
   }
 
-  const unknownKeys = (file, field, object, keys) => {
-    for (const key of Object.keys(object)) if (!keys.includes(key)) add(file, field ? `${field}.${key}` : key, 'unknown key', `remove it; the keys are ${keys.join(', ')}`);
-  };
-  const noNulls = (file, field, object) => {
-    for (const [key, value] of Object.entries(object)) if (value === null) add(file, field ? `${field}.${key}` : key, 'null', 'leave an optional key out instead of null');
-  };
-
-  // areas.json
-  const areaFile = 'plan/areas.json';
-  const areaIds = new Set();
-  if (raw.areas !== undefined) {
-    if (!Array.isArray(raw.areas)) add(areaFile, '-', 'not an array', 'write an array of { id, title, line }');
-    else raw.areas.forEach((area, index) => {
+  // parts.json first: the folder layout depends on it.
+  const partsFile = 'plan/parts.json';
+  /** @type {Set<string>} */
+  const partIds = new Set();
+  const parts = json.get('parts.json');
+  if (parts !== undefined) {
+    if (!Array.isArray(parts)) add(partsFile, '-', 'not an array', 'write an array of { id, title, line }');
+    else parts.forEach((part, index) => {
       const field = `[${index}]`;
-      if (!isObject(area)) return add(areaFile, field, 'not an object', 'write { id, title, line }');
-      unknownKeys(areaFile, field, area, AREA_KEYS);
-      for (const key of AREA_KEYS) if (!isText(area[key])) add(areaFile, `${field}.${key}`, 'missing or empty', `write the area's ${key}`);
-      if (typeof area.id !== 'string') return;
-      if (!ID_PATTERN.test(area.id)) add(areaFile, `${field}.id`, `"${area.id}" is not an id`, 'use lowercase letters, digits and dashes');
-      if (areaIds.has(area.id)) add(areaFile, `${field}.id`, `"${area.id}" appears twice`, 'give each area its own id');
-      areaIds.add(area.id);
+      if (!isObject(part)) return add(partsFile, field, 'not an object', 'write { id, title, line }');
+      unknownKeys(partsFile, field, part, PART_KEYS);
+      for (const key of PART_KEYS) if (!isText(part[key])) add(partsFile, at(field, key), 'missing or empty', `write the part's ${key}`);
+      if (typeof part.id !== 'string') return;
+      if (!ID_PATTERN.test(part.id)) add(partsFile, at(field, 'id'), `"${part.id}" is not an id`, 'use lowercase letters, digits and dashes');
+      else if (RESERVED_PARTS.has(part.id)) add(partsFile, at(field, 'id'), `"${part.id}" is not allowed as a part id`, 'choose another id');
+      if (partIds.has(part.id)) add(partsFile, at(field, 'id'), `"${part.id}" appears twice`, 'give each part its own id');
+      partIds.add(part.id);
     });
   }
 
-  // order.json
+  // The folder: the known files only, entry files named by an id, notes beside their entry.
+  for (const name of LISTS) if (!files.has(name)) add(`plan/${name}`, '-', 'missing', `create plan/${name}`);
+  for (const name of ['README.md', 'PRODUCT.md']) if (!files.has(name)) add(`plan/${name}`, '-', 'missing', `write plan/${name}`);
+  for (const id of partIds) if (!files.has(`${id}/README.md`)) add(`plan/${id}/README.md`, '-', 'missing: every part has its page', `write plan/${id}/README.md`);
+  /** @type {{ id: string, kind: 'decision' | 'feature', part: string | null, name: string, file: string }[]} */
+  const entryFiles = [];
+  for (const name of names) {
+    if (ROOT_FILES.has(name)) continue;
+    const partFile = PART_FILE.exec(name);
+    if (partFile && partIds.has(partFile[1])) continue;
+    const entry = ENTRY_FILE.exec(name);
+    if (!entry || (entry[1] === undefined ? entry[2] !== 'decisions' : !partIds.has(entry[1]))) {
+      add(`plan/${name}`, '-', 'not a file of the plan', 'move it out of plan/; plan/README.md lists its files, and a part\'s folder is named by an id of parts.json');
+      continue;
+    }
+    const [, part = null, folder, id, ext] = entry;
+    if (!ID_PATTERN.test(id)) {
+      add(`plan/${name}`, '-', `"${id}" is not an id (${ID_PATTERN.source})`, 'rename the file: lowercase letters, digits and dashes');
+      continue;
+    }
+    if (ext === 'md') {
+      const own = name.replace(/\.md$/, '.json');
+      if (!files.has(own)) add(`plan/${name}`, '-', 'notes without an entry file', `create plan/${own} or delete the notes`);
+      continue;
+    }
+    entryFiles.push({ id, kind: folder === 'decisions' ? 'decision' : 'feature', part, name, file: `plan/${name}` });
+  }
+
+  /**
+   * The shape of a sentence: its keys, its required keys and its values (rules 2 and 3).
+   * @param {'word' | 'principle' | 'property'} kind @param {string[]} [extra] keys required besides the sentence's (`in` for a `sets` item)
+   */
+  function checkSentence(kind, file, field, sentence, extra = []) {
+    if (!isObject(sentence)) return add(file, field, 'not an object', `write a ${kind} as an object`);
+    unknownKeys(file, field, sentence, [...extra, ...SENTENCE_KEYS[kind]]);
+    present(file, field, sentence, [...extra, ...REQUIRED_KEYS[kind]]);
+    for (const key of SENTENCE_KEYS[kind]) if (!['not', 'check', 'at'].includes(key)) textKey(file, field, sentence, key);
+    const id = sentenceId(kind, sentence);
+    if (typeof id === 'string' && id !== '' && !ID_PATTERN.test(id)) add(file, at(field, idField(kind)), `"${id}" is not an id`, 'use lowercase letters, digits and dashes (in a word: spaces too)');
+    if (kind === 'word') textList(file, at(field, 'not'), sentence.not, 'words or phrases');
+    if (kind === 'property') {
+      if (Object.hasOwn(sentence, 'kind') && !PROPERTY_KINDS.includes(sentence.kind)) add(file, at(field, 'kind'), `"${sentence.kind}" is not a kind`, `write one of ${PROPERTY_KINDS.join(', ')}`);
+      for (const check of textList(file, at(field, 'check'), sentence.check, 'checks')) {
+        if (!CHECKS.includes(check)) add(file, at(field, 'check'), `"${check}" is not a check`, `write one or more of ${CHECKS.join(', ')}`);
+      }
+      textList(file, at(field, 'at'), sentence.at, 'paths');
+    }
+  }
+
+  // The lists of sentences.
+  /** @type {{ id: string, kind: 'word' | 'principle' | 'property', list: string, file: string, field: string, value: any }[]} */
+  const sentences = [];
+  /** @type {[string, 'word' | 'principle' | 'property', string][]} file, kind, list name */
+  const lists = [['words.json', 'word', 'words'], ['principles.json', 'principle', 'principles']];
+  for (const name of names) {
+    const match = /^(?:([^/]+)\/)?properties\.json$/.exec(name);
+    if (match && (match[1] === undefined || partIds.has(match[1]))) lists.push([name, 'property', match[1] ? `${match[1]}/properties` : 'properties']);
+  }
+  for (const [name, kind, list] of lists) {
+    const value = json.get(name);
+    if (value === undefined) continue;
+    const file = `plan/${name}`;
+    if (!Array.isArray(value)) {
+      add(file, '-', 'not an array', `write an array of ${kind}s`);
+      continue;
+    }
+    value.forEach((sentence, index) => {
+      const field = `[${index}]`;
+      checkSentence(kind, file, field, sentence);
+      if (!isObject(sentence)) return;
+      const id = sentenceId(kind, sentence);
+      if (isText(id)) sentences.push({ id, kind, list, file, field, value: sentence });
+    });
+  }
+
+  // The entries: their shape (rules 2 to 5).
+  /** @type {Map<string, any>} */
+  const entries = new Map();
+  for (const { id, kind, part, name, file } of entryFiles) {
+    const data = json.get(name);
+    if (data === undefined) continue;
+    if (!isObject(data)) {
+      add(file, '-', 'not an object', `write the ${kind} as an object`);
+      continue;
+    }
+    const keys = kind === 'decision' ? DECISION_KEYS : FEATURE_KEYS;
+    unknownKeys(file, '', data, keys);
+    present(file, '', data, REQUIRED_KEYS[kind]);
+    for (const key of ['asks', 'answer', 'name', 'what']) if (keys.includes(key)) textKey(file, '', data, key);
+    for (const key of ['needs', 'removes', 'adds', 'keeps']) if (keys.includes(key)) textList(file, key, data[key], 'ids');
+    if (Object.hasOwn(data, 'verdict') && !VERDICTS.includes(data.verdict)) add(file, 'verdict', `"${data.verdict}" is not a verdict`, `write ${VERDICTS.join(' or ')}, or leave it out`);
+    if (Object.hasOwn(data, 'suggest') && !isEmpty(data.suggest)) {
+      if (!isObject(data.suggest)) add(file, 'suggest', 'not an object', 'write { verdict, why }');
+      else {
+        unknownKeys(file, 'suggest', data.suggest, SUGGEST_KEYS);
+        present(file, 'suggest', data.suggest, SUGGEST_KEYS);
+        if (Object.hasOwn(data.suggest, 'verdict') && !VERDICTS.includes(data.suggest.verdict)) add(file, 'suggest.verdict', `"${data.suggest.verdict}" is not a verdict`, `write ${VERDICTS.join(' or ')}`);
+        textKey(file, 'suggest', data.suggest, 'why');
+      }
+    }
+    if (Object.hasOwn(data, 'suggested_in') && !(Number.isInteger(data.suggested_in) && data.suggested_in > 0)) add(file, 'suggested_in', 'not an issue number', 'write a positive integer');
+    if (Object.hasOwn(data, 'surfaces') && !isEmpty(data.surfaces)) {
+      if (!isObject(data.surfaces)) add(file, 'surfaces', 'not an object', `write { ${SURFACES_KEYS.join(', ')} }`);
+      else {
+        unknownKeys(file, 'surfaces', data.surfaces, SURFACES_KEYS);
+        present(file, 'surfaces', data.surfaces, []);
+        for (const key of SURFACES_KEYS) textKey(file, 'surfaces', data.surfaces, key);
+      }
+    }
+    if (Object.hasOwn(data, 'built') && !isDate(data.built)) add(file, 'built', `"${data.built}" is not a date`, 'write the day it was built, YYYY-MM-DD');
+    // Rule 5: sets and removes only before take, adds only with it.
+    const taken = data.verdict === 'take';
+    if (taken && Object.hasOwn(data, 'sets')) add(file, 'sets', 'sets on a taken entry', 'run plan take, which writes the sentences into their lists and records their ids in adds');
+    if (taken && Object.hasOwn(data, 'removes')) add(file, 'removes', 'removes on a taken entry', 'run plan take, which removes the sentences');
+    if (!taken && Object.hasOwn(data, 'adds')) add(file, 'adds', 'adds without the verdict take', 'remove adds: only a taken entry has brought sentences');
+    if (Object.hasOwn(data, 'sets') && !isEmpty(data.sets)) {
+      if (!Array.isArray(data.sets)) add(file, 'sets', 'not a list', 'write a list of { in, …the sentence }');
+      else data.sets.forEach((item, index) => {
+        const field = `sets[${index}]`;
+        if (!isObject(item)) return add(file, field, 'not an object', 'write { in, …the sentence }');
+        const kind = listKind(item.in);
+        if (!kind) return add(file, at(field, 'in'), `"${item.in}" is not a list`, 'write words, principles, properties or <part>/properties');
+        if (item.in.includes('/') && !partIds.has(item.in.split('/')[0])) add(file, at(field, 'in'), `"${item.in.split('/')[0]}" is not a part`, 'name a part of parts.json');
+        checkSentence(kind, file, field, item, ['in']);
+      });
+    }
+    if (!entries.has(id)) entries.set(id, { ...data, id, kind, part, file });
+  }
+
+  // Every entry file counts as an entry for the links, even one that does not parse: that one error is enough.
+  const entryIds = new Set(entryFiles.map((entry) => entry.id));
+
+  // Rule 1: one namespace of ids, across entries and sentences.
+  /** @type {Map<string, string>} where each id is first defined */
+  const owner = new Map();
+  for (const entry of entryFiles) {
+    if (owner.has(entry.id)) add(entry.file, '-', `the id "${entry.id}" is also ${owner.get(entry.id)}`, 'give each decision, feature, word, principle and property its own id');
+    else owner.set(entry.id, entry.file);
+  }
+  for (const sentence of sentences) {
+    if (owner.has(sentence.id)) add(sentence.file, at(sentence.field, idField(sentence.kind)), `the id "${sentence.id}" is also ${owner.get(sentence.id)}`, 'give each decision, feature, word, principle and property its own id');
+    else owner.set(sentence.id, `${sentence.file} ${sentence.field}`);
+  }
+  /** @type {Map<string, typeof sentences[number]>} */
+  const sentenceById = new Map();
+  for (const sentence of sentences) if (!sentenceById.has(sentence.id)) sentenceById.set(sentence.id, sentence);
+  // A sentence an entry sets joins the namespace when taken: it may only replace a sentence of its own list.
+  for (const entry of entries.values()) {
+    if (!Array.isArray(entry.sets)) continue;
+    entry.sets.forEach((item, index) => {
+      const kind = isObject(item) ? listKind(item.in) : null;
+      if (!kind) return;
+      const id = sentenceId(kind, item);
+      if (typeof id !== 'string' || !ID_PATTERN.test(id)) return;
+      const field = at(`sets[${index}]`, idField(kind));
+      if (entries.has(id)) add(entry.file, field, `the id "${id}" is also ${entries.get(id).file}`, 'give the sentence its own id');
+      else if (sentenceById.has(id) && sentenceById.get(id).list !== item.in) add(entry.file, field, `the id "${id}" is already a sentence of ${sentenceById.get(id).list}`, 'give the sentence its own id, or set it in its own list');
+    });
+  }
+
+  // Rule 6: every sentence is added by exactly one taken entry; every added id is a sentence.
+  /** @type {Map<string, string[]>} */
+  const addedBy = new Map();
+  for (const entry of entries.values()) {
+    if (entry.verdict !== 'take' || !Array.isArray(entry.adds)) continue;
+    entry.adds.forEach((id, index) => {
+      if (typeof id !== 'string') return;
+      if (!sentenceById.has(id)) add(entry.file, `adds[${index}]`, `"${id}" is not a sentence`, 'add only the ids of words, principles and properties in their lists');
+      addedBy.set(id, [...(addedBy.get(id) ?? []), entry.id]);
+    });
+  }
+  for (const sentence of sentences) {
+    const by = addedBy.get(sentence.id) ?? [];
+    const field = at(sentence.field, idField(sentence.kind));
+    if (by.length === 0) add(sentence.file, field, `"${sentence.id}" is added by no taken entry`, 'name it in the adds of the taken decision or feature that brought it');
+    else if (by.length > 1) add(sentence.file, field, `"${sentence.id}" is added by ${by.join(', ')}`, 'keep it in the adds of one entry only');
+  }
+
+  // Rule 7: links name what exists.
+  const principleIds = new Set(sentences.filter((s) => s.kind === 'principle').map((s) => s.id));
+  const propertyIds = new Set(sentences.filter((s) => s.kind === 'property').map((s) => s.id));
+  for (const sentence of sentences) {
+    if (sentence.kind !== 'property') continue;
+    if (!Object.hasOwn(sentence.value, 'from')) notes.push({ file: sentence.file, field: sentence.field, message: `the property "${sentence.id}" follows from no principle`, fix: 'name the principle it follows from in from, once there is one' });
+    else if (typeof sentence.value.from === 'string' && !principleIds.has(sentence.value.from)) add(sentence.file, at(sentence.field, 'from'), `"${sentence.value.from}" is not a principle`, 'name a principle of principles.json');
+  }
+  for (const entry of entries.values()) {
+    const named = (key) => (Array.isArray(entry[key]) ? entry[key].map((id, index) => [id, `${key}[${index}]`]).filter(([id]) => typeof id === 'string') : []);
+    for (const [id, field] of named('needs')) {
+      if (id === entry.id) add(entry.file, field, `"${id}" needs itself`, 'remove it');
+      else if (!entryIds.has(id)) add(entry.file, field, `"${id}" is not a decision or a feature`, 'name an entry of the plan');
+    }
+    for (const [id, field] of named('keeps')) if (!propertyIds.has(id)) add(entry.file, field, `"${id}" is not a property`, 'name a property of the plan');
+    for (const [id, field] of named('removes')) if (!sentenceById.has(id)) add(entry.file, field, `"${id}" is not a sentence`, 'name a word, principle or property of the plan');
+    if (Array.isArray(entry.sets)) entry.sets.forEach((item, index) => {
+      if (isObject(item) && listKind(item.in) === 'property' && typeof item.from === 'string' && !principleIds.has(item.from)) {
+        add(entry.file, `sets[${index}].from`, `"${item.from}" is not a principle`, 'name a principle of principles.json');
+      }
+    });
+  }
+
+  // Rule 8: order.json.
   const orderFile = 'plan/order.json';
-  /** @type {Map<string, number>} */
-  const placedCount = new Map();
-  /** @type {Map<string, string>} */
-  const stageOf = new Map();
-  if (raw.order !== undefined) {
-    if (!isObject(raw.order)) add(orderFile, '-', 'not an object', 'write { "stages": [...] }');
+  const order = json.get('order.json');
+  if (order !== undefined) {
+    /** @type {Map<string, number>} position of each entry, from 1 across the flattened order */
+    const position = new Map();
+    if (!isObject(order)) add(orderFile, '-', 'not an object', 'write { stages: [...] }');
     else {
-      unknownKeys(orderFile, '', raw.order, ORDER_KEYS);
-      if (!Array.isArray(raw.order.stages)) add(orderFile, 'stages', 'not an array', 'write an array of { id, title, line, features }');
+      unknownKeys(orderFile, '', order, ORDER_KEYS);
+      if (!Array.isArray(order.stages)) add(orderFile, 'stages', 'not a list', 'write a list of { id, title, line, entries }');
       else {
         const stageIds = new Set();
-        raw.order.stages.forEach((stage, index) => {
+        let count = 0;
+        order.stages.forEach((stage, index) => {
           const field = `stages[${index}]`;
-          if (!isObject(stage)) return add(orderFile, field, 'not an object', 'write { id, title, line, features }');
+          if (!isObject(stage)) return add(orderFile, field, 'not an object', 'write { id, title, line, entries }');
           unknownKeys(orderFile, field, stage, STAGE_KEYS);
-          for (const key of ['id', 'title', 'line']) if (!isText(stage[key])) add(orderFile, `${field}.${key}`, 'missing or empty', `write the stage's ${key}`);
+          for (const key of ['id', 'title', 'line']) if (!isText(stage[key])) add(orderFile, at(field, key), 'missing or empty', `write the stage's ${key}`);
           if (typeof stage.id === 'string') {
-            if (!ID_PATTERN.test(stage.id)) add(orderFile, `${field}.id`, `"${stage.id}" is not an id`, 'use lowercase letters, digits and dashes');
-            if (stageIds.has(stage.id)) add(orderFile, `${field}.id`, `"${stage.id}" appears twice`, 'give each stage its own id');
+            if (!ID_PATTERN.test(stage.id)) add(orderFile, at(field, 'id'), `"${stage.id}" is not an id`, 'use lowercase letters, digits and dashes');
+            if (stageIds.has(stage.id)) add(orderFile, at(field, 'id'), `"${stage.id}" appears twice`, 'give each stage its own id');
             stageIds.add(stage.id);
-            if (stage.id === GONE_STAGE && index !== raw.order.stages.length - 1) add(orderFile, `${field}.id`, `the stage "${GONE_STAGE}" is not the last`, `move "${GONE_STAGE}" to the end`);
           }
-          if (!Array.isArray(stage.features)) return add(orderFile, `${field}.features`, 'not an array', 'write the feature ids in build order');
-          stage.features.forEach((id, at) => {
-            if (typeof id !== 'string') return add(orderFile, `${field}.features[${at}]`, 'not a feature id', 'write the id as a string');
-            placedCount.set(id, (placedCount.get(id) ?? 0) + 1);
-            if (!stageOf.has(id)) stageOf.set(id, stage.id);
+          if (!Array.isArray(stage.entries)) return add(orderFile, at(field, 'entries'), 'not a list', 'write the ids of its entries, [] for none');
+          stage.entries.forEach((id, i) => {
+            count += 1;
+            const entryField = `${field}.entries[${i}]`;
+            if (typeof id !== 'string') return add(orderFile, entryField, 'not an id', 'write the id of a decision or a feature');
+            if (!entryIds.has(id)) add(orderFile, entryField, `"${id}" is not a decision or a feature`, 'remove it or create its file');
+            if (position.has(id)) add(orderFile, entryField, `"${id}" is placed twice`, 'keep it in one stage, once');
+            else position.set(id, count);
           });
         });
       }
     }
-  }
-  for (const [id, count] of placedCount) {
-    if (!Object.hasOwn(raw.features, id)) add(orderFile, id, 'no feature file has this id', `create plan/features/${id}.json or remove "${id}" from order.json`);
-    if (count > 1) add(orderFile, id, `placed ${count} times`, 'keep it in one place only');
-  }
-
-  // features/<id>.json
-  const featureIds = Object.keys(raw.features).filter((id) => ID_PATTERN.test(id));
-  for (const id of Object.keys(raw.features)) {
-    const file = `plan/features/${id}.json`;
-    const data = raw.features[id];
-    if (!isObject(data)) {
-      add(file, '-', 'not an object', 'write { name, what, area, needs, ... }');
-      continue;
-    }
-    unknownKeys(file, '', data, FEATURE_KEYS);
-    noNulls(file, '', data);
-    if (!isText(data.name)) add(file, 'name', 'missing or empty', 'write the feature\'s name');
-    if (!isText(data.what)) add(file, 'what', 'missing or empty', 'write what the feature does, in one or two sentences');
-    for (const field of ['name', 'what']) {
-      if (isText(data[field]) && (data[field].includes('<!--') || data[field].includes('-->'))) add(file, field, 'holds <!-- or -->', 'remove it: the issue body would read it as a marker');
-    }
-    if (!placedCount.has(id)) add(file, '-', 'not in order.json', `place "${id}" in one stage of plan/order.json`);
-    const stage = stageOf.get(id);
-    if (data.area === undefined) {
-      if (stage !== undefined && stage !== GONE_STAGE) add(file, 'area', 'missing', `name one of the areas of plan/areas.json; only the stage "${GONE_STAGE}" allows none`);
-    } else if (typeof data.area !== 'string' || !areaIds.has(data.area)) {
-      if (data.area !== null) add(file, 'area', `"${data.area}" is not an area`, `use one of the ids in plan/areas.json: ${[...areaIds].join(', ')}`);
-    }
-    if (!Array.isArray(data.needs)) add(file, 'needs', 'missing or not an array', 'write the ids of the features it needs, or []');
-    else {
-      const seen = new Set();
-      data.needs.forEach((need, at) => {
-        const field = `needs[${at}]`;
-        if (typeof need !== 'string') return add(file, field, 'not a feature id', 'write the id as a string');
-        if (need === id) add(file, field, 'the feature needs itself', `remove "${id}" from its needs`);
-        else if (!Object.hasOwn(raw.features, need)) add(file, field, `"${need}" is not a feature`, 'name an existing feature, or remove it');
-        if (seen.has(need)) add(file, field, `"${need}" appears twice`, 'keep it once');
-        seen.add(need);
-      });
-    }
-    if (data.surfaces !== undefined && data.surfaces !== null) {
-      if (!isObject(data.surfaces)) add(file, 'surfaces', 'not an object', 'write { "app": "…", "cli": "…" }');
-      else {
-        unknownKeys(file, 'surfaces', data.surfaces, SURFACES_KEYS);
-        noNulls(file, 'surfaces', data.surfaces);
-        if (!Object.keys(data.surfaces).length) add(file, 'surfaces', 'empty', 'leave surfaces out when it has neither app nor cli');
-        for (const key of SURFACES_KEYS) if (data.surfaces[key] !== undefined && data.surfaces[key] !== null && !isText(data.surfaces[key])) add(file, `surfaces.${key}`, 'not a text', 'write a text, or leave it out');
-      }
-    }
-    if (data.suggest !== undefined && data.suggest !== null) {
-      if (!isObject(data.suggest)) add(file, 'suggest', 'not an object', 'write { "verdict": "take", "why": "…" }');
-      else {
-        unknownKeys(file, 'suggest', data.suggest, SUGGEST_KEYS);
-        noNulls(file, 'suggest', data.suggest);
-        if (!VERDICTS.includes(data.suggest.verdict)) add(file, 'suggest.verdict', `"${data.suggest.verdict}" is not a verdict`, `use ${VERDICTS.join(', ')}`);
-        if (data.suggest.why !== undefined && data.suggest.why !== null && !isText(data.suggest.why)) add(file, 'suggest.why', 'not a text', 'write a text, or leave it out');
-      }
-    }
-    if (data.suggested_in !== undefined && data.suggested_in !== null && !(Number.isInteger(data.suggested_in) && data.suggested_in > 0)) {
-      add(file, 'suggested_in', 'not an issue number', 'write the number of the suggestion issue');
-    }
-    if (data.verdict !== undefined && data.verdict !== null && !VERDICTS.includes(data.verdict)) add(file, 'verdict', `"${data.verdict}" is not a verdict`, `use ${VERDICTS.join(', ')}, or leave it out for undecided`);
-    if (data.built !== undefined && data.built !== null) {
-      if (!isDate(data.built)) add(file, 'built', `"${data.built}" is not a date`, 'write YYYY-MM-DD, UTC');
-      if (data.verdict !== 'take') add(file, 'built', 'built without the verdict take', 'only a feature the owner took is built');
-    }
-  }
-
-  // No cycle in needs.
-  const needsOf = (id) => (Array.isArray(raw.features[id]?.needs) ? raw.features[id].needs.filter((need) => typeof need === 'string' && need !== id && Object.hasOwn(raw.features, need)) : []);
-  /** @type {Map<string, 'open' | 'done'>} */
-  const visit = new Map();
-  const reported = new Set();
-  const walk = (id, path) => {
-    visit.set(id, 'open');
-    for (const need of needsOf(id)) {
-      if (visit.get(need) === 'open') {
-        const cycle = [...path.slice(path.indexOf(need)), need];
-        const key = [...new Set(cycle)].sort().join(' ');
-        if (!reported.has(key)) {
-          reported.add(key);
-          add(`plan/features/${id}.json`, 'needs', `a cycle: ${cycle.join(' → ')}`, `remove one of these needs`);
-        }
-      } else if (!visit.has(need)) walk(need, [...path, need]);
-    }
-    visit.set(id, 'done');
-  };
-  for (const id of featureIds.sort()) if (!visit.has(id)) walk(id, [id]);
-
-  // decisions.json
-  const decisionFile = 'plan/decisions.json';
-  if (raw.decisions !== undefined) {
-    if (!Array.isArray(raw.decisions)) add(decisionFile, '-', 'not an array', 'write an array of { id, date, text, about }');
-    else {
-      const ids = new Set();
-      raw.decisions.forEach((decision, index) => {
-        const field = `[${index}]`;
-        if (!isObject(decision)) return add(decisionFile, field, 'not an object', 'write { id, date, text, about }');
-        unknownKeys(decisionFile, field, decision, DECISION_KEYS);
-        noNulls(decisionFile, field, decision);
-        if (typeof decision.id !== 'string' || !ID_PATTERN.test(decision.id)) add(decisionFile, `${field}.id`, `"${decision.id}" is not an id`, 'use lowercase letters, digits and dashes');
-        else if (ids.has(decision.id)) add(decisionFile, `${field}.id`, `"${decision.id}" appears twice`, 'give each decision its own id');
-        ids.add(decision.id);
-        if (!isDate(decision.date)) add(decisionFile, `${field}.date`, `"${decision.date}" is not a date`, 'write YYYY-MM-DD');
-        if (!isText(decision.text)) add(decisionFile, `${field}.text`, 'missing or empty', 'write what was decided');
-        if (decision.about !== undefined && decision.about !== null) {
-          if (!Array.isArray(decision.about) || !decision.about.length) add(decisionFile, `${field}.about`, 'not a list of area ids', 'name areas, or leave about out for the whole product');
-          else {
-            const named = new Set();
-            decision.about.forEach((target, at) => {
-              const where = `${field}.about[${at}]`;
-              if (typeof target === 'string' && Object.hasOwn(raw.features, target) && !areaIds.has(target)) add(decisionFile, where, `"${target}" is a feature, not an area`, `a decision about one feature goes in plan/features/${target}.md; about names areas only`);
-              else if (!areaIds.has(target)) add(decisionFile, where, `"${target}" is not an area`, `use one of the ids in plan/areas.json: ${[...areaIds].join(', ')}`);
-              if (named.has(target)) add(decisionFile, where, `"${target}" appears twice`, 'keep it once');
-              named.add(target);
-            });
-          }
-        }
+    for (const entry of entries.values()) {
+      if (!position.has(entry.id)) add(entry.file, '-', `"${entry.id}" is in no stage`, 'place it in a stage of order.json');
+      if (!Array.isArray(entry.needs)) continue;
+      entry.needs.forEach((id, index) => {
+        const need = entries.get(id);
+        if (!need || id === entry.id) return;
+        if (position.has(id) && position.has(entry.id) && position.get(id) > position.get(entry.id)) add(orderFile, entry.id, `"${entry.id}" comes before "${id}", which it needs`, `move "${entry.id}" after "${id}" in order.json`);
+        if (entry.verdict !== 'drop' && need.verdict === 'drop') add(entry.file, `needs[${index}]`, `"${id}" is dropped`, 'drop this entry too, or remove the need');
       });
     }
   }
 
-  // Canonical form, for every JSON file that parsed.
-  const canonical = (name, value, form) => {
-    if (value === undefined) return;
-    if (files.get(name) !== canonicalText(form(value))) add(`plan/${name}`, '-', 'not in canonical form', 'write it as JSON.stringify(value, null, 2) plus a final newline, keys in the order of tools/plan/README.md');
-  };
-  canonical(PLAN_FILES.areas, raw.areas, canonicalAreas);
-  canonical(PLAN_FILES.order, raw.order, canonicalOrder);
-  canonical(PLAN_FILES.decisions, raw.decisions, canonicalDecisions);
-  for (const id of Object.keys(raw.features)) canonical(`features/${id}.json`, raw.features[id], canonicalFeature);
-
-  /** @type {string[]} */
-  const notes = [];
-  if (knownAreas) {
-    for (const id of areaIds) {
-      if (!knownAreas.includes(id)) notes.push(`plan/areas.json: the area "${id}" is new. Draw its place on the map in website/src/workshop/map.ts; the site build checks it.`);
+  // Rule 9: built, and the files of every at.
+  for (const entry of entries.values()) {
+    if (!Object.hasOwn(entry, 'built')) continue;
+    if (entry.verdict !== 'take') add(entry.file, 'built', 'built without the verdict take', 'take the feature first, or remove built');
+    const waiting = (Array.isArray(entry.needs) ? entry.needs : []).filter((id) => !isDone(entries.get(id)));
+    if (waiting.length) add(entry.file, 'built', `built while ${waiting.join(', ')} ${waiting.length > 1 ? 'are' : 'is'} not done`, 'finish what it needs first, or remove built');
+    if (Array.isArray(entry.adds)) for (const id of entry.adds) {
+      const sentence = sentenceById.get(id);
+      if (sentence?.kind === 'property' && !Object.hasOwn(sentence.value, 'at')) add(sentence.file, at(sentence.field, 'at'), `the property "${id}" of the built feature "${entry.id}" has no at`, 'name the files of its checks in at');
     }
   }
+  /** @type {[string, string, unknown][]} file, field, the at */
+  const ats = sentences.filter((s) => s.kind === 'property').map((s) => [s.file, at(s.field, 'at'), s.value.at]);
+  for (const entry of entries.values()) {
+    if (Array.isArray(entry.sets)) entry.sets.forEach((item, index) => { if (isObject(item) && listKind(item.in) === 'property') ats.push([entry.file, `sets[${index}].at`, item.at]); });
+  }
+  if (exists) {
+    for (const [file, field, paths] of ats) {
+      if (Array.isArray(paths)) paths.forEach((path, index) => {
+        if (isText(path) && !exists(path)) add(file, `${field}[${index}]`, `"${path}" does not exist`, 'name a file of the repository, by its path from the top');
+      });
+    }
+  } else if (ats.some(([, , paths]) => Array.isArray(paths) && paths.length)) {
+    notes.push({ file: 'plan/', field: '-', message: 'the files named by at were not looked for', fix: 'run plan check in the repository' });
+  }
+
+  // Rule 10: the words under not, in every JSON string value and every .md file, except inside a not list.
+  /** @type {{ phrase: string, pattern: RegExp, word: string }[]} */
+  const refused = [];
+  for (const sentence of sentences) {
+    if (sentence.kind !== 'word' || !Array.isArray(sentence.value.not)) continue;
+    for (const phrase of sentence.value.not) if (isText(phrase)) refused.push({ phrase, pattern: phrasePattern(phrase), word: sentence.value.word });
+  }
+  if (refused.length) {
+    const scan = (file, field, text) => {
+      for (const { phrase, pattern, word } of refused) if (pattern.test(text)) add(file, field, `"${phrase}" is not a word of the plan`, `write "${word}" instead`);
+    };
+    const walk = (file, field, value) => {
+      if (typeof value === 'string') scan(file, field || '-', value);
+      else if (Array.isArray(value)) value.forEach((item, index) => walk(file, `${field}[${index}]`, item));
+      else if (isObject(value)) for (const [key, item] of Object.entries(value)) if (key !== 'not') walk(file, at(field, key), item);
+    };
+    for (const name of names) {
+      if (name.endsWith('.md')) scan(`plan/${name}`, '-', /** @type {string} */ (files.get(name)));
+      else if (json.has(name)) walk(`plan/${name}`, '', json.get(name));
+    }
+  }
+
   return { errors, notes };
+}
+
+/** The keys whose change, with the verdict unchanged, is an error (rule 11). */
+const SENTENCE_OF_ENTRY = ['asks', 'answer', 'name', 'what', 'sets', 'removes'];
+
+/** @param {Map<string, string>} files @returns {Map<string, { file: string, value: any }>} the entries that parse, by id */
+function entriesOf(files) {
+  const out = new Map();
+  for (const [name, text] of files) {
+    if (isHidden(name)) continue;
+    const match = ENTRY_FILE.exec(name);
+    if (!match || match[4] !== 'json' || out.has(match[3])) continue;
+    try {
+      const value = JSON.parse(text);
+      if (isObject(value)) out.set(match[3], { file: `plan/${name}`, value });
+    } catch {
+      // Not JSON: checkFiles reports it.
+    }
+  }
+  return out;
+}
+
+/**
+ * Rule 11: an entry with a verdict whose asks, answer, name, what, sets or removes changed while the
+ * verdict stayed. An entry with no verdict may change freely; one that gains or loses a verdict too.
+ * @param {Map<string, string>} files the plan as it is @param {Map<string, string>} baseFiles the merged plan
+ * @returns {{ errors: Problem[] }}
+ */
+export function checkChange(files, baseFiles) {
+  /** @type {Problem[]} */
+  const errors = [];
+  const base = entriesOf(baseFiles);
+  for (const [id, { file, value }] of entriesOf(files)) {
+    const before = base.get(id)?.value;
+    if (!before || before.verdict === undefined || before.verdict !== value.verdict) continue;
+    for (const key of SENTENCE_OF_ENTRY) {
+      if (JSON.stringify(before[key]) !== JSON.stringify(value[key])) {
+        errors.push({ file, field: key, message: `"${id}" changed its ${key} while its verdict stayed ${before.verdict}`, fix: 'remove the verdict, so the owner rules on the new text, or undo the change' });
+      }
+    }
+  }
+  return { errors };
 }

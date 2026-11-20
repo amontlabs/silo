@@ -1,12 +1,20 @@
 // Reads `plan/`, from a directory or from a git ref, into one plan object.
 //
-//   plan = { product, areas, stages: [{ id, title, line, features: [ids] }], features: { [id]: feature }, decisions }
-//   feature = the fields of its file, plus id, stage, position (from 1, in build order) and notes (its .md, or null)
+//   plan = {
+//     parts: [{ id, title, line }],
+//     words: [{ word, means, not?, id }],
+//     principles: [{ id, says, asks, known_as?, why }],
+//     properties: [{ id, says, kind, from?, check, at?, part }],   part: an id, or null for the root
+//     stages: [{ id, title, line, entries: [ids] }],
+//     entries: { [id]: { id, kind, part, stage, position, notes?, ...the keys of its file } },
+//   }
+//
+// position counts from 1 across the flattened order; notes is the text of <id>.md, absent without one.
 
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { PLAN_FILES } from '../model/names.js';
+import { wordId } from '../model/names.js';
 
 /** The plan could not be read: a file is missing or is not JSON. */
 export class PlanError extends Error {
@@ -21,7 +29,7 @@ export class PlanError extends Error {
 export const isHidden = (rel) => rel.split('/').some((part) => part.startsWith('.'));
 
 /**
- * Every file under a plan directory, by its path relative to it (`features/fork.json`).
+ * Every file under a plan directory, by its path relative to it (`engine/features/fork.json`).
  * @param {string} dir @returns {Map<string, string>}
  */
 export function loadDir(dir) {
@@ -82,55 +90,82 @@ function json(files, name, problems) {
   }
 }
 
-const FEATURE_FILE = /^features\/([^/]+)\.json$/;
+/** The lists that must exist, at the root of `plan/`. */
+const REQUIRED_FILES = ['parts.json', 'order.json', 'words.json', 'principles.json'];
+
+/** `decisions/<id>.json` at the root, `<part>/decisions/<id>.json` or `<part>/features/<id>.json` in a part. */
+const ENTRY_FILE = /^(?:([^/]+)\/)?(decisions|features)\/([^/]+)\.json$/;
+/** `properties.json` at the root or `<part>/properties.json`. */
+const PROPERTIES_FILE = /^(?:([^/]+)\/)?properties\.json$/;
+
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const objects = (value) => (Array.isArray(value) ? value.filter(isObject) : []);
 
 /**
  * Builds the plan object from the files, as far as they parse. Shape errors are the check's;
- * this reports only missing files and invalid JSON, in `problems`.
+ * this reports only missing lists and invalid JSON, in `problems`. `json` holds every file it
+ * read (the lists, the properties and the entries) that parsed, by its path relative to `plan/`,
+ * as it is in the file.
  * @param {Map<string, string>} files
  */
 export function parsePlan(files) {
   /** @type {{ file: string, field: string, message: string, fix: string }[]} */
   const problems = [];
-  const areas = json(files, PLAN_FILES.areas, problems);
-  const order = json(files, PLAN_FILES.order, problems);
-  const decisions = json(files, PLAN_FILES.decisions, problems);
-  if (!files.has(PLAN_FILES.product)) problems.push({ file: 'plan/PRODUCT.md', field: '-', message: 'missing', fix: 'create plan/PRODUCT.md' });
+  /** @type {Map<string, any>} */
+  const parsed = new Map();
+  const read = (name) => {
+    const value = json(files, name, problems);
+    if (value !== undefined) parsed.set(name, value);
+    return value;
+  };
+  const [parts, order, words, principles] = REQUIRED_FILES.map(read);
 
-  const stages = Array.isArray(order?.stages) ? order.stages.filter((stage) => stage && typeof stage === 'object') : [];
+  const stages = objects(order?.stages).map((stage) => ({ ...stage, entries: Array.isArray(stage.entries) ? stage.entries : [] }));
   /** @type {Map<string, { stage: string, position: number }>} */
   const placed = new Map();
   let position = 0;
   for (const stage of stages) {
-    for (const id of Array.isArray(stage.features) ? stage.features : []) {
+    for (const id of stage.entries) {
       position += 1;
       if (typeof id === 'string' && !placed.has(id)) placed.set(id, { stage: stage.id, position });
     }
   }
 
+  const properties = [];
   /** @type {Record<string, any>} */
-  const features = Object.create(null);
-  /** @type {Record<string, any>} */
-  const raw = Object.create(null);
-  for (const name of files.keys()) {
-    const match = FEATURE_FILE.exec(name);
-    if (!match || isHidden(name)) continue;
-    const data = json(files, name, problems);
-    if (data === undefined) continue;
-    raw[match[1]] = data;
-    const place = placed.get(match[1]);
-    const fields = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
-    features[match[1]] = { ...fields, id: match[1], stage: place?.stage ?? null, position: place?.position ?? null, notes: files.get(`features/${match[1]}.md`) ?? null };
+  const entries = Object.create(null);
+  // Sorted paths: the root's properties.json comes before every part's, and parts follow each other by name.
+  const names = [...files.keys()].filter((name) => !isHidden(name)).sort((a, b) => (a.includes('/') ? 1 : 0) - (b.includes('/') ? 1 : 0) || (a < b ? -1 : a > b ? 1 : 0));
+  for (const name of names) {
+    const props = PROPERTIES_FILE.exec(name);
+    if (props) {
+      const list = read(name);
+      for (const property of objects(list)) properties.push({ ...property, part: props[1] ?? null });
+      continue;
+    }
+    const match = ENTRY_FILE.exec(name);
+    if (!match || (match[1] === undefined && match[2] === 'features')) continue;
+    const [, part = null, folder, id] = match;
+    const data = read(name);
+    if (data === undefined || Object.hasOwn(entries, id)) continue;
+    const place = placed.get(id);
+    /** @type {Record<string, any>} */
+    const entry = { id, kind: folder === 'decisions' ? 'decision' : 'feature', part, stage: place?.stage ?? null, position: place?.position ?? null };
+    for (const [key, value] of Object.entries(isObject(data) ? data : {})) if (!Object.hasOwn(entry, key)) entry[key] = value;
+    const notes = files.get(name.replace(/\.json$/, '.md'));
+    if (notes !== undefined) entry.notes = notes;
+    entries[id] = entry;
   }
 
   const plan = {
-    product: files.get(PLAN_FILES.product) ?? '',
-    areas: Array.isArray(areas) ? areas : [],
-    stages: stages.map((stage) => ({ ...stage, features: Array.isArray(stage.features) ? stage.features : [] })),
-    features,
-    decisions: Array.isArray(decisions) ? decisions : [],
+    parts: objects(parts),
+    words: objects(words).map((word) => ({ ...word, id: wordId(word.word) })),
+    principles: objects(principles),
+    properties,
+    stages,
+    entries,
   };
-  return { plan, problems, raw: { areas, order, decisions, features: raw } };
+  return { plan, problems, json: parsed };
 }
 
 /** @param {Map<string, string>} files */

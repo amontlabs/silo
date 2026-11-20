@@ -1,0 +1,12 @@
+[
+  {
+    "id": "engine",
+    "title": "The engine",
+    "line": "What runs the computers, and what it is built with."
+  },
+  {
+    "id": "record",
+    "title": "The record",
+    "line": "What Silo writes down about a computer, and what it may do with it."
+  }
+]

@@ -1,0 +1,4 @@
+{
+  "asks": "Which VM engine runs Linux computers, on a Mac and on a Linux host?",
+  "answer": "libkrun, with Silo's own patches on top."
+}
