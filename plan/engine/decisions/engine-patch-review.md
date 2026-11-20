@@ -4,4 +4,4 @@
 - Snapshot, device and display code runs in the helper process, which a hostile guest attacks, and
   restore reads back state the guest controlled. Most of MicroSandbox's security advisories of
   2026 were in such layers: snapshot capture and import, the disk journal, file copy. Facts as of
-  19 November 2026, from [research/linux-vm-engine.md](../../../research/linux-vm-engine.md).
+  19 November 2026, from [the research in the notes of `linux-vm-engine`](linux-vm-engine.md).
