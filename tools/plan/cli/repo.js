@@ -1,8 +1,9 @@
 // The checkout the command works in: its root, its plan files, git.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
+import { ruledKeysDiffer } from '../check/index.js';
 import { isHidden, loadDir, loadRef } from '../read/index.js';
 import { Refused } from './args.js';
 
@@ -61,15 +62,51 @@ export function uncommitted(root) {
 }
 
 /**
- * Whether the latest commit since the base that changed an entry's file is the owner's verdict on
- * it (`Owner: take <id>` or `Owner: drop <id>`), and the file is still as that commit left it.
- * Rule 11 does not apply to such an entry: the owner ruled again after the change.
+ * The files under `plan/` that git is told not to look at, with the flag that says so
+ * (`plan/x.md (assume-unchanged)`): `git status` hides an edit of such a file, so a verdict would
+ * read a plan git does not see. Every file counts, dot-named ones too. Throws Refused when git fails.
+ * @param {string} root @returns {string[]}
+ */
+export function unwatched(root) {
+  // `ls-files -v` tags each file: a lowercase letter is assume-unchanged, `S` or `s` skip-worktree.
+  const out = git(root, ['-c', 'core.fsmonitor=false', 'ls-files', '-v', '-z', '--', 'plan']);
+  if (out === null) throw new Refused('git could not say whether a file of plan/ is hidden from it; nothing changed');
+  return out.split('\0').filter(Boolean).flatMap((record) => {
+    const [tag, path] = [record[0], record.slice(2)];
+    const flags = [];
+    if (tag !== tag.toUpperCase()) flags.push('assume-unchanged');
+    if (tag.toUpperCase() === 'S') flags.push('skip-worktree');
+    return flags.length ? [`${path} (${flags.join(', ')})`] : [];
+  });
+}
+
+/**
+ * Whether the latest commit since the base that changed an entry's verdict or its sentence keys
+ * (asks, answer, name, what, sets, removes) is the owner's verdict on it (`Owner: take <id>` or
+ * `Owner: drop <id>`), and none of those has changed since, committed or not. Rule 11 does not
+ * apply to such an entry: the owner ruled again after the change. A commit that touched only other
+ * keys of the file, such as the `adds` a take of another entry rewrites, does not count.
  * @param {string} root @param {string} ref the base @returns {(id: string, file: string) => boolean} file: `plan/…`
  */
 export const ruledByOwner = (root, ref) => (id, file) => {
-  const subject = git(root, ['log', '-1', '--format=%s', `${ref}..HEAD`, '--', file]);
-  if (subject === null || ![`Owner: take ${id}`, `Owner: drop ${id}`].includes(subject.trim())) return false;
-  return git(root, ['diff', '--quiet', 'HEAD', '--', file]) !== null;
+  const at = (rev) => git(root, ['cat-file', 'blob', `${rev}:${file}`]);
+  // The working file against HEAD: an uncommitted change of those keys comes after any verdict.
+  let disk;
+  try {
+    disk = readFileSync(join(root, file), 'utf8');
+  } catch {
+    disk = null;
+  }
+  if (ruledKeysDiffer(at('HEAD'), disk)) return false;
+  const log = git(root, ['log', '-z', '--format=%H %s', `${ref}..HEAD`, '--', file]);
+  if (log === null) return false;
+  for (const record of log.split('\0').filter(Boolean)) {
+    const space = record.indexOf(' ');
+    const [commit, subject] = [record.slice(0, space), record.slice(space + 1)];
+    if (!ruledKeysDiffer(at(`${commit}^`), at(commit))) continue;
+    return [`Owner: take ${id}`, `Owner: drop ${id}`].includes(subject.trim());
+  }
+  return false;
 };
 
 /**

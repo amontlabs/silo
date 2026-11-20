@@ -419,7 +419,7 @@ export function checkFiles(files, { exists } = {}) {
     if (!Object.hasOwn(entry, 'built')) continue;
     if (entry.verdict !== 'take') add(entry.file, 'built', 'built without the verdict take', 'take the feature first, or remove built');
     const waiting = (Array.isArray(entry.needs) ? entry.needs : []).filter((id) => !isDone(entries.get(id)));
-    if (waiting.length) add(entry.file, 'built', `built while ${waiting.join(', ')} ${waiting.length > 1 ? 'are' : 'is'} not done`, 'finish what it needs first, or remove built');
+    if (waiting.length) add(entry.file, 'built', `built while ${waiting.map(shown).join(', ')} ${waiting.length > 1 ? 'are' : 'is'} not done`, 'finish what it needs first, or remove built');
     if (Array.isArray(entry.adds)) for (const id of entry.adds) {
       const sentence = sentenceById.get(id);
       if (sentence?.kind === 'property' && !Object.hasOwn(sentence.value, 'at')) add(sentence.file, at(sentence.field, 'at'), `the property "${id}" of the built feature "${entry.id}" has no at`, 'name the files of its checks in at');
@@ -468,6 +468,27 @@ export function checkFiles(files, { exists } = {}) {
 /** The keys whose change, with the verdict unchanged, is an error (rule 11). */
 const SENTENCE_OF_ENTRY = ['asks', 'answer', 'name', 'what', 'sets', 'removes'];
 
+/**
+ * Whether two versions of an entry file differ in what the owner rules on: the verdict or a key of
+ * rule 11. `adds` is left out: a take of another entry rewrites it when it moves a sentence. A
+ * version that is missing, not JSON or not an object counts as none, unlike any object.
+ * @param {string | null} before @param {string | null} after the texts of the file
+ */
+export function ruledKeysDiffer(before, after) {
+  const parse = (text) => {
+    if (text === null) return null;
+    try {
+      const value = JSON.parse(text);
+      return isObject(value) ? value : null;
+    } catch {
+      return null;
+    }
+  };
+  const [a, b] = [parse(before), parse(after)];
+  if (a === null || b === null) return a !== b;
+  return ['verdict', ...SENTENCE_OF_ENTRY].some((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
+}
+
 /** @param {Map<string, string>} files @returns {Map<string, { file: string, value: any }>} the entries that parse, by id */
 function entriesOf(files) {
   const out = new Map();
@@ -488,8 +509,9 @@ function entriesOf(files) {
 /**
  * Rule 11: an entry with a verdict whose asks, answer, name, what, sets or removes changed while the
  * verdict stayed. An entry with no verdict may change freely; one that gains or loses a verdict too.
- * `ruledByOwner(id, file)` says whether the latest commit since the base on that entry is the
- * owner's verdict on it: the owner ruled again after the change, and the rule does not apply.
+ * `ruledByOwner(id, file)` says whether the latest commit since the base that changed the entry's
+ * verdict or one of those keys is the owner's verdict on it: the owner ruled again after the
+ * change, and the rule does not apply.
  * @param {Map<string, string>} files the plan as it is @param {Map<string, string>} baseFiles the merged plan
  * @param {{ ruledByOwner?: (id: string, file: string) => boolean }} [options]
  * @returns {{ errors: Problem[] }}

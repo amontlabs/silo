@@ -29,7 +29,9 @@ write and write nothing when it fails.
 
 Uncommitted changes are asked of git with every untracked and ignored file listed, whatever the
 user's settings; only a path the reader skips too (a part of its name starts with a dot) is left
-out, and when git cannot answer the verdict is refused. The check before a verdict includes the
+out, and when git cannot answer the verdict is refused. A file under `plan/` that git is told not
+to look at (`git update-index --assume-unchanged` or `--skip-worktree`) refuses the verdict too,
+and the message names it: git would hide an edit of it. The check before a verdict includes the
 rule against the merged plan, except for the entry ruled on. The files are written all or none:
 when one cannot be written, or the commit fails, the ones already written are put back.
 
@@ -38,8 +40,10 @@ when one cannot be written, or the commit fails, the ones already written are pu
 Each problem names the file, the field, what is wrong and the fix.
 
 - A file under `plan/` that is not one of the plan's, except a name that starts with a dot, and a
-  part without its `README.md`. A symbolic link anywhere under `plan/`, to a file or a folder: the
-  reader never follows one, on disk or at a git ref.
+  part without its `README.md`. A symbolic link anywhere under `plan/`, to a file or a folder,
+  whatever its name, a dot-named one too, and a `plan/` that is itself a link: the reader never
+  follows one, on disk or at a git ref.
+- A file whose bytes are not valid UTF-8. A real U+FFFD character is text like any other.
 - JSON that is not in canonical form (`JSON.stringify(value, null, 2)`, a final newline, keys in
   the model's order), an unknown key, a missing required key, or an optional key that is empty.
 - An id that does not match `^[a-z0-9][a-z0-9-]{0,62}$`, or that two items of the plan share:
@@ -64,9 +68,11 @@ Each problem names the file, the field, what is wrong and the fix.
 - A word listed in a word's `not`, used anywhere else in `plan/`.
 - Against the merged plan (`origin/main`, else `HEAD`): an entry whose question, answer, name,
   description, `sets` or `removes` changed while its verdict stayed. Only the command checks this,
-  not the offline check of a tree. It does not apply to an entry whose latest commit since the base
-  is the owner's verdict on it (`Owner: take <id>` or `Owner: drop <id>`) and that has not changed
-  since: the owner ruled again after the change.
+  not the offline check of a tree. It does not apply to an entry when the latest commit since the
+  base that changed its verdict, question, answer, name, description, `sets` or `removes` is the
+  owner's verdict on it (`Owner: take <id>` or `Owner: drop <id>`), and none of those has changed
+  since: the owner ruled again after the change. A commit that changed only its `adds`, as a take
+  of another entry does when it moves a sentence, does not count.
 
 A malformed value is a problem like any other: the check never throws on one.
 

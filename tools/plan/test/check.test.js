@@ -291,3 +291,14 @@ test('a problem reads file: field: message. Fix: …', () => {
   const [error] = checkFiles(filesOf(variant((f) => { f['engine/decisions/model-tool.json'].verdict = 'later'; }))).errors;
   assert.equal(formatProblem(error), 'plan/engine/decisions/model-tool.json: verdict: "later" is not a verdict. Fix: write take or drop, or leave it out');
 });
+
+test('a built feature with a malformed needs gives problems, never a throw', () => {
+  const files = variant((f) => {
+    f['engine/decisions/linux-vm-engine.json'].verdict = 'take';
+    f['engine/features/start-computer.json'].built = '2026-11-20';
+    f['engine/features/start-computer.json'].needs = [{ toString: null }, 'engine-language'];
+  });
+  const errors = errorsOf(files);
+  assert.ok(errors.includes('plan/engine/features/start-computer.json needs[0]: not a text'), errors.join('\n'));
+  assert.ok(errors.includes('plan/engine/features/start-computer.json built: built while {"toString":null} is not done'), errors.join('\n'));
+});

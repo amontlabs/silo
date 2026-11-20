@@ -8,7 +8,7 @@ import { entryStatus, waitingFor } from '../model/status.js';
 import { PlanError, parsePlan } from '../read/index.js';
 import { drop, take } from '../write/index.js';
 import { Refused, UsageError, parseArgs } from './args.js';
-import { baseFiles, existsIn, findRoot, git, planFiles, ruledByOwner, uncommitted } from './repo.js';
+import { baseFiles, existsIn, findRoot, git, planFiles, ruledByOwner, uncommitted, unwatched } from './repo.js';
 
 export const COMMANDS = [
   { name: '', usage: 'plan', what: 'What is next: the first entry with no verdict, the features ready to build, the features that wait and for what.' },
@@ -263,6 +263,8 @@ function verdict(ctx, argv, kind) {
   if (git(root, ['rev-parse', '--show-toplevel']) === null) throw new Refused(`${root} is not a git checkout: a verdict is a commit`);
   const dirty = uncommitted(root);
   if (dirty.length) throw new Refused(`plan/ has uncommitted changes (${dirty.join(', ')}): commit or discard them first`);
+  const hidden = unwatched(root);
+  if (hidden.length) throw new Refused(`git is told not to look at ${hidden.join(', ')}, so it cannot say whether plan/ has uncommitted changes: clear the flag with git update-index --no-assume-unchanged or --no-skip-worktree first`);
 
   const files = planFiles(root);
   const outcome = (kind === 'take' ? take : drop)(files, id, { exists: existsIn(root) });

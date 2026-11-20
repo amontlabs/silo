@@ -349,3 +349,57 @@ test('rule 11: the owner\'s verdict after the change lifts the rule; a later pla
     assert.equal((await run(root, ['drop', 'no-detour'])).code, 1);
   }, files);
 });
+
+test('a file under plan/ marked assume-unchanged or skip-worktree stops take and drop, which name it', async () => {
+  await withRepo(async (root) => {
+    const before = head(root);
+    writeFileSync(join(root, 'plan', 'engine', 'README.md'), 'Edited, hidden from git status.\n');
+    git(root, 'update-index', '--assume-unchanged', 'plan/engine/README.md');
+    assert.ok(clean(root), 'git status no longer shows the edit');
+    const assumed = await run(root, ['take', 'losses-show']);
+    assert.equal(assumed.code, 1);
+    assert.match(assumed.err, /plan\/engine\/README\.md/);
+    assert.match(assumed.err, /assume-unchanged/);
+    assert.equal(head(root), before);
+    git(root, 'update-index', '--no-assume-unchanged', 'plan/engine/README.md');
+    git(root, 'checkout', '--', 'plan/engine/README.md');
+
+    writeFileSync(join(root, 'plan', 'record', 'README.md'), 'Edited, hidden from git status.\n');
+    git(root, 'update-index', '--skip-worktree', 'plan/record/README.md');
+    assert.ok(clean(root), 'git status no longer shows the edit');
+    const skipped = await run(root, ['drop', 'no-detour']);
+    assert.equal(skipped.code, 1);
+    assert.match(skipped.err, /plan\/record\/README\.md/);
+    assert.match(skipped.err, /skip-worktree/);
+    assert.equal(head(root), before);
+    git(root, 'update-index', '--no-skip-worktree', 'plan/record/README.md');
+    git(root, 'checkout', '--', 'plan/record/README.md');
+    assert.equal((await run(root, ['drop', 'no-detour'])).code, 0);
+  });
+});
+
+test('rule 11: a take that moves a sentence out of an entry the owner re-ruled leaves that entry exempt', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const design = 'decisions/the-design.json';
+    const taken = readJson(root, design);
+    // Entry B, the-design: its verdict cleared and its answer changed, then taken again by the owner.
+    const { verdict: _verdict, adds: _adds, ...open } = taken;
+    writeJson(root, design, { ...open, answer: `${taken.answer} Revised.` });
+    git(root, 'commit', '-q', '-am', 'Revise the-design');
+    writeJson(root, design, { ...taken, answer: `${taken.answer} Revised.` });
+    git(root, 'commit', '-q', '-am', 'Owner: take the-design');
+    const before = await run(root, ['check']);
+    assert.equal(before.code, 0, before.out + before.err);
+    // Entry A, linux-vm-engine, moves one of the-design's properties to the engine part.
+    const vm = 'engine/decisions/linux-vm-engine.json';
+    const property = readJson(root, 'record/properties.json').find((p) => p.id === 'classifier-never-acts');
+    writeJson(root, vm, { ...readJson(root, vm), sets: [{ in: 'engine/properties', ...property }] });
+    git(root, 'commit', '-q', '-am', 'linux-vm-engine moves classifier-never-acts');
+    const take = await run(root, ['take', 'linux-vm-engine']);
+    assert.equal(take.code, 0, take.err);
+    assert.ok(!readJson(root, design).adds.includes('classifier-never-acts'));
+    const after = await run(root, ['check']);
+    assert.equal(after.code, 0, after.out + after.err);
+  });
+});
