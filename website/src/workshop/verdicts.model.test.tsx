@@ -1,8 +1,8 @@
 // Random sequences of an owner's actions and the server's answers, checked after every step against
 // a reference model: a verdict is only ever sent for the row that was open and on screen, never inside the guard,
 // never twice at once for one issue, and the page never shows as done what the server has not answered:
-// a row waiting for an answer says "Saving…", everything else and the "to decide" counts show the server's answers
-// over the plan file's. Enter sends a verdict only for an open row, past its own guard, with its verdict buttons in
+// a row waiting for an answer says "Saving…", every other row shows its plan file's status (a verdict the server
+// records never changes it), and the "to decide" counts leave out what the server has recorded. Enter sends a verdict only for an open row, past its own guard, with its verdict buttons in
 // sight: the row whose header holds the focus, else the one opened last. On a closed row's header it opens that row.
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,7 +10,7 @@ import { App, OPEN_GUARD_MS } from './App';
 import { buildData, liveState } from './fixtures';
 import type { Verdict } from './plan';
 
-type Display = 'undecided' | 'planned' | 'later' | 'dropped' | 'saving';
+type Display = 'undecided' | 'planned' | 'dropped' | 'saving';
 type Sent = { n: number; verdict: Verdict; resolve: (status: number) => void };
 
 const ISSUE_OF: Record<string, number> = {
@@ -19,10 +19,10 @@ const ISSUE_OF: Record<string, number> = {
 };
 const FILE: Record<number, Verdict | null> = { 10: 'take', 11: 'take', 15: 'take', 17: 'drop' };
 const LIVE: Record<number, Verdict | null> = { 10: 'take', 15: 'take' };
-/** Entries in an area that wait for a verdict: no file verdict, no live one. */
-const IN_AREAS = [12, 13, 14, 16];
+/** Entries in a part that wait for a verdict: no file verdict, no live one. */
+const IN_PARTS = [12, 13, 14, 16];
 // Part B holds the two entries that can be open together and still wait for a verdict, so it comes up more often.
-const PLACES = ['#part-b', '#part-b', '#part-b', '#part-d', '#part-e', '#part-a', '#part-c', '#left', '#suggested', '#decisions', '#latest', ''];
+const PLACES = ['#part-b', '#part-b', '#part-b', '#part-d', '#part-e', '#part-a', '#part-c', '#left', '#suggested', '#product', '#latest', ''];
 
 function random(seed: number) {
   let a = seed;
@@ -35,7 +35,7 @@ function random(seed: number) {
 }
 
 function display(verdict: Verdict | null): Display {
-  return verdict === 'take' ? 'planned' : verdict === 'later' ? 'later' : verdict === 'drop' ? 'dropped' : 'undecided';
+  return verdict === 'take' ? 'planned' : verdict === 'drop' ? 'dropped' : 'undecided';
 }
 
 function shown(key: string): Display | null {
@@ -43,7 +43,7 @@ function shown(key: string): Display | null {
   if (!item) return null;
   const word = item.querySelector('.ws-word')?.textContent;
   if (word === 'Saving…') return 'saving';
-  return word === 'planned' ? 'planned' : word === 'later' ? 'later' : word === 'dropped' ? 'dropped' : 'undecided';
+  return word === 'planned' ? 'planned' : word === 'dropped' ? 'dropped' : 'undecided';
 }
 
 /** How often the sequences reached each case of Enter, so a rule is not checked on nothing. */
@@ -80,18 +80,20 @@ async function run(seed: number): Promise<number> {
   // The reference model: what the server holds, and what is pending.
   const server: Record<number, Verdict | null> = { ...LIVE };
   const pending = new Map<number, Verdict>();
-  const confirmed = (n: number): Display => display(server[n] ?? FILE[n] ?? null);
-  // A verdict in the file counts like one on GitHub, the live one first.
+  // The status shown comes from the file alone.
+  const confirmed = (n: number): Display => display(FILE[n] ?? null);
   const expected = (n: number): Display => (pending.has(n) ? 'saving' : confirmed(n));
-  // Entries in areas the owner still has to decide.
-  const toDecide = () => IN_AREAS.filter((n) => (server[n] ?? null) === null).length;
+  /** Undecided in its file and with no verdict recorded on its issue: the owner may still decide it. */
+  const open = (n: number) => confirmed(n) === 'undecided' && (server[n] ?? null) === null;
+  // Entries in parts the owner still has to decide.
+  const toDecide = () => IN_PARTS.filter((n) => (server[n] ?? null) === null).length;
   // Several rows may be open, each with its own guard from the moment it opened. The one opened last is in the
   // address; Enter on the page goes to it, Enter on a row to that row, and a click to the row of the button.
   const openAt = new Map<string, number>();
   let mostOpen = 0;
   const current$ = () => {
     const tail = decodeURIComponent(location.hash.slice(1)).split('/')[1];
-    return tail ? (/^(issue|decided)-/.test(tail) ? tail : `entry-${tail}`) : null;
+    return tail ? (/^issue-/.test(tail) ? tail : `entry-${tail}`) : null;
   };
   const observe = () => {
     const shown = new Set([...document.querySelectorAll('.ws-item.open')].map((item) => item.id));
@@ -104,7 +106,7 @@ async function run(seed: number): Promise<number> {
     const n = key ? ISSUE_OF[key] : undefined;
     if (!key || n === undefined || !openAt.has(key) || now - (openAt.get(key) as number) < OPEN_GUARD_MS || pending.has(n)) return null;
     // The server records verdicts on entries only.
-    if (!key.startsWith('entry-') || confirmed(n) !== 'undecided') return null;
+    if (!key.startsWith('entry-') || !open(n)) return null;
     if (label === 'Take') return { n, verdict: 'take' };
     return { n, verdict: label.toLowerCase() as Verdict };
   };
@@ -184,7 +186,7 @@ async function run(seed: number): Promise<number> {
       }
     } else if (choice < 0.46) {
       const buttons = [...document.querySelectorAll<HTMLButtonElement>('.ws-item.open .ws-btn')]
-        .filter((button) => /^(Take|Later|Drop)/.test(button.textContent ?? ''));
+        .filter((button) => /^(Take|Drop)/.test(button.textContent ?? ''));
       if (buttons.length) {
         const button = pick(buttons);
         const label = (button.textContent ?? '').replace(/\s*↵$/, '');
@@ -202,7 +204,7 @@ async function run(seed: number): Promise<number> {
         act(() => { row.focus(); fireEvent.click(row); });
       }
     } else if (choice < 0.76) {
-      // Go somewhere else: another area, the strip's lists, the decisions, the map, or the "to decide" link.
+      // Go somewhere else: another part, the strip's lists, the decisions, the map, or the "to decide" link.
       // Often a guard has passed by then.
       if (rand() < 0.4) now += 700;
       const where = rand();
@@ -237,7 +239,7 @@ async function run(seed: number): Promise<number> {
       const taken = Object.keys(ISSUE_OF).find((key) => ISSUE_OF[key] === predicted?.n) as string;
       const at = listed.indexOf(taken);
       const next = [...listed.slice(at + 1), ...listed.slice(0, at)].find((key) => openBefore.has(key) && key !== taken
-        && key.startsWith('entry-') && confirmed(ISSUE_OF[key]) === 'undecided' && !pending.has(ISSUE_OF[key]));
+        && key.startsWith('entry-') && open(ISSUE_OF[key]) && !pending.has(ISSUE_OF[key]));
       if (next) openAt.delete(next);
       pending.set(predicted.n, predicted.verdict);
     } else {

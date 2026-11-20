@@ -42,12 +42,13 @@ export async function staticFile(distDir, pathname) {
   return (await file(target)) || file(join(target, 'index.html'));
 }
 
-const PLAN = join(website, '..', 'plan');
+// plan/, or the plan WORKSHOP_PLAN names, as the build reads it.
+const PLAN = process.env.WORKSHOP_PLAN || join(website, '..', 'plan');
 
-/** The features of the plan in `dir`, in build order. */
+/** The features of the plan in `dir`, in the order of order.json. */
 export function loadFeatures(dir) {
   const plan = readPlan(dir);
-  return plan.stages.flatMap((stage) => stage.features).map((id) => plan.features[id]).filter(Boolean);
+  return plan.stages.flatMap((stage) => stage.entries).map((id) => plan.entries[id]).filter((entry) => entry?.kind === 'feature');
 }
 
 // The Workshop page names where it reads a feature's file at a commit; with the fake GitHub, the fake.

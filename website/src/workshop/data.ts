@@ -1,82 +1,89 @@
 // The plan as the repository holds it, in plan/: read with tools/plan/read and checked with tools/plan/check
 // at build time. Any error stops the build with the file, the field and the fix.
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
 import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
 import { checkLayout, LayoutError, SILO_MAP } from './map.ts';
 import type { MapLayout } from './map.ts';
-import type { BuildData, Decision, Feature, Notes, Verdict } from './plan.ts';
+import type { BuildData, Entry, Notes, Verdict } from './plan.ts';
 
 export const PLAN_DIR = 'plan';
 
 export class PlanFileError extends Error {}
 
-interface RawFeature {
-  name: string;
-  what: string;
-  area?: string;
+interface RawEntry {
+  id: string;
+  kind: 'decision' | 'feature';
+  part: string | null;
+  stage: string;
+  position: number;
+  notes?: string;
+  name?: string;
+  what?: string;
+  asks?: string;
+  answer?: string;
   needs?: string[];
   suggest?: { verdict?: string; why?: string };
   verdict?: string;
   built?: string;
-  stage: string;
-  position: number;
-  notes: string | null;
 }
 
 interface RawPlan {
-  areas: { id: string; title: string; line: string }[];
-  stages: { id: string; title: string; line: string; features: string[] }[];
-  features: Record<string, RawFeature>;
-  decisions: { id: string; date: string; text: string; about?: string[] }[];
+  parts: { id: string; title: string; line: string }[];
+  stages: { id: string; title: string; line: string; entries: string[] }[];
+  entries: Record<string, RawEntry>;
 }
 
-const hasNotes = (raw: RawFeature) => typeof raw.notes === 'string' && raw.notes.trim() !== '';
+/** The map, and what the page may do beyond showing the plan: the owner's verdicts and entries' threads (both off by default). */
+export interface BuildOptions {
+  map?: MapLayout;
+  decide?: boolean;
+  threads?: boolean;
+}
 
-/** The notes of the features that have some, by id: the chunk the page loads when a person reaches "Notes". */
+const hasNotes = (raw: RawEntry) => typeof raw.notes === 'string' && raw.notes.trim() !== '';
+
+const ordered = (plan: RawPlan): RawEntry[] => plan.stages.flatMap((stage) => stage.entries).map((id) => plan.entries[id]).filter(Boolean);
+
+/** The notes of the entries that have some, by id: the chunk the page loads when a person reaches "Notes". */
 export function toNotes(plan: RawPlan): Notes {
   const notes: Notes = {};
-  for (const [id, raw] of Object.entries(plan.features)) if (hasNotes(raw)) notes[id] = raw.notes as string;
+  for (const raw of ordered(plan)) if (hasNotes(raw)) notes[raw.id] = raw.notes as string;
   return notes;
 }
 
-/** The plan object of tools/plan/read, as the page holds it: features in build order, decisions newest first. */
-export function toBuildData(plan: RawPlan, map: MapLayout = SILO_MAP): BuildData {
-  const features: Feature[] = plan.stages.flatMap((stage) => stage.features).map((id) => {
-    const raw = plan.features[id];
-    return {
-      id,
-      name: raw.name,
-      what: raw.what,
-      area: raw.area ?? null,
-      needs: Array.isArray(raw.needs) ? raw.needs : [],
-      stage: raw.stage,
-      position: raw.position,
-      suggest: raw.suggest ? { verdict: (raw.suggest.verdict ?? null) as Verdict | null, why: raw.suggest.why ?? null } : null,
-      verdict: (raw.verdict ?? null) as Verdict | null,
-      built: raw.built ?? null,
-      notes: hasNotes(raw),
-    };
-  });
-  // Newest first; decisions of the same day keep the file's order.
-  const decisions: Decision[] = plan.decisions
-    .map((decision, index) => ({ decision, index }))
-    .sort((a, b) => (a.decision.date === b.decision.date ? a.index - b.index : a.decision.date < b.decision.date ? 1 : -1))
-    .map(({ decision }) => ({ id: decision.id, date: decision.date, text: decision.text, about: decision.about ?? null }));
+/** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
+export function toBuildData(plan: RawPlan, { map = SILO_MAP, decide = false, threads = false }: BuildOptions = {}): BuildData {
+  const entries: Entry[] = ordered(plan).map((raw) => ({
+    id: raw.id,
+    kind: raw.kind,
+    part: raw.part,
+    stage: raw.stage,
+    position: raw.position,
+    name: (raw.kind === 'decision' ? raw.asks : raw.name) ?? '',
+    what: (raw.kind === 'decision' ? raw.answer : raw.what) ?? null,
+    needs: Array.isArray(raw.needs) ? raw.needs : [],
+    suggest: raw.suggest ? { verdict: (raw.suggest.verdict ?? null) as Verdict | null, why: raw.suggest.why ?? null } : null,
+    verdict: (raw.verdict ?? null) as Verdict | null,
+    built: raw.built ?? null,
+    notes: hasNotes(raw),
+  }));
   return {
-    areas: plan.areas.map((area) => ({ id: area.id, title: area.title, line: area.line })),
+    parts: plan.parts.map((part) => ({ id: part.id, title: part.title, line: part.line })),
     stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
-    features,
-    decisions,
+    entries,
     map,
+    decide,
+    threads,
   };
 }
 
-/** Checks the files of a plan, or throws with every problem. */
-function checkedPlan(files: Map<string, string>): RawPlan {
-  const { errors } = checkFiles(files);
+/** Checks the files of a plan, or throws with every problem. `exists` says whether a repository path exists. */
+function checkedPlan(files: Map<string, string>, exists?: (path: string) => boolean): RawPlan {
+  const { errors } = checkFiles(files, exists ? { exists } : {});
   if (errors.length) throw new PlanFileError(errors.map(formatProblem).join('\n'));
-  return parsePlan(files).plan as RawPlan;
+  return parsePlan(files).plan as unknown as RawPlan;
 }
 
 /** Checks the files of a plan and gives their notes, or throws with every problem. */
@@ -84,16 +91,11 @@ export function notesFrom(files: Map<string, string>): Notes {
   return toNotes(checkedPlan(files));
 }
 
-/** Checks the files of a plan and gives the page's data, drawn with `map`, or throws with every problem. */
-export function buildDataFrom(files: Map<string, string>, map: MapLayout = SILO_MAP): BuildData {
-  const data = toBuildData(checkedPlan(files), map);
-  // Every area holds at least one feature: the map has no empty part.
-  const used = new Set(data.features.map((feature) => feature.area));
-  for (const area of data.areas) {
-    if (!used.has(area.id)) throw new PlanFileError(`plan/areas.json: ${area.id}: has no feature. Fix: give it a feature, or remove the area`);
-  }
+/** Checks the files of a plan and gives the page's data, or throws with every problem. */
+export function buildDataFrom(files: Map<string, string>, options: BuildOptions = {}, exists?: (path: string) => boolean): BuildData {
+  const data = toBuildData(checkedPlan(files, exists), options);
   try {
-    checkLayout(data.areas.map((area) => area.id), map);
+    checkLayout(data.parts.map((part) => part.id), data.map);
   } catch (error) {
     if (error instanceof LayoutError) throw new PlanFileError(error.message);
     throw error;
@@ -101,20 +103,25 @@ export function buildDataFrom(files: Map<string, string>, map: MapLayout = SILO_
   return data;
 }
 
-function planFilesIn(repository: string): Map<string, string> {
+/** The plan's folder: `WORKSHOP_PLAN` when set (a fixture plan, for a build that proves the page), else plan/ under `repository`. */
+export function planDir(repository: string, env: Record<string, string | undefined> = process.env): string {
+  return env.WORKSHOP_PLAN || join(repository, PLAN_DIR);
+}
+
+function planFilesIn(dir: string): Map<string, string> {
   try {
-    return loadDir(join(repository, PLAN_DIR));
+    return loadDir(dir);
   } catch {
-    throw new PlanFileError(`${PLAN_DIR}/: cannot be read`);
+    throw new PlanFileError(`${dir}: cannot be read`);
   }
 }
 
-/** Reads plan/ under `repository` and returns the page's data, drawn with `map`, or throws. */
+/** Reads the plan of `repository` and returns the page's data for the real build: no verdicts, no threads. */
 export function readBuildData(repository: string, map: MapLayout = SILO_MAP): BuildData {
-  return buildDataFrom(planFilesIn(repository), map);
+  return buildDataFrom(planFilesIn(planDir(repository)), { map }, (path) => existsSync(join(repository, path)));
 }
 
-/** Reads plan/ under `repository` and returns its notes, or throws. */
+/** Reads the plan of `repository` and returns its notes, or throws. */
 export function readNotes(repository: string): Notes {
-  return notesFrom(planFilesIn(repository));
+  return notesFrom(planFilesIn(planDir(repository)));
 }

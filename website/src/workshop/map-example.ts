@@ -1,5 +1,5 @@
 // An example of a map layout, not Silo's plan. Its five parts and their names are made up; they show how the parts
-// of plan/areas.json become places and wires on the map, and every kind of thing a layout can hold: a tall part with
+// of plan/parts.json become places and wires on the map, and every kind of thing a layout can hold: a tall part with
 // a glyph, a part inside another, copies stacked behind a part, a wide bar, zones, text that is not a part, and
 // wires with arrows, labels and a cross. The tests draw the fixture plan (fixtures.ts) with it; the page never shows
 // it. The real parts go in SILO_MAP in map.ts.

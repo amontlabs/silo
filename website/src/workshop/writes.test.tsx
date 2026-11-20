@@ -8,7 +8,7 @@ import {
   clock, detail, itemOf, mockApi, ok, owner, ownerOn, part, posts, refused, renderApp, rowButton, tile, visitor, wait,
 } from './test-support';
 import type { Route } from './test-support';
-import type { Feature } from './plan';
+import type { Entry } from './plan';
 
 const away = { top: -900, bottom: -860, left: 0, right: 800, width: 800, height: 40, x: 0, y: -900, toJSON() {} } as DOMRect;
 const scrollIntoView = Element.prototype.scrollIntoView;
@@ -103,40 +103,19 @@ describe('a signed-in person', () => {
   });
 });
 
-describe('the decisions', () => {
-  it('are never offered to a visitor: no link, the address shows the map, no key opens them', async () => {
-    for (const me of [null, visitor]) {
+describe('the old list of decisions', () => {
+  it('is gone for everyone: no link, and its address shows the map', async () => {
+    for (const me of [null, visitor, owner]) {
       history.replaceState(null, '', '/workshop#decisions');
       mockApi({ me });
       const view = await renderApp();
       await waitFor(() => expect(location.hash).toBe(''));
-      expect(screen.queryByText(/^Decisions/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /^Decisions/ })).not.toBeInTheDocument();
       expect(screen.queryByText('Only you see this.')).not.toBeInTheDocument();
       expect(document.querySelector('a[href="#decisions"]')).toBeNull();
       expect(part('part-a')).toBeInTheDocument();
-      for (const key of ['d', 'D', 'Enter', 'Escape']) fireEvent.keyDown(document.body, { key });
-      act(() => { location.hash = '#decisions/decided-core-in-zig'; });
-      await waitFor(() => expect(location.hash).toBe(''));
-      expect(screen.queryByText('The core is written in Zig')).not.toBeInTheDocument();
       view.unmount();
     }
-  });
-
-  it('open for the owner from the link, from the plan file, newest first', async () => {
-    mockApi({ me: owner });
-    await renderApp();
-    await userEvent.click(screen.getByRole('link', { name: 'Decisions' }));
-    expect(location.hash).toBe('#decisions');
-    expect(screen.getByText('3 decided')).toBeInTheDocument();
-    const rows = within(document.querySelector('.ws-list') as HTMLElement).getAllByRole('button');
-    expect(within(document.querySelector('.ws-list') as HTMLElement).getAllByText(/^1[56] Nov$/).map((n) => n.textContent)).toEqual(['16 Nov', '16 Nov', '15 Nov']);
-    expect(rows.map((b) => b.textContent)).toEqual(['The core is written in Zig', 'Changes go one way only', 'Security is built properly']);
-    await userEvent.click(rowButton('Changes go one way only'));
-    expect(screen.getByText('Changes go one way only. Nothing else moves.')).toBeInTheDocument();
-    expect(screen.getByText('16 Nov · Part D, Part E')).toBeInTheDocument();
-    expect(location.hash).toBe('#decisions/decided-one-way');
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
   });
 });
 
@@ -156,12 +135,14 @@ describe('the owner deciding entries', () => {
     expect(location.hash).toBe('#part-b/create');
     expect(within(itemOf('Create and delete a computer')).getByText('to decide')).toBeInTheDocument();
     expect(document.activeElement).toBe(rowButton('Create and delete a computer'));
-    for (const name of [/^Take/, /^Later$/, /^Drop$/]) expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    for (const name of [/^Take/, /^Drop$/]) expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    // "Later" is not a verdict.
+    expect(screen.queryByRole('button', { name: /^Later$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^(Refine|Confirm)/ })).not.toBeInTheDocument();
     expect(screen.getByText('Suggested: take. Key records by id.')).toBeInTheDocument();
   });
 
-  it('takes with Enter after the guard, then the next in the area, then the lowest anywhere', async () => {
+  it('takes with Enter after the guard, then the next in the part, then the lowest anywhere', async () => {
     const time = clock();
     const calls = mockApi({ me: owner });
     history.replaceState(null, '', '/workshop#part-b/create');
@@ -177,19 +158,21 @@ describe('the owner deciding entries', () => {
     expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'false');
     expect(itemOf('Create and delete a computer').querySelector('.ws-word')).toHaveTextContent('Saving…');
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
-    expect(await within(itemOf('Create and delete a computer')).findByText('planned')).toBeInTheDocument();
+    // Saved: the issue records the take. The row's status stays its file's until `plan take` writes it there.
+    await waitFor(() => expect(itemOf('Create and delete a computer').querySelector('.ws-word')?.textContent).toBe(''));
+    expect(itemOf('Create and delete a computer')).toHaveClass('st-undecided');
     expect(location.hash).toBe('#part-b/exec');
     // A second fast Enter lands on the row that just opened and is refused.
     fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
     expect(posts(calls, 'verdict')).toHaveLength(1);
     time.advance(OPEN_GUARD_MS);
-    await userEvent.click(screen.getByRole('button', { name: 'Later' }));
-    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }, { n: 13, verdict: 'later' }]);
-    // Part B has none left: the lowest one anywhere opens, its area unfolds.
+    await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
+    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }, { n: 13, verdict: 'drop' }]);
+    // Part B has none left: the lowest one anywhere opens, its part unfolds.
     await ownerOn('Fork a computer');
     expect(screen.getByRole('heading', { level: 2, name: 'Part D' })).toBeInTheDocument();
     expect(location.hash).toBe('#part-d/fork');
-    // The guard holds across the area change.
+    // The guard holds across the part change.
     fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
     expect(posts(calls, 'verdict')).toHaveLength(2);
   });
@@ -230,17 +213,17 @@ describe('the owner deciding entries', () => {
 
   it('counts only undecided entries with an issue, whatever their file says elsewhere', async () => {
     const data = buildData();
-    const base = data.features.find((feature) => feature.id === 'exec') as Feature;
+    const base = data.entries.find((entry) => entry.id === 'exec') as Entry;
     // Entries whose file already holds a verdict never wait for the owner; undecided ones with an issue do.
-    const decided = (['take', 'later', 'drop'] as const).map((verdict, i): Feature => ({ ...base, position: 30 + i, id: `c-${verdict}`, name: `Decided ${verdict}`, verdict }));
-    const open = { ...base, position: 40, id: 'c-open', name: 'Open one', verdict: null } as Feature;
-    data.features = [...data.features, ...decided, open];
+    const decided = (['take', 'drop'] as const).map((verdict, i): Entry => ({ ...base, position: 30 + i, id: `c-${verdict}`, name: `Decided ${verdict}`, verdict }));
+    const open = { ...base, position: 40, id: 'c-open', name: 'Open one', verdict: null } as Entry;
+    data.entries = [...data.entries, ...decided, open];
     mockApi({ me: owner, state: () => ok(liveState(Object.fromEntries([...decided, open].map((feature, i) => [50 + i, issue({ entry: feature.id, title: feature.name })])))) });
     history.replaceState(null, '', '/workshop#part-b');
     render(<App data={data} />);
     await waitFor(() => expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent(/to decide/));
     // `create`, `exec` and the new open one wait; the decided ones count as what their file says.
-    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('1 planned · 3 to decide · 1 later · 1 dropped');
+    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('1 planned · 3 to decide · 1 dropped');
   });
 });
 

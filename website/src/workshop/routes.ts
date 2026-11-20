@@ -1,26 +1,25 @@
-// Addresses: `#<area>` and `#<area>/<entry id>`, `#suggested`, `#left` and `#decisions`, each with an optional
-// open row, and `#latest`. The older `#entry-<id>` and `#issue-<n>` still open that row where it now lives.
+// Addresses: `#<part>` and `#<part>/<entry id>`, `#product` (the decisions of the whole product), `#suggested` and
+// `#left`, each with an optional open row, and `#latest` while entries have threads. The older `#entry-<id>` and `#issue-<n>` still open that row where it now lives.
 import type { Plan, Row } from './plan';
 
 export type Place =
   | { kind: 'home' }
-  | { kind: 'area'; area: string }
+  | { kind: 'part'; part: string }
   | { kind: 'suggested' }
   | { kind: 'left' }
-  | { kind: 'decisions' }
+  | { kind: 'product' }
   | { kind: 'latest' };
 
 export const HOME: Place = { kind: 'home' };
 
 export function samePlace(a: Place, b: Place): boolean {
-  return a.kind === b.kind && (a.kind !== 'area' || (b.kind === 'area' && a.area === b.area));
+  return a.kind === b.kind && (a.kind !== 'part' || (b.kind === 'part' && a.part === b.part));
 }
 
 /** Where a row is shown. */
 export function placeOf(row: Row): Place {
   if (row.kind === 'suggestion') return { kind: 'suggested' };
-  if (row.kind === 'decided') return { kind: 'decisions' };
-  return row.area ? { kind: 'area', area: row.area } : { kind: 'left' };
+  return row.part ? { kind: 'part', part: row.part } : { kind: 'product' };
 }
 
 /** Where a row opens from a place: in that place when it is shown there (a dropped entry also sits in the left-out list), else where it lives. */
@@ -31,24 +30,24 @@ export function placeFrom(row: Row, place: Place, plan: Plan): Place {
 /** The rows a place shows, in order. */
 export function rowsOf(plan: Plan, place: Place): Row[] {
   switch (place.kind) {
-    case 'area': return plan.areas.find((group) => group.area.id === place.area)?.rows ?? [];
+    case 'part': return plan.parts.find((group) => group.part.id === place.part)?.rows ?? [];
     case 'suggested': return plan.suggestions;
     case 'left': return plan.left;
-    case 'decisions': return plan.decided;
+    case 'product': return plan.product;
     default: return [];
   }
 }
 
 const rowPart = (key: string) => (key.startsWith('entry-') ? key.slice('entry-'.length) : key);
-const rowKey = (part: string) => (/^(issue|decided)-/.test(part) ? part : `entry-${part}`);
+const rowKey = (part: string) => (/^issue-/.test(part) ? part : `entry-${part}`);
 
 export function formatHash(place: Place, key: string | null = null): string {
   const tail = key ? `/${rowPart(key)}` : '';
   switch (place.kind) {
-    case 'area': return `#${place.area}${tail}`;
+    case 'part': return `#${place.part}${tail}`;
     case 'suggested': return `#suggested${tail}`;
     case 'left': return `#left${tail}`;
-    case 'decisions': return `#decisions${tail}`;
+    case 'product': return `#product${tail}`;
     case 'latest': return '#latest';
     default: return '';
   }
@@ -77,14 +76,14 @@ export function resolveHash(hash: string, plan: Plan, rows: Map<string, Row>): {
     if (!tail) return { place, key: null };
     const row = rows.get(rowKey(tail));
     if (row) return { place: placeFrom(row, place, plan), key: row.key };
-    // Entries come from the plan file: one that is not there no longer exists, and its area opens.
+    // Entries come from the plan file: one that is not there no longer exists, and its part opens.
     // Issues may only appear with the live state, so those wait.
-    return place.kind === 'area' && !/^(issue|decided)-/.test(tail) ? { place, key: null } : null;
+    return place.kind === 'part' && !/^issue-/.test(tail) ? { place, key: null } : null;
   };
-  if (head === 'latest') return { place: { kind: 'latest' }, key: null };
-  if (head === 'suggested' || head === 'left' || head === 'decisions') return named({ kind: head });
-  if (plan.areas.some((group) => group.area.id === head)) return named({ kind: 'area', area: head });
+  if (head === 'latest') return plan.threads ? { place: { kind: 'latest' }, key: null } : null;
+  if (head === 'suggested' || head === 'left' || head === 'product') return named({ kind: head });
+  if (plan.parts.some((group) => group.part.id === head)) return named({ kind: 'part', part: head });
   const loose = rows.get(tail ? rowKey(tail) : head);
-  if (loose && (tail || /^(entry|issue|decided)-/.test(head))) return { place: placeOf(loose), key: loose.key };
+  if (loose && (tail || /^(entry|issue)-/.test(head))) return { place: placeOf(loose), key: loose.key };
   return null;
 }

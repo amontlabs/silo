@@ -22,7 +22,7 @@ const PEOPLE: [string, string][] = [
 /** Each issue's thread: the history line of its verdict, and people's comments on some. */
 function threads(data: BuildData, when: 'today' | 'later'): Map<string, Comment[]> {
   const out = new Map<string, Comment[]>();
-  data.features.forEach((feature, index) => {
+  data.entries.forEach((feature, index) => {
     const comments: Comment[] = [];
     const at = (days: number) => new Date(Date.parse('2026-11-16T10:00:00Z') - days * 86_400_000 + index * 60_000).toISOString();
     const verdict: Verdict | undefined = when === 'later' && index < 40 ? feature.suggest?.verdict ?? undefined : undefined;
@@ -43,17 +43,15 @@ export function fixtureState(data: BuildData, when: 'today' | 'later'): { state:
   const comments = new Map<number, Comment[]>();
   const byFeature = threads(data, when);
   const latest: LiveLatest[] = [];
-  let building = 0;
-  data.features.forEach((feature, index) => {
+  data.entries.forEach((feature, index) => {
     const thread = byFeature.get(feature.id) ?? [];
-    const verdict = thread.find((comment) => comment.change?.fields.includes('verdict'))?.change?.verdict ?? null;
-    const take = verdict === 'take' && building < 2 && when === 'later';
-    if (take) building += 1;
+    const marked = thread.find((comment) => comment.change?.fields.includes('verdict'))?.change?.verdict;
+    const verdict = marked === 'take' || marked === 'drop' ? marked : null;
     const n = 1000 + index;
     issues[n] = entryIssue({
       entry: feature.id, title: feature.name, verdict, up: (hash(feature.id) % 9) + (index < 40 ? 3 : 0),
       comments: thread.length, updates: thread.filter((comment) => comment.change).length,
-      ...(verdict === 'drop' ? { state: 'closed', reason: 'not_planned' } : {}), ...(take ? { building: true } : {}),
+      ...(verdict === 'drop' ? { state: 'closed', reason: 'not_planned' } : {}),
     });
     comments.set(n, thread);
     for (const comment of thread) latest.push({ n, entry: feature.id, author: comment.author, bot: comment.bot, createdAt: comment.createdAt, ...(comment.change ? { change: comment.change } : { text: comment.text }) });

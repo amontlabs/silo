@@ -9,41 +9,51 @@ import type { BuildData, Change, LiveIssue, LiveLatest, LiveState, Notes } from 
 interface FixtureFeature {
   id: string;
   stage: string;
-  area?: string;
+  part: string;
   name: string;
   what: string;
-  verdict?: 'take' | 'later' | 'drop';
+  verdict?: 'take' | 'drop';
   built?: string;
-  suggest?: { verdict: 'take' | 'later' | 'drop'; why?: string };
+  suggest?: { verdict: 'take' | 'drop'; why?: string };
 }
 
-/** In build order. */
+export interface FixtureDecision {
+  id: string;
+  stage: string;
+  /** null: a decision of the whole product, in plan/decisions/. */
+  part: string | null;
+  asks: string;
+  answer?: string;
+  verdict?: 'take' | 'drop';
+}
+
+/** In the order of order.json. */
 export const FEATURES: FixtureFeature[] = [
-  { id: 'core', stage: 'second', area: 'part-a', name: 'The engine runs on its own', what: 'A background engine owns every computer.', verdict: 'take', suggest: { verdict: 'take', why: 'The core piece.' } },
-  { id: 'calls', stage: 'second', area: 'part-a', name: 'Every call defined once', what: 'Each call is written down once.', verdict: 'take', suggest: { verdict: 'take' } },
-  { id: 'create', stage: 'second', area: 'part-b', name: 'Create and delete a computer', what: 'Make a Linux computer.', suggest: { verdict: 'take', why: 'Key records by id.' } },
-  { id: 'exec', stage: 'second', area: 'part-b', name: 'Run a command', what: 'Run a command inside.', suggest: { verdict: 'take' } },
-  { id: 'cli', stage: 'second', area: 'part-d', name: 'One silo command', what: 'One command.', suggest: { verdict: 'take' } },
-  { id: 'fork', stage: 'third', area: 'part-d', name: 'Fork a computer', what: 'Copy a computer.', suggest: { verdict: 'take' } },
-  { id: 'checkpoint', stage: 'third', area: 'part-d', name: 'Save a checkpoint', what: 'Save and go back.', suggest: { verdict: 'take' } },
-  { id: 'diff', stage: 'third', area: 'part-d', name: 'See what a fork changed', what: 'The diff.', suggest: { verdict: 'take' } },
-  { id: 'install-agent', stage: 'fourth', area: 'part-d', name: 'Install your agent', what: 'Claude Code or Codex.', suggest: { verdict: 'take' } },
-  { id: 'shells', stage: 'fifth', area: 'part-c', name: 'Your shell inside', what: 'Your dotfiles.', verdict: 'take', suggest: { verdict: 'take' } },
-  { id: 'secrets', stage: 'fifth', area: 'part-d', name: 'Secrets you cannot read', what: 'A placeholder inside.', suggest: { verdict: 'take' } },
-  { id: 'triggers', stage: 'sixth', area: 'part-e', name: 'Tasks from GitHub events', what: 'A label starts a task.', suggest: { verdict: 'later' } },
-  { id: 'linux', stage: 'seventh', area: 'part-e', name: 'A Linux server', what: 'Run on Linux.', suggest: { verdict: 'later' } },
-  { id: 'release', stage: 'eighth', area: 'part-e', name: 'Signed releases', what: 'Signed builds.', suggest: { verdict: 'take' } },
-  { id: 'audit', stage: 'ninth', area: 'part-e', name: 'Who did what', what: 'Every call recorded.', suggest: { verdict: 'take' } },
-  { id: 'screen', stage: 'tenth', area: 'part-e', name: 'A desktop in a computer', what: 'A shared screen.', suggest: { verdict: 'later' } },
-  { id: 'mac-guests', stage: 'eleventh', area: 'part-e', name: 'macOS computers', what: 'macOS inside.', suggest: { verdict: 'later' } },
-  { id: 'export', stage: 'twelfth', area: 'part-e', name: 'Share a computer as a file', what: 'Export and import.', suggest: { verdict: 'later' } },
-  { id: 'reviewer', stage: 'gone', name: 'A hosted reviewer', what: 'A hosted service.', verdict: 'drop', suggest: { verdict: 'drop' } },
-  { id: 'old-desktop', stage: 'gone', name: 'An earlier desktop stack', what: 'KasmVNC.', suggest: { verdict: 'drop' } },
-  { id: 'intake', stage: 'first', area: 'part-d', name: 'How research enters the plan', what: 'Where a new line goes.', suggest: { verdict: 'take' } },
+  { id: 'core', stage: 'second', part: 'part-a', name: 'The engine runs on its own', what: 'A background engine owns every computer.', verdict: 'take', suggest: { verdict: 'take', why: 'The core piece.' } },
+  { id: 'calls', stage: 'second', part: 'part-a', name: 'Every call defined once', what: 'Each call is written down once.', verdict: 'take', suggest: { verdict: 'take' } },
+  { id: 'create', stage: 'second', part: 'part-b', name: 'Create and delete a computer', what: 'Make a Linux computer.', suggest: { verdict: 'take', why: 'Key records by id.' } },
+  { id: 'exec', stage: 'second', part: 'part-b', name: 'Run a command', what: 'Run a command inside.', suggest: { verdict: 'take' } },
+  { id: 'cli', stage: 'second', part: 'part-d', name: 'One silo command', what: 'One command.', suggest: { verdict: 'take' } },
+  { id: 'fork', stage: 'third', part: 'part-d', name: 'Fork a computer', what: 'Copy a computer.', suggest: { verdict: 'take' } },
+  { id: 'checkpoint', stage: 'third', part: 'part-d', name: 'Save a checkpoint', what: 'Save and go back.', suggest: { verdict: 'take' } },
+  { id: 'diff', stage: 'third', part: 'part-d', name: 'See what a fork changed', what: 'The diff.', suggest: { verdict: 'take' } },
+  { id: 'install-agent', stage: 'fourth', part: 'part-d', name: 'Install your agent', what: 'Claude Code or Codex.', suggest: { verdict: 'take' } },
+  { id: 'shells', stage: 'fifth', part: 'part-c', name: 'Your shell inside', what: 'Your dotfiles.', verdict: 'take', suggest: { verdict: 'take' } },
+  { id: 'secrets', stage: 'fifth', part: 'part-d', name: 'Secrets you cannot read', what: 'A placeholder inside.', suggest: { verdict: 'take' } },
+  { id: 'triggers', stage: 'sixth', part: 'part-e', name: 'Tasks from GitHub events', what: 'A label starts a task.', suggest: { verdict: 'drop' } },
+  { id: 'linux', stage: 'seventh', part: 'part-e', name: 'A Linux server', what: 'Run on Linux.', suggest: { verdict: 'drop' } },
+  { id: 'release', stage: 'eighth', part: 'part-e', name: 'Signed releases', what: 'Signed builds.', suggest: { verdict: 'take' } },
+  { id: 'audit', stage: 'ninth', part: 'part-e', name: 'Who did what', what: 'Every call recorded.', suggest: { verdict: 'take' } },
+  { id: 'screen', stage: 'tenth', part: 'part-e', name: 'A desktop in a computer', what: 'A shared screen.', suggest: { verdict: 'drop' } },
+  { id: 'mac-guests', stage: 'eleventh', part: 'part-e', name: 'macOS computers', what: 'macOS inside.', suggest: { verdict: 'drop' } },
+  { id: 'export', stage: 'twelfth', part: 'part-e', name: 'Share a computer as a file', what: 'Export and import.', suggest: { verdict: 'drop' } },
+  { id: 'reviewer', stage: 'gone', part: 'part-e', name: 'A hosted reviewer', what: 'A hosted service.', verdict: 'drop', suggest: { verdict: 'drop' } },
+  { id: 'old-desktop', stage: 'gone', part: 'part-c', name: 'An earlier desktop stack', what: 'KasmVNC.', verdict: 'drop', suggest: { verdict: 'drop' } },
+  { id: 'intake', stage: 'first', part: 'part-d', name: 'How research enters the plan', what: 'Where a new line goes.', suggest: { verdict: 'take' } },
 ];
 
 /** The parts of the example map (map-example.ts), which the tests draw this plan with. */
-export const AREAS = [
+export const PARTS = [
   { id: 'part-a', title: 'Part A', line: 'A tall part with a glyph.' },
   { id: 'part-b', title: 'Part B', line: 'A part that holds another.' },
   { id: 'part-c', title: 'Part C', line: 'A part inside Part B.' },
@@ -67,10 +77,14 @@ export const STAGES = [
   { id: 'gone', title: 'Gone', line: 'Dropped.' },
 ];
 
-export const DECISIONS = [
-  { id: 'security-properly', date: '2026-11-15', text: 'Security is built properly. It is not the focus yet.' },
-  { id: 'core-in-zig', date: '2026-11-16', text: 'The core is written in Zig. It is the core piece.', about: ['part-a'] },
-  { id: 'one-way', date: '2026-11-16', text: 'Changes go one way only. Nothing else moves.', about: ['part-d', 'part-e'] },
+/** Placed before the features of their stage: taken, answered, open and dropped, of the whole product and of parts. */
+export const DECISIONS: FixtureDecision[] = [
+  { id: 'security-properly', stage: 'first', part: null, asks: 'How is security built?', answer: 'Properly. It is not the focus yet.', verdict: 'take' },
+  { id: 'one-host', stage: 'first', part: null, asks: 'Which host runs Silo first?' },
+  { id: 'core-in-zig', stage: 'first', part: 'part-a', asks: 'Which language is the core written in?', answer: 'Zig. It is the core piece.', verdict: 'take' },
+  { id: 'one-way', stage: 'third', part: 'part-d', asks: 'Which way do changes go?', answer: 'One way only. Nothing else moves.' },
+  { id: 'who-signs', stage: 'eighth', part: 'part-e', asks: 'Who signs the releases?' },
+  { id: 'old-format', stage: 'gone', part: 'part-e', asks: 'Which format does an export use?', answer: 'Our own.', verdict: 'drop' },
 ];
 
 /** The notes of `core`: every kind of block, a relative link and a link to another scheme. */
@@ -92,42 +106,54 @@ silo engine start
 \`\`\`
 `;
 
+/** The notes of `core-in-zig`: a decision's notes, as `<id>.md` beside it. */
+export const ZIG_NOTES = 'Zig keeps the engine small.\n';
+
+const DEFAULT_NOTES: Record<string, string> = { core: CORE_NOTES, 'core-in-zig': ZIG_NOTES };
+
 /** The files of the fixture plan, by their path under plan/. */
-export function planFiles({ features = FEATURES, notes = { core: CORE_NOTES } as Record<string, string>, decisions = DECISIONS as unknown[] } = {}): Map<string, string> {
+export function planFiles({ features = FEATURES, notes = DEFAULT_NOTES, decisions = DECISIONS, parts = PARTS } = {}): Map<string, string> {
   const files = new Map<string, string>();
+  files.set('README.md', 'The model.\n');
   files.set('PRODUCT.md', 'Silo.\n');
-  files.set('areas.json', canonicalText(AREAS));
-  files.set('order.json', canonicalText({ stages: STAGES.map((stage) => ({ ...stage, features: features.filter((f) => f.stage === stage.id).map((f) => f.id) })) }));
-  files.set('decisions.json', canonicalText(decisions));
+  files.set('parts.json', canonicalText(parts));
+  files.set('words.json', canonicalText([]));
+  files.set('principles.json', canonicalText([]));
+  // Each stage holds its decisions, then its features.
+  const ids = (stage: string) => [...decisions.filter((d) => d.stage === stage), ...features.filter((f) => f.stage === stage)].map((entry) => entry.id);
+  files.set('order.json', canonicalText({ stages: STAGES.map((stage) => ({ ...stage, entries: ids(stage.id) })) }));
+  for (const part of parts) files.set(`${part.id}/README.md`, `${part.title}.\n`);
+  for (const decision of decisions) {
+    const file: Record<string, unknown> = { asks: decision.asks };
+    if (decision.answer) file.answer = decision.answer;
+    if (decision.verdict) file.verdict = decision.verdict;
+    const path = decision.part ? `${decision.part}/decisions/${decision.id}` : `decisions/${decision.id}`;
+    files.set(`${path}.json`, canonicalText(file));
+    if (notes[decision.id]) files.set(`${path}.md`, notes[decision.id]);
+  }
   for (const feature of features) {
     const file: Record<string, unknown> = { name: feature.name, what: feature.what };
-    if (feature.area) file.area = feature.area;
-    file.needs = [];
-    if (feature.suggest) file.suggest = feature.suggest;
+    // A suggestion always says why; the fixture gives one where its list leaves it out.
+    if (feature.suggest) file.suggest = { verdict: feature.suggest.verdict, why: feature.suggest.why ?? 'It fits.' };
     if (feature.verdict) file.verdict = feature.verdict;
     if (feature.built) file.built = feature.built;
-    files.set(`features/${feature.id}.json`, canonicalText(file));
-    if (notes[feature.id]) files.set(`features/${feature.id}.md`, notes[feature.id]);
+    files.set(`${feature.part}/features/${feature.id}.json`, canonicalText(file));
+    if (notes[feature.id]) files.set(`${feature.part}/features/${feature.id}.md`, notes[feature.id]);
   }
   return files;
 }
 
-/** The files of a plan that holds no part, no stage and no feature, with the fixture's decisions. */
+/** The files of a plan that holds no part and no feature: only the decisions of the whole product. */
 export function emptyPlanFiles(): Map<string, string> {
-  return new Map([
-    ['PRODUCT.md', 'Silo.\n'],
-    ['DESIGN.md', 'The design.\n'],
-    ['areas.json', canonicalText([])],
-    ['order.json', canonicalText({ stages: [] })],
-    ['decisions.json', canonicalText(DECISIONS.map(({ about: _about, ...decision }) => decision))],
-  ]);
+  return planFiles({ features: [], parts: [], decisions: DECISIONS.filter((decision) => decision.part === null), notes: {} });
 }
 
 const NOTES = new WeakMap<BuildData, Notes>();
 
+/** The fixture plan drawn on the example map, with the owner's verdicts and entries' threads on: what the tests exercise. */
 export function buildData(options?: Parameters<typeof planFiles>[0]): BuildData {
   const files = planFiles(options);
-  const data = buildDataFrom(files, EXAMPLE_MAP);
+  const data = buildDataFrom(files, { map: EXAMPLE_MAP, decide: true, threads: true });
   NOTES.set(data, notesFrom(files));
   return data;
 }

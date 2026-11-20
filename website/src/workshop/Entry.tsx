@@ -1,5 +1,5 @@
-// One row of a list, and what it shows once open: the sentence, its notes, its state, the thread (comments and
-// history lines) and the box.
+// One row of a list, and what it shows once open: the sentence, its notes, its state and, for a row with a thread,
+// the thread (comments and history lines) and the box. A row without a thread draws none of those, not even a placeholder.
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -8,7 +8,7 @@ import { compareLink, featureFileAt } from '../../../tools/workshop/model/index.
 import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
 import { awaitsVerdict, changesText, changeWords, isDecided, relativeTime, shortDate } from './plan';
-import type { Change, Decision, Row } from './plan';
+import type { Change, Row } from './plan';
 import type { Detail, Workshop } from './useWorkshop';
 
 /** How long the closing body stays in place for its animation. */
@@ -29,10 +29,11 @@ export interface EntryContext {
   armed: (row: Row) => boolean;
 }
 
-const WORDS: Partial<Record<Row['status'], string>> = { planned: 'planned', later: 'later', building: 'building', built: 'built', dropped: 'dropped' };
+const WORDS: Partial<Record<Row['status'], string>> = { planned: 'planned', built: 'built', dropped: 'dropped' };
+/** A decision's word on its row: taken is decided; open or answered says nothing, as an undecided feature does. */
+const DECISION_WORDS: Partial<Record<Row['status'], string>> = { planned: 'decided', dropped: 'dropped' };
 
 export function pipClass(row: Row): string {
-  if (row.kind === 'decided') return 'ws-pip planned';
   return `ws-pip ${row.status}`;
 }
 
@@ -42,10 +43,9 @@ function initials(login: string): string {
 }
 
 function stateText(row: Row): string {
+  if (row.of === 'decision') return row.status === 'planned' ? 'Decided.' : row.status === 'dropped' ? 'Dropped.' : 'Not decided yet.';
   switch (row.status) {
     case 'planned': return 'Planned.';
-    case 'later': return 'Later.';
-    case 'building': return 'Being built now.';
     case 'built': {
       const day = row.built ?? row.closedAt;
       return day ? `Built, ${shortDate(day)}.` : 'Built.';
@@ -149,10 +149,8 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   const isSaving = row.issue !== null && w.saving[row.issue] === true;
   const live = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
   const owed = w.canDecide && live && awaitsVerdict(row);
-  const word = row.kind === 'entry' || row.kind === 'suggestion'
-    ? (isSaving ? 'Saving…' : owed ? 'to decide' : WORDS[row.status])
-    : undefined;
-  const quiet = (row.kind === 'entry' || row.kind === 'suggestion') && !isDecided(row);
+  const word = isSaving ? 'Saving…' : owed ? 'to decide' : (row.of === 'decision' ? DECISION_WORDS : WORDS)[row.status];
+  const quiet = !isDecided(row);
   const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : '', owed ? 'owed' : ''].filter(Boolean).join(' ');
   return (
     <li className={classes} id={row.key}>
@@ -171,9 +169,14 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   );
 }
 
+/** Whether a row has a thread on GitHub, or may have one once the live state answers: a suggestion, or an entry while entries have threads. */
+export function threaded(row: Row, ctx: EntryContext): boolean {
+  return row.kind === 'suggestion' || ctx.w.plan.threads;
+}
+
 function Vote({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
-  if (row.kind !== 'entry' && row.kind !== 'suggestion') return null;
+  if (!threaded(row, ctx)) return null;
   if (w.waiting) return <i className="ws-ph ws-ph-vote" aria-hidden="true" />;
   if (!w.liveOk || row.up === null) return null;
   const on = row.issue !== null && w.votes[row.issue] === true;
@@ -192,8 +195,7 @@ function Side({ row, ctx }: { row: Row; ctx: EntryContext }) {
   return (
     <span className="ws-side">
       {row.kind === 'suggestion' && row.author ? <span className="ws-by">{row.author}</span> : null}
-      {row.kind === 'decided' && row.date ? <span className="ws-by">{shortDate(row.date)}</span> : null}
-      <span className="ws-votes" aria-busy={w.waiting || undefined}><Vote row={row} ctx={ctx} /></span>
+      <span className="ws-votes" aria-busy={(w.waiting && threaded(row, ctx)) || undefined}><Vote row={row} ctx={ctx} /></span>
       <span className="ws-talks">{showComments ? <span className="ws-late-s" aria-label={`${row.comments} comments`}>💬 {row.comments}</span> : null}</span>
     </span>
   );
@@ -214,7 +216,6 @@ function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
     <>
       <div className="ws-state ws-late-o">
         <button type="button" className={cls('ws-btn go')} disabled={busy} onClick={act(() => ctx.mainAction(row))}>Take <kbd>↵</kbd></button>
-        <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'later'))}>Later</button>
         <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'drop'))}>Drop</button>
       </div>
       {suggested ? <p className="ws-hint">Suggested: {suggested}.{row.suggest?.why ? ` ${row.suggest.why}` : ''}</p> : null}
@@ -225,14 +226,10 @@ function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
 function StateLine({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
   const hasIssue = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
-  if (row.kind === 'decided') {
-    const about = (row.about ?? []).map((id) => w.plan.areas.find((group) => group.area.id === id)?.area.title ?? id);
-    return <div className="ws-state"><span className="ws-date">{row.date ? shortDate(row.date) : ''}{about.length ? ` · ${about.join(', ')}` : ''}</span></div>;
-  }
   if (row.issue !== null && w.saving[row.issue]) return <div className="ws-state"><span className="ws-muted">Saving…</span></div>;
   if (w.canDecide && hasIssue && (row.issue as number) > 0 && awaitsVerdict(row)) return <VerdictButtons row={row} ctx={ctx} />;
   const text = stateText(row);
-  const tone = row.status === 'building' ? 'ws-now' : isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
+  const tone = isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
   return <div className="ws-state"><span className={tone}>{text}</span></div>;
 }
 
@@ -258,6 +255,8 @@ async function textsAt(repo: string, commit: string, id: string): Promise<Texts>
 function HistoryLine({ change, createdAt, row, repo }: { change: Change; createdAt: string; row: Row; repo: string }) {
   const [texts, setTexts] = useState<'closed' | 'loading' | 'error' | { before: Texts; after: Texts }>('closed');
   const words = changeWords(change);
+  // A change with nothing to say (the old "later" verdict, `suggested_in`) draws no line.
+  if (!words.length) return null;
   const id = row.key.startsWith('entry-') ? row.key.slice('entry-'.length) : null;
   const comparable = changesText(change) && id !== null;
   let link: string | null = null;
@@ -404,33 +403,23 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   );
 }
 
-/** The entry's notes and, for the owner, the decisions about its area: each closed until asked for, on one line. */
+/** The entry's notes, closed until asked for. */
 function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
-  const [shown, setShown] = useState<'notes' | 'decisions' | null>(null);
-  const decisions: Decision[] = w.canDecide ? row.decisions : [];
-  // The line keeps its room from first paint whenever "Decisions" may still appear (until `me` and the live state
-  // answer, the session marker says), and keeps it once given, so nothing below moves when the answers arrive.
-  const mayDecide = row.decisions.length > 0 && (w.liveOk || w.waiting) && (w.me ? w.me.canDecide : w.me === undefined && hasSessionHint());
-  const [kept, setKept] = useState(() => row.notes || mayDecide);
-  if (!kept && (row.notes || mayDecide)) setKept(true);
-  if (!kept && !row.notes && !mayDecide) return null;
-  const toggle = (what: 'notes' | 'decisions') => () => setShown((current) => (current === what ? null : what));
+  const [shown, setShown] = useState(false);
+  if (!row.notes) return null;
   const id = row.key.slice('entry-'.length);
   const notes = typeof w.notes === 'object' ? w.notes[id] : undefined;
   return (
     <div className="ws-extras">
       <div className="ws-extras-bar">
-        {row.notes ? (
-          <button
-            type="button" className="ws-disc" aria-expanded={shown === 'notes'} aria-controls={`${row.key}-notes`}
-            onPointerEnter={w.wantNotes} onPointerDown={w.wantNotes} onTouchStart={w.wantNotes} onFocus={w.wantNotes}
-            onClick={() => { w.wantNotes(); toggle('notes')(); }}
-          >Notes</button>
-        ) : null}
-        {decisions.length ? <button type="button" className="ws-disc ws-late-o" aria-expanded={shown === 'decisions'} aria-controls={`${row.key}-decisions`} onClick={toggle('decisions')}>Decisions · {decisions.length}</button> : null}
+        <button
+          type="button" className="ws-disc" aria-expanded={shown} aria-controls={`${row.key}-notes`}
+          onPointerEnter={w.wantNotes} onPointerDown={w.wantNotes} onTouchStart={w.wantNotes} onFocus={w.wantNotes}
+          onClick={() => { w.wantNotes(); setShown((current) => !current); }}
+        >Notes</button>
       </div>
-      {shown === 'notes' && row.notes ? (
+      {shown ? (
         <div className="ws-extras-in" id={`${row.key}-notes`}>
           {notes ? <Markdown text={notes} /> : w.notes === 'error' ? <p className="ws-quiet">Notes could not load.</p> : typeof w.notes === 'object' ? null : (
             <div className="ws-ph-notes" aria-busy="true">
@@ -439,25 +428,20 @@ function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
           )}
         </div>
       ) : null}
-      {shown === 'decisions' && decisions.length ? (
-        <ul className="ws-extras-in ws-decs" id={`${row.key}-decisions`}>
-          {decisions.map((decision) => <li key={decision.id}><small>{shortDate(decision.date)}</small><p>{decision.text}</p></li>)}
-        </ul>
-      ) : null}
     </div>
   );
 }
 
 function Body({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
   const { w } = ctx;
-  const what = row.kind === 'entry' || row.kind === 'decided' ? row.what : typeof detail === 'object' ? detail.body : null;
+  const what = row.kind === 'entry' ? row.what : typeof detail === 'object' ? detail.body : null;
   return (
     <div className="ws-more-pad">
       {what ? <div className="ws-what"><RichText text={what} /></div> : null}
       {row.kind === 'entry' ? <Extras row={row} ctx={ctx} /> : null}
       {w.rowNotice?.key === row.key ? <p className="ws-row-notice" role="alert">{w.rowNotice.text}</p> : null}
       <StateLine row={row} ctx={ctx} />
-      {row.kind === 'decided' ? null : <Talk row={row} ctx={ctx} detail={detail} />}
+      {threaded(row, ctx) ? <Talk row={row} ctx={ctx} detail={detail} /> : null}
     </div>
   );
 }

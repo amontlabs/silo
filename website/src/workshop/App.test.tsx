@@ -5,16 +5,12 @@ import { App } from './App';
 import { buildData, FEATURES, issue, liveState } from './fixtures';
 import type { LiveState } from './plan';
 import {
-  areaTitle, detail, itemOf, mockApi, ok, owner, part, refused, renderApp, rowButton, tile,
+  partTitle, detail, itemOf, mockApi, ok, owner, part, refused, renderApp, rowButton, tile,
 } from './test-support';
 import type { Route } from './test-support';
 
-// `core`, `calls` and `create` are built, as their files say; `exec` is being built, as its issue says.
-const builtData = () => buildData({ features: FEATURES.map((feature) => (['core', 'calls', 'create'].includes(feature.id) ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature)) });
-const later = (): LiveState => liveState({
-  13: issue({ entry: 'exec', verdict: 'take', building: true, up: 4 }),
-  14: issue({ entry: 'fork', verdict: 'take' }),
-});
+// `core`, `calls` and `create` are built and `fork` is taken, as their files say.
+const builtData = () => buildData({ features: FEATURES.map((feature) => (['core', 'calls', 'create'].includes(feature.id) ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature.id === 'fork' ? { ...feature, verdict: 'take' as const } : feature)) });
 
 describe('the map', () => {
   it('shows the title, one line, every part with its state and only the states present', async () => {
@@ -30,24 +26,23 @@ describe('the map', () => {
     expect(part('part-b')).toHaveClass('s-open');
     expect(part('part-b')).toHaveAccessibleName('Part B, not decided yet, 2 features. A part that holds another.');
     expect(part('part-c')).toHaveAccessibleName('Part C, 1 planned, 1 feature. A part inside Part B.');
-    expect(part('part-d')).toHaveAccessibleName('Part D, not decided yet, 7 features. A part with copies behind it.');
+    expect(part('part-d')).toHaveAccessibleName('Part D, not decided yet, 7 features, 1 decision. A part with copies behind it.');
     const key = screen.getByRole('list', { name: 'Key' });
     expect(within(key).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['next', 'planned', 'not decided yet']);
   });
 
-  it('shows built, building and next areas, on the map and the tiles alike', async () => {
-    mockApi({ state: () => ok(later()) });
+  it('shows built and next parts, on the map and the tiles alike', async () => {
+    mockApi();
     await renderApp(builtData());
-    expect(screen.getByText('Building Part B. Part D is next.')).toBeInTheDocument();
+    expect(screen.getByText('Part D is next.')).toBeInTheDocument();
     expect(part('part-a')).toHaveClass('s-done');
-    expect(part('part-b')).toHaveClass('s-now');
-    expect(part('part-b')).toHaveTextContent('now · 1/2');
+    expect(part('part-b')).toHaveClass('s-done');
     expect(part('part-d')).toHaveClass('s-next');
-    for (const [id, state] of [['part-a', 's-done'], ['part-b', 's-now'], ['part-d', 's-next'], ['part-c', 's-planned'], ['part-e', 's-open']]) {
+    for (const [id, state] of [['part-a', 's-done'], ['part-b', 's-done'], ['part-d', 's-next'], ['part-c', 's-planned'], ['part-e', 's-open']]) {
       expect(tile(id).parentElement).toHaveClass(state);
     }
-    expect(tile('part-b')).toHaveTextContent('now · 1/2');
-    expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['done', 'building now', 'next', 'planned', 'not decided yet']);
+    expect(tile('part-c')).toHaveTextContent('1 planned');
+    expect(within(screen.getByRole('list', { name: 'Key' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['done', 'next', 'planned', 'not decided yet']);
   });
 
   it('switches to the tiles in build order and back', async () => {
@@ -57,7 +52,7 @@ describe('the map', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Order' }));
     expect(screen.getByRole('button', { name: 'Order' })).toHaveAttribute('aria-pressed', 'true');
     expect(location.search).toBe('?view=order');
-    const order = [...document.querySelectorAll<HTMLElement>('.ws-tile')].map((t) => t.dataset.area);
+    const order = [...document.querySelectorAll<HTMLElement>('.ws-tile')].map((t) => t.dataset.part);
     expect(order.slice(0, 4)).toEqual(['part-a', 'part-b', 'part-c', 'part-d']);
     expect(order.at(-1)).toBe('suggested');
     expect(screen.getByText('After that')).toBeInTheDocument();
@@ -65,17 +60,18 @@ describe('the map', () => {
     expect(location.search).toBe('');
   });
 
-  it('links to what is left out, the latest and the suggestions, in that order', async () => {
+  it('links to what is left out, the whole product, the latest and the suggestions, in that order', async () => {
     mockApi();
     await renderApp();
     expect(screen.getByRole('link', { name: '2 suggested' })).toHaveAttribute('href', '#suggested');
-    expect(screen.getByRole('link', { name: 'Left out · 2' })).toHaveAttribute('href', '#left');
-    expect([...document.querySelectorAll('.ws-fold-link')].map((a) => a.textContent)).toEqual(['Left out · 2', 'Latest', '2 suggested']);
+    expect(screen.getByRole('link', { name: 'Left out · 3' })).toHaveAttribute('href', '#left');
+    expect(screen.getByRole('link', { name: 'The whole product' })).toHaveAttribute('href', '#product');
+    expect([...document.querySelectorAll('.ws-fold-link')].map((a) => a.textContent)).toEqual(['Left out · 3', 'The whole product', 'Latest', '2 suggested']);
   });
 });
 
-describe('an area', () => {
-  it('opens from its part: the map folds, the area and its entries show, the address and focus follow', async () => {
+describe('a part', () => {
+  it('opens from its part: the map folds, the part and its entries show, the address and focus follow', async () => {
     mockApi();
     await renderApp();
     await userEvent.click(part('part-b'));
@@ -104,12 +100,12 @@ describe('an area', () => {
 
     await userEvent.click(part('part-e'));
     fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
-    expect(areaTitle()).toBeNull();
+    expect(partTitle()).toBeNull();
     expect(part('part-e')).toHaveFocus();
 
     await userEvent.click(part('part-a'));
     act(() => history.back());
-    await waitFor(() => expect(areaTitle()).toBeNull());
+    await waitFor(() => expect(partTitle()).toBeNull());
     act(() => history.forward());
     await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Part A' })).toBeInTheDocument());
   });
@@ -167,14 +163,19 @@ describe('an entry', () => {
     expect(location.hash).toBe('#part-b');
   });
 
-  it('says being built and planned in a few words', async () => {
-    mockApi({ state: () => ok(later()) });
-    history.replaceState(null, '', '/workshop#part-b/exec');
+  it('says planned, decided and not decided in a few words', async () => {
+    mockApi();
+    history.replaceState(null, '', '/workshop#part-c/shells');
     await renderApp();
-    expect(await screen.findByText('Being built now.')).toBeInTheDocument();
-    expect(within(itemOf('Run a command')).getByText('building')).toBeInTheDocument();
-    act(() => { location.hash = '#part-c/shells'; });
-    await waitFor(() => expect(screen.getByText('Planned.')).toBeInTheDocument());
+    expect(await screen.findByText('Planned.')).toBeInTheDocument();
+    expect(within(itemOf('Your shell inside')).getByText('planned')).toBeInTheDocument();
+    act(() => { location.hash = '#part-a/core-in-zig'; });
+    await waitFor(() => expect(screen.getByText('Decided.')).toBeInTheDocument());
+    expect(within(itemOf('Which language is the core written in?')).getByText('decided')).toBeInTheDocument();
+    expect(screen.getByText('Zig. It is the core piece.')).toBeInTheDocument();
+    act(() => { location.hash = '#part-d/one-way'; });
+    await waitFor(() => expect(screen.getByText('Not decided yet.')).toBeInTheDocument());
+    expect(itemOf('Which way do changes go?')).toHaveClass('st-undecided');
   });
 
   it('shows a verdict written in the file as planned, with nothing to confirm', async () => {
@@ -189,7 +190,7 @@ describe('an entry', () => {
 });
 
 describe('addresses', () => {
-  it('open an area and an entry, and old entry links open the entry where it now lives', async () => {
+  it('open a part and an entry, and old entry links open the entry where it now lives', async () => {
     history.replaceState(null, '', '/workshop#entry-exec');
     mockApi();
     await renderApp();
@@ -197,8 +198,13 @@ describe('addresses', () => {
     expect(location.hash).toBe('#part-b/exec');
     act(() => { location.hash = '#entry-reviewer'; });
     await waitFor(() => expect(rowButton('A hosted reviewer')).toHaveAttribute('aria-expanded', 'true'));
-    expect(location.hash).toBe('#left/reviewer');
-    expect(screen.getByRole('heading', { level: 2, name: 'Left out' })).toBeInTheDocument();
+    expect(location.hash).toBe('#part-e/reviewer');
+    expect(screen.getByRole('heading', { level: 2, name: 'Part E' })).toBeInTheDocument();
+    // A decision of the whole product lives in its own place.
+    act(() => { location.hash = '#entry-one-host'; });
+    await waitFor(() => expect(rowButton('Which host runs Silo first?')).toHaveAttribute('aria-expanded', 'true'));
+    expect(location.hash).toBe('#product/one-host');
+    expect(screen.getByRole('heading', { level: 2, name: 'The whole product' })).toBeInTheDocument();
   });
 
   it('open a suggestion once the live state arrives', async () => {
@@ -215,7 +221,7 @@ describe('addresses', () => {
     mockApi();
     const first = await renderApp();
     await waitFor(() => expect(location.hash).toBe(''));
-    expect(areaTitle()).toBeNull();
+    expect(partTitle()).toBeNull();
     first.unmount();
     history.replaceState(null, '', '/workshop#entry-%E0%A4%A');
     await renderApp();
@@ -224,9 +230,9 @@ describe('addresses', () => {
   });
 
   it('open a dropped entry in the left-out list where it was opened', async () => {
-    mockApi({ state: () => ok(liveState({ 13: issue({ entry: 'exec', verdict: 'drop', state: 'closed', reason: 'not_planned' }) })) });
+    mockApi();
     history.replaceState(null, '', '/workshop#left');
-    await renderApp();
+    await renderApp(buildData({ features: FEATURES.map((feature) => (feature.id === 'exec' ? { ...feature, verdict: 'drop' as const } : feature)) }));
     await userEvent.click(rowButton('Run a command'));
     expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('heading', { level: 2, name: 'Left out' })).toBeInTheDocument();
@@ -235,7 +241,7 @@ describe('addresses', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Left out' })).toBeInTheDocument();
   });
 
-  it('open the area when its entry no longer exists, and find an entry under another area', async () => {
+  it('open the part when its entry no longer exists, and find an entry under another part', async () => {
     history.replaceState(null, '', '/workshop#part-a/gone-away');
     mockApi();
     const first = await renderApp();
@@ -250,15 +256,27 @@ describe('addresses', () => {
 });
 
 describe('the bottom strip', () => {
-  it('lists what is left out with each one\'s real state', async () => {
+  it('lists every dropped entry of the parts, decisions and features', async () => {
     mockApi();
     await renderApp();
-    await userEvent.click(screen.getByRole('link', { name: 'Left out · 2' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Left out · 3' }));
     expect(location.hash).toBe('#left');
+    expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['Which format does an export use?', 'A hosted reviewer', 'An earlier desktop stack']);
     expect(within(itemOf('A hosted reviewer')).getByText('dropped')).toBeInTheDocument();
-    expect(itemOf('An earlier desktop stack')).toHaveClass('st-undecided');
+    expect(within(itemOf('Which format does an export use?')).getByText('dropped')).toBeInTheDocument();
+    expect([...document.querySelectorAll('.ws-detail .ws-tally')].map((tally) => tally.textContent?.replace(/\u00a0/g, ' '))).toEqual(['2 dropped', 'Decisions: 1 dropped']);
     await userEvent.click(rowButton('An earlier desktop stack'));
-    expect(screen.getByText('Not decided yet.')).toBeInTheDocument();
+    expect(screen.getByText('Dropped.')).toBeInTheDocument();
+  });
+
+  it('opens the decisions of the whole product, with their tally', async () => {
+    mockApi();
+    await renderApp();
+    await userEvent.click(screen.getByRole('link', { name: 'The whole product' }));
+    expect(location.hash).toBe('#product');
+    expect(screen.getByRole('heading', { level: 2, name: 'The whole product' })).toHaveFocus();
+    expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['How is security built?', 'Which host runs Silo first?']);
+    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('Decisions: 1 decided · 1 not decided');
   });
 
   it('opens the suggestions by votes, with a way to sign in for a visitor', async () => {
@@ -271,10 +289,10 @@ describe('the bottom strip', () => {
     expect(screen.getByRole('link', { name: 'Sign in to suggest' })).toHaveAttribute('href', '/api/workshop/login?return=%2Fworkshop%23suggested');
   });
 
-  it('returns to the link that opened the left-out list, the latest, the suggestions or the decisions', async () => {
+  it('returns to the link that opened the left-out list, the whole product, the latest or the suggestions', async () => {
     mockApi({ me: owner });
     await renderApp();
-    for (const [name, title] of [['Left out · 2', 'Left out'], ['Latest', 'Latest'], ['2 suggested', 'Suggest a feature'], ['Decisions', 'Decisions']]) {
+    for (const [name, title] of [['Left out · 3', 'Left out'], ['The whole product', 'The whole product'], ['Latest', 'Latest'], ['2 suggested', 'Suggest a feature']]) {
       await userEvent.click(screen.getByRole('link', { name }));
       expect(screen.getByRole('heading', { level: 2, name: title })).toHaveFocus();
       fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });

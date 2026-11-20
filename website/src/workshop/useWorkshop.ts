@@ -98,10 +98,13 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const waiting = !liveOk && live.load === 'pending' && !offline;
   const liveRefOk = useRef(liveOk);
   liveRefOk.current = liveOk;
-  /** The owner's marks and words show for someone the page shows as deciding, remembered or answered. */
-  const canDecide = liveOk && me?.canDecide === true;
+  /**
+   * The owner's marks and words show for someone the page shows as deciding, remembered or answered, and only in a
+   * build that offers verdicts (BuildData.decide).
+   */
+  const canDecide = data.decide && liveOk && me?.canDecide === true;
   /** A verdict is sent only once `me` answered on this visit that this person decides. */
-  const mayDecide = liveOk && meKnown && answer?.canDecide === true;
+  const mayDecide = data.decide && liveOk && meKnown && answer?.canDecide === true;
   const plan = useMemo(() => buildPlan(data, live.state), [data, live.state]);
   const rows = useMemo(() => allRows(plan), [plan]);
   const rowByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);

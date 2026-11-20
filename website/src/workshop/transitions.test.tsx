@@ -5,20 +5,20 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { buildData, fixtureNotes } from './fixtures';
-import { areaTitle, itemOf, mockApi, owner, part, posts, renderApp, rowButton, tile, wait } from './test-support';
+import { partTitle, itemOf, mockApi, owner, part, posts, renderApp, rowButton, tile, wait } from './test-support';
 
 type Mode = 'finishing' | 'failing' | 'absent';
 type Move =
-  | { kind: 'open'; area: string }
+  | { kind: 'open'; part: string }
   | { kind: 'view'; to: 'map' | 'order' }
   | { kind: 'full-map' }
   | { kind: 'escape' }
   | { kind: 'back' }
-  | { kind: 'address'; area: string };
+  | { kind: 'address'; part: string };
 type Step = Move & { after: number };
 type Config = { motion: boolean; wide: boolean; mode: Mode };
 
-const AREAS = ['part-b', 'part-d', 'part-a', 'part-e'];
+const PARTS = ['part-b', 'part-d', 'part-a', 'part-e'];
 /** Milliseconds between two moves: none, a few, and around the lengths of the page's own animations. */
 const GAPS = [0, 3, 20, 60, 130, 140, 200, 500];
 
@@ -56,12 +56,12 @@ const elapse = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsy
 const settleAll = () => act(async () => { await vi.runAllTimersAsync(); });
 const rootOf = () => document.querySelector('.ws') as HTMLElement;
 const classesOf = () => [...rootOf().classList].sort();
-const hashOf = (area: string) => (area ? `#${area}` : '');
+const hashOf = (part: string) => (part ? `#${part}` : '');
 
-/** The area the page shows ('' for the full map), read from the open tile of the strip. */
-function shownArea(): string {
+/** The part the page shows ('' for the full map), read from the open tile of the strip. */
+function shownPart(): string {
   if (!document.querySelector('.ws-detail')) return '';
-  return document.querySelector('.ws-tile.on')?.getAttribute('data-area') ?? '?';
+  return document.querySelector('.ws-tile.on')?.getAttribute('data-part') ?? '?';
 }
 const shownView = () => (rootOf().classList.contains('v-order') ? 'order' : 'map');
 const addressView = () => (new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
@@ -125,29 +125,29 @@ describe('moves between places', () => {
     return Array.from({ length }, () => {
       const after = pick(GAPS);
       const roll = rand();
-      if (roll < 0.35) return { kind: 'open', area: pick(AREAS), after } as Step;
+      if (roll < 0.35) return { kind: 'open', part: pick(PARTS), after } as Step;
       if (roll < 0.5) return { kind: 'view', to: pick(['map', 'order'] as const), after };
       if (roll < 0.62) return { kind: 'full-map', after };
       if (roll < 0.74) return { kind: 'escape', after };
       if (roll < 0.86) return { kind: 'back', after };
-      return { kind: 'address', area: pick(['', ...AREAS]), after };
+      return { kind: 'address', part: pick(['', ...PARTS]), after };
     });
   }
-  const open = (area: string, after = 0): Step => ({ kind: 'open', area, after });
+  const open = (part: string, after = 0): Step => ({ kind: 'open', part, after });
   const view = (to: 'map' | 'order', after = 0): Step => ({ kind: 'view', to, after });
   const named: [string, Step[]][] = [
     ['a part clicked while the view swaps', [view('order'), open('part-d')]],
     ['a part, then another after the first has landed', [open('part-b', 600), open('part-d', 600), view('order', 600), view('map')]],
     ['the full map taken again and again', [open('part-b', 600), { kind: 'full-map', after: 600 }, open('part-d', 400), { kind: 'full-map', after: 0 }, open('part-a'), { kind: 'full-map', after: 0 }, open('part-e', 20)]],
     ['a second move while the first waits for its view transition', [open('part-a'), open('part-b', 10), { kind: 'escape', after: 10 }, open('part-d', 0)]],
-    ['an address that is followed while a view transition waits', [open('part-a'), { kind: 'address', area: 'part-b', after: 5 }]],
+    ['an address that is followed while a view transition waits', [open('part-a'), { kind: 'address', part: 'part-b', after: 5 }]],
     ['Escape and Back after a view', [open('part-b', 600), view('order', 600), { kind: 'escape', after: 600 }, { kind: 'back', after: 600 }, view('map', 0), { kind: 'back', after: 0 }]],
     ['Order and a tile while the map unfolds', [open('part-b', 600), { kind: 'full-map', after: 0 }, view('order', 135), open('part-d')]],
     ['Back to an entry without the view', [open('part-b', 600), view('order', 600), { kind: 'back', after: 600 }]],
     ['Back to an entry without the view, then Order', [open('part-b', 600), view('order', 600), { kind: 'back', after: 600 }, view('order', 600)]],
     ['Back while the view swaps', [open('part-b', 600), view('order', 20), { kind: 'back', after: 600 }]],
-    ['the area being left opened again while the map unfolds', [open('part-b', 600), { kind: 'full-map', after: 60 }, open('part-b', 600)]],
-    ['the area being left opened again at once', [open('part-b', 600), { kind: 'escape', after: 10 }, open('part-b', 600)]],
+    ['the part being left opened again while the map unfolds', [open('part-b', 600), { kind: 'full-map', after: 60 }, open('part-b', 600)]],
+    ['the part being left opened again at once', [open('part-b', 600), { kind: 'escape', after: 10 }, open('part-b', 600)]],
     ['Escape again while the map unfolds', [open('part-b', 600), { kind: 'escape', after: 100 }, { kind: 'escape', after: 60 }]],
     ['Escape again while the view transition waits', [open('part-b', 600), { kind: 'escape', after: 20 }, { kind: 'escape', after: 20 }]],
   ];
@@ -163,21 +163,21 @@ describe('moves between places', () => {
     const rest: Record<string, string[]> = {
       'full-map map': await atRest('', ''),
       'full-map order': await atRest('', '?view=order'),
-      'area map': await atRest('#part-b', ''),
-      'area order': await atRest('#part-b', '?view=order'),
+      'part map': await atRest('#part-b', ''),
+      'part order': await atRest('#part-b', '?view=order'),
     };
     const moving = new Set<string>();
     try {
       for (const config of configs) {
         const sequences: [string, Step[]][] = [...named, ...[1, 2, 3, 4, 5, 6, 77].map((seed): [string, Step[]] => [`seed ${seed}`, sequence(seed, 7)])];
         for (const [name, steps] of sequences) {
-          const where = `${name} (${JSON.stringify(config)}): ${steps.map((step) => `${step.kind}${'area' in step ? ` ${step.area}` : 'to' in step ? ` ${step.to}` : ''} +${step.after}`).join(', ')}`;
+          const where = `${name} (${JSON.stringify(config)}): ${steps.map((step) => `${step.kind}${'part' in step ? ` ${step.part}` : 'to' in step ? ` ${step.to}` : ''} +${step.after}`).join(', ')}`;
           screenOf(config);
           viewTransitions(config.mode);
           await mount();
           const push = vi.spyOn(history, 'pushState');
           // What the last move that took effect asks for; null where the address decides (after Back).
-          let area: string | null = '';
+          let place: string | null = '';
           let wanted: 'map' | 'order' | null = 'map';
           let depth = 0;
           let heldHeight = false;
@@ -185,20 +185,20 @@ describe('moves between places', () => {
           let landsAt: number | null = null;
           const landed = () => {
             if (landsAt === null || Date.now() < landsAt) return;
-            expect(shownArea(), `${where}: going back has landed at its time`).toBe('');
+            expect(shownPart(), `${where}: going back has landed at its time`).toBe('');
             landsAt = null;
           };
           // A new move lets go at once of the height a going-back kept, before anything has settled.
           const released = () => expect(rootOf().style.minHeight, `${where}: the page height is let go when a move starts`).toBe('');
-          const note = () => { for (const name of classesOf()) if (!rest['full-map map'].includes(name) && !rest['area order'].includes(name)) moving.add(name); };
+          const note = () => { for (const name of classesOf()) if (!rest['full-map map'].includes(name) && !rest['part order'].includes(name)) moving.add(name); };
           for (const step of steps) {
             landed();
-            const here = shownArea();
+            const here = shownPart();
             const onMap = rootOf().classList.contains('v-map');
-            // Going back from an area: the map unfolds for a while, a view transition waits for its update, or it is
+            // Going back from a part: the map unfolds for a while, a view transition waits for its update, or it is
             // done at once. Another going-back meanwhile changes nothing.
             const goBack = () => {
-              area = '';
+              place = '';
               if (landsAt !== null) return;
               const unfolds = config.motion && config.wide && onMap;
               const waits = config.motion && !unfolds && config.mode !== 'absent';
@@ -210,15 +210,15 @@ describe('moves between places', () => {
             const before = push.mock.calls.length;
             if (step.kind === 'open') {
               const tiles = !config.wide || rootOf().classList.contains('v-order');
-              const button = tiles ? tile(step.area) : part(step.area);
+              const button = tiles ? tile(step.part) : part(step.part);
               act(() => { fireEvent.click(button); });
-              if (here !== step.area) {
-                area = step.area;
+              if (here !== step.part) {
+                place = step.part;
                 landsAt = null;
                 released();
               } else if (landsAt !== null) {
-                // The area being left is asked for again: it stays open, and the going-back is dropped.
-                area = here;
+                // The part being left is asked for again: it stays open, and the going-back is dropped.
+                place = here;
                 landsAt = null;
                 released();
               } else goBack();
@@ -237,14 +237,14 @@ describe('moves between places', () => {
                 depth -= 1;
                 act(() => history.back());
                 await elapse(1);
-                area = null;
+                place = null;
                 wanted = null;
                 landsAt = null;
                 released();
               }
             } else {
-              act(() => { history.pushState(null, '', `/workshop${location.search}${hashOf(step.area)}`); dispatchEvent(new PopStateEvent('popstate')); });
-              area = step.area;
+              act(() => { history.pushState(null, '', `/workshop${location.search}${hashOf(step.part)}`); dispatchEvent(new PopStateEvent('popstate')); });
+              place = step.part;
               // An address followed names its view, as on a fresh load.
               wanted = addressView();
               landsAt = null;
@@ -265,16 +265,16 @@ describe('moves between places', () => {
           const hash = location.hash;
           // The place and the view the address names are the ones shown, and the last move is the one that won.
           const named = hash === '' ? '' : decodeURIComponent(hash.slice(1));
-          expect(shownArea(), `${where}: the place the address names`).toBe(named);
-          if (named) expect(areaTitle()?.textContent, `${where}: the title of the area`).toBe(document.querySelector(`.ws-tile[data-area="${named}"] .ws-title`)?.textContent);
-          else expect(areaTitle(), `${where}: no area is open`).toBeNull();
-          if (area !== null) expect(named, `${where}: the last move decides the place`).toBe(area);
+          expect(shownPart(), `${where}: the place the address names`).toBe(named);
+          if (named) expect(partTitle()?.textContent, `${where}: the title of the part`).toBe(document.querySelector(`.ws-tile[data-part="${named}"] .ws-title`)?.textContent);
+          else expect(partTitle(), `${where}: no part is open`).toBeNull();
+          if (place !== null) expect(named, `${where}: the last move decides the place`).toBe(place);
           // The view shown is the one the address names, and the one last chosen unless Back decided it.
           expect(shownView(), `${where}: the view the address names`).toBe(addressView());
           if (wanted !== null) expect(shownView(), `${where}: the view last chosen`).toBe(wanted);
           expect(screen.getByRole('button', { name: shownView() === 'order' ? 'Order' : 'Map' }), `${where}: the pressed button`).toHaveAttribute('aria-pressed', 'true');
           // Nothing is left half done: no state class beyond those of a page at rest, no height kept, all in sight.
-          expect(classesOf(), `${where}: the classes of a page at rest`).toEqual(rest[`${named ? 'area' : 'full-map'} ${shownView()}`]);
+          expect(classesOf(), `${where}: the classes of a page at rest`).toEqual(rest[`${named ? 'part' : 'full-map'} ${shownView()}`]);
           expect(rootOf().style.minHeight, `${where}: no height kept`).toBe('');
           expect(rootOf().style.height, `${where}: no height set`).toBe('');
           for (const node of [rootOf(), screen.getByRole('heading', { level: 1, name: 'Workshop' }), document.querySelector('.ws-swap-map'), document.querySelector('.ws-swap-order')]) {
@@ -286,7 +286,7 @@ describe('moves between places', () => {
           // Later timers change nothing: the address stays what it was.
           await elapse(10_000);
           expect(location.href, `${where}: the address after the last move`).toBe(address);
-          expect(shownArea(), `${where}: the place stays`).toBe(named);
+          expect(shownPart(), `${where}: the place stays`).toBe(named);
           cleanup();
           vi.useRealTimers();
           vi.restoreAllMocks();
@@ -307,7 +307,7 @@ describe('Back, Forward and Escape', () => {
     delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
   });
 
-  it('moves the focus out of the view that Back or Forward hides, to the same area in the one shown', async () => {
+  it('moves the focus out of the view that Back or Forward hides, to the same part in the one shown', async () => {
     screenOf({ motion: false, wide: true, mode: 'absent' });
     await mount();
     act(() => { fireEvent.click(part('part-b')); });
@@ -340,7 +340,7 @@ describe('Back, Forward and Escape', () => {
     screenOf({ motion: false, wide: true, mode: 'absent' });
     await mount();
     const title = () => screen.getByRole('heading', { level: 1, name: 'Workshop' });
-    // The full map in Map, an area in Order, then the full map again in Order.
+    // The full map in Map, a part in Order, then the full map again in Order.
     act(() => { fireEvent.click(part('part-b')); });
     act(() => { fireEvent.click(screen.getByRole('button', { name: 'Order' })); });
     act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
@@ -357,7 +357,7 @@ describe('Back, Forward and Escape', () => {
     expect(location.hash).toBe('');
     expect(shownView()).toBe('order');
     expect(document.activeElement).toBe(title());
-    // Back to the full map in Map with the focus on Latest; Forward to the area takes the links under the map off the
+    // Back to the full map in Map with the focus on Latest; Forward to the part takes the links under the map off the
     // page.
     act(() => history.go(-2));
     await elapse(1);
@@ -374,7 +374,7 @@ describe('Back, Forward and Escape', () => {
     screenOf({ motion: true, wide: true, mode: 'finishing' });
     viewTransitions('finishing');
     await mount();
-    // An entry the page has not seen yet, then an area opened over it.
+    // An entry the page has not seen yet, then a part opened over it.
     act(() => { history.pushState(null, '', '/workshop#suggested/issue-999999'); });
     act(() => { fireEvent.click(part('part-b')); });
     await elapse(600);
@@ -393,9 +393,9 @@ describe('Back, Forward and Escape', () => {
     await mount();
     act(() => { fireEvent.click(part('part-b')); });
     act(() => { fireEvent.keyDown(document.body, { key: 'Escape', repeat: true }); });
-    expect(shownArea()).toBe('part-b');
+    expect(shownPart()).toBe('part-b');
     act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
-    expect(shownArea()).toBe('');
+    expect(shownPart()).toBe('');
   });
 });
 

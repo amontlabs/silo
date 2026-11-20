@@ -673,12 +673,15 @@ const FIXTURE_FEATURES = [
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 
 async function writePlan(dir) {
-  await mkdir(join(dir, 'features'), { recursive: true });
+  await mkdir(join(dir, 'part-a', 'features'), { recursive: true });
+  await writeFile(join(dir, 'README.md'), 'The model.\n');
   await writeFile(join(dir, 'PRODUCT.md'), '# Fixture\n\nA small plan.\n');
-  await writeFile(join(dir, 'areas.json'), json([{ id: 'part-a', title: 'Part A', line: 'The one part of this plan.' }]));
-  await writeFile(join(dir, 'order.json'), json({ stages: [{ id: 'start', title: 'Start', line: 'The first things.', features: FIXTURE_FEATURES.map(([id]) => id) }] }));
-  await writeFile(join(dir, 'decisions.json'), json([]));
-  for (const [id, name, what] of FIXTURE_FEATURES) await writeFile(join(dir, 'features', `${id}.json`), json({ name, what, area: 'part-a', needs: [] }));
+  await writeFile(join(dir, 'parts.json'), json([{ id: 'part-a', title: 'Part A', line: 'The one part of this plan.' }]));
+  await writeFile(join(dir, 'part-a', 'README.md'), 'Part A.\n');
+  await writeFile(join(dir, 'order.json'), json({ stages: [{ id: 'start', title: 'Start', line: 'The first things.', entries: FIXTURE_FEATURES.map(([id]) => id) }] }));
+  await writeFile(join(dir, 'words.json'), json([]));
+  await writeFile(join(dir, 'principles.json'), json([]));
+  for (const [id, name, what] of FIXTURE_FEATURES) await writeFile(join(dir, 'part-a', 'features', `${id}.json`), json({ name, what }));
   // The plan tool is loaded only by the tests that write a plan: the server's own tests never need it.
   const { checkFiles } = await import('../../tools/plan/check/index.js');
   const { loadDir } = await import('../../tools/plan/read/index.js');

@@ -43,7 +43,6 @@ describe('the first frame', () => {
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
     // The owner's words, from memory.
     expect(screen.getByRole('link', { name: /to decide/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Decisions' })).toBeInTheDocument();
     expect(within(itemOf('Create and delete a computer')).getByText('to decide')).toBeInTheDocument();
     expect(document.querySelector('.ws-ph')).toBeNull();
   });
@@ -363,7 +362,7 @@ describe('the page\'s own writes over an answer', () => {
       const time = clock();
       let kept = null as LiveState | null;
       let model = null as { fetched: number; up: number } | null;
-      const writes: { at: number; up?: number; verdict?: 'take' | 'later' }[] = [];
+      const writes: { at: number; up?: number; verdict?: 'take' | 'drop' }[] = [];
       for (let step = 0; step < 40; step += 1) {
         const roll = random();
         if (roll < 0.2) {
@@ -371,7 +370,7 @@ describe('the page\'s own writes over an answer', () => {
           writes.push({ at: Date.now(), up });
           keep({ n: 12, set: { up } }, Date.now());
         } else if (roll < 0.3) {
-          const verdict = random() < 0.5 ? 'take' : 'later';
+          const verdict = random() < 0.5 ? 'take' : 'drop';
           writes.push({ at: Date.now(), verdict });
           keep({ n: 12, set: { verdict } }, Date.now());
         } else if (roll < 0.75) {
@@ -387,7 +386,7 @@ describe('the page\'s own writes over an answer', () => {
         expect(kept.issues[12].up).toBe(model.up);
         expect(kept.old).toBeUndefined();
         let up = model.up;
-        let verdict: 'take' | 'later' | null = null;
+        let verdict: 'take' | 'drop' | null = null;
         for (const write of writes) {
           if (Date.now() - write.at >= 24 * 3600_000 || model.fetched > write.at + 60_000) continue;
           if (write.up !== undefined) up = write.up;

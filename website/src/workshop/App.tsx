@@ -1,17 +1,16 @@
-// The Workshop: the drawing of Silo (tiles on narrow screens), an opened area under it, and its entries
+// The Workshop: the drawing of Silo (tiles on narrow screens), an opened part under it, and its entries
 // opening in place. Addresses follow routes.ts; the live state and every write live in useWorkshop.ts.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { loginUrl } from './api';
 import type { Me } from './api';
-import { AreaPlace, LeftPlace } from './AreaView';
-import { DecisionsPlace } from './Decisions';
+import { LeftPlace, PartPlace, ProductPlace } from './PartView';
 import { LatestPlace } from './Latest';
 import type { EntryContext } from './Entry';
 import { MapView } from './MapView';
-import { FOLD_HEIGHT, MAP_WIDTH } from './map';
+import { FOLD_HEIGHT, hasMap, MAP_WIDTH } from './map';
 import { awaitsVerdict, needsOwner, statusLine } from './plan';
-import type { AreaState, BuildData, Notes, Row } from './plan';
+import type { PartState, BuildData, Notes, Row } from './plan';
 import { formatHash, HOME, placeFrom, placeOf, resolveHash, rowsOf, samePlace } from './routes';
 import type { Place } from './routes';
 import { SuggestPlace } from './Suggest';
@@ -50,7 +49,7 @@ export function Account({ me, signIn, onSignOut }: { me: Me | null | undefined; 
 const noNotes = () => Promise.resolve({});
 
 type View = 'map' | 'order';
-type Focus = { kind: 'title' } | { kind: 'area'; area: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string } | { kind: 'buttons'; key: string };
+type Focus = { kind: 'title' } | { kind: 'part'; part: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string } | { kind: 'buttons'; key: string };
 
 const LEAVE_MS = 140;
 /** How long what just arrived is marked, for its fade in (about 150 ms). */
@@ -60,8 +59,8 @@ const SWAP_MS = 130;
 /** How long the map takes to fold, and an entry to open. */
 const FOLD_MS = 440;
 const ROW_MS = 240;
-const KEY: [AreaState, string, string][] = [
-  ['done', 'ws-pip built', 'done'], ['now', 'ws-pip building', 'building now'], ['next', 'ws-pip next', 'next'],
+const KEY: [PartState, string, string][] = [
+  ['done', 'ws-pip built', 'done'], ['next', 'ws-pip next', 'next'],
   ['planned', 'ws-pip planned', 'planned'], ['open', 'ws-dash', 'not decided yet'],
 ];
 
@@ -79,7 +78,7 @@ function selectorOf(node: Element | null): string | null {
   const name = [...node.classList][0];
   if (href && name) return `a.${name}[href="${href}"]`;
   const tile = node.closest<HTMLElement>('.ws-tile');
-  if (tile?.dataset.area) return `.ws-tile[data-area="${tile.dataset.area}"] .ws-tile-hit`;
+  if (tile?.dataset.part) return `.ws-tile[data-part="${tile.dataset.part}"] .ws-tile-hit`;
   return null;
 }
 
@@ -93,8 +92,8 @@ export function seen(node: Element): boolean {
   let top = 0;
   for (const cover of document.querySelectorAll('.site-header, .ws-swap-map')) {
     if (getComputedStyle(cover).position !== 'sticky') continue;
-    const area = cover.getBoundingClientRect();
-    if (area.height > 0 && area.top <= box.top) top = Math.max(top, area.bottom);
+    const part = cover.getBoundingClientRect();
+    if (part.height > 0 && part.top <= box.top) top = Math.max(top, part.bottom);
   }
   return box.top >= top && box.bottom <= innerHeight;
 }
@@ -171,11 +170,13 @@ function SignIn({ href }: { href: string }) {
   );
 }
 
-// At build time there is no address: the plain view.
-const initialView = (): View => (typeof location !== 'undefined' && new URLSearchParams(location.search).get('view') === 'order' ? 'order' : 'map');
+// At build time there is no address: the plain view. Without a map, the tiles are all there is.
+const viewFrom = (map: boolean): View => (!map || (typeof location !== 'undefined' && new URLSearchParams(location.search).get('view') === 'order') ? 'order' : 'map');
 const address = (hash = '') => `${location.pathname}${location.search}${hash}`;
 
 export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
+  const mapped = hasMap(data.map);
+  const initialView = () => viewFrom(mapped);
   const [place, setPlace] = useState<Place>(HOME);
   // Rows open independently; `openKey` is the one opened last: the address, Enter and the guard follow it.
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -259,15 +260,14 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     if (accountSlot) accountSlot.classList.toggle('ws-arr-p', arrivedPerson);
   }, [accountSlot, arrivedPerson]);
 
-  // Visitors never see the decisions: the address shows them the plan.
-  const shown: Place = place.kind === 'decisions' && !canDecide ? HOME : place;
+  const shown: Place = place;
   const isHome = shown.kind === 'home';
   const onMap = () => view === 'map' && wide();
 
   const waiting = useCallback((row: Row) => needsOwner(row) && row.issue !== null && Boolean(live.state?.issues[row.issue]), [live.state]);
-  const toDecide = useMemo(() => new Map(canDecide ? plan.areas.map((group) => [group.area.id, group.rows.filter(waiting).length]) : []), [canDecide, plan, waiting]);
+  const toDecide = useMemo(() => new Map(canDecide ? plan.parts.map((group) => [group.part.id, group.rows.filter(waiting).length]) : []), [canDecide, plan, waiting]);
   const totalToDecide = [...toDecide.values()].reduce((sum, n) => sum + n, 0);
-  const byBuildOrder = useMemo(() => plan.areas.flatMap((group) => group.rows).sort((a, b) => (a.n ?? 0) - (b.n ?? 0)), [plan]);
+  const byBuildOrder = useMemo(() => plan.parts.flatMap((group) => group.rows).sort((a, b) => (a.n ?? 0) - (b.n ?? 0)), [plan]);
   const free = (row: Row) => waiting(row) && !w.pendingRef.current.has(row.issue as number);
 
   // Each open row's buttons look armed once its own guard has passed.
@@ -307,7 +307,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
 
   function go(next: Place, key: string | null, options: { push?: boolean; focus?: Focus | null; announce?: string } = {}) {
     address$(next, key, options.push);
-    if (next.kind === 'area' && shown.kind === 'home') foldedAt.current = Date.now();
+    if (next.kind === 'part' && shown.kind === 'home') foldedAt.current = Date.now();
     settle(next, key);
     w.setRowNotice((current) => (current?.key === key ? current : null));
     if (options.announce !== undefined) w.setAnnounce(options.announce);
@@ -339,7 +339,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       update();
       return mine;
     }
-    const tile = hero ? document.querySelector<HTMLElement>(`.ws-tile[data-area="${hero}"]`) : null;
+    const tile = hero ? document.querySelector<HTMLElement>(`.ws-tile[data-part="${hero}"]`) : null;
     if (tile) tile.style.viewTransitionName = 'hero';
     // The update waits for the old view's picture; a navigation made meanwhile wins over it.
     const vt = start(() => { if (navigations.current === mine) flushSync(update); }) as { finished: Promise<void>; ready?: Promise<void> };
@@ -434,8 +434,8 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   function back() {
     // A going-back under way lands at its time: a second one (the button pressed twice, Escape again) changes nothing.
     if (isHome || backUnderWay()) return;
-    const focus: Focus | null = shown.kind === 'area' ? { kind: 'area', area: shown.area } : opener.current ? { kind: 'selector', selector: opener.current } : shown.kind === 'suggested' ? { kind: 'area', area: 'suggested' } : null;
-    const hero = shown.kind === 'area' ? shown.area : shown.kind === 'suggested' ? 'suggested' : null;
+    const focus: Focus | null = shown.kind === 'part' ? { kind: 'part', part: shown.part } : opener.current ? { kind: 'selector', selector: opener.current } : shown.kind === 'suggested' ? { kind: 'part', part: 'suggested' } : null;
+    const hero = shown.kind === 'part' ? shown.part : shown.kind === 'suggested' ? 'suggested' : null;
     const finish = () => go(HOME, null, { push: true, focus, announce: '' });
     if (still()) {
       finish();
@@ -472,9 +472,9 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     // From a scrolled full map, the fold drives the scroll back to the top: each frame the page is scrolled in
     // proportion to how far the map has folded, so every box travels one way during the fold.
     if (isHome && onMap() && scrollY > 0 && !still()) startLift();
-    if (next.kind !== 'area') opener.current = selectorOf(document.activeElement);
-    const title = next.kind === 'area' ? plan.areas.find((group) => group.area.id === next.area)?.area.title : null;
-    const hero = next.kind === 'area' ? next.area : next.kind === 'suggested' ? 'suggested' : null;
+    if (next.kind !== 'part') opener.current = selectorOf(document.activeElement);
+    const title = next.kind === 'part' ? plan.parts.find((group) => group.part.id === next.part)?.part.title : null;
+    const hero = next.kind === 'part' ? next.part : next.kind === 'suggested' ? 'suggested' : null;
     travel(() => go(next, null, { push: true, focus: { kind: 'title' }, announce: title ? `${title}, open` : '' }), hero);
   }
 
@@ -514,8 +514,9 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     wantedHash.current = null;
     const canonical = formatHash(resolved.place, resolved.key);
     if (location.hash && canonical !== location.hash) history.replaceState(history.state, '', address(canonical));
-    // While the live state loads, the named row waits closed: it would grow when votes and comments arrive.
-    const hold = resolved.key !== null && holdingRef.current;
+    // While the live state loads, the named row waits closed: it would grow when votes and comments arrive. Without
+    // threads an entry has nothing that arrives, and opens at once.
+    const hold = resolved.key !== null && holdingRef.current && plan.threads;
     settle(resolved.place, hold ? null : resolved.key);
     if (hold) heldOpen.current = resolved.key;
     focusNext.current = resolved.key && !hold ? { kind: 'reveal', key: resolved.key } : null;
@@ -540,16 +541,16 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       setSwap(null);
       const next = initialView();
       // On a wide screen the other view's panel is taken out of sight, and Order also hides "Suggest a feature" under
-      // the map: the focus on what gets hidden goes to the same area in the view now shown, else to the title, rather
+      // the map: the focus on what gets hidden goes to the same part in the view now shown, else to the title, rather
       // than to the page itself.
       const hidden = document.querySelector(`.ws-swap-${viewRef.current}`);
       const focused = document.activeElement;
       const hides = !!focused && (!!hidden?.contains(focused) || (next === 'order' && focused.matches('.ws-under .ws-suggest')));
       underFocus.current = focused?.closest('.ws-under') ? focused : null;
       if (next !== viewRef.current && wide() && focused && hides) {
-        const area = focused.closest<HTMLElement>('[data-part], [data-area]');
-        const id = area?.dataset.part ?? area?.dataset.area;
-        viewFocus.current = !id ? '' : next === 'map' ? `.ws-part[data-part="${id}"]` : `.ws-tile[data-area="${id}"] .ws-tile-hit`;
+        const part = focused.closest<HTMLElement>('[data-part]');
+        const id = part?.dataset.part;
+        viewFocus.current = !id ? '' : next === 'map' ? `.ws-part[data-part="${id}"]` : `.ws-tile[data-part="${id}"] .ws-tile-hit`;
       }
       setViewState(next);
       followRef.current();
@@ -586,14 +587,6 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     nav.current.openKey = key;
     focusNext.current = { kind: 'reveal', key };
   }, [holding, rowByKey]);
-  // Once it is known that this person cannot decide, the decisions address is dropped.
-  useEffect(() => {
-    if (place.kind === 'decisions' && live.load !== 'pending' && w.meKnown && !canDecide) {
-      history.replaceState(history.state, '', address());
-      settle(HOME, null);
-    }
-  }, [place, live.load, w.meKnown, canDecide]);
-
   // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown; a link
   // under the map that the move took off the page hands the focus to the title.
   useLayoutEffect(() => {
@@ -608,7 +601,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     node?.focus({ preventScroll: true });
   });
 
-  // Focus follows what the person asked for; a new area starts at its top, under the folded map.
+  // Focus follows what the person asked for; a new part starts at its top, under the folded map.
   useLayoutEffect(() => {
     const target = focusNext.current;
     if (!target) return;
@@ -636,11 +629,11 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
         const stop = (onMap() ? top.offsetTop + top.offsetHeight : mainRef.current.offsetTop + top.offsetHeight) - (header?.offsetHeight ?? 0);
         if (scrollY > stop && !lift.current) scrollTo({ top: stop, behavior: still() ? 'instant' : 'smooth' });
       }
-      document.getElementById('ws-area-title')?.focus({ preventScroll: true });
+      document.getElementById('ws-part-title')?.focus({ preventScroll: true });
     } else {
       let selector: string;
       if (target.kind === 'selector') selector = target.selector;
-      else selector = onMap() && target.area !== 'suggested' ? `.ws-part[data-part="${target.area}"]` : `.ws-tile[data-area="${target.area}"] .ws-tile-hit`;
+      else selector = onMap() && target.part !== 'suggested' ? `.ws-part[data-part="${target.part}"]` : `.ws-tile[data-part="${target.part}"] .ws-tile-hit`;
       const node = document.querySelector<HTMLElement>(selector) ?? (target.kind === 'selector' ? document.querySelector<HTMLElement>('.ws-top h1') : null);
       if (node && !node.hasAttribute('tabindex') && node.tagName === 'H1') node.setAttribute('tabindex', '-1');
       node?.focus({ preventScroll: true });
@@ -654,7 +647,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     if (board && on && board.scrollWidth > board.clientWidth) board.scrollLeft = on.offsetLeft - (board.clientWidth - on.offsetWidth) / 2;
   }, [shown]);
 
-  // The folded map's height, for the area's left column that sticks under it.
+  // The folded map's height, for the part's left column that sticks under it.
   useEffect(() => {
     const main = mainRef.current;
     if (!main || typeof ResizeObserver !== 'function') return;
@@ -665,7 +658,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
 
   // Map or Order. The swap runs on its own timers: a navigation in the middle never leaves it half done.
   function setView(next: View) {
-    if (next === view) return;
+    if (next === view || !mapped) return;
     const apply = () => {
       setViewState(next);
       const params = new URLSearchParams(location.search);
@@ -746,9 +739,9 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       {w.signinFailed ? <p className="ws-quiet ws-note">Sign-in did not complete.</p> : null}
     </>
   );
-  const present = new Set(plan.areas.map((group) => group.state));
+  const present = new Set(plan.parts.map((group) => group.state));
   const suggested = plan.suggestions.filter((row) => row.status !== 'dropped').length;
-  const current = shown.kind === 'area' ? shown.area : shown.kind === 'suggested' ? 'suggested' : null;
+  const current = shown.kind === 'part' ? shown.part : shown.kind === 'suggested' ? 'suggested' : null;
   const firstToDecide = byBuildOrder.find(free);
   const link = (target: Place) => (event: { preventDefault: () => void }) => {
     event.preventDefault();
@@ -756,12 +749,12 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   };
 
   let detail = null;
-  if (shown.kind === 'area') {
-    const group = plan.areas.find((item) => item.area.id === shown.area);
-    if (group) detail = <AreaPlace group={group} toDecide={toDecide.get(group.area.id) ?? 0} ctx={ctx} onBack={back} notes={notes} />;
+  if (shown.kind === 'part') {
+    const group = plan.parts.find((item) => item.part.id === shown.part);
+    if (group) detail = <PartPlace group={group} toDecide={toDecide.get(group.part.id) ?? 0} ctx={ctx} onBack={back} notes={notes} />;
   } else if (shown.kind === 'suggested') detail = <SuggestPlace ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'left') detail = <LeftPlace rows={plan.left} ctx={ctx} onBack={back} notes={notes} />;
-  else if (shown.kind === 'decisions') detail = <DecisionsPlace ctx={ctx} onBack={back} notes={notes} />;
+  else if (shown.kind === 'product') detail = <ProductPlace rows={plan.product} ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'latest') detail = <LatestPlace ctx={ctx} onBack={back} notes={notes} />;
 
   // The place in the first frame is drawn where it stands: it never runs its entrance afterwards. A place opened
@@ -778,7 +771,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
         <section className="ws-top joint">
           <div className="ws-head">
             <h1>Workshop</h1>
-            <Status key={statusLine(plan.areas)} text={statusLine(plan.areas)} boot={boot} />
+            <Status key={statusLine(plan.parts)} text={statusLine(plan.parts)} boot={boot} />
           </div>
           <div className="ws-top-side">
             <div className="ws-tools">
@@ -787,39 +780,39 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
                   <b>{totalToDecide} to decide</b>
                 </a>
               ) : null}
-              {canDecide ? (
-                <a className="ws-loglink ws-late-o" href="#decisions" aria-current={shown.kind === 'decisions' ? 'page' : undefined} onClick={link({ kind: 'decisions' })}>
-                  Decisions
-                </a>
+              {mapped ? (
+                <div className="ws-seg" role="group" aria-label="Arrangement">
+                  <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>Map</button>
+                  <button type="button" aria-pressed={view === 'order'} onClick={() => setView('order')}>Order</button>
+                </div>
               ) : null}
-              <div className="ws-seg" role="group" aria-label="Arrangement">
-                <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>Map</button>
-                <button type="button" aria-pressed={view === 'order'} onClick={() => setView('order')}>Order</button>
-              </div>
             </div>
             <ul className="ws-key" aria-label="Key">
               {KEY.filter(([state]) => present.has(state)).map(([state, mark, label]) => <KeyItem key={state} mark={mark} label={label} boot={boot} />)}
             </ul>
           </div>
         </section>
-        <div className="ws-swap ws-swap-map">
-          <MapView layout={data.map} groups={plan.areas} folded={!isHome && !leaving} current={current} toDecide={toDecide} onOpen={(area) => openPlace({ kind: 'area', area })} />
-        </div>
+        {mapped ? (
+          <div className="ws-swap ws-swap-map">
+            <MapView layout={data.map} groups={plan.parts} folded={!isHome && !leaving} current={current} toDecide={toDecide} onOpen={(part) => openPlace({ kind: 'part', part })} />
+          </div>
+        ) : null}
         <div className="ws-swap ws-swap-order">
-          <Tiles groups={plan.areas} current={current} toDecide={toDecide} suggested={suggested} onOpen={(area) => openPlace({ kind: 'area', area })} onSuggest={() => openPlace({ kind: 'suggested' })} />
+          <Tiles groups={plan.parts} current={current} toDecide={toDecide} suggested={suggested} onOpen={(part) => openPlace({ kind: 'part', part })} onSuggest={() => openPlace({ kind: 'suggested' })} />
         </div>
         {isHome ? (
           <div className="ws-under">
             <div className="ws-under-left">
               {plan.left.length ? <a className="ws-fold-link" href="#left" onClick={link({ kind: 'left' })}>Left out · {plan.left.length}</a> : null}
-              <a className="ws-fold-link" href="#latest" onClick={link({ kind: 'latest' })}>Latest</a>
+              {plan.product.length ? <a className="ws-fold-link" href="#product" onClick={link({ kind: 'product' })}>The whole product</a> : null}
+              {plan.threads ? <a className="ws-fold-link" href="#latest" onClick={link({ kind: 'latest' })}>Latest</a> : null}
               {suggested ? <a className="ws-fold-link ws-late-s" href="#suggested" onClick={link({ kind: 'suggested' })}>{suggested} suggested</a> : null}
               {notes}
             </div>
             <a className="ws-btn ws-suggest" href="#suggested" onClick={link({ kind: 'suggested' })}>Suggest a feature</a>
           </div>
         ) : (
-          <section className={formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : 'ws-detail'} key={formatHash(shown)} aria-labelledby="ws-area-title">{detail}</section>
+          <section className={formatHash(shown) === firstPlace.current ? 'ws-detail ws-still' : 'ws-detail'} key={formatHash(shown)} aria-labelledby="ws-part-title">{detail}</section>
         )}
         <p className="sr-only" aria-live="polite">{w.announce}</p>
         {w.notice ? <p className="ws-notice" role="alert">{w.notice}</p> : null}
