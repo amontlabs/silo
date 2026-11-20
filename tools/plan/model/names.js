@@ -1,7 +1,10 @@
 // Names shared by every part of the plan: the id pattern, the kinds, the verdicts, the checks and
 // the key orders of each kind, as the model in plan/README.md gives them.
 
-/** An id of an entry, a sentence, a part or a stage. An entry's id is also its file name. */
+/**
+ * An id of an entry, a sentence, a part or a stage. An entry's id is also its file name. Entries and
+ * sentences share one namespace: no decision, feature, word, principle or property shares an id.
+ */
 export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 /** A day, `YYYY-MM-DD`. */
@@ -18,8 +21,8 @@ export const VERDICTS = Object.freeze(['take', 'drop']);
 /** A property's `kind`: it never happens, it always ends up happening, or a number we commit to. */
 export const PROPERTY_KINDS = Object.freeze(['safety', 'liveness', 'measured']);
 
-/** A property's `check`: what proves it. */
-export const CHECKS = Object.freeze(['types', 'model', 'simulator', 'hostile test', 'live check', 'benchmark']);
+/** A property's `check`: what proves it. A property lists one or more, each once. */
+export const CHECKS = Object.freeze(['types', 'model', 'simulator', 'hostile test', 'live check', 'benchmark', 'test', 'assertion']);
 
 /** Key orders of the canonical form. */
 export const WORD_KEYS = Object.freeze(['word', 'means', 'not']);
@@ -36,7 +39,7 @@ export const STAGE_KEYS = Object.freeze(['id', 'title', 'line', 'entries']);
 /** The keys each kind must have. */
 export const REQUIRED_KEYS = Object.freeze({
   word: Object.freeze(['word', 'means']),
-  principle: Object.freeze(['id', 'says', 'asks', 'why']),
+  principle: Object.freeze(['id', 'says', 'asks']),
   property: Object.freeze(['id', 'says', 'kind', 'check']),
   decision: Object.freeze(['asks']),
   feature: Object.freeze(['name', 'what']),

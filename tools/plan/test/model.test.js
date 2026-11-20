@@ -15,7 +15,7 @@ test('the names of the model', () => {
   assert.deepEqual(ENTRY_KINDS, ['decision', 'feature']);
   assert.deepEqual(SENTENCE_KINDS, ['word', 'principle', 'property']);
   assert.deepEqual(PROPERTY_KINDS, ['safety', 'liveness', 'measured']);
-  assert.deepEqual(CHECKS, ['types', 'model', 'simulator', 'hostile test', 'live check', 'benchmark']);
+  assert.deepEqual(CHECKS, ['types', 'model', 'simulator', 'hostile test', 'live check', 'benchmark', 'test', 'assertion']);
   for (const id of ['a', '0', 'linux-vm-engine', 'a'.repeat(63)]) assert.match(id, ID_PATTERN);
   for (const id of ['', '-a', 'A', 'a_b', 'a b', 'a'.repeat(64), 'a/b']) assert.doesNotMatch(id, ID_PATTERN);
   // Nothing of the old model or of GitHub is left.

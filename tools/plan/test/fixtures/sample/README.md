@@ -23,8 +23,8 @@ named in the `adds` of exactly one taken decision or feature.
 | Principle | one sentence that every addition to Silo must respect, and the question it asks | `principles.json` |
 | Property | one sentence that always holds in Silo, and how it is checked | `properties.json` at the root, `<part>/properties.json` in a part |
 
-Each sentence has an id, unique among all sentences. A word's id is the word itself, with a
-hyphen for each space.
+A word's id is the word itself, with a hyphen for each space. An id is unique in the whole plan:
+no word, principle, property, decision or feature shares one.
 
 ## What is to do
 
@@ -33,8 +33,7 @@ hyphen for each space.
 | Decision | one choice about Silo: the question, and its answer once there is one | `decisions/<id>.json` at the root, `<part>/decisions/<id>.json` in a part |
 | Feature | one thing Silo does, to build | `<part>/features/<id>.json` |
 
-The file name is the id, unique among all decisions and features. The notes hold the research,
-the options and what was found.
+The file name is the id. The notes hold the research, the options and what was found.
 
 Until it is taken, a decision or a feature shows in full the sentences it would bring:
 
@@ -79,7 +78,7 @@ An entry names another by its id. The check refuses an id that does not exist.
 | `needs` | a decision, a feature | decisions, features | What must be done first: a decision is done when taken, a feature when built |
 | `adds` | a taken decision or feature | sentences | The sentences it brought into the lists |
 | `keeps` | a feature | properties | What it must not break |
-| `at` | a property | a file | Its check, once it exists. Silo promises in public only a property whose check passes |
+| `at` | a property | files | Its checks, once they exist. Silo promises in public only a property whose checks pass |
 
 ## Parts
 
@@ -95,17 +94,18 @@ In this order. A key in brackets is optional: it is absent, never empty.
 | Kind | Keys |
 |---|---|
 | Word | `word`, `means`, [`not`] |
-| Principle | `id`, `says`, `asks`, [`known_as`], `why` |
+| Principle | `id`, `says`, `asks`, [`known_as`], [`why`] |
 | Property | `id`, `says`, `kind`, [`from`], `check`, [`at`] |
 | Decision | `asks`, [`answer`], [`needs`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`] |
 | Feature | `name`, `what`, [`needs`], [`sets`], [`removes`], [`adds`], [`keeps`], [`surfaces`], [`suggest`], [`suggested_in`], [`verdict`], [`built`] |
 
-- `not`: the words this word replaces. The check refuses each of them, as a whole word, anywhere
-  in `plan/`. List a word here only when every use of it in the plan would mean this concept.
+- `not`: the words or phrases this word replaces. The check refuses each of them anywhere in
+  `plan/`. List one here only when every use of it in the plan would mean this concept.
 - `known_as`: the principle's standard name.
 - `kind`: `safety` (it never happens), `liveness` (it always ends up happening) or `measured` (a
   number we commit to).
-- `check`: `types`, `model`, `simulator`, `hostile test`, `live check` or `benchmark`.
+- `check`: a list of one or more of `types`, `model`, `simulator`, `hostile test`, `live check`,
+  `benchmark`, `test`, `assertion`. `at`: the files of those checks.
 - `suggest`: `{ "verdict", "why" }`, what is recommended to the owner. A recommended answer to a
   decision goes in `answer`.
 - `suggested_in`: the number of the visitor's suggestion the entry came from.

@@ -4,7 +4,7 @@
   "sets": [
     {
       "in": "principles",
-      "id": "nothing-without-a-reason",
+      "id": "least-privilege",
       "says": "Nothing is given without a reason: no access, no visibility, no resource.",
       "asks": "What does it need, and why each?",
       "known_as": "least privilege",
