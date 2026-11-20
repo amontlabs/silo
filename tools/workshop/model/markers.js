@@ -1,13 +1,11 @@
-// The three markers the bot writes on GitHub, and their readers.
+// The two markers the bot writes on GitHub, and their readers.
 //   <!-- silo-entry: <id> -->         last line of an entry's issue body
-//   <!-- silo-synced: <40 hex> -->    the commit the issue was last synced at
 //   <!-- silo-change: {json} -->      last line of a history comment
 
 import { CHANGE_FIELDS, DEFAULT_RAW, DEFAULT_REPO, DEFAULT_WEB, ID_PATTERN, VERDICTS, isDate } from './names.js';
 
 const SHA = /^[0-9a-f]{40}$/;
 const ENTRY = /<!-- silo-entry: ([a-z0-9][a-z0-9-]{0,62}) -->/;
-const SYNCED = /<!-- silo-synced: ([0-9a-f]{40}) -->/;
 const CHANGE = /<!-- silo-change: (\{.*\}) -->\s*$/;
 
 const normalized = (text) => (text ?? '').replace(/\r\n/g, '\n').trim();
@@ -25,36 +23,11 @@ export function readEntryMarker(body) {
   return match && lines[lines.length - 1].trim() === match[0] ? match[1] : null;
 }
 
-/** @param {string} commit */
-export function syncedMarker(commit) {
-  if (!SHA.test(commit)) throw new Error(`not a commit: ${commit}`);
-  return `<!-- silo-synced: ${commit} -->`;
-}
-
-/** @param {string | null | undefined} body @returns {string | null} */
-export function readSyncedMarker(body) {
-  return SYNCED.exec(normalized(body))?.[1] ?? null;
-}
-
-/**
- * The body with its synced marker naming `commit`: the marker replaced where it is, else put
- * before the entry marker ending the body, else at the end.
- * @param {string | null | undefined} body @param {string} commit
- */
-export function withSyncedMarker(body, commit) {
-  const marker = syncedMarker(commit);
-  const text = normalized(body);
-  if (SYNCED.test(text)) return text.replace(SYNCED, marker);
-  const lines = text.split('\n');
-  if (readEntryMarker(text)) return [...lines.slice(0, -1), marker, lines[lines.length - 1]].join('\n');
-  return text ? `${text}\n\n${marker}` : marker;
-}
-
-/** @param {string | null | undefined} body @returns {string} the body without the entry and synced markers. */
+/** @param {string | null | undefined} body @returns {string} the body without the entry marker. */
 export function withoutMarkers(body) {
   return normalized(body)
     .split('\n')
-    .filter((line) => !ENTRY.test(line) && !SYNCED.test(line))
+    .filter((line) => !ENTRY.test(line))
     .join('\n')
     .trim();
 }

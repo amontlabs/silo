@@ -1,17 +1,15 @@
 // The Workshop's live state and every write: what the server answered, what is still on its way,
-// and what the page remembers of its own writes. Navigation lives in App and reaches in through `nav`.
+// and what the page remembers of its own writes. Navigation lives in App.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, MutableRefObject } from 'react';
+import type { FormEvent } from 'react';
 import { api, ApiError, hasSessionHint } from './api';
 import type { Comment, IssueDetail, Me } from './api';
 import { recallPerson, recallState, rememberPerson, rememberState } from './memory';
 import { applyKept, keep, keptComments, newerAnswer } from './writes';
 import type { Write } from './writes';
 import { allRows, buildPlan } from './plan';
-import type { BuildData, LiveIssue, LiveState, Notes, Row, Verdict } from './plan';
+import type { BuildData, LiveIssue, LiveState, Notes, Row } from './plan';
 
-/** A row that just opened refuses its main action for this long. */
-export const OPEN_GUARD_MS = 700;
 const NOTICE_MS = 8000;
 /** A fetch of an issue's comments this recent serves an opening. */
 const FRESH_MS = 4000;
@@ -30,18 +28,6 @@ export type Live = { load: 'pending' | 'answered' | 'failed'; state: LiveState |
 type MeAnswer = Me | null | undefined | 'error';
 export type Detail = IssueDetail | 'loading' | 'error';
 
-/** What the writes need from navigation. */
-export interface Nav {
-  /** The row opened last: the address follows it. */
-  openKey: string | null;
-  /** Every open row and when it opened: each has its own guard. */
-  openedAt: Map<string, number>;
-  /** After a verdict on the open row: open the next one waiting, or close. */
-  advanceFrom: (row: Row) => void;
-  /** Back to a row whose write was refused. */
-  reopen: (row: Row) => void;
-}
-
 function takeSigninFailure(): boolean {
   // At build time there is no address.
   if (typeof location === 'undefined') return false;
@@ -53,13 +39,7 @@ function takeSigninFailure(): boolean {
   return true;
 }
 
-function verdictPatch(verdict: Verdict | null): Partial<LiveIssue> {
-  return verdict === 'drop'
-    ? { verdict: 'drop', state: 'closed', reason: 'not_planned' }
-    : { verdict, state: 'open', reason: null, closedAt: null };
-}
-
-export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, nav: MutableRefObject<Nav>, loadNotes: () => Promise<Notes> = () => Promise.resolve({})) {
+export function useWorkshop(data: BuildData, openKey: string | null, openKeys: ReadonlySet<string>, openings: number, loadNotes: () => Promise<Notes> = () => Promise.resolve({})) {
   // The newest answer as the server sent it (or as remembered), how the load stands, and whether a `fresh=1` ask is
   // still out. What the page shows is that answer with the page's own writes applied (writes.ts).
   const [loaded, setLoaded] = useState<{ load: Live['load']; answer: LiveState | null; fresh: boolean }>(() => ({ load: 'pending', answer: recallState(Date.now()), fresh: false }));
@@ -75,11 +55,8 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   /** Who the page shows as signed in: `me`'s answer, else the remembered person; undefined while not known. */
   const me: Me | null | undefined = meKnown ? answer : !hasSessionHint() ? null : remembered ?? (answer === 'error' ? null : undefined);
   const [details, setDetails] = useState<Record<number, Detail>>({});
-  const [pending, setPending] = useState<ReadonlySet<number>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
-  const [rowNotice, setRowNotice] = useState<{ key: string; text: string } | null>(null);
   // Writes the server has not answered yet. Nothing here counts as done.
-  const [saving, setSaving] = useState<Record<number, true>>({});
   const [sending, setSending] = useState<Record<number, Comment[]>>({});
   const [votePending, setVotePending] = useState<ReadonlySet<number>>(new Set());
   const [suggestionsSending, setSuggestionsSending] = useState<{ id: number; title: string; author: string }[]>([]);
@@ -88,7 +65,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const [announce, setAnnounce] = useState('');
   const [votes, setVotes] = useState<Record<number, boolean>>({});
   const [signinFailed] = useState(takeSigninFailure);
-  const pendingRef = useRef(new Set<number>());
 
   /** A state is shown, from memory or from the server. */
   const liveOk = live.state !== null;
@@ -98,13 +74,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   const waiting = !liveOk && live.load === 'pending' && !offline;
   const liveRefOk = useRef(liveOk);
   liveRefOk.current = liveOk;
-  /**
-   * The owner's marks and words show for someone the page shows as deciding, remembered or answered, and only in a
-   * build that offers verdicts (BuildData.decide).
-   */
-  const canDecide = data.decide && liveOk && me?.canDecide === true;
-  /** A verdict is sent only once `me` answered on this visit that this person decides. */
-  const mayDecide = data.decide && liveOk && meKnown && answer?.canDecide === true;
   const plan = useMemo(() => buildPlan(data, live.state), [data, live.state]);
   const rows = useMemo(() => allRows(plan), [plan]);
   const rowByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
@@ -245,12 +214,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     // Re-rendering, or the plan changing under the same open row, does not ask again.
   }, [openKey, openings, liveOk, signedInAs]);
 
-  const setBusy = (n: number, busy: boolean) => {
-    if (busy) pendingRef.current.add(n);
-    else pendingRef.current.delete(n);
-    setPending(new Set(pendingRef.current));
-  };
-
   // The count the server answered for a write; an older server answers none, and the count shown moves by one.
   const shownRef = useRef(shownState);
   shownRef.current = shownState;
@@ -293,49 +256,6 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     }
     const message = error instanceof ApiError ? error.message : 'Something went wrong.';
     setNotice(`${what}: not saved. ${message}`);
-  };
-
-  /** The one guard every verdict passes, by key or by click. */
-  const verdictReady = (row: Row): boolean => {
-    const n = row.issue;
-    return mayDecide && n !== null && n > 0 && Boolean(live.state?.issues[n]) && !pendingRef.current.has(n)
-      && nav.current.openedAt.has(row.key) && Date.now() - (nav.current.openedAt.get(row.key) as number) >= OPEN_GUARD_MS;
-  };
-
-  const sendVerdict = async (row: Row, verdict: Verdict | null) => {
-    const n = row.issue;
-    if (n === null || !live.state?.issues[n] || !verdictReady(row)) return;
-    setBusy(n, true);
-    setSaving((current) => ({ ...current, [n]: true }));
-    setNotice(null);
-    setRowNotice(null);
-    // The queue moves on at once; the row shows "Saving…" until the server answers.
-    if (nav.current.openedAt.has(row.key)) {
-      setAnnounce('');
-      nav.current.advanceFrom(row);
-      setAnnounce((next) => (next ? `${row.name}: saving. ${next}` : `${row.name}: saving`));
-    } else setAnnounce(`${row.name}: saving`);
-    try {
-      await api.verdict(n, verdict);
-      const confirmed = verdictPatch(verdict);
-      remember({ n, set: confirmed });
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        signedOut();
-        return;
-      }
-      // Back to the row that was refused.
-      nav.current.reopen(row);
-      const message = error instanceof ApiError ? error.message : 'Something went wrong.';
-      setRowNotice({ key: row.key, text: `${row.name}: not saved. ${message}` });
-    } finally {
-      setBusy(n, false);
-      setSaving((current) => {
-        const next = { ...current };
-        delete next[n];
-        return next;
-      });
-    }
   };
 
   const sendComment = async (row: Row, event: FormEvent) => {
@@ -392,7 +312,7 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
     setAnnounce('Sending suggestion');
     try {
       const { number } = await api.suggest(title, text);
-      const issue: LiveIssue = { kind: 'suggestion', entry: null, title, state: 'open', reason: null, verdict: null, up: 0, comments: 0, author, bot: false, createdAt: new Date().toISOString(), closedAt: null };
+      const issue: LiveIssue = { kind: 'suggestion', entry: null, title, state: 'open', reason: null, up: 0, comments: 0, author, bot: false, createdAt: new Date().toISOString(), closedAt: null };
       setDetails((current) => ({ ...current, [number]: { number, title, body: text, url: '', up: 0, comments: [] } }));
       remember({ n: number, set: issue });
     } catch (error) {
@@ -416,9 +336,9 @@ export function useWorkshop(data: BuildData, openKey: string | null, openKeys: R
   };
 
   return {
-    live, liveOk, waiting, offline, settled, me, meKnown, canDecide, mayDecide, retry, plan, rowByKey, details, prefetch, notes, wantNotes, fetchNow, pending, pendingRef, saving, sending, votePending,
-    votes, suggestionsSending, notice, rowNotice, setRowNotice, drafts, setDrafts, suggestDraft,
-    setSuggestDraft, announce, setAnnounce, signinFailed, verdictReady, sendVerdict, sendComment, toggleVote,
+    live, liveOk, waiting, offline, settled, me, retry, plan, rowByKey, details, prefetch, notes, wantNotes, fetchNow, sending, votePending,
+    votes, suggestionsSending, notice, drafts, setDrafts, suggestDraft,
+    setSuggestDraft, announce, setAnnounce, signinFailed, sendComment, toggleVote,
     sendSuggestion, signOut,
   };
 }

@@ -10,7 +10,6 @@ export interface TilesProps {
   groups: PartGroup[];
   /** The open part, or 'suggested'. */
   current: string | null;
-  toDecide: Map<string, number>;
   suggested: number;
   onOpen: (part: string) => void;
   onSuggest: () => void;
@@ -18,18 +17,16 @@ export interface TilesProps {
 
 const number = (n: number) => String(n).padStart(2, '0');
 
-function Tile({ group, on, todo, onOpen }: { group: PartGroup; on: boolean; todo: number; onOpen: (part: string) => void }) {
+function Tile({ group, on, onOpen }: { group: PartGroup; on: boolean; onOpen: (part: string) => void }) {
   const { counts, state } = group;
   const partBuilt = state !== 'done' && counts.built > 0;
   const share = Math.round((100 * counts.built) / Math.max(1, counts.built + counts.planned));
   return (
     <div className={`ws-tile s-${state}${partBuilt ? ' part-built' : ''}${on ? ' on' : ''}`} data-part={group.part.id} style={{ '--p': share } as CSSProperties}>
-      <button type="button" className="ws-tile-hit" aria-label={spoken(group, todo)} aria-current={on ? 'true' : undefined} onClick={() => onOpen(group.part.id)}>
+      <button type="button" className="ws-tile-hit" aria-label={spoken(group)} aria-current={on ? 'true' : undefined} onClick={() => onOpen(group.part.id)}>
         <span className="ws-tile-top">
           <span className="ws-num">{number(group.number)}</span>
-          <span className="ws-lab">
-            {todo ? <b className="ws-late-o">{todo} to decide</b> : stateWords(group)}
-          </span>
+          <span className="ws-lab">{stateWords(group)}</span>
         </span>
         <span className="ws-title"><i className="ws-mark" />{group.part.title}</span>
         <span className="ws-tline">{group.part.line}</span>
@@ -41,10 +38,10 @@ function Tile({ group, on, todo, onOpen }: { group: PartGroup; on: boolean; todo
   );
 }
 
-export function Tiles({ groups, current, toDecide, suggested, onOpen, onSuggest }: TilesProps) {
+export function Tiles({ groups, current, suggested, onOpen, onSuggest }: TilesProps) {
   const first = groups.filter((group) => group.first);
   const after = groups.filter((group) => !group.first);
-  const tile = (group: PartGroup) => <Tile key={group.part.id} group={group} on={current === group.part.id} todo={toDecide.get(group.part.id) ?? 0} onOpen={onOpen} />;
+  const tile = (group: PartGroup) => <Tile key={group.part.id} group={group} on={current === group.part.id} onOpen={onOpen} />;
   const on = current === 'suggested';
   return (
     <nav className="ws-board" aria-label="Parts, in build order">

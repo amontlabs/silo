@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Loads the Workshop in a real browser at several window sizes and places, and checks what a first visit shows.
-//   node scripts/load-check.mjs [url] [--slow-api <ms>] [--slow-script <ms>] [--owner]
+//   node scripts/load-check.mjs [url] [--slow-api <ms>] [--slow-script <ms>] [--signed-in]
 // The url defaults to the `workshop:dev --fake` server. --slow-api and --slow-script hold back the API's answers
-// and the page's script; --owner fakes the `me` answer as the owner.
+// and the page's script; --signed-in fakes the `me` answer as a signed-in person.
 // Each run prints when the page first painted, when each late item appeared, what the page's first frame held
 // and every layout shift, and checks the footer rule before the script has run and once everything has loaded.
 // Then come the visits that need a browser profile: a second visit, which draws what the first one showed in
-// its first frame, and the owner signed in through the fake GitHub's page (the real session marker), whose
-// second visit has the login and, when entries have threads, the owner's words in its first frame.
+// its first frame, and a person signed in through the fake GitHub's page (the real session marker), whose
+// second visit has the login in its first frame.
 // Last, with the page's script held, what the build drew into the page: the plain view in the first painted
 // frame and the script taking over without a move; at a part's address, the plain view never painted; on a
 // second visit, the remembered state drawn at the takeover without moving anything under the title row.
@@ -26,7 +26,6 @@ const SIZES = [[1440, 900], [1440, 1100], [2560, 1440], [1024, 1366], [390, 844]
 const LATE = {
   account: '#workshop-account > :not(.ws-ph)',
   votes: '.ws-vote',
-  'owner marks': '.ws.ws-owner',
   'Suggest a feature': '.ws-suggest',
 };
 // Room for rounding between boxes, in CSS pixels.
@@ -35,12 +34,12 @@ const SLACK = 1;
 const SHIFT_BUDGET = 0.01;
 
 function parseArgs(argv) {
-  const options = { url: 'http://127.0.0.1:4174/workshop', slowApi: 0, slowScript: 0, owner: false };
+  const options = { url: 'http://127.0.0.1:4174/workshop', slowApi: 0, slowScript: 0, signedIn: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--slow-api') options.slowApi = Number(argv[(i += 1)]);
     else if (arg === '--slow-script') options.slowScript = Number(argv[(i += 1)]);
-    else if (arg === '--owner') options.owner = true;
+    else if (arg === '--signed-in') options.signedIn = true;
     else if (!arg.startsWith('--')) options.url = arg;
     else throw new Error(`Unknown option ${arg}`);
   }
@@ -58,7 +57,6 @@ function recordTimeline(late) {
   // markup the build drew (marked data-prerendered until the script takes over) is not the app's render.
   let first = null;
   const frame = () => {
-    const words = [...document.querySelectorAll('.ws-detail .ws-word')].filter((node) => node.textContent === 'to decide').length;
     const rows = [...document.querySelectorAll('.ws-detail .ws-item')].filter((row) => row.querySelector('.ws-votes'));
     return {
       at: Math.round(performance.now()),
@@ -68,8 +66,6 @@ function recordTimeline(late) {
       rowsWithPlaceholder: rows.filter((row) => row.querySelector('.ws-votes .ws-ph-vote')).length,
       votes: document.querySelectorAll('.ws-vote').length,
       login: document.querySelector('#workshop-account .ws-login')?.textContent ?? null,
-      toDecideLink: document.querySelector('.ws-loglink b')?.textContent ?? null,
-      toDecideWords: words,
     };
   };
   const check = () => {
@@ -148,11 +144,11 @@ async function holdScripts(page, delay) {
   return release;
 }
 
-async function slowApi(page, delay, owner) {
+async function slowApi(page, delay, signedIn) {
   await page.route('**/api/workshop/**', async (route) => {
     if (delay) await wait(delay);
-    if (owner && new URL(route.request().url()).pathname === '/api/workshop/me') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ login: 'owner', avatar: '', canDecide: true }) });
+    if (signedIn && new URL(route.request().url()).pathname === '/api/workshop/me') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ login: 'signed-in', avatar: '' }) });
     } else await route.continue();
   });
 }
@@ -160,10 +156,10 @@ async function slowApi(page, delay, owner) {
 /** One load of one place at one size: the rule before the script runs, then the timeline and the rule after. */
 async function run(browser, options, [width, height], place, shared = null) {
   const context = shared ?? await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
-  if (options.owner && !shared) await context.addCookies([{ name: 'workshop-hint', value: '1', url: options.url }]);
+  if (options.signedIn && !shared) await context.addCookies([{ name: 'workshop-hint', value: '1', url: options.url }]);
   const page = await context.newPage();
   await page.addInitScript(recordTimeline, LATE);
-  await slowApi(page, options.slowApi, options.owner);
+  await slowApi(page, options.slowApi, options.signedIn);
   const release = await holdScripts(page, options.slowScript);
   await page.goto(options.url + place.hash, { waitUntil: 'commit' });
   // The page is parsed and styled; the held script has not run.
@@ -205,8 +201,6 @@ function firstFrame(first, wants) {
   if (wants.noPlaceholders && (first.rows === 0 || first.rowsWithPlaceholder !== 0)) problems.push(`${first.rowsWithPlaceholder} of ${first.rows} rows without a thread have a vote placeholder`);
   if (wants.votes && first.votes === 0) problems.push('no votes');
   if (wants.login && first.login !== wants.login) problems.push(`login ${JSON.stringify(first.login)}, not ${wants.login}`);
-  if (wants.toDecide && !/^\d+ to decide$/.test(first.toDecideLink ?? '')) problems.push('no "N to decide"');
-  if (wants.toDecide && first.toDecideWords === 0) problems.push('no "to decide" words in the rows');
   return problems;
 }
 
@@ -218,7 +212,6 @@ function report(result, wants = {}) {
     first.signIn ? 'sign-in' : null, first.suggest ? 'Suggest a feature' : null,
     first.rows ? `${first.rowsWithPlaceholder}/${first.rows} rows with a vote placeholder` : null,
     first.votes ? `${first.votes} votes` : null, first.login ? `login ${first.login}` : null,
-    first.toDecideLink ? `"${first.toDecideLink}"` : null, first.toDecideWords ? `${first.toDecideWords} "to decide" words` : null,
   ].filter(Boolean).join(', ') || 'nothing live' : '—';
   const frame = firstFrame(first, wants);
   const total = result.shifts.reduce((sum, shift) => sum + shift.value, 0);
@@ -252,26 +245,26 @@ async function signIn(context, url, login) {
 }
 
 /**
- * The visits that need a browser profile: a second visit, and the owner's second visit after signing in, at `rows`
+ * The visits that need a browser profile: a second visit, and the second visit of a person signed in, at `rows`
  * (the first place with entries' rows), or at the plain view when the plan has none.
  */
 async function visits(browser, options, rows, page$) {
   const place = rows ?? { name: 'plain view', hash: '' };
   const size = [1440, 900];
   const context = () => browser.newContext({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
-  const plain = { ...options, owner: false };
+  const plain = { ...options, signedIn: false };
   let passed = true;
   console.log('\nvisits in one browser profile');
   const visitor = await context();
-  // Votes and the owner's "to decide" are on entries' threads: without threads, neither shows.
+  // Votes are on entries' threads: without threads, none shows.
   const threads = page$.threads;
   passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, first visit` }, visitor)) }, { signIn: true, placeholders: Boolean(rows) && threads, noPlaceholders: Boolean(rows) && !threads }) && passed;
   passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, second visit` }, visitor)) }, { signIn: true, votes: Boolean(rows) && threads }) && passed;
   await visitor.close();
-  const owner = await context();
-  await signIn(owner, options.url, 'owner-fake');
-  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, owner-fake signed in, second visit` }, owner)) }, { votes: Boolean(rows) && threads, login: 'owner-fake', toDecide: Boolean(rows) && threads }) && passed;
-  await owner.close();
+  const person = await context();
+  await signIn(person, options.url, 'owner-fake');
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, owner-fake signed in, second visit` }, person)) }, { votes: Boolean(rows) && threads, login: 'owner-fake' }) && passed;
+  await person.close();
 
   // An entry of the first place with rows opened before the answers: the rows below it do not move when they arrive. The
   // entry has no comments: their number comes with the state, and their lines are not held before it.
@@ -532,13 +525,13 @@ async function main() {
   try {
     const page$ = await pageOf(browser, options.url);
     const list = page$.places;
-    console.log(`${options.url}, API held ${options.slowApi} ms, script held ${options.slowScript} ms${options.owner ? ', as the owner' : ''}`);
+    console.log(`${options.url}, API held ${options.slowApi} ms, script held ${options.slowScript} ms${options.signedIn ? ', signed in' : ''}`);
     for (const size of SIZES) {
       for (const place of list) {
         // Every run here is a first visit: nothing is remembered, so the first frame has the placeholders (none on a
         // row without a thread) and, signed out, the sign-in button and "Suggest a feature".
         const rows = Boolean(place.rows);
-        const wants = { signIn: !options.owner, suggest: place.hash === '', placeholders: rows && page$.threads, noPlaceholders: rows && !page$.threads };
+        const wants = { signIn: !options.signedIn, suggest: place.hash === '', placeholders: rows && page$.threads, noPlaceholders: rows && !page$.threads };
         passed = report(await run(browser, options, size, place), wants) && passed;
       }
     }

@@ -327,7 +327,7 @@ test('doctor: sources only, the App public and installed, its permissions, and o
   const ok = await run(['doctor'], { fake, box });
   assert.equal(ok.code, 0, ok.stdout);
   assert.match(ok.stdout, /^Label workshop:suggestion: yes$/m);
-  assert.doesNotMatch(ok.stdout, /verdict:|workshop:entry|workshop:building/);
+  assert.doesNotMatch(ok.stdout, /workshop:entry/);
   fake.public = false;
   assert.match((await run(['doctor'], { fake, box })).stdout, /Public: no/);
 });

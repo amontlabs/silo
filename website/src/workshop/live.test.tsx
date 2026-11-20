@@ -1,11 +1,11 @@
 // The first frame and the load: what the browser remembers, placeholders while nothing is known, the fresh ask
-// after an old answer, the retry and "Try again", and verdicts that wait for `me`.
+// after an old answer, the retry and "Try again", and the person `me` answers.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { App, OPEN_GUARD_MS } from './App';
+import { App } from './App';
 import type { Me } from './api';
 import { buildData, issue, liveState } from './fixtures';
 import type { LiveState } from './plan';
@@ -41,10 +41,25 @@ describe('the first frame', () => {
     expect(within(itemOf('Create and delete a computer')).getByLabelText('2 comments')).toBeInTheDocument();
     expect(screen.getByText('polarzero')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
-    // The owner's words, from memory.
-    expect(screen.getByRole('link', { name: /to decide/ })).toBeInTheDocument();
-    expect(within(itemOf('Create and delete a computer')).getByText('to decide')).toBeInTheDocument();
     expect(document.querySelector('.ws-ph')).toBeNull();
+  });
+
+  it('reads what an earlier page remembered: a person with a "decides" flag, a state with verdicts', async () => {
+    marker();
+    const old = liveState();
+    for (const [number, verdict] of [['10', 'take'], ['12', 'drop']]) old.issues[number] = { ...old.issues[number], verdict } as typeof old.issues[string];
+    localStorage.setItem(STATE, JSON.stringify(old));
+    localStorage.setItem(PERSON, JSON.stringify({ login: 'polarzero', avatar: '', canDecide: true }));
+    const answer = held<{ status: number; body: unknown }>();
+    mockApi({ state: () => answer.promise, routes: { 'GET me': () => answer.promise } });
+    history.replaceState(null, '', '/workshop#part-b');
+    render(<App data={buildData()} />);
+    expect(screen.getByText('polarzero')).toBeInTheDocument();
+    expect(votes('Create and delete a computer')).toBe('👍 12');
+    expect(screen.queryByText(/to decide/)).toBeNull();
+    expect(within(itemOf('Create and delete a computer')).queryByText('dropped')).toBeNull();
+    await act(async () => answer.release(ok(owner)));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(PERSON) ?? '{}')).toEqual({ login: 'polarzero', avatar: '' }));
   });
 
   it('renders sign-in at once without the session marker, without waiting for `state` or `me`', () => {
@@ -375,7 +390,7 @@ describe('the page\'s own writes over an answer', () => {
       const time = clock();
       let kept = null as LiveState | null;
       let model = null as { fetched: number; up: number } | null;
-      const writes: { at: number; up?: number; verdict?: 'take' | 'drop' }[] = [];
+      const writes: { at: number; up?: number; comments?: number }[] = [];
       for (let step = 0; step < 40; step += 1) {
         const roll = random();
         if (roll < 0.2) {
@@ -383,9 +398,9 @@ describe('the page\'s own writes over an answer', () => {
           writes.push({ at: Date.now(), up });
           keep({ n: 12, set: { up } }, Date.now());
         } else if (roll < 0.3) {
-          const verdict = random() < 0.5 ? 'take' : 'drop';
-          writes.push({ at: Date.now(), verdict });
-          keep({ n: 12, set: { verdict } }, Date.now());
+          const comments = Math.floor(random() * 50);
+          writes.push({ at: Date.now(), comments });
+          keep({ n: 12, set: { comments } }, Date.now());
         } else if (roll < 0.75) {
           const fetched = Date.now() - Math.floor(random() * 10 * 60_000) + Math.floor(random() * 3 * 60_000);
           const up = Math.floor(random() * 50);
@@ -399,15 +414,15 @@ describe('the page\'s own writes over an answer', () => {
         expect(kept.issues[12].up).toBe(model.up);
         expect(kept.old).toBeUndefined();
         let up = model.up;
-        let verdict: 'take' | 'drop' | null = null;
+        let comments = 5;
         for (const write of writes) {
           if (Date.now() - write.at >= 24 * 3600_000 || model.fetched > write.at + 60_000) continue;
           if (write.up !== undefined) up = write.up;
-          if (write.verdict) verdict = write.verdict;
+          if (write.comments !== undefined) comments = write.comments;
         }
         const shown = applyKept(kept, Date.now());
         expect(shown.issues[12].up).toBe(up);
-        expect(shown.issues[12].verdict).toBe(verdict);
+        expect(shown.issues[12].comments).toBe(comments);
         expect(applyKept(shown, Date.now())).toEqual(shown);
       }
       vi.restoreAllMocks();
@@ -429,30 +444,7 @@ describe('the page\'s own writes over an answer', () => {
   });
 });
 
-describe('verdicts and `me`', () => {
-  it('are not sent while only memory says the person decides, and are once `me` answered', async () => {
-    const time = clock();
-    marker();
-    remember(liveState(), owner);
-    const me = held<{ status: number; body: unknown }>();
-    const calls = mockApi({ routes: { 'GET me': () => me.promise } });
-    history.replaceState(null, '', '/workshop#part-b/create');
-    render(<App data={buildData()} />);
-    // The state is remembered: the row opens at once.
-    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'true');
-    await waitFor(() => expect(document.querySelector('.ws[data-live="answered"]')).not.toBeNull());
-    time.advance(OPEN_GUARD_MS);
-    const take = screen.getByRole('button', { name: /^Take/ });
-    expect(take).toHaveClass('ws-unarmed');
-    fireEvent.click(take);
-    fireEvent.keyDown(rowButton('Create and delete a computer'), { key: 'Enter' });
-    expect(posts(calls, 'verdict')).toHaveLength(0);
-    await act(async () => me.release(ok(owner)));
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Take/ })).not.toHaveClass('ws-unarmed'));
-    fireEvent.click(screen.getByRole('button', { name: /^Take/ }));
-    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
-  });
-
+describe('`me`', () => {
   it('say nothing on page load when the session is gone: the vote check waits for `me`', async () => {
     marker();
     remember(liveState(), visitor);
@@ -472,7 +464,7 @@ describe('verdicts and `me`', () => {
   it('follow `me` when it answers differently from memory', async () => {
     marker();
     remember(liveState(), owner);
-    mockApi({ me: { login: 'mara-k', avatar: '', canDecide: false } });
+    mockApi({ me: visitor });
     history.replaceState(null, '', '/workshop#part-b');
     render(<App data={buildData()} />);
     expect(screen.getByText('polarzero')).toBeInTheDocument();

@@ -1,6 +1,6 @@
 // The Workshop: the drawing of Silo (tiles on narrow screens), an opened part under it, and its entries
 // opening in place. Addresses follow routes.ts; the live state and every write live in useWorkshop.ts.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { loginUrl } from './api';
 import type { Me } from './api';
@@ -9,16 +9,13 @@ import { LatestPlace } from './Latest';
 import type { EntryContext } from './Entry';
 import { MapView } from './MapView';
 import { FOLD_HEIGHT, hasMap, MAP_WIDTH } from './map';
-import { awaitsVerdict, needsOwner, statusLine } from './plan';
-import type { PartState, BuildData, Notes, Row } from './plan';
-import { formatHash, HOME, placeFrom, placeOf, resolveHash, rowsOf, samePlace } from './routes';
+import { statusLine } from './plan';
+import type { PartState, BuildData, Notes } from './plan';
+import { formatHash, HOME, placeFrom, resolveHash, samePlace } from './routes';
 import type { Place } from './routes';
 import { SuggestPlace } from './Suggest';
 import { Tiles } from './Tiles';
-import { OPEN_GUARD_MS, useWorkshop } from './useWorkshop';
-import type { Nav } from './useWorkshop';
-
-export { OPEN_GUARD_MS } from './useWorkshop';
+import { useWorkshop } from './useWorkshop';
 
 export interface AppProps {
   data: BuildData;
@@ -56,7 +53,7 @@ export function Account({ me, signIn, tip, onSignOut }: { me: Me | null | undefi
 const noNotes = () => Promise.resolve({});
 
 type View = 'map' | 'order';
-type Focus = { kind: 'title' } | { kind: 'part'; part: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string } | { kind: 'buttons'; key: string };
+type Focus = { kind: 'title' } | { kind: 'part'; part: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string };
 
 const LEAVE_MS = 140;
 /** How long what just arrived is marked, for its fade in (about 150 ms). */
@@ -65,7 +62,6 @@ const ACCOUNT_WIDTH = 'silo-workshop-account-width';
 const SWAP_MS = 130;
 /** How long the map takes to fold, and an entry to open. */
 const FOLD_MS = 440;
-const ROW_MS = 240;
 const KEY: [PartState, string, string][] = [
   ['done', 'ws-pip built', 'done'], ['next', 'ws-pip next', 'next'],
   ['planned', 'ws-pip planned', 'planned'], ['open', 'ws-dash', 'not decided yet'],
@@ -88,25 +84,6 @@ function selectorOf(node: Element | null): string | null {
   if (tile?.dataset.part) return `.ws-tile[data-part="${tile.dataset.part}"] .ws-tile-hit`;
   return null;
 }
-
-/**
- * Entirely inside the part of the window a person sees: below the sticky header and the folded map when it is
- * stuck, above the bottom edge. An element without layout (no rendering engine) counts as seen.
- */
-export function seen(node: Element): boolean {
-  const box = node.getBoundingClientRect();
-  if (box.width === 0 && box.height === 0) return true;
-  let top = 0;
-  for (const cover of document.querySelectorAll('.site-header, .ws-swap-map')) {
-    if (getComputedStyle(cover).position !== 'sticky') continue;
-    const part = cover.getBoundingClientRect();
-    if (part.height > 0 && part.top <= box.top) top = Math.max(top, part.bottom);
-  }
-  return box.top >= top && box.bottom <= innerHeight;
-}
-
-/** A row's verdict buttons, where a person sees and presses them. */
-const verdictButtons = (item: Element | null) => item?.querySelector('.ws-btn.go')?.closest('.ws-state') ?? null;
 
 function isField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -194,16 +171,16 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const [view, setViewState] = useState<View>(initialView);
   const [leaving, setLeaving] = useState(false);
   const [swap, setSwap] = useState<'out' | 'in' | null>(null);
-  const [armedTick, setArmed] = useState(0);
   // While the fold drives the scroll, the folded map is not pinned yet: pinned, it would jump down first.
   const [lifting, setLifting] = useState(false);
   // While the page keeps its height after going back, the footer waits hidden; it fades in at its place.
   const [held, setHeld] = useState(false);
   // The first frames take the state as it is, without animating into it.
   const [boot, setBoot] = useState(true);
-  const nav = useRef<Nav>({ openKey: null, openedAt: new Map(), advanceFrom: () => {}, reopen: () => {} });
-  const w = useWorkshop(data, openKey, openKeys, openings, nav, loadNotes);
-  const { plan, rowByKey, live, canDecide } = w;
+  // The row opened last, read by handlers that run after a render.
+  const openKeyRef = useRef<string | null>(null);
+  const w = useWorkshop(data, openKey, openKeys, openings, loadNotes);
+  const { plan, rowByKey, live } = w;
   /** No state is shown and the first answer is still to come. */
   const holding = !live.state && live.load === 'pending';
   const focusNext = useRef<Focus | null>(null);
@@ -261,10 +238,9 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     return () => cancelAnimationFrame(frame);
   }, []);
   const later = (fn: () => void, ms: number) => { timers.current.push(setTimeout(fn, ms)); };
-  // What arrives after the first frames fades in where it stands: the numbers, the person, the owner's marks.
+  // What arrives after the first frames fades in where it stands: the numbers and the person.
   const arrivedState = useArrival(w.liveOk, boot);
   const arrivedPerson = useArrival(w.me !== undefined, boot);
-  const arrivedOwner = useArrival(canDecide, boot);
   useLayoutEffect(() => {
     if (accountSlot) accountSlot.classList.toggle('ws-arr-p', arrivedPerson);
   }, [accountSlot, arrivedPerson]);
@@ -272,25 +248,6 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const shown: Place = place;
   const isHome = shown.kind === 'home';
   const onMap = () => view === 'map' && wide();
-
-  const waiting = useCallback((row: Row) => needsOwner(row) && row.issue !== null && Boolean(live.state?.issues[row.issue]), [live.state]);
-  const toDecide = useMemo(() => new Map(canDecide ? plan.parts.map((group) => [group.part.id, group.rows.filter(waiting).length]) : []), [canDecide, plan, waiting]);
-  const totalToDecide = [...toDecide.values()].reduce((sum, n) => sum + n, 0);
-  const byBuildOrder = useMemo(() => plan.parts.flatMap((group) => group.rows).sort((a, b) => (a.n ?? 0) - (b.n ?? 0)), [plan]);
-  const free = (row: Row) => waiting(row) && !w.pendingRef.current.has(row.issue as number);
-
-  // Each open row's buttons look armed once its own guard has passed.
-  useEffect(() => {
-    const now = Date.now();
-    const waits = [...nav.current.openedAt.values()].map((at) => at + OPEN_GUARD_MS - now).filter((ms) => ms > 0);
-    if (!waits.length) return;
-    const timer = setTimeout(() => setArmed((n) => n + 1), Math.min(...waits) + 10);
-    return () => clearTimeout(timer);
-  }, [openKeys, openings, armedTick]);
-  const armed = (key: string) => {
-    const at = nav.current.openedAt.get(key);
-    return at !== undefined && Date.now() - at >= OPEN_GUARD_MS;
-  };
 
   /** Moves to a place, with at most the one row open. */
   function settle(next: Place, key: string | null) {
@@ -302,8 +259,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     setOpenKey(key);
     setOpenKeys(key ? new Set([key]) : new Set());
     if (key) setOpenings((n) => n + 1);
-    nav.current.openKey = key;
-    nav.current.openedAt = new Map(key ? [[key, Date.now()]] : []);
+    openKeyRef.current = key;
     navigations.current += 1;
   }
 
@@ -318,7 +274,6 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     address$(next, key, options.push);
     if (next.kind === 'part' && shown.kind === 'home') foldedAt.current = Date.now();
     settle(next, key);
-    w.setRowNotice((current) => (current?.key === key ? current : null));
     if (options.announce !== undefined) w.setAnnounce(options.announce);
     focusNext.current = options.focus ?? null;
   }
@@ -381,10 +336,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     });
     setOpenKey(row.key);
     setOpenings((n) => n + 1);
-    nav.current.openKey = row.key;
-    if (options.closing) nav.current.openedAt.delete(options.closing);
-    nav.current.openedAt.set(row.key, Date.now());
-    w.setRowNotice((current) => (current?.key === row.key ? current : null));
+    openKeyRef.current = row.key;
     w.setAnnounce(`${row.name}, open`);
     focusNext.current = options.focus ? { kind: 'row', key: row.key, reveal: options.reveal !== false } : null;
   }
@@ -396,49 +348,12 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
       next.delete(key);
       return next;
     });
-    nav.current.openedAt.delete(key);
-    if (openKey === key || nav.current.openKey === key) {
+    if (openKey === key || openKeyRef.current === key) {
       address$(shown, null);
       setOpenKey(null);
-      nav.current.openKey = null;
+      openKeyRef.current = null;
     }
   }
-
-  nav.current.advanceFrom = (row: Row) => {
-    const group = rowsOf(plan, placeFrom(row, shown, plan));
-    const at = group.findIndex((item) => item.key === row.key);
-    const ordered = at === -1 ? group : [...group.slice(at + 1), ...group.slice(0, at)];
-    // Another open entry here still waiting becomes the current one.
-    const waitingOpen = ordered.find((item) => item.key !== row.key && openKeys.has(item.key) && free(item));
-    // It is treated as freshly opened: its guard starts again and its buttons are brought into view.
-    if (waitingOpen) {
-      closeRow(row.key);
-      address$(shown, waitingOpen.key);
-      setOpenKey(waitingOpen.key);
-      setOpenings((n) => n + 1);
-      nav.current.openKey = waitingOpen.key;
-      nav.current.openedAt.set(waitingOpen.key, Date.now());
-      focusNext.current = { kind: 'buttons', key: waitingOpen.key };
-      w.setAnnounce(`${waitingOpen.name}, open`);
-      return;
-    }
-    const fresh = (item: Row) => item.key !== row.key && free(item) && !openKeys.has(item.key);
-    const next = ordered.find(fresh) ?? byBuildOrder.find(fresh);
-    const take = document.getElementById(row.key)?.querySelector('.ws-btn.go')?.getBoundingClientRect().top;
-    // With a mouse, the next Take comes under the pointer; on a touch screen, the row is only brought into view.
-    const coarse = media('(pointer: coarse)', false);
-    openRow(next?.key ?? null, { focus: true, reveal: coarse, push: false, closing: row.key });
-    if (!coarse && next && take !== undefined && samePlace(placeFrom(next, shown, plan), shown)) {
-      // Measured once the rows have finished opening and closing, then once more after the comments came in.
-      const follow = () => {
-        const now = document.getElementById(next.key)?.querySelector('.ws-btn.go')?.getBoundingClientRect().top;
-        if (now !== undefined && Math.abs(now - take) > 1) scrollBy({ top: now - take, behavior: still() ? 'instant' : 'smooth' });
-      };
-      later(follow, ROW_MS);
-      later(follow, ROW_MS + 420);
-    }
-  };
-  nav.current.reopen = (row: Row) => openRow(row.key, { focus: true, push: false });
 
   function back() {
     // A going-back under way lands at its time: a second one (the button pressed twice, Escape again) changes nothing.
@@ -587,13 +502,12 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     if (holding || !key) return;
     heldOpen.current = null;
     if (!rowByKey.has(key)) return;
-    nav.current.openedAt.set(key, Date.now());
     setOpenKeys((current) => new Set([...current, key]));
     // When the person opened another row meanwhile, that row stays the current one and keeps the address.
-    if (nav.current.openKey !== null) return;
+    if (openKeyRef.current !== null) return;
     setOpenKey(key);
     setOpenings((n) => n + 1);
-    nav.current.openKey = key;
+    openKeyRef.current = key;
     focusNext.current = { kind: 'reveal', key };
   }, [holding, rowByKey]);
   // After Back or Forward showed the other view, the focus that was in the hidden one lands in the one shown; a link
@@ -615,14 +529,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     const target = focusNext.current;
     if (!target) return;
     focusNext.current = null;
-    if (target.kind === 'buttons') {
-      document.getElementById(target.key)?.querySelector<HTMLElement>('.ws-row')?.focus({ preventScroll: true });
-      // Once the decided row above has closed, the buttons come fully into view if they are not already.
-      later(() => {
-        const buttons = verdictButtons(document.getElementById(target.key));
-        if (buttons && !seen(buttons)) buttons.scrollIntoView?.({ block: 'center', behavior: still() ? 'instant' : 'smooth' });
-      }, ROW_MS);
-    } else if (target.kind === 'row' || target.kind === 'reveal') {
+    if (target.kind === 'row' || target.kind === 'reveal') {
       const item = document.getElementById(target.key);
       if (target.kind === 'row') item?.querySelector<HTMLElement>('.ws-row')?.focus({ preventScroll: true });
       // While the map folds, the page under it moves: the row is brought into view once the fold is done.
@@ -690,38 +597,12 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
     }, SWAP_MS)];
   }
 
-  const mainAction = (row: Row) => {
-    if (!w.verdictReady(row)) return;
-    if (awaitsVerdict(row)) void w.sendVerdict(row, 'take');
-  };
-
-  const shownRows = rowsOf(plan, shown);
   const keyHandler = useRef<(event: KeyboardEvent) => void>(() => {});
   keyHandler.current = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && !isHome && !isField(event.target)) {
       // A held key repeats: only the press itself goes back.
       if (!event.repeat) back();
-      return;
     }
-    if (event.key !== 'Enter' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (!w.mayDecide || isField(event.target)) return;
-    // One rule, whatever holds the focus: the open row that contains the focus, else the row opened last, takes
-    // Enter only if it is armed, waits for a verdict and its verdict buttons are entirely where the person sees
-    // them. Other buttons and links keep their own Enter.
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    const control = target?.closest('button, a, summary');
-    if (control && !control.classList.contains('ws-row')) return;
-    // On a row's own header, that row is the only target: a closed one keeps the button's Enter, which opens it.
-    // Only with the focus on no control at all does Enter go to the row opened last.
-    const own = control ? control.closest<HTMLElement>('.ws-item') : null;
-    if (control && !own?.classList.contains('open')) return;
-    const item = own ?? target?.closest<HTMLElement>('.ws-item.open') ?? (openKey ? document.getElementById(openKey) : null);
-    const row = item ? rowByKey.get(item.id) : undefined;
-    const buttons = verdictButtons(item);
-    if (!row || !needsOwner(row) || !openKeys.has(row.key) || !shownRows.includes(row) || !armed(row.key) || !buttons || !seen(buttons)) return;
-    event.preventDefault();
-    if (event.repeat) return;
-    mainAction(row);
   };
   useEffect(() => {
     const listener = (event: KeyboardEvent) => keyHandler.current(event);
@@ -731,9 +612,8 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
 
   const signIn = loginUrl(typeof location === 'undefined' ? '' : location.hash);
   const ctx: EntryContext = {
-    w, signIn, mainAction, open: openKeys,
+    w, signIn, open: openKeys,
     onToggle: (row) => (openKeys.has(row.key) ? closeRow(row.key) : openRow(row.key)),
-    armed: (row) => w.mayDecide && armed(row.key),
   };
   const account = <Account me={w.me} signIn={signIn} tip={plan.threads} onSignOut={() => void w.signOut()} />;
 
@@ -751,7 +631,6 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const present = new Set(plan.parts.map((group) => group.state));
   const suggested = plan.suggestions.filter((row) => row.status !== 'dropped').length;
   const current = shown.kind === 'part' ? shown.part : shown.kind === 'suggested' ? 'suggested' : null;
-  const firstToDecide = byBuildOrder.find(free);
   const link = (target: Place) => (event: { preventDefault: () => void }) => {
     event.preventDefault();
     openPlace(target);
@@ -760,7 +639,7 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   let detail = null;
   if (shown.kind === 'part') {
     const group = plan.parts.find((item) => item.part.id === shown.part);
-    if (group) detail = <PartPlace group={group} toDecide={toDecide.get(group.part.id) ?? 0} ctx={ctx} onBack={back} notes={notes} />;
+    if (group) detail = <PartPlace group={group} ctx={ctx} onBack={back} notes={notes} />;
   } else if (shown.kind === 'suggested') detail = <SuggestPlace ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'left') detail = <LeftPlace rows={plan.left} ctx={ctx} onBack={back} notes={notes} />;
   else if (shown.kind === 'product') detail = <ProductPlace rows={plan.product} ctx={ctx} onBack={back} notes={notes} />;
@@ -771,8 +650,8 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
   const firstPlace = useRef<string | null>(null);
   if (boot && !isHome) firstPlace.current = formatHash(shown);
   else if (!boot && firstPlace.current !== null && firstPlace.current !== formatHash(shown)) firstPlace.current = null;
-  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'ws-leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', canDecide ? 'ws-owner' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '',
-    arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : '', arrivedOwner ? 'ws-arr-o' : ''].filter(Boolean).join(' ');
+  const classes = ['ws', isHome ? 'is-sheet' : 'is-open', `v-${view}`, leaving ? 'ws-leaving' : '', swap ? `swap-${swap}` : '', boot ? 'ws-boot' : '', lifting ? 'ws-lifting' : '', held ? 'ws-keeping' : '',
+    arrivedState ? 'ws-arr-s' : '', arrivedPerson ? 'ws-arr-p' : ''].filter(Boolean).join(' ');
   return (
     <>
       {accountSlot ? createPortal(account, accountSlot) : accountSlot === false ? null : <div className="ws-account-inline">{account}</div>}
@@ -784,11 +663,6 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
           </div>
           <div className="ws-top-side">
             <div className="ws-tools">
-              {canDecide && firstToDecide ? (
-                <a className="ws-loglink ws-late-o" href={formatHash(placeOf(firstToDecide), firstToDecide.key)} onClick={(event) => { event.preventDefault(); openRow(firstToDecide.key, { focus: true }); }}>
-                  <b>{totalToDecide} to decide</b>
-                </a>
-              ) : null}
               {mapped ? (
                 <div className="ws-seg" role="group" aria-label="Arrangement">
                   <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>Map</button>
@@ -803,11 +677,11 @@ export function App({ data, loadNotes = noNotes, accountSlot }: AppProps) {
         </section>
         {mapped ? (
           <div className="ws-swap ws-swap-map">
-            <MapView layout={data.map} groups={plan.parts} folded={!isHome && !leaving} current={current} toDecide={toDecide} onOpen={(part) => openPlace({ kind: 'part', part })} />
+            <MapView layout={data.map} groups={plan.parts} folded={!isHome && !leaving} current={current} onOpen={(part) => openPlace({ kind: 'part', part })} />
           </div>
         ) : null}
         <div className="ws-swap ws-swap-order">
-          <Tiles groups={plan.parts} current={current} toDecide={toDecide} suggested={suggested} onOpen={(part) => openPlace({ kind: 'part', part })} onSuggest={() => openPlace({ kind: 'suggested' })} />
+          <Tiles groups={plan.parts} current={current} suggested={suggested} onOpen={(part) => openPlace({ kind: 'part', part })} onSuggest={() => openPlace({ kind: 'suggested' })} />
         </div>
         {isHome ? (
           <div className="ws-under">

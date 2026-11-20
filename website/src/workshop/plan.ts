@@ -28,7 +28,6 @@ export interface Entry {
   /** A feature's `what`, a decision's `answer` (null while it has none). */
   what: string | null;
   needs: string[];
-  suggest: { verdict: Verdict | null; why: string | null } | null;
   verdict: Verdict | null;
   /** A decision's `replaces`: the ids of the decisions it takes the place of. */
   replaces: string[];
@@ -62,8 +61,6 @@ export interface BuildData {
   entries: Entry[];
   /** Where the parts sit on the map: Silo's own (map.ts), or the example the tests draw. Without places, no map. */
   map: MapLayout;
-  /** Whether the owner's verdict buttons may show. The server has no verdict route: off in the real build. */
-  decide: boolean;
   /** Whether entries have threads on GitHub (votes, comments, history). Off in the real build: no entry has one yet. */
   threads: boolean;
 }
@@ -74,7 +71,6 @@ export interface LiveIssue {
   title: string;
   state: 'open' | 'closed';
   reason: null | 'completed' | 'not_planned';
-  verdict: Verdict | null;
   up: number;
   comments: number;
   /** How many of its comments are history lines. */
@@ -120,7 +116,6 @@ export interface Row {
   part: string | null;
   /** Place in order.json, for entries. */
   n: number | null;
-  suggest: Entry['suggest'];
   /** Whether the entry has notes. */
   notes: boolean;
   /** The day the file says it was built. */
@@ -130,8 +125,6 @@ export interface Row {
   /** People's comments: the issue's comments less its history lines. */
   comments: number | null;
   updates: number;
-  /** The owner's verdict as its issue records it. It never changes the status, which comes from the file. */
-  recorded: Verdict | null;
   /** The keys of the rows of the decisions this one replaces, or would replace while it has no verdict. */
   replaces: string[];
   /** The key of the row of the decision that replaced this one. */
@@ -232,17 +225,17 @@ export function entryStatuses(entries: Entry[]): Map<string, Status> {
   }));
 }
 
-/** A suggestion: closed as not planned is dropped, closed as completed is built, else its verdict label. */
+/** A suggestion, by its issue alone: closed as not planned is dropped, closed as completed is built, open is not decided. */
 function suggestionStatus(live: LiveIssue): Status {
   if (live.state === 'closed' && live.reason === 'completed') return 'built';
   if (live.state === 'closed' && live.reason === 'not_planned') return 'dropped';
-  return live.verdict === 'take' ? 'planned' : live.verdict === 'drop' ? 'dropped' : 'undecided';
+  return 'undecided';
 }
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, suggest: null, notes: false, built: null,
-    author: null, up: null, comments: null, updates: 0, recorded: null, replaces: [], replacedBy: null, date: null, closedAt: null,
+    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, built: null,
+    author: null, up: null, comments: null, updates: 0, replaces: [], replacedBy: null, date: null, closedAt: null,
   };
 }
 
@@ -316,7 +309,6 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
       row.updates = Math.max(0, Math.min(issue.updates ?? 0, issue.comments));
       row.up = issue.up;
       row.comments = issue.comments - row.updates;
-      row.recorded = issue.verdict === 'take' || issue.verdict === 'drop' ? issue.verdict : null;
       row.closedAt = issue.closedAt;
     }
   };
@@ -330,7 +322,6 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
     row.stage = entry.stage;
     row.part = entry.part;
     row.n = entry.position;
-    row.suggest = entry.suggest;
     row.notes = entry.notes;
     row.built = entry.built;
     // A dropped decision replaces nothing, so it names nothing.
@@ -386,16 +377,6 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
 export function allRows(plan: Plan): Row[] {
   return [...plan.parts.flatMap((group) => group.rows), ...plan.product, ...plan.suggestions];
 }
-
-/**
- * A feature the owner may still take or drop: undecided in its file, with a real issue that records no verdict yet.
- * Decisions are taken with `plan take`.
- */
-export function awaitsVerdict(row: Row): boolean {
-  return row.kind === 'entry' && row.of === 'feature' && row.status === 'undecided' && row.recorded === null && row.issue !== null && row.issue > 0;
-}
-
-export const needsOwner = awaitsVerdict;
 
 /** By the field names of a history marker (tools/workshop/model): `area` is that wire format's name for the part. */
 const PHRASES: Record<string, string> = {

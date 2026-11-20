@@ -7,7 +7,7 @@ import { hasSessionHint } from './api';
 import { compareLink, featureFileAt } from '../../../tools/workshop/model/index.js';
 import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
-import { awaitsVerdict, changesText, changeWords, isDecided, relativeTime, shortDate } from './plan';
+import { changesText, changeWords, isDecided, relativeTime, shortDate } from './plan';
 import type { Change, Row } from './plan';
 import { formatHash, placeOf } from './routes';
 import type { Detail, Workshop } from './useWorkshop';
@@ -23,11 +23,8 @@ export interface EntryContext {
   w: Workshop;
   signIn: string;
   onToggle: (row: Row) => void;
-  mainAction: (row: Row) => void;
   /** The rows open now. */
   open: ReadonlySet<string>;
-  /** Whether this row's verdict buttons act now: it was opened last and its guard has passed. */
-  armed: (row: Row) => boolean;
 }
 
 const WORDS: Partial<Record<Row['status'], string>> = { planned: 'planned', built: 'built', dropped: 'dropped' };
@@ -149,19 +146,16 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   });
   useEffect(() => () => clearTimeout(settling.current), []);
 
-  const isSaving = row.issue !== null && w.saving[row.issue] === true;
-  const live = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
-  const owed = w.canDecide && live && awaitsVerdict(row);
-  const word = isSaving ? 'Saving…' : owed ? 'to decide' : (row.of === 'decision' ? DECISION_WORDS : WORDS)[row.status];
+  const word = (row.of === 'decision' ? DECISION_WORDS : WORDS)[row.status];
   const quiet = !isDecided(row);
-  const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : '', owed ? 'owed' : ''].filter(Boolean).join(' ');
+  const classes = ['ws-item', `st-${row.status}`, open ? 'open' : '', quiet ? 'quiet' : ''].filter(Boolean).join(' ');
   return (
     <li className={classes} id={row.key}>
       <div className="ws-line">
         <button type="button" className="ws-row" aria-expanded={open} aria-controls={`${row.key}-more`} onClick={() => ctx.onToggle(row)} onPointerEnter={() => w.prefetch(row)} onPointerDown={() => w.prefetch(row)} onTouchStart={() => w.prefetch(row)} onFocus={() => w.prefetch(row)}>
           <i className={pipClass(row)} aria-hidden="true" />
           <span className="ws-name">{row.name}</span>
-          <b className={isSaving ? 'ws-word ws-pending' : owed ? 'ws-word ws-late-o' : 'ws-word'}>{word ?? ''}</b>
+          <b className="ws-word">{word ?? ''}</b>
         </button>
         <Side row={row} ctx={ctx} />
       </div>
@@ -204,33 +198,7 @@ function Side({ row, ctx }: { row: Row; ctx: EntryContext }) {
   );
 }
 
-function VerdictButtons({ row, ctx }: { row: Row; ctx: EntryContext }) {
-  const { w } = ctx;
-  const busy = row.issue !== null && w.pending.has(row.issue);
-  // Each open row has its own guard: until it has passed, the buttons look as inert as they are.
-  const armed = ctx.armed(row);
-  const cls = (name: string) => `${name}${armed ? '' : ' ws-unarmed'}`;
-  const act = (fn: () => void) => () => {
-    if (!ctx.armed(row)) return;
-    fn();
-  };
-  const suggested = row.suggest?.verdict ?? null;
-  return (
-    <>
-      <div className="ws-state ws-late-o">
-        <button type="button" className={cls('ws-btn go')} disabled={busy} onClick={act(() => ctx.mainAction(row))}>Take <kbd>↵</kbd></button>
-        <button type="button" className={cls('ws-btn')} disabled={busy} onClick={act(() => void w.sendVerdict(row, 'drop'))}>Drop</button>
-      </div>
-      {suggested ? <p className="ws-hint">Suggested: {suggested}.{row.suggest?.why ? ` ${row.suggest.why}` : ''}</p> : null}
-    </>
-  );
-}
-
-function StateLine({ row, ctx }: { row: Row; ctx: EntryContext }) {
-  const { w } = ctx;
-  const hasIssue = row.issue !== null && Boolean(w.live.state?.issues[row.issue]);
-  if (row.issue !== null && w.saving[row.issue]) return <div className="ws-state"><span className="ws-muted">Saving…</span></div>;
-  if (w.canDecide && hasIssue && (row.issue as number) > 0 && awaitsVerdict(row)) return <VerdictButtons row={row} ctx={ctx} />;
+function StateLine({ row }: { row: Row }) {
   const text = stateText(row);
   const tone = isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
   return <div className="ws-state"><span className={tone}>{text}</span></div>;
@@ -390,7 +358,7 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   if (w.me || (w.me === undefined && !signedOut)) {
     box = (
       <form className="ws-box" onSubmit={(event) => void w.sendComment(row, event)}>
-        <textarea aria-label="Comment" disabled={!w.me} placeholder={w.canDecide ? 'Reply…' : 'Add a comment'} maxLength={5000} rows={1} value={w.drafts[row.key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
+        <textarea aria-label="Comment" disabled={!w.me} placeholder="Add a comment" maxLength={5000} rows={1} value={w.drafts[row.key] ?? ''} onChange={(event) => w.setDrafts((current) => ({ ...current, [row.key]: event.target.value }))} />
         <button type="submit" className="ws-btn" disabled={!(w.drafts[row.key] ?? '').trim()}>Comment</button>
         {github}
       </form>
@@ -481,8 +449,7 @@ function Body({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
     <div className="ws-more-pad">
       {what ? <div className="ws-what"><RichText text={what} /></div> : null}
       {row.kind === 'entry' ? <Extras row={row} ctx={ctx} /> : null}
-      {w.rowNotice?.key === row.key ? <p className="ws-row-notice" role="alert">{w.rowNotice.text}</p> : null}
-      <StateLine row={row} ctx={ctx} />
+      <StateLine row={row} />
       <ReplaceLines row={row} ctx={ctx} />
       {threaded(row, ctx) ? <Talk row={row} ctx={ctx} detail={detail} /> : null}
     </div>

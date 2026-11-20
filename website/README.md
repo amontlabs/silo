@@ -44,8 +44,8 @@ npm --prefix website run dev
 
 The page preview is at http://127.0.0.1:4173. The Workshop there has no API.
 To look at a later state without the API, open
-`http://127.0.0.1:4173/workshop/?fixture=later` (verdicts with their
-history lines) or `?fixture=today`; add `&as=owner` or `&as=visitor` to
+`http://127.0.0.1:4173/workshop/?fixture=later` (with history
+lines) or `?fixture=today`; add `&as=in` to
 be signed in (`&login=<name>` for another login), `&delay=2000` to hold the live state and the sign-in answer back,
 and `&detail=700` to hold each entry's comments back. The page's memory of the last visit is off with a fixture,
 so `&delay=` shows a first visit; `&memory=1` turns it on. This exists only in
@@ -69,17 +69,14 @@ an ordinary issue and a pull request. It also serves the files of the
 repository at a commit as `raw.githubusercontent.com` does, and the runner
 names it to the page (`<meta name="workshop-raw">`), so "Text changed" opens.
 Sign-in goes through the fake's page, which offers two people: `owner-fake`
-(admin, can decide) and `visitor-fake` (read only). Everything lives in memory
-and resets on restart.
+and `visitor-fake`. Everything lives in memory and resets on restart.
 
-`--fake --progress` seeds a later state instead: the entries of the first six
-stages carry the verdict of their file, else the one suggested for them, the
-first two taken are being built, and the thread of each decided entry holds the
-bot's history comments of every kind beside people's comments over the last
-days. Nothing shows as built that the file does not say is built (the page
-reads `built` from the file), and every history line agrees with the state the
-sample shows: "Built" only on an entry built, and an entry's last verdict line
-is its verdict.
+`--fake --progress` seeds a later state instead: the thread of each entry of the
+first six stages holds the bot's history comments of every kind beside people's
+comments over the last days. Nothing shows as built that the file does not say
+is built (the page reads `built` from the file), and every history line agrees
+with the plan: "Built" only on an entry built, and an entry's last verdict line
+is the verdict of its file, else the one suggested for it.
 The runner prints what it seeded.
 
 Without `--fake`, the server uses GitHub with the `WORKSHOP_*` variables of the
@@ -106,19 +103,18 @@ rows and whether entries have threads are read from the page's data
 from its counts of rows (`placesOf`, tested in `load-check.test.mjs`); whether
 it draws a map is read
 from the page. For each load it prints when the page first
-painted, when the account, the votes, the owner's marks and "Suggest a
+painted, when the account, the votes and "Suggest a
 feature" appeared, what the page's first frame held, and every layout shift
 with their total. Every one of these loads is a first visit: its first frame
-must hold the sign-in button (unless `--owner`), "Suggest a feature" on the
+must hold the sign-in button (unless `--signed-in`), "Suggest a feature" on the
 plain view, and on the first place with rows (the first part that has rows,
 else the whole product) a vote placeholder on every row when entries have threads, none on
 any row when they have not. Then, in one browser profile at 1440 × 900, that
 place (the plain view when the plan has no row) is visited twice (with threads,
-the second visit must have the votes in its first frame), and the owner signs
+the second visit must have the votes in its first frame), and a person signs
 in through the fake GitHub's page as `owner-fake` (so the session cookie, its
-marker and the remembered person are real) and visits again: the login, and
-with threads "N to decide" and the rows' "to decide", must be in its first
-frame (the app's first frame: the markup the build drew does not count). Then
+marker and the remembered person are real) and visits again: the login must
+be in its first frame (the app's first frame: the markup the build drew does not count). Then
 an entry of that place without comments is opened before the answers, at 1440 × 900 and
 390 × 844, and the rows below it must not move when they arrive; and
 `#suggested` is visited signed in with nobody remembered, and the list must not
@@ -131,7 +127,7 @@ error when that check fails, a first frame lacks what it must hold, or a
 load's layout shifts add up to more than 0.01 (the key gains an item when the
 state arrives, a shift of a few ten-thousandths). `--slow-api <ms>` holds back
 each API answer, `--slow-script <ms>` holds back the page's script, and
-`--owner` fakes the `me` answer as the owner. Last, with the page's script
+`--signed-in` fakes the `me` answer as a signed-in person. Last, with the page's script
 held (run it with `--slow-script 3000`) and the API held longer, it loads the
 built page at 1440 × 900: on the plain view the first painted frame must hold
 the map (or the tiles, without a map) when the plan has parts, and the sign-in
@@ -167,8 +163,7 @@ the Workshop server against its fake GitHub, including the Vercel output
 layout and the local server), then the page's Vitest tests.
 
 The fake GitHub answers like GitHub where it matters to the server: expiring user tokens
-with PKCE, a single-use refresh token, grant revocation, the permission
-endpoint answering 200 with `none` for a non-collaborator, ETags and `304` on
+with PKCE, a single-use refresh token, grant revocation, ETags and `304` on
 listings, the repository-wide comment list with `sort`, `direction` and
 `since`, comment edits and deletions, primary and
 secondary rate limits, locked issues, and a hook that delays or fails any call.
@@ -190,12 +185,11 @@ nothing else, or the build stops. `map-example.ts` is a made-up layout of five
 parts that shows every kind of thing a layout can hold; the tests draw their
 fixture plan (`fixtures.ts`) with it, and the page never shows it.
 
-The page's data (`BuildData`) carries two switches, both off in the real build
-and on in the tests' fixture plan. `decide` switches the owner's verdict
-buttons, "N to decide" and the owner's marks; `threads` switches entries'
-issues on GitHub. Off, the code behind them and its tests stay. The server has
-no verdict route: decisions and features are taken or dropped with `plan take`
-and `plan drop`.
+The page's data (`BuildData`) carries one switch, `threads`. It switches entries'
+issues on GitHub: off in the real build, on in the tests' fixture plan. Off, the
+code behind it and its tests stay. The page has no way to take or drop an entry
+and the server has no verdict route: decisions and features are taken or dropped
+with `plan take` and `plan drop`.
 
 With `threads` off, no issue is matched to an entry, even an old one whose
 marker names it, and an entry shows its text, its notes and its state with
@@ -270,8 +264,7 @@ What a person sees:
   "Replaced by", with the question of the decision that replaced it as a link
   that opens it where it lives. A decision that names others in `replaces`
   shows "Replaces" (taken) or "Would replace" (no verdict) with their questions
-  as links; a dropped one shows no such line. A replaced decision offers the
-  owner no verdict, as a taken one offers none. In Latest, a change of
+  as links; a dropped one shows no such line. In Latest, a change of
   `replaces` reads "Replaces changed".
 - A part's state, counts and the line under the title come from its features
   only: done (something built, nothing planned), next (the part holding the
@@ -294,10 +287,10 @@ What a person sees:
   nothing. The suggest form shows whenever the person is shown signed in and
   keeps its draft; it sends only while a state is shown.
 - What the page shows first: the plan is in the bundle. The live state (votes,
-  comments, suggestions, the owner's marks) and who is signed in come from
+  comments, suggestions) and who is signed in come from
   `GET state` and `GET me`, and the page remembers both in local storage
   (`memory.ts`): the newest answer as the server sent it, and the signed-in
-  login, avatar and whether they decide. The page's own confirmed writes are
+  login and avatar. The page's own confirmed writes are
   kept apart (`writes.ts`), as a list with each one's time, of values set: a
   new suggestion, and for a vote or a comment the count the server
   answered for that write (`up`, `comments`; the count shown plus or minus one
@@ -308,7 +301,8 @@ What a person sees:
   is dropped after a day, the page's own comments after six minutes. Both are drawn in the
   first frame. The person is used only while the `workshop-hint` cookie is
   there, and forgotten on sign-out, on a 401 and when `me` answers signed out; a
-  state over 7 days old or of another shape is ignored. Without the cookie the
+  state over 7 days old or of another shape is ignored, and so is a field that
+  an older page stored and this one does not read. Without the cookie the
   visitor is signed out from the first frame ("Sign in with GitHub", "Sign in to
   comment", "Sign in to suggest").
 - The load: `state` is asked once. Its answer is shown unless the state shown
@@ -324,9 +318,9 @@ What a person sees:
   and the suggest form; notes have their own while their chunk loads. They
   pulse slowly (not with reduced motion), are `aria-hidden`, and their region
   is `aria-busy`. Nothing has a placeholder that may not come (comment counts,
-  "N suggested", the owner's marks, anything of a thread an entry does not
-  have). What arrives after the first frames (numbers, the account, the
-  owner's marks, a new item of the key) fades in over 150 ms where it stands;
+  "N suggested", anything of a thread an entry does not
+  have). What arrives after the first frames (numbers, the account, a new
+  item of the key) fades in over 150 ms where it stands;
   nothing fades on navigation or when a row opens, or with reduced motion.
 - An open entry shows its text, then "Notes" (its `<id>.md`), closed by
   default, and opened in place: headings, paragraphs, lists, http and https
@@ -389,7 +383,7 @@ Back and Forward move between places; opening a row replaces the address.
 | File | What |
 | --- | --- |
 | `App.tsx` | Places, addresses, focus, keyboard, the layout. |
-| `useWorkshop.ts` | Live state and every write: the load, pending writes, the verdict guard. |
+| `useWorkshop.ts` | Live state and every write: the load, pending writes. |
 | `MapView.tsx`, `Tiles.tsx` | The map and the tiles. |
 | `PartView.tsx`, `Suggest.tsx`, `Latest.tsx` | An opened part, the whole product's decisions and what is left out; the suggestions; the latest changes. |
 | `Entry.tsx` | One row and what it shows open: the text, notes, the state, and for a row with a thread the thread with its history lines. |
@@ -404,26 +398,20 @@ and nothing is written at run time apart from GitHub issues.
 
 | Label | What the issue is |
 | --- | --- |
-| `workshop:entry` | An older issue the bot created for one feature. Nothing creates these any more. The body ends with `<!-- silo-synced: <commit> -->` and `<!-- silo-entry: <id> -->`; the server removes both before answering. |
+| `workshop:entry` | An older issue the bot created for one feature. Nothing creates these any more. The body ends with `<!-- silo-entry: <id> -->`; the server removes it before answering. |
 | `workshop:suggestion` | A feature suggested by a visitor. |
 
 An issue that carries the retired label `workshop:decision` is not part of the
-Workshop. An older entry may carry a verdict label (`verdict:take`,
-`verdict:later` or `verdict:drop`) and be closed as "not planned" or
-"completed"; the server still reads these, nothing sets them any more, and an
-entry's status comes from its file alone. Votes are 👍 reactions and
-comments are issue comments. The history is the bot's history comments, whose
+Workshop. An entry's status comes from its file alone. A suggestion's status
+comes from its issue alone: open is not decided, closed as "not planned" is
+dropped, closed as "completed" is built. Votes are 👍 reactions and comments are
+issue comments. The history is the bot's history comments, whose
 last line is `<!-- silo-change: {…} -->` (see `tools/workshop/README.md`); the
 server gives it to the page as `change`. Only a comment by the Workshop's own
 App is read for it: its `performed_via_github_app` id is the configured App id
 (`WORKSHOP_APP_ID`), or its author is the App's account, `<slug>[bot]` (the
 slug read from the installation). A comment by any other bot is an ordinary
 comment.
-
-An older entry may also carry `workshop:building` ("Being built now"). Nothing
-sets or removes it any more. The server counts the label only on an open entry
-that also carries `verdict:take`, so a label left on an issue reopened by hand
-shows nothing.
 
 ## The API
 
@@ -432,8 +420,8 @@ JSON.
 
 | Endpoint | Who | What |
 | --- | --- | --- |
-| `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, verdict, 👍 count, comment count, author, dates. An open entry carrying both `workshop:building` and `verdict:take` also has `"building": true`; the field is absent on every other issue. An entry with history comments among those held has `updates`, their number. `latest`: the newest 30 comments held on entries, newest first, each `{ n, entry, author, bot, createdAt }` with `change` for a history comment, else `text`, its first line cut to 140 characters. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
-| `GET me` | signed in | `{ login, avatar, canDecide }`; `canDecide` is false when the permission could not be read (the next `me` tries again). 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
+| `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, 👍 count, comment count, author, dates. An entry with history comments among those held has `updates`, their number. `latest`: the newest 30 comments held on entries, newest first, each `{ n, entry, author, bot, createdAt }` with `change` for a history comment, else `text`, its first line cut to 140 characters. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
+| `GET me` | signed in | `{ login, avatar }`, read from the session cookie alone: it calls nothing on GitHub. 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
 | `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text, a history comment with its parsed `change`; `more: true` when GitHub counts more. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
@@ -562,8 +550,6 @@ seconds plus the 10 seconds of CDN cache.
   one Workshop label or that are pull requests are skipped. The two lists are
   merged entries first, so an issue in both is read as an entry and entries
   come first against the 2,000 cap.
-  `building` is read from the labels of the same lists, so it costs no call of
-  its own, and a label added or removed on GitHub shows at the next refresh.
   Each page is sent with `If-None-Match` and the ETag GitHub gave for it last
   time; a `304 Not Modified` means the page is unchanged and the held copy is
   reused. Vote counts come from each issue's reaction summary in that list.
@@ -608,8 +594,8 @@ URL each time and always counts.
 
 ### The installation token and its ceilings
 
-The installation token is spent only on the snapshot refresh, the permission
-check, the repository lookup at sign-in and labelling a suggestion. Each has
+The installation token is spent only on the snapshot refresh, the repository
+lookup at sign-in and labelling a suggestion. Each has
 its own ceiling per instance, so that no use can starve another, and nothing
 a visitor does without signing in can make `suggest`,
 `comment`, `vote` or `me` answer 429:
@@ -617,14 +603,12 @@ a visitor does without signing in can make `suggest`,
 | Use | Calls a minute |
 | --- | --- |
 | Snapshot refresh | 40 |
-| Permission check for accounts not known to decide | 12 |
-| Permission re-read for accounts known to decide (nobody else can spend it) | 4 |
 | Repository lookup at sign-in (once per instance, then remembered) | 4 |
 | Labelling a suggestion, and the label retries (charged per call) | 20 |
 
-Worst case per instance per hour: (40 + 12 + 4 + 4 + 20) × 60 = 80 × 60 =
-4,800 calls, below the installation's 5,000. The largest refresh is 20 issue
-pages + 15 comment pages = 35 calls, which fits in a minute's 40, and 80 calls
+Worst case per instance per hour: (40 + 4 + 20) × 60 = 64 × 60 =
+3,840 calls, below the installation's 5,000. The largest refresh is 20 issue
+pages + 15 comment pages = 35 calls, which fits in a minute's 40, and 64 calls
 a minute is far below GitHub's secondary limit of 900 points a minute for
 `GET` requests. Calls to GitHub's token endpoint are not installation calls;
 new sign-ins have a ceiling of 30 a minute and token refreshes of existing
@@ -647,8 +631,8 @@ always counts against GitHub's limit):
 **The limit is shared by every instance.** The 5,000 calls an hour belong to
 the installation, and every warm instance spends from them. At about 130 calls
 an hour each, about 38 warm instances that are all idle use up the hour;
-two instances spending at their ceilings (4,800 an hour each) use it up in
-about half an hour. Nothing in this code can prevent that: instances do not
+two instances spending at their ceilings (3,840 an hour each) use it up in
+about 40 minutes. Nothing in this code can prevent that: instances do not
 know about each other. When it happens, GitHub answers with a rate limit, every
 instance keeps serving its snapshot (stale after 10 minutes), and the
 snapshots catch up when the hour resets.
@@ -661,13 +645,11 @@ snapshots catch up when the hour resets.
   with `retry-after`, or whose message mentions a rate limit), nothing calls
   GitHub with the installation token until the time GitHub gave (at most an
   hour).
-- Each signed-in person may make 20 writes a minute per instance; people known
-  to be able to decide have their own allowance of 120. Sign-out counts as a
-  write. A person may make 3 suggestions a minute and 10 an hour; an attempt
+- Each signed-in person may make 20 writes a minute per instance. Sign-out
+  counts as a write. A person may make 3 suggestions a minute and 10 an hour; an attempt
   counts only when the issue was created.
 - Each session may make 60 GitHub calls a minute for reads (`GET vote` and the
-  reads before a write), or 300 for a person known to be able to decide; more
-  answer 429. The reads a whole action needs are checked before its first
+  reads before a write); more answer 429. The reads a whole action needs are checked before its first
   call.
 - A session GitHub has rejected (a 401, an invalid refresh token, a revoked
   grant) is remembered by a hash of its token for a day (at most 10,000) and
@@ -685,10 +667,8 @@ snapshots catch up when the hour resets.
   Steps are ordered so that a cut is safe to retry: `comment` skips
   posting when the same person posted the identical text on that issue in the
   last five minutes.
-- Concurrent permission checks for the same person share one call.
-- `me` reads the cookie and calls GitHub only for the permission check (cached
-  five minutes); it never refreshes the user token, and a failed permission
-  read answers `canDecide: false` rather than an error.
+- `me` reads the cookie and calls nothing on GitHub; it never refreshes the user
+  token.
 - `suggest` refuses with 429 before creating anything when the installation
   is blocked or the label ceiling is reached. If labelling a new suggestion
   still fails twice, the answer is 502 with its `number`, and the number is
@@ -709,7 +689,7 @@ snapshots catch up when the hour resets.
 | `website/server/github.mjs` | GitHub REST client with pagination and an 8-second limit per call; errors carry a status and the identity used, never a body. |
 | `website/server/app-auth.mjs` | App JWT (RS256, Node's `crypto`) and the cached installation token. |
 | `website/server/session.mjs` | Sealed cookies (AES-256-GCM). |
-| `website/server/issues.mjs` | Kinds, the verdict labels of older entries, the markers (read with `tools/workshop/model/`), which comments are the App's own, and the cuts. |
+| `website/server/issues.mjs` | Kinds, the markers (read with `tools/workshop/model/`), which comments are the App's own, and the cuts. |
 | `website/server/snapshot.mjs` | The in-memory snapshot that answers every anonymous read, and its refresh. |
 | `website/server/workshop.mjs` | Every endpoint, independent of the HTTP server. |
 | `website/server/node.mjs` | Adapter for Node's `req`/`res`, used by Vercel and the local server. |
@@ -825,8 +805,8 @@ Then generate a private key and a client secret, and install the App on
 credentials; `workshop store` finishes a setup whose Keychain step failed. The
 repository needs the label `workshop:suggestion`, which the site puts on each
 new suggestion; `workshop doctor` checks the credentials, the installation, the
-permissions and that label. The other Workshop labels stay on older issues and
-nothing sets them. `workshop decline <issue> --why "…"` closes a suggestion as
+permissions and that label. `workshop:entry` stays on older issues and nothing
+sets it. `workshop decline <issue> --why "…"` closes a suggestion as
 not planned, with the reason as the bot's comment.
 
 For local work against the real GitHub, create a second App the same way with
@@ -898,7 +878,7 @@ origin differs.
 **Identities and scope.** The App can only read and write issues of the one
 repository, and the installation token is requested for that repository with
 those two permissions. The installation token serves only the snapshot refresh,
-the permission check and labelling a suggestion
+the repository lookup at sign-in and labelling a suggestion
 (which a visitor cannot do). Everything else done for a signed-in person,
 including reading the issue before a write, uses that person's token, so
 GitHub's own permissions apply (a locked issue refuses a visitor's comment)
@@ -909,25 +889,6 @@ drops the cached token; it never signs anyone out. *Limit:* if labelling a
 suggestion fails twice, the new issue stays outside the Workshop until a
 background retry labels it (in memory, on that instance only), and the answer
 carries its number.
-
-**Deciding.** `canDecide` is GitHub's answer: the person's permission on the
-repository (`write`, `maintain` or `admin`), read with the installation token
-and cached five minutes by GitHub account id, for yes and for no; that one
-cache serves `me`. The permission is read for the
-account's current login, asked of GitHub with the person's own token at that
-moment, never the login in the cookie, and the answer must be about the same
-account id as the session. Writes are not preceded by a re-read: they use the
-person's own token, and GitHub itself refuses a write by someone without
-access; such a refusal (403) drops that person's cached yes,
-and only a yes. Accounts known to be able to decide re-read on an allowance
-nobody else's requests can spend; a read that says no removes the account
-from them.
-Reading the permission with the person's own token (`GET /repos/{owner}/{repo}`
-and its `permissions` object) was considered: GitHub's reference for that
-endpoint lists `permissions` in the response schema but does not say which
-kinds of token receive it
-([Get a repository](https://docs.github.com/en/rest/repos/repos#get-a-repository),
-read 2026-11-16), so the documented collaborator permission endpoint is used.
 
 **Secrets in output.** Logs are one JSON line per request with the endpoint,
 the status and GitHub's status only. Errors sent to the browser are fixed
@@ -951,7 +912,6 @@ services:
   `Accept: application/json`, including `code_verifier` and `repository_id`;
 - whether a refreshed user token stays limited to the repository;
 - a visitor removing their own 👍 with their user token;
-- the collaborator permission endpoint with only the Metadata read permission;
 - that `waitUntil()` of the request context keeps a Build Output
   Node.js function alive after the response, as documented for Vercel
   Functions (the code does not depend on it);

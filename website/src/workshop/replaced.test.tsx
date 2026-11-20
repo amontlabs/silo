@@ -58,11 +58,6 @@ describe('a replaced decision', () => {
     expect(rowButton(CURRENT)).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('offers the owner no verdict', async () => {
-    const item = await openFrom('#product/plain-logs', OLD);
-    expect(within(item).queryByRole('button', { name: /^(Take|Drop)/ })).not.toBeInTheDocument();
-  });
-
   it('leaves the browser a click with a modifier key', async () => {
     const item = await openFrom('#product/plain-logs', OLD);
     const link = within(item).getByRole('link', { name: CURRENT });

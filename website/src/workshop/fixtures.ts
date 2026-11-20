@@ -160,10 +160,10 @@ export function emptyPlanFiles(): Map<string, string> {
 
 const NOTES = new WeakMap<BuildData, Notes>();
 
-/** The fixture plan drawn on the example map, with the owner's verdicts and entries' threads on: what the tests exercise. */
+/** The fixture plan drawn on the example map, with entries' threads on: what the tests exercise. */
 export function buildData(options?: Parameters<typeof planFiles>[0]): BuildData {
   const files = planFiles(options);
-  const data = buildDataFrom(files, { map: EXAMPLE_MAP, decide: true, threads: true });
+  const data = buildDataFrom(files, { map: EXAMPLE_MAP, threads: true });
   NOTES.set(data, notesFrom(files));
   return data;
 }
@@ -176,7 +176,7 @@ export function fixtureNotes(data: BuildData): Notes {
 const day = '2026-11-14T10:00:00Z';
 
 export function issue(fields: Partial<LiveIssue>): LiveIssue {
-  return { kind: 'entry', entry: null, title: '', state: 'open', reason: null, verdict: null, up: 0, comments: 0, author: 'silo-workshop[bot]', bot: true, createdAt: day, closedAt: null, ...fields };
+  return { kind: 'entry', entry: null, title: '', state: 'open', reason: null, up: 0, comments: 0, author: 'silo-workshop[bot]', bot: true, createdAt: day, closedAt: null, ...fields };
 }
 
 export const SHA = { a: 'a'.repeat(40), b: 'b'.repeat(40), c: 'c'.repeat(40), d: 'd'.repeat(40) };
@@ -186,18 +186,18 @@ export function historyComment(id: number, change: Change, createdAt: string): C
   return { id, author: 'silo-workshop[bot]', avatar: '', bot: true, createdAt, text: changeComment(change), change };
 }
 
-/** Live state: `core` is taken on GitHub, `create` has votes, comments and history lines. */
+/** Live state: `core` has votes, `create` has votes, comments and history lines. */
 export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLatest[] = []): LiveState {
   return {
     repo: 'amontlabs/silo',
     fetchedAt: new Date(Date.now()).toISOString(),
     issues: {
-      10: issue({ entry: 'core', title: 'The engine runs on its own', verdict: 'take', up: 8 }),
+      10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8 }),
       11: issue({ entry: 'calls', title: 'Every call defined once', up: 3 }),
       12: issue({ entry: 'create', title: 'Create and delete a computer', up: 12, comments: 5, updates: 3 }),
       13: issue({ entry: 'exec', title: 'Run a command', up: 4 }),
       14: issue({ entry: 'fork', title: 'Fork a computer', up: 21 }),
-      15: issue({ entry: 'shells', title: 'Your shell inside', verdict: 'take' }),
+      15: issue({ entry: 'shells', title: 'Your shell inside' }),
       16: issue({ entry: 'linux', title: 'A Linux server' }),
       17: issue({ entry: 'reviewer', title: 'A hosted reviewer' }),
       30: issue({ kind: 'suggestion', title: 'Start a task from Slack', up: 9, author: 'devin-oss', bot: false }),

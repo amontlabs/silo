@@ -26,7 +26,7 @@ test('anonymous reads cannot make a signed-in person\'s request answer 429', asy
         if (i % 20 === 0) await t.workshop.idle();
       }
       const me = await owner.call('GET', 'me');
-      assert.deepEqual([me.status, me.json.canDecide], [200, true]);
+      assert.deepEqual([me.status, me.json.login], [200, 'owner-fake']);
       for (const [who, path, body] of [
         [visitor, 'comment', { n: 1, text: 'still here' }],
         [visitor, 'vote', { n: 1, on: true }],
@@ -40,16 +40,12 @@ test('anonymous reads cannot make a signed-in person\'s request answer 429', asy
   } finally { await t.close(); }
 });
 
-test('me: an unreadable permission is canDecide false and is read again; a 401 clears the hint cookie', async () => {
+test('me answers the login and the avatar and nothing else; a 401 clears the hint cookie', async () => {
   const t = await setup();
   try {
     const c = t.client();
     await c.signIn('owner-fake');
-    t.fake.state.hook = (r) => (r.path.endsWith('/permission') ? { status: 503 } : null);
-    const failed = await c.call('GET', 'me');
-    assert.deepEqual([failed.status, failed.json.login, failed.json.canDecide], [200, 'owner-fake', false]);
-    t.fake.state.hook = null;
-    assert.equal((await c.call('GET', 'me')).json.canDecide, true, 'the next me tries again');
+    assert.deepEqual((await c.call('GET', 'me')).json, { login: 'owner-fake', avatar: 'https://avatars.example.test/owner-fake.png' });
 
     const hinted = t.client();
     hinted.jar.set('workshop-hint', '1');
@@ -180,6 +176,6 @@ test('state answers 503 not_configured when the App is not installed on the repo
 });
 
 test('the installation ceilings are separate and sum to under 5,000 calls an hour', () => {
-  const perMinute = BUDGET.refreshCallsPerMinute + BUDGET.permissionChecksPerMinute + BUDGET.signinLookupsPerMinute + BUDGET.labelCallsPerMinute;
+  const perMinute = BUDGET.refreshCallsPerMinute + BUDGET.signinLookupsPerMinute + BUDGET.labelCallsPerMinute;
   assert.ok(perMinute * 60 < 5000, `${perMinute * 60}`);
 });

@@ -54,10 +54,6 @@
 .ws-top-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 .ws-top { position: relative; }
 .ws-tools { display: flex; align-items: center; gap: 16px; min-height: 28px; }
-.ws-loglink { font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
-.ws-loglink b { font-weight: 400; color: var(--accent-ink); }
-.ws-loglink:hover, .ws-loglink[aria-current="page"] { color: var(--accent-ink); }
-.ws .ws-loglink:focus-visible { outline-offset: 3px; }
 .ws-seg { display: flex; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); }
 .ws .ws-seg button { padding: 4px 11px; font: 12px/18px var(--mono); color: var(--muted); border-radius: 2px; transition: background-color .16s, color .16s; }
 .ws .ws-seg button:hover { color: var(--ink); }
@@ -75,7 +71,6 @@
 .ws-pip.planned::before { border-color: var(--ink); }
 .ws-pip.undecided::before { border-color: color-mix(in srgb, var(--faint) 70%, transparent); }
 .ws-pip.dropped::before, .ws-pip.replaced::before { width: 9px; height: 1.5px; border: 0; border-radius: 0; background: var(--faint); }
-.ws-owner .ws-pip.undecided::before { border-color: var(--accent-ink); }
 
 /* ---- the map: each box carries its full and its folded place ---- */
 .ws-mapsec { position: relative; container-type: inline-size; border-bottom: 1px solid var(--line); background: var(--paper); }
@@ -129,7 +124,6 @@
 .ws-gl { position: absolute; color: var(--g); fill: none; stroke: currentColor; stroke-width: 1; overflow: visible; transition: opacity .2s, color .3s; }
 .ws-gl text { font: 9.5px var(--mono); fill: currentColor; stroke: none; }
 .ws-gl .solid { fill: currentColor; stroke: none; }
-.ws-todo { position: absolute; top: -12px; right: 8px; min-width: 22px; height: 18px; padding: 0 5px; border: 1px solid var(--accent-ink); border-radius: 8px; background: var(--paper); font: 500 12px/16px var(--mono); color: var(--accent-ink); text-align: center; transition: opacity .2s; }
 
 .ws-part.s-open .ws-p-st { visibility: hidden; }
 .ws .ws-part.s-planned, .ws .ws-part.s-next { --g: var(--muted); border-style: solid; border-color: var(--ink); color: var(--ink); }
@@ -145,9 +139,9 @@
 .ws-stage.fold .ws-p-ttl { left: calc(10 * var(--u)); top: calc((var(--ch) * var(--u) - 2px - 1.3em) / 2); transform: none; font-size: max(12px, calc(12.5 * var(--u))); }
 .ws-stage.fold .ws-part.inner .ws-p-ttl { left: calc(8 * var(--u)); font-size: max(12px, calc(12 * var(--u))); }
 .ws-stage.fold .ws-part.tall .ws-p-ttl { top: calc(8 * var(--u)); transform: none; }
-.ws-stage.fold .ws-p-st, .ws-stage.fold .ws-gl, .ws-stage.fold .ws-todo { opacity: 0; transition: opacity .1s; }
+.ws-stage.fold .ws-p-st, .ws-stage.fold .ws-gl { opacity: 0; transition: opacity .1s; }
 /* Unfolding, the words come back once their boxes have grown. */
-.ws-stage:not(.fold) :is(.ws-p-st, .ws-gl, .ws-todo) { transition: opacity .18s .24s, color .3s; }
+.ws-stage:not(.fold) :is(.ws-p-st, .ws-gl) { transition: opacity .18s .24s, color .3s; }
 .ws-tip { position: fixed; z-index: 30; left: 0; top: 0; max-width: 270px; padding: 5px 9px 6px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-hover); box-shadow: 0 6px 18px #0000001a, 0 1px 3px #0000000f; font-size: 12.5px; line-height: 1.35; pointer-events: none; animation: ws-appear .12s both; }
 
 /* ---- the sheet: tiles in build order ---- */
@@ -271,7 +265,6 @@
 .st-dropped .ws-name, .st-replaced .ws-name { color: var(--faint); text-decoration: line-through; }
 .ws-item.open .ws-name { color: var(--ink); }
 .ws-word { font: 400 12px var(--mono); color: var(--muted); white-space: nowrap; min-width: 66px; text-align: right; }
-.ws-item.owed .ws-word { color: var(--accent-ink); }
 .ws-side { display: flex; align-items: center; font: 12px var(--mono); color: var(--faint); white-space: nowrap; }
 .ws-by { margin-right: 14px; }
 .ws-votes { width: 52px; }
@@ -294,7 +287,6 @@
 .ws-date { font: 12px var(--mono); color: var(--faint); }
 .ws-replace { margin-top: 10px; font-size: 14px; color: var(--muted); max-width: 70ch; overflow-wrap: anywhere; }
 .ws-replace span { font: 12px var(--mono); color: var(--faint); }
-.ws-hint { color: var(--faint); font: 12px/1.5 var(--mono); margin-top: 9px; max-width: 70ch; }
 .ws-talk { margin-top: 16px; display: grid; gap: 11px; border-top: 1px solid var(--line); padding-top: 14px; max-width: 720px; }
 .ws-earlier { justify-self: start; }
 .ws-c { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; font-size: 14px; }
@@ -319,8 +311,6 @@
 .ws .ws-btn.go:hover:not(:disabled) { background: var(--accent-hover); border-color: #d68200; }
 .ws .ws-btn:focus-visible { outline-offset: 2px; }
 .ws .ws-btn:disabled { opacity: .5; }
-.ws-btn kbd { font: 12px/1.2 var(--mono); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; opacity: .6; }
-.ws-row-notice { margin: 12px 0 0; max-width: 60ch; padding: 8px 12px; border: 1px solid var(--no); border-radius: 3px; color: var(--no); font-size: 13.5px; }
 .ws-notice { position: fixed; z-index: 30; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); padding: 9px 14px; border: 1px solid var(--no); border-radius: 3px; background: var(--paper); box-shadow: 0 6px 18px #0000001f; color: var(--no); font-size: 13.5px; animation: ws-appear .2s var(--ease-out) both; }
 .ws-pending { opacity: .55; }
 .ws-item.ws-pending .ws-line:hover { background: none; }
@@ -364,8 +354,7 @@
 @media (max-width: 1199.98px) {
   .ws-top { flex-wrap: wrap; gap: 14px; }
   .ws-top-side { margin-left: 0; width: 100%; align-items: flex-start; gap: 8px; }
-  .ws-tools { min-height: 0; position: absolute; top: 30px; right: 24px; }
-  .ws-tools:not(:has(.ws-loglink)) { display: none; }
+  .ws-tools { display: none; }
   .is-sheet .ws-tile .ws-pips { margin-right: 0; }
   .ws-key { justify-content: flex-start; }
 }
@@ -373,7 +362,6 @@
   .ws-noscript { padding: 0 16px 24px; }
   .ws-top { padding: 26px 16px 16px; }
   .ws-top h1 { font-size: 34px; }
-  .ws-tools { top: 26px; right: 16px; flex-direction: column; align-items: flex-end; gap: 0; }
   .ws-key { min-height: 36px; align-content: flex-start; }
   .is-sheet .ws-band-first, .is-sheet .ws-band-after { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .is-sheet .ws-band > .ws-tile.ws-tile:last-child { grid-column: auto; }
@@ -401,7 +389,6 @@
   .ws-line { padding-right: 16px; gap: 8px; }
   .ws .ws-row { padding-left: 10px; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; }
   .ws-word { display: none; }
-  .ws-word.ws-pending { display: block; min-width: 0; }
   .ws-votes { width: 46px; }
   .ws-talks { width: 32px; }
   .ws-by { display: none; }
@@ -441,18 +428,17 @@
 @media (max-width: 480px) { .ws-login { display: none; } }
 @media (max-width: 380px) { .ws-pip { width: 11px; } }
 .ws-c-ghost { height: 42px; border-radius: 3px; background: color-mix(in srgb, var(--line) 40%, transparent); }
-.ws .ws-btn.ws-unarmed { opacity: .45; }
 .ws .ws-btn { transition: background-color .16s, border-color .16s, opacity .2s; }
 .ws-what { overflow-wrap: anywhere; }
 .ws-by { display: inline-block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .ws-more-pad .ws-box { max-width: 720px; }
 .ws-signin { line-height: 1.4; }
 /* Faint text is for numbers and drawing labels; what a person reads or presses is muted. */
-.ws-side, .ws .ws-vote, .ws-signin, .ws-gh, .ws-hint, .ws-link { color: var(--muted); }
+.ws-side, .ws .ws-vote, .ws-signin, .ws-gh, .ws-link { color: var(--muted); }
 /* Small controls get a taller target than they look. */
 .ws .ws-vote { padding: 8px 5px; margin: -8px -5px; }
 .ws .ws-back { padding: 12px 0; margin: -8px 0; }
-.ws-fold-link, .ws-loglink { display: inline-block; padding: 8px 0; margin: -8px 0; }
+.ws-fold-link { display: inline-block; padding: 8px 0; margin: -8px 0; }
 @media (max-width: 640px) { .workshop-shell .site-header .ws-account-slot .button.small { font-size: 12px; } }
 .ws-account .ws-link { padding: 8px 0; margin: -8px 0; }
 /* For a visitor who would rather not sign in here: the entry's issue, right under the sign-in box. */
@@ -551,7 +537,7 @@
 .ws-hold #workshop-root[data-prerendered] .ws > :not(.ws-top), .ws-hold .workshop-shell:has(#workshop-root[data-prerendered]) .ws-foot { visibility: hidden; }
 
 /* What arrives after the first frames fades in where it stands. */
-.ws-arr-s .ws-late-s, .ws-arr-o .ws-late-o, .ws-arr-p .ws-late-p, .ws-key .ws-in, .ws-status.ws-in, #workshop-account.ws-arr-p > * { animation: ws-appear .15s ease-out both; }
+.ws-arr-s .ws-late-s, .ws-arr-p .ws-late-p, .ws-key .ws-in, .ws-status.ws-in, #workshop-account.ws-arr-p > * { animation: ws-appear .15s ease-out both; }
 @media (prefers-reduced-motion: reduce) {
   #workshop-account > *, #workshop-account::before { animation: none !important; transition: none !important; }
 }

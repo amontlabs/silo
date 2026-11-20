@@ -1,4 +1,4 @@
-// The Workshop while the plan holds no part, as the real build draws it: no map, no verdicts, no threads.
+// The Workshop while the plan holds no part, as the real build draws it: no map, no threads.
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +11,7 @@ const empty = () => buildDataFrom(emptyPlanFiles());
 
 // Issues of features the plan no longer holds, as sync leaves them: closed, with their label.
 const withGoneEntries = () => liveState({
-  40: issue({ entry: 'gone-feature', title: 'Gone', verdict: 'take', state: 'closed', reason: 'not_planned', closedAt: '2026-11-18T00:00:00Z' }),
+  40: issue({ entry: 'gone-feature', title: 'Gone', state: 'closed', reason: 'not_planned', closedAt: '2026-11-18T00:00:00Z' }),
 });
 
 describe('the Workshop with an empty plan', () => {

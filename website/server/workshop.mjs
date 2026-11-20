@@ -5,7 +5,7 @@
 // Identities: anonymous reads are answered from the in-memory snapshot
 // (snapshot.mjs), which alone reads GitHub for them, with the installation
 // token. Everything done for a signed-in person uses that person's token,
-// except the permission check and labelling a suggestion.
+// except labelling a suggestion.
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAppAuth } from './app-auth.mjs';
@@ -25,23 +25,17 @@ export const LIMITS = { text: 5000, title: 120 };
 // The rest are per person (writes, suggestions) and per session (GitHub reads).
 export const BUDGET = {
   refreshCallsPerMinute: 40,
-  permissionChecksPerMinute: 12,
-  deciderChecksPerMinute: 4,
   signinLookupsPerMinute: 4,
   labelCallsPerMinute: 20,
   tokenExchangesPerMinute: 30,
   tokenRenewalsPerMinute: 60,
   writesPerMinute: 20,
-  deciderWritesPerMinute: 120,
   suggestionsPerMinute: 3,
   suggestionsPerHour: 10,
   sessionReadsPerMinute: 60,
-  deciderSessionReadsPerMinute: 300,
 };
 const CEILINGS = {
   refresh: ['refreshCallsPerMinute', true],
-  permission: ['permissionChecksPerMinute', true],
-  decider: ['deciderChecksPerMinute', true],
   signin: ['signinLookupsPerMinute', true],
   label: ['labelCallsPerMinute', true],
   exchange: ['tokenExchangesPerMinute', false],
@@ -49,7 +43,6 @@ const CEILINGS = {
 };
 export const DEADLINE = 12_000;
 const RECENT_POST = 5 * 60_000;
-const PERMISSION_TTL = 5 * 60_000;
 const REFRESH_MARGIN = 5 * 60_000;
 const MAX_BLOCK = 60 * 60_000;
 const UNLABELLED_LIMIT = 100;
@@ -143,9 +136,6 @@ export function createWorkshop({
 
   let blockedUntil = 0;
   const ceilings = Object.fromEntries(Object.keys(CEILINGS).map((name) => [name, { start: 0, used: 0 }]));
-  const permissions = new Map();
-  const permissionPending = new Map();
-  const deciders = new Set();
   const refreshing = new Map();
   const writes = counter(60_000);
   const suggestionsMinute = counter(60_000);
@@ -209,8 +199,6 @@ export function createWorkshop({
       if (error.status === 401) return json(502, { error: 'github_failed', message: 'GitHub did not answer. Try again later.' });
       if (error.status === 404 || error.status === 410) return json(404, { error: 'not_found', message: 'This is not a Workshop issue.' });
       if (error.status === 403) {
-        // GitHub refused the person: a cached "can decide" is dropped (a cached "cannot" stays).
-        if (error.as === 'user' && ctx.session && permissions.get(ctx.session.id)?.value === true) permissions.delete(ctx.session.id);
         return json(403, { error: 'forbidden', message: 'GitHub did not allow this.' });
       }
       if (error.status === 422) return json(400, { error: 'rejected', message: 'GitHub did not accept this.' });
@@ -300,16 +288,11 @@ export function createWorkshop({
 
   const installationRequest = (method, path, options = {}) => asInstallation((token) => github.request(method, path, { ...options, token, as: 'installation' }));
 
-  // The reads a session may make a minute: more for a person known to be able to decide.
-  function readLimit(session) {
-    return cachedPermission(session.id)?.value === true ? BUDGET.deciderSessionReadsPerMinute : BUDGET.sessionReadsPerMinute;
-  }
-
   // A call with the person's token. Reads count in the session's own ceiling; a change marks the
   // request as having changed GitHub, so a refresh follows.
   async function userRequest(session, method, path, options = {}) {
     if (method === 'GET') {
-      const wait = sessionReads.take(hash(session.t), readLimit(session), now());
+      const wait = sessionReads.take(hash(session.t), BUDGET.sessionReadsPerMinute, now());
       if (wait) tooMany(wait);
     }
     const answer = await github.request(method, path, { ...options, token: session.t, as: 'user' });
@@ -348,16 +331,6 @@ export function createWorkshop({
     },
   }) : null;
 
-  // Shares one in-flight call per key between concurrent requests.
-  function shared(map, key, start) {
-    let pending = map.get(key);
-    if (!pending) {
-      pending = detach(start).finally(() => map.delete(key));
-      map.set(key, pending);
-    }
-    return bounded(pending);
-  }
-
   // GitHub data
 
   // The issue as the signed-in person sees it, refused unless it is a Workshop issue.
@@ -388,41 +361,6 @@ export function createWorkshop({
       if (error instanceof GitHubError && error.notInstalled) refuse(503, 'not_configured', 'Live comments are not set up on this server.');
       refuse(502, 'github_failed', 'GitHub did not answer. Try again later.');
     }
-  }
-
-  // The person's permission, by GitHub account id: yes and no are both cached five minutes, for `me`.
-  // People known to be able to decide re-read on their own allowance.
-  function cachedPermission(id) {
-    const cached = permissions.get(id);
-    return cached && now() - cached.at < PERMISSION_TTL ? cached : null;
-  }
-
-  async function canDecide(session) {
-    const cached = cachedPermission(session.id);
-    if (cached) return cached.value;
-    return shared(permissionPending, session.id, async () => {
-      spendOrRefuse(deciders.has(session.id) ? 'decider' : 'permission');
-      // The account's current login, from GitHub with the person's own token, never the cookie's.
-      const { data: user } = await userRequest(session, 'GET', '/user');
-      if (user?.id !== session.id) throw new GitHubError(401, { as: 'user' });
-      const { data } = await installationRequest('GET', `/repos/${repo}/collaborators/${encodeURIComponent(user.login)}/permission`).catch((error) => {
-        if (error instanceof GitHubError && error.status === 404) return { data: null };
-        throw error;
-      });
-      // The answer must be about the same account.
-      const sameAccount = data?.user?.id === undefined || data.user.id === session.id;
-      const value = sameAccount && (['admin', 'maintain', 'write'].includes(data?.role_name) || ['admin', 'write'].includes(data?.permission));
-      permissions.delete(session.id);
-      permissions.set(session.id, { value, at: now() });
-      if (permissions.size > REMEMBERED) permissions.delete(permissions.keys().next().value);
-      if (value) {
-        deciders.add(session.id);
-        if (deciders.size > 1000) deciders.delete(deciders.values().next().value);
-      } else {
-        deciders.delete(session.id);
-      }
-      return value;
-    });
   }
 
   async function labelSuggestion(number) {
@@ -553,10 +491,9 @@ export function createWorkshop({
     return session;
   }
 
-  // Writes per person a minute; people known to be able to decide have their own, larger allowance.
+  // Writes per person a minute.
   function countWrite(session) {
-    const decides = cachedPermission(session.id)?.value === true;
-    const wait = writes.take(`${decides ? 'decider' : 'person'}:${session.id}`, decides ? BUDGET.deciderWritesPerMinute : BUDGET.writesPerMinute, now());
+    const wait = writes.take(session.id, BUDGET.writesPerMinute, now());
     if (wait) tooMany(wait, 'Too many changes in a minute. Try again shortly.');
   }
 
@@ -614,21 +551,14 @@ export function createWorkshop({
       return json(200, stale || old ? { ...body, ...(stale ? { stale: true } : {}), ...(old ? { old: true } : {}) } : body, { 'Cache-Control': cache });
     },
 
-    // Reads only the cookie; the permission check is the one GitHub call, cached five minutes. When it
-    // cannot be read, the answer says the person cannot decide, and the next `me` tries again.
+    // Reads only the cookie: no call to GitHub.
     async 'GET me'(ctx) {
       const session = await currentUser(ctx, { refresh: false });
       if (!session) {
         clearSession(ctx);
         refuse(401, 'signed_out', 'Sign in with GitHub first.');
       }
-      let decides = false;
-      try {
-        decides = await canDecide(session);
-      } catch (error) {
-        if (error instanceof GitHubError) ctx.githubStatus = error.status;
-      }
-      return json(200, { login: session.login, avatar: session.avatar, canDecide: decides });
+      return json(200, { login: session.login, avatar: session.avatar });
     },
 
     async 'GET issue'(ctx) {
