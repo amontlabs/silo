@@ -8,7 +8,7 @@ import { loadDir } from '../../../tools/plan/read/index.js';
 import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, notesFrom, planDir, readBuildData, readHistories, readHistory, unshallow } from './data';
 import type { Git } from './data';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
-import { checkLayout, LayoutError, MAP_HEIGHT, SILO_MAP } from './map';
+import { checkLayout, LayoutError, MAP_HEIGHT, NO_MAP, SILO_MAP } from './map';
 import type { Box, MapLayout } from './map';
 import { EXAMPLE_MAP } from './map-example';
 
@@ -45,7 +45,7 @@ describe('reading the plan files', () => {
   });
 
   it('holds no switch for entries\' threads: the page\'s data has none, in the real build and in the fixtures', () => {
-    expect(buildDataFrom(emptyPlanFiles())).not.toHaveProperty('threads');
+    expect(buildDataFrom(emptyPlanFiles(), { map: NO_MAP })).not.toHaveProperty('threads');
     expect(buildData()).not.toHaveProperty('threads');
     expect(buildData()).not.toHaveProperty('decide');
   });
@@ -100,14 +100,14 @@ describe('what an entry says of the plan\'s lists', () => {
 
 describe('a plan that holds no part', () => {
   it('reads with no part and no feature, and keeps the decisions of the whole product', () => {
-    const data = buildDataFrom(emptyPlanFiles());
-    expect(data).toMatchObject({ parts: [], map: SILO_MAP });
+    const data = buildDataFrom(emptyPlanFiles(), { map: NO_MAP });
+    expect(data).toMatchObject({ parts: [], map: NO_MAP });
     expect(data.entries.map((entry) => entry.id)).toEqual(['security-properly', 'one-host']);
     expect(notesFrom(emptyPlanFiles())).toEqual({});
   });
 
   it('reads a part with no feature: nothing stops the build', () => {
-    const data = buildDataFrom(planFiles({ features: FEATURES.filter((feature) => feature.part !== 'part-b') }));
+    const data = buildDataFrom(planFiles({ features: FEATURES.filter((feature) => feature.part !== 'part-b') }), { map: EXAMPLE_MAP });
     expect(data.parts.map((part) => part.id)).toContain('part-b');
   });
 });
@@ -127,10 +127,11 @@ describe('a plan with an error', () => {
     expect(message).toContain('Fix:');
   });
 
-  it('stops on a part the example map has no place for; Silo\'s own map, empty, draws no map and takes any plan', () => {
+  it('stops on a part the map has no place for; a layout that places nothing draws no map and takes any plan', () => {
     const files = planFiles({ parts: [...PARTS, { id: 'billing', title: 'Billing', line: 'Money.' }] });
     expect(() => buildDataFrom(files, { map: EXAMPLE_MAP })).toThrow('The map has no place for the part "billing" of plan/parts.json. Add it to website/src/workshop/map.ts.');
-    expect(buildDataFrom(files).map).toBe(SILO_MAP);
+    expect(() => buildDataFrom(files)).toThrow('The map has no place for the part "part-a" of plan/parts.json.');
+    expect(buildDataFrom(files, { map: NO_MAP }).map).toBe(NO_MAP);
   });
 });
 
@@ -154,7 +155,7 @@ describe('reading plan/ from a repository folder', () => {
   it('reads the plan named by WORKSHOP_PLAN instead: the plan tool\'s sample', () => {
     expect(planDir('/repo', {})).toBe('/repo/plan');
     expect(planDir('/repo', { WORKSHOP_PLAN: SAMPLE })).toBe(SAMPLE);
-    const data = buildDataFrom(loadDir(SAMPLE));
+    const data = buildDataFrom(loadDir(SAMPLE), { map: NO_MAP });
     expect(data.parts.map((part) => part.id)).toEqual(['engine', 'record']);
     expect(data.entries.filter((entry) => entry.part === null).map((entry) => entry.id)).toEqual(['the-design', 'nothing-without-a-reason']);
   });
@@ -251,11 +252,11 @@ describe('the history of the entries', () => {
     const source = historyFromGit('/repo', still.git);
     expect(source.shallow).toBe(true);
     expect(still.calls.filter((call) => call === 'unshallow')).toHaveLength(1);
-    expect(buildDataFrom(emptyPlanFiles(), { history: source }).shallow).toBe(true);
-    expect(buildDataFrom(emptyPlanFiles()).shallow).toBe(false);
+    expect(buildDataFrom(emptyPlanFiles(), { map: NO_MAP, history: source }).shallow).toBe(true);
+    expect(buildDataFrom(emptyPlanFiles(), { map: NO_MAP }).shallow).toBe(false);
   });
 
-  it('gives a plan read from another folder none: the history is the caller\'s, or none', () => {
+  it('gives a plan read from another folder no history and no map: the history is the caller\'s, or none', () => {
     expect(readHistory(REPOSITORY)).not.toBeNull();
     const before = process.env.WORKSHOP_PLAN;
     process.env.WORKSHOP_PLAN = SAMPLE;
@@ -264,6 +265,7 @@ describe('the history of the entries', () => {
       const data = readBuildData(REPOSITORY);
       expect(data.entries.every((entry) => entry.history === null)).toBe(true);
       expect(data.shallow).toBe(false);
+      expect(data.map).toBe(NO_MAP);
       expect(readHistories(REPOSITORY)).toEqual({});
     } finally {
       if (before === undefined) delete process.env.WORKSHOP_PLAN;
@@ -286,7 +288,7 @@ describe('the history of the entries', () => {
     const files = planFiles();
     const source = { shallow: false, changes: new Map([['core', [{ commit: 'a'.repeat(40), date: '2026-11-01T10:00:00Z', what: ['added' as const] }]], ['gone', [{ commit: 'b'.repeat(40), date: '2026-11-01T10:00:00Z', what: ['added' as const] }]]]) };
     expect(Object.keys(historiesFrom(files, source))).toEqual(['core']);
-    expect(buildDataFrom(files, { history: source }).entries.filter((entry) => entry.history).map((entry) => entry.id)).toEqual(['core']);
+    expect(buildDataFrom(files, { map: EXAMPLE_MAP, history: source }).entries.filter((entry) => entry.history).map((entry) => entry.id)).toEqual(['core']);
     expect(historiesFrom(files, null)).toEqual({});
   });
 });
@@ -297,8 +299,11 @@ describe('the map layout', () => {
   it('draws the fixture plan with the example, and Silo\'s plan with its own map', () => {
     expect(buildData().map).toBe(EXAMPLE_MAP);
     expect(Object.keys(EXAMPLE_MAP.places)).toEqual(ids);
-    // Silo's own map is empty: every plan passes, and the page shows the tiles alone.
-    expect(() => checkLayout(['engine', 'record'])).not.toThrow();
+    const silo = (JSON.parse(readFileSync(join(REPOSITORY, 'plan/parts.json'), 'utf8')) as { id: string }[]).map((part) => part.id);
+    expect(() => checkLayout(silo)).not.toThrow();
+    expect(() => checkLayout(['engine', 'record'])).toThrow(LayoutError);
+    // A layout that places nothing takes every plan, and the page shows the tiles alone.
+    expect(() => checkLayout(['engine', 'record'], NO_MAP)).not.toThrow();
   });
 
   it('places exactly the parts of the plan', () => {

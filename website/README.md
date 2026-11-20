@@ -181,12 +181,14 @@ A part whose id is `product`, `left`, `suggested` or `latest` stops the build:
 those are the page's own addresses, and the message names the part and the fix.
 `map.ts` holds the drawing (`SILO_MAP`): where each part sits on the full map
 and on the folded one, the zones, the text that is not a part, and the wires.
-`SILO_MAP` is empty: with no place in it there is no map, any plan passes, and
-the page shows the parts as tiles only, without the Map and Order control. Once
-the drawing places one part, it must place every part of `plan/parts.json` and
-nothing else, or the build stops. `map-example.ts` is a made-up layout of five
-parts that shows every kind of thing a layout can hold; the tests draw their
-fixture plan (`fixtures.ts`) with it, and the page never shows it.
+It places every part of `plan/parts.json` and nothing else, or the build stops:
+a part added to or removed from the plan needs its place in the drawing. A
+layout with no place in it (`NO_MAP`) draws no map: any plan passes, and the
+page shows the parts as tiles only, without the Map and Order control. A plan
+read from another folder (`WORKSHOP_PLAN`) is built with it. `map-example.ts`
+is a made-up layout of five parts that shows every kind of thing a layout can
+hold; the tests draw their fixture plan (`fixtures.ts`) with it, and the page
+never shows it.
 
 The page has no way to take or drop an entry and the server has no verdict route:
 decisions and features are taken or dropped with `plan take` and `plan drop`.

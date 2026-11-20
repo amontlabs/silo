@@ -8,7 +8,7 @@ import { listKind, wordId } from '../../../tools/plan/model/index.js';
 import { repoAddress } from '../../../tools/workshop/model/index.js';
 import { entryHistory, readSteps } from '../../../tools/plan/history/index.js';
 import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
-import { checkLayout, LayoutError, SILO_MAP } from './map.ts';
+import { checkLayout, LayoutError, NO_MAP, SILO_MAP } from './map.ts';
 import type { MapLayout } from './map.ts';
 import { RESERVED_ADDRESSES } from './routes.ts';
 import type { BuildData, Change, Entry, EntryFacts, Facts, Histories, Notes, Statement, Verdict } from './plan.ts';
@@ -292,8 +292,8 @@ export function readHistory(repository: string): HistorySource | null {
   return source;
 }
 
-/** Reads the plan of `repository` and returns the page's data for the real build. */
-export function readBuildData(repository: string, map: MapLayout = SILO_MAP): BuildData {
+/** Reads the plan of `repository` and returns the page's data for the real build. Silo's map draws plan/; another plan has none. */
+export function readBuildData(repository: string, map: MapLayout = planDir(repository) === join(repository, PLAN_DIR) ? SILO_MAP : NO_MAP): BuildData {
   return buildDataFrom(planFilesIn(planDir(repository)), { map, history: readHistory(repository) }, (path) => existsSync(join(repository, path)));
 }
 

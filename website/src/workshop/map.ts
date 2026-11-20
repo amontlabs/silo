@@ -77,13 +77,66 @@ export interface MapLayout {
   wires: { full: Wire[]; fold: Wire[] };
 }
 
-/** Silo's map. It is not drawn yet: with no place, the page shows the parts as tiles only. */
+/** A layout that draws no map: with it any plan builds, and the page shows the parts as tiles only. */
+export const NO_MAP: MapLayout = { places: {}, zones: [], notes: [], ghosts: [], wires: { full: [], fold: [] } };
+
+/**
+ * Silo's map: the Mac, and inside it the virtual machines where the computers run. The app and the engine sit on the
+ * left, the record, the opinions and the rules along the bottom, the boundary on the edge of the virtual machines and
+ * the model providers outside the Mac. The wires follow a request out through the boundary, the facts it leaves into
+ * the record, and what the record triggers back at the boundary.
+ */
 export const SILO_MAP: MapLayout = {
-  places: {},
-  zones: [],
-  notes: [],
-  ghosts: [],
-  wires: { full: [], fold: [] },
+  places: {
+    views: { full: [48, 114, 136, 144], fold: [36, 30, 120, 30] },
+    plugins: { full: [48, 418, 160, 64], fold: [36, 136, 128, 26], ty: 13, sy: 36 },
+    engine: { full: [204, 114, 112, 272], fold: [172, 30, 96, 96], tall: true },
+    opinions: { full: [232, 418, 204, 64], fold: [180, 136, 172, 26], ty: 13, sy: 36 },
+    recipes: { full: [456, 34, 168, 48], fold: [420, 14, 132, 26], ty: 6, sy: 27 },
+    computers: { full: [372, 130, 180, 128], fold: [300, 58, 216, 34] },
+    'agent-programs': { full: [388, 186, 136, 52], fold: [384, 63, 104, 24], inner: true, ty: 7, sy: 29 },
+    'going-back': { full: [372, 298, 152, 56], fold: [300, 98, 104, 26], ty: 9, sy: 31 },
+    record: { full: [480, 418, 160, 64], fold: [456, 136, 100, 26], ty: 13, sy: 36 },
+    boundary: { full: [592, 162, 124, 64], fold: [532, 62, 100, 28], ty: 13, sy: 36 },
+    rules: { full: [688, 418, 184, 64], fold: [580, 136, 160, 26], ty: 13, sy: 36 },
+    traffic: { full: [744, 162, 196, 64], fold: [656, 62, 164, 28], ty: 13, sy: 36 },
+    // A low bar under the whole drawing: what holds in every part.
+    checking: { full: [24, 566, 1088, 48], fold: [872, 124, 168, 30], ty: 6, sy: 27 },
+  },
+  zones: [
+    { label: 'YOUR MAC', full: [24, 18, 936, 536], fold: [16, 8, 828, 164], corners: true },
+    { label: 'VIRTUAL MACHINES', full: [348, 106, 296, 280], fold: [288, 48, 276, 82], rounded: true },
+  ],
+  notes: [{ title: 'Model providers', line: 'outside Silo', full: [984, 40, 128, 40], fold: [872, 58, 150, 36] }],
+  // Main is one computer among several: forks and fresh computers.
+  ghosts: [
+    { of: 'computers', full: [384, 142, 180, 128], fold: [300, 58, 216, 34] },
+    { of: 'computers', full: [378, 136, 180, 128], fold: [300, 58, 216, 34] },
+  ],
+  wires: {
+    full: [
+      { of: 'views', d: 'M184 178H197', arrows: [[204, 178, 'r']] },
+      { of: 'computers', d: 'M316 194H365', arrows: [[372, 194, 'r']], label: [332, 186, 'runs', 'middle'] },
+      { of: 'recipes', d: 'M540 82V123', arrows: [[540, 130, 'd']], label: [549, 98, 'makes'] },
+      // A request leaves the computer through the boundary, where its model traffic is read, to the model provider.
+      { of: 'traffic', d: 'M564 194H585M716 194H737M842 162V49H977', arrows: [[592, 194, 'r'], [744, 194, 'r'], [984, 49, 'r']], label: [851, 112, 'calls'] },
+      { of: 'record', d: 'M620 226V411', arrows: [[620, 418, 'd']], label: [629, 330, 'facts'] },
+      { of: 'opinions', d: 'M480 450H443', arrows: [[436, 450, 'l']], label: [458, 442, 'read', 'middle'] },
+      // A rule is triggered by a fact, a precaution by an opinion.
+      { of: 'rules', d: 'M640 450H681M334 482V510H720V489', arrows: [[688, 450, 'r'], [720, 482, 'u']], label: [527, 528, 'triggers', 'middle'] },
+      { of: 'rules', d: 'M760 418V300H680V233', arrows: [[680, 226, 'u']], label: [769, 362, 'decides'] },
+    ],
+    fold: [
+      { of: 'views', d: 'M156 45H165', arrows: [[172, 45, 'r']] },
+      { of: 'computers', d: 'M268 75H293', arrows: [[300, 75, 'r']] },
+      { of: 'recipes', d: 'M496 40V51', arrows: [[496, 58, 'd']] },
+      { of: 'traffic', d: 'M516 76H525M632 76H649M820 76H865', arrows: [[532, 76, 'r'], [656, 76, 'r'], [872, 76, 'r']] },
+      { of: 'record', d: 'M544 90V129', arrows: [[544, 136, 'd']] },
+      { of: 'opinions', d: 'M456 149H359', arrows: [[352, 149, 'l']] },
+      { of: 'rules', d: 'M556 149H573', arrows: [[580, 149, 'r']] },
+      { of: 'rules', d: 'M600 136V97', arrows: [[600, 90, 'u']] },
+    ],
+  },
 };
 
 export function arrowPath([x, y, dir]: Arrow): string {
