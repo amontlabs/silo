@@ -176,16 +176,21 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   );
 }
 
+/** What a vote button holds: the thumb, then the count from 1 up. */
+function Thumb({ up }: { up: number }) {
+  return <><span aria-hidden="true">👍</span>{up > 0 ? <span className="ws-n" aria-hidden="true">{up}</span> : null}</>;
+}
+
 function Vote({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
   if (w.waiting) return <i className="ws-ph ws-ph-vote" aria-hidden="true" />;
   if (!w.liveOk || row.up === null) return null;
   const on = row.issue !== null && w.votes[row.issue] === true;
   const busy = w.votePending.has(row.key);
-  if (!w.me) return <a className="ws-vote ws-late-s" href={ctx.signIn} title="Sign in to vote" aria-label={`${row.up} votes, sign in to vote`}>👍 {row.up}</a>;
+  if (!w.me) return <a className="ws-vote ws-late-s" href={ctx.signIn} title="Sign in to vote" aria-label={`${row.up} votes, sign in to vote`}><Thumb up={row.up} /></a>;
   return (
     <button type="button" className={`ws-vote ws-late-s${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${row.up} votes`} onClick={() => void w.toggleVote(row)} disabled={busy}>
-      👍 {row.up}
+      <Thumb up={row.up} />
     </button>
   );
 }
@@ -304,18 +309,18 @@ function ReplaceLines({ row, ctx, only }: { row: Row; ctx: EntryContext; only: (
   );
 }
 
-/** The 👍 under a comment: its count and, signed in, the button; signed out, the count asks to sign in as the row's vote does. */
+/** The 👍 under a comment, the same button as a row's: signed out it asks to sign in. */
 function CommentVote({ row, comment, ctx }: { row: Row; comment: Comment; ctx: EntryContext }) {
   const { w } = ctx;
   const up = comment.up ?? 0;
-  if (!w.me) return <a className="ws-vote ws-cvote" href={ctx.signIn} title="Sign in to vote" aria-label={`${up} votes on this comment, sign in to vote`}>👍 {up}</a>;
+  if (!w.me) return <a className="ws-vote ws-cvote" href={ctx.signIn} title="Sign in to vote" aria-label={`${up} votes on this comment, sign in to vote`}><Thumb up={up} /></a>;
   const id = comment.id;
   const real = row.issue !== null && typeof id === 'number';
   const on = real && (w.commentVotes[row.issue as number] ?? []).includes(id);
   const busy = real && w.commentVotePending.has(`${row.issue}:${id}`);
   return (
     <button type="button" className={`ws-vote ws-cvote${on ? ' on' : ''}${busy ? ' ws-pending' : ''}`} aria-pressed={on} aria-busy={busy} aria-label={`${up} votes on this comment`} disabled={!real || busy} onClick={() => void w.toggleCommentVote(row, comment)}>
-      👍 {up}
+      <Thumb up={up} />
     </button>
   );
 }

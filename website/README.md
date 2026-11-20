@@ -379,7 +379,7 @@ What a person sees:
   matches none by itself, so an issue that merely names the entry is not its thread. A feature
   whose file has `suggested_in` shows once, as the feature, and its thread is that
   suggestion's issue, which is not listed among the suggestions.
-- A row whose entry has no thread yet shows the vote with a count of 0. Opened, it shows
+- A row whose entry has no thread yet shows the vote with the thumb alone. Opened, it shows
   "No comments yet." and then the comment box (signed in) or "Sign in to comment", and no link to
   GitHub, since there is no issue yet; the room of that link stays empty, so the row taking its
   thread moves nothing in the panel. A row whose thread has no comment shows the same line.
@@ -399,8 +399,8 @@ What a person sees:
 - A thread is closed when `state` says `closed`.
 - A thread is also closed when the server answers a write 403 `closed`, which it does only to a write that names an entry.
 - That answer carries `n`, which becomes the row's thread when the row had none.
-- Under each comment of a thread are its 👍 count and a button (`up` of `GET issue`). Signed out,
-  the count shows and the button asks to sign in, as the row's vote does. Signed in, the button is
+- Under each comment of a thread is its 👍 button (`up` of `GET issue`), the same button as a row's: the thumb and, from 1 vote up,
+  the count. Signed out, the button asks to sign in, as the row's vote does. Signed in, the button is
   pressed for the comments `GET vote` names. A click changes the count at once and sends
   `POST comment-vote`.
 - The count the server answers for a vote on a comment is applied to a `GET issue` answer unless that answer

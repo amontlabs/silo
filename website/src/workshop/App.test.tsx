@@ -125,10 +125,10 @@ describe('a part', () => {
     mockApi();
     await renderApp();
     expect(within(itemOf('The engine runs on its own')).getByText('planned')).toBeInTheDocument();
-    expect(within(itemOf('The engine runs on its own')).getByText('👍 8')).toBeInTheDocument();
+    expect(within(itemOf('The engine runs on its own')).getByRole('link', { name: '8 votes, sign in to vote' })).toHaveTextContent('👍8');
     act(() => { location.hash = '#part-b'; });
     await waitFor(() => expect(within(itemOf('Create and delete a computer')).getByText('💬 2')).toBeInTheDocument());
-    expect(within(itemOf('Create and delete a computer')).getByText('👍 12')).toBeInTheDocument();
+    expect(within(itemOf('Create and delete a computer')).getByRole('link', { name: '12 votes, sign in to vote' })).toHaveTextContent('👍12');
     expect(within(itemOf('Run a command')).queryByText(/💬/)).not.toBeInTheDocument();
   });
 });
@@ -336,7 +336,7 @@ describe('when the API is missing or slow', () => {
       expect(screen.queryByText(/^Decisions/)).not.toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Suggest a feature' })).toBeInTheDocument();
       await userEvent.click(part('part-b'));
-      expect(screen.queryByText(/^👍/)).not.toBeInTheDocument();
+      expect(document.querySelector('.ws-vote')).toBeNull();
       await userEvent.click(rowButton('Create and delete a computer'));
       expect(screen.getByText('Not decided yet.')).toBeInTheDocument();
       expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
@@ -351,8 +351,8 @@ describe('when the API is missing or slow', () => {
     expect(part('part-a')).toHaveClass('s-next');
     expect(rowButton('Create and delete a computer')).toBeInTheDocument();
     expect(screen.queryByText('Live comments are unavailable.')).not.toBeInTheDocument();
-    expect(screen.queryByText(/^👍/)).not.toBeInTheDocument();
+    expect(document.querySelector('.ws-vote')).toBeNull();
     await act(async () => release(ok(liveState())));
-    expect(await screen.findByText('👍 12')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '12 votes, sign in to vote' })).toHaveTextContent('👍12');
   });
 });

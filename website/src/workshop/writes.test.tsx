@@ -57,7 +57,7 @@ describe('a signed-in person', () => {
     await act(async () => release(ok({ number: 77 })));
     const group = screen.getByRole('region', { name: 'Suggested by people' });
     expect(within(group).getByRole('button', { name: /^Pause a computer/ }).closest('.ws-item')).toHaveAttribute('id', 'issue-77');
-    expect(within(group).getAllByRole('button', { name: /votes/ }).map((b) => b.textContent)).toEqual(['👍 14', '👍 9', '👍 0']);
+    expect(within(group).getAllByRole('button', { name: /votes/ }).map((b) => b.textContent)).toEqual(['👍14', '👍9', '👍']);
   });
 
   it('says once that sign-in did not complete and cleans the address', async () => {
