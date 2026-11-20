@@ -41,7 +41,7 @@ says.
 | Decision | one choice about Silo: the question, and its answer once there is one | `decisions/<id>.json` at the root, `<part>/decisions/<id>.json` in a part |
 | Feature | one thing Silo does, to build | `<part>/features/<id>.json` |
 
-The file name is the id. The notes are plain prose: where the sentence comes from, the options,
+The file name is the id. The notes are optional, and plain prose: where the sentence comes from, the options,
 what was found, and the owner's own words when the owner said it.
 
 Before you add an entry, search `plan/` for one that already asks it. A narrower question about
@@ -63,7 +63,10 @@ Until it is taken, a decision or a feature shows in full the sentences it would 
 
 - Only `plan take` and `plan drop` write a verdict, on the owner's word. Taking writes what the
   entry sets into the lists and replaces `sets` by `adds`, the ids it brought, in one commit.
-- An answer with no verdict is only put forward: it binds nobody.
+- An answer with no verdict is only put forward: it binds nobody. What the owner leans towards
+  goes there, and its notes say it is a lean.
+- A plain edit of the plan is checked with `plan check` and committed with a subject that starts
+  with `Plan:`.
 - `plan take` and `plan drop` refuse while `plan/` has uncommitted changes: commit your other
   edits of the plan first.
 - A yes to part of an entry splits it first: the part taken, and the rest still to decide.
@@ -83,8 +86,8 @@ Until it is taken, a decision or a feature shows in full the sentences it would 
 order they are dealt with. Every decision and every feature is in exactly one stage.
 
 - The owner is shown the first entry with no verdict.
-- An entry that is not for now is moved to a later stage: its id moves in `order.json`, and that
-  edit is committed. There is no verdict for "later".
+- An entry that is not for now is moved to a later stage: its id moves to the end of that stage
+  in `order.json`, and that edit is committed. There is no verdict for "later".
 - A new entry is placed after everything it needs, beside the entries of its topic.
 - An entry comes after everything it needs.
 - Features are sorted so that the most certain and most useful come first, and every cut from the
