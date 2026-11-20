@@ -84,6 +84,17 @@ function selectorOf(node: Element | null): string | null {
   return null;
 }
 
+/** Scrolls the page the least needed for the element to be in view under the sticky header, at once. */
+function reveal(node: Element) {
+  const header = document.querySelector<HTMLElement>('.site-header')?.offsetHeight ?? 0;
+  const box = node.getBoundingClientRect();
+  const room = innerHeight - header;
+  let by = 0;
+  if (box.top < header || box.height > room) by = box.top - header;
+  else if (box.bottom > innerHeight) by = box.bottom - innerHeight;
+  if (by) scrollTo({ top: scrollY + by, behavior: 'instant' });
+}
+
 function isField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
@@ -202,6 +213,10 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   // A link under the map that held the focus when Back or Forward moved: if the move takes it off the page, the title
   // takes the focus.
   const underFocus = useRef<Element | null>(null);
+  /** The move whose view transition set the mark on `<html>` (`vt-open`, `vt-back`); -1 when none is set. */
+  const markOwner = useRef(-1);
+  /** True while a view transition's update runs: what it scrolls is set at once, before the new view is captured. */
+  const inTransition = useRef(false);
   // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
@@ -231,6 +246,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     [...timers.current, ...swapTimers.current].forEach(clearTimeout);
     clearTimeout(heldHeight.current);
     if (lift.current) cancelAnimationFrame(lift.current.frame);
+    clearMark();
   }, []);
   useEffect(() => {
     let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => setBoot(false)); });
@@ -277,11 +293,19 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     focusNext.current = options.focus ?? null;
   }
 
+  /** Takes off `<html>` the mark of the way a view transition goes. */
+  function clearMark() {
+    document.documentElement.classList.remove('vt-open', 'vt-back');
+    markOwner.current = -1;
+  }
+
   /**
    * A new move starts: what an earlier one left waiting (the end of going back, a view transition's update) never
-   * lands after it, and the height a going-back kept is let go at once. Returns this move's count.
+   * lands after it, the mark of its view transition goes, and the height a going-back kept is let go at once.
+   * Returns this move's count.
    */
   function moveStarts(): number {
+    clearMark();
     timers.current.forEach(clearTimeout);
     timers.current = [];
     clearTimeout(heldHeight.current);
@@ -294,20 +318,33 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   /** True while a going-back has started and neither landed nor been overtaken by another move. */
   const backUnderWay = () => goingBack.current === navigations.current;
 
-  /** Runs a change of place; off the map, the tile that was tapped travels to its place (view transitions). */
-  function travel(update: () => void, hero: string | null): number {
+  /**
+   * Runs a change of place. Off the map, a move from or to the plain view (`way`) is a view transition: the sheet of
+   * tiles rolls up into the strip over the place, or down again (workshop.css). `<html>` carries the way, `vt-open`
+   * or `vt-back`, until the transition ends or another move starts. A move between two places has no `way`.
+   */
+  function travel(update: () => void, way: 'open' | 'back' | null): number {
     const mine = moveStarts();
     const start = (document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } }).startViewTransition?.bind(document);
-    if (onMap() || still() || !start) {
+    if (!way || onMap() || still() || !start) {
       update();
       return mine;
     }
-    const tile = hero ? document.querySelector<HTMLElement>(`.ws-tile[data-part="${hero}"]`) : null;
-    if (tile) tile.style.viewTransitionName = 'hero';
-    // The update waits for the old view's picture; a navigation made meanwhile wins over it.
-    const vt = start(() => { if (navigations.current === mine) flushSync(update); }) as { finished: Promise<void>; ready?: Promise<void> };
+    document.documentElement.classList.add(`vt-${way}`);
+    markOwner.current = mine;
+    // The update waits for the old view's picture; a navigation made meanwhile wins over it. What it scrolls is set
+    // in the same task (layout effects), so the new view is captured where it lands.
+    const vt = start(() => {
+      if (navigations.current !== mine) return;
+      inTransition.current = true;
+      try {
+        flushSync(update);
+      } finally {
+        inTransition.current = false;
+      }
+    }) as { finished: Promise<void>; ready?: Promise<void> };
     vt.ready?.catch(() => {});
-    vt.finished.catch(() => {}).finally(() => { if (tile) tile.style.viewTransitionName = ''; });
+    vt.finished.catch(() => {}).finally(() => { if (markOwner.current === mine) clearMark(); });
     return mine;
   }
 
@@ -358,14 +395,13 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     // A going-back under way lands at its time: a second one (the button pressed twice, Escape again) changes nothing.
     if (isHome || backUnderWay()) return;
     const focus: Focus | null = shown.kind === 'part' ? { kind: 'part', part: shown.part } : opener.current ? { kind: 'selector', selector: opener.current } : shown.kind === 'suggested' ? { kind: 'part', part: 'suggested' } : null;
-    const hero = shown.kind === 'part' ? shown.part : shown.kind === 'suggested' ? 'suggested' : null;
     const finish = () => go(HOME, null, { push: true, focus, announce: '' });
     if (still()) {
       finish();
       return;
     }
     if (!onMap()) {
-      goingBack.current = travel(finish, hero);
+      goingBack.current = travel(finish, 'back');
       return;
     }
     goingBack.current = moveStarts();
@@ -397,8 +433,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     if (isHome && onMap() && scrollY > 0 && !still()) startLift();
     if (next.kind !== 'part') opener.current = selectorOf(document.activeElement);
     const title = next.kind === 'part' ? plan.parts.find((group) => group.part.id === next.part)?.part.title : null;
-    const hero = next.kind === 'part' ? next.part : next.kind === 'suggested' ? 'suggested' : null;
-    travel(() => go(next, null, { push: true, focus: { kind: 'title' }, announce: title ? `${title}, open` : '' }), hero);
+    travel(() => go(next, null, { push: true, focus: { kind: 'title' }, announce: title ? `${title}, open` : '' }), isHome ? 'open' : null);
   }
 
   function startLift() {
@@ -541,7 +576,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       const header = document.querySelector<HTMLElement>('.site-header');
       if (top && mainRef.current) {
         const stop = (onMap() ? top.offsetTop + top.offsetHeight : mainRef.current.offsetTop + top.offsetHeight) - (header?.offsetHeight ?? 0);
-        if (scrollY > stop && !lift.current) scrollTo({ top: stop, behavior: still() ? 'instant' : 'smooth' });
+        if (scrollY > stop && !lift.current) scrollTo({ top: stop, behavior: still() || inTransition.current ? 'instant' : 'smooth' });
       }
       document.getElementById('ws-part-title')?.focus({ preventScroll: true });
     } else {
@@ -551,11 +586,14 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       const node = document.querySelector<HTMLElement>(selector) ?? (target.kind === 'selector' ? document.querySelector<HTMLElement>('.ws-top h1') : null);
       if (node && !node.hasAttribute('tabindex') && node.tagName === 'H1') node.setAttribute('tabindex', '-1');
       node?.focus({ preventScroll: true });
+      // Back on the plain view through a view transition, what takes the focus is brought into view at once, scrolled
+      // the least needed and clear of the sticky header.
+      if (node && inTransition.current) reveal(node.closest('.ws-tile') ?? node);
     }
   });
 
-  // The open tile of the strip stays in view on a phone.
-  useEffect(() => {
+  // The open tile of the strip stays in view on a phone; set before paint, so a view transition captures it there.
+  useLayoutEffect(() => {
     const board = document.querySelector<HTMLElement>('.ws-board');
     const on = board?.querySelector<HTMLElement>('.ws-tile.on');
     if (board && on && board.scrollWidth > board.clientWidth) board.scrollLeft = on.offsetLeft - (board.clientWidth - on.offsetWidth) / 2;

@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "build:vercel": "npm run build && node scripts/prepare-vercel.mjs",
     "workshop:dev": "node scripts/workshop-dev.mjs",
-    "load-check": "node scripts/load-check.mjs"
+    "load-check": "node scripts/load-check.mjs",
+    "motion-sheet": "node scripts/motion-sheet.mjs"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

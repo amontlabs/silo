@@ -108,9 +108,12 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   const inner = useRef<HTMLDivElement>(null);
   const lastHeight = useRef(0);
   const lastShown = useRef(shown);
-  // The panel grows too when what the entry says of the lists arrives.
-  const factsIn = typeof w.facts === 'object';
-  const lastFactsIn = useRef(factsIn);
+  // The panel grows too when what the entry says of the lists arrives, when Notes or History opens or closes, and when
+  // their chunk arrives after its placeholder.
+  const [extrasMoved, setExtrasMoved] = useState(0);
+  const loaded = (chunk: unknown) => (typeof chunk === 'object' ? 'in' : String(chunk));
+  const chunks = `${loaded(w.facts)}|${loaded(w.notes)}|${loaded(w.histories)}|${extrasMoved}`;
+  const lastChunks = useRef(chunks);
   const settling = useRef<ReturnType<typeof setTimeout>>(undefined);
   // The panel's height as last laid out, kept current while it animates open (no render happens then).
   const animating = useRef(false);
@@ -124,9 +127,9 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   useLayoutEffect(() => {
     const node = inner.current;
     if (!node) return;
-    const changed = lastShown.current !== shown || lastFactsIn.current !== factsIn;
+    const changed = lastShown.current !== shown || lastChunks.current !== chunks;
     lastShown.current = shown;
-    lastFactsIn.current = factsIn;
+    lastChunks.current = chunks;
     if (animating.current && !changed) return;
     const still = typeof matchMedia !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches;
     // From the height on screen (mid-change, if one runs) to the panel's natural height, measured without it.
@@ -170,7 +173,7 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
         <Side row={row} ctx={ctx} />
       </div>
       <div className={grown ? 'ws-more open' : 'ws-more'} id={`${row.key}-more`} aria-hidden={open ? undefined : true} inert={!open}>
-        <div className="ws-more-in" ref={inner}>{open || closing ? <Body row={row} ctx={ctx} detail={shown} /> : null}</div>
+        <div className="ws-more-in" ref={inner}>{open || closing ? <Body row={row} ctx={ctx} detail={shown} onExtras={() => setExtrasMoved((n) => n + 1)} /> : null}</div>
       </div>
     </li>
   );
@@ -359,7 +362,9 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   const github = url ? <a className="ws-gh" href={url} target="_blank" rel="noopener noreferrer">GitHub #{n} ↗</a> : null;
   if (!w.liveOk) return <div className="ws-talk"><div className="ws-box">{github}</div></div>;
   // An entry with no thread yet has no issue to link to; the room of the link is kept, so the row taking its thread moves nothing.
-  const room = n === null ? <span className="ws-gh ws-room" aria-hidden="true">GitHub #000 ↗</span> : github;
+  const held = <span className="ws-gh ws-room" aria-hidden="true">GitHub #000 ↗</span>;
+  // Once the number is known, the link keeps at least that room, so the text field keeps its width.
+  const room = n === null ? held : <span className="ws-gh-slot">{github}{held}</span>;
   const closed = row.closed;
   let box: ReactNode = <div className="ws-box">{room}</div>;
   // Until `me` answers, the session marker says which of the two shapes to keep the room of; without it the
@@ -416,6 +421,8 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
           <div>
             <b>{comment.author} <small>Sending…</small></b>
             <RichText text={comment.text} />
+            {/* Drawn and disabled until the comment is confirmed: the comment keeps its height then. */}
+            <CommentVote row={row} comment={comment} ctx={ctx} />
           </div>
         </div>
       ))}
@@ -504,8 +511,8 @@ function historySummary(row: Row): string {
   return `${changeLine(last.what, row.of)}, ${shortDate(last.date)}${last.count > 1 ? ` · ${last.count} changes` : ''}`;
 }
 
-/** The entry's notes and its history, each closed until asked for. */
-function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
+/** The entry's notes and its history, each closed until asked for; `onMove` tells the panel to grow or shrink to them. */
+function Extras({ row, ctx, onMove }: { row: Row; ctx: EntryContext; onMove: () => void }) {
   const { w } = ctx;
   const [shown, setShown] = useState(false);
   const [history, setHistory] = useState(false);
@@ -519,14 +526,14 @@ function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
           <button
             type="button" className="ws-disc" aria-expanded={shown} aria-controls={`${row.key}-notes`}
             onPointerEnter={w.wantNotes} onPointerDown={w.wantNotes} onTouchStart={w.wantNotes} onFocus={w.wantNotes}
-            onClick={() => { w.wantNotes(); setShown((current) => !current); }}
+            onClick={() => { w.wantNotes(); setShown((current) => !current); onMove(); }}
           >Notes</button>
         ) : null}
         {row.history ? (
           <button
             type="button" className="ws-disc ws-disc-history" aria-expanded={history} aria-controls={`${row.key}-history`}
             onPointerEnter={w.wantHistory} onPointerDown={w.wantHistory} onTouchStart={w.wantHistory} onFocus={w.wantHistory}
-            onClick={() => { w.wantHistory(); setHistory((current) => !current); }}
+            onClick={() => { w.wantHistory(); setHistory((current) => !current); onMove(); }}
           >History<span> · {historySummary(row)}</span></button>
         ) : null}
       </div>
@@ -690,7 +697,7 @@ function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
   );
 }
 
-function Body({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
+function Body({ row, ctx, detail, onExtras }: { row: Row; ctx: EntryContext; detail: Detail | undefined; onExtras: () => void }) {
   const { w } = ctx;
   const what = row.kind === 'entry' ? row.what : typeof detail === 'object' ? detail.body : null;
   return (
@@ -699,7 +706,7 @@ function Body({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
       {row.kind === 'entry' ? <OpenFacts row={row} ctx={ctx} /> : null}
       <StateLine row={row} />
       <ReplaceLines row={row} ctx={ctx} only={(label) => label === 'Replaced by'} />
-      {row.kind === 'entry' ? <Extras row={row} ctx={ctx} /> : null}
+      {row.kind === 'entry' ? <Extras row={row} ctx={ctx} onMove={onExtras} /> : null}
       <Talk row={row} ctx={ctx} detail={detail} />
     </div>
   );

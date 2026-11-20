@@ -202,7 +202,7 @@
 .is-open .ws-board .ws-title { display: flex; align-items: center; gap: 8px; margin: 0; font: 13.5px/1.35 var(--sans); letter-spacing: 0; color: var(--muted); white-space: nowrap; }
 .is-open .ws-board .ws-mark { display: block; }
 .is-open .ws-suggest-tile .ws-title::before { content: "+"; font: 13px var(--mono); color: var(--accent-ink); }
-.is-open .ws-tile:hover { background-color: var(--surface-hover); }
+/* A chip under the pointer takes the ink only: the lighter ground and the line under it mark the open chip alone. */
 .is-open .ws-tile:hover .ws-title, .is-open .ws-tile.on .ws-title { color: var(--ink); }
 .is-open .ws-tile.on { background-color: var(--surface-hover); box-shadow: inset 0 -2px 0 var(--accent), 0 1px 0 var(--line); }
 
@@ -328,6 +328,9 @@
 .ws .ws-signin:focus-visible { outline-offset: -1px; }
 .ws-gh { font: 12px/37px var(--mono); color: var(--faint); white-space: nowrap; }
 .ws-gh:hover { color: var(--accent-ink); }
+/* The link to the issue next to the comment box keeps at least the room held before its number was known. */
+.ws-gh-slot { display: inline-grid; }
+.ws-gh-slot > * { grid-area: 1 / 1; justify-self: start; }
 .ws .ws-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 12px; min-height: 34px; font-size: 13.5px; line-height: 1.2; white-space: nowrap; border: 1px solid var(--line); background: var(--surface); border-radius: 3px; box-shadow: 0 1px 2px #34251710; transition: background-color .16s, border-color .16s; }
 .ws .ws-btn:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--muted); color: var(--ink); }
 .ws .ws-btn.go { background: var(--accent); border-color: #d68200; color: #282016; }
@@ -350,15 +353,23 @@
 @keyframes ws-appear { from { opacity: 0; } }
 @keyframes ws-swap-in { from { opacity: 0; transform: translateY(8px); } }
 
-/* Off the map, the tile that was tapped travels to its place in the strip, and back. */
+/* Off the map, between the plain view and a place: the sheet of tiles rolls up into the strip like a blind, uncovering
+   the place under it, and rolls down again over it. `vt-open` or `vt-back` on <html> says the way for the time of the
+   move (App.tsx `travel`). The board is opaque and clips what it holds, so its edge cuts the tiles or the chips; the
+   header stays above it. The place does not rise: its own entrance waits out the move at its end state. */
+html:is(.vt-open, .vt-back) .workshop-shell .site-header { view-transition-name: header; }
+html:is(.vt-open, .vt-back) .ws-board { view-transition-name: board; }
+html:is(.vt-open, .vt-back) .ws-detail { animation-duration: 0s; }
 ::view-transition-group(*) { animation-duration: .34s; animation-timing-function: cubic-bezier(.3, .7, .2, 1); }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .22s; }
-::view-transition-group(hero) { background: var(--surface-hover); outline: 1px solid var(--line); }
-::view-transition-old(hero), ::view-transition-new(hero) { width: 100%; height: 100%; object-fit: none; object-position: 0 0; }
-::view-transition-old(hero) { animation: ws-fall .12s ease both; }
-::view-transition-new(hero) { animation: ws-appear .18s ease .14s both; }
-::view-transition-new(detail) { animation: ws-rise .32s cubic-bezier(.3, .7, .2, 1) .08s both; }
-::view-transition-old(detail) { animation: ws-fall .14s ease both; }
+::view-transition-group(header) { z-index: 2; }
+::view-transition-group(board) { z-index: 1; overflow: clip; background: var(--paper); box-shadow: 0 1px 0 var(--line); }
+::view-transition-new(detail) { animation: ws-appear .14s ease both; }
+::view-transition-old(detail) { animation: ws-fall .2s ease .06s both; }
+html.vt-open::view-transition-old(board) { animation: ws-fall .22s cubic-bezier(.4, 0, 1, 1) both; }
+html.vt-open::view-transition-new(board) { animation: ws-appear .18s ease .1s both; }
+html.vt-back::view-transition-old(board) { animation: ws-fall .1s ease both; }
+html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 @keyframes ws-fall { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }

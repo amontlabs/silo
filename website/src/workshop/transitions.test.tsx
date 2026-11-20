@@ -443,3 +443,104 @@ describe('a tap during a view transition', () => {
     expect(row).toHaveAttribute('aria-expanded', 'false');
   });
 });
+
+describe('the blind between the plain view and a place', () => {
+  /** A phone that wants motion: the tiles, never the map. */
+  function narrow() {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
+  }
+  /** View transitions whose update and end the test runs, with what the page had scrolled when each update ran. */
+  function transitions() {
+    const started: { update: () => void; end: () => void; scrolls: unknown[] }[] = [];
+    const scrolls: unknown[] = [];
+    vi.spyOn(window, 'scrollTo').mockImplementation(((options: unknown) => { scrolls.push(options); }) as typeof window.scrollTo);
+    (document as unknown as { startViewTransition: unknown }).startViewTransition = (update: () => void) => {
+      let end: () => void = () => {};
+      const finished = new Promise<void>((resolve) => { end = resolve; });
+      const entry = { update: () => { const before = scrolls.length; update(); entry.scrolls = scrolls.slice(before); }, end: () => act(() => end()), scrolls: [] as unknown[] };
+      started.push(entry);
+      return { finished, ready: Promise.resolve(), skipTransition() {} };
+    };
+    return started;
+  }
+  const marks = () => [...document.documentElement.classList].filter((name) => name.startsWith('vt-'));
+  function scrolledTo(y: number) {
+    Object.defineProperty(window, 'scrollY', { value: y, configurable: true });
+  }
+  afterEach(() => {
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    delete (window as unknown as { scrollY?: unknown }).scrollY;
+    document.documentElement.classList.remove('vt-open', 'vt-back');
+  });
+
+  it('runs only from or to the plain view, with the way marked on <html> until it ends', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    await renderApp();
+    await userEvent.click(tile('part-b'));
+    expect(started).toHaveLength(1);
+    expect(marks()).toEqual(['vt-open']);
+    act(() => started[0].update());
+    expect(shownPart()).toBe('part-b');
+    expect(marks()).toEqual(['vt-open']);
+    await started[0].end();
+    await waitFor(() => expect(marks()).toEqual([]));
+    // From one place to another: no view transition, the new place at once.
+    await userEvent.click(tile('part-d'));
+    expect(started).toHaveLength(1);
+    expect(shownPart()).toBe('part-d');
+    expect(marks()).toEqual([]);
+    // Back to the plain view: the other way.
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    expect(started).toHaveLength(2);
+    expect(marks()).toEqual(['vt-back']);
+    act(() => started[1].update());
+    expect(shownPart()).toBe('');
+    await started[1].end();
+    await waitFor(() => expect(marks()).toEqual([]));
+  });
+
+  it('takes the mark off when another move overtakes the transition, and leaves the next one its own', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    await renderApp();
+    await userEvent.click(tile('part-b'));
+    expect(marks()).toEqual(['vt-open']);
+    // Back of the browser during the move: at once, no transition, no mark.
+    act(() => { history.pushState(null, '', '/workshop#part-a'); dispatchEvent(new PopStateEvent('popstate')); });
+    expect(marks()).toEqual([]);
+    act(() => started[0].update());
+    expect(shownPart()).toBe('part-a');
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    expect(marks()).toEqual(['vt-back']);
+    // The overtaken transition ending takes nothing off the one under way.
+    await started[0].end();
+    expect(marks()).toEqual(['vt-back']);
+  });
+
+  it('sets the scroll at once inside the update: to the strip on opening, to the tile left on going back', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    await renderApp();
+    scrolledTo(900);
+    await userEvent.click(tile('part-b'));
+    act(() => started[0].update());
+    // Past the stop (jsdom lays nothing out: the stop is 0), the page goes to it in the update itself, at once.
+    expect(started[0].scrolls).toEqual([{ top: 0, behavior: 'instant' }]);
+    await started[0].end();
+    scrolledTo(500);
+    // The tile of the part left is 200 px above the window once back: the page scrolls up just that, at once.
+    const plain = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.ws-tile[data-part="part-b"]')) return { x: 0, y: -200, top: -200, left: 0, right: 200, bottom: -120, width: 200, height: 80, toJSON() {} } as DOMRect;
+      return plain.call(this);
+    });
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    act(() => started[1].update());
+    expect(started[1].scrolls).toEqual([{ top: 300, behavior: 'instant' }]);
+    expect(document.activeElement).toBe(tile('part-b'));
+  });
+});

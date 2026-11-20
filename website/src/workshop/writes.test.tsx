@@ -128,11 +128,14 @@ describe('writes the server has not confirmed', () => {
     const pending = screen.getByText('On its way.').closest('.ws-c') as HTMLElement;
     expect(pending).toHaveClass('ws-pending');
     expect(within(pending).getByText('Sending…')).toBeInTheDocument();
+    // Its 👍 is drawn and disabled, so the comment keeps its height once confirmed.
+    expect(within(pending).getByRole('button', { name: /votes on this comment/ })).toBeDisabled();
     expect(within(itemOf('Run a command')).queryByText(/💬/)).not.toBeInTheDocument();
     expect(announced()).toBe('Sending comment');
     expect(localStorage.getItem('silo-workshop-writes-2')).toBeNull();
     await act(async () => answer.release(ok()));
     expect(screen.getByText('On its way.').closest('.ws-c')).not.toHaveClass('ws-pending');
+    expect(within(screen.getByText('On its way.').closest('.ws-c') as HTMLElement).getByRole('button', { name: /votes on this comment/ })).toBeInTheDocument();
     expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
     expect(localStorage.getItem('silo-workshop-writes-2')).toContain('On its way.');
   });
