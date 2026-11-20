@@ -348,6 +348,20 @@ test('plan: the next decision that replaces others shows each one with its answe
   }, files);
 });
 
+test('plan and show print a replaced decision whose adds is not a list, which the check reports, without failing', async () => {
+  const files = basePlan();
+  files['decisions/nothing-without-a-reason.json'] = { ...files['decisions/nothing-without-a-reason.json'], replaces: ['the-design'] };
+  const { answer: _answer, ...design } = files['decisions/the-design.json'];
+  files['decisions/the-design.json'] = { ...design, adds: 'computer' };
+  await withRepo(async (root) => {
+    const next = await run(root, []);
+    assert.equal(next.code, 0, next.out);
+    assert.match(next.out, /^ {4}the-design: adds nothing$/m);
+    const shown = await run(root, ['show', 'nothing-without-a-reason']);
+    assert.equal(shown.code, 0, shown.out);
+  }, files);
+});
+
 test('show: a decision that replaces lists what it replaces; a replaced one says so first and binds nothing; a need replaced says by what', async () => {
   await withRepo(async (root) => {
     const zig = await run(root, ['show', 'zig-again']);

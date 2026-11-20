@@ -126,7 +126,8 @@ later decision.
 
 To change one statement that is in force, add a decision that sets the same id with the new
 text, or that removes it. When the owner takes it, the id moves from the `adds` of the old entry
-to the `adds` of the new one, and the old entry stays taken.
+to the `adds` of the new one. The old entry stays taken. If it is a decision that would be left
+with no answer and no statement, the take asks that the new decision name it in `replaces`.
 
 To change what a whole decision settled, add a decision that names it in `replaces`. The new
 decision sets again or removes every statement the old one added. When the owner takes it, the

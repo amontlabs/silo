@@ -365,14 +365,24 @@ test('replaces is a list of decisions other than its own entry, each once', () =
   assert.deepEqual(errorsOf(variant((f) => { f['engine/features/start-computer.json'].replaces = ['engine-language']; })), ['plan/engine/features/start-computer.json replaces: unknown key']);
 });
 
-test('replaces names a taken decision, whatever the verdict of the entry that names it', () => {
+test('replaces names a taken decision, on a decision that is taken or has no verdict; a dropped one is skipped', () => {
   const zig = 'plan/engine/decisions/zig-again.json';
-  for (const verdict of [undefined, 'take', 'drop']) {
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f, { verdict: 'drop', replaces: ['linux-vm-engine'] }); })), []);
+  for (const verdict of [undefined, 'take']) {
     assert.deepEqual(errorsOf(variant((f) => { replacer(f, { verdict, replaces: ['linux-vm-engine'] }); })), [`${zig} replaces[0]: "linux-vm-engine" is not taken`], String(verdict));
   }
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].verdict = 'drop'; replacer(f, { verdict: undefined, replaces: ['model-tool'] }); })), [`${zig} replaces[0]: "model-tool" is not taken`]);
   const [error] = checkFiles(filesOf(variant((f) => { replacer(f, { replaces: ['linux-vm-engine'] }); }))).errors;
   assert.match(error.fix, /edit "linux-vm-engine" instead/);
+});
+
+test('an entry sets a statement or removes it, not both', () => {
+  const files = variant((f) => {
+    const decision = f['decisions/nothing-without-a-reason.json'];
+    decision.sets = [...decision.sets, { in: 'words', word: 'computer', means: 'A whole virtual machine.' }];
+    decision.removes = ['fork', 'computer'];
+  });
+  assert.deepEqual(errorsOf(files), ['plan/decisions/nothing-without-a-reason.json removes[1]: "computer" is also set by this entry']);
 });
 
 test('a decision is replaced by one taken decision only', () => {

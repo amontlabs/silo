@@ -101,6 +101,9 @@ function readPlan(root) {
 /** The entries in the order of order.json. @param {any} plan */
 const ordered = (plan) => plan.stages.flatMap((stage) => stage.entries).filter((id, i, all) => Object.hasOwn(plan.entries, id) && all.indexOf(id) === i).map((id) => plan.entries[id]);
 
+/** A list of ids as the files give it; anything else, which the check reports, reads as none. @param {unknown} value @returns {string[]} */
+const idsOf = (value) => (Array.isArray(value) ? value.filter((id) => typeof id === 'string') : []);
+
 /** One `sets` item on one line: its list, its id or word, and what it says or means. @param {any} item */
 const setLine = (item) => {
   const name = item?.id ?? item?.word;
@@ -116,7 +119,7 @@ const setLine = (item) => {
 function replacedSummary(plan, id) {
   const decision = Object.hasOwn(plan.entries, id) && plan.entries[id].kind === 'decision' ? plan.entries[id] : undefined;
   if (!decision) return { id };
-  return { id, ...(decision.answer !== undefined ? { answer: decision.answer } : { adds: decision.adds ?? [] }) };
+  return { id, ...(decision.answer !== undefined ? { answer: decision.answer } : { adds: idsOf(decision.adds) }) };
 }
 
 /** One line of `replaces`: the decision's id and its answer, or what it adds. @param {{ id: string, answer?: string, adds?: string[] }} summary */
@@ -214,7 +217,7 @@ function wrapIds(ids, indent, width = 100) {
 }
 
 /** A taken decision on one line: its answer, or the ids it adds when it has none. @param {any} decision */
-const decisionLine = (decision) => `  decision ${decision.id}${decision.part ? ` (${decision.part})` : ''}: ${decision.answer ?? `adds ${(decision.adds ?? []).join(', ')}`}`;
+const decisionLine = (decision) => `  decision ${decision.id}${decision.part ? ` (${decision.part})` : ''}: ${decision.answer ?? `adds ${idsOf(decision.adds).join(', ')}`}`;
 
 /**
  * An entry, whole, then what binds it. The taken decisions of the whole product that the entry
@@ -333,7 +336,7 @@ function showStatement(plan, id) {
   ][0];
   if (!found) return null;
   const entries = Object.values(plan.entries);
-  const addedBy = entries.filter((entry) => (entry.adds ?? []).includes(id)).map((entry) => entry.id);
+  const addedBy = entries.filter((entry) => idsOf(entry.adds).includes(id)).map((entry) => entry.id);
   const keptBy = entries.filter((entry) => (entry.keeps ?? []).includes(id)).map((entry) => entry.id);
   const setBy = entries.filter((entry) => (entry.sets ?? []).some((item) => item?.id === id || (item?.word !== undefined && String(item.word).toLowerCase().replaceAll(' ', '-') === id))).map((entry) => entry.id);
   const removedBy = entries.filter((entry) => (entry.removes ?? []).includes(id)).map((entry) => entry.id);

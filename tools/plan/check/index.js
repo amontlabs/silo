@@ -329,6 +329,15 @@ export function checkFiles(files, { exists } = {}) {
     });
   }
 
+  // An entry sets a statement or removes it, never both: a take could write no plan from the two.
+  for (const entry of entries.values()) {
+    if (!Array.isArray(entry.sets) || !Array.isArray(entry.removes)) continue;
+    const set = new Set(entry.sets.map((item) => (isObject(item) && listKind(item.in) ? statementId(listKind(item.in), item) : undefined)));
+    entry.removes.forEach((id, index) => {
+      if (typeof id === 'string' && set.has(id)) add(entry.file, `removes[${index}]`, `"${id}" is also set by this entry`, 'keep it in sets to change it, or in removes to take it out, not both');
+    });
+  }
+
   // Rule 6: every statement is added by exactly one taken entry; every added id is a statement.
   /** @type {Map<string, string[]>} */
   const addedBy = new Map();
@@ -409,6 +418,8 @@ export function checkFiles(files, { exists } = {}) {
       if (!decisionIds.has(id)) return add(entry.file, field, `"${id}" is not a decision`, 'name a taken decision of the plan');
       const target = entries.get(id);
       if (!target) return;
+      // A dropped decision is skipped: what it would have replaced is free to change.
+      if (entry.verdict === 'drop') return;
       if (target.verdict !== 'take') return add(entry.file, field, `"${id}" is not taken`, `edit "${id}" instead: it has no verdict to replace`);
       const by = replacedBy.get(id);
       // Only a taken decision replaces: with no verdict, or dropped, its replaces says nothing of the decisions it names.

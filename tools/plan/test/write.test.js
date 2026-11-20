@@ -333,6 +333,24 @@ test('drop refuses a replaced decision and a taken decision that replaces; a dec
   assert.deepEqual(checkFiles(apply(proposal, dropped)).errors, []);
 });
 
+test('drop refuses a taken decision that a decision with no verdict would replace, and names it; a dropped one holds nothing back', () => {
+  const waiting = sample({
+    'engine/decisions/engine-colour.json': { asks: 'Which colour is the engine?', answer: 'Blue.', verdict: 'take' },
+    'decisions/nothing-without-a-reason.json': { ...basePlan()['decisions/nothing-without-a-reason.json'], replaces: ['engine-colour'] },
+  });
+  place(waiting, 'engine-colour');
+  assert.deepEqual(checkFiles(waiting).errors, []);
+  const refusedDrop = drop(waiting, 'engine-colour');
+  assert.equal(refusedDrop.status, 'refused');
+  assert.equal(refusedDrop.message, 'engine-colour is named in the replaces of nothing-without-a-reason, not decided yet: take or drop it first, or remove engine-colour from its replaces');
+  assert.equal(refusedDrop.changed.size, 0);
+
+  const skipped = apply(waiting, drop(waiting, 'nothing-without-a-reason'));
+  const dropped = drop(skipped, 'engine-colour');
+  assert.equal(dropped.status, 'done', dropped.message);
+  assert.deepEqual(checkFiles(apply(skipped, dropped)).errors, []);
+});
+
 test('drop writes the verdict and keeps sets; it refuses a taken entry that brought statements', () => {
   const files = sample();
   const outcome = drop(files, 'losses-show');
