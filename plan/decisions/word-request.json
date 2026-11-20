@@ -5,10 +5,7 @@
     {
       "in": "words",
       "word": "request",
-      "means": "What waits at the boundary.",
-      "not": [
-        "the thing"
-      ]
+      "means": "What waits at the boundary."
     }
   ]
 }

@@ -24,7 +24,10 @@
     {
       "in": "words",
       "word": "allow",
-      "means": "What happens to one request waiting at the boundary: it passes."
+      "means": "What happens to one request waiting at the boundary: it passes.",
+      "not": [
+        "exception"
+      ]
     },
     {
       "in": "words",
@@ -34,7 +37,10 @@
     {
       "in": "words",
       "word": "deny",
-      "means": "What happens to one request waiting at the boundary: it is refused. Everything is denied unless a rule allows it or you say yes to an ask. \"Deny\" is the word at the boundary; \"pause\" and \"stop\" are kept for a computer."
+      "means": "What happens to one request waiting at the boundary: it is refused. Everything is denied unless a rule allows it or you say yes to an ask. \"Deny\" is the word at the boundary; \"pause\" and \"stop\" are kept for a computer.",
+      "not": [
+        "block"
+      ]
     },
     {
       "in": "words",

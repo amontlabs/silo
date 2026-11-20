@@ -187,7 +187,8 @@ on that id prints the part, with the word's meaning.
   uncommitted changes.
 - The owner's yes to a statement is for its text: a word's `means`, a principle's `says` and
   `asks`, a property's `says`. A property's `check`, `at` and `from` are not part of that yes.
-  Whoever builds the check edits them in the list.
+  Whoever builds the check edits them in the list. A word's `not` is not part of it either, and
+  is edited in the list too.
 - A list file is created by the first take that adds a statement to it. An empty list has no file.
 
 ## Reference
@@ -210,8 +211,10 @@ Keys are written in this order. A key in brackets is optional: when it has no va
 | Decision | `asks`, [`answer`], [`needs`], [`replaces`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`], [`replaced_by`] |
 | Feature | `name`, `what`, [`needs`], [`sets`], [`removes`], [`adds`], [`keeps`], [`surfaces`], [`suggest`], [`suggested_in`], [`verdict`], [`built`] |
 
-- `not`: the words or phrases this word replaces. The check refuses each of them anywhere in
-  `plan/`. List one here only when every use of it in the plan would mean this concept.
+- `not`: the words not to write when you mean this word. A writer would naturally reach for them,
+  and they would be wrong there. No check looks for them, so a listed word keeps its everyday
+  meaning. [`guides/engineering.md`](../guides/engineering.md) says which words belong in the
+  list.
 - `known_as`: the principle's standard name.
 - `kind`: `safety` (something that never happens), `liveness` (something that always ends up
   happening) or `measured` (a number we commit to).

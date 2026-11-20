@@ -99,8 +99,9 @@ In this order. A key in brackets is optional: it is absent, never empty.
 | Decision | `asks`, [`answer`], [`needs`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`] |
 | Feature | `name`, `what`, [`needs`], [`sets`], [`removes`], [`adds`], [`keeps`], [`surfaces`], [`suggest`], [`suggested_in`], [`verdict`], [`built`] |
 
-- `not`: the words or phrases this word replaces. The check refuses each of them anywhere in
-  `plan/`. List one here only when every use of it in the plan would mean this concept.
+- `not`: the words not to write when you mean this word. A writer would naturally reach for them,
+  and they would be wrong there. No check looks for them, so a listed word keeps its everyday
+  meaning.
 - `known_as`: the principle's standard name.
 - `kind`: `safety` (it never happens), `liveness` (it always ends up happening) or `measured` (a
   number we commit to).

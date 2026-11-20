@@ -4,7 +4,9 @@
 It reads film.json, voice.json (from voice.py) and explainer.js, and the entries the film shows from
 plan/ (tools/entries.py). The film folder must be a direct child of W, and every clip a plain
 file of its voice/ (tools/place.py). It takes the player from W/player/ and the parts of the kit left unchanged
-(fonts, GSAP and its plugins, icons, player.css) from W/kit/kit/. W is films/.
+(fonts, GSAP and its plugins, icons, player.css) from W/kit/kit/. W is films/. The page ends with
+the texts of W/kit/licences/ in a comment: the icons' and the fonts' licences ask that their text
+goes with every copy.
 """
 import _venv  # noqa: F401  (W/.venv, offline)
 import base64, html, json, pathlib, sys
@@ -12,6 +14,7 @@ import entries, place
 
 W = pathlib.Path(__file__).resolve().parent.parent
 KIT, PLAYER = W / "kit" / "kit", W / "player"
+LICENCES = W / "kit" / "licences"
 VENDOR = ["gsap.min.js", "MotionPathPlugin.min.js", "DrawSVGPlugin.min.js", "MorphSVGPlugin.min.js", "CustomEase.min.js", "icons.js"]
 FONTS = {"geist-regular.otf": "font/otf", "geist-medium.otf": "font/otf", "geist-mono.ttf": "font/ttf"}
 
@@ -22,6 +25,12 @@ def js(s):   # safe inside <script>…</script>
 
 def data_url(path, mime):
     return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
+
+
+def licences():   # every text of kit/licences/, as one HTML comment
+    texts = "\n\n".join(f"{p.name}\n\n{p.read_text().strip()}" for p in sorted(LICENCES.glob("*.txt")))
+    assert texts and "-->" not in texts and "--!>" not in texts, LICENCES
+    return f"<!--\nLicences of the third-party files inlined in this page.\n\n{texts}\n-->\n"
 
 
 def main():
@@ -59,6 +68,7 @@ def main():
     for k, v in parts.items():
         assert k in page, k
         page = page.replace(k, v)
+    page = page.rstrip("\n") + "\n" + licences()
     out = place.inside(ch, "out")
     out.mkdir(exist_ok=True)
     (out / "index.html").write_text(page)
