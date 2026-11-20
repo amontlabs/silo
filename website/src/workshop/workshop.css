@@ -74,7 +74,7 @@
 .ws-pip.next::before { border-color: var(--accent); }
 .ws-pip.planned::before { border-color: var(--ink); }
 .ws-pip.undecided::before { border-color: color-mix(in srgb, var(--faint) 70%, transparent); }
-.ws-pip.dropped::before { width: 9px; height: 1.5px; border: 0; border-radius: 0; background: var(--faint); }
+.ws-pip.dropped::before, .ws-pip.replaced::before { width: 9px; height: 1.5px; border: 0; border-radius: 0; background: var(--faint); }
 .ws-owner .ws-pip.undecided::before { border-color: var(--accent-ink); }
 
 /* ---- the map: each box carries its full and its folded place ---- */
@@ -268,7 +268,7 @@
 .ws-row .ws-pip { justify-self: center; }
 .ws-name { font-size: 15px; overflow-wrap: anywhere; transition: color .16s; }
 .ws-item.quiet .ws-name { color: var(--muted); }
-.st-dropped .ws-name { color: var(--faint); text-decoration: line-through; }
+.st-dropped .ws-name, .st-replaced .ws-name { color: var(--faint); text-decoration: line-through; }
 .ws-item.open .ws-name { color: var(--ink); }
 .ws-word { font: 400 12px var(--mono); color: var(--muted); white-space: nowrap; min-width: 66px; text-align: right; }
 .ws-item.owed .ws-word { color: var(--accent-ink); }
@@ -292,6 +292,8 @@
 .ws-yes { color: var(--ink); }
 .ws-muted { color: var(--muted); }
 .ws-date { font: 12px var(--mono); color: var(--faint); }
+.ws-replace { margin-top: 10px; font-size: 14px; color: var(--muted); max-width: 70ch; overflow-wrap: anywhere; }
+.ws-replace span { font: 12px var(--mono); color: var(--faint); }
 .ws-hint { color: var(--faint); font: 12px/1.5 var(--mono); margin-top: 9px; max-width: 70ch; }
 .ws-talk { margin-top: 16px; display: grid; gap: 11px; border-top: 1px solid var(--line); padding-top: 14px; max-width: 720px; }
 .ws-earlier { justify-self: start; }
@@ -301,7 +303,7 @@
 .ws-c b small { font: 12px var(--mono); color: var(--faint); font-weight: 400; margin-left: 6px; }
 .ws-c p { color: var(--muted); overflow-wrap: anywhere; }
 .ws-c p + p { margin-top: 6px; }
-.ws-c a, .ws-what a { color: var(--accent-ink); text-decoration: underline; }
+.ws-c a, .ws-what a, .ws-replace a { color: var(--accent-ink); text-decoration: underline; }
 .ws-box { display: flex; gap: 10px; align-items: flex-start; margin-top: 2px; font-size: 13.5px; }
 .ws textarea, .ws input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 3px; padding: 8px 11px; background: var(--paper); color: var(--ink); font: 13.5px/1.4 var(--sans); resize: vertical; }
 .ws textarea { min-height: 37px; }

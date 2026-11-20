@@ -211,7 +211,7 @@ title row, the map when there is one, the tiles and the row under them in
 tooltip when entries have threads), and, in the page's `<noscript>`, the line
 that says what needs JavaScript followed by every part with its decisions and
 features and then the decisions of the whole product, as a plain list (id,
-name, state; `NoScript.tsx`). The root and the slot carry `data-prerendered`
+name, state, and "Replaced by" for a replaced decision; `NoScript.tsx`). The root and the slot carry `data-prerendered`
 until the script takes over. A
 prerender that throws fails the build; the dev server does not prerender.
 Rendering at build time reads nothing of `window`, `document`, `location`,
@@ -260,7 +260,19 @@ What a person sees:
   drawn by the same row. A feature is planned (taken, ready or not), built (its
   file says `built`), dropped, or not decided. A decision's name is its `asks`
   and its body its `answer`; it is decided (taken), not decided (open or
-  answered) or dropped.
+  answered), replaced or dropped. A decision is replaced when its file has a
+  `replaced_by`, which `plan take` writes into each decision a taken decision
+  names in `replaces`; the page passes it to the model, which reads the state
+  from that key. A replaced decision is not counted as decided: a part's
+  decisions line shows "N replaced" before "N dropped". It stays at its place
+  in the order of `order.json`, looks as a dropped row does, and is not in
+  "Left out". Opened, it shows what it showed when taken and the line
+  "Replaced by", with the question of the decision that replaced it as a link
+  that opens it where it lives. A decision that names others in `replaces`
+  shows "Replaces" (taken) or "Would replace" (no verdict) with their questions
+  as links; a dropped one shows no such line. A replaced decision offers the
+  owner no verdict, as a taken one offers none. In Latest, a change of
+  `replaces` reads "Replaces changed".
 - A part's state, counts and the line under the title come from its features
   only: done (something built, nothing planned), next (the part holding the
   first planned feature in order), planned, not decided yet. An open part shows

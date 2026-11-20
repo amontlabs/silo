@@ -25,6 +25,10 @@ export interface FixtureDecision {
   asks: string;
   answer?: string;
   verdict?: 'take' | 'drop';
+  /** The decisions it takes the place of. */
+  replaces?: string[];
+  /** The decision that replaced it, as `plan take` writes it. */
+  replacedBy?: string;
 }
 
 /** In the order of order.json. */
@@ -81,9 +85,12 @@ export const STAGES = [
 export const DECISIONS: FixtureDecision[] = [
   { id: 'security-properly', stage: 'first', part: null, asks: 'How is security built?', answer: 'Properly. It is not the focus yet.', verdict: 'take' },
   { id: 'one-host', stage: 'first', part: null, asks: 'Which host runs Silo first?' },
+  { id: 'plain-logs', stage: 'first', part: null, asks: 'Which logs does Silo keep?', answer: 'Plain text logs.', verdict: 'take', replacedBy: 'signed-logs' },
   { id: 'core-in-zig', stage: 'first', part: 'part-a', asks: 'Which language is the core written in?', answer: 'Zig. It is the core piece.', verdict: 'take' },
   { id: 'one-way', stage: 'third', part: 'part-d', asks: 'Which way do changes go?', answer: 'One way only. Nothing else moves.' },
+  { id: 'tamper-proof-logs', stage: 'third', part: 'part-d', asks: 'Can a log be changed after the fact?', answer: 'No. Each line is chained to the one before.', replaces: ['signed-logs'] },
   { id: 'who-signs', stage: 'eighth', part: 'part-e', asks: 'Who signs the releases?' },
+  { id: 'signed-logs', stage: 'eighth', part: 'part-e', asks: 'How are logs kept honest?', answer: 'Each log is signed.', verdict: 'take', replaces: ['plain-logs'] },
   { id: 'old-format', stage: 'gone', part: 'part-e', asks: 'Which format does an export use?', answer: 'Our own.', verdict: 'drop' },
 ];
 
@@ -126,7 +133,10 @@ export function planFiles({ features = FEATURES, notes = DEFAULT_NOTES, decision
   for (const decision of decisions) {
     const file: Record<string, unknown> = { asks: decision.asks };
     if (decision.answer) file.answer = decision.answer;
+    // The key order of plan/README.md: replaces before the verdict, replaced_by after it.
+    if (decision.replaces) file.replaces = decision.replaces;
     if (decision.verdict) file.verdict = decision.verdict;
+    if (decision.replacedBy) file.replaced_by = decision.replacedBy;
     const path = decision.part ? `${decision.part}/decisions/${decision.id}` : `decisions/${decision.id}`;
     files.set(`${path}.json`, canonicalText(file));
     if (notes[decision.id]) files.set(`${path}.md`, notes[decision.id]);
@@ -143,9 +153,9 @@ export function planFiles({ features = FEATURES, notes = DEFAULT_NOTES, decision
   return files;
 }
 
-/** The files of a plan that holds no part and no feature: only the decisions of the whole product. */
+/** The files of a plan that holds no part and no feature: only the decisions of the whole product, none of them replaced by a decision of a part. */
 export function emptyPlanFiles(): Map<string, string> {
-  return planFiles({ features: [], parts: [], decisions: DECISIONS.filter((decision) => decision.part === null), notes: {} });
+  return planFiles({ features: [], parts: [], decisions: DECISIONS.filter((decision) => decision.part === null && !decision.replacedBy), notes: {} });
 }
 
 const NOTES = new WeakMap<BuildData, Notes>();

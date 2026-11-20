@@ -175,11 +175,18 @@ describe('the Workshop without JavaScript', () => {
   });
 
   it('lists the decisions of the whole product, and keeps them on a plan with no part', () => {
-    for (const data of [buildData(), buildDataFrom(emptyPlanFiles())]) {
+    for (const [data, ids] of [[buildData(), ['security-properly', 'one-host', 'plain-logs']], [buildDataFrom(emptyPlanFiles()), ['security-properly', 'one-host']]] as const) {
       const product = noscript(data).querySelector('section[data-part="product"]');
       expect(product?.querySelector('h2')?.textContent).toBe('The whole product');
-      expect(rowsOf(product)?.map((row) => row?.split(' ')[0])).toEqual(['security-properly', 'one-host']);
+      expect(rowsOf(product)?.map((row) => row?.split(' ')[0])).toEqual(ids);
     }
+  });
+
+  it('says a decision is replaced, and by which one', () => {
+    const box = noscript();
+    expect(rowsOf(box.querySelector('section[data-part="product"]'))).toContain('plain-logs Which logs does Silo keep? Replaced. Replaced by signed-logs How are logs kept honest?');
+    // Only the replaced decision has the line.
+    expect(box.textContent?.match(/Replaced by/g)).toHaveLength(1);
   });
 
   it('goes into the page\'s <noscript> only, so the page drawn with JavaScript is unchanged', () => {
