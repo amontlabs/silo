@@ -1,10 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalText } from '../../../tools/plan/model/index.js';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { loadDir } from '../../../tools/plan/read/index.js';
-import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, notesFrom, planDir, readBuildData, readHistories, readHistory } from './data';
+import { buildDataFrom, factsFrom, historiesFrom, historyFromGit, notesFrom, planDir, readBuildData, readHistories, readHistory, unshallow } from './data';
 import type { Git } from './data';
 import { buildData, CORE_NOTES, DECISIONS, emptyPlanFiles, FEATURES, PARTS, planFiles, withLists, ZIG_NOTES } from './fixtures';
 import { checkLayout, LayoutError, MAP_HEIGHT, SILO_MAP } from './map';
@@ -181,6 +182,50 @@ describe('the history of the entries', () => {
     };
     return { git, calls };
   };
+
+  describe('on real git', () => {
+    const run = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim();
+    const commits = (cwd: string) => Number(run(cwd, 'rev-list', '--count', 'HEAD'));
+    const made: string[] = [];
+    afterEach(() => { for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
+    /** A local repository of five commits on a branch other than the default one, and a clone of it made as Vercel makes one: shallow, with no remote. */
+    function vercelClone() {
+      const dir = mkdtempSync(join(tmpdir(), 'workshop-clone-'));
+      made.push(dir);
+      const origin = join(dir, 'origin');
+      mkdirSync(origin);
+      run(origin, 'init', '-q', '-b', 'main');
+      run(origin, 'config', 'user.email', 'a@b.c');
+      run(origin, 'config', 'user.name', 'a');
+      run(origin, 'config', 'commit.gpgsign', 'false');
+      run(origin, 'commit', '-q', '--allow-empty', '-m', 'first');
+      run(origin, 'checkout', '-q', '-b', 'preview');
+      for (let i = 2; i <= 5; i++) run(origin, 'commit', '-q', '--allow-empty', '-m', `commit ${i}`);
+      const clone = join(dir, 'clone');
+      execFileSync('git', ['clone', '-q', '--depth=3', '--branch', 'preview', `file://${origin}`, clone]);
+      run(clone, 'remote', 'remove', 'origin');
+      return { origin, clone, address: `file://${origin}` };
+    }
+
+    it('fetches the whole history of the commit being built from the public address when there is no origin', () => {
+      const { clone, address } = vercelClone();
+      const head = run(clone, 'rev-parse', 'HEAD');
+      expect(commits(clone)).toBe(3);
+      unshallow(clone, address);
+      expect(commits(clone)).toBe(5);
+      expect(run(clone, 'rev-parse', 'HEAD')).toBe(head);
+      expect(run(clone, 'rev-parse', '--is-shallow-repository')).toBe('false');
+      expect(run(clone, 'status', '--porcelain')).toBe('');
+    });
+
+    it('goes on shallow when neither origin nor the public address can be fetched', () => {
+      const { clone, origin } = vercelClone();
+      rmSync(origin, { recursive: true, force: true });
+      expect(() => unshallow(clone, `file://${origin}`)).toThrow();
+      expect(commits(clone)).toBe(3);
+    });
+  });
 
   it('turns the steps of git into each entry\'s changes, newest first', () => {
     const { git, calls } = fakeGit([{ steps, shallow: false }]);

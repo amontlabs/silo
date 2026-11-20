@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
 import { listKind, wordId } from '../../../tools/plan/model/index.js';
+import { repoAddress } from '../../../tools/workshop/model/index.js';
 import { entryHistory, readSteps } from '../../../tools/plan/history/index.js';
 import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
 import { checkLayout, LayoutError, SILO_MAP } from './map.ts';
@@ -239,14 +240,31 @@ export interface Git {
   unshallow: (root: string) => void;
 }
 
-/** `git fetch --unshallow` from origin: the repository is public, so it needs no credential and must never ask for one. */
-function unshallow(root: string): void {
-  execFileSync('git', ['-C', root, 'fetch', '--unshallow', 'origin'], { stdio: 'ignore', timeout: 5 * 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+/** What a fetch of history may do: it never asks for a credential (the repository is public) and never waits more than five minutes. */
+function fetchHistory(root: string, args: string[]): void {
+  execFileSync('git', ['-C', root, ...args], { stdio: 'ignore', timeout: 5 * 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
 }
 
 /**
- * The changes of every entry, read from the git repository at `repository`. A shallow clone is fetched whole from
- * origin once and read again; when that fails the build goes on with what the clone holds and `shallow` says so.
+ * Fetches what a shallow clone lacks. First `git fetch --unshallow origin`; Vercel's clone has no remote, so when that
+ * fails, the commit being built from the repository's public address, whatever branch it is on. Only objects are
+ * fetched: the working tree and the checked-out commit stay as they are.
+ */
+export function unshallow(root: string, address = repoAddress()): void {
+  try {
+    fetchHistory(root, ['fetch', '--unshallow', 'origin']);
+    return;
+  } catch {
+    // No such remote, or it cannot be reached: the public address is next.
+  }
+  const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 60_000 }).trim();
+  fetchHistory(root, ['fetch', '--unshallow', address, head]);
+}
+
+/**
+ * The changes of every entry, read from the git repository at `repository`. A shallow clone is fetched whole once
+ * (from origin, else from the repository's public address) and read again; when both fail the build goes on with what
+ * the clone holds and `shallow` says so.
  */
 export function historyFromGit(repository: string, git: Git = { readSteps, unshallow }): HistorySource {
   let read = git.readSteps(repository);
@@ -254,7 +272,7 @@ export function historyFromGit(repository: string, git: Git = { readSteps, unsha
     try {
       git.unshallow(repository);
     } catch {
-      // The host may not reach origin: the build goes on with the clone it has.
+      // The host may not reach any remote: the build goes on with the clone it has.
     }
     read = git.readSteps(repository);
   }
