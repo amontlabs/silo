@@ -130,6 +130,18 @@ half a pixel or more when the script takes over, at 1440 × 900 and 390 × 844.
 A plan with no part is checked at the places it has, and passes.
 `npm test` does not run it.
 
+To see the page's moves frame by frame, with the same server running,
+`npm --prefix website run motion-sheet` (a URL, `--out <dir>` and flow names
+after `--`). For each move, such as the plain view to a part and back at
+1440 × 900 and 390 × 844, it writes to `website/.motion/` a contact sheet of
+the frames at fixed times after the action and a text file with each change
+of the scroll and of each element's box and opacity, the animations that ran
+and the layout shifts. It exits with an error when a move between the plain view and
+a place scrolls the page more than once, when a move between two places runs a
+view transition, when Notes opening grows its panel in fewer than four steps,
+or when a comment changes height as it is confirmed; the full list is at the
+top of `scripts/motion-sheet.mjs`. `npm test` does not run it either.
+
 To build and check the page on another plan than `plan/` (the real plan may be
 in the middle of a change), name its folder in `WORKSHOP_PLAN` for the build
 and for the runner:
@@ -230,8 +242,13 @@ What a person sees:
 - The parts as tiles in the order of `parts.json`; parts that hold an entry of
   the first five stages sit in the first band, the others after "After that".
   With a map, at 1200 px and wider, the map of the parts (Map) or the tiles
-  (Order); narrower, the tiles only. Opening a tile is a view transition where
-  the browser has them.
+  (Order); narrower, the tiles only. Where the browser has view transitions,
+  opening a tile rolls the sheet of tiles up into the strip of part names, like
+  a blind, and the place is uncovered under it; going back rolls it down again.
+  A move from one place to another (a name in the strip, a link to an entry
+  that lives elsewhere, a line of Latest) shows the new place at once. In the
+  strip, the name under the pointer turns to the ink colour; the lighter ground
+  and the line under it mark the open part alone.
 - A part's rows are its decisions and features, in the order of `order.json`,
   drawn by the same row. A feature is planned (taken, ready or not), built (its
   file says `built`), dropped, or not decided. A decision's name is its `asks`
@@ -261,7 +278,10 @@ What a person sees:
   row with no thread yet loads nothing);
   it shows itself open at once, its panel grows when the comments are in or
   after 180 ms, and while they still load each one the count announces holds
-  its place. An entry named by the address
+  its place. The panel also grows or shrinks over 200 ms when Notes or History
+  opens or closes, and when their text arrives after its placeholder. A comment
+  being sent shows its 👍 disabled, so it keeps its height once confirmed, and
+  "GitHub #N" next to the box keeps at least the room of "GitHub #000 ↗". An entry named by the address
   waits closed until the first answer when no live state is shown yet. An
   address naming something the state shown lacks falls back to the plan only
   once the load has answered or failed, and the `fresh=1` ask has too when one

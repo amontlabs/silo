@@ -52,6 +52,9 @@ function viewTransitions(mode: Mode) {
   };
 }
 
+/** The window's own `scrollY`, put back after a test that sets it. */
+const SCROLL_Y = Object.getOwnPropertyDescriptor(window, 'scrollY');
+const restoreScrollY = () => { if (SCROLL_Y) Object.defineProperty(window, 'scrollY', SCROLL_Y); };
 const elapse = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 const settleAll = () => act(async () => { await vi.runAllTimersAsync(); });
 const rootOf = () => document.querySelector('.ws') as HTMLElement;
@@ -441,5 +444,277 @@ describe('a tap during a view transition', () => {
     act(() => { fireEvent.pointerDown(document.documentElement, { button: 2 }); fireEvent.pointerUp(row, { button: 2 }); });
     await wait(30);
     expect(row).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('the blind between the plain view and a place', () => {
+  /** A phone that wants motion: the tiles, never the map. */
+  function narrow() {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
+  }
+  /** View transitions whose update and end the test runs, with what the page had scrolled when each update ran. */
+  function transitions() {
+    const started: { update: () => void; end: () => void; scrolls: unknown[]; skipped: boolean }[] = [];
+    const scrolls: unknown[] = [];
+    vi.spyOn(window, 'scrollTo').mockImplementation(((options: unknown) => { scrolls.push(options); }) as typeof window.scrollTo);
+    (document as unknown as { startViewTransition: unknown }).startViewTransition = (update: () => void) => {
+      let end: () => void = () => {};
+      const finished = new Promise<void>((resolve) => { end = resolve; });
+      const entry = { update: () => { const before = scrolls.length; update(); entry.scrolls = scrolls.slice(before); }, end: () => act(() => end()), scrolls: [] as unknown[], skipped: false };
+      started.push(entry);
+      // As the browser does: a transition skipped runs its update if it has not yet, and ends.
+      return { finished, ready: Promise.resolve(), skipTransition() { entry.skipped = true; entry.update(); end(); } };
+    };
+    return started;
+  }
+  const marks = () => [...document.documentElement.classList].filter((name) => name.startsWith('vt-'));
+  function scrolledTo(y: number) {
+    Object.defineProperty(window, 'scrollY', { value: y, configurable: true });
+  }
+  afterEach(() => {
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    restoreScrollY();
+    document.documentElement.classList.remove('vt-open', 'vt-back');
+  });
+
+  it('runs only from or to the plain view, with the way marked on <html> until it ends', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    await renderApp();
+    await userEvent.click(tile('part-b'));
+    expect(started).toHaveLength(1);
+    expect(marks()).toEqual(['vt-open']);
+    act(() => started[0].update());
+    expect(shownPart()).toBe('part-b');
+    expect(marks()).toEqual(['vt-open']);
+    await started[0].end();
+    await waitFor(() => expect(marks()).toEqual([]));
+    // From one place to another: no view transition, the new place at once.
+    await userEvent.click(tile('part-d'));
+    expect(started).toHaveLength(1);
+    expect(shownPart()).toBe('part-d');
+    expect(marks()).toEqual([]);
+    // Back to the plain view: the other way.
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    expect(started).toHaveLength(2);
+    expect(marks()).toEqual(['vt-back']);
+    act(() => started[1].update());
+    expect(shownPart()).toBe('');
+    await started[1].end();
+    await waitFor(() => expect(marks()).toEqual([]));
+  });
+
+  it('takes the mark off when another move overtakes the transition, and leaves the next one its own', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    await renderApp();
+    await userEvent.click(tile('part-b'));
+    expect(marks()).toEqual(['vt-open']);
+    // Back of the browser during the move: at once, no transition, no mark.
+    act(() => { history.pushState(null, '', '/workshop#part-a'); dispatchEvent(new PopStateEvent('popstate')); });
+    expect(marks()).toEqual([]);
+    act(() => started[0].update());
+    expect(shownPart()).toBe('part-a');
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    expect(marks()).toEqual(['vt-back']);
+    // The overtaken transition ending takes nothing off the one under way.
+    await started[0].end();
+    expect(marks()).toEqual(['vt-back']);
+  });
+
+  it('sets the scroll at once inside the update: to the strip on opening, to the tile left on going back', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    await renderApp();
+    scrolledTo(900);
+    await userEvent.click(tile('part-b'));
+    act(() => started[0].update());
+    // Past the stop (jsdom lays nothing out: the stop is 0), the page goes to it in the update itself, at once.
+    expect(started[0].scrolls).toEqual([{ top: 0, behavior: 'instant' }]);
+    await started[0].end();
+    scrolledTo(500);
+    // The tile of the part left is 200 px above the window once back: the page scrolls up just that, at once.
+    const plain = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.ws-tile[data-part="part-b"]')) return { x: 0, y: -200, top: -200, left: 0, right: 200, bottom: -120, width: 200, height: 80, toJSON() {} } as DOMRect;
+      return plain.call(this);
+    });
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    act(() => started[1].update());
+    expect(started[1].scrolls).toEqual([{ top: 300, behavior: 'instant' }]);
+    expect(document.activeElement).toBe(tile('part-b'));
+  });
+});
+
+describe('a view transition overtaken by another move', () => {
+  function narrow() {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
+  }
+  /** View transitions that wait for the test to run their update, and record being skipped. */
+  function transitions() {
+    const started: { update: () => void; end: () => void; skipped: boolean }[] = [];
+    (document as unknown as { startViewTransition: unknown }).startViewTransition = (update: () => void) => {
+      let end: () => void = () => {};
+      const finished = new Promise<void>((resolve) => { end = resolve; });
+      const entry = { update, end: () => end(), skipped: false };
+      started.push(entry);
+      return { finished, ready: Promise.resolve(), skipTransition() { entry.skipped = true; update(); end(); } };
+    };
+    return started;
+  }
+  afterEach(() => {
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    document.documentElement.classList.remove('vt-open', 'vt-back');
+  });
+
+  it('is skipped when another place is opened from the strip before its update runs', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    history.replaceState(null, '', '/workshop#part-b');
+    await renderApp();
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    expect(started).toHaveLength(1);
+    await userEvent.click(tile('part-d'));
+    expect(started[0].skipped).toBe(true);
+    expect(shownPart()).toBe('part-d');
+  });
+
+  it('is skipped when the open chip is pressed again to keep the place', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    history.replaceState(null, '', '/workshop#part-b');
+    await renderApp();
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    await userEvent.click(tile('part-b'));
+    expect(started).toHaveLength(1);
+    expect(started[0].skipped).toBe(true);
+    expect(shownPart()).toBe('part-b');
+  });
+
+  it('is skipped by Back or Forward of the browser', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    await renderApp();
+    await userEvent.click(tile('part-b'));
+    act(() => { history.pushState(null, '', '/workshop#part-a'); dispatchEvent(new PopStateEvent('popstate')); });
+    expect(started[0].skipped).toBe(true);
+    expect(shownPart()).toBe('part-a');
+  });
+
+  it('is not skipped when it ends before the next move', async () => {
+    narrow();
+    const started = transitions();
+    mockApi();
+    await renderApp();
+    await userEvent.click(tile('part-b'));
+    act(() => started[0].update());
+    await act(async () => started[0].end());
+    // The next move, to another place: the transition that ended is left alone.
+    await userEvent.click(tile('part-d'));
+    expect(shownPart()).toBe('part-d');
+    expect(started[0].skipped).toBe(false);
+  });
+});
+
+describe('going back from a place reached by its address', () => {
+  function narrow() {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
+  }
+  afterEach(() => {
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    document.documentElement.classList.remove('vt-open', 'vt-back');
+  });
+
+  it.each([['#latest', 'Latest'], ['#product', 'The whole product'], ['#left', /^Left out/]] as const)('from %s gives the focus to the link under the tiles that leads there, brought into view at once', async (hash, name) => {
+    narrow();
+    let update: () => void = () => {};
+    (document as unknown as { startViewTransition: unknown }).startViewTransition = (run: () => void) => {
+      update = run;
+      return { finished: new Promise(() => {}), ready: Promise.resolve(), skipTransition() {} };
+    };
+    const scrolls: unknown[] = [];
+    vi.spyOn(window, 'scrollTo').mockImplementation(((options: unknown) => { scrolls.push(options); }) as typeof window.scrollTo);
+    mockApi();
+    history.replaceState(null, '', `/workshop${hash}`);
+    await renderApp();
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+    const plain = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('a.ws-fold-link')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1220, width: 80, height: 20, toJSON() {} } as DOMRect;
+      return plain.call(this);
+    });
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    act(() => update());
+    restoreScrollY();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name }));
+    expect(scrolls).toEqual([{ top: 1220 - innerHeight, behavior: 'instant' }]);
+  });
+
+  it('gives the focus to the title when no link leads there', async () => {
+    narrow();
+    let update: () => void = () => {};
+    (document as unknown as { startViewTransition: unknown }).startViewTransition = (run: () => void) => {
+      update = run;
+      return { finished: new Promise(() => {}), ready: Promise.resolve(), skipTransition() {} };
+    };
+    mockApi();
+    history.replaceState(null, '', '/workshop#latest');
+    await renderApp();
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    // The plain view the update draws has no link to Latest.
+    const find = document.querySelector.bind(document);
+    vi.spyOn(document, 'querySelector').mockImplementation(((selector: string) => (selector === 'a.ws-fold-link[href="#latest"]' ? null : find(selector))) as typeof document.querySelector);
+    act(() => update());
+    expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Workshop' }));
+  });
+});
+
+describe('going back off the map without a view transition', () => {
+  afterEach(() => {
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    restoreScrollY();
+  });
+
+  it.each([
+    ['reduced motion', true],
+    ['a browser without view transitions', false],
+  ] as const)('with %s, brings what takes the focus into view at once', async (_, reduced) => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('prefers-reduced-motion') ? reduced : false, media: query, addEventListener() {}, removeEventListener() {} }));
+    const started: unknown[] = [];
+    if (reduced) (document as unknown as { startViewTransition: unknown }).startViewTransition = (update: () => void) => { started.push(update); update(); return { finished: Promise.resolve(), ready: Promise.resolve() }; };
+    else delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    const scrolls: unknown[] = [];
+    vi.spyOn(window, 'scrollTo').mockImplementation(((options: unknown) => { scrolls.push(options); }) as typeof window.scrollTo);
+    mockApi();
+    await renderApp();
+    // The tile of the part left is 200 px above the window once back; the link to Latest is 450 px below it.
+    const plain = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.ws-tile[data-part="part-b"]')) return { x: 0, y: -200, top: -200, left: 0, right: 200, bottom: -120, width: 200, height: 80, toJSON() {} } as DOMRect;
+      if (this.matches('a.ws-fold-link[href="#latest"]')) return { x: 0, y: 1200, top: 1200, left: 0, right: 80, bottom: 1218, width: 80, height: 18, toJSON() {} } as DOMRect;
+      return plain.call(this);
+    });
+    await userEvent.click(tile('part-b'));
+    Object.defineProperty(window, 'scrollY', { value: 500, configurable: true });
+    scrolls.length = 0;
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    expect(shownPart()).toBe('');
+    expect(document.activeElement).toBe(tile('part-b'));
+    expect(scrolls).toEqual([{ top: 300, behavior: 'instant' }]);
+    // A place reached by its address: the link under the tiles that leads to it.
+    history.replaceState(null, '', '/workshop#latest');
+    act(() => { dispatchEvent(new PopStateEvent('popstate')); });
+    expect(shownPart()).not.toBe('');
+    scrolls.length = 0;
+    await userEvent.click(document.querySelector<HTMLElement>('.ws-back')!);
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Latest' }));
+    expect(scrolls).toEqual([{ top: 500 + 1218 - innerHeight, behavior: 'instant' }]);
+    expect(started).toEqual([]);
   });
 });
