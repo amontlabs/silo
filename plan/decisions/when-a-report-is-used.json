@@ -1,13 +1,8 @@
 {
   "asks": "When does Silo rest on a report and not on a fact?",
   "answer": "Only for what cannot be seen from outside the computer.",
-  "sets": [
-    {
-      "in": "principles",
-      "id": "facts-before-reports",
-      "says": "A report is used only for what cannot be seen from outside the computer.",
-      "asks": "Can it be seen from outside the computer?",
-      "why": "A fact cannot be tampered with from inside the computer. A report can."
-    }
-  ]
+  "adds": [
+    "facts-before-reports"
+  ],
+  "verdict": "take"
 }
