@@ -24,15 +24,14 @@ export const LIMITS = { text: 5000, title: 120 };
 // Ceilings per instance. The installation token has one per use, kept apart so that no use can
 // starve another. `exchange` covers new sign-ins at GitHub's token endpoint and `renew` the token
 // refreshes of existing sessions, so that made-up sign-ins cannot stop sessions from refreshing.
-// The rest are per person (writes, suggestions, opened threads), for everyone (opened threads, counted
-// on GitHub) and per session (GitHub reads).
+// The rest are per person (writes, suggestions) and per session (GitHub reads). The threads opened for
+// entries are bounded by the plan's entries, one thread each, and by the `open` ceiling for how fast.
 export const BUDGET = {
   refreshCallsPerMinute: 40,
   signinLookupsPerMinute: 4,
-  labelCallsPerMinute: 20,
-  openCallsPerMinute: 10,
-  openingsPerPersonPerHour: 5,
-  openingsPerHour: 30,
+  labelCallsPerMinute: 10,
+  // An opening is 3 calls: the read of entry issues, the opening and the read that confirms it.
+  openCallsPerMinute: 27,
   tokenExchangesPerMinute: 30,
   tokenRenewalsPerMinute: 60,
   writesPerMinute: 20,
@@ -109,11 +108,6 @@ function counter(windowMs) {
       }
       return entry.count + cost > limit ? Math.max(1, (entry.start + windowMs - at) / 1000) : 0;
     },
-    // Gives back `cost` taken from `key` in the current window.
-    give(key, at, cost = 1) {
-      const entry = windows.get(key);
-      if (entry && at - entry.start < windowMs) entry.count = Math.max(0, entry.count - cost);
-    },
   };
 }
 
@@ -158,10 +152,6 @@ export function createWorkshop({
   const suggestionsMinute = counter(60_000);
   const suggestionsHour = counter(3600_000);
   const sessionReads = counter(60_000);
-  const openingsPerson = counter(3600_000);
-  // The openings of entries' threads this instance charged in the last hour, `{ at, number }`, `number`
-  // once the issue exists: they count against everyone's limit until a read of GitHub shows them.
-  const ownOpenings = new Set();
   const openings = new Map();
   const usedSignins = memory(STATE_MAX_AGE * 1000);
   const rejected = memory(REJECTED_FOR);
@@ -295,6 +285,8 @@ export function createWorkshop({
     const at = now();
     const blocked = CEILINGS[name][1] && at < blockedUntil;
     const wait = Math.max(blocked ? blockedUntil - at : 0, ceilings[name].start + 60_000 - at, 1000);
+    // New threads are busy, not GitHub: the answer says so, with the wait.
+    if (name === 'open' && !blocked) tooMany(wait / 1000, 'New threads are busy. Try again shortly.');
     // `local`: our own ceiling, not GitHub, said no.
     throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil(wait / 1000), as: 'installation', local: !blocked });
   }
@@ -443,18 +435,15 @@ export function createWorkshop({
     return kind === 'entry' && readEntryMarker(issue.body) === entry.id;
   }
 
-  // The entry issues on GitHub that name `id`, lowest number first, and `lastHour`, the creation time of
-  // every entry issue created in the last hour, by number. Read with the installation token within the
-  // `open` ceiling: the newest pages, until they reach both an hour ago and a minute before the
-  // snapshot's refresh began; the snapshot gives the older issues that name `id`. Without a snapshot,
-  // every page. `ignore`: numbers a read has shown are not the thread.
+  // The entry issues on GitHub that name `id`, lowest number first. Read with the installation token
+  // within the `open` ceiling: the newest pages, until they reach a minute before the snapshot's
+  // refresh began; the snapshot gives the older issues that name `id`. Without a snapshot, every page.
+  // `ignore`: numbers a read has shown are not the thread.
   async function entryIssuesOnGitHub(id, ignore) {
     const held = snapshots.held(id);
     const numbers = new Set((held?.numbers ?? []).filter((number) => !ignore.has(number)));
     const found = new Map();
-    const hourAgo = now() - 3600_000;
-    const since = Math.min(hourAgo, held ? held.startedAt - SNAPSHOT.overlap : -Infinity);
-    const lastHour = new Map();
+    const since = held ? held.startedAt - SNAPSHOT.overlap : -Infinity;
     let next = `/repos/${repo}/issues?labels=${encodeURIComponent(LABELS.entry)}&state=all&sort=created&direction=desc&per_page=100`;
     for (let page = 0; next && page < SNAPSHOT.issuePages; page += 1) {
       spendOrRefuse('open');
@@ -462,8 +451,6 @@ export function createWorkshop({
       const issues = Array.isArray(data) ? data : [];
       for (const issue of issues) {
         if (kindOf(issue) !== 'entry') continue;
-        const created = Date.parse(issue.created_at);
-        if (created >= hourAgo) lastHour.set(issue.number, created);
         if (readEntryMarker(issue.body) === id && !ignore.has(issue.number)) {
           numbers.add(issue.number);
           found.set(issue.number, issue);
@@ -474,21 +461,7 @@ export function createWorkshop({
       next = nextLink(headers.get('link'));
       if (next && !next.startsWith(config.apiBase + '/')) throw new GitHubError(502, { as: 'installation' });
     }
-    return { numbers: [...numbers].sort((a, b) => a - b), found, lastHour };
-  }
-
-  // The openings of entries' threads in the last hour: those GitHub showed in `lastHour`, and this
-  // instance's own that it did not show yet. Answers their number and the seconds until one more fits.
-  function openingsInHour(lastHour) {
-    const hourAgo = now() - 3600_000;
-    const times = [...lastHour.values()];
-    for (const opening of ownOpenings) {
-      if (opening.at < hourAgo) ownOpenings.delete(opening);
-      else if (opening.number === null || !lastHour.has(opening.number)) times.push(opening.at);
-    }
-    times.sort((a, b) => a - b);
-    const extra = times.length - BUDGET.openingsPerHour;
-    return { count: times.length, wait: extra >= 0 ? (times[extra] + 3600_000 - now()) / 1000 : 0 };
+    return { numbers: [...numbers].sort((a, b) => a - b), found };
   }
 
   // The entry's title as an issue title: one line, cut to the title limit at a word, with an ellipsis.
@@ -548,37 +521,19 @@ export function createWorkshop({
   // Finds the entry's thread on GitHub and, with `open`, opens it as the App when there is none.
   // Answers `{ candidates }`, the numbers to confirm, lowest first, and `opened`, the issue this call
   // opened when it is the thread. Requests that may open share one call per entry on this instance.
-  // The person's and everyone's openings an hour are charged before the opening, and given back when
-  // nothing was opened. After an opening, the entry issues are read again; when that read fails, the
-  // write is not made. When it shows a lower issue for the entry (another instance opened one at the
-  // same moment), that one is the thread and the issue this call opened is closed.
-  function lookUp(session, entry, ignore, open) {
+  // An opening is bounded only by the `open` ceiling. After an opening, the entry issues are read
+  // again; when that read fails, the write is not made. When it shows a lower issue for the entry
+  // (another instance opened one at the same moment), that one is the thread and the issue this call
+  // opened is closed.
+  function lookUp(entry, ignore, open) {
     const store = requests.getStore();
     const run = async () => {
       const before = await entryIssuesOnGitHub(entry.id, ignore);
       if (before.numbers.length || !open) return { candidates: before.numbers, opened: null };
-      // Only an opening is limited. The person's count and everyone's are checked and charged in one
-      // step, with no wait between, so that two openings at once cannot both pass; the charge is given
-      // back when nothing was opened.
-      const person = openingsPerson.peek(session.id, BUDGET.openingsPerPersonPerHour, now());
-      if (person) tooMany(person, 'You have started too many new threads this hour. Try again later.');
-      const everyone = openingsInHour(before.lastHour);
-      if (everyone.count >= BUDGET.openingsPerHour) tooMany(everyone.wait, 'Too many new threads were started on the Workshop this hour. Try again later.');
-      openingsPerson.take(session.id, BUDGET.openingsPerPersonPerHour, now());
-      const mine = { at: now(), number: null };
-      ownOpenings.add(mine);
-      let data;
-      try {
-        // Room for the opening and the read that confirms it.
-        if (!hasRoom('open', 2)) spendOrRefuse('open', 2);
-        spendOrRefuse('open');
-        data = (await installationRequest('POST', `/repos/${repo}/issues`, { body: { title: threadTitle(entry.title), body: threadBody(entry), labels: [LABELS.entry] } })).data;
-      } catch (error) {
-        ownOpenings.delete(mine);
-        openingsPerson.give(session.id, now());
-        throw error;
-      }
-      mine.number = data.number;
+      // Room for the opening and the read that confirms it.
+      if (!hasRoom('open', 2)) spendOrRefuse('open', 2);
+      spendOrRefuse('open');
+      const { data } = await installationRequest('POST', `/repos/${repo}/issues`, { body: { title: threadTitle(entry.title), body: threadBody(entry), labels: [LABELS.entry] } });
       if (store) store.changed = true;
       const issue = await labelled(data, entry);
       // The read confirms only when it shows the issue just opened; otherwise the write is not made.
@@ -636,7 +591,7 @@ export function createWorkshop({
     }
     for (let round = 0; round < 2; round += 1) {
       const shared = open ? openings.get(entry.id) : null;
-      const { candidates, opened } = await bounded(shared ?? lookUp(session, entry, ignore, open));
+      const { candidates, opened } = await bounded(shared ?? lookUp(entry, ignore, open));
       if (opened && !shared) return found(opened.number, opened, true);
       for (const n of candidates) {
         const issue = await confirm(n);

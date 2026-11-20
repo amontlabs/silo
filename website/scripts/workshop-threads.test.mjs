@@ -142,38 +142,45 @@ test('an id that is no entry of the plan, and a request naming both an issue and
   } finally { await t.close(); }
 });
 
-test('openings are limited per person, for everyone, and by the App\'s ceiling; each answered 429 in plain words', async () => {
-  const entries = [...PLAN_ENTRIES, ...['e1', 'e2', 'e3', 'e4'].map((id) => ({ id, kind: 'feature', title: `Entry ${id}`, part: 'computers', suggestedIn: null }))];
-  const t = await setup({ entries });
+const EIGHT = ['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7', 'e8'].map((id) => ({ id, kind: 'feature', title: `Entry ${id}`, part: 'computers', suggestedIn: null }));
+
+test('one person opening more than five threads in an hour, several in the same minute, is refused none', async () => {
+  const t = await setup({ entries: [...PLAN_ENTRIES, ...EIGHT] });
   try {
-    assert.deepEqual([BUDGET.openingsPerPersonPerHour, BUDGET.openingsPerHour, BUDGET.openCallsPerMinute], [5, 30, 10]);
-    const visitor = await signedIn(t);
-    const owner = await signedIn(t, 'owner-fake');
-    t.fake.addUser('third-fake');
-    const third = await signedIn(t, 'third-fake');
-    // Everyone's limit counts the entry issues created on GitHub in the last hour: the seeded ones are older.
-    t.clock.t += 3601_000;
-    await withBudget({ openingsPerPersonPerHour: 1, openingsPerHour: 2 }, async () => {
-      assert.equal((await visitor.call('POST', 'comment', { body: { entry: 'e1', text: 'x' } })).status, 200);
-      const person = await visitor.call('POST', 'comment', { body: { entry: 'e2', text: 'x' } });
-      assert.deepEqual([person.status, person.json.message], [429, 'You have started too many new threads this hour. Try again later.']);
-      assert.ok(Number(person.headers['Retry-After']) > 0);
-      // A thread that exists is no opening.
-      assert.equal((await visitor.call('POST', 'comment', { body: { entry: 'e1', text: 'again' } })).status, 200);
-      assert.equal((await owner.call('POST', 'vote', { body: { entry: 'e2', on: true } })).status, 200);
-      const everyone = await third.call('POST', 'vote', { body: { entry: 'e3', on: true } });
-      assert.deepEqual([everyone.status, everyone.json.message], [429, 'Too many new threads were started on the Workshop this hour. Try again later.']);
+    // The plan's entries and the `open` ceiling bound openings; no budget counts them.
+    assert.deepEqual(Object.keys(BUDGET).filter((key) => /opening/i.test(key)), []);
+    assert.equal(BUDGET.openCallsPerMinute, 27);
+    const c = await signedIn(t);
+    const statuses = [];
+    // Four openings in one minute, three calls each, then four in the next.
+    for (const id of EIGHT.slice(0, 4).map((entry) => entry.id)) statuses.push((await c.call('POST', 'comment', { body: { entry: id, text: 'x' } })).status);
+    t.clock.t += 61_000;
+    for (const id of EIGHT.slice(4).map((entry) => entry.id)) statuses.push((await c.call('POST', 'vote', { body: { entry: id, on: true } })).status);
+    assert.deepEqual(statuses, Array(8).fill(200));
+    assert.equal(created(t).length, 8);
+    for (const { id } of EIGHT) assert.equal(entryIssues(t, id).length, 1, id);
+  } finally { await t.close(); }
+});
+
+test('the `open` ceiling refuses an opening it has no room for, 429 with the wait, opens nothing, and lets it through in the next minute', async () => {
+  const t = await setup({ entries: [...PLAN_ENTRIES, ...EIGHT] });
+  try {
+    const c = await signedIn(t);
+    // Four calls a minute: one opening is three, so the second has no room for itself and its confirming read.
+    await withBudget({ openCallsPerMinute: 4 }, async () => {
+      assert.equal((await c.call('POST', 'comment', { body: { entry: 'e1', text: 'x' } })).status, 200);
+      const before = t.fake.state.requests.length;
+      const refused = await c.call('POST', 'comment', { body: { entry: 'e2', text: 'x' } });
+      assert.deepEqual([refused.status, refused.json.error, refused.json.message], [429, 'rate_limited', 'New threads are busy. Try again shortly.']);
+      assert.ok(Number(refused.headers['Retry-After']) > 0 && Number(refused.headers['Retry-After']) <= 60, refused.headers['Retry-After']);
+      assert.equal(created(t).length, 1);
+      assert.deepEqual(entryIssues(t, 'e2'), []);
+      assert.equal(since(t, before).filter((call) => call.startsWith('POST')).length, 0, 'no write of any kind');
+      t.clock.t += Number(refused.headers['Retry-After']) * 1000;
+      const again = await c.call('POST', 'comment', { body: { entry: 'e2', text: 'x' } });
+      assert.equal(again.status, 200, again.body);
       assert.equal(created(t).length, 2);
-      t.clock.t += 3601_000;
-      assert.equal((await visitor.call('POST', 'comment', { body: { entry: 'e3', text: 'x' } })).status, 200, 'an hour later');
-    });
-    t.clock.t += 60_000;
-    await withBudget({ openCallsPerMinute: 1 }, async () => {
-      // The read before the opening takes the minute's one call: the opening is refused, nothing is created.
-      const ceiling = await visitor.call('POST', 'comment', { body: { entry: 'e4', text: 'x' } });
-      assert.equal(ceiling.status, 429);
-      assert.equal(created(t).length, 3);
-      assert.deepEqual(entryIssues(t, 'e4'), []);
+      assert.deepEqual(issueOf(t.fake, again.json.n).comments.map((x) => x.body), ['x']);
     });
   } finally { await t.close(); }
 });
@@ -297,60 +304,37 @@ test('votes on comments: each comment\'s count, the person\'s own, and giving or
   } finally { await t.close(); }
 });
 
-const MORE = ['e1', 'e2', 'e3', 'e4', 'e5', 'e6'].map((id) => ({ id, kind: 'feature', title: `Entry ${id}`, part: 'computers', suggestedIn: null }));
+const MORE = ['e1', 'e2', 'e3'].map((id) => ({ id, kind: 'feature', title: `Entry ${id}`, part: 'computers', suggestedIn: null }));
 
-test('at 4 of 5 openings for the person, two openings at once create one issue', async () => {
+test('a thread another instance opened, which this instance\'s snapshot does not hold, is found: nothing is opened and the comment is posted', async () => {
   const t = await setup({ entries: [...PLAN_ENTRIES, ...MORE] });
   try {
     const c = await signedIn(t);
-    // A minute apart: the App's ceiling of ten calls a minute holds three openings.
-    for (const id of ['e1', 'e2', 'e3', 'e4']) {
-      t.clock.t += 61_000;
-      assert.equal((await c.call('POST', 'comment', { body: { entry: id, text: 'x' } })).status, 200, id);
-    }
-    t.clock.t += 61_000;
-    // A thread found on GitHub gives the charge back: it was no opening.
-    t.fake.addIssue({ title: 'Entry e6', body: 'Feature.\n\n<!-- silo-entry: e6 -->', labels: ['workshop:entry'] });
-    assert.equal((await c.call('POST', 'comment', { body: { entry: 'e6', text: 'found' } })).status, 200);
-    // Every App call waits a little, so that both requests are in flight together.
-    t.fake.state.hook = (r) => (r.kind === 'installation' && ISSUES.test(r.path) ? { delay: 20 } : null);
-    const both = await Promise.all(['e5', 'which-distro'].map((id) => c.call('POST', 'comment', { body: { entry: id, text: 'x' } })));
-    t.fake.state.hook = null;
-    assert.deepEqual(both.map((answer) => answer.status).sort(), [200, 429]);
-    assert.equal(both.find((answer) => answer.status === 429).json.message, 'You have started too many new threads this hour. Try again later.');
-    assert.equal(created(t).length, 5);
-    // At 5 of 5, a comment on a thread another instance opened, which this instance's snapshot does not hold, opens nothing and is posted.
     const elsewhere = t.fake.addIssue({ title: 'Fork a computer', body: 'Feature.\n\n<!-- silo-entry: fork-computers -->', labels: ['workshop:entry'] });
-    t.clock.t += 61_000;
-    const posted = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'At the limit.' } });
+    const posted = await c.call('POST', 'comment', { body: { entry: 'fork-computers', text: 'Found.' } });
     assert.deepEqual([posted.status, posted.json.n], [200, elsewhere.number], posted.body);
-    assert.deepEqual(issueOf(t.fake, elsewhere.number).comments.map((x) => x.body), ['At the limit.']);
-    assert.equal(created(t).length, 5);
-  } finally { t.fake.state.hook = null; await t.close(); }
+    assert.deepEqual(issueOf(t.fake, elsewhere.number).comments.map((x) => x.body), ['Found.']);
+    assert.equal(created(t).length, 0);
+  } finally { await t.close(); }
 });
 
-test('at 29 of 30 openings for everyone, counted on GitHub, two openings at once create one issue, on any instance', async () => {
+test('an instance with no snapshot reads every page of entry issues: a thread older than the newest page is found, and nothing is opened', async () => {
   const t = await setup({ entries: [...PLAN_ENTRIES, ...MORE] });
   try {
-    t.clock.t += 3601_000;
-    const a = await signedIn(t);
-    const b = await signedIn(t, 'owner-fake');
-    // Opened in the last hour by other instances, or by this one before a restart.
-    for (let i = 0; i < 29; i += 1) t.fake.addIssue({ title: `Other ${i}`, body: `Feature.\n\n<!-- silo-entry: other-${i} -->`, labels: ['workshop:entry'] });
-    t.fake.state.hook = (r) => (r.kind === 'installation' && ISSUES.test(r.path) ? { delay: 20 } : null);
-    const both = await Promise.all([a.call('POST', 'comment', { body: { entry: 'e1', text: 'x' } }), b.call('POST', 'comment', { body: { entry: 'e2', text: 'x' } })]);
-    t.fake.state.hook = null;
-    assert.deepEqual(both.map((answer) => answer.status).sort(), [200, 429]);
-    assert.equal(both.find((answer) => answer.status === 429).json.message, 'Too many new threads were started on the Workshop this hour. Try again later.');
-    assert.equal(created(t).length, 1);
-    // A new instance knows nothing in memory, and GitHub still says 30.
+    const hoursAgo = new Date(t.clock.t - 5 * 3600_000).toISOString();
+    t.fake.addIssue({ title: 'Entry e1', body: 'Feature.\n\n<!-- silo-entry: e1 -->', labels: ['workshop:entry'], createdAt: hoursAgo });
+    const old = [...t.fake.state.issues.values()].find((i) => readEntryMarker(i.body) === 'e1').number;
+    // More than a page of newer entry issues for other entries.
+    t.clock.t += 60_000;
+    for (let i = 0; i < 105; i += 1) t.fake.addIssue({ title: `Other ${i}`, body: `Feature.\n\n<!-- silo-entry: other-${i} -->`, labels: ['workshop:entry'] });
     const fresh = createWorkshop({ config: t.config, entries: readPlanEntries([...PLAN_ENTRIES, ...MORE]), now: () => t.clock.t, log: () => {} });
     const c = t.client(fresh);
     await c.signIn('visitor-fake');
-    assert.equal((await c.call('POST', 'comment', { body: { entry: 'e3', text: 'x' } })).status, 429);
-    assert.equal(created(t).length, 1);
+    const answer = await c.call('POST', 'comment', { body: { entry: 'e1', text: 'Old thread.' } });
+    assert.deepEqual([answer.status, answer.json.n], [200, old], answer.body);
+    assert.equal(created(t).length, 0);
     await fresh.idle();
-  } finally { t.fake.state.hook = null; await t.close(); }
+  } finally { await t.close(); }
 });
 
 test('two instances opening one entry at the same moment: both writes land on the lower issue, and the higher one is closed without its label', async () => {
