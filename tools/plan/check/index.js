@@ -248,7 +248,7 @@ export function checkFiles(files, { exists } = {}) {
     unknownKeys(file, '', data, keys);
     present(file, '', data, REQUIRED_KEYS[kind]);
     for (const key of ['asks', 'answer', 'name', 'what']) if (keys.includes(key)) textKey(file, '', data, key);
-    for (const key of ['needs', 'removes', 'adds', 'keeps']) if (keys.includes(key)) textList(file, key, data[key], 'ids');
+    for (const key of ['needs', 'replaces', 'removes', 'adds', 'keeps']) if (keys.includes(key)) textList(file, key, data[key], 'ids');
     if (Object.hasOwn(data, 'verdict') && !VERDICTS.includes(data.verdict)) add(file, 'verdict', `"${shown(data.verdict)}" is not a verdict`, `write ${VERDICTS.join(' or ')}, or leave it out`);
     if (Object.hasOwn(data, 'suggest') && !isEmpty(data.suggest)) {
       if (!isObject(data.suggest)) add(file, 'suggest', 'not an object', 'write { verdict, why }');
@@ -269,12 +269,11 @@ export function checkFiles(files, { exists } = {}) {
       }
     }
     if (Object.hasOwn(data, 'built') && !isDate(data.built)) add(file, 'built', `"${shown(data.built)}" is not a date`, 'write the day it was built, YYYY-MM-DD');
-    // Rule 5: sets and removes only before take, adds only with it.
+    // Rule 5: sets and removes only before take, adds only with it. `replaces` stays after a take.
     const taken = data.verdict === 'take';
     if (taken && Object.hasOwn(data, 'sets')) add(file, 'sets', 'sets on a taken entry', 'run plan take, which writes the statements into their lists and records their ids in adds');
     if (taken && Object.hasOwn(data, 'removes')) add(file, 'removes', 'removes on a taken entry', 'run plan take, which removes the statements');
     if (!taken && Object.hasOwn(data, 'adds')) add(file, 'adds', 'adds without the verdict take', 'remove adds: only a taken entry has brought statements');
-    if (taken && kind === 'decision' && !Object.hasOwn(data, 'answer') && !Object.hasOwn(data, 'adds')) add(file, 'answer', 'a taken decision without an answer or adds', 'write the answer the owner took, or remove the verdict');
     if (Object.hasOwn(data, 'sets') && !isEmpty(data.sets)) {
       if (!Array.isArray(data.sets)) add(file, 'sets', 'not a list', 'write a list of { in, …the statement }');
       else data.sets.forEach((item, index) => {
@@ -379,6 +378,83 @@ export function checkFiles(files, { exists } = {}) {
     }
   }
 
+  // `replaces`: a taken decision takes the place of taken decisions, each replaced by one decision only.
+  const decisionIds = new Set(entryFiles.filter((entry) => entry.kind === 'decision').map((entry) => entry.id));
+  /** @type {Map<string, string[]>} the taken decisions that name each taken decision in `replaces` */
+  const replacers = new Map();
+  /** @type {[any, string, string][]} entry, the id it names, its field: the names that are a decision other than itself */
+  const replacing = [];
+  for (const entry of entries.values()) {
+    if (entry.kind !== 'decision' || !Array.isArray(entry.replaces)) continue;
+    // An id named twice is reported once, by the shape of the list.
+    const seen = new Set();
+    entry.replaces.forEach((id, index) => {
+      if (typeof id !== 'string' || seen.has(id)) return;
+      seen.add(id);
+      const field = `replaces[${index}]`;
+      if (id === entry.id) return add(entry.file, field, `"${id}" replaces itself`, 'remove it');
+      if (!decisionIds.has(id)) return add(entry.file, field, `"${id}" is not a decision`, 'name a taken decision of the plan');
+      replacing.push([entry, id, field]);
+      const target = entries.get(id);
+      if (target && target.verdict !== 'take') add(entry.file, field, `"${id}" is not taken`, `edit "${id}" instead: it has no verdict to replace`);
+      else if (target && entry.verdict === 'take') replacers.set(id, [...(replacers.get(id) ?? []), entry.id]);
+    });
+  }
+  /** @type {Map<string, string>} each replaced decision, and the decision that replaced it */
+  const replacedBy = new Map([...replacers].map(([id, by]) => [id, by[0]]));
+  for (const [entry, id, field] of replacing) {
+    const by = replacers.get(id) ?? [];
+    if (entry.verdict === 'take' && by.length > 1) add(entry.file, field, `"${id}" is replaced by ${by.join(', ')}`, `a decision is replaced by one decision only: keep "${id}" in the replaces of one of them`);
+    if (entry.verdict === undefined && by.length) notes.push({ file: entry.file, field, message: `"${id}" is already replaced by ${by[0]}`, fix: `name "${by[0]}" instead, the decision that replaced it` });
+  }
+  for (const [id, by] of replacedBy) {
+    const target = entries.get(id);
+    if (Array.isArray(target.adds) && target.adds.length) add(target.file, 'adds', `"${id}" is replaced by ${by} and still adds ${target.adds.map(shown).join(', ')}`, `${by} sets again or removes each of those statements`);
+  }
+  // A chain of replaces among taken decisions never comes back to its start.
+  /** @type {Map<string, string[]>} the taken decisions each taken decision replaces */
+  const replacedOf = new Map();
+  for (const [target, by] of replacers) for (const id of by) replacedOf.set(id, [...(replacedOf.get(id) ?? []), target]);
+  for (const entry of entries.values()) {
+    if (!replacedOf.has(entry.id)) continue;
+    /** @type {Map<string, string>} each decision reached, and the one it was reached from */
+    const from = new Map();
+    const queue = [entry.id];
+    let loop = false;
+    while (queue.length && !loop) {
+      const current = /** @type {string} */ (queue.shift());
+      for (const next of replacedOf.get(current) ?? []) {
+        if (next === entry.id) {
+          from.set(next, current);
+          loop = true;
+          break;
+        }
+        if (!from.has(next)) {
+          from.set(next, current);
+          queue.push(next);
+        }
+      }
+    }
+    if (!loop) continue;
+    const chain = [entry.id];
+    for (let at = /** @type {string} */ (from.get(entry.id)); at !== entry.id; at = /** @type {string} */ (from.get(at))) chain.unshift(at);
+    chain.unshift(entry.id);
+    add(entry.file, 'replaces', `the replaces come back to "${entry.id}": ${chain.join(' replaces ')}`, 'remove one of them, so that a decision never replaces itself through others');
+  }
+  // A taken decision has an answer or an adds, unless it is replaced: then it is no longer in force.
+  for (const entry of entries.values()) {
+    if (entry.kind === 'decision' && entry.verdict === 'take' && !replacedBy.has(entry.id) && !Object.hasOwn(entry, 'answer') && !Object.hasOwn(entry, 'adds')) {
+      add(entry.file, 'answer', 'a taken decision without an answer or adds', 'write the answer the owner took, or remove the verdict');
+    }
+  }
+  // An entry still to do that needs a replaced decision may depend on what is no longer in force.
+  for (const entry of entries.values()) {
+    if (entry.verdict === 'drop' || isDone(entry) || !Array.isArray(entry.needs)) continue;
+    entry.needs.forEach((id, index) => {
+      if (typeof id === 'string' && replacedBy.has(id)) notes.push({ file: entry.file, field: `needs[${index}]`, message: `"${id}" is replaced by ${replacedBy.get(id)}`, fix: `need "${replacedBy.get(id)}" instead, if this entry depends on what that one says` });
+    });
+  }
+
   // Rule 8: order.json.
   const orderFile = 'plan/order.json';
   const order = json.get('order.json');
@@ -478,7 +554,7 @@ export function checkFiles(files, { exists } = {}) {
 }
 
 /** The keys whose change, with the verdict unchanged, is an error (rule 11). */
-const ENTRY_TEXT_KEYS = ['asks', 'answer', 'name', 'what', 'sets', 'removes'];
+const ENTRY_TEXT_KEYS = ['asks', 'answer', 'name', 'what', 'replaces', 'sets', 'removes'];
 
 /**
  * Whether two versions of an entry file differ in what the owner rules on: the verdict or a key of
@@ -519,7 +595,7 @@ function entriesOf(files) {
 }
 
 /**
- * Rule 11: an entry with a verdict whose asks, answer, name, what, sets or removes changed while the
+ * Rule 11: an entry with a verdict whose asks, answer, name, what, replaces, sets or removes changed while the
  * verdict stayed. An entry with no verdict may change freely; one that gains or loses a verdict too.
  * `ruledByOwner(id, file)` says whether the latest commit since the base that changed the entry's
  * verdict or one of those keys is the owner's verdict on it: the owner ruled again after the

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkChange, checkFiles, formatProblem } from '../check/index.js';
+import { checkChange, checkFiles, formatProblem, ruledKeysDiffer } from '../check/index.js';
 import { basePlan, filesOf } from './helpers.js';
 
 /** The sample plan with one change: `edit` gets a deep copy and returns nothing or the files. */
@@ -316,4 +316,128 @@ test('a built feature with a malformed needs gives problems, never a throw', () 
 
 test('a taken decision whose adds stands for its answer passes the check', () => {
   assert.deepEqual(errorsOf(variant((f) => { delete f['decisions/the-design.json'].answer; })), []);
+});
+
+/**
+ * The sample with a decision zig-again, placed last, that names what `replaces` gives (by default
+ * engine-language, which is taken and adds nothing), with the given verdict.
+ * @param {any} f the files @param {Record<string, unknown>} [keys] keys of zig-again
+ */
+function replacer(f, keys = {}) {
+  f['engine/decisions/zig-again.json'] = { asks: 'Which language now?', answer: 'Zig, still.', replaces: ['engine-language'], verdict: 'take', ...keys };
+  stage(f, 'later').entries.push('zig-again');
+  return f;
+}
+
+const notesOf = (files) => checkFiles(filesOf(files), { exists: () => true }).notes.map((n) => `${n.file} ${n.field}: ${n.message}`);
+
+test('replaces on a taken decision is allowed, and the decision it names may then have neither an answer nor an adds', () => {
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f); })), []);
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f); delete f['engine/decisions/engine-language.json'].answer; })), []);
+  // Not replaced, it needs one or the other.
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f, { verdict: undefined }); delete f['engine/decisions/engine-language.json'].answer; })), [
+    'plan/engine/decisions/engine-language.json answer: a taken decision without an answer or adds',
+  ]);
+});
+
+test('replaces is a list of decisions other than its own entry, each once', () => {
+  const zig = 'plan/engine/decisions/zig-again.json';
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f, { replaces: 'engine-language' }); })), [`${zig} replaces: not a list`]);
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f, { replaces: [] }); })), [`${zig} replaces: empty`]);
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f, { replaces: ['engine-language', 'engine-language'] }); })), [`${zig} replaces[1]: "engine-language" appears twice`]);
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f, { replaces: [3] }); })), [`${zig} replaces[0]: not a text`]);
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f, { replaces: ['zig-again'] }); })), [`${zig} replaces[0]: "zig-again" replaces itself`]);
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f, { replaces: ['start-computer'] }); })), [`${zig} replaces[0]: "start-computer" is not a decision`]);
+  assert.deepEqual(errorsOf(variant((f) => { replacer(f, { replaces: ['fork'] }); })), [`${zig} replaces[0]: "fork" is not a decision`]);
+  // A feature has no such key.
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/features/start-computer.json'].replaces = ['engine-language']; })), ['plan/engine/features/start-computer.json replaces: unknown key']);
+});
+
+test('replaces names a taken decision, whatever the verdict of the entry that names it', () => {
+  const zig = 'plan/engine/decisions/zig-again.json';
+  for (const verdict of [undefined, 'take', 'drop']) {
+    assert.deepEqual(errorsOf(variant((f) => { replacer(f, { verdict, replaces: ['linux-vm-engine'] }); })), [`${zig} replaces[0]: "linux-vm-engine" is not taken`], String(verdict));
+  }
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].verdict = 'drop'; replacer(f, { verdict: undefined, replaces: ['model-tool'] }); })), [`${zig} replaces[0]: "model-tool" is not taken`]);
+  const [error] = checkFiles(filesOf(variant((f) => { replacer(f, { replaces: ['linux-vm-engine'] }); }))).errors;
+  assert.match(error.fix, /edit "linux-vm-engine" instead/);
+});
+
+test('a decision is replaced by one taken decision only', () => {
+  const errors = errorsOf(variant((f) => {
+    replacer(f);
+    f['engine/decisions/zig-forever.json'] = { asks: 'And now?', answer: 'Zig.', replaces: ['engine-language'], verdict: 'take' };
+    stage(f, 'later').entries.push('zig-forever');
+  }));
+  assert.deepEqual(errors, [
+    'plan/engine/decisions/zig-again.json replaces[0]: "engine-language" is replaced by zig-again, zig-forever',
+    'plan/engine/decisions/zig-forever.json replaces[0]: "engine-language" is replaced by zig-again, zig-forever',
+  ]);
+  // A second one with no verdict is a note, not an error: it should name the decision that replaced it.
+  const pending = variant((f) => {
+    replacer(f);
+    f['engine/decisions/zig-forever.json'] = { asks: 'And now?', answer: 'Zig.', replaces: ['engine-language'] };
+    stage(f, 'later').entries.push('zig-forever');
+  });
+  assert.deepEqual(errorsOf(pending), []);
+  assert.ok(notesOf(pending).includes('plan/engine/decisions/zig-forever.json replaces[0]: "engine-language" is already replaced by zig-again'), notesOf(pending).join('\n'));
+  // Dropped, it says nothing.
+  const dropped = variant((f) => { replacer(f); f['engine/decisions/zig-forever.json'] = { asks: 'And now?', answer: 'Zig.', replaces: ['engine-language'], verdict: 'drop' }; stage(f, 'later').entries.push('zig-forever'); });
+  assert.deepEqual(errorsOf(dropped), []);
+  assert.ok(!notesOf(dropped).some((n) => n.includes('zig-forever')));
+});
+
+test('a replaced decision has no adds', () => {
+  const errors = errorsOf(variant((f) => { replacer(f, { replaces: ['the-design'] }); }));
+  assert.deepEqual(errors, [`plan/decisions/the-design.json adds: "the-design" is replaced by zig-again and still adds ${basePlan()['decisions/the-design.json'].adds.join(', ')}`]);
+  const [error] = checkFiles(filesOf(variant((f) => { replacer(f, { replaces: ['the-design'] }); }))).errors;
+  assert.match(error.fix, /zig-again sets again or removes each of those statements/);
+});
+
+test('a chain of replaces among taken decisions never comes back to its start', () => {
+  const errors = errorsOf(variant((f) => { replacer(f); f['engine/decisions/engine-language.json'].replaces = ['zig-again']; }));
+  assert.deepEqual(errors, [
+    'plan/engine/decisions/engine-language.json replaces: the replaces come back to "engine-language": engine-language replaces zig-again replaces engine-language',
+    'plan/engine/decisions/zig-again.json replaces: the replaces come back to "zig-again": zig-again replaces engine-language replaces zig-again',
+  ]);
+  // Three long.
+  const three = errorsOf(variant((f) => {
+    replacer(f);
+    f['engine/decisions/zig-forever.json'] = { asks: 'And now?', answer: 'Zig.', replaces: ['zig-again'], verdict: 'take' };
+    stage(f, 'later').entries.push('zig-forever');
+    f['engine/decisions/engine-language.json'].replaces = ['zig-forever'];
+  }));
+  assert.ok(three.includes('plan/engine/decisions/zig-forever.json replaces: the replaces come back to "zig-forever": zig-forever replaces zig-again replaces engine-language replaces zig-forever'), three.join('\n'));
+  // A chain that does not come back is fine.
+  assert.deepEqual(errorsOf(variant((f) => {
+    replacer(f);
+    f['engine/decisions/zig-forever.json'] = { asks: 'And now?', answer: 'Zig.', replaces: ['zig-again'], verdict: 'take' };
+    stage(f, 'later').entries.push('zig-forever');
+  })), []);
+});
+
+test('an entry still to do that needs a replaced decision gets a note; a done or dropped one does not', () => {
+  // start-computer is taken, not built, and needs engine-language.
+  const note = 'plan/engine/features/start-computer.json needs[0]: "engine-language" is replaced by zig-again';
+  assert.ok(notesOf(variant((f) => { replacer(f); })).includes(note));
+  assert.ok(!notesOf(variant((f) => { replacer(f, { verdict: undefined }); })).includes(note));
+  const built = variant((f) => {
+    replacer(f);
+    f['engine/decisions/linux-vm-engine.json'].verdict = 'take';
+    f['engine/features/start-computer.json'].built = '2026-11-20';
+  });
+  assert.deepEqual(errorsOf(built), []);
+  assert.ok(!notesOf(built).includes(note));
+  const dropped = variant((f) => { replacer(f); f['engine/features/start-computer.json'].verdict = 'drop'; });
+  assert.ok(!notesOf(dropped).includes(note));
+  const [problem] = checkFiles(filesOf(variant((f) => { replacer(f); })), { exists: () => true }).notes.filter((n) => n.field === 'needs[0]');
+  assert.match(problem.fix, /need "zig-again" instead/);
+});
+
+test('rule 11 covers replaces', () => {
+  const base = filesOf(variant((f) => { replacer(f); }));
+  const changed = filesOf(variant((f) => { replacer(f, { replaces: ['engine-language', 'the-design'] }); }));
+  assert.deepEqual(checkChange(changed, base).errors.map((e) => `${e.file} ${e.field}`), ['plan/engine/decisions/zig-again.json replaces']);
+  const name = 'engine/decisions/zig-again.json';
+  assert.equal(ruledKeysDiffer(base.get(name) ?? null, changed.get(name) ?? null), true);
 });
