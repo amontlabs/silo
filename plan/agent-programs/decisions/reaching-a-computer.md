@@ -31,12 +31,18 @@ The question has three parts: `reaching-a-computer`, `following-the-work` (with
 
 ## More from the research of 18 November 2026
 
-- Lima and GitHub Codespaces keep a file of SSH entries in this way.
-- The protocols that attach a window to a conversation (ACP, and the one VS Code is building)
-  leave open how a window finds a conversation. Silo knows where every conversation is, because it
-  sees every computer from outside.
-- How sure it is: each claim of the researchers carries its source, and some rest only on a search
-  summary. Checked directly: Anthropic's terms, Claude Code's network documentation and the Codex
-  rule on SSH entries. Weak spots: almost no independent user reviews of the tools for following
-  many agents, and no Reddit or Hacker News thread could be read. The findings are kept outside
-  this repository.
+- From the researchers: Lima and GitHub Codespaces each generate SSH entries for their machines,
+  which the user's SSH settings include.
+- The protocols that attach a window to a conversation (the Agent Client Protocol, and one VS Code
+  is building) leave open how a window finds a conversation. Silo sees every computer from
+  outside, so it is placed to answer that. How a conversation is recognised is still open
+  (`recognising-a-conversation`).
+
+How sure this research is:
+
+- Each claim of the researchers carries its source. Some rest only on a search summary.
+- Checked directly: Anthropic's terms, Claude Code's network documentation and the Codex rule on
+  SSH entries.
+- Almost no independent user review was found of the tools for following many agents. No Reddit or
+  Hacker News thread could be read.
+- The findings are kept outside this repository.
