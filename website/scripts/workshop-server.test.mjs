@@ -17,7 +17,7 @@ import { CUTS, cut, readBody } from '../server/issues.mjs';
 import { SNAPSHOT } from '../server/snapshot.mjs';
 import { createFakeGitHub, FAKE_APP, progressOf, seedDemo } from './fake-github.mjs';
 import { DEFAULT_OUTPUT, ENDPOINTS, HANDLER, prepareVercel, RUNTIME } from './prepare-vercel.mjs';
-import { loadFeatures, progressLine, startDev } from './workshop-dev.mjs';
+import { loadEntries, progressLine, startDev } from './workshop-dev.mjs';
 import { changeComment, readChange, readEntryMarker, withoutMarkers } from '../../tools/workshop/model/index.js';
 
 import { count, retiredNumber, entryNumber, FAILED, issueOf, ORIGIN, SESSION, setup, START, withBudget } from './workshop-test-support.mjs';
@@ -810,7 +810,7 @@ test('workshop-dev --fake serves the site and the API on one port, with sign-in 
       assert.equal(page.status, 200);
       assert.equal(await page.text(), `<!doctype html><head><meta name="workshop-raw" content="${dev.fakeGitHub.rawUrl}"><title>Workshop</title></head>`);
     }
-    assert.equal(loadFeatures(join(site, 'plan')).length, 4, 'seeded from the plan directory');
+    assert.equal(loadEntries(join(site, 'plan')).length, 4, 'seeded from the plan directory');
     assert.equal((await fetch(dev.origin + '/')).status, 200);
     assert.equal((await fetch(dev.origin + '/%2e%2e/package.json')).status, 404);
     const state = await (await fetch(dev.origin + '/api/workshop/state')).json();

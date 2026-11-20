@@ -45,10 +45,11 @@ export async function staticFile(distDir, pathname) {
 // plan/, or the plan WORKSHOP_PLAN names, as the build reads it.
 const PLAN = process.env.WORKSHOP_PLAN || join(website, '..', 'plan');
 
-/** The features of the plan in `dir`, in the order of order.json. */
-export function loadFeatures(dir) {
+/** The entries of the plan in `dir`, in the order of order.json, as the fake GitHub seeds them: a decision's asks is its name. */
+export function loadEntries(dir) {
   const plan = readPlan(dir);
-  return plan.stages.flatMap((stage) => stage.entries).map((id) => plan.entries[id]).filter((entry) => entry?.kind === 'feature');
+  return plan.stages.flatMap((stage) => stage.entries).map((id) => plan.entries[id]).filter(Boolean)
+    .map((entry) => ({ id: entry.id, name: entry.name ?? entry.asks, what: entry.what ?? entry.answer ?? entry.asks, ...(entry.built ? { built: entry.built } : {}) }));
 }
 
 // The Workshop page names where it reads a feature's file at a commit; with the fake GitHub, the fake.
@@ -63,7 +64,7 @@ export async function startDev({ fake = false, progress = false, planDir = PLAN,
   if (fake) {
     fakeGitHub = createFakeGitHub({ repo: 'amontlabs/silo' });
     await fakeGitHub.listen();
-    plan = seedDemo(fakeGitHub, loadFeatures(planDir), { progress }).progress;
+    plan = seedDemo(fakeGitHub, loadEntries(planDir), { progress }).progress;
     config = readConfig(fakeGitHub.workshopEnv(origin), { apiBase: fakeGitHub.url, webBase: fakeGitHub.url });
   } else {
     config = readConfig({ ...env, WORKSHOP_SITE_ORIGIN: origin });

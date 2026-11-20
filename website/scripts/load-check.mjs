@@ -7,10 +7,12 @@
 // and every layout shift, and checks the footer rule before the script has run and once everything has loaded.
 // Then come the visits that need a browser profile: a second visit, which draws what the first one showed in
 // its first frame, and the owner signed in through the fake GitHub's page (the real session marker), whose
-// second visit has the login and the owner's words in its first frame.
+// second visit has the login and, when entries have threads, the owner's words in its first frame.
 // Last, with the page's script held, what the build drew into the page: the plain view in the first painted
-// frame and the script taking over without a move; at an area's address, the plain map never painted; on a
+// frame and the script taking over without a move; at a part's address, the plain view never painted; on a
 // second visit, the remembered state drawn at the takeover without moving anything under the title row.
+// What the page offers is read from it: a map (else the tiles alone), and threads on entries (a link to Latest).
+// Without threads, an entry's row holds no vote, no count and no placeholder for them.
 // It exits non-zero when the footer rule fails, a first frame lacks what it must hold, or a run's layout shifts
 // add up to more than SHIFT_BUDGET.
 // It drives Playwright's own browser: `npx playwright-core install chromium-headless-shell` once.
@@ -196,6 +198,7 @@ function firstFrame(first, wants) {
   if (wants.signIn && !first.signIn) problems.push('no sign-in button');
   if (wants.suggest && !first.suggest) problems.push('no "Suggest a feature"');
   if (wants.placeholders && (first.rows === 0 || first.rowsWithPlaceholder !== first.rows)) problems.push(`${first.rowsWithPlaceholder} of ${first.rows} rows have a vote placeholder`);
+  if (wants.noPlaceholders && (first.rows === 0 || first.rowsWithPlaceholder !== 0)) problems.push(`${first.rowsWithPlaceholder} of ${first.rows} rows without a thread have a vote placeholder`);
   if (wants.votes && first.votes === 0) problems.push('no votes');
   if (wants.login && first.login !== wants.login) problems.push(`login ${JSON.stringify(first.login)}, not ${wants.login}`);
   if (wants.toDecide && !/^\d+ to decide$/.test(first.toDecideLink ?? '')) problems.push('no "N to decide"');
@@ -245,32 +248,35 @@ async function signIn(context, url, login) {
 }
 
 /** The visits that need a browser profile: a second visit, and the owner's second visit after signing in. */
-async function visits(browser, options, place) {
+async function visits(browser, options, place, page$) {
   const size = [1440, 900];
   const context = () => browser.newContext({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
   const plain = { ...options, owner: false };
   let passed = true;
   console.log('\nvisits in one browser profile');
   const visitor = await context();
-  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, first visit` }, visitor)) }, { signIn: true, placeholders: true }) && passed;
-  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, second visit` }, visitor)) }, { signIn: true, votes: true }) && passed;
+  // Votes and the owner's "to decide" are on entries' threads: without threads, neither shows.
+  const threads = page$.threads;
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, first visit` }, visitor)) }, { signIn: true, placeholders: threads, noPlaceholders: !threads }) && passed;
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, second visit` }, visitor)) }, { signIn: true, votes: threads }) && passed;
   await visitor.close();
   const owner = await context();
   await signIn(owner, options.url, 'owner-fake');
-  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, owner-fake signed in, second visit` }, owner)) }, { votes: true, login: 'owner-fake', toDecide: true }) && passed;
+  passed = report({ ...(await run(browser, plain, size, { ...place, name: `${place.name}, owner-fake signed in, second visit` }, owner)) }, { votes: threads, login: 'owner-fake', toDecide: threads }) && passed;
   await owner.close();
 
-  // An entry of the first area opened before the answers: the rows below it do not move when they arrive. The
+  // An entry of the first part opened before the answers: the rows below it do not move when they arrive. The
   // entry has no comments: their number comes with the state, and their lines are not held before it.
   const live = await (await fetch(`${new URL(options.url).origin}/api/workshop/state`)).json();
-  const quiet = Object.values(live.issues ?? {}).filter((issue) => issue.kind === 'entry' && issue.entry && issue.comments === 0).map((issue) => `entry-${issue.entry}`);
+  // Without threads no entry has comments: any entry will do.
+  const quiet = threads ? Object.values(live.issues ?? {}).filter((issue) => issue.kind === 'entry' && issue.entry && issue.comments === 0).map((issue) => `entry-${issue.entry}`) : null;
   for (const narrow of [false, true]) {
     const view = narrow ? [390, 844] : size;
     const fresh = await browser.newContext({ viewport: { width: view[0], height: view[1] }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
     let opened = null;
     const open = async (page) => {
-      opened = await page.evaluate((ids) => [...document.querySelectorAll('.ws-detail .ws-item')].map((item) => item.id).find((id) => ids.includes(id)) ?? null, quiet);
-      if (!opened) throw new Error('the first area has no entry without comments');
+      opened = await page.evaluate((ids) => [...document.querySelectorAll('.ws-detail .ws-item')].map((item) => item.id).find((id) => !ids || ids.includes(id)) ?? null, quiet);
+      if (!opened) throw new Error('the first part has no entry without comments');
       await page.click(`#${opened} .ws-row`);
       await wait(500);
     };
@@ -292,26 +298,38 @@ async function visits(browser, options, place) {
   return passed;
 }
 
-/** The plain view, the first area, Latest and the suggestions. */
-async function places(browser, url) {
+/**
+ * What the page offers, read from it: whether it draws a map, and whether entries have threads (it links to Latest
+ * only then). Its places: the plain view, the first part, the whole product, Latest and the suggestions, as it has them.
+ */
+async function pageOf(browser, url) {
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto(url);
-  const first = await page.locator('[data-area]').first().getAttribute('data-area', { timeout: 15000 });
+  const first = await page.locator('[data-part]').first().getAttribute('data-part', { timeout: 15000 });
+  await page.waitForLoadState('networkidle');
+  const mapped = (await page.locator('.ws-stage').count()) > 0;
+  const threads = (await page.locator('a[href="#latest"]').count()) > 0;
+  const product = (await page.locator('a[href="#product"]').count()) > 0;
   await context.close();
-  return [
-    { name: 'plain view', hash: '' },
-    { name: `first area (#${first})`, hash: `#${first}` },
-    { name: '#latest', hash: '#latest' },
-    { name: '#suggested', hash: '#suggested' },
-  ];
+  return {
+    mapped,
+    threads,
+    places: [
+      { name: 'plain view', hash: '' },
+      { name: `first part (#${first})`, hash: `#${first}` },
+      ...(product ? [{ name: '#product', hash: '#product' }] : []),
+      ...(threads ? [{ name: '#latest', hash: '#latest' }] : []),
+      { name: '#suggested', hash: '#suggested' },
+    ],
+  };
 }
 
 /**
- * Opening the first area from the map and going back never moves the page sideways, as a scroll bar coming or
- * going would: the frame's left edge is sampled on every frame, at 1440x900.
+ * Opening the first part from the map (or its tile, without a map) and going back never moves the page sideways, as
+ * a scroll bar coming or going would: the frame's left edge is sampled on every frame, at 1440x900.
  */
-async function sideways(browser, url, area) {
+async function sideways(browser, url, part, mapped) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   await page.goto(url);
@@ -328,7 +346,7 @@ async function sideways(browser, url, area) {
   });
   const left = () => page.evaluate(() => Math.round(document.querySelector('.page-shell').getBoundingClientRect().left));
   const plain = await left();
-  await page.locator(`.ws-part[data-part="${area}"]`).click();
+  await page.locator(mapped ? `.ws-part[data-part="${part}"]` : `.ws-tile[data-part="${part}"] .ws-tile-hit`).click();
   await wait(1500);
   const opened = await left();
   await page.locator('.ws-back').click();
@@ -337,24 +355,24 @@ async function sideways(browser, url, area) {
   const seen = [...new Set(await page.evaluate(() => window.__lefts))];
   await context.close();
   const passed = plain === opened && opened === back && seen.length === 1;
-  console.log(`1440x900   open #${area} and go back: frame's left edge ${plain} px, opened ${opened} px, back ${back} px, on every frame ${seen.join(' / ')} px: ${passed ? 'ok' : 'FAIL: the page moved sideways'}`);
+  console.log(`1440x900   open #${part} and go back: frame's left edge ${plain} px, opened ${opened} px, back ${back} px, on every frame ${seen.join(' / ')} px: ${passed ? 'ok' : 'FAIL: the page moved sideways'}`);
   return passed;
 }
 
 /**
  * Records, on every frame from the first one shown (fonts in) until the script has taken over: whether the
- * markup the build drew is still there, whether the plain map, sign-in and an opened area are visible, and the
+ * markup the build drew is still there, whether the plain map, sign-in and an opened part are visible, and the
  * boxes of the title row, the map, the footer and the account slot.
  */
 function recordFrames() {
-  const state = { firstShown: null, lastDrawn: null, firstMounted: null, plainMap: [] };
+  const state = { firstShown: null, lastDrawn: null, firstMounted: null, plainView: [] };
   const visible = (node) => {
     if (!node) return false;
     const box = node.getBoundingClientRect();
     return box.width > 0 && box.height > 0 && getComputedStyle(node).visibility === 'visible';
   };
   // To the hundredth of a pixel, so a move of half a pixel shows.
-  const boxes = () => Object.fromEntries(['.ws-top', '.ws-swap-map', '.ws-under', '.ws-foot', '#workshop-account'].map((selector) => {
+  const boxes = () => Object.fromEntries(['.ws-top', '.ws-swap-map', '.ws-swap-order', '.ws-under', '.ws-foot', '#workshop-account'].map((selector) => {
     const box = document.querySelector(selector)?.getBoundingClientRect();
     return [selector, box ? [box.top + scrollY, box.left, box.width, box.height].map((value) => Math.round(value * 100) / 100) : null];
   }));
@@ -364,12 +382,13 @@ function recordFrames() {
         at: Math.round(performance.now()),
         drawn: Boolean(document.querySelector('#workshop-root[data-prerendered]')),
         map: visible(document.querySelector('.ws.is-sheet .ws-stage')),
+        tiles: visible(document.querySelector('.ws.is-sheet .ws-board')),
         signIn: visible(document.querySelector('#workshop-account a.button')),
-        area: visible(document.querySelector('.ws-detail')),
+        part: visible(document.querySelector('.ws-detail')),
         boxes: boxes(),
       };
       state.firstShown ??= frame;
-      if (frame.map) state.plainMap.push(frame.at);
+      if (frame.map || frame.tiles) state.plainView.push(frame.at);
       if (frame.drawn) state.lastDrawn = frame;
       else state.firstMounted ??= frame;
     }
@@ -429,7 +448,7 @@ async function drawnSecondVisit(browser, options) {
     await context.close();
     const problems = [];
     if (!r.prerendered) problems.push('the page holds no prerendered markup');
-    const moves = r.lastDrawn && r.firstMounted ? boxMoves(r.lastDrawn.boxes, r.firstMounted.boxes, ['.ws-swap-map', '.ws-under', '.ws-foot']) : ['no frame before the takeover'];
+    const moves = r.lastDrawn && r.firstMounted ? boxMoves(r.lastDrawn.boxes, r.firstMounted.boxes, ['.ws-swap-map', '.ws-swap-order', '.ws-under', '.ws-foot']) : ['no frame before the takeover'];
     const top = r.lastDrawn && r.firstMounted ? [r.lastDrawn.boxes['.ws-top'], r.firstMounted.boxes['.ws-top']] : null;
     if (top && Math.abs(top[0][0] + top[0][3] - (top[1][0] + top[1][3])) >= HALF) moves.unshift(`the title row's bottom ${top[0][0] + top[0][3]} → ${top[1][0] + top[1][3]}`);
     if (moves.length) problems.push(`moved at the takeover: ${moves.join(', ')}`);
@@ -441,12 +460,12 @@ async function drawnSecondVisit(browser, options) {
   return passed;
 }
 
-/** The plain address: the map and sign-in in the first painted frame, the footer rule, no move at the takeover. */
-async function drawnPlain(browser, options) {
+/** The plain address: the map (or the tiles) and sign-in in the first painted frame, the footer rule, no move at the takeover. */
+async function drawnPlain(browser, options, mapped) {
   const r = await drawn(browser, options, { hash: '' });
   const problems = [];
   if (!r.prerendered) problems.push('the page holds no prerendered markup');
-  if (!r.firstShown?.map) problems.push('no map in the first painted frame');
+  if (mapped ? !r.firstShown?.map : !r.firstShown?.tiles) problems.push(`no ${mapped ? 'map' : 'tiles'} in the first painted frame`);
   if (!r.firstShown?.signIn) problems.push('no sign-in in the first painted frame');
   if (r.before.length) problems.push(`footer: ${r.before.join('; ')}`);
   const moves = r.lastDrawn && r.firstMounted ? boxMoves(r.lastDrawn.boxes, r.firstMounted.boxes) : ['no frame before the takeover'];
@@ -454,25 +473,25 @@ async function drawnPlain(browser, options) {
   const atTakeover = r.shifts.filter((shift) => r.lastDrawn && shift.at >= r.lastDrawn.at && shift.at <= r.firstMounted.at + 100);
   if (atTakeover.length) problems.push(`layout shifts at the takeover: ${atTakeover.map((shift) => `${shift.at} ms ${shift.value}`).join(', ')}`);
   console.log(`\nthe built page, script held ${options.slowScript} ms\n1440x900   plain view
-  first painted frame ${r.firstShown?.at} ms: ${[r.firstShown?.map ? 'map' : null, r.firstShown?.signIn ? 'sign-in' : null].filter(Boolean).join(', ') || 'nothing'}
+  first painted frame ${r.firstShown?.at} ms: ${[r.firstShown?.map ? 'map' : null, r.firstShown?.tiles ? 'tiles' : null, r.firstShown?.signIn ? 'sign-in' : null].filter(Boolean).join(', ') || 'nothing'}
   footer before the script: ${r.before.length ? 'FAIL' : 'ok'}
   script took over at ${r.firstMounted?.at} ms: ${moves.length ? 'boxes moved' : 'title row, map, footer and account in place'}; shifts at the takeover ${atTakeover.length}
   ${problems.length ? `FAIL: ${problems.join('; ')}` : 'ok'}`);
   return !problems.length;
 }
 
-/** An area's address: the plain map is never painted, the area appears when the script runs. */
-async function drawnArea(browser, options, place) {
+/** A part's address: the plain view (map or tiles) is never painted, the part appears when the script runs. */
+async function drawnPart(browser, options, place) {
   const r = await drawn(browser, options, place);
   const problems = [];
   if (!r.prerendered) problems.push('the page holds no prerendered markup');
-  if (r.plainMap.length) problems.push(`the plain map painted at ${r.plainMap.slice(0, 3).join(', ')} ms`);
-  if (!r.firstMounted?.area) problems.push('no area in the first frame after the takeover');
+  if (r.plainView.length) problems.push(`the plain view painted at ${r.plainView.slice(0, 3).join(', ')} ms`);
+  if (!r.firstMounted?.part) problems.push('no part in the first frame after the takeover');
   if (r.before.length) problems.push(`footer: ${r.before.join('; ')}`);
   console.log(`1440x900   ${place.name}
-  first painted frame ${r.firstShown?.at} ms: ${r.firstShown?.map ? 'plain map' : 'title row only'}; plain map painted in ${r.plainMap.length} frames
+  first painted frame ${r.firstShown?.at} ms: ${r.firstShown?.map || r.firstShown?.tiles ? 'plain view' : 'title row only'}; plain view painted in ${r.plainView.length} frames
   footer before the script: ${r.before.length ? 'FAIL' : 'ok'}
-  script took over at ${r.firstMounted?.at} ms, area ${r.firstMounted?.area ? 'shown' : 'missing'} in that frame
+  script took over at ${r.firstMounted?.at} ms, part ${r.firstMounted?.part ? 'shown' : 'missing'} in that frame
   ${problems.length ? `FAIL: ${problems.join('; ')}` : 'ok'}`);
   return !problems.length;
 }
@@ -483,20 +502,23 @@ async function main() {
   const browser = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
   let passed = true;
   try {
-    const list = await places(browser, options.url);
+    const page$ = await pageOf(browser, options.url);
+    const list = page$.places;
     console.log(`${options.url}, API held ${options.slowApi} ms, script held ${options.slowScript} ms${options.owner ? ', as the owner' : ''}`);
     for (const size of SIZES) {
       for (const place of list) {
-        // Every run here is a first visit: nothing is remembered, so the first frame has the placeholders and,
-        // signed out, the sign-in button and "Suggest a feature".
-        const wants = { signIn: !options.owner, suggest: place.hash === '', placeholders: place.hash === list[1].hash };
+        // Every run here is a first visit: nothing is remembered, so the first frame has the placeholders (none on a
+        // row without a thread) and, signed out, the sign-in button and "Suggest a feature".
+        const rows = place.hash === list[1].hash;
+        const wants = { signIn: !options.owner, suggest: place.hash === '', placeholders: rows && page$.threads, noPlaceholders: rows && !page$.threads };
         passed = report(await run(browser, options, size, place), wants) && passed;
       }
     }
-    passed = (await sideways(browser, options.url, list[1].hash.slice(1))) && passed;
-    passed = (await visits(browser, options, list[1])) && passed;
-    passed = (await drawnPlain(browser, options)) && passed;
-    passed = (await drawnArea(browser, options, list[1])) && passed;
+    console.log(`the page: ${page$.mapped ? 'a map' : 'tiles, no map'}; entries ${page$.threads ? 'have' : 'have no'} threads`);
+    passed = (await sideways(browser, options.url, list[1].hash.slice(1), page$.mapped)) && passed;
+    passed = (await visits(browser, options, list[1], page$)) && passed;
+    passed = (await drawnPlain(browser, options, page$.mapped)) && passed;
+    passed = (await drawnPart(browser, options, list[1])) && passed;
     passed = (await drawnSecondVisit(browser, options)) && passed;
   } finally {
     await browser.close();
