@@ -24,6 +24,19 @@ const isObject = (value) => value !== null && typeof value === 'object' && !Arra
 const isText = (value) => typeof value === 'string' && value.trim() !== '';
 const each = (fn) => (list) => (Array.isArray(list) ? list.map(fn) : list);
 const at = (field, key) => (field ? `${field}.${key}` : key);
+/** A value as a message shows it: a text as it is, anything else as JSON, so a malformed field never throws. */
+const shown = (value) => (typeof value === 'string' ? value : JSON.stringify(value) ?? String(typeof value));
+
+/**
+ * Why a path of an `at` is not a repository path, or null: it must be relative, stay inside the
+ * repository and name a file, so no empty, `.` or `..` part, no backslash and no drive letter.
+ * @param {string} path
+ */
+function badPath(path) {
+  if (path.startsWith('/') || /^[A-Za-z]:/.test(path) || path.includes('\\')) return 'is not relative to the top of the repository';
+  if (path.split('/').some((part) => part === '' || part === '.' || part === '..')) return 'has an empty, "." or ".." part';
+  return null;
+}
 
 /** The files at the root of `plan/` that are not entries. */
 const ROOT_FILES = new Set(['README.md', 'PRODUCT.md', 'parts.json', 'order.json', 'words.json', 'principles.json', 'properties.json']);
@@ -110,7 +123,6 @@ export function checkFiles(files, { exists } = {}) {
   for (const name of names) {
     if (!name.endsWith('.json')) continue;
     const text = /** @type {string} */ (files.get(name));
-    if (text.includes('�')) add(`plan/${name}`, '-', 'not UTF-8', 'save the file as UTF-8');
     let value;
     try {
       value = JSON.parse(text);
@@ -185,7 +197,7 @@ export function checkFiles(files, { exists } = {}) {
     if (typeof id === 'string' && id !== '' && !ID_PATTERN.test(id)) add(file, at(field, idField(kind)), `"${id}" is not an id`, 'use lowercase letters, digits and dashes (in a word: spaces too)');
     if (kind === 'word') textList(file, at(field, 'not'), sentence.not, 'words or phrases');
     if (kind === 'property') {
-      if (Object.hasOwn(sentence, 'kind') && !PROPERTY_KINDS.includes(sentence.kind)) add(file, at(field, 'kind'), `"${sentence.kind}" is not a kind`, `write one of ${PROPERTY_KINDS.join(', ')}`);
+      if (Object.hasOwn(sentence, 'kind') && !PROPERTY_KINDS.includes(sentence.kind)) add(file, at(field, 'kind'), `"${shown(sentence.kind)}" is not a kind`, `write one of ${PROPERTY_KINDS.join(', ')}`);
       for (const check of textList(file, at(field, 'check'), sentence.check, 'checks')) {
         if (!CHECKS.includes(check)) add(file, at(field, 'check'), `"${check}" is not a check`, `write one or more of ${CHECKS.join(', ')}`);
       }
@@ -234,13 +246,13 @@ export function checkFiles(files, { exists } = {}) {
     present(file, '', data, REQUIRED_KEYS[kind]);
     for (const key of ['asks', 'answer', 'name', 'what']) if (keys.includes(key)) textKey(file, '', data, key);
     for (const key of ['needs', 'removes', 'adds', 'keeps']) if (keys.includes(key)) textList(file, key, data[key], 'ids');
-    if (Object.hasOwn(data, 'verdict') && !VERDICTS.includes(data.verdict)) add(file, 'verdict', `"${data.verdict}" is not a verdict`, `write ${VERDICTS.join(' or ')}, or leave it out`);
+    if (Object.hasOwn(data, 'verdict') && !VERDICTS.includes(data.verdict)) add(file, 'verdict', `"${shown(data.verdict)}" is not a verdict`, `write ${VERDICTS.join(' or ')}, or leave it out`);
     if (Object.hasOwn(data, 'suggest') && !isEmpty(data.suggest)) {
       if (!isObject(data.suggest)) add(file, 'suggest', 'not an object', 'write { verdict, why }');
       else {
         unknownKeys(file, 'suggest', data.suggest, SUGGEST_KEYS);
         present(file, 'suggest', data.suggest, SUGGEST_KEYS);
-        if (Object.hasOwn(data.suggest, 'verdict') && !VERDICTS.includes(data.suggest.verdict)) add(file, 'suggest.verdict', `"${data.suggest.verdict}" is not a verdict`, `write ${VERDICTS.join(' or ')}`);
+        if (Object.hasOwn(data.suggest, 'verdict') && !VERDICTS.includes(data.suggest.verdict)) add(file, 'suggest.verdict', `"${shown(data.suggest.verdict)}" is not a verdict`, `write ${VERDICTS.join(' or ')}`);
         textKey(file, 'suggest', data.suggest, 'why');
       }
     }
@@ -253,19 +265,20 @@ export function checkFiles(files, { exists } = {}) {
         for (const key of SURFACES_KEYS) textKey(file, 'surfaces', data.surfaces, key);
       }
     }
-    if (Object.hasOwn(data, 'built') && !isDate(data.built)) add(file, 'built', `"${data.built}" is not a date`, 'write the day it was built, YYYY-MM-DD');
+    if (Object.hasOwn(data, 'built') && !isDate(data.built)) add(file, 'built', `"${shown(data.built)}" is not a date`, 'write the day it was built, YYYY-MM-DD');
     // Rule 5: sets and removes only before take, adds only with it.
     const taken = data.verdict === 'take';
     if (taken && Object.hasOwn(data, 'sets')) add(file, 'sets', 'sets on a taken entry', 'run plan take, which writes the sentences into their lists and records their ids in adds');
     if (taken && Object.hasOwn(data, 'removes')) add(file, 'removes', 'removes on a taken entry', 'run plan take, which removes the sentences');
     if (!taken && Object.hasOwn(data, 'adds')) add(file, 'adds', 'adds without the verdict take', 'remove adds: only a taken entry has brought sentences');
+    if (taken && kind === 'decision' && !Object.hasOwn(data, 'answer')) add(file, 'answer', 'a taken decision without an answer', 'write the answer the owner took, or remove the verdict');
     if (Object.hasOwn(data, 'sets') && !isEmpty(data.sets)) {
       if (!Array.isArray(data.sets)) add(file, 'sets', 'not a list', 'write a list of { in, …the sentence }');
       else data.sets.forEach((item, index) => {
         const field = `sets[${index}]`;
         if (!isObject(item)) return add(file, field, 'not an object', 'write { in, …the sentence }');
         const kind = listKind(item.in);
-        if (!kind) return add(file, at(field, 'in'), `"${item.in}" is not a list`, 'write words, principles, properties or <part>/properties');
+        if (!kind) return add(file, at(field, 'in'), `"${shown(item.in)}" is not a list`, 'write words, principles, properties or <part>/properties');
         if (item.in.includes('/') && !partIds.has(item.in.split('/')[0])) add(file, at(field, 'in'), `"${item.in.split('/')[0]}" is not a part`, 'name a part of parts.json');
         checkSentence(kind, file, field, item, ['in']);
       });
@@ -290,7 +303,7 @@ export function checkFiles(files, { exists } = {}) {
   /** @type {Map<string, typeof sentences[number]>} */
   const sentenceById = new Map();
   for (const sentence of sentences) if (!sentenceById.has(sentence.id)) sentenceById.set(sentence.id, sentence);
-  // A sentence an entry sets joins the namespace when taken: it may only replace a sentence of its own list.
+  // A sentence an entry sets joins the namespace when taken: it may replace or move a sentence of its own kind only.
   for (const entry of entries.values()) {
     if (!Array.isArray(entry.sets)) continue;
     entry.sets.forEach((item, index) => {
@@ -300,7 +313,7 @@ export function checkFiles(files, { exists } = {}) {
       if (typeof id !== 'string' || !ID_PATTERN.test(id)) return;
       const field = at(`sets[${index}]`, idField(kind));
       if (entries.has(id)) add(entry.file, field, `the id "${id}" is also ${entries.get(id).file}`, 'give the sentence its own id');
-      else if (sentenceById.has(id) && sentenceById.get(id).list !== item.in) add(entry.file, field, `the id "${id}" is already a sentence of ${sentenceById.get(id).list}`, 'give the sentence its own id, or set it in its own list');
+      else if (sentenceById.has(id) && sentenceById.get(id).kind !== kind) add(entry.file, field, `the id "${id}" is already a ${sentenceById.get(id).kind} of ${sentenceById.get(id).list}`, `give the ${kind} its own id: a sets item replaces or moves a sentence of its own kind only`);
     });
   }
 
@@ -338,11 +351,20 @@ export function checkFiles(files, { exists } = {}) {
     }
     for (const [id, field] of named('keeps')) if (!propertyIds.has(id)) add(entry.file, field, `"${id}" is not a property`, 'name a property of the plan');
     for (const [id, field] of named('removes')) if (!sentenceById.has(id)) add(entry.file, field, `"${id}" is not a sentence`, 'name a word, principle or property of the plan');
+    // A property it sets may follow from a principle in force, or from one this same entry sets.
+    const ownPrinciples = new Set((Array.isArray(entry.sets) ? entry.sets : []).filter((item) => isObject(item) && listKind(item.in) === 'principle' && typeof item.id === 'string').map((item) => item.id));
     if (Array.isArray(entry.sets)) entry.sets.forEach((item, index) => {
-      if (isObject(item) && listKind(item.in) === 'property' && typeof item.from === 'string' && !principleIds.has(item.from)) {
-        add(entry.file, `sets[${index}].from`, `"${item.from}" is not a principle`, 'name a principle of principles.json');
+      if (isObject(item) && listKind(item.in) === 'property' && typeof item.from === 'string' && !principleIds.has(item.from) && !ownPrinciples.has(item.from)) {
+        add(entry.file, `sets[${index}].from`, `"${item.from}" is not a principle`, 'name a principle of principles.json, or one this entry sets');
       }
     });
+    // Rule 5: a taken decision has every decision it needs taken.
+    if (entry.kind === 'decision' && entry.verdict === 'take') {
+      for (const [id, field] of named('needs')) {
+        const need = entries.get(id);
+        if (need?.kind === 'decision' && need.verdict !== 'take') add(entry.file, field, `"${id}" is not taken, and this taken decision needs it`, `take "${id}" first, or remove the verdict`);
+      }
+    }
   }
 
   // Rule 8: order.json.
@@ -408,15 +430,15 @@ export function checkFiles(files, { exists } = {}) {
   for (const entry of entries.values()) {
     if (Array.isArray(entry.sets)) entry.sets.forEach((item, index) => { if (isObject(item) && listKind(item.in) === 'property') ats.push([entry.file, `sets[${index}].at`, item.at]); });
   }
-  if (exists) {
-    for (const [file, field, paths] of ats) {
-      if (Array.isArray(paths)) paths.forEach((path, index) => {
-        if (isText(path) && !exists(path)) add(file, `${field}[${index}]`, `"${path}" does not exist`, 'name a file of the repository, by its path from the top');
-      });
-    }
-  } else if (ats.some(([, , paths]) => Array.isArray(paths) && paths.length)) {
-    notes.push({ file: 'plan/', field: '-', message: 'the files named by at were not looked for', fix: 'run plan check in the repository' });
+  for (const [file, field, paths] of ats) {
+    if (Array.isArray(paths)) paths.forEach((path, index) => {
+      if (!isText(path)) return;
+      const bad = badPath(path);
+      if (bad) add(file, `${field}[${index}]`, `"${path}" ${bad}`, 'name a file of the repository by its path from the top, such as engine/test/rule.zig');
+      else if (exists && !exists(path)) add(file, `${field}[${index}]`, `"${path}" is not a regular file of the repository`, 'name a file, not a directory nor a link that leads outside, by its path from the top');
+    });
   }
+  if (!exists) notes.push({ file: 'plan/', field: '-', message: 'the files named by at were not looked for', fix: 'run plan check in the repository' });
 
   // Rule 10: the words under not, in every JSON string value and every .md file, except inside a not list.
   /** @type {{ phrase: string, pattern: RegExp, word: string }[]} */
@@ -466,20 +488,23 @@ function entriesOf(files) {
 /**
  * Rule 11: an entry with a verdict whose asks, answer, name, what, sets or removes changed while the
  * verdict stayed. An entry with no verdict may change freely; one that gains or loses a verdict too.
+ * `ruledByOwner(id, file)` says whether the latest commit since the base on that entry is the
+ * owner's verdict on it: the owner ruled again after the change, and the rule does not apply.
  * @param {Map<string, string>} files the plan as it is @param {Map<string, string>} baseFiles the merged plan
+ * @param {{ ruledByOwner?: (id: string, file: string) => boolean }} [options]
  * @returns {{ errors: Problem[] }}
  */
-export function checkChange(files, baseFiles) {
+export function checkChange(files, baseFiles, { ruledByOwner } = {}) {
   /** @type {Problem[]} */
   const errors = [];
   const base = entriesOf(baseFiles);
   for (const [id, { file, value }] of entriesOf(files)) {
     const before = base.get(id)?.value;
     if (!before || before.verdict === undefined || before.verdict !== value.verdict) continue;
-    for (const key of SENTENCE_OF_ENTRY) {
-      if (JSON.stringify(before[key]) !== JSON.stringify(value[key])) {
-        errors.push({ file, field: key, message: `"${id}" changed its ${key} while its verdict stayed ${before.verdict}`, fix: 'remove the verdict, so the owner rules on the new text, or undo the change' });
-      }
+    const changed = SENTENCE_OF_ENTRY.filter((key) => JSON.stringify(before[key]) !== JSON.stringify(value[key]));
+    if (changed.length && ruledByOwner?.(id, file)) continue;
+    for (const key of changed) {
+      errors.push({ file, field: key, message: `"${id}" changed its ${key} while its verdict stayed ${shown(before.verdict)}`, fix: 'remove the verdict, so the owner rules on the new text, or undo the change' });
     }
   }
   return { errors };

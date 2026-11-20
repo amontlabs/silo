@@ -1,14 +1,14 @@
 // `plan`: the commands. Exit codes: 0 done, 1 refused or errors found, 2 wrong use.
 // Nothing here calls the network: the command reads `plan/`, checks it, and commits a verdict.
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { checkChange, checkFiles, formatProblem } from '../check/index.js';
 import { entryStatus, waitingFor } from '../model/status.js';
-import { PlanError, isHidden, parsePlan } from '../read/index.js';
+import { PlanError, parsePlan } from '../read/index.js';
 import { drop, take } from '../write/index.js';
 import { Refused, UsageError, parseArgs } from './args.js';
-import { baseFiles, existsIn, findRoot, git, planFiles } from './repo.js';
+import { baseFiles, existsIn, findRoot, git, planFiles, ruledByOwner, uncommitted } from './repo.js';
 
 export const COMMANDS = [
   { name: '', usage: 'plan', what: 'What is next: the first entry with no verdict, the features ready to build, the features that wait and for what.' },
@@ -54,6 +54,15 @@ export async function main(argv, context = {}) {
       for (const problem of problems ?? []) ctx.err(formatProblem(problem));
     }
     return code;
+  }
+}
+
+/** A file's text, or null when it cannot be read. @param {string} path */
+function readOr(path) {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
   }
 }
 
@@ -228,7 +237,7 @@ function check(ctx, argv) {
   const files = planFiles(root);
   const { errors, notes } = checkFiles(files, { exists: existsIn(root) });
   const base = baseFiles(root);
-  if (base) errors.push(...checkChange(files, base.files).errors);
+  if (base) errors.push(...checkChange(files, base.files, { ruledByOwner: ruledByOwner(root, base.ref) }).errors);
   else notes.push({ file: 'plan/', field: '-', message: 'no git base (origin/main or HEAD): entries changed under their verdict were not looked for', fix: 'run plan check in a git checkout' });
   if (flags.has('json')) ctx.out(JSON.stringify({ ok: errors.length === 0, errors, notes }, null, 2));
   else {
@@ -252,8 +261,8 @@ function verdict(ctx, argv, kind) {
   const [id] = positional;
   const root = findRoot(ctx.cwd);
   if (git(root, ['rev-parse', '--show-toplevel']) === null) throw new Refused(`${root} is not a git checkout: a verdict is a commit`);
-  const dirty = (git(root, ['status', '--porcelain', '--', 'plan']) ?? '').split('\n').filter((line) => line && !isHidden(line.slice(3)));
-  if (dirty.length) throw new Refused(`plan/ has uncommitted changes (${dirty.map((line) => line.slice(3)).join(', ')}): commit or discard them first`);
+  const dirty = uncommitted(root);
+  if (dirty.length) throw new Refused(`plan/ has uncommitted changes (${dirty.join(', ')}): commit or discard them first`);
 
   const files = planFiles(root);
   const outcome = (kind === 'take' ? take : drop)(files, id, { exists: existsIn(root) });
@@ -262,24 +271,53 @@ function verdict(ctx, argv, kind) {
     ctx.out(`plan ${kind}: ${outcome.message}`);
     return 0;
   }
+  // Rule 11 against the merged plan: the plan must pass it before the verdict, as plan check would.
+  // The entry ruled on is left out: the verdict this commit records lifts the rule for it.
+  const base = baseFiles(root);
+  if (base) {
+    const owner = ruledByOwner(root, base.ref);
+    const changed = checkChange(files, base.files, { ruledByOwner: (other, file) => other === id || owner(other, file) }).errors;
+    if (changed.length) throw refusal(`the plan fails the check against ${base.ref} (${changed.length} error${changed.length === 1 ? '' : 's'}); plan check lists them`, changed);
+  }
 
   const paths = [...outcome.changed.keys()].map((name) => `plan/${name}`);
-  for (const [name, text] of outcome.changed) {
-    const path = join(root, 'plan', name);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, text);
+  /**
+   * Puts back every file written so far, as it was: a failed verdict leaves the checkout unchanged.
+   * @returns {string} what could not be put back, for the message; empty when all was.
+   */
+  const restore = (names) => {
+    const left = [];
+    for (const name of names) {
+      const path = join(root, 'plan', name);
+      try {
+        // The file that failed may be untouched (it could not be opened): leave it as it is then.
+        if (!files.has(name)) rmSync(path, { force: true });
+        else if (readOr(path) !== files.get(name)) writeFileSync(path, /** @type {string} */ (files.get(name)));
+      } catch {
+        left.push(`plan/${name}`);
+      }
+    }
+    return left.length ? ` and ${left.join(', ')} could not be put back: restore ${left.length === 1 ? 'it' : 'them'} with git checkout` : '';
+  };
+  /** @type {string[]} */
+  const written = [];
+  try {
+    for (const [name, text] of outcome.changed) {
+      const path = join(root, 'plan', name);
+      written.push(name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    }
+  } catch (error) {
+    const left = restore(written);
+    throw new Refused(`could not write plan/${written.at(-1)} (${/** @type {Error} */ (error).message}); ${left ? `the files written were put back${left}` : 'nothing changed'}`);
   }
   const subject = `Owner: ${kind} ${id}`;
   const committed = git(root, ['add', '--', ...paths]) !== null && git(root, ['commit', '-q', '-m', subject, '--', ...paths]) !== null;
   if (!committed) {
-    // Put the files back as they were, so a failed commit leaves the checkout unchanged.
     git(root, ['reset', '-q', '--', ...paths]);
-    for (const name of outcome.changed.keys()) {
-      const path = join(root, 'plan', name);
-      if (files.has(name)) writeFileSync(path, /** @type {string} */ (files.get(name)));
-      else rmSync(path, { force: true });
-    }
-    throw new Refused(`git could not commit "${subject}"; nothing changed`);
+    const left = restore(outcome.changed.keys());
+    throw new Refused(`git could not commit "${subject}"; ${left ? `the files written were put back${left}` : 'nothing changed'}`);
   }
   ctx.out([`${subject}`, ...paths.map((path) => `  ${path}`)].join('\n'));
   return 0;

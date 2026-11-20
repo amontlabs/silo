@@ -24,31 +24,51 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 entry is built, when a decision has no `answer`, or when a decision needs a decision that is not
 taken. On an entry already taken it says so and exits 0. `plan drop` refuses a built entry and a
 taken entry that has `adds`, and also refuses a plan that fails the check or has uncommitted
-changes. Both check the plan they would write and write nothing when it fails.
+changes. A taken decision that brought no sentence may be dropped. Both check the plan they would
+write and write nothing when it fails.
+
+Uncommitted changes are asked of git with every untracked and ignored file listed, whatever the
+user's settings; only a path the reader skips too (a part of its name starts with a dot) is left
+out, and when git cannot answer the verdict is refused. The check before a verdict includes the
+rule against the merged plan, except for the entry ruled on. The files are written all or none:
+when one cannot be written, or the commit fails, the ones already written are put back.
 
 ## What the check refuses
 
 Each problem names the file, the field, what is wrong and the fix.
 
 - A file under `plan/` that is not one of the plan's, except a name that starts with a dot, and a
-  part without its `README.md`.
+  part without its `README.md`. A symbolic link anywhere under `plan/`, to a file or a folder: the
+  reader never follows one, on disk or at a git ref.
 - JSON that is not in canonical form (`JSON.stringify(value, null, 2)`, a final newline, keys in
   the model's order), an unknown key, a missing required key, or an optional key that is empty.
 - An id that does not match `^[a-z0-9][a-z0-9-]{0,62}$`, or that two items of the plan share:
   ids are one namespace across decisions, features, words, principles and properties.
 - A `verdict` or `suggest` that is not `take` or `drop`; `sets` or `removes` on a taken entry;
-  `adds` on an entry that is not taken.
+  `adds` on an entry that is not taken; a taken decision without an `answer`, or one that needs a
+  decision not taken.
+- A `sets` item whose id is an entry's, or a sentence of another kind. The id of a sentence of the
+  same kind is allowed: in the same list it replaces it, in another list it moves it.
 - A sentence that is not in the `adds` of exactly one taken entry, or an `adds` id that names no
   sentence.
-- A link (`from`, `keeps`, `needs`, `removes`) to an id that does not exist.
+- A link (`from`, `keeps`, `needs`, `removes`) to an id that does not exist. The `from` of a
+  property an entry sets may name a principle that the same entry sets.
 - An entry missing from `order.json` or in it twice, an entry placed before something it needs
   (which also refuses cycles), or an entry that needs a dropped one while not dropped itself.
-- A `built` that is not a date, or set on a feature that is not taken, whose needs are not all
-  done, or whose added properties lack an `at` naming files that exist.
+- A `built` that is not a real calendar day (`YYYY-MM-DD`), or set on a feature that is not taken,
+  whose needs are not all done, or whose added properties lack an `at`.
+- A path of an `at` that is not relative to the top of the repository (absolute, with an empty,
+  `.` or `..` part), or that does not name a regular file there: a directory, a missing file, or a
+  link that leads outside the repository. Without the repository, only the file test is left out,
+  and a note says so.
 - A word listed in a word's `not`, used anywhere else in `plan/`.
 - Against the merged plan (`origin/main`, else `HEAD`): an entry whose question, answer, name,
   description, `sets` or `removes` changed while its verdict stayed. Only the command checks this,
-  not the offline check of a tree.
+  not the offline check of a tree. It does not apply to an entry whose latest commit since the base
+  is the owner's verdict on it (`Owner: take <id>` or `Owner: drop <id>`) and that has not changed
+  since: the owner ruled again after the change.
+
+A malformed value is a problem like any other: the check never throws on one.
 
 A property without `from` is a note, not an error.
 

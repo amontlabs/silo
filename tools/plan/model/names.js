@@ -70,6 +70,8 @@ export function wordId(word) {
 export function isDate(text) {
   if (typeof text !== 'string' || !DATE_PATTERN.test(text)) return false;
   const [y, m, d] = text.split('-').map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
+  // setUTCFullYear, not Date.UTC: Date.UTC reads a year below 100 as 1900 plus that year.
+  const date = new Date(0);
+  date.setUTCFullYear(y, m - 1, d);
   return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
 }

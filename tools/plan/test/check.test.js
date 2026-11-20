@@ -106,11 +106,21 @@ test('rule 5: sets and removes before take, adds only with it, each sets item in
   assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].in = 'nowhere/properties'; })), ['plan/record/decisions/losses-show.json sets[0].in: "nowhere" is not a part']);
   assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].in = 'facts'; })), ['plan/record/decisions/losses-show.json sets[0].in: "facts" is not a list']);
   assert.deepEqual(errorsOf(variant((f) => { delete f['record/decisions/losses-show.json'].sets[0].kind; })), ['plan/record/decisions/losses-show.json sets[0].kind: missing or empty']);
-  // A sets item may replace a sentence of its own list, not take an id of another list.
+  // A sets item may replace a sentence of its own list, or move one of another list of the same kind; never take an id of another kind.
   assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].id = 'classifier-never-acts'; })), []);
+  assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['record/decisions/losses-show.json'].sets[0], { in: 'engine/properties', id: 'classifier-never-acts' }); })), []);
+  assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['record/decisions/losses-show.json'].sets[0], { in: 'properties', id: 'classifier-never-acts' }); })), []);
   assert.deepEqual(errorsOf(variant((f) => { f['decisions/nothing-without-a-reason.json'].sets[0].id = 'classifier-never-acts'; })), [
-    'plan/decisions/nothing-without-a-reason.json sets[0].id: the id "classifier-never-acts" is already a sentence of record/properties',
+    'plan/decisions/nothing-without-a-reason.json sets[0].id: the id "classifier-never-acts" is already a property of record/properties',
   ]);
+  // A taken decision has an answer, and every decision it needs is taken.
+  assert.deepEqual(errorsOf(variant((f) => { delete f['engine/decisions/engine-language.json'].answer; })), ['plan/engine/decisions/engine-language.json answer: a taken decision without an answer']);
+  assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { needs: ['model-tool'], verdict: 'take' }); })), [
+    'plan/engine/decisions/linux-vm-engine.json needs[0]: "model-tool" is not taken, and this taken decision needs it',
+  ]);
+  // Not taken: it may wait for what it needs. A feature it needs is no decision to take first.
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/linux-vm-engine.json'].needs = ['model-tool']; })), []);
+  assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { needs: ['engine-language'], verdict: 'take' }); })), []);
 });
 
 test('rule 6: every sentence is added by exactly one taken entry', () => {
@@ -128,6 +138,10 @@ test('rule 7: from, keeps, needs and removes name what exists; a property with n
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].needs = ['nobody']; })), ['plan/engine/decisions/model-tool.json needs[0]: "nobody" is not a decision or a feature']);
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].removes = ['nothing']; })), ['plan/engine/decisions/model-tool.json removes[0]: "nothing" is not a sentence']);
   assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].from = 'nobody'; })), ['plan/record/decisions/losses-show.json sets[0].from: "nobody" is not a principle']);
+  // A property may follow from a principle the same entry sets; not from one another entry sets.
+  const ownPrinciple = { in: 'record/properties', id: 'reason-recorded', says: 'Every grant records its reason.', kind: 'safety', from: 'least-privilege', check: ['test'] };
+  assert.deepEqual(errorsOf(variant((f) => { f['decisions/nothing-without-a-reason.json'].sets.push(ownPrinciple); })), []);
+  assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].from = 'least-privilege'; })), ['plan/record/decisions/losses-show.json sets[0].from: "least-privilege" is not a principle']);
   const { errors, notes } = checkFiles(filesOf(variant((f) => { delete f['record/properties.json'][0].from; })), { exists: () => true });
   assert.deepEqual(errors, []);
   assert.deepEqual(notes.map((n) => `${n.file} ${n.field}: ${n.message}`), ['plan/record/properties.json [0]: the property "rule-reads-only-facts" follows from no principle']);
@@ -150,6 +164,8 @@ test('rule 8: the order', () => {
   // Stage ids are not in the namespace of entries and sentences, and none is reserved.
   assert.deepEqual(errorsOf(variant((f) => { stage(f, 'later').id = 'gone'; })), []);
   assert.deepEqual(errorsOf(variant((f) => { stage(f, 'later').id = 'fork'; })), []);
+  // The names reserved for folders are not reserved for stages.
+  assert.deepEqual(errorsOf(variant((f) => { stage(f, 'later').id = 'features'; stage(f, 'app').id = 'decisions'; })), []);
 });
 
 test('rule 9: built, and the files named by at', () => {
@@ -168,11 +184,69 @@ test('rule 9: built, and the files named by at', () => {
   assert.deepEqual(errorsOf(variant(builtWithProperty)), ['plan/record/properties.json [3].at: the property "classifier-never-acts" of the built feature "start-computer" has no at']);
   const withAt = variant((f) => { builtWithProperty(f); f['record/properties.json'][3].at = ['engine/test/classifier.zig']; });
   assert.deepEqual(errorsOf(withAt, { exists: (path) => path === 'engine/test/classifier.zig' }), []);
-  assert.deepEqual(errorsOf(withAt, { exists: () => false }), ['plan/record/properties.json [3].at[0]: "engine/test/classifier.zig" does not exist']);
+  assert.deepEqual(errorsOf(withAt, { exists: () => false }), ['plan/record/properties.json [3].at[0]: "engine/test/classifier.zig" is not a regular file of the repository']);
   // Without exists, the file test is left out and a note says so.
   const { errors, notes } = checkFiles(filesOf(withAt));
   assert.deepEqual(errors, []);
   assert.deepEqual(notes.map((n) => n.message), ['the files named by at were not looked for']);
+  // The note is there even when no property has an at.
+  assert.deepEqual(checkFiles(filesOf(basePlan())).notes.map((n) => n.message), ['the files named by at were not looked for']);
+});
+
+test('rule 9: every path of an at is relative and stays inside the repository, whatever exists says', () => {
+  const withPath = (path) => variant((f) => { f['record/properties.json'][0].at = [path]; });
+  for (const path of ['/etc/passwd', '../outside.txt', 'engine/../../outside.txt', './engine/x.zig', 'engine//x.zig', 'engine/x.zig/', 'C:/x.zig', 'engine\\x.zig']) {
+    for (const options of [{ exists: () => true }, {}]) {
+      const errors = errorsOf(withPath(path), options);
+      assert.equal(errors.length, 1, `${path}: ${errors}`);
+      assert.match(errors[0], /^plan\/record\/properties\.json \[0\]\.at\[0\]: /);
+    }
+  }
+  // In a sets item too.
+  assert.equal(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].at = ['/etc/passwd']; }), { exists: () => true }).length, 1);
+  assert.deepEqual(errorsOf(withPath('engine/test/x.zig'), { exists: () => true }), []);
+});
+
+test('a malformed field is a problem, never a throw: the check always returns { errors, notes }', () => {
+  // An object with a toString key throws when it is turned into text the usual way.
+  const hostile = [{ toString: 1 }, { valueOf: 1, toString: 'x' }, [{ toString: 1 }], {}, [], null, 7, true, 'x'];
+  const edits = [
+    (f, v) => { f['engine/decisions/model-tool.json'].verdict = v; },
+    (f, v) => { f['engine/decisions/model-tool.json'].suggest = { verdict: v, why: 'W.' }; },
+    (f, v) => { f['engine/decisions/model-tool.json'].suggest = v; },
+    (f, v) => { f['engine/features/start-computer.json'].built = v; },
+    (f, v) => { f['record/decisions/losses-show.json'].sets[0].in = v; },
+    (f, v) => { f['record/decisions/losses-show.json'].sets[0].kind = v; },
+    (f, v) => { f['record/decisions/losses-show.json'].sets[0].id = v; },
+    (f, v) => { f['record/decisions/losses-show.json'].sets[0].from = v; },
+    (f, v) => { f['record/decisions/losses-show.json'].sets[0].at = v; },
+    (f, v) => { f['record/decisions/losses-show.json'].sets = [v]; },
+    (f, v) => { f['record/properties.json'][0].kind = v; },
+    (f, v) => { f['record/properties.json'][0].check = v; },
+    (f, v) => { f['record/properties.json'][0].at = [v]; },
+    (f, v) => { f['words.json'][0].word = v; },
+    (f, v) => { f['words.json'][2].not = [v]; },
+    (f, v) => { f['engine/features/start-computer.json'].needs = [v]; },
+    (f, v) => { f['decisions/the-design.json'].adds = [v]; },
+    (f, v) => { f['order.json'].stages[0].id = v; },
+    (f, v) => { f['order.json'].stages[0].entries = [v]; },
+    (f, v) => { f['parts.json'][0].id = v; },
+  ];
+  for (const [index, edit] of edits.entries()) {
+    for (const value of hostile) {
+      const files = filesOf(variant((f) => { edit(f, structuredClone(value)); }));
+      let result;
+      assert.doesNotThrow(() => { result = checkFiles(files, { exists: () => true }); }, `edit ${index} with ${JSON.stringify(value)}`);
+      assert.ok(Array.isArray(result.errors) && Array.isArray(result.notes));
+      assert.doesNotThrow(() => checkChange(files, filesOf(basePlan())), `edit ${index} with ${JSON.stringify(value)}`);
+      assert.doesNotThrow(() => checkChange(filesOf(basePlan()), files), `edit ${index} with ${JSON.stringify(value)}`);
+    }
+  }
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].verdict = { toString: 1 }; })), ['plan/engine/decisions/model-tool.json verdict: "{"toString":1}" is not a verdict']);
+});
+
+test('rule 2: a text holding U+FFFD is valid UTF-8 and passes', () => {
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].asks = 'Which tool checks the model \uFFFD of access?'; })), []);
 });
 
 test('rule 10: the words under not are refused on word boundaries, in any case, except inside a not list', () => {
@@ -205,6 +279,10 @@ test('rule 11: an entry whose sentence changed while its verdict stayed', () => 
   assert.deepEqual(changeOf((f) => { delete f['engine/decisions/engine-language.json'].verdict; f['engine/decisions/engine-language.json'].answer = 'Rust.'; }), []);
   // Keys outside the sentence may change.
   assert.deepEqual(changeOf((f) => { f['engine/features/start-computer.json'].surfaces = { app: 'Start' }; }), []);
+  // The owner ruled again after the change: the rule does not apply to that entry, and only to it.
+  const ruled = (id) => id === 'engine-language';
+  assert.deepEqual(checkChange(filesOf(variant((f) => { f['engine/decisions/engine-language.json'].answer = 'Rust.'; })), base, { ruledByOwner: ruled }).errors, []);
+  assert.deepEqual(checkChange(filesOf(variant((f) => { f['engine/features/start-computer.json'].what = 'Boot.'; })), base, { ruledByOwner: ruled }).errors.map((e) => e.field), ['what']);
   // The offline check does not look at the base.
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/engine-language.json'].answer = 'Rust.'; })), []);
 });

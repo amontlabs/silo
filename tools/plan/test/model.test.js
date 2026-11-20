@@ -144,6 +144,13 @@ test('dates', () => {
   assert.equal(isDate('2026-02-30'), false);
   assert.equal(isDate('2026-2-3'), false);
   assert.equal(isDate(20261201), false);
+  // Every real calendar day, whatever its year; a year below 100 is not read as 19xx.
+  assert.equal(isDate('0099-01-01'), true);
+  assert.equal(isDate('0001-12-31'), true);
+  assert.equal(isDate('0004-02-29'), true);
+  assert.equal(isDate('0001-02-29'), false);
+  assert.equal(isDate('0099-02-29'), false);
+  assert.equal(isDate('9999-12-31'), true);
 });
 
 test('the model imports nothing outside its folder and no node: module', () => {

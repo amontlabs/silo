@@ -120,6 +120,35 @@ test('replacing a sentence moves its id out of the earlier entry\'s adds', () =>
   assert.deepEqual(checkFiles(after).errors, []);
 });
 
+test('a sets item with the id of a sentence of another list of its kind moves it there, and the result passes the check', () => {
+  const files = sample();
+  const entry = parse(files, 'record/decisions/losses-show.json');
+  entry.sets[0] = { in: 'engine/properties', id: 'classifier-never-acts', says: 'A classifier never acts on the engine.', kind: 'safety', from: 'less-sure-less-power', check: ['model'] };
+  files.set('record/decisions/losses-show.json', canonicalText(canonicalDecision(entry)));
+  assert.deepEqual(checkFiles(files).errors, []);
+  const outcome = take(files, 'losses-show');
+  assert.equal(outcome.status, 'done', `${outcome.message} ${JSON.stringify(outcome.errors ?? [])}`);
+  const after = apply(files, outcome);
+  assert.ok(!parse(after, 'record/properties.json').some((p) => p.id === 'classifier-never-acts'));
+  assert.deepEqual(parse(after, 'engine/properties.json').map((p) => p.id), ['classifier-never-acts']);
+  assert.ok(!parse(after, 'decisions/the-design.json').adds.includes('classifier-never-acts'));
+  assert.deepEqual(checkFiles(after).errors, []);
+});
+
+test('one take sets a principle and a property that follows from it', () => {
+  const files = sample();
+  const entry = parse(files, 'decisions/nothing-without-a-reason.json');
+  entry.sets.push({ in: 'record/properties', id: 'reason-recorded', says: 'Every grant records its reason.', kind: 'safety', from: 'least-privilege', check: ['test'] });
+  files.set('decisions/nothing-without-a-reason.json', canonicalText(canonicalDecision(entry)));
+  assert.deepEqual(checkFiles(files).errors, []);
+  const outcome = take(files, 'nothing-without-a-reason');
+  assert.equal(outcome.status, 'done', `${outcome.message} ${JSON.stringify(outcome.errors ?? [])}`);
+  const after = apply(files, outcome);
+  assert.deepEqual(parse(after, 'decisions/nothing-without-a-reason.json').adds, ['least-privilege', 'reason-recorded']);
+  assert.equal(parse(after, 'record/properties.json').at(-1).from, 'least-privilege');
+  assert.deepEqual(checkFiles(after).errors, []);
+});
+
 test('removes deletes the sentence and takes it out of the adds that brought it; an entry that sets nothing gets no adds', () => {
   const files = sample();
   files.set('decisions/no-fork.json', canonicalText(canonicalDecision({ asks: 'Is a fork a word of its own?', answer: 'No.', removes: ['fork'] })));
@@ -162,12 +191,14 @@ function random(seed) {
   return { int: (n) => Math.floor(next() * n), pick: (list) => list[Math.floor(next() * list.length)] };
 }
 
+const PROPERTY_LISTS = ['properties', 'engine/properties', 'record/properties'];
+
 test('model: any sequence of takes keeps the lists equal to a reference, and every sentence in the adds of exactly one taken entry', () => {
   for (let seed = 1; seed <= 25; seed += 1) {
     const rng = random(seed);
     const files = sample();
     // The reference: each sentence this test made, by id, with its list, its text and the entry that brought it.
-    /** @type {Map<string, { list: 'words' | 'principles', value: any, by: string }>} */
+    /** @type {Map<string, { list: string, value: any, by: string }>} */
     const model = new Map();
     for (let step = 0; step < 12; step += 1) {
       const id = `step-${seed}-${step}`;
@@ -179,10 +210,14 @@ test('model: any sequence of takes keeps the lists equal to a reference, and eve
         const sid = reuse ? rng.pick(existing) : `gen-${seed}-${step}-${i}`;
         if (used.has(sid)) continue;
         used.add(sid);
-        const list = reuse ? model.get(sid).list : rng.pick(['words', 'principles']);
+        // A property set again may land in another list of properties: it moves there.
+        const before = reuse ? model.get(sid).list : rng.pick(['words', 'principles', 'property']);
+        const list = before === 'property' || PROPERTY_LISTS.includes(before) ? rng.pick(PROPERTY_LISTS) : before;
         const value = list === 'words'
           ? { word: sid.replaceAll('-', ' '), means: `Meaning of step ${step}.` }
-          : { id: sid, says: `Says, at step ${step}.`, asks: 'Asks what?', why: 'Because.' };
+          : list === 'principles'
+            ? { id: sid, says: `Says, at step ${step}.`, asks: 'Asks what?', why: 'Because.' }
+            : { id: sid, says: `Holds, at step ${step}.`, kind: 'safety', from: 'less-sure-less-power', check: ['test'] };
         sets.push({ in: list, ...value });
       }
       const candidates = [...model.keys()].filter((sid) => !used.has(sid));
@@ -197,12 +232,12 @@ test('model: any sequence of takes keeps the lists equal to a reference, and eve
       for (const sid of removes) model.delete(sid);
 
       // The lists hold exactly the reference's sentences, with the sample's own around them.
-      const words = parse(files, 'words.json');
-      const principles = parse(files, 'principles.json');
       const generated = (list, items) => items.filter((item) => (list === 'words' ? wordId(item.word) : item.id).startsWith('gen-'));
       const expected = (list) => [...model.entries()].filter(([, s]) => s.list === list).map(([, s]) => s.value);
-      assert.deepEqual(new Set(generated('words', words).map((w) => JSON.stringify(w))), new Set(expected('words').map((w) => JSON.stringify(w))), `seed ${seed} step ${step}: words`);
-      assert.deepEqual(new Set(generated('principles', principles).map((p) => JSON.stringify(p))), new Set(expected('principles').map((p) => JSON.stringify(p))), `seed ${seed} step ${step}: principles`);
+      for (const list of ['words', 'principles', ...PROPERTY_LISTS]) {
+        const items = files.has(`${list}.json`) ? parse(files, `${list}.json`) : [];
+        assert.deepEqual(new Set(generated(list, items).map((w) => JSON.stringify(w))), new Set(expected(list).map((w) => JSON.stringify(w))), `seed ${seed} step ${step}: ${list}`);
+      }
       // Each generated sentence is in the adds of exactly one entry, the one that set it last.
       for (const [sid, sentence] of model) {
         const owners = [...files.keys()].filter((name) => /decisions\/[^/]+\.json$/.test(name)).filter((name) => (parse(files, name).adds ?? []).includes(sid));
