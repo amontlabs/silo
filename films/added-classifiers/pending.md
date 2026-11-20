@@ -1,9 +1,8 @@
 # Still to change in this film
 
-What the owner settled and the film does not carry yet, from the state of the design on 20 November 2026. Delete this file once the film carries it.
+What the owner settled and the film does not carry yet. Delete this file once the film carries it.
 
-"Owner" marks what the owner said first. The rest the owner agreed to. "Mark only" means
-the statement stays and its mark becomes Agreed.
+"Owner" marks what the owner said first. The rest the owner agreed to.
 
 Film 5, "What you can add":
 

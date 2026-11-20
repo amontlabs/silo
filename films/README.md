@@ -6,6 +6,9 @@ what a decision sets. A visitor watches one to understand a part.
 - A film states nothing of its own. Its `film.json` names the entries it shows, and the page under
   the film prints them from the plan.
 - A film is behind when an entry it shows has changed since it was built.
+  `python3 -I tools/behind.py <id>`, run from `films/`, says which: for each id the film shows, the file of
+  `plan/` that holds it, and the commits that changed that file later than the last commit that
+  touched the film's folder. Otherwise it says the film is up to date.
 
 Each film ends as one HTML file: the film with its voice and subtitles, the entries it shows as
 `plan/` holds them, and the questions the owner answers under the film.
@@ -20,9 +23,8 @@ Each film ends as one HTML file: the film with its voice and subtitles, the entr
 | `rules-and-precautions` | decides | 8 |
 | `added-classifiers` | decides | 6 |
 
-The owner watched all five on 19 November 2026. What the owner settled since and a film does not carry
-yet is in that film's `pending.md`; the file goes once the film carries it. The fifth film needs a
-new script.
+What the owner settled and a film does not carry yet is in that film's `pending.md`; the file goes
+once the film carries it. The fifth film needs a new script.
 
 ## What is here
 
@@ -37,7 +39,8 @@ tools/
   entries.py         reads from plan/ the entries a film shows, and what each not decided would set (standard library only)
   place.py           the folders and files a tool may use: a film is a folder directly under films/ (standard library only)
   build.py           → out/index.html, one file with everything inlined
-  check.sh           the checks; builds first
+  behind.py          which entries a film shows have changed since the film last changed (standard library only)
+  check.sh           one film's own checks; builds first
   shot.sh            stills of the built page, taken the way check.sh takes them
   check_sources.mjs, check_player.py, check_page.py, sheet.py, listen.py   (used by check.sh)
   _venv.py           makes every Python tool that needs it run with .venv, offline
@@ -87,8 +90,10 @@ with `films/.venv/bin/python` and with `HF_HUB_OFFLINE=1`, so nothing reaches th
 `tools/_venv.py` does this: each tool starts itself again with that Python, whichever Python you
 call it with, and stops if `.venv` is missing. `check.sh` uses the same Python.
 
-The environment is not tracked (about 840 MB, it pulls in torch). Make it from the Python 3.12 of
-python.org, which already holds `mlx-audio`, `soundfile`, `pillow`, `faster-whisper` and `numpy`:
+The environment lives at `films/.venv` in the checkout you work in. It is not tracked, and it weighs
+about 840 MB (it pulls in torch): delete it when you are done. Make it from the Python 3.12 of
+python.org, which already holds `mlx-audio`, `soundfile`, `pillow`, `faster-whisper` and `numpy`,
+from the checkout's root:
 
 ```
 uv venv --python /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 --system-site-packages films/.venv
@@ -169,7 +174,7 @@ All commands run from `films/`.
 5. **Write `explainer.js`.** Write it the way `kit/CLAUDE.md` says, with these differences:
    - These films are carried by a voice: usually 60 to 100 seconds and five to seven scenes, not
      15 to 30 seconds. This is not a hard limit. The owner wants them short and clear, and longer
-     when a subject deserves it (19 November 2026). Never cut an idea, and never rush a sentence,
+     when a subject deserves it. Never cut an idea, and never rush a sentence,
      to fit a length.
    - Each scene's `caption` has ten words or fewer. It shows above the stage as the scene's title.
      Its `source` is shown under the film by the Sources button.
@@ -190,7 +195,8 @@ All commands run from `films/`.
    - Use `V` for every time tied to the voice. Never write a number taken from `voice.json`: it
      changes when a sentence changes, and each voice has its own timings.
 
-6. **Check:** `tools/check.sh <id>`. It prints a summary and exits 1 if any check fails.
+6. **Check:** `tools/check.sh <id>`. This is one film's own check, not the repository's
+   `tools/ci/check.sh`. It prints a summary and exits 1 if any check fails.
    1. **sources**: `film.json` has `shows`. Captions have ten words or fewer. The film has as many
       scenes as the narration, and its title is the film's.
    2. **player**: the page is loaded once per voice. It fails on any error, on any layout note
@@ -238,6 +244,19 @@ All commands run from `films/`.
 
 The page to send is `<id>/out/index.html`. It needs no network and no other file. Delete `out/`
 once nothing needs it.
+
+## Changing a film
+
+A film changes when it is behind (`tools/behind.py`), when its `pending.md` holds something, or
+when the owner asks. Change the script first, then go through the steps above from the one each
+change touches: `narration.json` and the voice for a sentence, `explainer.js` for the picture,
+then the check and the stills.
+
+- A film is changed for a sentence only once that sentence is in force in `plan/`, or when the
+  owner asks for it.
+- `shows`, `words` and `test` in `film.json` follow what the film still says. An entry the film no
+  longer explains leaves `shows`; one it now explains enters it.
+- `pending.md` is deleted when the film carries it.
 
 ## The page
 

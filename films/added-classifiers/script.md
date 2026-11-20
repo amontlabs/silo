@@ -31,17 +31,6 @@ tiers keep the cost down, and what a plugin now is.
 - Agreed: put forward in the discussions of 18 and 19 November 2026 and accepted by the owner. Not yet recorded as a decision.
 - Proposed: Claude's proposal. The owner has not answered it.
 
-## Statements (shown under the film, each with its mark)
-
-1. [Agreed] An added classifier is a program that reads the record and gives opinions: a script, a small model, your own agent. It runs in a computer of its own.
-2. [Agreed] Letting it read the record of a computer is a grant. Its worst case is said when you make it: the classifier can read everything recorded about that computer and send it wherever its own network rules allow.
-3. [Agreed] It gives back opinions, panels and questions to you. It can never act on a computer, answer an ask, set or change a rule or a precaution, give a secret, or write into another computer.
-4. [Agreed] There are three tiers, and each wakes only when the one before cannot judge: the built-in classifiers, which cost no tokens; a small model; an agent.
-5. [Proposed] A plugin is a package through which pieces made by someone else arrive: classifiers, rules and precautions you accept, panels, and programs that forward alerts and asks. Installing it grants nothing: every grant in it is shown to you and accepted as a grant.
-6. [Proposed] Before an added classifier goes live, it can be run against the recorded past in a fresh computer, and you see what it would have done.
-7. [Agreed] The monitor agent is the third tier: your own agent program, in its own computer, with read access to the record. Silo ships its recipe, its instructions and its commands. It pauses nothing itself: a precaution you set does.
-8. [Proposed] Before you confirm a grant, the app shows the paths it adds: from which computer data can reach which host.
-
 ## Words introduced (shown under the statements)
 
 - added classifier: a classifier that does not ship with Silo: a program, in a computer of its own, that reads the record and gives opinions.
