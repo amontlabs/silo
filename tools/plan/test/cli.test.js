@@ -585,6 +585,28 @@ test('rule 11: the owner\'s verdict after the change lifts the rule; a later pla
   }, files);
 });
 
+test('rule 11 covers replaces: a change under the verdict is refused, and the owner\'s verdict after it lifts the rule', async () => {
+  const files = basePlan();
+  files['engine/decisions/zig-tooling.json'] = { asks: 'Which build tool?', answer: 'zig build.', verdict: 'take' };
+  files['engine/decisions/zig-again.json'] = { asks: 'Which language now?', answer: 'Zig, still.', replaces: ['engine-language'], verdict: 'drop' };
+  files['order.json'] = structuredClone(files['order.json']);
+  files['order.json'].stages.at(-1).entries.push('zig-tooling', 'zig-again');
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const name = 'engine/decisions/zig-again.json';
+    writeJson(root, name, { ...readJson(root, name), replaces: ['zig-tooling'] });
+    const changed = JSON.parse((await run(root, ['check', '--json'])).out);
+    assert.deepEqual(changed.errors.map((e) => `${e.file} ${e.field}`), [`plan/${name} replaces`]);
+    // The verdict cleared with the change, then the owner's no again: the rule no longer applies.
+    const { verdict: _verdict, ...entry } = readJson(root, name);
+    writeJson(root, name, entry);
+    git(root, 'commit', '-q', '-am', 'Plan: zig-again replaces zig-tooling');
+    const dropped = await run(root, ['drop', 'zig-again']);
+    assert.equal(dropped.code, 0, dropped.err);
+    assert.equal((await run(root, ['check'])).code, 0);
+  }, files);
+});
+
 test('a file under plan/ marked assume-unchanged or skip-worktree stops take and drop, which name it', async () => {
   await withRepo(async (root) => {
     const before = head(root);
