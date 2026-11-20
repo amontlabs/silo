@@ -7,12 +7,12 @@ of the features built so far.
 
 | Where | Holds | Read |
 |---|---|---|
-| `plan/` | What Silo is, what always holds in it, what is still to decide and what gets built | [`plan/README.md`](plan/README.md), then only the part your work touches. `plan show <id>` prints the brief for one entry |
+| `plan/` | What Silo is, what always holds in it, what is still to decide and what gets built | [`plan/README.md`](plan/README.md), then only the part your work touches. `plan` shows what is next, `plan show <id>` the brief for one entry or what is next in one part |
 | `guides/` | How one kind of work is done | the guide your work needs, below |
 | `films/` | Narrated explainers of entries of the plan. Recordings are committed to the repository as files and played on the site | [`films/README.md`](films/README.md), only to make or change a film |
 | `research/` | Dated research the plan cites. Each fact carries its source and date | when an entry cites it |
 | `website/` | The home page and the Workshop, which shows the plan live. What Silo is belongs on the home page, not in the Workshop. GitHub is the Workshop's storage: issues of this repository, no database of ours and no separate backups. Agents post as a bot, not under the owner's name | [`website/README.md`](website/README.md), to work on the site |
-| `tools/` | `tools/plan/bin/plan` reads the plan and writes the owner's verdicts. `tools/workshop/bin/workshop` holds what talks to GitHub for the Workshop. `tools/ci/check.sh` is the whole check: the merge gate and CI both run it | |
+| `tools/` | `tools/plan/bin/plan`, written `plan` everywhere, reads the plan and writes the owner's verdicts. `tools/workshop/bin/workshop` holds what talks to GitHub for the Workshop. `tools/ci/check.sh` is the whole check: the merge gate and CI both run it | |
 
 | Guide | Read it |
 |---|---|
@@ -71,4 +71,5 @@ Rules for every agent. Orchestrator: also read .atelier/rules/ORCHESTRATOR.md. W
 
 This section is deleted when the owner says so.
 
-- Nothing is pushed and no issue is created without the owner's word.
+- Nothing is pushed and no issue is created without the owner's word. This comes before "Agents
+  may push" above.
