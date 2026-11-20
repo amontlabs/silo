@@ -390,7 +390,8 @@ What a person sees:
 - A row that takes a thread, or whose thread's number changes, while it is open asks for that thread and for the
   person's votes, as an opening does.
 - The person's own comment stays shown from the page's kept writes until an answer holds it.
-- The first 👍 works the same on a decision, a feature and a suggestion, whatever its state.
+- A 👍 works the same on a decision, a feature and a suggestion, whether the entry is decided, planned, dropped
+  or replaced.
 - A comment that the server answers twice (a retry after an error) shows once.
 - The page applies and keeps its own writes in the order it sent them, not the order their answers came.
 - A thread closed on GitHub shows its comments, no box, and "This thread is closed on GitHub." with the

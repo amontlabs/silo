@@ -287,22 +287,28 @@ describe('votes on comments', () => {
   it('keeps the count the server answered over an older answer of the thread, for a minute only', async () => {
     const time = clock();
     let served = 2;
+    // Each answer of the thread gives the second comment a count of its own, so the test can see that it was applied.
+    let answers = 0;
     const { item, calls } = await open('#part-b', 'Create and delete a computer', {
       me: owner,
       routes: {
         ...routes,
-        'GET issue': (url) => ok(detail(Number(url.searchParams.get('n')), { comments: [comment(7, 'mara-k', 'First.', served), comment(8, 'devin-oss', 'Second.', 0)] })),
+        'GET issue': (url) => {
+          answers += 1;
+          return ok(detail(Number(url.searchParams.get('n')), { comments: [comment(7, 'mara-k', 'First.', served), comment(8, 'devin-oss', 'Second.', 100 + answers)] }));
+        },
         'POST comment-vote': () => ok({ ok: true, up: 9 }),
       },
     });
     const first = () => within(within(item).getByText('First.').closest('.ws-c') as HTMLElement);
+    const second = () => within(within(item).getByText('Second.').closest('.ws-c') as HTMLElement);
     const reads = () => calls.filter((call) => call.path === 'issue').length;
     const reopen = async (expected: number) => {
       time.advance(5000);
       await userEvent.click(rowButton('Create and delete a computer'));
       await userEvent.click(rowButton('Create and delete a computer'));
       await waitFor(() => expect(reads()).toBe(expected));
-      await wait(30);
+      await waitFor(() => expect(second().getByRole('button', { name: new RegExp(`^${100 + answers} votes on this comment`) })).toBeInTheDocument());
     };
     await waitFor(() => expect(first().getByRole('button', { name: /2 votes on this comment/ })).toBeEnabled());
     await userEvent.click(first().getByRole('button', { name: /2 votes on this comment/ }));
