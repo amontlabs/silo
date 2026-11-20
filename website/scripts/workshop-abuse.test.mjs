@@ -143,8 +143,8 @@ test('a session GitHub rejected is answered 401 without calling GitHub; each ses
   } finally { await t.close(); }
 });
 
-test('suggestions: 3 a minute and 10 an hour per person; the label ceiling is 20 a minute and charged per call', async () => {
-  assert.equal(BUDGET.labelCallsPerMinute, 20);
+test('suggestions: 3 a minute and 10 an hour per person; the label ceiling is 10 a minute and charged per call', async () => {
+  assert.equal(BUDGET.labelCallsPerMinute, 10);
   const t = await setup();
   try {
     const c = t.client();

@@ -176,6 +176,7 @@ test('state answers 503 not_configured when the App is not installed on the repo
 });
 
 test('the installation ceilings are separate and sum to under 5,000 calls an hour', () => {
-  const perMinute = BUDGET.refreshCallsPerMinute + BUDGET.signinLookupsPerMinute + BUDGET.labelCallsPerMinute;
+  const perMinute = BUDGET.refreshCallsPerMinute + BUDGET.signinLookupsPerMinute + BUDGET.labelCallsPerMinute + BUDGET.openCallsPerMinute;
+  assert.equal(perMinute * 60, 4860);
   assert.ok(perMinute * 60 < 5000, `${perMinute * 60}`);
 });

@@ -544,13 +544,18 @@ an id of the plan, never both. With `entry`:
   that `suggested_in` names. An issue whose label or marker was changed on
   GitHub is no thread. The server then looks the thread up on GitHub once
   more, as before an opening, and goes on with what it finds, or opens one.
+  An issue that was labelled `workshop:entry` or given a marker by hand on
+  GitHub is found once the snapshot holds it, at the next refresh.
 - When the entry has no thread, the server first reads the entry issues on
-  GitHub with the App's token: the newest pages, until they reach both an hour
-  ago and the issues the snapshot already held a minute before its refresh
-  began. The snapshot gives the older ones. A thread another instance has
-  just opened is found this way. Without a snapshot, it reads every page.
+  GitHub with the App's token: the newest pages, until they reach the issues
+  the snapshot already held a minute before its refresh began. The snapshot
+  gives the older ones. A thread another instance has just opened is found
+  this way. Without a snapshot, it reads up to 20 pages (2,000 entry
+  issues).
 - When that read finds none, the App opens the issue described under
-  "Storage", labelled `workshop:entry`.
+  "Storage", labelled `workshop:entry`. What bounds
+  the openings is described under "The installation token and its
+  ceilings".
 - When GitHub created the issue without the label, the App creates the label
   in the repository (one that exists already is fine) and adds it to the
   issue. When the issue still lacks it, the App closes the issue, and the
@@ -590,8 +595,8 @@ What a write costs on GitHub:
 | A 👍 on an entry whose thread the snapshot holds | 0 | 2: the issue, the 👍 |
 
 Each read of entry issues is one page when the snapshot is fresh, and one
-more page for each 100 entry issues opened in the last hour or since the
-snapshot's refresh. An entry written from a
+more page for each 100 entry issues opened since a minute before the
+snapshot's refresh began. An entry written from a
 suggestion costs one more read with the person's token: the suggestion's
 issue. The App's token is never used to write a person's words, and a
 person's token is never used to open an issue for an entry.
@@ -773,27 +778,40 @@ a visitor does without signing in can make `suggest`,
 | --- | --- |
 | Snapshot refresh | 40 |
 | Repository lookup at sign-in (once per instance, then remembered) | 4 |
-| Labelling a suggestion, and the label retries (charged per call) | 20 |
-| Opening an entry's thread: the reads of entry issues and the opening (charged per call) | 10 |
+| Labelling a suggestion, and the label retries (charged per call) | 10 |
+| Opening an entry's thread: the reads of entry issues and the opening (charged per call) | 27 |
 
-Worst case per instance per hour: (40 + 4 + 20 + 10) × 60 = 74 × 60 =
-4,440 calls, below the installation's 5,000. The largest refresh is 20 issue
+Worst case per instance per hour: (40 + 4 + 10 + 27) × 60 = 81 × 60 =
+4,860 calls, below the installation's 5,000. The calls that repair an opening
+come on top (see below): at most 3 for an opening GitHub returned without its
+label, two `POST`s and one `PATCH`. The largest refresh is 20 issue
 pages + 15 comment pages = 35 calls, which fits in a minute's 40. GitHub's
 secondary limit is 900 points a minute, a `GET` costing 1 point and a `POST`
-5: at most 30 of the 74 calls a minute are `POST`s (labels and openings),
-which is 30 × 5 + 44 = 194 points. Calls to GitHub's token endpoint are not installation calls;
+5: at most 37 of the 81 calls a minute are `POST`s (labels and openings),
+which is 37 × 5 + 44 = 229 points, plus 3 calls (15 points) for each
+opening repaired in that minute. Calls to GitHub's token endpoint are not installation calls;
 new sign-ins have a ceiling of 30 a minute and token refreshes of existing
 sessions a separate one of 60, so made-up sign-ins cannot stop sessions from
 refreshing.
 
-The opening ceiling is ten calls a minute per instance, whatever they are: the
-reads of entry issues, the openings, and the calls that repair an opening.
-An opening is refused before its call when the ceiling has no room for it and
-for the read that confirms it. The calls that repair an opening (creating the
-missing label, adding it, closing an issue) are charged to the ceiling but
-never refused by it, so that nothing is left half done. The read before an
-opening also runs for a write on an entry that the snapshot holds no thread
-for, and finds the thread when another instance opened it.
+The opening ceiling is 27 calls a minute per instance, whatever they are: the
+reads of entry issues, the openings, and the calls that repair an opening. An
+opening is 3 calls (the read before, the opening, the read after), so an
+instance opens at most 9 threads a minute.
+
+Two things bound the threads the App opens. An entry has one thread, so the
+plan's entries are the most it can open. The `open` ceiling bounds how fast.
+The opening and the first page of the read that confirms it are charged
+together, before the opening. When the ceiling has no room for both, the
+answer is 429, "The Workshop is busy. Try again in a minute.", with
+`Retry-After` for the wait, and nothing is opened. A further page of that read
+is charged when it is read.
+
+The calls that repair an opening (creating the missing label, adding it,
+closing an issue) are charged to the ceiling but never refused by it, so that
+nothing is left half done. The read before an opening also runs for a write on
+an entry that the snapshot holds no thread for, and finds the thread when
+another instance opened it.
 
 With each of the two lists on one page, a refresh is 3 calls (2 list pages,
 which are `304` and free when unchanged, and 1 `since` comment call, which
@@ -811,8 +829,8 @@ always counts against GitHub's limit):
 **The limit is shared by every instance.** The 5,000 calls an hour belong to
 the installation, and every warm instance spends from them. At about 130 calls
 an hour each, about 38 warm instances that are all idle use up the hour;
-two instances spending at their ceilings (4,440 an hour each) use it up in
-about 34 minutes. Nothing in this code can prevent that: instances do not
+two instances spending at their ceilings (4,860 an hour each) use it up in
+about 31 minutes. Nothing in this code can prevent that: instances do not
 know about each other. When it happens, GitHub answers with a rate limit, every
 instance keeps serving its snapshot (stale after 10 minutes), and the
 snapshots catch up when the hour resets.
@@ -829,26 +847,6 @@ snapshots catch up when the hour resets.
   counts as a write, and so does a vote on a comment. A person may make 3
   suggestions a minute and 10 an hour; an attempt counts only when the issue
   was created.
-- All people together may cause 30 openings of an entry's thread an hour.
-  This is the limit that bounds the bot. It is counted on GitHub: the read
-  of entry issues that every opening makes covers the last hour, and every
-  entry issue created in that hour counts. In memory, an instance adds only
-  its own openings that GitHub's read did not show yet. So the limit holds
-  across instances and restarts. A write that would cause the 31st answers
-  429: "Too many new threads were started on the Workshop this hour."
-- A person may cause 5 openings an hour. This count is kept in the
-  instance's memory, because the Workshop has no storage but GitHub: another
-  instance, or a restart, starts it again. A write that would cause the 6th
-  answers 429: "You have started too many new threads this hour."
-- Only an opening is limited: the server first looks the thread up on
-  GitHub, and a write on an entry that has a thread, there or in the
-  snapshot, is refused by neither count. When an issue has to be opened, the
-  person's count and everyone's are checked and charged in one step, with no
-  wait between, and the person's charge is given back when the opening
-  failed. On one
-  instance, two openings at once by one person at 4 of 5, or by anyone at 29
-  of 30, open one issue. Two instances opening at the same moment can each
-  pass at 29, since neither sees the other's issue yet.
 - Each session may make 60 GitHub calls a minute for reads (`GET vote`, its
   GraphQL query, and the reads before a write); more answer 429. The reads a whole action needs are checked before its first
   call.
@@ -903,7 +901,7 @@ snapshots catch up when the hour resets.
 | `website/scripts/workshop-limits.test.mjs` | Ceilings, `me`, sign-out, deadlines, patch timing, cleaned output, the App not installed. |
 | `website/scripts/workshop-refresh.test.mjs` | Refreshes started by writes, coalescing, the floor, the idle refresh, what each read waits for and its headers, the parallel refresh and its failures. |
 | `website/scripts/workshop-abuse.test.mjs` | What a visitor or a replayed cookie can make the server do, memory, waits and retries. |
-| `website/scripts/workshop-threads.test.mjs` | Entries' threads: opening, finding, sharing, limits, failures, closed threads, `suggested_in`; votes on comments. |
+| `website/scripts/workshop-threads.test.mjs` | Entries' threads: opening, finding, sharing, the `open` ceiling, failures, closed threads, `suggested_in`; votes on comments. |
 
 All of them run with the website's `npm test`.
 
@@ -1084,8 +1082,9 @@ origin differs.
 **Identities and scope.** The App can only read and write issues of the one
 repository, and the installation token is requested for that repository with
 those two permissions. The installation token serves only the snapshot refresh,
-the repository lookup at sign-in and labelling a suggestion
-(which a visitor cannot do). Everything else done for a signed-in person,
+the repository lookup at sign-in, labelling a suggestion
+(which a visitor cannot do) and opening an entry's thread, with the reads of
+entry issues before and after it. Everything else done for a signed-in person,
 including reading the issue before a write, uses that person's token, so
 GitHub's own permissions apply (a locked issue refuses a visitor's comment)
 and GitHub records the person as the author. Every write first reads the issue
