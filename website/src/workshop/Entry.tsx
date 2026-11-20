@@ -117,6 +117,9 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   const settling = useRef<ReturnType<typeof setTimeout>>(undefined);
   // The panel's height as last laid out, kept current while it animates open (no render happens then).
   const animating = useRef(false);
+  // When the panel last started to open: while it opens, its height follows what it holds without a growth of its own.
+  const grewAt = useRef(-Infinity);
+  const lastGrown = useRef(grown);
   useEffect(() => {
     const node = inner.current;
     if (!node || typeof ResizeObserver !== 'function') return;
@@ -127,6 +130,9 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   useLayoutEffect(() => {
     const node = inner.current;
     if (!node) return;
+    if (grown && !lastGrown.current) grewAt.current = Date.now();
+    lastGrown.current = grown;
+    const unfolding = Date.now() - grewAt.current < GROW_MS;
     const changed = lastShown.current !== shown || lastChunks.current !== chunks;
     lastShown.current = shown;
     lastChunks.current = chunks;
@@ -138,7 +144,7 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
     node.style.height = '';
     const to = node.getBoundingClientRect().height;
     if (!animating.current) lastHeight.current = to;
-    if (!changed || !grown || still || from <= 0 || Math.abs(to - from) < 1) {
+    if (!changed || !grown || unfolding || still || from <= 0 || Math.abs(to - from) < 1) {
       node.style.transition = '';
       animating.current = false;
       return;
@@ -421,8 +427,8 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
           <div>
             <b>{comment.author} <small>Sending…</small></b>
             <RichText text={comment.text} />
-            {/* Drawn and disabled until the comment is confirmed: the comment keeps its height then. */}
-            <CommentVote row={row} comment={comment} ctx={ctx} />
+            {/* The room of its 👍, in the button's box, until the comment is confirmed: it keeps its height then. */}
+            <span className="ws-vote ws-cvote ws-cvote-room" aria-hidden="true"><Thumb up={0} /></span>
           </div>
         </div>
       ))}

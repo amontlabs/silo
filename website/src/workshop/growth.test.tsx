@@ -6,7 +6,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildData, fixtureHistories, fixtureNotes } from './fixtures';
 import type { Histories, Notes } from './plan';
 import type { HistorySource } from './data';
-import { itemOf, mockApi, owner, renderApp, rowButton } from './test-support';
+import { itemOf, mockApi, owner, renderApp, rowButton, wait } from './test-support';
+
+/** A little over the time the panel takes to open, during which it has no growth of its own. */
+const GROW_MS = 260;
 
 const CORE = 'The engine runs on its own';
 /** Three changes of `core`, so its row has a History. */
@@ -58,6 +61,7 @@ async function openCore(loadNotes: () => Promise<Notes>, loadHistory: () => Prom
   const item = itemOf(CORE);
   // The panel's opening is over.
   await waitFor(() => expect(item.querySelector<HTMLElement>('.ws-more-in')!.style.height).toBe(''), { timeout: 1000 });
+  await wait(GROW_MS);
   return { item, panel: item.querySelector<HTMLElement>('.ws-more-in')! };
 }
 
@@ -102,6 +106,26 @@ describe('the panel of an open row', () => {
     await act(async () => later.release(fixtureHistories(data())));
     await waitFor(() => expect(item.querySelector('.ws-h')).not.toBeNull());
     expect(watch.seen.length).toBeGreaterThanOrEqual(2);
+    watch.stop();
+  });
+});
+
+describe('a row closed and opened again while its Notes load', () => {
+  it('lets the panel open to the notes that arrive meanwhile, with no height of its own pinned', async () => {
+    const notes = deferred<Notes>();
+    const { item, panel } = await openCore(() => notes.promise, () => Promise.resolve(fixtureHistories(data())));
+    await userEvent.click(within(item).getByRole('button', { name: 'Notes' }));
+    await waitFor(() => expect(panel.style.height).toBe(''), { timeout: 1000 });
+    // Closed, then opened again before its body is taken away; the notes arrive while it opens.
+    await userEvent.click(rowButton(CORE));
+    await userEvent.click(rowButton(CORE));
+    await waitFor(() => expect(item.querySelector('.ws-more')).toHaveClass('open'));
+    expect(item.querySelector('.ws-ph-notes')).not.toBeNull();
+    const watch = heights(panel);
+    await act(async () => notes.release(fixtureNotes(data())));
+    await waitFor(() => expect(item.querySelector('.ws-md')).not.toBeNull());
+    expect(watch.seen).toEqual([]);
+    expect(panel.style.height).toBe('');
     watch.stop();
   });
 });

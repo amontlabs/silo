@@ -4,8 +4,8 @@
 // The url defaults to the `workshop:dev --fake` server; the output folder to website/.motion/; no flow named runs
 // every flow (the names are the keys of FLOWS below).
 // For each move it writes <name>.jpg, a contact sheet of the frames on screen at fixed times after the action, and
-// <name>.txt: per element, each change of its box and opacity at each animation frame, the page's scroll, the
-// animations that ran and the layout shifts.
+// <name>.txt: every change of the page's scroll and of each element's box and opacity, read at each animation
+// frame and never cut, the animations that ran and the layout shifts.
 // It exits non-zero when
 // - in a move between the plain view and a place, the scroll position takes more than one new value;
 // - `.ws-detail` runs `ws-rise` while a `::view-transition-*(detail)` animation runs, or a group named `hero` animates;
@@ -37,9 +37,13 @@ function parseArgs(argv) {
   return options;
 }
 
-/** Starts, in the page, a sampler that reads at every animation frame the chosen elements and the animations running. */
-async function sample(page, selectors, flags) {
-  await page.evaluate(({ selectors, flags }) => {
+/**
+ * Starts, in the page, a sampler that reads at every animation frame the chosen elements and the animations running.
+ * An element is named by a selector, or by `{ selector, text }`: the first match whose text holds `text`, whose
+ * classes are read too.
+ */
+async function sample(page, selectors) {
+  await page.evaluate((selectors) => {
     const rows = [];
     const shifts = [];
     const seen = new Map();
@@ -53,13 +57,13 @@ async function sample(page, selectors, flags) {
       if (!window.__motion.on) return;
       const board = document.querySelector('.ws-board');
       const row = { t: Date.now(), y: Math.round(scrollY), sx: board ? Math.round(board.scrollLeft) : null, running: [] };
-      for (const [name, selector] of Object.entries(selectors)) {
-        const node = document.querySelector(selector);
+      for (const [name, which] of Object.entries(selectors)) {
+        const node = typeof which === 'string' ? document.querySelector(which) : [...document.querySelectorAll(which.selector)].find((n) => n.textContent.includes(which.text));
         if (!node) { row[name] = null; continue; }
         const box = node.getBoundingClientRect();
         row[name] = [Math.round(box.left), Math.round(box.top * 10) / 10, Math.round(box.width), Math.round(box.height * 10) / 10, +(+getComputedStyle(node).opacity).toFixed(2)];
+        if (typeof which !== 'string') row[name].push(node.className);
       }
-      for (const [name, selector] of Object.entries(flags)) row[name] = document.querySelector(selector) !== null;
       for (const animation of document.getAnimations()) {
         const effect = animation.effect;
         const target = effect?.target;
@@ -74,7 +78,7 @@ async function sample(page, selectors, flags) {
       requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
-  }, { selectors, flags });
+  }, selectors);
 }
 
 /** The problems of a move, from what was sampled after the action. */
@@ -86,7 +90,9 @@ function problemsOf(kind, rows, t0) {
   const overlap = after.find((row) => row.running.some((id) => id.includes('|ws-detail|ws-rise')) && row.running.some((id) => /^::view-transition-[a-z-]+\(detail\)/.test(id)));
   if (overlap) problems.push(`.ws-detail runs ws-rise during a view transition of detail (+${overlap.t - t0} ms)`);
   if (kind === 'blind') {
-    const values = [];
+    // From the position before the action: each value after it that differs from the one before is a new one.
+    const before = rows.filter((row) => row.t < t0).at(-1);
+    const values = before ? [before.y] : [];
     for (const row of after) if (values[values.length - 1] !== row.y) values.push(row.y);
     if (values.length > 2) problems.push(`the scroll takes ${values.length - 1} new values: ${values.join(' → ')}`);
     if (!any((id) => id.startsWith('::view-transition'))) problems.push('no view transition ran');
@@ -101,13 +107,18 @@ function problemsOf(kind, rows, t0) {
     if (heights.length - 1 < 4) problems.push(`the panel's height changes in ${heights.length - 1} steps: ${heights.join(' → ')}`);
   }
   if (kind === 'comment') {
-    const from = after.findIndex((row) => row.pending);
+    // The comment is the one with the text sent; its classes say whether it is being sent.
+    const pending = (row) => row.comment[5].split(' ').includes('ws-pending');
+    const from = after.findIndex((row) => row.comment && pending(row));
     if (from < 0) problems.push('the comment was never seen being sent');
     else {
-      const rest = after.slice(from).filter((row) => row.comment && row.box);
-      const heights = new Set(rest.map((row) => row.comment[3]));
-      const tops = new Set(rest.map((row) => row.box[1] + row.y));
-      if (!rest.some((row) => !row.pending)) problems.push('the comment was never seen confirmed');
+      const rest = after.slice(from);
+      const lost = rest.find((row) => !row.comment || !row.box);
+      if (lost) problems.push(`the comment or the box is not found at +${lost.t - t0} ms`);
+      const found = rest.filter((row) => row.comment && row.box);
+      if (!found.some((row) => !pending(row))) problems.push('the comment was never seen confirmed');
+      const heights = new Set(found.map((row) => row.comment[3]));
+      const tops = new Set(found.map((row) => row.box[1] + row.y));
       if (heights.size > 1) problems.push(`the comment's height changes: ${[...heights].join(', ')}`);
       if (tops.size > 1) problems.push(`the comment box's top changes: ${[...tops].join(', ')}`);
     }
@@ -116,14 +127,14 @@ function problemsOf(kind, rows, t0) {
 }
 
 /** Runs one action, writes its sheet and its text, and returns its problems. */
-async function capture(out, page, name, action, { selectors = ROWS, flags = {}, kind = null, ms = 1500 } = {}) {
+async function capture(out, page, name, action, { selectors = ROWS, kind = null, ms = 1500 } = {}) {
   const client = await page.context().newCDPSession(page);
   const frames = [];
   client.on('Page.screencastFrame', (frame) => {
     frames.push({ t: frame.metadata.timestamp * 1000, data: frame.data });
     client.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
   });
-  await sample(page, selectors, flags);
+  await sample(page, selectors);
   await client.send('Page.startScreencast', { format: 'jpeg', quality: 70, maxWidth: 720, maxHeight: 720, everyNthFrame: 1 });
   await wait(250);
   const t0 = Date.now();
@@ -138,17 +149,17 @@ async function capture(out, page, name, action, { selectors = ROWS, flags = {}, 
 
   const problems = problemsOf(kind, data.rows, t0);
   const lines = [`## ${name}  ${frames.length} frames${kind ? `  checked as: ${kind}` : ''}`];
-  for (const key of ['y', 'sx', ...Object.keys(selectors), ...Object.keys(flags)]) {
+  for (const key of ['y', 'sx', ...Object.keys(selectors)]) {
     let last;
     const changes = [];
     for (const row of data.rows) {
       const value = JSON.stringify(row[key]);
       if (value !== last) { changes.push(`${row.t - t0}:${value}`); last = value; }
     }
-    lines.push(`${key}: ${changes.length > 28 ? [...changes.slice(0, 14), `…(${changes.length - 24})…`, ...changes.slice(-10)].join(' ') : changes.join(' ')}`);
+    lines.push(`${key}: ${changes.join(' ')}`);
   }
   const animations = data.seen.filter(([, a]) => a.first >= t0 - 5).map(([id, a]) => `  +${a.first - t0} ms ${id} duration=${a.duration} delay=${a.delay}`);
-  lines.push(`animations after the action (${animations.length}):`, ...animations.slice(0, 40));
+  lines.push(`animations after the action (${animations.length}):`, ...animations);
   const shifts = data.shifts.filter((s) => s.t >= t0);
   lines.push(`layout shifts after the action: ${shifts.length ? shifts.map((s) => `+${s.t - t0} ms ${s.v}${s.input ? ' (input)' : ''} [${s.from.join(', ')}]`).join('; ') : 'none'}`);
   lines.push(problems.length ? `FAIL: ${problems.join('; ')}` : 'ok');
@@ -237,15 +248,15 @@ const FLOWS = {
     await box.waitFor();
     await wait(600);
     // A text of its own each run: the page shows a person's comment once per text, and the server keeps earlier runs'.
-    await box.fill(`A comment, to see it land (${new Date().toISOString()}).`);
+    const text = `A comment, to see it land (${new Date().toISOString()}).`;
+    await box.fill(text);
     await page.route('**/comment', async (route) => {
       if (route.request().method() === 'POST') await wait(400);
       await route.continue();
     });
     return capture(s.out, page, 'comment-sent', click('.ws-item.open form button[type="submit"]'), {
       kind: 'comment', ms: 1400,
-      selectors: { ...ROWS, comment: '.ws-item.open .ws-talk > div.ws-c:last-of-type', box: '.ws-item.open .ws-talk > .ws-box' },
-      flags: { pending: '.ws-item.open .ws-c.ws-pending' },
+      selectors: { ...ROWS, comment: { selector: '.ws-item.open .ws-c', text }, box: '.ws-item.open .ws-talk > .ws-box' },
     });
   },
   // Latest from the plain view, then a line of Latest that opens its entry where it lives.

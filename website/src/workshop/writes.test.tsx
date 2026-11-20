@@ -116,6 +116,8 @@ describe('writes the server has not confirmed', () => {
     const route: Route = () => new Promise((resolve) => { release = resolve; });
     return { route, release: (value: { status: number; body: unknown }) => release(value) };
   }
+  /** The room of a comment's 👍 while it is being sent. */
+  const roomOf = (comment: HTMLElement) => comment.querySelector('.ws-vote.ws-cvote-room');
   const announced = () => document.querySelector('.sr-only[aria-live="polite"]')?.textContent;
 
   it('show a comment being sent as pending, then as an ordinary comment', async () => {
@@ -128,8 +130,10 @@ describe('writes the server has not confirmed', () => {
     const pending = screen.getByText('On its way.').closest('.ws-c') as HTMLElement;
     expect(pending).toHaveClass('ws-pending');
     expect(within(pending).getByText('Sending…')).toBeInTheDocument();
-    // Its 👍 is drawn and disabled, so the comment keeps its height once confirmed.
-    expect(within(pending).getByRole('button', { name: /votes on this comment/ })).toBeDisabled();
+    // The room of its 👍 is held by a placeholder that is neither a button nor a link, hidden from assistive technology.
+    expect(roomOf(pending)).toHaveAttribute('aria-hidden', 'true');
+    expect(within(pending).queryByRole('button')).toBeNull();
+    expect(within(pending).queryByRole('link')).toBeNull();
     expect(within(itemOf('Run a command')).queryByText(/💬/)).not.toBeInTheDocument();
     expect(announced()).toBe('Sending comment');
     expect(localStorage.getItem('silo-workshop-writes-2')).toBeNull();
@@ -138,6 +142,23 @@ describe('writes the server has not confirmed', () => {
     expect(within(screen.getByText('On its way.').closest('.ws-c') as HTMLElement).getByRole('button', { name: /votes on this comment/ })).toBeInTheDocument();
     expect(within(itemOf('Run a command')).getByText('💬 1')).toBeInTheDocument();
     expect(localStorage.getItem('silo-workshop-writes-2')).toContain('On its way.');
+  });
+
+  it('keep the room of the 👍 of a comment being sent a placeholder when the person signs out meanwhile', async () => {
+    const answer = deferred();
+    mockApi({ me: visitor, routes: { 'POST comment': answer.route } });
+    history.replaceState(null, '', '/workshop#part-b/exec');
+    await renderApp();
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Comment' }), 'Before signing out.');
+    await userEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull());
+    const pending = screen.getByText('Before signing out.').closest('.ws-c') as HTMLElement;
+    expect(pending).toHaveClass('ws-pending');
+    expect(roomOf(pending)).toHaveAttribute('aria-hidden', 'true');
+    expect(within(pending).queryByRole('link')).toBeNull();
+    expect(within(pending).queryByRole('button')).toBeNull();
+    await act(async () => answer.release(ok()));
   });
 
   // The 👍 of "Run a command" (4 votes, thread 13), asked in these tests with the API's answers held back.

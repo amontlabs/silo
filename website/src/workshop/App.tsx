@@ -52,6 +52,8 @@ const noFacts = () => Promise.resolve({ entries: {}, statements: {} });
 const noHistory = () => Promise.resolve({});
 
 type View = 'map' | 'order';
+/** What the page uses of the browser's `ViewTransition`. */
+type ViewTransitionLike = { finished: Promise<void>; ready?: Promise<void>; skipTransition?: () => void };
 type Focus = { kind: 'title' } | { kind: 'part'; part: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string };
 
 const LEAVE_MS = 140;
@@ -217,6 +219,8 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   const markOwner = useRef(-1);
   /** True while a view transition's update runs: what it scrolls is set at once, before the new view is captured. */
   const inTransition = useRef(false);
+  /** The browser's view transition of the last move that started one, until it ends or another move starts. */
+  const transition = useRef<ViewTransitionLike | null>(null);
   // Once who is signed in is known, the account slot takes the width of what it holds (see workshop.css).
   useEffect(() => {
     if (!accountSlot) return;
@@ -301,10 +305,15 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
 
   /**
    * A new move starts: what an earlier one left waiting (the end of going back, a view transition's update) never
-   * lands after it, the mark of its view transition goes, and the height a going-back kept is let go at once.
-   * Returns this move's count.
+   * lands after it, its view transition ends at once with its mark, so no picture of it covers this move, and the
+   * height a going-back kept is let go at once. Returns this move's count.
    */
   function moveStarts(): number {
+    // Counted first: the update of the transition skipped here, if the browser runs it now, finds it was overtaken.
+    const mine = ++navigations.current;
+    const overtaken = transition.current;
+    transition.current = null;
+    overtaken?.skipTransition?.();
     clearMark();
     timers.current.forEach(clearTimeout);
     timers.current = [];
@@ -312,7 +321,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     if (mainRef.current) mainRef.current.style.minHeight = '';
     setHeld(false);
     setLeaving(false);
-    return ++navigations.current;
+    return mine;
   }
 
   /** True while a going-back has started and neither landed nor been overtaken by another move. */
@@ -325,7 +334,7 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
    */
   function travel(update: () => void, way: 'open' | 'back' | null): number {
     const mine = moveStarts();
-    const start = (document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } }).startViewTransition?.bind(document);
+    const start = (document as Document & { startViewTransition?: (cb: () => void) => ViewTransitionLike }).startViewTransition?.bind(document);
     if (!way || onMap() || still() || !start) {
       update();
       return mine;
@@ -342,9 +351,13 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       } finally {
         inTransition.current = false;
       }
-    }) as { finished: Promise<void>; ready?: Promise<void> };
+    });
+    transition.current = vt;
     vt.ready?.catch(() => {});
-    vt.finished.catch(() => {}).finally(() => { if (markOwner.current === mine) clearMark(); });
+    vt.finished.catch(() => {}).finally(() => {
+      if (transition.current === vt) transition.current = null;
+      if (markOwner.current === mine) clearMark();
+    });
     return mine;
   }
 
@@ -394,7 +407,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
   function back() {
     // A going-back under way lands at its time: a second one (the button pressed twice, Escape again) changes nothing.
     if (isHome || backUnderWay()) return;
-    const focus: Focus | null = shown.kind === 'part' ? { kind: 'part', part: shown.part } : opener.current ? { kind: 'selector', selector: opener.current } : shown.kind === 'suggested' ? { kind: 'part', part: 'suggested' } : null;
+    // A place reached by its address has no opener: the link under the tiles that leads to it takes the focus, or the
+    // page's title when there is none.
+    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part } : opener.current ? { kind: 'selector', selector: opener.current } : shown.kind === 'suggested' ? { kind: 'part', part: 'suggested' } : { kind: 'selector', selector: `a.ws-fold-link[href="${formatHash(shown)}"]` };
     const finish = () => go(HOME, null, { push: true, focus, announce: '' });
     if (still()) {
       finish();

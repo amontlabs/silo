@@ -134,9 +134,9 @@ To see the page's moves frame by frame, with the same server running,
 `npm --prefix website run motion-sheet` (a URL, `--out <dir>` and flow names
 after `--`). For each move, such as the plain view to a part and back at
 1440 × 900 and 390 × 844, it writes to `website/.motion/` a contact sheet of
-the frames at fixed times after the action and a text file with each
-element's box and opacity at each frame, the animations that ran and the
-layout shifts. It exits with an error when a move between the plain view and
+the frames at fixed times after the action and a text file with each change
+of the scroll and of each element's box and opacity, the animations that ran
+and the layout shifts. It exits with an error when a move between the plain view and
 a place scrolls the page more than once, when a move between two places runs a
 view transition, when Notes opening grows its panel in fewer than four steps,
 or when a comment changes height as it is confirmed; the full list is at the

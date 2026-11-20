@@ -485,6 +485,7 @@ html.vt-back::view-transition-new(board) { animation: ws-appear .2s ease both; }
 .ws-gh-alt .out { stroke: currentColor; }
 /* Under a comment: the same button, a little smaller. */
 .ws .ws-cvote { margin: 3px 0 0; height: 20px; padding: 0 7px; }
+.ws .ws-cvote-room { pointer-events: none; }
 /* An entry with no comment yet, and one whose thread is closed: one line each, the height of the line under the sign-in box. */
 .ws-none { margin: 0 0 -4px; padding: 4px 0; font: 12px/1.5 var(--mono); }
 .ws-closed { margin: 2px 0 0; font: 12px/1.5 var(--mono); color: var(--muted); }
