@@ -1,0 +1,18 @@
+[
+  {
+    "id": "less-sure-less-power",
+    "says": "The less sure the trigger, the less it may do.",
+    "asks": "What triggers it: you, a fact, or something less sure?",
+    "why": "A wrong grant lets something out that cannot be taken back. A wrong pause costs time."
+  },
+  {
+    "id": "kind-before-design",
+    "says": "The kind of every action is named before the feature is designed.",
+    "asks": "What kind is each of its actions?"
+  },
+  {
+    "id": "bad-paths-first",
+    "says": "Bad paths are written first.",
+    "asks": "What are its bad paths? What happens when it is slow, when it fails halfway, when its input is missing, when it is wrong?"
+  }
+]
