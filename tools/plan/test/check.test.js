@@ -36,6 +36,17 @@ test('the folder: a file that is not the plan, a missing list, a part without it
   ]);
 });
 
+test('a part id that is also an entry, a principle or a property is refused, and so is one set under a part id; a word may share it', () => {
+  const part = (id) => (f) => { f['parts.json'].push({ id, title: 'T', line: 'L' }); f[`${id}/README.md`] = 'x'; };
+  assert.deepEqual(errorsOf(variant(part('model-tool'))), ['plan/parts.json [2].id: the part id "model-tool" is also plan/engine/decisions/model-tool.json']);
+  assert.deepEqual(errorsOf(variant(part('less-sure-less-power'))), ['plan/parts.json [2].id: the part id "less-sure-less-power" is also the principle at plan/principles.json [0]']);
+  assert.deepEqual(errorsOf(variant(part('rule-reads-only-facts'))), ['plan/parts.json [2].id: the part id "rule-reads-only-facts" is also the property at plan/record/properties.json [0]']);
+  assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].id = 'engine'; })), [
+    'plan/record/decisions/losses-show.json sets[0].id: the id "engine" is also a part of plan/parts.json',
+  ]);
+  assert.deepEqual(errorsOf(variant(part('fork'))), []);
+});
+
 test('files whose name starts with a dot are ignored', () => {
   assert.deepEqual(errorsOf(variant((f) => { f['.DS_Store'] = 'x'; f['engine/.draft.json'] = '{'; })), []);
 });
