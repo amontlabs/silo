@@ -51,7 +51,7 @@ user's settings; only a path the reader skips too (a part of its name starts wit
 out, and when git cannot answer the verdict is refused. A file under `plan/` that git is told not
 to look at (`git update-index --assume-unchanged` or `--skip-worktree`) refuses the verdict too,
 and the message names it: git would hide an edit of it. The check before a verdict includes the
-rule against the merged plan, except for the entry ruled on. The files are written all or none:
+rules against the merged plan, except for the entry ruled on. The files are written all or none:
 when one cannot be written, or the commit fails, the ones already written are put back.
 
 ## What the check refuses
@@ -105,6 +105,14 @@ Each problem names the file, the field, what is wrong and the fix.
   none of those has changed since: the owner ruled again after the change. A commit that changed
   only its `adds` or its `replaced_by`, as a take of another entry does, does not count. A change of
   `replaced_by` alone is never refused.
+- Against the same plan: an entry whose verdict is `take` or `drop` and is not the one the merged
+  plan holds for it (another verdict, none, or no such entry: a verdict typed in, or an entry copied
+  from a decided one). The same evidence lifts it: the latest commit since the base that changed
+  its verdict or those keys is `Owner: take <id>` for a `take`, `Owner: drop <id>` for a `drop`,
+  and none of those has changed since. A verdict taken away by hand passes, so does a plan whose
+  merged plan holds no entry (the remote's old plan, until the first push). The check cannot tell
+  an agent that runs `plan take` without the owner's word, or one that writes a commit named
+  `Owner: take <id>` by hand, from the owner.
 
 A malformed value is a problem like any other: the check never throws on one.
 

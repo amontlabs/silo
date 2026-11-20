@@ -104,10 +104,12 @@ export function unwatched(root) {
  * (asks, answer, name, what, replaces, sets, removes) is the owner's verdict on it (`Owner: take <id>` or
  * `Owner: drop <id>`), and none of those has changed since, committed or not. Rule 11 does not
  * apply to such an entry: the owner ruled again after the change. A commit that touched only other
- * keys of the file, such as the `adds` a take of another entry rewrites, does not count.
- * @param {string} root @param {string} ref the base @returns {(id: string, file: string) => boolean} file: `plan/…`
+ * keys of the file, such as the `adds` a take of another entry rewrites, does not count. With a
+ * `verdict` (`take` or `drop`), only the owner's verdict of that kind counts: a typed `take` is not
+ * covered by `Owner: drop <id>`.
+ * @param {string} root @param {string} ref the base @returns {(id: string, file: string, verdict?: string) => boolean} file: `plan/…`
  */
-export const ruledByOwner = (root, ref) => (id, file) => {
+export const ruledByOwner = (root, ref) => (id, file, verdict) => {
   const at = (rev) => git(root, ['cat-file', 'blob', `${rev}:${file}`]);
   // The working file against HEAD: an uncommitted change of those keys comes after any verdict.
   let disk;
@@ -123,7 +125,7 @@ export const ruledByOwner = (root, ref) => (id, file) => {
     const space = record.indexOf(' ');
     const [commit, subject] = [record.slice(0, space), record.slice(space + 1)];
     if (!ruledKeysDiffer(at(`${commit}^`), at(commit))) continue;
-    return [`Owner: take ${id}`, `Owner: drop ${id}`].includes(subject.trim());
+    return (verdict ? [`Owner: ${verdict} ${id}`] : [`Owner: take ${id}`, `Owner: drop ${id}`]).includes(subject.trim());
   }
   return false;
 };

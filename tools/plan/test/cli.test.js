@@ -677,3 +677,111 @@ test('rule 11: a take that moves a statement out of an entry the owner re-ruled 
     assert.equal(after.code, 0, after.out + after.err);
   });
 });
+
+/** The problems `plan check --json` lists, as `file field`. */
+const problems = async (root) => JSON.parse((await run(root, ['check', '--json'])).out).errors.map((e) => `${e.file} ${e.field}`);
+
+test('a verdict that the command did not write fails the check, naming the file, the field and the fix', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const name = 'engine/decisions/linux-vm-engine.json';
+    // Typed in and not committed yet.
+    writeJson(root, name, { ...readJson(root, name), verdict: 'take' });
+    const typed = JSON.parse((await run(root, ['check', '--json'])).out);
+    assert.deepEqual(typed.errors.map((e) => `${e.file} ${e.field}`), [`plan/${name} verdict`]);
+    assert.match(typed.errors[0].fix, /remove the verdict; the owner's yes is the command plan take linux-vm-engine/);
+    const text = await run(root, ['check']);
+    assert.equal(text.code, 1);
+    assert.match(text.out, /plan\/engine\/decisions\/linux-vm-engine\.json: verdict: .* Fix: remove the verdict/);
+    // Committed under any other subject.
+    git(root, 'commit', '-q', '-am', 'Plan: take linux-vm-engine');
+    assert.deepEqual(await problems(root), [`plan/${name} verdict`]);
+    // Even under the other verdict's subject.
+    git(root, 'commit', '-q', '--amend', '-m', 'Owner: drop linux-vm-engine');
+    assert.deepEqual(await problems(root), [`plan/${name} verdict`]);
+    // Taken away by hand: not decided again, which passes.
+    const { verdict: _verdict, ...open } = readJson(root, name);
+    writeJson(root, name, open);
+    assert.deepEqual(await problems(root), []);
+  });
+});
+
+test('a new entry born with a verdict, and a verdict changed by hand, fail the check', async () => {
+  const files = basePlan();
+  files['record/decisions/no-detour.json'] = { ...files['record/decisions/no-detour.json'], verdict: 'drop' };
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    // A copy of a decided entry under a new id.
+    writeJson(root, 'engine/decisions/copied.json', { ...readJson(root, 'engine/decisions/engine-language.json') });
+    const order = readJson(root, 'order.json');
+    order.stages.at(-1).entries.push('copied');
+    writeJson(root, 'order.json', order);
+    git(root, 'add', 'plan');
+    git(root, 'commit', '-q', '-m', 'Plan: copied');
+    assert.deepEqual(await problems(root), ['plan/engine/decisions/copied.json verdict']);
+    // take to drop, and drop to take, by hand.
+    const flipped = { 'engine/decisions/engine-language.json': 'drop', 'record/decisions/no-detour.json': 'take' };
+    for (const [name, verdict] of Object.entries(flipped)) writeJson(root, name, { ...readJson(root, name), verdict });
+    git(root, 'commit', '-q', '-am', 'Plan: flip');
+    assert.deepEqual((await problems(root)).filter((p) => p.endsWith(' verdict')).sort(), [
+      'plan/engine/decisions/copied.json verdict',
+      'plan/engine/decisions/engine-language.json verdict',
+      'plan/record/decisions/no-detour.json verdict',
+    ]);
+  }, files);
+});
+
+test('plan take and plan drop leave the check passing, also after the entry was edited by hand and a verdict typed in', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const name = 'engine/decisions/linux-vm-engine.json';
+    writeJson(root, name, { ...readJson(root, name), verdict: 'take', answer: 'Firecracker.' });
+    git(root, 'commit', '-q', '-am', 'Plan: typed take');
+    assert.deepEqual(await problems(root), [`plan/${name} verdict`]);
+    // Cleared by hand and the text edited, then ruled on by the command.
+    const { verdict: _verdict, ...open } = readJson(root, name);
+    writeJson(root, name, { ...open, answer: 'Cloud Hypervisor.' });
+    git(root, 'commit', '-q', '-am', 'Plan: clear it');
+    const ruled = await run(root, ['take', 'linux-vm-engine']);
+    assert.equal(ruled.code, 0, ruled.err);
+    assert.deepEqual(await problems(root), []);
+    // A drop, which writes its own verdict.
+    const dropped = await run(root, ['drop', 'no-detour']);
+    assert.equal(dropped.code, 0, dropped.err);
+    assert.deepEqual(await problems(root), []);
+    // The take of another entry rewrites adds and replaced_by in files it does not rule on.
+    assert.equal((await run(root, ['take', 'losses-show'])).code, 0);
+    assert.deepEqual(await problems(root), []);
+    // A typed verdict after the owner's, in a later commit, is refused again.
+    const vm = readJson(root, name);
+    writeJson(root, name, { ...vm, verdict: 'drop' });
+    git(root, 'commit', '-q', '-am', 'Plan: flip it');
+    assert.ok((await problems(root)).includes(`plan/${name} verdict`));
+  });
+});
+
+test('a verdict on a branch merged by a merge commit still counts', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(root, 'checkout', '-q', '-b', 'owner');
+    assert.equal((await run(root, ['take', 'losses-show'])).code, 0);
+    git(root, 'checkout', '-q', 'main');
+    writeFileSync(join(root, 'NOTES.md'), 'other work\n');
+    git(root, 'add', 'NOTES.md');
+    git(root, 'commit', '-q', '-m', 'Other work');
+    git(root, 'merge', '-q', '--no-ff', '-m', 'Merge branch owner', 'owner');
+    assert.deepEqual(await problems(root), []);
+  });
+});
+
+test('a merged plan that holds no entry is no base for verdicts: the entries it lacks are not refused', async () => {
+  await withRepo(async (root) => {
+    // The remote holds the old plan: a commit with no entry of today's.
+    const empty = git(root, 'commit-tree', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', '-m', 'Old plan').trim();
+    git(root, 'update-ref', 'refs/remotes/origin/main', empty);
+    assert.deepEqual(await problems(root), []);
+    // The commands work against it too.
+    assert.equal((await run(root, ['take', 'losses-show'])).code, 0);
+    assert.deepEqual(await problems(root), []);
+  });
+});
