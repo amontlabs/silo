@@ -1,0 +1,4 @@
+{
+  "asks": "Is an agent program's own account of its model requests used as a check?",
+  "answer": "Agent programs can report on themselves: each model request, its model, its token counts, its tool calls. What a program says of itself is a report. Alone this is useless for what Silo promises, because an agent can turn it off or falsify it. Collected in parallel, beside the facts the boundary saw, it becomes a check. A request the boundary saw and the program did not report, or reported with other numbers, raises an alert: an agent may have tampered with something it knows is watched."
+}

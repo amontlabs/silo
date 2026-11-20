@@ -1,0 +1,8 @@
+{
+  "asks": "What does the model see when Silo denies one of its tool calls?",
+  "answer": "The model sees its own call, unchanged, with an error that says it was denied.",
+  "suggest": {
+    "verdict": "take",
+    "why": "It states the target, and leaves how Silo makes the error exist to be found out (denied-tool-call-mechanism)."
+  }
+}

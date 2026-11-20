@@ -1,0 +1,4 @@
+{
+  "asks": "Does a subscription sign-in change how Silo reads traffic?",
+  "answer": "A subscription sign-in and an API key make no difference to reading. Both are requests to the provider over an encrypted connection, and they differ only in the credential they carry."
+}

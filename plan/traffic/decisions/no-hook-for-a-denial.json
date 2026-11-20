@@ -1,0 +1,5 @@
+{
+  "asks": "Does Silo deny a tool call through the agent program's own hook?",
+  "answer": "An agent program's own hook is not used for this. It runs later and inside the computer: after the agent program has read the reply and before the tool runs. The agent can remove it there.",
+  "verdict": "take"
+}

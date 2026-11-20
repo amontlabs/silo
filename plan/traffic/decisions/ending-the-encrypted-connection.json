@@ -1,0 +1,4 @@
+{
+  "asks": "How does the boundary read encrypted model traffic?",
+  "answer": "To read it, the boundary has to end the encrypted connection for those hosts, with a certificate the computer trusts. This is the mechanism secrets already use."
+}

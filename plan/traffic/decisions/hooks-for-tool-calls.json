@@ -1,0 +1,5 @@
+{
+  "asks": "Does Silo catch tool calls through each agent program's hooks?",
+  "answer": "Not hooks. A hook sees the call, not its traces. One build command writes tens of thousands of files, and a server it starts keeps writing after the call returns. The traces are the disk problem. Which run did something comes from the operating system's process tree, not from the agent program. It is still a report, and the run is an opinion. A hook earns a place in one case: several subagents in one process running tools at the same instant. There it can stamp the call's identifier on the command it starts.",
+  "verdict": "take"
+}

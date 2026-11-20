@@ -1,0 +1,5 @@
+{
+  "asks": "What handles a mismatch between an agent program's own account and the boundary?",
+  "answer": "A mismatch is handled by a precaution, because it compares a report with facts. So it takes only protective actions.",
+  "verdict": "take"
+}
