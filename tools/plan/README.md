@@ -51,7 +51,7 @@ user's settings; only a path the reader skips too (a part of its name starts wit
 out, and when git cannot answer the verdict is refused. A file under `plan/` that git is told not
 to look at (`git update-index --assume-unchanged` or `--skip-worktree`) refuses the verdict too,
 and the message names it: git would hide an edit of it. The check before a verdict includes the
-rule against the merged plan, except for the entry ruled on. The files are written all or none:
+rules against the merged plan, except for the entry ruled on. The files are written all or none:
 when one cannot be written, or the commit fails, the ones already written are put back.
 
 ## What the check refuses
@@ -97,14 +97,25 @@ Each problem names the file, the field, what is wrong and the fix.
   `.` or `..` part), or that does not name a regular file there: a directory, a missing file, or a
   link that leads outside the repository. Without the repository, only the file test is left out,
   and a note says so.
-- Against the merged plan (`origin/main`, else `HEAD`): an entry whose question, answer, name,
-  description, `replaces`, `sets` or `removes` changed while its verdict stayed. Only the command
-  checks this, not the offline check of a tree. It does not apply to an entry when the latest
-  commit since the base that changed its verdict, question, answer, name, description, `replaces`,
-  `sets` or `removes` is the owner's verdict on it (`Owner: take <id>` or `Owner: drop <id>`), and
-  none of those has changed since: the owner ruled again after the change. A commit that changed
-  only its `adds` or its `replaced_by`, as a take of another entry does, does not count. A change of
-  `replaced_by` alone is never refused.
+- Against the merged plan (`origin/main`, else `HEAD`; only the command checks this, not the
+  offline check of a tree):
+  - an entry whose question, answer, name, description, `replaces`, `sets` or `removes` changed
+    while its verdict stayed;
+  - an entry whose verdict is `take` or `drop` and is not the one the merged plan holds for it
+    (another verdict, none, or no such entry: a verdict typed in, or an entry copied from a decided
+    one). A verdict taken away by hand passes, and so does a plan whose merged plan holds no entry
+    (the remote's old plan, until the first push).
+
+  Neither applies to an entry whose file holds what the owner ruled on. The evidence is the latest
+  commit since the base, on any merged branch, named `Owner: take <id>` or `Owner: drop <id>` (for
+  a verdict typed in, the one of its kind). Of two such commits, one made on top of the other is
+  the later, whatever their dates. That commit must have written the entry's file, found in it by its id
+  wherever the file was then. The entry's file now, committed or not, must agree with that version
+  on the verdict and on the keys above. A merge, a move, a change of other keys (`adds`,
+  `replaced_by`, `suggest`, as a take of another entry or a suggestion does) or a change that was
+  put back come between without effect; a later ruling replaces an earlier one. The check does not
+  catch `plan take` run without the owner's word, a commit named `Owner: take <id>` written by
+  hand, or an owner's commit amended or squashed with another change.
 
 A malformed value is a problem like any other: the check never throws on one.
 

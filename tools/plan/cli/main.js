@@ -400,7 +400,7 @@ function verdict(ctx, argv, kind) {
   const base = baseFiles(root);
   if (base) {
     const owner = ruledByOwner(root, base.ref);
-    const changed = checkChange(files, base.files, { ruledByOwner: (other, file) => other === id || owner(other, file) }).errors;
+    const changed = checkChange(files, base.files, { ruledByOwner: (other, file, kindOf) => other === id || owner(other, file, kindOf) }).errors;
     if (changed.length) throw refusal(`the plan fails the check against ${base.ref} (${changed.length} error${changed.length === 1 ? '' : 's'}); plan check lists them`, changed);
   }
 

@@ -459,7 +459,8 @@ test('rule 11 covers replaces, and not replaced_by, which the take of another en
   assert.equal(ruledKeysDiffer(base.get(name) ?? null, changed.get(name) ?? null), true);
   const old = 'engine/decisions/engine-language.json';
   assert.equal(ruledKeysDiffer(filesOf(basePlan()).get(old) ?? null, base.get(old) ?? null), false);
-  assert.deepEqual(checkChange(base, filesOf(basePlan())).errors, []);
+  // zig-again is new here, with the owner's take: only its verdict could be refused.
+  assert.deepEqual(checkChange(base, filesOf(basePlan()), { ruledByOwner: () => true }).errors, []);
 });
 
 test('replaced_by names the taken decision that names this one in replaces, and only a taken decision has it', () => {
@@ -491,4 +492,60 @@ test('replaced_by names the taken decision that names this one in replaces, and 
   // Last in the key order of a decision.
   const { errors } = checkFiles(new Map([...filesOf(variant((f) => { replacer(f); }))].map(([name, text]) => [name, name === 'engine/decisions/engine-language.json' ? `${JSON.stringify({ replaced_by: 'zig-again', ...JSON.parse(text) }, null, 2)}\n` : text])));
   assert.deepEqual(errors.map((e) => `${e.file} ${e.field}: ${e.message}`), [`${old} -: not in canonical form`]);
+});
+
+test('rule 11: a verdict the owner\'s command did not write is an error, one error on the field verdict', () => {
+  const base = filesOf(basePlan());
+  const name = 'engine/decisions/linux-vm-engine.json'; // no verdict in the base
+  const taken = filesOf(variant((f) => { f[name].verdict = 'take'; }));
+  assert.deepEqual(checkChange(taken, base).errors, [{
+    file: `plan/${name}`,
+    field: 'verdict',
+    message: '"linux-vm-engine" has the verdict take, which the owner\'s command did not write',
+    fix: "undo that change; the owner's yes is the command plan take linux-vm-engine",
+  }]);
+  const dropped = filesOf(variant((f) => { f[name].verdict = 'drop'; }));
+  assert.match(checkChange(dropped, base).errors[0].fix, /the owner's no is the command plan drop linux-vm-engine/);
+  // Given the evidence, the command's kind is asked for: a take is not covered by a drop.
+  const asked = [];
+  const ruled = (kind) => (id, file, verdict) => { asked.push([id, file, verdict]); return verdict === kind; };
+  assert.deepEqual(checkChange(taken, base, { ruledByOwner: ruled('take') }).errors, []);
+  assert.deepEqual(asked, [['linux-vm-engine', `plan/${name}`, 'take']]);
+  assert.equal(checkChange(taken, base, { ruledByOwner: ruled('drop') }).errors.length, 1);
+  // A new entry born with a verdict; the base holds other entries.
+  const born = filesOf(variant((f) => { f['engine/decisions/born.json'] = { asks: 'Which?', answer: 'This.', verdict: 'take' }; stage(f, 'later').entries.push('born'); }));
+  assert.deepEqual(checkChange(born, base).errors.map((e) => `${e.file} ${e.field}`), ['plan/engine/decisions/born.json verdict']);
+  // A verdict changed by hand from take to drop, or drop to take.
+  const flipped = filesOf(variant((f) => { f['engine/decisions/engine-language.json'].verdict = 'drop'; }));
+  assert.deepEqual(checkChange(flipped, base).errors.map((e) => e.field), ['verdict']);
+  const dropBase = filesOf(variant((f) => { f['engine/decisions/engine-language.json'].verdict = 'drop'; }));
+  assert.deepEqual(checkChange(base, dropBase).errors.map((e) => e.field), ['verdict']);
+  // A verdict taken away by hand, and an entry that kept its verdict, are fine.
+  assert.deepEqual(checkChange(filesOf(variant((f) => { delete f['engine/decisions/engine-language.json'].verdict; })), base).errors, []);
+  assert.deepEqual(checkChange(base, base).errors, []);
+});
+
+test('rule 11: a merged plan that holds no entry is no base for the verdicts', () => {
+  const noEntries = new Map([['README.md', 'The old plan.\n']]);
+  assert.deepEqual(checkChange(filesOf(basePlan()), noEntries).errors, []);
+  assert.deepEqual(checkChange(filesOf(basePlan()), new Map()).errors, []);
+});
+
+test('rule 11, the verdict of every combination of the base, the file and the evidence', () => {
+  // The reference: an error exactly when the file holds a verdict that differs from the base's and
+  // the evidence is not the owner's command for that verdict (none given counts as none).
+  const name = 'engine/decisions/engine-language.json';
+  const entry = (verdict) => filesOf(variant((f) => { if (verdict === 'none') delete f[name].verdict; else f[name].verdict = verdict; }));
+  const gone = filesOf(variant((f) => { delete f[name]; }));
+  for (const before of ['absent', 'none', 'take', 'drop']) {
+    for (const after of ['none', 'take', 'drop']) {
+      for (const evidence of [undefined, 'no', 'take', 'drop']) {
+        const base = before === 'absent' ? gone : entry(before);
+        const ruledByOwner = evidence === undefined ? undefined : (id, file, verdict) => evidence === verdict;
+        const errors = checkChange(entry(after), base, { ruledByOwner }).errors.filter((e) => e.field === 'verdict');
+        const expected = after !== 'none' && before !== after && evidence !== after;
+        assert.equal(errors.length, expected ? 1 : 0, `${before} -> ${after}, evidence ${evidence}`);
+      }
+    }
+  }
 });

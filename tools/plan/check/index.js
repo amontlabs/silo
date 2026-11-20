@@ -591,13 +591,19 @@ function entriesOf(files) {
 }
 
 /**
- * Rule 11: an entry with a verdict whose asks, answer, name, what, replaces, sets or removes changed while the
- * verdict stayed. An entry with no verdict may change freely; one that gains or loses a verdict too.
- * `ruledByOwner(id, file)` says whether the latest commit since the base that changed the entry's
- * verdict or one of those keys is the owner's verdict on it: the owner ruled again after the
- * change, and the rule does not apply.
+ * Rule 11, against the merged plan:
+ * - an entry with a verdict whose asks, answer, name, what, replaces, sets or removes changed while
+ *   the verdict stayed. An entry with no verdict may change freely; one that gains or loses a
+ *   verdict too.
+ * - an entry whose verdict is take or drop and is not the one the merged plan holds for it (another
+ *   verdict, none, or no such entry): only the owner's command writes a verdict. A merged plan that
+ *   holds no entry is no base for this: nothing is compared against it.
+ * `ruledByOwner(id, file, verdict)` says whether the entry's file holds what the owner last ruled on
+ * since the base (its verdict and those keys, as of the owner's latest take or drop commit): the
+ * owner ruled on this text, and the rule does not apply. With a `verdict`, the owner's take or drop
+ * of that kind.
  * @param {Map<string, string>} files the plan as it is @param {Map<string, string>} baseFiles the merged plan
- * @param {{ ruledByOwner?: (id: string, file: string) => boolean }} [options]
+ * @param {{ ruledByOwner?: (id: string, file: string, verdict?: string) => boolean }} [options]
  * @returns {{ errors: Problem[] }}
  */
 export function checkChange(files, baseFiles, { ruledByOwner } = {}) {
@@ -606,6 +612,14 @@ export function checkChange(files, baseFiles, { ruledByOwner } = {}) {
   const base = entriesOf(baseFiles);
   for (const [id, { file, value }] of entriesOf(files)) {
     const before = base.get(id)?.value;
+    if (base.size && VERDICTS.includes(value.verdict) && before?.verdict !== value.verdict && !ruledByOwner?.(id, file, value.verdict)) {
+      errors.push({
+        file,
+        field: 'verdict',
+        message: `"${id}" has the verdict ${value.verdict}, which the owner's command did not write`,
+        fix: `undo that change; the owner's ${value.verdict === 'take' ? 'yes' : 'no'} is the command plan ${value.verdict} ${id}`,
+      });
+    }
     if (!before || before.verdict === undefined || before.verdict !== value.verdict) continue;
     const changed = ENTRY_TEXT_KEYS.filter((key) => JSON.stringify(before[key]) !== JSON.stringify(value[key]));
     if (changed.length && ruledByOwner?.(id, file)) continue;
