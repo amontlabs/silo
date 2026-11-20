@@ -550,8 +550,8 @@ an id of the plan, never both. With `entry`:
   GitHub with the App's token: the newest pages, until they reach the issues
   the snapshot already held a minute before its refresh began. The snapshot
   gives the older ones. A thread another instance has just opened is found
-  this way. Without a snapshot, it reads the snapshot's 20 pages, 2,000 entry
-  issues.
+  this way. Without a snapshot, it reads up to 20 pages (2,000 entry
+  issues).
 - When that read finds none, the App opens the issue described under
   "Storage", labelled `workshop:entry`. What bounds
   the openings is described under "The installation token and its
@@ -784,11 +784,11 @@ a visitor does without signing in can make `suggest`,
 Worst case per instance per hour: (40 + 4 + 10 + 27) × 60 = 81 × 60 =
 4,860 calls, below the installation's 5,000. The calls that repair an opening
 come on top (see below): at most 3 for an opening GitHub returned without its
-label. The largest refresh is 20 issue
+label, two `POST`s and one `PATCH`. The largest refresh is 20 issue
 pages + 15 comment pages = 35 calls, which fits in a minute's 40. GitHub's
 secondary limit is 900 points a minute, a `GET` costing 1 point and a `POST`
 5: at most 37 of the 81 calls a minute are `POST`s (labels and openings),
-which is 37 × 5 + 44 = 229 points, plus 3 `POST`s (15 points) for each
+which is 37 × 5 + 44 = 229 points, plus 3 calls (15 points) for each
 opening repaired in that minute. Calls to GitHub's token endpoint are not installation calls;
 new sign-ins have a ceiling of 30 a minute and token refreshes of existing
 sessions a separate one of 60, so made-up sign-ins cannot stop sessions from

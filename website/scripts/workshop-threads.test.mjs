@@ -10,6 +10,8 @@ import { ORIGIN, PLAN_ENTRIES, issueOf, setup, withBudget } from './workshop-tes
 const ISSUES = /^\/repos\/amontlabs\/silo\/issues$/;
 const created = (t) => t.fake.state.requests.filter((r) => r.method === 'POST' && ISSUES.test(r.path));
 const entryIssues = (t, id) => [...t.fake.state.issues.values()].filter((i) => i.labels.includes('workshop:entry') && readEntryMarker(i.body) === id).map((i) => i.number);
+// The App's calls to the entry issues that the `open` ceiling counts: not the snapshot's refreshes, which carry `page=`.
+const openCalls = (t, from) => t.fake.state.requests.slice(from).filter((r) => r.kind === 'installation' && ISSUES.test(r.path) && !/[?&]page=/.test(r.query));
 const since = (t, before) => t.fake.state.requests.slice(before).map((r) => `${r.method} ${r.path.replace(/\d+/g, 'N')} ${r.kind}${r.login && r.kind === 'user' ? ` ${r.login}` : ''}`);
 
 async function signedIn(t, login = 'visitor-fake') {
@@ -171,6 +173,7 @@ test('more openings at once than the `open` ceiling affords: every issue created
     const c = await signedIn(t);
     t.fake.state.hook = (r) => (r.kind === 'installation' && ISSUES.test(r.path) ? { delay: 20 } : null);
     const ids = MANY.slice(0, 13).map((entry) => entry.id);
+    const first = t.fake.state.requests.length;
     const answers = await Promise.all(ids.map((id) => c.call('POST', 'comment', { body: { entry: id, text: 'x' } })));
     t.fake.state.hook = null;
     const made = answers.filter((answer) => answer.status === 200);
@@ -180,8 +183,11 @@ test('more openings at once than the `open` ceiling affords: every issue created
     assert.equal(created(t).length, made.length);
     for (const answer of refused) assert.deepEqual([answer.json.message, Object.hasOwn(answer.json, 'n')], ['The Workshop is busy. Try again in a minute.', false]);
     for (const answer of made) assert.deepEqual(issueOf(t.fake, answer.json.n).comments.map((x) => x.body), ['x']);
-    // Each opening is 3 calls and each refusal after the read is 1: all within the minute's ceiling.
-    assert.ok(made.length * 3 + refused.length <= BUDGET.openCallsPerMinute, `${made.length} made, ${refused.length} refused`);
+    // The calls the `open` ceiling counts, as the fake recorded them: 3 for each opening, 1 for each
+    // refusal, never above the ceiling. The snapshot's refreshes read the same address, but with `page=`.
+    const calls = openCalls(t, first);
+    assert.equal(calls.length, made.length * 3 + refused.length, calls.map((r) => `${r.method} ${r.query}`).join('\n'));
+    assert.ok(calls.length <= BUDGET.openCallsPerMinute, `${calls.length} calls`);
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
@@ -206,6 +212,34 @@ test('the `open` ceiling refuses an opening it has no room for, 429 with the wai
       assert.deepEqual(issueOf(t.fake, again.json.n).comments.map((x) => x.body), ['x']);
     });
   } finally { await t.close(); }
+});
+
+test('a confirming read paid for in one minute and run in the next is counted in the next, never refused', async () => {
+  const t = await setup({ entries: [...PLAN_ENTRIES, ...MANY] });
+  try {
+    const c = await signedIn(t);
+    // Three calls a minute: one opening, whose confirming read runs a minute after it was charged.
+    await withBudget({ openCallsPerMinute: 3 }, async () => {
+      let next = null;
+      t.fake.state.hook = (r) => {
+        if (r.kind === 'installation' && r.method === 'POST' && ISSUES.test(r.path)) {
+          t.clock.t += 61_000;
+          next = t.fake.state.requests.length;
+          t.fake.state.hook = null;
+        }
+        return null;
+      };
+      assert.equal((await c.call('POST', 'comment', { body: { entry: 'm0', text: 'x' } })).status, 200);
+      assert.ok(next !== null);
+      // In the new minute the confirming read is already one call, so a second opening has no room.
+      const refused = await c.call('POST', 'comment', { body: { entry: 'm1', text: 'x' } });
+      assert.deepEqual([refused.status, refused.json.message], [429, 'The Workshop is busy. Try again in a minute.']);
+      assert.equal(created(t).length, 1);
+      const calls = openCalls(t, next);
+      assert.deepEqual(calls.map((r) => r.method), ['GET', 'GET'], 'the confirming read and the second opening\'s first read');
+      assert.ok(calls.length <= BUDGET.openCallsPerMinute);
+    });
+  } finally { t.fake.state.hook = null; await t.close(); }
 });
 
 test('the person\'s write failing after the opening: the issue stays, the error carries n, and the next try finds it', async () => {

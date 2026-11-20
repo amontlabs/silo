@@ -438,16 +438,18 @@ export function createWorkshop({
   // The entry issues on GitHub that name `id`, lowest number first. Read with the installation token
   // within the `open` ceiling: the newest pages, until they reach a minute before the snapshot's
   // refresh began; the snapshot gives the older issues that name `id`. Without a snapshot, every page.
-  // `ignore`: numbers a read has shown are not the thread. `prepaid`: the first page is already charged
-  // to the ceiling.
-  async function entryIssuesOnGitHub(id, ignore, { prepaid = false } = {}) {
+  // `ignore`: numbers a read has shown are not the thread. `paidIn`: the first page is already charged
+  // to the ceiling, in the window that began then; when that window is over, it is charged to the
+  // current one instead, and never refused.
+  async function entryIssuesOnGitHub(id, ignore, { paidIn } = {}) {
     const held = snapshots.held(id);
     const numbers = new Set((held?.numbers ?? []).filter((number) => !ignore.has(number)));
     const found = new Map();
     const since = held ? held.startedAt - SNAPSHOT.overlap : -Infinity;
     let next = `/repos/${repo}/issues?labels=${encodeURIComponent(LABELS.entry)}&state=all&sort=created&direction=desc&per_page=100`;
     for (let page = 0; next && page < SNAPSHOT.issuePages; page += 1) {
-      if (page > 0 || !prepaid) spendOrRefuse('open');
+      if (page > 0 || paidIn === undefined) spendOrRefuse('open');
+      else if (ceilingOf('open').start !== paidIn) ceilingOf('open').used += 1;
       const { data, headers } = await installationRequest('GET', next);
       const issues = Array.isArray(data) ? data : [];
       for (const issue of issues) {
@@ -534,11 +536,12 @@ export function createWorkshop({
       // The opening and the first page of the read that confirms it are charged together before the
       // opening, so that an opening that is made can always be confirmed.
       spendOrRefuse('open', 2);
+      const paidIn = ceilings.open.start;
       const { data } = await installationRequest('POST', `/repos/${repo}/issues`, { body: { title: threadTitle(entry.title), body: threadBody(entry), labels: [LABELS.entry] } });
       if (store) store.changed = true;
       const issue = await labelled(data, entry);
       // The read confirms only when it shows the issue just opened; otherwise the write is not made.
-      const after = await entryIssuesOnGitHub(entry.id, ignore, { prepaid: true });
+      const after = await entryIssuesOnGitHub(entry.id, ignore, { paidIn });
       if (!after.found.has(issue.number)) refuse(502, 'github_failed', 'GitHub did not show the new thread yet. Try again.');
       const lowest = after.numbers[0];
       if (lowest === issue.number) {
