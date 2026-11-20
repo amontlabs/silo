@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 // Serves the built site (dist/) and the Workshop API on one port.
 //   node scripts/workshop-dev.mjs --fake [--port 4174]   against a built-in fake GitHub
-//   node scripts/workshop-dev.mjs --fake --progress      the same, in a later state: verdicts in the history comments
 //   node scripts/workshop-dev.mjs [--port 4174]          against GitHub, from WORKSHOP_* variables
 // Run `npm run build` first. The site's origin is http://127.0.0.1:<port>.
 import { createReadStream } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -52,19 +51,15 @@ export function loadEntries(dir) {
     .map((entry) => ({ id: entry.id, name: entry.name ?? entry.asks, what: entry.what ?? entry.answer ?? entry.asks, ...(entry.built ? { built: entry.built } : {}) }));
 }
 
-// The Workshop page names where it reads a feature's file at a commit; with the fake GitHub, the fake.
-const RAW_META = '<meta name="workshop-raw" content="';
-
 // `planDir` is the plan the fake GitHub is seeded from.
-export async function startDev({ fake = false, progress = false, planDir = PLAN, port = 4174, host = '127.0.0.1', distDir = join(website, 'dist'), env = process.env, log } = {}) {
+export async function startDev({ fake = false, planDir = PLAN, port = 4174, host = '127.0.0.1', distDir = join(website, 'dist'), env = process.env, log } = {}) {
   const origin = `http://${host}:${port}`;
   let fakeGitHub = null;
-  let plan = null;
   let config;
   if (fake) {
     fakeGitHub = createFakeGitHub({ repo: 'amontlabs/silo' });
     await fakeGitHub.listen();
-    plan = seedDemo(fakeGitHub, loadEntries(planDir), { progress }).progress;
+    seedDemo(fakeGitHub, loadEntries(planDir));
     config = readConfig(fakeGitHub.workshopEnv(origin), { apiBase: fakeGitHub.url, webBase: fakeGitHub.url });
   } else {
     config = readConfig({ ...env, WORKSHOP_SITE_ORIGIN: origin });
@@ -94,10 +89,6 @@ export async function startDev({ fake = false, progress = false, planDir = PLAN,
     }
     res.writeHead(200, { 'Content-Type': TYPES[extname(path)] || 'application/octet-stream' });
     if (req.method === 'HEAD') return res.end();
-    if (fakeGitHub && extname(path) === '.html' && /^\/workshop\/?$/.test(pathname)) {
-      const html = await readFile(path, 'utf8');
-      return res.end(html.replace('<head>', `<head>${RAW_META}${fakeGitHub.rawUrl}">`));
-    }
     createReadStream(path).on('error', () => res.destroy()).pipe(res);
   });
   await new Promise((resolve, reject) => {
@@ -108,7 +99,6 @@ export async function startDev({ fake = false, progress = false, planDir = PLAN,
     origin,
     config,
     fakeGitHub,
-    progress: plan,
     async close() {
       server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
@@ -117,33 +107,20 @@ export async function startDev({ fake = false, progress = false, planDir = PLAN,
   };
 }
 
-// What the --progress state shows, in one line.
-export function progressLine(plan) {
-  const counts = { take: 0, later: 0, drop: 0 };
-  for (const verdict of plan.verdicts.values()) counts[verdict] += 1;
-  return `Verdicts on the stages ${plan.stages.join(', ') || 'none'}: ${counts.take} taken, ${counts.later} later, ${counts.drop} dropped; built: ${plan.built.size}.`;
-}
-
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const args = process.argv.slice(2);
   const portIndex = args.indexOf('--port');
   const port = portIndex >= 0 ? Number(args[portIndex + 1]) : 4174;
   const fake = args.includes('--fake');
-  const progress = args.includes('--progress');
-  if (progress && !fake) {
-    console.error('--progress needs --fake.');
-    process.exit(2);
-  }
   const distDir = join(website, 'dist');
   if (!(await file(join(distDir, 'index.html')))) {
     console.error('No built site in dist/. Run `npm run build` first.');
     process.exit(1);
   }
-  const dev = await startDev({ fake, progress, port, distDir });
+  const dev = await startDev({ fake, port, distDir });
   if (!fake && !dev.config.configured) console.log('WORKSHOP_* variables are not set: the API answers 503 not_configured. Use --fake for a fake GitHub.');
   console.log(`Workshop: ${dev.origin}/workshop${fake ? ` (fake GitHub at ${dev.fakeGitHub.url}; users owner-fake and visitor-fake)` : ''}`);
   const stop = () => dev.close().then(() => process.exit(0));
-  if (dev.progress) console.log(progressLine(dev.progress));
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }

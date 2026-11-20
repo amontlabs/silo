@@ -1,13 +1,13 @@
 // One row of a list, and what it shows once open: the text, what the entry says of the plan's lists, its state, its
-// notes and, for a row with a thread, the thread (comments and history lines) and the box. A row without a thread draws none of those, not even a placeholder.
+// notes, its history and, for a row with a thread, the thread (comments) and the box. A row without a thread draws none of those, not even a placeholder.
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { hasSessionHint } from './api';
-import { compareLink, featureFileAt } from '../../../tools/workshop/model/index.js';
+import { DEFAULT_REPO, DEFAULT_WEB } from '../../../tools/workshop/model/index.js';
 import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
-import { changesText, changeWords, isDecided, relativeTime, shortDate } from './plan';
+import { changeLine, changePhrase, isDecided, relativeTime, shortDate } from './plan';
 import type { Change, EntryFacts, Facts, Row, Statement } from './plan';
 import { formatHash, placeOf } from './routes';
 import type { Detail, Workshop } from './useWorkshop';
@@ -309,86 +309,6 @@ function ReplaceLines({ row, ctx, only }: { row: Row; ctx: EntryContext; only: (
   );
 }
 
-/** Where the page reads a feature's file at a commit: raw.githubusercontent.com, or what the page names. */
-function rawBase(): string | undefined {
-  const named = document.querySelector<HTMLMetaElement>('meta[name="workshop-raw"]')?.content;
-  return named && safeHref(named) ? named.replace(/\/+$/, '') : undefined;
-}
-
-type Texts = { name: string; what: string };
-const TEXT_LIMIT = 2000;
-
-async function textsAt(repo: string, commit: string, id: string): Promise<Texts> {
-  const raw = rawBase();
-  const response = await fetch(featureFileAt(commit, id, { repo, ...(raw ? { raw } : {}) }), { credentials: 'omit', cache: 'force-cache' });
-  if (!response.ok) throw new Error('not available');
-  const file = JSON.parse(await response.text()) as { name?: unknown; what?: unknown };
-  if (typeof file.name !== 'string' || typeof file.what !== 'string') throw new Error('not available');
-  return { name: file.name.slice(0, TEXT_LIMIT), what: file.what.slice(0, TEXT_LIMIT) };
-}
-
-/** A history line: when, what changed, and the change on GitHub. For the text, before and after on demand. */
-function HistoryLine({ change, createdAt, row, repo }: { change: Change; createdAt: string; row: Row; repo: string }) {
-  const [texts, setTexts] = useState<'closed' | 'loading' | 'error' | { before: Texts; after: Texts }>('closed');
-  const words = changeWords(change);
-  // A change with nothing to say (the old "later" verdict, `suggested_in`) draws no line.
-  if (!words.length) return null;
-  const id = row.key.startsWith('entry-') ? row.key.slice('entry-'.length) : null;
-  const comparable = changesText(change) && id !== null;
-  let link: string | null = null;
-  try {
-    link = safeHref(compareLink(change, { repo }));
-  } catch {
-    link = null;
-  }
-  const toggle = () => {
-    if (texts !== 'closed') {
-      setTexts('closed');
-      return;
-    }
-    setTexts('loading');
-    Promise.all([textsAt(repo, change.before, id as string), textsAt(repo, change.commit, id as string)]).then(
-      ([before, after]) => setTexts({ before, after }),
-      () => setTexts('error'),
-    );
-  };
-  const open = texts !== 'closed';
-  const panel = `${row.key}-${change.commit.slice(0, 12)}`;
-  return (
-    <div className="ws-h">
-      <i aria-hidden="true" />
-      <div>
-        <p>
-          <span className="ws-h-what">
-            {words.map((word, index) => (
-              <Fragment key={word}>
-                {index ? ' · ' : ''}
-                {word === 'Text changed' && comparable
-                  ? <button type="button" className="ws-h-btn" aria-expanded={open} aria-controls={panel} onClick={toggle}>{word}</button>
-                  : word}
-              </Fragment>
-            ))}
-          </span>
-          <small>{relativeTime(createdAt)}</small>
-          {link ? <a className="ws-h-link" href={link} target="_blank" rel="noopener noreferrer" title="The change on GitHub">{change.commit.slice(0, 7)} ↗</a> : null}
-        </p>
-        {open ? (
-          <div className="ws-h-diff" id={panel}>
-            {texts === 'loading' ? <p className="ws-quiet">…</p> : null}
-            {texts === 'error' ? <p className="ws-quiet">not available</p> : null}
-            {typeof texts === 'object' ? (
-              <>
-                <div><small>Before</small>{texts.before.name !== texts.after.name ? <b>{texts.before.name}</b> : null}{texts.before.what !== texts.after.what ? <p>{texts.before.what}</p> : null}</div>
-                <div><small>After</small>{texts.before.name !== texts.after.name ? <b>{texts.after.name}</b> : null}{texts.before.what !== texts.after.what ? <p>{texts.after.what}</p> : null}</div>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
   const { w } = ctx;
   // Until the first answer, the box's room is held.
@@ -413,8 +333,8 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   }
   if (row.issue === null || row.issue <= 0) return null;
   const n = row.issue;
-  const repo = w.live.state?.repo ?? 'amontlabs/silo';
-  const url = (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`https://github.com/${repo}/issues/${n}`);
+  const repo = w.live.state?.repo ?? DEFAULT_REPO;
+  const url = (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`${DEFAULT_WEB}/${repo}/issues/${n}`);
   const github = url ? <a className="ws-gh" href={url} target="_blank" rel="noopener noreferrer">GitHub #{n} ↗</a> : null;
   if (!w.liveOk) return <div className="ws-talk"><div className="ws-box">{github}</div></div>;
   let box: ReactNode = <div className="ws-box">{github}</div>;
@@ -442,28 +362,24 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
       </>
     );
   }
-  // While the thread loads, each comment and history line the counts announce holds its place.
+  // While the thread loads, each comment the count announces holds its place.
   const loading = detail === undefined || detail === 'loading';
   const ghostComments = loading ? Math.min(row.comments ?? 0, 20) : 0;
-  const ghostUpdates = loading ? Math.min(row.updates, 20 - ghostComments) : 0;
   return (
-    <div className="ws-talk" aria-busy={ghostUpdates + ghostComments > 0 ? 'true' : undefined}>
-      {Array.from({ length: ghostUpdates }, (_, i) => <div className="ws-h-ghost" key={`h${i}`} aria-hidden="true" />)}
+    <div className="ws-talk" aria-busy={ghostComments > 0 ? 'true' : undefined}>
       {Array.from({ length: ghostComments }, (_, i) => <div className="ws-c-ghost" key={`c${i}`} aria-hidden="true" />)}
       {detail === 'error' ? <p className="ws-quiet">Comments could not load.</p> : null}
       {typeof detail === 'object' && detail.more && url ? <a className="ws-gh ws-earlier" href={url} target="_blank" rel="noopener noreferrer">Earlier comments on GitHub ↗</a> : null}
       {typeof detail === 'object'
-        ? detail.comments.map((comment) => (comment.change && comment.bot
-          ? <HistoryLine key={comment.id} change={comment.change} createdAt={comment.createdAt} row={row} repo={repo} />
-          : (
-            <div className="ws-c" key={comment.id}>
-              <i aria-hidden="true">{initials(comment.author)}</i>
-              <div>
-                <b>{comment.author} <small>{relativeTime(comment.createdAt)}</small></b>
-                <RichText text={comment.text} />
-              </div>
+        ? detail.comments.map((comment) => (
+          <div className="ws-c" key={comment.id}>
+            <i aria-hidden="true">{initials(comment.author)}</i>
+            <div>
+              <b>{comment.author} <small>{relativeTime(comment.createdAt)}</small></b>
+              <RichText text={comment.text} />
             </div>
-          )))
+          </div>
+        ))
         : null}
       {(w.sending[n] ?? []).map((comment) => (
         <div className="ws-c ws-pending" key={comment.id} aria-busy="true">
@@ -479,23 +395,113 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   );
 }
 
-/** The entry's notes, closed until asked for. */
+/** The commit on GitHub, for the link of a History line. */
+const commitLink = (repo: string, commit: string) => safeHref(`${DEFAULT_WEB}/${repo}/commit/${commit}`);
+
+/** How many ghost lines hold the place of the changes while their chunk loads. */
+const HISTORY_GHOSTS = 12;
+
+/** The phrases of a change on one line: a text change opens its before and after, a replacement links the decision that replaced it. */
+function ChangePhrases({ change, row, ctx, panel, open, onToggle }: { change: Change; row: Row; ctx: EntryContext; panel: string; open: boolean; onToggle: () => void }) {
+  const by = change.by !== undefined ? ctx.w.rowByKey.get(`entry-${change.by}`) : undefined;
+  return (
+    <span className="ws-h-what">
+      {change.what.map((name, index) => {
+        const phrase = changePhrase(name, row.of);
+        return (
+          <Fragment key={name}>
+            {index ? ' · ' : ''}
+            {name === 'text' && change.text
+              ? <button type="button" className="ws-h-btn" aria-expanded={open} aria-controls={panel} onClick={onToggle}>{phrase}</button>
+              : phrase}
+            {name === 'replaced' && by ? <>{' '}<EntryLink other={by} ctx={ctx} /></> : null}
+          </Fragment>
+        );
+      })}
+    </span>
+  );
+}
+
+/** One line of an entry's History: the date, what changed and the commit; for a text change, its before and after below. */
+function HistoryLine({ change, row, ctx, repo }: { change: Change; row: Row; ctx: EntryContext; repo: string }) {
+  const [diff, setDiff] = useState(false);
+  const link = commitLink(repo, change.commit);
+  const panel = `${row.key}-${change.commit.slice(0, 12)}`;
+  const text = change.text;
+  const differs = (key: 'title' | 'body') => text !== undefined && text.before[key] !== text.after[key];
+  const side = (label: string, value: NonNullable<Change['text']>['before']) => (
+    <div>
+      <small>{label}</small>
+      {differs('title') && value.title ? <b>{value.title}</b> : null}
+      {differs('body') && value.body ? <p>{value.body}</p> : null}
+    </div>
+  );
+  return (
+    <div className="ws-h">
+      <i aria-hidden="true" />
+      <div>
+        <p>
+          <small className="ws-h-date">{shortDate(change.date)}</small>
+          <ChangePhrases change={change} row={row} ctx={ctx} panel={panel} open={diff} onToggle={() => setDiff((current) => !current)} />
+          {link ? <a className="ws-h-link" href={link} target="_blank" rel="noopener noreferrer">commit</a> : null}
+        </p>
+        {diff && text ? <div className="ws-h-diff" id={panel}>{side('Before', text.before)}{side('After', text.after)}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+/** The changes of an entry, newest first; a placeholder line for each while they load. */
+function HistoryList({ row, ctx }: { row: Row; ctx: EntryContext }) {
+  const { w } = ctx;
+  const id = planId(row);
+  const changes = typeof w.histories === 'object' && id !== null ? w.histories[id] : undefined;
+  const repo = w.live.state?.repo ?? DEFAULT_REPO;
+  const shallow = w.plan.shallow ? <p className="ws-quiet">Earlier changes are not available in this build.</p> : null;
+  if (changes) return <>{changes.map((change) => <HistoryLine key={change.commit} change={change} row={row} ctx={ctx} repo={repo} />)}{shallow}</>;
+  if (w.histories === 'error') return <p className="ws-quiet">History could not load.</p>;
+  return (
+    <div aria-busy="true">
+      {Array.from({ length: Math.min(row.history?.count ?? 1, HISTORY_GHOSTS) }, (_, i) => <div className="ws-h-ghost" key={i} aria-hidden="true" />)}
+      {w.plan.shallow ? <div className="ws-h-ghost" aria-hidden="true" /> : null}
+    </div>
+  );
+}
+
+/** The closed History line: the newest change with its date, and how many there are when more than one. */
+function historySummary(row: Row): string {
+  const last = row.history;
+  if (!last) return '';
+  return `${changeLine(last.what, row.of)}, ${shortDate(last.date)}${last.count > 1 ? ` · ${last.count} changes` : ''}`;
+}
+
+/** The entry's notes and its history, each closed until asked for. */
 function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const { w } = ctx;
   const [shown, setShown] = useState(false);
-  if (!row.notes) return null;
+  const [history, setHistory] = useState(false);
+  if (!row.notes && !row.history) return null;
   const id = row.key.slice('entry-'.length);
   const notes = typeof w.notes === 'object' ? w.notes[id] : undefined;
   return (
     <div className="ws-extras">
       <div className="ws-extras-bar">
-        <button
-          type="button" className="ws-disc" aria-expanded={shown} aria-controls={`${row.key}-notes`}
-          onPointerEnter={w.wantNotes} onPointerDown={w.wantNotes} onTouchStart={w.wantNotes} onFocus={w.wantNotes}
-          onClick={() => { w.wantNotes(); setShown((current) => !current); }}
-        >Notes</button>
+        {row.notes ? (
+          <button
+            type="button" className="ws-disc" aria-expanded={shown} aria-controls={`${row.key}-notes`}
+            onPointerEnter={w.wantNotes} onPointerDown={w.wantNotes} onTouchStart={w.wantNotes} onFocus={w.wantNotes}
+            onClick={() => { w.wantNotes(); setShown((current) => !current); }}
+          >Notes</button>
+        ) : null}
+        {row.history ? (
+          <button
+            type="button" className="ws-disc ws-disc-history" aria-expanded={history} aria-controls={`${row.key}-history`}
+            onPointerEnter={w.wantHistory} onPointerDown={w.wantHistory} onTouchStart={w.wantHistory} onFocus={w.wantHistory}
+            onClick={() => { w.wantHistory(); setHistory((current) => !current); }}
+          >History<span> · {historySummary(row)}</span></button>
+        ) : null}
       </div>
-      {shown ? (
+      {row.notes && shown ? (
         <div className="ws-extras-in" id={`${row.key}-notes`}>
           {notes ? <Markdown text={notes} /> : w.notes === 'error' ? <p className="ws-quiet">Notes could not load.</p> : typeof w.notes === 'object' ? null : (
             <div className="ws-ph-notes" aria-busy="true">
@@ -504,6 +510,7 @@ function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
           )}
         </div>
       ) : null}
+      {row.history && history ? <div className="ws-extras-in" id={`${row.key}-history`}><HistoryList row={row} ctx={ctx} /></div> : null}
     </div>
   );
 }

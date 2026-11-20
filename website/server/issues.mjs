@@ -1,7 +1,7 @@
 // How GitHub issues and comments become Workshop data: kinds, the
 // markers, and the cuts that bound every answer. Names, labels and markers come
 // from the Workshop's model (tools/workshop/model).
-import { ENTRY_LABEL, readChange, readEntryMarker, SUGGESTION_LABEL, withoutMarkers } from '../../tools/workshop/model/index.js';
+import { ENTRY_LABEL, readEntryMarker, SUGGESTION_LABEL, withoutMarkers } from '../../tools/workshop/model/index.js';
 
 export const LABELS = { entry: ENTRY_LABEL, suggestion: SUGGESTION_LABEL };
 export const CUTS = { body: 20_000, comment: 5000 };
@@ -57,13 +57,11 @@ export function reasonOf(issue) {
   return issue.state === 'closed' && (issue.state_reason === 'completed' || issue.state_reason === 'not_planned') ? issue.state_reason : null;
 }
 
-// A comment as `issue` returns it. Only the App's comments can be history lines; their marker is read on the
-// whole body, before the text is cut.
+// A comment as `issue` returns it.
 export function commentOf(comment, app) {
   const full = comment.body || '';
   const text = fresh(clean(cut(full, CUTS.comment)));
   const bot = byApp(comment, app);
-  const change = bot ? readChange(full) : null;
   return {
     id: comment.id,
     author: fresh(clean(comment.user?.login ?? 'ghost', { oneLine: true })),
@@ -72,7 +70,6 @@ export function commentOf(comment, app) {
     createdAt: comment.created_at,
     text,
     ...(full.length > CUTS.comment ? { cut: true } : {}),
-    ...(change ? { change } : {}),
   };
 }
 

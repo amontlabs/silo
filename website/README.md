@@ -44,8 +44,7 @@ npm --prefix website run dev
 
 The page preview is at http://127.0.0.1:4173. The Workshop there has no API.
 To look at a later state without the API, open
-`http://127.0.0.1:4173/workshop/?fixture=later` (with history
-lines) or `?fixture=today`; add `&as=in` to
+`http://127.0.0.1:4173/workshop/?fixture=today`; add `&as=in` to
 be signed in (`&login=<name>` for another login), `&delay=2000` to hold the live state and the sign-in answer back,
 and `&detail=700` to hold each entry's comments back. The page's memory of the last visit is off with a fixture,
 so `&delay=` shows a first visit; `&memory=1` turns it on. This exists only in
@@ -65,19 +64,9 @@ This serves `website/dist` and the API at `http://127.0.0.1:4174`
 an issue for every entry of `plan/` (or of the plan `WORKSHOP_PLAN` names; the
 page matches none of them while entries have no threads), two issues with the retired label
 `workshop:decision` (outside the Workshop), a suggestion, comments, 👍 votes,
-an ordinary issue and a pull request. It also serves the files of the
-repository at a commit as `raw.githubusercontent.com` does, and the runner
-names it to the page (`<meta name="workshop-raw">`), so "Text changed" opens.
+an ordinary issue and a pull request.
 Sign-in goes through the fake's page, which offers two people: `owner-fake`
 and `visitor-fake`. Everything lives in memory and resets on restart.
-
-`--fake --progress` seeds a later state instead: the thread of each entry of the
-first six stages holds the bot's history comments of every kind beside people's
-comments over the last days. Nothing shows as built that the file does not say
-is built (the page reads `built` from the file), and every history line agrees
-with the plan: "Built" only on an entry built, and an entry's last verdict line
-is the verdict of its file, else the one suggested for it.
-The runner prints what it seeded.
 
 Without `--fake`, the server uses GitHub with the `WORKSHOP_*` variables of the
 environment (a development App, see [The GitHub App](#the-github-app)); its origin is always
@@ -173,7 +162,9 @@ secondary rate limits, locked issues, and a hook that delays or fails any call.
 React and TypeScript. At build time the `workshopData` plugin of `website/vite.config.ts`
 reads `plan/` (or the folder `WORKSHOP_PLAN` names) with `tools/plan/read` and
 checks it with `tools/plan/check` (`data.ts`); any error of `plan check` stops
-the build with the file, the field and the fix. A part with no feature is fine.
+the build with the file, the field and the fix. The same file calls `readSteps`
+and `entryHistory` of `tools/plan/history` on the repository, once per build:
+that is the history of each entry (see "History" below). A part with no feature is fine.
 A part whose id is `product`, `left`, `suggested` or `latest` stops the build:
 those are the page's own addresses, and the message names the part and the fix.
 `map.ts` holds the drawing (`SILO_MAP`): where each part sits on the full map
@@ -192,7 +183,7 @@ and the server has no verdict route: decisions and features are taken or dropped
 with `plan take` and `plan drop`.
 
 With `threads` off, no issue is matched to an entry, even an old one whose
-marker names it, and an entry shows its text, its notes and its state with
+marker names it, and an entry shows its text, its notes, its history and its state with
 no vote, no count, no comment box, no GitHub link and no placeholder for any of
 them; the page has no Latest, and sign-in has no tooltip. Suggestions keep their
 votes and comments.
@@ -347,29 +338,44 @@ What a person sees:
   a press or focus reaches a row that has something in it (`Row.more`, known
   from the page's data) or such a row opens, with three placeholder lines in
   the place of its parts meanwhile; if it cannot load, the parts are left out.
-  Then "Notes" (its `<id>.md`), closed by
-  default, and opened in place: headings, paragraphs, lists, http and https
+  Then "Notes" (its `<id>.md`) and "History", side by side, each closed by
+  default and opened in place. Notes: headings, paragraphs, lists, http and https
   links (an address may hold one level of brackets), inline code and code
   blocks become elements (`Markdown.tsx`); nothing is ever inserted as HTML,
   and anything else stays text. The notes of all entries are a chunk of their
   own (`virtual:workshop-notes`), loaded the first time a pointer, a press or
   focus reaches a "Notes"; the page's bundle only knows which entries have
   some.
+- "History" is on every entry that has at least one change, with or without
+  threads. Closed, its line reads "History", the last change's phrases and
+  its date, and "N changes" when there are several ("History · Decided, 20
+  Nov · 3 changes"). Opened, it lists the changes in place, newest first, one
+  line each: the date, the phrases of that change joined by ` · `, and a
+  "commit" link to that commit on GitHub. The phrases come from the names the
+  plan tool's history gives (`tools/plan/history`, `plan.ts` `changePhrase`):
+  "Added", "Moved to another part", "Text changed", "What a yes would do
+  changed", "Needs changed", "What it must keep changed", "Where it shows
+  changed", "Recommendation changed", "Notes edited", "Decided" on a decision
+  and "Planned" on a feature, "Dropped", "Back to not decided", "Replaced by"
+  (followed by the question of the decision that replaced it, a link that
+  opens it) and "Built"; no name of a key ever shows. "Text changed" opens
+  the title and the body before and after, whichever differ.
+  The history is read from git when the site is built (`readSteps` and
+  `entryHistory`, called by `data.ts`): nothing asks GitHub for it. A
+  shallow clone is fetched whole from `origin` once (`git fetch --unshallow`,
+  no credential); when that fails, the build goes on and every list ends with
+  "Earlier changes are not available in this build." (`BuildData.shallow`).
+  A plan read from another folder (`WORKSHOP_PLAN`) has no history.
+  The page's data holds, for each entry, only its last change and the number of
+  changes (`Entry.history`), enough for the closed line. The changes with their
+  texts are a chunk of their own (`virtual:workshop-history`, `Histories`),
+  loaded the first time a pointer, a press or focus reaches a History, or Latest
+  opens, with one placeholder line per change meanwhile; if it cannot load,
+  the list says so and the next time tries again.
 - An open suggestion, or an entry when entries have threads, shows its thread
-  and a box to add a comment. The bot's history comments are history lines in
-  the same thread, in time order: no avatar and no box of their own, one line
-  each: what changed, the time and the change on GitHub. What changed is one
-  phrase per change, joined by ` · `: "Text changed" (`name` or `what`, once),
-  "Notes edited", "Needs changed", "Moved to another part" (`area`, the
-  marker's name for it), "Suggestion changed", "Surfaces changed", "Taken",
-  "Dropped", "Verdict cleared", "Built"; `suggested_in` and the old "later"
-  verdict say nothing and draw no line, and no raw key ever shows. A phrase
-  too long for the line is cut with an ellipsis; the time and the link keep
-  their place. "Text changed" opens the name and the text before and
-  after: the page reads `plan/features/<id>.json` at the two commits from
-  `raw.githubusercontent.com` only then, and shows "not available" when it
-  cannot. While the thread loads, each comment and each history line the live
-  state counts holds its place. A visitor who is not signed in gets "Sign in to comment" and, under it,
+  and a box to add a comment. A comment of the Workshop's App is an ordinary
+  comment. While the thread loads, each comment the live state counts holds
+  its place. A visitor who is not signed in gets "Sign in to comment" and, under it,
   "or comment directly on GitHub", the one link to that row's issue; a signed-in person
   gets the box and "GitHub #N". Until `me` answers, the panel keeps the room of
   the shape the `workshop-hint` cookie predicts, so it moves only when that
@@ -378,8 +384,8 @@ What a person sees:
   and feature of the parts), to "The whole product" (`#product`: the decisions
   of `plan/decisions/`, with their own counts), to Latest when entries have
   threads, and to the suggestions. Latest (`#latest`) lists the newest 30
-  comments and history lines across the entries, newest first, each opening its
-  entry (a click with a modifier key, or a middle click, is left to the
+  comments and changes (from the history chunk) across the entries, merged by
+  time, newest first, each opening its entry (a click with a modifier key, or a middle click, is left to the
   browser). While it loads, ten one-line placeholders hold its place and
   nothing sits below the list in its column.
 - The header's account slot has a fixed width from first paint: signed in when
@@ -411,7 +417,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `useWorkshop.ts` | Live state and every write: the load, pending writes. |
 | `MapView.tsx`, `Tiles.tsx` | The map and the tiles. |
 | `PartView.tsx`, `Suggest.tsx`, `Latest.tsx` | An opened part, the whole product's decisions and what is left out; the suggestions; the latest changes. |
-| `Entry.tsx` | One row and what it shows open: the text, what the entry says of the plan's lists and what it needs, its id and the button that copies it, the state, notes, and for a row with a thread the thread with its history lines. |
+| `Entry.tsx` | One row and what it shows open: the text, what the entry says of the plan's lists and what it needs, its id and the button that copies it, the state, notes, history, and for a row with a thread the thread. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, parts' counts and states on top of the plan's model; the drawing; the build-time reader. |
 | `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |
 | `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |
@@ -430,13 +436,12 @@ An issue that carries the retired label `workshop:decision` is not part of the
 Workshop. An entry's status comes from its file alone. A suggestion's status
 comes from its issue alone: open is not decided, closed as "not planned" is
 dropped, closed as "completed" is built. Votes are 👍 reactions and comments are
-issue comments. The history is the bot's history comments, whose
-last line is `<!-- silo-change: {…} -->` (see `tools/workshop/README.md`); the
-server gives it to the page as `change`. Only a comment by the Workshop's own
-App is read for it: its `performed_via_github_app` id is the configured App id
-(`WORKSHOP_APP_ID`), or its author is the App's account, `<slug>[bot]` (the
-slug read from the installation). A comment by any other bot is an ordinary
-comment.
+issue comments. GitHub holds only what people add: comments, suggestions and
+votes. The history of an entry is read from git when the site is built. A
+comment is marked `bot` when it is by the Workshop's own App: its
+`performed_via_github_app` id is the configured App id (`WORKSHOP_APP_ID`), or
+its author is the App's account, `<slug>[bot]` (the slug read from the
+installation). It is otherwise an ordinary comment.
 
 ## The API
 
@@ -445,9 +450,9 @@ JSON.
 
 | Endpoint | Who | What |
 | --- | --- | --- |
-| `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, 👍 count, comment count, author, dates. An entry with history comments among those held has `updates`, their number. `latest`: the newest 30 comments held on entries, newest first, each `{ n, entry, author, bot, createdAt }` with `change` for a history comment, else `text`, its first line cut to 140 characters. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
+| `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, 👍 count, comment count, author, dates. `latest`: the newest 30 comments held on entries, newest first, each `{ n, entry, author, bot, createdAt, text }`, `text` its first line cut to 140 characters. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
 | `GET me` | signed in | `{ login, avatar }`, read from the session cookie alone: it calls nothing on GitHub. 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
-| `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text, a history comment with its parsed `change`; `more: true` when GitHub counts more. The same public answer for everyone. |
+| `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. The same public answer for everyone. |
 | `GET vote?n=` | signed in | `{ on }`: whether the person has given a 👍, read with their own token. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
@@ -682,9 +687,6 @@ snapshots catch up when the hour resets.
   nothing.
 - A sign-in cookie works for one callback per instance (its id is remembered
   for its 10-minute life, at most 10,000).
-- History comments older than the comments the server holds (the latest 100
-  per issue, at most 5,000 in all) are not seen as history: GitHub's comment
-  count still includes them, so the page counts them as people's comments.
 - Every GitHub call has an 8-second limit, and every handler has a 12-second
   deadline for all its GitHub calls and every wait together, including waits
   on shared work such as an installation token another request is fetching

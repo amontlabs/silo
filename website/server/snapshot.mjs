@@ -84,21 +84,13 @@ function reduceIssue(issue) {
   };
 }
 
-// An entry says how many of its held comments are the bot's history lines (`updates`), so the page holds the
-// right room for them while they load.
-function summaryOf(entry) {
-  let updates = 0;
-  if (entry.summary.kind === 'entry') for (const comment of entry.comments.values()) if (comment.change) updates += 1;
-  return updates ? { ...entry.summary, updates } : entry.summary;
-}
-
 // The first line of a comment, cut, for the list of what happened lately.
 function firstLine(text) {
   const line = text.split('\n').map((part) => part.trim()).find(Boolean) ?? '';
   return cut(line, SNAPSHOT.latestText);
 }
 
-// The newest comments and history lines across every entry, newest first.
+// The newest comments across every entry, newest first.
 function latestOf(snapshot) {
   const all = [];
   for (const [number, entry] of snapshot.issues) {
@@ -112,7 +104,7 @@ function latestOf(snapshot) {
     author: comment.author,
     bot: comment.bot,
     createdAt: comment.createdAt,
-    ...(comment.change ? { change: comment.change } : { text: firstLine(comment.text) }),
+    text: firstLine(comment.text),
   }));
 }
 
@@ -122,7 +114,7 @@ function latestOf(snapshot) {
 // `keepAlive(promise)` asks the platform to keep the instance running until it settles.
 // `afterRefresh()` runs, detached, after each successful refresh.
 // `wall()` is the real clock for the floor, the lost-refresh limit and the waits.
-// `app()` is the Workshop's App, `{ id, login }`: only its comments become history lines.
+// `app()` is the Workshop's App, `{ id, login }`: its comments are marked as the bot's.
 export function createSnapshot({
   repo, request, app = () => null, now = Date.now, wall = Date.now, log = () => {},
   detach = (fn) => fn(), keepAlive = () => {}, afterRefresh = () => {},
@@ -439,7 +431,7 @@ export function createSnapshot({
   function stateAnswer(snapshot) {
     if (!snapshot.stateAnswer || snapshot.stateAnswer.version !== snapshot.version) {
       const issues = {};
-      for (const [number, entry] of snapshot.issues) issues[number] = summaryOf(entry);
+      for (const [number, entry] of snapshot.issues) issues[number] = entry.summary;
       snapshot.stateAnswer = { version: snapshot.version, body: { repo, fetchedAt: new Date(snapshot.at).toISOString(), issues, latest: latestOf(snapshot) } };
     }
     return snapshot.stateAnswer.body;

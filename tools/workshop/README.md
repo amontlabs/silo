@@ -44,15 +44,13 @@ or logged.
 
 Two labels: `workshop:suggestion` on a person's suggestion, and `workshop:entry` on an older issue
 the bot created for one feature. Label names read from GitHub are compared ignoring
-capitalisation. An entry's issue ends with `<!-- silo-entry: <id> -->`. A history comment ends with
-`<!-- silo-change: {json} -->`, naming the commit, the commit before and the fields that changed.
-The fields a history comment may name are fixed in `model/names.js`, so the comments already
-written still read whatever the plan's files become.
+capitalisation. An entry's issue ends with `<!-- silo-entry: <id> -->`. The bot once wrote a comment
+on an issue for each change of its entry; that comment is read as any other comment now, and the
+history of an entry comes from git (`tools/plan/history`).
 
 ## Modules
 
-- `model/`: the names and labels, the entry marker and the history comment with their readers, and
-  the links of a history comment. Plain ESM; it imports nothing outside its folder and no `node:`
+- `model/`: the names and labels, and the entry marker with its reader. Plain ESM; it imports nothing outside its folder and no `node:`
   module (a test enforces it). The site's server imports it, and the site's function ships this
   folder with `package.json` and nothing else of `tools/`.
 - `github/`: the REST client, the App's JWT and installation token, credentials, the Keychain,

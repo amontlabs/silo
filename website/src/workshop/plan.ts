@@ -3,10 +3,9 @@
 // and states, and the words the page uses for them.
 import { entryStatus as modelStatus } from '../../../tools/plan/model/index.js';
 import type { Verdict } from '../../../tools/plan/model/status.js';
-import type { Change } from '../../../tools/workshop/model/markers.js';
 import type { MapLayout } from './map';
 
-export type { Change, Verdict };
+export type { Verdict };
 
 /**
  * A row's status, in the page's words. A taken feature, ready or not, is planned; a taken decision is decided, or
@@ -39,7 +38,41 @@ export interface Entry {
   notes: boolean;
   /** Whether it has anything to show from `Facts` (the chunk `virtual:workshop-facts`), given its verdict. */
   more: boolean;
+  /** What a closed History line says: its newest change and how many it has; null with no change. The changes themselves are `Histories`. */
+  history: HistorySummary | null;
 }
+
+/** What the history of an entry names (tools/plan/history `WHAT`), never the name of a key of its file. */
+export type ChangeName = 'added' | 'moved' | 'text' | 'sets' | 'needs' | 'keeps' | 'surfaces' | 'suggest' | 'notes' | 'taken' | 'dropped' | 'cleared' | 'replaced' | 'built';
+
+/** A title and a body, as an entry's text before or after a change; a part is null when the entry has none. */
+export interface ChangeText {
+  title: string | null;
+  body: string | null;
+}
+
+/** One change of an entry, as a commit made it. */
+export interface Change {
+  /** The full hash. */
+  commit: string;
+  /** The committer date, `2026-11-20T12:00:00Z`. */
+  date: string;
+  what: ChangeName[];
+  /** With `text`: the title and body before and after. */
+  text?: { before: ChangeText; after: ChangeText };
+  /** With `replaced`: the id of the decision that replaced it. */
+  by?: string;
+}
+
+/** The newest change of an entry and the number of its changes: all a closed History line needs. */
+export interface HistorySummary {
+  date: string;
+  what: ChangeName[];
+  count: number;
+}
+
+/** The changes of every entry that has some, newest first, by entry id: a chunk of its own (`virtual:workshop-history`), loaded when a History is first opened. */
+export type Histories = Record<string, Change[]>;
 
 export type StatementKind = 'word' | 'principle' | 'property';
 
@@ -95,8 +128,10 @@ export interface BuildData {
   entries: Entry[];
   /** Where the parts sit on the map: Silo's own (map.ts), or the example the tests draw. Without places, no map. */
   map: MapLayout;
-  /** Whether entries have threads on GitHub (votes, comments, history). Off in the real build: no entry has one yet. */
+  /** Whether entries have threads on GitHub (votes, comments). Off in the real build: no entry has one yet. */
   threads: boolean;
+  /** Set when the build could not read the whole history of the repository: every History ends with a line that says so. */
+  shallow: boolean;
 }
 
 export interface LiveIssue {
@@ -107,15 +142,13 @@ export interface LiveIssue {
   reason: null | 'completed' | 'not_planned';
   up: number;
   comments: number;
-  /** How many of its comments are history lines. */
-  updates?: number;
   author: string;
   bot: boolean;
   createdAt: string;
   closedAt: string | null;
 }
 
-/** One of the newest comments or history lines across the entries. */
+/** One of the newest comments across the entries. */
 export interface LiveLatest {
   n: number;
   entry: string;
@@ -123,7 +156,6 @@ export interface LiveLatest {
   bot: boolean;
   createdAt: string;
   text?: string;
-  change?: Change;
 }
 
 export interface LiveState {
@@ -154,6 +186,8 @@ export interface Row {
   notes: boolean;
   /** Whether the entry has something to show from `Facts`. */
   more: boolean;
+  /** The entry's closed History line; null when it has no change. */
+  history: HistorySummary | null;
   /** The entry's verdict; null for no verdict, and for anything that is not an entry. */
   verdict: Verdict | null;
   /** The keys of the rows of the entries it needs. */
@@ -162,9 +196,7 @@ export interface Row {
   built: string | null;
   author: string | null;
   up: number | null;
-  /** People's comments: the issue's comments less its history lines. */
   comments: number | null;
-  updates: number;
   /** The keys of the rows of the decisions this one replaces, or would replace while it has no verdict. */
   replaces: string[];
   /** The key of the row of the decision that replaced this one. */
@@ -173,6 +205,7 @@ export interface Row {
   closedAt: string | null;
 }
 
+/** A line of Latest: a comment (`text`, from `author`) or a change of the entry's history. */
 export interface LatestItem {
   key: string;
   row: Row;
@@ -181,6 +214,9 @@ export interface LatestItem {
   text: string | null;
   change: Change | null;
 }
+
+/** How many lines Latest holds. */
+export const LATEST_LINES = 30;
 
 /** A part's features by status. */
 export interface Counts {
@@ -223,10 +259,12 @@ export interface Plan {
   left: Row[];
   /** Suggestions by votes; dropped ones last. */
   suggestions: Row[];
-  /** The newest comments and history lines across the entries, newest first; empty without threads. */
+  /** The newest comments and changes across the entries, newest first; empty without threads. */
   latest: LatestItem[];
   /** Whether entries have threads (BuildData.threads). */
   threads: boolean;
+  /** Whether the history is cut short (BuildData.shallow). */
+  shallow: boolean;
 }
 
 /** How many stages make the first band of the sheet. */
@@ -274,8 +312,8 @@ function suggestionStatus(live: LiveIssue): Status {
 
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
-    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, verdict: null, needs: [], built: null,
-    author: null, up: null, comments: null, updates: 0, replaces: [], replacedBy: null, date: null, closedAt: null,
+    key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, notes: false, more: false, history: null, verdict: null, needs: [], built: null,
+    author: null, up: null, comments: null, replaces: [], replacedBy: null, date: null, closedAt: null,
   };
 }
 
@@ -334,7 +372,7 @@ export function stateWords(group: { state: PartState; counts: Counts }): string 
   }
 }
 
-export function buildPlan(data: BuildData, live: LiveState | null): Plan {
+export function buildPlan(data: BuildData, live: LiveState | null, histories: Histories = {}): Plan {
   const issues = live?.issues ?? {};
   // Old issues on GitHub are never matched to an entry while entries have no threads.
   const byEntry = new Map<string, number>();
@@ -346,9 +384,8 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
   const counts = (row: Row) => {
     const issue = row.issue === null ? undefined : issues[row.issue];
     if (issue) {
-      row.updates = Math.max(0, Math.min(issue.updates ?? 0, issue.comments));
       row.up = issue.up;
-      row.comments = issue.comments - row.updates;
+      row.comments = issue.comments;
       row.closedAt = issue.closedAt;
     }
   };
@@ -364,6 +401,7 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
     row.n = entry.position;
     row.notes = entry.notes;
     row.more = entry.more;
+    row.history = entry.history;
     row.verdict = entry.verdict;
     row.needs = entry.needs.map((id) => `entry-${id}`);
     row.built = entry.built;
@@ -405,15 +443,25 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
   suggestions.sort((a, b) => dropped(a) - dropped(b) || (b.up ?? 0) - (a.up ?? 0) || (a.issue ?? 0) - (b.issue ?? 0));
 
   const latest: LatestItem[] = [];
-  for (const [index, item] of (data.threads ? live?.latest ?? [] : []).entries()) {
-    const row = entries.get(item.entry);
-    if (!row || row.issue !== item.n) continue;
-    latest.push({ key: `latest-${index}`, row, author: item.author, createdAt: item.createdAt, text: item.text ?? null, change: item.change ?? null });
+  if (data.threads) {
+    for (const [index, item] of (live?.latest ?? []).entries()) {
+      const row = entries.get(item.entry);
+      if (!row || row.issue !== item.n) continue;
+      latest.push({ key: `latest-${index}`, row, author: item.author, createdAt: item.createdAt, text: item.text ?? null, change: null });
+    }
+    for (const [id, changes] of Object.entries(histories)) {
+      const row = entries.get(id);
+      if (!row) continue;
+      for (const [index, change] of changes.entries()) latest.push({ key: `latest-${id}-${index}`, row, author: '', createdAt: change.date, text: null, change });
+    }
+    // Newest first; a comment goes before a change of the same second, and what is equal keeps its order.
+    latest.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    latest.length = Math.min(latest.length, LATEST_LINES);
   }
 
   const product = rows.filter((row) => row.part === null);
   const left = groups.flatMap((group) => group.rows.filter((row) => row.status === 'dropped')).sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
-  return { parts: groups, product, left, suggestions, latest, threads: data.threads };
+  return { parts: groups, product, left, suggestions, latest, threads: data.threads, shallow: data.shallow };
 }
 
 /** Every row once: the parts' entries, the whole product's decisions, then suggestions. */
@@ -421,39 +469,33 @@ export function allRows(plan: Plan): Row[] {
   return [...plan.parts.flatMap((group) => group.rows), ...plan.product, ...plan.suggestions];
 }
 
-/** By the field names of a history marker (tools/workshop/model): `area` is that wire format's name for the part. */
-const PHRASES: Record<string, string> = {
-  name: 'Text changed',
-  what: 'Text changed',
-  notes: 'Notes edited',
+/** The page's words for each name of a change; a taken decision is decided, a taken feature planned. */
+const PHRASES: Record<Exclude<ChangeName, 'taken'>, string> = {
+  added: 'Added',
+  moved: 'Moved to another part',
+  text: 'Text changed',
+  sets: 'What a yes would do changed',
   needs: 'Needs changed',
-  area: 'Moved to another part',
-  suggest: 'Suggestion changed',
-  surfaces: 'Surfaces changed',
-  replaces: 'Replaces changed',
+  keeps: 'What it must keep changed',
+  surfaces: 'Where it shows changed',
+  suggest: 'Recommendation changed',
+  notes: 'Notes edited',
+  dropped: 'Dropped',
+  cleared: 'Back to not decided',
+  replaced: 'Replaced by',
   built: 'Built',
 };
 
-/** What a history line says changed, one phrase per change in the order of its fields; `suggested_in` says nothing. */
-export function changeWords(change: Change): string[] {
-  const words: string[] = [];
-  for (const field of change.fields) {
-    let word: string | undefined;
-    if (field !== 'verdict') word = PHRASES[field];
-    else if (change.verdict === 'take') word = 'Taken';
-    else if (change.verdict === 'drop') word = 'Dropped';
-    // A verdict that is no longer one (the old "later") says nothing.
-    else if (!change.verdict) word = 'Verdict cleared';
-    if (word && !words.includes(word)) words.push(word);
-  }
-  return words;
+/** What one name of a change says on an entry of this kind. */
+export function changePhrase(name: ChangeName, of: Entry['kind'] | null): string {
+  if (name === 'taken') return of === 'feature' ? 'Planned' : 'Decided';
+  return PHRASES[name];
 }
 
-/** The phrases of a change on one line. */
-export const changeLine = (change: Change) => changeWords(change).join(' · ');
-
-/** Whether a change touched the text a person can compare: `name` or `what`. */
-export const changesText = (change: Change) => change.fields.includes('name') || change.fields.includes('what');
+/** What a change says on one line: its phrases, in the module's order, joined by " · ". */
+export function changeLine(what: readonly ChangeName[], of: Entry['kind'] | null): string {
+  return what.map((name) => changePhrase(name, of)).join(' · ');
+}
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

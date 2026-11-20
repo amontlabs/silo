@@ -4,7 +4,6 @@
 // endpoints the Workshop uses. State lives in memory.
 import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
 import { createServer } from 'node:http';
-import { changeComment } from '../../tools/workshop/model/index.js';
 
 export const FAKE_APP = { appId: '1001', slug: 'silo-workshop', clientId: 'Iv1.fakeclient', installationId: 7, repoId: 4242 };
 
@@ -31,8 +30,6 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     hook: null,
     perPage: null,
     requests: [],
-    // Files of the repository at a commit, as raw.githubusercontent.com serves them: `<commit>/<path>` to text.
-    raw: new Map(),
   };
   let baseUrl = '';
   const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
@@ -195,12 +192,6 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
   async function handle(req, res) {
     const url = new URL(req.url, 'http://fake');
     const path = url.pathname;
-    // raw.githubusercontent.com: /<owner>/<repo>/<commit>/<path>, readable from any origin.
-    if (path.startsWith(`/raw/${repo}/`)) {
-      const text = state.raw.get(path.slice(`/raw/${repo}/`.length));
-      res.writeHead(text === undefined ? 404 : 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-      return res.end(text ?? '404: Not Found');
-    }
     const who = caller(req);
     const record = { method: req.method, path, query: url.search, wall: Date.now(), kind: who?.kind ?? 'anonymous', login: who?.user?.login ?? null };
     state.requests.push(record);
@@ -409,9 +400,6 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     react,
     repo,
     get url() { return baseUrl; },
-    /** Where the page reads files of the repository at a commit, as it reads raw.githubusercontent.com. */
-    get rawUrl() { return `${baseUrl}/raw`; },
-    setRaw(commit, path, text) { state.raw.set(`${commit}/${path}`, text); },
     async listen(port = 0, host = '127.0.0.1') {
       await new Promise((resolve) => server.listen(port, host, resolve));
       baseUrl = `http://${host}:${server.address().port}`;
@@ -439,23 +427,18 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
 // A small Workshop: entries from the plan (when given, in build order), two issues with the
 // retired label `workshop:decision` (no longer part of the Workshop), a suggestion, comments and
 // votes, an unrelated issue and a pull request.
-//
-// With `progress`, a later state: see `progressOf`, and the bot's history comments of every kind
-// beside people's comments. Answers `{ progress }`, the plan that was applied (null without `progress`).
-export function seedDemo(fake, features = [], { progress = false, now = Date.now() } = {}) {
+export function seedDemo(fake, features = []) {
   fake.addUser('owner-fake', { permission: 'admin' });
   fake.addUser('visitor-fake', { permission: 'read' });
-  if (progress) for (const login of ['lin-qi', 'mara-k', 'devin-oss']) fake.addUser(login, { permission: 'read' });
   const list = features.length ? features : [
     { id: 'engine-service', name: 'The engine runs on its own', what: 'A background engine owns every computer.' },
     { id: 'calls-and-events', name: 'Every call and event defined once', what: 'Each thing the engine can be asked is written down once.' },
     { id: 'vm-runtime', name: 'The VM runtime, packaged', what: 'Silo ships the program that runs each computer.' },
   ];
-  const plan = progress ? progressOf(list) : null;
   const numbers = new Map();
   for (const feature of list) {
     const labels = ['workshop:entry'];
-    const closed = feature.built || plan?.built.has(feature.id) ? 'completed' : plan?.verdicts.get(feature.id) === 'drop' ? 'not_planned' : null;
+    const closed = feature.built ? 'completed' : null;
     const issue = fake.addIssue({ title: feature.name, body: `${feature.what}\n<!-- silo-entry: ${feature.id} -->`, labels, ...(closed ? { state: 'closed', reason: closed } : {}) });
     numbers.set(feature.id, issue.number);
   }
@@ -471,71 +454,4 @@ export function seedDemo(fake, features = [], { progress = false, now = Date.now
   fake.react(suggestion.number, 'visitor-fake');
   fake.addIssue({ title: 'An ordinary bug report', body: 'Not part of the Workshop.', author: 'visitor-fake' });
   fake.addIssue({ title: 'A pull request with a Workshop label', labels: ['workshop:entry'], pull: true });
-  if (plan) seedHistory(fake, list, numbers, plan, now);
-  return { progress: plan };
-}
-
-const sha = (text) => createHash('sha1').update(text).digest('hex');
-const HOUR = 3_600_000;
-
-// The history comments and people's comments of the --progress state, oldest first, over the last
-// days: a verdict line for each entry that has one and a built line for each entry built, then on
-// chosen entries a text change (with its before and after served as raw files), notes edited, a field
-// changed and a verdict cleared. Every line agrees with the state the sample shows.
-function seedHistory(fake, list, numbers, plan, now) {
-  let clock = now - 5 * 24 * HOUR;
-  let head = sha('seed');
-  const step = (hours = 1) => { clock += hours * HOUR; return clock; };
-  const history = (id, fields, extra = {}) => {
-    const before = head;
-    head = sha(`${before}:${id}:${fields.join(',')}`);
-    fake.addComment(numbers.get(id), null, changeComment({ commit: head, before, fields, ...extra }, { repo: fake.repo }), step(1));
-    return { before, commit: head };
-  };
-  const decided = list.filter((feature) => plan.verdicts.has(feature.id));
-  for (const feature of decided) history(feature.id, ['verdict'], { verdict: plan.verdicts.get(feature.id) });
-  // Built only on the entries the sample shows as built, after their verdict line.
-  for (const feature of decided.filter((f) => plan.built.has(f.id))) history(feature.id, ['built'], { built: feature.built });
-  const taken = decided.filter((feature) => plan.verdicts.get(feature.id) === 'take');
-  const [first, second] = taken;
-  const people = [['lin-qi', 'Does this also cover a computer the engine restarts after a crash?'], ['mara-k', 'This is the part that would make me trust it with my main.'], ['devin-oss', 'How does it behave when the disk is full?']];
-  if (first) {
-    fake.addComment(numbers.get(first.id), people[0][0], people[0][1], step(2));
-    const change = history(first.id, ['name', 'what']);
-    const old = { ...first, name: `${first.name}, always`, what: first.what.replace(/\.$/, ', started by the app at login.') };
-    const file = (feature) => `${JSON.stringify({ name: feature.name, what: feature.what, area: feature.area, needs: feature.needs ?? [] }, null, 2)}\n`;
-    fake.setRaw(change.before, `plan/features/${first.id}.json`, file(old));
-    fake.setRaw(change.commit, `plan/features/${first.id}.json`, file(first));
-    fake.addComment(numbers.get(first.id), 'owner-fake', 'Shorter, and the app no longer starts it.', step(1));
-    history(first.id, ['notes']);
-    fake.addComment(numbers.get(first.id), people[1][0], people[1][1], step(5));
-  }
-  if (second) {
-    history(second.id, ['needs', 'notes']);
-    fake.addComment(numbers.get(second.id), people[2][0], people[2][1], step(4));
-  }
-  const cleared = list.find((feature) => !plan.verdicts.has(feature.id) && feature.area);
-  if (cleared) {
-    history(cleared.id, ['verdict'], { verdict: 'later' });
-    history(cleared.id, ['verdict'], { verdict: null });
-  }
-}
-
-const VERDICT_NAMES = ['take', 'later', 'drop'];
-/** The first stages, whose entries are decided in the later state: the starter and the stage after it. */
-const DECIDED_STAGES = 6;
-
-// A later state of the plan, in build order: the entries of the first six stages carry the verdict
-// of their file, else the one suggested for them. Nothing is built that the file does not say is
-// built. Answers the verdicts, and the ids built.
-export function progressOf(features) {
-  const stages = [...new Set(features.map((feature) => feature.stage).filter(Boolean))];
-  const decided = new Set(stages.slice(0, DECIDED_STAGES));
-  const verdicts = new Map();
-  for (const feature of features) {
-    const verdict = feature.verdict ?? (decided.has(feature.stage) ? feature.suggest?.verdict : undefined);
-    if (VERDICT_NAMES.includes(verdict)) verdicts.set(feature.id, verdict);
-  }
-  const built = new Set(features.filter((feature) => feature.built).map((feature) => feature.id));
-  return { stages: stages.slice(0, DECIDED_STAGES), verdicts, built };
 }

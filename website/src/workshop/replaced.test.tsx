@@ -2,8 +2,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { buildData, DECISIONS, issue, liveState, SHA } from './fixtures';
-import type { Change } from './plan';
+import { buildData, DECISIONS, SHA } from './fixtures';
 import { itemOf, mockApi, ok, owner, renderApp, rowButton } from './test-support';
 
 const OLD = 'Which logs does Silo keep?';
@@ -104,15 +103,15 @@ describe('a decision that replaces another', () => {
 });
 
 describe('the latest changes', () => {
-  it('say in words that what a decision replaces changed, never the key', async () => {
-    const change = { commit: SHA.b, before: SHA.a, fields: ['replaces'] } as Change;
+  it('say in words that what a decision would do changed, never the key', async () => {
     const at = new Date().toISOString();
-    mockApi({ state: () => ok(liveState({ 40: issue({ entry: 'signed-logs', title: CURRENT }) }, [{ n: 40, entry: 'signed-logs', author: 'silo-workshop[bot]', bot: true, createdAt: at, change }])) });
+    const data = buildData(undefined, { shallow: false, changes: new Map([['signed-logs', [{ commit: SHA.b, date: at, what: ['sets', 'replaced'], by: 'tamper-proof-logs' }]]]) });
+    mockApi();
     history.replaceState(null, '', '/workshop#latest');
-    await renderApp();
+    await renderApp(data);
     const row = await screen.findByRole('link', { name: new RegExp(`^${CURRENT}`) });
-    expect(row).toHaveTextContent('Replaces changed');
-    expect(row.textContent).not.toMatch(/replaces\b(?! changed)/);
+    expect(row).toHaveTextContent('What a yes would do changed · Replaced by');
+    expect(row.textContent).not.toMatch(/\b(sets|replaces|replaced)\b/);
     await act(async () => {});
   });
 });

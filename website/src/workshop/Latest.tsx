@@ -1,4 +1,5 @@
-// What happened lately across the entries: the newest comments and history lines, each linking to its entry.
+// What happened lately across the entries: the newest comments and changes, each linking to its entry.
+import { useEffect } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import { Block } from './PartView';
 import { pipClass } from './Entry';
@@ -11,7 +12,7 @@ import { formatHash, placeOf } from './routes';
 export const LATEST_GHOSTS = 10;
 
 function what(item: LatestItem): string {
-  if (item.change) return changeLine(item.change);
+  if (item.change) return changeLine(item.change.what, item.row.of);
   return `${item.author}: ${item.text ?? ''}`;
 }
 
@@ -39,8 +40,11 @@ export const ghost = (index: number) => (
 
 export function LatestPlace({ ctx, onBack, notes }: { ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   const { w } = ctx;
+  const { wantHistory } = w;
+  // The changes are a chunk of their own: asked for as the place opens, and held on their placeholders until they are in.
+  useEffect(() => wantHistory(), [wantHistory]);
   const items = w.plan.latest;
-  const loading = w.waiting;
+  const loading = w.waiting || w.histories === undefined || w.histories === 'loading';
   let empty: ReactNode = null;
   if (!items.length && !loading) empty = <p className="ws-empty">{w.liveOk ? 'Nothing yet.' : 'Latest is offline.'}</p>;
   return (

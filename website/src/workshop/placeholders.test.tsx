@@ -9,10 +9,9 @@ import { describe, expect, it } from 'vitest';
 import { App } from './App';
 import type { Comment } from './api';
 import { buildDataFrom } from './data';
-import { buildData, historyComment, issue, liveState, planFiles, SHA } from './fixtures';
+import { buildData, issue, liveState, planFiles } from './fixtures';
 import { EXAMPLE_MAP } from './map-example';
 import { LATEST_GHOSTS } from './Latest';
-import type { Change } from './plan';
 import { detail, itemOf, mockApi, ok, owner, rowButton } from './test-support';
 import type { Reply } from './test-support';
 
@@ -30,13 +29,9 @@ function held() {
   return { promise, release };
 }
 
-const change = (fields: string[], extra: Partial<Change> = {}): Change => ({ fields, before: SHA.a, commit: SHA.b, ...extra }) as Change;
 const thread: Comment[] = [
   { id: 1, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-10T10:00:00Z', text: 'One.' },
-  historyComment(2, change(['needs']), '2026-11-11T10:00:00Z'),
-  { id: 3, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-12T10:00:00Z', text: 'Two.' },
-  historyComment(4, change(['verdict'], { verdict: 'take' }), '2026-11-13T10:00:00Z'),
-  historyComment(5, change(['notes']), '2026-11-14T10:00:00Z'),
+  { id: 2, author: 'mara-k', avatar: '', bot: false, createdAt: '2026-11-12T10:00:00Z', text: 'Two.' },
 ];
 
 const focusable = (element: Element) => [element, ...element.querySelectorAll('*')].filter((node) =>
@@ -94,7 +89,7 @@ async function hold(visit: Visit) {
     await act(async () => {
       // Old issues on GitHub whose markers name these entries, with votes and comments: never matched while threads are off.
       state.release(ok(liveState({
-        10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8, comments: 5, updates: 1 }),
+        10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8, comments: 5 }),
         40: issue({ entry: 'core-in-zig', title: 'Which language is the core written in?', up: 6, comments: 4 }),
         41: issue({ entry: 'calls', title: 'Every call defined once', up: 3, comments: 2 }),
       })));
@@ -139,8 +134,8 @@ describe('placeholders while the page waits', () => {
       await release();
       leave();
     }
-    // The notes' own placeholder waits on a chunk, not on an answer, and is held by a busy container of its own.
-    expect(classes.filter((name) => !all.has(name) && name !== 'ws-ph-notes')).toEqual([]);
+    // The notes' and the history's placeholders wait on a chunk, not on an answer, and are held by a busy container of their own.
+    expect(classes.filter((name) => !all.has(name) && name !== 'ws-ph-notes' && name !== 'ws-h-ghost')).toEqual([]);
   });
 
   it('holds one place per number, per line of the thread and per line of Latest', async () => {
@@ -151,13 +146,13 @@ describe('placeholders while the page waits', () => {
     expect(slots).toBeGreaterThan(0);
     expect(document.querySelectorAll('.ws-detail .ws-item .ws-vote')).toHaveLength(slots);
     leave();
-    // The thread: one per comment and per history line it will hold.
+    // The thread: one per comment it will hold.
     release = await hold(visitOf('the thread'));
     const item = itemOf('Create and delete a computer');
-    const ghosts = item.querySelectorAll('.ws-h-ghost, .ws-c-ghost').length;
+    const ghosts = item.querySelectorAll('.ws-c-ghost').length;
     await release();
-    await waitFor(() => expect(item.querySelectorAll('.ws-h, .ws-c').length).toBeGreaterThan(0));
-    expect(ghosts).toBe(item.querySelectorAll('.ws-h, .ws-c').length);
+    await waitFor(() => expect(item.querySelectorAll('.ws-c').length).toBeGreaterThan(0));
+    expect(ghosts).toBe(item.querySelectorAll('.ws-c').length);
     leave();
     // Latest: the number the code declares.
     release = await hold(visitOf('Latest, state and me'));
@@ -214,7 +209,7 @@ describe('a row without a thread', () => {
     await act(async () => {
       // Old issues on GitHub whose markers name these entries, with votes and comments: never matched while threads are off.
       state.release(ok(liveState({
-        10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8, comments: 5, updates: 1 }),
+        10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8, comments: 5 }),
         40: issue({ entry: 'core-in-zig', title: 'Which language is the core written in?', up: 6, comments: 4 }),
         41: issue({ entry: 'calls', title: 'Every call defined once', up: 3, comments: 2 }),
       })));

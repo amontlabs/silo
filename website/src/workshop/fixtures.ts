@@ -1,10 +1,9 @@
 // A small plan in the files of plan/, for the tests: they never read the real one.
 import { canonicalDecision, canonicalFeature, canonicalText } from '../../../tools/plan/model/index.js';
-import { changeComment } from '../../../tools/workshop/model/index.js';
-import { buildDataFrom, factsFrom, notesFrom } from './data';
+import { buildDataFrom, factsFrom, historiesFrom, notesFrom } from './data';
+import type { HistorySource } from './data';
 import { EXAMPLE_MAP } from './map-example';
-import type { Comment } from './api';
-import type { BuildData, Change, Facts, LiveIssue, LiveLatest, LiveState, Notes } from './plan';
+import type { BuildData, Facts, Histories, LiveIssue, LiveLatest, LiveState, Notes } from './plan';
 
 /** What an entry's file may hold beyond its text and verdict: ids it needs, statements it sets, removes, adds or keeps. */
 interface FixtureLists {
@@ -228,13 +227,18 @@ export function emptyPlanFiles(): Map<string, string> {
 
 const NOTES = new WeakMap<BuildData, Notes>();
 const FACTS = new WeakMap<BuildData, Facts>();
+const HISTORIES = new WeakMap<BuildData, Histories>();
 
-/** The fixture plan drawn on the example map, with entries' threads on: what the tests exercise. */
-export function buildData(options?: Parameters<typeof planFiles>[0]): BuildData {
+/**
+ * The fixture plan drawn on the example map, with entries' threads on: what the tests exercise. `history` is the one
+ * the test writes by hand: no git process starts, and an entry it does not name has no change.
+ */
+export function buildData(options?: Parameters<typeof planFiles>[0], history: HistorySource | null = null): BuildData {
   const files = planFiles(options);
-  const data = buildDataFrom(files, { map: EXAMPLE_MAP, threads: true });
+  const data = buildDataFrom(files, { map: EXAMPLE_MAP, threads: true, history });
   NOTES.set(data, notesFrom(files));
   FACTS.set(data, factsFrom(files));
+  HISTORIES.set(data, historiesFrom(files, history));
   return data;
 }
 
@@ -248,6 +252,11 @@ export function fixtureFacts(data: BuildData): Facts {
   return FACTS.get(data) ?? { entries: {}, statements: {} };
 }
 
+/** The changes of a fixture plan made by `buildData`, as the page's history chunk gives them. */
+export function fixtureHistories(data: BuildData): Histories {
+  return HISTORIES.get(data) ?? {};
+}
+
 const day = '2026-11-14T10:00:00Z';
 
 export function issue(fields: Partial<LiveIssue>): LiveIssue {
@@ -256,12 +265,7 @@ export function issue(fields: Partial<LiveIssue>): LiveIssue {
 
 export const SHA = { a: 'a'.repeat(40), b: 'b'.repeat(40), c: 'c'.repeat(40), d: 'd'.repeat(40) };
 
-/** A history comment of the bot, as `GET issue` gives it. */
-export function historyComment(id: number, change: Change, createdAt: string): Comment {
-  return { id, author: 'silo-workshop[bot]', avatar: '', bot: true, createdAt, text: changeComment(change), change };
-}
-
-/** Live state: `core` has votes, `create` has votes, comments and history lines. */
+/** Live state: `core` has votes, `create` has votes and comments. */
 export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLatest[] = []): LiveState {
   return {
     repo: 'amontlabs/silo',
@@ -269,7 +273,7 @@ export function liveState(extra: Record<string, LiveIssue> = {}, latest: LiveLat
     issues: {
       10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8 }),
       11: issue({ entry: 'calls', title: 'Every call defined once', up: 3 }),
-      12: issue({ entry: 'create', title: 'Create and delete a computer', up: 12, comments: 5, updates: 3 }),
+      12: issue({ entry: 'create', title: 'Create and delete a computer', up: 12, comments: 2 }),
       13: issue({ entry: 'exec', title: 'Run a command', up: 4 }),
       14: issue({ entry: 'fork', title: 'Fork a computer', up: 21 }),
       15: issue({ entry: 'shells', title: 'Your shell inside' }),

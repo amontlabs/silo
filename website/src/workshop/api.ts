@@ -1,5 +1,5 @@
 // The browser side of the Workshop's HTTP contract (`/api/workshop/`).
-import type { Change, LiveState } from './plan';
+import type { LiveState } from './plan';
 
 export const API = '/api/workshop';
 
@@ -15,8 +15,6 @@ export interface Comment {
   bot: boolean;
   createdAt: string;
   text: string;
-  /** Set on the bot's history comments: what changed, and in which commits. */
-  change?: Change;
 }
 
 export interface IssueDetail {
@@ -112,7 +110,7 @@ export const api = {
   },
   issue: (n: number) => request<IssueDetail>(`issue?n=${n}`),
   myVote: async (n: number) => (await request<{ on: boolean }>(`vote?n=${n}`, { cache: 'no-store' })).on === true,
-  /** `comments`: the issue's whole count after the comment (history lines included), when the server says. */
+  /** `comments`: the issue's whole count after the comment, when the server says. */
   comment: (n: number, text: string) => post<{ comments?: unknown }>('comment', { n, text }),
   /** `up`: the issue's 👍 count after the vote, when the server says. */
   vote: (n: number, on: boolean) => post<{ up?: unknown }>('vote', { n, on }),
