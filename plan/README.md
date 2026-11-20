@@ -2,7 +2,8 @@
 
 The plan is the design of Silo, kept as small files: its vocabulary, what must always be true of
 it, the questions about it, and the features to build. The Workshop shows these files on the
-site. The owner says yes or no to each question and each feature, there or in a conversation.
+site. The owner says yes or no to each question and each feature in a conversation, and the agent
+writes the answer with `plan take` or `plan drop`.
 
 This page explains how the files work. To read the plan itself, use the tool: `plan` prints what
 is next, and `plan show <id>` prints one item with everything that applies to it.
