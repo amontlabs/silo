@@ -1,0 +1,2 @@
+- The owner said this, of the limits on a hold and on every wait at the boundary.
+- "Here" means those waits; the sentence is copied as the record has it.

@@ -1,0 +1,5 @@
+{
+  "asks": "Are the rules an agent program sets for itself a boundary?",
+  "answer": "Rules that live inside an agent program are not a boundary. Agents fetch a package by hand to get past a rule on package age, or read a file through the shell when the file tool refuses.",
+  "verdict": "take"
+}

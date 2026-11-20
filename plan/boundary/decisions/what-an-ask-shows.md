@@ -1,0 +1,2 @@
+- The record marks the line "(Notes, in the words of section 2)".
+- The line ends "Your yes is a grant.": see `yes-to-an-ask`.

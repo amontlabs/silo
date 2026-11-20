@@ -1,0 +1,15 @@
+{
+  "asks": "What does a pending ask hold?",
+  "answer": "A pending ask holds only the one request it is about. The computer keeps running.",
+  "sets": [
+    {
+      "in": "boundary/properties",
+      "id": "ask-holds-only-its-request",
+      "says": "A pending ask holds only the one request it is about. The computer keeps running.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

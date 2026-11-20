@@ -1,0 +1,18 @@
+{
+  "asks": "Does a wait for a classifier's opinion end at Silo's limit?",
+  "answer": "The wait for a classifier's opinion has a limit too, and Silo ends it itself.",
+  "needs": [
+    "hold-limit"
+  ],
+  "sets": [
+    {
+      "in": "boundary/properties",
+      "id": "every-wait-ends",
+      "says": "Every wait at the boundary ends: by an answer (yours, or a classifier's opinion), when the program closes its connection, or at Silo's own limit.",
+      "kind": "liveness",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

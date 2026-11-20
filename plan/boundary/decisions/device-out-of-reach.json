@@ -1,0 +1,15 @@
+{
+  "asks": "Can a computer reach your device?",
+  "answer": "A computer cannot reach your device: not your Mac, your local network, your VPN or cloud metadata.",
+  "sets": [
+    {
+      "in": "boundary/properties",
+      "id": "computer-cannot-reach-your-device",
+      "says": "A computer cannot reach your device.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ]
+}

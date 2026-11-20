@@ -1,0 +1,4 @@
+{
+  "asks": "Can a rule ask you each time a secret or a destination is used?",
+  "answer": "A rule can say \"ask each time\" for a named secret or a named destination."
+}

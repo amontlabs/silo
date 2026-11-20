@@ -1,0 +1,5 @@
+{
+  "asks": "Can network rules be put forward from what a computer did?",
+  "answer": "Rules can be proposed from the record: run open for a while, then keep the hosts that were actually used.",
+  "verdict": "take"
+}

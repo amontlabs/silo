@@ -1,0 +1,7 @@
+{
+  "asks": "What does Silo see when an agent program gives up on a hold?",
+  "answer": "A program that gives up first closes its connection, and Silo sees that.",
+  "needs": [
+    "hold-limit"
+  ]
+}

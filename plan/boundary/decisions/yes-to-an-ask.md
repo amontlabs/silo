@@ -1,0 +1,2 @@
+- The record's section 4.7 says, marked Notes: "Your yes is a grant."
+- That everything is denied unless a rule allows it or you say yes to an ask is the part `rules`.

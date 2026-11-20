@@ -1,0 +1,4 @@
+{
+  "asks": "What does a rule show you when it is set?",
+  "answer": "Each rule states its worst case in plain words when it is set. Example: allowing this host means anything this computer can read can be sent there."
+}

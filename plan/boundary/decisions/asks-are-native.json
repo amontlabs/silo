@@ -1,0 +1,5 @@
+{
+  "asks": "Where does an ask live?",
+  "answer": "Asks are native to Silo: shown in the Silo app, two-way with the agent, not a prompt of the agent program. No broker agent.",
+  "verdict": "take"
+}

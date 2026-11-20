@@ -1,0 +1,5 @@
+{
+  "asks": "Where is a rule on the age of packages enforced?",
+  "answer": "A rule on the age of packages is enforced at the boundary, because agents get around the same rule set inside a tool.",
+  "verdict": "take"
+}

@@ -1,0 +1,5 @@
+{
+  "asks": "What does Silo assume about the agent?",
+  "answer": "The agent is considered hostile. Rules exist to make an attack predictable: a hostile agent can do what the rules allow and nothing else. No destination is special. The user sets the rules for GitHub as for everything else. Silo is as secure as the rules the user sets, and it makes a secure setup as easy as the rest.",
+  "verdict": "take"
+}

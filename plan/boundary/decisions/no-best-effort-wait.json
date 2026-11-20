@@ -1,0 +1,7 @@
+{
+  "asks": "May a wait at the boundary end by best effort?",
+  "answer": "Nothing here may be best effort.",
+  "needs": [
+    "hold-limit"
+  ]
+}

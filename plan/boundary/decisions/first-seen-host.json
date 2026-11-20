@@ -1,0 +1,8 @@
+{
+  "asks": "What does Silo do when a computer reaches a host for the first time?",
+  "answer": "A host seen for the first time raises an alert.",
+  "adds": [
+    "new-host-raises-an-alert"
+  ],
+  "verdict": "take"
+}

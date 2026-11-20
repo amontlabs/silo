@@ -1,0 +1,5 @@
+{
+  "asks": "What may agents do inside a computer?",
+  "answer": "Inside, agents have full access (`sudo`) and nothing asks them for approval.",
+  "verdict": "take"
+}

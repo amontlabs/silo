@@ -1,0 +1,8 @@
+{
+  "asks": "Does the record show what went to an allowed host?",
+  "answer": "An allowed host is still a way out.",
+  "adds": [
+    "record-shows-what-was-sent"
+  ],
+  "verdict": "take"
+}
