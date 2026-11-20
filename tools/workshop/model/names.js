@@ -24,3 +24,6 @@ export const SET_LABELS = LABELS;
 export const DEFAULT_REPO = 'amontlabs/silo';
 export const DEFAULT_SITE = 'https://silo.amontlabs.com';
 export const DEFAULT_WEB = 'https://github.com';
+
+/** The public https address of a repository on GitHub: the page's links to its commits and issues, and the build's fetch of its history, start from it. */
+export const repoAddress = (repo = DEFAULT_REPO) => `${DEFAULT_WEB}/${repo}`;

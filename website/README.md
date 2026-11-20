@@ -357,9 +357,13 @@ What a person sees:
   the title and the body before and after, whichever differ.
   The history is read from git when the site is built (`readSteps` and
   `entryHistory`, called by `data.ts`): nothing asks GitHub for it. A
-  shallow clone is fetched whole from `origin` once (`git fetch --unshallow`,
-  no credential); when that fails, the build goes on and every list ends with
-  "Earlier changes are not available in this build." (`BuildData.shallow`).
+  shallow clone is fetched whole once, with no credential and a five-minute
+  limit per fetch: `git fetch --unshallow origin`, and when that fails (Vercel's
+  clone has no remote) the commit being built from the repository's public
+  address (`repoAddress`, the one the "commit" links use), so a preview branch
+  gets its whole history too. When both fail, the build goes on and every list
+  ends with "Earlier changes are not available in this build."
+  (`BuildData.shallow`).
   A plan read from another folder (`WORKSHOP_PLAN`) has no history.
   The page's data holds, for each entry, only its last change and the number of
   changes (`Entry.history`), enough for the closed line. The changes with their
@@ -1120,6 +1124,8 @@ services:
 - that `waitUntil()` of the request context keeps a Build Output
   Node.js function alive after the response, as documented for Vercel
   Functions (the code does not depend on it);
+- that a Vercel build gets the whole history (its clone is shallow, with no
+  remote), until a deploy has shown it;
 - that GitHub answers `304` to the conditional issue and comment list pages as
   documented, and that the reaction summary in the issue list moves the page's
   ETag when a vote changes.

@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { hasSessionHint } from './api';
-import { DEFAULT_REPO, DEFAULT_WEB } from '../../../tools/workshop/model/index.js';
+import { DEFAULT_REPO, repoAddress } from '../../../tools/workshop/model/index.js';
 import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
 import { changeLine, changePhrase, isDecided, relativeTime, shortDate } from './plan';
@@ -352,7 +352,7 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
   const n = row.issue !== null && row.issue > 0 ? row.issue : null;
   if (n === null && (row.kind !== 'entry' || !w.liveOk)) return null;
   const repo = w.live.state?.repo ?? DEFAULT_REPO;
-  const url = n === null ? null : (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`${DEFAULT_WEB}/${repo}/issues/${n}`);
+  const url = n === null ? null : (typeof detail === 'object' && safeHref(detail.url)) || safeHref(`${repoAddress(repo)}/issues/${n}`);
   const github = url ? <a className="ws-gh" href={url} target="_blank" rel="noopener noreferrer">GitHub #{n} ↗</a> : null;
   if (!w.liveOk) return <div className="ws-talk"><div className="ws-box">{github}</div></div>;
   // An entry with no thread yet has no issue to link to; the room of the link is kept, so the row taking its thread moves nothing.
@@ -422,7 +422,7 @@ function Talk({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
 }
 
 /** The commit on GitHub, for the link of a History line. */
-const commitLink = (repo: string, commit: string) => safeHref(`${DEFAULT_WEB}/${repo}/commit/${commit}`);
+const commitLink = (repo: string, commit: string) => safeHref(`${repoAddress(repo)}/commit/${commit}`);
 
 /** How many ghost lines hold the place of the changes while their chunk loads. */
 const HISTORY_GHOSTS = 12;
