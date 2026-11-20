@@ -30,6 +30,10 @@ What the owner took is the sentence: `means`, `says`, `asks`. How a property is 
 `at`) and which principle it follows from (`from`) are kept by whoever builds the check, as plain
 edits.
 
+A list file exists once it holds a sentence: the take that brings the first one creates it. An
+entry may use a word that is only put forward; it then means what the decision putting it forward
+says.
+
 ## What is to do
 
 | Kind | One is | File |
@@ -37,7 +41,12 @@ edits.
 | Decision | one choice about Silo: the question, and its answer once there is one | `decisions/<id>.json` at the root, `<part>/decisions/<id>.json` in a part |
 | Feature | one thing Silo does, to build | `<part>/features/<id>.json` |
 
-The file name is the id. The notes hold the research, the options and what was found.
+The file name is the id. The notes are plain prose: where the sentence comes from, the options,
+what was found, and the owner's own words when the owner said it.
+
+Before you add an entry, search `plan/` for one that already asks it. A narrower question about
+what an entry with no verdict already answers is an edit or a split of that entry, never a second
+entry.
 
 Until it is taken, a decision or a feature shows in full the sentences it would bring:
 
@@ -50,10 +59,13 @@ Until it is taken, a decision or a feature shows in full the sentences it would 
 |---|---|
 | absent | Not decided. A decision with no `answer` and nothing under `sets` is open |
 | `take` | The owner said yes to exactly what the entry shows: its sentence, what it sets and what it removes |
-| `drop` | The owner said no. The entry stays, and is skipped |
+| `drop` | The owner said no to what the entry shows. It settles nothing else. The entry stays, and is skipped |
 
 - Only `plan take` and `plan drop` write a verdict, on the owner's word. Taking writes what the
   entry sets into the lists and replaces `sets` by `adds`, the ids it brought, in one commit.
+- An answer with no verdict is only put forward: it binds nobody.
+- `plan take` and `plan drop` refuse while `plan/` has uncommitted changes: commit your other
+  edits of the plan first.
 - A yes to part of an entry splits it first: the part taken, and the rest still to decide.
 - An entry whose sentence changes loses its verdict. An entry with no verdict is edited freely.
 - A taken decision stays, as a built feature does. When a later entry puts a new sentence in
@@ -71,7 +83,9 @@ Until it is taken, a decision or a feature shows in full the sentences it would 
 order they are dealt with. Every decision and every feature is in exactly one stage.
 
 - The owner is shown the first entry with no verdict.
-- An entry that is not for now is moved to a later stage. No verdict means "later".
+- An entry that is not for now is moved to a later stage: its id moves in `order.json`, and that
+  edit is committed. There is no verdict for "later".
+- A new entry is placed after everything it needs, beside the entries of its topic.
 - An entry comes after everything it needs.
 - Features are sorted so that the most certain and most useful come first, and every cut from the
   top is a product.
@@ -124,9 +138,14 @@ In this order. A key in brackets is optional: it is absent, never empty.
 | Command | What |
 |---|---|
 | `plan` | What is next: the first entry with no verdict, the features ready to build, the features that wait and for what |
-| `plan show <id>` | One entry or one sentence, with what it links to and what binds it: the brief for whoever works on it |
+| `plan show <id>` | One entry or one sentence, with what it links to and what binds it: the brief for whoever works on it. For a part's id: what is next in that part |
 | `plan take <id>` | The owner's yes |
 | `plan drop <id>` | The owner's no |
 | `plan check` | The plan holds together. The merge gate and the site's build run it |
 
-Everything else is a plain edit of a file, which the check accepts or refuses.
+`plan` is `tools/plan/bin/plan`. Everything else is a plain edit of a file, which the check
+accepts or refuses.
+
+The tool names an entry's state. A decision is `open`, `answered` (it has an answer or sets
+sentences, and has no verdict), `taken` or `dropped`. A feature is `undecided`, `taken`, `ready`
+(taken, and everything it needs is done), `built` or `dropped`.
