@@ -1,0 +1,24 @@
+{
+  "asks": "Can anything change what the record already holds?",
+  "answer": "Nothing written inside a computer can change what the record already holds. A report adds a line; it never edits one.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "no-call-changes-the-record",
+      "says": "A fact or a report is never changed or removed by a call.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    },
+    {
+      "in": "record/properties",
+      "id": "restore-cannot-erase-the-record",
+      "says": "A restore or a drop cannot erase the record.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

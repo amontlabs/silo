@@ -1,0 +1,16 @@
+{
+  "asks": "What does the record do when a computer floods it?",
+  "answer": "A flood coarsens the present and never erases the past. Under pressure, a source merges new lines before writing them (per folder, per host). A merge never mixes facts with reports, and it is marked as a merge. Lines already written are never changed. Older ones are not evicted to make room, because an agent could then erase its trail by making noise.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "flood-never-removes-older-lines",
+      "says": "A flood from one computer never removes older facts and reports.",
+      "kind": "safety",
+      "from": "agent-is-hostile",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

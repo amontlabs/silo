@@ -1,0 +1,4 @@
+{
+  "asks": "In what form are facts and reports kept on disk?",
+  "answer": "Append-only files for facts and reports, compressed, with an index for queries."
+}

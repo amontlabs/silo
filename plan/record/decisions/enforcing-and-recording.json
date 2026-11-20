@@ -1,0 +1,15 @@
+{
+  "asks": "Does enforcing wait for the record to be written?",
+  "answer": "Enforcing does not depend on recording. The boundary enforces from the rules it was given. If the record cannot be written, facts and reports wait in a buffer of fixed size, and then a gap is recorded.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "enforcing-needs-no-record",
+      "says": "Enforcing does not depend on recording.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

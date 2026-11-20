@@ -1,0 +1,15 @@
+{
+  "asks": "Which rules may a driver enforce?",
+  "answer": "A driver enforces only rules the core issued, identified by a version. Each decision names the version. What is wanted and what is seen applies to rules as to everything else.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "drivers-enforce-issued-rules",
+      "says": "A driver enforces only rules the core issued, identified by a version.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

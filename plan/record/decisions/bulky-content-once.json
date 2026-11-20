@@ -1,0 +1,4 @@
+{
+  "asks": "How is bulky content stored?",
+  "answer": "Bulky content is stored once, by its hash, apart from the facts and reports that point to it: the text of a message, the output of a command, a recording."
+}

@@ -1,0 +1,15 @@
+{
+  "asks": "Does the record say who made each change?",
+  "answer": "Every change is recorded with who made it.",
+  "sets": [
+    {
+      "in": "record/properties",
+      "id": "every-change-has-its-author",
+      "says": "Every change is recorded with who made it.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

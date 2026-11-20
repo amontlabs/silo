@@ -1,0 +1,8 @@
+{
+  "asks": "How is the work in a computer shared out among the runs?",
+  "answer": "The books must balance. This is how the design avoids \"best effort\", which the owner wants avoided because it compounds.",
+  "adds": [
+    "books-balance"
+  ],
+  "verdict": "take"
+}
