@@ -25,7 +25,6 @@ interface RawEntry {
   asks?: string;
   answer?: string;
   needs?: string[];
-  suggest?: { verdict?: string; why?: string };
   verdict?: string;
   replaces?: string[];
   replaced_by?: string;
@@ -38,10 +37,9 @@ interface RawPlan {
   entries: Record<string, RawEntry>;
 }
 
-/** The map, and what the page may do beyond showing the plan: the owner's verdicts and entries' threads (both off by default). */
+/** The map, and what the page may do beyond showing the plan: entries' threads (off by default). */
 export interface BuildOptions {
   map?: MapLayout;
-  decide?: boolean;
   threads?: boolean;
 }
 
@@ -57,7 +55,7 @@ export function toNotes(plan: RawPlan): Notes {
 }
 
 /** The plan object of tools/plan/read, as the page holds it: decisions and features in the order of order.json. */
-export function toBuildData(plan: RawPlan, { map = SILO_MAP, decide = false, threads = false }: BuildOptions = {}): BuildData {
+export function toBuildData(plan: RawPlan, { map = SILO_MAP, threads = false }: BuildOptions = {}): BuildData {
   const entries: Entry[] = ordered(plan).map((raw) => ({
     id: raw.id,
     kind: raw.kind,
@@ -67,7 +65,6 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, decide = false, thr
     name: (raw.kind === 'decision' ? raw.asks : raw.name) ?? '',
     what: (raw.kind === 'decision' ? raw.answer : raw.what) ?? null,
     needs: Array.isArray(raw.needs) ? raw.needs : [],
-    suggest: raw.suggest ? { verdict: (raw.suggest.verdict ?? null) as Verdict | null, why: raw.suggest.why ?? null } : null,
     verdict: (raw.verdict ?? null) as Verdict | null,
     replaces: Array.isArray(raw.replaces) ? raw.replaces : [],
     replacedBy: typeof raw.replaced_by === 'string' ? raw.replaced_by : null,
@@ -79,7 +76,6 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, decide = false, thr
     stages: plan.stages.map((stage) => ({ id: stage.id, title: stage.title, line: stage.line })),
     entries,
     map,
-    decide,
     threads,
   };
 }
@@ -126,7 +122,7 @@ function planFilesIn(dir: string): Map<string, string> {
   }
 }
 
-/** Reads the plan of `repository` and returns the page's data for the real build: no verdicts, no threads. */
+/** Reads the plan of `repository` and returns the page's data for the real build: no threads. */
 export function readBuildData(repository: string, map: MapLayout = SILO_MAP): BuildData {
   return buildDataFrom(planFilesIn(planDir(repository)), { map }, (path) => existsSync(join(repository, path)));
 }

@@ -80,7 +80,6 @@ test('changes on GitHub show up after the next refresh; a deleted comment within
     const added = t.fake.addComment(1, 'visitor-fake', 'A new comment.');
     t.fake.editComment(1, t.fake.state.issues.get(1).comments[0].id, 'Edited.');
     t.fake.react(3, 'visitor-fake');
-    t.fake.state.issues.get(2).labels.push('verdict:take');
     const fresh = t.fake.addIssue({ title: 'New decision', labels: ['workshop:decision'] });
     const fresh2 = t.fake.addIssue({ title: 'New entry', body: 'x\n<!-- silo-entry: new-one -->', labels: ['workshop:entry'] });
     Object.assign(t.fake.state.issues.get(6), { state: 'closed', state_reason: 'not_planned', closed_at: new Date(t.clock.t).toISOString() });
@@ -88,7 +87,6 @@ test('changes on GitHub show up after the next refresh; a deleted comment within
     const state = (await settle(t)).json.issues;
     assert.equal(state[1].comments, 3);
     assert.equal(state[3].up, 1);
-    assert.equal(state[2].verdict, 'take');
     assert.equal(Object.hasOwn(state, fresh.number), false, 'the retired label makes no Workshop issue');
     assert.deepEqual([state[fresh2.number].kind, state[fresh2.number].entry], ['entry', 'new-one']);
     assert.deepEqual([state[6].state, state[6].reason], ['closed', 'not_planned']);
@@ -271,35 +269,5 @@ test('the refresh counts against the installation backstop', async () => {
     await withBudget({ refreshCallsPerMinute: 1 }, async () => {
       assert.equal((await t.client().call('GET', 'state')).status, 502);
     });
-  } finally { await t.close(); }
-});
-
-const building = (state, n) => Object.hasOwn(state[n] ?? {}, 'building');
-
-test('state carries building only on open taken entries with the label, from the same lists and calls', async () => {
-  const t = await setup();
-  try {
-    const c = t.client();
-    await c.call('GET', 'state');
-    const issues = t.fake.state.issues;
-    issues.get(2).labels.push('verdict:later');
-    for (const n of [1, 2, 3, 5, 6, 7]) issues.get(n).labels.push('workshop:building');
-    const closed = t.fake.addIssue({ title: 'Built', labels: ['workshop:entry', 'verdict:take', 'workshop:building'], state: 'closed', reason: 'completed' });
-    const before = github(t);
-    t.clock.t += 61_000;
-    const state = (await settle(t)).json.issues;
-    const calls = t.fake.state.requests.slice(before).filter((r) => r.kind !== 'app');
-    assert.equal(calls.length, 3, 'one page of each of the two lists and one comment call');
-    assert.equal(state[1].building, true, 'open, taken, labelled');
-    for (const n of [2, 3, 4, 5, 6, 7, closed.number]) assert.equal(building(state, n), false, `#${n}`);
-
-    const unchanged = t.fake.state.requests.length;
-    t.clock.t += 61_000;
-    assert.equal((await settle(t)).json.issues[1].building, true);
-    assert.ok(t.fake.state.requests.slice(unchanged).filter((r) => LIST.test(r.path)).every((r) => r.status === 304), 'unchanged lists still answer 304');
-
-    issues.get(1).labels = issues.get(1).labels.filter((name) => name !== 'workshop:building');
-    t.clock.t += 61_000;
-    assert.equal(building((await settle(t)).json.issues, 1), false, 'a removed label shows at the next refresh');
   } finally { await t.close(); }
 });

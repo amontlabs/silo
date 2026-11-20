@@ -26,7 +26,6 @@ export function mockApi(options: { state?: Route; me?: Me | null; routes?: Recor
     'GET me': () => (options.me ? ok(options.me) : refused(401, 'Not signed in.')),
     'GET issue': (url) => ok(detail(Number(url.searchParams.get('n')))),
     'GET vote': () => ok({ on: false }),
-    'POST verdict': () => ok(),
     'POST comment': () => ok(),
     'POST vote': () => ok(),
     'POST logout': () => ok(),
@@ -48,8 +47,8 @@ export function mockApi(options: { state?: Route; me?: Me | null; routes?: Recor
 }
 
 export const posts = (calls: Call[], path: string) => calls.filter((call) => call.method === 'POST' && call.path === path);
-export const owner: Me = { login: 'polarzero', avatar: '', canDecide: true };
-export const visitor: Me = { login: 'mara-k', avatar: '', canDecide: false };
+export const owner: Me = { login: 'polarzero', avatar: '' };
+export const visitor: Me = { login: 'mara-k', avatar: '' };
 
 export function rowButton(name: string) {
   return screen.getByRole('button', { name: new RegExp(`^${name}`) });

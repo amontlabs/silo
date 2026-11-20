@@ -32,7 +32,7 @@
 // refresh swaps in, the patches made since that refresh began are applied
 // again, and older ones are dropped, since GitHub's answer already holds them.
 import { GitHubError, nextLink } from './github.mjs';
-import { BUILDING_LABEL, clean, commentIssue, commentOf, cut, kindOf, labelNames, LABELS, readBody, reasonOf, verdictOf } from './issues.mjs';
+import { clean, commentIssue, commentOf, cut, kindOf, LABELS, readBody, reasonOf } from './issues.mjs';
 
 export const SNAPSHOT = {
   maxAge: 30_000,
@@ -72,7 +72,6 @@ function reduceIssue(issue) {
       title: clean(issue.title, { oneLine: true }),
       state: issue.state === 'closed' ? 'closed' : 'open',
       reason: reasonOf(issue),
-      verdict: verdictOf(issue),
       up: issue.reactions?.['+1'] ?? 0,
       comments: issue.comments ?? 0,
       author: clean(issue.user?.login ?? 'ghost', { oneLine: true }),
@@ -82,19 +81,15 @@ function reduceIssue(issue) {
     },
     body: text,
     url: issue.html_url,
-    building: kind === 'entry' && labelNames(issue).includes(BUILDING_LABEL),
   };
 }
 
-// An entry is being built while its issue is open, taken and carries the building label. This is
-// read when the answer is made, so a patch that closes the issue or changes the verdict hides it at once.
-// An entry also says how many of its held comments are the bot's history lines (`updates`), so the page
-// holds the right room for them while they load.
+// An entry says how many of its held comments are the bot's history lines (`updates`), so the page holds the
+// right room for them while they load.
 function summaryOf(entry) {
-  const building = entry.building && entry.summary.kind === 'entry' && entry.summary.state === 'open' && entry.summary.verdict === 'take';
   let updates = 0;
   if (entry.summary.kind === 'entry') for (const comment of entry.comments.values()) if (comment.change) updates += 1;
-  return building || updates ? { ...entry.summary, ...(building ? { building: true } : {}), ...(updates ? { updates } : {}) } : entry.summary;
+  return updates ? { ...entry.summary, updates } : entry.summary;
 }
 
 // The first line of a comment, cut, for the list of what happened lately.
@@ -155,7 +150,6 @@ export function createSnapshot({
       summary: { ...reduced.summary },
       body: reduced.body,
       url: reduced.url,
-      building: reduced.building,
       comments: previous ? new Map(previous.comments) : new Map(),
     };
   }

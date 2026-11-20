@@ -1,20 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
-import { App, OPEN_GUARD_MS } from './App';
+import { describe, expect, it } from 'vitest';
 import { apiConfig } from './api';
-import { buildData, issue, liveState } from './fixtures';
-import {
-  clock, detail, itemOf, mockApi, ok, owner, ownerOn, part, posts, refused, renderApp, rowButton, tile, visitor, wait,
-} from './test-support';
+import { detail, itemOf, mockApi, ok, owner, part, posts, refused, renderApp, rowButton, visitor } from './test-support';
 import type { Route } from './test-support';
-import type { Entry } from './plan';
 
-const away = { top: -900, bottom: -860, left: 0, right: 800, width: 800, height: 40, x: 0, y: -900, toJSON() {} } as DOMRect;
-const scrollIntoView = Element.prototype.scrollIntoView;
-afterEach(() => { Element.prototype.scrollIntoView = scrollIntoView; });
-
-// Signing in, writes, the owner's decisions and verdicts.
+// Signing in and writes.
 describe('a signed-in person', () => {
   it('sees their login, comments, votes and signs out', async () => {
     const calls = mockApi({ me: visitor });
@@ -119,114 +110,6 @@ describe('the old list of decisions', () => {
   });
 });
 
-describe('the owner deciding entries', () => {
-  it('sees how many wait on each part and tile, and the lowest one opens from the link', async () => {
-    mockApi({ me: owner });
-    await renderApp();
-    expect(part('part-b').querySelector('.ws-todo')).toHaveTextContent('2');
-    // A verdict written in the file never waits for the owner.
-    expect(part('part-a').querySelector('.ws-todo')).toBeNull();
-    expect(part('part-c').querySelector('.ws-todo')).toBeNull();
-    expect(tile('part-b')).toHaveTextContent('2 to decide');
-    expect(part('part-b')).toHaveAccessibleName(/, 2 to decide\./);
-    // The lowest entry waiting for the owner.
-    await userEvent.click(screen.getByRole('link', { name: '4 to decide' }));
-    await ownerOn('Create and delete a computer');
-    expect(location.hash).toBe('#part-b/create');
-    expect(within(itemOf('Create and delete a computer')).getByText('to decide')).toBeInTheDocument();
-    expect(document.activeElement).toBe(rowButton('Create and delete a computer'));
-    for (const name of [/^Take/, /^Drop$/]) expect(screen.getByRole('button', { name })).toBeInTheDocument();
-    // "Later" is not a verdict.
-    expect(screen.queryByRole('button', { name: /^Later$/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^(Refine|Confirm)/ })).not.toBeInTheDocument();
-    expect(screen.getByText('Suggested: take. Key records by id.')).toBeInTheDocument();
-  });
-
-  it('takes with Enter after the guard, then the next in the part, then the lowest anywhere', async () => {
-    const time = clock();
-    const calls = mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#part-b/create');
-    await renderApp();
-    await ownerOn('Create and delete a computer');
-    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-    expect(posts(calls, 'verdict')).toHaveLength(0);
-    time.advance(OPEN_GUARD_MS);
-    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter', repeat: true });
-    expect(posts(calls, 'verdict')).toHaveLength(0);
-    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }]);
-    expect(rowButton('Create and delete a computer')).toHaveAttribute('aria-expanded', 'false');
-    expect(itemOf('Create and delete a computer').querySelector('.ws-word')).toHaveTextContent('Saving…');
-    expect(rowButton('Run a command')).toHaveAttribute('aria-expanded', 'true');
-    // Saved: the issue records the take. The row's status stays its file's until `plan take` writes it there.
-    await waitFor(() => expect(itemOf('Create and delete a computer').querySelector('.ws-word')?.textContent).toBe(''));
-    expect(itemOf('Create and delete a computer')).toHaveClass('st-undecided');
-    expect(location.hash).toBe('#part-b/exec');
-    // A second fast Enter lands on the row that just opened and is refused.
-    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-    expect(posts(calls, 'verdict')).toHaveLength(1);
-    time.advance(OPEN_GUARD_MS);
-    await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
-    expect(posts(calls, 'verdict').map((call) => call.body)).toEqual([{ n: 12, verdict: 'take' }, { n: 13, verdict: 'drop' }]);
-    // Part B has none left: the lowest one anywhere opens, its part unfolds.
-    await ownerOn('Fork a computer');
-    expect(screen.getByRole('heading', { level: 2, name: 'Part D' })).toBeInTheDocument();
-    expect(location.hash).toBe('#part-d/fork');
-    // The guard holds across the part change.
-    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-    expect(posts(calls, 'verdict')).toHaveLength(2);
-  });
-
-  it('ignores Enter in a field and on other buttons', async () => {
-    const time = clock();
-    const calls = mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#part-b/create');
-    await renderApp();
-    await ownerOn('Create and delete a computer');
-    time.advance(OPEN_GUARD_MS);
-    fireEvent.keyDown(await screen.findByRole('textbox', { name: 'Comment' }), { key: 'Enter' });
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Drop' }), { key: 'Enter' });
-    expect(posts(calls, 'verdict')).toHaveLength(0);
-  });
-
-  it('brings the row made current into view when its verdict buttons are out of sight', async () => {
-    mockApi({ me: owner });
-    history.replaceState(null, '', '/workshop#part-b');
-    await renderApp();
-    const scrolled: string[] = [];
-    Element.prototype.scrollIntoView = function scroll(this: Element) { scrolled.push(this.closest('.ws-item')?.id ?? ''); };
-    await userEvent.click(rowButton('Create and delete a computer'));
-    await wait(OPEN_GUARD_MS + 50);
-    await userEvent.click(rowButton('Run a command'));
-    await wait(OPEN_GUARD_MS + 50);
-    // The first row's buttons are scrolled far above the window, then the row opened last is taken: the first
-    // becomes current and is brought back into view.
-    const first = itemOf('Create and delete a computer').querySelector('.ws-btn.go')?.closest('.ws-state') as HTMLElement;
-    first.getBoundingClientRect = () => away;
-    act(() => (document.activeElement as HTMLElement).blur());
-    scrolled.length = 0;
-    fireEvent.keyDown(document.body, { key: 'Enter' });
-    await wait(300);
-    expect(scrolled).toContain('entry-create');
-    expect(location.hash).toBe('#part-b/create');
-  });
-
-  it('counts only undecided entries with an issue, whatever their file says elsewhere', async () => {
-    const data = buildData();
-    const base = data.entries.find((entry) => entry.id === 'exec') as Entry;
-    // Entries whose file already holds a verdict never wait for the owner; undecided ones with an issue do.
-    const decided = (['take', 'drop'] as const).map((verdict, i): Entry => ({ ...base, position: 30 + i, id: `c-${verdict}`, name: `Decided ${verdict}`, verdict }));
-    const open = { ...base, position: 40, id: 'c-open', name: 'Open one', verdict: null } as Entry;
-    data.entries = [...data.entries, ...decided, open];
-    mockApi({ me: owner, state: () => ok(liveState(Object.fromEntries([...decided, open].map((feature, i) => [50 + i, issue({ entry: feature.id, title: feature.name })])))) });
-    history.replaceState(null, '', '/workshop#part-b');
-    render(<App data={data} />);
-    await waitFor(() => expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent(/to decide/));
-    // `create`, `exec` and the new open one wait; the decided ones count as what their file says.
-    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('1 planned · 3 to decide · 1 dropped');
-  });
-});
-
 describe('writes the server has not confirmed', () => {
   function deferred() {
     let release: (value: { status: number; body: unknown }) => void = () => {};
@@ -297,7 +180,6 @@ describe('writes the server has not confirmed', () => {
 describe('a refused write', () => {
   type Reply = { status: number; body: unknown };
   const STORE = 'silo-workshop-writes-2';
-  const ROW = 'Create and delete a computer';
   const VOTED = 'Run a command';
 
   // `make` sends the write; `during` is what the person sees while it is out; `undone` is what must be back
@@ -340,21 +222,6 @@ describe('a refused write', () => {
       undone: () => expect(screen.queryByText('Pause')).not.toBeInTheDocument(),
       typed: () => expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Pause'),
     },
-    {
-      name: 'verdict', as: owner, at: '#part-b/create', route: 'POST verdict', alert: new RegExp(ROW),
-      async make(time: ReturnType<typeof clock>) {
-        await ownerOn(ROW);
-        time.advance(OPEN_GUARD_MS);
-        await userEvent.click(screen.getByRole('button', { name: 'Drop' }));
-      },
-      during: () => {
-        expect(itemOf(ROW).querySelector('.ws-word')).toHaveTextContent('Saving…');
-        // The queue has moved on to the next row while this one saves.
-        expect(rowButton(VOTED)).toHaveAttribute('aria-expanded', 'true');
-      },
-      undone: () => expect(within(itemOf(ROW)).queryByText('dropped')).not.toBeInTheDocument(),
-      typed: null,
-    },
   ];
 
   const refusals: { name: string; reply: Reply | null; why: string | null; out?: boolean }[] = [
@@ -368,7 +235,6 @@ describe('a refused write', () => {
 
   describe.each(writes)('$name', (write) => {
     it.each(refusals)('answered by $name is told, undone and not kept', async ({ reply, why, out }) => {
-      const time = clock();
       const gate: { release: (answer: Reply) => void } = { release: () => {} };
       const calls = mockApi({
         me: write.as,
@@ -379,7 +245,7 @@ describe('a refused write', () => {
       if (!reply) apiConfig.writeTimeoutMs = 30;
       try {
         await renderApp();
-        await write.make(time);
+        await write.make();
         await waitFor(() => expect(posts(calls, write.route.replace('POST ', ''))).toHaveLength(1));
         write.during();
         if (reply) await act(async () => gate.release(reply));
@@ -397,21 +263,10 @@ describe('a refused write', () => {
           if (why) expect(alert).toHaveTextContent(why);
           write.typed?.();
         }
-        if (write.name === 'verdict' && !out) {
-          // The alert is in the entry it concerns, and that row is open again, with its address.
-          expect(document.getElementById('entry-create')).toContainElement(alert);
-          expect(rowButton(ROW)).toHaveAttribute('aria-expanded', 'true');
-          expect(location.hash).toBe('#part-b/create');
-        }
         write.undone();
         expect(screen.queryByText('Sending…')).not.toBeInTheDocument();
         expect(screen.queryByText('Saving…')).not.toBeInTheDocument();
         expect(localStorage.getItem(STORE)).toBeNull();
-        if (write.name === 'verdict') {
-          // The refused verdict is not sent again by a key press.
-          fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
-          expect(posts(calls, 'verdict')).toHaveLength(1);
-        }
       } finally {
         apiConfig.writeTimeoutMs = timeout;
       }

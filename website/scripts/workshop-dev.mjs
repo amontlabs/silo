@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Serves the built site (dist/) and the Workshop API on one port.
 //   node scripts/workshop-dev.mjs --fake [--port 4174]   against a built-in fake GitHub
-//   node scripts/workshop-dev.mjs --fake --progress      the same, in a later state: verdicts, entries being built, history
+//   node scripts/workshop-dev.mjs --fake --progress      the same, in a later state: verdicts in the history comments
 //   node scripts/workshop-dev.mjs [--port 4174]          against GitHub, from WORKSHOP_* variables
 // Run `npm run build` first. The site's origin is http://127.0.0.1:<port>.
 import { createReadStream } from 'node:fs';
@@ -121,7 +121,7 @@ export async function startDev({ fake = false, progress = false, planDir = PLAN,
 export function progressLine(plan) {
   const counts = { take: 0, later: 0, drop: 0 };
   for (const verdict of plan.verdicts.values()) counts[verdict] += 1;
-  return `Verdicts on the stages ${plan.stages.join(', ') || 'none'}: ${counts.take} taken, ${counts.later} later, ${counts.drop} dropped; being built: ${plan.building.size}; built: ${plan.built.size}.`;
+  return `Verdicts on the stages ${plan.stages.join(', ') || 'none'}: ${counts.take} taken, ${counts.later} later, ${counts.drop} dropped; built: ${plan.built.size}.`;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
@@ -141,7 +141,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   }
   const dev = await startDev({ fake, progress, port, distDir });
   if (!fake && !dev.config.configured) console.log('WORKSHOP_* variables are not set: the API answers 503 not_configured. Use --fake for a fake GitHub.');
-  console.log(`Workshop: ${dev.origin}/workshop${fake ? ` (fake GitHub at ${dev.fakeGitHub.url}; users owner-fake can decide, visitor-fake cannot)` : ''}`);
+  console.log(`Workshop: ${dev.origin}/workshop${fake ? ` (fake GitHub at ${dev.fakeGitHub.url}; users owner-fake and visitor-fake)` : ''}`);
   const stop = () => dev.close().then(() => process.exit(0));
   if (dev.progress) console.log(progressLine(dev.progress));
   process.on('SIGINT', stop);

@@ -331,17 +331,15 @@ describe('when the API is missing or slow', () => {
       await renderApp();
       expect(screen.getAllByText('Votes and comments are offline.').length).toBeGreaterThan(0);
       expect(part('part-a')).toHaveClass('s-next');
-      // Who is signed in does not depend on the live state; deciding does.
+      // Who is signed in does not depend on the live state.
       expect(screen.getByText('polarzero')).toBeInTheDocument();
       expect(screen.queryByText(/^Decisions/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/to decide/)).not.toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Suggest a feature' })).toBeInTheDocument();
       await userEvent.click(part('part-b'));
       expect(screen.queryByText(/^👍/)).not.toBeInTheDocument();
       await userEvent.click(rowButton('Create and delete a computer'));
       expect(screen.getByText('Not decided yet.')).toBeInTheDocument();
       expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
     });
   }
 

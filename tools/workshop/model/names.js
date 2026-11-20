@@ -1,4 +1,4 @@
-// The names of the Workshop on GitHub: labels, verdicts as labels name them, ids, defaults.
+// The names of the Workshop on GitHub: labels, ids, defaults.
 // Copied from the plan's names so that this folder stands alone: issues already on GitHub keep
 // these names, whatever the plan's files become.
 
@@ -8,28 +8,16 @@ export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 /** A day, `YYYY-MM-DD`, UTC. */
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-/** @typedef {'take' | 'later' | 'drop'} Verdict */
+/** The verdicts a history comment may record: the old `later` is still read. @typedef {'take' | 'later' | 'drop'} Verdict */
 export const VERDICTS = Object.freeze(['take', 'later', 'drop']);
 
 export const ENTRY_LABEL = 'workshop:entry';
 export const SUGGESTION_LABEL = 'workshop:suggestion';
-export const BUILDING_LABEL = 'workshop:building';
-export const verdictLabel = (verdict) => `verdict:${verdict}`;
 
-/** @param {string} label @returns {string | null} the verdict a label names, or null: only the three verdict labels, in any capitalisation. */
-export function labelVerdict(label) {
-  const match = /^verdict:(.+)$/.exec(String(label ?? '').toLowerCase());
-  return match && VERDICTS.includes(match[1]) ? match[1] : null;
-}
-
-/** Every label the Workshop's issues carry, read on the issues already on GitHub. */
+/** Every label the Workshop's issues carry. */
 export const LABELS = Object.freeze([
   { name: ENTRY_LABEL, color: '0e8a16', description: 'Workshop: an entry of the plan' },
   { name: SUGGESTION_LABEL, color: 'fbca04', description: 'Workshop: a feature suggested by a visitor' },
-  { name: verdictLabel('take'), color: '2da44e', description: "The owner's verdict: take" },
-  { name: verdictLabel('later'), color: '8c959f', description: "The owner's verdict: later" },
-  { name: verdictLabel('drop'), color: 'cf222e', description: "The owner's verdict: drop" },
-  { name: BUILDING_LABEL, color: '8250df', description: 'Being built now' },
 ]);
 
 /** The labels something still puts on an issue: the site labels each new suggestion. `workshop doctor` checks these. */

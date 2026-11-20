@@ -129,12 +129,6 @@ export async function startFake({ appId = '4242', slug = 'silo-workshop', repo =
     event(number, 'unlabeled', actorOf(login), { label: { name } });
   };
   const actorOf = (login) => (login === bot.login ? bot : { login, type: login.endsWith('[bot]') ? 'Bot' : 'User' });
-  /** The Workshop's click: the new verdict label first, then the others off. */
-  fake.setVerdictLabel = (number, verdict, login = 'owner') => {
-    const issue = fake.issues.get(number);
-    if (verdict) fake.label(number, `verdict:${verdict}`, login);
-    for (const name of issue.labels.filter((n) => /^verdict:/i.test(n) && !same(n, `verdict:${verdict}`))) fake.unlabel(number, name, login);
-  };
   fake.close = (number, reason, login = 'owner') => {
     const issue = fake.issues.get(number);
     issue.state = 'closed';

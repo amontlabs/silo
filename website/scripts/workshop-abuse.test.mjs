@@ -36,45 +36,18 @@ async function signInMany(t, prefix, n) {
   return clients;
 }
 
-test('visitors write 20 times a minute without a permission read; the owner, known to decide, writes 60 in one minute on one read', async () => {
+test('a person writes 20 times a minute, whoever they are', async () => {
   const t = await setup();
   try {
     assert.equal(BUDGET.writesPerMinute, 20);
     const visitors = await signInMany(t, 'visitor', 5);
-    for (const visitor of visitors) {
+    const owner = t.client();
+    await owner.signIn('owner-fake');
+    for (const person of [...visitors, owner]) {
       const answers = [];
-      for (let i = 0; i < 25; i += 1) answers.push((await visitor.call('POST', 'vote', { body: { n: entryNumber, on: i % 2 === 0 } })).status);
+      for (let i = 0; i < 25; i += 1) answers.push((await person.call('POST', 'vote', { body: { n: entryNumber, on: i % 2 === 0 } })).status);
       assert.deepEqual(answers, [...Array(20).fill(200), ...Array(5).fill(429)], answers.join(' '));
     }
-    assert.equal(count(t.fake, 'GET', /permission$/), 0, 'a write never reads the permission');
-    const owner = t.client();
-    await owner.signIn('owner-fake');
-    assert.equal((await owner.call('GET', 'me')).json.canDecide, true);
-    for (let i = 0; i < 60; i += 1) {
-      const response = await owner.call('POST', 'comment', { body: { n: entryNumber, text: `Note ${i}.` } });
-      assert.equal(response.status, 200, `comment ${i}: ${response.body}`);
-    }
-    assert.equal(count(t.fake, 'GET', /owner-fake\/permission$/), 1, 'no re-read per write');
-  } finally { await t.close(); }
-});
-
-test('a known decider re-reads on an allowance of its own; a GitHub refusal drops the cached yes', async () => {
-  const t = await setup();
-  try {
-    const owner = t.client();
-    await owner.signIn('owner-fake');
-    assert.equal((await owner.call('GET', 'me')).json.canDecide, true);
-    t.clock.t += 6 * 60_000;
-    const visitors = await signInMany(t, 'reader', BUDGET.permissionChecksPerMinute + 3);
-    for (const visitor of visitors) await visitor.call('GET', 'me');
-    assert.equal((await owner.call('GET', 'me')).json.canDecide, true, 'the general allowance is spent, the owner\'s is not');
-
-    t.fake.state.users.get('owner-fake').permission = 'read';
-    t.fake.state.hook = (r) => (r.kind === 'user' && r.method === 'POST' ? { status: 403 } : null);
-    const refused = await owner.call('POST', 'comment', { body: { n: entryNumber, text: 'Refused.' } });
-    t.fake.state.hook = null;
-    assert.equal(refused.status, 403, 'GitHub refuses the comment');
-    assert.equal((await owner.call('GET', 'me')).json.canDecide, false, 'read again after the refusal');
   } finally { await t.close(); }
 });
 
@@ -215,16 +188,13 @@ test('nothing raw is kept: 1,000 foreign issues and 1,000 large foreign comments
 test('a handler never waits past its deadline on shared work such as an installation token fetch', async () => {
   const t = await setup();
   try {
-    const owner = t.client();
-    await owner.signIn('owner-fake');
-    const cookie = [...owner.jar].map(([k, v]) => `${k}=${v}`).join('; ');
     const quick = variant(t, { deadlineMs: 300 });
     t.fake.state.hook = (r) => (r.path.endsWith('/access_tokens') ? { delay: 1500 } : null);
     quick.handle({ method: 'GET', url: '/api/workshop/state', headers: {}, body: '' }).catch(() => {});
     const started = Date.now();
-    const me = await quick.handle({ method: 'GET', url: '/api/workshop/me', headers: { cookie }, body: '' });
+    const second = await quick.handle({ method: 'GET', url: '/api/workshop/state', headers: {}, body: '' });
     assert.ok(Date.now() - started < 700, `${Date.now() - started} ms`);
-    assert.deepEqual([me.status, JSON.parse(me.body).canDecide], [200, false]);
+    assert.equal(second.status, 502);
     await wait(1600);
   } finally { t.fake.state.hook = null; await t.close(); }
 });
@@ -305,32 +275,6 @@ test('a request that changed GitHub and then failed still starts the refresh', a
     await t.workshop.idle();
     assert.equal(lists(t), before + 1, 'the new issue was refreshed');
   } finally { t.fake.state.hook = null; await t.close(); }
-});
-
-test('a GitHub 403 drops only a cached yes; a "no" read removes the account from the deciders', async () => {
-  const t = await setup();
-  try {
-    const visitor = t.client();
-    await visitor.signIn('visitor-fake');
-    assert.equal((await visitor.call('GET', 'me')).json.canDecide, false);
-    issueOf(t.fake, 3).locked = true;
-    for (let i = 0; i < 15; i += 1) assert.equal((await visitor.call('POST', 'comment', { body: { n: 3, text: `locked ${i}` } })).status, 403);
-    await visitor.call('GET', 'me');
-    assert.equal(count(t.fake, 'GET', /visitor-fake\/permission$/), 1, 'the cached "no" survives the 403s');
-
-    const owner = t.client();
-    await owner.signIn('owner-fake');
-    assert.equal((await owner.call('GET', 'me')).json.canDecide, true);
-    t.fake.state.users.get('owner-fake').permission = 'read';
-    t.clock.t += 6 * 60_000;
-    assert.equal((await owner.call('GET', 'me')).json.canDecide, false);
-    t.clock.t += 6 * 60_000;
-    const reads = count(t.fake, 'GET', /owner-fake\/permission$/);
-    await withBudget({ deciderChecksPerMinute: 0 }, async () => {
-      await owner.call('GET', 'me');
-    });
-    assert.equal(count(t.fake, 'GET', /owner-fake\/permission$/), reads + 1, 'read on the general allowance, no longer a decider');
-  } finally { await t.close(); }
 });
 
 test('made-up sign-ins cannot stop existing sessions from refreshing their token', async () => {
@@ -436,20 +380,19 @@ test('only Workshop issues are listed: foreign issues are neither fetched nor co
   } finally { await t.close(); }
 });
 
-test('a decider\'s session has 300 reads a minute', async () => {
-  assert.equal(BUDGET.deciderSessionReadsPerMinute, 300);
+test('a session has 60 reads a minute', async () => {
+  assert.equal(BUDGET.sessionReadsPerMinute, 60);
   const t = await setup();
   try {
     const owner = t.client();
     await owner.signIn('owner-fake');
-    assert.equal((await owner.call('GET', 'me')).json.canDecide, true);
-    for (let i = 0; i < 140; i += 1) {
+    for (let i = 0; i < 25; i += 1) {
       const response = await owner.call('GET', `vote?n=${entryNumber}`);
       assert.equal(response.status, 200, `read ${i}: ${response.body}`);
     }
     t.clock.t += 61_000;
     // A vote read is two reads: the issue, then its reactions.
-    await withBudget({ deciderSessionReadsPerMinute: 4 }, async () => {
+    await withBudget({ sessionReadsPerMinute: 4 }, async () => {
       for (let i = 0; i < 2; i += 1) assert.equal((await owner.call('GET', `vote?n=${entryNumber}`)).status, 200);
       const before = t.fake.state.requests.length;
       const refused = await owner.call('GET', `vote?n=${entryNumber}`);
@@ -471,21 +414,4 @@ test('a suggestion attempt counts only when the issue was created', async () => 
     for (let i = 0; i < 4; i += 1) statuses.push((await c.call('POST', 'suggest', { body: { title: `Works ${i}`, text: 'x' } })).status);
     assert.deepEqual(statuses, [200, 200, 200, 429]);
   } finally { t.fake.state.hook = null; await t.close(); }
-});
-
-test('the permission is read for the account\'s current login, never the cookie\'s', async () => {
-  const t = await setup();
-  try {
-    const owner = t.client();
-    await owner.signIn('owner-fake');
-    const user = t.fake.state.users.get('owner-fake');
-    t.fake.state.users.delete('owner-fake');
-    user.login = 'owner-renamed';
-    t.fake.state.users.set('owner-renamed', user);
-    for (const entry of t.fake.state.tokens.values()) if (entry.login === 'owner-fake') entry.login = 'owner-renamed';
-    t.fake.addUser('owner-fake', { permission: 'read' });
-    assert.equal((await owner.call('GET', 'me')).json.canDecide, true);
-    assert.equal(count(t.fake, 'GET', /owner-renamed\/permission$/), 1);
-    assert.equal(count(t.fake, 'GET', /collaborators\/owner-fake\/permission$/), 0);
-  } finally { await t.close(); }
 });

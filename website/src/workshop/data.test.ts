@@ -13,14 +13,14 @@ import { EXAMPLE_MAP } from './map-example';
 const SAMPLE = join(dirname(new URL(import.meta.url).pathname), '../../../tools/plan/test/fixtures/sample');
 
 describe('reading the plan files', () => {
-  it('reads decisions and features in the order of order.json, with their position, part, needs and suggestion', () => {
+  it('reads decisions and features in the order of order.json, with their position, part and needs', () => {
     const data = buildData();
     expect(data.entries).toHaveLength(FEATURES.length + DECISIONS.length);
     expect(data.entries.map((entry) => entry.position)).toEqual(data.entries.map((_, index) => index + 1));
     expect(data.entries.slice(0, 5).map((entry) => entry.id)).toEqual(['security-properly', 'one-host', 'plain-logs', 'core-in-zig', 'intake']);
     const engine = data.entries.find((entry) => entry.id === 'core');
-    expect(engine).toMatchObject({ kind: 'feature', part: 'part-a', stage: 'second', verdict: 'take', built: null, needs: [], suggest: { verdict: 'take', why: 'The core piece.' } });
-    expect(data.entries.find((entry) => entry.id === 'calls')?.suggest).toEqual({ verdict: 'take', why: 'It fits.' });
+    expect(engine).toMatchObject({ kind: 'feature', part: 'part-a', stage: 'second', verdict: 'take', built: null, needs: [] });
+    expect(engine).not.toHaveProperty('suggest');
     expect(data.entries.find((entry) => entry.id === 'create')?.verdict).toBeNull();
   });
 
@@ -42,9 +42,10 @@ describe('reading the plan files', () => {
     expect(JSON.stringify(buildData())).not.toContain('The engine owns every computer');
   });
 
-  it('turns the owner\'s verdicts and entries\' threads off in the real build, and on in the fixtures', () => {
-    expect(buildDataFrom(emptyPlanFiles())).toMatchObject({ decide: false, threads: false });
-    expect(buildData()).toMatchObject({ decide: true, threads: true });
+  it('turns entries\' threads off in the real build, and on in the fixtures', () => {
+    expect(buildDataFrom(emptyPlanFiles())).toMatchObject({ threads: false });
+    expect(buildData()).toMatchObject({ threads: true });
+    expect(buildData()).not.toHaveProperty('decide');
   });
 });
 
@@ -95,7 +96,7 @@ describe('reading plan/ from a repository folder', () => {
       const data = readBuildData(root, EXAMPLE_MAP);
       expect(data.entries).toHaveLength(FEATURES.length + DECISIONS.length);
       expect(data.parts).toHaveLength(PARTS.length);
-      expect(data).toMatchObject({ decide: false, threads: false });
+      expect(data).toMatchObject({ threads: false });
       expect(() => readBuildData(join(root, 'missing'))).toThrow('cannot be read');
     } finally {
       rmSync(root, { recursive: true, force: true });

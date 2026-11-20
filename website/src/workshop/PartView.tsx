@@ -46,14 +46,12 @@ export function Rows({ rows, ctx }: { rows: Row[]; ctx: EntryContext }) {
 const one = (n: number, words: string) => `${n} ${words}`.replace(/ /g, '\u00a0');
 const joined = (items: ReactNode[]) => items.flatMap((item, index) => (index ? ['\u00a0· ', item] : [item]));
 
-/** The counts of a part's features. A feature is counted once: one the owner has to decide comes off "not decided". */
-function tally(counts: Counts, toDecide: number): ReactNode[] {
-  const { built, planned, dropped } = counts;
-  const undecided = Math.max(0, counts.undecided - toDecide);
+/** The counts of a part's features. */
+function tally(counts: Counts): ReactNode[] {
+  const { built, planned, undecided, dropped } = counts;
   const items: ReactNode[] = [];
   if (built) items.push(one(built, 'built'));
   if (planned) items.push(one(planned, 'planned'));
-  if (toDecide) items.push(<i key="d" className="ws-late-o">{one(toDecide, 'to decide')}</i>);
   if (undecided) items.push(one(undecided, 'not decided'));
   if (dropped) items.push(one(dropped, 'dropped'));
   return joined(items);
@@ -70,8 +68,8 @@ function decisionTally(counts: DecisionCounts): ReactNode[] {
 }
 
 /** The tallies of a list of rows: its features', then its decisions'. */
-function Tallies({ rows, toDecide = 0 }: { rows: Row[]; toDecide?: number }) {
-  const features = tally(countRows(rows.filter((row) => row.of === 'feature')), toDecide);
+function Tallies({ rows }: { rows: Row[] }) {
+  const features = tally(countRows(rows.filter((row) => row.of === 'feature')));
   const decisions = decisionTally(countDecisions(rows.filter((row) => row.of === 'decision')));
   return (
     <>
@@ -81,7 +79,7 @@ function Tallies({ rows, toDecide = 0 }: { rows: Row[]; toDecide?: number }) {
   );
 }
 
-export function PartPlace({ group, toDecide, ctx, onBack, notes }: { group: PartGroup; toDecide: number; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
+export function PartPlace({ group, ctx, onBack, notes }: { group: PartGroup; ctx: EntryContext; onBack: () => void; notes?: ReactNode }) {
   return (
     <Block
       num={String(group.number).padStart(2, '0')} title={group.part.title} line={group.part.line} onBack={onBack} notes={notes}
@@ -90,7 +88,7 @@ export function PartPlace({ group, toDecide, ctx, onBack, notes }: { group: Part
       <div className="ws-pips" aria-hidden="true">
         {group.rows.filter((row) => row.of === 'feature' && row.status !== 'dropped').map((row) => <i className={pipClass(row)} key={row.key} />)}
       </div>
-      <Tallies rows={group.rows} toDecide={toDecide} />
+      <Tallies rows={group.rows} />
     </Block>
   );
 }

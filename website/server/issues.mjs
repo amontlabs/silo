@@ -1,9 +1,8 @@
-// How GitHub issues and comments become Workshop data: kinds, verdicts, the
+// How GitHub issues and comments become Workshop data: kinds, the
 // markers, and the cuts that bound every answer. Names, labels and markers come
 // from the Workshop's model (tools/workshop/model).
-import { BUILDING_LABEL, ENTRY_LABEL, labelVerdict, readChange, readEntryMarker, SUGGESTION_LABEL, VERDICTS, withoutMarkers } from '../../tools/workshop/model/index.js';
+import { ENTRY_LABEL, readChange, readEntryMarker, SUGGESTION_LABEL, withoutMarkers } from '../../tools/workshop/model/index.js';
 
-export { BUILDING_LABEL, VERDICTS };
 export const LABELS = { entry: ENTRY_LABEL, suggestion: SUGGESTION_LABEL };
 export const CUTS = { body: 20_000, comment: 5000 };
 const KIND_BY_LABEL = new Map(Object.entries(LABELS).map(([kind, label]) => [label, kind]));
@@ -52,12 +51,6 @@ export function kindOf(issue) {
   if (issue.pull_request) return null;
   const kinds = labelNames(issue).map((name) => KIND_BY_LABEL.get(name)).filter(Boolean);
   return kinds.length === 1 ? kinds[0] : null;
-}
-
-export function verdictOf(issue) {
-  const verdicts = new Set(labelNames(issue).map(labelVerdict).filter(Boolean));
-  for (const verdict of VERDICTS) if (verdicts.has(verdict)) return verdict;
-  return null;
 }
 
 export function reasonOf(issue) {

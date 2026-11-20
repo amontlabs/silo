@@ -292,8 +292,7 @@ describe('decisions from the plan', () => {
     expect(screen.getByText('Decided.')).toBeInTheDocument();
     await userEvent.click(notesButton());
     expect(await screen.findByText('Zig keeps the engine small.')).toBeInTheDocument();
-    // A decision is never offered for a verdict here, and no row lists "Decisions" any more.
-    expect(screen.queryByRole('button', { name: /^Take/ })).not.toBeInTheDocument();
+    // No row lists "Decisions" any more.
     await userEvent.click(rowButton('The engine runs on its own'));
     expect(screen.queryByRole('button', { name: /^Decisions/ })).not.toBeInTheDocument();
   });
@@ -302,8 +301,8 @@ describe('decisions from the plan', () => {
 describe('the status of an entry', () => {
   const built = (id: string) => buildData({ features: FEATURES.map((feature) => (feature.id === id ? { ...feature, verdict: 'take' as const, built: '2026-11-16' } : feature)) });
 
-  it('is built when the file says so, whatever the live verdict label says', async () => {
-    mockApi({ state: () => ok(liveState({ 14: issue({ entry: 'fork', verdict: 'drop', title: 'Fork a computer' }) })) });
+  it('is built when the file says so, whatever its live issue says', async () => {
+    mockApi({ state: () => ok(liveState({ 14: issue({ entry: 'fork', state: 'closed', reason: 'not_planned', title: 'Fork a computer' }) })) });
     history.replaceState(null, '', '/workshop#part-d/fork');
     await renderApp(built('fork'));
     await waitFor(() => expect(rowButton('Fork a computer')).toHaveAttribute('aria-expanded', 'true'));

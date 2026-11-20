@@ -1,6 +1,6 @@
 // What the page wrote itself, kept apart from what the server answered. A `state` answer can come from a cache up
 // to a day old, and the page shows the answer it remembers before any new one, so the page's own writes are kept
-// as a list, each with its time: values set on an issue (a verdict; a vote or comment count as the server answered
+// as a list, each with its time: values set on an issue (a vote or comment count as the server answered
 // it for that write; a whole issue for a new suggestion). Never a change to a count: the server patches its
 // snapshot in place, so an answer may already count a write made after its `fetchedAt`, and a change would count
 // it twice. The state shown is the newest answer with every write applied in order, except the writes the answer

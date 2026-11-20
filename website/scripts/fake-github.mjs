@@ -1,6 +1,6 @@
 // A fake GitHub for the Workshop's tests and for `workshop-dev.mjs --fake`:
 // the App and installation tokens, the user authorization flow with expiring
-// tokens and PKCE, and the issue, comment, reaction, label and permission
+// tokens and PKCE, and the issue, comment, reaction and label
 // endpoints the Workshop uses. State lives in memory.
 import { createHash, generateKeyPairSync, randomBytes, verify } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -292,15 +292,6 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (path === '/user' && who.kind === 'user') return json(res, 200, publicUser(who.user));
     if (path === `/repos/${repo}`) return json(res, 200, { id: FAKE_APP.repoId, full_name: repo });
 
-    const permission = path.match(new RegExp(`^/repos/${repo}/collaborators/([^/]+)/permission$`));
-    if (permission) {
-      if (who.kind !== 'installation') return json(res, 403, { message: 'Forbidden' });
-      const user = state.users.get(decodeURIComponent(permission[1]));
-      // GitHub answers 200 for any account: `read` on a public repository, or `none`.
-      const role = user?.permission ?? 'none';
-      return json(res, 200, { permission: role === 'maintain' ? 'write' : role, role_name: role, user: user ? publicUser(user) : null });
-    }
-
     if (path === `/repos/${repo}/issues` && req.method === 'GET') {
       const labels = (url.searchParams.get('labels') || '').split(',').filter(Boolean);
       const wanted = url.searchParams.get('state') || 'open';
@@ -462,13 +453,9 @@ export function seedDemo(fake, features = [], { progress = false, now = Date.now
   ];
   const plan = progress ? progressOf(list) : null;
   const numbers = new Map();
-  for (const [index, feature] of list.entries()) {
+  for (const feature of list) {
     const labels = ['workshop:entry'];
-    let verdict = index === 0 ? 'take' : index === 2 ? 'later' : null;
-    if (plan) verdict = plan.verdicts.get(feature.id) ?? null;
-    if (verdict) labels.push(`verdict:${verdict}`);
-    if (plan?.building.has(feature.id)) labels.push('workshop:building');
-    const closed = feature.built || plan?.built.has(feature.id) ? 'completed' : verdict === 'drop' && plan ? 'not_planned' : null;
+    const closed = feature.built || plan?.built.has(feature.id) ? 'completed' : plan?.verdicts.get(feature.id) === 'drop' ? 'not_planned' : null;
     const issue = fake.addIssue({ title: feature.name, body: `${feature.what}\n<!-- silo-entry: ${feature.id} -->`, labels, ...(closed ? { state: 'closed', reason: closed } : {}) });
     numbers.set(feature.id, issue.number);
   }
@@ -537,11 +524,10 @@ function seedHistory(fake, list, numbers, plan, now) {
 const VERDICT_NAMES = ['take', 'later', 'drop'];
 /** The first stages, whose entries are decided in the later state: the starter and the stage after it. */
 const DECIDED_STAGES = 6;
-const BUILDING_COUNT = 2;
 
 // A later state of the plan, in build order: the entries of the first six stages carry the verdict
-// of their file, else the one suggested for them; the first two taken are being built. Nothing is
-// built that the file does not say is built. Answers the verdicts, and the ids built and being built.
+// of their file, else the one suggested for them. Nothing is built that the file does not say is
+// built. Answers the verdicts, and the ids built.
 export function progressOf(features) {
   const stages = [...new Set(features.map((feature) => feature.stage).filter(Boolean))];
   const decided = new Set(stages.slice(0, DECIDED_STAGES));
@@ -551,6 +537,5 @@ export function progressOf(features) {
     if (VERDICT_NAMES.includes(verdict)) verdicts.set(feature.id, verdict);
   }
   const built = new Set(features.filter((feature) => feature.built).map((feature) => feature.id));
-  const building = new Set(features.filter((feature) => verdicts.get(feature.id) === 'take' && !built.has(feature.id)).slice(0, BUILDING_COUNT).map((feature) => feature.id));
-  return { stages: stages.slice(0, DECIDED_STAGES), verdicts, built, building };
+  return { stages: stages.slice(0, DECIDED_STAGES), verdicts, built };
 }

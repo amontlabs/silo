@@ -1,12 +1,11 @@
 // The browser side of the Workshop's HTTP contract (`/api/workshop/`).
-import type { Change, LiveState, Verdict } from './plan';
+import type { Change, LiveState } from './plan';
 
 export const API = '/api/workshop';
 
 export interface Me {
   login: string;
   avatar: string;
-  canDecide: boolean;
 }
 
 export interface Comment {
@@ -118,7 +117,6 @@ export const api = {
   /** `up`: the issue's 👍 count after the vote, when the server says. */
   vote: (n: number, on: boolean) => post<{ up?: unknown }>('vote', { n, on }),
   suggest: (title: string, text: string) => post<{ number: number }>('suggest', { title, text }),
-  verdict: (n: number, verdict: Verdict | null) => post<unknown>('verdict', { n, verdict }),
   logout: () => post<unknown>('logout', {}),
 };
 

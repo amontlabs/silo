@@ -68,10 +68,10 @@ export function rememberState(state: LiveState) {
 export function recallPerson(): Me | null {
   if (!hasSessionHint()) return null;
   const person = read(PERSON);
-  if (!isObject(person) || typeof person.login !== 'string' || !person.login || typeof person.avatar !== 'string' || typeof person.canDecide !== 'boolean') return null;
-  return { login: person.login, avatar: person.avatar, canDecide: person.canDecide };
+  if (!isObject(person) || typeof person.login !== 'string' || !person.login || typeof person.avatar !== 'string') return null;
+  return { login: person.login, avatar: person.avatar };
 }
 
 export function rememberPerson(person: Me | null) {
-  write(PERSON, person ? { login: person.login, avatar: person.avatar, canDecide: person.canDecide } : null);
+  write(PERSON, person ? { login: person.login, avatar: person.avatar } : null);
 }

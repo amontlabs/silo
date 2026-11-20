@@ -1,17 +1,17 @@
-// Development only (`?fixture=today` or `?fixture=later`, with `&as=owner` or `&as=visitor`): the page on a made-up
+// Development only (`?fixture=today` or `?fixture=later`, with `&as=in` to be signed in): the page on a made-up
 // live state, without the API. The page's memory of the last visit is off unless `&memory=1`, so `&delay=<ms>` shows
 // a first visit. main.tsx loads this only when import.meta.env.DEV, so a production build has none of it.
 import { changeComment } from '../../../tools/workshop/model/index.js';
 import { api } from './api';
 import { memoryConfig } from './memory';
 import type { Comment } from './api';
-import type { BuildData, Change, LiveIssue, LiveLatest, LiveState, Verdict } from './plan';
+import type { BuildData, Change, LiveIssue, LiveLatest, LiveState } from './plan';
 
 const hash = (text: string) => [...text].reduce((x, ch) => (x * 31 + ch.charCodeAt(0)) >>> 0, 7);
 const hex = (text: string) => Array.from({ length: 5 }, (_, i) => hash(`${text}:${i}`).toString(16).padStart(8, '0')).join('');
 
 function entryIssue(fields: Partial<LiveIssue>): LiveIssue {
-  return { kind: 'entry', entry: null, title: '', state: 'open', reason: null, verdict: null, up: 0, comments: 0, author: 'silo-workshop[bot]', bot: true, createdAt: '2026-11-14T10:00:00Z', closedAt: null, ...fields };
+  return { kind: 'entry', entry: null, title: '', state: 'open', reason: null, up: 0, comments: 0, author: 'silo-workshop[bot]', bot: true, createdAt: '2026-11-14T10:00:00Z', closedAt: null, ...fields };
 }
 
 const PEOPLE: [string, string][] = [
@@ -25,7 +25,7 @@ function threads(data: BuildData, when: 'today' | 'later'): Map<string, Comment[
   data.entries.forEach((feature, index) => {
     const comments: Comment[] = [];
     const at = (days: number) => new Date(Date.parse('2026-11-16T10:00:00Z') - days * 86_400_000 + index * 60_000).toISOString();
-    const verdict: Verdict | undefined = when === 'later' && index < 40 ? feature.suggest?.verdict ?? undefined : undefined;
+    const verdict = when === 'later' && index < 40 ? feature.verdict ?? undefined : undefined;
     const history = (fields: Change['fields'], extra: Partial<Change>, days: number) => {
       const change = { commit: hex(`${feature.id}${fields.join()}`), before: hex(`${feature.id}${fields.join()}-before`), fields, ...extra } as Change;
       comments.push({ id: `${feature.id}-h${comments.length}`, author: 'silo-workshop[bot]', avatar: '', bot: true, createdAt: at(days), text: changeComment(change), change });
@@ -45,13 +45,10 @@ export function fixtureState(data: BuildData, when: 'today' | 'later'): { state:
   const latest: LiveLatest[] = [];
   data.entries.forEach((feature, index) => {
     const thread = byFeature.get(feature.id) ?? [];
-    const marked = thread.find((comment) => comment.change?.fields.includes('verdict'))?.change?.verdict;
-    const verdict = marked === 'take' || marked === 'drop' ? marked : null;
     const n = 1000 + index;
     issues[n] = entryIssue({
-      entry: feature.id, title: feature.name, verdict, up: (hash(feature.id) % 9) + (index < 40 ? 3 : 0),
+      entry: feature.id, title: feature.name, up: (hash(feature.id) % 9) + (index < 40 ? 3 : 0),
       comments: thread.length, updates: thread.filter((comment) => comment.change).length,
-      ...(verdict === 'drop' ? { state: 'closed', reason: 'not_planned' } : {}),
     });
     comments.set(n, thread);
     for (const comment of thread) latest.push({ n, entry: feature.id, author: comment.author, bot: comment.bot, createdAt: comment.createdAt, ...(comment.change ? { change: comment.change } : { text: comment.text }) });
@@ -69,18 +66,18 @@ export function installFixture(data: BuildData, params: URLSearchParams): void {
   const delay = Number(params.get('delay') ?? 0);
   memoryConfig.on = params.get('memory') === '1';
   // The session marker the server would set: signed in as someone, or signed out.
-  document.cookie = as === 'owner' || as === 'visitor' ? 'workshop-hint=1; path=/' : 'workshop-hint=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+  document.cookie = as === 'in' ? 'workshop-hint=1; path=/' : 'workshop-hint=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   api.state = () => new Promise((resolve) => setTimeout(() => resolve(state), delay));
   const wait = <T,>(ms: number, value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
   // `me` waits as long as `delay`; `detail=<ms>` holds back each issue's comments.
   const detail = Number(params.get('detail') ?? 0);
   // `login=<name>` replaces the fake login, to see a long one.
   const login = params.get('login');
-  api.me = async () => wait(delay, as === 'owner' ? { login: login ?? 'owner-fake', avatar: '', canDecide: true } : as === 'visitor' ? { login: login ?? 'visitor-fake', avatar: '', canDecide: false } : null);
+  api.me = async () => wait(delay, as === 'in' ? { login: login ?? 'visitor-fake', avatar: '' } : null);
   api.issue = async (n: number) => wait(detail, {
     number: n, title: state.issues[n]?.title ?? '', body: '', url: `https://github.com/amontlabs/silo/issues/${n}`, up: state.issues[n]?.up ?? 0,
     comments: comments.get(n) ?? [],
   });
   api.myVote = async () => false;
-  for (const write of ['comment', 'vote', 'verdict', 'logout'] as const) api[write] = async () => ({});
+  for (const write of ['comment', 'vote', 'logout'] as const) api[write] = async () => ({});
 }

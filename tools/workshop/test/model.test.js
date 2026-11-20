@@ -3,24 +3,16 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  changeComment, compareLink, entryMarker, featureFileAt, isDate, labelVerdict, labelVerdicts, readBuildingComment, readChange, readEntryMarker, readSyncedMarker,
-  syncedMarker, wantedIssue, withoutMarkers, withSyncedMarker,
+  changeComment, compareLink, entryMarker, featureFileAt, isDate, readChange, readEntryMarker, withoutMarkers,
 } from '../model/index.js';
 
-test('entry and synced markers', () => {
-  const sha = 'a'.repeat(40);
-  const body = `Text\n\n${syncedMarker(sha)}\n${entryMarker('fork')}`;
+test('the entry marker', () => {
+  const body = `Text\n\n${entryMarker('fork')}`;
   assert.equal(readEntryMarker(body), 'fork');
   assert.equal(readEntryMarker(`${body}\nedited after`), null);
   assert.equal(readEntryMarker('Text'), null);
-  assert.equal(readSyncedMarker(body), sha);
-  assert.equal(readSyncedMarker('none'), null);
   assert.equal(withoutMarkers(body), 'Text');
   assert.throws(() => entryMarker('Bad Id'));
-  assert.throws(() => syncedMarker('abc'));
-  assert.equal(labelVerdict('verdict:take'), 'take');
-  assert.equal(labelVerdict('verdict:refine'), null);
-  assert.equal(labelVerdict('workshop:entry'), null);
 });
 
 test('history comment: written and read back, nothing from the plan in it', () => {
@@ -47,27 +39,7 @@ test('the links of a change: the comparison on GitHub and a feature file at a co
   assert.throws(() => featureFileAt('main', 'fork'));
 });
 
-test('wanted issue: title, body and state', () => {
-  const synced = 'd'.repeat(40);
-  const open = wantedIssue({ id: 'fork', name: 'Fork', what: 'Copy.', area: 'forks', suggested_in: 12 }, { synced, site: 'https://x.test' });
-  assert.equal(open.title, 'Fork');
-  assert.equal(open.body, `Copy.\n\nOn the Workshop: https://x.test/workshop#forks/fork\n\nSuggested in #12\n\n<!-- silo-synced: ${synced} -->\n<!-- silo-entry: fork -->`);
-  assert.equal(readEntryMarker(open.body), 'fork');
-  assert.deepEqual([open.state, open.stateReason], ['open', null]);
-  const built = wantedIssue({ id: 'fork', name: 'Fork', what: 'Copy.', area: 'forks', verdict: 'take', built: '2026-12-01' }, { synced });
-  assert.deepEqual([built.state, built.stateReason], ['closed', 'completed']);
-  assert.ok(!built.body.includes('Suggested in'));
-  const dropped = wantedIssue({ id: 'old', name: 'Old', what: 'Gone.', verdict: 'drop' }, { synced });
-  assert.deepEqual([dropped.state, dropped.stateReason], ['closed', 'not_planned']);
-  assert.ok(dropped.body.includes('/workshop#left/old'));
-  assert.equal(wantedIssue({ id: 'x', name: 'X', what: 'W', verdict: 'later' }, { synced }).state, 'open');
-});
-
-test('labels, claims and dates as the issues already on GitHub hold them', () => {
-  assert.deepEqual(labelVerdicts(['verdict:drop', 'Verdict:Take', 'verdict:refine', 'workshop:entry']), ['take', 'drop']);
-  assert.equal(readBuildingComment('Being built on mig/workshop.'), 'mig/workshop');
-  assert.equal(readBuildingComment('Being built on a branch with spaces.'), null);
-  assert.equal(withSyncedMarker(`Text\n\n${entryMarker('fork')}`, 'e'.repeat(40)), `Text\n\n<!-- silo-synced: ${'e'.repeat(40)} -->\n${entryMarker('fork')}`);
+test('dates', () => {
   assert.equal(isDate('2026-02-28'), true);
   assert.equal(isDate('2026-02-30'), false);
 });
@@ -75,7 +47,7 @@ test('labels, claims and dates as the issues already on GitHub hold them', () =>
 test('the model imports nothing outside its folder and no node: module', () => {
   const dir = join(import.meta.dirname, '..', 'model');
   const files = readdirSync(dir).filter((name) => name.endsWith('.js'));
-  assert.ok(files.length >= 4);
+  assert.ok(files.length >= 3);
   for (const name of files) {
     // Comments may name types with import('./x.js'); only code counts.
     const text = readFileSync(join(dir, name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');

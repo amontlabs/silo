@@ -94,7 +94,7 @@ async function hold(visit: Visit) {
     await act(async () => {
       // Old issues on GitHub whose markers name these entries, with votes and comments: never matched while threads are off.
       state.release(ok(liveState({
-        10: issue({ entry: 'core', title: 'The engine runs on its own', verdict: 'take', up: 8, comments: 5, updates: 1 }),
+        10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8, comments: 5, updates: 1 }),
         40: issue({ entry: 'core-in-zig', title: 'Which language is the core written in?', up: 6, comments: 4 }),
         41: issue({ entry: 'calls', title: 'Every call defined once', up: 3, comments: 2 }),
       })));
@@ -150,11 +150,6 @@ describe('placeholders while the page waits', () => {
     await release();
     expect(slots).toBeGreaterThan(0);
     expect(document.querySelectorAll('.ws-detail .ws-item .ws-vote')).toHaveLength(slots);
-    // What may not exist is not announced: no "to decide" before the owner is known.
-    leave();
-    const again = await hold(visitOf('rows and an open entry, state and me'));
-    expect(screen.queryByText(/to decide/)).not.toBeInTheDocument();
-    await again();
     leave();
     // The thread: one per comment and per history line it will hold.
     release = await hold(visitOf('the thread'));
@@ -219,7 +214,7 @@ describe('a row without a thread', () => {
     await act(async () => {
       // Old issues on GitHub whose markers name these entries, with votes and comments: never matched while threads are off.
       state.release(ok(liveState({
-        10: issue({ entry: 'core', title: 'The engine runs on its own', verdict: 'take', up: 8, comments: 5, updates: 1 }),
+        10: issue({ entry: 'core', title: 'The engine runs on its own', up: 8, comments: 5, updates: 1 }),
         40: issue({ entry: 'core-in-zig', title: 'Which language is the core written in?', up: 6, comments: 4 }),
         41: issue({ entry: 'calls', title: 'Every call defined once', up: 3, comments: 2 }),
       })));
@@ -227,8 +222,5 @@ describe('a row without a thread', () => {
     });
     await waitFor(() => expect(document.querySelector('.ws')).toHaveAttribute('data-live', 'answered'));
     nothingOfAThread();
-    // The owner sees no verdict button and no "to decide" in a build without verdicts.
-    expect(screen.queryByRole('button', { name: /^Take/ })).toBeNull();
-    expect(screen.queryByText(/to decide/)).toBeNull();
   });
 });

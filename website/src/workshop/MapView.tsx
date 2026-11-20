@@ -10,12 +10,12 @@ import type { PartGroup, PartState } from './plan';
 const SPOKEN: Record<PartState, string> = { done: 'done', next: 'next', planned: 'planned', open: 'not decided yet' };
 
 /** What a screen reader hears for a part or a tile. */
-export function spoken(group: PartGroup, toDecide: number): string {
+export function spoken(group: PartGroup): string {
   const features = group.counts.built + group.counts.planned + group.counts.undecided;
   const decisions = group.decisions.decided + group.decisions.undecided;
   const state = group.state === 'planned' ? stateWords(group) : SPOKEN[group.state];
   const counted = [`${features} ${features === 1 ? 'feature' : 'features'}`, ...(decisions ? [`${decisions} ${decisions === 1 ? 'decision' : 'decisions'}`] : [])];
-  return `${group.part.title}, ${state}, ${counted.join(', ')}${toDecide ? `, ${toDecide} to decide` : ''}. ${group.part.line}`;
+  return `${group.part.title}, ${state}, ${counted.join(', ')}. ${group.part.line}`;
 }
 
 /** A part's glyph, drawn from the layout's paths. */
@@ -56,11 +56,10 @@ export interface MapViewProps {
   groups: PartGroup[];
   folded: boolean;
   current: string | null;
-  toDecide: Map<string, number>;
   onOpen: (part: string) => void;
 }
 
-export function MapView({ layout, groups, folded, current, toDecide, onOpen }: MapViewProps) {
+export function MapView({ layout, groups, folded, current, onOpen }: MapViewProps) {
   const states = new Map(groups.map((group) => [group.part.id, group.state]));
   const byId = new Map(groups.map((group) => [group.part.id, group]));
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
@@ -119,13 +118,12 @@ export function MapView({ layout, groups, folded, current, toDecide, onOpen }: M
         {Object.entries(layout.places).map(([id, place]) => {
           const group = byId.get(id);
           if (!group) return null;
-          const todo = toDecide.get(id) ?? 0;
           const on = current === id;
           const classes = ['ws-geo', 'ws-part', `s-${group.state}`, place.inner ? 'inner' : '', place.tall ? 'tall' : '', place.wide ? 'wide' : '', on ? 'on' : ''].filter(Boolean).join(' ');
           return (
             <button
               type="button" key={id} data-part={id} className={classes} style={style(placeStyle(place.full, place.fold, place))}
-              aria-label={spoken(group, todo)} aria-current={on ? 'true' : undefined}
+              aria-label={spoken(group)} aria-current={on ? 'true' : undefined}
               onClick={() => { hideTip(); onOpen(id); }}
               onMouseEnter={(event) => showTip(event.currentTarget, group)} onMouseLeave={hideTip}
               onFocus={(event) => { if (focusVisible(event.currentTarget)) showTip(event.currentTarget, group); }} onBlur={hideTip}
@@ -133,7 +131,6 @@ export function MapView({ layout, groups, folded, current, toDecide, onOpen }: M
               <span className="ws-p-ttl">{group.part.title}</span>
               <span className="ws-p-st"><i className="ws-mk" /><span>{stateWords(group)}</span></span>
               {place.glyph ? <GlyphView glyph={place.glyph} /> : null}
-              {todo ? <b className="ws-todo ws-late-o">{todo}</b> : null}
             </button>
           );
         })}
