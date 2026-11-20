@@ -64,6 +64,7 @@ function decisionTally(counts: DecisionCounts): ReactNode[] {
   const items: ReactNode[] = [];
   if (counts.decided) items.push(one(counts.decided, 'decided'));
   if (counts.undecided) items.push(one(counts.undecided, 'not decided'));
+  if (counts.replaced) items.push(one(counts.replaced, 'replaced'));
   if (counts.dropped) items.push(one(counts.dropped, 'dropped'));
   return joined(items);
 }

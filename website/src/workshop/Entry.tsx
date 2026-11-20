@@ -9,6 +9,7 @@ import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
 import { awaitsVerdict, changesText, changeWords, isDecided, relativeTime, shortDate } from './plan';
 import type { Change, Row } from './plan';
+import { formatHash, placeOf } from './routes';
 import type { Detail, Workshop } from './useWorkshop';
 
 /** How long the closing body stays in place for its animation. */
@@ -31,7 +32,7 @@ export interface EntryContext {
 
 const WORDS: Partial<Record<Row['status'], string>> = { planned: 'planned', built: 'built', dropped: 'dropped' };
 /** A decision's word on its row: taken is decided; open or answered says nothing, as an undecided feature does. */
-const DECISION_WORDS: Partial<Record<Row['status'], string>> = { planned: 'decided', dropped: 'dropped' };
+const DECISION_WORDS: Partial<Record<Row['status'], string>> = { planned: 'decided', replaced: 'replaced', dropped: 'dropped' };
 
 export function pipClass(row: Row): string {
   return `ws-pip ${row.status}`;
@@ -43,7 +44,9 @@ function initials(login: string): string {
 }
 
 export function stateText(row: Row): string {
-  if (row.of === 'decision') return row.status === 'planned' ? 'Decided.' : row.status === 'dropped' ? 'Dropped.' : 'Not decided yet.';
+  if (row.of === 'decision') {
+    return row.status === 'planned' ? 'Decided.' : row.status === 'replaced' ? 'Replaced.' : row.status === 'dropped' ? 'Dropped.' : 'Not decided yet.';
+  }
   switch (row.status) {
     case 'planned': return 'Planned.';
     case 'built': {
@@ -231,6 +234,45 @@ function StateLine({ row, ctx }: { row: Row; ctx: EntryContext }) {
   const text = stateText(row);
   const tone = isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
   return <div className="ws-state"><span className={tone}>{text}</span></div>;
+}
+
+/**
+ * The lines of a decision's open view that name other decisions: the one that replaced it, and those it replaces
+ * (or would, while it has no verdict). A dropped decision names none of them.
+ */
+export function replaceLines(row: Row): { label: string; keys: string[] }[] {
+  const lines: { label: string; keys: string[] }[] = [];
+  if (row.replacedBy !== null) lines.push({ label: 'Replaced by', keys: [row.replacedBy] });
+  if (row.replaces.length) lines.push({ label: row.status === 'undecided' ? 'Would replace' : 'Replaces', keys: row.replaces });
+  return lines;
+}
+
+/** Each line links the question of each decision to where it lives; a plain click opens it here, a click with a modifier key is left to the browser. */
+function ReplaceLines({ row, ctx }: { row: Row; ctx: EntryContext }) {
+  const lines = replaceLines(row);
+  if (!lines.length) return null;
+  return (
+    <>
+      {lines.map((line) => (
+        <p className="ws-replace" key={line.label}>
+          <span>{line.label}</span>
+          {line.keys.map((key) => ctx.w.rowByKey.get(key)).filter((other): other is Row => other !== undefined).map((other, index) => (
+            <Fragment key={other.key}>
+              {index ? ' · ' : ' '}
+              <a
+                href={formatHash(placeOf(other), other.key)}
+                onClick={(event) => {
+                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  if (!ctx.open.has(other.key)) ctx.onToggle(other);
+                }}
+              >{other.name}</a>
+            </Fragment>
+          ))}
+        </p>
+      ))}
+    </>
+  );
 }
 
 /** Where the page reads a feature's file at a commit: raw.githubusercontent.com, or what the page names. */
@@ -441,6 +483,7 @@ function Body({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detai
       {row.kind === 'entry' ? <Extras row={row} ctx={ctx} /> : null}
       {w.rowNotice?.key === row.key ? <p className="ws-row-notice" role="alert">{w.rowNotice.text}</p> : null}
       <StateLine row={row} ctx={ctx} />
+      <ReplaceLines row={row} ctx={ctx} />
       {threaded(row, ctx) ? <Talk row={row} ctx={ctx} detail={detail} /> : null}
     </div>
   );

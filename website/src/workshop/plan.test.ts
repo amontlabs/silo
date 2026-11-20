@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildDataFrom } from './data';
 import { buildData, DECISIONS, FEATURES, issue, liveState, planFiles } from './fixtures';
-import { allRows, awaitsVerdict, buildPlan, changeLine, changeWords, entryStatuses, relativeTime, statusLine, stateWords } from './plan';
+import { allRows, awaitsVerdict, buildPlan, changeLine, changeWords, countDecisions, entryStatuses, isDecided, relativeTime, statusLine, stateWords } from './plan';
 import type { Change, Entry, PartGroup } from './plan';
 
 const names = (rows: { name: string }[]) => rows.map((row) => row.name);
@@ -14,7 +14,7 @@ describe('the plan by part', () => {
   it('gives each part its decisions and features in the order of order.json', () => {
     const plan = buildPlan(buildData(), null);
     expect(byPart(plan).get('part-a')!.rows.map((row) => [row.key, row.of])).toEqual([['entry-core-in-zig', 'decision'], ['entry-core', 'feature'], ['entry-calls', 'feature']]);
-    expect(byPart(plan).get('part-d')!.rows.map((row) => row.key)).toEqual(['entry-intake', 'entry-cli', 'entry-one-way', 'entry-fork', 'entry-checkpoint', 'entry-diff', 'entry-install-agent', 'entry-secrets']);
+    expect(byPart(plan).get('part-d')!.rows.map((row) => row.key)).toEqual(['entry-intake', 'entry-cli', 'entry-one-way', 'entry-tamper-proof-logs', 'entry-fork', 'entry-checkpoint', 'entry-diff', 'entry-install-agent', 'entry-secrets']);
   });
 
   it('draws a decision as a row: its asks the name, its answer the body', () => {
@@ -24,7 +24,7 @@ describe('the plan by part', () => {
 
   it('puts the decisions of the whole product in a place of their own', () => {
     const plan = buildPlan(buildData(), null);
-    expect(plan.product.map((row) => [row.key, row.status])).toEqual([['entry-security-properly', 'planned'], ['entry-one-host', 'undecided']]);
+    expect(plan.product.map((row) => [row.key, row.status])).toEqual([['entry-security-properly', 'planned'], ['entry-one-host', 'undecided'], ['entry-plain-logs', 'replaced']]);
     expect(allRows(plan).filter((row) => row.part === null && row.kind === 'entry')).toEqual(plan.product);
   });
 
@@ -47,7 +47,7 @@ describe('the plan by part', () => {
   });
 
   it('says a status in the page\'s words, through the plan\'s model', () => {
-    const entry = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'feature', part: 'p', stage: 's', position: 1, name: 'X', what: 'X.', needs: [], suggest: null, verdict: null, built: null, notes: false, ...fields });
+    const entry = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'feature', part: 'p', stage: 's', position: 1, name: 'X', what: 'X.', needs: [], suggest: null, verdict: null, replaces: [], replacedBy: null, built: null, notes: false, ...fields });
     const status = (fields: Partial<Entry>, others: Entry[] = []) => entryStatuses([entry(fields), ...others]).get('x');
     expect(status({})).toBe('undecided');
     expect(status({ verdict: 'take' })).toBe('planned');
@@ -65,10 +65,10 @@ describe('the plan by part', () => {
     const plan = buildPlan(buildData(), null);
     const partA = byPart(plan).get('part-a')!;
     expect(partA.counts).toEqual({ built: 0, planned: 2, undecided: 0, dropped: 0 });
-    expect(partA.decisions).toEqual({ decided: 1, undecided: 0, dropped: 0 });
+    expect(partA.decisions).toEqual({ decided: 1, undecided: 0, replaced: 0, dropped: 0 });
     const partE = byPart(plan).get('part-e')!;
     expect(partE.counts).toEqual({ built: 0, planned: 0, undecided: 7, dropped: 1 });
-    expect(partE.decisions).toEqual({ decided: 0, undecided: 1, dropped: 1 });
+    expect(partE.decisions).toEqual({ decided: 1, undecided: 1, replaced: 0, dropped: 1 });
     // A part that holds only decisions is open, with no feature counted.
     const onlyDecisions = buildPlan(buildData({ features: FEATURES.filter((feature) => feature.part !== 'part-a') }), null);
     expect(byPart(onlyDecisions).get('part-a')).toMatchObject({ counts: { built: 0, planned: 0, undecided: 0, dropped: 0 }, state: 'open', rows: [{ key: 'entry-core-in-zig' }] });
@@ -157,11 +157,12 @@ describe('history words', () => {
     expect(changeWords(change(['area']))).toEqual(['Moved to another part']);
     expect(changeWords(change(['suggest']))).toEqual(['Suggestion changed']);
     expect(changeWords(change(['surfaces']))).toEqual(['Surfaces changed']);
+    expect(changeWords(change(['replaces']))).toEqual(['Replaces changed']);
     expect(changeWords(change(['suggested_in']))).toEqual([]);
     expect(changeWords(change(['needs', 'verdict'], { verdict: 'take' }))).toEqual(['Needs changed', 'Taken']);
-    const every = change(['name', 'what', 'area', 'needs', 'surfaces', 'suggest', 'suggested_in', 'verdict', 'built', 'notes'], { verdict: 'take', built: '2026-11-16' });
-    expect(changeLine(every)).toBe('Text changed · Moved to another part · Needs changed · Surfaces changed · Suggestion changed · Taken · Built · Notes edited');
-    expect(changeLine(every)).not.toMatch(/[a-z]+_[a-z]+|\b(name|what|area|needs|surfaces|suggest|verdict|built|notes)\b/);
+    const every = change(['name', 'what', 'area', 'needs', 'surfaces', 'replaces', 'suggest', 'suggested_in', 'verdict', 'built', 'notes'], { verdict: 'take', built: '2026-11-16' });
+    expect(changeLine(every)).toBe('Text changed · Moved to another part · Needs changed · Surfaces changed · Replaces changed · Suggestion changed · Taken · Built · Notes edited');
+    expect(changeLine(every)).not.toMatch(/[a-z]+_[a-z]+|\b(name|what|area|needs|surfaces|replaces|suggest|verdict|built|notes)\b/);
   });
 
   it('says how long ago', () => {
@@ -204,5 +205,60 @@ describe('the line under the title', () => {
 
   it('is never moved by a decision: a taken decision is not a planned feature', () => {
     expect(line(buildData({ features: FEATURES.filter((feature) => feature.part !== 'part-a') }))).toBe('Starting with Part C.');
+  });
+});
+
+describe('a replaced decision', () => {
+  const decision = (fields: Partial<Entry>): Entry => ({ id: 'x', kind: 'decision', part: 'p', stage: 's', position: 1, name: 'X?', what: 'Yes.', needs: [], suggest: null, verdict: 'take', replaces: [], replacedBy: null, built: null, notes: false, ...fields });
+  const status = (fields: Partial<Entry>) => entryStatuses([decision(fields)]).get('x');
+
+  it('has the status replaced once its file names the decision that replaced it, and is decided before', () => {
+    expect(status({})).toBe('planned');
+    expect(status({ replacedBy: 'y' })).toBe('replaced');
+    // Not planned, not dropped, and no verdict makes it neither.
+    expect(status({ replacedBy: 'y', verdict: 'drop' })).toBe('dropped');
+    expect(status({ replaces: ['y'] })).toBe('planned');
+    expect(status({ replaces: ['y'], verdict: null })).toBe('undecided');
+  });
+
+  it('is read from the file by the build: replaces and replaced_by', () => {
+    const entries = buildData().entries;
+    expect(entries.find((entry) => entry.id === 'plain-logs')).toMatchObject({ replaces: [], replacedBy: 'signed-logs' });
+    expect(entries.find((entry) => entry.id === 'signed-logs')).toMatchObject({ replaces: ['plain-logs'], replacedBy: null });
+    expect(entries.find((entry) => entry.id === 'tamper-proof-logs')).toMatchObject({ replaces: ['signed-logs'], verdict: null });
+    expect(entries.find((entry) => entry.id === 'core-in-zig')).toMatchObject({ replaces: [], replacedBy: null });
+  });
+
+  it('is a row with the status replaced, which names the decision that replaced it', () => {
+    const plan = buildPlan(buildData(), null);
+    expect(plan.product.find((row) => row.key === 'entry-plain-logs')).toMatchObject({ status: 'replaced', replacedBy: 'entry-signed-logs', replaces: [] });
+    expect(byPart(plan).get('part-e')!.rows.find((row) => row.key === 'entry-signed-logs')).toMatchObject({ status: 'planned', replacedBy: null, replaces: ['entry-plain-logs'] });
+    expect(byPart(plan).get('part-d')!.rows.find((row) => row.key === 'entry-tamper-proof-logs')).toMatchObject({ status: 'undecided', replaces: ['entry-signed-logs'] });
+  });
+
+  it('is counted as replaced, never as decided', () => {
+    const plan = buildPlan(buildData(), null);
+    expect(countDecisions(plan.product)).toEqual({ decided: 1, undecided: 1, replaced: 1, dropped: 0 });
+    expect(countDecisions(byPart(plan).get('part-e')!.rows.filter((row) => row.of === 'decision'))).toEqual({ decided: 1, undecided: 1, replaced: 0, dropped: 1 });
+    expect(isDecided(plan.product[2])).toBe(false);
+    expect(isDecided(plan.product[0])).toBe(true);
+  });
+
+  it('stays at its place, and is not in the list of dropped entries', () => {
+    const plan = buildPlan(buildData(), null);
+    expect(plan.product.map((row) => row.key)).toEqual(['entry-security-properly', 'entry-one-host', 'entry-plain-logs']);
+    expect(plan.left.map((row) => row.key)).not.toContain('entry-plain-logs');
+    expect(allRows(plan).filter((row) => row.key === 'entry-plain-logs')).toHaveLength(1);
+  });
+
+  it('is offered no verdict', () => {
+    const plan = buildPlan(buildData(), liveState({ 40: issue({ entry: 'plain-logs' }) }));
+    for (const row of allRows(plan).filter((item) => item.of === 'decision')) expect(awaitsVerdict(row)).toBe(false);
+  });
+
+  it('is named by no dropped decision: a dropped one replaces nothing', () => {
+    const decisions = DECISIONS.map((item) => (item.id === 'tamper-proof-logs' ? { ...item, verdict: 'drop' as const } : item));
+    const row = buildPlan(buildData({ decisions }), null).parts.flatMap((group) => group.rows).find((item) => item.key === 'entry-tamper-proof-logs');
+    expect(row).toMatchObject({ status: 'dropped', replaces: [] });
   });
 });

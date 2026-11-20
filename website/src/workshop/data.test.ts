@@ -17,7 +17,7 @@ describe('reading the plan files', () => {
     const data = buildData();
     expect(data.entries).toHaveLength(FEATURES.length + DECISIONS.length);
     expect(data.entries.map((entry) => entry.position)).toEqual(data.entries.map((_, index) => index + 1));
-    expect(data.entries.slice(0, 5).map((entry) => entry.id)).toEqual(['security-properly', 'one-host', 'core-in-zig', 'intake', 'core']);
+    expect(data.entries.slice(0, 5).map((entry) => entry.id)).toEqual(['security-properly', 'one-host', 'plain-logs', 'core-in-zig', 'intake']);
     const engine = data.entries.find((entry) => entry.id === 'core');
     expect(engine).toMatchObject({ kind: 'feature', part: 'part-a', stage: 'second', verdict: 'take', built: null, needs: [], suggest: { verdict: 'take', why: 'The core piece.' } });
     expect(data.entries.find((entry) => entry.id === 'calls')?.suggest).toEqual({ verdict: 'take', why: 'It fits.' });

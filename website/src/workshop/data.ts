@@ -27,6 +27,8 @@ interface RawEntry {
   needs?: string[];
   suggest?: { verdict?: string; why?: string };
   verdict?: string;
+  replaces?: string[];
+  replaced_by?: string;
   built?: string;
 }
 
@@ -67,6 +69,8 @@ export function toBuildData(plan: RawPlan, { map = SILO_MAP, decide = false, thr
     needs: Array.isArray(raw.needs) ? raw.needs : [],
     suggest: raw.suggest ? { verdict: (raw.suggest.verdict ?? null) as Verdict | null, why: raw.suggest.why ?? null } : null,
     verdict: (raw.verdict ?? null) as Verdict | null,
+    replaces: Array.isArray(raw.replaces) ? raw.replaces : [],
+    replacedBy: typeof raw.replaced_by === 'string' ? raw.replaced_by : null,
     built: raw.built ?? null,
     notes: hasNotes(raw),
   }));

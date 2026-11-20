@@ -8,8 +8,11 @@ import type { MapLayout } from './map';
 
 export type { Change, Verdict };
 
-/** A row's status, in the page's words. A taken feature, ready or not, is planned; a taken decision is decided. */
-export type Status = 'built' | 'planned' | 'undecided' | 'dropped';
+/**
+ * A row's status, in the page's words. A taken feature, ready or not, is planned; a taken decision is decided, or
+ * replaced once a later decision has taken its place: a replaced decision is no longer in force.
+ */
+export type Status = 'built' | 'planned' | 'undecided' | 'dropped' | 'replaced';
 
 /** A decision or a feature, as the page holds it. */
 export interface Entry {
@@ -27,6 +30,10 @@ export interface Entry {
   needs: string[];
   suggest: { verdict: Verdict | null; why: string | null } | null;
   verdict: Verdict | null;
+  /** A decision's `replaces`: the ids of the decisions it takes the place of. */
+  replaces: string[];
+  /** A decision's `replaced_by`: the id of the decision that replaced it, written by `plan take`. */
+  replacedBy: string | null;
   /** The day it was built, `YYYY-MM-DD`. */
   built: string | null;
   /** Whether it has notes; their text is a chunk of its own (`virtual:workshop-notes`), loaded on demand. */
@@ -125,6 +132,10 @@ export interface Row {
   updates: number;
   /** The owner's verdict as its issue records it. It never changes the status, which comes from the file. */
   recorded: Verdict | null;
+  /** The keys of the rows of the decisions this one replaces, or would replace while it has no verdict. */
+  replaces: string[];
+  /** The key of the row of the decision that replaced this one. */
+  replacedBy: string | null;
   date: string | null;
   closedAt: string | null;
 }
@@ -146,10 +157,11 @@ export interface Counts {
   dropped: number;
 }
 
-/** A part's decisions: taken, open or answered, dropped. */
+/** A part's decisions: taken, open or answered, replaced, dropped. */
 export interface DecisionCounts {
   decided: number;
   undecided: number;
+  replaced: number;
   dropped: number;
 }
 
@@ -187,8 +199,9 @@ export interface Plan {
 /** How many stages make the first band of the sheet. */
 export const STARTER_STAGES = 5;
 
+/** Whether a row stands as decided: a replaced decision does not, whatever it once was. */
 export function isDecided(row: Row): boolean {
-  return row.status !== 'undecided';
+  return row.status !== 'undecided' && row.status !== 'replaced';
 }
 
 type ModelEntry = Parameters<typeof modelStatus>[0];
@@ -199,6 +212,8 @@ function modelEntry(entry: Entry): ModelEntry {
     ...(entry.verdict ? { verdict: entry.verdict } : {}),
     ...(entry.kind === 'decision' && entry.what !== null ? { answer: entry.what } : {}),
     ...(entry.built ? { built: entry.built } : {}),
+    // The model reads a replaced decision from this key alone.
+    ...(entry.kind === 'decision' && entry.replacedBy !== null ? { replaced_by: entry.replacedBy } : {}),
     needs: entry.needs,
   };
 }
@@ -210,6 +225,7 @@ export function entryStatuses(entries: Entry[]): Map<string, Status> {
     switch (modelStatus(models[entry.id], models)) {
       case 'built': return [entry.id, 'built'];
       case 'dropped': return [entry.id, 'dropped'];
+      case 'replaced': return [entry.id, 'replaced'];
       case 'taken': case 'ready': return [entry.id, 'planned'];
       default: return [entry.id, 'undecided'];
     }
@@ -226,22 +242,23 @@ function suggestionStatus(live: LiveIssue): Status {
 function baseRow(key: string, kind: RowKind, name: string): Row {
   return {
     key, kind, of: null, name, what: null, issue: null, status: 'undecided', stage: null, part: null, n: null, suggest: null, notes: false, built: null,
-    author: null, up: null, comments: null, updates: 0, recorded: null, date: null, closedAt: null,
+    author: null, up: null, comments: null, updates: 0, recorded: null, replaces: [], replacedBy: null, date: null, closedAt: null,
   };
 }
 
 /** @param rows the features of a part */
 export function countRows(rows: { status: Status }[]): Counts {
   const counts: Counts = { built: 0, planned: 0, undecided: 0, dropped: 0 };
-  for (const row of rows) counts[row.status] += 1;
+  for (const row of rows) if (row.status !== 'replaced') counts[row.status] += 1;
   return counts;
 }
 
 /** @param rows the decisions of a part */
 export function countDecisions(rows: { status: Status }[]): DecisionCounts {
-  const counts: DecisionCounts = { decided: 0, undecided: 0, dropped: 0 };
+  const counts: DecisionCounts = { decided: 0, undecided: 0, replaced: 0, dropped: 0 };
   for (const row of rows) {
     if (row.status === 'dropped') counts.dropped += 1;
+    else if (row.status === 'replaced') counts.replaced += 1;
     else if (row.status === 'undecided') counts.undecided += 1;
     else counts.decided += 1;
   }
@@ -316,6 +333,9 @@ export function buildPlan(data: BuildData, live: LiveState | null): Plan {
     row.suggest = entry.suggest;
     row.notes = entry.notes;
     row.built = entry.built;
+    // A dropped decision replaces nothing, so it names nothing.
+    row.replaces = entry.kind === 'decision' && statuses.get(entry.id) !== 'dropped' ? entry.replaces.map((id) => `entry-${id}`) : [];
+    row.replacedBy = entry.replacedBy === null ? null : `entry-${entry.replacedBy}`;
     row.issue = byEntry.get(entry.id) ?? null;
     row.status = statuses.get(entry.id) as Status;
     counts(row);
@@ -386,6 +406,7 @@ const PHRASES: Record<string, string> = {
   area: 'Moved to another part',
   suggest: 'Suggestion changed',
   surfaces: 'Surfaces changed',
+  replaces: 'Replaces changed',
   built: 'Built',
 };
 

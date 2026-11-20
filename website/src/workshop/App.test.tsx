@@ -26,7 +26,7 @@ describe('the map', () => {
     expect(part('part-b')).toHaveClass('s-open');
     expect(part('part-b')).toHaveAccessibleName('Part B, not decided yet, 2 features. A part that holds another.');
     expect(part('part-c')).toHaveAccessibleName('Part C, 1 planned, 1 feature. A part inside Part B.');
-    expect(part('part-d')).toHaveAccessibleName('Part D, not decided yet, 7 features, 1 decision. A part with copies behind it.');
+    expect(part('part-d')).toHaveAccessibleName('Part D, not decided yet, 7 features, 2 decisions. A part with copies behind it.');
     const key = screen.getByRole('list', { name: 'Key' });
     expect(within(key).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['next', 'planned', 'not decided yet']);
   });
@@ -275,8 +275,8 @@ describe('the bottom strip', () => {
     await userEvent.click(screen.getByRole('link', { name: 'The whole product' }));
     expect(location.hash).toBe('#product');
     expect(screen.getByRole('heading', { level: 2, name: 'The whole product' })).toHaveFocus();
-    expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['How is security built?', 'Which host runs Silo first?']);
-    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('Decisions: 1 decided · 1 not decided');
+    expect([...document.querySelectorAll('.ws-detail .ws-name')].map((name) => name.textContent)).toEqual(['How is security built?', 'Which host runs Silo first?', 'Which logs does Silo keep?']);
+    expect(document.querySelector('.ws-detail .ws-tally')).toHaveTextContent('Decisions: 1 decided · 1 not decided · 1 replaced');
   });
 
   it('opens the suggestions by votes, with a way to sign in for a visitor', async () => {
