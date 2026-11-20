@@ -52,7 +52,10 @@
   },
   {
     "word": "classifier",
-    "means": "Whatever gives an opinion."
+    "means": "Whatever gives an opinion.",
+    "not": [
+      "judge"
+    ]
   },
   {
     "word": "rule",
@@ -60,7 +63,10 @@
   },
   {
     "word": "precaution",
-    "means": "A precaution is triggered by a report or an opinion. It can be wrong, so it takes only protective actions."
+    "means": "A precaution is triggered by a report or an opinion. It can be wrong, so it takes only protective actions.",
+    "not": [
+      "watch"
+    ]
   },
   {
     "word": "granting",
@@ -79,7 +85,10 @@
   },
   {
     "word": "synchronous",
-    "means": "The request waits at the boundary for the answer."
+    "means": "The request waits at the boundary for the answer.",
+    "not": [
+      "hook"
+    ]
   },
   {
     "word": "asynchronous",

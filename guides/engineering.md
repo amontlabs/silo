@@ -98,6 +98,18 @@ The examples come from Silo's own design. Its words are in `plan/words.json`.
      "gap"."
 8. **When a word or a sentence changes, it changes everywhere in the same change.** Search for the
    old one.
+9. **A word listed under `not` is not written for that concept, and is not proposed for it
+   again.** In `plan/words.json`, a word's `not` reads "do not write these when you mean this".
+   Read it before you name something, and look for those words when you review. No check looks
+   for them, and a listed word keeps its everyday meaning.
+   - Wrong: "a judge gives an opinion". Right: "a classifier gives an opinion".
+   - Fine: "faster to judge", which is not about a classifier.
+10. **A word goes under `not` by judgement, not each time a wording changes.** List it when a
+    writer would naturally reach for it to name the concept, and it would be wrong there:
+    inaccurate, or read as something else.
+    - Listed: "block" under "deny", because it was read as "stop".
+    - Not listed: "corroborated" under "matched", which was accurate and only less plain. "The
+      thing" under "request", which nobody would take for a name.
 
 ## Stating it
 

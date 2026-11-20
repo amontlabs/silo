@@ -62,7 +62,8 @@ the whole machine"; "a snapshot of main's disk"; "sudo"; "a Linux server with KV
 case says more than an adjective: "two agents can listen on port 3000".
 
 The terms are in [`plan/words.json`](../plan/words.json), and the measured facts in the plan's
-files under [`plan/`](../plan/). Take them from there, and state nothing the plan does not support. One precise term per idea is
+files under [`plan/`](../plan/). Take them from there, and state nothing the plan does not support. A term's `not` lists the
+words not to write in its place. One precise term per idea is
 enough: a sentence stacked with technical words reads as badly as a slogan.
 
 ## What not to say

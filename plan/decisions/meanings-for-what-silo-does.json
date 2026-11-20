@@ -12,7 +12,10 @@
     {
       "in": "words",
       "word": "precaution",
-      "means": "Data you set. It is triggered by a report or an opinion, so it can be wrong, and it takes only protective actions."
+      "means": "Data you set. It is triggered by a report or an opinion, so it can be wrong, and it takes only protective actions.",
+      "not": [
+        "watch"
+      ]
     },
     {
       "in": "words",

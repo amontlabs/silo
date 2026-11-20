@@ -5,10 +5,7 @@
     {
       "in": "words",
       "word": "unverified",
-      "means": "Said of a report Silo could not check.",
-      "not": [
-        "as told"
-      ]
+      "means": "Said of a report Silo could not check."
     }
   ]
 }
