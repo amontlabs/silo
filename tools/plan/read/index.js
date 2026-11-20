@@ -12,7 +12,7 @@
 // position counts from 1 across the flattened order; notes is the text of <id>.md, absent without one.
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { wordId } from '../model/names.js';
 
@@ -28,28 +28,65 @@ export class PlanError extends Error {
 /** A path with a part whose name starts with a dot (`.DS_Store`, `features/.x.json`): not a file of the plan, ignored. @param {string} rel */
 export const isHidden = (rel) => rel.split('/').some((part) => part.startsWith('.'));
 
+/** A symbolic link under `plan/`: an error, never followed (it could lead outside `plan/`). @param {string} rel */
+const linkProblem = (rel) => ({ file: `plan/${rel}`, field: '-', message: 'a symbolic link', fix: 'replace it with the file or folder itself' });
+
+/** Bytes that are not valid UTF-8 are an error, never a replacement character; a BOM is kept as it is. */
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/** A file whose bytes are not valid UTF-8. @param {string} rel */
+const encodingProblem = (rel) => ({ file: `plan/${rel}`, field: '-', message: 'not valid UTF-8', fix: 'save it as UTF-8' });
+
+/**
+ * The text of a file of the plan, decoded strictly: invalid bytes push a problem and give undefined.
+ * @param {Uint8Array} bytes @param {string} rel @param {any[]} problems
+ */
+function decode(bytes, rel, problems) {
+  try {
+    return UTF8.decode(bytes);
+  } catch {
+    problems.push(encodingProblem(rel));
+    return undefined;
+  }
+}
+
 /**
  * Every file under a plan directory, by its path relative to it (`engine/features/fork.json`).
+ * A symbolic link, the directory itself or anything under it, whatever its name, is never followed:
+ * it throws a PlanError. A path with a dot-named part is looked at for links, never read. A file
+ * that is not valid UTF-8 throws a PlanError too.
  * @param {string} dir @returns {Map<string, string>}
  */
 export function loadDir(dir) {
   /** @type {Map<string, string>} */
   const files = new Map();
+  if (lstatSync(dir).isSymbolicLink()) throw new PlanError([linkProblem('')]);
+  /** @type {{ file: string, field: string, message: string, fix: string }[]} */
+  const problems = [];
   const walk = (path, prefix) => {
     for (const name of readdirSync(path).sort()) {
-      if (name.startsWith('.')) continue;
       const full = join(path, name);
       const rel = prefix ? `${prefix}/${name}` : name;
-      if (statSync(full).isDirectory()) walk(full, rel);
-      else files.set(rel, readFileSync(full, 'utf8'));
+      // Looked at before the name: a link is an error whatever it is called.
+      const stat = lstatSync(full);
+      if (stat.isSymbolicLink()) problems.push(linkProblem(rel));
+      else if (stat.isDirectory()) walk(full, rel);
+      else if (!isHidden(rel)) {
+        const text = decode(readFileSync(full), rel, problems);
+        if (text !== undefined) files.set(rel, text);
+      }
     }
   };
   walk(dir, '');
+  if (problems.length) throw new PlanError(problems);
   return files;
 }
 
 /**
- * Every file under `plan/` at a git ref of a repository.
+ * Every file under `plan/` at a git ref of a repository. Names are read NUL-separated and the
+ * blobs by their object id, so a path holding a newline is read like any other. A symbolic link
+ * or a submodule under `plan/`, whatever its name, throws a PlanError, and so does a plan folder
+ * that is itself a link or not a folder, and a file that is not valid UTF-8.
  * @param {string} repo a directory inside the repository @param {string} ref @param {string} [prefix] the plan's folder in the tree
  * @returns {Map<string, string>}
  */
@@ -59,19 +96,43 @@ export function loadRef(repo, ref, prefix = 'plan') {
   const top = inRepo(repo, ['rev-parse', '--show-toplevel']).toString().trim();
   const git = (args, input) => inRepo(top, args, input);
   const commit = git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).toString().trim();
-  const names = git(['ls-tree', '-r', '-z', '--name-only', commit, '--', `${prefix}/`]).toString().split('\0').filter((name) => name && !isHidden(name.slice(prefix.length + 1)));
+  // The plan folder and each folder above it must be a folder: through a link, `ls-tree -r` sees nothing and the plan would read empty.
+  const parts = prefix.split('/');
+  for (let depth = 1; depth <= parts.length; depth += 1) {
+    const path = parts.slice(0, depth).join('/');
+    const [record] = git(['ls-tree', '-z', commit, '--', path]).toString('utf8').split('\0').filter(Boolean);
+    if (!record) break;
+    const [mode, type] = record.slice(0, record.indexOf('\t')).split(' ');
+    if (mode === '120000') throw new PlanError([{ file: `${path}/`, field: '-', message: 'a symbolic link', fix: 'replace it with the folder itself' }]);
+    if (type !== 'tree') throw new PlanError([{ file: `${path}/`, field: '-', message: `a ${type}, not a folder`, fix: 'make it the folder of the plan' }]);
+  }
+  // Each record: `<mode> <type> <oid>\t<path>`.
+  const all = git(['ls-tree', '-r', '-z', commit, '--', `${prefix}/`]).toString('utf8').split('\0').filter(Boolean).map((record) => {
+    const tab = record.indexOf('\t');
+    const [mode, type, oid] = record.slice(0, tab).split(' ');
+    return { mode, type, oid, name: record.slice(tab + 1).slice(prefix.length + 1) };
+  });
+  // Looked at before the name: a link or a submodule is an error whatever it is called.
+  const links = all.filter((record) => record.type !== 'blob' || record.mode === '120000');
+  if (links.length) throw new PlanError(links.map((record) => (record.mode === '120000' ? linkProblem(record.name) : { file: `plan/${record.name}`, field: '-', message: `a ${record.type}, not a file`, fix: 'replace it with the files themselves' })));
+  const records = all.filter((record) => !isHidden(record.name));
   /** @type {Map<string, string>} */
   const files = new Map();
-  if (!names.length) return files;
-  const out = git(['cat-file', '--batch'], names.map((name) => `${commit}:${name}\n`).join(''));
+  if (!records.length) return files;
+  const out = git(['cat-file', '--batch'], records.map((record) => `${record.oid}\n`).join(''));
+  /** @type {{ file: string, field: string, message: string, fix: string }[]} */
+  const problems = [];
   let at = 0;
-  for (const name of names) {
+  for (const { name, oid } of records) {
     const end = out.indexOf(10, at);
-    const header = out.subarray(at, end).toString();
-    const size = Number(header.split(' ')[2]);
-    files.set(name.slice(prefix.length + 1), out.subarray(end + 1, end + 1 + size).toString('utf8'));
+    const [got, , sizeText] = out.subarray(at, end).toString().split(' ');
+    const size = Number(sizeText);
+    if (got !== oid || !Number.isInteger(size)) throw new Error(`git cat-file gave an unexpected answer for plan/${name}`);
+    const text = decode(out.subarray(end + 1, end + 1 + size), name, problems);
+    if (text !== undefined) files.set(name, text);
     at = end + 1 + size + 1;
   }
+  if (problems.length) throw new PlanError(problems);
   return files;
 }
 
@@ -159,7 +220,7 @@ export function parsePlan(files) {
 
   const plan = {
     parts: objects(parts),
-    words: objects(words).map((word) => ({ ...word, id: wordId(word.word) })),
+    words: objects(words).map((word) => ({ ...word, id: typeof word.word === 'string' ? wordId(word.word) : null })),
     principles: objects(principles),
     properties,
     stages,

@@ -3,15 +3,16 @@
 // Workshop can call them as they are.
 
 import { checkFiles } from '../check/index.js';
-import { canonicalDecision, canonicalFeature, canonicalPrinciple, canonicalProperty, canonicalText, canonicalWord } from '../model/canonical.js';
+import { canonicalDecision, canonicalFeature, canonicalOrder, canonicalPrinciple, canonicalProperty, canonicalText, canonicalWord } from '../model/canonical.js';
 import { listKind, wordId } from '../model/names.js';
+import { hasSets } from '../model/status.js';
 import { parsePlan } from '../read/index.js';
 
 /** @typedef {{ file: string, field: string, message: string, fix: string }} Problem */
 /**
  * What a verdict did. `changed` holds the new text of each file that changed, by its path
- * relative to `plan/`; it is empty unless `status` is `done`.
- * @typedef {{ status: 'done' | 'already' | 'refused', changed: Map<string, string>, message: string, errors?: Problem[] }} Outcome
+ * relative to `plan/`, and null for a file to delete; it is empty unless `status` is `done`.
+ * @typedef {{ status: 'done' | 'already' | 'refused', changed: Map<string, string | null>, message: string, errors?: Problem[] }} Outcome
  */
 /** @typedef {{ exists?: (path: string) => boolean }} Options */
 
@@ -51,13 +52,16 @@ function load(files, id, options) {
 /**
  * The changed files, after checking the plan they make. A result that fails the check is
  * refused and nothing is written.
- * @param {Map<string, string>} files @param {Map<string, string>} changed @param {Options} options @param {string} message
+ * @param {Map<string, string>} files @param {Map<string, string | null>} changed @param {Options} options @param {string} message
  * @returns {Outcome}
  */
 function finish(files, changed, options, message) {
-  for (const [name, text] of changed) if (files.get(name) === text) changed.delete(name);
+  for (const [name, text] of changed) if (text === null ? !files.has(name) : files.get(name) === text) changed.delete(name);
   const after = new Map(files);
-  for (const [name, text] of changed) after.set(name, text);
+  for (const [name, text] of changed) {
+    if (text === null) after.delete(name);
+    else after.set(name, text);
+  }
   const { errors } = checkFiles(after, options);
   if (errors.length) return refused(`the plan would fail the check (${errors.length} error${errors.length === 1 ? '' : 's'}); nothing was written`, errors);
   return { status: 'done', changed, message };
@@ -70,7 +74,9 @@ const entryText = (kind, value) => canonicalText(kind === 'decision' ? canonical
  * The owner's yes. Puts each `sets` item in its list (the same id is replaced whole, in place; a
  * new id is appended), deletes each sentence `removes` names, takes those ids out of every other
  * entry's `adds`, and writes `adds` and `"verdict": "take"` in the entry in place of `sets` and
- * `removes`.
+ * `removes`. A taken decision left with neither an `answer` nor an `adds` brought nothing but
+ * sentences that are now replaced: it is replaced whole, its file, its notes and its place in
+ * `order.json` deleted. The take is refused when another entry needs such a decision.
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
  */
 export function take(files, id, options = {}) {
@@ -80,7 +86,7 @@ export function take(files, id, options = {}) {
   if (entry.built) return refused(`${id} is built`);
   if (entry.verdict === 'take') return { status: 'already', changed: new Map(), message: `${id} is already taken` };
   if (entry.kind === 'decision') {
-    if (entry.answer === undefined) return refused(`${id} has no answer: write its answer first`);
+    if (entry.answer === undefined && !hasSets(entry)) return refused(`${id} has no answer and sets nothing: write its answer first`);
     const waiting = (entry.needs ?? []).filter((need) => plan.entries[need]?.kind === 'decision' && plan.entries[need].verdict !== 'take');
     if (waiting.length) return refused(`${id} needs ${waiting.join(', ')}, not taken yet`);
   }
@@ -122,19 +128,38 @@ export function take(files, id, options = {}) {
     if (found) found.list.splice(found.index, 1);
   }
 
-  /** @type {Map<string, string>} */
+  /** @type {Map<string, string | null>} */
   const changed = new Map();
   for (const [name, list] of lists) changed.set(name, canonicalText(list.map((item) => (isObject(item) ? CANONICAL_SENTENCE[fileKind(name)](item) : item))));
 
   // An id this entry brings or takes out no longer belongs to the entry that brought it before.
   const moved = new Set([...setIds, ...removes]);
+  /** @type {Set<string>} the taken decisions this take replaces whole */
+  const replaced = new Set();
   for (const other of Object.values(plan.entries)) {
     if (other.id === id || !Array.isArray(other.adds) || !other.adds.some((sid) => moved.has(sid))) continue;
     const otherFile = entryFile(other);
     const data = structuredClone(json.get(otherFile));
     data.adds = data.adds.filter((sid) => !moved.has(sid));
     if (!data.adds.length) delete data.adds;
-    changed.set(otherFile, entryText(other.kind, data));
+    // A decision whose whole content was its sentences has nothing left once they are replaced.
+    if (other.kind === 'decision' && other.verdict === 'take' && data.answer === undefined && data.adds === undefined) {
+      replaced.add(other.id);
+      changed.set(otherFile, null);
+      const notesFile = otherFile.replace(/\.json$/, '.md');
+      if (files.has(notesFile)) changed.set(notesFile, null);
+    } else changed.set(otherFile, entryText(other.kind, data));
+  }
+  if (replaced.size) {
+    const needing = Object.values(plan.entries)
+      .filter((other) => !replaced.has(other.id))
+      .flatMap((other) => (Array.isArray(other.needs) ? other.needs : []).filter((need) => replaced.has(need)).map((need) => `${other.id} needs ${need}`));
+    if (needing.length) {
+      return refused(`${id} replaces every sentence ${[...replaced].join(', ')} brought, so ${replaced.size === 1 ? 'that decision would be' : 'those decisions would be'} deleted, but ${needing.join(', ')}: write ${replaced.size === 1 ? 'its' : 'their'} answer or change those needs first`);
+    }
+    const order = structuredClone(json.get('order.json'));
+    for (const stage of order.stages) stage.entries = stage.entries.filter((other) => !replaced.has(other));
+    changed.set('order.json', canonicalText(canonicalOrder(order)));
   }
 
   const data = structuredClone(json.get(file));

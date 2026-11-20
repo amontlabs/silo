@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PlanError, loadRef, parsePlan, readPlan, readPlanAt } from '../read/index.js';
-import { SAMPLE_DIR, basePlan, cleanup, filesOf, git, initRepo, writePlan } from './helpers.js';
+import { PlanError, loadDir, loadRef, parsePlan, readPlan, readPlanAt } from '../read/index.js';
+import { SAMPLE_DIR, basePlan, cleanup, filesOf, git, initRepo, temp, writePlan } from './helpers.js';
 
 const sample = (name) => JSON.parse(readFileSync(join(SAMPLE_DIR, name), 'utf8'));
 const notes = (name) => readFileSync(join(SAMPLE_DIR, name), 'utf8');
@@ -144,4 +144,109 @@ test('parsePlan: the same entry id twice keeps the first by path; keys of the fi
   assert.equal(plan.entries['model-tool'].part, 'engine');
   assert.equal(plan.entries['start-computer'].stage, 'app');
   assert.equal(plan.entries['start-computer'].kind, 'feature');
+});
+
+test('a symbolic link under plan/ is an error and is never followed: a file, a folder, plan/ itself, on disk and at a ref', () => {
+  const outside = temp('plan-outside-');
+  const root = writePlan(basePlan());
+  try {
+    writeFileSync(join(outside, 'x.md'), 'outside\n');
+    mkdirSync(join(outside, 'features'));
+    writeFileSync(join(outside, 'features', 'y.json'), '{}\n');
+    const isLink = (path) => (error) => error instanceof PlanError && error.problems.some((p) => p.file === path && /symbolic link/.test(p.message));
+    // A file.
+    symlinkSync(join(outside, 'x.md'), join(root, 'plan', 'engine', 'decisions', 'engine-language.md'));
+    assert.throws(() => loadDir(join(root, 'plan')), isLink('plan/engine/decisions/engine-language.md'));
+    // A folder, even one whose files would be valid.
+    rmSync(join(root, 'plan', 'engine', 'decisions', 'engine-language.md'));
+    symlinkSync(join(outside, 'features'), join(root, 'plan', 'record', 'features'));
+    assert.throws(() => readPlan(join(root, 'plan')), isLink('plan/record/features'));
+    // At a ref: git keeps the link as a link.
+    initRepo(root);
+    assert.throws(() => loadRef(root, 'HEAD'), isLink('plan/record/features'));
+    // plan/ itself.
+    const linked = temp('plan-linked-');
+    symlinkSync(join(root, 'plan'), join(linked, 'plan'));
+    rmSync(join(root, 'plan', 'record', 'features'));
+    assert.throws(() => loadDir(join(linked, 'plan')), isLink('plan/'));
+    cleanup(linked);
+  } finally {
+    cleanup(root);
+    cleanup(outside);
+  }
+});
+
+test('a path holding a newline at a git ref is read like any other, and the files after it too', () => {
+  const root = writePlan(basePlan());
+  try {
+    // Sorted by git between decisions/the-design.json and engine/: it comes before most entries.
+    writeFileSync(join(root, 'plan', 'decisions', 'x\ny.md'), 'two\nlines\n');
+    writeFileSync(join(root, 'plan', 'decisions', 'a\nb'), 'second\n');
+    initRepo(root);
+    const files = loadRef(root, 'HEAD');
+    const disk = loadDir(join(root, 'plan'));
+    assert.deepEqual(new Map([...files].sort()), new Map([...disk].sort()));
+    assert.equal(files.get('decisions/x\ny.md'), 'two\nlines\n');
+    assert.equal(files.get('engine/decisions/engine-language.json'), filesOf(basePlan()).get('engine/decisions/engine-language.json'));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('a dot-named symbolic link under plan/ is an error too, on disk and at a ref, and one inside a dot-named folder', () => {
+  const outside = temp('plan-outside-');
+  const root = writePlan(basePlan());
+  try {
+    writeFileSync(join(outside, 'x.md'), 'outside\n');
+    const isLink = (path) => (error) => error instanceof PlanError && error.problems.some((p) => p.file === path && /symbolic link/.test(p.message));
+    symlinkSync(outside, join(root, 'plan', '.cache'));
+    assert.throws(() => loadDir(join(root, 'plan')), isLink('plan/.cache'));
+    initRepo(root);
+    assert.throws(() => loadRef(root, 'HEAD'), isLink('plan/.cache'));
+    rmSync(join(root, 'plan', '.cache'));
+    mkdirSync(join(root, 'plan', '.drafts'));
+    symlinkSync(join(outside, 'x.md'), join(root, 'plan', '.drafts', 'x.md'));
+    assert.throws(() => loadDir(join(root, 'plan')), isLink('plan/.drafts/x.md'));
+    git(root, 'add', '-A');
+    git(root, 'commit', '-q', '-m', 'Drafts');
+    assert.throws(() => loadRef(root, 'HEAD'), isLink('plan/.drafts/x.md'));
+    // A dot-named regular file is still skipped.
+    rmSync(join(root, 'plan', '.drafts'), { recursive: true });
+    writeFileSync(join(root, 'plan', '.DS_Store'), 'x');
+    assert.equal(loadDir(join(root, 'plan')).has('.DS_Store'), false);
+  } finally {
+    cleanup(root);
+    cleanup(outside);
+  }
+});
+
+test('a committed plan that is itself a symbolic link is an error at a ref, not an empty plan', () => {
+  const root = writePlan(basePlan());
+  try {
+    renameSync(join(root, 'plan'), join(root, 'real'));
+    symlinkSync('real', join(root, 'plan'));
+    initRepo(root);
+    const isLink = (error) => error instanceof PlanError && error.problems.some((p) => p.file === 'plan/' && /symbolic link/.test(p.message));
+    assert.throws(() => loadRef(root, 'HEAD'), isLink);
+    assert.throws(() => readPlanAt(root, 'HEAD'), isLink);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('bytes that are not valid UTF-8 are an error, on disk and at a ref; a real U+FFFD passes', () => {
+  const root = writePlan(basePlan());
+  try {
+    const bad = (error) => error instanceof PlanError && error.problems.some((p) => p.file === 'plan/engine/README.md' && /not valid UTF-8/.test(p.message));
+    writeFileSync(join(root, 'plan', 'engine', 'README.md'), Buffer.from([0x45, 0x6e, 0xff, 0x0a]));
+    assert.throws(() => loadDir(join(root, 'plan')), bad);
+    initRepo(root);
+    assert.throws(() => loadRef(root, 'HEAD'), bad);
+    writeFileSync(join(root, 'plan', 'engine', 'README.md'), 'A real �, and a BOM ﻿.\n');
+    git(root, 'commit', '-q', '-am', 'Real');
+    assert.equal(loadDir(join(root, 'plan')).get('engine/README.md'), 'A real �, and a BOM ﻿.\n');
+    assert.equal(loadRef(root, 'HEAD').get('engine/README.md'), 'A real �, and a BOM ﻿.\n');
+  } finally {
+    cleanup(root);
+  }
 });
