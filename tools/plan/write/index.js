@@ -72,9 +72,10 @@ const entryText = (kind, value) => canonicalText(kind === 'decision' ? canonical
  * new id is appended), deletes each statement `removes` names, takes those ids out of every other
  * entry's `adds`, and writes `adds` and `"verdict": "take"` in the entry in place of `sets` and
  * `removes`; `replaces` stays. Each decision named in `replaces` stays too, with its file and its
- * notes: it is replaced, and no longer in force. The take is refused when a decision it names is
- * not taken or already replaced, when one would keep an `adds`, and when a taken decision it does
- * not name would be left with neither an `answer` nor an `adds`.
+ * notes, and gets `replaced_by` with this entry's id: it is replaced, and no longer in force. The
+ * take is refused when a decision it names is not taken or already replaced, when one would keep
+ * an `adds`, and when a taken decision it does not name would be left with neither an `answer` nor
+ * an `adds`.
  * @param {Map<string, string>} files @param {string} id @param {Options} [options] @returns {Outcome}
  */
 export function take(files, id, options = {}) {
@@ -83,7 +84,7 @@ export function take(files, id, options = {}) {
   const { plan, json, entry, file } = loaded;
   if (entry.built) return refused(`${id} is built`);
   if (entry.verdict === 'take') {
-    const by = replacedBy(entry, plan.entries);
+    const by = replacedBy(entry);
     return { status: 'already', changed: new Map(), message: by ? `${id} is already taken, and replaced by ${by}` : `${id} is already taken` };
   }
   if (entry.kind === 'decision') {
@@ -96,7 +97,7 @@ export function take(files, id, options = {}) {
   for (const target of replaces) {
     const other = Object.hasOwn(plan.entries, target) ? plan.entries[target] : undefined;
     if (other?.kind !== 'decision' || other.verdict !== 'take') return refused(`${id} replaces ${target}, which is not taken: edit ${target} instead, it has no verdict to replace`);
-    const by = replacedBy(other, plan.entries);
+    const by = replacedBy(other);
     if (by) return refused(`${id} replaces ${target}, which ${by} already replaced: a decision is replaced by one decision only, so ${id} replaces ${by}, the later one, instead`);
   }
 
@@ -169,6 +170,14 @@ export function take(files, id, options = {}) {
     return refused(`${id} moves every statement of ${emptied.join(', ')}, which ${emptied.length === 1 ? 'has' : 'have'} no answer, so ${emptied.length === 1 ? 'it' : 'they'} would be left with nothing in force: ${fix}`);
   }
 
+  // Each decision it replaces says so in its own file.
+  for (const target of replaces) {
+    const name = entryFile(plan.entries[target]);
+    const replaced = changed.has(name) ? JSON.parse(/** @type {string} */ (changed.get(name))) : structuredClone(json.get(name));
+    replaced.replaced_by = id;
+    changed.set(name, entryText('decision', replaced));
+  }
+
   const data = structuredClone(json.get(file));
   delete data.sets;
   delete data.removes;
@@ -191,7 +200,7 @@ export function drop(files, id, options = {}) {
   const { plan, json, entry, file } = loaded;
   if (entry.verdict === 'drop') return { status: 'already', changed: new Map(), message: `${id} is already dropped` };
   if (entry.built) return refused(`${id} is built`);
-  const by = replacedBy(entry, plan.entries);
+  const by = replacedBy(entry);
   if (by) return refused(`${id} is replaced by ${by}: it is no longer in force, and has nothing to drop`);
   if (entry.verdict === 'take' && Array.isArray(entry.adds) && entry.adds.length) {
     return refused(`${id} is taken and brought ${entry.adds.join(', ')}: an entry that removes or replaces them comes first`);

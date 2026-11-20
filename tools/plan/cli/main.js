@@ -227,10 +227,10 @@ function showEntry(plan, entry, all) {
   const keys = Object.fromEntries(Object.entries(entry).filter(([key]) => !PLACE_KEYS.includes(key)));
   const needs = (entry.needs ?? []).map((need) => {
     if (!Object.hasOwn(plan.entries, need)) return { id: need, status: 'missing' };
-    const by = replacedBy(plan.entries[need], plan.entries);
+    const by = replacedBy(plan.entries[need]);
     return { id: need, status: status(plan.entries[need]), ...(by ? { replaced_by: by } : {}) };
   });
-  const replacedByOther = replacedBy(entry, plan.entries);
+  const replacedByOther = replacedBy(entry);
   const replaces = replacesOf(plan, entry);
   const neededBy = Object.values(plan.entries).filter((other) => (other.needs ?? []).includes(entry.id)).map((other) => ({ id: other.id, status: status(other) }));
   const keeps = new Set(entry.keeps ?? []);
@@ -238,7 +238,7 @@ function showEntry(plan, entry, all) {
   const needed = new Set(entry.needs ?? []);
   const decisions = Object.values(plan.entries)
     // In force: taken and not replaced.
-    .filter((other) => other.id !== entry.id && other.kind === 'decision' && other.verdict === 'take' && !replacedBy(other, plan.entries) && (other.part === null || other.part === entry.part || needed.has(other.id)))
+    .filter((other) => other.id !== entry.id && other.kind === 'decision' && other.verdict === 'take' && !replacedBy(other) && (other.part === null || other.part === entry.part || needed.has(other.id)))
     .map(({ id, part, asks, answer, adds }) => ({ id, part, asks, ...(answer !== undefined ? { answer } : {}), ...(adds !== undefined ? { adds } : {}) }));
   const json = {
     kind: entry.kind,
@@ -297,7 +297,7 @@ function showEntry(plan, entry, all) {
  */
 function showPart(plan, part) {
   const entries = ordered(plan).filter((entry) => entry.part === part.id);
-  const replaced = entries.filter((entry) => replacedBy(entry, plan.entries)).map((entry) => entry.id);
+  const replaced = entries.filter((entry) => replacedBy(entry)).map((entry) => entry.id);
   const taken = entries.filter((entry) => entry.verdict === 'take' && !replaced.includes(entry.id)).map((entry) => entry.id);
   const dropped = entries.filter((entry) => entry.verdict === 'drop').map((entry) => entry.id);
   const open = entries.filter((entry) => entry.verdict === undefined).map((entry) => ({

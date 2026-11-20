@@ -306,7 +306,7 @@ test('a take that replaces a decision commits the changed files only: the decisi
       'M\tplan/record/decisions/losses-show.json',
       'M\tplan/record/properties.json',
     ]);
-    assert.deepEqual(readJson(root, 'record/decisions/losses-show.json'), { asks: onlySets.asks, verdict: 'take' });
+    assert.deepEqual(readJson(root, 'record/decisions/losses-show.json'), { asks: onlySets.asks, verdict: 'take', replaced_by: 'gap-reworded' });
     assert.equal(readFileSync(join(root, 'plan', 'record', 'decisions', 'losses-show.md'), 'utf8'), 'Why the record shows its losses.\n');
     assert.deepEqual(readJson(root, 'record/decisions/gap-reworded.json').replaces, ['losses-show']);
     assert.ok(clean(root));
@@ -327,6 +327,7 @@ test('a take that replaces a decision commits the changed files only: the decisi
 function replacedPlan() {
   const files = basePlan();
   files['engine/decisions/zig-again.json'] = { asks: 'Which language now?', answer: 'Zig, still.', replaces: ['engine-language'], verdict: 'take' };
+  files['engine/decisions/engine-language.json'] = { ...files['engine/decisions/engine-language.json'], replaced_by: 'zig-again' };
   files['order.json'] = structuredClone(files['order.json']);
   files['order.json'].stages.at(-1).entries.push('zig-again');
   return files;
@@ -361,6 +362,8 @@ test('show: a decision that replaces lists what it replaces; a replaced one says
     const oldJson = JSON.parse((await run(root, ['show', 'engine-language', '--json'])).out);
     assert.equal(oldJson.status, 'replaced');
     assert.equal(oldJson.replaced_by, 'zig-again');
+    assert.equal(oldJson.keys.replaced_by, 'zig-again');
+    assert.equal(old.out.match(/^replaced_by: zig-again$/m)?.length, 1);
 
     // In force means taken and not replaced: the replaced decision binds nothing; its need still prints.
     const feature = await run(root, ['show', 'start-computer']);

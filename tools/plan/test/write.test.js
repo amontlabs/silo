@@ -216,6 +216,10 @@ test('a take that replaces a decision keeps that decision, its notes and its pla
     const old = parse(after, 'record/decisions/losses-show.json');
     assert.equal(old.verdict, 'take');
     assert.equal(old.adds, undefined);
+    // The replaced decision's own file says so, in the same take.
+    assert.equal(old.replaced_by, 'gap-reworded');
+    assert.equal(after.get('record/decisions/losses-show.json'), canonicalText(canonicalDecision(old)));
+    assert.equal(Object.keys(old).at(-1), 'replaced_by');
     assert.equal(old.answer !== undefined, answer);
     assert.equal(after.get('record/decisions/losses-show.md'), 'Why the record shows its losses.\n');
     assert.equal(after.get('order.json'), files.get('order.json'));
@@ -512,9 +516,12 @@ test('model: after any sequence of takes and drops the plan passes the check, no
       }
       // The replaced decisions are the reference's, and each statement is in the adds of exactly one
       // entry, the one that set it last, which is taken and not replaced.
+      // A decision has replaced_by exactly when a taken decision names it in replaces.
       const { plan } = parsePlan(files);
-      const fromFiles = new Map(Object.values(plan.entries).map((entry) => [entry.id, replacedBy(entry, plan.entries)]).filter(([, by]) => by));
+      const fromFiles = new Map(Object.values(plan.entries).map((entry) => [entry.id, replacedBy(entry)]).filter(([, by]) => by));
       assert.deepEqual(fromFiles, replaced, `${label}: replaced`);
+      const named = new Map(Object.values(plan.entries).filter((entry) => entry.verdict === 'take').flatMap((entry) => (entry.replaces ?? []).map((target) => [target, entry.id])));
+      assert.deepEqual(named, fromFiles, `${label}: replaced_by agrees with replaces`);
       for (const [sid, statement] of model) {
         const owners = Object.values(plan.entries).filter((entry) => (entry.adds ?? []).includes(sid)).map((entry) => entry.id);
         assert.deepEqual(owners, [statement.by], `${label}: ${sid}`);

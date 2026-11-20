@@ -52,31 +52,26 @@ test('the status of a decision, first match wins', () => {
   assert.deepEqual(DECISION_STATUSES, ['dropped', 'replaced', 'taken', 'answered', 'open']);
 });
 
-test('a taken decision that a taken decision names in replaces is replaced, and still done', () => {
+test('a decision that has replaced_by is replaced, and still done; the file alone says it', () => {
   const entries = {
-    old: { kind: 'decision', answer: 'A', verdict: 'take' },
+    old: { kind: 'decision', answer: 'A', verdict: 'take', replaced_by: 'later' },
     later: { kind: 'decision', answer: 'B', replaces: ['old'], verdict: 'take' },
     feature: { kind: 'feature', needs: ['old'], verdict: 'take' },
   };
-  // The site gives entries without their id: the key in entries stands for it.
   assert.equal(entryStatus(entries.old, entries), 'replaced');
-  assert.equal(entryStatus({ id: 'old', ...entries.old }, entries), 'replaced');
-  assert.equal(replacedBy(entries.old, entries), 'later');
+  // No other entry is read: the replacing one need not even be given.
+  assert.equal(entryStatus(entries.old, {}), 'replaced');
+  assert.equal(replacedBy(entries.old), 'later');
   assert.equal(entryStatus(entries.later, entries), 'taken');
-  assert.equal(replacedBy(entries.later, entries), null);
+  assert.equal(replacedBy(entries.later), null);
+  // A taken decision named in replaces without replaced_by is not replaced: the check refuses that plan.
+  assert.equal(entryStatus({ kind: 'decision', answer: 'A', verdict: 'take' }, entries), 'taken');
   assert.ok(isDone(entries.old));
   assert.equal(entryStatus(entries.feature, entries), 'ready');
-  // A replacing decision that is not taken, or dropped, replaces nothing yet.
-  for (const verdict of [undefined, 'drop']) {
-    const pending = { ...entries, later: { kind: 'decision', answer: 'B', replaces: ['old'], ...(verdict ? { verdict } : {}) } };
-    assert.equal(entryStatus(pending.old, pending), 'taken', String(verdict));
-  }
-  // First match wins: a dropped decision stays dropped whoever names it.
-  const dropped = { ...entries, old: { kind: 'decision', answer: 'A', verdict: 'drop' } };
-  assert.equal(entryStatus(dropped.old, dropped), 'dropped');
+  // First match wins: dropped before replaced, replaced before taken.
+  assert.equal(entryStatus({ kind: 'decision', answer: 'A', verdict: 'drop', replaced_by: 'later' }, {}), 'dropped');
   // A feature is never replaced.
-  const feature = { f: { kind: 'feature', verdict: 'take' }, d: { kind: 'decision', answer: 'B', replaces: ['f'], verdict: 'take' } };
-  assert.equal(entryStatus(feature.f, feature), 'ready');
+  assert.equal(replacedBy({ kind: 'feature', replaced_by: 'later' }), null);
 });
 
 test('a decision that puts forward only statements is answered: a sets stands for its answer, an empty one does not', () => {

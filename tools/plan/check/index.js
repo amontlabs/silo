@@ -247,7 +247,7 @@ export function checkFiles(files, { exists } = {}) {
     const keys = kind === 'decision' ? DECISION_KEYS : FEATURE_KEYS;
     unknownKeys(file, '', data, keys);
     present(file, '', data, REQUIRED_KEYS[kind]);
-    for (const key of ['asks', 'answer', 'name', 'what']) if (keys.includes(key)) textKey(file, '', data, key);
+    for (const key of ['asks', 'answer', 'name', 'what', 'replaced_by']) if (keys.includes(key)) textKey(file, '', data, key);
     for (const key of ['needs', 'replaces', 'removes', 'adds', 'keeps']) if (keys.includes(key)) textList(file, key, data[key], 'ids');
     if (Object.hasOwn(data, 'verdict') && !VERDICTS.includes(data.verdict)) add(file, 'verdict', `"${shown(data.verdict)}" is not a verdict`, `write ${VERDICTS.join(' or ')}, or leave it out`);
     if (Object.hasOwn(data, 'suggest') && !isEmpty(data.suggest)) {
@@ -270,6 +270,7 @@ export function checkFiles(files, { exists } = {}) {
     }
     if (Object.hasOwn(data, 'built') && !isDate(data.built)) add(file, 'built', `"${shown(data.built)}" is not a date`, 'write the day it was built, YYYY-MM-DD');
     // Rule 5: sets and removes only before take, adds only with it. `replaces` stays after a take.
+    // `replaced_by` is checked with `replaces`, below.
     const taken = data.verdict === 'take';
     if (taken && Object.hasOwn(data, 'sets')) add(file, 'sets', 'sets on a taken entry', 'run plan take, which writes the statements into their lists and records their ids in adds');
     if (taken && Object.hasOwn(data, 'removes')) add(file, 'removes', 'removes on a taken entry', 'run plan take, which removes the statements');
@@ -378,12 +379,24 @@ export function checkFiles(files, { exists } = {}) {
     }
   }
 
-  // `replaces`: a taken decision takes the place of taken decisions, each replaced by one decision only.
+  // `replaces` and `replaced_by`: a taken decision takes the place of taken decisions, and each of
+  // those names it back in `replaced_by`, which `plan take` writes. So a decision is replaced by one
+  // decision only, and its own file says it is no longer in force.
   const decisionIds = new Set(entryFiles.filter((entry) => entry.kind === 'decision').map((entry) => entry.id));
-  /** @type {Map<string, string[]>} the taken decisions that name each taken decision in `replaces` */
-  const replacers = new Map();
-  /** @type {[any, string, string][]} entry, the id it names, its field: the names that are a decision other than itself */
-  const replacing = [];
+  /** @type {Map<string, string>} each decision that has a `replaced_by`, and the decision it names */
+  const replacedBy = new Map();
+  for (const entry of entries.values()) {
+    if (entry.kind !== 'decision' || typeof entry.replaced_by !== 'string' || entry.replaced_by === '') continue;
+    const by = entry.replaced_by;
+    replacedBy.set(entry.id, by);
+    if (entry.verdict !== 'take') add(entry.file, 'replaced_by', 'replaced_by on a decision that is not taken', 'remove replaced_by: only a taken decision is replaced');
+    const replacer = entries.get(by);
+    if (!(replacer?.kind === 'decision' && replacer.verdict === 'take' && Array.isArray(replacer.replaces) && replacer.replaces.includes(entry.id))) {
+      add(entry.file, 'replaced_by', `"${by}" is not a taken decision that names "${entry.id}" in replaces`, `write the id of the taken decision whose replaces names "${entry.id}", or remove replaced_by`);
+    }
+  }
+  /** @type {Map<string, string[]>} the taken decisions each taken decision replaces */
+  const replacedOf = new Map();
   for (const entry of entries.values()) {
     if (entry.kind !== 'decision' || !Array.isArray(entry.replaces)) continue;
     // An id named twice is reported once, by the shape of the list.
@@ -394,27 +407,25 @@ export function checkFiles(files, { exists } = {}) {
       const field = `replaces[${index}]`;
       if (id === entry.id) return add(entry.file, field, `"${id}" replaces itself`, 'remove it');
       if (!decisionIds.has(id)) return add(entry.file, field, `"${id}" is not a decision`, 'name a taken decision of the plan');
-      replacing.push([entry, id, field]);
       const target = entries.get(id);
-      if (target && target.verdict !== 'take') add(entry.file, field, `"${id}" is not taken`, `edit "${id}" instead: it has no verdict to replace`);
-      else if (target && entry.verdict === 'take') replacers.set(id, [...(replacers.get(id) ?? []), entry.id]);
+      if (!target) return;
+      if (target.verdict !== 'take') return add(entry.file, field, `"${id}" is not taken`, `edit "${id}" instead: it has no verdict to replace`);
+      const by = replacedBy.get(id);
+      // Only a taken decision replaces: with no verdict, or dropped, its replaces says nothing of the decisions it names.
+      if (entry.verdict === 'take') {
+        replacedOf.set(entry.id, [...(replacedOf.get(entry.id) ?? []), id]);
+        if (by === undefined) add(entry.file, field, `"${id}" has no replaced_by that names this decision`, `write "replaced_by": "${entry.id}" in "${id}", as plan take does`);
+        else if (by !== entry.id) add(entry.file, field, `"${id}" is replaced by ${by}, not by this decision`, `a decision is replaced by one decision only: replace "${by}" instead, or remove "${id}" from replaces`);
+      } else if (entry.verdict === undefined && by !== undefined) {
+        notes.push({ file: entry.file, field, message: `"${id}" is already replaced by ${by}`, fix: `name "${by}" instead, the decision that replaced it` });
+      }
     });
-  }
-  /** @type {Map<string, string>} each replaced decision, and the decision that replaced it */
-  const replacedBy = new Map([...replacers].map(([id, by]) => [id, by[0]]));
-  for (const [entry, id, field] of replacing) {
-    const by = replacers.get(id) ?? [];
-    if (entry.verdict === 'take' && by.length > 1) add(entry.file, field, `"${id}" is replaced by ${by.join(', ')}`, `a decision is replaced by one decision only: keep "${id}" in the replaces of one of them`);
-    if (entry.verdict === undefined && by.length) notes.push({ file: entry.file, field, message: `"${id}" is already replaced by ${by[0]}`, fix: `name "${by[0]}" instead, the decision that replaced it` });
   }
   for (const [id, by] of replacedBy) {
     const target = entries.get(id);
     if (Array.isArray(target.adds) && target.adds.length) add(target.file, 'adds', `"${id}" is replaced by ${by} and still adds ${target.adds.map(shown).join(', ')}`, `${by} sets again or removes each of those statements`);
   }
   // A chain of replaces among taken decisions never comes back to its start.
-  /** @type {Map<string, string[]>} the taken decisions each taken decision replaces */
-  const replacedOf = new Map();
-  for (const [target, by] of replacers) for (const id of by) replacedOf.set(id, [...(replacedOf.get(id) ?? []), target]);
   for (const entry of entries.values()) {
     if (!replacedOf.has(entry.id)) continue;
     /** @type {Map<string, string>} each decision reached, and the one it was reached from */

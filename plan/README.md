@@ -130,8 +130,8 @@ to the `adds` of the new one, and the old entry stays taken.
 
 To change what a whole decision settled, add a decision that names it in `replaces`. The new
 decision sets again or removes every statement the old one added. When the owner takes it, the
-old decision keeps its file and its notes. The tool shows it as replaced, with the decision that
-replaced it, and it is no longer in force.
+tool writes `replaced_by` in the old decision, which keeps its file and its notes. The tool shows
+it as replaced, and it is no longer in force.
 
 A decision is replaced by one decision only. To change it again, replace the decision that
 replaced it.
@@ -205,7 +205,7 @@ Keys are written in this order. A key in brackets is optional: when it has no va
 | Word | `word`, `means`, [`not`] |
 | Principle | `id`, `says`, `asks`, [`known_as`], [`why`] |
 | Property | `id`, `says`, `kind`, [`from`], `check`, [`at`] |
-| Decision | `asks`, [`answer`], [`needs`], [`replaces`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`] |
+| Decision | `asks`, [`answer`], [`needs`], [`replaces`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`], [`replaced_by`] |
 | Feature | `name`, `what`, [`needs`], [`sets`], [`removes`], [`adds`], [`keeps`], [`surfaces`], [`suggest`], [`suggested_in`], [`verdict`], [`built`] |
 
 - `not`: the words or phrases this word replaces. The check refuses each of them anywhere in
@@ -220,6 +220,7 @@ Keys are written in this order. A key in brackets is optional: when it has no va
 - `suggest`: what is recommended to the owner, as `{ "verdict", "why" }`. A recommended answer to
   a decision goes in `answer`.
 - `suggested_in`: the number of the visitor's suggestion the entry came from.
+- `replaced_by`: the id of the decision that replaced this one. `plan take` writes it.
 - `sets` and `removes` exist only before a take, and `adds` only after it. `replaces` stays.
 
 ### Links
@@ -230,6 +231,7 @@ These keys hold ids of other items, or paths. The check refuses an id that does 
 |---|---|---|---|
 | `needs` | a decision or a feature | decisions and features | What must be done first. |
 | `replaces` | a decision | taken decisions | The decisions it takes the place of. |
+| `replaced_by` | a replaced decision | one decision | The taken decision that names it in `replaces`. |
 | `adds` | a taken decision or feature | statements | The statements in force that its take wrote into the lists. |
 | `keeps` | a feature | properties | The properties it must not break. |
 | `from` | a property | one principle | The principle the property follows from. The check notes a property that has none. |
@@ -243,8 +245,8 @@ The tool gives each entry a state.
 |---|---|---|
 | Decision | `open` | No verdict, no `answer` and nothing under `sets`. |
 | | `answered` | No verdict, and an `answer` or something under `sets`. |
-| | `taken` | Taken, and no taken decision replaces it. |
-| | `replaced` | Taken, and a taken decision names it in `replaces`. It is no longer in force. |
+| | `taken` | Taken, and not replaced. |
+| | `replaced` | Taken, and `replaced_by` names the decision that replaced it. It is no longer in force. |
 | | `dropped` | The verdict. |
 | Feature | `undecided` | No verdict. |
 | | `taken` | Taken, and something it needs is not done. |
