@@ -1,6 +1,6 @@
 // Addresses: `#<part>` and `#<part>/<entry id>`, `#product` (the decisions of the whole product), `#suggested` and
 // `#left`, each with an optional open row, and `#latest` while entries have threads. The older `#entry-<id>` and `#issue-<n>` still open that row where it now lives.
-import type { Plan, Row } from './plan';
+import type { Plan, Row } from './plan.ts';
 
 export type Place =
   | { kind: 'home' }
@@ -11,6 +11,9 @@ export type Place =
   | { kind: 'latest' };
 
 export const HOME: Place = { kind: 'home' };
+
+/** The addresses the page keeps for its own places: a part may not take one of these ids, or its address would open that place instead. */
+export const RESERVED_ADDRESSES = ['product', 'left', 'suggested', 'latest'] as const;
 
 export function samePlace(a: Place, b: Place): boolean {
   return a.kind === b.kind && (a.kind !== 'part' || (b.kind === 'part' && a.part === b.part));
@@ -39,7 +42,10 @@ export function rowsOf(plan: Plan, place: Place): Row[] {
 }
 
 const rowPart = (key: string) => (key.startsWith('entry-') ? key.slice('entry-'.length) : key);
-const rowKey = (part: string) => (/^issue-/.test(part) ? part : `entry-${part}`);
+
+/** The row an address's tail names: an entry of the plan by its id first, whatever the id looks like, then a suggestion by its `issue-<n>` key. */
+const rowNamed = (rows: Map<string, Row>, tail: string): Row | undefined =>
+  rows.get(`entry-${tail}`) ?? (/^issue-/.test(tail) ? rows.get(tail) : undefined);
 
 export function formatHash(place: Place, key: string | null = null): string {
   const tail = key ? `/${rowPart(key)}` : '';
@@ -74,7 +80,7 @@ export function resolveHash(hash: string, plan: Plan, rows: Map<string, Row>): {
   // An entry is found by its id whatever place the address names; the address is then rewritten to where it is.
   const named = (place: Place) => {
     if (!tail) return { place, key: null };
-    const row = rows.get(rowKey(tail));
+    const row = rowNamed(rows, tail);
     if (row) return { place: placeFrom(row, place, plan), key: row.key };
     // Entries come from the plan file: one that is not there no longer exists, and its part opens.
     // Issues may only appear with the live state, so those wait.
@@ -83,7 +89,7 @@ export function resolveHash(hash: string, plan: Plan, rows: Map<string, Row>): {
   if (head === 'latest') return plan.threads ? { place: { kind: 'latest' }, key: null } : null;
   if (head === 'suggested' || head === 'left' || head === 'product') return named({ kind: head });
   if (plan.parts.some((group) => group.part.id === head)) return named({ kind: 'part', part: head });
-  const loose = rows.get(tail ? rowKey(tail) : head);
+  const loose = tail ? rowNamed(rows, tail) : rows.get(head);
   if (loose && (tail || /^(entry|issue)-/.test(head))) return { place: placeOf(loose), key: loose.key };
   return null;
 }

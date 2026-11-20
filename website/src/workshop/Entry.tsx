@@ -42,7 +42,7 @@ function initials(login: string): string {
   return (parts.length > 1 ? parts[0][0] + parts[1][0] : login.slice(0, 2)).toLowerCase();
 }
 
-function stateText(row: Row): string {
+export function stateText(row: Row): string {
   if (row.of === 'decision') return row.status === 'planned' ? 'Decided.' : row.status === 'dropped' ? 'Dropped.' : 'Not decided yet.';
   switch (row.status) {
     case 'planned': return 'Planned.';

@@ -98,23 +98,26 @@ npm --prefix website run load-check
 The first command downloads Playwright's own Chromium once; the check never
 uses an installed Chrome. It opens `http://127.0.0.1:4174/workshop` (pass
 another URL after `--` to check another server) at 1440 × 900, 1440 × 1100,
-2560 × 1440, 1024 × 1366 and 390 × 844, on the plain view, the first part,
-`#product` and `#latest` when the page links to them, and `#suggested`. What
-the page offers is read from it: a map, or the tiles alone; and threads on
-entries, which it has only when it links to Latest. For each load it prints when the page first
+2560 × 1440, 1024 × 1366 and 390 × 844, on the plain view, the first part
+when the plan has one, `#product` when the whole product has rows, `#latest`
+when entries have threads, and `#suggested`. The parts, the whole product's
+rows and whether entries have threads are read from the page's data
+(`window.__workshopData`, set by `main.tsx`); whether it draws a map is read
+from the page. For each load it prints when the page first
 painted, when the account, the votes, the owner's marks and "Suggest a
 feature" appeared, what the page's first frame held, and every layout shift
 with their total. Every one of these loads is a first visit: its first frame
 must hold the sign-in button (unless `--owner`), "Suggest a feature" on the
-plain view, and on the rows of the first part a vote placeholder on every row
-when entries have threads, none on any row when they have not. Then, in one
-browser profile at 1440 × 900, the first part is visited twice (with threads,
+plain view, and on the first place with rows (the first part, else the whole
+product) a vote placeholder on every row when entries have threads, none on
+any row when they have not. Then, in one browser profile at 1440 × 900, that
+place (the plain view when the plan has no row) is visited twice (with threads,
 the second visit must have the votes in its first frame), and the owner signs
 in through the fake GitHub's page as `owner-fake` (so the session cookie, its
 marker and the remembered person are real) and visits again: the login, and
 with threads "N to decide" and the rows' "to decide", must be in its first
 frame (the app's first frame: the markup the build drew does not count). Then
-an entry of the first part without comments is opened before the answers, at 1440 × 900 and
+an entry of that place without comments is opened before the answers, at 1440 × 900 and
 390 × 844, and the rows below it must not move when they arrive; and
 `#suggested` is visited signed in with nobody remembered, and the list must not
 move when `me` answers. "account" is when the login or the sign-in button
@@ -129,13 +132,15 @@ each API answer, `--slow-script <ms>` holds back the page's script, and
 `--owner` fakes the `me` answer as the owner. Last, with the page's script
 held (run it with `--slow-script 3000`) and the API held longer, it loads the
 built page at 1440 × 900: on the plain view the first painted frame must hold
-the map (or the tiles, without a map) and the sign-in button, the footer rule
+the map (or the tiles, without a map) when the plan has parts, and the sign-in
+button, the footer rule
 must hold, and the title row, the map or the tiles, the footer and the account
 slot must not move and no layout shift happen when the script takes over; on
-the first part the plain view must never be painted and the part must be in
-the first frame after the takeover; and on a
+the first place with rows the plain view must never be painted and the place
+must be in the first frame after the takeover; and on a
 second visit, the state remembered, nothing under the title row may move by
 half a pixel or more when the script takes over, at 1440 × 900 and 390 × 844.
+A plan with no part is checked at the places it has, and passes.
 `npm test` does not run it.
 
 To build and check the page on another plan than `plan/` (the real plan may be
@@ -172,6 +177,8 @@ React and TypeScript. At build time the `workshopData` plugin of `website/vite.c
 reads `plan/` (or the folder `WORKSHOP_PLAN` names) with `tools/plan/read` and
 checks it with `tools/plan/check` (`data.ts`); any error of `plan check` stops
 the build with the file, the field and the fix. A part with no feature is fine.
+A part whose id is `product`, `left`, `suggested` or `latest` stops the build:
+those are the page's own addresses, and the message names the part and the fix.
 `map.ts` holds the drawing (`SILO_MAP`): where each part sits on the full map
 and on the folded one, the zones, the text that is not a part, and the wires.
 `SILO_MAP` is empty: with no place in it there is no map, any plan passes, and
@@ -188,16 +195,21 @@ and on in the tests' fixture plan, where the code behind them stays tested:
   The server has no verdict route; the real build never calls it. Decisions and
   features are taken or dropped with `plan take` and `plan drop`.
 - `threads`: whether entries have issues on GitHub. Off, no issue is matched to
-  an entry, and an entry shows its sentence, its notes and its state with no
-  vote, no count, no comment box, no GitHub link and no placeholder for any of
-  them; the page has no Latest. Suggestions keep their votes and comments.
+  an entry, even an old one whose marker names it, and an entry shows its
+  sentence, its notes and its state with no vote, no count, no comment box, no
+  GitHub link and no placeholder for any of them; the page has no Latest, and
+  sign-in has no tooltip. Suggestions keep their votes and comments.
 
 `npm run build` then runs `scripts/prerender.mjs`, which renders the plain
 address `/workshop` (`src/workshop/prerender.tsx`: nothing remembered, nobody
 signed in, the load pending) and writes it into `dist/workshop/index.html`: the
 title row, the map when there is one, the tiles and the row under them in
-`#workshop-root`, and "Sign in with GitHub" with its tooltip in the header's
-account slot. Both carry `data-prerendered` until the script takes over. A
+`#workshop-root`, "Sign in with GitHub" in the header's account slot (with its
+tooltip when entries have threads), and, in the page's `<noscript>`, the line
+that says what needs JavaScript followed by every part with its decisions and
+features and then the decisions of the whole product, as a plain list (id,
+name, state; `NoScript.tsx`). The root and the slot carry `data-prerendered`
+until the script takes over. A
 prerender that throws fails the build; the dev server does not prerender.
 Rendering at build time reads nothing of `window`, `document`, `location`,
 `localStorage` or `matchMedia` (effects may). So the page is drawn whole before
@@ -222,8 +234,10 @@ its script arrives:
   "Sign in with GitHub" replaces the placeholder, marker or not. The plain list
   (`Boundary.tsx`) gives each part's decisions and features with their state,
   then the decisions of the whole product.
-- Without JavaScript the plan is readable from the page, and a line under it
-  says what needs JavaScript.
+- Without JavaScript the tiles show and, under them, the line that says what
+  needs JavaScript and the plain list of every part's rows and the whole
+  product's. The list is inside `<noscript>`, so a browser that runs the script
+  never draws it and the first paint with JavaScript is unchanged.
 - The page preloads every face it waits for and shows as soon as they are in
   (at most 1.2 s), without waiting for its own script: the check runs right
   after the fonts' stylesheet.
@@ -270,7 +284,7 @@ What a person sees:
   (`memory.ts`): the newest answer as the server sent it, and the signed-in
   login, avatar and whether they decide. The page's own confirmed writes are
   kept apart (`writes.ts`), as a list with each one's time, of values set: a
-  verdict, a new suggestion, and for a vote or a comment the count the server
+  verdict (only with `decide` on), a new suggestion, and for a vote or a comment the count the server
   answered for that write (`up`, `comments`; the count shown plus or minus one
   when an older server answers none). Never a change to a count: the server
   patches its snapshot in place, so an answer may already count a write made
@@ -355,17 +369,20 @@ What a person sees:
   the head script applies it before first paint; it is never applied during a
   visit, so on the first visit after signing in the login sits right-aligned in
   the reserved width.
-  Under "Sign in with GitHub", on hover and keyboard focus, a tooltip tied to
-  the button says "or comment directly on GitHub", taking no room.
+  When entries have threads, under "Sign in with GitHub", on hover and keyboard
+  focus, a tooltip tied to the button says "or comment directly on GitHub",
+  taking no room. Without threads there is no tooltip: signing in then serves
+  only suggestions, and "Sign in to suggest" says so where it is offered.
 
 Addresses: `#<part>`, `#<part>/<entry id>`, `#product`, `#suggested` and
 `#left`, each with an optional open row (`#suggested/issue-<n>`), and `#latest`
-when entries have threads. An entry is found by its id whatever place the
-address names, and the address is rewritten; an entry that no longer exists
-opens its part. The older `#entry-<id>` and `#issue-<n>` open that row where it
-now lives. The old list of decisions and its address `#decisions` are gone. A
-part whose id is `product`, `suggested`, `left` or `latest` is shadowed by that
-place.
+when entries have threads. A row named by an address is looked for first
+among the plan's entries, by id, whatever place the address names (an entry
+whose id begins with `issue-` included), and only then among the suggestions;
+the address is then rewritten to where the row is. An entry that no longer
+exists opens its part. The older `#entry-<id>` and `#issue-<n>` open that row
+where it now lives. The old list of decisions and its address `#decisions` are
+gone. No part can take the id of a place: the build refuses it (above).
 Back and Forward move between places; opening a row replaces the address.
 
 | File | What |
@@ -377,6 +394,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `Entry.tsx` | One row and what it shows open: the sentence, notes, the state, and for a row with a thread the thread with its history lines. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, parts' counts and states on top of the plan's model; the drawing; the build-time reader. |
 | `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |
+| `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |
 
 ## Storage
 
@@ -385,29 +403,26 @@ and nothing is written at run time apart from GitHub issues.
 
 | Label | What the issue is |
 | --- | --- |
-| `workshop:entry` | One feature of `plan/features/`, created by the bot. The body ends with `<!-- silo-synced: <commit> -->` and `<!-- silo-entry: <id> -->`; the server removes both before answering. |
+| `workshop:entry` | An older issue the bot created for one feature. Nothing creates these any more. The body ends with `<!-- silo-synced: <commit> -->` and `<!-- silo-entry: <id> -->`; the server removes both before answering. |
 | `workshop:suggestion` | A feature suggested by a visitor. |
 
 An issue that carries the retired label `workshop:decision` is not part of the
-Workshop. The owner's verdict on an entry is one label: `verdict:take` or
-`verdict:later`. A dropped entry has `verdict:drop` and is closed as "not
-planned". A built entry is closed as "completed". Votes are 👍 reactions and
+Workshop. An older entry may carry a verdict label (`verdict:take`,
+`verdict:later` or `verdict:drop`) and be closed as "not planned" or
+"completed"; the server still reads these, nothing sets them any more, and an
+entry's status comes from its file alone. Votes are 👍 reactions and
 comments are issue comments. The history is the bot's history comments, whose
-last line is `<!-- silo-change: {…} -->` (see `tools/plan/README.md`); the
+last line is `<!-- silo-change: {…} -->` (see `tools/workshop/README.md`); the
 server gives it to the page as `change`. Only a comment by the Workshop's own
 App is read for it: its `performed_via_github_app` id is the configured App id
 (`WORKSHOP_APP_ID`), or its author is the App's account, `<slug>[bot]` (the
 slug read from the installation). A comment by any other bot is an ordinary
 comment.
 
-An entry being built now also carries `workshop:building` ("Being built now").
-`plan start <id>` sets it, `plan stop <id>` removes it, and `plan sync`
-removes it when it closes the entry once its file says `built` (see
-`tools/plan/README.md`). A verdict
-other than take (`later`, `drop`, or cleared) removes it in the same
-write, so an entry taken again is not shown as being built. The server counts
-the label only on an open entry that also carries `verdict:take`, so a removal
-that failed, or a label left on an issue reopened by hand, shows nothing.
+An older entry may also carry `workshop:building` ("Being built now"). Nothing
+sets or removes it any more. The server counts the label only on an open entry
+that also carries `verdict:take`, so a label left on an issue reopened by hand
+shows nothing.
 
 ## The API
 
@@ -426,15 +441,13 @@ JSON.
 | `POST comment {n, text}` | signed in | Comments as that person. Answers `{ "ok": true, id, comments }`: `comments` is the comment count GitHub gave in the issue read made before posting, plus 1 when this request posted the comment (not when it was found already posted); absent when that read gave no count. |
 | `POST vote {n, on}` | signed in | Adds or removes that person's 👍. Answers `{ "ok": true, up }`: `up` is the 👍 count from the issue's reaction summary in the read made before writing, plus 1 when GitHub created the reaction (a 👍 already there adds nothing), minus the person's 👍 removed, never below 0; absent when that read gave no count. Neither answer costs a GitHub call of its own. |
 | `POST suggest {title, text}` | signed in | Opens an issue as that person and labels it `workshop:suggestion`. Returns `{ number }`. |
-| `POST verdict {n, verdict}` | can decide | Sets (`take`, `later`, `drop`) or clears (`null`) the verdict of an entry; the `verdict` key is required and a `note` is refused. An entry closed as completed (built) is refused with 409 `built` before anything changes. Any verdict but `take` also removes `workshop:building` when the issue carries it (no call otherwise); if that removal fails, the verdict still stands. |
 
 A comment that the same person posted on that issue in the last five minutes is
 not posted again.
 
 Errors are `{ "error": code, "message": plain words }` with 400 (bad input),
 401 (not signed in, or the session is gone), 403 (not allowed, or a request
-from another site), 404 (not a Workshop issue), 405, 409 (a verdict on a built
-entry), 413 (body over 64 KB),
+from another site), 404 (not a Workshop issue), 405, 413 (body over 64 KB),
 429 (GitHub's rate limit or one of ours), 502 (GitHub failed or took over 8
 seconds) and 503 `not_configured` (missing or invalid App settings). A
 suggestion whose issue was created but could not be labelled answers 502 with
@@ -443,12 +456,12 @@ answer JSON: any failure redirects to `/workshop?signin=failed`; cancelling on
 GitHub returns to the page.
 
 Each comment is cut to 5,000 characters and then carries `"cut": true`. Every
-marker is read with the readers of `tools/plan/model/` on the whole body or
-comment, and the text is cut after: one definition, shared with `plan`. The
+marker is read with the readers of `tools/workshop/model/` on the whole body or
+comment, and the text is cut after: one definition, shared with `workshop`. The
 change marker is read only on the App's comments, so a person's comment never
 reaches that reader.
 
-An issue is a Workshop issue when it carries exactly one of the three kind
+An issue is a Workshop issue when it carries exactly one of the two kind
 labels and is not a pull request.
 
 Comments are limited to 5,000 characters, titles to 120
@@ -511,7 +524,7 @@ seconds plus the 10 seconds of CDN cache.
 - **Refresh.** A read that finds the snapshot over 30 seconds old starts a
   refresh, unless one is running or waiting to start, and waits for it as
   described above (`state` not at all). Any request that changed something on GitHub (a comment, a vote, a
-  suggestion, a verdict, even one that failed halfway) starts one
+  suggestion, even one that failed halfway) starts one
   straight away; when it succeeded, it waits for that refresh up to 2 seconds
   (the page already shows the write as pending), but only when the refresh is
   running or will start within those 2 seconds; otherwise it answers at once
@@ -566,8 +579,8 @@ seconds plus the 10 seconds of CDN cache.
   list or the comment listing fails, the refresh's other calls are aborted,
   and the refresh fails with that first failure.
 - **Writes.** After a signed-in person's write succeeds, the snapshot is
-  patched in place: the new comment, the comment and 👍 counts, the verdict,
-  open or closed (a drop sets `closedAt`), a new suggestion. Each patch is kept
+  patched in place: the new comment, the comment and 👍 counts, a new
+  suggestion. Each patch is kept
   with its time. When a refresh completes, GitHub's data replaces the snapshot
   and the patches made after that refresh began are applied again; older
   patches are dropped, since GitHub's answer already holds them. A count moves
@@ -597,7 +610,7 @@ URL each time and always counts.
 The installation token is spent only on the snapshot refresh, the permission
 check, the repository lookup at sign-in and labelling a suggestion. Each has
 its own ceiling per instance, so that no use can starve another, and nothing
-a visitor does without signing in can make `verdict`, `suggest`,
+a visitor does without signing in can make `suggest`,
 `comment`, `vote` or `me` answer 429:
 
 | Use | Calls a minute |
@@ -668,8 +681,7 @@ snapshots catch up when the hour resets.
   deadline for all its GitHub calls and every wait together, including waits
   on shared work such as an installation token another request is fetching
   (the platform stops a function at 15 seconds); past it, the answer is 502.
-  Steps are ordered so that a cut is safe to retry: `verdict` changes only
-  labels and state, each step a no-op when already done; `comment` skips
+  Steps are ordered so that a cut is safe to retry: `comment` skips
   posting when the same person posted the identical text on that issue in the
   last five minutes.
 - Concurrent permission checks for the same person share one call.
@@ -696,7 +708,7 @@ snapshots catch up when the hour resets.
 | `website/server/github.mjs` | GitHub REST client with pagination and an 8-second limit per call; errors carry a status and the identity used, never a body. |
 | `website/server/app-auth.mjs` | App JWT (RS256, Node's `crypto`) and the cached installation token. |
 | `website/server/session.mjs` | Sealed cookies (AES-256-GCM). |
-| `website/server/issues.mjs` | Kinds, verdicts, the markers (read by the plan model), which comments are the App's own, and the cuts. |
+| `website/server/issues.mjs` | Kinds, the verdict labels of older entries, the markers (read with `tools/workshop/model/`), which comments are the App's own, and the cuts. |
 | `website/server/snapshot.mjs` | The in-memory snapshot that answers every anonymous read, and its refresh. |
 | `website/server/workshop.mjs` | Every endpoint, independent of the HTTP server. |
 | `website/server/node.mjs` | Adapter for Node's `req`/`res`, used by Vercel and the local server. |
@@ -734,9 +746,9 @@ following Vercel's
   (`.vc-config.json`: runtime `nodejs24.x`, handler
   `website/api/workshop.cjs`, launcher `Nodejs`). It holds the files it loads
   at their paths in the repository: `website/api/` and `website/server/` at
-  any depth, and the plan's
-  model, `tools/plan/model/*.js` with `tools/plan/package.json` (which makes it
-  ESM). The script finds what loads by loading the entry point in a separate
+  any depth, and the Workshop's
+  model, `tools/workshop/model/*.js` with `tools/workshop/package.json` (which
+  makes it ESM). The script finds what loads by loading the entry point in a separate
   process with a resolve hook, and refuses by name, before writing anything,
   any other file it loads, in `website/` or outside it. The other
   endpoints (`me.func`, `issue.func`, `vote.func`, …) are symlinks to it, so
@@ -807,9 +819,14 @@ That gives them nothing: the server only ever uses the installation on
 `WORKSHOP_REPO`, and it requests user tokens for that repository only.
 
 Then generate a private key and a client secret, and install the App on
-`amontlabs/silo` only ("Only select repositories"). Create the six labels in
-the repository (`plan sync` does): `workshop:entry`, `workshop:suggestion`,
-`verdict:take`, `verdict:later`, `verdict:drop`, `workshop:building`.
+`amontlabs/silo` only ("Only select repositories"). `workshop setup`
+(`tools/workshop`) does all of this from a page on `127.0.0.1` and stores the
+credentials; `workshop store` finishes a setup whose Keychain step failed. The
+repository needs the label `workshop:suggestion`, which the site puts on each
+new suggestion; `workshop doctor` checks the credentials, the installation, the
+permissions and that label. The other Workshop labels stay on older issues and
+nothing sets them. `workshop decline <issue> --why "…"` closes a suggestion as
+not planned, with the reason as the bot's comment.
 
 For local work against the real GitHub, create a second App the same way with
 the callback `http://127.0.0.1:4174/api/workshop/callback`, installed on a test
@@ -886,10 +903,7 @@ including reading the issue before a write, uses that person's token, so
 GitHub's own permissions apply (a locked issue refuses a visitor's comment)
 and GitHub records the person as the author. Every write first reads the issue
 and refuses with 404 unless it carries a Workshop label and is not a pull
-request; `verdict` works only on entries, and never on one closed as completed.
-A verdict adds and removes only `verdict:*` labels, one at a time, and, for any
-verdict but take, `workshop:building`, so other labels changed by someone else
-are kept. It posts nothing. Clearing a verdict reopens only a dropped entry. A 401 on the installation token is a 502 and
+request. A 401 on the installation token is a 502 and
 drops the cached token; it never signs anyone out. *Limit:* if labelling a
 suggestion fails twice, the new issue stays outside the Workshop until a
 background retry labels it (in memory, on that instance only), and the answer
@@ -898,12 +912,12 @@ carries its number.
 **Deciding.** `canDecide` is GitHub's answer: the person's permission on the
 repository (`write`, `maintain` or `admin`), read with the installation token
 and cached five minutes by GitHub account id, for yes and for no; that one
-cache serves `me` and `verdict`. The permission is read for the
+cache serves `me`. The permission is read for the
 account's current login, asked of GitHub with the person's own token at that
 moment, never the login in the cookie, and the answer must be about the same
 account id as the session. Writes are not preceded by a re-read: they use the
-person's own token, and GitHub itself refuses a label change or a close by
-someone without access; such a refusal (403) drops that person's cached yes,
+person's own token, and GitHub itself refuses a write by someone without
+access; such a refusal (403) drops that person's cached yes,
 and only a yes. Accounts known to be able to decide re-read on an allowance
 nobody else's requests can spend; a read that says no removes the account
 from them.
@@ -928,8 +942,7 @@ and two instances can briefly show different versions.
 
 The Workshop went live on 2026-11-17. That first deployment showed that
 Vercel's Git build uses `.vercel/output` at the repository root, that Vercel
-follows the symlinked functions and loads the `.cjs` handler, and that the Plan
-workflow's sync creates the labels and one issue per feature. Everything else
+follows the symlinked functions and loads the `.cjs` handler. Everything else
 was run against the fake GitHub and in Node. These still depend on the real
 services:
 
@@ -944,20 +957,18 @@ services:
 - that GitHub answers `304` to the conditional issue and comment list pages as
   documented, and that the reaction summary in the issue list moves the page's
   ETag when a vote changes.
-- the verdict half of the Plan workflow (the owner's click becoming a commit
-  on `main`), and what `tools/plan/README.md` lists as not verified.
 
 ## Why built this way
 
 - **giscus** stores comments in GitHub Discussions and has no place for a
-  verdict or a vote that the owner's page counts.
+  vote that the page counts.
 - **utterances** signs people in with an OAuth App that needs the broad
   `public_repo` scope, write access to every public repository of the person.
   A GitHub App's user token is limited to the App's permissions and, here, to
   one repository.
 - **A database of our own** is something to run, secure and back up. Issues
   keep the history, the authorship and the moderation tools on GitHub.
-- **Verdicts as labels, then commits.** A click sets a label; a workflow then
-  records it in the feature's file with its own token (`plan pull`), so the
-  App's key, held by Vercel, never gets write access to the code. See
-  `tools/plan/README.md`.
+- **Verdicts in the plan's files only.** The owner takes or drops an entry with
+  `plan take` and `plan drop`, which commit the file; the site has no verdict
+  route, so the App's key, held by Vercel, never gets write access to the code.
+  See `tools/plan/README.md`.

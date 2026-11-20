@@ -8,7 +8,8 @@ import { Boundary } from './Boundary';
 import { buildDataFrom } from './data';
 import { loadDir } from '../../../tools/plan/read/index.js';
 import { buildData, emptyPlanFiles } from './fixtures';
-import { prerender } from './prerender';
+import { inject, prerender } from './prerender';
+import { NOSCRIPT_LINE } from './NoScript';
 import { takeOver } from './takeover';
 import { mockApi, owner } from './test-support';
 
@@ -148,4 +149,46 @@ describe('the prerendered Workshop', () => {
     document.documentElement.classList.remove('ws-session');
   });
 
+});
+
+describe('the Workshop without JavaScript', () => {
+  /** The list the build writes into the page's <noscript>, as a browser without JavaScript reads it. */
+  function noscript(data = buildData()) {
+    const box = document.createElement('div');
+    box.innerHTML = built(data).noscript;
+    return box;
+  }
+  const rowsOf = (section: Element | null) => [...(section?.querySelectorAll('li') ?? [])].map((li) => li.textContent);
+
+  it('lists a part with its decisions and features: id, name and state, in the order of order.json', () => {
+    const box = noscript();
+    expect(box.querySelector('.ws-quiet')?.textContent).toBe(NOSCRIPT_LINE);
+    const partA = box.querySelector('section[data-part="part-a"]');
+    expect(partA?.querySelector('h2')?.textContent).toBe('Part A');
+    expect(rowsOf(partA)).toEqual([
+      'core-in-zig Which language is the core written in? Decided.',
+      'core The engine runs on its own Planned.',
+      'calls Every call defined once Planned.',
+    ]);
+    expect(rowsOf(box.querySelector('section[data-part="part-b"]'))).toContain('create Create and delete a computer Not decided yet.');
+    expect([...box.querySelectorAll('section')].map((section) => section.getAttribute('data-part'))).toEqual([...buildData().parts.map((part) => part.id), 'product']);
+  });
+
+  it('lists the decisions of the whole product, and keeps them on a plan with no part', () => {
+    for (const data of [buildData(), buildDataFrom(emptyPlanFiles())]) {
+      const product = noscript(data).querySelector('section[data-part="product"]');
+      expect(product?.querySelector('h2')?.textContent).toBe('The whole product');
+      expect(rowsOf(product)?.map((row) => row?.split(' ')[0])).toEqual(['security-properly', 'one-host']);
+    }
+  });
+
+  it('goes into the page\'s <noscript> only, so the page drawn with JavaScript is unchanged', () => {
+    const parts = built();
+    const html = '<div class="ws-account-slot" id="workshop-account"></div><div id="workshop-root"></div><noscript id="workshop-noscript"><p>line</p></noscript>';
+    const out = inject(html, parts);
+    expect(out).toContain(`<noscript id="workshop-noscript">${parts.noscript}</noscript>`);
+    expect(out).toContain(`<div id="workshop-root" data-prerendered>${parts.root}</div>`);
+    expect(parts.root).not.toContain('ws-noscript');
+    expect(() => inject(html.replace(/<noscript[\s\S]*<\/noscript>/, ''), parts)).toThrow('must hold');
+  });
 });

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -16,6 +16,15 @@ const website = fileURLToPath(new URL('..', import.meta.url));
 const sample = join(website, '..', 'tools', 'plan', 'test', 'fixtures', 'sample');
 const parts = JSON.parse(await readFile(join(sample, 'parts.json'), 'utf8'));
 const env = { ...process.env, WORKSHOP_PLAN: sample };
+/** The ids of the decisions and features in a folder of the sample: `<part>/` or the whole product's top. */
+async function idsIn(dir, kinds) {
+  const ids = [];
+  for (const kind of kinds) {
+    const names = await readdir(join(sample, dir, kind)).catch(() => []);
+    ids.push(...names.filter((name) => name.endsWith('.json')).map((name) => name.slice(0, -'.json'.length)));
+  }
+  return ids;
+}
 const escape = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 const dir = await mkdtemp(join(tmpdir(), 'silo-prerender-'));
@@ -29,7 +38,7 @@ const html = await readFile(join(dist, 'workshop', 'index.html'), 'utf8');
 const between = (open, close) => html.slice(html.indexOf(open) + open.length, html.indexOf(close, html.indexOf(open)));
 
 test('the built page holds the plain view: the title row, a tile for every part, and the row under them', () => {
-  const root = between('<div id="workshop-root" data-prerendered>', '<noscript>');
+  const root = between('<div id="workshop-root" data-prerendered>', '<noscript');
   // Silo's map has no place yet: the tiles alone, with no Map and Order control and no drawing.
   assert.match(root, /^<div class="ws is-sheet v-order ws-boot" data-live="pending">/);
   assert.match(root, /<h1>Workshop<\/h1>/);
@@ -48,15 +57,33 @@ test('the built page holds the plain view: the title row, a tile for every part,
   assert.doesNotMatch(root, /ws-account-inline|Sign in/);
 });
 
-test('the header holds sign-in with its tooltip, returning to the plain address', () => {
+test('the header holds sign-in, returning to the plain address, with no tooltip: entries have no thread', () => {
   const slot = between('<div class="ws-account-slot" id="workshop-account" data-prerendered>', '</div>');
-  assert.match(slot, /^<span class="ws-signin-wrap"><a class="button small" href="\/api\/workshop\/login\?return=%2Fworkshop" aria-describedby="ws-signin-tip">/);
-  assert.match(slot, /<span class="ws-signin-tip" id="ws-signin-tip" role="tooltip">or comment directly on GitHub<\/span><\/span>$/);
+  assert.match(slot, /^<span class="ws-signin-wrap"><a class="button small" href="\/api\/workshop\/login\?return=%2Fworkshop">/);
+  assert.doesNotMatch(slot, /ws-signin-tip|aria-describedby|GitHub<\/span><\/span>$/);
+  assert.doesNotMatch(html, /comment directly on GitHub/);
   assert.equal(html.match(/Sign in/g).length, 1, 'one sign-in button');
 });
 
-test('without JavaScript a line says what needs it, and every face the page waits for is preloaded', () => {
-  assert.match(html, /<noscript><p class="ws-quiet ws-noscript">Opening a part or a list, suggesting a feature, voting and commenting on suggestions, and choosing a color theme need JavaScript.<\/p><\/noscript>/);
+test('without JavaScript every part shows its rows and the whole product its own, after the line that says what needs JavaScript', async () => {
+  const noscript = between('<noscript id="workshop-noscript">', '</noscript>');
+  assert.match(noscript, /^<div class="ws-noscript"><p class="ws-quiet">Reading an entry&#x27;s notes, seeing the suggestions, suggesting a feature, voting and commenting on suggestions, and choosing a color theme need JavaScript.<\/p>/);
+  const section = (id) => noscript.slice(noscript.indexOf(`<section data-part="${id}">`), noscript.indexOf('</section>', noscript.indexOf(`<section data-part="${id}">`)));
+  for (const part of parts) {
+    const rows = section(part.id);
+    assert.ok(rows.includes(`<h2>${escape(part.title)}</h2>`), `the title of ${part.id}`);
+    const ids = await idsIn(part.id, ['decisions', 'features']);
+    assert.ok(ids.length > 0, `the sample's ${part.id} has rows`);
+    for (const id of ids) assert.match(rows, new RegExp(`<li><code>${id}</code> [^<]+ <span class="ws-noscript-state">(Decided|Planned|Not decided yet|Dropped|Built[^<]*)\\.</span></li>`), `${id} in ${part.id}`);
+  }
+  const product = section('product');
+  assert.match(product, /<h2>The whole product<\/h2>/);
+  for (const id of await idsIn('.', ['decisions'])) assert.match(product, new RegExp(`<li><code>${id}</code> `), `${id} in the whole product`);
+  // The list sits in the <noscript> alone: what the script takes over is the root, which holds none of it.
+  assert.doesNotMatch(between('<div id="workshop-root" data-prerendered>', '<noscript'), /ws-noscript/);
+});
+
+test('every face the page waits for is preloaded', () => {
   for (const face of ['serif-400-italic', 'serif-400-normal', 'sans-400-normal', 'mono-400-normal']) {
     assert.match(html, new RegExp(`<link rel="preload" href="/fonts/ibm-plex-${face}.woff2" as="font"`), face);
   }

@@ -44,6 +44,13 @@
 .ws-status { color: var(--muted); margin-top: 8px; min-height: 1lh; }
 /* For visitors without JavaScript, under the plan, in the page's column. */
 .ws-noscript { padding: 0 24px 28px; }
+.ws-noscript section { margin-top: 24px; }
+.ws-noscript h2 { font: 18px/1.3 var(--serif); }
+.ws-noscript section > p { color: var(--muted); margin-top: 4px; }
+.ws-noscript-rows { list-style: none; margin: 10px 0 0; padding: 0; }
+.ws-noscript-rows li { padding: 4px 0; }
+.ws-noscript-rows code { font: 12px var(--mono); color: var(--faint); margin-right: 6px; }
+.ws-noscript-state { color: var(--muted); margin-left: 6px; }
 .ws-top-side { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 .ws-top { position: relative; }
 .ws-tools { display: flex; align-items: center; gap: 16px; min-height: 28px; }

@@ -17,7 +17,7 @@ try {
   const { default: data } = await vite.ssrLoadModule('virtual:workshop-data');
   const parts = prerender(data);
   await writeFile(page, inject(await readFile(page, 'utf8'), parts));
-  console.log(`prerendered the Workshop into ${page} (${Math.round((parts.root.length + parts.account.length) / 1024)} KB of markup)`);
+  console.log(`prerendered the Workshop into ${page} (${Math.round((parts.root.length + parts.account.length + parts.noscript.length) / 1024)} KB of markup)`);
 } finally {
   await vite.close();
 }

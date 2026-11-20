@@ -6,6 +6,7 @@ import { checkFiles, formatProblem } from '../../../tools/plan/check/index.js';
 import { loadDir, parsePlan } from '../../../tools/plan/read/index.js';
 import { checkLayout, LayoutError, SILO_MAP } from './map.ts';
 import type { MapLayout } from './map.ts';
+import { RESERVED_ADDRESSES } from './routes.ts';
 import type { BuildData, Entry, Notes, Verdict } from './plan.ts';
 
 export const PLAN_DIR = 'plan';
@@ -94,6 +95,11 @@ export function notesFrom(files: Map<string, string>): Notes {
 /** Checks the files of a plan and gives the page's data, or throws with every problem. */
 export function buildDataFrom(files: Map<string, string>, options: BuildOptions = {}, exists?: (path: string) => boolean): BuildData {
   const data = toBuildData(checkedPlan(files, exists), options);
+  for (const part of data.parts) {
+    if ((RESERVED_ADDRESSES as readonly string[]).includes(part.id)) {
+      throw new PlanFileError(`plan/parts.json: the part "${part.id}" takes an address the Workshop keeps for its own page (#${part.id}). Fix: give the part another id; the Workshop keeps ${RESERVED_ADDRESSES.join(', ')}.`);
+    }
+  }
   try {
     checkLayout(data.parts.map((part) => part.id), data.map);
   } catch (error) {
