@@ -1,8 +1,9 @@
 # Writing for people
 
-Read this before you write anything a visitor or a user reads: the website, the README, the text
-of the app and of the command line, release notes. It does not apply to code comments, commit
-messages or notes between agents.
+Read this before you write anything a person reads: the website, the text of the app and of the
+command line, release notes, and the pages of this repository (a README, a guide, a page or the
+notes of the plan). It does not apply to code comments, commit messages or a brief for another
+agent.
 
 ## Say it plainly
 
@@ -27,6 +28,33 @@ The formulations below are shaped to sound good instead of saying the thing. Do 
 A list is fine when its items are the content: the diff covers code, packages, settings, files
 and databases.
 
+## Explain it
+
+A page that explains how something works can fail the opposite way: so much is packed into each
+sentence that only its writer can read it. Write it for a reader who was not there when the thing
+was designed.
+
+- **Show one real case next to the general statement.** The real file, the real command, what it
+  prints.
+- **Use the words the reader already has.** When the page needs a term of its own, define it once,
+  where it is first needed and with an example. Then use only that term, for that one thing.
+- **One fact per sentence.** A condition or an exception gets its own sentence.
+- **The common case comes first.** A rare case comes after it, or is left to the tool that reports
+  it.
+- **Keep a page short by leaving out what the reader does not need, not by packing what stays.** A
+  page without its example or its definitions is shorter and takes longer to read.
+
+Do not write these. The examples come from a page of this repository that had to be rewritten.
+
+| Formulation | Example, not to be written |
+| --- | --- |
+| A label made up for the page, used as if the reader knew it | "What holds", "the first half", "an answer that is only put forward" |
+| One term used for two things | "sentence" for an item of a list, then for the question of a decision |
+| A table cell or a heading the reader has to decode | "One is: one sentence in force", "Carries: no status: every line binds" |
+| A general statement with nothing to picture | "A sentence enters the first half only through the second." |
+| A condition, an exception and a result in one sentence | "A taken decision with no answer of its own, whose every sentence was replaced, is deleted by that take." |
+| A term used before the line that explains it | `adds` in the opening paragraph, explained ninety lines below |
+
 ## Use the accurate term
 
 Simple does not mean vague. Name the real thing: "its own virtual machine", not "its own copy of
@@ -48,4 +76,5 @@ enough: a sentence stacked with technical words reads as badly as a slogan.
 
 ## Before you show it
 
-Reread the text against the table above, then against the feature's files for each fact.
+Reread the text against the two tables above. Then check each fact against its source: the plan's
+files, the code, or what the tool prints.

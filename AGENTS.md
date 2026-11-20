@@ -17,7 +17,7 @@ of the features built so far.
 |---|---|
 | [`guides/owner.md`](guides/owner.md) | when the owner is who you answer to |
 | [`guides/engineering.md`](guides/engineering.md) | before you design, name, specify or review |
-| [`guides/writing.md`](guides/writing.md) | before you write text a visitor or a user reads |
+| [`guides/writing.md`](guides/writing.md) | before you write text a person reads: the site, the app, or a page of this repository |
 | [`guides/interface.md`](guides/interface.md) | before you build a page or a screen |
 
 Other work does not need them.
