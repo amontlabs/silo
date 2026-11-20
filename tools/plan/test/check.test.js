@@ -502,7 +502,7 @@ test('rule 11: a verdict the owner\'s command did not write is an error, one err
     file: `plan/${name}`,
     field: 'verdict',
     message: '"linux-vm-engine" has the verdict take, which the owner\'s command did not write',
-    fix: "remove the verdict; the owner's yes is the command plan take linux-vm-engine",
+    fix: "undo that change; the owner's yes is the command plan take linux-vm-engine",
   }]);
   const dropped = filesOf(variant((f) => { f[name].verdict = 'drop'; }));
   assert.match(checkChange(dropped, base).errors[0].fix, /the owner's no is the command plan drop linux-vm-engine/);

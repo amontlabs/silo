@@ -97,22 +97,24 @@ Each problem names the file, the field, what is wrong and the fix.
   `.` or `..` part), or that does not name a regular file there: a directory, a missing file, or a
   link that leads outside the repository. Without the repository, only the file test is left out,
   and a note says so.
-- Against the merged plan (`origin/main`, else `HEAD`): an entry whose question, answer, name,
-  description, `replaces`, `sets` or `removes` changed while its verdict stayed. Only the command
-  checks this, not the offline check of a tree. It does not apply to an entry when the latest
-  commit since the base that changed its verdict, question, answer, name, description, `replaces`,
-  `sets` or `removes` is the owner's verdict on it (`Owner: take <id>` or `Owner: drop <id>`), and
-  none of those has changed since: the owner ruled again after the change. A commit that changed
-  only its `adds` or its `replaced_by`, as a take of another entry does, does not count. A change of
-  `replaced_by` alone is never refused.
-- Against the same plan: an entry whose verdict is `take` or `drop` and is not the one the merged
-  plan holds for it (another verdict, none, or no such entry: a verdict typed in, or an entry copied
-  from a decided one). The same evidence lifts it: the latest commit since the base that changed
-  its verdict or those keys is `Owner: take <id>` for a `take`, `Owner: drop <id>` for a `drop`,
-  and none of those has changed since. A verdict taken away by hand passes, so does a plan whose
-  merged plan holds no entry (the remote's old plan, until the first push). The check cannot tell
-  an agent that runs `plan take` without the owner's word, or one that writes a commit named
-  `Owner: take <id>` by hand, from the owner.
+- Against the merged plan (`origin/main`, else `HEAD`; only the command checks this, not the
+  offline check of a tree):
+  - an entry whose question, answer, name, description, `replaces`, `sets` or `removes` changed
+    while its verdict stayed;
+  - an entry whose verdict is `take` or `drop` and is not the one the merged plan holds for it
+    (another verdict, none, or no such entry: a verdict typed in, or an entry copied from a decided
+    one). A verdict taken away by hand passes, and so does a plan whose merged plan holds no entry
+    (the remote's old plan, until the first push).
+
+  Neither applies to an entry whose file holds what the owner ruled on. The evidence is the latest
+  commit since the base, on any merged branch, named `Owner: take <id>` or `Owner: drop <id>`
+  (for a verdict typed in, the one of its kind); the entry is found in it by its id, wherever its file was then. The entry's file now,
+  committed or not, must agree with it on the verdict and on the keys above. A merge, a move, a
+  change of other keys (`adds`, `replaced_by`, `suggest`, as a take of another entry or a
+  suggestion does) or a change that was put back come between without effect; a later ruling
+  replaces an earlier one. The check does not catch `plan take` run without the owner's word, a
+  commit named `Owner: take <id>` written by hand, or an owner's commit amended or squashed with
+  another change.
 
 A malformed value is a problem like any other: the check never throws on one.
 

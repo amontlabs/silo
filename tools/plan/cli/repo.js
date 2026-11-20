@@ -100,34 +100,34 @@ export function unwatched(root) {
 }
 
 /**
- * Whether the latest commit since the base that changed an entry's verdict or its text keys
- * (asks, answer, name, what, replaces, sets, removes) is the owner's verdict on it (`Owner: take <id>` or
- * `Owner: drop <id>`), and none of those has changed since, committed or not. Rule 11 does not
- * apply to such an entry: the owner ruled again after the change. A commit that touched only other
- * keys of the file, such as the `adds` a take of another entry rewrites, does not count. With a
- * `verdict` (`take` or `drop`), only the owner's verdict of that kind counts: a typed `take` is not
- * covered by `Owner: drop <id>`.
+ * Whether the entry's file holds what the owner ruled on. Among the commits since the base, on any
+ * branch that was merged, the latest whose subject is exactly the owner's verdict on the entry
+ * (`Owner: take <id>` or `Owner: drop <id>`; with a `verdict`, only that kind) is found. In it the
+ * entry's file is found by its id, wherever it was then. The answer is yes when that version and
+ * the working file, committed or not, agree on the verdict and on the text keys (asks, answer,
+ * name, what, replaces, sets, removes): so a merge, a move or an edit of other keys, such as the
+ * `adds` a take of another entry rewrites, changes nothing, and neither does an edit that was put
+ * back. No such commit, or a difference: no. Rule 11 does not apply to an entry for which it is yes.
  * @param {string} root @param {string} ref the base @returns {(id: string, file: string, verdict?: string) => boolean} file: `plan/…`
  */
 export const ruledByOwner = (root, ref) => (id, file, verdict) => {
-  const at = (rev) => git(root, ['cat-file', 'blob', `${rev}:${file}`]);
-  // The working file against HEAD: an uncommitted change of those keys comes after any verdict.
+  const subjects = verdict ? [`Owner: ${verdict} ${id}`] : [`Owner: take ${id}`, `Owner: drop ${id}`];
+  const log = git(root, ['log', '-z', '--format=%H %s', `${ref}..HEAD`]);
+  if (log === null) return false;
+  const found = log.split('\0').filter(Boolean).find((record) => subjects.includes(record.slice(record.indexOf(' ') + 1).trim()));
+  if (found === undefined) return false;
+  const commit = found.slice(0, found.indexOf(' '));
+  const changed = git(root, ['diff-tree', '-r', '--root', '--no-renames', '--name-only', '-z', '--no-commit-id', commit]);
+  const entryFile = new RegExp(`^plan/(?:[^/]+/)?(?:decisions|features)/${id}\\.json$`);
+  const path = changed?.split('\0').find((name) => entryFile.test(name));
+  if (path === undefined) return false;
   let disk;
   try {
     disk = readFileSync(join(root, file), 'utf8');
   } catch {
     disk = null;
   }
-  if (ruledKeysDiffer(at('HEAD'), disk)) return false;
-  const log = git(root, ['log', '-z', '--format=%H %s', `${ref}..HEAD`, '--', file]);
-  if (log === null) return false;
-  for (const record of log.split('\0').filter(Boolean)) {
-    const space = record.indexOf(' ');
-    const [commit, subject] = [record.slice(0, space), record.slice(space + 1)];
-    if (!ruledKeysDiffer(at(`${commit}^`), at(commit))) continue;
-    return (verdict ? [`Owner: ${verdict} ${id}`] : [`Owner: take ${id}`, `Owner: drop ${id}`]).includes(subject.trim());
-  }
-  return false;
+  return !ruledKeysDiffer(git(root, ['cat-file', 'blob', `${commit}:${path}`]), disk);
 };
 
 /**
