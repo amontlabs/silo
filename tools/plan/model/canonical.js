@@ -41,16 +41,16 @@ export const canonicalProperty = (property) => ordered(property, PROPERTY_KEYS);
 /** @param {any} part */
 export const canonicalPart = (part) => ordered(part, PART_KEYS);
 
-const SENTENCE_KEYS = { word: WORD_KEYS, principle: PRINCIPLE_KEYS, property: PROPERTY_KEYS };
+const STATEMENT_KEYS = { word: WORD_KEYS, principle: PRINCIPLE_KEYS, property: PROPERTY_KEYS };
 
 /**
- * An item of `sets`: `in`, then the keys of the sentence kind its list holds (none known when the
+ * An item of `sets`: `in`, then the keys of the statement kind its list holds (none known when the
  * list is not one).
  * @param {any} item
  */
 export function canonicalSetItem(item) {
   const kind = item && typeof item === 'object' ? listKind(item.in) : null;
-  return ordered(item, ['in', ...(kind ? SENTENCE_KEYS[kind] : [])]);
+  return ordered(item, ['in', ...(kind ? STATEMENT_KEYS[kind] : [])]);
 }
 
 /** @param {any} entry @param {readonly string[]} keys */

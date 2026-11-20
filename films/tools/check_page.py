@@ -1,6 +1,6 @@
 """check_page.py <film dir> < dump: the built page shows every part film.json names, with the right number of
 items, and none it does not name. Each entry the film shows is printed with its id; one not decided has its three
-buttons and a note, and under its sentence every sentence a yes would set (its list, its id or word, its text) and
+buttons and a note, and under its text every statement a yes would set (its list, its id or word, its text) and
 every id it would remove; one in force or dropped has none of these."""
 import json, pathlib, re, sys
 import entries, place
@@ -33,19 +33,19 @@ if h:
         bad.append(f"What the film shows: the page lists {[i for i, _, _ in lis]}, film.json shows {C['shows']}")
     for (i, status, body), e in zip(lis, shown):
         if status != e["status"]: bad.append(f"{i}: the page says {status!r}, plan/ says {e['status']!r}")
-        if html_text(e["text"]) not in body: bad.append(f"{i}: its sentence from plan/ is not on the page")
+        if html_text(e["text"]) not in body: bad.append(f"{i}: its text from plan/ is not on the page")
         if e["status"] == "not decided" and (radios(body) != 3 or "<textarea" not in body):
             bad.append(f"{i}: not decided, but it lacks its three buttons and its note")
         if e["status"] != "not decided" and (radios(body) or "<textarea" in body):
             bad.append(f"{i}: {e['status']}, but it has buttons or a note")
         rows = re.findall(r'<p class="set(?: removes)?"([^>]*)>(.*?)</p>', body, re.S)
         if e["status"] != "not decided":
-            if rows: bad.append(f"{i}: {e['status']}, but it shows sentences a yes would set or remove")
+            if rows: bad.append(f"{i}: {e['status']}, but it shows statements a yes would set or remove")
             continue
         attr = lambda t: html_text(t).replace('"', "&quot;")
         sets = [(a, b) for a, b in rows if "data-removes" not in a]
         if len(sets) != len(e["sets"]):
-            bad.append(f"{i}: a yes sets {len(e['sets'])} sentences, the page shows {len(sets)}")
+            bad.append(f"{i}: a yes sets {len(e['sets'])} statements, the page shows {len(sets)}")
         for (a, b), x in zip(sets, e["sets"]):
             if f'data-in="{attr(x["in"])}"' not in a or f'data-name="{attr(x["name"])}"' not in a \
                     or html_text(x["text"]) not in b or html_text(x["name"]) not in b or html_text(x["in"]) not in b:

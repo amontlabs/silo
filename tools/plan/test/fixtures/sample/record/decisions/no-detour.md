@@ -3,7 +3,7 @@
 That a classifier gave an opinion, or that a precaution acted, is recorded as a fact. A rule
 triggered by such a fact would let an opinion do what only a fact may.
 
-## The sentence put forward
+## The statement put forward
 
 "No rule is ever triggered by a fact that says a classifier gave an opinion or a precaution
 acted."

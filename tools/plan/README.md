@@ -11,8 +11,8 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 
 | Command | What it does |
 |---|---|
-| `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the sentences it sets), the features ready to build, and the features that wait and for what. |
-| `plan show <id>` | For an entry: first the entry whole (its keys, its `sets` in full, its stage and position, each need with its status, what needs it, its notes), then what binds it, compact: every principle and the properties of the root, of its part and in `keeps` (id and `says`); the taken decisions of its part and in `needs` (id and `answer`, or the ids it adds when it has none); the other taken decisions of the root as ids only, which `--all` prints in full. For a part: its title and line (and the word of the same id with its meaning, when there is one), its taken entries (and its dropped ones) as a count and their ids, then each entry with no verdict in the order of `order.json` (id, kind, status, and its `asks` or `name`), the first marked `next`, then its properties (id and `says`). For a sentence: the sentence, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. `--json` gives everything, whatever `--all`. |
+| `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the statements it sets), the features ready to build, and the features that wait and for what. |
+| `plan show <id>` | For an entry: first the entry whole (its keys, its `sets` in full, its stage and position, each need with its status, what needs it, its notes), then what binds it, compact: every principle and the properties of the root, of its part and in `keeps` (id and `says`); the taken decisions of its part and in `needs` (id and `answer`, or the ids it adds when it has none); the other taken decisions of the root as ids only, which `--all` prints in full. For a part: its title and line (and the word of the same id with its meaning, when there is one), its taken entries (and its dropped ones) as a count and their ids, then each entry with no verdict in the order of `order.json` (id, kind, status, and its `asks` or `name`), the first marked `next`, then its properties (id and `says`). For a statement: the statement, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. `--json` gives everything, whatever `--all`. |
 | `plan take <id>` | The owner's yes. Writes what the entry sets into the lists, removes what it removes, moves those ids out of the `adds` of the entries that brought them, deletes a taken decision left with neither an `answer` nor an `adds` (its file, its notes and its place in `order.json`), writes `adds` and `"verdict": "take"`, and commits only the changed files as `Owner: take <id>`. |
 | `plan drop <id>` | The owner's no. Writes `"verdict": "drop"`, keeps `sets` and `removes`, and commits `Owner: drop <id>`. |
 | `plan check` | Checks the plan. The merge gate and the site's build run it. |
@@ -22,13 +22,13 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 
 `plan take` refuses when the plan fails the check, when `plan/` has uncommitted changes, when the
 entry is built, when a decision has neither an `answer` nor a `sets`, or when a decision needs a
-decision that is not taken. A decision that puts forward only sentences needs no `answer`: its `sets`
-stands for one. A taken decision that had no `answer` and whose every sentence the take replaces
+decision that is not taken. A decision that puts forward only statements needs no `answer`: its `sets`
+stands for one. A taken decision that had no `answer` and whose every statement the take replaces
 or removes is replaced whole: its file, its notes and its place in `order.json` are deleted in the
 same commit. A taken decision with an `answer` stays, with no `adds`. The take is refused, naming
 both, when another entry needs a decision it would delete. On an entry already taken it says so
 and exits 0. `plan drop` refuses a built entry and a taken entry that has `adds`, and also refuses a
-plan that fails the check or has uncommitted changes. A taken decision that brought no sentence may be dropped. Both check the plan they would
+plan that fails the check or has uncommitted changes. A taken decision that brought no statement may be dropped. Both check the plan they would
 write and write nothing when it fails.
 
 Uncommitted changes are asked of git with every untracked and ignored file listed, whatever the
@@ -59,10 +59,10 @@ Each problem names the file, the field, what is wrong and the fix.
 - A `verdict` or `suggest` that is not `take` or `drop`; `sets` or `removes` on a taken entry;
   `adds` on an entry that is not taken; a taken decision with neither an `answer` nor an `adds`,
   or one that needs a decision not taken.
-- A `sets` item whose id is an entry's, or a sentence of another kind. The id of a sentence of the
+- A `sets` item whose id is an entry's, or a statement of another kind. The id of a statement of the
   same kind is allowed: in the same list it replaces it, in another list it moves it.
-- A sentence that is not in the `adds` of exactly one taken entry, or an `adds` id that names no
-  sentence.
+- A statement that is not in the `adds` of exactly one taken entry, or an `adds` id that names no
+  statement.
 - A link (`from`, `keeps`, `needs`, `removes`) to an id that does not exist. The `from` of a
   property an entry sets may name a principle that the same entry sets.
 - An entry missing from `order.json` or in it twice, an entry placed before something it needs
@@ -80,7 +80,7 @@ Each problem names the file, the field, what is wrong and the fix.
   base that changed its verdict, question, answer, name, description, `sets` or `removes` is the
   owner's verdict on it (`Owner: take <id>` or `Owner: drop <id>`), and none of those has changed
   since: the owner ruled again after the change. A commit that changed only its `adds`, as a take
-  of another entry does when it moves a sentence, does not count.
+  of another entry does when it moves a statement, does not count.
 
 A malformed value is a problem like any other: the check never throws on one.
 

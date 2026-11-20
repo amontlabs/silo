@@ -9,8 +9,8 @@ export const DECISION_STATUSES = Object.freeze(['dropped', 'taken', 'answered', 
 export const FEATURE_STATUSES = Object.freeze(['built', 'dropped', 'ready', 'taken', 'undecided']);
 
 /**
- * Whether an entry puts forward sentences: a `sets` that is a list of one item or more. A decision
- * whose whole proposal is its sentences has no `answer`, and its `sets` stands for one.
+ * Whether an entry puts forward statements: a `sets` that is a list of one item or more. A decision
+ * whose whole proposal is its statements has no `answer`, and its `sets` stands for one.
  * @param {{ sets?: unknown }} entry
  */
 export function hasSets(entry) {

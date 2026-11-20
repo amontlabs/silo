@@ -28,7 +28,7 @@ test('the folder: a file that is not the plan, a missing list, a part without it
   assert.deepEqual(errorsOf(variant((f) => {
     delete f['words.json'];
     f['decisions/the-design.json'].adds = f['decisions/the-design.json'].adds.filter((id) => !WORD_IDS.includes(id));
-  })).filter((e) => !e.includes('is not a sentence')), ['plan/words.json -: missing']);
+  })).filter((e) => !e.includes('is not a statement')), ['plan/words.json -: missing']);
   assert.deepEqual(errorsOf(variant((f) => { delete f['engine/README.md']; })), ['plan/engine/README.md -: missing: every part has its page']);
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/ghost.md'] = 'x'; })), ['plan/engine/decisions/ghost.md -: notes without an entry file']);
   assert.deepEqual(errorsOf(variant((f) => { f['parts.json'].push({ id: 'decisions', title: 'T', line: 'L' }); f['decisions/README.md'] = 'x'; })), [
@@ -51,7 +51,7 @@ test('files whose name starts with a dot are ignored', () => {
   assert.deepEqual(errorsOf(variant((f) => { f['.DS_Store'] = 'x'; f['engine/.draft.json'] = '{'; })), []);
 });
 
-test('rule 1: one namespace of ids, across entries and sentences', () => {
+test('rule 1: one namespace of ids, across entries and statements', () => {
   // A decision named like a word.
   assert.deepEqual(errorsOf(variant((f) => {
     f['engine/decisions/fork.json'] = { asks: 'How is a computer forked?' };
@@ -66,7 +66,7 @@ test('rule 1: one namespace of ids, across entries and sentences', () => {
   assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/model-tool.json'] = { asks: 'Q?' }; })), ['plan/record/decisions/model-tool.json -: the id "model-tool" is also plan/engine/decisions/model-tool.json']);
   // A file name that is not an id.
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/Bad_Id.json'] = { asks: 'Q?' }; })), ['plan/engine/decisions/Bad_Id.json -: "Bad_Id" is not an id (^[a-z0-9][a-z0-9-]{0,62}$)']);
-  // A sentence an entry sets, named like an entry.
+  // A statement an entry sets, named like an entry.
   assert.deepEqual(errorsOf(variant((f) => { f['decisions/nothing-without-a-reason.json'].sets[0].id = 'model-tool'; })), [
     'plan/decisions/nothing-without-a-reason.json sets[0].id: the id "model-tool" is also plan/engine/decisions/model-tool.json',
   ]);
@@ -117,7 +117,7 @@ test('rule 5: sets and removes before take, adds only with it, each sets item in
   assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].in = 'nowhere/properties'; })), ['plan/record/decisions/losses-show.json sets[0].in: "nowhere" is not a part']);
   assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].in = 'facts'; })), ['plan/record/decisions/losses-show.json sets[0].in: "facts" is not a list']);
   assert.deepEqual(errorsOf(variant((f) => { delete f['record/decisions/losses-show.json'].sets[0].kind; })), ['plan/record/decisions/losses-show.json sets[0].kind: missing or empty']);
-  // A sets item may replace a sentence of its own list, or move one of another list of the same kind; never take an id of another kind.
+  // A sets item may replace a statement of its own list, or move one of another list of the same kind; never take an id of another kind.
   assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].id = 'classifier-never-acts'; })), []);
   assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['record/decisions/losses-show.json'].sets[0], { in: 'engine/properties', id: 'classifier-never-acts' }); })), []);
   assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['record/decisions/losses-show.json'].sets[0], { in: 'properties', id: 'classifier-never-acts' }); })), []);
@@ -134,11 +134,11 @@ test('rule 5: sets and removes before take, adds only with it, each sets item in
   assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { needs: ['engine-language'], verdict: 'take' }); })), []);
 });
 
-test('rule 6: every sentence is added by exactly one taken entry', () => {
+test('rule 6: every statement is added by exactly one taken entry', () => {
   const design = (f) => f['decisions/the-design.json'];
   assert.deepEqual(errorsOf(variant((f) => { design(f).adds = design(f).adds.filter((id) => id !== 'fork'); })), ['plan/words.json [1].word: "fork" is added by no taken entry']);
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/engine-language.json'].adds = ['fork']; })), ['plan/words.json [1].word: "fork" is added by the-design, engine-language']);
-  assert.deepEqual(errorsOf(variant((f) => { design(f).adds.push('vm'); })), ['plan/decisions/the-design.json adds[14]: "vm" is not a sentence']);
+  assert.deepEqual(errorsOf(variant((f) => { design(f).adds.push('vm'); })), ['plan/decisions/the-design.json adds[14]: "vm" is not a statement']);
   // A principle in its list that no taken entry brought.
   assert.deepEqual(errorsOf(variant((f) => { f['principles.json'].push({ id: 'least-privilege', says: 'S.', asks: 'A?' }); })), ['plan/principles.json [1].id: "least-privilege" is added by no taken entry']);
 });
@@ -147,7 +147,7 @@ test('rule 7: from, keeps, needs and removes name what exists; a property with n
   assert.deepEqual(errorsOf(variant((f) => { f['record/properties.json'][0].from = 'nobody'; })), ['plan/record/properties.json [0].from: "nobody" is not a principle']);
   assert.deepEqual(errorsOf(variant((f) => { f['engine/features/start-computer.json'].keeps = ['nothing-at-all']; })), ['plan/engine/features/start-computer.json keeps[0]: "nothing-at-all" is not a property']);
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].needs = ['nobody']; })), ['plan/engine/decisions/model-tool.json needs[0]: "nobody" is not a decision or a feature']);
-  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].removes = ['nothing']; })), ['plan/engine/decisions/model-tool.json removes[0]: "nothing" is not a sentence']);
+  assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/model-tool.json'].removes = ['nothing']; })), ['plan/engine/decisions/model-tool.json removes[0]: "nothing" is not a statement']);
   assert.deepEqual(errorsOf(variant((f) => { f['record/decisions/losses-show.json'].sets[0].from = 'nobody'; })), ['plan/record/decisions/losses-show.json sets[0].from: "nobody" is not a principle']);
   // A property may follow from a principle the same entry sets; not from one another entry sets.
   const ownPrinciple = { in: 'record/properties', id: 'reason-recorded', says: 'Every grant records its reason.', kind: 'safety', from: 'least-privilege', check: ['test'] };
@@ -172,7 +172,7 @@ test('rule 8: the order', () => {
   assert.deepEqual(errorsOf(variant((f) => { f['engine/decisions/engine-language.json'].needs = ['start-computer']; })), [
     'plan/order.json engine-language: "engine-language" comes before "start-computer", which it needs',
   ]);
-  // Stage ids are not in the namespace of entries and sentences, and none is reserved.
+  // Stage ids are not in the namespace of entries and statements, and none is reserved.
   assert.deepEqual(errorsOf(variant((f) => { stage(f, 'later').id = 'gone'; })), []);
   assert.deepEqual(errorsOf(variant((f) => { stage(f, 'later').id = 'fork'; })), []);
   // The names reserved for folders are not reserved for stages.
@@ -276,7 +276,7 @@ test('rule 10: the words under not are refused on word boundaries, in any case, 
   })), []);
 });
 
-test('rule 11: an entry whose sentence changed while its verdict stayed', () => {
+test('rule 11: an entry whose text changed while its verdict stayed', () => {
   const base = filesOf(basePlan());
   const changeOf = (edit) => checkChange(filesOf(variant(edit)), base).errors.map((e) => `${e.file} ${e.field}: ${e.message}`);
   assert.deepEqual(changeOf((f) => { f['engine/decisions/engine-language.json'].answer = 'Rust.'; }), ['plan/engine/decisions/engine-language.json answer: "engine-language" changed its answer while its verdict stayed take']);
@@ -288,7 +288,7 @@ test('rule 11: an entry whose sentence changed while its verdict stayed', () => 
   // No verdict: free to change. A verdict that changes with it: the owner's new word.
   assert.deepEqual(changeOf((f) => { f['engine/decisions/linux-vm-engine.json'].answer = 'Firecracker.'; }), []);
   assert.deepEqual(changeOf((f) => { delete f['engine/decisions/engine-language.json'].verdict; f['engine/decisions/engine-language.json'].answer = 'Rust.'; }), []);
-  // Keys outside the sentence may change.
+  // Keys outside the text may change.
   assert.deepEqual(changeOf((f) => { f['engine/features/start-computer.json'].surfaces = { app: 'Start' }; }), []);
   // The owner ruled again after the change: the rule does not apply to that entry, and only to it.
   const ruled = (id) => id === 'engine-language';

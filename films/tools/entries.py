@@ -1,15 +1,15 @@
-"""entries.py: reads the entries and sentences a film shows from plan/, at build time.
+"""entries.py: reads the entries and statements a film shows from plan/, at build time.
 
 Uses only the standard library, so it runs with any Python 3 and needs no environment.
 `shown(ids)` gives, for each id in order, a dict:
   id      the id
   kind    word, principle, property, decision or feature
-  text    the sentence: a word's meaning, a principle's or a property's `says`, a decision's
+  text    the text: a word's meaning, a principle's or a property's `says`, a decision's
           `answer` (its `asks` while it has none), a feature's `what`
   asks    a decision's question, when it has an answer too
-  status  "in force" (a sentence, or an entry the owner took), "not decided" (no verdict) or
+  status  "in force" (a statement, or an entry the owner took), "not decided" (no verdict) or
           "dropped" (the owner said no)
-  sets    for an entry not decided: every sentence a yes would set, in order, as
+  sets    for an entry not decided: every statement a yes would set, in order, as
           { "in": the list it goes to, "name": its id or its word, "text": its `says` or `means` }
   removes for an entry not decided: the ids a yes would take out of the lists
 A yes covers exactly what the entry shows, so the page prints `sets` and `removes` with it.
@@ -25,7 +25,7 @@ def word_id(word):
 
 
 def read_plan(plan=PLAN):
-    """Every sentence and every entry of plan/, by id."""
+    """Every statement and every entry of plan/, by id."""
     found = {}
     if not plan.is_dir():
         raise SystemExit(f"{plan} is missing: the films are built inside the Silo repository.")

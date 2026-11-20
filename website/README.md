@@ -198,7 +198,7 @@ no verdict route: decisions and features are taken or dropped with `plan take`
 and `plan drop`.
 
 With `threads` off, no issue is matched to an entry, even an old one whose
-marker names it, and an entry shows its sentence, its notes and its state with
+marker names it, and an entry shows its text, its notes and its state with
 no vote, no count, no comment box, no GitHub link and no placeholder for any of
 them; the page has no Latest, and sign-in has no tooltip. Suggestions keep their
 votes and comments.
@@ -316,7 +316,7 @@ What a person sees:
   have). What arrives after the first frames (numbers, the account, the
   owner's marks, a new item of the key) fades in over 150 ms where it stands;
   nothing fades on navigation or when a row opens, or with reduced motion.
-- An open entry shows its sentence, then "Notes" (its `<id>.md`), closed by
+- An open entry shows its text, then "Notes" (its `<id>.md`), closed by
   default, and opened in place: headings, paragraphs, lists, http and https
   links (an address may hold one level of brackets), inline code and code
   blocks become elements (`Markdown.tsx`); nothing is ever inserted as HTML,
@@ -334,7 +334,7 @@ What a person sees:
   "Dropped", "Verdict cleared", "Built"; `suggested_in` and the old "later"
   verdict say nothing and draw no line, and no raw key ever shows. A phrase
   too long for the line is cut with an ellipsis; the time and the link keep
-  their place. "Text changed" opens the name and the sentence before and
+  their place. "Text changed" opens the name and the text before and
   after: the page reads `plan/features/<id>.json` at the two commits from
   `raw.githubusercontent.com` only then, and shows "not available" when it
   cannot. While the thread loads, each comment and each history line the live
@@ -380,7 +380,7 @@ Back and Forward move between places; opening a row replaces the address.
 | `useWorkshop.ts` | Live state and every write: the load, pending writes, the verdict guard. |
 | `MapView.tsx`, `Tiles.tsx` | The map and the tiles. |
 | `PartView.tsx`, `Suggest.tsx`, `Latest.tsx` | An opened part, the whole product's decisions and what is left out; the suggestions; the latest changes. |
-| `Entry.tsx` | One row and what it shows open: the sentence, notes, the state, and for a row with a thread the thread with its history lines. |
+| `Entry.tsx` | One row and what it shows open: the text, notes, the state, and for a row with a thread the thread with its history lines. |
 | `routes.ts`, `plan.ts`, `map.ts`, `data.ts` | Addresses; the rows, statuses, parts' counts and states on top of the plan's model; the drawing; the build-time reader. |
 | `api.ts`, `writes.ts`, `memory.ts`, `RichText.tsx`, `Markdown.tsx`, `Boundary.tsx` | The API client, the page's own writes (a list of values set, kept a day; its comments six minutes), the remembered answer and person, text from GitHub, notes, the fallback list. |
 | `prerender.tsx`, `NoScript.tsx`, `takeover.ts` | The markup the build writes into the page, the list for a reader without JavaScript, and the script's takeover. |

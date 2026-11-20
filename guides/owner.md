@@ -18,8 +18,8 @@ Read this when the owner is who you answer to. A subagent does not need it.
 
 ## When the owner rules
 
-- Show what `plan` gives, or `plan show <part>` for one part: the entry, its sentence, every
-  sentence it would set, and your recommendation with its reason.
+- Show what `plan` gives, or `plan show <part>` for one part: the entry, its text, every
+  statement it would set, and your recommendation with its reason.
 - The owner answers by id. "Yes" is `plan take <id>`. "No" is `plan drop <id>`: it says no to what
   the entry shows, so ask what should hold in its place when that matters. "Not now" moves the id
   to a later stage of `plan/order.json`. "Yes, but" is an edit or a split of the entry, shown

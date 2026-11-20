@@ -46,7 +46,7 @@ const ENTRY_FILE = /^(?:([^/]+)\/)?(decisions|features)\/([^/]+)\.(json|md)$/;
 const PART_FILE = /^([^/]+)\/(README\.md|properties\.json)$/;
 const RESERVED_PARTS = new Set(['decisions', 'features']);
 
-const SENTENCE_KEYS = { word: WORD_KEYS, principle: PRINCIPLE_KEYS, property: PROPERTY_KEYS };
+const STATEMENT_KEYS = { word: WORD_KEYS, principle: PRINCIPLE_KEYS, property: PROPERTY_KEYS };
 
 /** The canonical form of a JSON file of the plan, by its path relative to `plan/`. */
 function canonicalOf(name) {
@@ -69,8 +69,8 @@ function phrasePattern(phrase) {
   return new RegExp(`(?<![\\p{L}\\p{N}_])${body}(?![\\p{L}\\p{N}_])`, 'iu');
 }
 
-/** The id of a sentence: a word's is derived from `word`, the others carry `id`. */
-const sentenceId = (kind, sentence) => (kind === 'word' ? (typeof sentence.word === 'string' ? wordId(sentence.word) : null) : sentence.id);
+/** The id of a statement: a word's is derived from `word`, the others carry `id`. */
+const statementId = (kind, statement) => (kind === 'word' ? (typeof statement.word === 'string' ? wordId(statement.word) : null) : statement.id);
 const idField = (kind) => (kind === 'word' ? 'word' : 'id');
 
 /**
@@ -188,29 +188,29 @@ export function checkFiles(files, { exists } = {}) {
   }
 
   /**
-   * The shape of a sentence: its keys, its required keys and its values (rules 2 and 3).
-   * @param {'word' | 'principle' | 'property'} kind @param {string[]} [extra] keys required besides the sentence's (`in` for a `sets` item)
+   * The shape of a statement: its keys, its required keys and its values (rules 2 and 3).
+   * @param {'word' | 'principle' | 'property'} kind @param {string[]} [extra] keys required besides the statement's (`in` for a `sets` item)
    */
-  function checkSentence(kind, file, field, sentence, extra = []) {
-    if (!isObject(sentence)) return add(file, field, 'not an object', `write a ${kind} as an object`);
-    unknownKeys(file, field, sentence, [...extra, ...SENTENCE_KEYS[kind]]);
-    present(file, field, sentence, [...extra, ...REQUIRED_KEYS[kind]]);
-    for (const key of SENTENCE_KEYS[kind]) if (!['not', 'check', 'at'].includes(key)) textKey(file, field, sentence, key);
-    const id = sentenceId(kind, sentence);
+  function checkStatement(kind, file, field, statement, extra = []) {
+    if (!isObject(statement)) return add(file, field, 'not an object', `write a ${kind} as an object`);
+    unknownKeys(file, field, statement, [...extra, ...STATEMENT_KEYS[kind]]);
+    present(file, field, statement, [...extra, ...REQUIRED_KEYS[kind]]);
+    for (const key of STATEMENT_KEYS[kind]) if (!['not', 'check', 'at'].includes(key)) textKey(file, field, statement, key);
+    const id = statementId(kind, statement);
     if (typeof id === 'string' && id !== '' && !ID_PATTERN.test(id)) add(file, at(field, idField(kind)), `"${id}" is not an id`, 'use lowercase letters, digits and dashes (in a word: spaces too)');
-    if (kind === 'word') textList(file, at(field, 'not'), sentence.not, 'words or phrases');
+    if (kind === 'word') textList(file, at(field, 'not'), statement.not, 'words or phrases');
     if (kind === 'property') {
-      if (Object.hasOwn(sentence, 'kind') && !PROPERTY_KINDS.includes(sentence.kind)) add(file, at(field, 'kind'), `"${shown(sentence.kind)}" is not a kind`, `write one of ${PROPERTY_KINDS.join(', ')}`);
-      for (const check of textList(file, at(field, 'check'), sentence.check, 'checks')) {
+      if (Object.hasOwn(statement, 'kind') && !PROPERTY_KINDS.includes(statement.kind)) add(file, at(field, 'kind'), `"${shown(statement.kind)}" is not a kind`, `write one of ${PROPERTY_KINDS.join(', ')}`);
+      for (const check of textList(file, at(field, 'check'), statement.check, 'checks')) {
         if (!CHECKS.includes(check)) add(file, at(field, 'check'), `"${check}" is not a check`, `write one or more of ${CHECKS.join(', ')}`);
       }
-      textList(file, at(field, 'at'), sentence.at, 'paths');
+      textList(file, at(field, 'at'), statement.at, 'paths');
     }
   }
 
-  // The lists of sentences.
+  // The lists of statements.
   /** @type {{ id: string, kind: 'word' | 'principle' | 'property', list: string, file: string, field: string, value: any }[]} */
-  const sentences = [];
+  const statements = [];
   /** @type {[string, 'word' | 'principle' | 'property', string][]} file, kind, list name */
   const lists = [['words.json', 'word', 'words'], ['principles.json', 'principle', 'principles']];
   for (const name of names) {
@@ -225,12 +225,12 @@ export function checkFiles(files, { exists } = {}) {
       add(file, '-', 'not an array', `write an array of ${kind}s`);
       continue;
     }
-    value.forEach((sentence, index) => {
+    value.forEach((statement, index) => {
       const field = `[${index}]`;
-      checkSentence(kind, file, field, sentence);
-      if (!isObject(sentence)) return;
-      const id = sentenceId(kind, sentence);
-      if (isText(id)) sentences.push({ id, kind, list, file, field, value: sentence });
+      checkStatement(kind, file, field, statement);
+      if (!isObject(statement)) return;
+      const id = statementId(kind, statement);
+      if (isText(id)) statements.push({ id, kind, list, file, field, value: statement });
     });
   }
 
@@ -271,19 +271,19 @@ export function checkFiles(files, { exists } = {}) {
     if (Object.hasOwn(data, 'built') && !isDate(data.built)) add(file, 'built', `"${shown(data.built)}" is not a date`, 'write the day it was built, YYYY-MM-DD');
     // Rule 5: sets and removes only before take, adds only with it.
     const taken = data.verdict === 'take';
-    if (taken && Object.hasOwn(data, 'sets')) add(file, 'sets', 'sets on a taken entry', 'run plan take, which writes the sentences into their lists and records their ids in adds');
-    if (taken && Object.hasOwn(data, 'removes')) add(file, 'removes', 'removes on a taken entry', 'run plan take, which removes the sentences');
-    if (!taken && Object.hasOwn(data, 'adds')) add(file, 'adds', 'adds without the verdict take', 'remove adds: only a taken entry has brought sentences');
+    if (taken && Object.hasOwn(data, 'sets')) add(file, 'sets', 'sets on a taken entry', 'run plan take, which writes the statements into their lists and records their ids in adds');
+    if (taken && Object.hasOwn(data, 'removes')) add(file, 'removes', 'removes on a taken entry', 'run plan take, which removes the statements');
+    if (!taken && Object.hasOwn(data, 'adds')) add(file, 'adds', 'adds without the verdict take', 'remove adds: only a taken entry has brought statements');
     if (taken && kind === 'decision' && !Object.hasOwn(data, 'answer') && !Object.hasOwn(data, 'adds')) add(file, 'answer', 'a taken decision without an answer or adds', 'write the answer the owner took, or remove the verdict');
     if (Object.hasOwn(data, 'sets') && !isEmpty(data.sets)) {
-      if (!Array.isArray(data.sets)) add(file, 'sets', 'not a list', 'write a list of { in, …the sentence }');
+      if (!Array.isArray(data.sets)) add(file, 'sets', 'not a list', 'write a list of { in, …the statement }');
       else data.sets.forEach((item, index) => {
         const field = `sets[${index}]`;
-        if (!isObject(item)) return add(file, field, 'not an object', 'write { in, …the sentence }');
+        if (!isObject(item)) return add(file, field, 'not an object', 'write { in, …the statement }');
         const kind = listKind(item.in);
         if (!kind) return add(file, at(field, 'in'), `"${shown(item.in)}" is not a list`, 'write words, principles, properties or <part>/properties');
         if (item.in.includes('/') && !partIds.has(item.in.split('/')[0])) add(file, at(field, 'in'), `"${item.in.split('/')[0]}" is not a part`, 'name a part of parts.json');
-        checkSentence(kind, file, field, item, ['in']);
+        checkStatement(kind, file, field, item, ['in']);
       });
     }
     if (!entries.has(id)) entries.set(id, { ...data, id, kind, part, file });
@@ -292,68 +292,68 @@ export function checkFiles(files, { exists } = {}) {
   // Every entry file counts as an entry for the links, even one that does not parse: that one error is enough.
   const entryIds = new Set(entryFiles.map((entry) => entry.id));
 
-  // Rule 1: one namespace of ids, across entries and sentences.
+  // Rule 1: one namespace of ids, across entries and statements.
   /** @type {Map<string, string>} where each id is first defined */
   const owner = new Map();
   for (const entry of entryFiles) {
     if (owner.has(entry.id)) add(entry.file, '-', `the id "${entry.id}" is also ${owner.get(entry.id)}`, 'give each decision, feature, word, principle and property its own id');
     else owner.set(entry.id, entry.file);
   }
-  for (const sentence of sentences) {
-    if (owner.has(sentence.id)) add(sentence.file, at(sentence.field, idField(sentence.kind)), `the id "${sentence.id}" is also ${owner.get(sentence.id)}`, 'give each decision, feature, word, principle and property its own id');
-    else owner.set(sentence.id, `${sentence.file} ${sentence.field}`);
+  for (const statement of statements) {
+    if (owner.has(statement.id)) add(statement.file, at(statement.field, idField(statement.kind)), `the id "${statement.id}" is also ${owner.get(statement.id)}`, 'give each decision, feature, word, principle and property its own id');
+    else owner.set(statement.id, `${statement.file} ${statement.field}`);
   }
-  /** @type {Map<string, typeof sentences[number]>} */
-  const sentenceById = new Map();
-  for (const sentence of sentences) if (!sentenceById.has(sentence.id)) sentenceById.set(sentence.id, sentence);
-  // plan show takes a part's id as it takes an entry's or a sentence's, so a part may not share one.
+  /** @type {Map<string, typeof statements[number]>} */
+  const statementById = new Map();
+  for (const statement of statements) if (!statementById.has(statement.id)) statementById.set(statement.id, statement);
+  // plan show takes a part's id as it takes an entry's or a statement's, so a part may not share one.
   // A word may: a part is often named by the word for its concept, and plan show on the part shows the word.
   for (const [id, field] of partFields) {
     const entry = entryFiles.find((item) => item.id === id);
-    const sentence = sentenceById.get(id);
+    const statement = statementById.get(id);
     if (entry) add(partsFile, field, `the part id "${id}" is also ${entry.file}`, 'give the part or the entry another id');
-    else if (sentence && sentence.kind !== 'word') add(partsFile, field, `the part id "${id}" is also the ${sentence.kind} at ${sentence.file} ${sentence.field}`, `give the part or the ${sentence.kind} another id`);
+    else if (statement && statement.kind !== 'word') add(partsFile, field, `the part id "${id}" is also the ${statement.kind} at ${statement.file} ${statement.field}`, `give the part or the ${statement.kind} another id`);
   }
-  // A sentence an entry sets joins the namespace when taken: it may replace or move a sentence of its own kind only.
+  // A statement an entry sets joins the namespace when taken: it may replace or move a statement of its own kind only.
   for (const entry of entries.values()) {
     if (!Array.isArray(entry.sets)) continue;
     entry.sets.forEach((item, index) => {
       const kind = isObject(item) ? listKind(item.in) : null;
       if (!kind) return;
-      const id = sentenceId(kind, item);
+      const id = statementId(kind, item);
       if (typeof id !== 'string' || !ID_PATTERN.test(id)) return;
       const field = at(`sets[${index}]`, idField(kind));
-      if (entries.has(id)) add(entry.file, field, `the id "${id}" is also ${entries.get(id).file}`, 'give the sentence its own id');
+      if (entries.has(id)) add(entry.file, field, `the id "${id}" is also ${entries.get(id).file}`, 'give the statement its own id');
       else if (kind !== 'word' && partIds.has(id)) add(entry.file, field, `the id "${id}" is also a part of plan/parts.json`, `give the ${kind} its own id`);
-      else if (sentenceById.has(id) && sentenceById.get(id).kind !== kind) add(entry.file, field, `the id "${id}" is already a ${sentenceById.get(id).kind} of ${sentenceById.get(id).list}`, `give the ${kind} its own id: a sets item replaces or moves a sentence of its own kind only`);
+      else if (statementById.has(id) && statementById.get(id).kind !== kind) add(entry.file, field, `the id "${id}" is already a ${statementById.get(id).kind} of ${statementById.get(id).list}`, `give the ${kind} its own id: a sets item replaces or moves a statement of its own kind only`);
     });
   }
 
-  // Rule 6: every sentence is added by exactly one taken entry; every added id is a sentence.
+  // Rule 6: every statement is added by exactly one taken entry; every added id is a statement.
   /** @type {Map<string, string[]>} */
   const addedBy = new Map();
   for (const entry of entries.values()) {
     if (entry.verdict !== 'take' || !Array.isArray(entry.adds)) continue;
     entry.adds.forEach((id, index) => {
       if (typeof id !== 'string') return;
-      if (!sentenceById.has(id)) add(entry.file, `adds[${index}]`, `"${id}" is not a sentence`, 'add only the ids of words, principles and properties in their lists');
+      if (!statementById.has(id)) add(entry.file, `adds[${index}]`, `"${id}" is not a statement`, 'add only the ids of words, principles and properties in their lists');
       addedBy.set(id, [...(addedBy.get(id) ?? []), entry.id]);
     });
   }
-  for (const sentence of sentences) {
-    const by = addedBy.get(sentence.id) ?? [];
-    const field = at(sentence.field, idField(sentence.kind));
-    if (by.length === 0) add(sentence.file, field, `"${sentence.id}" is added by no taken entry`, 'name it in the adds of the taken decision or feature that brought it');
-    else if (by.length > 1) add(sentence.file, field, `"${sentence.id}" is added by ${by.join(', ')}`, 'keep it in the adds of one entry only');
+  for (const statement of statements) {
+    const by = addedBy.get(statement.id) ?? [];
+    const field = at(statement.field, idField(statement.kind));
+    if (by.length === 0) add(statement.file, field, `"${statement.id}" is added by no taken entry`, 'name it in the adds of the taken decision or feature that brought it');
+    else if (by.length > 1) add(statement.file, field, `"${statement.id}" is added by ${by.join(', ')}`, 'keep it in the adds of one entry only');
   }
 
   // Rule 7: links name what exists.
-  const principleIds = new Set(sentences.filter((s) => s.kind === 'principle').map((s) => s.id));
-  const propertyIds = new Set(sentences.filter((s) => s.kind === 'property').map((s) => s.id));
-  for (const sentence of sentences) {
-    if (sentence.kind !== 'property') continue;
-    if (!Object.hasOwn(sentence.value, 'from')) notes.push({ file: sentence.file, field: sentence.field, message: `the property "${sentence.id}" follows from no principle`, fix: 'name the principle it follows from in from, once there is one' });
-    else if (typeof sentence.value.from === 'string' && !principleIds.has(sentence.value.from)) add(sentence.file, at(sentence.field, 'from'), `"${sentence.value.from}" is not a principle`, 'name a principle of principles.json');
+  const principleIds = new Set(statements.filter((s) => s.kind === 'principle').map((s) => s.id));
+  const propertyIds = new Set(statements.filter((s) => s.kind === 'property').map((s) => s.id));
+  for (const statement of statements) {
+    if (statement.kind !== 'property') continue;
+    if (!Object.hasOwn(statement.value, 'from')) notes.push({ file: statement.file, field: statement.field, message: `the property "${statement.id}" follows from no principle`, fix: 'name the principle it follows from in from, once there is one' });
+    else if (typeof statement.value.from === 'string' && !principleIds.has(statement.value.from)) add(statement.file, at(statement.field, 'from'), `"${statement.value.from}" is not a principle`, 'name a principle of principles.json');
   }
   for (const entry of entries.values()) {
     const named = (key) => (Array.isArray(entry[key]) ? entry[key].map((id, index) => [id, `${key}[${index}]`]).filter(([id]) => typeof id === 'string') : []);
@@ -362,7 +362,7 @@ export function checkFiles(files, { exists } = {}) {
       else if (!entryIds.has(id)) add(entry.file, field, `"${id}" is not a decision or a feature`, 'name an entry of the plan');
     }
     for (const [id, field] of named('keeps')) if (!propertyIds.has(id)) add(entry.file, field, `"${id}" is not a property`, 'name a property of the plan');
-    for (const [id, field] of named('removes')) if (!sentenceById.has(id)) add(entry.file, field, `"${id}" is not a sentence`, 'name a word, principle or property of the plan');
+    for (const [id, field] of named('removes')) if (!statementById.has(id)) add(entry.file, field, `"${id}" is not a statement`, 'name a word, principle or property of the plan');
     // A property it sets may follow from a principle in force, or from one this same entry sets.
     const ownPrinciples = new Set((Array.isArray(entry.sets) ? entry.sets : []).filter((item) => isObject(item) && listKind(item.in) === 'principle' && typeof item.id === 'string').map((item) => item.id));
     if (Array.isArray(entry.sets)) entry.sets.forEach((item, index) => {
@@ -433,12 +433,12 @@ export function checkFiles(files, { exists } = {}) {
     const waiting = (Array.isArray(entry.needs) ? entry.needs : []).filter((id) => !isDone(entries.get(id)));
     if (waiting.length) add(entry.file, 'built', `built while ${waiting.map(shown).join(', ')} ${waiting.length > 1 ? 'are' : 'is'} not done`, 'finish what it needs first, or remove built');
     if (Array.isArray(entry.adds)) for (const id of entry.adds) {
-      const sentence = sentenceById.get(id);
-      if (sentence?.kind === 'property' && !Object.hasOwn(sentence.value, 'at')) add(sentence.file, at(sentence.field, 'at'), `the property "${id}" of the built feature "${entry.id}" has no at`, 'name the files of its checks in at');
+      const statement = statementById.get(id);
+      if (statement?.kind === 'property' && !Object.hasOwn(statement.value, 'at')) add(statement.file, at(statement.field, 'at'), `the property "${id}" of the built feature "${entry.id}" has no at`, 'name the files of its checks in at');
     }
   }
   /** @type {[string, string, unknown][]} file, field, the at */
-  const ats = sentences.filter((s) => s.kind === 'property').map((s) => [s.file, at(s.field, 'at'), s.value.at]);
+  const ats = statements.filter((s) => s.kind === 'property').map((s) => [s.file, at(s.field, 'at'), s.value.at]);
   for (const entry of entries.values()) {
     if (Array.isArray(entry.sets)) entry.sets.forEach((item, index) => { if (isObject(item) && listKind(item.in) === 'property') ats.push([entry.file, `sets[${index}].at`, item.at]); });
   }
@@ -455,9 +455,9 @@ export function checkFiles(files, { exists } = {}) {
   // Rule 10: the words under not, in every JSON string value and every .md file, except inside a not list.
   /** @type {{ phrase: string, pattern: RegExp, word: string }[]} */
   const refused = [];
-  for (const sentence of sentences) {
-    if (sentence.kind !== 'word' || !Array.isArray(sentence.value.not)) continue;
-    for (const phrase of sentence.value.not) if (isText(phrase)) refused.push({ phrase, pattern: phrasePattern(phrase), word: sentence.value.word });
+  for (const statement of statements) {
+    if (statement.kind !== 'word' || !Array.isArray(statement.value.not)) continue;
+    for (const phrase of statement.value.not) if (isText(phrase)) refused.push({ phrase, pattern: phrasePattern(phrase), word: statement.value.word });
   }
   if (refused.length) {
     const scan = (file, field, text) => {
@@ -478,11 +478,11 @@ export function checkFiles(files, { exists } = {}) {
 }
 
 /** The keys whose change, with the verdict unchanged, is an error (rule 11). */
-const SENTENCE_OF_ENTRY = ['asks', 'answer', 'name', 'what', 'sets', 'removes'];
+const ENTRY_TEXT_KEYS = ['asks', 'answer', 'name', 'what', 'sets', 'removes'];
 
 /**
  * Whether two versions of an entry file differ in what the owner rules on: the verdict or a key of
- * rule 11. `adds` is left out: a take of another entry rewrites it when it moves a sentence. A
+ * rule 11. `adds` is left out: a take of another entry rewrites it when it moves a statement. A
  * version that is missing, not JSON or not an object counts as none, unlike any object.
  * @param {string | null} before @param {string | null} after the texts of the file
  */
@@ -498,7 +498,7 @@ export function ruledKeysDiffer(before, after) {
   };
   const [a, b] = [parse(before), parse(after)];
   if (a === null || b === null) return a !== b;
-  return ['verdict', ...SENTENCE_OF_ENTRY].some((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
+  return ['verdict', ...ENTRY_TEXT_KEYS].some((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
 }
 
 /** @param {Map<string, string>} files @returns {Map<string, { file: string, value: any }>} the entries that parse, by id */
@@ -535,7 +535,7 @@ export function checkChange(files, baseFiles, { ruledByOwner } = {}) {
   for (const [id, { file, value }] of entriesOf(files)) {
     const before = base.get(id)?.value;
     if (!before || before.verdict === undefined || before.verdict !== value.verdict) continue;
-    const changed = SENTENCE_OF_ENTRY.filter((key) => JSON.stringify(before[key]) !== JSON.stringify(value[key]));
+    const changed = ENTRY_TEXT_KEYS.filter((key) => JSON.stringify(before[key]) !== JSON.stringify(value[key]));
     if (changed.length && ruledByOwner?.(id, file)) continue;
     for (const key of changed) {
       errors.push({ file, field: key, message: `"${id}" changed its ${key} while its verdict stayed ${shown(before.verdict)}`, fix: 'remove the verdict, so the owner rules on the new text, or undo the change' });

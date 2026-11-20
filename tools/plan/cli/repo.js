@@ -100,7 +100,7 @@ export function unwatched(root) {
 }
 
 /**
- * Whether the latest commit since the base that changed an entry's verdict or its sentence keys
+ * Whether the latest commit since the base that changed an entry's verdict or its text keys
  * (asks, answer, name, what, sets, removes) is the owner's verdict on it (`Owner: take <id>` or
  * `Owner: drop <id>`), and none of those has changed since, committed or not. Rule 11 does not
  * apply to such an entry: the owner ruled again after the change. A commit that touched only other
