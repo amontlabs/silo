@@ -1,6 +1,6 @@
 {
   "asks": "What becomes of a dropped computer?",
-  "answer": "A dropped computer waits in a bin. It can be brought back for a time.",
+  "answer": "A dropped computer waits in a bin.",
   "needs": [
     "how-a-fork-ends"
   ],

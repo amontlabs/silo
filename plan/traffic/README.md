@@ -25,5 +25,5 @@ program to say so, and to act on it at the boundary before the agent program rea
 ## One example
 
 Silo denies a tool call that Claude Code's model asked for. At the boundary, the model's
-reply is changed before Claude Code reads it, and the record keeps the reply as it came and as it
-was forwarded. The agent's next call is judged on its own, like any other.
+reply is changed before Claude Code reads it, and the record holds the original tool call and its
+replacement, both as facts. The agent's next call is judged on its own, like any other.

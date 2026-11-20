@@ -1,11 +1,10 @@
 # The engine
 
-The core piece. It decides, drivers act, and everything else only talks to it.
+The core piece. Everything else only talks to it.
 
 ## For
 
-To be the one place where Silo decides. The app, the command line and every tool only talk to it
-(`engine-language`).
+Given by `engine-language`.
 
 ## Why it is so
 
@@ -20,5 +19,5 @@ To be the one place where Silo decides. The app, the command line and every tool
 ## One example
 
 A precaution makes a tool call wait at the boundary for a classifier's opinion. What waits is that
-one request, not the core (`core-never-waits`). Which process keeps the limit of that wait is
-still to decide (`synchronous-precaution-path`).
+one request, not the core (`core-never-waits`). Where that wait is handled is still to decide
+(`synchronous-precaution-path`).

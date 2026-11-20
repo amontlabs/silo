@@ -1,7 +1,6 @@
 # Agent programs
 
-The vendors' programs, unmodified: how they run in a computer, sign in, and are reached from your
-Mac.
+The vendors' programs: how they run in a computer, sign in, and are reached from your Mac.
 
 ## For
 
@@ -10,10 +9,10 @@ inside a computer instead of on your Mac.
 
 ## Why it is so
 
-- **A login is the one thing a copy must not carry by accident** (`login-handling`). A computer is
+- **A login must not end up in a copy by accident** (`login-handling`). A computer is
   copied whole, and a login copied with it ends up in a fork or a shared computer. How it is
   handled is still open (`logins`).
-- **Silo disguises nothing** (`disguising`).
+- **No disguise** (`disguising`).
 - How a program on your Mac reaches a computer, and how you follow work that moves to a fork, are
   not settled: `reaching-a-computer`, `following-the-work`, `agents-making-computers`.
 

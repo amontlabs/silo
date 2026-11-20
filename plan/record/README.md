@@ -16,7 +16,7 @@ can be purged. The owner called this the core.
   with by the agent, so it is never taken for what Silo saw from outside. Opinions are computed on
   top, in the part `opinions`.
 - **The books balance** (`books-balance`, `what-runs-wrote`), because "best effort" compounds
-  (`never-fills-a-hole`).
+  (`holes`).
 - **One chain from the computer down to each trace** (`the-chain`), so that an alert opens on what
   triggered it, and on the turn that led to it.
 - **Noise and repetition are left out** (`file-reads`, `store-messages-once`).

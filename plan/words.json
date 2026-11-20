@@ -1,47 +1,11 @@
 [
   {
-    "word": "Silo",
-    "means": "The product: the engine, the Mac app and the `silo` command."
-  },
-  {
-    "word": "computer",
-    "means": "A virtual machine that Silo runs. It has macOS or Linux inside."
-  },
-  {
     "word": "main",
     "means": "The long-lived computer where your agents work."
   },
   {
-    "word": "fork",
-    "means": "A copy of a computer, or of one of its checkpoints, that then lives its own life."
-  },
-  {
-    "word": "fresh computer",
-    "means": "A computer made from a recipe, and not a copy of another."
-  },
-  {
-    "word": "checkpoint",
-    "means": "A saved moment of a computer."
-  },
-  {
-    "word": "restore",
-    "means": "Put a computer back to a checkpoint."
-  },
-  {
-    "word": "drop",
-    "means": "Remove a fork or a fresh computer. It goes to the bin first."
-  },
-  {
     "word": "bin",
-    "means": "Where a dropped computer waits for a time before it is removed for good."
-  },
-  {
-    "word": "pause",
-    "means": "Freeze a whole computer: nothing in it runs, nothing crosses its boundary, and nothing is lost. Undone by resume."
-  },
-  {
-    "word": "stop",
-    "means": "End the programs running in a computer. Its disk stays."
+    "means": "Where a dropped computer waits."
   },
   {
     "word": "probe",
@@ -49,7 +13,7 @@
   },
   {
     "word": "boundary",
-    "means": "The edge of a computer. Everything that enters or leaves it passes through parts of Silo that run outside it.",
+    "means": "The edge of a computer.",
     "not": [
       "wall",
       "door"
@@ -57,14 +21,14 @@
   },
   {
     "word": "channel",
-    "means": "One way through the boundary. None exists by default.",
+    "means": "One way through the boundary.",
     "not": [
       "door"
     ]
   },
   {
     "word": "record",
-    "means": "Everything Silo has written down about a computer: its facts and its reports, in the order they came, never changed afterwards."
+    "means": "Everything Silo has written down about a computer: its facts and its reports, written once."
   },
   {
     "word": "fact",
@@ -96,23 +60,11 @@
   },
   {
     "word": "rule",
-    "means": "Data you set. It is triggered by a fact, so it is exact."
+    "means": "A rule is triggered by a fact. It is exact, and it may do anything you wrote in it."
   },
   {
     "word": "precaution",
-    "means": "Data you set. It is triggered by a report or an opinion, so it can be wrong."
-  },
-  {
-    "word": "allow",
-    "means": "What happens to one request waiting at the boundary: it passes."
-  },
-  {
-    "word": "hold",
-    "means": "What happens to one request waiting at the boundary: it waits for your answer."
-  },
-  {
-    "word": "deny",
-    "means": "What happens to one request waiting at the boundary: it is refused."
+    "means": "A precaution is triggered by a report or an opinion. It can be wrong, so it takes only protective actions."
   },
   {
     "word": "granting",
@@ -124,7 +76,7 @@
   },
   {
     "word": "protective",
-    "means": "Said of an action that is neither granting nor destructive, so a wrong one costs only time.",
+    "means": "Said of an action that grants nothing and destroys nothing. A wrong one costs only time.",
     "not": [
       "reversible"
     ]
@@ -136,21 +88,6 @@
   {
     "word": "asynchronous",
     "means": "Nothing waits."
-  },
-  {
-    "word": "alert",
-    "means": "What Silo raises for your attention."
-  },
-  {
-    "word": "ask",
-    "means": "What a hold shows you: a request that waits for your answer."
-  },
-  {
-    "word": "agent program",
-    "means": "Claude Code, Codex and the like.",
-    "not": [
-      "harness"
-    ]
   },
   {
     "word": "run",
@@ -166,31 +103,15 @@
   },
   {
     "word": "tool call",
-    "means": "One thing a turn asked for: a command, a file edit, a search."
+    "means": "One thing a turn asked for."
   },
   {
     "word": "trace",
     "means": "What a tool call left behind: processes, file changes, connections."
   },
   {
-    "word": "recipe",
-    "means": "A text that says how to make a computer."
-  },
-  {
-    "word": "task",
-    "means": "A command run in a fork or in a fresh computer, with an end."
-  },
-  {
     "word": "only here",
     "means": "Said of something that nothing else would bring back if it vanished."
-  },
-  {
-    "word": "secret",
-    "means": "A value a computer can use and cannot read."
-  },
-  {
-    "word": "login",
-    "means": "A sign-in to a model provider, by subscription or by key."
   },
   {
     "word": "engine",

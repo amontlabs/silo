@@ -27,7 +27,7 @@
   {
     "id": "plugins",
     "title": "What you can add",
-    "line": "Programs made by someone else: they give opinions, and they put forward rules and precautions."
+    "line": "What someone else made, and you add."
   },
   {
     "id": "traffic",
@@ -42,7 +42,7 @@
   {
     "id": "views",
     "title": "What you see",
-    "line": "A short ranked list of what needs you, four places to look, and the receipt of each run."
+    "line": "A short ranked list of what needs you, and four places to look."
   },
   {
     "id": "recipes",
@@ -52,16 +52,16 @@
   {
     "id": "agent-programs",
     "title": "Agent programs",
-    "line": "The vendors' programs, unmodified: how they run in a computer, sign in, and are reached from your Mac."
+    "line": "The vendors' programs: how they run in a computer, sign in, and are reached from your Mac."
   },
   {
     "id": "engine",
     "title": "The engine",
-    "line": "The core piece. It decides, drivers act, and everything else only talks to it."
+    "line": "The core piece. Everything else only talks to it."
   },
   {
     "id": "checking",
     "title": "How it is checked",
-    "line": "How Silo shows that a property holds: assertions, the simulator, the model of access, hostile tests, measurements."
+    "line": "How Silo shows that a property holds."
   }
 ]

@@ -3,8 +3,7 @@
   "answer": "What kind is each of its actions? What triggers it? What are its bad paths?",
   "adds": [
     "less-sure-less-power",
-    "kind-before-design",
-    "bad-paths-first"
+    "kind-before-design"
   ],
   "verdict": "take"
 }

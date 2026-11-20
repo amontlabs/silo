@@ -1,5 +1,5 @@
 {
   "asks": "How is speed measured?",
-  "answer": "Measure distributions, with repeated interleaved runs. One run before and one after proves nothing on a laptop. The overhead of keeping the record is measured the same way: a build and a parallel test suite, in a computer and on a plain machine.",
+  "answer": "Measure distributions, with repeated interleaved runs. One run before and one after proves nothing on a laptop.",
   "verdict": "take"
 }

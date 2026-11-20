@@ -9,17 +9,15 @@ To give agents a computer of their own, and to keep what they do there away from
 
 ## Why it is so
 
-- **One main, where the agents live** (`main-and-its-agents`, `several-agents-in-main`). Forks
-  and fresh computers serve tasks, so most work happens in one long-lived place, across several
-  repositories (`main-repositories`).
+- **One main, where the agents live** (`main-and-its-agents`, `several-agents-in-main`,
+  `main-repositories`).
 - **Nothing of your device goes in** (`nothing-shared-from-your-device`). What a computer can
   reach is the work of `boundary`.
-- **The same thing on both systems** (`macos-and-linux-consistent`, `agents-drive-the-screen`),
-  as the principle `one-kind-of-thing` asks.
-- **A Mac holds a few, not fifty** (`computers-per-mac`). Memory decides how many fit, so an idle
-  computer gives memory back (`idle-computer-gives-memory-back`), and the case of many forks runs
-  elsewhere (`many-forks-elsewhere`).
-- **Low memory or disk is met by a rule** (`low-memory-or-disk`), because the meters are facts.
+- **The same thing on both systems** (`macos-and-linux-consistent`, `agents-drive-the-screen`,
+  `one-kind-of-computer`).
+- **A Mac holds a few, not fifty** (`computers-per-mac`, `idle-computer-gives-memory-back`,
+  `many-forks-elsewhere`).
+- **Low memory or disk** (`low-memory-or-disk`).
 
 ## One example
 

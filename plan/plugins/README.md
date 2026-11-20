@@ -12,12 +12,9 @@ that program any power over the computer.
 - **An added classifier only gives opinions and asks you questions**
   (`what-a-classifier-gives-back`, `added-classifier-cannot-act`). What follows from an opinion
   is said by a precaution you set.
-- **What it reads is a grant** (`reading-is-a-grant`): it comes from you or from a rule you set,
-  and it states its worst case.
-- **Where it runs depends on what it is** (`where-a-classifier-runs`): data needs no computer,
-  code or tools need one, and you can always see which
-  (`where-a-classifier-runs-is-shown`).
-- **Nothing loads into the engine or the app** (`added-classifier`).
+- **What it reads is a grant** (`reading-is-a-grant`).
+- **Where it runs depends on what it is** (`where-a-classifier-runs`,
+  `where-a-classifier-runs-is-shown`).
 
 ## One example
 

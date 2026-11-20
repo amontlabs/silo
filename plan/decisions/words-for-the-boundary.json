@@ -4,13 +4,8 @@
   "adds": [
     "boundary",
     "channel",
-    "allow",
-    "hold",
-    "deny",
     "synchronous",
-    "asynchronous",
-    "ask",
-    "secret"
+    "asynchronous"
   ],
   "verdict": "take"
 }

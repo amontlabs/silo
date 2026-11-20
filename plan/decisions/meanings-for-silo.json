@@ -1,0 +1,17 @@
+{
+  "asks": "What does the word \"Silo\" mean?",
+  "needs": [
+    "words-for-silo"
+  ],
+  "sets": [
+    {
+      "in": "words",
+      "word": "Silo",
+      "means": "The product: the engine, the Mac app and the `silo` command."
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The word is agreed; this meaning is the record's own word list, which carries no mark."
+  }
+}

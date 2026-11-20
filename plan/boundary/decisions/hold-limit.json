@@ -1,5 +1,5 @@
 {
   "asks": "Does a hold end without your answer?",
-  "answer": "A hold has a limit. An agent program gives up on a reply that takes too long, and that time can change without Silo knowing. So Silo does not guess it: it keeps its own limit and ends the hold itself, every time.",
+  "answer": "A hold has a limit. Silo keeps its own limit and ends the hold itself, every time.",
   "verdict": "take"
 }

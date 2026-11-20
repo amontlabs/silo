@@ -9,12 +9,11 @@ without letting a judgement pass for what Silo saw.
 
 ## Why it is so
 
-- **An opinion can be wrong, so it is kept apart** (`opinion-stored-apart`). Built on as truth, an
-  error would pass into every later opinion. Kept apart, a better classifier replaces a worse one
-  and the opinions are computed again, with nothing to migrate (`opinions-computed-again`).
+- **An opinion can be wrong, so it is kept apart** (`opinion-stored-apart`,
+  `opinions-computed-again`).
 - **A classifier only gives opinions** (`classifier-never-acts`). What an opinion may lead to is
   said by a precaution you set, in the part `rules`.
-- **Your own opinion is kept as you gave it** (`your-opinion-kept-as-given`).
+- **Your own opinions** (`your-opinion-kept-as-given`).
 
 ## One example
 

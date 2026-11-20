@@ -1,0 +1,15 @@
+{
+  "asks": "Is \"Bad paths are written first\" a principle of Silo?",
+  "sets": [
+    {
+      "in": "principles",
+      "id": "bad-paths-first",
+      "says": "Bad paths are written first.",
+      "asks": "What are its bad paths? What happens when it is slow, when it fails halfway, when its input is missing, when it is wrong?"
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The owner said it on 19 November 2026, and question 5 of section 12 is Agreed."
+  }
+}

@@ -1,7 +1,6 @@
 # What you see
 
-The Mac app and the `silo` command: what needs you, four places to look, and the account of each
-run.
+The Mac app and the `silo` command: what needs you, and four places to look.
 
 ## For
 
@@ -10,7 +9,7 @@ that happened.
 
 ## Why it is so
 
-- **A short ranked list of what needs you, not a dashboard** (`first-screen`).
+- **The first screen** (`first-screen`).
 - **Facts, reports and opinions are told apart on screen** (`kinds-look-different`,
   `never-shown-as-a-fact`), because a report can be interfered with and an opinion can be wrong.
 - **Lists ranked by cost, and a tree for subagents** (`patterns-ranked-by-cost`,

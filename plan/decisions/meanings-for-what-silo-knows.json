@@ -1,0 +1,17 @@
+{
+  "asks": "What does the word \"record\" mean?",
+  "needs": [
+    "words-for-what-silo-knows"
+  ],
+  "sets": [
+    {
+      "in": "words",
+      "word": "record",
+      "means": "Everything Silo has written down about a computer: its facts and its reports, in the order they came, never changed afterwards."
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The word is agreed; this meaning is the record's own word list, which carries no mark."
+  }
+}

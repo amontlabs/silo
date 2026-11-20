@@ -2,13 +2,11 @@
   "asks": "Which words name an agent's work?",
   "answer": "One word per idea.",
   "adds": [
-    "agent-program",
     "run",
     "conversation",
     "turn",
     "tool-call",
-    "trace",
-    "login"
+    "trace"
   ],
   "verdict": "take"
 }

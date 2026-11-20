@@ -1,0 +1,57 @@
+{
+  "asks": "What do these words for a computer mean: computer, fork, fresh computer, checkpoint, restore, drop, bin, pause, stop?",
+  "needs": [
+    "words-for-computers"
+  ],
+  "sets": [
+    {
+      "in": "words",
+      "word": "computer",
+      "means": "A virtual machine that Silo runs. It has macOS or Linux inside."
+    },
+    {
+      "in": "words",
+      "word": "fork",
+      "means": "A copy of a computer, or of one of its checkpoints, that then lives its own life."
+    },
+    {
+      "in": "words",
+      "word": "fresh computer",
+      "means": "A computer made from a recipe, and not a copy of another."
+    },
+    {
+      "in": "words",
+      "word": "checkpoint",
+      "means": "A saved moment of a computer."
+    },
+    {
+      "in": "words",
+      "word": "restore",
+      "means": "Put a computer back to a checkpoint."
+    },
+    {
+      "in": "words",
+      "word": "drop",
+      "means": "Remove a fork or a fresh computer. It goes to the bin first."
+    },
+    {
+      "in": "words",
+      "word": "bin",
+      "means": "Where a dropped computer waits for a time before it is removed for good."
+    },
+    {
+      "in": "words",
+      "word": "pause",
+      "means": "Freeze a whole computer: nothing in it runs, nothing crosses its boundary, and nothing is lost. Undone by resume."
+    },
+    {
+      "in": "words",
+      "word": "stop",
+      "means": "End the programs running in a computer. Its disk stays."
+    }
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The word is agreed; this meaning is the record's own word list, which carries no mark."
+  }
+}

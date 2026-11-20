@@ -1,12 +1,5 @@
 {
   "asks": "Which words name a computer and what is done to it?",
   "answer": "One word per idea.",
-  "adds": [
-    "computer",
-    "fresh-computer",
-    "drop",
-    "pause",
-    "stop"
-  ],
   "verdict": "take"
 }

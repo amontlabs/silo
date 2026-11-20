@@ -9,11 +9,10 @@ needs no setup first.
 
 ## Why it is so
 
-- **Silo stores the recipe** (`recipe-stored-by-silo`, `no-project-folder`), because an agent can
-  edit what sits in a repository.
-- **A recipe sets up a whole working computer** (`what-a-recipe-sets-up`).
-- **A task starts ready** (`tasks-start-ready`).
+- **Where a recipe is kept** (`recipe-stored-by-silo`, `no-project-folder`).
+- **What a recipe is for** (`what-a-recipe-sets-up`).
+- **Tasks** (`tasks-start-ready`).
 
 ## One example
 
-You start a task from a checkpoint of main. It runs at once: nothing is installed first.
+You start a task from a checkpoint of main. It has no setup to wait for.
