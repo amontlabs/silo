@@ -7,3 +7,5 @@ Accessibility and Screen Recording into the system's permission database, with S
 Protection turned off in the computer. A fork's disk copy carried them.
 
 Also to find out: whether it holds for a fork of a running computer.
+
+The old Silo followed the method GitHub uses for its macOS test machines.
