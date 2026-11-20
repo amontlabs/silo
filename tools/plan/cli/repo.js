@@ -102,8 +102,9 @@ export function unwatched(root) {
 /**
  * Whether the entry's file holds what the owner ruled on. Among the commits since the base, on any
  * branch that was merged, the latest whose subject is exactly the owner's verdict on the entry
- * (`Owner: take <id>` or `Owner: drop <id>`; with a `verdict`, only that kind) is found. In it the
- * entry's file is found by its id, wherever it was then. The answer is yes when that version and
+ * (`Owner: take <id>` or `Owner: drop <id>`; with a `verdict`, only that kind) is found; no commit
+ * comes before a descendant of it. In it the entry's file is found by its id, among the files the
+ * commit wrote (not those it deleted), wherever it was then. The answer is yes when that version and
  * the working file, committed or not, agree on the verdict and on the text keys (asks, answer,
  * name, what, replaces, sets, removes): so a merge, a move or an edit of other keys, such as the
  * `adds` a take of another entry rewrites, changes nothing, and neither does an edit that was put
@@ -112,14 +113,18 @@ export function unwatched(root) {
  */
 export const ruledByOwner = (root, ref) => (id, file, verdict) => {
   const subjects = verdict ? [`Owner: ${verdict} ${id}`] : [`Owner: take ${id}`, `Owner: drop ${id}`];
-  const log = git(root, ['log', '-z', '--format=%H %s', `${ref}..HEAD`]);
+  const log = git(root, ['log', '-z', '--date-order', '--format=%H %s', `${ref}..HEAD`]);
   if (log === null) return false;
-  const found = log.split('\0').filter(Boolean).find((record) => subjects.includes(record.slice(record.indexOf(' ') + 1).trim()));
+  const found = log.split('\0').filter(Boolean).find((record) => subjects.includes(record.slice(record.indexOf(' ') + 1)));
   if (found === undefined) return false;
   const commit = found.slice(0, found.indexOf(' '));
-  const changed = git(root, ['diff-tree', '-r', '--root', '--no-renames', '--name-only', '-z', '--no-commit-id', commit]);
-  const entryFile = new RegExp(`^plan/(?:[^/]+/)?(?:decisions|features)/${id}\\.json$`);
-  const path = changed?.split('\0').find((name) => entryFile.test(name));
+  const changed = git(root, ['diff-tree', '-r', '--root', '--no-renames', '--diff-filter=d', '--name-only', '-z', '--no-commit-id', commit]);
+  // plan/decisions/<id>.json, plan/<part>/decisions/<id>.json or plan/<part>/features/<id>.json
+  const isEntryFile = (name) => {
+    const parts = name.split('/');
+    return parts[0] === 'plan' && (parts.length === 3 || parts.length === 4) && parts.at(-1) === `${id}.json` && ['decisions', 'features'].includes(parts.at(-2));
+  };
+  const path = changed?.split('\0').find(isEntryFile);
   if (path === undefined) return false;
   let disk;
   try {

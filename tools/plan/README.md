@@ -107,14 +107,15 @@ Each problem names the file, the field, what is wrong and the fix.
     (the remote's old plan, until the first push).
 
   Neither applies to an entry whose file holds what the owner ruled on. The evidence is the latest
-  commit since the base, on any merged branch, named `Owner: take <id>` or `Owner: drop <id>`
-  (for a verdict typed in, the one of its kind); the entry is found in it by its id, wherever its file was then. The entry's file now,
-  committed or not, must agree with it on the verdict and on the keys above. A merge, a move, a
-  change of other keys (`adds`, `replaced_by`, `suggest`, as a take of another entry or a
-  suggestion does) or a change that was put back come between without effect; a later ruling
-  replaces an earlier one. The check does not catch `plan take` run without the owner's word, a
-  commit named `Owner: take <id>` written by hand, or an owner's commit amended or squashed with
-  another change.
+  commit since the base, on any merged branch, named `Owner: take <id>` or `Owner: drop <id>` (for
+  a verdict typed in, the one of its kind), no commit counting as later than one that comes
+  before it in history. That commit must have written the entry's file, found in it by its id
+  wherever the file was then. The entry's file now, committed or not, must agree with that version
+  on the verdict and on the keys above. A merge, a move, a change of other keys (`adds`,
+  `replaced_by`, `suggest`, as a take of another entry or a suggestion does) or a change that was
+  put back come between without effect; a later ruling replaces an earlier one. The check does not
+  catch `plan take` run without the owner's word, a commit named `Owner: take <id>` written by
+  hand, or an owner's commit amended or squashed with another change.
 
 A malformed value is a problem like any other: the check never throws on one.
 

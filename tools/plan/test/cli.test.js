@@ -889,3 +889,55 @@ test('evidence: the latest ruling counts: a text put back by hand to an earlier 
     assert.deepEqual(await problems(root), [`plan/${name} verdict`]);
   });
 });
+
+test('evidence: an older ruling never comes before a later one of its descendants, whatever their commit times', async () => {
+  const name = EVIDENCE_NAME;
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    // The owner takes A on main. On a branch from it, the verdict is cleared, the answer becomes B,
+    // and the owner takes B with a commit time before A's. Main goes on with other work; then the merge.
+    const open = readJson(root, name);
+    assert.equal((await run(root, ['take', 'linux-vm-engine'])).code, 0);
+    git(root, 'checkout', '-q', '-b', 'later');
+    writeJson(root, name, { ...open, answer: 'Answer B.' });
+    git(root, 'commit', '-q', '-am', 'Plan: clear it, answer B');
+    process.env.GIT_COMMITTER_DATE = '2020-01-01T00:00:00Z';
+    try {
+      assert.equal((await run(root, ['take', 'linux-vm-engine'])).code, 0);
+    } finally {
+      delete process.env.GIT_COMMITTER_DATE;
+    }
+    git(root, 'checkout', '-q', 'main');
+    writeFileSync(join(root, 'NOTES.md'), 'other work\n');
+    git(root, 'add', 'NOTES.md');
+    git(root, 'commit', '-q', '-m', 'Other work');
+    git(root, 'merge', '-q', '--no-ff', '-m', 'Merge branch later', 'later');
+    assert.equal(readJson(root, name).answer, 'Answer B.');
+    assert.deepEqual(await problems(root), []);
+  });
+});
+
+test('evidence: a take squashed with the move of the entry to another part still counts', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(root, 'mv', 'plan/engine/decisions/linux-vm-engine.json', 'plan/record/decisions/linux-vm-engine.json');
+    git(root, 'mv', 'plan/engine/decisions/linux-vm-engine.md', 'plan/record/decisions/linux-vm-engine.md');
+    writeJson(root, 'record/decisions/linux-vm-engine.json', { ...JSON.parse(git(root, 'show', 'HEAD:plan/engine/decisions/linux-vm-engine.json')), verdict: 'take' });
+    git(root, 'add', 'plan');
+    git(root, 'commit', '-q', '-m', 'Owner: take linux-vm-engine');
+    assert.deepEqual(await problems(root), []);
+  });
+});
+
+test('evidence: an id with a character of a regular expression gives the file\'s problems, not a generic error', async () => {
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    writeJson(root, 'engine/decisions/odd(.json', { asks: 'Which?', answer: 'This.', verdict: 'take' });
+    git(root, 'add', 'plan');
+    git(root, 'commit', '-q', '-m', 'Owner: take odd(');
+    const checked = await run(root, ['check', '--json']);
+    const listed = JSON.parse(checked.out);
+    assert.equal(listed.ok, false);
+    assert.ok(listed.errors.some((e) => e.file === 'plan/engine/decisions/odd(.json'), checked.out);
+  });
+});
