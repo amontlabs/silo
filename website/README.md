@@ -99,17 +99,19 @@ The first command downloads Playwright's own Chromium once; the check never
 uses an installed Chrome. It opens `http://127.0.0.1:4174/workshop` (pass
 another URL after `--` to check another server) at 1440 × 900, 1440 × 1100,
 2560 × 1440, 1024 × 1366 and 390 × 844, on the plain view, the first part
-when the plan has one, `#product` when the whole product has rows, `#latest`
+that has rows, `#product` when the whole product has rows, `#latest`
 when entries have threads, and `#suggested`. The parts, the whole product's
 rows and whether entries have threads are read from the page's data
-(`window.__workshopData`, set by `main.tsx`); whether it draws a map is read
+(`window.__workshopData`, set by `main.tsx`), and the places to visit are chosen
+from its counts of rows (`placesOf`, tested in `load-check.test.mjs`); whether
+it draws a map is read
 from the page. For each load it prints when the page first
 painted, when the account, the votes, the owner's marks and "Suggest a
 feature" appeared, what the page's first frame held, and every layout shift
 with their total. Every one of these loads is a first visit: its first frame
 must hold the sign-in button (unless `--owner`), "Suggest a feature" on the
-plain view, and on the first place with rows (the first part, else the whole
-product) a vote placeholder on every row when entries have threads, none on
+plain view, and on the first place with rows (the first part that has rows,
+else the whole product) a vote placeholder on every row when entries have threads, none on
 any row when they have not. Then, in one browser profile at 1440 × 900, that
 place (the plain view when the plan has no row) is visited twice (with threads,
 the second visit must have the votes in its first frame), and the owner signs
@@ -189,16 +191,17 @@ parts that shows every kind of thing a layout can hold; the tests draw their
 fixture plan (`fixtures.ts`) with it, and the page never shows it.
 
 The page's data (`BuildData`) carries two switches, both off in the real build
-and on in the tests' fixture plan, where the code behind them stays tested:
+and on in the tests' fixture plan. `decide` switches the owner's verdict
+buttons, "N to decide" and the owner's marks; `threads` switches entries'
+issues on GitHub. Off, the code behind them and its tests stay. The server has
+no verdict route: decisions and features are taken or dropped with `plan take`
+and `plan drop`.
 
-- `decide`: the owner's verdict buttons, "N to decide" and the owner's marks.
-  The server has no verdict route; the real build never calls it. Decisions and
-  features are taken or dropped with `plan take` and `plan drop`.
-- `threads`: whether entries have issues on GitHub. Off, no issue is matched to
-  an entry, even an old one whose marker names it, and an entry shows its
-  sentence, its notes and its state with no vote, no count, no comment box, no
-  GitHub link and no placeholder for any of them; the page has no Latest, and
-  sign-in has no tooltip. Suggestions keep their votes and comments.
+With `threads` off, no issue is matched to an entry, even an old one whose
+marker names it, and an entry shows its sentence, its notes and its state with
+no vote, no count, no comment box, no GitHub link and no placeholder for any of
+them; the page has no Latest, and sign-in has no tooltip. Suggestions keep their
+votes and comments.
 
 `npm run build` then runs `scripts/prerender.mjs`, which renders the plain
 address `/workshop` (`src/workshop/prerender.tsx`: nothing remembered, nobody
@@ -284,7 +287,7 @@ What a person sees:
   (`memory.ts`): the newest answer as the server sent it, and the signed-in
   login, avatar and whether they decide. The page's own confirmed writes are
   kept apart (`writes.ts`), as a list with each one's time, of values set: a
-  verdict (only with `decide` on), a new suggestion, and for a vote or a comment the count the server
+  new suggestion, and for a vote or a comment the count the server
   answered for that write (`up`, `comments`; the count shown plus or minus one
   when an older server answers none). Never a change to a count: the server
   patches its snapshot in place, so an answer may already count a write made
@@ -348,20 +351,6 @@ What a person sees:
   entry (a click with a modifier key, or a middle click, is left to the
   browser). While it loads, ten one-line placeholders hold its place and
   nothing sits below the list in its column.
-- With `decide` on, a person who can decide also gets the number of features
-  still to decide on each part, and a link to the first one in order. A feature
-  waits for a verdict while its file has none and its issue records none.
-  After a verdict the next feature waiting in the same part opens, else the
-  lowest one anywhere. Each open row has its own 700 ms guard, and its verdict
-  buttons look dimmed until it has passed; a row that becomes the current one
-  after a verdict starts its guard again and is brought into view. Enter goes
-  to the open row that holds the focus, else to the row opened last, and only
-  when that row's verdict buttons are entirely in the visible part of the
-  window. A tap during a view transition is ignored. The verdicts are take and
-  drop; a verdict takes no note and never changes the row's status, which
-  stays its file's. What is remembered about the person is for display: a
-  verdict is sent only once `me` has answered on this visit that they decide,
-  and until then the verdict buttons look dimmed.
 - The header's account slot has a fixed width from first paint: signed in when
   the readable `workshop-hint` cookie is there (a long login is cut by an
   ellipsis), signed out otherwise. It changes only when that cookie was stale.

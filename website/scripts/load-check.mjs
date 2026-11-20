@@ -13,8 +13,10 @@
 // second visit, the remembered state drawn at the takeover without moving anything under the title row.
 // What the page must offer is read from its data (window.__workshopData, set by src/workshop/main.tsx): its parts,
 // the whole product's rows and whether entries have threads; whether it draws a map is read from the page.
-// Without threads, an entry's row holds no vote, no count and no placeholder for them. A plan with no part is
-// checked at the places it has: the plain view, the whole product when it has rows, and the suggestions.
+// The places with rows are chosen from the real counts of rows (placesOf): the first part that has rows and the whole
+// product when it has rows. Without threads, an entry's row holds no vote, no count and no placeholder for them. A
+// plan with no part is checked at the places it has: the plain view, the whole product when it has rows, and the
+// suggestions.
 // It exits non-zero when the footer rule fails, a first frame lacks what it must hold, or a run's layout shifts
 // add up to more than SHIFT_BUDGET.
 // It drives Playwright's own browser: `npx playwright-core install chromium-headless-shell` once.
@@ -305,11 +307,36 @@ async function visits(browser, options, rows, page$) {
 }
 
 /**
- * What the page offers, read from its data: its parts, whether the whole product has rows, whether entries have
- * threads (Latest exists only then); and from the page, whether it draws a map. Its places: the plain view, the first
- * part, the whole product, Latest and the suggestions, as it has them. `rows` is the first place that shows entries'
- * rows (the first part, else the whole product), or null when the plan has none.
+ * The places to visit, chosen from the page's data (window.__workshopData): `parts` are the parts in order, `entries`
+ * the rows, each with its part's id or null for the whole product, and `threads` whether entries have threads (Latest
+ * exists only then). Returns `tile`, the first part's id (its tile is drawn whether or not it has rows), or null
+ * without parts; `part`, the first part that has rows; `product`, the whole product when it has rows; `rows`, the
+ * first of these two (the place that shows entries' rows), or null when the plan has none; and `places`: the plain
+ * view, those two, Latest and the suggestions. A part without rows is not visited as a place with rows, so its
+ * correct render of zero rows is not refused.
  */
+export function placesOf({ parts, entries, threads }) {
+  const count = (id) => entries.filter((entry) => entry.part === id).length;
+  const withRows = parts.find((part) => count(part.id) > 0);
+  const part = withRows ? { name: `first part with rows (#${withRows.id})`, hash: `#${withRows.id}`, rows: true } : null;
+  const product = count(null) ? { name: '#product', hash: '#product', rows: true } : null;
+  return {
+    tile: parts.length ? parts[0].id : null,
+    threads: Boolean(threads),
+    part,
+    product,
+    rows: part ?? product,
+    places: [
+      { name: 'plain view', hash: '' },
+      ...(part ? [part] : []),
+      ...(product ? [product] : []),
+      ...(threads ? [{ name: '#latest', hash: '#latest' }] : []),
+      { name: '#suggested', hash: '#suggested' },
+    ],
+  };
+}
+
+/** What the page offers: the places `placesOf` chooses from the page's data, and whether the page draws a map. */
 async function pageOf(browser, url) {
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -317,27 +344,13 @@ async function pageOf(browser, url) {
   await page.waitForFunction(() => window.__workshopData, null, { timeout: 15000 });
   const data = await page.evaluate(() => {
     const { parts, entries, threads } = window.__workshopData;
-    return { parts: parts.map((part) => part.id), product: entries.filter((entry) => entry.part === null).length, threads };
+    return { parts: parts.map((part) => ({ id: part.id })), entries: entries.map((entry) => ({ part: entry.part })), threads };
   });
   await page.waitForSelector('#workshop-root:not([data-prerendered]) .ws', { timeout: 15000 });
   await page.waitForLoadState('networkidle');
   const mapped = (await page.locator('.ws-stage').count()) > 0;
   await context.close();
-  const part = data.parts.length ? { name: `first part (#${data.parts[0]})`, hash: `#${data.parts[0]}`, rows: true } : null;
-  const product = data.product ? { name: '#product', hash: '#product', rows: true } : null;
-  return {
-    mapped,
-    threads: data.threads,
-    part,
-    rows: part ?? product,
-    places: [
-      { name: 'plain view', hash: '' },
-      ...(part ? [part] : []),
-      ...(product ? [product] : []),
-      ...(data.threads ? [{ name: '#latest', hash: '#latest' }] : []),
-      { name: '#suggested', hash: '#suggested' },
-    ],
-  };
+  return { mapped, ...placesOf(data) };
 }
 
 /**
@@ -529,10 +542,10 @@ async function main() {
         passed = report(await run(browser, options, size, place), wants) && passed;
       }
     }
-    console.log(`the page: ${page$.mapped ? 'a map' : page$.part ? 'tiles, no map' : 'no part'}; entries ${page$.threads ? 'have' : 'have no'} threads`);
-    if (page$.part) passed = (await sideways(browser, options.url, page$.part.hash.slice(1), page$.mapped)) && passed;
+    console.log(`the page: ${page$.mapped ? 'a map' : page$.tile ? 'tiles, no map' : 'no part'}; entries ${page$.threads ? 'have' : 'have no'} threads`);
+    if (page$.tile) passed = (await sideways(browser, options.url, page$.tile, page$.mapped)) && passed;
     passed = (await visits(browser, options, page$.rows, page$)) && passed;
-    passed = (await drawnPlain(browser, options, page$.mapped, Boolean(page$.part))) && passed;
+    passed = (await drawnPlain(browser, options, page$.mapped, Boolean(page$.tile))) && passed;
     if (page$.rows) passed = (await drawnPart(browser, options, page$.rows)) && passed;
     passed = (await drawnSecondVisit(browser, options)) && passed;
   } finally {
@@ -542,4 +555,5 @@ async function main() {
   process.exitCode = passed ? 0 : 1;
 }
 
-await main();
+// Run as a script, not when a test imports placesOf.
+if (import.meta.main) await main();
