@@ -325,4 +325,7 @@ New files:
 - Ground work only: no detail of one use case, no arrangement, no feature.
 - What the voice says, the picture shows, whole. Wrong: the voice names four cases and the picture
   shows two.
+- What is, never what was. A film is a specification, not a changelog. Wrong: "In the older film
+  a plugin could pause a computer itself."
+- Every sentence establishes something. No line is carried over from older notes.
 - The title names what the film is about, and nothing else in the plan.
