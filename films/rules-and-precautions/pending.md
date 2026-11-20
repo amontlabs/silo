@@ -30,3 +30,9 @@ Film 4, "Rules and precautions":
   the base design. Owner.
 - A denied tool call is not matched to the agent's next call. Each call is judged on its
   own.
+- The scene of the denied tool call stays, as an example. Owner. It says what the model sees and
+  not how: the model sees its own call, unchanged, with an error that says it was denied
+  (`denied-tool-call`). The two sentences that name a mechanism go, with their picture: "Silo
+  changes the reply: the tool call is replaced by a refusal", and "The agent program sends the
+  refusal back with its next request, and the model reads it. The original and the replacement
+  are both kept as facts."

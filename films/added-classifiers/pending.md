@@ -20,8 +20,16 @@ Film 5, "What you can add":
   film, and no issue is created now.
 - Cut, because it says what was: "In the older film a plugin could pause or stop a computer
   itself. Not any more: it is only the package."
+- What a plugin needs is a set of rules. Owner. Importing a plugin shows them and changes
+  nothing. Installing it switches them on (`plugin-calls`, `import-then-install`).
+- A declaration uses the standard names: `on`, `inputs`, `outputs`, `runs`, `permissions`,
+  `precautions`. Owner.
+- No call of a plugin is named or shown. Owner. Only the areas they touch: the record, opinions,
+  the app, the user.
+- A classifier is a plugin whose declared output is an opinion, and every statement about the
+  program someone adds says "plugin" (`classifier-declares-an-opinion`, `plugin-is-the-subject`).
 - The film needs a new script. It waits for these decisions of the plan: `plugin-declaration`,
-  `declaration-is-enforced`, `plugin-calls`, `plugin-forwarding-call`, `plugin-says-done`,
-  `classifier-is-a-role`, `shipped-plugins-declare`, `plugin-wakes-on`,
-  `request-waits-only-by-precaution`, `opinion-is-a-value`, `who-fixes-the-values` and
-  `read-grant-names-its-part`.
+  `declaration-is-enforced`, `plugin-calls`, `import-then-install`, `plugin-is-the-subject`,
+  `plugin-forwarding-call`, `plugin-says-done`, `classifier-declares-an-opinion`,
+  `shipped-plugins-declare`, `plugin-wakes-on`, `request-waits-only-by-precaution`,
+  `opinion-is-a-value`, `who-fixes-the-values` and `read-grant-names-its-part`.

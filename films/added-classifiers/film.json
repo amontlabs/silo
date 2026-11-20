@@ -10,7 +10,7 @@
     "added-classifier-cannot-act",
     "plugins-in-sequence",
     "plugin-declaration",
-    "install-grants-nothing",
+    "import-then-install",
     "plugin-trial-on-the-past",
     "grant-shows-its-paths"
   ],

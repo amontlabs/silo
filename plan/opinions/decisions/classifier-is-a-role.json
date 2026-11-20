@@ -1,8 +1,0 @@
-{
-  "asks": "Is \"classifier\" a kind of thing, or a role?",
-  "answer": "The opinion is the strict thing, and \"classifier\" is a role. Whatever arrives through the \"give an opinion\" call is an opinion, whoever sent it, and the law speaks only of opinions. \"Classifier\" stays the word for whatever gives one.",
-  "suggest": {
-    "verdict": "take",
-    "why": "The current state of the design recommends it and gives no further reason."
-  }
-}

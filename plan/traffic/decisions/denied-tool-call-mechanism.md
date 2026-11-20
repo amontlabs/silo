@@ -23,3 +23,13 @@ An agent's notes on it:
   against the terms, with `terms-on-changing-a-reply` and `anthropic-reads-intermediate`, and
   against "It does not imitate the agent program" of `forwarded-byte-for-byte`.
 - Not tested.
+
+## The owner's answer (21 November 2026)
+
+The owner holds that returning the denial to the provider as the tool's result works as it does in
+an agent program, and sees one real issue: Silo sending a request of its own. It is decided later,
+in the Workshop.
+
+An agent's note, not shared by the owner: the provider keeps no conversation, so the agent
+program's later requests carry neither the call nor the denial unless Silo adds them. To test when
+this is built.

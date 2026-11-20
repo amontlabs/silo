@@ -1,0 +1,18 @@
+{
+  "asks": "What do importing and installing a plugin do?",
+  "answer": "Importing a plugin changes nothing: it shows every rule and precaution the plugin comes with. Installing it switches them on.",
+  "needs": [
+    "plugin-declaration"
+  ],
+  "sets": [
+    {
+      "in": "plugins/properties",
+      "id": "importing-changes-nothing",
+      "says": "Importing a plugin changes nothing: it shows every rule and precaution the plugin comes with.",
+      "kind": "safety",
+      "check": [
+        "model"
+      ]
+    }
+  ]
+}

@@ -30,3 +30,14 @@ quotes of the first two lines came through a summarising fetch.
 
 Not documented: who writes the result of a blocked call. It follows from the third line that the
 agent program does.
+
+## The owner's answer (21 November 2026)
+
+Accept that Silo can do this. How is decided later, in the Workshop, and no more time goes to it
+now. The scene stays in film 4, as a good example.
+
+The one open point the owner calls real is Silo sending a request of its own: it is in
+`denied-tool-call-mechanism`.
+
+This decision takes the place of `denied-call-in-the-reply`, whose answer named a mechanism: "the
+tool call is replaced by a refusal". It sets again the property that decision added, unchanged.

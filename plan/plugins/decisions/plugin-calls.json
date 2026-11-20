@@ -1,6 +1,6 @@
 {
   "asks": "Which calls may a plugin use?",
-  "answer": "Silo's calls for plugins are few and none acts: read part of a record, give an opinion, show a panel (a view of the record, in the app), ask the user a question. So \"may use: everything\" is safe.",
+  "answer": "A plugin can do nothing until a rule allows it. Its declaration lists the rules it needs. Which calls Silo offers is settled when they are built. They touch four areas: the record (reading a part of it), opinions (giving one), the app (showing a panel) and the user (putting a question).",
   "needs": [
     "plugin-declaration"
   ],
@@ -12,17 +12,16 @@
     },
     {
       "in": "plugins/properties",
-      "id": "no-plugin-call-acts",
-      "says": "Silo's calls for plugins are few and none acts: read part of a record, give an opinion, show a panel (a view of the record, in the app), ask the user a question.",
+      "id": "plugin-needs-a-rule",
+      "says": "A plugin can do nothing until a rule allows it.",
       "kind": "safety",
-      "from": "less-sure-less-power",
       "check": [
-        "types"
+        "hostile test"
       ]
     }
   ],
   "suggest": {
     "verdict": "take",
-    "why": "The current state of the design recommends it and gives no further reason."
+    "why": "The owner said it: what a plugin needs is a set of rules, shown when it is imported and switched on when it is installed."
   }
 }

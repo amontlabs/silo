@@ -1,6 +1,20 @@
 {
   "asks": "What does the model see when Silo denies one of its tool calls?",
   "answer": "The model sees its own call, unchanged, with an error that says it was denied.",
+  "replaces": [
+    "denied-call-in-the-reply"
+  ],
+  "sets": [
+    {
+      "in": "traffic/properties",
+      "id": "no-silent-change-to-traffic",
+      "says": "Silo changes nothing in traffic without recording the change.",
+      "kind": "safety",
+      "check": [
+        "hostile test"
+      ]
+    }
+  ],
   "suggest": {
     "verdict": "take",
     "why": "It states the target, and leaves how Silo makes the error exist to be found out (denied-tool-call-mechanism)."
