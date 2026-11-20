@@ -17,7 +17,9 @@ all of them.
 | `kit/fonts/geist-mono.ttf` | Geist Mono | The same | The same | The same |
 
 `licences/lucide.txt` is the `LICENSE` file of the package lucide-static 1.60.0. `licences/geist.txt`
-is `OFL.txt` of <https://github.com/vercel/geist-font>, as it stood on 20 November 2026.
+is `OFL.txt` of <https://github.com/vercel/geist-font> at its tag 1.4.2, which carries the same
+copyright line as the fonts here (2024). Each built film ends with both texts, in a comment
+(`tools/build.py`).
 
 GSAP stays Webflow's property. Its licence (last modified 30 May 2025) allows using GSAP "on any
 website, web application, or digital interface", which is what the films do. It asks for no copy of
