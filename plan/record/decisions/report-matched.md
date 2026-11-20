@@ -2,4 +2,5 @@
 
 The owner asked for "verified", or at worst "matched".
 
-"Unverified", already settled, is the word for a report Silo could not check.
+"Unverified" is the word the owner settled for a report Silo could not check. Its meaning is put
+forward by `word-unverified`.
