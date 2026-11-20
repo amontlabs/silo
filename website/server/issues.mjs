@@ -34,11 +34,10 @@ export function readBody(raw) {
   return { entry: readEntryMarker(raw), text: fresh(clean(cut(withoutMarkers(raw), CUTS.body))) };
 }
 
-// Whether a comment was written by the Workshop's own App: made through the App with the configured id, or by
-// its `<slug>[bot]` account. `app` is `{ id, login }`; either may be null while unknown.
+// Whether a comment was written by the Workshop's own App: its author is the App's `<slug>[bot]` account.
+// `performed_via_github_app` says nothing here: GitHub sets it on a person's comment written with their token
+// of the App. `app` is `{ login }`, with a null login while the installation was not read yet.
 export function byApp(comment, app) {
-  const through = comment.performed_via_github_app?.id;
-  if (app?.id && through !== undefined && through !== null && String(through) === String(app.id)) return true;
   return Boolean(app?.login) && comment.user?.login === app.login;
 }
 

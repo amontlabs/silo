@@ -112,7 +112,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     return {
       id: comment.id, body: comment.body, created_at: comment.created_at, updated_at: comment.updated_at,
       user: publicUser(comment.user), issue_url: `${baseUrl}/repos/${repo}/issues/${number}`,
-      performed_via_github_app: comment.user === bot ? { id: Number(FAKE_APP.appId), slug: FAKE_APP.slug } : null,
+      performed_via_github_app: comment.user === bot || comment.viaApp ? { id: Number(FAKE_APP.appId), slug: FAKE_APP.slug } : null,
       reactions: { '+1': comment.reactions.filter((r) => r.content === '+1').length },
     };
   }
@@ -446,7 +446,7 @@ export function createFakeGitHub({ repo = 'amontlabs/silo', now = Date.now, clie
     if (rest === '/comments' && req.method === 'POST') {
       if (issue.locked && !canWrite(who)) return json(res, 403, { message: 'Issue is locked' });
       const body = await readBody(req);
-      const comment = { id: state.nextId++, user: who.user, body: body.body, created_at: iso(), updated_at: iso(), reactions: [] };
+      const comment = { id: state.nextId++, user: who.user, body: body.body, created_at: iso(), updated_at: iso(), reactions: [], viaApp: true };
       issue.comments.push(comment);
       return json(res, 201, commentJson(issue.number, comment));
     }

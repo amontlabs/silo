@@ -999,6 +999,27 @@ test('the entry marker line is removed from a body', async () => {
   } finally { await t.close(); }
 });
 
+test('a comment a person writes through the Workshop is not the bot\'s, though GitHub records it as made via the App; the App\'s own is', async () => {
+  const t = await setup();
+  try {
+    const c = t.client();
+    t.fake.addComment(1, null, 'By the App.', START + 9000);
+    await c.signIn('visitor-fake');
+    await settle(t, c);
+    const posted = await c.call('POST', 'comment', { body: { n: 1, text: 'Written by a person.' } });
+    assert.equal(posted.status, 200);
+    const viaApp = [...t.fake.state.issues.get(1).comments].find((x) => x.body === 'Written by a person.');
+    assert.ok(viaApp?.viaApp, 'the fake records the comment as made via the App');
+    await settle(t, c);
+    const comments = (await c.call('GET', 'issue?n=1')).json.comments;
+    assert.equal(comments.find((x) => x.text === 'Written by a person.').bot, false);
+    assert.equal(comments.find((x) => x.text === 'By the App.').bot, true);
+    const latest = (await c.call('GET', 'state')).json.latest;
+    assert.equal(latest.find((x) => x.text === 'Written by a person.')?.bot, false);
+    assert.equal(latest.find((x) => x.text === 'By the App.')?.bot, true);
+  } finally { await t.close(); }
+});
+
 test('a comment of the Workshop App is an ordinary comment: marked as the bot\'s, with no change and no count of history lines', async () => {
   const t = await setup();
   try {
