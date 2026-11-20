@@ -1,6 +1,6 @@
 {
   "asks": "What makes a plugin a classifier?",
-  "answer": "A classifier is a plugin whose declared output is an opinion. Whatever arrives as an opinion is an opinion, whoever sent it, and the law speaks only of opinions.",
+  "answer": "A classifier is a plugin whose output is a value from a fixed list. It is one case of a plugin, not the name for all of them.",
   "needs": [
     "plugin-declaration",
     "shipped-plugins-declare"
@@ -9,7 +9,7 @@
     {
       "in": "words",
       "word": "classifier",
-      "means": "A plugin whose declared output is an opinion.",
+      "means": "A plugin whose output is a value from a fixed list.",
       "not": [
         "judge"
       ]

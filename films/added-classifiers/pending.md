@@ -20,16 +20,21 @@ Film 5, "What you can add":
   film, and no issue is created now.
 - Cut, because it says what was: "In the older film a plugin could pause or stop a computer
   itself. Not any more: it is only the package."
-- What a plugin needs is a set of rules. Owner. Importing a plugin shows them and changes
-  nothing. Installing it switches them on (`plugin-calls`, `import-then-install`).
+- Importing a plugin shows what it may use, and the rules and precautions it comes with, and
+  changes nothing. Installing it switches them on. Owner (`import-then-install`).
+- What a plugin may use is tools it declares: putting a question to the user and showing a panel
+  are tools, not outputs. Owner. Whether a tool it may use is said as a rule is not settled: the
+  owner finds that rules sit at a different layer (`plugin-calls`).
+- A plugin's output is a schema. A classifier is the case where it is a value from a fixed list:
+  one case of a plugin, not the name for all of them. Owner (`what-makes-a-classifier`).
 - A declaration uses the standard names: `on`, `inputs`, `outputs`, `runs`, `permissions`,
-  `precautions`. Owner.
-- No call of a plugin is named or shown. Owner. Only the areas they touch: the record, opinions,
+  `precautions`. Owner. What goes under `runs` is not settled.
+- No tool of a plugin is named or shown. Owner. Only the areas they touch: the record, opinions,
   the app, the user.
-- A classifier is a plugin whose declared output is an opinion, and every statement about the
-  program someone adds says "plugin" (`classifier-declares-an-opinion`, `plugin-is-the-subject`).
+- The owner asks for more work on the whole part before the script: whether "extension" is the
+  word, and why a plugin can never act on a computer (`plugin-is-the-subject`).
 - The film needs a new script. It waits for these decisions of the plan: `plugin-declaration`,
   `declaration-is-enforced`, `plugin-calls`, `import-then-install`, `plugin-is-the-subject`,
-  `plugin-forwarding-call`, `plugin-says-done`, `classifier-declares-an-opinion`,
+  `plugin-forwarding-call`, `plugin-says-done`, `what-makes-a-classifier`,
   `shipped-plugins-declare`, `plugin-wakes-on`, `request-waits-only-by-precaution`,
   `opinion-is-a-value`, `who-fixes-the-values` and `read-grant-names-its-part`.

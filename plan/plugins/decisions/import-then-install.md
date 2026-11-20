@@ -9,3 +9,6 @@ grant in it is accepted as a grant.
 
 How a plugin is installed, and how one of its rules is taken back, is the later feature
 `installing-a-plugin`.
+
+The owner, on 21 November 2026: fine, and important. Approved. The verdict waits for
+`plugin-declaration`, which this decision needs.

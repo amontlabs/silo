@@ -20,3 +20,10 @@
 - The word was compared with estimator, detector, monitor, evaluator, reviewer and labeler. None
   is both standard and plainer. "Classifier" is exact for an opinion that is a kind from a fixed
   list. For the other shapes the plan calls an opinion, see `opinion-is-a-value`.
+
+## The owner's answer (21 November 2026, later)
+
+"Classifier" is the correct word, and the reason is that it produces a value from a fixed list,
+more than that it produces an opinion. It is one specific case, not a generic category, and the
+owner wonders why the design fixates on it before the outputs of a plugin are known. The answer
+above is worded from this.

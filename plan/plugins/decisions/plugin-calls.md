@@ -26,3 +26,14 @@ reads can still leak.
 - A panel, and forwarding alerts and asks to the user's phone, are calls and not kinds of plugin.
   Forwarding is open (`plugin-forwarding-call`), and so is whether a plugin with no output still
   says it is done (`plugin-says-done`).
+
+## The owner's third answer (21 November 2026)
+
+- The owner approved this decision. The verdict is not written: it waits for
+  `plugin-declaration`, which this decision needs, and the same message doubts the word "rule" in
+  its answer.
+- The doubt: "rules are actually kind of different and sit at a different layer." What is sure for
+  the owner: installing a plugin shows which tools it declared and is allowed to use.
+- Putting a question to the user and showing a panel are tools a plugin uses while it runs, not
+  outputs. A plugin can wait for the answer to its question.
+- The output is a schema. How an output is used and how it shows in the app is designed later.

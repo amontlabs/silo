@@ -23,3 +23,9 @@ decision that takes its place, shown to the owner first:
 - `what-a-classifier-can-never-do`: what it can never do;
 - `what-defines-a-classifier`: what one defines for it;
 - `where-a-classifier-runs`: where it runs.
+
+## The owner's answer (21 November 2026)
+
+The owner does not understand why a plugin can never act on a computer, nor the rest of that
+sentence, nor where it comes from, and asks for more work on it. To the owner, what a plugin may
+do reads as what is shown and accepted when it is installed.

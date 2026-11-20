@@ -41,3 +41,6 @@ The one open point the owner calls real is Silo sending a request of its own: it
 
 This decision takes the place of `denied-call-in-the-reply`, whose answer named a mechanism: "the
 tool call is replaced by a refusal". It sets again the property that decision added, unchanged.
+
+Later that day the owner was not sure this can be approved yet, since how it is done is part of a
+feature decided later.

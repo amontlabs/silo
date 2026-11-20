@@ -27,3 +27,15 @@ The owner's word "triggered" in the answer is the one `plugin-wakes-on` would re
 
 An older text called a plugin a package through which pieces made by someone else arrive. That is
 not carried: what it brings is now said by the declaration.
+
+## The owner's answers (21 November 2026)
+
+- `runs` is important. The example shown had `model` and `prompt` under it, which "doesn't
+  correspond to anything". An agent's note: the example assumed that Silo itself calls a model for
+  a plugin that is only data. No entry says so, nor whose sign-in it would use.
+- The owner floats "extension" as the better word, as in an IDE, where an extension declares a
+  front end and a back end.
+- Read on Theia's pages on 21 November 2026: a "Theia extension" is "installed at compile time",
+  "can access the full API of Theia", and declares its front end in `theiaExtensions`. What is
+  "installable at runtime", runs "in a dedicated process" and works "against a defined API" is
+  called there a VS Code extension.
