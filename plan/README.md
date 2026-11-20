@@ -1,123 +1,196 @@
 # The plan
 
-What Silo is, what always holds in it, what is still to decide and what gets built. The Workshop
-shows it, and the owner rules on it there or in a conversation.
+The plan is the design of Silo, kept as small files: its vocabulary, what must always be true of
+it, the questions about it, and the features to build. The Workshop shows these files on the
+site. The owner says yes or no to each question and each feature, there or in a conversation.
 
-## Two halves
+This page explains how the files work. To read the plan itself, use the tool: `plan` prints what
+is next, and `plan show <id>` prints one item with everything that applies to it.
 
-| | What holds | What is to do |
+## The files
+
+```
+plan/
+  PRODUCT.md            what Silo is for, and what is true of every part of it
+  words.json            the words
+  principles.json       the principles
+  properties.json       the properties of the whole product
+  decisions/            the decisions about the whole product
+    <id>.json
+    <id>.md             the notes of that decision, optional
+  parts.json            the parts of the product
+  order.json            the stages, and in each stage its decisions and features in order
+  <part>/               one folder for each part
+    README.md           what the part is for, why it is designed this way, one example
+    properties.json     the properties of this part
+    decisions/
+    features/
+```
+
+## The lists hold what is settled
+
+| File | One item is | Example |
 |---|---|---|
-| Kinds | words, principles, properties | decisions, features |
-| One is | one sentence in force | one thing the owner rules on |
-| Lives in | a list, read whole | its own file, with its notes beside it in `<id>.md` |
-| Carries | no status: every line binds | a verdict, and a place in the order |
+| `words.json` | a word: the one name of a concept, and what it means | `main` means "One long-lived computer where your agents work." |
+| `principles.json` | a principle: a sentence that every addition to Silo must respect, and the question it asks about an addition | `less-sure-less-power` says "The less sure the trigger, the less it may do." It asks "What triggers it: you, a fact, or something less sure?" |
+| `properties.json` | a property: a sentence that is always true of Silo, and how that is checked | `rule-reads-only-facts` says "A rule reads only facts." A simulator checks it. |
 
-A sentence enters the first half only through the second: every word, principle and property is
-named in the `adds` of exactly one taken decision or feature.
+A list holds only what the owner said yes to, and all of it is in force. Nothing in a list is a
+draft.
 
-## What holds
+The tool and the rest of this page call an item of a list a **sentence**.
 
-| Kind | One is | File |
+## The entries hold what is asked and what gets built
+
+| Kind | One is | Example |
 |---|---|---|
-| Word | the one name of a concept, and what it means | `words.json` |
-| Principle | one sentence that every addition to Silo must respect, and the question it asks | `principles.json` |
-| Property | one sentence that always holds in Silo, and how it is checked | `properties.json` at the root, `<part>/properties.json` in a part |
+| Decision | one question about Silo, and its answer once it has one | `main-and-its-agents` asks "Where do the user's agents work?" |
+| Feature | one thing Silo does, to build | `linux-desktop`: "A desktop in Linux computers." |
 
-A word's id is the word itself in lower case, with a hyphen for each space. An id is unique in the whole plan:
-no word, principle, property, decision or feature shares one.
+Each decision and each feature is one file, named by its id. The tool and the rest of this page
+call either one an **entry**. An entry may have notes beside it, in `<id>.md`. They are plain
+prose: where the entry comes from, the options, what was found, and the owner's own words.
 
-What the owner took is the sentence: `means`, `says`, `asks`. How a property is checked (`check`,
-`at`) and which principle it follows from (`from`) are kept by whoever builds the check, as plain
-edits.
+## How a sentence gets into a list
 
-A list file exists once it holds a sentence: the take that brings the first one creates it. An
-entry may use a word that is only put forward; it then means what the decision putting it forward
-says.
+Nobody adds a sentence by editing a list. An entry shows the sentence under `sets`, and the tool
+writes it into the list when the owner says yes to that entry.
 
-## What is to do
+Before the owner's yes, the decision `main-and-its-agents` reads:
 
-| Kind | One is | File |
+```json
+{
+  "asks": "Where do the user's agents work?",
+  "answer": "There is one main computer, and the user's agents live in it. Forks and fresh computers serve tasks.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "main",
+      "means": "One long-lived computer where your agents work."
+    }
+  ]
+}
+```
+
+`plan take main-and-its-agents` then makes one commit. It adds the word to `words.json`. In the
+entry, it writes the verdict and replaces `sets` by `adds`, which keeps only the ids:
+
+```json
+{
+  "asks": "Where do the user's agents work?",
+  "answer": "There is one main computer, and the user's agents live in it. Forks and fresh computers serve tasks.",
+  "adds": [
+    "main"
+  ],
+  "verdict": "take"
+}
+```
+
+So each sentence in a list is in the `adds` of exactly one taken entry, and `plan show main` names
+that entry.
+
+An entry changes or removes a sentence that is in force in the same way:
+
+- An item of `sets` with the id of a sentence already in a list replaces that sentence.
+- `removes` lists the ids of the sentences to delete.
+
+Each item of `sets` starts with `in`, the list it goes to: `words`, `principles`, `properties` or
+`<part>/properties`. The keys of the sentence follow.
+
+The text of an entry may use a word that is not in `words.json` yet, when a decision with no
+verdict sets it. The word then has the meaning that decision gives it.
+
+## The owner's answer
+
+| `verdict` | Written by | Meaning |
 |---|---|---|
-| Decision | one choice about Silo: the question, and its answer once there is one | `decisions/<id>.json` at the root, `<part>/decisions/<id>.json` in a part |
-| Feature | one thing Silo does, to build | `<part>/features/<id>.json` |
+| absent | | The owner has not answered. |
+| `take` | `plan take <id>` | Yes to exactly what the entry showed: its text, what it sets and what it removes. |
+| `drop` | `plan drop <id>` | No to what the entry showed. A no does not say what should be true instead. The entry stays in its file, and the tool skips it. |
 
-The file name is the id. The notes are optional, and plain prose: where the sentence comes from, the options,
-what was found, and the owner's own words when the owner said it.
+- Only these two commands write a verdict, and only when the owner said so.
+- An answer in an entry with no verdict is a proposal, and nobody has to follow it. When the
+  owner leans towards an answer without saying yes, write it as the entry's answer and say in the
+  notes that it is a lean.
+- "Not now" is not a verdict. The entry moves to a later stage, as "The order" says below.
+- When the owner says yes to part of an entry, split the entry first. One entry holds the part the
+  owner agreed to, and is taken. The other holds the rest, and keeps no verdict.
+- A verdict is for the text the owner saw. An entry with no verdict can be edited freely. When
+  you change the question, answer, name, description, `sets` or `removes` of an entry that has a
+  verdict, remove the verdict in the same edit, so that the owner answers the new text.
 
-Before you add an entry, search `plan/` for one that already asks it. A narrower question about
-what an entry with no verdict already answers is an edit or a split of that entry, never a second
-entry.
+## Changing what was taken
 
-Until it is taken, a decision or a feature shows in full the sentences it would bring:
+A taken decision stays in the plan, and so does a built feature. To change a sentence that is in
+force, add a decision that sets the same id with the new text, or that removes it. When the owner
+takes that decision:
 
-- `sets`: sentences to add, or to put in place of the one with the same id. Each item starts with
-  `in`, the list it goes to (`words`, `principles`, `properties` or `<part>/properties`), then
-  the sentence's own keys.
-- `removes`: ids of sentences to take out of the lists.
+- The id moves from the `adds` of the old entry to the `adds` of the new one.
+- An old decision left with no `answer` and no `adds` has nothing left to say, and the take
+  deletes it.
 
-| `verdict` | Meaning |
-|---|---|
-| absent | Not decided. A decision with no `answer` and nothing under `sets` is open |
-| `take` | The owner said yes to exactly what the entry shows: its sentence, what it sets and what it removes |
-| `drop` | The owner said no to what the entry shows. It settles nothing else. The entry stays, and is skipped |
+A taken decision that added no sentence can be reversed directly, with `plan drop`.
 
-- Only `plan take` and `plan drop` write a verdict, on the owner's word. Taking writes what the
-  entry sets into the lists and replaces `sets` by `adds`, the ids it brought, in one commit.
-- An answer with no verdict is only put forward: it binds nobody. What the owner leans towards
-  goes there, and its notes say it is a lean.
-- A plain edit of the plan is checked with `plan check` and committed with a subject that starts
-  with `Plan:`.
-- `plan take` and `plan drop` refuse while `plan/` has uncommitted changes: commit your other
-  edits of the plan first.
-- A yes to part of an entry splits it first: the part taken, and the rest still to decide.
-- An entry whose sentence changes loses its verdict. An entry with no verdict is edited freely.
-- A taken decision stays, as a built feature does. When a later entry puts a new sentence in
-  place of one it brought, that id moves to the later entry's `adds`. A taken decision with no
-  answer of its own, whose every sentence was replaced, is deleted by that take. The owner can
-  rule again: a taken decision that brought no sentence may be dropped.
-- A decision is taken only after the decisions it needs. A feature may be taken before what it
-  needs is built: it waits.
-- A feature is built when `built` holds a date. That needs the verdict take, everything it needs
-  done, and for each property it adds an `at` that names an existing file.
+## What an entry needs
+
+`needs` lists the entries that must be done before this one. A decision is done when it is taken,
+and a feature when it is built.
+
+- A decision can be taken only after the decisions it needs.
+- A feature can be taken before what it needs is done. It then waits to be built.
+- A feature is built when `built` holds the date. The check accepts that only when the feature is
+  taken, everything it needs is done, and each property it added has an `at` that names an
+  existing file.
 
 ## The order
 
-`order.json` holds the stages, first to last, and in each one the decisions and features in the
-order they are dealt with. Every decision and every feature is in exactly one stage.
+`order.json` lists the stages, first to last. Each stage lists its entries in the order they are
+dealt with, and every entry is in exactly one stage.
 
 - The owner is shown the first entry with no verdict.
-- An entry that is not for now is moved to a later stage: its id moves to the end of that stage
-  in `order.json`, and that edit is committed. There is no verdict for "later".
-- A new entry is placed after everything it needs, beside the entries of its topic.
-- An entry comes after everything it needs.
-- Features are sorted so that the most certain and most useful come first, and every cut from the
-  top is a product.
-
-## Links
-
-An entry names another by its id. The check refuses an id that does not exist.
-
-| Key | On | Names | Meaning |
-|---|---|---|---|
-| `from` | a property | a principle | The principle it follows from. A property without one shows as a gap to close |
-| `needs` | a decision, a feature | decisions, features | What must be done first: a decision is done when taken, a feature when built |
-| `adds` | a taken decision or feature | sentences | The sentences it brought into the lists |
-| `keeps` | a feature | properties | What it must not break |
-| `at` | a property | files | Its checks, once they exist. Silo promises in public only a property whose checks pass |
+- An entry comes after everything it needs. A new entry also goes next to the entries on the same
+  topic.
+- An entry that is not for now moves to a later stage: move its id to the end of that stage, and
+  commit the edit.
+- Features are ordered with the most certain and most useful first, so that the features built so
+  far always make a product, wherever the building stops.
 
 ## Parts
 
-`parts.json` lists the parts of the product: `id`, `title`, `line`. Each part is one folder under
-its id. Its `README.md` says what the part is for, why it is so, and gives one example. It names
-sentences by id and never repeats them. What concerns the whole product sits at the root, in the
-same shape.
+`parts.json` lists the parts of the product. Each has an `id`, a `title` and a `line`, and a
+folder named by its id.
 
-A part may be named like the word it is about (`record`, `boundary`, `engine`). `plan show` on
-that id shows the part, with the word's meaning.
+A part's `README.md` says what the part is for and why it is designed this way, and gives one
+example. It names sentences by their id and does not repeat them. `PRODUCT.md` does the same for
+the whole product.
 
-## Keys
+A part may have the same id as the word it is about (`record`, `boundary`, `engine`). `plan show`
+on that id prints the part, with the word's meaning.
 
-In this order. A key in brackets is optional: it is absent, never empty.
+## Working on the plan
+
+- Before you add an entry, search `plan/` for one that asks the same thing. When an entry with no
+  verdict already covers your question, edit it or split it. Do not add a second entry.
+- Apart from a verdict, every change to the plan is an edit of its files. Check it with
+  `plan check`, and commit it with a subject that starts with `Plan:`.
+- Commit your edits before a verdict: `plan take` and `plan drop` refuse while `plan/` has
+  uncommitted changes.
+- The owner's yes to a sentence is for its text: a word's `means`, a principle's `says` and
+  `asks`, a property's `says`. A property's `check`, `at` and `from` are not part of that yes.
+  Whoever builds the check edits them in the list.
+- A list file is created by the first take that adds a sentence to it. An empty list has no file.
+
+## Reference
+
+### Ids
+
+An id is made of lowercase letters, digits and hyphens. A word's id is the word in lower case,
+with a hyphen for each space: `tool call` has the id `tool-call`. No two of the plan's words,
+principles, properties, decisions and features share an id.
+
+### Keys
+
+Keys are written in this order. A key in brackets is optional: when it has no value, leave it out.
 
 | Kind | Keys |
 |---|---|
@@ -130,28 +203,52 @@ In this order. A key in brackets is optional: it is absent, never empty.
 - `not`: the words or phrases this word replaces. The check refuses each of them anywhere in
   `plan/`. List one here only when every use of it in the plan would mean this concept.
 - `known_as`: the principle's standard name.
-- `kind`: `safety` (it never happens), `liveness` (it always ends up happening) or `measured` (a
-  number we commit to).
-- `check`: a list of one or more of `types`, `model`, `simulator`, `hostile test`, `live check`,
-  `benchmark`, `test`, `assertion`. `at`: the files of those checks.
-- `suggest`: `{ "verdict", "why" }`, what is recommended to the owner. A recommended answer to a
-  decision goes in `answer`.
+- `kind`: `safety` (something that never happens), `liveness` (something that always ends up
+  happening) or `measured` (a number we commit to).
+- `check`: one or more of `types`, `model`, `simulator`, `hostile test`, `live check`,
+  `benchmark`, `test`, `assertion`.
+- `surfaces`: where the feature shows, as `{ "app", "cli" }`: its place in the app and its
+  command.
+- `suggest`: what is recommended to the owner, as `{ "verdict", "why" }`. A recommended answer to
+  a decision goes in `answer`.
 - `suggested_in`: the number of the visitor's suggestion the entry came from.
-- `sets` and `removes` exist only before the verdict take, `adds` only with it.
+- `sets` and `removes` exist only before a take, and `adds` only after it.
 
-## The tool
+### Links
 
-| Command | What |
+These keys hold ids of other items, or paths. The check refuses an id that does not exist.
+
+| Key | Written on | Holds | Meaning |
+|---|---|---|---|
+| `needs` | a decision or a feature | decisions and features | What must be done first. |
+| `adds` | a taken decision or feature | sentences | The sentences its take wrote into the lists. |
+| `keeps` | a feature | properties | The properties it must not break. |
+| `from` | a property | one principle | The principle the property follows from. The check notes a property that has none. |
+| `at` | a property | paths of files | The files of its checks, once they exist. Silo promises a property in public only when its checks pass. |
+
+### States
+
+The tool gives each entry a state.
+
+| Kind | State | When |
+|---|---|---|
+| Decision | `open` | No verdict, no `answer` and nothing under `sets`. |
+| | `answered` | No verdict, and an `answer` or something under `sets`. |
+| | `taken`, `dropped` | The verdict. |
+| Feature | `undecided` | No verdict. |
+| | `taken` | Taken, and something it needs is not done. |
+| | `ready` | Taken, and everything it needs is done. |
+| | `built` | `built` holds the date. |
+| | `dropped` | The verdict. |
+
+### The tool
+
+`plan` is `tools/plan/bin/plan`.
+
+| Command | What it does |
 |---|---|
-| `plan` | What is next: the first entry with no verdict, the features ready to build, the features that wait and for what |
-| `plan show <id>` | One entry or one sentence, with what it links to and what binds it: the brief for whoever works on it. For a part's id: what is next in that part |
-| `plan take <id>` | The owner's yes |
-| `plan drop <id>` | The owner's no |
-| `plan check` | The plan holds together. The merge gate and the site's build run it |
-
-`plan` is `tools/plan/bin/plan`. Everything else is a plain edit of a file, which the check
-accepts or refuses.
-
-The tool names an entry's state. A decision is `open`, `answered` (it has an answer or sets
-sentences, and has no verdict), `taken` or `dropped`. A feature is `undecided`, `taken`, `ready`
-(taken, and everything it needs is done), `built` or `dropped`.
+| `plan` | Prints what is next: the first entry with no verdict, the features ready to build, and the features that wait, each with what it waits for. |
+| `plan show <id>` | Prints one entry or one sentence, with what it links to and what applies to it. This is the brief for whoever works on it. With the id of a part, it prints what is next in that part. |
+| `plan take <id>` | Writes the owner's yes. |
+| `plan drop <id>` | Writes the owner's no. |
+| `plan check` | Checks that the plan's files fit together. The merge gate and the site's build run it. |
