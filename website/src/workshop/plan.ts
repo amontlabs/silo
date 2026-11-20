@@ -1,7 +1,7 @@
 // The Workshop's model: the plan built into the page, merged with the live state from GitHub. Names, the
 // status rule and the areas' states come from the plan's model (tools/plan/model); this adds the rows.
 import { areaGroups, featureStatus } from '../../../tools/plan/model/index.js';
-import type { Change } from '../../../tools/plan/model/markers.js';
+import type { Change } from '../../../tools/workshop/model/markers.js';
 import type { Counts } from '../../../tools/plan/model/areas.js';
 import type { Status, Verdict } from '../../../tools/plan/model/status.js';
 import type { MapLayout } from './map';

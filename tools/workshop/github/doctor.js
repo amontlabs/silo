@@ -1,8 +1,8 @@
-// `plan doctor`: where each credential comes from (never a value), whether the App is public and
+// `workshop doctor`: where each credential comes from (never a value), whether the App is public and
 // installed, its permissions, and whether the six labels exist.
 import { lookup } from './credentials.js';
 import { CREDENTIAL_NAMES } from './names.js';
-import { LABELS } from '../model/names.js';
+import { SET_LABELS } from '../model/names.js';
 
 /** @param {{ deps: any, gh: import('./client.js').GitHub, credentials: () => { appId: string, privateKey: string } }} options */
 export async function doctor({ deps, gh, credentials }) {
@@ -18,7 +18,7 @@ export async function doctor({ deps, gh, credentials }) {
     problems: [],
   };
   if (!sources.WORKSHOP_APP_ID || !sources.WORKSHOP_PRIVATE_KEY) {
-    report.problems.push('the App id or private key is missing: run `plan setup`');
+    report.problems.push('the App id or private key is missing: run `workshop setup`');
     return report;
   }
   try {
@@ -35,9 +35,9 @@ export async function doctor({ deps, gh, credentials }) {
   report.permissions = gh.installation.permissions ?? {};
   if (report.permissions?.issues !== 'write') report.problems.push('the App cannot write issues');
   const existing = new Set((await gh.paginate(gh.repoPath('/labels'))).map((label) => String(label.name).toLowerCase()));
-  report.labels = Object.fromEntries(LABELS.map((label) => [label.name, existing.has(label.name.toLowerCase())]));
-  const missing = LABELS.filter((label) => !report.labels?.[label.name]).map((label) => label.name);
-  if (missing.length) report.problems.push(`labels missing (plan sync creates them): ${missing.join(', ')}`);
+  report.labels = Object.fromEntries(SET_LABELS.map((label) => [label.name, existing.has(label.name.toLowerCase())]));
+  const missing = SET_LABELS.filter((label) => !report.labels?.[label.name]).map((label) => label.name);
+  if (missing.length) report.problems.push(`labels missing (create them on GitHub, in the repository's labels): ${missing.join(', ')}`);
   return report;
 }
 

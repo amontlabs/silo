@@ -1,5 +1,6 @@
 // A small plan in the files of plan/, for the tests: they never read the real one.
-import { canonicalText, changeComment } from '../../../tools/plan/model/index.js';
+import { canonicalText } from '../../../tools/plan/model/index.js';
+import { changeComment } from '../../../tools/workshop/model/index.js';
 import { buildDataFrom, notesFrom } from './data';
 import { EXAMPLE_MAP } from './map-example';
 import type { Comment } from './api';

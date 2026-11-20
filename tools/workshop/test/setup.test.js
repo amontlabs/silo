@@ -10,11 +10,11 @@ import { assertNoSecrets, fakeKeychain, run, sandbox, secretsOf } from './setup-
 
 const unescape = (s) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
-/** Starts `plan setup`, plays the browser and GitHub's two clicks, and returns the command's result. */
-async function driveSetup({ fake, box, keychain, args = [], tamper }) {
+/** Starts `workshop setup`, plays the browser and GitHub's two clicks, and returns the command's result. */
+async function driveSetup({ fake, box, keychain, args = [], tamper, overrides = {} }) {
   let opened;
   const opening = new Promise((resolve) => (opened = resolve));
-  const running = run(['setup', ...args], { fake, box, keychain, overrides: { openBrowser: (url) => opened(url) } });
+  const running = run(['setup', ...args], { fake, box, keychain, overrides: { openBrowser: (url) => opened(url), ...overrides } });
   const local = await Promise.race([opening, running.then((r) => ({ finished: r }))]);
   if (local.finished) return { result: local.finished };
   const html = await (await fetch(local)).text();
@@ -128,6 +128,29 @@ test('a callback with the wrong state is refused and the code is not exchanged',
   assert.equal(fake.log.filter((r) => r.path.includes('/conversions')).length, 1);
 });
 
+test('a conversion GitHub answers with 502 shows the code neither in the page nor in the output', async (t) => {
+  const fake = await startFake();
+  t.after(fake.stop);
+  const box = sandbox(t);
+  const keychain = fakeKeychain();
+  const codes = [];
+  const failing = async (input, init) => {
+    const match = new URL(String(input)).pathname.match(/^\/app-manifests\/([^/]+)\/conversions$/);
+    if (!match) return globalThis.fetch(input, init);
+    codes.push(decodeURIComponent(match[1]));
+    return new Response('{"message":"Bad Gateway"}', { status: 502, headers: { 'content-type': 'application/json' } });
+  };
+  const { result, page, callbackStatus } = await driveSetup({ fake, box, keychain, overrides: { fetch: failing } });
+  assert.equal(codes.length, 1);
+  assert.equal(callbackStatus, 502);
+  assert.equal(result.code, 3);
+  assert.match(page, /502/);
+  assert.match(result.stderr, /502/);
+  assert.match(page + result.stderr, /the App conversion/);
+  assert.ok(!(page + result.stdout + result.stderr).includes(codes[0]), 'the conversion code appeared');
+  assert.equal(keychain.store.size, 0);
+});
+
 test('setup rejects a site that is not https', async (t) => {
   const fake = await startFake();
   t.after(fake.stop);
@@ -186,7 +209,7 @@ for (const okStores of [0, 2]) {
     const flaky = flakyKeychain(okStores);
     const first = await driveSetup({ fake, box, keychain: flaky });
     assert.equal(first.result.code, 1);
-    assert.match(first.result.stderr, /the App silo-workshop exists on GitHub and its credentials are in .*vercel\.env.*run `plan store`/);
+    assert.match(first.result.stderr, /the App silo-workshop exists on GitHub and its credentials are in .*vercel\.env.*run `workshop store`/);
     assert.equal(flaky.keychain.store.size, okStores);
     const envPath = vercelEnvPath(box.home);
     assert.equal(statSync(envPath).mode & 0o777, 0o600);
@@ -197,7 +220,7 @@ for (const okStores of [0, 2]) {
     for (const args of [[], ['--replace']]) {
       const retry = await driveSetup({ fake, box, keychain: flaky, args });
       assert.equal(retry.result.code, 1);
-      assert.match(retry.result.stderr, /run `plan store` to finish/);
+      assert.match(retry.result.stderr, /run `workshop store` to finish/);
     }
     assert.equal(fake.manifests.length, 1, 'never a second App');
 
@@ -230,7 +253,7 @@ test('a Keychain holding another App than vercel.env: setup --replace refuses an
   for (const [name, value] of Object.entries(other)) keychain.set(name, value);
   const refused = await driveSetup({ fake, box, keychain, args: ['--replace'] });
   assert.equal(refused.result.code, 1);
-  assert.match(refused.result.stderr, /holds App 4242 but the Keychain holds App 999: run `plan store --replace` .* or delete .*vercel\.env/);
+  assert.match(refused.result.stderr, /holds App 4242 but the Keychain holds App 999: run `workshop store --replace` .* or delete .*vercel\.env/);
   assert.equal(fake.manifests.length, 1);
   const storeRefused = await run(['store'], { fake, box, keychain });
   assert.equal(storeRefused.code, 1);
@@ -242,7 +265,7 @@ test('a Keychain holding another App than vercel.env: setup --replace refuses an
   keychain.store.clear();
   keychain.set('WORKSHOP_APP_ID', '999');
   const partial = await driveSetup({ fake, box, keychain, args: ['--replace'] });
-  assert.match(partial.result.stderr, /run `plan store` to finish/);
+  assert.match(partial.result.stderr, /run `workshop store` to finish/);
   assert.equal((await run(['store'], { fake, box, keychain })).code, 0);
   assert.equal(keychain.get('WORKSHOP_APP_ID'), fake.appId);
   assert.equal(keychain.store.size, 4);
@@ -288,7 +311,7 @@ test('the setup server refuses any Host but 127.0.0.1 or localhost on its port',
   assert.match(result.stderr, /timed out/);
 });
 
-test('doctor: sources only, the App public and installed, its permissions, the six labels', async (t) => {
+test('doctor: sources only, the App public and installed, its permissions, and only the label something still sets', async (t) => {
   const fake = await startFake();
   t.after(fake.stop);
   const box = sandbox(t);
@@ -298,12 +321,13 @@ test('doctor: sources only, the App public and installed, its permissions, the s
   assert.deepEqual(report.credentials, { WORKSHOP_APP_ID: 'keychain', WORKSHOP_CLIENT_ID: 'missing', WORKSHOP_CLIENT_SECRET: 'missing', WORKSHOP_PRIVATE_KEY: 'keychain' });
   assert.equal(report.public, true);
   assert.equal(report.installed, true);
-  assert.deepEqual(Object.keys(report.labels), ['workshop:entry', 'workshop:suggestion', 'verdict:take', 'verdict:later', 'verdict:drop', 'workshop:building']);
-  assert.match(report.problems.join('\n'), /labels missing \(plan sync creates them\): workshop:entry, .*workshop:building/);
-  for (const name of Object.keys(report.labels)) fake.labels.push({ name });
+  assert.deepEqual(Object.keys(report.labels), ['workshop:suggestion']);
+  assert.match(report.problems.join('\n'), /labels missing \(create them on GitHub, in the repository's labels\): workshop:suggestion$/m);
+  fake.labels.push({ name: 'Workshop:Suggestion' });
   const ok = await run(['doctor'], { fake, box });
   assert.equal(ok.code, 0, ok.stdout);
-  assert.match(ok.stdout, /Label workshop:building: yes/);
+  assert.match(ok.stdout, /^Label workshop:suggestion: yes$/m);
+  assert.doesNotMatch(ok.stdout, /verdict:|workshop:entry|workshop:building/);
   fake.public = false;
   assert.match((await run(['doctor'], { fake, box })).stdout, /Public: no/);
 });

@@ -11,10 +11,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 //
 // The function holds the files it loads at the paths they have in the
 // repository: website/api/ and website/server/ at any depth, and
-// tools/plan/model/ (the plan's model, with tools/plan/package.json, which
-// makes it ESM). Any other file it would load, in website/ or outside it,
+// tools/workshop/model/ (the Workshop's model, with tools/workshop/package.json,
+// which makes it ESM). Any other file it would load, in website/ or outside it,
 // stops the packaging: a package in website/node_modules/ is one of them.
-export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'vote', 'suggest', 'verdict'];
+export const ENDPOINTS = ['state', 'me', 'issue', 'login', 'callback', 'logout', 'comment', 'vote', 'suggest'];
 export const RUNTIME = 'nodejs24.x';
 export const HANDLER = 'website/api/workshop.cjs';
 
@@ -22,7 +22,7 @@ const website = fileURLToPath(new URL('..', import.meta.url));
 // Vercel's Git build reads .vercel/output in the project's root directory, the repository root.
 export const DEFAULT_OUTPUT = join(website, '..', '.vercel', 'output');
 /** The one folder outside website/ the function may load from, relative to the repository. */
-export const MODEL_DIR = join('tools', 'plan', 'model');
+export const MODEL_DIR = join('tools', 'workshop', 'model');
 
 async function exists(path) {
   return stat(path).then(() => true, () => false);
@@ -64,7 +64,7 @@ function functionFiles(siteDir) {
   }
   // The whole model ships, and the package.json that makes it ESM.
   for (const name of readdirSync(join(root, MODEL_DIR))) if (name.endsWith('.js')) files.add(join(root, MODEL_DIR, name));
-  files.add(join(root, 'tools', 'plan', 'package.json'));
+  files.add(join(root, 'tools', 'workshop', 'package.json'));
   for (const name of readdirSync(join(site, 'server'))) if (name.endsWith('.mjs') && !name.endsWith('.test.mjs')) files.add(join(site, 'server', name));
   files.add(join(site, 'api', 'workshop.cjs'));
   return { root, files: [...files].sort() };

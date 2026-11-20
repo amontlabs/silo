@@ -1,7 +1,7 @@
 // Development only (`?fixture=today` or `?fixture=later`, with `&as=owner` or `&as=visitor`): the page on a made-up
 // live state, without the API. The page's memory of the last visit is off unless `&memory=1`, so `&delay=<ms>` shows
 // a first visit. main.tsx loads this only when import.meta.env.DEV, so a production build has none of it.
-import { changeComment } from '../../../tools/plan/model/index.js';
+import { changeComment } from '../../../tools/workshop/model/index.js';
 import { api } from './api';
 import { memoryConfig } from './memory';
 import type { Comment } from './api';

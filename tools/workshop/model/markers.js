@@ -60,7 +60,7 @@ export function withoutMarkers(body) {
 }
 
 /**
- * @typedef {{ commit: string, before: string, fields: string[], verdict?: import('./status.js').Verdict | null, built?: string }} Change
+ * @typedef {{ commit: string, before: string, fields: string[], verdict?: import('./names.js').Verdict | null, built?: string }} Change
  * `verdict` is present when the verdict changed (null when cleared); `built` when it was set.
  */
 

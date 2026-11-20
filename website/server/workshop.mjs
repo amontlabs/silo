@@ -10,12 +10,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAppAuth } from './app-auth.mjs';
 import { createGitHub, DEFAULT_TIMEOUT, GitHubError, nextLink } from './github.mjs';
-import { BUILDING_LABEL, kindOf, LABELS, labelNames, reasonOf, VERDICTS } from './issues.mjs';
-import { verdictLabel } from '../../tools/plan/model/index.js';
+import { kindOf, LABELS, labelNames } from './issues.mjs';
 import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCookie, SESSION_MAX_AGE, STATE_MAX_AGE, unseal } from './session.mjs';
 import { createSnapshot, SNAPSHOT } from './snapshot.mjs';
 
-export { LABELS, VERDICTS };
+export { LABELS };
 
 const DIRECTION_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
 const TITLE_FORBIDDEN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/;
@@ -68,7 +67,7 @@ const PRIVATE = 'private, no-store';
 
 const ENDPOINTS = new Map(Object.entries({
   state: ['GET'], me: ['GET'], issue: ['GET'], login: ['GET'], callback: ['GET'], vote: ['GET', 'POST'],
-  logout: ['POST'], comment: ['POST'], suggest: ['POST'], verdict: ['POST'],
+  logout: ['POST'], comment: ['POST'], suggest: ['POST'],
 }));
 
 class Refusal extends Error {
@@ -306,25 +305,12 @@ export function createWorkshop({
     return cachedPermission(session.id)?.value === true ? BUDGET.deciderSessionReadsPerMinute : BUDGET.sessionReadsPerMinute;
   }
 
-  // Admits an action that will make `reads` GitHub reads with the person's token, all or nothing.
-  function admitReads(session, reads) {
-    const wait = sessionReads.take(hash(session.t), readLimit(session), now(), reads);
-    if (wait) tooMany(wait);
-    const store = requests.getStore();
-    if (store) store.prepaid = (store.prepaid || 0) + reads;
-  }
-
-  // A call with the person's token. Reads count in the session's own ceiling (unless the action paid for
-  // them up front); a change marks the request as having changed GitHub, so a refresh follows.
+  // A call with the person's token. Reads count in the session's own ceiling; a change marks the
+  // request as having changed GitHub, so a refresh follows.
   async function userRequest(session, method, path, options = {}) {
     if (method === 'GET') {
-      const store = requests.getStore();
-      if (store?.prepaid > 0) {
-        store.prepaid -= 1;
-      } else {
-        const wait = sessionReads.take(hash(session.t), readLimit(session), now());
-        if (wait) tooMany(wait);
-      }
+      const wait = sessionReads.take(hash(session.t), readLimit(session), now());
+      if (wait) tooMany(wait);
     }
     const answer = await github.request(method, path, { ...options, token: session.t, as: 'user' });
     if (method !== 'GET') {
@@ -404,8 +390,8 @@ export function createWorkshop({
     }
   }
 
-  // The person's permission, by GitHub account id: yes and no are both cached five minutes, for `me`,
-  // and `verdict`. People known to be able to decide re-read on their own allowance.
+  // The person's permission, by GitHub account id: yes and no are both cached five minutes, for `me`.
+  // People known to be able to decide re-read on their own allowance.
   function cachedPermission(id) {
     const cached = permissions.get(id);
     return cached && now() - cached.at < PERMISSION_TTL ? cached : null;
@@ -437,10 +423,6 @@ export function createWorkshop({
       }
       return value;
     });
-  }
-
-  async function requireDecider(session) {
-    if (!(await canDecide(session))) refuse(403, 'cannot_decide', 'Only the owner can decide.');
   }
 
   async function labelSuggestion(number) {
@@ -798,54 +780,6 @@ export function createWorkshop({
       return json(200, { number });
     },
 
-    // Labels and state change first. GitHub itself refuses the changes to someone without access.
-    // A built entry (closed as completed) keeps its verdict.
-    async 'POST verdict'(ctx) {
-      const session = await writer(ctx);
-      const input = readJson(ctx);
-      const n = issueNumber(input.n);
-      if (!Object.hasOwn(input, 'verdict')) refuse(400, 'bad_input', 'The verdict is missing.');
-      if (Object.hasOwn(input, 'note')) refuse(400, 'bad_input', 'A verdict takes no note.');
-      const verdict = input.verdict;
-      if (verdict !== null && !VERDICTS.includes(verdict)) refuse(400, 'bad_input', 'That verdict is not known.');
-      await requireDecider(session);
-      admitReads(session, 1);
-      const { issue, kind } = await workshopIssue(session, n);
-      if (kind !== 'entry') refuse(404, 'not_found', 'This is not a Workshop entry.');
-      if (issue.state === 'closed' && issue.state_reason === 'completed') refuse(409, 'built', 'This entry is built. Its verdict does not change.');
-      const target = verdict ? verdictLabel(verdict) : null;
-      const current = labelNames(issue).filter((name) => name.startsWith('verdict:'));
-      for (const name of current) {
-        if (name === target) continue;
-        await userRequest(session, 'DELETE', `/repos/${repo}/issues/${n}/labels/${encodeURIComponent(name)}`).catch((error) => {
-          if (!(error instanceof GitHubError && error.status === 404)) throw error;
-        });
-      }
-      if (target && !current.includes(target)) await userRequest(session, 'POST', `/repos/${repo}/issues/${n}/labels`, { body: { labels: [target] } });
-      const dropped = issue.state === 'closed' && issue.state_reason === 'not_planned';
-      let state = { state: issue.state === 'closed' ? 'closed' : 'open', reason: reasonOf(issue) };
-      if (verdict === 'drop' && !dropped) {
-        await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'closed', state_reason: 'not_planned' } });
-        state = { state: 'closed', reason: 'not_planned', closedAt: new Date(now()).toISOString() };
-      } else if (verdict !== 'drop' && dropped) {
-        await userRequest(session, 'PATCH', `/repos/${repo}/issues/${n}`, { body: { state: 'open', state_reason: 'reopened' } });
-        state = { state: 'open', reason: null };
-      }
-      snapshots.patch.fields(n, { verdict, ...state, ...(state.state === 'open' ? { closedAt: null } : {}) });
-      // An entry is built only while it is taken: any other verdict also takes its building label off.
-      // The issue just read says whether the label is there. A failed removal leaves the verdict
-      // standing; the state answer shows building only on a taken entry anyway.
-      if (verdict !== 'take' && labelNames(issue).includes(BUILDING_LABEL)) {
-        try {
-          await userRequest(session, 'DELETE', `/repos/${repo}/issues/${n}/labels/${encodeURIComponent(BUILDING_LABEL)}`);
-          snapshots.patch.building(n, false);
-        } catch (error) {
-          if (error instanceof GitHubError && error.status === 404) snapshots.patch.building(n, false);
-          else log({ endpoint: 'verdict', building_label: 'not_removed', ...(error instanceof GitHubError ? { github: error.status } : { failure: error?.name || 'Error' }) });
-        }
-      }
-      return json(200, { ok: true });
-    },
   }));
 
   function callbackUrl() {

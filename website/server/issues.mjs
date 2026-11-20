@@ -1,7 +1,7 @@
 // How GitHub issues and comments become Workshop data: kinds, verdicts, the
 // markers, and the cuts that bound every answer. Names, labels and markers come
-// from the plan's model (tools/plan/model).
-import { BUILDING_LABEL, ENTRY_LABEL, labelVerdict, readChange, readEntryMarker, SUGGESTION_LABEL, VERDICTS, withoutMarkers } from '../../tools/plan/model/index.js';
+// from the Workshop's model (tools/workshop/model).
+import { BUILDING_LABEL, ENTRY_LABEL, labelVerdict, readChange, readEntryMarker, SUGGESTION_LABEL, VERDICTS, withoutMarkers } from '../../tools/workshop/model/index.js';
 
 export { BUILDING_LABEL, VERDICTS };
 export const LABELS = { entry: ENTRY_LABEL, suggestion: SUGGESTION_LABEL };

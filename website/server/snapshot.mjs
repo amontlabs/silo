@@ -505,12 +505,6 @@ export function createSnapshot({
     up(number, delta) {
       count(number, 'up', delta);
     },
-    building(number, on) {
-      record(onEntry(number, (entry) => { entry.building = on; }));
-    },
-    fields(number, fields) {
-      record(onEntry(number, (entry) => Object.assign(entry.summary, fields)));
-    },
     issue(issue, kind) {
       const reduced = reduceIssue({ ...issue, labels: [{ name: `workshop:${kind}` }] });
       if (!reduced) return;

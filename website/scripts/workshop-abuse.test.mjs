@@ -36,24 +36,25 @@ async function signInMany(t, prefix, n) {
   return clients;
 }
 
-test('100 verdict posts from visitors, then 60 verdicts from the owner in one minute: all of the owner\'s succeed', async () => {
+test('visitors write 20 times a minute without a permission read; the owner, known to decide, writes 60 in one minute on one read', async () => {
   const t = await setup();
   try {
+    assert.equal(BUDGET.writesPerMinute, 20);
     const visitors = await signInMany(t, 'visitor', 5);
     for (const visitor of visitors) {
-      for (let i = 0; i < 20; i += 1) {
-        const response = await visitor.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'take' } });
-        assert.ok([403, 429].includes(response.status), response.body);
-      }
+      const answers = [];
+      for (let i = 0; i < 25; i += 1) answers.push((await visitor.call('POST', 'vote', { body: { n: entryNumber, on: i % 2 === 0 } })).status);
+      assert.deepEqual(answers, [...Array(20).fill(200), ...Array(5).fill(429)], answers.join(' '));
     }
-    assert.equal(count(t.fake, 'GET', /permission$/), 5, 'one read per visitor; "no" is cached');
+    assert.equal(count(t.fake, 'GET', /permission$/), 0, 'a write never reads the permission');
     const owner = t.client();
     await owner.signIn('owner-fake');
+    assert.equal((await owner.call('GET', 'me')).json.canDecide, true);
     for (let i = 0; i < 60; i += 1) {
-      const response = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: i % 2 ? 'take' : 'later' } });
-      assert.equal(response.status, 200, `verdict ${i}: ${response.body}`);
+      const response = await owner.call('POST', 'comment', { body: { n: entryNumber, text: `Note ${i}.` } });
+      assert.equal(response.status, 200, `comment ${i}: ${response.body}`);
     }
-    assert.equal(count(t.fake, 'GET', /owner-fake\/permission$/), 1, 'no re-read per verdict');
+    assert.equal(count(t.fake, 'GET', /owner-fake\/permission$/), 1, 'no re-read per write');
   } finally { await t.close(); }
 });
 
@@ -66,11 +67,13 @@ test('a known decider re-reads on an allowance of its own; a GitHub refusal drop
     t.clock.t += 6 * 60_000;
     const visitors = await signInMany(t, 'reader', BUDGET.permissionChecksPerMinute + 3);
     for (const visitor of visitors) await visitor.call('GET', 'me');
-    assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'take' } })).status, 200, 'the general allowance is spent, the owner\'s is not');
+    assert.equal((await owner.call('GET', 'me')).json.canDecide, true, 'the general allowance is spent, the owner\'s is not');
 
     t.fake.state.users.get('owner-fake').permission = 'read';
-    const refused = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'later' } });
-    assert.equal(refused.status, 403, 'GitHub refuses the label change');
+    t.fake.state.hook = (r) => (r.kind === 'user' && r.method === 'POST' ? { status: 403 } : null);
+    const refused = await owner.call('POST', 'comment', { body: { n: entryNumber, text: 'Refused.' } });
+    t.fake.state.hook = null;
+    assert.equal(refused.status, 403, 'GitHub refuses the comment');
     assert.equal((await owner.call('GET', 'me')).json.canDecide, false, 'read again after the refusal');
   } finally { await t.close(); }
 });
@@ -296,10 +299,11 @@ test('a request that changed GitHub and then failed still starts the refresh', a
     await t.client().call('GET', 'state');
     await t.workshop.idle();
     const before = lists(t);
-    t.fake.state.hook = (r) => (r.method === 'PATCH' ? { status: 500 } : null);
-    assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'drop' } })).status, 502);
+    t.fake.state.hook = (r) => (r.kind === 'installation' && r.method === 'POST' && /\/labels$/.test(r.path) ? { status: 500 } : null);
+    assert.equal((await owner.call('POST', 'suggest', { body: { title: 'An idea', text: 'Details.' } })).status, 502);
+    t.fake.state.hook = null;
     await t.workshop.idle();
-    assert.equal(lists(t), before + 1, 'the label change was refreshed');
+    assert.equal(lists(t), before + 1, 'the new issue was refreshed');
   } finally { t.fake.state.hook = null; await t.close(); }
 });
 
@@ -432,25 +436,25 @@ test('only Workshop issues are listed: foreign issues are neither fetched nor co
   } finally { await t.close(); }
 });
 
-test('a decider\'s session has 300 reads a minute; a verdict counts one read', async () => {
+test('a decider\'s session has 300 reads a minute', async () => {
   assert.equal(BUDGET.deciderSessionReadsPerMinute, 300);
   const t = await setup();
   try {
     const owner = t.client();
     await owner.signIn('owner-fake');
-    for (let i = 0; i < 60; i += 1) {
-      const response = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: ['take', 'later', 'drop', null][i % 4] } });
-      assert.equal(response.status, 200, `verdict ${i}: ${response.body}`);
+    assert.equal((await owner.call('GET', 'me')).json.canDecide, true);
+    for (let i = 0; i < 140; i += 1) {
+      const response = await owner.call('GET', `vote?n=${entryNumber}`);
+      assert.equal(response.status, 200, `read ${i}: ${response.body}`);
     }
     t.clock.t += 61_000;
-    await withBudget({ deciderSessionReadsPerMinute: 3 }, async () => {
-      for (const verdict of ['take', 'later', 'drop']) assert.equal((await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict } })).status, 200);
+    // A vote read is two reads: the issue, then its reactions.
+    await withBudget({ deciderSessionReadsPerMinute: 4 }, async () => {
+      for (let i = 0; i < 2; i += 1) assert.equal((await owner.call('GET', `vote?n=${entryNumber}`)).status, 200);
       const before = t.fake.state.requests.length;
-      const labels = [...issueOf(t.fake, entryNumber).labels];
-      const refused = await owner.call('POST', 'verdict', { body: { n: entryNumber, verdict: 'take' } });
+      const refused = await owner.call('GET', `vote?n=${entryNumber}`);
       assert.equal(refused.status, 429);
       assert.equal(t.fake.state.requests.length, before, 'refused before its first call');
-      assert.deepEqual(issueOf(t.fake, entryNumber).labels, labels);
     });
   } finally { await t.close(); }
 });

@@ -1,0 +1,11 @@
+{
+  "name": "silo-workshop-tool",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Workshop's GitHub side: the App, its credentials, and the model of labels, markers and history comments.",
+  "type": "module",
+  "engines": { "node": ">=26" },
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

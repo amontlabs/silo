@@ -110,29 +110,26 @@ test('each kind of write patches the snapshot at once, even when the refresh it 
   try {
     const visitor = t.client();
     await visitor.signIn('visitor-fake');
-    const owner = t.client();
-    await owner.signIn('owner-fake');
     const reader = t.client();
     await reader.call('GET', 'state');
     t.fake.state.hook = (r) => (r.kind === 'installation' && r.method === 'GET' && (LIST.test(r.path) || COMMENTS.test(r.path)) ? { status: 500 } : null);
     await visitor.call('POST', 'comment', { body: { n: 2, text: 'Patched in.' } });
     await visitor.call('POST', 'vote', { body: { n: 2, on: true } });
-    await owner.call('POST', 'verdict', { body: { n: 2, verdict: 'drop' } });
     const suggestion = await visitor.call('POST', 'suggest', { body: { title: 'Patched suggestion', text: 'x' } });
     await visitor.call('POST', 'vote', { body: { n: 1, on: false } });
     const state = (await reader.call('GET', 'state')).json.issues;
-    assert.deepEqual([state[2].comments, state[2].up, state[2].verdict, state[2].state, state[2].reason], [1, 2, 'drop', 'closed', 'not_planned']);
+    assert.deepEqual([state[2].comments, state[2].up], [1, 2]);
     assert.equal(state[1].up, 0);
     assert.deepEqual([state[suggestion.json.number].kind, state[suggestion.json.number].author], ['suggestion', 'visitor-fake']);
     const issue = (await reader.call('GET', 'issue?n=2')).json;
     assert.deepEqual(issue.comments.slice(-1).map((x) => [x.author, x.text]), [['visitor-fake', 'Patched in.']]);
     assert.equal((await reader.call('GET', `issue?n=${suggestion.json.number}`)).json.body, 'x');
     await t.workshop.idle();
-    assert.equal((await reader.call('GET', 'state')).json.issues[2].verdict, 'drop', 'the patch holds through the failed refresh');
+    assert.deepEqual([(await reader.call('GET', 'state')).json.issues[2].comments, (await reader.call('GET', 'state')).json.issues[2].up], [1, 2], 'the patch holds through the failed refresh');
     t.fake.state.hook = null;
     t.clock.t += 61_000;
     const truth = (await settle(t)).json.issues;
-    assert.deepEqual([truth[2].comments, truth[2].up, truth[2].verdict], [1, 2, 'drop'], 'GitHub agrees after the refresh');
+    assert.deepEqual([truth[2].comments, truth[2].up], [1, 2], 'GitHub agrees after the refresh');
   } finally { await t.close(); }
 });
 
@@ -277,8 +274,6 @@ test('the refresh counts against the installation backstop', async () => {
   } finally { await t.close(); }
 });
 
-const BUILDING = /\/labels\/workshop%3Abuilding$/;
-const unlabels = (t) => t.fake.state.requests.filter((r) => r.method === 'DELETE' && BUILDING.test(r.path));
 const building = (state, n) => Object.hasOwn(state[n] ?? {}, 'building');
 
 test('state carries building only on open taken entries with the label, from the same lists and calls', async () => {
@@ -306,68 +301,5 @@ test('state carries building only on open taken entries with the label, from the
     issues.get(1).labels = issues.get(1).labels.filter((name) => name !== 'workshop:building');
     t.clock.t += 61_000;
     assert.equal(building((await settle(t)).json.issues, 1), false, 'a removed label shows at the next refresh');
-  } finally { await t.close(); }
-});
-
-test('a verdict other than take removes the building label in the same write, and only when it is there', async () => {
-  const t = await setup();
-  try {
-    const owner = t.client();
-    await owner.signIn('owner-fake');
-    const c = t.client();
-    const issues = t.fake.state.issues;
-    issues.get(1).labels.push('workshop:building');
-    await c.call('GET', 'state');
-    const verdict = (n, value, extra = {}) => owner.call('POST', 'verdict', { body: { n, verdict: value, ...extra } });
-    const labelled = (n) => issues.get(n).labels.includes('workshop:building');
-
-    // Taking it again keeps the label; dropping takes it off, and a retaken entry is not being built.
-    assert.equal((await verdict(1, 'take')).status, 200);
-    assert.equal(unlabels(t).length, 0);
-    assert.equal((await c.call('GET', 'state')).json.issues[1].building, true);
-    assert.equal((await verdict(1, 'drop')).status, 200);
-    assert.equal(labelled(1), false);
-    assert.equal(unlabels(t).length, 1);
-    assert.equal((await verdict(1, 'take')).status, 200);
-    assert.equal(issues.get(1).state, 'open');
-    assert.equal(building((await c.call('GET', 'state')).json.issues, 1), false, 'retaken, not being built');
-    await t.workshop.idle();
-    t.clock.t += 61_000;
-    assert.equal(building((await settle(t)).json.issues, 1), false, 'nor after a refresh');
-
-    // later and cleared each take it off; with no label there is no call.
-    for (const [value, extra] of [['later'], [null]]) {
-      issues.get(1).labels.push('workshop:building');
-      if (!issues.get(1).labels.includes('verdict:take')) issues.get(1).labels.push('verdict:take');
-      const calls = unlabels(t).length;
-      assert.equal((await verdict(1, value, extra)).status, 200, String(value));
-      assert.equal(labelled(1), false, String(value));
-      assert.equal(unlabels(t).length, calls + 1, String(value));
-      const again = unlabels(t).length;
-      assert.equal((await verdict(1, value, extra)).status, 200);
-      assert.equal(unlabels(t).length, again, `${value}: no call without the label`);
-    }
-    assert.equal((await verdict(2, 'later')).status, 200);
-    assert.equal(unlabels(t).length, 3, 'an entry never labelled costs no call');
-  } finally { await t.close(); }
-});
-
-test('a failed removal of the building label leaves the verdict standing and shows no building', async () => {
-  const t = await setup();
-  try {
-    const owner = t.client();
-    await owner.signIn('owner-fake');
-    const c = t.client();
-    t.fake.state.issues.get(1).labels.push('workshop:building');
-    await c.call('GET', 'state');
-    t.fake.state.hook = (r) => (r.method === 'DELETE' && BUILDING.test(r.path) ? { status: 500 } : null);
-    const answer = await owner.call('POST', 'verdict', { body: { n: 1, verdict: 'later' } });
-    assert.deepEqual([answer.status, answer.json], [200, { ok: true }]);
-    const issue = t.fake.state.issues.get(1);
-    assert.ok(issue.labels.includes('verdict:later') && issue.labels.includes('workshop:building'));
-    const state = (await c.call('GET', 'state')).json.issues;
-    assert.equal(state[1].verdict, 'later');
-    assert.equal(building(state, 1), false);
-    assert.ok(t.logs.some((line) => line.includes('"building_label":"not_removed"')));
   } finally { await t.close(); }
 });
