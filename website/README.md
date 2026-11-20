@@ -493,7 +493,7 @@ JSON.
 | `GET state`, `GET state?fresh=1` | anyone | Every issue with a Workshop label, open or closed: kind, entry id, title, state, 👍 count, comment count, author, dates. `reason` is `not_planned` for a closed issue that was closed as not planned (a dropped suggestion), `completed` for one closed as completed (a built suggestion), and null otherwise. `threads`: the issue number of each entry's thread, by entry id, for the entries of the plan that have one. `latest`: the newest 30 comments held on entries' threads, newest first, each `{ n, entry, author, bot, createdAt, text }`, `text` its first line cut to 140 characters. `"old": true` when the snapshot it was answered from was over 30 seconds old; the field is absent otherwise. `fresh=1` (that exact value) waits for fresh numbers first, as described under the snapshot below. |
 | `GET me` | signed in | `{ login, avatar }`, read from the session cookie alone: it calls nothing on GitHub. 401, with the `workshop-hint` cookie cleared, only when there is no valid session. |
 | `GET issue?n=` | anyone | Body text (first 20,000 characters), 👍 count from the issue's reaction summary, and the latest 100 comments held, oldest first, as plain text; `more: true` when GitHub counts more. Each comment has `up`, its 👍 count, from the reaction summary GitHub returns with the comment. The same public answer for everyone. |
-| `GET vote?n=` | signed in | `{ on, comments }`. `on` says whether the person has given the issue a 👍. `comments` lists the ids of the issue's latest 100 comments the person has given a 👍. Both are read with the person's own token: the 👍 on comments in one GraphQL query. |
+| `GET vote?n=` | signed in | `{ on, comments }`. `on` says whether the person has given the issue a 👍. `comments` lists the ids of the issue's latest 100 comments the person has given a 👍. Both are read with the person's own token: the 👍 on comments in one GraphQL query. Only the newest 100 comments are looked at: they are the comments `GET issue` gives and the page shows. |
 | `GET login?return=` | anyone | Redirects to GitHub. `return` must be a path under `/workshop`. |
 | `GET callback` | GitHub | Finishes sign-in and redirects to the return path. |
 | `POST logout` | anyone | Revokes the person's whole grant for the App (all their sessions), then clears the cookies whatever happened. Answers `{ "ok": true, "revoked": true\|false }`. |
@@ -513,25 +513,46 @@ an id of the plan, never both. With `entry`:
 - An id that is no entry of the plan answers 404, before any call to GitHub.
 - When the entry has a thread, the write goes on it as it would with that
   thread's `n`, and the answer carries `n`.
+- Before a write to an entry's thread, the read of the issue the write makes
+  anyway confirms that the issue still is the thread: it carries the label
+  `workshop:entry` and its marker names the entry, or it is the suggestion
+  that `suggested_in` names. An issue whose label or marker was changed on
+  GitHub is no thread. The server then looks the thread up on GitHub once
+  more, as before an opening, and goes on with what it finds, or opens one.
 - When the entry has no thread, the server first reads the entry issues on
-  GitHub with the App's token: the newest pages, until they reach issues the
-  snapshot already held a minute before its refresh began; the snapshot
-  gives the older ones. A thread another instance has just opened is found
-  this way. Without a snapshot, it reads every page.
+  GitHub with the App's token: the newest pages, until they reach both an hour
+  ago and the issues the snapshot already held a minute before its refresh
+  began. The snapshot gives the older ones. A thread another instance has
+  just opened is found this way. Without a snapshot, it reads every page.
 - When that read finds none, the App opens the issue described under
-  "Storage", labelled `workshop:entry`. The App then reads the entry issues
-  again: when another instance opened one at the same moment, the lowest
-  number is the thread. The person's comment or 👍 then goes on the thread
-  with the person's own token. The answer carries `n`.
+  "Storage", labelled `workshop:entry`.
+- When GitHub created the issue without the label, the App creates the label
+  in the repository (one that exists already is fine) and adds it to the
+  issue. When the issue still lacks it, the App closes the issue, and the
+  answer is 502 with `"error": "github"`. No open issue without the label is
+  left behind.
+- After the opening, the App reads the entry issues again. When that read
+  fails, or the ceiling below has no room left for it, the person's write is
+  not made: the answer is an error that says to try again, and the next try
+  finds the issue. No write goes to an issue that this read has not shown to
+  be the lowest for the entry.
+- When that read shows a lower issue for the entry, another instance opened
+  one at the same moment. The lower one is the thread, and the person's write
+  goes on it. The App closes the issue it opened, as not planned, and takes
+  the label `workshop:entry` off it.
+- The person's comment or 👍 then goes on the thread with the person's own
+  token. The answer carries `n`.
 - Two requests for the same entry on the same instance share one opening.
 - When the issue was opened and the person's write then fails, the issue
   stays. The answer is the error, and it carries `n`. The next try finds the
   issue.
+- Once the server knows the thread of the entry a write names, every answer
+  to that write carries `n`, errors included.
 - `POST vote {entry, on: false}` on an entry with no thread answers
   `{ "ok": true, "up": 0 }` and opens nothing.
-- A write on an entry's thread that is closed or locked, and that GitHub
-  refuses, answers 403 `closed`: "This thread is closed on GitHub." No second
-  issue is opened.
+- When GitHub refuses a write on an entry's thread with a 403, the server
+  reads the issue once more. When it is closed or locked, the answer is 403
+  `closed`: "This thread is closed on GitHub." No second issue is opened.
 
 What a write costs on GitHub:
 
@@ -543,7 +564,8 @@ What a write costs on GitHub:
 | A 👍 on an entry whose thread the snapshot holds | 0 | 2: the issue, the 👍 |
 
 Each read of entry issues is one page when the snapshot is fresh, and one
-more page for each 100 entry issues opened since. An entry written from a
+more page for each 100 entry issues opened in the last hour or since the
+snapshot's refresh. An entry written from a
 suggestion costs one more read with the person's token: the suggestion's
 issue. The App's token is never used to write a person's words, and a
 person's token is never used to open an issue for an entry.
@@ -554,19 +576,15 @@ an entry's thread closed on GitHub, or a request from another site), 404 (not
 a Workshop issue, not an entry of the plan, or not a comment of that issue),
 405, 413 (body over 64 KB), 429 (GitHub's rate limit or one of ours), 502
 (GitHub failed or took over 8 seconds) and 503 `not_configured` (missing or
-invalid App settings). A write naming an entry whose thread was found or
-opened carries the thread's `n` in its error too. A suggestion whose issue
-was created but could not be labelled answers 502 with `"error": "github"`
-and the issue's `number`. An entry's issue that GitHub created without the
-label `workshop:entry` answers 502 with `"error": "github"`; nothing is
-written on it. `login` and `callback` never answer JSON: any failure redirects
+invalid App settings). A write naming an entry whose thread the server knows
+carries the thread's `n` in its error too. A suggestion whose issue was
+created but could not be labelled answers 502 with `"error": "github"` and
+the issue's `number`. `login` and `callback` never answer JSON: any failure redirects
 to `/workshop?signin=failed`; cancelling on GitHub returns to the page.
 
 Each comment is cut to 5,000 characters and then carries `"cut": true`. Every
 marker is read with the readers of `tools/workshop/model/` on the whole body or
-comment, and the text is cut after: one definition, shared with `workshop`. The
-change marker is read only on the App's comments, so a person's comment never
-reaches that reader.
+comment, and the text is cut after: one definition, shared with `workshop`.
 
 An issue is a Workshop issue when it carries exactly one of the two kind
 labels and is not a pull request.
@@ -742,10 +760,14 @@ new sign-ins have a ceiling of 30 a minute and token refreshes of existing
 sessions a separate one of 60, so made-up sign-ins cannot stop sessions from
 refreshing.
 
-An opening costs 3 calls when the snapshot is fresh (a read, the opening, a
-read), so the ceiling allows 3 openings a minute on an instance. The read
-before an opening also runs for a write on an entry that the snapshot holds
-no thread for, and finds the thread when another instance opened it.
+The opening ceiling is ten calls a minute per instance, whatever they are: the
+reads of entry issues, the openings, and the calls that repair an opening.
+An opening is refused before its call when the ceiling has no room for it and
+for the read that confirms it. The calls that repair an opening (creating the
+missing label, adding it, closing an issue) are charged to the ceiling but
+never refused by it, so that nothing is left half done. The read before an
+opening also runs for a write on an entry that the snapshot holds no thread
+for, and finds the thread when another instance opened it.
 
 With each of the two lists on one page, a refresh is 3 calls (2 list pages,
 which are `304` and free when unchanged, and 1 `since` comment call, which
@@ -781,12 +803,23 @@ snapshots catch up when the hour resets.
   counts as a write, and so does a vote on a comment. A person may make 3
   suggestions a minute and 10 an hour; an attempt counts only when the issue
   was created.
-- A person may cause 5 openings of an entry's thread an hour per instance,
-  and all people together 30. An opening counts only when the issue was
-  created. A write that would cause one more answers 429 with plain words:
-  "You have started too many new threads this hour." or "Too many new threads
-  were started on the Workshop this hour." A write on an entry that has a
-  thread is no opening.
+- All people together may cause 30 openings of an entry's thread an hour.
+  This is the limit that bounds the bot. It is counted on GitHub: the read
+  of entry issues that every opening makes covers the last hour, and every
+  entry issue created in that hour counts. In memory, an instance adds only
+  its own openings that GitHub's read did not show yet. So the limit holds
+  across instances and restarts. A write that would cause the 31st answers
+  429: "Too many new threads were started on the Workshop this hour."
+- A person may cause 5 openings an hour. This count is kept in the
+  instance's memory, because the Workshop has no storage but GitHub: another
+  instance, or a restart, starts it again. A write that would cause the 6th
+  answers 429: "You have started too many new threads this hour."
+- A person's opening is charged before any call to GitHub, and given back
+  when nothing was opened: when the read found a thread, or the opening
+  failed. A write on an entry that has a thread is no opening. On one
+  instance, two openings at once by one person at 4 of 5, or by anyone at 29
+  of 30, open one issue. Two instances opening at the same moment can each
+  pass at 29, since neither sees the other's issue yet.
 - Each session may make 60 GitHub calls a minute for reads (`GET vote`, its
   GraphQL query, and the reads before a write); more answer 429. The reads a whole action needs are checked before its first
   call.

@@ -42,7 +42,8 @@ export async function setup({ configured = true, seed = true, timeoutMs, entries
   const workshop = createWorkshop({ config, entries: readPlanEntries(entries), now, log: (entry) => logs.push(JSON.stringify(entry)), ...(timeoutMs ? { timeoutMs } : {}) });
   const secrets = () => [...fake.issuedTokens, fake.clientSecret, env.WORKSHOP_SESSION_SECRET, ...[...fake.state.codes.keys()]].filter(Boolean);
 
-  function client() {
+  // A client of `target`, this setup's workshop unless another instance is given.
+  function client(target = workshop) {
     const jar = new Map();
     async function call(method, path, { body, headers = {} } = {}) {
       const h = {};
@@ -52,7 +53,7 @@ export async function setup({ configured = true, seed = true, timeoutMs, entries
         if (value === undefined) delete h[name];
         else h[name] = value;
       }
-      const response = await workshop.handle({ method, url: `/api/workshop/${path}`, headers: h, body: body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body) });
+      const response = await target.handle({ method, url: `/api/workshop/${path}`, headers: h, body: body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body) });
       outputs.push(JSON.stringify(response));
       for (const cookie of response.cookies) {
         const [pair, ...attributes] = cookie.split('; ');

@@ -12,7 +12,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAppAuth } from './app-auth.mjs';
 import { createGitHub, DEFAULT_TIMEOUT, GitHubError, nextLink } from './github.mjs';
 import { clean, commentIssue, countOf, kindOf, LABELS, labelNames } from './issues.mjs';
-import { entryMarker, readEntryMarker } from '../../tools/workshop/model/index.js';
+import { entryMarker, LABELS as LABEL_DEFINITIONS, readEntryMarker } from '../../tools/workshop/model/index.js';
 import { clearCookie, cookieNames, HINT_COOKIE, parseCookies, seal, serializeCookie, SESSION_MAX_AGE, STATE_MAX_AGE, unseal } from './session.mjs';
 import { createSnapshot, SNAPSHOT } from './snapshot.mjs';
 
@@ -24,8 +24,8 @@ export const LIMITS = { text: 5000, title: 120 };
 // Ceilings per instance. The installation token has one per use, kept apart so that no use can
 // starve another. `exchange` covers new sign-ins at GitHub's token endpoint and `renew` the token
 // refreshes of existing sessions, so that made-up sign-ins cannot stop sessions from refreshing.
-// The rest are per person (writes, suggestions, opened threads), for everyone (opened threads) and per
-// session (GitHub reads).
+// The rest are per person (writes, suggestions, opened threads), for everyone (opened threads, counted
+// on GitHub) and per session (GitHub reads).
 export const BUDGET = {
   refreshCallsPerMinute: 40,
   signinLookupsPerMinute: 4,
@@ -109,6 +109,11 @@ function counter(windowMs) {
       }
       return entry.count + cost > limit ? Math.max(1, (entry.start + windowMs - at) / 1000) : 0;
     },
+    // Gives back `cost` taken from `key` in the current window.
+    give(key, at, cost = 1) {
+      const entry = windows.get(key);
+      if (entry && at - entry.start < windowMs) entry.count = Math.max(0, entry.count - cost);
+    },
   };
 }
 
@@ -154,7 +159,9 @@ export function createWorkshop({
   const suggestionsHour = counter(3600_000);
   const sessionReads = counter(60_000);
   const openingsPerson = counter(3600_000);
-  const openingsAll = counter(3600_000);
+  // The openings of entries' threads this instance charged in the last hour, `{ at, number }`, `number`
+  // once the issue exists: they count against everyone's limit until a read of GitHub shows them.
+  const ownOpenings = new Set();
   const openings = new Map();
   const usedSignins = memory(STATE_MAX_AGE * 1000);
   const rejected = memory(REJECTED_FOR);
@@ -428,25 +435,60 @@ export function createWorkshop({
     return { n, issue, fresh: false };
   }
 
-  // The entry issues on GitHub that name `id`, lowest number first, read with the installation token
-  // within the `open` ceiling: the newest pages, until they reach what the snapshot held a minute
-  // before its refresh began, and the snapshot's own for the older ones. Without a snapshot, every page.
-  async function entryIssuesOnGitHub(id) {
+  // Whether `issue`, as GitHub gave it, is `entry`'s thread: the suggestion its file names, or an entry
+  // issue whose marker names it.
+  function isThreadOf(issue, entry) {
+    const kind = kindOf(issue);
+    if (kind === 'suggestion') return issue.number === entry.suggestedIn;
+    return kind === 'entry' && readEntryMarker(issue.body) === entry.id;
+  }
+
+  // The entry issues on GitHub that name `id`, lowest number first, and `lastHour`, the creation time of
+  // every entry issue created in the last hour, by number. Read with the installation token within the
+  // `open` ceiling: the newest pages, until they reach both an hour ago and a minute before the
+  // snapshot's refresh began; the snapshot gives the older issues that name `id`. Without a snapshot,
+  // every page. `ignore`: numbers a read has shown are not the thread.
+  async function entryIssuesOnGitHub(id, ignore) {
     const held = snapshots.held(id);
-    const numbers = new Set(held?.numbers ?? []);
-    const since = held ? held.startedAt - SNAPSHOT.overlap : -Infinity;
+    const numbers = new Set((held?.numbers ?? []).filter((number) => !ignore.has(number)));
+    const found = new Map();
+    const hourAgo = now() - 3600_000;
+    const since = Math.min(hourAgo, held ? held.startedAt - SNAPSHOT.overlap : -Infinity);
+    const lastHour = new Map();
     let next = `/repos/${repo}/issues?labels=${encodeURIComponent(LABELS.entry)}&state=all&sort=created&direction=desc&per_page=100`;
     for (let page = 0; next && page < SNAPSHOT.issuePages; page += 1) {
       spendOrRefuse('open');
       const { data, headers } = await installationRequest('GET', next);
       const issues = Array.isArray(data) ? data : [];
-      for (const issue of issues) if (kindOf(issue) === 'entry' && readEntryMarker(issue.body) === id) numbers.add(issue.number);
+      for (const issue of issues) {
+        if (kindOf(issue) !== 'entry') continue;
+        const created = Date.parse(issue.created_at);
+        if (created >= hourAgo) lastHour.set(issue.number, created);
+        if (readEntryMarker(issue.body) === id && !ignore.has(issue.number)) {
+          numbers.add(issue.number);
+          found.set(issue.number, issue);
+        }
+      }
       const oldest = issues.at(-1);
       if (!oldest || Date.parse(oldest.created_at) < since) break;
       next = nextLink(headers.get('link'));
       if (next && !next.startsWith(config.apiBase + '/')) throw new GitHubError(502, { as: 'installation' });
     }
-    return [...numbers].sort((a, b) => a - b);
+    return { numbers: [...numbers].sort((a, b) => a - b), found, lastHour };
+  }
+
+  // The openings of entries' threads in the last hour: those GitHub showed in `lastHour`, and this
+  // instance's own that it did not show yet. Answers their number and the seconds until one more fits.
+  function openingsInHour(lastHour) {
+    const hourAgo = now() - 3600_000;
+    const times = [...lastHour.values()];
+    for (const opening of ownOpenings) {
+      if (opening.at < hourAgo) ownOpenings.delete(opening);
+      else if (opening.number === null || !lastHour.has(opening.number)) times.push(opening.at);
+    }
+    times.sort((a, b) => a - b);
+    const extra = times.length - BUDGET.openingsPerHour;
+    return { count: times.length, wait: extra >= 0 ? (times[extra] + 3600_000 - now()) / 1000 : 0 };
   }
 
   // The entry's title as an issue title: one line, cut to the title limit at a word, with an ellipsis.
@@ -465,73 +507,154 @@ export function createWorkshop({
     return `${what} of the Silo plan: ${config.origin}/workshop#${entry.part ?? 'product'}/${entry.id}\n\n${entryMarker(entry.id)}`;
   }
 
-  // Opens the entry's thread as the App, unless GitHub already has one. Requests for the same entry on
-  // this instance share one opening. Counted against the person's and everyone's openings an hour,
-  // only once the issue exists. Answers `{ n, opened }`: `opened` is the issue this opening created.
-  function openThread(session, entry) {
+  // An App call that repairs what an opening left (a label, a duplicate issue): charged to the `open`
+  // ceiling but never refused by it, so that no open issue without its label, and no duplicate, is
+  // left behind for want of room. GitHub asking us to wait still stops it.
+  function repair(method, path, options) {
+    ceilingOf('open').used += 1;
+    return installationRequest(method, path, options);
+  }
+
+  // Closes an issue this instance opened, as not planned and without the label `workshop:entry`.
+  async function retire(number) {
+    try {
+      await repair('PATCH', `/repos/${repo}/issues/${number}`, { body: { state: 'closed', state_reason: 'not_planned', labels: [] } });
+    } catch (error) {
+      log({ endpoint: 'thread', failure: 'retire_failed', ...(error instanceof GitHubError ? { github: error.status } : {}) });
+    }
+  }
+
+  // The issue GitHub created, with the label `workshop:entry`. When GitHub dropped the label, the App
+  // creates it in the repository (it may exist already) and adds it; when the issue still lacks it,
+  // the App closes the issue and the write is refused.
+  async function labelled(data, entry) {
+    if (isThreadOf(data, entry)) return data;
+    try {
+      const definition = LABEL_DEFINITIONS.find((label) => label.name === LABELS.entry);
+      await repair('POST', `/repos/${repo}/labels`, { body: definition }).catch((error) => {
+        if (!(error instanceof GitHubError && error.status === 422)) throw error;
+      });
+      const { data: labels } = await repair('POST', `/repos/${repo}/issues/${data.number}/labels`, { body: { labels: [LABELS.entry] } });
+      const issue = { ...data, labels: Array.isArray(labels) ? labels : [] };
+      if (isThreadOf(issue, entry)) return issue;
+    } catch {
+      // Refused below, after the issue is closed.
+    }
+    log({ endpoint: 'thread', failure: 'thread_not_labelled' });
+    await retire(data.number);
+    refuse(502, 'github', 'The thread could not be opened on the Workshop. Try again later.');
+  }
+
+  // Finds the entry's thread on GitHub and, with `open`, opens it as the App when there is none.
+  // Answers `{ candidates }`, the numbers to confirm, lowest first, and `opened`, the issue this call
+  // opened when it is the thread. Requests that may open share one call per entry on this instance.
+  // The person's and everyone's openings an hour are charged before the opening, and given back when
+  // nothing was opened. After an opening, the entry issues are read again; when that read fails, the
+  // write is not made. When it shows a lower issue for the entry (another instance opened one at the
+  // same moment), that one is the thread and the issue this call opened is closed.
+  function lookUp(session, entry, ignore, open) {
     const store = requests.getStore();
-    const opening = (async () => {
-      const found = await entryIssuesOnGitHub(entry.id);
-      if (found.length) return { n: found[0], opened: null };
-      const person = openingsPerson.peek(session.id, BUDGET.openingsPerPersonPerHour, now());
+    const run = async () => {
+      if (!open) return { candidates: (await entryIssuesOnGitHub(entry.id, ignore)).numbers, opened: null };
+      // The person's charge is taken before any call, and given back unless an issue was opened.
+      const person = openingsPerson.take(session.id, BUDGET.openingsPerPersonPerHour, now());
       if (person) tooMany(person, 'You have started too many new threads this hour. Try again later.');
-      const all = openingsAll.peek('all', BUDGET.openingsPerHour, now());
-      if (all) tooMany(all, 'Too many new threads were started on the Workshop this hour. Try again later.');
-      spendOrRefuse('open');
-      const { data } = await installationRequest('POST', `/repos/${repo}/issues`, { body: { title: threadTitle(entry.title), body: threadBody(entry), labels: [LABELS.entry] } });
-      openingsPerson.take(session.id, BUDGET.openingsPerPersonPerHour, now());
-      openingsAll.take('all', BUDGET.openingsPerHour, now());
-      if (store) store.changed = true;
-      if (kindOf(data) !== 'entry' || readEntryMarker(data.body) !== entry.id) {
-        // GitHub dropped the label (it may not exist: `workshop doctor` checks it). Nothing is written on it.
-        log({ endpoint: 'thread', failure: 'thread_not_labelled' });
-        refuse(502, 'github', 'The thread could not be opened on the Workshop. Try again later.');
+      const mine = { at: now(), number: null };
+      let data;
+      try {
+        const before = await entryIssuesOnGitHub(entry.id, ignore);
+        if (before.numbers.length) {
+          openingsPerson.give(session.id, now());
+          return { candidates: before.numbers, opened: null };
+        }
+        const everyone = openingsInHour(before.lastHour);
+        if (everyone.count >= BUDGET.openingsPerHour) tooMany(everyone.wait, 'Too many new threads were started on the Workshop this hour. Try again later.');
+        ownOpenings.add(mine);
+        // Room for the opening and the read that confirms it.
+        if (!hasRoom('open', 2)) spendOrRefuse('open', 2);
+        spendOrRefuse('open');
+        data = (await installationRequest('POST', `/repos/${repo}/issues`, { body: { title: threadTitle(entry.title), body: threadBody(entry), labels: [LABELS.entry] } })).data;
+      } catch (error) {
+        ownOpenings.delete(mine);
+        openingsPerson.give(session.id, now());
+        throw error;
       }
-      snapshots.patch.issue(data, 'entry');
-      // Another instance may have opened one for this entry at the same moment: the lowest number is the thread.
-      const after = await entryIssuesOnGitHub(entry.id).catch(() => []);
-      return { n: Math.min(data.number, ...after), opened: data };
-    })().finally(() => openings.delete(entry.id));
+      mine.number = data.number;
+      if (store) store.changed = true;
+      const issue = await labelled(data, entry);
+      const after = await entryIssuesOnGitHub(entry.id, ignore);
+      const lowest = Math.min(issue.number, ...after.numbers);
+      if (lowest === issue.number) {
+        snapshots.patch.issue(issue, 'entry');
+        return { candidates: [lowest], opened: issue };
+      }
+      await retire(issue.number);
+      const lower = after.found.get(lowest);
+      if (lower) snapshots.patch.issue(lower, 'entry');
+      return { candidates: [lowest], opened: null };
+    };
+    if (!open) return run();
+    const opening = run().finally(() => openings.delete(entry.id));
     opening.catch(() => {});
     openings.set(entry.id, opening);
     return opening;
   }
 
   // The entry's thread: the suggestion it was written from when that is a Workshop suggestion, else the
-  // lowest-numbered entry issue that names it, held in the snapshot or found on GitHub. With `open`, an
-  // entry without one gets one; without, null. Answers `{ n, issue, fresh }`, `fresh` when this request
-  // opened the issue and holds it as GitHub created it.
+  // lowest-numbered entry issue that names it. Every candidate, from the snapshot or from GitHub, is
+  // confirmed by the read of it the write makes anyway: an issue whose label or marker was changed on
+  // GitHub is no thread, and the thread is then looked up on GitHub once more. With `open`, an entry
+  // without one gets one; without, null. Answers `{ n, issue, fresh }`, `fresh` when this request
+  // opened the issue and holds it as GitHub created it. Once a thread is known, `ctx.thread` names it,
+  // so that every answer to the write carries it, errors included.
   async function threadOf(ctx, session, entry, { open }) {
     const found = (n, issue, fresh = false) => {
       ctx.thread = n;
       return { n, issue, fresh };
     };
-    if (entry.suggestedIn) {
-      const read = await userRequest(session, 'GET', `/repos/${repo}/issues/${entry.suggestedIn}`).catch((error) => {
+    const ignore = new Set();
+    const confirm = async (n) => {
+      ctx.thread = n;
+      const read = await userRequest(session, 'GET', `/repos/${repo}/issues/${n}`).catch((error) => {
         if (error instanceof GitHubError && (error.status === 404 || error.status === 410)) return null;
         throw error;
       });
-      if (read && kindOf(read.data) === 'suggestion') return found(entry.suggestedIn, read.data);
+      if (read && isThreadOf(read.data, entry)) return read.data;
+      ctx.thread = undefined;
+      ignore.add(n);
+      return null;
+    };
+    if (entry.suggestedIn) {
+      const issue = await confirm(entry.suggestedIn);
+      if (issue) return found(entry.suggestedIn, issue);
     }
-    const held = snapshots.held(entry.id);
-    if (held?.numbers.length) return found(held.numbers[0], (await workshopIssue(session, held.numbers[0])).issue);
-    if (!open) {
-      const numbers = await entryIssuesOnGitHub(entry.id);
-      return numbers.length ? found(numbers[0], (await workshopIssue(session, numbers[0])).issue) : null;
+    const held = snapshots.held(entry.id)?.numbers ?? [];
+    if (held.length) {
+      const issue = await confirm(held[0]);
+      if (issue) return found(held[0], issue);
     }
-    const shared = openings.get(entry.id);
-    const { n, opened } = await bounded(shared ?? openThread(session, entry));
-    if (!shared && opened?.number === n) return found(n, opened, true);
-    return found(n, (await workshopIssue(session, n)).issue);
+    for (let round = 0; round < 2; round += 1) {
+      const shared = open ? openings.get(entry.id) : null;
+      const { candidates, opened } = await bounded(shared ?? lookUp(session, entry, ignore, open));
+      if (opened && !shared) return found(opened.number, opened, true);
+      for (const n of candidates) {
+        const issue = await confirm(n);
+        if (issue) return found(n, issue);
+      }
+      if (!candidates.length && !open) return null;
+    }
+    refuse(502, 'github', 'The thread of this entry could not be found. Try again.');
   }
 
-  // A write to an entry's thread that GitHub refuses while the thread is closed or locked on GitHub.
-  async function onThread(named, issue, write) {
+  // A write to an entry's thread that GitHub refuses: the thread is read again, and when it is closed
+  // or locked on GitHub the answer says so.
+  async function onThread(session, named, n, write) {
     try {
       return await write();
     } catch (error) {
-      if (named.entry && error instanceof GitHubError && error.status === 403 && !error.rateLimited && (issue.state === 'closed' || issue.locked)) {
-        refuse(403, 'closed', 'This thread is closed on GitHub.');
+      if (named.entry && error instanceof GitHubError && error.status === 403 && !error.rateLimited) {
+        const read = await userRequest(session, 'GET', `/repos/${repo}/issues/${n}`).catch(() => null);
+        if (read && (read.data?.state === 'closed' || read.data?.locked)) refuse(403, 'closed', 'This thread is closed on GitHub.');
       }
       throw error;
     }
@@ -810,7 +933,7 @@ export function createWorkshop({
       const { n, issue, fresh } = named.entry ? await threadOf(ctx, session, named.entry, { open: true }) : await namedIssue(session, named.n);
       // An issue this request just opened has no comment to find.
       const existing = fresh ? null : await alreadyPosted(session, n, body);
-      const data = existing ?? (await onThread(named, issue, () => userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } }))).data;
+      const data = existing ?? (await onThread(session, named, n, () => userRequest(session, 'POST', `/repos/${repo}/issues/${n}/comments`, { body: { body } }))).data;
       if (data && !existing) snapshots.patch.comment(n, data);
       const read = countOf(issue.comments);
       return json(200, { ok: true, id: data?.id ?? null, ...(read === null ? {} : { comments: read + (existing ? 0 : 1) }), ...(named.entry ? { n } : {}) });
@@ -829,7 +952,7 @@ export function createWorkshop({
       const { n, issue } = thread;
       let up = countOf(issue.reactions?.['+1']);
       if (input.on) {
-        const { status } = await onThread(named, issue, () => userRequest(session, 'POST', `/repos/${repo}/issues/${n}/reactions`, { body: { content: '+1' } }));
+        const { status } = await onThread(session, named, n, () => userRequest(session, 'POST', `/repos/${repo}/issues/${n}/reactions`, { body: { content: '+1' } }));
         if (status === 201) {
           snapshots.patch.up(n, 1);
           if (up !== null) up += 1;
@@ -837,7 +960,7 @@ export function createWorkshop({
       } else {
         const mine = (await userPages(session, `/repos/${repo}/issues/${n}/reactions?content=%2B1`)).filter((reaction) => reaction.user?.id === session.id);
         for (const reaction of mine) {
-          await onThread(named, issue, () => userRequest(session, 'DELETE', `/repos/${repo}/issues/${n}/reactions/${reaction.id}`));
+          await onThread(session, named, n, () => userRequest(session, 'DELETE', `/repos/${repo}/issues/${n}/reactions/${reaction.id}`));
           snapshots.patch.up(n, -1);
           if (up !== null) up = Math.max(0, up - 1);
         }
