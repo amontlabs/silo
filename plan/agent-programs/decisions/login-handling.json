@@ -1,0 +1,5 @@
+{
+  "asks": "Do agent logins need special handling?",
+  "answer": "Agent logins need special handling so that a login does not end up in forks or shared computers by accident. How is decided later.",
+  "verdict": "take"
+}

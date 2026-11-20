@@ -1,0 +1,4 @@
+{
+  "asks": "What does the user's app show when work moves to a fork?",
+  "answer": "Silo does not try to make the window of an agent app follow the work. The agent app is where the user talks to one agent in one computer. Silo's window is where the user sees all the work, from the record, whichever agent program did it."
+}

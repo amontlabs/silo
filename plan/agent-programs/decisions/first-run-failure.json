@@ -1,0 +1,4 @@
+{
+  "asks": "What does first run do where it could fail?",
+  "answer": "First run must not fail. It sets up only what will work, and puts a question to you where it would otherwise guess."
+}
