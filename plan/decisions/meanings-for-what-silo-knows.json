@@ -7,7 +7,7 @@
     {
       "in": "words",
       "word": "record",
-      "means": "Everything Silo has written down about a computer: its facts and its reports, in the order they came, never changed afterwards."
+      "means": "Everything Silo has written down about a computer: its facts and its reports, in the order they came, never changed afterwards. Engineers call this an append-only log. Opinions are computed from it and kept apart."
     },
     {
       "in": "words",

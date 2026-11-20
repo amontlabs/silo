@@ -7,7 +7,7 @@
     {
       "in": "words",
       "word": "boundary",
-      "means": "The edge of a computer. Everything that enters or leaves it passes through parts of Silo that run outside it.",
+      "means": "The edge of a computer. Everything that enters or leaves it passes through parts of Silo that run outside it. Rules decide there.",
       "not": [
         "wall",
         "door"
@@ -16,7 +16,7 @@
     {
       "in": "words",
       "word": "channel",
-      "means": "One way through the boundary. None exists by default.",
+      "means": "One way through the boundary. The channels are the network, ports, files, secrets, the screen, the clipboard, repository access. None exists by default.",
       "not": [
         "door"
       ]
@@ -34,12 +34,12 @@
     {
       "in": "words",
       "word": "deny",
-      "means": "What happens to one request waiting at the boundary: it is refused."
+      "means": "What happens to one request waiting at the boundary: it is refused. Everything is denied unless a rule allows it or you say yes to an ask. \"Deny\" is the word at the boundary; \"pause\" and \"stop\" are kept for a computer."
     },
     {
       "in": "words",
       "word": "ask",
-      "means": "What a hold shows you: a request that waits for your answer."
+      "means": "What a hold shows you: a request that waits for your answer. Your yes is a grant."
     },
     {
       "in": "words",

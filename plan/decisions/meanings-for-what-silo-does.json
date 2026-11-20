@@ -17,7 +17,7 @@
     {
       "in": "words",
       "word": "alert",
-      "means": "What Silo raises for your attention."
+      "means": "What Silo raises for your attention: through a rule, through a precaution, or about itself (a computer that stopped, a source that was lost)."
     }
   ],
   "suggest": {
