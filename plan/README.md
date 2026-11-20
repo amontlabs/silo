@@ -2,7 +2,8 @@
 
 The plan is the design of Silo, kept as small files: its vocabulary, what must always be true of
 it, the questions about it, and the features to build. The Workshop shows these files on the
-site. The owner says yes or no to each question and each feature, there or in a conversation.
+site. The owner says yes or no to each question and each feature in a conversation, and the agent
+writes the answer with `plan take` or `plan drop`.
 
 This page explains how the files work. To read the plan itself, use the tool: `plan` prints what
 is next, and `plan show <id>` prints one item with everything that applies to it.
@@ -116,25 +117,34 @@ verdict sets it. The word then has the meaning that decision gives it.
 - When the owner says yes to part of an entry, split the entry first. One entry holds the part the
   owner agreed to, and is taken. The other holds the rest, and keeps no verdict.
 - A verdict is for the text the owner saw. An entry with no verdict can be edited freely. When
-  you change the question, answer, name, description, `sets` or `removes` of an entry that has a
-  verdict, remove the verdict in the same edit, so that the owner answers the new text.
+  you change the question, answer, name, description, `replaces`, `sets` or `removes` of an entry
+  that has a verdict, remove the verdict in the same edit, so that the owner answers the new text.
 
 ## Changing what was taken
 
-A taken decision stays in the plan, and so does a built feature. To change a statement that is in
-force, add a decision that sets the same id with the new text, or that removes it. When the owner
-takes that decision:
+A taken decision stays in the plan, and so does a built feature. What it settled is changed by a
+later decision.
 
-- The id moves from the `adds` of the old entry to the `adds` of the new one.
-- An old decision left with no `answer` and no `adds` has nothing left to say, and the take
-  deletes it.
+To change one statement that is in force, add a decision that sets the same id with the new
+text, or that removes it. When the owner takes it, the id moves from the `adds` of the old entry
+to the `adds` of the new one. The old entry stays taken. If it is a decision that would be left
+with no answer and no statement, the take asks that the new decision name it in `replaces`.
 
-A taken decision that added no statement can be reversed directly, with `plan drop`.
+To change what a whole decision settled, add a decision that names it in `replaces`. The new
+decision sets again or removes every statement the old one added. When the owner takes it, the
+tool writes `replaced_by` in the old decision, which keeps its file and its notes. The tool shows
+it as replaced, and it is no longer in force.
+
+A decision is replaced by one decision only. To change it again, replace the decision that
+replaced it.
+
+A taken decision that added no statement and replaces nothing can be reversed directly, with
+`plan drop`.
 
 ## What an entry needs
 
 `needs` lists the entries that must be done before this one. A decision is done when it is taken,
-and a feature when it is built.
+and a feature when it is built. A replaced decision still counts as done.
 
 - A decision can be taken only after the decisions it needs.
 - A feature can be taken before what it needs is done. It then waits to be built.
@@ -197,7 +207,7 @@ Keys are written in this order. A key in brackets is optional: when it has no va
 | Word | `word`, `means`, [`not`] |
 | Principle | `id`, `says`, `asks`, [`known_as`], [`why`] |
 | Property | `id`, `says`, `kind`, [`from`], `check`, [`at`] |
-| Decision | `asks`, [`answer`], [`needs`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`] |
+| Decision | `asks`, [`answer`], [`needs`], [`replaces`], [`sets`], [`removes`], [`adds`], [`suggest`], [`suggested_in`], [`verdict`], [`replaced_by`] |
 | Feature | `name`, `what`, [`needs`], [`sets`], [`removes`], [`adds`], [`keeps`], [`surfaces`], [`suggest`], [`suggested_in`], [`verdict`], [`built`] |
 
 - `not`: the words or phrases this word replaces. The check refuses each of them anywhere in
@@ -212,7 +222,8 @@ Keys are written in this order. A key in brackets is optional: when it has no va
 - `suggest`: what is recommended to the owner, as `{ "verdict", "why" }`. A recommended answer to
   a decision goes in `answer`.
 - `suggested_in`: the number of the visitor's suggestion the entry came from.
-- `sets` and `removes` exist only before a take, and `adds` only after it.
+- `replaced_by`: the id of the decision that replaced this one. `plan take` writes it.
+- `sets` and `removes` exist only before a take, and `adds` only after it. `replaces` stays.
 
 ### Links
 
@@ -221,7 +232,9 @@ These keys hold ids of other items, or paths. The check refuses an id that does 
 | Key | Written on | Holds | Meaning |
 |---|---|---|---|
 | `needs` | a decision or a feature | decisions and features | What must be done first. |
-| `adds` | a taken decision or feature | statements | The statements its take wrote into the lists. |
+| `replaces` | a decision | taken decisions | The decisions it takes the place of. |
+| `replaced_by` | a replaced decision | one decision | The taken decision that names it in `replaces`. |
+| `adds` | a taken decision or feature | statements | The statements in force that its take wrote into the lists. |
 | `keeps` | a feature | properties | The properties it must not break. |
 | `from` | a property | one principle | The principle the property follows from. The check notes a property that has none. |
 | `at` | a property | paths of files | The files of its checks, once they exist. Silo promises a property in public only when its checks pass. |
@@ -234,7 +247,9 @@ The tool gives each entry a state.
 |---|---|---|
 | Decision | `open` | No verdict, no `answer` and nothing under `sets`. |
 | | `answered` | No verdict, and an `answer` or something under `sets`. |
-| | `taken`, `dropped` | The verdict. |
+| | `taken` | Taken, and not replaced. |
+| | `replaced` | Taken, and `replaced_by` names the decision that replaced it. It is no longer in force. |
+| | `dropped` | The verdict. |
 | Feature | `undecided` | No verdict. |
 | | `taken` | Taken, and something it needs is not done. |
 | | `ready` | Taken, and everything it needs is done. |

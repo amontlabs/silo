@@ -280,7 +280,7 @@ test('take commits only the changed files as "Owner: take <id>", and the check p
   });
 });
 
-test('a take that replaces every statement of a decision taken on statements alone deletes its file, its notes and its place in order.json in the same commit', async () => {
+test('a take that replaces a decision commits the changed files only: the decision it replaces keeps its file, its notes and its place', async () => {
   const files = basePlan();
   const { answer: _answer, ...onlySets } = files['record/decisions/losses-show.json'];
   files['record/decisions/losses-show.json'] = onlySets;
@@ -290,6 +290,7 @@ test('a take that replaces every statement of a decision taken on statements alo
     writeJson(root, 'record/decisions/gap-reworded.json', {
       asks: 'How is a loss said?',
       answer: 'As a gap in the record.',
+      replaces: ['losses-show'],
       sets: [{ in: 'record/properties', id: 'every-loss-is-a-gap', says: 'Every loss of facts or reports leaves a gap in the record.', kind: 'safety', check: ['simulator'] }],
     });
     const order = readJson(root, 'order.json');
@@ -299,18 +300,106 @@ test('a take that replaces every statement of a decision taken on statements alo
     git(root, 'commit', '-qm', 'Plan: gap-reworded');
     const { code, out, err } = await run(root, ['take', 'gap-reworded']);
     assert.equal(code, 0, `${out}${err}`);
-    assert.match(out, /plan\/record\/decisions\/losses-show\.json \(deleted\)/);
     assert.equal(git(root, 'log', '-1', '--format=%s').trim(), 'Owner: take gap-reworded');
     assert.deepEqual(git(root, 'show', '--name-status', '--format=', 'HEAD').trim().split('\n').sort(), [
-      'D\tplan/record/decisions/losses-show.json',
-      'D\tplan/record/decisions/losses-show.md',
-      'M\tplan/order.json',
       'M\tplan/record/decisions/gap-reworded.json',
+      'M\tplan/record/decisions/losses-show.json',
       'M\tplan/record/properties.json',
     ]);
+    assert.deepEqual(readJson(root, 'record/decisions/losses-show.json'), { asks: onlySets.asks, verdict: 'take', replaced_by: 'gap-reworded' });
+    assert.equal(readFileSync(join(root, 'plan', 'record', 'decisions', 'losses-show.md'), 'utf8'), 'Why the record shows its losses.\n');
+    assert.deepEqual(readJson(root, 'record/decisions/gap-reworded.json').replaces, ['losses-show']);
     assert.ok(clean(root));
     assert.equal((await run(root, ['check'])).code, 0);
+
+    // Taken again: it says it is taken and replaced, and exits 0.
+    const again = await run(root, ['take', 'losses-show']);
+    assert.equal(again.code, 0);
+    assert.equal(again.out, 'plan take: losses-show is already taken, and replaced by gap-reworded');
+    // Dropped: refused, naming the decision that replaced it.
+    const dropped = await run(root, ['drop', 'losses-show']);
+    assert.equal(dropped.code, 1);
+    assert.match(dropped.err, /losses-show is replaced by gap-reworded/);
   }, files);
+});
+
+/** The sample with zig-again, placed last, taken, replacing engine-language. */
+function replacedPlan() {
+  const files = basePlan();
+  files['engine/decisions/zig-again.json'] = { asks: 'Which language now?', answer: 'Zig, still.', replaces: ['engine-language'], verdict: 'take' };
+  files['engine/decisions/engine-language.json'] = { ...files['engine/decisions/engine-language.json'], replaced_by: 'zig-again' };
+  files['order.json'] = structuredClone(files['order.json']);
+  files['order.json'].stages.at(-1).entries.push('zig-again');
+  return files;
+}
+
+test('plan: the next decision that replaces others shows each one with its answer, or what it adds', async () => {
+  const files = basePlan();
+  files['decisions/nothing-without-a-reason.json'] = { ...files['decisions/nothing-without-a-reason.json'], replaces: ['engine-language', 'the-design'] };
+  const { answer: _answer, ...design } = files['decisions/the-design.json'];
+  files['decisions/the-design.json'] = design;
+  await withRepo(async (root) => {
+    const { code, out } = await run(root, []);
+    assert.equal(code, 0, out);
+    assert.match(out, /^ {2}replaces:\n {4}engine-language: Zig\. The engine is the core piece.*\n {4}the-design: adds computer, fork, boundary, /m);
+    const json = JSON.parse((await run(root, ['--json'])).out);
+    assert.deepEqual(json.next.replaces[0], { id: 'engine-language', answer: basePlan()['engine/decisions/engine-language.json'].answer });
+    assert.deepEqual(json.next.replaces[1], { id: 'the-design', adds: design.adds });
+  }, files);
+});
+
+test('plan and show print a replaced decision whose adds is not a list, which the check reports, without failing', async () => {
+  const files = basePlan();
+  files['decisions/nothing-without-a-reason.json'] = { ...files['decisions/nothing-without-a-reason.json'], replaces: ['the-design'] };
+  const { answer: _answer, ...design } = files['decisions/the-design.json'];
+  files['decisions/the-design.json'] = { ...design, adds: 'computer' };
+  await withRepo(async (root) => {
+    const next = await run(root, []);
+    assert.equal(next.code, 0, next.out);
+    assert.match(next.out, /^ {4}the-design: adds nothing$/m);
+    const shown = await run(root, ['show', 'nothing-without-a-reason']);
+    assert.equal(shown.code, 0, shown.out);
+  }, files);
+});
+
+test('show: a decision that replaces lists what it replaces; a replaced one says so first and binds nothing; a need replaced says by what', async () => {
+  await withRepo(async (root) => {
+    const zig = await run(root, ['show', 'zig-again']);
+    assert.match(zig.out, /^replaces:\n {2}engine-language: Zig\. The engine is the core piece/m);
+    const zigJson = JSON.parse((await run(root, ['show', 'zig-again', '--json'])).out);
+    assert.equal(zigJson.status, 'taken');
+    assert.deepEqual(zigJson.keys.replaces, ['engine-language']);
+    assert.deepEqual(zigJson.replaces, [{ id: 'engine-language', answer: basePlan()['engine/decisions/engine-language.json'].answer }]);
+
+    const old = await run(root, ['show', 'engine-language']);
+    assert.match(old.out, /^decision engine-language \(engine\): replaced, stage ground, 2 of 9\nReplaced by: zig-again\n\nasks: /);
+    const oldJson = JSON.parse((await run(root, ['show', 'engine-language', '--json'])).out);
+    assert.equal(oldJson.status, 'replaced');
+    assert.equal(oldJson.replaced_by, 'zig-again');
+    assert.equal(oldJson.keys.replaced_by, 'zig-again');
+    assert.equal(old.out.match(/^replaced_by: zig-again$/m)?.length, 1);
+
+    // In force means taken and not replaced: the replaced decision binds nothing; its need still prints.
+    const feature = await run(root, ['show', 'start-computer']);
+    assert.match(feature.out, /^Needs:\n {2}engine-language {2}replaced by zig-again\n/m);
+    const binds = feature.out.slice(feature.out.indexOf('What binds it:'));
+    assert.doesNotMatch(binds, /engine-language/);
+    assert.match(binds, /^ {2}decision zig-again \(engine\): Zig, still\.$/m);
+    const featureJson = JSON.parse((await run(root, ['show', 'start-computer', '--json'])).out);
+    assert.deepEqual(featureJson.needs[0], { id: 'engine-language', status: 'replaced', replaced_by: 'zig-again' });
+    assert.deepEqual(featureJson.binds.decisions.map((d) => d.id).sort(), ['the-design', 'zig-again']);
+    const all = (await run(root, ['show', 'start-computer', '--all'])).out;
+    assert.doesNotMatch(all.slice(all.indexOf('What binds it:')), /engine-language/);
+    // A root decision replaced is left out of the whole product's too.
+    const rootReplaced = (await run(root, ['show', 'linux-vm-engine'])).out;
+    assert.doesNotMatch(rootReplaced.slice(rootReplaced.indexOf('What binds it:')), /engine-language/);
+
+    const part = await run(root, ['show', 'engine']);
+    assert.match(part.out, /^Taken: 2\n {2}start-computer, zig-again\nReplaced: 1\n {2}engine-language\n/m);
+    const partJson = JSON.parse((await run(root, ['show', 'engine', '--json'])).out);
+    assert.deepEqual(partJson.taken, ['start-computer', 'zig-again']);
+    assert.deepEqual(partJson.replaced, ['engine-language']);
+  }, replacedPlan());
 });
 
 test('a refused take writes and commits nothing: no answer, uncommitted changes in plan/', async () => {
@@ -510,6 +599,28 @@ test('rule 11: the owner\'s verdict after the change lifts the rule; a later pla
     assert.equal((await run(root, ['check'])).code, 1);
     // A commit by the owner on another entry does not lift it.
     assert.equal((await run(root, ['drop', 'no-detour'])).code, 1);
+  }, files);
+});
+
+test('rule 11 covers replaces: a change under the verdict is refused, and the owner\'s verdict after it lifts the rule', async () => {
+  const files = basePlan();
+  files['engine/decisions/zig-tooling.json'] = { asks: 'Which build tool?', answer: 'zig build.', verdict: 'take' };
+  files['engine/decisions/zig-again.json'] = { asks: 'Which language now?', answer: 'Zig, still.', replaces: ['engine-language'], verdict: 'drop' };
+  files['order.json'] = structuredClone(files['order.json']);
+  files['order.json'].stages.at(-1).entries.push('zig-tooling', 'zig-again');
+  await withRepo(async (root) => {
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const name = 'engine/decisions/zig-again.json';
+    writeJson(root, name, { ...readJson(root, name), replaces: ['zig-tooling'] });
+    const changed = JSON.parse((await run(root, ['check', '--json'])).out);
+    assert.deepEqual(changed.errors.map((e) => `${e.file} ${e.field}`), [`plan/${name} replaces`]);
+    // The verdict cleared with the change, then the owner's no again: the rule no longer applies.
+    const { verdict: _verdict, ...entry } = readJson(root, name);
+    writeJson(root, name, entry);
+    git(root, 'commit', '-q', '-am', 'Plan: zig-again replaces zig-tooling');
+    const dropped = await run(root, ['drop', 'zig-again']);
+    assert.equal(dropped.code, 0, dropped.err);
+    assert.equal((await run(root, ['check'])).code, 0);
   }, files);
 });
 

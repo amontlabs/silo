@@ -4,7 +4,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { checkChange, checkFiles, formatProblem } from '../check/index.js';
-import { entryStatus, hasSets, waitingFor } from '../model/status.js';
+import { entryStatus, hasSets, replacedBy, waitingFor } from '../model/status.js';
 import { PlanError, parsePlan } from '../read/index.js';
 import { drop, take } from '../write/index.js';
 import { Refused, UsageError, parseArgs } from './args.js';
@@ -101,12 +101,32 @@ function readPlan(root) {
 /** The entries in the order of order.json. @param {any} plan */
 const ordered = (plan) => plan.stages.flatMap((stage) => stage.entries).filter((id, i, all) => Object.hasOwn(plan.entries, id) && all.indexOf(id) === i).map((id) => plan.entries[id]);
 
+/** A list of ids as the files give it; anything else, which the check reports, reads as none. @param {unknown} value @returns {string[]} */
+const idsOf = (value) => (Array.isArray(value) ? value.filter((id) => typeof id === 'string') : []);
+
 /** One `sets` item on one line: its list, its id or word, and what it says or means. @param {any} item */
 const setLine = (item) => {
   const name = item?.id ?? item?.word;
   const text = item?.says ?? item?.means;
   return `${item?.in}: ${name}${text !== undefined ? `: ${text}` : ''}`;
 };
+
+/**
+ * A decision an entry names in `replaces`, as the owner weighs it: its answer, or the ids it adds
+ * when it has none. A name that is no decision of the plan has neither.
+ * @param {any} plan @param {string} id
+ */
+function replacedSummary(plan, id) {
+  const decision = Object.hasOwn(plan.entries, id) && plan.entries[id].kind === 'decision' ? plan.entries[id] : undefined;
+  if (!decision) return { id };
+  return { id, ...(decision.answer !== undefined ? { answer: decision.answer } : { adds: idsOf(decision.adds) }) };
+}
+
+/** One line of `replaces`: the decision's id and its answer, or what it adds. @param {{ id: string, answer?: string, adds?: string[] }} summary */
+const replacedText = (summary) => `${summary.id}: ${summary.answer ?? (summary.adds ? `adds ${summary.adds.join(', ') || 'nothing'}` : 'not a decision of the plan')}`;
+
+/** The decisions an entry names in `replaces`, summed up, or undefined when it names none. @param {any} plan @param {any} entry */
+const replacesOf = (plan, entry) => (entry.kind === 'decision' && Array.isArray(entry.replaces) ? entry.replaces.map((id) => replacedSummary(plan, id)) : undefined);
 
 /** @param {Context} ctx @param {string[]} argv */
 function next(ctx, argv) {
@@ -125,6 +145,7 @@ function next(ctx, argv) {
     stage: first.stage,
     position: first.position,
     ...(first.kind === 'decision' ? { asks: first.asks, ...(first.answer !== undefined ? { answer: first.answer } : hasSets(first) ? { sets: first.sets } : {}) } : { name: first.name, what: first.what }),
+    ...(replacesOf(plan, first) ? { replaces: replacesOf(plan, first) } : {}),
     ...(first.suggest ? { suggest: first.suggest } : {}),
   };
   if (flags.has('json')) {
@@ -143,6 +164,11 @@ function next(ctx, argv) {
         lines.push('  sets:');
         for (const item of nextOne.sets) lines.push(`    ${setLine(item)}`);
       } else lines.push('  no answer yet');
+      // What a yes puts out of force.
+      if (nextOne.replaces) {
+        lines.push('  replaces:');
+        for (const summary of nextOne.replaces) lines.push(`    ${replacedText(summary)}`);
+      }
     } else lines.push(`  ${nextOne.name}: ${nextOne.what}`);
     if (nextOne.suggest) lines.push(`  suggest: ${nextOne.suggest.verdict}. ${nextOne.suggest.why}`);
   }
@@ -191,7 +217,7 @@ function wrapIds(ids, indent, width = 100) {
 }
 
 /** A taken decision on one line: its answer, or the ids it adds when it has none. @param {any} decision */
-const decisionLine = (decision) => `  decision ${decision.id}${decision.part ? ` (${decision.part})` : ''}: ${decision.answer ?? `adds ${(decision.adds ?? []).join(', ')}`}`;
+const decisionLine = (decision) => `  decision ${decision.id}${decision.part ? ` (${decision.part})` : ''}: ${decision.answer ?? `adds ${idsOf(decision.adds).join(', ')}`}`;
 
 /**
  * An entry, whole, then what binds it. The taken decisions of the whole product that the entry
@@ -202,13 +228,20 @@ function showEntry(plan, entry, all) {
   const total = ordered(plan).length;
   const status = (other) => entryStatus(other, plan.entries);
   const keys = Object.fromEntries(Object.entries(entry).filter(([key]) => !PLACE_KEYS.includes(key)));
-  const needs = (entry.needs ?? []).map((need) => ({ id: need, status: Object.hasOwn(plan.entries, need) ? status(plan.entries[need]) : 'missing' }));
+  const needs = (entry.needs ?? []).map((need) => {
+    if (!Object.hasOwn(plan.entries, need)) return { id: need, status: 'missing' };
+    const by = replacedBy(plan.entries[need]);
+    return { id: need, status: status(plan.entries[need]), ...(by ? { replaced_by: by } : {}) };
+  });
+  const replacedByOther = replacedBy(entry);
+  const replaces = replacesOf(plan, entry);
   const neededBy = Object.values(plan.entries).filter((other) => (other.needs ?? []).includes(entry.id)).map((other) => ({ id: other.id, status: status(other) }));
   const keeps = new Set(entry.keeps ?? []);
   const properties = plan.properties.filter((property) => property.part === null || property.part === entry.part || keeps.has(property.id));
   const needed = new Set(entry.needs ?? []);
   const decisions = Object.values(plan.entries)
-    .filter((other) => other.id !== entry.id && other.kind === 'decision' && other.verdict === 'take' && (other.part === null || other.part === entry.part || needed.has(other.id)))
+    // In force: taken and not replaced.
+    .filter((other) => other.id !== entry.id && other.kind === 'decision' && other.verdict === 'take' && !replacedBy(other) && (other.part === null || other.part === entry.part || needed.has(other.id)))
     .map(({ id, part, asks, answer, adds }) => ({ id, part, asks, ...(answer !== undefined ? { answer } : {}), ...(adds !== undefined ? { adds } : {}) }));
   const json = {
     kind: entry.kind,
@@ -217,21 +250,28 @@ function showEntry(plan, entry, all) {
     stage: entry.stage,
     position: entry.position,
     status: status(entry),
+    ...(replacedByOther ? { replaced_by: replacedByOther } : {}),
     keys,
+    ...(replaces ? { replaces } : {}),
     needs,
     needed_by: neededBy,
     ...(entry.notes !== undefined ? { notes: entry.notes } : {}),
     binds: { principles: plan.principles, properties, decisions },
   };
-  const text = [`${entry.kind} ${entry.id}${entry.part ? ` (${entry.part})` : ''}: ${json.status}, stage ${entry.stage}, ${entry.position} of ${total}`, ''];
+  const text = [`${entry.kind} ${entry.id}${entry.part ? ` (${entry.part})` : ''}: ${json.status}, stage ${entry.stage}, ${entry.position} of ${total}`];
+  if (replacedByOther) text.push(`Replaced by: ${replacedByOther}`);
+  text.push('');
   for (const [key, value] of Object.entries(keys)) {
-    if (Array.isArray(value) && value.some((item) => typeof item !== 'string')) {
+    if (key === 'replaces' && replaces) {
+      text.push('replaces:');
+      for (const summary of replaces) text.push(`  ${replacedText(summary)}`);
+    } else if (Array.isArray(value) && value.some((item) => typeof item !== 'string')) {
       text.push(`${key}:`);
       for (const item of value) text.push(`  ${JSON.stringify(item)}`);
     } else text.push(`${key}: ${inline(value)}`);
   }
   text.push('', needs.length ? 'Needs:' : 'Needs: nothing.');
-  for (const need of needs) text.push(`  ${need.id}  ${need.status}`);
+  for (const need of needs) text.push(`  ${need.id}  ${need.replaced_by ? `replaced by ${need.replaced_by}` : need.status}`);
   text.push(neededBy.length ? 'Needed by:' : 'Needed by: nothing.');
   for (const other of neededBy) text.push(`  ${other.id}  ${other.status}`);
   if (entry.notes !== undefined) text.push('', 'Notes:', '', entry.notes.trimEnd());
@@ -253,13 +293,15 @@ function showEntry(plan, entry, all) {
 }
 
 /**
- * A part: its title and line, its entries in the order (the taken and dropped ones as ids, then
+ * A part: its title and line, its entries in the order (the taken ones in force, the replaced and
+ * the dropped ones as ids, then
  * each one with no verdict, the first marked next), and its properties.
  * @param {any} plan @param {any} part
  */
 function showPart(plan, part) {
   const entries = ordered(plan).filter((entry) => entry.part === part.id);
-  const taken = entries.filter((entry) => entry.verdict === 'take').map((entry) => entry.id);
+  const replaced = entries.filter((entry) => replacedBy(entry)).map((entry) => entry.id);
+  const taken = entries.filter((entry) => entry.verdict === 'take' && !replaced.includes(entry.id)).map((entry) => entry.id);
   const dropped = entries.filter((entry) => entry.verdict === 'drop').map((entry) => entry.id);
   const open = entries.filter((entry) => entry.verdict === undefined).map((entry) => ({
     id: entry.id,
@@ -270,9 +312,10 @@ function showPart(plan, part) {
   const properties = plan.properties.filter((property) => property.part === part.id).map(({ id, says }) => ({ id, says }));
   // A part may share its id with the word for its concept: plan show on that id shows both.
   const word = plan.words.find((item) => item.id === part.id);
-  const json = { kind: 'part', id: part.id, title: part.title, line: part.line, ...(word ? { word: { word: word.word, means: word.means } } : {}), taken, dropped, next: open[0]?.id ?? null, open, properties };
+  const json = { kind: 'part', id: part.id, title: part.title, line: part.line, ...(word ? { word: { word: word.word, means: word.means } } : {}), taken, replaced, dropped, next: open[0]?.id ?? null, open, properties };
   const text = [`part ${part.id}: ${part.title}`, part.line, ...(word ? [`The word "${word.word}": ${word.means}`] : []), ''];
   text.push(`Taken: ${taken.length}${taken.length ? '' : '.'}`, ...wrapIds(taken, '  '));
+  if (replaced.length) text.push(`Replaced: ${replaced.length}`, ...wrapIds(replaced, '  '));
   if (dropped.length) text.push(`Dropped: ${dropped.length}`, ...wrapIds(dropped, '  '));
   text.push('', open.length ? 'To decide, in order:' : 'To decide: nothing. Every entry has a verdict.');
   const width = Math.max(0, ...open.map((entry) => entry.id.length));
@@ -293,7 +336,7 @@ function showStatement(plan, id) {
   ][0];
   if (!found) return null;
   const entries = Object.values(plan.entries);
-  const addedBy = entries.filter((entry) => (entry.adds ?? []).includes(id)).map((entry) => entry.id);
+  const addedBy = entries.filter((entry) => idsOf(entry.adds).includes(id)).map((entry) => entry.id);
   const keptBy = entries.filter((entry) => (entry.keeps ?? []).includes(id)).map((entry) => entry.id);
   const setBy = entries.filter((entry) => (entry.sets ?? []).some((item) => item?.id === id || (item?.word !== undefined && String(item.word).toLowerCase().replaceAll(' ', '-') === id))).map((entry) => entry.id);
   const removedBy = entries.filter((entry) => (entry.removes ?? []).includes(id)).map((entry) => entry.id);
@@ -372,7 +415,7 @@ function verdict(ctx, argv, kind) {
       const path = join(root, 'plan', name);
       try {
         // The file that failed may be untouched (it could not be opened): leave it as it is then.
-        // A deleted file reads as null, so it is written back.
+        // A file the verdict created is removed.
         if (!files.has(name)) rmSync(path, { force: true });
         else if (readOr(path) !== files.get(name)) writeFileSync(path, /** @type {string} */ (files.get(name)));
       } catch {
@@ -387,16 +430,12 @@ function verdict(ctx, argv, kind) {
     for (const [name, text] of outcome.changed) {
       const path = join(root, 'plan', name);
       written.push(name);
-      // null: a decision replaced whole, its file or its notes deleted.
-      if (text === null) rmSync(path);
-      else {
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, text);
-      }
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
     }
   } catch (error) {
     const left = restore(written);
-    throw new Refused(`could not ${outcome.changed.get(/** @type {string} */ (written.at(-1))) === null ? 'delete' : 'write'} plan/${written.at(-1)} (${/** @type {Error} */ (error).message}); ${left ? `the files written were put back${left}` : 'nothing changed'}`);
+    throw new Refused(`could not write plan/${written.at(-1)} (${/** @type {Error} */ (error).message}); ${left ? `the files written were put back${left}` : 'nothing changed'}`);
   }
   const subject = `Owner: ${kind} ${id}`;
   const committed = git(root, ['add', '--', ...paths]) !== null && git(root, ['commit', '-q', '-m', subject, '--', ...paths]) !== null;
@@ -405,6 +444,6 @@ function verdict(ctx, argv, kind) {
     const left = restore(outcome.changed.keys());
     throw new Refused(`git could not commit "${subject}"; ${left ? `the files written were put back${left}` : 'nothing changed'}`);
   }
-  ctx.out([`${subject}`, ...[...outcome.changed].map(([name, text]) => `  plan/${name}${text === null ? ' (deleted)' : ''}`)].join('\n'));
+  ctx.out([`${subject}`, ...[...outcome.changed.keys()].map((name) => `  plan/${name}`)].join('\n'));
   return 0;
 }

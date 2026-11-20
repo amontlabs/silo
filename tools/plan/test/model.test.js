@@ -6,7 +6,7 @@ import * as model from '../model/index.js';
 import {
   CHECKS, DECISION_KEYS, DECISION_STATUSES, ENTRY_KINDS, FEATURE_KEYS, FEATURE_STATUSES, ID_PATTERN, PROPERTY_KINDS, STATEMENT_KINDS, VERDICTS,
   canonicalDecision, canonicalFeature, canonicalOrder, canonicalPart, canonicalProperty, canonicalSetItem, canonicalText, canonicalWord,
-  entryStatus, isDate, isDone, listKind, waitingFor, wordId,
+  entryStatus, isDate, isDone, listKind, replacedBy, waitingFor, wordId,
 } from '../model/index.js';
 import { basePlan, canonicalFile } from './helpers.js';
 
@@ -49,7 +49,29 @@ const DECISION_CASES = [
 
 test('the status of a decision, first match wins', () => {
   for (const [keys, status] of DECISION_CASES) assert.equal(entryStatus({ kind: 'decision', asks: 'Q', ...keys }, {}), status, JSON.stringify(keys));
-  assert.deepEqual(DECISION_STATUSES, ['dropped', 'taken', 'answered', 'open']);
+  assert.deepEqual(DECISION_STATUSES, ['dropped', 'replaced', 'taken', 'answered', 'open']);
+});
+
+test('a decision that has replaced_by is replaced, and still done; the file alone says it', () => {
+  const entries = {
+    old: { kind: 'decision', answer: 'A', verdict: 'take', replaced_by: 'later' },
+    later: { kind: 'decision', answer: 'B', replaces: ['old'], verdict: 'take' },
+    feature: { kind: 'feature', needs: ['old'], verdict: 'take' },
+  };
+  assert.equal(entryStatus(entries.old, entries), 'replaced');
+  // No other entry is read: the replacing one need not even be given.
+  assert.equal(entryStatus(entries.old, {}), 'replaced');
+  assert.equal(replacedBy(entries.old), 'later');
+  assert.equal(entryStatus(entries.later, entries), 'taken');
+  assert.equal(replacedBy(entries.later), null);
+  // A taken decision named in replaces without replaced_by is not replaced: the check refuses that plan.
+  assert.equal(entryStatus({ kind: 'decision', answer: 'A', verdict: 'take' }, entries), 'taken');
+  assert.ok(isDone(entries.old));
+  assert.equal(entryStatus(entries.feature, entries), 'ready');
+  // First match wins: dropped before replaced, replaced before taken.
+  assert.equal(entryStatus({ kind: 'decision', answer: 'A', verdict: 'drop', replaced_by: 'later' }, {}), 'dropped');
+  // A feature is never replaced.
+  assert.equal(replacedBy({ kind: 'feature', replaced_by: 'later' }), null);
 });
 
 test('a decision that puts forward only statements is answered: a sets stands for its answer, an empty one does not', () => {
@@ -117,6 +139,8 @@ test('canonical form: key order of each kind, two spaces, final newline', () => 
   assert.deepEqual(Object.keys(canonicalOrder({ stages: [{ entries: [], line: 'l', title: 't', id: 'i' }] }).stages[0]), ['id', 'title', 'line', 'entries']);
   assert.equal(canonicalText({ a: [1] }), '{\n  "a": [\n    1\n  ]\n}\n');
   assert.deepEqual(DECISION_KEYS.slice(0, 2), ['asks', 'answer']);
+  assert.deepEqual(Object.keys(canonicalDecision({ verdict: 'take', adds: ['a'], replaces: ['r'], needs: ['n'], answer: 'A', asks: 'Q' })), ['asks', 'answer', 'needs', 'replaces', 'adds', 'verdict']);
+  assert.deepEqual(Object.keys(canonicalDecision({ removes: ['x'], sets: [], replaces: ['r'], asks: 'Q' })), ['asks', 'replaces', 'sets', 'removes']);
   assert.deepEqual(FEATURE_KEYS.at(-1), 'built');
 });
 
