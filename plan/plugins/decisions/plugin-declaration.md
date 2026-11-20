@@ -20,3 +20,5 @@ The owner's word "triggered" in the answer is the one `plugin-wakes-on` would re
 
 An older text called a plugin a package through which pieces made by someone else arrive. That is
 not carried: what it brings is now said by the declaration.
+
+On 20 November 2026 the owner asked to see the declaration as an idiomatic example.
