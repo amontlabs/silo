@@ -271,7 +271,7 @@ export function checkFiles(files, { exists } = {}) {
     if (taken && Object.hasOwn(data, 'sets')) add(file, 'sets', 'sets on a taken entry', 'run plan take, which writes the sentences into their lists and records their ids in adds');
     if (taken && Object.hasOwn(data, 'removes')) add(file, 'removes', 'removes on a taken entry', 'run plan take, which removes the sentences');
     if (!taken && Object.hasOwn(data, 'adds')) add(file, 'adds', 'adds without the verdict take', 'remove adds: only a taken entry has brought sentences');
-    if (taken && kind === 'decision' && !Object.hasOwn(data, 'answer')) add(file, 'answer', 'a taken decision without an answer', 'write the answer the owner took, or remove the verdict');
+    if (taken && kind === 'decision' && !Object.hasOwn(data, 'answer') && !Object.hasOwn(data, 'adds')) add(file, 'answer', 'a taken decision without an answer or adds', 'write the answer the owner took, or remove the verdict');
     if (Object.hasOwn(data, 'sets') && !isEmpty(data.sets)) {
       if (!Array.isArray(data.sets)) add(file, 'sets', 'not a list', 'write a list of { in, …the sentence }');
       else data.sets.forEach((item, index) => {

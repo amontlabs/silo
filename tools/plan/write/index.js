@@ -5,6 +5,7 @@
 import { checkFiles } from '../check/index.js';
 import { canonicalDecision, canonicalFeature, canonicalPrinciple, canonicalProperty, canonicalText, canonicalWord } from '../model/canonical.js';
 import { listKind, wordId } from '../model/names.js';
+import { hasSets } from '../model/status.js';
 import { parsePlan } from '../read/index.js';
 
 /** @typedef {{ file: string, field: string, message: string, fix: string }} Problem */
@@ -80,7 +81,7 @@ export function take(files, id, options = {}) {
   if (entry.built) return refused(`${id} is built`);
   if (entry.verdict === 'take') return { status: 'already', changed: new Map(), message: `${id} is already taken` };
   if (entry.kind === 'decision') {
-    if (entry.answer === undefined) return refused(`${id} has no answer: write its answer first`);
+    if (entry.answer === undefined && !hasSets(entry)) return refused(`${id} has no answer and sets nothing: write its answer first`);
     const waiting = (entry.needs ?? []).filter((need) => plan.entries[need]?.kind === 'decision' && plan.entries[need].verdict !== 'take');
     if (waiting.length) return refused(`${id} needs ${waiting.join(', ')}, not taken yet`);
   }

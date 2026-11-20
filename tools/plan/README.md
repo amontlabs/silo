@@ -11,7 +11,7 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 
 | Command | What it does |
 |---|---|
-| `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`), the features ready to build, and the features that wait and for what. |
+| `plan` | Shows the first entry in the order with no verdict (its kind, its question or its name, and `suggest`; for a decision its `answer`, or when it has none the sentences it sets), the features ready to build, and the features that wait and for what. |
 | `plan show <id>` | For an entry: its keys, its stage and position, each need with its status, what needs it, its notes, and what binds it: every principle, the properties of the root, of its part and in `keeps`, and the taken decisions of the root, of its part and in `needs`. For a sentence: the sentence, the entry whose `adds` brought it, the features that keep it, and the entries that would replace or remove it. |
 | `plan take <id>` | The owner's yes. Writes what the entry sets into the lists, removes what it removes, moves those ids out of the `adds` of the entries that brought them, writes `adds` and `"verdict": "take"`, and commits only the changed files as `Owner: take <id>`. |
 | `plan drop <id>` | The owner's no. Writes `"verdict": "drop"`, keeps `sets` and `removes`, and commits `Owner: drop <id>`. |
@@ -21,10 +21,12 @@ Node 26, no dependency, no network call. `npm test` runs the tests, which use th
 1 refused or errors found, 2 wrong use.
 
 `plan take` refuses when the plan fails the check, when `plan/` has uncommitted changes, when the
-entry is built, when a decision has no `answer`, or when a decision needs a decision that is not
-taken. On an entry already taken it says so and exits 0. `plan drop` refuses a built entry and a
-taken entry that has `adds`, and also refuses a plan that fails the check or has uncommitted
-changes. A taken decision that brought no sentence may be dropped. Both check the plan they would
+entry is built, when a decision has neither an `answer` nor a `sets`, or when a decision needs a
+decision that is not taken. A decision that puts forward only sentences needs no `answer`: its `sets`
+stands for one. It also refuses a take that would leave a taken decision with neither an `answer`
+nor an `adds`, as when every sentence it brought is replaced. On an entry already taken it says so
+and exits 0. `plan drop` refuses a built entry and a taken entry that has `adds`, and also refuses a
+plan that fails the check or has uncommitted changes. A taken decision that brought no sentence may be dropped. Both check the plan they would
 write and write nothing when it fails.
 
 Uncommitted changes are asked of git with every untracked and ignored file listed, whatever the
@@ -49,8 +51,8 @@ Each problem names the file, the field, what is wrong and the fix.
 - An id that does not match `^[a-z0-9][a-z0-9-]{0,62}$`, or that two items of the plan share:
   ids are one namespace across decisions, features, words, principles and properties.
 - A `verdict` or `suggest` that is not `take` or `drop`; `sets` or `removes` on a taken entry;
-  `adds` on an entry that is not taken; a taken decision without an `answer`, or one that needs a
-  decision not taken.
+  `adds` on an entry that is not taken; a taken decision with neither an `answer` nor an `adds`,
+  or one that needs a decision not taken.
 - A `sets` item whose id is an entry's, or a sentence of another kind. The id of a sentence of the
   same kind is allowed: in the same list it replaces it, in another list it moves it.
 - A sentence that is not in the `adds` of exactly one taken entry, or an `adds` id that names no

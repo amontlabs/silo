@@ -4,7 +4,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { checkChange, checkFiles, formatProblem } from '../check/index.js';
-import { entryStatus, waitingFor } from '../model/status.js';
+import { entryStatus, hasSets, waitingFor } from '../model/status.js';
 import { PlanError, parsePlan } from '../read/index.js';
 import { drop, take } from '../write/index.js';
 import { Refused, UsageError, parseArgs } from './args.js';
@@ -101,6 +101,13 @@ function readPlan(root) {
 /** The entries in the order of order.json. @param {any} plan */
 const ordered = (plan) => plan.stages.flatMap((stage) => stage.entries).filter((id, i, all) => Object.hasOwn(plan.entries, id) && all.indexOf(id) === i).map((id) => plan.entries[id]);
 
+/** One `sets` item on one line: its list, its id or word, and what it says or means. @param {any} item */
+const setLine = (item) => {
+  const name = item?.id ?? item?.word;
+  const text = item?.says ?? item?.means;
+  return `${item?.in}: ${name}${text !== undefined ? `: ${text}` : ''}`;
+};
+
 /** @param {Context} ctx @param {string[]} argv */
 function next(ctx, argv) {
   const { flags, positional } = parseArgs(argv, {});
@@ -117,7 +124,7 @@ function next(ctx, argv) {
     part: first.part,
     stage: first.stage,
     position: first.position,
-    ...(first.kind === 'decision' ? { asks: first.asks, ...(first.answer !== undefined ? { answer: first.answer } : {}) } : { name: first.name, what: first.what }),
+    ...(first.kind === 'decision' ? { asks: first.asks, ...(first.answer !== undefined ? { answer: first.answer } : hasSets(first) ? { sets: first.sets } : {}) } : { name: first.name, what: first.what }),
     ...(first.suggest ? { suggest: first.suggest } : {}),
   };
   if (flags.has('json')) {
@@ -130,7 +137,12 @@ function next(ctx, argv) {
     lines.push(`Next: ${nextOne.kind} ${nextOne.id}${nextOne.part ? ` (${nextOne.part})` : ''}, stage ${nextOne.stage}`);
     if (nextOne.kind === 'decision') {
       lines.push(`  asks: ${nextOne.asks}`);
-      lines.push(nextOne.answer !== undefined ? `  answer: ${nextOne.answer}` : '  no answer yet');
+      if (nextOne.answer !== undefined) lines.push(`  answer: ${nextOne.answer}`);
+      else if (nextOne.sets) {
+        // A decision whose proposal is only sentences: they stand for its answer.
+        lines.push('  sets:');
+        for (const item of nextOne.sets) lines.push(`    ${setLine(item)}`);
+      } else lines.push('  no answer yet');
     } else lines.push(`  ${nextOne.name}: ${nextOne.what}`);
     if (nextOne.suggest) lines.push(`  suggest: ${nextOne.suggest.verdict}. ${nextOne.suggest.why}`);
   }

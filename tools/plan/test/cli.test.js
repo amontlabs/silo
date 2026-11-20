@@ -79,6 +79,26 @@ test('plan: the first entry with no verdict, the features ready and those that w
   });
 });
 
+test('plan: the next decision with no answer shows the sentences it sets; with an answer, the answer', async () => {
+  const files = basePlan();
+  const { answer: _answer, ...onlySets } = files['decisions/nothing-without-a-reason.json'];
+  files['decisions/nothing-without-a-reason.json'] = onlySets;
+  await withRepo(async (root) => {
+    const { code, out } = await run(root, []);
+    assert.equal(code, 0);
+    assert.match(out, /^ {2}sets:\n {4}principles: least-privilege: Nothing is given without a reason: no access, no visibility, no resource\.$/m);
+    assert.doesNotMatch(out, /no answer yet/);
+    const json = JSON.parse((await run(root, ['--json'])).out);
+    assert.deepEqual(json.next.sets, onlySets.sets);
+    assert.equal(json.next.answer, undefined);
+  }, files);
+  await withRepo(async (root) => {
+    const { out } = await run(root, []);
+    assert.match(out, /^ {2}answer: Nothing without a reason/m);
+    assert.doesNotMatch(out, /sets:/);
+  });
+});
+
 test('show: an entry with its needs, what needs it and what binds it; a sentence with who adds and keeps it; an unknown id is 1', async () => {
   await withRepo(async (root) => {
     const entry = JSON.parse((await run(root, ['show', 'start-computer', '--json'])).out);

@@ -52,6 +52,13 @@ test('the status of a decision, first match wins', () => {
   assert.deepEqual(DECISION_STATUSES, ['dropped', 'taken', 'answered', 'open']);
 });
 
+test('a decision that puts forward only sentences is answered: a sets stands for its answer, an empty one does not', () => {
+  const sets = [{ in: 'words', word: 'fork', means: 'A copy of a computer.' }];
+  assert.equal(entryStatus({ kind: 'decision', asks: 'Q', sets }, {}), 'answered');
+  assert.equal(entryStatus({ kind: 'decision', asks: 'Q', sets: [] }, {}), 'open');
+  assert.equal(entryStatus({ kind: 'decision', asks: 'Q', sets, verdict: 'drop' }, {}), 'dropped');
+});
+
 /** The table of the contract, written out for a feature. */
 function expectedFeature(built, verdict, needsDone) {
   if (built) return 'built';

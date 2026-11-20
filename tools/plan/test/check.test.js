@@ -113,8 +113,8 @@ test('rule 5: sets and removes before take, adds only with it, each sets item in
   assert.deepEqual(errorsOf(variant((f) => { f['decisions/nothing-without-a-reason.json'].sets[0].id = 'classifier-never-acts'; })), [
     'plan/decisions/nothing-without-a-reason.json sets[0].id: the id "classifier-never-acts" is already a property of record/properties',
   ]);
-  // A taken decision has an answer, and every decision it needs is taken.
-  assert.deepEqual(errorsOf(variant((f) => { delete f['engine/decisions/engine-language.json'].answer; })), ['plan/engine/decisions/engine-language.json answer: a taken decision without an answer']);
+  // A taken decision has an answer or an adds, and every decision it needs is taken.
+  assert.deepEqual(errorsOf(variant((f) => { delete f['engine/decisions/engine-language.json'].answer; })), ['plan/engine/decisions/engine-language.json answer: a taken decision without an answer or adds']);
   assert.deepEqual(errorsOf(variant((f) => { Object.assign(f['engine/decisions/linux-vm-engine.json'], { needs: ['model-tool'], verdict: 'take' }); })), [
     'plan/engine/decisions/linux-vm-engine.json needs[0]: "model-tool" is not taken, and this taken decision needs it',
   ]);
@@ -301,4 +301,8 @@ test('a built feature with a malformed needs gives problems, never a throw', () 
   const errors = errorsOf(files);
   assert.ok(errors.includes('plan/engine/features/start-computer.json needs[0]: not a text'), errors.join('\n'));
   assert.ok(errors.includes('plan/engine/features/start-computer.json built: built while {"toString":null} is not done'), errors.join('\n'));
+});
+
+test('a taken decision whose adds stands for its answer passes the check', () => {
+  assert.deepEqual(errorsOf(variant((f) => { delete f['decisions/the-design.json'].answer; })), []);
 });

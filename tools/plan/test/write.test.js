@@ -44,6 +44,22 @@ test('take writes the sentences, adds and the verdict, and the result passes the
   assert.deepEqual(checkFiles(after).errors, []);
 });
 
+test('take accepts a decision that puts forward only sentences, and refuses one with neither an answer nor a sets', () => {
+  const { answer: _answer, ...onlySets } = basePlan()['record/decisions/losses-show.json'];
+  const files = sample({ 'record/decisions/losses-show.json': onlySets });
+  assert.deepEqual(checkFiles(files).errors, []);
+  const outcome = take(files, 'losses-show');
+  assert.equal(outcome.status, 'done');
+  const after = apply(files, outcome);
+  assert.deepEqual(parse(after, 'record/decisions/losses-show.json'), { asks: onlySets.asks, adds: ['every-loss-is-a-gap'], verdict: 'take' });
+  assert.deepEqual(checkFiles(after).errors, []);
+
+  const { sets: _sets, ...nothing } = onlySets;
+  const refusal = take(sample({ 'record/decisions/losses-show.json': nothing }), 'losses-show');
+  assert.equal(refusal.status, 'refused');
+  assert.match(refusal.message, /no answer and sets nothing/);
+});
+
 test('take refuses and writes nothing: no answer, a decision needed and not taken, a plan that fails the check, an unknown id', () => {
   const files = sample();
   const noAnswer = take(files, 'model-tool');
@@ -193,13 +209,15 @@ function random(seed) {
 
 const PROPERTY_LISTS = ['properties', 'engine/properties', 'record/properties'];
 
-test('model: any sequence of takes keeps the lists equal to a reference, and every sentence in the adds of exactly one taken entry', () => {
+test('model: any sequence of takes keeps the lists equal to a reference, every sentence in the adds of exactly one taken entry, and every taken decision with an answer or an adds', () => {
   for (let seed = 1; seed <= 25; seed += 1) {
     const rng = random(seed);
     const files = sample();
     // The reference: each sentence this test made, by id, with its list, its text and the entry that brought it.
     /** @type {Map<string, { list: string, value: any, by: string }>} */
     const model = new Map();
+    // The taken decisions that had no answer: their adds stands for it.
+    const onlySets = new Set();
     for (let step = 0; step < 12; step += 1) {
       const id = `step-${seed}-${step}`;
       const sets = [];
@@ -222,11 +240,28 @@ test('model: any sequence of takes keeps the lists equal to a reference, and eve
       }
       const candidates = [...model.keys()].filter((sid) => !used.has(sid));
       const removes = candidates.length && rng.int(3) === 0 ? [rng.pick(candidates)] : [];
-      files.set(`decisions/${id}.json`, canonicalText(canonicalDecision({ asks: `Step ${step}?`, answer: 'Yes.', ...(sets.length ? { sets } : {}), ...(removes.length ? { removes } : {}) })));
+      // A decision that sets sentences may have no answer.
+      const answered = !sets.length || rng.int(3) !== 0;
+      files.set(`decisions/${id}.json`, canonicalText(canonicalDecision({ asks: `Step ${step}?`, ...(answered ? { answer: 'Yes.' } : {}), ...(sets.length ? { sets } : {}), ...(removes.length ? { removes } : {}) })));
       place(files, id);
 
-      const outcome = take(files, id);
+      // A take that would leave a decision without an answer or an adds is refused and writes nothing;
+      // with its own answer written, the same take is then done.
+      const gone = new Set([...used, ...removes]);
+      const emptied = [...onlySets].filter((owner) => [...model].filter(([, sentence]) => sentence.by === owner).every(([sid]) => gone.has(sid)));
+      let outcome = take(files, id);
+      if (emptied.length) {
+        assert.equal(outcome.status, 'refused', `seed ${seed} step ${step}: would empty the adds of ${emptied.join(', ')}`);
+        assert.equal(outcome.changed.size, 0);
+        assert.match(JSON.stringify(outcome.errors ?? []), /without an answer or adds/);
+        for (const owner of emptied) {
+          files.set(`decisions/${owner}.json`, canonicalText(canonicalDecision({ ...parse(files, `decisions/${owner}.json`), answer: 'Yes.' })));
+          onlySets.delete(owner);
+        }
+        outcome = take(files, id);
+      }
       assert.equal(outcome.status, 'done', `seed ${seed} step ${step}: ${outcome.message} ${JSON.stringify(outcome.errors ?? [])}`);
+      if (!answered) onlySets.add(id);
       for (const [name, text] of outcome.changed) files.set(name, text);
       for (const { in: list, ...value } of sets) model.set(list === 'words' ? wordId(value.word) : value.id, { list, value, by: id });
       for (const sid of removes) model.delete(sid);
