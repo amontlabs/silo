@@ -1,0 +1,18 @@
+{
+  "asks": "What happens when a caller repeats a call?",
+  "answer": "Every call carries an id chosen by the caller. Repeating it returns the first result.",
+  "needs": [
+    "engine-shape"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "repeated-call-does-nothing-twice",
+      "says": "A repeated call does nothing twice.",
+      "kind": "safety",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

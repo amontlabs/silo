@@ -1,0 +1,7 @@
+{
+  "asks": "What speaks to the engine from the app and the command line?",
+  "answer": "The client that speaks to the engine is Zig, linked into the app through a C interface, and it also serves the command line.",
+  "needs": [
+    "engine-own-program"
+  ]
+}

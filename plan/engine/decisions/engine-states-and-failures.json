@@ -1,0 +1,4 @@
+{
+  "asks": "How does the engine's code keep a failure from being forgotten?",
+  "answer": "Every state is one of a fixed list of cases, every failure is part of a function's type, and the compiler refuses code that forgets one. This holds from the first line, and beyond the core wherever Zig allows it."
+}

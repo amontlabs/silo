@@ -1,0 +1,6 @@
+{
+  "asks": "What does the engine save of its own state?",
+  "needs": [
+    "core-state-stays-small"
+  ]
+}

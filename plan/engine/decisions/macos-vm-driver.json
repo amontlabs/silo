@@ -1,0 +1,5 @@
+{
+  "asks": "How are macOS computers driven?",
+  "answer": "macOS computers are driven from Swift directly, never through Rust bindings. The code that drives Apple's virtualization framework is Swift, belongs to the engine side, and never runs inside the app.",
+  "verdict": "take"
+}

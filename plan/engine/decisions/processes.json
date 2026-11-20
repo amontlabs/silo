@@ -1,0 +1,16 @@
+{
+  "asks": "Which processes make up Silo?",
+  "answer": "The engine, one helper per computer, the recorder, the app and the command, an added classifier in a computer of its own, and the probe inside each computer.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "recorder",
+      "means": "The part of Silo, outside the computer, that keeps the record."
+    },
+    {
+      "in": "words",
+      "word": "helper",
+      "means": "The process, one per computer, that holds the virtual machine and its boundary."
+    }
+  ]
+}

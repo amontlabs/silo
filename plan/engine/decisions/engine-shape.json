@@ -1,0 +1,31 @@
+{
+  "asks": "How is the engine cut into parts?",
+  "answer": "The core decides and touches nothing. Drivers do things: run a virtual machine, carry the network, take a checkpoint.",
+  "sets": [
+    {
+      "in": "words",
+      "word": "core",
+      "means": "The part of the engine that decides and touches nothing."
+    },
+    {
+      "in": "words",
+      "word": "driver",
+      "means": "A part of Silo that does what an effect asks."
+    },
+    {
+      "in": "words",
+      "word": "call",
+      "means": "What the app, the command or an agent sends to ask for a change."
+    },
+    {
+      "in": "words",
+      "word": "event",
+      "means": "What the core puts out to say what happened."
+    },
+    {
+      "in": "words",
+      "word": "effect",
+      "means": "What the core puts out to ask a driver to act."
+    }
+  ]
+}

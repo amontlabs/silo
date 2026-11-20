@@ -1,0 +1,4 @@
+{
+  "asks": "Is the engine its own program?",
+  "answer": "The engine is its own program, not a library inside the app."
+}

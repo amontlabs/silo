@@ -1,0 +1,7 @@
+{
+  "asks": "How does anything change the engine's state?",
+  "answer": "Nothing changes state except an input handled by the core. Calls, driver results and the clock all enter the same way, through one queue. Every input passes one validation on the way in, which caps every field.",
+  "needs": [
+    "engine-shape"
+  ]
+}

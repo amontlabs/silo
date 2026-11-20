@@ -1,0 +1,5 @@
+{
+  "asks": "How much may observing slow a computer?",
+  "answer": "Disk speed is already the bottleneck for people who run many agents. Observing must not slow a computer in a way a person can feel.",
+  "verdict": "take"
+}

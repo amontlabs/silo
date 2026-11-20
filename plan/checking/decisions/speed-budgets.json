@@ -1,0 +1,5 @@
+{
+  "asks": "Which operations have a speed budget?",
+  "answer": "Fork, start, checkpoint and the memory of an idle computer each have a budget, written before their code, as a 99th percentile and a worst case. Recovery time after a crash is a metric.",
+  "verdict": "take"
+}

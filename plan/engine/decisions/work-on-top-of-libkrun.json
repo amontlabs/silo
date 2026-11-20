@@ -1,0 +1,7 @@
+{
+  "asks": "What does Silo build on top of libkrun?",
+  "answer": "Disk checkpoints and forks that share blocks, a guest agent or SSH, and the Mac window.",
+  "needs": [
+    "linux-vm-engine"
+  ]
+}

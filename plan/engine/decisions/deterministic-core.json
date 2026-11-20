@@ -1,0 +1,7 @@
+{
+  "asks": "Is the core deterministic?",
+  "answer": "The same inputs in the same order give the same state and the same outputs. Time and randomness are inputs. The core runs on one thread.",
+  "needs": [
+    "engine-inputs"
+  ]
+}

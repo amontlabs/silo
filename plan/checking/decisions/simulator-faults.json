@@ -1,0 +1,7 @@
+{
+  "asks": "What faults does the simulator make?",
+  "answer": "Any message may be delayed without bound, dropped or reordered. Each fake driver misbehaves on purpose, according to a written fault model: a virtual machine dies, the disk fills, a reply never comes, a reply comes twice. Every real failure becomes a behaviour of a fake.",
+  "needs": [
+    "core-simulator"
+  ]
+}

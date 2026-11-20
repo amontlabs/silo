@@ -1,0 +1,18 @@
+{
+  "asks": "How does the engine bring what is seen to what is wanted?",
+  "answer": "Each row keeps what was asked and what was last observed. While they differ, the core issues effects to make them match, or says what it is waiting for. A virtual machine can die by itself and the device can reboot, so the saved state is never assumed to describe the world.",
+  "needs": [
+    "engine-state"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "wanted-and-seen-agree",
+      "says": "What is wanted and what is seen agree in the end, or the engine says what it is waiting for.",
+      "kind": "liveness",
+      "check": [
+        "simulator"
+      ]
+    }
+  ]
+}

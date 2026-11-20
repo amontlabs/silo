@@ -1,0 +1,7 @@
+{
+  "asks": "Can a classifier stop the core?",
+  "answer": "A classifier that crashes or runs long must never stop the core.",
+  "needs": [
+    "processes"
+  ]
+}

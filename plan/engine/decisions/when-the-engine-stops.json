@@ -1,0 +1,18 @@
+{
+  "asks": "What happens to running computers when the engine stops?",
+  "answer": "Computers outlive the engine. The price is one helper per computer.",
+  "needs": [
+    "processes"
+  ],
+  "sets": [
+    {
+      "in": "engine/properties",
+      "id": "computers-outlive-the-engine",
+      "says": "If the engine stops, running computers keep running under the rules they had.",
+      "kind": "safety",
+      "check": [
+        "live check"
+      ]
+    }
+  ]
+}

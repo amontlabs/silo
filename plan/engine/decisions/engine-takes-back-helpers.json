@@ -1,0 +1,6 @@
+{
+  "asks": "Can a restarted engine take back its helpers?",
+  "needs": [
+    "when-the-engine-stops"
+  ]
+}

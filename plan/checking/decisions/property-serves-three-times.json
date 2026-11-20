@@ -1,0 +1,4 @@
+{
+  "asks": "What is a property's sentence for?",
+  "answer": "A promise should be one sentence that serves three times: as what the user is told, as what the simulator checks, and as what a hostile test tries to break."
+}

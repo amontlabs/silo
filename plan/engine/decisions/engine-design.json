@@ -1,0 +1,5 @@
+{
+  "asks": "What is the engine's design built around?",
+  "answer": "The engine's design is data first, with events.",
+  "verdict": "take"
+}

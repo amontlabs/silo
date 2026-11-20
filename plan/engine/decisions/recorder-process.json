@@ -1,0 +1,6 @@
+{
+  "asks": "Is the recorder its own process?",
+  "needs": [
+    "processes"
+  ]
+}
