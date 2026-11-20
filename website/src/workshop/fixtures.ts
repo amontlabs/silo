@@ -1,12 +1,20 @@
 // A small plan in the files of plan/, for the tests: they never read the real one.
-import { canonicalText } from '../../../tools/plan/model/index.js';
+import { canonicalDecision, canonicalFeature, canonicalText } from '../../../tools/plan/model/index.js';
 import { changeComment } from '../../../tools/workshop/model/index.js';
-import { buildDataFrom, notesFrom } from './data';
+import { buildDataFrom, factsFrom, notesFrom } from './data';
 import { EXAMPLE_MAP } from './map-example';
 import type { Comment } from './api';
-import type { BuildData, Change, LiveIssue, LiveLatest, LiveState, Notes } from './plan';
+import type { BuildData, Change, Facts, LiveIssue, LiveLatest, LiveState, Notes } from './plan';
 
-interface FixtureFeature {
+/** What an entry's file may hold beyond its text and verdict: ids it needs, statements it sets, removes, adds or keeps. */
+interface FixtureLists {
+  needs?: string[];
+  sets?: Record<string, unknown>[];
+  removes?: string[];
+  adds?: string[];
+}
+
+interface FixtureFeature extends FixtureLists {
   id: string;
   stage: string;
   part: string;
@@ -15,10 +23,13 @@ interface FixtureFeature {
   verdict?: 'take' | 'drop';
   built?: string;
   suggest?: { verdict: 'take' | 'drop'; why?: string };
+  keeps?: string[];
+  surfaces?: { app?: string; cli?: string };
 }
 
-export interface FixtureDecision {
+export interface FixtureDecision extends FixtureLists {
   id: string;
+  suggest?: { verdict: 'take' | 'drop'; why: string };
   stage: string;
   /** null: a decision of the whole product, in plan/decisions/. */
   part: string | null;
@@ -94,6 +105,57 @@ export const DECISIONS: FixtureDecision[] = [
   { id: 'old-format', stage: 'gone', part: 'part-e', asks: 'Which format does an export use?', answer: 'Our own.', verdict: 'drop' },
 ];
 
+/**
+ * Entries that say something of the plan's lists, with the lists they refer to: draw them with `buildData(withLists())`.
+ * They stay out of the default plan, whose counts and order the other tests read.
+ */
+export const LISTS = {
+  words: [
+    { word: 'twin', means: 'A copy of a computer.' },
+    { word: 'scrap', means: 'A computer nobody uses.' },
+  ],
+  principles: [{ id: 'least-power', says: 'The less sure the trigger, the less it may do.', asks: 'What triggers it?' }],
+  properties: [
+    { id: 'never-leaks', says: 'Nothing leaves a computer unasked.', kind: 'safety', check: ['hostile test'] },
+    { id: 'ends-up', says: 'Every wait ends.', kind: 'liveness', check: ['test'] },
+  ],
+};
+
+export const LIST_FEATURES: FixtureFeature[] = [
+  {
+    id: 'fork-keeps', stage: 'fourth', part: 'part-b', name: 'Keep a fork apart', what: 'A fork shares nothing with the computer it came from.',
+    needs: ['security-properly', 'one-way', 'core'], keeps: ['never-leaks', 'ends-up'],
+    surfaces: { app: 'Computers, then Fork', cli: 'silo fork <computer>' },
+  },
+  { id: 'leak-guard', stage: 'second', part: 'part-b', name: 'Stop what leaks', what: 'A guard at the edge.', verdict: 'take', adds: ['never-leaks', 'ends-up'] },
+];
+
+export const LIST_DECISIONS: FixtureDecision[] = [
+  // A decision with no verdict whose yes adds a word and changes a principle, and recommends a yes.
+  {
+    id: 'name-a-snapshot', stage: 'fourth', part: 'part-b', asks: 'What is a saved moment of a computer called?',
+    sets: [
+      { in: 'words', word: 'snapshot', means: 'A saved moment of a computer.' },
+      { in: 'principles', id: 'least-power', says: 'The less sure the trigger, the less it may do, and it asks first.', asks: 'What triggers it, and what does it ask?' },
+    ],
+    suggest: { verdict: 'take', why: 'The word is already in use.' },
+  },
+  // A decision with no verdict whose yes removes a word.
+  { id: 'retire-scrap', stage: 'fourth', part: 'part-b', asks: 'Does Silo keep the word scrap?', removes: ['scrap'], suggest: { verdict: 'drop', why: 'Nobody says it.' } },
+  // A decision with no answer, only a new property: all it says is what a yes would add.
+  {
+    id: 'bound-a-wait', stage: 'fourth', part: 'part-b', asks: 'Is a wait at the edge bounded?',
+    sets: [{ in: 'part-b/properties', id: 'wait-is-bounded', says: 'A wait at the edge ends within its limit.', kind: 'liveness', check: ['simulator'] }],
+  },
+  // A taken decision that added statements to the lists.
+  { id: 'what-we-call-things', stage: 'first', part: null, asks: 'What are the words of Silo?', answer: 'A twin and a scrap.', verdict: 'take', adds: ['twin', 'scrap', 'least-power'] },
+];
+
+/** The fixture plan with the entries above and the lists they refer to. */
+export function withLists(): Parameters<typeof planFiles>[0] {
+  return { features: [...FEATURES, ...LIST_FEATURES], decisions: [...DECISIONS, ...LIST_DECISIONS], lists: LISTS };
+}
+
 /** The notes of `core`: every kind of block, a relative link and a link to another scheme. */
 export const CORE_NOTES = `## Notes
 
@@ -119,13 +181,14 @@ export const ZIG_NOTES = 'Zig keeps the engine small.\n';
 const DEFAULT_NOTES: Record<string, string> = { core: CORE_NOTES, 'core-in-zig': ZIG_NOTES };
 
 /** The files of the fixture plan, by their path under plan/. */
-export function planFiles({ features = FEATURES, notes = DEFAULT_NOTES, decisions = DECISIONS, parts = PARTS } = {}): Map<string, string> {
+export function planFiles({ features = FEATURES, notes = DEFAULT_NOTES, decisions = DECISIONS, parts = PARTS, lists = { words: [], principles: [], properties: [] } as typeof LISTS | { words: never[]; principles: never[]; properties: never[] } } = {}): Map<string, string> {
   const files = new Map<string, string>();
   files.set('README.md', 'The model.\n');
   files.set('PRODUCT.md', 'Silo.\n');
   files.set('parts.json', canonicalText(parts));
-  files.set('words.json', canonicalText([]));
-  files.set('principles.json', canonicalText([]));
+  files.set('words.json', canonicalText(lists.words));
+  files.set('principles.json', canonicalText(lists.principles));
+  if (lists.properties.length) files.set('properties.json', canonicalText(lists.properties));
   // Each stage holds its decisions, then its features.
   const ids = (stage: string) => [...decisions.filter((d) => d.stage === stage), ...features.filter((f) => f.stage === stage)].map((entry) => entry.id);
   files.set('order.json', canonicalText({ stages: STAGES.map((stage) => ({ ...stage, entries: ids(stage.id) })) }));
@@ -133,21 +196,26 @@ export function planFiles({ features = FEATURES, notes = DEFAULT_NOTES, decision
   for (const decision of decisions) {
     const file: Record<string, unknown> = { asks: decision.asks };
     if (decision.answer) file.answer = decision.answer;
-    // The key order of plan/README.md: replaces before the verdict, replaced_by after it.
+    if (decision.needs) file.needs = decision.needs;
     if (decision.replaces) file.replaces = decision.replaces;
+    if (decision.sets) file.sets = decision.sets;
+    if (decision.removes) file.removes = decision.removes;
+    if (decision.adds) file.adds = decision.adds;
+    if (decision.suggest) file.suggest = decision.suggest;
     if (decision.verdict) file.verdict = decision.verdict;
     if (decision.replacedBy) file.replaced_by = decision.replacedBy;
     const path = decision.part ? `${decision.part}/decisions/${decision.id}` : `decisions/${decision.id}`;
-    files.set(`${path}.json`, canonicalText(file));
+    files.set(`${path}.json`, canonicalText(canonicalDecision(file)));
     if (notes[decision.id]) files.set(`${path}.md`, notes[decision.id]);
   }
   for (const feature of features) {
     const file: Record<string, unknown> = { name: feature.name, what: feature.what };
+    for (const key of ['needs', 'sets', 'removes', 'adds', 'keeps', 'surfaces'] as const) if (feature[key]) file[key] = feature[key];
     // A suggestion always says why; the fixture gives one where its list leaves it out.
     if (feature.suggest) file.suggest = { verdict: feature.suggest.verdict, why: feature.suggest.why ?? 'It fits.' };
     if (feature.verdict) file.verdict = feature.verdict;
     if (feature.built) file.built = feature.built;
-    files.set(`${feature.part}/features/${feature.id}.json`, canonicalText(file));
+    files.set(`${feature.part}/features/${feature.id}.json`, canonicalText(canonicalFeature(file)));
     if (notes[feature.id]) files.set(`${feature.part}/features/${feature.id}.md`, notes[feature.id]);
   }
   return files;
@@ -159,18 +227,25 @@ export function emptyPlanFiles(): Map<string, string> {
 }
 
 const NOTES = new WeakMap<BuildData, Notes>();
+const FACTS = new WeakMap<BuildData, Facts>();
 
 /** The fixture plan drawn on the example map, with entries' threads on: what the tests exercise. */
 export function buildData(options?: Parameters<typeof planFiles>[0]): BuildData {
   const files = planFiles(options);
   const data = buildDataFrom(files, { map: EXAMPLE_MAP, threads: true });
   NOTES.set(data, notesFrom(files));
+  FACTS.set(data, factsFrom(files));
   return data;
 }
 
 /** The notes of a fixture plan made by `buildData`, as the page's notes chunk gives them. */
 export function fixtureNotes(data: BuildData): Notes {
   return NOTES.get(data) ?? {};
+}
+
+/** The facts of a fixture plan made by `buildData`, as the page's facts chunk gives them. */
+export function fixtureFacts(data: BuildData): Facts {
+  return FACTS.get(data) ?? { entries: {}, statements: {} };
 }
 
 const day = '2026-11-14T10:00:00Z';

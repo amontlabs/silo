@@ -1,5 +1,5 @@
-// One row of a list, and what it shows once open: the text, its notes, its state and, for a row with a thread,
-// the thread (comments and history lines) and the box. A row without a thread draws none of those, not even a placeholder.
+// One row of a list, and what it shows once open: the text, what the entry says of the plan's lists, its state, its
+// notes and, for a row with a thread, the thread (comments and history lines) and the box. A row without a thread draws none of those, not even a placeholder.
 // Opening never moves the row or the rows above: the open frame is an overlay and the body grows below.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -8,7 +8,7 @@ import { compareLink, featureFileAt } from '../../../tools/workshop/model/index.
 import { Markdown } from './Markdown';
 import { RichText, safeHref } from './RichText';
 import { changesText, changeWords, isDecided, relativeTime, shortDate } from './plan';
-import type { Change, Row } from './plan';
+import type { Change, EntryFacts, Facts, Row, Statement } from './plan';
 import { formatHash, placeOf } from './routes';
 import type { Detail, Workshop } from './useWorkshop';
 
@@ -81,6 +81,11 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
     return () => clearTimeout(timer);
   }, [held]);
   const grown = open && !held;
+  const { wantFacts } = w;
+  // A row with something to show from the facts asks for them as it opens, if no pointer or focus did before.
+  useEffect(() => {
+    if (open && row.more) wantFacts();
+  }, [open, row.more, wantFacts]);
 
   // Comments that arrive while the panel is opening wait, on their placeholders, until the opening has ended.
   const [wasGrown, setWasGrown] = useState(grown);
@@ -102,6 +107,9 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   const inner = useRef<HTMLDivElement>(null);
   const lastHeight = useRef(0);
   const lastShown = useRef(shown);
+  // The panel grows too when what the entry says of the lists arrives.
+  const factsIn = typeof w.facts === 'object';
+  const lastFactsIn = useRef(factsIn);
   const settling = useRef<ReturnType<typeof setTimeout>>(undefined);
   // The panel's height as last laid out, kept current while it animates open (no render happens then).
   const animating = useRef(false);
@@ -115,8 +123,9 @@ export function Entry({ row, open, ctx }: { row: Row; open: boolean; ctx: EntryC
   useLayoutEffect(() => {
     const node = inner.current;
     if (!node) return;
-    const changed = lastShown.current !== shown;
+    const changed = lastShown.current !== shown || lastFactsIn.current !== factsIn;
     lastShown.current = shown;
+    lastFactsIn.current = factsIn;
     if (animating.current && !changed) return;
     const still = typeof matchMedia !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches;
     // From the height on screen (mid-change, if one runs) to the panel's natural height, measured without it.
@@ -198,10 +207,60 @@ function Side({ row, ctx }: { row: Row; ctx: EntryContext }) {
   );
 }
 
+/** The id of an entry, a plan id; null for a suggestion, which has none. */
+export const planId = (row: Row): string | null => (row.kind === 'entry' ? row.key.slice('entry-'.length) : null);
+
+/** How long "Copied" stays. */
+export const COPIED_MS = 2000;
+
+/**
+ * The entry's id in the monospace face and a button that writes it to the clipboard. When the clipboard refuses, the
+ * id's text is selected so the person can copy it by hand. The button keeps the width of the longer word.
+ */
+function CopyId({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const text = useRef<HTMLElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const select = () => {
+    const node = text.current;
+    if (node) getSelection()?.selectAllChildren(node);
+  };
+  const copy = () => {
+    clearTimeout(timer.current);
+    const done = () => {
+      setCopied(true);
+      timer.current = setTimeout(() => setCopied(false), COPIED_MS);
+    };
+    // A missing or refusing clipboard (an insecure page, a denied permission) leaves the id selected instead.
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setCopied(false);
+      select();
+      return;
+    }
+    navigator.clipboard.writeText(id).then(done, () => {
+      setCopied(false);
+      select();
+    });
+  };
+  const now = copied ? 'Copied' : 'Copy id';
+  return (
+    <span className="ws-id">
+      <code ref={text}>{id}</code>
+      <button type="button" className="ws-copy" onClick={copy}>
+        <span>{now}</span>
+        <span aria-hidden="true">{copied ? 'Copy id' : 'Copied'}</span>
+      </button>
+      <span className="ws-sr" role="status" aria-live="polite">{copied ? 'Copied' : ''}</span>
+    </span>
+  );
+}
+
 function StateLine({ row }: { row: Row }) {
   const text = stateText(row);
   const tone = isDecided(row) && row.status !== 'dropped' ? 'ws-yes' : 'ws-muted';
-  return <div className="ws-state"><span className={tone}>{text}</span></div>;
+  const id = planId(row);
+  return <div className="ws-state"><span className={tone}>{text}</span>{id ? <CopyId id={id} /> : null}</div>;
 }
 
 /**
@@ -215,9 +274,23 @@ export function replaceLines(row: Row): { label: string; keys: string[] }[] {
   return lines;
 }
 
-/** Each line links the question of each decision to where it lives; a plain click opens it here, a click with a modifier key is left to the browser. */
-function ReplaceLines({ row, ctx }: { row: Row; ctx: EntryContext }) {
-  const lines = replaceLines(row);
+/** A link to an entry, where it lives: a plain click opens it here, a click with a modifier key is left to the browser. */
+function EntryLink({ other, ctx }: { other: Row; ctx: EntryContext }) {
+  return (
+    <a
+      href={formatHash(placeOf(other), other.key)}
+      onClick={(event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        if (!ctx.open.has(other.key)) ctx.onToggle(other);
+      }}
+    >{other.name}</a>
+  );
+}
+
+/** Each line links the question of each decision to where it lives. `only` picks the lines that go in one place of the open view. */
+function ReplaceLines({ row, ctx, only }: { row: Row; ctx: EntryContext; only: (label: string) => boolean }) {
+  const lines = replaceLines(row).filter((line) => only(line.label));
   if (!lines.length) return null;
   return (
     <>
@@ -227,14 +300,7 @@ function ReplaceLines({ row, ctx }: { row: Row; ctx: EntryContext }) {
           {line.keys.map((key) => ctx.w.rowByKey.get(key)).filter((other): other is Row => other !== undefined).map((other, index) => (
             <Fragment key={other.key}>
               {index ? ' · ' : ' '}
-              <a
-                href={formatHash(placeOf(other), other.key)}
-                onClick={(event) => {
-                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                  event.preventDefault();
-                  if (!ctx.open.has(other.key)) ctx.onToggle(other);
-                }}
-              >{other.name}</a>
+              <EntryLink other={other} ctx={ctx} />
             </Fragment>
           ))}
         </p>
@@ -442,15 +508,162 @@ function Extras({ row, ctx }: { row: Row; ctx: EntryContext }) {
   );
 }
 
+const KINDS: Record<Statement['kind'], string> = { word: 'word', principle: 'principle', property: 'property' };
+
+/** A statement as text: a word and its meaning, a principle and the question it asks, a property. */
+function StatementText({ statement }: { statement: Statement }) {
+  return (
+    <span className="ws-st">
+      {statement.word !== null ? <b>{statement.word}</b> : null}
+      {statement.word !== null ? ' ' : ''}
+      {statement.text}
+      {statement.asks ? <span className="ws-st-asks"> {statement.asks}</span> : null}
+    </span>
+  );
+}
+
+/** One part of an open view: a small quiet label and its lines under it. */
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="ws-fact">
+      <span className="ws-fact-label">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/** What a yes would add, change and remove: the lines of an entry with no verdict that sets or removes statements. */
+function YesLines({ own, facts }: { own: EntryFacts; facts: Facts }) {
+  const sets = own.sets ?? [];
+  const adds = sets.filter((statement) => !facts.statements[statement.id]);
+  const changes = sets.filter((statement) => facts.statements[statement.id]);
+  const removes = own.removes ?? [];
+  return (
+    <>
+      {adds.length ? (
+        <Fact label="A yes would add">
+          <ul className="ws-fact-lines">
+            {adds.map((statement) => (
+              <li key={statement.id}><span className="ws-tag">{KINDS[statement.kind]}</span><StatementText statement={statement} /></li>
+            ))}
+          </ul>
+        </Fact>
+      ) : null}
+      {changes.length ? (
+        <Fact label="A yes would change">
+          <ul className="ws-fact-lines">
+            {changes.map((statement) => (
+              <li key={statement.id}>
+                <span className="ws-tag">{KINDS[statement.kind]}</span><code>{statement.id}</code>
+                <span className="ws-tag">Now</span><StatementText statement={facts.statements[statement.id]} />
+                <span className="ws-tag">After</span><StatementText statement={statement} />
+              </li>
+            ))}
+          </ul>
+        </Fact>
+      ) : null}
+      {removes.length ? (
+        <Fact label="A yes would remove">
+          <ul className="ws-fact-lines">
+            {removes.map((id) => {
+              const statement = facts.statements[id];
+              return (
+                <li key={id}>
+                  <span className="ws-tag">{statement ? KINDS[statement.kind] : ''}</span>
+                  {statement?.kind === 'word' ? <StatementText statement={statement} /> : <code>{id}</code>}
+                  {statement && statement.kind !== 'word' ? <><span aria-hidden="true" /><StatementText statement={statement} /></> : null}
+                </li>
+              );
+            })}
+          </ul>
+        </Fact>
+      ) : null}
+    </>
+  );
+}
+
+/** The state word of a row that another one needs; one that is not decided says nothing on its own row, and here says so. */
+function needWord(row: Row): string {
+  return (row.of === 'decision' ? DECISION_WORDS : WORDS)[row.status] ?? 'not decided yet';
+}
+
+function NeedsLines({ row, ctx }: { row: Row; ctx: EntryContext }) {
+  const needs = row.needs.map((key) => ctx.w.rowByKey.get(key)).filter((other): other is Row => other !== undefined);
+  if (!needs.length) return null;
+  return (
+    <Fact label="Needs">
+      <ul className="ws-fact-lines ws-needs">
+        {needs.map((other) => (
+          <li key={other.key}><EntryLink other={other} ctx={ctx} /> <span className="ws-need-word">{needWord(other)}</span></li>
+        ))}
+      </ul>
+    </Fact>
+  );
+}
+
+/** What the open view says of the lists and of what the entry needs, in the order of the plan's model. */
+function OpenFacts({ row, ctx }: { row: Row; ctx: EntryContext }) {
+  const { w } = ctx;
+  const id = planId(row);
+  const facts = typeof w.facts === 'object' ? w.facts : null;
+  const own = facts && id !== null ? facts.entries[id] : undefined;
+  const waiting = row.more && !facts && w.facts !== 'error';
+  const open = row.verdict === null;
+  const taken = row.verdict === 'take';
+  const adds = taken && own?.adds ? own.adds.map((statementId) => facts?.statements[statementId]).filter((statement): statement is Statement => statement !== undefined) : [];
+  return (
+    <>
+      {waiting ? (
+        <div className="ws-fact">
+          <div className="ws-ph-notes" aria-busy="true">
+            <i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" /><i className="ws-ph" aria-hidden="true" />
+          </div>
+        </div>
+      ) : null}
+      {open && own?.suggest ? (
+        <Fact label={`Recommended: ${own.suggest.verdict}`}>
+          {own.suggest.why ? <p className="ws-fact-text">{own.suggest.why}</p> : null}
+        </Fact>
+      ) : null}
+      {open && own && facts ? <YesLines own={own} facts={facts} /> : null}
+      {adds.length ? (
+        <Fact label="Added">
+          <ul className="ws-fact-lines">
+            {adds.map((statement) => <li key={statement.id}><span className="ws-tag">{KINDS[statement.kind]}</span><StatementText statement={statement} /></li>)}
+          </ul>
+        </Fact>
+      ) : null}
+      <ReplaceLines row={row} ctx={ctx} only={(label) => label !== 'Replaced by'} />
+      <NeedsLines row={row} ctx={ctx} />
+      {facts && own?.keeps && row.of === 'feature' ? (
+        <Fact label="Must keep">
+          <ul className="ws-fact-lines ws-keeps">
+            {own.keeps.map((statementId) => <li key={statementId}>{facts.statements[statementId]?.text ?? statementId}</li>)}
+          </ul>
+        </Fact>
+      ) : null}
+      {own?.surfaces && row.of === 'feature' ? (
+        <Fact label="Where it shows">
+          <ul className="ws-fact-lines">
+            {own.surfaces.app ? <li><span className="ws-tag">App</span><span className="ws-st">{own.surfaces.app}</span></li> : null}
+            {own.surfaces.cli ? <li><span className="ws-tag">Command</span><code>{own.surfaces.cli}</code></li> : null}
+          </ul>
+        </Fact>
+      ) : null}
+    </>
+  );
+}
+
 function Body({ row, ctx, detail }: { row: Row; ctx: EntryContext; detail: Detail | undefined }) {
   const { w } = ctx;
   const what = row.kind === 'entry' ? row.what : typeof detail === 'object' ? detail.body : null;
   return (
     <div className="ws-more-pad">
       {what ? <div className="ws-what"><RichText text={what} /></div> : null}
-      {row.kind === 'entry' ? <Extras row={row} ctx={ctx} /> : null}
+      {row.kind === 'entry' ? <OpenFacts row={row} ctx={ctx} /> : null}
       <StateLine row={row} />
-      <ReplaceLines row={row} ctx={ctx} />
+      <ReplaceLines row={row} ctx={ctx} only={(label) => label === 'Replaced by'} />
+      {row.kind === 'entry' ? <Extras row={row} ctx={ctx} /> : null}
       {threaded(row, ctx) ? <Talk row={row} ctx={ctx} detail={detail} /> : null}
     </div>
   );
