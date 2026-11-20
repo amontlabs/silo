@@ -65,10 +65,3 @@ Rules for every agent. Orchestrator: also read .atelier/rules/ORCHESTRATOR.md. W
 - No time estimates and no plans built from dates.
 - Agents may push to this repository's remote. The old history stays on the branch `legacy`.
 <!-- atelier:end -->
-
-## For now
-
-This section is deleted when the owner says so.
-
-- Nothing is pushed and no issue is created without the owner's word. This comes before "Agents
-  may push" above.
