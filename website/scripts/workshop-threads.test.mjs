@@ -142,42 +142,65 @@ test('an id that is no entry of the plan, and a request naming both an issue and
   } finally { await t.close(); }
 });
 
-const EIGHT = ['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7', 'e8'].map((id) => ({ id, kind: 'feature', title: `Entry ${id}`, part: 'computers', suggestedIn: null }));
+const MANY = Array.from({ length: 40 }, (_, i) => ({ id: `m${i}`, kind: 'feature', title: `Entry m${i}`, part: 'computers', suggestedIn: null }));
 
-test('one person opening more than five threads in an hour, several in the same minute, is refused none', async () => {
-  const t = await setup({ entries: [...PLAN_ENTRIES, ...EIGHT] });
+test('one person opening more than thirty threads in an hour, several in the same minute, is refused none', async () => {
+  const t = await setup({ entries: [...PLAN_ENTRIES, ...MANY] });
   try {
     // The plan's entries and the `open` ceiling bound openings; no budget counts them.
     assert.deepEqual(Object.keys(BUDGET).filter((key) => /opening/i.test(key)), []);
     assert.equal(BUDGET.openCallsPerMinute, 27);
     const c = await signedIn(t);
     const statuses = [];
-    // Four openings in one minute, three calls each, then four in the next.
-    for (const id of EIGHT.slice(0, 4).map((entry) => entry.id)) statuses.push((await c.call('POST', 'comment', { body: { entry: id, text: 'x' } })).status);
-    t.clock.t += 61_000;
-    for (const id of EIGHT.slice(4).map((entry) => entry.id)) statuses.push((await c.call('POST', 'vote', { body: { entry: id, on: true } })).status);
-    assert.deepEqual(statuses, Array(8).fill(200));
-    assert.equal(created(t).length, 8);
-    for (const { id } of EIGHT) assert.equal(entryIssues(t, id).length, 1, id);
+    // Eight openings a minute, three calls each, for five minutes.
+    for (let minute = 0; minute < 5; minute += 1) {
+      for (const { id } of MANY.slice(minute * 8, minute * 8 + 8)) {
+        statuses.push((await c.call('POST', minute % 2 ? 'vote' : 'comment', { body: minute % 2 ? { entry: id, on: true } : { entry: id, text: 'x' } })).status);
+      }
+      t.clock.t += 61_000;
+    }
+    assert.deepEqual(statuses, Array(40).fill(200));
+    assert.equal(created(t).length, 40);
+    for (const { id } of MANY) assert.equal(entryIssues(t, id).length, 1, id);
   } finally { await t.close(); }
 });
 
+test('more openings at once than the `open` ceiling affords: every issue created has its write made, the refused ones made no opening', async () => {
+  const t = await setup({ entries: [...PLAN_ENTRIES, ...MANY] });
+  try {
+    const c = await signedIn(t);
+    t.fake.state.hook = (r) => (r.kind === 'installation' && ISSUES.test(r.path) ? { delay: 20 } : null);
+    const ids = MANY.slice(0, 13).map((entry) => entry.id);
+    const answers = await Promise.all(ids.map((id) => c.call('POST', 'comment', { body: { entry: id, text: 'x' } })));
+    t.fake.state.hook = null;
+    const made = answers.filter((answer) => answer.status === 200);
+    const refused = answers.filter((answer) => answer.status === 429);
+    assert.equal(made.length + refused.length, 13, answers.map((answer) => answer.status).join());
+    assert.ok(made.length > 0 && refused.length > 0);
+    assert.equal(created(t).length, made.length);
+    for (const answer of refused) assert.deepEqual([answer.json.message, Object.hasOwn(answer.json, 'n')], ['The Workshop is busy. Try again in a minute.', false]);
+    for (const answer of made) assert.deepEqual(issueOf(t.fake, answer.json.n).comments.map((x) => x.body), ['x']);
+    // Each opening is 3 calls and each refusal after the read is 1: all within the minute's ceiling.
+    assert.ok(made.length * 3 + refused.length <= BUDGET.openCallsPerMinute, `${made.length} made, ${refused.length} refused`);
+  } finally { t.fake.state.hook = null; await t.close(); }
+});
+
 test('the `open` ceiling refuses an opening it has no room for, 429 with the wait, opens nothing, and lets it through in the next minute', async () => {
-  const t = await setup({ entries: [...PLAN_ENTRIES, ...EIGHT] });
+  const t = await setup({ entries: [...PLAN_ENTRIES, ...MANY] });
   try {
     const c = await signedIn(t);
     // Four calls a minute: one opening is three, so the second has no room for itself and its confirming read.
     await withBudget({ openCallsPerMinute: 4 }, async () => {
-      assert.equal((await c.call('POST', 'comment', { body: { entry: 'e1', text: 'x' } })).status, 200);
+      assert.equal((await c.call('POST', 'comment', { body: { entry: 'm0', text: 'x' } })).status, 200);
       const before = t.fake.state.requests.length;
-      const refused = await c.call('POST', 'comment', { body: { entry: 'e2', text: 'x' } });
-      assert.deepEqual([refused.status, refused.json.error, refused.json.message], [429, 'rate_limited', 'New threads are busy. Try again shortly.']);
+      const refused = await c.call('POST', 'comment', { body: { entry: 'm1', text: 'x' } });
+      assert.deepEqual([refused.status, refused.json.error, refused.json.message], [429, 'rate_limited', 'The Workshop is busy. Try again in a minute.']);
       assert.ok(Number(refused.headers['Retry-After']) > 0 && Number(refused.headers['Retry-After']) <= 60, refused.headers['Retry-After']);
       assert.equal(created(t).length, 1);
-      assert.deepEqual(entryIssues(t, 'e2'), []);
+      assert.deepEqual(entryIssues(t, 'm1'), []);
       assert.equal(since(t, before).filter((call) => call.startsWith('POST')).length, 0, 'no write of any kind');
       t.clock.t += Number(refused.headers['Retry-After']) * 1000;
-      const again = await c.call('POST', 'comment', { body: { entry: 'e2', text: 'x' } });
+      const again = await c.call('POST', 'comment', { body: { entry: 'm1', text: 'x' } });
       assert.equal(again.status, 200, again.body);
       assert.equal(created(t).length, 2);
       assert.deepEqual(issueOf(t.fake, again.json.n).comments.map((x) => x.body), ['x']);

@@ -544,11 +544,14 @@ an id of the plan, never both. With `entry`:
   that `suggested_in` names. An issue whose label or marker was changed on
   GitHub is no thread. The server then looks the thread up on GitHub once
   more, as before an opening, and goes on with what it finds, or opens one.
+  An issue that was labelled `workshop:entry` or given a marker by hand on
+  GitHub is found once the snapshot holds it, at the next refresh.
 - When the entry has no thread, the server first reads the entry issues on
   GitHub with the App's token: the newest pages, until they reach the issues
   the snapshot already held a minute before its refresh began. The snapshot
   gives the older ones. A thread another instance has just opened is found
-  this way. Without a snapshot, it reads every page.
+  this way. Without a snapshot, it reads the snapshot's 20 pages, 2,000 entry
+  issues.
 - When that read finds none, the App opens the issue described under
   "Storage", labelled `workshop:entry`. What bounds
   the openings is described under "The installation token and its
@@ -779,11 +782,14 @@ a visitor does without signing in can make `suggest`,
 | Opening an entry's thread: the reads of entry issues and the opening (charged per call) | 27 |
 
 Worst case per instance per hour: (40 + 4 + 10 + 27) × 60 = 81 × 60 =
-4,860 calls, below the installation's 5,000. The largest refresh is 20 issue
+4,860 calls, below the installation's 5,000. The calls that repair an opening
+come on top (see below): at most 3 for an opening GitHub returned without its
+label. The largest refresh is 20 issue
 pages + 15 comment pages = 35 calls, which fits in a minute's 40. GitHub's
 secondary limit is 900 points a minute, a `GET` costing 1 point and a `POST`
 5: at most 37 of the 81 calls a minute are `POST`s (labels and openings),
-which is 37 × 5 + 44 = 229 points. Calls to GitHub's token endpoint are not installation calls;
+which is 37 × 5 + 44 = 229 points, plus 3 `POST`s (15 points) for each
+opening repaired in that minute. Calls to GitHub's token endpoint are not installation calls;
 new sign-ins have a ceiling of 30 a minute and token refreshes of existing
 sessions a separate one of 60, so made-up sign-ins cannot stop sessions from
 refreshing.
@@ -795,9 +801,11 @@ instance opens at most 9 threads a minute.
 
 Two things bound the threads the App opens. An entry has one thread, so the
 plan's entries are the most it can open. The `open` ceiling bounds how fast.
-An opening is refused before its call when the ceiling has no room for it and
-for the read that confirms it. The answer is 429, "New threads are busy. Try
-again shortly.", with `Retry-After` for the wait, and nothing is opened.
+The opening and the first page of the read that confirms it are charged
+together, before the opening. When the ceiling has no room for both, the
+answer is 429, "The Workshop is busy. Try again in a minute.", with
+`Retry-After` for the wait, and nothing is opened. A further page of that read
+is charged when it is read.
 
 The calls that repair an opening (creating the missing label, adding it,
 closing an issue) are charged to the ceiling but never refused by it, so that
@@ -1074,8 +1082,9 @@ origin differs.
 **Identities and scope.** The App can only read and write issues of the one
 repository, and the installation token is requested for that repository with
 those two permissions. The installation token serves only the snapshot refresh,
-the repository lookup at sign-in and labelling a suggestion
-(which a visitor cannot do). Everything else done for a signed-in person,
+the repository lookup at sign-in, labelling a suggestion
+(which a visitor cannot do) and opening an entry's thread, with the reads of
+entry issues before and after it. Everything else done for a signed-in person,
 including reading the issue before a write, uses that person's token, so
 GitHub's own permissions apply (a locked issue refuses a visitor's comment)
 and GitHub records the person as the author. Every write first reads the issue

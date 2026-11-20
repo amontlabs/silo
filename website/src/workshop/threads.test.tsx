@@ -135,9 +135,9 @@ describe('a row with no thread yet', () => {
   });
 
   it('is shown again, still with no thread, when the server refuses a first vote', async () => {
-    const { item } = await open('#part-b', GUARD, { me: owner, routes: { 'POST vote': () => refused(429, 'Too many new threads were started on the Workshop this hour. Try again later.') } });
+    const { item } = await open('#part-b', GUARD, { me: owner, routes: { 'POST vote': () => refused(429, 'The Workshop is busy. Try again in a minute.') } });
     await userEvent.click(within(item).getByRole('button', { name: /0 votes/ }));
-    expect(await screen.findByText('Vote: not saved. Too many new threads were started on the Workshop this hour. Try again later.')).toBeInTheDocument();
+    expect(await screen.findByText('Vote: not saved. The Workshop is busy. Try again in a minute.')).toBeInTheDocument();
     expect(within(item).getByRole('button', { name: /0 votes/ })).toHaveAttribute('aria-pressed', 'false');
     expect(within(item).getByText('No comments yet.')).toBeInTheDocument();
   });

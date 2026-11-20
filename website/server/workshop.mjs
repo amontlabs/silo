@@ -285,8 +285,8 @@ export function createWorkshop({
     const at = now();
     const blocked = CEILINGS[name][1] && at < blockedUntil;
     const wait = Math.max(blocked ? blockedUntil - at : 0, ceilings[name].start + 60_000 - at, 1000);
-    // New threads are busy, not GitHub: the answer says so, with the wait.
-    if (name === 'open' && !blocked) tooMany(wait / 1000, 'New threads are busy. Try again shortly.');
+    // Our own `open` ceiling, not GitHub, is full: the answer says so, with the wait.
+    if (name === 'open' && !blocked) tooMany(wait / 1000, 'The Workshop is busy. Try again in a minute.');
     // `local`: our own ceiling, not GitHub, said no.
     throw new GitHubError(429, { rateLimited: true, retryAfter: Math.ceil(wait / 1000), as: 'installation', local: !blocked });
   }
@@ -438,15 +438,16 @@ export function createWorkshop({
   // The entry issues on GitHub that name `id`, lowest number first. Read with the installation token
   // within the `open` ceiling: the newest pages, until they reach a minute before the snapshot's
   // refresh began; the snapshot gives the older issues that name `id`. Without a snapshot, every page.
-  // `ignore`: numbers a read has shown are not the thread.
-  async function entryIssuesOnGitHub(id, ignore) {
+  // `ignore`: numbers a read has shown are not the thread. `prepaid`: the first page is already charged
+  // to the ceiling.
+  async function entryIssuesOnGitHub(id, ignore, { prepaid = false } = {}) {
     const held = snapshots.held(id);
     const numbers = new Set((held?.numbers ?? []).filter((number) => !ignore.has(number)));
     const found = new Map();
     const since = held ? held.startedAt - SNAPSHOT.overlap : -Infinity;
     let next = `/repos/${repo}/issues?labels=${encodeURIComponent(LABELS.entry)}&state=all&sort=created&direction=desc&per_page=100`;
     for (let page = 0; next && page < SNAPSHOT.issuePages; page += 1) {
-      spendOrRefuse('open');
+      if (page > 0 || !prepaid) spendOrRefuse('open');
       const { data, headers } = await installationRequest('GET', next);
       const issues = Array.isArray(data) ? data : [];
       for (const issue of issues) {
@@ -530,14 +531,14 @@ export function createWorkshop({
     const run = async () => {
       const before = await entryIssuesOnGitHub(entry.id, ignore);
       if (before.numbers.length || !open) return { candidates: before.numbers, opened: null };
-      // Room for the opening and the read that confirms it.
-      if (!hasRoom('open', 2)) spendOrRefuse('open', 2);
-      spendOrRefuse('open');
+      // The opening and the first page of the read that confirms it are charged together before the
+      // opening, so that an opening that is made can always be confirmed.
+      spendOrRefuse('open', 2);
       const { data } = await installationRequest('POST', `/repos/${repo}/issues`, { body: { title: threadTitle(entry.title), body: threadBody(entry), labels: [LABELS.entry] } });
       if (store) store.changed = true;
       const issue = await labelled(data, entry);
       // The read confirms only when it shows the issue just opened; otherwise the write is not made.
-      const after = await entryIssuesOnGitHub(entry.id, ignore);
+      const after = await entryIssuesOnGitHub(entry.id, ignore, { prepaid: true });
       if (!after.found.has(issue.number)) refuse(502, 'github_failed', 'GitHub did not show the new thread yet. Try again.');
       const lowest = after.numbers[0];
       if (lowest === issue.number) {
