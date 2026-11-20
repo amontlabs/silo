@@ -16,7 +16,7 @@
 - It needs `shipped-plugins-declare`: if what ships with Silo had no declaration, a built-in
   classifier would not be a plugin.
 - The plan used "classifier" for two things: the program someone adds, and what gives an opinion.
-  The first is now "plugin": `plugin-is-the-subject` in the part `plugins`.
+  The first is now "plugin": `what-a-plugin-never-does` in the part `plugins`.
 - The word was compared with estimator, detector, monitor, evaluator, reviewer and labeler. None
   is both standard and plainer. "Classifier" is exact for an opinion that is a kind from a fixed
   list. For the other shapes the plan calls an opinion, see `opinion-is-a-value`.

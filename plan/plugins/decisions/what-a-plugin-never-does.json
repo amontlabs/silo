@@ -1,0 +1,36 @@
+{
+  "asks": "What can a plugin never do?",
+  "answer": "No tool a plugin can use grants or destroys. Every statement about the program someone adds has \"plugin\" as its subject, and \"classifier\" is said only of the case where its output is a value from a fixed list.",
+  "needs": [
+    "plugin-declaration"
+  ],
+  "sets": [
+    {
+      "in": "plugins/properties",
+      "id": "no-tool-grants-or-destroys",
+      "says": "No tool a plugin can use grants or destroys.",
+      "kind": "safety",
+      "from": "less-sure-less-power",
+      "check": [
+        "types"
+      ]
+    },
+    {
+      "in": "plugins/properties",
+      "id": "where-a-plugin-runs-is-shown",
+      "says": "The user can always see where a plugin runs.",
+      "kind": "safety",
+      "check": [
+        "test"
+      ]
+    }
+  ],
+  "removes": [
+    "added-classifier-cannot-act",
+    "where-a-classifier-runs-is-shown"
+  ],
+  "suggest": {
+    "verdict": "take",
+    "why": "The owner called the first sentence basically perfect on 21 November 2026."
+  }
+}

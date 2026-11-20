@@ -44,3 +44,5 @@ tool call is replaced by a refusal". It sets again the property that decision ad
 
 Later that day the owner was not sure this can be approved yet, since how it is done is part of a
 feature decided later.
+
+The owner agreed on 21 November 2026, and it is taken.

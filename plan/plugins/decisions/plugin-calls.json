@@ -1,6 +1,6 @@
 {
-  "asks": "Which calls may a plugin use?",
-  "answer": "A plugin can do nothing until a rule allows it. Its declaration lists the rules it needs. Which calls Silo offers is settled when they are built. They touch four areas: the record (reading a part of it), opinions (giving one), the app (showing a panel) and the user (putting a question).",
+  "asks": "Which tools may a plugin use?",
+  "answer": "A plugin can use only the tools it declares, and installing it grants them. Which tools Silo offers is settled when they are built. They touch four areas: the record (reading a part of it), opinions (giving one), the app (showing a panel) and the user (putting a question).",
   "needs": [
     "plugin-declaration"
   ],
@@ -12,8 +12,8 @@
     },
     {
       "in": "plugins/properties",
-      "id": "plugin-needs-a-rule",
-      "says": "A plugin can do nothing until a rule allows it.",
+      "id": "plugin-uses-only-declared-tools",
+      "says": "A plugin can use only the tools it declares, and installing it grants them.",
       "kind": "safety",
       "check": [
         "hostile test"
@@ -22,6 +22,6 @@
   ],
   "suggest": {
     "verdict": "take",
-    "why": "The owner said it: what a plugin needs is a set of rules, shown when it is imported and switched on when it is installed."
+    "why": "The owner agreed to this sentence on 21 November 2026."
   }
 }

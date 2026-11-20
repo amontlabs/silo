@@ -39,3 +39,19 @@ not carried: what it brings is now said by the declaration.
   "can access the full API of Theia", and declares its front end in `theiaExtensions`. What is
   "installable at runtime", runs "in a dedicated process" and works "against a defined API" is
   called there a VS Code extension.
+
+## The owner's answers (21 November 2026, later)
+
+- "Extension" is the word, in place of "plugin". An extension is a back end, the program, and a
+  front end, which is panels that fit in the app the way the app is designed. Silo can offer
+  useful pieces for the front end, such as notifying and showing a panel in different ways. The
+  owner likens it to the mods of Claude Code. The rename is done with the rewrite of this part.
+- Examples of what an extension may use are generic and exact, such as "read this path on main",
+  not "read the conversations of main". Finding the conversations in what it reads is the
+  extension's job.
+- The owner asks for one design of the whole: how an extension fits in, before single points are
+  settled. "Providing an output to a precaution" is not the purpose of an extension, and "on not
+  safe: deny" does not say what is denied.
+- Read on Claude Code's pages on 21 November 2026, through a summarising fetch: a mod registers
+  handlers on events; a panel is an element tree the handler returns and the app draws; "Mods
+  aren't sandboxed"; the set of answers a hook may give differs by event.

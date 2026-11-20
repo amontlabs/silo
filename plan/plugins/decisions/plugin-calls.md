@@ -37,3 +37,7 @@ reads can still leak.
 - Putting a question to the user and showing a panel are tools a plugin uses while it runs, not
   outputs. A plugin can wait for the answer to its question.
 - The output is a schema. How an output is used and how it shows in the app is designed later.
+
+On 21 November 2026 the owner agreed to the sentence now in the answer: "A plugin can use only the
+tools it declares, and installing it grants them." The earlier wording, "until a rule allows it",
+is gone.

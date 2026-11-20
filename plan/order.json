@@ -222,7 +222,7 @@
         "what-defines-a-classifier",
         "where-a-classifier-runs",
         "plugin-declaration",
-        "plugin-is-the-subject",
+        "what-a-plugin-never-does",
         "declaration-is-enforced",
         "plugin-calls",
         "plugin-wakes-on",

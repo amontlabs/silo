@@ -32,9 +32,9 @@ Film 5, "What you can add":
 - No tool of a plugin is named or shown. Owner. Only the areas they touch: the record, opinions,
   the app, the user.
 - The owner asks for more work on the whole part before the script: whether "extension" is the
-  word, and why a plugin can never act on a computer (`plugin-is-the-subject`).
+  word, and why a plugin can never act on a computer (`what-a-plugin-never-does`).
 - The film needs a new script. It waits for these decisions of the plan: `plugin-declaration`,
-  `declaration-is-enforced`, `plugin-calls`, `import-then-install`, `plugin-is-the-subject`,
+  `declaration-is-enforced`, `plugin-calls`, `import-then-install`, `what-a-plugin-never-does`,
   `plugin-forwarding-call`, `plugin-says-done`, `what-makes-a-classifier`,
   `shipped-plugins-declare`, `plugin-wakes-on`, `request-waits-only-by-precaution`,
   `opinion-is-a-value`, `who-fixes-the-values` and `read-grant-names-its-part`.
