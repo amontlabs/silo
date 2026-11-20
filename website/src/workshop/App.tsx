@@ -54,7 +54,8 @@ const noHistory = () => Promise.resolve({});
 type View = 'map' | 'order';
 /** What the page uses of the browser's `ViewTransition`. */
 type ViewTransitionLike = { finished: Promise<void>; ready?: Promise<void>; skipTransition?: () => void };
-type Focus = { kind: 'title' } | { kind: 'part'; part: string } | { kind: 'selector'; selector: string } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string };
+/** `bring`: what takes the focus is brought into view at once (going back off the map). */
+type Focus = { kind: 'title' } | { kind: 'part'; part: string; bring?: boolean } | { kind: 'selector'; selector: string; bring?: boolean } | { kind: 'row'; key: string; reveal?: boolean } | { kind: 'reveal'; key: string };
 
 const LEAVE_MS = 140;
 /** How long what just arrived is marked, for its fade in (about 150 ms). */
@@ -409,7 +410,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
     if (isHome || backUnderWay()) return;
     // A place reached by its address has no opener: the link under the tiles that leads to it takes the focus, or the
     // page's title when there is none.
-    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part } : opener.current ? { kind: 'selector', selector: opener.current } : shown.kind === 'suggested' ? { kind: 'part', part: 'suggested' } : { kind: 'selector', selector: `a.ws-fold-link[href="${formatHash(shown)}"]` };
+    // Off the map, with a view transition or without one, it is brought into view; the map has its own going-back.
+    const bring = !onMap();
+    const focus: Focus = shown.kind === 'part' ? { kind: 'part', part: shown.part, bring } : opener.current ? { kind: 'selector', selector: opener.current, bring } : shown.kind === 'suggested' ? { kind: 'part', part: 'suggested', bring } : { kind: 'selector', selector: `a.ws-fold-link[href="${formatHash(shown)}"]`, bring };
     const finish = () => go(HOME, null, { push: true, focus, announce: '' });
     if (still()) {
       finish();
@@ -601,9 +604,9 @@ export function App({ data, loadNotes = noNotes, loadFacts = noFacts, loadHistor
       const node = document.querySelector<HTMLElement>(selector) ?? (target.kind === 'selector' ? document.querySelector<HTMLElement>('.ws-top h1') : null);
       if (node && !node.hasAttribute('tabindex') && node.tagName === 'H1') node.setAttribute('tabindex', '-1');
       node?.focus({ preventScroll: true });
-      // Back on the plain view through a view transition, what takes the focus is brought into view at once, scrolled
-      // the least needed and clear of the sticky header.
-      if (node && inTransition.current) reveal(node.closest('.ws-tile') ?? node);
+      // Back on the plain view off the map, what takes the focus is brought into view at once, scrolled the least
+      // needed and clear of the sticky header (inside a view transition, before the new view is captured).
+      if (node && (inTransition.current || target.bring)) reveal(node.closest('.ws-tile') ?? node);
     }
   });
 
