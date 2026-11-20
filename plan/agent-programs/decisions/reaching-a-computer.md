@@ -28,3 +28,21 @@ The question has three parts: `reaching-a-computer`, `following-the-work` (with
   sub-agents do.
 - The SSH mode of the desktop apps is young. It has open bugs with several conversations on one
   machine, and for Claude it takes no API key. A terminal over SSH is the path that always works.
+
+## More from the research of 18 November 2026
+
+- From the researchers: Lima and GitHub Codespaces each generate SSH entries for their machines,
+  which the user's SSH settings include.
+- The protocols that attach a window to a conversation (the Agent Client Protocol, and one VS Code
+  is building) leave open how a window finds a conversation. Silo sees every computer from
+  outside, so it is placed to answer that. How a conversation is recognised is still open
+  (`recognising-a-conversation`).
+
+How sure this research is:
+
+- Each claim of the researchers carries its source. Some rest only on a search summary.
+- Checked directly: Anthropic's terms, Claude Code's network documentation and the Codex rule on
+  SSH entries.
+- Almost no independent user review was found of the tools for following many agents. No Reddit or
+  Hacker News thread could be read.
+- The findings are kept outside this repository.

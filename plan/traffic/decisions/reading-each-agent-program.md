@@ -28,3 +28,149 @@ Signing in from scratch and the renewal of a token through the boundary; trust t
 
 - Anthropic documents the set-up: "Enterprise TLS-inspection proxies work without additional configuration when their root certificate is installed in the OS trust store". Its terms do not prevent "an end user from signing in to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code".
 - OpenAI's terms, read in full, have no clause on reading one's own traffic. Its documentation gives Codex a setting for "a corporate TLS proxy or private root CA". The nearest clauses forbid sharing an account's credentials, extracting output automatically, and trying to extract the model's protected reasoning.
+
+## The research of 19 November 2026, in detail
+
+The sections above are its summary, and this is what they rest on. The report, the researchers'
+notes, the saved copies of the terms and the test's summary files are kept outside this
+repository.
+
+### The test
+
+An ordinary inspecting proxy, mitmproxy 12.3.1, stood in for the boundary on a Mac, with the
+owner's own sign-ins. Each program was told to trust the proxy's certificate for one command.
+Nothing was added to the system's trust store. The proxy, its certificate and the raw output were
+deleted afterwards. The summary files that were kept hold, per request, header names, sizes,
+hashes and counts. They hold no sign-in and no conversation text.
+
+The proxy is not Silo's boundary. The table says what a proxy in that place could read.
+
+| | Claude Code 2.1.327, Claude subscription | Codex 0.170.0, ChatGPT sign-in |
+|---|---|---|
+| Certificate trusted | Works. One tool call, one answer. | Works. One tool call, one answer. |
+| Certificate not trusted | Refuses: "SSL certificate verification failed". 16 tries, none passed. | Refuses: "Reconnecting... waiting for network". 53 tries, none passed. |
+| How model traffic travels | HTTP/1.1, the answer as a stream of events | A persistent socket (WebSocket). Its other calls use HTTP/2. |
+| Read by the proxy | The model that answered, four token counts, the tool call, a request id, the rate-limit headers | The model that answered, token counts, the tool call, rate-limit events |
+| Hosts | `api.anthropic.com`, and Datadog for its telemetry | `chatgpt.com`, `ab.chatgpt.com` for its telemetry, `github.com` |
+| Provider's reaction | Normal answers, status 200, no challenge | Normal answers, no challenge |
+| Writes its encryption keys to a file when asked | No | The file is created and stays empty |
+
+One side connection of Codex, to `github.com`, refused the certificate. The likely cause is a
+helper that does not read Codex's certificate setting. This was not confirmed. Whether the
+certificate in the system's trust store is enough for it is to test in a real computer.
+
+Also not tested: whether a provider reacts over days or under heavy use, the comparison with the
+program's own account for Codex (`own-account-matches`), and the desktop apps.
+
+### What Anthropic's pages say
+
+Read directly on 19 November 2026. The pages show no date.
+
+- Claude Code trusts the system's certificates: "By default, Claude Code trusts both its bundled
+  Mozilla CA certificates and your operating system's certificate store."
+  (code.claude.com/docs/en/network-config)
+- Anthropic describes a subscription sign-in that passes through a gateway: "Requests still
+  route through the gateway, but a saved claude.ai login remains the active credential, so its
+  usage limits and billing apply. Gateways that pass this traffic on to Anthropic must forward
+  `Authorization` and the OAuth capability in `anthropic-beta`." The same page says: "Anthropic
+  doesn't endorse, maintain, or audit third-party gateway products".
+  (code.claude.com/docs/en/llm-gateway)
+- What is forbidden: "Anthropic does not permit third-party developers to offer Claude.ai login
+  into their own applications, or to route requests through Free, Pro, Max, or Ultra plan
+  credentials on behalf of their users. Moreover, developers may not collect, store, or
+  intermediate Claude.ai credentials or session tokens — sign-in to a Claude account must complete
+  through Anthropic's own flow." (code.claude.com/docs/en/legal-and-compliance) How Anthropic
+  reads "intermediate" is the decision `anthropic-reads-intermediate`.
+- An API key held as a secret is allowed. The rule "does not restrict how customers provision and
+  manage their own API keys [...] for example, configuring an API key in a development
+  environment, secrets manager, or machine image". (same page)
+- The rule for a product that preinstalls or runs Claude Code: "Preinstalling or running Claude
+  Code in your products or services (e.g. in hosted sandboxes or other agent infrastructure)
+  requires agreeing to our Commercial Terms of Service". The program "must not be modified", and
+  the product "may not remove, disable, or restrict any authentication method built into it". It
+  "may not pay for, resell, or intermediate Claude usage" for its users. (same page) The decisions
+  are `anthropic-conditions-kept` and `recipe-under-preinstall-rule`.
+- Anthropic "reserves the right to take measures to enforce these restrictions and may do so
+  without prior notice".
+- The Commercial Terms (effective 17 June 2025) and the Service Specific Terms (effective
+  31 August 2026) were read in full. They do not mention Claude Code, recipes or preinstalling.
+  They forbid to "reverse engineer or duplicate the Services". Nothing in Silo takes Claude Code
+  apart: the boundary reads requests and answers as they pass. Whether reading them counts under
+  that clause was not asked of Anthropic.
+
+### What OpenAI's texts say
+
+Read on 19 November 2026, from the English pages.
+
+| Text | Date on the page |
+|---|---|
+| Terms of use (rest of world) | effective 1 January 2026 |
+| Europe terms of use | updated 16 January 2026 |
+| Service terms | updated 13 November 2026 |
+| Usage policies | effective 20 November 2026 |
+| Services agreement (business) | effective 1 January 2026 |
+
+- No clause mentions reading, intercepting or proxying your own traffic. The words "intercept" and
+  "proxy" appear in none of the five texts.
+- The nearest clauses are in the terms of use. "You may not share your account credentials or make
+  your account available to anyone else". You may not "Automatically or programmatically extract
+  data or Output". You may not "Interfere with or disrupt our Services, including circumvent any
+  rate limits or restrictions or bypass any protective measures or safety mitigations".
+- The usage policies add: "You must not attempt to extract protected reasoning through
+  unauthorized access, reverse engineering, or circumvention of safeguards." The decision is
+  `hidden-reasoning-stays-closed`.
+- The part of the service terms on "Sign in with ChatGPT" addresses a developer who uses that
+  sign-in "in your services". In Silo the user signs in to Codex itself. The separate "Sign in
+  with ChatGPT Terms" were not read in full, so whether they bear on Silo is to confirm.
+- OpenAI's documentation: "If your network uses a corporate TLS proxy or private root CA, set
+  `CODEX_CA_CERTIFICATE` to a PEM bundle before logging in" (learn.chatgpt.com/docs/auth, read by
+  a researcher). Codex is open source under Apache-2.0.
+- No rule was found for running Codex inside another product.
+
+### Docker Sandboxes is not taken as a precedent
+
+Docker's documentation, read directly (docs.docker.com/ai/sandboxes/security/credentials), says of
+a Claude subscription: "You sign in on the host, and the proxy handles token refresh and routing."
+Its proxy "looks up the matching credential on the host, and overwrites the auth header before
+forwarding". No public agreement between Docker and Anthropic was found, and Anthropic's rule
+begins with "Unless we've mutually agreed otherwise". So this shows what one large vendor ships,
+not what the terms allow. Silo's path does not lean on it and does less: the boundary keeps no
+sign-in and injects none.
+
+### What other products do
+
+- Anthropic's rule on preinstalling reached its legal page about 21 August 2026, by the page's
+  own date. An archived copy of the page of 16 August lacks it, and one of 30 August has it. The
+  same edit added the sentence
+  that lets a user sign in with a subscription "including where a platform hosts Claude Code".
+- Anthropic's own documentation recommends a virtual machine: "A dedicated virtual machine
+  provides the strongest separation [...] Options include cloud instances, local hypervisors, and
+  microVMs". It names Docker Sandboxes for it. That page states no conditions.
+  (code.claude.com/docs/en/sandbox-environments, read directly)
+- Shipping Claude Code already installed is common, and the user signs in inside. Daytona: "The
+  default Daytona snapshot includes Claude Code". Conductor, an app on the user's own Mac:
+  "Conductor comes with Claude Code preinstalled". Both were read directly. The researchers found
+  the same for E2B, Fly's Sprites, Blaxel, Namespace and Docker.
+- On the pages that were read, their documentation on Claude Code, none of them mentions the
+  rule, the Commercial Terms or an agreement with Anthropic. Other pages of theirs were not
+  searched.
+- From the researchers, not read directly: what Anthropic acted against in 2026 was tools that
+  used a subscription's sign-in in a client of their own, in place of the real Claude Code.
+- From the researchers, not read directly: Homebrew's package downloads Claude Code from
+  Anthropic and hands out no copy, and the Nix package set marks Claude Code's licence as unfree.
+
+Silo's path is the common one, and it does less than some of these products. A recipe fetches
+Claude Code from Anthropic and Silo ships no copy (`claude-code-fetched-by-recipe`). The boundary
+forwards the sign-in inside each request and stores it nowhere (`program-and-sign-in-untouched`).
+
+### How sure this is
+
+- Read directly: Anthropic's legal, network and gateway pages, its Commercial Terms and Service
+  Specific Terms in full, Claude Code's licence, Docker's page on credentials and its page on
+  Claude Code, OpenAI's five texts, and every test result.
+- From the researchers, some of it only from search summaries: field reports, the history of
+  Anthropic's enforcement in 2026, the gateway products.
+- Not read in full: Anthropic's Consumer Terms and Usage Policy, the "Sign in with ChatGPT Terms",
+  and OpenAI's help-centre articles.
+- This is a reading of the terms, not legal advice. No lawyer has read it, and neither vendor was
+  asked.

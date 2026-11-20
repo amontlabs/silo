@@ -26,3 +26,15 @@ and machines that can be rebuilt exactly." The answer is a proposal built on the
 
 `recipe-format` says a recipe is written in an existing format that people know. This answer says
 a user picks pieces and writes a short list. The two are to be squared.
+
+## How sure the research is
+
+- Each claim of the researchers carries its source. Some rest only on a search summary.
+- The security advisories for Nix in 2026 were read through summaries. The counts quoted from them
+  need checking.
+- The research found no published figure for the time and disk of a recipe's first build.
+- Users' reports put a Nix store at tens of gigabytes per machine. They give no workload to
+  compare with.
+- The product that showed Nix to its users and left it is Railway. That it left for that reason is
+  the researchers' reading, not checked directly.
+- The findings are kept outside this repository.
