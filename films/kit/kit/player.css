@@ -1,0 +1,51 @@
+/* Fjord's type: Geist and Geist Mono, Regular and Medium only. gallery.py inlines these files as data URLs. */
+@font-face { font-family: "Geist"; font-weight: 400; font-style: normal; src: url("fonts/geist-regular.otf") format("opentype"); }
+@font-face { font-family: "Geist"; font-weight: 500; font-style: normal; src: url("fonts/geist-medium.otf") format("opentype"); }
+@font-face { font-family: "Geist Mono"; font-weight: 400; font-style: normal; src: url("fonts/geist-mono.ttf") format("truetype"); }
+
+/* The colours come from kit.js (one palette for the stage and the page); these are the values before it runs. */
+:root { --bg: #e4e8eb; --surface: #f6f8f9; --ink: #101418; --muted: #5d6871; --faint: #98a2aa; --line: #cdd3d8; --accent: #2b63c6; --bad: #cf3a3a; --shadow: #14273a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #0d1114; --surface: #1a2025; --ink: #eef0ee; --muted: #9aa3a9; --faint: #5f6a72; --line: #323b42; --accent: #6da7ec; --bad: #ec7e7e; --shadow: #000000; }
+}
+:root[data-theme="dark"] { --bg: #0d1114; --surface: #1a2025; --ink: #eef0ee; --muted: #9aa3a9; --faint: #5f6a72; --line: #323b42; --accent: #6da7ec; --bad: #ec7e7e; --shadow: #000000; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 15px/1.4 Geist, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; font-synthesis: none; }
+#frame { max-width: 1000px; margin: 0 auto; padding: 18px 16px; }
+.ask { color: var(--muted); font-size: 13px; margin: 0 0 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ask:empty { display: none; }
+.ask::before { content: "You asked: "; color: var(--faint); }
+.answer { font-size: 21px; font-weight: 500; letter-spacing: -0.015em; margin: 0 0 14px; line-height: 1.3; text-wrap: balance; }
+#stage { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: var(--bg); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow) 10%, transparent), 0 18px 40px -20px color-mix(in srgb, var(--shadow) 42%, transparent); }
+/* Type keeps its shape while the camera moves: no hinting jumps from one zoom to the next. */
+#stage text { font-synthesis: none; text-rendering: geometricPrecision; }
+.caption { font-size: 17px; font-weight: 500; letter-spacing: -0.01em; margin-top: 14px; min-height: 24px; text-wrap: balance; }
+.source { color: var(--muted); font-size: 13px; margin-top: 4px; display: none; }
+body.sources .source { display: block; }
+nav { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+nav button { font: inherit; color: var(--ink); cursor: pointer; }
+nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pp { flex: none; width: 30px; height: 30px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--ink); color: var(--bg); }
+.pp svg { display: block; }
+.src { flex: none; background: none; border: 1px solid var(--line); border-radius: 7px; padding: 3px 11px; font-size: 13px; color: var(--muted); }
+.src:hover, .src[aria-pressed="true"] { color: var(--ink); border-color: var(--faint); }
+.src[aria-pressed="true"] { background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.time { flex: none; font: 12px "Geist Mono", ui-monospace, monospace; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* One segment per scene. Each is a tall target around a thin track. */
+.segs { flex: 1; display: flex; gap: 4px; touch-action: none; cursor: pointer; }
+.segs .seg { flex: 1; min-width: 0; height: 22px; padding: 0; border: 0; background: none; position: relative; cursor: pointer; }
+.segs .seg::before, .segs .seg i { content: ""; position: absolute; left: 0; right: 0; top: 9px; height: 4px; border-radius: 2px; transition: top 0.12s, height 0.12s; }
+.segs .seg::before { background: color-mix(in srgb, var(--ink) 14%, transparent); }
+.segs .seg i { background: var(--ink); transform-origin: 0 50%; transform: scaleX(0); }
+.segs:hover .seg::before, .segs:hover .seg i { top: 8px; height: 6px; border-radius: 3px; }
+.segs .seg:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; border-radius: 6px; }
+#errors { display: none; color: var(--bad); white-space: pre-wrap; font: 12px "Geist Mono", ui-monospace, monospace; margin-top: 10px; }
+body.broken #errors { display: block; }
+/* Embedded in Fjord's Show me panel (`?embed=1`): the stage alone, filling the view, which Fjord keeps at 16:9 and rounds.
+   Fjord draws the answer, caption, controls and Sources natively, so none of the page's chrome shows, and nothing scrolls. */
+.embed, .embed body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+.embed ::-webkit-scrollbar { display: none; }
+.embed #frame { max-width: none; width: 100%; height: 100%; padding: 0; }
+.embed .ask, .embed .answer, .embed .caption, .embed .source, .embed nav, .embed #errors { display: none !important; }
+.embed #stage { width: 100%; height: 100%; border-radius: 0; box-shadow: none; cursor: pointer; }

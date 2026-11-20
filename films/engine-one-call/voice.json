@@ -1,0 +1,178 @@
+{
+ "engine": "kokoro",
+ "speed": 1.0,
+ "before": 0.4,
+ "between": 0.35,
+ "after": 0.6,
+ "voices": [
+  {
+   "id": "af_heart",
+   "label": "Heart",
+   "scenes": [
+    {
+     "sentences": [
+      {
+       "text": "The engine keeps what it knows in small tables.",
+       "file": "voice/c6e7db0e14ef84fc.mp3",
+       "start": 0.4,
+       "length": 2.4
+      },
+      {
+       "text": "This is the table of computers.",
+       "file": "voice/72a73bcb9b81c80c.mp3",
+       "start": 3.15,
+       "length": 1.753
+      },
+      {
+       "text": "Each row is one computer: its number, its name, what you want it to be, and what the engine last saw.",
+       "file": "voice/c2a99a24d940a029.mp3",
+       "start": 5.253,
+       "length": 5.762
+      }
+     ],
+     "total": 11.615
+    },
+    {
+     "sentences": [
+      {
+       "text": "You click Start in the app.",
+       "file": "voice/8c844def6acfd80d.mp3",
+       "start": 0.4,
+       "length": 1.243
+      },
+      {
+       "text": "The app starts nothing itself.",
+       "file": "voice/c7196315da8e779b.mp3",
+       "start": 1.993,
+       "length": 1.546
+      },
+      {
+       "text": "It sends a call, start computer seven, into one queue.",
+       "file": "voice/3af3bf43f09c90f8.mp3",
+       "start": 3.889,
+       "length": 2.91
+      },
+      {
+       "text": "Everything that can change the state enters through that queue, one at a time.",
+       "file": "voice/820931612518997b.mp3",
+       "start": 7.149,
+       "length": 3.975
+      }
+     ],
+     "total": 11.724
+    },
+    {
+     "sentences": [
+      {
+       "text": "The core is a function.",
+       "file": "voice/d76efafab51d8f4b.mp3",
+       "start": 0.4,
+       "length": 1.158
+      },
+      {
+       "text": "It reads the state and the call, and checks that computer seven exists and is stopped.",
+       "file": "voice/c7c07fa5d69df2a4.mp3",
+       "start": 1.908,
+       "length": 4.62
+      },
+      {
+       "text": "Then it returns three things: the new state, an event, and an effect.",
+       "file": "voice/ad0933722d0150d1.mp3",
+       "start": 6.878,
+       "length": 3.603
+      }
+     ],
+     "total": 11.081
+    },
+    {
+     "sentences": [
+      {
+       "text": "The effect is only a request.",
+       "file": "voice/85811c5b0fc376a4.mp3",
+       "start": 0.4,
+       "length": 1.631
+      },
+      {
+       "text": "A driver does the real work: it starts the virtual machine.",
+       "file": "voice/ce88df913b63a6e0.mp3",
+       "start": 2.381,
+       "length": 3.248
+      },
+      {
+       "text": "That takes time, and it can fail.",
+       "file": "voice/8a397508b6562165.mp3",
+       "start": 5.979,
+       "length": 1.762
+      },
+      {
+       "text": "When it is done, its answer comes back through the same queue, as an input.",
+       "file": "voice/af9e1066d148c630.mp3",
+       "start": 8.091,
+       "length": 3.893
+      }
+     ],
+     "total": 12.584
+    },
+    {
+     "sentences": [
+      {
+       "text": "The core handles that input the same way.",
+       "file": "voice/e3789ea7e085b6fa.mp3",
+       "start": 0.4,
+       "length": 2.039
+      },
+      {
+       "text": "It writes seen running, and a second event.",
+       "file": "voice/86f53c25789de687.mp3",
+       "start": 2.789,
+       "length": 2.203
+      },
+      {
+       "text": "What you want and what the engine saw now agree, so there is nothing left to do.",
+       "file": "voice/10b1257e644c58fa.mp3",
+       "start": 5.342,
+       "length": 4.153
+      }
+     ],
+     "total": 10.095
+    },
+    {
+     "sentences": [
+      {
+       "text": "The core touches nothing.",
+       "file": "voice/bfc7a4dfb453931c.mp3",
+       "start": 0.4,
+       "length": 1.229
+      },
+      {
+       "text": "So the same inputs, in the same order, always give the same result: the engine can replay a history, and pick up after a crash.",
+       "file": "voice/b14f967da2265528.mp3",
+       "start": 1.979,
+       "length": 7.755
+      },
+      {
+       "text": "The numbered events are how the app follows what the engine did.",
+       "file": "voice/74c4f5cceec6911c.mp3",
+       "start": 10.084,
+       "length": 3.083
+      },
+      {
+       "text": "What agents do inside a computer is not in them: that is the record, and it is written apart.",
+       "file": "voice/f92799117c540c95.mp3",
+       "start": 13.517,
+       "length": 5.386
+      },
+      {
+       "text": "And the core can be tested with millions of random sequences of inputs before it ever starts a real machine.",
+       "file": "voice/a2eb91cb61c02653.mp3",
+       "start": 19.253,
+       "length": 6.378
+      }
+     ],
+     "total": 26.231
+    }
+   ],
+   "total": 83.33
+  }
+ ]
+}

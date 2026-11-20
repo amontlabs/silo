@@ -1,0 +1,232 @@
+{
+ "engine": "kokoro",
+ "speed": 1.0,
+ "before": 0.4,
+ "between": 0.35,
+ "after": 0.6,
+ "voices": [
+  {
+   "id": "af_heart",
+   "label": "Heart",
+   "scenes": [
+    {
+     "sentences": [
+      {
+       "text": "Silo ships some classifiers.",
+       "file": "voice/9f31bcc53e82ae07.mp3",
+       "start": 0.4,
+       "length": 1.594
+      },
+      {
+       "text": "You can add others: a script, a small model, or your own agent.",
+       "file": "voice/90b8848a8440ca9e.mp3",
+       "start": 2.344,
+       "length": 3.489
+      },
+      {
+       "text": "An added classifier is a program.",
+       "file": "voice/5d2e59ab658d353a.mp3",
+       "start": 6.183,
+       "length": 1.921
+      },
+      {
+       "text": "Nothing is loaded into Silo itself, so it runs in a computer of its own, with a boundary like any other.",
+       "file": "voice/309e7420c2f547c7.mp3",
+       "start": 8.454,
+       "length": 6.296
+      },
+      {
+       "text": "It reads text that agents wrote: file names, commands, web pages.",
+       "file": "voice/ef7e95e5fb77bcb3.mp3",
+       "start": 15.1,
+       "length": 4.186
+      },
+      {
+       "text": "That is how an agent could try to give it instructions.",
+       "file": "voice/fb740b90e489b745.mp3",
+       "start": 19.636,
+       "length": 2.798
+      },
+      {
+       "text": "Its boundary keeps that contained.",
+       "file": "voice/b4f6c388abfa315e.mp3",
+       "start": 22.784,
+       "length": 1.795
+      }
+     ],
+     "total": 25.179
+    },
+    {
+     "sentences": [
+      {
+       "text": "Letting it read a computer's record is a grant, and you make it.",
+       "file": "voice/d150510e2a1ab688.mp3",
+       "start": 0.4,
+       "length": 3.252
+      },
+      {
+       "text": "Silo says the worst case first: this classifier can read everything recorded about main, and send it wherever its own network rules allow.",
+       "file": "voice/848e453b64020984.mp3",
+       "start": 4.002,
+       "length": 8.182
+      },
+      {
+       "text": "Silo shows that as a path, before you confirm.",
+       "file": "voice/1e460ab247d88451.mp3",
+       "start": 12.534,
+       "length": 2.557
+      }
+     ],
+     "total": 15.691
+    },
+    {
+     "sentences": [
+      {
+       "text": "What comes back is opinions, each pointing at the lines of the record that led to it.",
+       "file": "voice/1b377eb926b3d6bf.mp3",
+       "start": 0.4,
+       "length": 4.597
+      },
+      {
+       "text": "It can also give panels for the app to draw, and questions for you.",
+       "file": "voice/4403525b6a7dc5d3.mp3",
+       "start": 5.347,
+       "length": 3.478
+      },
+      {
+       "text": "It can never act on a computer, answer an ask, set or change a rule or a precaution, give a secret, or write into another computer.",
+       "file": "voice/9b3b81fc0cfee760.mp3",
+       "start": 9.175,
+       "length": 8.212
+      },
+      {
+       "text": "What its opinion leads to is said by a precaution you set.",
+       "file": "voice/9488e41debfb0174.mp3",
+       "start": 17.737,
+       "length": 3.411
+      }
+     ],
+     "total": 21.748
+    },
+    {
+     "sentences": [
+      {
+       "text": "Classifiers work in three tiers.",
+       "file": "voice/b350995e7b2a8de0.mp3",
+       "start": 0.4,
+       "length": 1.854
+      },
+      {
+       "text": "Each wakes only when the one before cannot judge.",
+       "file": "voice/68fd3259cf38b39c.mp3",
+       "start": 2.604,
+       "length": 2.406
+      },
+      {
+       "text": "First the built-in classifiers.",
+       "file": "voice/0f9e23da687180de.mp3",
+       "start": 5.36,
+       "length": 1.66
+      },
+      {
+       "text": "They always run and cost no tokens.",
+       "file": "voice/3ede4775fa759e0c.mp3",
+       "start": 7.37,
+       "length": 2.068
+      },
+      {
+       "text": "Then a small model, for what they cannot judge.",
+       "file": "voice/11c351ec8a1e81b5.mp3",
+       "start": 9.788,
+       "length": 2.36
+      },
+      {
+       "text": "Then an agent, which wakes when the small model is unsure, or when you ask it a question.",
+       "file": "voice/50b95bb46ad7da14.mp3",
+       "start": 12.498,
+       "length": 4.938
+      },
+      {
+       "text": "That third tier is the monitor agent you proposed: your own agent program, in its own computer.",
+       "file": "voice/47470d4663162e77.mp3",
+       "start": 17.786,
+       "length": 5.768
+      },
+      {
+       "text": "Silo ships its recipe.",
+       "file": "voice/893c020b2f32db62.mp3",
+       "start": 23.904,
+       "length": 1.424
+      },
+      {
+       "text": "What an added classifier spends is your choice, and it is metered like any computer.",
+       "file": "voice/f084c087f4b2a05d.mp3",
+       "start": 25.678,
+       "length": 4.53
+      }
+     ],
+     "total": 30.808
+    },
+    {
+     "sentences": [
+      {
+       "text": "Pieces made by someone else arrive in a package, called a plugin: classifiers, rules and precautions, panels, and programs that forward alerts and asks to your phone.",
+       "file": "voice/55ae32fd5fe06581.mp3",
+       "start": 0.4,
+       "length": 10.113
+      },
+      {
+       "text": "Installing a plugin grants nothing.",
+       "file": "voice/351872ee30481a62.mp3",
+       "start": 10.863,
+       "length": 1.802
+      },
+      {
+       "text": "Each rule, each precaution and each grant in it is shown to you, and you accept it or not.",
+       "file": "voice/f215cdc2f4a61883.mp3",
+       "start": 13.015,
+       "length": 4.772
+      },
+      {
+       "text": "In the older film a plugin could pause or stop a computer itself.",
+       "file": "voice/4766b11c66e076e2.mp3",
+       "start": 18.137,
+       "length": 3.652
+      },
+      {
+       "text": "Not any more: it is only the package.",
+       "file": "voice/f171278b8c11dc8f.mp3",
+       "start": 22.139,
+       "length": 2.148
+      }
+     ],
+     "total": 24.887
+    },
+    {
+     "sentences": [
+      {
+       "text": "Before a classifier goes live, Silo can run it against the recorded past, in a fresh computer.",
+       "file": "voice/32284f79e96abadf.mp3",
+       "start": 0.4,
+       "length": 5.575
+      },
+      {
+       "text": "You see what it would have done: the opinions it would have given, and where it tried to connect.",
+       "file": "voice/ee01a743bcbcdefe.mp3",
+       "start": 6.325,
+       "length": 4.335
+      },
+      {
+       "text": "How a piece is installed and started, and how you take a grant back, is not designed yet.",
+       "file": "voice/50a922f08c84c7d6.mp3",
+       "start": 11.01,
+       "length": 5.023
+      }
+     ],
+     "total": 16.633
+    }
+   ],
+   "total": 134.946
+  }
+ ]
+}

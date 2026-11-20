@@ -1,0 +1,297 @@
+{
+ "engine": "kokoro",
+ "speed": 1.0,
+ "before": 0.4,
+ "between": 0.35,
+ "after": 0.6,
+ "voices": [
+  {
+   "id": "af_heart",
+   "label": "Heart",
+   "scenes": [
+    {
+     "sentences": [
+      {
+       "text": "Start with what Silo saw itself.",
+       "file": "voice/7f316c8bcf64e523.mp3",
+       "start": 0.4,
+       "length": 1.586
+      },
+      {
+       "text": "An agent opens a connection.",
+       "file": "voice/3599219fc941255a.mp3",
+       "start": 2.336,
+       "length": 1.625
+      },
+      {
+       "text": "It passes through a part of Silo that sits outside the computer.",
+       "file": "voice/057496a1e9e2e577.mp3",
+       "start": 4.311,
+       "length": 3.403
+      },
+      {
+       "text": "The agent also writes a file.",
+       "file": "voice/718d7fcd9f9ce968.mp3",
+       "start": 8.064,
+       "length": 1.693
+      },
+      {
+       "text": "The file stays inside, and Silo sees the change from outside, on the computer's disk.",
+       "file": "voice/bb91a91367601c77.mp3",
+       "start": 10.107,
+       "length": 5.081
+      },
+      {
+       "text": "Silo writes one line for each: a fact.",
+       "file": "voice/5da19611a0b02f22.mp3",
+       "start": 15.538,
+       "length": 2.35
+      },
+      {
+       "text": "It is never changed.",
+       "file": "voice/29dc2ebcecf6a5c0.mp3",
+       "start": 18.238,
+       "length": 1.129
+      }
+     ],
+     "total": 19.967
+    },
+    {
+     "sentences": [
+      {
+       "text": "Some things cannot be seen from outside, such as which process wrote that file.",
+       "file": "voice/0d8b30cbb16f402f.mp3",
+       "start": 0.4,
+       "length": 4.251
+      },
+      {
+       "text": "A process is one running program.",
+       "file": "voice/67e5908ea2288b10.mp3",
+       "start": 5.001,
+       "length": 1.99
+      },
+      {
+       "text": "A small part of Silo, the probe, runs inside the computer and tells Silo.",
+       "file": "voice/0224594135a48fd8.mp3",
+       "start": 7.341,
+       "length": 4.23
+      },
+      {
+       "text": "That line is a report.",
+       "file": "voice/ff1a3b04fd9b6ff0.mp3",
+       "start": 11.921,
+       "length": 1.288
+      },
+      {
+       "text": "The agent has full access in there, so a report is only what the inside said.",
+       "file": "voice/2acac042efa6bbb0.mp3",
+       "start": 13.559,
+       "length": 4.367
+      },
+      {
+       "text": "An agent program, such as Claude Code, can also give its own account of itself.",
+       "file": "voice/f2e3cb9c828731bd.mp3",
+       "start": 18.276,
+       "length": 4.64
+      },
+      {
+       "text": "That is a report too.",
+       "file": "voice/028fbf04ecd021b6.mp3",
+       "start": 23.266,
+       "length": 1.236
+      }
+     ],
+     "total": 25.102
+    },
+    {
+     "sentences": [
+      {
+       "text": "Facts and reports, in the order they came, are the record.",
+       "file": "voice/ab7f87b907df0a30.mp3",
+       "start": 0.4,
+       "length": 2.971
+      },
+      {
+       "text": "Nothing in it is changed afterwards.",
+       "file": "voice/eaa6ea2bd6066a56.mp3",
+       "start": 3.721,
+       "length": 1.895
+      },
+      {
+       "text": "One line is never both: that the file changed is a fact, and which process changed it is a report that points to it.",
+       "file": "voice/4f100a2173af5401.mp3",
+       "start": 5.966,
+       "length": 6.593
+      }
+     ],
+     "total": 13.159
+    },
+    {
+     "sentences": [
+      {
+       "text": "An opinion is what something thinks about the record: this file is code, this agent is stuck.",
+       "file": "voice/4255f453151fcc5e.mp3",
+       "start": 0.4,
+       "length": 5.236
+      },
+      {
+       "text": "It is computed from the record, and kept apart from it.",
+       "file": "voice/de6c34e56742ee37.mp3",
+       "start": 5.986,
+       "length": 2.882
+      },
+      {
+       "text": "It can be wrong.",
+       "file": "voice/a85c7a6629fa4dfd.mp3",
+       "start": 9.218,
+       "length": 0.888
+      },
+      {
+       "text": "So it says whose it is, and when what gave it improves, its opinions are computed again.",
+       "file": "voice/726abd4961d6a79a.mp3",
+       "start": 10.456,
+       "length": 4.977
+      },
+      {
+       "text": "The rows of the record do not change.",
+       "file": "voice/94c46af019074414.mp3",
+       "start": 15.783,
+       "length": 1.864
+      },
+      {
+       "text": "You can give one too.",
+       "file": "voice/81c4e0005c132273.mp3",
+       "start": 17.997,
+       "length": 1.154
+      },
+      {
+       "text": "Silo asks: is this a build?",
+       "file": "voice/8af8eeccdb3403f8.mp3",
+       "start": 19.501,
+       "length": 1.825
+      },
+      {
+       "text": "Your answer is your opinion.",
+       "file": "voice/d6522d8591ad354b.mp3",
+       "start": 21.676,
+       "length": 1.463
+      },
+      {
+       "text": "Silo keeps it as you gave it.",
+       "file": "voice/7c276e5ef2c3ca1f.mp3",
+       "start": 23.489,
+       "length": 1.546
+      }
+     ],
+     "total": 25.635
+    },
+    {
+     "sentences": [
+      {
+       "text": "What gives an opinion is called a classifier: a pattern, a function, a small model, or an agent.",
+       "file": "voice/be08fa9925e148b2.mp3",
+       "start": 0.4,
+       "length": 5.838
+      },
+      {
+       "text": "A classifier gives opinions.",
+       "file": "voice/e1700bf34eb21fda.mp3",
+       "start": 6.588,
+       "length": 1.654
+      },
+      {
+       "text": "It never acts.",
+       "file": "voice/2f8b7321272783d2.mp3",
+       "start": 8.592,
+       "length": 0.962
+      },
+      {
+       "text": "What an opinion can lead to comes in the film on rules and precautions.",
+       "file": "voice/25ddc055527cb75c.mp3",
+       "start": 9.904,
+       "length": 3.674
+      }
+     ],
+     "total": 14.178
+    },
+    {
+     "sentences": [
+      {
+       "text": "Something computed is as sure as its least sure ingredient.",
+       "file": "voice/825a027915ebed94.mp3",
+       "start": 0.4,
+       "length": 3.225
+      },
+      {
+       "text": "A count of facts is as good as a fact.",
+       "file": "voice/3e4f9d7aff90e196.mp3",
+       "start": 3.975,
+       "length": 1.919
+      },
+      {
+       "text": "Mix in a report, and the result is as told: no surer than the report.",
+       "file": "voice/ede98562a06b7cef.mp3",
+       "start": 6.244,
+       "length": 4.357
+      },
+      {
+       "text": "Add a judgement, and it is an opinion.",
+       "file": "voice/8c8cd4e920a8d07d.mp3",
+       "start": 10.951,
+       "length": 2.01
+      },
+      {
+       "text": "And a report or an opinion is never stored as a fact.",
+       "file": "voice/b9ba08f3f74a7820.mp3",
+       "start": 13.311,
+       "length": 3.114
+      }
+     ],
+     "total": 17.025
+    },
+    {
+     "sentences": [
+      {
+       "text": "All the reports together account for 48 megabytes, written by the build.",
+       "file": "voice/0ef522359cb5ce39.mp3",
+       "start": 0.4,
+       "length": 4.13
+      },
+      {
+       "text": "From outside, Silo saw 61 megabytes change.",
+       "file": "voice/d6265e3fc0d6ce8a.mp3",
+       "start": 4.88,
+       "length": 3.101
+      },
+      {
+       "text": "Silo corrects neither.",
+       "file": "voice/f403567a4c9b7d52.mp3",
+       "start": 8.331,
+       "length": 1.232
+      },
+      {
+       "text": "The 13 megabytes left over are shown as unattributed, and are never spread over the rest.",
+       "file": "voice/ef3acfcf6a21b227.mp3",
+       "start": 9.913,
+       "length": 5.416
+      },
+      {
+       "text": "And where Silo lost sight for a moment, it records a gap.",
+       "file": "voice/bd744073e1b5d5ec.mp3",
+       "start": 15.679,
+       "length": 2.96
+      },
+      {
+       "text": "The record says what it does not know.",
+       "file": "voice/1449b6b20556ab5c.mp3",
+       "start": 18.989,
+       "length": 1.726
+      }
+     ],
+     "total": 21.315
+    }
+   ],
+   "total": 136.381
+  }
+ ]
+}

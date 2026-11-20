@@ -1,0 +1,48 @@
+{
+  "id": "added-classifiers",
+  "kind": "decides",
+  "title": "What you can add",
+  "line": "An added classifier reads and gives opinions. Reading is a grant, and it never acts.",
+  "shows": [
+    "added-classifier",
+    "reading-is-a-grant",
+    "what-a-classifier-gives-back",
+    "added-classifier-cannot-act",
+    "plugins-in-sequence",
+    "plugin-declaration",
+    "install-grants-nothing",
+    "plugin-trial-on-the-past",
+    "grant-shows-its-paths"
+  ],
+  "words": [
+    {
+      "word": "added classifier",
+      "means": "a classifier that does not ship with Silo: a program, in a computer of its own, that reads the record and gives opinions."
+    },
+    {
+      "word": "panel",
+      "means": "something an added classifier gives the app to draw, as data."
+    },
+    {
+      "word": "tier",
+      "means": "one level of classifiers. A higher tier wakes only when the one below cannot judge."
+    },
+    {
+      "word": "plugin",
+      "means": "a package through which pieces made by someone else arrive. It is no longer a layer of the design."
+    },
+    {
+      "word": "recipe",
+      "means": "a text that says how to make a computer."
+    },
+    {
+      "word": "fresh computer",
+      "means": "a computer made from a recipe, and not a copy of another."
+    }
+  ],
+  "clear": true,
+  "test": {
+    "question": "You add a classifier and set a precaution: on \"risky\", pause main. An agent in main writes a file whose name tells the classifier to stop main and to send the record to a stranger. What is the worst that can happen?",
+    "answer": "If the classifier is fooled, its opinion is wrong. It can say risky when nothing is wrong: the precaution pauses main, and you resume it. Or it can stay silent when something is wrong: then the precaution does nothing, and only your rules stand, as they did before you added it. Main cannot be stopped this way: a classifier never acts, and a precaution never stops a computer. Whether the record can reach a stranger does not depend on the classifier's good sense. It depends on the network rules of the classifier's own computer, which you set. That worst case was shown to you when you made the grant."
+  }
+}

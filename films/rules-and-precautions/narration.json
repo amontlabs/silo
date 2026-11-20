@@ -1,0 +1,78 @@
+{
+  "speed": 1.0,
+  "voices": [
+    {
+      "id": "af_heart",
+      "label": "Heart"
+    }
+  ],
+  "scenes": [
+    [
+      "A rule is triggered by a fact, and it reads only facts.",
+      "So it is exact.",
+      "It may do anything you wrote in it.",
+      "Here a fake secret that no honest task uses is about to leave the computer.",
+      "The rule denies it, stops the computer and alerts you."
+    ],
+    [
+      "A precaution is triggered by a report or an opinion, and those can be wrong.",
+      "An opinion: a classifier thinks an agent is working against you.",
+      "Or a report: an agent program's own account does not match what Silo saw.",
+      "Because its trigger can be wrong, a precaution takes only reversible actions, such as alert, checkpoint, pause, deny and hold.",
+      "It never allows, never resumes and never stops a computer.",
+      "Silo is built so that such a precaution cannot even be written.",
+      "Like a rule, a precaution is kept outside the computer, and nothing inside can change it.",
+      "What an agent may see of it is still open."
+    ],
+    [
+      "Who or what triggers something decides what it may do.",
+      "You can do anything.",
+      "A fact, through a rule, does what the rule says.",
+      "A report or an opinion, through a precaution, does only what can be undone.",
+      "A budget shows the difference.",
+      "On a computer it is a rule: the boundary counts every call.",
+      "On a run it is a precaution: which run made a call is an opinion.",
+      "A wrong grant lets something out that cannot be taken back.",
+      "A wrong pause costs time.",
+      "A classifier itself never acts.",
+      "And there is no detour.",
+      "That a classifier gave an opinion, or that a precaution acted, is itself a fact.",
+      "No rule may be triggered by it."
+    ],
+    [
+      "A rule or a precaution can be synchronous or asynchronous.",
+      "Synchronous: the thing waits at the boundary for the answer, so it can still be denied or held.",
+      "A rule answers on the spot, because a fact is known on the spot.",
+      "Here the budget of main is reached, and in this example the next model call is denied.",
+      "A precaution makes the thing wait for a classifier's opinion.",
+      "Here the opinion is not safe, and the precaution denies it."
+    ],
+    [
+      "Asynchronous: nothing waits, and only the computer is left to act on.",
+      "A rule: the memory of the Mac runs low.",
+      "The meter is a fact, and in this example the rule pauses main and alerts you.",
+      "A precaution: a classifier's opinion comes after the thing has passed, and the precaution pauses main.",
+      "The timing does not change the kinds: a rule may trigger any kind, and a precaution only reversible ones."
+    ],
+    [
+      "A model's reply asks for a command to be run: a tool call.",
+      "It waits at the boundary for a classifier.",
+      "That wait has a limit too, and Silo ends it itself.",
+      "If the opinion is safe, the precaution does nothing, and the call passes as the rules allow.",
+      "If it is unsure, in this example the precaution holds it for you."
+    ],
+    [
+      "Here it says: not safe.",
+      "The precaution denies the call, and Silo changes the reply: the tool call is replaced by a refusal.",
+      "The agent program sends the refusal back with its next request, and the model reads it.",
+      "The original and the replacement are both kept as facts.",
+      "This works where Silo can read the model's traffic.",
+      "How each agent program takes a changed reply is still to be tested."
+    ],
+    [
+      "A classifier can be fooled: a bad action can be cut into steps that each look innocent.",
+      "A rule at the boundary cannot be got around, even by an agent that knows it by heart.",
+      "So the rules are the promise, and a precaution is extra caution on top."
+    ]
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "speed": 1.0,
+  "voices": [
+    { "id": "af_heart", "label": "Heart" }
+  ],
+  "scenes": [
+    [
+      "Start with what Silo saw itself.",
+      "An agent opens a connection.",
+      "It passes through a part of Silo that sits outside the computer.",
+      "The agent also writes a file.",
+      "The file stays inside, and Silo sees the change from outside, on the computer's disk.",
+      "Silo writes one line for each: a fact.",
+      "It is never changed."
+    ],
+    [
+      "Some things cannot be seen from outside, such as which process wrote that file.",
+      "A process is one running program.",
+      "A small part of Silo, the probe, runs inside the computer and tells Silo.",
+      "That line is a report.",
+      "The agent has full access in there, so a report is only what the inside said.",
+      "An agent program, such as Claude Code, can also give its own account of itself.",
+      "That is a report too."
+    ],
+    [
+      "Facts and reports, in the order they came, are the record.",
+      "Nothing in it is changed afterwards.",
+      "One line is never both: that the file changed is a fact, and which process changed it is a report that points to it."
+    ],
+    [
+      "An opinion is what something thinks about the record: this file is code, this agent is stuck.",
+      "It is computed from the record, and kept apart from it.",
+      "It can be wrong.",
+      "So it says whose it is, and when what gave it improves, its opinions are computed again.",
+      "The rows of the record do not change.",
+      "You can give one too.",
+      "Silo asks: is this a build?",
+      "Your answer is your opinion.",
+      "Silo keeps it as you gave it."
+    ],
+    [
+      "What gives an opinion is called a classifier: a pattern, a function, a small model, or an agent.",
+      "A classifier gives opinions.",
+      "It never acts.",
+      "What an opinion can lead to comes in the film on rules and precautions."
+    ],
+    [
+      "Something computed is as sure as its least sure ingredient.",
+      "A count of facts is as good as a fact.",
+      "Mix in a report, and the result is as told: no surer than the report.",
+      "Add a judgement, and it is an opinion.",
+      "And a report or an opinion is never stored as a fact."
+    ],
+    [
+      "All the reports together account for 48 megabytes, written by the build.",
+      "From outside, Silo saw 61 megabytes change.",
+      "Silo corrects neither.",
+      "The 13 megabytes left over are shown as unattributed, and are never spread over the rest.",
+      "And where Silo lost sight for a moment, it records a gap.",
+      "The record says what it does not know."
+    ]
+  ]
+}
